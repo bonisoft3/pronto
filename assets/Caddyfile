@@ -1,0 +1,66 @@
+# Two listeners, one body. Browsers negotiate HTTP/2 only over TLS, and
+# HTTP/1.1 caps ~6 connections per origin — fewer than one tab's Electric
+# long-poll shapes. :8443 exists so automated QA (ignore-certificate-errors)
+# gets h2 multiplexing; humans stay on :8080 plain http, which localhost
+# already treats as a secure context (passkeys keep working, no CA trust).
+(app) {
+  handle /crud/* {
+    uri strip_prefix /crud
+    @post method POST
+    request_header @post Prefer "return=representation,resolution=ignore-duplicates"
+    reverse_proxy crud:3000
+  }
+  handle /electric/* {
+    uri strip_prefix /electric
+    reverse_proxy electric:3000 {
+      flush_interval -1
+      transport http {
+        read_timeout 300s
+      }
+    }
+  }
+  # No strip_prefix: the auth service mounts its routes WITH the /auth
+  # prefix. Ships unconditionally — in a cluster without an auth service
+  # the upstream never resolves and this unused route just 502s.
+  handle /auth/* {
+    reverse_proxy auth:9999
+  }
+  # The blob plane. Ships unconditionally, like /auth — in a cluster
+  # without the blobs services the upstreams never resolve and these
+  # unused routes just 502.
+  handle /blobs/* {
+    uri strip_prefix /blobs
+    reverse_proxy rclone-s3:3900
+  }
+  handle /img/* {
+    uri strip_prefix /img
+    reverse_proxy imgproxy:8081
+  }
+  handle /health {
+    respond "ok" 200
+  }
+  handle /omnishell/* {
+    uri strip_prefix /omnishell
+    root * /omnishell
+    # Statics revalidate every load (Last-Modified 304s): dev-loop edits and
+    # redeployed bundles must never be pinned by the browser's heuristic cache.
+    header Cache-Control "no-cache"
+    file_server
+  }
+  handle {
+    root * /srv
+    header Cache-Control "no-cache"
+    file_server
+  }
+}
+
+:8080 {
+  import app
+}
+
+# Hostname-scoped: a port-only address would make tls internal the
+# catch-all automation policy and conflict with :8080's default.
+https://localhost:8443 {
+  tls internal
+  import app
+}

@@ -1,0 +1,943 @@
+// #emit derives the emitted-file bundle from an #App. `cue export -e out`
+// yields the whole program surface: `manifest` is the list of files, `files`
+// maps each path to its content or its source. Derived structure renders in
+// CUE (strings for raw formats, structs for the writer to serialize — the
+// bayt #render division of labor); assembly files (html, css, jessie,
+// bloblang, complex sql) are never CUE strings — they live in the app tree
+// and their entries carry `src`. Where a derived config's consumer cannot
+// reference a file, the content is inlined via @embed at the reference site.
+//
+// Not emitted here: .mise.toml (scaffold-owned) and the ir view (ir.html is
+// the pinned artifact itself). bayt.cue is emitted as a thin stub over
+// bayt.json (the build seat's export), and the sayt verbs run on their
+// builtins against emitted files (tasks.json, compose.yaml, .say.yaml lint
+// rules).
+@extern(embed)
+
+package pronto
+
+import (
+	"encoding/json"
+	"list"
+	"regexp"
+	"strconv"
+	"strings"
+
+	prontobuild "github.com/bonisoft3/pronto/builders:bayt"
+	"github.com/bonisoft3/pronto/clusters:mecha"
+	prontoloop "github.com/bonisoft3/pronto/loops:sayt"
+	"github.com/bonisoft3/pronto/terminals:omnishell"
+)
+
+#File: {
+	format: "sql" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text"
+	text?:  string // raw formats, writer-materialized
+	data?:  _      // structured formats, writer-serialized
+	src?:   string // assembly file authored in place; writer verifies presence
+}
+
+_caddyfileAsset: _ @embed(file="assets/Caddyfile", type=text)
+
+_sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestamptz: "TIMESTAMPTZ", tsvector: "TSVECTOR"}
+
+#colSql: C={
+	f: #Field
+	_frags: list.Concat([
+		["\"\(C.f.name)\"", _sqlType[C.f.type]],
+		[if C.f.generated != _|_ {"GENERATED ALWAYS AS (\(C.f.generated)) STORED"}],
+		[if C.f.pk {"PRIMARY KEY"}],
+		[if C.f.generated == _|_ if C.f.default != _|_ {"DEFAULT \(C.f.default)"}],
+		[if C.f.generated == _|_ if !C.f.pk && C.f.required {"NOT NULL"}],
+		[if C.f.unique != _|_ if C.f.unique {"UNIQUE"}],
+		[if C.f.ref != _|_ {"REFERENCES \(C.f.ref)(id) ON DELETE CASCADE"}],
+		[if C.f.check != _|_ {"CHECK (\(C.f.check))"}],
+	])
+	out: strings.Join(_frags, " ")
+}
+
+#indexSql: I={
+	e: #Entity
+	out: [for ix in I.e.indexes {
+		"CREATE INDEX IF NOT EXISTS idx_\(I.e.table)_\(ix.on) ON \(I.e.table) USING \(ix.using) (\(ix.on));"
+	}]
+}
+
+// Go-style duration composed of h/m/s integer units ("168h", "30m", "1h30m").
+#durationSeconds: D={
+	d:  string
+	_m: regexp.FindNamedSubmatch(#"^(?:(?P<h>\d+)h)?(?:(?P<m>\d+)m)?(?:(?P<s>\d+)s)?$"#, D.d)
+	_hours: [if D._m.h != "" {strconv.Atoi(D._m.h)}, 0][0]
+	_mins: [if D._m.m != "" {strconv.Atoi(D._m.m)}, 0][0]
+	_secs: [if D._m.s != "" {strconv.Atoi(D._m.s)}, 0][0]
+	out: D._hours*3600 + D._mins*60 + D._secs
+}
+
+#tableSql: T={
+	e: #Entity
+	_lines: list.Concat([
+		[for fld in T.e.fields {"  " + (#colSql & {f: fld}).out}],
+		// Platform column, never a #Field: the write's transaction id, returned
+		// via Prefer: return=representation so clients can awaitTxId against
+		// the shape stream (006_txid.sql restamps it on UPDATE).
+		["  \"txid\" BIGINT DEFAULT pg_current_xact_id()::text::bigint"],
+		[if T.e.invariant != _|_ {"  CHECK (\(T.e.invariant.check))"}],
+	])
+	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
+}
+
+#sqlLit: L={
+	v: string | int | bool
+	out: [
+		if (L.v & string) != _|_ {"'" + strings.Replace(L.v, "'", "''", -1) + "'"},
+		if (L.v & bool) != _|_ {[if L.v {"true"}, "false"][0]},
+		"\(L.v)",
+	][0]
+}
+
+#seedSql: S={
+	e: #Entity
+	_rows: [for r in S.e.seed {
+		_cols: [for f in S.e.fields if r[f.name] != _|_ {f.name}]
+		out:   "INSERT INTO \(S.e.table) (" + strings.Join(_cols, ", ") + ") VALUES (" +
+			strings.Join([for c in _cols {(#sqlLit & {v: r[c]}).out}], ", ") +
+			") ON CONFLICT (id) DO NOTHING;"
+	}]
+	out: strings.Join([for r in S._rows {r.out}], "\n")
+}
+
+// The app_user USING clause of an owned entity. `qual` prefixes the row's
+// own columns: the table name in the entity's policies, the parent alias
+// when a through-mode child inlines this clause. `table` is the owned
+// entity's table regardless of qual — it names the shared-arm helper.
+#ownedUsing: U={
+	a:     #Access
+	qual:  string
+	table: string
+	// The membership test is a SECURITY DEFINER helper (emitted with the
+	// owned entity's policies), not an inline EXISTS: the via table's own
+	// policy references this table back, and inlining would recurse
+	// (Postgres aborts with "infinite recursion detected in policy").
+	_shared: [
+		if U.a.shared != _|_ {" OR \(U.table)_shared(\(U.qual).id)"},
+		"",
+	][0]
+	out: "\(U.qual).\(U.a.owner) = auth_uid()" + U._shared
+}
+
+// One entity's RLS block. Policy names are deterministic:
+// <table>_<role>_<action>. Every mode grants service ALL — pipelines and
+// the auth service write with the service token, RLS never blocks them.
+#policySql: P={
+	e: #Entity
+	entities: [string]: #Entity // parent lookup for through mode
+	_t: P.e.table
+	if P.e.access.mode == "owned" {
+		_using: (#ownedUsing & {a: P.e.access, qual: P._t, table: P._t}).out
+		// The helper runs as the migration superuser, so its read of the via
+		// table bypasses RLS — the cycle-break #ownedUsing relies on. auth_uid()
+		// still reads the caller's session GUC (set_config is role-independent).
+		_pkType: [for f in P.e.fields if f.pk {f.type}][0]
+		_pre: [
+			if P.e.access.shared != _|_ {
+				"""
+					CREATE OR REPLACE FUNCTION \(P._t)_shared(row_id \(_sqlType[P._pkType])) RETURNS boolean
+					LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+					  SELECT EXISTS (SELECT 1 FROM \(P.e.access.shared.via) s WHERE s.\(P.e.access.shared.on) = row_id AND s.\(P.e.access.shared.user) = auth_uid())
+					$$;
+					"""
+			},
+		]
+		_appUser: [
+			"CREATE POLICY \(P._t)_app_user_select ON \(P._t) FOR SELECT TO app_user USING (\(P._using));",
+			"CREATE POLICY \(P._t)_app_user_insert ON \(P._t) FOR INSERT TO app_user WITH CHECK (\(P._t).\(P.e.access.owner) = auth_uid());",
+			"CREATE POLICY \(P._t)_app_user_update ON \(P._t) FOR UPDATE TO app_user USING (\(P._using));",
+			"CREATE POLICY \(P._t)_app_user_delete ON \(P._t) FOR DELETE TO app_user USING (\(P._using));",
+		]
+	}
+	if P.e.access.mode == "through" {
+		// The parent's owned USING is inlined one level, its row columns
+		// re-qualified by the alias p; a through parent is a schema error.
+		_parent: P.entities[P.e.access.parent]
+		// The join casts the parent pk when the child's on-column differs in
+		// type (a live-path child keys the parent's uuid as text); Postgres
+		// has no cross-type = operator for uuid.
+		_onType: [for f in P.e.fields if f.name == P.e.access.on {f.type}][0]
+		_pkType: [for f in P._parent.fields if f.pk {f.type}][0]
+		_pid: [if P._onType == P._pkType {"p.id"}, "p.id::\(_sqlType[P._onType])"][0]
+		_pre: []
+		_expr: "EXISTS (SELECT 1 FROM \(P._parent.table) p WHERE \(P._pid) = \(P._t).\(P.e.access.on) AND (\((#ownedUsing & {a: P._parent.access, qual: "p", table: P._parent.table}).out)))"
+		_appUser: [
+			"CREATE POLICY \(P._t)_app_user_all ON \(P._t) FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr));",
+		]
+	}
+	if P.e.access.mode == "public-read" {
+		_pre: []
+		_appUser: [
+			"CREATE POLICY \(P._t)_app_user_select ON \(P._t) FOR SELECT TO app_user USING (true);",
+		]
+	}
+	if P.e.access.mode == "service-only" {
+		_pre: []
+		_appUser: []
+	}
+	out: strings.Join(list.Concat([
+		P._pre,
+		["ALTER TABLE \(P._t) ENABLE ROW LEVEL SECURITY;"],
+		P._appUser,
+		["CREATE POLICY \(P._t)_service_all ON \(P._t) FOR ALL TO service USING (true) WITH CHECK (true);"],
+	]), "\n")
+}
+
+#rpkPipeline: R={
+	p:           #Pipeline
+	sourceTable: string
+	sinkTable:   string
+	sinkPk:      string
+	// Auth'd clusters put every table behind RLS, so the transform's reads
+	// and writes carry the service token; ${SERVICE_JWT} is benthos env
+	// interpolation, resolved from the transform service's environment.
+	authOn: *false | bool
+	// A keyed transform posts an array of sink rows, one per key, so the
+	// upsert must conflict on the sink pk; the singleton path conflicts on id.
+	_onConflict: [if R.p.key != _|_ {R.sinkPk}, "id"][0]
+	out: {
+		input: redis_streams: {
+			url: "${REDIS_URL}"
+			streams: ["cdc-events"]
+			body_key:       "data"
+			consumer_group: R.p.group
+		}
+		pipeline: processors: [
+			// The read is absolute, which is what makes the sink idempotent
+			// under at-least-once delivery. The branch grafts the fetched
+			// aggregate rows onto the event as root.rows, keeping the opencdc
+			// event (payload.before/payload.after as JSON-encoded row strings)
+			// beside the rows so a delete's key stays reachable for
+			// delete-to-zero emissions.
+			{branch: {
+				processors: [{http: {
+					url:  "${CRUD_URL}/\(R.sourceTable)?\(R.p.transform.aggregate)"
+					verb: "GET"
+					if R.authOn {
+						headers: Authorization: "Bearer ${SERVICE_JWT}"
+					}
+				}}]
+				result_map: "root.rows = this"
+			}},
+			{bloblang: R.p.transform.bloblang},
+		]
+		output: retry: {
+			max_retries: 3
+			backoff: {initial_interval: "2s", max_interval: "30s", max_elapsed_time: "3m"}
+			output: http_client: {
+				// CRUD_URL is PostgREST direct, never the gateway: Caddy's
+				// client-facing Prefer injection would clobber the
+				// merge-duplicates upsert below.
+				url:  "${CRUD_URL}/\(R.sinkTable)?on_conflict=\(R._onConflict)"
+				verb: "POST"
+				headers: {
+					"Content-Type": "application/json"
+					Prefer:         "resolution=merge-duplicates"
+					if R.authOn {
+						Authorization: "Bearer ${SERVICE_JWT}"
+					}
+				}
+				successful_on: [200, 201]
+			}
+		}
+	}
+}
+
+// Scheduled pipeline: a generate input ticks, one bloblang processor stamps
+// the filter's time tokens as metadata (and the PATCH body as root), and the
+// http_client mutates the sink rows the filter matches. Derived entirely —
+// no .blobl assembly, no browser shim.
+#rpkScheduled: R={
+	p:         #Pipeline
+	sinkTable: string
+	authOn:    *false | bool // same service-token contract as #rpkPipeline
+	_hasCutoff: strings.Contains(R.p.filter, "{cutoff}")
+	_hasNowts:  strings.Contains(R.p.filter, "{nowts}")
+	if R._hasCutoff {
+		_windowSeconds: (#durationSeconds & {d: R.p.window}).out
+	}
+	_metaLines: list.Concat([
+		[if R._hasCutoff {"meta cutoff = (timestamp_unix() - \(R._windowSeconds)).ts_format(\"2006-01-02T15:04:05Z\", \"UTC\")"}],
+		[if R._hasNowts {"meta nowts = now()"}],
+	])
+	_rootLine: [if R.p.set != _|_ {"root = " + json.Marshal(R.p.set)}, "root = {}"][0]
+	_url: "${CRUD_URL}/\(R.sinkTable)?" + strings.Replace(
+		strings.Replace(R.p.filter, "{cutoff}", "${! meta(\"cutoff\") }", -1),
+		"{nowts}", "${! meta(\"nowts\") }", -1)
+	out: {
+		input: generate: {interval: R.p.interval, mapping: "root = {}"}
+		pipeline: processors: [{bloblang: strings.Join(list.Concat([R._metaLines, [R._rootLine]]), "\n")}]
+		output: retry: {
+			max_retries: 3
+			backoff: {initial_interval: "2s", max_interval: "30s", max_elapsed_time: "3m"}
+			output: http_client: {
+				url: R._url
+				verb: [if R.p.action == "delete" {"DELETE"}, "PATCH"][0]
+				if R.p.action == "update" || R.authOn {
+					headers: {
+						if R.p.action == "update" {
+							"Content-Type": "application/json"
+						}
+						if R.authOn {
+							Authorization: "Bearer ${SERVICE_JWT}"
+						}
+					}
+				}
+				successful_on: [200, 204]
+			}
+		}
+	}
+}
+
+// The shell config is a file map, not a DSL: screen semantics live in the
+// generated HTML/CSS/Jessie themselves; this only wires routes, data files,
+// and pipeline topology to the filesystem. All paths are app-relative — the
+// same path language as the manifest.
+#shellConfig: S={
+	code: #App
+	migrations: [...string]
+	_tables: {for _, s in S.code.surface.screens for r in s.reads {(S.code.state.entities[r.entity].table): true}}
+	_tablePath: {for _, s in S.code.surface.screens for r in s.reads {
+		(S.code.state.entities[r.entity].table): S.code.state.entities[r.entity].path
+	}}
+	// Browser-only tiers. They are collections like any other — read by a
+	// data-live region, mutated by a form — but the terminal builds them from
+	// a local factory instead of an Electric shape, so they cannot be listed
+	// among the tables it subscribes.
+	_local: {for t, p in S._tablePath if p == "tab" || p == "device" {(t): p}}
+	_tableKeys: {for _, s in S.code.surface.screens for r in s.reads {
+		(S.code.state.entities[r.entity].table): [for f in S.code.state.entities[r.entity].fields if f.pk {f.name}][0]
+	}}
+	_nonIdKeys: {for t, k in S._tableKeys if k != "id" {(t): k}}
+	_access: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.access != _|_ {
+		(e.table): {
+			mode: e.access.mode
+			if e.access.mode == "owned" {
+				owner: e.access.owner
+				if e.access.shared != _|_ {shared: e.access.shared}
+			}
+			if e.access.mode == "through" {
+				parent: S.code.state.entities[e.access.parent].table
+				on:     e.access.on
+			}
+		}
+	}}
+	out: {
+		app: S.code.meta.name
+		if S.code.capabilities.auth != _|_ {
+			auth: S.code.capabilities.auth
+		}
+		// Optional keys are emitted only where they differ from the default,
+		// so shell.yaml stays stable for the ordinary screen.
+		routes: [for _, s in S.code.surface.screens {
+			path:   s.route
+			screen: s.name
+			nav: {
+				label: s.title
+				if !s.strip {strip: false}
+			}
+			files:  s.files
+			states: s.states // storybook frame list; semantics stay in the ir storyboard
+			if s.keep != 1 {
+				keep: s.keep
+			}
+			// Bindings live in the screen HTML; reads surface here only when a
+			// read carries filter/select.
+			if len([for r in s.reads if r.filter != _|_ || r.select != _|_ {r}]) > 0 {
+				reads: s.reads
+			}
+		}]
+		tables: list.SortStrings([for t, _ in S._tables if S._local[t] == _|_ {t}])
+		if len(S._local) > 0 {
+			local: S._local
+		}
+		// Primary key per table, only where it is not "id": the terminal's
+		// synced collections key rows by it (a pipeline sink like note_progress
+		// keys on its subject column, and keying such a table on the missing
+		// "id" collapses every row onto one key).
+		if len(S._nonIdKeys) > 0 {
+			keys: S._nonIdKeys
+		}
+		// RLS mirror for the terminal, in table-name space (through-parents
+		// resolved). The Electric sync plane is unscoped in the dev cluster,
+		// so the terminal must re-apply row visibility on every collection
+		// read — without this map, every browser renders every user's rows.
+		if len(S._access) > 0 {
+			access: S._access
+		}
+		"migrations": S.migrations
+		pipelines: [for _, p in S.code.state.pipelines {
+			if p.trigger == "cdc" if p.raw == _|_ {
+				name:      p.name
+				from:      S.code.state.entities[p.from].table
+				to:        S.code.state.entities[p.to].table
+				aggregate: p.transform.aggregate
+				shim:      p.shim
+				if p.key != _|_ {key: p.key}
+			}
+			if p.trigger == "schedule" {
+				name:    p.name
+				to:      S.code.state.entities[p.to].table
+				trigger: "schedule"
+			}
+			// Raw pipelines have no shim: the browser tier lists them and skips.
+			if p.raw != _|_ {
+				name: p.name
+				to:   S.code.state.entities[p.to].table
+				raw:  true
+			}
+		}]
+	}
+}
+
+#appMigrations: M={
+	code: #App
+	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.path != "tab" && e.path != "device" {e}]
+	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
+	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
+	list: [
+		"services/database/migrations/000_extensions.sql",
+		"services/database/migrations/001_roles.sql",
+		"services/database/migrations/002_grants.sql",
+		"services/database/migrations/003_publication.sql",
+		"services/database/migrations/004_create_tables.sql",
+		if len(M.accessed) > 0 {"services/database/migrations/005_policies.sql"},
+		"services/database/migrations/006_txid.sql",
+		"services/database/migrations/007_publication.sql",
+		for r in M.raw {"services/database/migrations/\(r.name)"},
+		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
+	]
+}
+
+// Default runtime instances, parameterized by the code. program.cue wires
+// them; overrides land in bayt.cue by unification.
+#DefaultLoop: D={
+	code:     #App
+	cluster:  mecha.#Cluster
+	terminal: omnishell.#Terminal
+	out: prontoloop.#Loop & {
+		meta: app: D.code.meta.name
+		surface: {
+			buildCmd: "deno run --allow-read=. --allow-write=. --allow-run=cue ../../plugins/pronto/write.ts ."
+			testCmd:  "cue vet -c ./..."
+			pipelineFiles: [for _, p in D.code.state.pipelines {"docker/\(D.code.meta.name)-\(p.name).yaml"}]
+			handlerFiles: [for _, h in D.code.surface.handlers {h.src}]
+			screenCssFiles: [for _, s in D.code.surface.screens {s.files.css}]
+			// Both runtimes declare checks about their own surfaces; the loop
+			// routes each to the verb it names. A name collision across the two
+			// is a conflict here rather than a silent overwrite.
+			checks: {
+				for name, c in D.cluster.surface.checks {(name): c}
+				for name, c in D.terminal.surface.checks {(name): c}
+			}
+		}
+	}
+}
+
+#DefaultBuild: D={
+	code: #App
+	loop: prontoloop.#Loop
+	out: prontobuild.#Build & {
+		meta: {
+			app:      D.code.meta.name
+			buildCmd: D.loop.surface.buildCmd
+			testCmd:  D.loop.surface.testCmd
+		}
+	}
+}
+
+#DefaultTerminal: D={
+	code: #App
+	_handlerSet: {for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}}
+	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
+	out: omnishell.#Terminal & {
+		app: D.code.meta.name
+		surface: {
+			screens: [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css}]
+			handlers: list.SortStrings([for i, _ in D._handlerSet {i}])
+			// The union of what screens import, so the served set is exactly what
+			// something references — an unreferenced file under shell/shared/ is
+			// never built and cannot pretend to be part of the app.
+			shared: list.SortStrings([for i, _ in D._sharedSet {i}])
+		}
+	}
+}
+
+#DefaultCluster: D={
+	code: #App
+	statics: [...mecha.#Static]
+
+	// The review ladder's artifacts, served beside the app by caddy's catch-all
+	// /srv root. One directory is load-bearing, not tidiness: brief.html links
+	// `ir.html`, its wikilinks render as `ir.html#Id`, and its transclusions
+	// `fetch` their target by bare relative path — all three resolve only if the
+	// four files are siblings. Served, the transclusion inlines instead of
+	// degrading to the boxed link it shows on file://.
+	//
+	// These are caddy statics, so they sit outside the terminal's auth gate by
+	// construction. Intended: reviewing a design doc is not using the app, and
+	// requiring a sign-in to read one would put the ladder behind the thing it
+	// exists to review.
+	_ladder: [for f in ["brief.html", "ir.html", "acceptance.md", "DESIGN.md"] {
+		source: "ladder-\(f)"
+		file:   f
+		target: "/srv/docs/\(f)"
+		watch:  true
+	}]
+
+	out: mecha.#Cluster & {
+		meta: {
+			app:     D.code.meta.name
+			statics: list.Concat([D.statics, D._ladder])
+		}
+		state: {
+			migrations: (#appMigrations & {"code": D.code}).list
+			pipelines: [for _, pl in D.code.state.pipelines {
+				name: "\(D.code.meta.name)-\(pl.name)"
+				file: "docker/\(D.code.meta.name)-\(pl.name).yaml"
+			}]
+		}
+	}
+}
+
+// The three components of an app package — code, cluster, terminal — are
+// inputs; program.cue wires the defaults (#DefaultCluster/#DefaultTerminal)
+// and bayt.cue redeclares the runtime pair as the escape-hatch seams.
+#emit: E={
+	code:     #App
+	cluster:  mecha.#Cluster
+	terminal: omnishell.#Terminal
+
+	// DDL emits parents first (a `ref` REFERENCES needs its target); the
+	// order comes from #App.entityOrder or declaration order.
+	_entities: [...#Entity]
+	if E.code.state.entityOrder != _|_ {
+		_entities: [for n in E.code.state.entityOrder {E.code.state.entities[n]}]
+	}
+	if E.code.state.entityOrder == _|_ {
+		_entities: [for _, e in E.code.state.entities {e}]
+	}
+
+	// The target terminal's published doctrine is a compile-time constraint:
+	// an app cannot demand an auth mode its terminal does not offer.
+	if E.code.capabilities.auth != _|_ {
+		_authModeOffered: true & list.Contains(E.terminal.capabilities.auth.modes, E.code.capabilities.auth.mode)
+	}
+
+	for _, v in E.code.capabilities.vendored {
+		_vendoredIsolationBuildable: true & list.Contains(E.terminal.capabilities.isolation, v.isolation)
+		for cap in v.capabilities {
+			let parts = strings.Split(cap, ".")
+			_vendoredCapabilityOffered: true & (E.terminal.capabilities[parts[0]][parts[1]] != _|_)
+		}
+	}
+	// The cluster stores these. tab and device live only in the browser, so
+	// nothing server-side is derived for them at all: no table, no restamp
+	// trigger, no publication entry, no policy, no seed — which is the whole
+	// point of separating durability from visibility.
+	_serverEntities: [for e in E._entities if e.path != "tab" && e.path != "device" {e}]
+	_localEntities: [for e in E._entities if e.path == "tab" || e.path == "device" {e}]
+	_cdcTables: strings.Join([for e in _entities if e.path == "crud" {e.table}], ",")
+	_pub: "\(E.code.meta.name)_cdc"
+	// The loop is the fourth component (see #DefaultLoop); it owns the verb
+	// surface and the argv doctrine.
+	loop: prontoloop.#Loop
+
+	// The build graph is the fifth (see #DefaultBuild); its resolved value
+	// is emitted as bayt.json for the bayt.cue stub to embed.
+	build: prontobuild.#Build
+
+	_hatchSeam: [
+		if len(E.code.capabilities.hatches) > 0 {
+			"""
+				// Compiled escape hatches (ir.html: \(strings.Join(list.SortStrings([for hn, _ in E.code.capabilities.hatches {hn}]), ", ")))
+				// live in program.cue's cluster unification; this redeclaration
+				// is the out-of-band human override seam (add a cluster service,
+				// modify one, null to drop one; extend the terminal).
+				"""
+		},
+		"""
+			// Escape hatches: none (ir.html) — the default runtime,
+			// redeclared unchanged. A program whose ir declares a hatch
+			// unifies its overrides right here (add a cluster service,
+			// modify one, null to drop one; extend the terminal).
+			""",
+	][0]
+
+	// The design block becomes CSS here and only here.
+	_design: E.code.surface.design
+	_designCss: """
+
+		/* Design system values, from DESIGN.md's frontmatter by way of the
+		   program's design block. A screen that redeclares one of these has
+		   forked the system — the shared layer is the only declaration. */
+		:root {
+		\(strings.Join(list.Concat([
+			// One declaration per colour, both appearances inside it. The dark
+			// palette is not a second :root to keep in step — it is the other
+			// half of this value, resolved against whatever colour-scheme is in
+			// force at the point of use.
+			[for k, v in E._design.colors {"  --\(k): light-dark(\(v), \(E._design.dark[k]));"}],
+			[for k, v in E._design.rounded {"  --r-\(k): \(v);"}],
+			[for k, v in E._design.spacing {"  --sp-\(k): \(v);"}],
+			[for k, v in E._design.motion {"  --motion-\(k): \(v);"}],
+			[
+				"  --shell-bg: var(--\(E._design.shell.bg));",
+				"  --shell-fg: var(--\(E._design.shell.fg));",
+				"  --shell-rule: var(--\(E._design.shell.rule));",
+				"  color-scheme: light dark;",
+			],
+		]), "\n"))
+		}
+		/* The storybook stamps -dark frames as data-state values. colour-scheme
+		   is inherited and light-dark() reads it at the point of use, so
+		   flipping it on the frame resolves every token inside to its twin —
+		   both appearances reviewable on one device, with no second palette to
+		   drift from this one. */
+		.screen[data-state$="-dark"] {
+		  color-scheme: dark;
+		}
+
+		"""
+
+	_seeded: (#appMigrations & {"code": E.code}).seeded
+
+	_migrations: (#appMigrations & {"code": E.code}).list
+
+	_accessed: (#appMigrations & {"code": E.code}).accessed
+	_raw:      (#appMigrations & {"code": E.code}).raw
+	// The auth plane switches on as one: declaring #App.auth or any entity
+	// access implies the roles, auth_uid(), and service-token plumbing —
+	// policies without tokens (or vice versa) is not a supported state.
+	_authOn: E.code.capabilities.auth != _|_ || len(E._accessed) > 0
+
+	// The cluster's auth service and JWT envs follow the program's auth block;
+	// the blob plane follows the program's flag.
+	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
+	cluster: capabilities: blobs: E.code.capabilities.blobs
+
+	files: [string]: #File
+	files: {
+		"services/database/migrations/000_extensions.sql": {
+			format: "sql"
+			// gen_random_uuid() is core since PostgreSQL 13; the slot stays so
+			// apps needing real extensions keep a stable migration order.
+			// auth_uid() reads the sub claim PostgREST stashes in
+			// request.jwt.claims; NULL outside a request or for tokens
+			// without a sub (anon).
+			_prelude: """
+				-- no extensions required
+
+				"""
+			if !E._authOn {
+				text: _prelude
+			}
+			if E._authOn {
+				text: _prelude + "\n" + """
+					CREATE OR REPLACE FUNCTION auth_uid() RETURNS uuid LANGUAGE sql STABLE AS $$
+					  SELECT nullif(current_setting('request.jwt.claims', true)::json->>'sub','')::uuid
+					$$;
+
+					"""
+			}
+		}
+		"services/database/migrations/001_roles.sql": {
+			format: "sql"
+			_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._authOn {"service"}]])
+			text: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
+				"""
+					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
+					    CREATE ROLE \(r) NOLOGIN;
+					  END IF;
+					"""
+			}], "\n") + "\nEND $$;\n"
+		}
+		"services/database/migrations/002_grants.sql": {
+			format: "sql"
+			if !E._authOn {
+				text: """
+					GRANT USAGE ON SCHEMA public TO anon;
+					GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
+					ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon;
+
+					"""
+			}
+			// Auth'd grants: anon can connect (USAGE) but touches no table —
+			// every row read or written goes through app_user or service,
+			// where 005's policies decide.
+			if E._authOn {
+				text: """
+					GRANT USAGE ON SCHEMA public TO anon, app_user, service;
+					GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user, service;
+					ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user, service;
+
+					"""
+			}
+		}
+		// Names and order match the set baked into mecha's database image, so
+		// compose config mounts shadow the baked files one-for-one.
+		// 003 must shadow the baked conduit_pub: FOR ALL TABLES re-opens the
+		// pipeline feedback loop and trips 42P10 (mechanism at 007).
+		"services/database/migrations/003_publication.sql": {
+			format: "sql"
+			text: """
+				-- Shadows the baked FOR ALL TABLES publication. The app publication
+				-- is created in 007_publication.sql, after the tables it names exist.
+
+				"""
+		}
+		"services/database/migrations/007_publication.sql": {
+			format: "sql"
+			// Runs after 004_create_tables: FOR TABLE fails on missing tables
+			// and initdb aborts on the first error. FOR TABLE <crud tables>,
+			// never FOR ALL TABLES — derived-table upserts must not re-feed the
+			// pipelines that wrote them, and conduit's `tables` setting does not
+			// filter logrepl events, so the publication is the loop breaker.
+			// publish_generated_columns = stored: Electric sets REPLICA IDENTITY
+			// FULL, and a publication excluding generated columns from a FULL
+			// identity refuses UPDATE/DELETE (42P10). Slots belong to consumers,
+			// created on first connect.
+			text: """
+				DO $$ BEGIN
+				  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '\(E._pub)') THEN
+				    CREATE PUBLICATION \(E._pub) FOR TABLE \(E._cdcTables) WITH (publish_generated_columns = stored);
+				  END IF;
+				END $$;
+
+				"""
+		}
+		"services/database/migrations/004_create_tables.sql": {
+			format: "sql"
+			_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
+			text: strings.Join(list.Concat([
+				[for ent in E._serverEntities {(#tableSql & {e: ent}).out}],
+				[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
+			]), "\n\n") + "\n"
+		}
+		if len(E._accessed) > 0 {
+			"services/database/migrations/005_policies.sql": {
+				format: "sql"
+				text: strings.Join([for ent in E._entities if ent.access != _|_ {
+					(#policySql & {e: ent, entities: E.code.state.entities}).out
+				}], "\n\n") + "\n"
+			}
+		}
+		"services/database/migrations/006_txid.sql": {
+			format: "sql"
+			// A column DEFAULT only fires on INSERT; updates restamp here so
+			// every write's response row carries the txid that committed it.
+			text: """
+				CREATE OR REPLACE FUNCTION restamp_txid() RETURNS trigger
+				LANGUAGE plpgsql AS $$
+				BEGIN
+				  NEW.txid := pg_current_xact_id()::text::bigint;
+				  RETURN NEW;
+				END $$;
+
+				""" + strings.Join([for ent in E._serverEntities {
+				"""
+					DROP TRIGGER IF EXISTS restamp_txid ON \(ent.table);
+					CREATE TRIGGER restamp_txid BEFORE UPDATE ON \(ent.table)
+					  FOR EACH ROW EXECUTE FUNCTION restamp_txid();
+					"""
+			}], "\n") + "\n"
+		}
+		for rm in E._raw {
+			"services/database/migrations/\(rm.name)": {format: "sql", src: rm.src}
+		}
+		if len(E._seeded) > 0 {
+			"services/database/migrations/900_seed.sql": {
+				format: "sql"
+				text:   strings.Join([for se in E._seeded {(#seedSql & {e: se}).out}], "\n") + "\n"
+			}
+		}
+		"docker/conduit-pipeline.yaml": {
+			format: "yaml"
+			data: {
+				version: "2.2"
+				pipelines: [{
+					id:     "cdc-to-bus"
+					status: "running"
+					connectors: [{
+						id:     "postgres-source"
+						type:   "source"
+						plugin: "builtin:postgres"
+						settings: {
+							url:          "${DATABASE_URL}"
+							tables:       E._cdcTables // derived tables are excluded: no CDC loops
+							cdcMode:      "logrepl"
+							snapshotMode: "never"
+							"logrepl.publicationName": E._pub
+							"logrepl.slotName":        "\(E.code.meta.name)_conduit_slot"
+							// Without this the http connector re-decodes the payload
+							// against the captured Avro schema and chokes post-encode.
+							"logrepl.withAvroSchema": "false"
+						}
+					}, {
+						id:     "bus-destination"
+						type:   "destination"
+						plugin: "standalone:http"
+						settings: {
+							url: "http://mesh-events:3500/v1.0/publish/redis-streams/cdc-events"
+							// The probe is a HEAD, which dapr's publish endpoint 404s.
+							validateConnection: "false"
+						}
+					}]
+					processors: [{
+						id:     "stringify-after"
+						plugin: "builtin:json.encode"
+						settings: field: ".Payload.After"
+					}, {
+						id:     "stringify-before"
+						plugin: "builtin:json.encode"
+						settings: field: ".Payload.Before"
+					}, {
+						// The http destination posts only Payload.After, and a
+						// delete's After is empty — back-fill from Before so every
+						// bus message carries the changed row.
+						id:     "restore-deleted-row"
+						plugin: "builtin:field.set"
+						settings: {
+							field: ".Payload.After"
+							value: "{{ if .Payload.After }}{{ printf \"%s\" .Payload.After }}{{ else }}{{ printf \"%s\" .Payload.Before }}{{ end }}"
+						}
+					}]
+				}]
+			}
+		}
+		for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {
+			"docker/\(E.code.meta.name)-\(pl.name).yaml": {
+				format: "yaml"
+				data: (#rpkPipeline & {
+					p:           pl
+					sourceTable: E.code.state.entities[pl.from].table
+					sinkTable:   E.code.state.entities[pl.to].table
+					sinkPk: [for fld in E.code.state.entities[pl.to].fields if fld.pk {fld.name}][0]
+					authOn: E._authOn
+				}).out
+			}
+		}
+		for _, pl in E.code.state.pipelines if pl.trigger == "schedule" {
+			"docker/\(E.code.meta.name)-\(pl.name).yaml": {
+				format: "yaml"
+				data: (#rpkScheduled & {
+					p:         pl
+					sinkTable: E.code.state.entities[pl.to].table
+					authOn:    E._authOn
+				}).out
+			}
+		}
+		// Raw pipelines: the assembly rpk stream is copied verbatim beside the
+		// derived ones, so the transform image and the rpk lint list treat all
+		// pipelines alike.
+		for _, pl in E.code.state.pipelines if pl.raw != _|_ {
+			"docker/\(E.code.meta.name)-\(pl.name).yaml": {format: "yaml", src: pl.src}
+			"\(pl.src)": {format: "yaml", src: pl.src}
+		}
+		"docker/Caddyfile": {
+			format: "caddyfile"
+			text:   _caddyfileAsset
+		}
+		"shell/shell.yaml": {
+			format: "yaml"
+			data: (#shellConfig & {"code": E.code, migrations: E._migrations}).out
+		}
+		"\(E.terminal.surface.entry)": {
+			format: "text"
+			text:   E.terminal.surface.assets.html
+		}
+		"\(E.terminal.surface.css)": {
+			format: "text"
+			text:   E.terminal.surface.assets.css
+		}
+		"\(E.terminal.surface.boot)": {
+			format: "text"
+			text:   E.terminal.surface.assets.boot
+		}
+		"shell/design.css": {
+			format: "css"
+			text:   E._designCss
+		}
+		for _, s in E.code.surface.screens {
+			"\(s.files.html)": {format: "html", src: s.files.html}
+			"\(s.files.css)": {format: "css", src: s.files.css}
+			for i in s.files.handlers {"\(i)": {format: "jessie", src: i}}
+		}
+		for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {
+			"\(pl.transform.src)": {format: "bloblang", src: pl.transform.src}
+			"\(pl.shim)": {format: "js", src: pl.shim}
+		}
+		for _, h in E.code.surface.handlers {
+			"\(h.src)": {format: "jessie", src: h.src}
+		}
+		"tests/pairs.yaml": {
+			format: "yaml"
+			data: pairs: [for _, t in E.code.meta.tests {t}]
+		}
+		// The runtime is fixed by default, and its pieces are owned by their
+		// implementations: mecha publishes the virtual cluster, omnishell the
+		// virtual terminal, and this emitter is their fixed composition.
+		"compose.yaml": {
+			format: "yaml"
+			data:   E.cluster.compose
+		}
+		"docker/shell.Dockerfile": {
+			format: "text"
+			text:   E.cluster.shellDockerfile
+		}
+		"bayt.json": {
+			format: "json"
+			data:   E.build.project
+		}
+		"bayt.cue": {
+			format: "cue"
+			text: """
+				// The build graph is authored in program.cue (the build seat) and
+				// lands here as bayt.json; unifying it back through bayt.#project
+				// keeps bayt's schema live at generate time.
+				@extern(embed)
+
+				package \(E.code.meta.name)
+
+				import (
+					bayt "github.com/bonisoft3/bayt/core:bayt"
+					mecha "github.com/bonisoft3/pronto/clusters:mecha"
+					omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
+					prontoloop "github.com/bonisoft3/pronto/loops:sayt"
+				)
+
+				\(E._hatchSeam)
+				cluster:  mecha.#Cluster
+				terminal: omnishell.#Terminal
+				loop:     prontoloop.#Loop
+
+				_baytData: _ @embed(file="bayt.json")
+
+				project: _\(E.code.meta.name)
+				_\(E.code.meta.name): bayt.#project & _baytData
+
+				depManifestsIn: {[string]: _}
+				_render: (bayt.#render & {project: _\(E.code.meta.name), depManifests: depManifestsIn})
+
+				"""
+		}
+		// Only lint carries rules: the other verbs use their builtins against
+		// the files they expect — build/test read .vscode/tasks.json, launch
+		// drives compose.yaml's `launch` service convention.
+		".say.yaml": {
+			format: "yaml"
+			data:   E.loop.surface.sayYaml
+		}
+		".vscode/tasks.json": {
+			format: "json"
+			data:   E.loop.surface.tasksJson
+		}
+	}
+
+	manifest: list.SortStrings([for p, _ in files {p}])
+}
