@@ -19,6 +19,7 @@ package pronto
 	dark: [string]:    string
 	rounded: [string]: string
 	spacing: [string]: string
+	motion: [string]:  string
 }
 #designPresets: press: {
 	// Identity for an editorial reading surface; the default an app takes
@@ -45,6 +46,7 @@ package pronto
 	}
 	rounded: {sm: "4px", md: "8px", full: "999px"}
 	spacing: {sm: "8px", md: "16px", lg: "24px", xl: "40px"}
+	motion: {fast: "110ms", base: "180ms", ease: "cubic-bezier(.2, 0, 0, 1)", shift: "6px"}
 }
 
 // The design system's values, mirroring DESIGN.md's frontmatter — that file
@@ -71,11 +73,11 @@ package pronto
 	rounded: {for k, v in D._preset.rounded {(k): *v | string}}
 	spacing: [string]: string
 	spacing: {for k, v in D._preset.spacing {(k): *v | string}}
-	// Overrides for the terminal's published motion defaults
-	// (plugins/omnishell/shell.css). Emitted after them, so naming one here
-	// wins. Empty by default, which is an app taking the terminal's feel as
-	// given.
+	// The motion vocabulary. The terminal ships no style at all — its
+	// shell.css is the empty contract — so this is the only declaration;
+	// the preset supplies the defaults and naming one here replaces it.
 	motion: [string]: string
+	motion: {for k, v in D._preset.motion {(k): *v | string}}
 	// Which colour the terminal's own chrome resolves to; the shell has no
 	// opinion about which swatch is a background.
 	shell: {
@@ -87,7 +89,7 @@ package pronto
 
 #Field: {
 	name: string
-	type: "uuid" | "text" | "bool" | "int" | "timestamptz" | "tsvector"
+	type: "uuid" | "text" | "bool" | "int" | "bigint" | "timestamptz" | "tsvector"
 	pk:       *false | bool
 	required: *true | bool
 	ref?:     string // referenced table; DDL: REFERENCES <ref>(id) ON DELETE CASCADE
@@ -146,6 +148,14 @@ package pronto
 	// USING <using> (<on>); emitted after the tables in 004.
 	indexes?: [...{on: string, using: *"btree" | "gin"}]
 	invariant?: {cel: string, check: string} // row-level
+	// Composite uniques the per-field `unique` flag cannot express. Declared
+	// rather than written as assembly SQL because the shell needs them too: a
+	// row's natural key is what an upsert resolves against, and what an
+	// optimistic contribution is collapsed on. The name is carried rather than
+	// derived because a violation IS the app's duplicate refusal and the
+	// constraint name is what reaches the screen.
+	uniques: *[] | [...{name: string, cols: [...string]}]
+
 	// Bootstrap rows (900_seed.sql). A pipeline-written singleton MUST seed
 	// its initial state: pipelines fire on CDC events, so before the first
 	// mutation the derived row exists only if the schema bootstrap made it.
@@ -179,6 +189,60 @@ package pronto
 		src: *"pipelines/\(name).blobl" | string // assembly file holding the mapping
 		bloblang: string // its content — inlined where the consumer cannot reference files
 	}
+	// The BROWSER-side transform, written as a fold: empty(key), step(acc, row),
+	// combine(a, b), result(acc), with `harden` supplied by SES. It replaces
+	// `shim` — the shim contract is (rows) => one row on id, which cannot state
+	// a keyed aggregate — and it additionally lets the terminal project the
+	// sink optimistically, resuming the fold over rows the sink has not counted.
+	//
+	// The container keeps its bloblang. rpk can run this module (it embeds
+	// goja), and an earlier revision did, but nothing lints a JavaScript string
+	// inside a pipeline YAML while `redpanda-connect lint` does catch a broken
+	// mapping — so the sharing bought less than the lost build-time check cost.
+	// Convert a container transform only where the aggregate is substantial
+	// enough that two expressions of it could genuinely diverge.
+	//
+	// Two laws no type states: combine is associative with empty(key) as its
+	// identity, so a fold splits; and the ACCUMULATOR IS THE SINK ROW, so a
+	// sink can be read back as a partial fold. The second is why the sink
+	// carries `watermark` below, and why an average would have to store sum
+	// and n rather than the quotient.
+	fold?: {
+		src: *"pipelines/\(name).js" | string
+		// Sink column holding the newest source txid the count includes. NOT
+		// the sink's own txid, which is stamped when the sink row is written —
+		// strictly after the read, so it counts rows it never saw.
+		watermark: string
+		// Source columns uniquely identifying one contribution (the table's
+		// composite unique). The reader's rows are collapsed on it: the server
+		// holds one, so counting duplicates shows a total that cannot exist.
+		dedupe: [...string]
+		// Source column that, when set, means the row has been retracted.
+		retracted: string
+		// The reader's own private answer to "did the count include me".
+		//
+		// A public aggregate mixes this reader's row with everyone else's, and
+		// the difference is not recoverable from the reader's own row: it is a
+		// property of the READ that produced the total, not of the data now. So
+		// the pipeline emits it, per reader, into a table RLS keeps private —
+		// a count discloses nobody, and each browser syncs only its own row.
+		//
+		// What the terminal actually maintains is `others`, which no write of
+		// this reader's can change; their intent applies on top of it, live and
+		// offline alike. `total` is carried beside `counted` so the pair is one
+		// row from one read, and `asOf` names the version of the reader's row it
+		// describes.
+		pair: {
+			table:   string
+			counted: string
+			total:   string
+			asOf:    string
+		}
+	}
+	if fold != _|_ {
+		shim?: _|_
+		key:   string // a fold groups; the singleton case has no key to seed empty() with
+	}
 	// Scheduled pipelines: a generate input ticks every `interval` and the
 	// action mutates `to` rows matched by `filter` (PostgREST fragment;
 	// tokens {cutoff} and {nowts} resolve to bloblang metadata at runtime).
@@ -191,8 +255,9 @@ package pronto
 	set?: {[string]: bool | int | string} // PATCH body for action "update"
 	// Browser tier cannot run bloblang; per the escape-hatch doctrine a cdc
 	// pipeline binds to a declared shim there: a pure ES module, rows → sink
-	// row. Scheduled and raw pipelines have no shim (no browser analogue).
-	if trigger == "cdc" if raw == _|_ {
+	// row. Scheduled and raw pipelines have no shim (no browser analogue), and
+	// a fold needs none — it already runs at every tier.
+	if trigger == "cdc" if raw == _|_ if fold == _|_ {
 		shim: *"pipelines/\(name).browser.js" | string
 	}
 }
@@ -218,7 +283,7 @@ package pronto
 #Form: {
 	id:     string
 	entity: string
-	action: "create" | "update" | "delete"
+	action: "create" | "update" | "delete" | "upsert"
 	// Delete forms only: a PostgREST filter fragment ({param.x} interpolates)
 	// scoping a bulk delete of every matching row, instead of the row context.
 	filter?: string
@@ -256,7 +321,14 @@ package pronto
 	// directly generated artifacts, not in CUE. reads/forms above are the
 	// structured source they are generated from — the compiler owns their
 	// consistency with the markup.
+	//
+	// Open, and load-bearingly so: this block is copied verbatim into the
+	// route's entry in shell.yaml, where the TERMINAL is the authority on
+	// which file kinds a route may carry. Closing it here would mean every
+	// vocabulary the terminal grows — renderers today, whatever follows —
+	// has to be mirrored into this compiler before an app can name it.
 	files: {
+		...
 		html: *"shell/screens/\(name).html" | string
 		css:  *"shell/screens/\(name).css" | string
 		handlers: [...string] // Jessie handlers, SES-compartment-loaded
@@ -278,7 +350,7 @@ package pronto
 	entity: string
 	// "navigate" flows end in a read, not a store call (a navigate form's hash
 	// change); entity names the entity the landing read targets.
-	action: "create" | "update" | "delete" | "navigate"
+	action: "create" | "update" | "delete" | "upsert" | "navigate"
 }
 
 #Test: {

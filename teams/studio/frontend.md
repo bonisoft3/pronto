@@ -16,5 +16,9 @@ Doctrine: screens own no effects and no transport — the store is the
 platform's; a screen that needs to fetch, poll, or time something is a
 design error to send back, not a workaround to write.
 
+Skills: `chrome-devtools-mcp:debug-optimize-lcp` when a screen is slow to
+arrive. What a reader waits for is this seat's surface as much as what
+they see, and "it feels slow" is a measurement nobody has taken yet.
+
 Gate: every screen's assembly files and the shell surface carry this
 role's review before the program ships.

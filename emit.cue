@@ -38,7 +38,7 @@ import (
 
 _caddyfileAsset: _ @embed(file="assets/Caddyfile", type=text)
 
-_sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestamptz: "TIMESTAMPTZ", tsvector: "TSVECTOR"}
+_sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: "BIGINT", timestamptz: "TIMESTAMPTZ", tsvector: "TSVECTOR"}
 
 #colSql: C={
 	f: #Field
@@ -188,6 +188,11 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 	]), "\n")
 }
 
+// Column conduit stamps onto every bus row naming the table it came from. Not
+// a database column: it exists only on the wire, so it must not collide with
+// one, hence the reserved prefix.
+_cdcTableField: "__table"
+
 #rpkPipeline: R={
 	p:           #Pipeline
 	sourceTable: string
@@ -200,6 +205,21 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 	// A keyed transform posts an array of sink rows, one per key, so the
 	// upsert must conflict on the sink pk; the singleton path conflicts on id.
 	_onConflict: [if R.p.key != _|_ {R.sinkPk}, "id"][0]
+	// The read is absolute, which is what makes the sink idempotent under
+	// at-least-once delivery. The branch grafts the fetched aggregate rows onto
+	// the event as root.rows, keeping the opencdc event (payload.before/after
+	// as JSON-encoded row strings) beside the rows so a delete's key stays
+	// reachable for delete-to-zero emissions.
+	_fetch: branch: {
+		processors: [{http: {
+			url:  "${CRUD_URL}/\(R.sourceTable)?\(R.p.transform.aggregate)"
+			verb: "GET"
+			if R.authOn {
+				headers: Authorization: "Bearer ${SERVICE_JWT}"
+			}
+		}}]
+		result_map: "root.rows = this"
+	}
 	out: {
 		input: redis_streams: {
 			url: "${REDIS_URL}"
@@ -208,23 +228,25 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 			consumer_group: R.p.group
 		}
 		pipeline: processors: [
-			// The read is absolute, which is what makes the sink idempotent
-			// under at-least-once delivery. The branch grafts the fetched
-			// aggregate rows onto the event as root.rows, keeping the opencdc
-			// event (payload.before/payload.after as JSON-encoded row strings)
-			// beside the rows so a delete's key stays reachable for
-			// delete-to-zero emissions.
-			{branch: {
-				processors: [{http: {
-					url:  "${CRUD_URL}/\(R.sourceTable)?\(R.p.transform.aggregate)"
-					verb: "GET"
-					if R.authOn {
-						headers: Authorization: "Bearer ${SERVICE_JWT}"
-					}
-				}}]
-				result_map: "root.rows = this"
-			}},
+			// Ahead of the fetch on purpose: cdc-events carries every table and
+			// each stream reads all of it, so a message the mapping will discard
+			// otherwise costs a PostgREST GET first. Which messages are its own
+			// is the mapping's decision — this only spares the malformed.
+			{mapping: "root = if this.exists(\"data\") && this.data.type() == \"string\" && this.data.length() > 0 { this } else { deleted() }"},
+			R._fetch,
 			{bloblang: R.p.transform.bloblang},
+			// A failed processor leaves the message untouched and carries on, so
+			// without this a throwing mapping silently POSTs the CloudEvent
+			// envelope and the only trace is PostgREST rejecting a column named
+			// `data`. Name the pipeline and the input, then drop: the read is
+			// absolute, so the next event for that key repairs the sink.
+			{catch: [
+				{log: {
+					level:   "ERROR"
+					message: "\(R.p.name): transform failed (${! error() }) on ${! content() }"
+				}},
+				{mapping: "root = deleted()"},
+			]},
 		]
 		output: retry: {
 			max_retries: 3
@@ -305,6 +327,21 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 	_tablePath: {for _, s in S.code.surface.screens for r in s.reads {
 		(S.code.state.entities[r.entity].table): S.code.state.entities[r.entity].path
 	}}
+	// A form's entity joins the registry even when no screen reads it: a
+	// write-only table — one a form appends to and only a pipeline reads back —
+	// must still be known to the store or create() refuses the table id.
+	_tables: {for _, s in S.code.surface.screens for f in s.forms {(S.code.state.entities[f.entity].table): true}}
+	_tablePath: {for _, s in S.code.surface.screens for f in s.forms {
+		(S.code.state.entities[f.entity].table): S.code.state.entities[f.entity].path
+	}}
+	// A fold's private pair joins the registry the same way: no region names it
+	// and no form writes it, but the terminal reads it on every projection, and
+	// a table the store does not know has no collection to read.
+	_tables: {for _, p in S.code.state.pipelines if p.fold != _|_ {(p.fold.pair.table): true}}
+	_tablePath: {for _, p in S.code.state.pipelines if p.fold != _|_ {
+		(p.fold.pair.table): [for _, e in S.code.state.entities if e.table == p.fold.pair.table {e.path}][0]
+	}}
+
 	// Browser-only tiers. They are collections like any other — read by a
 	// data-live region, mutated by a form — but the terminal builds them from
 	// a local factory instead of an Electric shape, so they cannot be listed
@@ -314,6 +351,7 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 		(S.code.state.entities[r.entity].table): [for f in S.code.state.entities[r.entity].fields if f.pk {f.name}][0]
 	}}
 	_nonIdKeys: {for t, k in S._tableKeys if k != "id" {(t): k}}
+	_uniqueTables: [for _, e in S.code.state.entities if len(e.uniques) > 0 {e.table}]
 	_access: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.access != _|_ {
 		(e.table): {
 			mode: e.access.mode
@@ -370,14 +408,37 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 		if len(S._access) > 0 {
 			access: S._access
 		}
+		// Natural keys, so the terminal can resolve a row the way the database
+		// would: an upsert writes "the row for this key", which is a local
+		// question the collection already answers. Guarded on a LIST: len() over
+		// the struct a comprehension builds reads as incomplete in cue 0.16.
+		if len(S._uniqueTables) > 0 {
+			uniques: {
+				for _, e in S.code.state.entities if len(e.uniques) > 0 {
+					(e.table): [for u in e.uniques {u.cols}]
+				}
+			}
+		}
 		"migrations": S.migrations
 		pipelines: [for _, p in S.code.state.pipelines {
 			if p.trigger == "cdc" if p.raw == _|_ {
-				name:      p.name
-				from:      S.code.state.entities[p.from].table
-				to:        S.code.state.entities[p.to].table
+				name: p.name
+				from: S.code.state.entities[p.from].table
+				to:   S.code.state.entities[p.to].table
 				aggregate: p.transform.aggregate
-				shim:      p.shim
+				if p.fold == _|_ {shim: p.shim}
+				// A fold names its module rather than a shim, and the terminal
+				// runs it at both browser tiers: the PGlite sink, and the
+				// optimistic projection over the synced sink. The watermark and
+				// dedupe key travel with it — the projection cannot be sound
+				// without either (decision-optimistic-fold).
+				if p.fold != _|_ {
+					fold:      p.fold.src
+					watermark: p.fold.watermark
+					dedupe:    p.fold.dedupe
+					retracted: p.fold.retracted
+					pair:      p.fold.pair
+				}
 				if p.key != _|_ {key: p.key}
 			}
 			if p.trigger == "schedule" {
@@ -397,6 +458,7 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 
 #appMigrations: M={
 	code: #App
+	_uniqueTables: [for _, e in M.code.state.entities if len(e.uniques) > 0 {e.table}]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.path != "tab" && e.path != "device" {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
@@ -409,6 +471,7 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 		if len(M.accessed) > 0 {"services/database/migrations/005_policies.sql"},
 		"services/database/migrations/006_txid.sql",
 		"services/database/migrations/007_publication.sql",
+		if len(M._uniqueTables) > 0 {"services/database/migrations/010_composite_uniques.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
 	]
@@ -464,6 +527,9 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 			// something references — an unreferenced file under shell/shared/ is
 			// never built and cannot pretend to be part of the app.
 			shared: list.SortStrings([for i, _ in D._sharedSet {i}])
+			folds: list.SortStrings([
+				for _, pl in D.code.state.pipelines if pl.fold != _|_ {pl.fold.src},
+			])
 		}
 	}
 }
@@ -509,6 +575,12 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 // inputs; program.cue wires the defaults (#DefaultCluster/#DefaultTerminal)
 // and bayt.cue redeclares the runtime pair as the escape-hatch seams.
 #emit: E={
+	_uniqueTables: [for _, e in E.code.state.entities if len(e.uniques) > 0 {e.table}]
+	_uniqueLines: [
+		for ent in E._serverEntities for u in ent.uniques {
+			"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(ent.table) (\(strings.Join(u.cols, ", ")));"
+		},
+	]
 	code:     #App
 	cluster:  mecha.#Cluster
 	terminal: omnishell.#Terminal
@@ -602,6 +674,93 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 		.screen[data-state$="-dark"] {
 		  color-scheme: dark;
 		}
+
+		/* The terminal's chrome, styled here because the terminal ships no
+		   style: its markup carries stable classes and attributes, and this
+		   emission — program-owned, preset-derived, app-overridable — is the
+		   only stylesheet they have. Aesthetic values stay behind --shell-*
+		   variables so an app can retheme without repeating structure. */
+		body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
+		  background: var(--shell-bg); color: var(--shell-fg); }
+		/* Sticky, because the navigation stack restores a screen's scroll
+		   position on return — without it the way back to the primary
+		   navigation is scrolling up. A sticky element is transparent, so it
+		   needs its own background or content runs under it. */
+		body > nav { position: sticky; top: 0; z-index: 10;
+		  background: var(--shell-bg);
+		  display: flex; gap: var(--shell-nav-gap, 20px);
+		  padding: var(--shell-nav-pad, 14px 24px);
+		  font-weight: var(--shell-nav-weight, 600);
+		  border-bottom: 1px solid var(--shell-rule); }
+		body > nav a { color: inherit; text-decoration: none; }
+		body > nav a:hover { text-decoration: var(--shell-nav-hover, underline); }
+		/* The signed-in person at the strip's far end, name-then-handle as a
+		   byline. All four ellipsis rules are load-bearing: nowrap alone
+		   cannot shrink, and min-width: 0 is what lets a flex item shrink
+		   below its content width at all. */
+		body > nav .shell-me { margin-left: auto; display: flex; gap: var(--shell-nav-gap, 20px); min-width: 0; }
+		body > nav .shell-who { display: flex; gap: 5px; min-width: 0; }
+		body > nav .shell-who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		body > nav .shell-who .name:empty { display: none; }
+		body > nav .shell-who .name:not(:empty)::after { content: " ·"; }
+		body > nav .shell-who .handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+		body > nav .shell-signout { font-weight: 400; opacity: var(--shell-signout-opacity, .65); }
+
+		/* Not a preference to weigh against the design: durations collapse
+		   and the interpreter's exit path, which waits on running animations,
+		   finds none and removes immediately. */
+		@media (prefers-reduced-motion: reduce) {
+		  :root { --motion-fast: 0s; --motion-base: 0s; --motion-shift: 0px; }
+		}
+
+		/* Lifecycle slots the interpreter stamps at moments no screen can
+		   observe. Keyframes, not transitions: screens style rows with
+		   transition, and the cascade would hand them the whole shorthand.
+		   These bindings are deliberately rebindable — a screen may point
+		   them at its own keyframes; the interpreter waits on whatever
+		   animations actually run. */
+		@keyframes shell-item-enter {
+		  from { opacity: 0; transform: translateY(var(--motion-shift)); }
+		}
+		@keyframes shell-item-exit {
+		  to { opacity: 0; transform: scale(.98); }
+		}
+		[data-id][data-enter] { animation: shell-item-enter var(--motion-base) var(--motion-ease); }
+		/* forwards holds the departed row invisible for the frames between
+		   the animation ending and the interpreter removing the node. */
+		[data-id][data-exit] { animation: shell-item-exit var(--motion-base) var(--motion-ease) forwards; }
+		@keyframes shell-reveal {
+		  from { opacity: 0; transform: translateY(calc(var(--motion-shift) * -1)); }
+		}
+		.empty, .invalid, .store-error {
+		  animation: shell-reveal var(--motion-base) var(--motion-ease);
+		}
+		/* A screen arriving on the navigation stack; the one it replaces is
+		   hidden at once — overlapping two live screens would need a stacking
+		   layout the terminal does not own. */
+		.shell-screen { transition: opacity var(--motion-fast) var(--motion-ease); }
+		.shell-screen[data-entering] { opacity: 0; }
+
+		/* The login ceremony — the one full surface the terminal renders,
+		   on the same tokens as everything else. */
+		.shell-login { display: grid; place-items: center; min-height: 70vh; }
+		.shell-login form { display: grid; gap: 12px; width: min(320px, 90vw);
+		  padding: var(--sp-lg, 24px); border: 1px solid var(--shell-rule);
+		  border-radius: var(--r-md, 8px); background: var(--surface); }
+		.shell-login h1 { margin: 0; font-size: 1.25rem; }
+		.shell-login label { display: grid; gap: 4px; font-weight: 600; }
+		.shell-login input { font: inherit; padding: 8px 10px;
+		  border-radius: var(--r-sm, 6px); border: 1px solid var(--shell-rule);
+		  background: var(--surface); color: var(--shell-fg); }
+		.shell-login button { font: inherit; font-weight: 600; padding: 8px 10px;
+		  border-radius: var(--r-sm, 6px); border: 1px solid var(--shell-rule);
+		  background: var(--shell-fg); color: var(--shell-bg);
+		  cursor: pointer; }
+		.shell-login .login-hint { margin: 0; font-weight: 400; font-size: .875rem;
+		  color: var(--shell-fg); opacity: .65; }
+		.shell-login .login-guest { background: var(--surface);
+		  color: var(--shell-fg); font-weight: 400; }
+		.shell-login .login-error { color: var(--danger); margin: 0; }
 
 		"""
 
@@ -702,12 +861,22 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 			// FULL, and a publication excluding generated columns from a FULL
 			// identity refuses UPDATE/DELETE (42P10). Slots belong to consumers,
 			// created on first connect.
+			// REPLICA IDENTITY FULL is declared here, not inherited. Under the
+			// DEFAULT identity a DELETE replicates only the primary key, so a
+			// pipeline keyed on any other column reads its own key as empty and
+			// cannot recount the group the row left — the count freezes at its
+			// last value and a junk sink row keyed on "" accumulates beside it.
+			// Electric sets FULL on the tables it syncs, which made this work by
+			// accident on any cluster it had already reached and fail on a fresh
+			// one until it did; delete-to-zero must not depend on that.
 			text: """
 				DO $$ BEGIN
 				  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '\(E._pub)') THEN
 				    CREATE PUBLICATION \(E._pub) FOR TABLE \(E._cdcTables) WITH (publish_generated_columns = stored);
 				  END IF;
 				END $$;
+
+				\(strings.Join([for t in strings.Split(E._cdcTables, ",") {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
 
 				"""
 		}
@@ -725,6 +894,18 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 				text: strings.Join([for ent in E._entities if ent.access != _|_ {
 					(#policySql & {e: ent, entities: E.code.state.entities}).out
 				}], "\n\n") + "\n"
+			}
+		}
+		// Composite uniques, from the entities' own declarations. Names are
+		// uq_<table>_<cols>, and a violation is what the app's duplicate refusal
+		// reads: the Caddyfile injects resolution=ignore-duplicates, which
+		// PostgREST targets at the PRIMARY KEY — a client-minted uuid that never
+		// collides — so a repeated pair reaches this index and comes back 23505
+		// rather than merging silently.
+		if len(E._uniqueLines) > 0 {
+			"services/database/migrations/010_composite_uniques.sql": {
+				format: "sql"
+				text:   strings.Join(E._uniqueLines, "\n") + "\n"
 			}
 		}
 		"services/database/migrations/006_txid.sql": {
@@ -789,6 +970,36 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 						}
 					}]
 					processors: [{
+						// Which table changed, carried in the row itself. The bus
+						// is one topic for every table and each pipeline reads all
+						// of it, so a consumer has to tell its own source's events
+						// apart; column shape cannot do it (favorite and bookmark
+						// are column-identical, and inferring from a witness column
+						// silently mis-fires the moment a sibling table grows one).
+						// Both sides are stamped because a delete's After is empty
+						// and restore-deleted-row back-fills it from Before.
+						id:     "stamp-collection-after"
+						plugin: "builtin:field.set"
+					// Guarded, and the guard is the whole point: a delete carries an
+					// EMPTY After, and setting a field on it CREATES one — which makes
+					// restore-deleted-row believe there is a row worth keeping, so it
+					// skips the back-fill and the delete reaches the bus as {__table}
+					// and nothing else. Every un-favourite then fails to recount and
+					// the sink only ratchets up.
+					condition: "{{ if .Payload.After }}true{{ else }}false{{ end }}"
+						settings: {
+							field: ".Payload.After.\(_cdcTableField)"
+							value: "{{ index .Metadata \"opencdc.collection\" }}"
+						}
+					}, {
+						id:     "stamp-collection-before"
+						plugin: "builtin:field.set"
+					condition: "{{ if .Payload.Before }}true{{ else }}false{{ end }}"
+						settings: {
+							field: ".Payload.Before.\(_cdcTableField)"
+							value: "{{ index .Metadata \"opencdc.collection\" }}"
+						}
+					}, {
 						id:     "stringify-after"
 						plugin: "builtin:json.encode"
 						settings: field: ".Payload.After"
@@ -869,8 +1080,13 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", timestam
 			for i in s.files.handlers {"\(i)": {format: "jessie", src: i}}
 		}
 		for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {
-			"\(pl.transform.src)": {format: "bloblang", src: pl.transform.src}
-			"\(pl.shim)": {format: "js", src: pl.shim}
+			if pl.fold == _|_ {
+				"\(pl.transform.src)": {format: "bloblang", src: pl.transform.src}
+				"\(pl.shim)": {format: "js", src: pl.shim}
+			}
+			if pl.fold != _|_ {
+				"\(pl.fold.src)": {format: "js", src: pl.fold.src}
+			}
 		}
 		for _, h in E.code.surface.handlers {
 			"\(h.src)": {format: "jessie", src: h.src}

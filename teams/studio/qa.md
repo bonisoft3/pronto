@@ -12,5 +12,11 @@ more than one user, delivery under failure — is reviewed against the ir
 and cited in this seat's section, with findings filed as review content
 rather than fixed silently.
 
+Skills: `superpowers:verification-before-completion` is this seat's
+charter restated — evidence before assertions, the command run and the
+output read before anything is called green. `superpowers:systematic-
+debugging` when a finding needs a root cause rather than a patch: a fix
+that cannot name what it fixed is a finding still open.
+
 Gate: the test and paths surfaces carry this role's review, with verify
 evidence cited, before the program ships.

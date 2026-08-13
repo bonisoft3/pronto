@@ -1,8 +1,18 @@
-# Two listeners, one body. Browsers negotiate HTTP/2 only over TLS, and
-# HTTP/1.1 caps ~6 connections per origin — fewer than one tab's Electric
-# long-poll shapes. :8443 exists so automated QA (ignore-certificate-errors)
-# gets h2 multiplexing; humans stay on :8080 plain http, which localhost
-# already treats as a secure context (passkeys keep working, no CA trust).
+# One door, and it is h2. A browser caps HTTP/1.1 at six connections per
+# origin; an Electric live shape is a long-poll that holds one for its whole
+# timeout, and a screen subscribes one per table — so on 1.1 the shapes eat the
+# pool and everything else queues behind them. Measured on the nine-table
+# article route: slowest shape 20 027 ms on 1.1 against 142 ms on h2, and the
+# screen rendered in 1 552 ms against 647 ms
+# (plugins/pronto/docs/2026-08-09-connection-ceiling.md). h2 multiplexes every
+# stream over one connection, so the cap stops being something to count against.
+#
+# Browsers negotiate h2 only over TLS — none of them speak cleartext h2 — so the
+# door is https, on a certificate mkcert issued and the developer trusted once.
+# "just setup" writes the pair (the cluster declares it as a setup check);
+# "mise exec -- mkcert -install" trusts it. The plain listener stays bound
+# INSIDE the container for the healthcheck and is no longer published, so there
+# is no plain-http path left to drift onto.
 (app) {
   handle /crud/* {
     uri strip_prefix /crud
@@ -58,9 +68,17 @@
   import app
 }
 
-# Hostname-scoped: a port-only address would make tls internal the
-# catch-all automation policy and conflict with :8080's default.
+# The published door. Hostname-scoped: a port-only address would make the
+# automation policy a catch-all and conflict with :8080's default.
+#
+# The certificate is mkcert's, mounted from the host rather than issued here.
+# `tls internal` would be simpler and is wrong for this: Caddy's root would
+# live inside the container, so no browser on the host could ever trust it, and
+# an untrusted certificate is worse than plain http — the interstitial blocks
+# WebAuthn outright, where http://localhost is a secure context and passkeys
+# work. mkcert puts the root in the host trust store instead, where the browser
+# can see it.
 https://localhost:8443 {
-  tls internal
+  tls /certs/localhost.pem /certs/localhost-key.pem
   import app
 }

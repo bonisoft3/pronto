@@ -12,5 +12,11 @@ phases, refusals with words). Empty states sell the next action;
 unhappy roads are designed experiences, not error handling. The
 interrogation seat: asks the questions the brief's author didn't.
 
+Skills: `chrome-devtools-mcp:a11y-debugging` while the flows are still
+being drawn. Focus order, tap-target size, contrast and ARIA are the
+gesture cost this seat already owns, measured rather than judged — and
+they are cheapest to fix before a storyboard frame is signed, not after
+the visual battery reports them at integrate.
+
 Gate: the ir's overview framing, flows, storyboard paths, and
 acceptance set carry this role's review before the program compiles.

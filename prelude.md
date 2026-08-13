@@ -125,9 +125,17 @@ box in ir.html; an app with none says so in its Decisions section.
 ## The virtual team
 
 Compilation itself is staffed: the brief's `team:` (default squad —
-product, design, eng, qa) names the roles that author and sign the ir.
-Each role holds a gate; the ir carries their reviews. Briefs stay minimal
-— the team asks the questions the human didn't.
+product, design, eng, qa) names the roles that author and sign the
+compile. Each role holds a gate over the surface it owns, wherever the
+ladder produces it: the seats that shape the ir sign the ir, and the
+seats whose surface is the assembly — screen markup and stylesheets, the
+shell, the emitted SQL — sign that, before the program ships. A hop
+nobody signs loses things quietly. Translation is where a multi-arm
+assertion becomes a single one, because the program's shape admits one;
+assembly is where one design system becomes a copy per screen, and the
+copies then differ. Neither loss is visible in the ir, which is why a
+gate that stops at the ir is a gate on a third of the work. Briefs stay
+minimal — the team asks the questions the human didn't.
 
 ## Composition
 
