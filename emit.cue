@@ -877,6 +877,7 @@ _cdcTableField: "__table"
 				END $$;
 
 				\(strings.Join([for t in strings.Split(E._cdcTables, ",") {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
+				GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
 
 				"""
 		}
