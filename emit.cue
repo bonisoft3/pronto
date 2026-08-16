@@ -869,7 +869,13 @@ _cdcTableField: "__table"
 			// Electric sets FULL on the tables it syncs, which made this work by
 			// accident on any cluster it had already reached and fail on a fresh
 			// one until it did; delete-to-zero must not depend on that.
-			text: """
+			// An app whose entities all live in the browser (tab, device) has no
+			// crud table at all, and `FOR TABLE` with an empty list is a syntax
+			// error that aborts initdb — so the publication is emitted only when
+			// there is something to publish.
+			text: [
+				if len(E._cdcTables) > 0 {
+					"""
 				DO $$ BEGIN
 				  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '\(E._pub)') THEN
 				    CREATE PUBLICATION \(E._pub) FOR TABLE \(E._cdcTables) WITH (publish_generated_columns = stored);
@@ -880,6 +886,12 @@ _cdcTableField: "__table"
 				GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
 
 				"""
+				},
+				"""
+				-- No crud-path entity: nothing to publish, nothing to grant.
+
+				""",
+			][0]
 		}
 		"services/database/migrations/004_create_tables.sql": {
 			format: "sql"
