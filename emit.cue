@@ -98,7 +98,7 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	e: #Entity
 	_rows: [for r in S.e.seed {
 		_cols: [for f in S.e.fields if r[f.name] != _|_ {f.name}]
-		out:   "INSERT INTO \(S.e.table) (" + strings.Join(_cols, ", ") + ") VALUES (" +
+		out: "INSERT INTO \(S.e.table) (" + strings.Join(_cols, ", ") + ") VALUES (" +
 			strings.Join([for c in _cols {(#sqlLit & {v: r[c]}).out}], ", ") +
 			") ON CONFLICT (id) DO NOTHING;"
 	}]
@@ -178,7 +178,22 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	}
 	if P.e.access.mode == "service-only" {
 		_pre: []
-		_appUser: []
+		// The one exception, and it is the terminal's: at boot the shell reads
+		// the signed-in row back out of app_user to tell a live account from a
+		// token naming one that is gone (interpreter/shell.js accountLives).
+		// It reads with the person's own token, so a service-only app_user
+		// answers zero rows, the shell concludes the account is gone, drops
+		// the session and shows the door — on every reload, to everybody. A
+		// person reading their own row discloses nobody; resolving anyone
+		// else's still needs the SECURITY DEFINER path.
+		if P._t == "app_user" {
+			_appUser: [
+				"CREATE POLICY app_user_self_select ON app_user FOR SELECT TO app_user USING (id = auth_uid());",
+			]
+		}
+		if P._t != "app_user" {
+			_appUser: []
+		}
 	}
 	out: strings.Join(list.Concat([
 		P._pre,
@@ -275,9 +290,9 @@ _cdcTableField: "__table"
 // http_client mutates the sink rows the filter matches. Derived entirely —
 // no .blobl assembly, no browser shim.
 #rpkScheduled: R={
-	p:         #Pipeline
-	sinkTable: string
-	authOn:    *false | bool // same service-token contract as #rpkPipeline
+	p:          #Pipeline
+	sinkTable:  string
+	authOn:     *false | bool // same service-token contract as #rpkPipeline
 	_hasCutoff: strings.Contains(R.p.filter, "{cutoff}")
 	_hasNowts:  strings.Contains(R.p.filter, "{nowts}")
 	if R._hasCutoff {
@@ -370,6 +385,7 @@ _cdcTableField: "__table"
 		if S.code.capabilities.auth != _|_ {
 			auth: S.code.capabilities.auth
 		}
+
 		// Optional keys are emitted only where they differ from the default,
 		// so shell.yaml stays stable for the ordinary screen.
 		routes: [for _, s in S.code.surface.screens {
@@ -384,6 +400,7 @@ _cdcTableField: "__table"
 			if s.keep != 1 {
 				keep: s.keep
 			}
+
 			// Bindings live in the screen HTML; reads surface here only when a
 			// read carries filter/select.
 			if len([for r in s.reads if r.filter != _|_ || r.select != _|_ {r}]) > 0 {
@@ -394,6 +411,7 @@ _cdcTableField: "__table"
 		if len(S._local) > 0 {
 			local: S._local
 		}
+
 		// Primary key per table, only where it is not "id": the terminal's
 		// synced collections key rows by it (a pipeline sink like note_progress
 		// keys on its subject column, and keying such a table on the missing
@@ -401,6 +419,7 @@ _cdcTableField: "__table"
 		if len(S._nonIdKeys) > 0 {
 			keys: S._nonIdKeys
 		}
+
 		// RLS mirror for the terminal, in table-name space (through-parents
 		// resolved). The Electric sync plane is unscoped in the dev cluster,
 		// so the terminal must re-apply row visibility on every collection
@@ -408,6 +427,7 @@ _cdcTableField: "__table"
 		if len(S._access) > 0 {
 			access: S._access
 		}
+
 		// Natural keys, so the terminal can resolve a row the way the database
 		// would: an upsert writes "the row for this key", which is a local
 		// question the collection already answers. Guarded on a LIST: len() over
@@ -422,11 +442,12 @@ _cdcTableField: "__table"
 		"migrations": S.migrations
 		pipelines: [for _, p in S.code.state.pipelines {
 			if p.trigger == "cdc" if p.raw == _|_ {
-				name: p.name
-				from: S.code.state.entities[p.from].table
-				to:   S.code.state.entities[p.to].table
+				name:      p.name
+				from:      S.code.state.entities[p.from].table
+				to:        S.code.state.entities[p.to].table
 				aggregate: p.transform.aggregate
 				if p.fold == _|_ {shim: p.shim}
+
 				// A fold names its module rather than a shim, and the terminal
 				// runs it at both browser tiers: the PGlite sink, and the
 				// optimistic projection over the synced sink. The watermark and
@@ -446,6 +467,7 @@ _cdcTableField: "__table"
 				to:      S.code.state.entities[p.to].table
 				trigger: "schedule"
 			}
+
 			// Raw pipelines have no shim: the browser tier lists them and skips.
 			if p.raw != _|_ {
 				name: p.name
@@ -462,7 +484,13 @@ _cdcTableField: "__table"
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.path != "tab" && e.path != "device" {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
-	list: [
+	// Same predicate as #emit._serverOn, and it has to be: the cluster mounts
+	// this list as configs, so a migration named here without a database to
+	// run it is a compose file referring to a service that was never emitted.
+	_server: len([for _, e in M.code.state.entities if e.path != "tab" && e.path != "device" {e}]) > 0 ||
+		M.code.capabilities.auth != _|_
+	list: [for f in M._all if M._server {f}]
+	_all: [
 		"services/database/migrations/000_extensions.sql",
 		"services/database/migrations/001_roles.sql",
 		"services/database/migrations/002_grants.sql",
@@ -558,7 +586,7 @@ _cdcTableField: "__table"
 
 	out: mecha.#Cluster & {
 		meta: {
-			app:     D.code.meta.name
+			app: D.code.meta.name
 			statics: list.Concat([D.statics, D._ladder])
 		}
 		state: {
@@ -608,6 +636,7 @@ _cdcTableField: "__table"
 			_vendoredCapabilityOffered: true & (E.terminal.capabilities[parts[0]][parts[1]] != _|_)
 		}
 	}
+
 	// The cluster stores these. tab and device live only in the browser, so
 	// nothing server-side is derived for them at all: no table, no restamp
 	// trigger, no publication entry, no policy, no seed — which is the whole
@@ -642,7 +671,7 @@ _cdcTableField: "__table"
 	][0]
 
 	// The design block becomes CSS here and only here.
-	_design: E.code.surface.design
+	_design:    E.code.surface.design
 	_designCss: """
 
 		/* Design system values, from DESIGN.md's frontmatter by way of the
@@ -664,7 +693,7 @@ _cdcTableField: "__table"
 				"  --shell-rule: var(--\(E._design.shell.rule));",
 				"  color-scheme: light dark;",
 			],
-		]), "\n"))
+	]), "\n"))
 		}
 		/* The storybook stamps -dark frames as data-state values. colour-scheme
 		   is inherited and light-dark() reads it at the point of use, so
@@ -769,7 +798,7 @@ _cdcTableField: "__table"
 	_migrations: (#appMigrations & {"code": E.code}).list
 
 	_accessed: (#appMigrations & {"code": E.code}).accessed
-	_raw:      (#appMigrations & {"code": E.code}).raw
+	_raw: (#appMigrations & {"code": E.code}).raw
 	// The auth plane switches on as one: declaring #App.auth or any entity
 	// access implies the roles, auth_uid(), and service-token plumbing —
 	// policies without tokens (or vice versa) is not a supported state.
@@ -779,103 +808,115 @@ _cdcTableField: "__table"
 	// the blob plane follows the program's flag.
 	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
 	cluster: capabilities: blobs: E.code.capabilities.blobs
+	// The data plane follows the program's own durability choices: an entity
+	// on a server tier is state the cluster has to keep, and an app with none
+	// is served by caddy alone. Auth is identity the cluster keeps, so it
+	// counts as server-side state too.
+	_serverOn: len(E._serverEntities) > 0 || E.code.capabilities.auth != _|_
+	cluster: capabilities: server: E._serverOn
 
 	files: [string]: #File
 	files: {
-		"services/database/migrations/000_extensions.sql": {
-			format: "sql"
-			// gen_random_uuid() is core since PostgreSQL 13; the slot stays so
-			// apps needing real extensions keep a stable migration order.
-			// auth_uid() reads the sub claim PostgREST stashes in
-			// request.jwt.claims; NULL outside a request or for tokens
-			// without a sub (anon).
-			_prelude: """
-				-- no extensions required
-
-				"""
-			if !E._authOn {
-				text: _prelude
-			}
-			if E._authOn {
-				text: _prelude + "\n" + """
-					CREATE OR REPLACE FUNCTION auth_uid() RETURNS uuid LANGUAGE sql STABLE AS $$
-					  SELECT nullif(current_setting('request.jwt.claims', true)::json->>'sub','')::uuid
-					$$;
+		// The server-side surface, emitted only where there is a server to run
+		// it: an app whose every entity is a browser tier has no schema, no
+		// publication, no bus wiring and no pipeline file, and the cluster it
+		// targets instantiates none of the services these configure.
+		if E._serverOn {
+			"services/database/migrations/000_extensions.sql": {
+				format: "sql"
+				// gen_random_uuid() is core since PostgreSQL 13; the slot stays so
+				// apps needing real extensions keep a stable migration order.
+				// auth_uid() reads the sub claim PostgREST stashes in
+				// request.jwt.claims; NULL outside a request or for tokens
+				// without a sub (anon).
+				_prelude: """
+					-- no extensions required
 
 					"""
+				if !E._authOn {
+					text: _prelude
+				}
+				if E._authOn {
+					text: _prelude + "\n" + """
+						CREATE OR REPLACE FUNCTION auth_uid() RETURNS uuid LANGUAGE sql STABLE AS $$
+						  SELECT nullif(current_setting('request.jwt.claims', true)::json->>'sub','')::uuid
+						$$;
+
+						"""
+				}
 			}
-		}
-		"services/database/migrations/001_roles.sql": {
-			format: "sql"
-			_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._authOn {"service"}]])
-			text: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
-				"""
+			"services/database/migrations/001_roles.sql": {
+				format: "sql"
+				_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._authOn {"service"}]])
+				text: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
+					"""
 					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
 					    CREATE ROLE \(r) NOLOGIN;
 					  END IF;
 					"""
-			}], "\n") + "\nEND $$;\n"
-		}
-		"services/database/migrations/002_grants.sql": {
-			format: "sql"
-			if !E._authOn {
+				}], "\n") + "\nEND $$;\n"
+			}
+			"services/database/migrations/002_grants.sql": {
+				format: "sql"
+				if !E._authOn {
+					text: """
+						GRANT USAGE ON SCHEMA public TO anon;
+						GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
+						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon;
+
+						"""
+				}
+
+				// Auth'd grants: anon can connect (USAGE) but touches no table —
+				// every row read or written goes through app_user or service,
+				// where 005's policies decide.
+				if E._authOn {
+					text: """
+						GRANT USAGE ON SCHEMA public TO anon, app_user, service;
+						GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user, service;
+						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user, service;
+
+						"""
+				}
+			}
+			// Names and order match the set baked into mecha's database image, so
+			// compose config mounts shadow the baked files one-for-one.
+			// 003 must shadow the baked conduit_pub: FOR ALL TABLES re-opens the
+			// pipeline feedback loop and trips 42P10 (mechanism at 007).
+			"services/database/migrations/003_publication.sql": {
+				format: "sql"
 				text: """
-					GRANT USAGE ON SCHEMA public TO anon;
-					GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
-					ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon;
+					-- Shadows the baked FOR ALL TABLES publication. The app publication
+					-- is created in 007_publication.sql, after the tables it names exist.
 
 					"""
 			}
-			// Auth'd grants: anon can connect (USAGE) but touches no table —
-			// every row read or written goes through app_user or service,
-			// where 005's policies decide.
-			if E._authOn {
-				text: """
-					GRANT USAGE ON SCHEMA public TO anon, app_user, service;
-					GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user, service;
-					ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user, service;
-
-					"""
-			}
-		}
-		// Names and order match the set baked into mecha's database image, so
-		// compose config mounts shadow the baked files one-for-one.
-		// 003 must shadow the baked conduit_pub: FOR ALL TABLES re-opens the
-		// pipeline feedback loop and trips 42P10 (mechanism at 007).
-		"services/database/migrations/003_publication.sql": {
-			format: "sql"
-			text: """
-				-- Shadows the baked FOR ALL TABLES publication. The app publication
-				-- is created in 007_publication.sql, after the tables it names exist.
-
-				"""
-		}
-		"services/database/migrations/007_publication.sql": {
-			format: "sql"
-			// Runs after 004_create_tables: FOR TABLE fails on missing tables
-			// and initdb aborts on the first error. FOR TABLE <crud tables>,
-			// never FOR ALL TABLES — derived-table upserts must not re-feed the
-			// pipelines that wrote them, and conduit's `tables` setting does not
-			// filter logrepl events, so the publication is the loop breaker.
-			// publish_generated_columns = stored: Electric sets REPLICA IDENTITY
-			// FULL, and a publication excluding generated columns from a FULL
-			// identity refuses UPDATE/DELETE (42P10). Slots belong to consumers,
-			// created on first connect.
-			// REPLICA IDENTITY FULL is declared here, not inherited. Under the
-			// DEFAULT identity a DELETE replicates only the primary key, so a
-			// pipeline keyed on any other column reads its own key as empty and
-			// cannot recount the group the row left — the count freezes at its
-			// last value and a junk sink row keyed on "" accumulates beside it.
-			// Electric sets FULL on the tables it syncs, which made this work by
-			// accident on any cluster it had already reached and fail on a fresh
-			// one until it did; delete-to-zero must not depend on that.
-			// An app whose entities all live in the browser (tab, device) has no
-			// crud table at all, and `FOR TABLE` with an empty list is a syntax
-			// error that aborts initdb — so the publication is emitted only when
-			// there is something to publish.
-			text: [
-				if len(E._cdcTables) > 0 {
-					"""
+			"services/database/migrations/007_publication.sql": {
+				format: "sql"
+				// Runs after 004_create_tables: FOR TABLE fails on missing tables
+				// and initdb aborts on the first error. FOR TABLE <crud tables>,
+				// never FOR ALL TABLES — derived-table upserts must not re-feed the
+				// pipelines that wrote them, and conduit's `tables` setting does not
+				// filter logrepl events, so the publication is the loop breaker.
+				// publish_generated_columns = stored: Electric sets REPLICA IDENTITY
+				// FULL, and a publication excluding generated columns from a FULL
+				// identity refuses UPDATE/DELETE (42P10). Slots belong to consumers,
+				// created on first connect.
+				// REPLICA IDENTITY FULL is declared here, not inherited. Under the
+				// DEFAULT identity a DELETE replicates only the primary key, so a
+				// pipeline keyed on any other column reads its own key as empty and
+				// cannot recount the group the row left — the count freezes at its
+				// last value and a junk sink row keyed on "" accumulates beside it.
+				// Electric sets FULL on the tables it syncs, which made this work by
+				// accident on any cluster it had already reached and fail on a fresh
+				// one until it did; delete-to-zero must not depend on that.
+				// An app whose entities all live in the browser (tab, device) has no
+				// crud table at all, and `FOR TABLE` with an empty list is a syntax
+				// error that aborts initdb — so the publication is emitted only when
+				// there is something to publish.
+				text: [
+					if len(E._cdcTables) > 0 {
+						"""
 				DO $$ BEGIN
 				  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '\(E._pub)') THEN
 				    CREATE PUBLICATION \(E._pub) FOR TABLE \(E._cdcTables) WITH (publish_generated_columns = stored);
@@ -886,182 +927,185 @@ _cdcTableField: "__table"
 				GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
 
 				"""
-				},
-				"""
-				-- No crud-path entity: nothing to publish, nothing to grant.
+					},
+					"""
+						-- No crud-path entity: nothing to publish, nothing to grant.
 
-				""",
-			][0]
-		}
-		"services/database/migrations/004_create_tables.sql": {
-			format: "sql"
-			_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
-			text: strings.Join(list.Concat([
-				[for ent in E._serverEntities {(#tableSql & {e: ent}).out}],
-				[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
-			]), "\n\n") + "\n"
-		}
-		if len(E._accessed) > 0 {
-			"services/database/migrations/005_policies.sql": {
-				format: "sql"
-				text: strings.Join([for ent in E._entities if ent.access != _|_ {
-					(#policySql & {e: ent, entities: E.code.state.entities}).out
-				}], "\n\n") + "\n"
+						""",
+				][0]
 			}
-		}
-		// Composite uniques, from the entities' own declarations. Names are
-		// uq_<table>_<cols>, and a violation is what the app's duplicate refusal
-		// reads: the Caddyfile injects resolution=ignore-duplicates, which
-		// PostgREST targets at the PRIMARY KEY — a client-minted uuid that never
-		// collides — so a repeated pair reaches this index and comes back 23505
-		// rather than merging silently.
-		if len(E._uniqueLines) > 0 {
-			"services/database/migrations/010_composite_uniques.sql": {
+			"services/database/migrations/004_create_tables.sql": {
 				format: "sql"
-				text:   strings.Join(E._uniqueLines, "\n") + "\n"
+				_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
+				text: strings.Join(list.Concat([
+					[for ent in E._serverEntities {(#tableSql & {e: ent}).out}],
+					[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
+				]), "\n\n") + "\n"
 			}
-		}
-		"services/database/migrations/006_txid.sql": {
-			format: "sql"
-			// A column DEFAULT only fires on INSERT; updates restamp here so
-			// every write's response row carries the txid that committed it.
-			text: """
-				CREATE OR REPLACE FUNCTION restamp_txid() RETURNS trigger
-				LANGUAGE plpgsql AS $$
-				BEGIN
-				  NEW.txid := pg_current_xact_id()::text::bigint;
-				  RETURN NEW;
-				END $$;
+			if len(E._accessed) > 0 {
+				"services/database/migrations/005_policies.sql": {
+					format: "sql"
+					text: strings.Join([for ent in E._entities if ent.access != _|_ {
+						(#policySql & {e: ent, entities: E.code.state.entities}).out
+					}], "\n\n") + "\n"
+				}
+			}
 
-				""" + strings.Join([for ent in E._serverEntities {
-				"""
+			// Composite uniques, from the entities' own declarations. Names are
+			// uq_<table>_<cols>, and a violation is what the app's duplicate refusal
+			// reads: the Caddyfile injects resolution=ignore-duplicates, which
+			// PostgREST targets at the PRIMARY KEY — a client-minted uuid that never
+			// collides — so a repeated pair reaches this index and comes back 23505
+			// rather than merging silently.
+			if len(E._uniqueLines) > 0 {
+				"services/database/migrations/010_composite_uniques.sql": {
+					format: "sql"
+					text:   strings.Join(E._uniqueLines, "\n") + "\n"
+				}
+			}
+			"services/database/migrations/006_txid.sql": {
+				format: "sql"
+				// A column DEFAULT only fires on INSERT; updates restamp here so
+				// every write's response row carries the txid that committed it.
+				text: """
+					CREATE OR REPLACE FUNCTION restamp_txid() RETURNS trigger
+					LANGUAGE plpgsql AS $$
+					BEGIN
+					  NEW.txid := pg_current_xact_id()::text::bigint;
+					  RETURN NEW;
+					END $$;
+
+					""" + strings.Join([for ent in E._serverEntities {
+					"""
 					DROP TRIGGER IF EXISTS restamp_txid ON \(ent.table);
 					CREATE TRIGGER restamp_txid BEFORE UPDATE ON \(ent.table)
 					  FOR EACH ROW EXECUTE FUNCTION restamp_txid();
 					"""
-			}], "\n") + "\n"
-		}
-		for rm in E._raw {
-			"services/database/migrations/\(rm.name)": {format: "sql", src: rm.src}
-		}
-		if len(E._seeded) > 0 {
-			"services/database/migrations/900_seed.sql": {
-				format: "sql"
-				text:   strings.Join([for se in E._seeded {(#seedSql & {e: se}).out}], "\n") + "\n"
+				}], "\n") + "\n"
 			}
-		}
-		"docker/conduit-pipeline.yaml": {
-			format: "yaml"
-			data: {
-				version: "2.2"
-				pipelines: [{
-					id:     "cdc-to-bus"
-					status: "running"
-					connectors: [{
-						id:     "postgres-source"
-						type:   "source"
-						plugin: "builtin:postgres"
-						settings: {
-							url:          "${DATABASE_URL}"
-							tables:       E._cdcTables // derived tables are excluded: no CDC loops
-							cdcMode:      "logrepl"
-							snapshotMode: "never"
-							"logrepl.publicationName": E._pub
-							"logrepl.slotName":        "\(E.code.meta.name)_conduit_slot"
-							// Without this the http connector re-decodes the payload
-							// against the captured Avro schema and chokes post-encode.
-							"logrepl.withAvroSchema": "false"
-						}
-					}, {
-						id:     "bus-destination"
-						type:   "destination"
-						plugin: "standalone:http"
-						settings: {
-							url: "http://mesh-events:3500/v1.0/publish/redis-streams/cdc-events"
-							// The probe is a HEAD, which dapr's publish endpoint 404s.
-							validateConnection: "false"
-						}
-					}]
-					processors: [{
-						// Which table changed, carried in the row itself. The bus
-						// is one topic for every table and each pipeline reads all
-						// of it, so a consumer has to tell its own source's events
-						// apart; column shape cannot do it (favorite and bookmark
-						// are column-identical, and inferring from a witness column
-						// silently mis-fires the moment a sibling table grows one).
-						// Both sides are stamped because a delete's After is empty
-						// and restore-deleted-row back-fills it from Before.
-						id:     "stamp-collection-after"
-						plugin: "builtin:field.set"
-					// Guarded, and the guard is the whole point: a delete carries an
-					// EMPTY After, and setting a field on it CREATES one — which makes
-					// restore-deleted-row believe there is a row worth keeping, so it
-					// skips the back-fill and the delete reaches the bus as {__table}
-					// and nothing else. Every un-favourite then fails to recount and
-					// the sink only ratchets up.
-					condition: "{{ if .Payload.After }}true{{ else }}false{{ end }}"
-						settings: {
-							field: ".Payload.After.\(_cdcTableField)"
-							value: "{{ index .Metadata \"opencdc.collection\" }}"
-						}
-					}, {
-						id:     "stamp-collection-before"
-						plugin: "builtin:field.set"
-					condition: "{{ if .Payload.Before }}true{{ else }}false{{ end }}"
-						settings: {
-							field: ".Payload.Before.\(_cdcTableField)"
-							value: "{{ index .Metadata \"opencdc.collection\" }}"
-						}
-					}, {
-						id:     "stringify-after"
-						plugin: "builtin:json.encode"
-						settings: field: ".Payload.After"
-					}, {
-						id:     "stringify-before"
-						plugin: "builtin:json.encode"
-						settings: field: ".Payload.Before"
-					}, {
-						// The http destination posts only Payload.After, and a
-						// delete's After is empty — back-fill from Before so every
-						// bus message carries the changed row.
-						id:     "restore-deleted-row"
-						plugin: "builtin:field.set"
-						settings: {
-							field: ".Payload.After"
-							value: "{{ if .Payload.After }}{{ printf \"%s\" .Payload.After }}{{ else }}{{ printf \"%s\" .Payload.Before }}{{ end }}"
-						}
-					}]
-				}]
+			for rm in E._raw {
+				"services/database/migrations/\(rm.name)": {format: "sql", src: rm.src}
 			}
-		}
-		for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {
-			"docker/\(E.code.meta.name)-\(pl.name).yaml": {
+			if len(E._seeded) > 0 {
+				"services/database/migrations/900_seed.sql": {
+					format: "sql"
+					text: strings.Join([for se in E._seeded {(#seedSql & {e: se}).out}], "\n") + "\n"
+				}
+			}
+			"docker/conduit-pipeline.yaml": {
 				format: "yaml"
-				data: (#rpkPipeline & {
-					p:           pl
-					sourceTable: E.code.state.entities[pl.from].table
-					sinkTable:   E.code.state.entities[pl.to].table
-					sinkPk: [for fld in E.code.state.entities[pl.to].fields if fld.pk {fld.name}][0]
-					authOn: E._authOn
-				}).out
+				data: {
+					version: "2.2"
+					pipelines: [{
+						id:     "cdc-to-bus"
+						status: "running"
+						connectors: [{
+							id:     "postgres-source"
+							type:   "source"
+							plugin: "builtin:postgres"
+							settings: {
+								url:                       "${DATABASE_URL}"
+								tables:                    E._cdcTables // derived tables are excluded: no CDC loops
+								cdcMode:                   "logrepl"
+								snapshotMode:              "never"
+								"logrepl.publicationName": E._pub
+								"logrepl.slotName":        "\(E.code.meta.name)_conduit_slot"
+								// Without this the http connector re-decodes the payload
+								// against the captured Avro schema and chokes post-encode.
+								"logrepl.withAvroSchema": "false"
+							}
+						}, {
+							id:     "bus-destination"
+							type:   "destination"
+							plugin: "standalone:http"
+							settings: {
+								url: "http://mesh-events:3500/v1.0/publish/redis-streams/cdc-events"
+								// The probe is a HEAD, which dapr's publish endpoint 404s.
+								validateConnection: "false"
+							}
+						}]
+						processors: [{
+							// Which table changed, carried in the row itself. The bus
+							// is one topic for every table and each pipeline reads all
+							// of it, so a consumer has to tell its own source's events
+							// apart; column shape cannot do it (favorite and bookmark
+							// are column-identical, and inferring from a witness column
+							// silently mis-fires the moment a sibling table grows one).
+							// Both sides are stamped because a delete's After is empty
+							// and restore-deleted-row back-fills it from Before.
+							id:     "stamp-collection-after"
+							plugin: "builtin:field.set"
+							// Guarded, and the guard is the whole point: a delete carries an
+							// EMPTY After, and setting a field on it CREATES one — which makes
+							// restore-deleted-row believe there is a row worth keeping, so it
+							// skips the back-fill and the delete reaches the bus as {__table}
+							// and nothing else. Every un-favourite then fails to recount and
+							// the sink only ratchets up.
+							condition: "{{ if .Payload.After }}true{{ else }}false{{ end }}"
+							settings: {
+								field: ".Payload.After.\(_cdcTableField)"
+								value: "{{ index .Metadata \"opencdc.collection\" }}"
+							}
+						}, {
+							id:        "stamp-collection-before"
+							plugin:    "builtin:field.set"
+							condition: "{{ if .Payload.Before }}true{{ else }}false{{ end }}"
+							settings: {
+								field: ".Payload.Before.\(_cdcTableField)"
+								value: "{{ index .Metadata \"opencdc.collection\" }}"
+							}
+						}, {
+							id:     "stringify-after"
+							plugin: "builtin:json.encode"
+							settings: field: ".Payload.After"
+						}, {
+							id:     "stringify-before"
+							plugin: "builtin:json.encode"
+							settings: field: ".Payload.Before"
+						}, {
+							// The http destination posts only Payload.After, and a
+							// delete's After is empty — back-fill from Before so every
+							// bus message carries the changed row.
+							id:     "restore-deleted-row"
+							plugin: "builtin:field.set"
+							settings: {
+								field: ".Payload.After"
+								value: "{{ if .Payload.After }}{{ printf \"%s\" .Payload.After }}{{ else }}{{ printf \"%s\" .Payload.Before }}{{ end }}"
+							}
+						}]
+					}]
+				}
 			}
-		}
-		for _, pl in E.code.state.pipelines if pl.trigger == "schedule" {
-			"docker/\(E.code.meta.name)-\(pl.name).yaml": {
-				format: "yaml"
-				data: (#rpkScheduled & {
-					p:         pl
-					sinkTable: E.code.state.entities[pl.to].table
-					authOn:    E._authOn
-				}).out
+			for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {
+				"docker/\(E.code.meta.name)-\(pl.name).yaml": {
+					format: "yaml"
+					data: (#rpkPipeline & {
+						p:           pl
+						sourceTable: E.code.state.entities[pl.from].table
+						sinkTable:   E.code.state.entities[pl.to].table
+						sinkPk: [for fld in E.code.state.entities[pl.to].fields if fld.pk {fld.name}][0]
+						authOn: E._authOn
+					}).out
+				}
 			}
-		}
-		// Raw pipelines: the assembly rpk stream is copied verbatim beside the
-		// derived ones, so the transform image and the rpk lint list treat all
-		// pipelines alike.
-		for _, pl in E.code.state.pipelines if pl.raw != _|_ {
-			"docker/\(E.code.meta.name)-\(pl.name).yaml": {format: "yaml", src: pl.src}
-			"\(pl.src)": {format: "yaml", src: pl.src}
+			for _, pl in E.code.state.pipelines if pl.trigger == "schedule" {
+				"docker/\(E.code.meta.name)-\(pl.name).yaml": {
+					format: "yaml"
+					data: (#rpkScheduled & {
+						p:         pl
+						sinkTable: E.code.state.entities[pl.to].table
+						authOn:    E._authOn
+					}).out
+				}
+			}
+
+			// Raw pipelines: the assembly rpk stream is copied verbatim beside the
+			// derived ones, so the transform image and the rpk lint list treat all
+			// pipelines alike.
+			for _, pl in E.code.state.pipelines if pl.raw != _|_ {
+				"docker/\(E.code.meta.name)-\(pl.name).yaml": {format: "yaml", src: pl.src}
+				"\(pl.src)": {format: "yaml", src: pl.src}
+			}
 		}
 		"docker/Caddyfile": {
 			format: "caddyfile"
@@ -1125,7 +1169,7 @@ _cdcTableField: "__table"
 		}
 		"bayt.cue": {
 			format: "cue"
-			text: """
+			text:   """
 				// The build graph is authored in program.cue (the build seat) and
 				// lands here as bayt.json; unifying it back through bayt.#project
 				// keeps bayt's schema live at generate time.

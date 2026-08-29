@@ -118,7 +118,7 @@ extend the existing axis *downward*:
 | durability | lives in | survives | syncs | CDC | RLS |
 |---|---|---|---|---|---|
 | `tab` | in-memory collection | navigation | no | no | n/a |
-| `device` | IndexedDB / PGlite | restart | no | no | n/a |
+| `device` | `localStorage` (measured 2026-08-27) | restart | no | no | n/a |
 | `offline` | local + outbox | device loss | yes | yes | yes |
 | `crud` | Postgres | always | yes | yes | yes |
 | `live` | Postgres, pipeline-written | always | read-only | no | yes |
