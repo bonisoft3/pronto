@@ -136,6 +136,9 @@ package pronto
 	path: "crud" | "live" | "offline" | "tab" | "device"
 	if path == "tab" || path == "device" {
 		access?: _|_
+		// No table is ever emitted for these tiers, so a SQL rendering is dead
+		// text written twice by hand; `cel` alone states the constraint.
+		fields: [...{check?: _|_}]
 	}
 	if path != "tab" && path != "device" {
 		access?: #Access

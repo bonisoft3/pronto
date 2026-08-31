@@ -400,12 +400,6 @@ _cdcTableField: "__table"
 			if s.keep != 1 {
 				keep: s.keep
 			}
-
-			// Bindings live in the screen HTML; reads surface here only when a
-			// read carries filter/select.
-			if len([for r in s.reads if r.filter != _|_ || r.select != _|_ {r}]) > 0 {
-				reads: s.reads
-			}
 		}]
 		tables: list.SortStrings([for t, _ in S._tables if S._local[t] == _|_ {t}])
 		if len(S._local) > 0 {

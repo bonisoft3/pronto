@@ -12,6 +12,7 @@
 // stale emissions.
 
 import { stringify } from "jsr:@std/yaml@1.0.5";
+import { derive } from "./derive.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Bundle = { manifest: string[]; files: Record<string, EmitFile> };
@@ -35,6 +36,9 @@ function fail(msg: string): never {
 }
 
 const appDir = Deno.args[0] ?? fail("usage: write.ts <appDir>  (runs `cue export` in appDir — needs --allow-run=cue)");
+
+// Markup-derived declarations regenerate before the export that reads them.
+await derive(appDir);
 
 const exported = await new Deno.Command("cue", {
   args: ["export", ".", "-e", "out", "--out", "json"],
