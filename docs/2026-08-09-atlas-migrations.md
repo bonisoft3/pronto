@@ -49,13 +49,35 @@ is not even self-consistent — it keeps `DEFAULT auth_uid()` while dropping the
 function, so `atlas migrate validate` fails with `function auth_uid() does not
 exist`. The failure appears on replay, never at generation.
 
-Cause: RLS policies and functions/triggers are Atlas **Pro** features;
-publications are not modelled at all. HCL versus SQL is irrelevant — `--to`
-accepts both and the drop happens either way. (Atlas has no YAML schema format;
-HCL only. Its JSON form is what makes it CUE-friendly.)
+Cause: RLS policies, functions/triggers, and grants/default-privileges are
+Atlas **Pro** features (modelled and diffed there, gated behind `atlas login`);
+publications are not modelled in either edition. HCL versus SQL is irrelevant —
+`--to` accepts both and the drop happens either way. There is no JSON input
+form: `.json`/`.hcl.json` desired state is rejected (measured on v0.37.1 and
+v1.3.1), and the JSON representation exists only as `schema inspect` output.
+Atlas's documented hook for program-generated schemas — the `external_schema`
+data source — takes a program that **emits SQL DDL**, so SQL emission is the
+blessed integration shape, not a workaround.
 
-So **Atlas cannot author pronto's schema.** Any design that asks it to is
-shipping an app with no row-level security.
+Two scopes matter, and only one of them fails:
+
+- **Live diffing is safe.** Against a running database carrying a policy, RLS
+  enable, trigger, function, and publication, `schema apply --dry-run` with a
+  desired state that omits them plans exactly the intended `ADD COLUMN` and
+  nothing else (measured, v0.37.1). Unmodelled object types are invisible on
+  both sides of the diff — never authored, never dropped. "Someone else
+  manages these" is the built-in semantics.
+- **Authoring from scratch fails.** Community Atlas without login cannot
+  *recreate* what it cannot see, so a generated baseline is missing the 66
+  objects — harmless on a long-lived database, fatal here, where the
+  no-volumes dev model rebuilds the database from generated artifacts on
+  every boot.
+
+So **community Atlas without login cannot author pronto's schema**, and in a
+fresh-replay world, cannot-author means does-not-exist: the replayed app has
+no row-level security. Pro moves policies/functions/triggers/grants into
+Atlas's half at the cost of an account dependency in an otherwise hermetic
+toolchain; the publication stays out regardless.
 
 ## The asymmetry that makes it work anyway
 
