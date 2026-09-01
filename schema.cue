@@ -169,10 +169,37 @@ package pronto
 		uniques: [...{where?: _|_}]
 	}
 
-	// Bootstrap rows (900_seed.sql). A pipeline-written singleton MUST seed
-	// its initial state: pipelines fire on CDC events, so before the first
-	// mutation the derived row exists only if the schema bootstrap made it.
+	// Bootstrap rows: the rows a store holds before anyone writes one. A
+	// server tier renders them into 900_seed.sql; a `tab` entity has no
+	// migration to render into, so the terminal writes them itself when it
+	// first opens the collection (shell.yaml `seed:`).
+	//
+	// A pipeline-written singleton MUST seed its initial state: pipelines fire
+	// on CDC events, so before the first mutation the derived row exists only
+	// if the schema bootstrap made it.
+	//
+	// Both tiers keep the same rule — the rows are written once against an
+	// empty store and never reconsidered — because at both tiers the store's
+	// birth is what triggers them: a fresh database runs the migration, a
+	// fresh tab collection is seeded at open. A row the reader deletes
+	// therefore stays deleted for as long as its store lives.
 	seed: [...{[string]: string | int | bool}]
+	if path == "device" {
+		// Not deferred — the tier is the wrong home for a stated row. A device
+		// collection outlives the page, so its birth and the terminal's boot
+		// are different moments and the rule above has nothing to hang on:
+		// seeding at every open resurrects what the reader deleted, and
+		// seeding once needs a ledger of what was already seeded that the
+		// reader cannot delete.
+		//
+		// No such ledger is needed, because the program is already the durable
+		// copy of anything it states. Rows the PROGRAM owns belong at `tab`,
+		// re-stated on every load and therefore never stale; `device` is for
+		// what the READER makes, which is exactly what a seed is not. An app
+		// wanting both reads its stated rows from the tab entity and keeps the
+		// reader's own at device.
+		seed: []
+	}
 }
 
 #Pipeline: {

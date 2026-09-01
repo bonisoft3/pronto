@@ -30,6 +30,30 @@ see in the file.
 That is the whole mechanism. The rest of this doc is about keeping it from
 becoming something else.
 
+## APG names the columns
+
+The projection's vocabulary is not ours to invent. APG enumerates, per pattern,
+exactly which states a widget has — `aria-activedescendant`, `aria-posinset` and
+`aria-setsize`, `aria-expanded`, `aria-checked` including `mixed` — and that
+enumeration is the column list. A pattern's columns are read off the spec, not
+designed.
+
+Two things follow. A column is named for the ARIA state it answers, not for the
+app's idea of it, so `active` on a listbox row means the row
+`aria-activedescendant` points at and nothing else. And an ID reference is a
+column's neighbour, not its content: `aria-controls`, `aria-labelledby` and
+`aria-activedescendant` all name an element, so every id a component emits has
+to carry its instance or the reference resolves to whichever duplicate the
+document hits first.
+
+The payoff is that one vocabulary serves three readers. A screen reader gets the
+state; a test runner gets a role-and-name query that survives a class rename,
+which a CSS selector does not; and the spec gets to be the arbiter of what a
+pattern must expose, instead of a design conversation being reopened per
+component. A test asserting `aria-checked` also cannot pass against markup that
+never bound, because the attribute holds an unresolved placeholder — a rendered
+string can be byte-identical to its bound result and prove nothing.
+
 ## Do not invent a query language
 
 The read tier already has one, in the boot graph of every app:
@@ -50,8 +74,20 @@ views; a third would be the drift this doc exists to prevent.
 Every boundary that has held in this platform held because the vocabulary
 stayed closed and the terminal owned the verbs. A projection that joins a
 region's rows against a machine's row is the first construct here that starts
-to resemble a query language in the read tier, so the refusals are the load
--bearing half of the design.
+to resemble a query language in the read tier, so the refusals are the
+load-bearing half of the design, and they stay whatever else changes.
+
+State them as a boundary someone can re-run: the useful question is not whether
+these rules read well, but whether the standard needs anything they forbid.
+Walked against APG at the time of writing — `aria-activedescendant` is a
+comparison against the machine's own row; `aria-posinset`/`aria-setsize` are
+positional facts about the region's own projection; `aria-expanded` is the
+machine's row; `aria-checked="mixed"` is an aggregate over rows the browser
+holds; a filtered listbox is a region interpolating the machine's own term.
+Every one is inside the boundary; none needed a predicate over a foreign
+collection. Re-run that walk when a new pattern arrives, and if one genuinely
+requires what is refused here, reopen the design rather than quietly widening
+the rule.
 
 Allowed:
 

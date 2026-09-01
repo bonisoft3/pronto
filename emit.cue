@@ -374,6 +374,10 @@ _cdcTableField: "__table"
 	// reconciles surviving browser-tier rows against them at first load.
 	_partialUniques: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where != _|_ {cols: u.cols, where: u.where}]}}
 	_partialTables: [for t, ps in S._partialUniques if len(ps) > 0 {t}]
+	// The seeds #appMigrations.seeded leaves out: a browser tier has no
+	// migration to render into, so the terminal is told the rows instead.
+	_localSeeds: {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
+	_seededLocal: [for t, _ in S._localSeeds {t}]
 	_access: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.access != _|_ {
 		(e.table): {
 			mode: e.access.mode
@@ -446,6 +450,9 @@ _cdcTableField: "__table"
 					(t): ps
 				}
 			}
+		}
+		if len(S._seededLocal) > 0 {
+			seed: S._localSeeds
 		}
 		"migrations": S.migrations
 		pipelines: [for _, p in S.code.state.pipelines {
@@ -725,28 +732,46 @@ _cdcTableField: "__table"
 		/* Sticky, because the navigation stack restores a screen's scroll
 		   position on return — without it the way back to the primary
 		   navigation is scrolling up. A sticky element is transparent, so it
-		   needs its own background or content runs under it. */
+		   needs its own background or content runs under it.
+
+		   One line, always: a wrapped strip is as tall as its rows and pushes
+		   the masthead below the fold, and any app with more routes than a
+		   phone's width holds would wrap at its natural size. It scrolls
+		   instead, and the scrollbar is hidden because a horizontal bar across
+		   the chrome reads as a second rule under the strip. */
 		body > nav { position: sticky; top: 0; z-index: 10;
 		  background: var(--shell-bg);
 		  display: flex; gap: var(--shell-nav-gap, 20px);
+		  flex-wrap: nowrap; align-items: center;
+		  overflow-x: auto; scrollbar-width: none;
 		  padding: var(--shell-nav-pad, 14px 24px);
 		  font-weight: var(--shell-nav-weight, 600);
 		  border-bottom: 1px solid var(--shell-rule); }
+		body > nav::-webkit-scrollbar { display: none; }
 		body > nav a { color: inherit; text-decoration: none; }
 		body > nav a:hover { text-decoration: var(--shell-nav-hover, underline); }
+		/* The routes carry their own width — shrinking them is what would make
+		   the strip fit by breaking words, which is the wrap this avoids. The
+		   identity beside them keeps flex's default shrink, so it is the part
+		   that gives and ellipsises. 24px is check-visual's touch-target floor:
+		   nav labels are small type, so the box grows to the floor rather than
+		   the type growing with it. */
+		body > nav > a { white-space: nowrap; flex: none;
+		  display: inline-flex; align-items: center; min-height: 24px; }
 		/* The signed-in person at the strip's far end, name-then-handle as a
 		   byline. All four ellipsis rules are load-bearing: nowrap alone
 		   cannot shrink, and min-width: 0 is what lets a flex item shrink
 		   below its content width at all. */
-		body > nav .shell-me { margin-left: auto; display: flex; gap: var(--shell-nav-gap, 20px); min-width: 0; }
-		body > nav .shell-who { display: flex; gap: 5px; min-width: 0; }
+		body > nav .shell-me { margin-left: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
+		body > nav .shell-who { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
 		body > nav .shell-who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		body > nav .shell-who .name:empty { display: none; }
 		body > nav .shell-who .name:not(:empty)::after { content: " ·"; }
 		body > nav .shell-who .handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 		/* De-emphasis comes from weight alone: layered opacity on --shell-fg
 		   lands below 4.5:1 contrast on both themes' nav ground. */
-		body > nav .shell-signout { font-weight: 400; }
+		body > nav .shell-signout { font-weight: 400;
+		  display: inline-flex; align-items: center; min-height: 24px; }
 
 		/* Not a preference to weigh against the design: durations collapse
 		   and the interpreter's exit path, which waits on running animations,
