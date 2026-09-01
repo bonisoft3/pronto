@@ -25,10 +25,15 @@ import {
   kindLint,
   type MachineRegion,
   machineRegions,
+  machineWrites,
   scanScreen,
   slotRegions,
+  templateArity,
   unknownColumns,
+  unwitnessedControls,
   unwitnessedSlot,
+  type Write,
+  writeLint,
   machineLint,
 } from "../omnishell/interpreter/lint.ts";
 import { machineShape } from "../omnishell/interpreter/fragment.js";
@@ -132,7 +137,16 @@ export async function derive(appDir: string): Promise<void> {
     // (and the assign strings that resolve) join the screen's derived
     // files.handlers so the loader can fetch them.
     const machineNames = new Set<string>();
-    for (const region of machineRegions(html)) {
+    // Every machine region on the screen that writes the same table is judged
+    // together: one region's spelling is only inconsistent against another's.
+    const writes = new Map<string, Write[]>();
+    let regions: MachineRegion[];
+    try {
+      regions = machineRegions(html);
+    } catch (e) {
+      fail(`${name}.html: ${(e as Error).message}`);
+    }
+    for (const region of regions) {
       let parsed: Parameters<typeof machineLint>[0];
       try {
         parsed = JSON.parse(region.machine);
@@ -155,8 +169,23 @@ export async function derive(appDir: string): Promise<void> {
           }
         }
       }
+      writes.set(region.table, [
+        ...(writes.get(region.table) ?? []),
+        ...machineWrites(parsed, region.emptyRow),
+      ]);
       machines.push({ screen: name, region });
     }
+    for (const [table, cols] of writes) {
+      const entity = entities[
+        byTable.get(table) ?? fail(`${name}.html reads "${table}", the table of no declared entity`)
+      ];
+      const why = writeLint(cols, entity);
+      if (why !== null) fail(`${name}.html: region "${table}": ${why}`);
+    }
+    // After the machine rules: a control's cover depends on what its region's
+    // machine answers, and an unparseable machine is that pass's finding.
+    for (const why of templateArity(html)) fail(`${name}.html: ${why}`);
+    for (const why of unwitnessedControls(html)) fail(`${name}.html: ${why}`);
     screens.push({ name, entities: [...new Set(named)].sort(), handlers: [...new Set([...handlers, ...machineNames])].sort() });
   }
   screens.sort((a, b) => (a.name < b.name ? -1 : 1));
