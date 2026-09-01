@@ -366,7 +366,14 @@ _cdcTableField: "__table"
 		(S.code.state.entities[r.entity].table): [for f in S.code.state.entities[r.entity].fields if f.pk {f.name}][0]
 	}}
 	_nonIdKeys: {for t, k in S._tableKeys if k != "id" {(t): k}}
-	_uniqueTables: [for _, e in S.code.state.entities if len(e.uniques) > 0 {e.table}]
+	// Natural keys only: a partial unique (`where:`) witnesses a slot's
+	// cardinality but cannot resolve an upsert, so it stays out of `uniques:`.
+	_naturalKeys: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where == _|_ {u.cols}]}}
+	_uniqueTables: [for t, ks in S._naturalKeys if len(ks) > 0 {t}]
+	// Partial uniques travel apart, as the whole invariant: the terminal
+	// reconciles surviving browser-tier rows against them at first load.
+	_partialUniques: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where != _|_ {cols: u.cols, where: u.where}]}}
+	_partialTables: [for t, ps in S._partialUniques if len(ps) > 0 {t}]
 	_access: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.access != _|_ {
 		(e.table): {
 			mode: e.access.mode
@@ -428,8 +435,15 @@ _cdcTableField: "__table"
 		// the struct a comprehension builds reads as incomplete in cue 0.16.
 		if len(S._uniqueTables) > 0 {
 			uniques: {
-				for _, e in S.code.state.entities if len(e.uniques) > 0 {
-					(e.table): [for u in e.uniques {u.cols}]
+				for t, ks in S._naturalKeys if len(ks) > 0 {
+					(t): ks
+				}
+			}
+		}
+		if len(S._partialTables) > 0 {
+			partialUniques: {
+				for t, ps in S._partialUniques if len(ps) > 0 {
+					(t): ps
 				}
 			}
 		}
@@ -474,7 +488,10 @@ _cdcTableField: "__table"
 
 #appMigrations: M={
 	code: #App
-	_uniqueTables: [for _, e in M.code.state.entities if len(e.uniques) > 0 {e.table}]
+	// Gates 010 on the same set _uniqueLines renders: server-tier uniques
+	// (where the schema admits no `where`), so the list never names a
+	// migration the bundle does not hold.
+	_uniqueTables: [for _, e in M.code.state.entities if e.path != "tab" && e.path != "device" if len(e.uniques) > 0 {e.table}]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.path != "tab" && e.path != "device" {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
@@ -541,7 +558,8 @@ _cdcTableField: "__table"
 	_handlerSet: {for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}}
 	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
 	out: omnishell.#Terminal & {
-		app: D.code.meta.name
+		app:         D.code.meta.name
+		description: D.code.meta.description
 		surface: {
 			screens: [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css}]
 			handlers: list.SortStrings([for i, _ in D._handlerSet {i}])
@@ -597,7 +615,6 @@ _cdcTableField: "__table"
 // inputs; program.cue wires the defaults (#DefaultCluster/#DefaultTerminal)
 // and bayt.cue redeclares the runtime pair as the escape-hatch seams.
 #emit: E={
-	_uniqueTables: [for _, e in E.code.state.entities if len(e.uniques) > 0 {e.table}]
 	_uniqueLines: [
 		for ent in E._serverEntities for u in ent.uniques {
 			"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(ent.table) (\(strings.Join(u.cols, ", ")));"
@@ -727,7 +744,9 @@ _cdcTableField: "__table"
 		body > nav .shell-who .name:empty { display: none; }
 		body > nav .shell-who .name:not(:empty)::after { content: " ·"; }
 		body > nav .shell-who .handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-		body > nav .shell-signout { font-weight: 400; opacity: var(--shell-signout-opacity, .65); }
+		/* De-emphasis comes from weight alone: layered opacity on --shell-fg
+		   lands below 4.5:1 contrast on both themes' nav ground. */
+		body > nav .shell-signout { font-weight: 400; }
 
 		/* Not a preference to weigh against the design: durations collapse
 		   and the interpreter's exit path, which waits on running animations,
@@ -780,7 +799,7 @@ _cdcTableField: "__table"
 		  background: var(--shell-fg); color: var(--shell-bg);
 		  cursor: pointer; }
 		.shell-login .login-hint { margin: 0; font-weight: 400; font-size: .875rem;
-		  color: var(--shell-fg); opacity: .65; }
+		  color: var(--shell-fg); }
 		.shell-login .login-guest { background: var(--surface);
 		  color: var(--shell-fg); font-weight: 400; }
 		.shell-login .login-error { color: var(--danger); margin: 0; }
@@ -1126,7 +1145,14 @@ _cdcTableField: "__table"
 			text:   E._designCss
 		}
 		for _, s in E.code.surface.screens {
-			"\(s.files.html)": {format: "html", src: s.files.html}
+			// A CUE-authored screen (markup) emits its html; an assembly screen
+			// is authored at the served path itself.
+			if s.markup != _|_ {
+				"\(s.files.html)": {format: "html", text: s.markup}
+			}
+			if s.markup == _|_ {
+				"\(s.files.html)": {format: "html", src: s.files.html}
+			}
 			"\(s.files.css)": {format: "css", src: s.files.css}
 			for i in s.files.handlers {"\(i)": {format: "jessie", src: i}}
 		}

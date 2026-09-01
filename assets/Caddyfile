@@ -14,6 +14,10 @@
 # INSIDE the container for the healthcheck and is no longer published, so there
 # is no plain-http path left to drift onto.
 (app) {
+  # The interpreter ships as plain ES modules plus a vendored data-plane
+  # driver measured in hundreds of KiB; compression at the door is what keeps
+  # a cold cache from paying for that in seconds on a slow link.
+  encode zstd gzip
   handle /crud/* {
     uri strip_prefix /crud
     @post method POST

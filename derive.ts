@@ -14,31 +14,26 @@
 // the program no longer declares fails the export rather than deriving in
 // silence.
 
-type Entity = { table: string; path: string };
+import { fileURLToPath } from "node:url";
+import { parseFilterSpec } from "../omnishell/interpreter/fragment.js";
+// The rules themselves live with the vocabulary they check — the terminal
+// publishes its markup's grammar AND its grammar's rules (omnishell/lint.ts);
+// this pass only walks an app's screens and applies them.
+import {
+  type Entity,
+  kindedRegions,
+  kindLint,
+  type MachineRegion,
+  machineRegions,
+  scanScreen,
+  slotRegions,
+  unknownColumns,
+  unwitnessedSlot,
+  machineLint,
+} from "../omnishell/interpreter/lint.ts";
+import { machineShape } from "../omnishell/interpreter/fragment.js";
 
-const TAG = /<[a-z][a-z0-9]*\s[^>]*>/gi;
-const STYLE = /<style\b[^>]*>[\s\S]*?<\/style>/gi;
-const ATTR = /\s(data-[a-z][a-z-]*)="([^"]*)"/g;
-
-const decode = (v: string) =>
-  v.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-
-/** Tables read and handler modules bound by one screen's markup. */
-export function scanScreen(html: string): { tables: string[]; handlers: string[] } {
-  const tables = new Set<string>();
-  const handlers = new Set<string>();
-  for (const tag of html.replace(STYLE, "").matchAll(TAG)) {
-    for (const [, name, raw] of tag[0].matchAll(ATTR)) {
-      const value = decode(raw);
-      if (name === "data-live") tables.add(value);
-      else if (name === "data-reads") {
-        for (const t of value.split(",")) if (t.trim() !== "") tables.add(t.trim());
-      } else if (name === "data-handler" || name.startsWith("data-on-")) handlers.add(value);
-    }
-  }
-  return { tables: [...tables].sort(), handlers: [...handlers].sort() };
-}
+type Spec = { col: string; op: string; value?: string }[] | null;
 
 const quoteKey = (k: string) => (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k) ? k : `"${k}"`);
 
@@ -75,17 +70,150 @@ export async function derive(appDir: string): Promise<void> {
   if (!exported.success) fail("cue export of code.state.entities failed");
   const entities: Record<string, Entity> = JSON.parse(new TextDecoder().decode(exported.stdout));
   const byTable = new Map(Object.entries(entities).map(([name, e]) => [e.table, name]));
+  for (const [ename, e] of Object.entries(entities)) {
+    for (const u of e.uniques ?? []) {
+      if (u.where !== undefined && parseFilterSpec(u.where) === null) {
+        fail(`entity ${ename}: uniques "${u.name}" where "${u.where}" is outside the translatable fragment subset`);
+      }
+    }
+  }
+
+  // The app's declared Jessie modules, by basename: what a machine's value
+  // positions may reference, and what tells an assign's reference from its
+  // literals.
+  const available = new Set<string>();
+  try {
+    for await (const f of Deno.readDir(`${appDir}/shell/handlers`)) {
+      if (f.isFile && f.name.endsWith(".js")) available.add(f.name.slice(0, -".js".length));
+    }
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
 
   const screens: { name: string; entities: string[]; handlers: string[] }[] = [];
+  const machines: { screen: string; region: MachineRegion }[] = [];
   for await (const f of Deno.readDir(`${appDir}/shell/screens`)) {
     if (!f.isFile || !f.name.endsWith(".html")) continue;
     const name = f.name.slice(0, -".html".length);
-    const { tables, handlers } = scanScreen(await Deno.readTextFile(`${appDir}/shell/screens/${f.name}`));
+    const html = await Deno.readTextFile(`${appDir}/shell/screens/${f.name}`);
+    const { tables, handlers, filters } = scanScreen(html);
     const named = tables.map((t) =>
       byTable.get(t) ?? fail(`${name}.html reads "${t}", the table of no declared entity`)
     );
-    screens.push({ name, entities: [...new Set(named)].sort(), handlers });
+    for (const { table, filter } of filters) {
+      const entity = entities[
+        byTable.get(table) ?? fail(`${name}.html filters "${table}", the table of no declared entity`)
+      ];
+      const bad = unknownColumns(filter, entity.fields.map((f) => f.name));
+      if (bad.length > 0) {
+        fail(`${name}.html: data-filter="${filter}" names ${bad.join(", ")} — not fields of "${table}"`);
+      }
+    }
+    for (const slot of slotRegions(html)) {
+      const entity = entities[
+        byTable.get(slot.table) ?? fail(`${name}.html reads "${slot.table}", the table of no declared entity`)
+      ];
+      const why = unwitnessedSlot(slot.filter, entity);
+      if (why !== null) {
+        fail(
+          `${name}.html: slot region "${slot.table}" (filter ${JSON.stringify(slot.filter ?? "")}) ` +
+            `may bind more than one row: ${why}`,
+        );
+      }
+    }
+    for (const kinded of kindedRegions(html)) {
+      const entity = entities[
+        byTable.get(kinded.table) ?? fail(`${name}.html reads "${kinded.table}", the table of no declared entity`)
+      ];
+      const why = kindLint(kinded.whens, entity);
+      if (why !== null) fail(`${name}.html: region "${kinded.table}": ${why}`);
+    }
+    // A machine's leaves are handler modules like any other: its references
+    // (and the assign strings that resolve) join the screen's derived
+    // files.handlers so the loader can fetch them.
+    const machineNames = new Set<string>();
+    for (const region of machineRegions(html)) {
+      let parsed: Parameters<typeof machineLint>[0];
+      try {
+        parsed = JSON.parse(region.machine);
+      } catch {
+        fail(`${name}.html: data-machine is not JSON`);
+      }
+      const why = machineLint(parsed, available);
+      if (why !== null) fail(`${name}.html: data-machine: ${why}`);
+      const shape = machineShape(parsed);
+      for (const r of shape.refs) machineNames.add(r);
+      for (const s of shape.assignStrings) if (available.has(s)) machineNames.add(s);
+      if (region.emptyRow !== undefined && parsed.context !== undefined) {
+        const row = JSON.parse(region.emptyRow);
+        for (const [k, v] of Object.entries(parsed.context)) {
+          if (k in row && row[k] !== v) {
+            fail(
+              `${name}.html: data-empty-row["${k}"] is ${JSON.stringify(row[k])} but the machine's ` +
+                `context says ${JSON.stringify(v)} — one fact, two values`,
+            );
+          }
+        }
+      }
+      machines.push({ screen: name, region });
+    }
+    screens.push({ name, entities: [...new Set(named)].sort(), handlers: [...new Set([...handlers, ...machineNames])].sort() });
   }
   screens.sort((a, b) => (a.name < b.name ? -1 : 1));
+
+  // A machine is vetted against the PUBLISHED #Machine (machine.cue), never a
+  // local restatement of it; the two structural preconditions the schema
+  // cannot see — the empty-row agreement, and the pinned pk a synthesized
+  // fallback row needs — are checked here beside it.
+  if (machines.length > 0) {
+    await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
+    const files: string[] = [];
+    // fail() is Deno.exit, which runs no finally blocks — so every failure
+    // path inside this block goes through die(), or the machine-*.json temps
+    // outlive the run.
+    const die: (msg: string) => never = (msg) => {
+      for (const file of files) {
+        try {
+          Deno.removeSync(`${appDir}/${file}`);
+        } catch { /* already gone */ }
+      }
+      return fail(msg);
+    };
+    for (const [i, { screen, region }] of machines.entries()) {
+      let parsed: { field: string; initial: string };
+      try {
+        parsed = JSON.parse(region.machine);
+      } catch {
+        die(`${screen}.html: data-machine is not JSON`);
+      }
+      const file = `.pronto/machine-${i}.json`;
+      await Deno.writeTextFile(`${appDir}/${file}`, region.machine);
+      files.push(file);
+      if (region.emptyRow !== undefined) {
+        const row = JSON.parse(region.emptyRow);
+        if (row[parsed.field] !== parsed.initial) {
+          die(
+            `${screen}.html: data-empty-row["${parsed.field}"] is ${
+              JSON.stringify(row[parsed.field])
+            } but the machine's initial is "${parsed.initial}" — one fact, two values`,
+          );
+        }
+      } else if (!((parseFilterSpec(region.filter) as Spec) ?? []).some((p) => p.col === "id" && p.op === "eq")) {
+        die(`${screen}.html: a machine region with no data-empty-row must pin its id with an eq filter`);
+      }
+    }
+    // Module-relative like the TS imports above, so a relocated appDir — a
+    // nested app, a downstream consumer through the CUE module cache — vets
+    // against the same published file the plugin ships.
+    const machineCue = fileURLToPath(new URL("../omnishell/machine.cue", import.meta.url));
+    const vet = await new Deno.Command("cue", {
+      args: ["vet", "-d", "#Machine", machineCue, ...files],
+      cwd: appDir,
+      stderr: "inherit",
+    }).output();
+    if (!vet.success) die("a data-machine does not fit the published #Machine");
+    for (const file of files) await Deno.remove(`${appDir}/${file}`).catch(() => {});
+  }
+
   await Deno.writeTextFile(`${appDir}/program_derived.cue`, renderDerived(pkg, screens));
 }

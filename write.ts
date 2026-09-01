@@ -37,24 +37,6 @@ function fail(msg: string): never {
 
 const appDir = Deno.args[0] ?? fail("usage: write.ts <appDir>  (runs `cue export` in appDir — needs --allow-run=cue)");
 
-// Markup-derived declarations regenerate before the export that reads them.
-await derive(appDir);
-
-const exported = await new Deno.Command("cue", {
-  args: ["export", ".", "-e", "out", "--out", "json"],
-  cwd: appDir,
-  stdout: "piped",
-  stderr: "inherit",
-}).output();
-if (!exported.success) fail("cue export failed");
-const bundle: Bundle = JSON.parse(new TextDecoder().decode(exported.stdout));
-
-const keys = Object.keys(bundle.files).sort();
-const manifest = [...bundle.manifest].sort();
-if (JSON.stringify(keys) !== JSON.stringify(manifest)) {
-  fail(`manifest and files disagree:\n  manifest: ${manifest}\n  files: ${keys}`);
-}
-
 function render(rel: string, f: EmitFile): string {
   if (f.format === "json") return JSON.stringify(f.data, null, 2) + "\n"; // no comment syntax, no header
   const header = HEADER[f.format] ?? fail(`${rel}: unknown format ${f.format}`);
@@ -63,41 +45,81 @@ function render(rel: string, f: EmitFile): string {
   return fail(`${rel}: no text and format ${f.format} is not structured`);
 }
 
-for (const rel of manifest) {
-  if (rel.startsWith("/") || rel.split("/").includes("..")) fail(`unsafe path: ${rel}`);
-  const f = bundle.files[rel];
-  const path = `${appDir}/${rel}`;
-  const dir = path.slice(0, path.lastIndexOf("/"));
-  if (f.src !== undefined) {
-    if (f.text !== undefined || f.data !== undefined) fail(`${rel}: src is exclusive with text/data`);
-    if (f.src.startsWith("/") || f.src.split("/").includes("..")) fail(`unsafe src: ${f.src}`);
-    let stat;
-    try {
-      stat = await Deno.stat(`${appDir}/${f.src}`);
-    } catch {
-      fail(`${rel}: missing assembly source ${f.src}`);
-    }
-    if (!stat.isFile) fail(`${rel}: assembly source ${f.src} is not a file`);
-    if (f.src !== rel) {
-      if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
-      await Deno.writeTextFile(path, await Deno.readTextFile(`${appDir}/${f.src}`));
-    }
-    continue;
+async function exportBundle(): Promise<Bundle> {
+  const exported = await new Deno.Command("cue", {
+    args: ["export", ".", "-e", "out", "--out", "json"],
+    cwd: appDir,
+    stdout: "piped",
+    stderr: "inherit",
+  }).output();
+  if (!exported.success) fail("cue export failed");
+  const bundle: Bundle = JSON.parse(new TextDecoder().decode(exported.stdout));
+  const keys = Object.keys(bundle.files).sort();
+  const manifest = [...bundle.manifest].sort();
+  if (JSON.stringify(keys) !== JSON.stringify(manifest)) {
+    fail(`manifest and files disagree:\n  manifest: ${manifest}\n  files: ${keys}`);
   }
-  if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
-  await Deno.writeTextFile(path, render(rel, f));
+  return bundle;
 }
 
-const manifestPath = `${appDir}/.pronto/manifest.json`;
-let previous: string[] = [];
-try {
-  previous = JSON.parse(await Deno.readTextFile(manifestPath));
-} catch (e) {
-  if (!(e instanceof Deno.errors.NotFound)) throw e;
+async function writeBundle(bundle: Bundle): Promise<void> {
+  const manifest = [...bundle.manifest].sort();
+  for (const rel of manifest) {
+    if (rel.startsWith("/") || rel.split("/").includes("..")) fail(`unsafe path: ${rel}`);
+    const f = bundle.files[rel];
+    const path = `${appDir}/${rel}`;
+    const dir = path.slice(0, path.lastIndexOf("/"));
+    if (f.src !== undefined) {
+      if (f.text !== undefined || f.data !== undefined) fail(`${rel}: src is exclusive with text/data`);
+      if (f.src.startsWith("/") || f.src.split("/").includes("..")) fail(`unsafe src: ${f.src}`);
+      let stat;
+      try {
+        stat = await Deno.stat(`${appDir}/${f.src}`);
+      } catch {
+        fail(`${rel}: missing assembly source ${f.src}`);
+      }
+      if (!stat.isFile) fail(`${rel}: assembly source ${f.src} is not a file`);
+      if (f.src !== rel) {
+        if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
+        await Deno.writeTextFile(path, await Deno.readTextFile(`${appDir}/${f.src}`));
+      }
+      continue;
+    }
+    if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(path, render(rel, f));
+  }
+
+  const manifestPath = `${appDir}/.pronto/manifest.json`;
+  let previous: string[] = [];
+  try {
+    previous = JSON.parse(await Deno.readTextFile(manifestPath));
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
+  for (const rel of previous) {
+    if (!bundle.files[rel]) await Deno.remove(`${appDir}/${rel}`).catch(() => {});
+  }
+  await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
+  await Deno.writeTextFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
 }
-for (const rel of previous) {
-  if (!bundle.files[rel]) await Deno.remove(`${appDir}/${rel}`).catch(() => {});
+
+const derivedText = () => Deno.readTextFile(`${appDir}/program_derived.cue`).catch(() => "");
+
+// Markup-derived declarations regenerate before the export that reads them —
+// and once more after the write, because a component screen's html is itself
+// an OUTPUT of the export (#Screen.markup) while derive reads the emitted
+// screens. A run that moved one re-derives and re-exports once; a derivation
+// still moving after that is a bug, never a longer loop.
+await derive(appDir);
+let bundle = await exportBundle();
+await writeBundle(bundle);
+const settled = await derivedText();
+await derive(appDir);
+if ((await derivedText()) !== settled) {
+  bundle = await exportBundle();
+  await writeBundle(bundle);
+  const again = await derivedText();
+  await derive(appDir);
+  if ((await derivedText()) !== again) fail("derivation did not settle in two passes");
 }
-await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
-await Deno.writeTextFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-console.error(`pronto write: ${manifest.length} files → ${appDir}`);
+console.error(`pronto write: ${bundle.manifest.length} files → ${appDir}`);

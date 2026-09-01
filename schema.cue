@@ -157,7 +157,17 @@ package pronto
 	// optimistic contribution is collapsed on. The name is carried rather than
 	// derived because a violation IS the app's duplicate refusal and the
 	// constraint name is what reaches the screen.
-	uniques: *[] | [...{name: string, cols: [...string]}]
+	//
+	// `where` makes the unique partial: it holds only over rows matching the
+	// predicate, stated in the data-plane fragment grammar. A partial unique
+	// is a slot's cardinality witness ("at most one row wears this flag"),
+	// never a natural key — upserts cannot resolve against it. Browser tiers
+	// only: its SQL rendering (a partial unique index) waits for a
+	// server-tier consumer.
+	uniques: *[] | [...{name: string, cols: [...string], where?: string}]
+	if path != "tab" && path != "device" {
+		uniques: [...{where?: _|_}]
+	}
 
 	// Bootstrap rows (900_seed.sql). A pipeline-written singleton MUST seed
 	// its initial state: pipelines fire on CDC events, so before the first
@@ -296,14 +306,31 @@ package pronto
 	fields: [...#FormField]
 }
 
-#Screen: {
+#Screen: S={
 	name:  string
 	ir:    *name | string
 	title: string
 	route: string // may contain one `:param` segment; params reach filters, hidden values, and `{param.x}` interpolation
 	// filter/select are PostgREST query fragments passed through verbatim;
 	// `{param.x}` placeholders resolve in the interpreter.
-	reads: [...{entity: string, order?: string, filter?: string, select?: string}]
+	// Derived from the markup (program_derived.cue). An assembly screen's html
+	// exists before any derivation, so a screen the derived file misses is a
+	// stale generation and the export fails incomplete rather than shipping a
+	// screen whose reads and handlers are silently empty. A CUE-authored
+	// screen alone carries the bootstrap default: its html does not exist
+	// before the first export, so the first derivation cannot see it —
+	// write.ts's fixpoint re-derives after writing and re-exports until the
+	// derived file holds what the emitted markup says.
+	reads!: [...{entity: string, order?: string, filter?: string, select?: string}]
+	if S.markup != _|_ {
+		reads: *[] | [...{entity: string, order?: string, filter?: string, select?: string}]
+	}
+	// A component-bearing screen is authored HERE, in CUE: `markup` is the
+	// screen's whole HTML, composed by interpolating component definitions
+	// (their tags survive in it as inert wrappers), and files.html becomes an
+	// emitted file rather than an assembly source. Absent, the screen is
+	// assembly authored at files.html as ever.
+	markup?: string
 	forms: [...#Form]
 	states: [...string] // ir frame ids are "\(name)-\(state)"
 	// How many instances of this screen the terminal's navigation stack holds
@@ -334,7 +361,12 @@ package pronto
 		...
 		html: *"shell/screens/\(name).html" | string
 		css:  *"shell/screens/\(name).css" | string
-		handlers: [...string] // Jessie handlers, SES-compartment-loaded
+		// Jessie handlers, SES-compartment-loaded. Derived from the markup;
+		// required or bootstrap-defaulted exactly as #Screen.reads is.
+		handlers!: [...string]
+		if S.markup != _|_ {
+			handlers: *[] | [...string]
+		}
 		// Stylesheets under shell/shared/ this screen imports. Screen CSS is
 		// injected as a <style> in the document head, so an @import inside it
 		// resolves against /shell/ — `@import url("shared/screen.css")`.
@@ -434,6 +466,9 @@ package pronto
 
 	meta: {
 		name: string
+		// One line for the entry page's meta description. The hash router gives
+		// every route this same description, so it names the app, not a screen.
+		description: string
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		tiers: [...#Tier]
 		decisions: [Id=string]: {ir: *Id | string, note: string}
