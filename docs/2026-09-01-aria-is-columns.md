@@ -116,7 +116,7 @@ for reads; the projection does not reach for it.
 
 ## The grammar
 
-`data-project` on a region, JSON, output column to clause. Three clauses:
+`data-project` on a region, JSON, output column to clause. Five kinds:
 
 ```html
 <div role="tablist" data-live="tab_option" data-order="pos.asc"
@@ -144,22 +144,32 @@ STORED rows are left alone — a machine reads its row off those, and a derived
 column reaching a transition would widen what a chart is decidable from past
 the row and the event that fired it.
 
-Four things are refused at hydration rather than warned about, each as a
+Six things are refused at hydration rather than warned about, each as a
 `ProjectionError` that propagates instead of being dressed as an outage: a
-clause outside the three, a derived name a stored column already carries (the
-merge order would silently decide which one a binding reads), a projection on
-a slot (`index` and `count` are facts about a set, and one row is not a set),
-an `eq` clause naming a column no row carries — which would otherwise answer
-"false" everywhere and paint a tablist where nothing is ever selected — and
-malformed JSON. The type matters more than the message: a nested region parses
-inside its parent's refresh, so a plain error there is caught by the
-dead-gateway guard and retried on a backoff forever, reporting the store down
-while the markup is what is wrong. The unknown column follows a binding's rule exactly, including
-its one carve-out: a row whose write is still in flight carries only the
-fields that were submitted, so it is answered rather than refused. A region
-carrying a projection also re-binds every row on every pass: a derived column is a function of the whole set, or of a value
-outside the row, so a row the delta never named can still be showing a stale
-answer.
+clause kind the parser does not admit; a derived name a stored column already carries, where
+the merge order would otherwise decide which one a binding reads; a projection
+on a slot, since `index` and `count` are facts about a set and one row is not
+one; an `eq` clause naming a column no row carries, which would answer "false"
+everywhere and paint a tablist where nothing is ever selected; a spec that is
+not JSON; and one that parses into something other than a map of clauses —
+`null` reaches the entries call and throws, and a bare `true` declares a
+projection that states nothing.
+
+The type carries more than the message, and it is not the projection's alone.
+A nested region resolves every declaration it takes from the row it hangs under
+— its filter, its own bound attributes, its machine — inside the PARENT's
+refresh, where the dead-gateway guard is standing. Anything thrown there that
+is not a `ProgramError` is retried on a backoff forever, reporting the store
+down while the markup is what is wrong. So a wrong declaration raises one
+wherever it is read, and not only where a projection reads it.
+
+The unknown column follows a binding's rule exactly, including its one
+carve-out: a row whose write is still in flight carries only the fields that
+were submitted, so it is answered rather than refused.
+
+A region carrying a projection also re-binds every row on every pass: a derived
+column is a function of the whole set, or of a value outside the row, so a row
+the delta never named can still be showing a stale answer.
 
 ## What it refuses
 
@@ -228,10 +238,9 @@ There is no machine on the screen at all, and that changes what a reviewer
 reads. "Read the chart and you have seen the whole contract" is the property
 this platform trades on, and for a row-backed component the chart is not where
 the contract lives: it is the form and the projection, together. The property
-survives — a projection is one attribute carrying at most three clauses from a
-closed set, which is a finite thing to finish reading, and a derived column
-cannot reach a guard, an assign or a target because `currentRows` keeps the
-stored rows. But the artifact set is different, and a reviewer should be told
+survives — a projection is one attribute whose kinds are a closed set, which is
+a finite thing to finish reading, and a derived column cannot reach a guard, an
+assign or a target because `currentRows` keeps the stored rows. But the artifact set is different, and a reviewer should be told
 which artifacts to read rather than discovering that the chart is empty.
 
 Measured against the shipped
@@ -256,13 +265,15 @@ It reaches the state a row can answer for itself: selection, position, set
 size — every ARIA state whose value is a fact about ONE row, compared against
 one parameter.
 
-It does not reach the keyboard as a chart. Arrow keys as a machine transition
-over the machine's own row (`active + 1`, clamped by `count`) needs two things
-no projection supplies — a transition selected by which key was pressed, and
-arithmetic — and by the first rule below, `index` and `count` are *operands*.
+It reaches the keyboard, as a GESTURE rather than as a chart — which is where
+it belongs, and the distinction is the whole of it. Arrow keys as a machine
+transition over the machine's own row (`active + 1`, clamped by `count`) is
+what no projection supplies: that needs a transition selected by which key was
+pressed, and arithmetic, and by the first rule below `index` and `count` are
+*operands*. So the chart route stays shut, and the gesture route needs none of
+it.
 
-It reaches the keyboard as a GESTURE, which is where it belongs. Three things
-compose, and each was already here for its own reason: virtual focus keeps DOM
+Three things compose, and each was already here for its own reason: virtual focus keeps DOM
 focus on the container, so nothing has to move it; the container binds its own
 element from the enclosing row, so it can name the active option; and `next`
 and `prev` put the neighbour on each row. Then `data-key` submits the form the

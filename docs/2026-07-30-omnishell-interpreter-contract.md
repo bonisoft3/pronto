@@ -41,6 +41,8 @@ A runtime for the binding vocabulary in the emitted HTML:
 | `data-text-format="<name>"` | an app renderer, resolved by basename out of the route's `files.renderers` the way `data-handler` resolves — a pure `(value) => nodes` Jessie module, with `interpreter/render.js` owning the node schema, the tag and attribute allowlist, the URL-scheme check and the DOM write |
 | `data-empty="…"` | empty-state copy when the query returns no rows |
 | `data-form` + `data-entity` + `data-action` | a self-describing mutation form |
+| `data-project="{…}"` | derived columns a region states about its own rows, merged into each row before binding — the closed clause set and its refusals are `docs/2026-09-01-aria-is-columns.md` |
+| `data-key="{…}"` | a key in APG's set submits the form it names, the way a form with no submit button submits on change |
 | `data-done="{field}"`-style attributes | attribute reflection for state-dependent CSS |
 
 Parse the HTML once, project it into components, hydrate against mecha
