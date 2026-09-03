@@ -98,8 +98,10 @@ package pronto
 	// SQL expression; DDL: GENERATED ALWAYS AS (<expr>) STORED. Generated
 	// fields emit no NOT NULL/DEFAULT and never appear in forms.
 	generated?: string
-	cel?:       string // constraint, `this` bound to the field value
-	check?:     string // SQL rendering of cel; the compiler owns their consistency
+	// The one statement of the field's constraint, `this` bound to the field
+	// value. Its SQL CHECK body and its CUE constraint are derived from the
+	// parsed expression (program_cel.cue), never written beside it.
+	cel?: string
 }
 
 // Row visibility, enforced as RLS policies (005_policies.sql). The four
@@ -136,9 +138,6 @@ package pronto
 	path: "crud" | "live" | "offline" | "tab" | "device"
 	if path == "tab" || path == "device" {
 		access?: _|_
-		// No table is ever emitted for these tiers, so a SQL rendering is dead
-		// text written twice by hand; `cel` alone states the constraint.
-		fields: [...{check?: _|_}]
 	}
 	if path != "tab" && path != "device" {
 		access?: #Access
@@ -150,7 +149,14 @@ package pronto
 	// DDL: CREATE INDEX IF NOT EXISTS idx_<table>_<on> ON <table>
 	// USING <using> (<on>); emitted after the tables in 004.
 	indexes?: [...{on: string, using: *"btree" | "gin"}]
-	invariant?: {cel: string, check: string} // row-level
+	// Row-level constraint, `this` bound to the row. Its CHECK body is derived
+	// like a field's, but only its CHECK: a predicate over several columns is
+	// not a constraint on any one field's value, so no CUE rendering exists.
+	invariant?: {cel: string, check?: string}
+	// Derived SQL CHECK bodies by column name (program_cel.cue), rendered from
+	// the parsed `cel` of each field. A browser tier declares none: no table
+	// is emitted for it, so its constraints reach only CUE.
+	checks: [string]: string
 	// Composite uniques the per-field `unique` flag cannot express. Declared
 	// rather than written as assembly SQL because the shell needs them too: a
 	// row's natural key is what an upsert resolves against, and what an

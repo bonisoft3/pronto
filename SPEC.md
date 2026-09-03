@@ -317,8 +317,16 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
 - **Not emitted**: `.mise.toml` (scaffold-owned), the ir view (ir.html is
   itself the pinned artifact).
 
-Known gaps, deliberate at alpha: CEL constraints and their SQL `check`
-renderings are supplied in parallel (compiler owns their consistency); the
+A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
+parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as
+protobuf-JSON); every rendering is a function of that file — the SQL CHECK
+bodies and the CUE field constraints in `program_cel.cue`, and the closed
+value set the terminal's per-kind template lint is judged against. An
+entity's `invariant:` binds `this` to the row instead of the value, so it
+derives a CHECK body and nothing for CUE: a predicate over several columns
+constrains no one field's value.
+
+Known gaps, deliberate at alpha: the
 pairs runner behind `tests/pairs.yaml` is unbuilt; derived entities rely on
 convention, not roles, to stay pipeline-only-writable; and **schema
 evolution is unsolved** — initdb SQL only runs on a fresh volume. The
@@ -357,6 +365,8 @@ reachable and a gate it cannot satisfy is a gate it will route around:
 12. ir↔program bijection: set equality both ways over the nine checked kinds,
     plus id uniqueness on each side, plus each screen's `data-route` equal to
     its `#Screen.route`.
+13. Every `cel:` has its parsed IR in `.pronto/cel.json`, and the renderings
+    in `program_cel.cue` are the ones that IR derives.
 
 ## Compile diffs
 

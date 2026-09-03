@@ -21,6 +21,10 @@
 
 import { fileURLToPath } from "node:url";
 import { parseFilterSpec } from "../omnishell/interpreter/fragment.js";
+import type { ParsedExpr } from "./cel-emit.ts";
+import { enumValues } from "./cel-emit.ts";
+import { parseCel } from "./cel.ts";
+import { celSites, renderCel, renderIr } from "./derive-cel.ts";
 // The rules themselves live with the vocabulary they check — the terminal
 // publishes its markup's grammar AND its grammar's rules (omnishell/lint.ts);
 // this pass only walks an app's screens and applies them.
@@ -45,9 +49,7 @@ import { machineShape } from "../omnishell/interpreter/fragment.js";
 
 type Spec = { col: string; op: string; value?: string }[] | null;
 
-// A quoted key is JSON-escaped, not wrapped: CUE reads a lone backslash as an
-// escape, and a decision id is whatever the ir's author put in an id attribute.
-const quoteKey = (k: string) => (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k) ? k : JSON.stringify(k));
+import { quoteKey } from "./cue.ts";
 
 const STYLE = /<style\b[^>]*>[\s\S]*?<\/style>/gi;
 const OPEN_TAG = /<([a-z][a-z0-9]*)\s[^>]*>/gi;
@@ -178,6 +180,11 @@ export async function derive(appDir: string): Promise<void> {
   const program = await Deno.readTextFile(`${appDir}/program.cue`);
   const pkg = /^package (\w+)$/m.exec(program)?.[1] ?? fail(`${appDir}/program.cue names no package`);
 
+  // The CEL derivation unifies back into the entities this export reads, and
+  // a constraint the previous run derived would judge a row the current run's
+  // cel admits — so the file is removed before the program is read, not after.
+  await Deno.remove(`${appDir}/program_cel.cue`).catch(() => {});
+
   // One export, not one per question: cue dominates this loop, so a second
   // invocation costs more than everything else derivation does.
   const exported = await new Deno.Command("cue", {
@@ -206,6 +213,36 @@ export async function derive(appDir: string): Promise<void> {
       }
     }
   }
+
+  // One parse per distinct constraint, and then the parser is done: the IR
+  // goes to disk and everything downstream — the CHECK bodies, the CUE
+  // constraints, the enum a template set is judged against — is read back
+  // from the file, so the artifact a reviewer diffs is the artifact the
+  // emitters ran on.
+  const sites = celSites(entities);
+  const parsed = new Map<string, ParsedExpr>();
+  for (const s of sites) {
+    if (parsed.has(s.cel)) continue;
+    try {
+      parsed.set(s.cel, parseCel(s.cel));
+    } catch (e) {
+      fail(`entity ${s.entity}: cel ${JSON.stringify(s.cel)} does not parse: ${(e as Error).message}`);
+    }
+  }
+  await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
+  await Deno.writeTextFile(`${appDir}/.pronto/cel.json`, renderIr(parsed));
+  const irs = new Map<string, ParsedExpr>(
+    Object.entries(JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cel.json`)) as Record<string, ParsedExpr>),
+  );
+  try {
+    await Deno.writeTextFile(`${appDir}/program_cel.cue`, renderCel(pkg, sites, irs));
+  } catch (e) {
+    fail((e as Error).message);
+  }
+  const enumsOf = (ename: string) => (col: string): string[] | null => {
+    const site = sites.find((s) => s.entity === ename && s.col === col);
+    return site === undefined ? null : enumValues(irs.get(site.cel)!);
+  };
 
   // The app's declared Jessie modules, by basename: what a machine's value
   // positions may reference, and what tells an assign's reference from its
@@ -251,10 +288,9 @@ export async function derive(appDir: string): Promise<void> {
       }
     }
     for (const kinded of kindedRegions(html)) {
-      const entity = entities[
-        byTable.get(kinded.table) ?? fail(`${name}.html reads "${kinded.table}", the table of no declared entity`)
-      ];
-      const why = kindLint(kinded.whens, entity);
+      const ename = byTable.get(kinded.table) ??
+        fail(`${name}.html reads "${kinded.table}", the table of no declared entity`);
+      const why = kindLint(kinded.whens, entities[ename], enumsOf(ename));
       if (why !== null) fail(`${name}.html: region "${kinded.table}": ${why}`);
     }
     // A machine's leaves are handler modules like any other: its references

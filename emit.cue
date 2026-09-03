@@ -42,6 +42,8 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 
 #colSql: C={
 	f: #Field
+	// The column's derived CHECK body; absent where the field states no cel.
+	check?: string
 	_frags: list.Concat([
 		["\"\(C.f.name)\"", _sqlType[C.f.type]],
 		[if C.f.generated != _|_ {"GENERATED ALWAYS AS (\(C.f.generated)) STORED"}],
@@ -50,7 +52,7 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		[if C.f.generated == _|_ if !C.f.pk && C.f.required {"NOT NULL"}],
 		[if C.f.unique != _|_ if C.f.unique {"UNIQUE"}],
 		[if C.f.ref != _|_ {"REFERENCES \(C.f.ref)(id) ON DELETE CASCADE"}],
-		[if C.f.check != _|_ {"CHECK (\(C.f.check))"}],
+		[if C.check != _|_ {"CHECK (\(C.check))"}],
 	])
 	out: strings.Join(_frags, " ")
 }
@@ -75,12 +77,14 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 #tableSql: T={
 	e: #Entity
 	_lines: list.Concat([
-		[for fld in T.e.fields {"  " + (#colSql & {f: fld}).out}],
+		[for fld in T.e.fields {
+			"  " + (#colSql & {f: fld, if T.e.checks[fld.name] != _|_ {check: T.e.checks[fld.name]}}).out
+		}],
 		// Platform column, never a #Field: the write's transaction id, returned
 		// via Prefer: return=representation so clients can awaitTxId against
 		// the shape stream (006_txid.sql restamps it on UPDATE).
 		["  \"txid\" BIGINT DEFAULT pg_current_xact_id()::text::bigint"],
-		[if T.e.invariant != _|_ {"  CHECK (\(T.e.invariant.check))"}],
+		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
 	])
 	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
 }
