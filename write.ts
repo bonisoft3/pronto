@@ -65,7 +65,9 @@ async function exportBundle(): Promise<Bundle> {
   // hand to name, which is why this is checked here instead.
   const dir = (bundle.files["bayt.json"]?.data as { dir?: string } | undefined)?.dir;
   if (dir !== undefined) {
-    const here = Deno.realPathSync(appDir);
+    // Compared in the spelling a bayt.json holds, which is always
+    // forward-slashed where realPathSync answers in the platform's own.
+    const here = Deno.realPathSync(appDir).replaceAll("\\", "/");
     if (here !== dir && !here.endsWith(`/${dir}`)) {
       fail(
         `bayt.json names dir "${dir}" but this app is at "${here}": a project's ` +
