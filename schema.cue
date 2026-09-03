@@ -498,6 +498,9 @@ package pronto
 		description: string
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		tiers: [...#Tier]
+		// A program names its decisions and nothing more: `note` is derived
+		// from the prose of the ir element `ir` names (pronto derive.ts), so the
+		// reviewed artifact is the only place the rationale is written.
 		decisions: [Id=string]: {ir: *Id | string, note: string}
 		tests: [Id=string]: #Test & {id: Id}
 	}
