@@ -49,7 +49,12 @@ import (
 				cmd: builtin: do: "cue vet ./..."
 			}
 			"build": sayt.build & mise.exec & {
-				srcs: globs: ["program.cue", "shell/**", "pipelines/**"]
+				// ir.html and acceptance.md are build inputs: derive.ts reads the
+				// diagrams and the ledger into .pronto/facts.json. Both are listed
+				// because the fingerprint is what decides a rebuild, and the ledger
+				// is pinned by nothing else — ir.html at least moves program.cue's
+				// meta.ir.sha256 when it changes.
+				srcs: globs: ["program.cue", "ir.html", "acceptance.md", "shell/**", "pipelines/**"]
 				cmd: builtin: do: B.meta.buildCmd
 				dockerfile: from: ref: ":setup"
 			}

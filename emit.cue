@@ -536,11 +536,11 @@ _cdcTableField: "__table"
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
 		surface: {
-			buildCmd: "deno run --allow-read=. --allow-write=. --allow-run=cue ../../plugins/pronto/write.ts ."
+			// --allow-env is mermaid's: the diagram parse reads the environment as it
+			// initialises, where the CEL parse beside it does not.
+			buildCmd: "deno run --allow-read=. --allow-write=. --allow-run=cue --allow-env ../../plugins/pronto/write.ts ."
 			testCmd:  "cue vet -c ./..."
 			pipelineFiles: [for _, p in D.code.state.pipelines {"docker/\(D.code.meta.name)-\(p.name).yaml"}]
-			handlerFiles: [for _, h in D.code.surface.handlers {h.src}]
-			screenCssFiles: [for _, s in D.code.surface.screens {s.files.css}]
 			// Both runtimes declare checks about their own surfaces; the loop
 			// routes each to the verb it names. A name collision across the two
 			// is a conflict here rather than a silent overwrite.

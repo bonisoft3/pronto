@@ -475,7 +475,7 @@ package pronto
 		//
 		// `ir` here is deliberately outside the bijection surface: no app
 		// declares a vendored unit yet, so it is not registered in
-		// check-bijection.ts's KINDS/COLLECTIONS (or SPEC.md's kind
+		// objects.ts's KINDS/COLLECTIONS (or SPEC.md's kind
 		// vocabulary) pending a real consumer — same deferral as
 		// `isolation`/`transports` and the iframe/worker transports.
 		vendored: [Name=string]: {

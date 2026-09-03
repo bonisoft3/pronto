@@ -365,8 +365,17 @@ reachable and a gate it cannot satisfy is a gate it will route around:
 12. ir↔program bijection: set equality both ways over the nine checked kinds,
     plus id uniqueness on each side, plus each screen's `data-route` equal to
     its `#Screen.route`.
-13. Every `cel:` has its parsed IR in `.pronto/cel.json`, and the renderings
-    in `program_cel.cue` are the ones that IR derives.
+13. Every `cel:` has its parsed IR in `.pronto/cel.json`, and every derived
+    file still hashes to what the derivation wrote — both asked by lint 14.
+14. The fact-store invariants in `plugins/pronto/invariants.sql`, evaluated by
+    DuckDB over `.pronto/facts.json`. The queries state the modality they read:
+    a program fact is closed, so naming something outside it is a
+    contradiction; an ir fact is loose, so a claim with no witness is a finding
+    while a program fact no diagram draws is not. `.mise.toml` is
+    scaffold-owned, so a new app carries the `http:duckdb` pin the rule needs.
+    Severity gates the exit as the visual battery's does: a contradiction
+    between two rungs is an error, an acceptance claim nothing has settled yet
+    is a warning — the ledger exists to track that work, not to fail on it.
 
 ## Compile diffs
 

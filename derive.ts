@@ -24,7 +24,26 @@ import { parseFilterSpec } from "../omnishell/interpreter/fragment.js";
 import type { ParsedExpr } from "./cel-emit.ts";
 import { enumValues } from "./cel-emit.ts";
 import { parseCel } from "./cel.ts";
+import { celFixtures } from "./cel-fixtures.ts";
+import { DENIED, jessieFacts, jessieSelfTest } from "./jessie.ts";
+import { ownedTokens, styleSelfTest } from "./styles.ts";
 import { celSites, renderCel, renderIr } from "./derive-cel.ts";
+import { claims, irAccepts, irPaths, LEDGER } from "./acceptance.ts";
+import { declarations, irIds, irRoutes, KINDS } from "./objects.ts";
+import { irDiagrams } from "./diagrams.ts";
+import {
+  acceptanceFacts,
+  artifactFacts,
+  mergeFacts,
+  jessieFactRows,
+  styleFacts,
+  bijectionFacts,
+  celFacts,
+  diagramFacts,
+  type FactChart,
+  programFacts,
+  renderFacts,
+} from "./facts.ts";
 // The rules themselves live with the vocabulary they check — the terminal
 // publishes its markup's grammar AND its grammar's rules (omnishell/lint.ts);
 // this pass only walks an app's screens and applies them.
@@ -58,7 +77,7 @@ const DECISION = /\sdata-kind="decision"/;
 
 /**
  * Inner html of every `data-kind="decision"` element, by id. Scanned with a
- * regex, not a DOM parse, for check-bijection.ts's reason. An ir spells a
+ * regex, not a DOM parse, for objects.ts's reason. An ir spells a
  * decision in whatever element its prose sits in — section, p, li — so the
  * body runs to that element's own close tag.
  */
@@ -142,7 +161,7 @@ function fail(msg: string): never {
 /**
  * The note of each decision the program declares: the prose of the element its
  * `ir` names, which defaults to the decision's own id. A missing element fails
- * here rather than reaching check-bijection.ts: nothing would constrain that
+ * here rather than reaching objects.ts: nothing would constrain that
  * decision's note, so the export carrying the finding never completes.
  */
 export function notesFor(
@@ -192,7 +211,13 @@ export async function derive(appDir: string): Promise<void> {
       "export",
       ".",
       "-e",
-      "{entities: code.state.entities, ir: code.meta.ir.source, decisions: {for k, v in code.meta.decisions {(k): v.ir}}}",
+      "{entities: code.state.entities, ir: code.meta.ir.source, " +
+        "decisions: {for k, v in code.meta.decisions {(k): v.ir}}, " +
+        "tests: {for k, t in code.meta.tests {(k): t.accepts}}, " +
+        "paths: {for k, s in code.surface.screens {(k): {for n, p in s.paths {(n): p.accepts}}}}, " +
+        // `program` rather than `code`: a field named for the value it holds would
+        // shadow it inside the struct literal and export an incomplete `_`.
+        "program: code}",
       "--out",
       "json",
     ],
@@ -201,8 +226,14 @@ export async function derive(appDir: string): Promise<void> {
     stderr: "inherit",
   }).output();
   if (!exported.success) fail("cue export of the entities, the ir source and the decision ids failed");
-  const exp: { entities: Record<string, Entity>; ir: string; decisions: Record<string, string> } = JSON
-    .parse(new TextDecoder().decode(exported.stdout));
+  const exp: {
+    entities: Record<string, Entity>;
+    ir: string;
+    decisions: Record<string, string>;
+    tests: Record<string, string[]>;
+    paths: Record<string, Record<string, string[]>>;
+    program: Record<string, unknown>;
+  } = JSON.parse(new TextDecoder().decode(exported.stdout));
   const entities = exp.entities;
   const notes = await decisionNotes(appDir, exp.ir, exp.decisions);
   const byTable = new Map(Object.entries(entities).map(([name, e]) => [e.table, name]));
@@ -404,7 +435,103 @@ export async function derive(appDir: string): Promise<void> {
     for (const file of files) await Deno.remove(`${appDir}/${file}`).catch(() => {});
   }
 
+  // The fact store, last: it is a projection of everything above, so anything
+  // that failed the derivation never reaches a row.
+  const enum_value: Record<string, unknown>[] = [];
+  for (const site of sites) {
+    if (site.col === null) continue;
+    for (const value of enumsOf(site.entity)(site.col) ?? []) {
+      enum_value.push({ entity: site.entity, field: site.col, value });
+    }
+  }
+  const charts: FactChart[] = machines.map((m) => ({
+    screen: m.screen,
+    table: m.region.table,
+    machine: m.region.machine,
+  }));
+  const irHtml = await Deno.readTextFile(`${appDir}/${exp.ir}`);
+  let diagrams: { nodes: Parameters<typeof diagramFacts>[0]; edges: Parameters<typeof diagramFacts>[1] };
+  let ledger: ReturnType<typeof acceptanceFacts>;
+  try {
+    diagrams = await irDiagrams(irHtml);
+  } catch (e) {
+    fail(`${exp.ir}: ${(e as Error).message}`);
+  }
+  try {
+    ledger = acceptanceFacts(
+      claims(await Deno.readTextFile(`${appDir}/${LEDGER}`)),
+      irPaths(irHtml),
+      irAccepts(irHtml),
+      exp.tests,
+      exp.paths,
+    );
+  } catch (e) {
+    fail(`${LEDGER}: ${(e as Error).message}`);
+  }
   await Deno.writeTextFile(`${appDir}/program_derived.cue`, renderDerived(pkg, screens, notes));
+
+  let bijection: ReturnType<typeof bijectionFacts>;
+  try {
+    bijection = bijectionFacts(KINDS, irIds(irHtml), irRoutes(irHtml), declarations(exp.program), exp.program);
+  } catch (e) {
+    fail(`${exp.ir}: ${(e as Error).message}`);
+  }
+  // The palette's one declaration: the shared layer owns a token, a screen may
+  // only consume it. Read here rather than at lint so the rule is a join.
+  const shared = (await Promise.all(
+    ["shell/shell.css", "shell/design.css"].map((f) => Deno.readTextFile(`${appDir}/${f}`).catch(() => "")),
+  )).join("\n");
+  const screenTokens: { path: string; tokens: Iterable<string> }[] = [];
+  for (const s of screens) {
+    const rel = `shell/screens/${s.name}.css`;
+    const css = await Deno.readTextFile(`${appDir}/${rel}`).catch(() => null);
+    if (css !== null) screenTokens.push({ path: rel, tokens: ownedTokens(css) });
+  }
+
+  // What each declared handler reaches for. Read here so the denylist is a
+  // join rather than a scan repeated per file at lint.
+  const modules: { path: string; references: string[]; completion: string }[] = [];
+  for (const name of [...available].sort()) {
+    const rel = `shell/handlers/${name}.js`;
+    const src = await Deno.readTextFile(`${appDir}/${rel}`).catch(() => null);
+    if (src !== null) modules.push({ path: rel, ...jessieFacts(src) });
+  }
+
+  // Hashed after every write above, so a derived file's row is what derive left
+  // on disk and a source's row is what it read.
+  const sha = async (path: string) => {
+    const bytes = await Deno.readFile(`${appDir}/${path}`);
+    return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+      .map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+  const artifacts: { path: string; sha256: string; derived: boolean }[] = [];
+  for (const [path, derived] of [
+    ["program.cue", false],
+    [exp.ir, false],
+    [LEDGER, false],
+    [".pronto/cel.json", true],
+    ["program_cel.cue", true],
+    ["program_derived.cue", true],
+  ] as [string, boolean][]) {
+    artifacts.push({ path, sha256: await sha(path), derived });
+  }
+
+  await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
+  await Deno.writeTextFile(
+    `${appDir}/.pronto/facts.json`,
+    renderFacts(mergeFacts(
+      programFacts(entities, screens, charts),
+      ledger,
+      bijection,
+      artifactFacts(artifacts),
+      celFacts(sites, [...irs.keys()]),
+      styleFacts(ownedTokens(shared), screenTokens),
+      jessieFactRows(DENIED, modules),
+      { enum_value },
+      diagramFacts(diagrams.nodes, diagrams.edges),
+    )),
+  );
+
 }
 
 function selfTest(): void {
@@ -522,7 +649,15 @@ function selfTest(): void {
   // second chance to be read as an escape.
   const rendered = renderDerived("p", [], [{ id: "decision\\blob", note: 'a "q" and a \\ and \\(x)' }]);
   const wantKey = '\t"decision\\\\blob": "a \\"q\\" and a \\\\ and \\\\(x)"';
-  let failed = 0;
+  // The cel emitters are pinned here too: one self-test, wired to one rule.
+  const celFindings = celFixtures();
+  for (const f of celFindings) console.error(`FAIL ${f.message}`);
+  const styleFailures = styleSelfTest();
+  for (const f of styleFailures) console.error(`FAIL ${f}`);
+  const jessieFailures = jessieSelfTest();
+  for (const f of jessieFailures) console.error(`FAIL ${f}`);
+
+  let failed = celFindings.length + styleFailures.length + jessieFailures.length;
   if (!rendered.includes(wantKey)) {
     failed++;
     console.error(`FAIL a backslash in a decision id:\n  got  ${JSON.stringify(rendered.split("_irNotes: {")[1]?.split("\n")[1])}\n  want ${JSON.stringify(wantKey)}`);
@@ -591,7 +726,10 @@ function selfTest(): void {
     }
   }
   if (failed > 0) Deno.exit(1);
-  console.error(`derive self-test: ${notes.length + scans.length + maps.length + 1} cases passed`);
+  console.error(
+    `derive self-test: ${notes.length + scans.length + maps.length + 1} derivation cases, ` +
+      "the cel fixtures, the style scanner and the jessie scanner passed",
+  );
 }
 
 if (import.meta.main) {

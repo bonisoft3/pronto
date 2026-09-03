@@ -1,23 +1,12 @@
-// pronto cel lint: the derived constraints are the ones the cel: sources say.
+// The emitters' fixture table: what each shape of `cel:` must render to.
 //
-//   deno run --allow-read=. --allow-run=cue ../../plugins/pronto/check-cel.ts <appDir>
-//
-// Runs with no CEL parser: this pass re-derives every artifact from
-// .pronto/cel.json and compares it with what is checked in.
-// A `cel:` edited without regenerating has no IR and is reported;
-// a hand-edited program_cel.cue no longer matches its own IR and is reported.
-//
-// The fixture table below runs on every invocation rather than behind a flag:
-// it holds the judgments no app's corpus reaches — a form the emitters must
-// REFUSE rather than render, and the value sets the terminal's kind lint is
-// judged against, which land in no checked-in artifact of their own.
-//
-// Findings print as {severity, path, message} JSON (SPEC.md lint format);
-// exit 1 when any finding is reported.
+// Real constraints, and the forms the emitters must REFUSE rather than render.
+// A transform pinned against what an author writes, run from derive.ts's
+// self-test. Whether an app's constraints and their IR agree is invariants.sql.
 
 import type { ParsedExpr } from "./cel-emit.ts";
 import { CelUnsupported, cueConstraint, enumValues, sqlCheck } from "./cel-emit.ts";
-import { type CelSite, celSites, type Entity, renderCel, renderIr } from "./derive-cel.ts";
+import { type CelSite, renderCel } from "./derive-cel.ts";
 
 type Finding = { severity: string; path: string; message: string };
 
@@ -64,7 +53,7 @@ const FIXTURES: { cel: string; col: string | null; sql: string | null; cue: stri
   { cel: "this.startsWith('x')", col: "c", sql: null, cue: null, values: null },
 ];
 
-function fixtures(): Finding[] {
+export function celFixtures(): Finding[] {
   const out: Finding[] = [];
   const say = (message: string) => out.push({ severity: "error", path: "plugins/pronto/cel-emit.ts", message });
     for (const f of FIXTURES) {
@@ -100,71 +89,3 @@ function fixtures(): Finding[] {
   if (imports("this == 'strings.x'")) say("a literal spelling strings. must not import strings");
   return out;
 }
-
-async function app(appDir: string): Promise<Finding[]> {
-  const out: Finding[] = [];
-  const program = await Deno.readTextFile(`${appDir}/program.cue`);
-  const pkg = /^package (\w+)$/m.exec(program)?.[1];
-  if (pkg === undefined) return [{ severity: "error", path: "program.cue", message: "names no package" }];
-
-  const exported = await new Deno.Command("cue", {
-    args: ["export", ".", "-e", "code.state.entities", "--out", "json"],
-    cwd: appDir,
-    stdout: "piped",
-    stderr: "inherit",
-  }).output();
-  if (!exported.success) {
-    return [{ severity: "error", path: "program.cue", message: "cue export of code.state.entities failed" }];
-  }
-  const entities: Record<string, Entity> = JSON.parse(new TextDecoder().decode(exported.stdout));
-  const sites = celSites(entities);
-
-  let irs: Map<string, ParsedExpr>;
-  try {
-    irs = new Map(Object.entries(JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cel.json`))));
-  } catch {
-    return [{ severity: "error", path: ".pronto/cel.json", message: "missing or unreadable; run plugins/pronto/write.ts" }];
-  }
-  for (const s of sites) {
-    if (!irs.has(s.cel)) {
-      out.push({
-        severity: "error",
-        path: ".pronto/cel.json",
-        message: `${s.entity}: no IR for cel ${JSON.stringify(s.cel)}; run plugins/pronto/write.ts`,
-      });
-    }
-  }
-  const stated = new Set(sites.map((s) => s.cel));
-  for (const cel of irs.keys()) {
-    if (!stated.has(cel)) {
-      out.push({
-        severity: "error",
-        path: ".pronto/cel.json",
-        message: `IR for ${JSON.stringify(cel)}, which no field or invariant states`,
-      });
-    }
-  }
-  if (out.length > 0) return out;
-
-  const want = new Map([[".pronto/cel.json", renderIr(irs)], ["program_cel.cue", renderCel(pkg, sites, irs)]]);
-  for (const [rel, text] of want) {
-    const have = await Deno.readTextFile(`${appDir}/${rel}`).catch(() => null);
-    if (have !== text) {
-      out.push({
-        severity: "error",
-        path: rel,
-        message: "does not match what the checked-in IR derives; run plugins/pronto/write.ts",
-      });
-    }
-  }
-  return out;
-}
-
-const appDir = Deno.args[0];
-if (appDir === undefined) {
-  console.error("usage: check-cel.ts <appDir>");
-  Deno.exit(1);
-}
-const findings = [...fixtures(), ...await app(appDir)];
-for (const f of findings) console.log(JSON.stringify(f));
-if (findings.length > 0) Deno.exit(1);

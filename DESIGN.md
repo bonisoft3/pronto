@@ -138,7 +138,7 @@ Bun's speed edge is real and may matter later, and nothing in the architecture i
 ## Open questions
 
 1. **Jessie grammar verification.** The restriction set described here is from memory; read endojs/Jessie's authoritative grammar before committing the lint gate to it. Same for quickjs-emscripten maintenance status.
-2. **ir.html id convention.** Settled: the bijection scheme is built and wired into lint (check-bijection.ts; SPEC.md specifies the nine compared kinds).
+2. **ir.html id convention.** Settled: the bijection scheme is built and wired into lint (objects.ts; SPEC.md specifies the nine compared kinds).
 3. **Handlers language experiment.** Constrained-Jessie vs bloblang/jq for the same three computed views; pick by readability and LLM success rate.
 4. **CUE package layout.** Settled: schema.cue defines `#Entity` / `#Pipeline` / `#Screen` / `#Flow` / `#App`, the schema surface the LLM writes against.
 5. **cue-wasm binary size/perf.** Expected tens of MB uncompressed, single-digit compressed behind a service worker; measure.
