@@ -290,7 +290,11 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
 - **The loop runs on builtins.** The emitter emits the files the loop's
   builtin verbs expect — `.vscode/tasks.json`, `compose.yaml` (the local
   virtual cluster; `launch` drives its gate service), and `.say.yaml`
-  carrying only lint rules. The doctrine — argv-shaped commands, which
+  carrying the checks, each filed under the verb whose layer it needs —
+  `lint` for the ones that read files, `test` and `integrate` for the ones
+  that need a mounted screen or a running cluster. A check the terminal
+  publishes lands in every app's `.say.yaml`; an app adds its own beside
+  them. The doctrine — argv-shaped commands, which
   check lands at which verb, agent-driven verify — rides the loop
   contract itself ([`plugins/sayt/loop.cue`](../sayt/loop.cue), rostered
   as [`loops/sayt.cue`](loops/sayt.cue)).
@@ -333,7 +337,10 @@ wired, pronto emits its context prompts from the program's storyboard data.
 ## Lints
 
 All deterministic, all pre-LLM, reported as structured findings
-(`{severity, path, message}` JSON):
+(`{severity, path, message}` JSON). A finding fails its verb unless its
+severity says otherwise: a check that cannot reach part of what it grades
+reports that as `advisory`, because an app carrying one has no way to make it
+reachable and a gate it cannot satisfy is a gate it will route around:
 
 1. Every brief `[[id]]` resolves to an ir.html element id.
 2. Every `![[]]` transclusion target exists.
