@@ -14,6 +14,8 @@
 package bayt
 
 import (
+	"list"
+
 	core "github.com/bonisoft3/bayt/core:bayt"
 	sayt "github.com/bonisoft3/bayt/stacks/sayt"
 	mise "github.com/bonisoft3/bayt/stacks/mise"
@@ -34,6 +36,10 @@ import (
 
 	project: core.#project & {
 		dir: "apps/\(B.meta.app)"
+		// The app's runtime is pronto's own compose.yaml. Including it puts the
+		// runtime services and the bayt targets in ONE compose project, which is
+		// what lets a target declare depends_on against a service.
+		compose: includes: ["compose.yaml"]
 		targets: {
 			"setup": sayt.setup & {
 				dockerfile: from: ref: "workspaceroot:setup"
@@ -54,8 +60,60 @@ import (
 			"launch": sayt.launch & {
 				dockerfile: from: ref: ":build"
 			}
+			// The visual battery. `sayt.integrate` is already `up: true, manual:
+			// true` — a load-by-name point kept off the bare-up stack — which is
+			// the shape this needs: a browser cannot reach a running caddy from a
+			// build RUN, so the check is the container's CMD and the verdict is
+			// its exit code.
 			"integrate": sayt.integrate & {
-				dockerfile: from: ref: ":build"
+				// No :build dep. The screens this photographs are checked-in
+				// artifacts the srcs below carry, and the ladder regenerates them
+				// at the build rung before ever reaching integrate — depending on
+				// the build image would couple the battery to a toolchain it does
+				// not use.
+				deps: []
+				srcs: globs: ["shell/shell.yaml", "shell/screens/**"]
+				dockerfile: {
+					from: name: core.lock.images.playwright
+					preamble: [
+						"COPY --from=\(core.lock.images.deno_bin) /deno /usr/local/bin/deno",
+						"ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
+						"ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
+						"ENV DENO_DIR=/deno-cache",
+						"COPY --from=root plugins/omnishell /omnishell",
+						"RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts",
+					]
+				}
+				cmd: "builtin": null
+				compose: {
+					// Relative to .bayt/, where the fragment lands: up past the app and
+					// apps/ to the monorepo root.
+					build: additional_contexts: root: "../../.."
+					// Plain HTTP, so the checker measures no secure context and
+					// anything gated on one is uncovered. Nothing in the battery
+					// reads such an API.
+					environment: APP_URL: "http://caddy:8080"
+					// caddy and not launch, though launch is the aggregate the whole
+					// runtime hangs off: bayt mirrors every depends_on key as a
+					// build context, and launch declares no build, which compose
+					// rejects. The verb brings the runtime up first and this
+					// closure joins the same project, so the plane is already
+					// there — see the visual check in omnishell/terminal.cue.
+					depends_on: caddy: condition: "service_healthy"
+					command: [
+						"deno", "run", "--node-modules-dir=auto",
+						"--allow-read", "--allow-write", "--allow-net",
+						"--allow-env", "--allow-run", "--allow-sys",
+						"/omnishell/check-visual.ts", ".",
+					]
+				}
+				// The container's exit code IS the verdict, and `cmd: builtin:
+				// null` leaves the image carrying only the playwright base's own
+				// CMD — so a command that lost the checker would exit 0 having
+				// photographed nothing. Stated as a constraint, dropping it is a
+				// generate-time error instead.
+				_runsChecker: list.Contains(compose.command, "/omnishell/check-visual.ts")
+				_runsChecker: true
 			}
 		}
 	}
