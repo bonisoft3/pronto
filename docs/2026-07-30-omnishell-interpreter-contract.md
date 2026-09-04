@@ -43,6 +43,9 @@ A runtime for the binding vocabulary in the emitted HTML:
 | `data-form` + `data-entity` + `data-action` | a self-describing mutation form |
 | `data-project="{…}"` | derived columns a region states about its own rows, merged into each row before binding — the closed clause set and its refusals are `docs/2026-09-01-aria-is-columns.md` |
 | `data-key="{…}"` | a key in APG's set submits the form it names, the way a form with no submit button submits on change |
+| `data-machine='[…, …]'` | several charts on one region, over one row: each is mounted knowing nothing of its siblings, and what they share is the row a transition states. Fields are refused as duplicates at mount (every per-chart key is the field); columns are `parallelLint`'s at compile time |
+| `data-focus="{column}"` | move focus to the member whose column reads `true`, leaving the tab order alone — for the patterns APG keeps wholly in the Tab sequence, where a tabstop would take affordances out of it. Acts only when the reader is inside the region and on another member; requires the region's chart to hear `focusin`, or the reader's own move would be undone on the next refresh |
+| `data-rove="{column}"` | a roving tabstop: the terminal puts the member whose column reads `true` in the tab order, every other member out of it, and moves DOM focus there when a declared gesture moved the column and never otherwise. A list's members are its rows, one per row; a singleton's are its own elements — `docs/2026-09-03-the-reader-is-also-a-writer.md` |
 | `data-done="{field}"`-style attributes | attribute reflection for state-dependent CSS |
 
 Parse the HTML once, project it into components, hydrate against mecha

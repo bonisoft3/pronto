@@ -54,8 +54,13 @@ import {
   type MachineRegion,
   machineRegions,
   machineWrites,
+  parallelLint,
+  focusLint,
+  roveLint,
+  stopRegions,
   scanScreen,
   slotRegions,
+  type StopRegion,
   templateArity,
   unknownColumns,
   unwitnessedControls,
@@ -337,6 +342,7 @@ export async function derive(appDir: string): Promise<void> {
     } catch (e) {
       fail(`${name}.html: ${(e as Error).message}`);
     }
+    const grouped = new Set<string>();
     for (const region of regions) {
       let parsed: Parameters<typeof machineLint>[0];
       try {
@@ -364,7 +370,28 @@ export async function derive(appDir: string): Promise<void> {
         ...(writes.get(region.table) ?? []),
         ...machineWrites(parsed, region.emptyRow),
       ]);
+      // The group's own rule, run once per group rather than once per chart.
+      const group = region.parallel.join("\u0000");
+      if (region.parallel.length > 1 && !grouped.has(group)) {
+        grouped.add(group);
+        const why = parallelLint(region.parallel.map((c) => JSON.parse(c)));
+        if (why !== null) fail(`${name}.html: region "${region.table}": ${why}`);
+      }
       machines.push({ screen: name, region });
+    }
+    for (const [attr, rule] of [["data-rove", roveLint], ["data-focus", focusLint]] as const) {
+      let stops: StopRegion[];
+      try {
+        stops = stopRegions(html, attr);
+      } catch (e) {
+        fail(`${name}.html: ${(e as Error).message}`);
+      }
+      const declared = (table: string) =>
+        entities[byTable.get(table) ?? fail(`${name}.html reads "${table}", the table of no declared entity`)];
+      for (const region of stops) {
+        const why = rule(region, declared(region.table), region.outer === undefined ? undefined : declared(region.outer));
+        if (why !== null) fail(`${name}.html: region "${region.table}": ${why}`);
+      }
     }
     for (const [table, cols] of writes) {
       const entity = entities[
