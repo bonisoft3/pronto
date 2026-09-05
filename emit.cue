@@ -382,6 +382,7 @@ _cdcTableField: "__table"
 	// migration to render into, so the terminal is told the rows instead.
 	_localSeeds: {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
 	_seededLocal: [for t, _ in S._localSeeds {t}]
+	_unitNames: [for n, _ in S.code.capabilities.vendored {n}]
 	_access: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.access != _|_ {
 		(e.table): {
 			mode: e.access.mode
@@ -457,6 +458,19 @@ _cdcTableField: "__table"
 		}
 		if len(S._seededLocal) > 0 {
 			seed: S._localSeeds
+		}
+
+		// The units a data-hatch may name, and what the terminal is allowed to
+		// do for each: the boundary to mount it behind, the capabilities it
+		// asked for (checked against the terminal's offer at compile time), and
+		// the entry point to load. The rest of `files` is served, not declared —
+		// a unit fetches its own siblings by name.
+		if len(S._unitNames) > 0 {
+			units: {
+				for n, v in S.code.capabilities.vendored {
+					(n): {isolation: v.isolation, capabilities: v.capabilities, src: v.src}
+				}
+			}
 		}
 		"migrations": S.migrations
 		pipelines: [for _, p in S.code.state.pipelines {
@@ -568,6 +582,7 @@ _cdcTableField: "__table"
 	code: #App
 	_handlerSet: {for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}}
 	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
+	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
 	out: omnishell.#Terminal & {
 		app:         D.code.meta.name
 		description: D.code.meta.description
@@ -581,6 +596,9 @@ _cdcTableField: "__table"
 			folds: list.SortStrings([
 				for _, pl in D.code.state.pipelines if pl.fold != _|_ {pl.fold.src},
 			])
+			// A unit's whole directory, not just its src: the wrapper's own
+			// imports are files the browser fetches by name.
+			units: list.SortStrings([for f, _ in D._unitSet {f}])
 		}
 	}
 }
@@ -653,6 +671,9 @@ _cdcTableField: "__table"
 
 	for _, v in E.code.capabilities.vendored {
 		_vendoredIsolationBuildable: true & list.Contains(E.terminal.capabilities.isolation, v.isolation)
+		// The unit's own entry point has to be one of the files the terminal
+		// serves, or the mount fetches a path nothing published.
+		_vendoredSrcServed: true & list.Contains(v.files, v.src)
 		for cap in v.capabilities {
 			let parts = strings.Split(cap, ".")
 			_vendoredCapabilityOffered: true & (E.terminal.capabilities[parts[0]][parts[1]] != _|_)

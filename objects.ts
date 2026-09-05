@@ -20,6 +20,7 @@ export const KINDS = [
   "decision",
   "handler",
   "hatch",
+  "unit",
 ] as const;
 type Kind = typeof KINDS[number];
 
@@ -36,6 +37,7 @@ const COLLECTIONS: Record<string, { bucket: string; field: string; kind: Kind }>
   decisions: { bucket: "meta", field: "decisions", kind: "decision" },
   handlers: { bucket: "surface", field: "handlers", kind: "handler" },
   hatches: { bucket: "capabilities", field: "hatches", kind: "hatch" },
+  units: { bucket: "capabilities", field: "vendored", kind: "unit" },
 };
 
 const STYLE = /<style\b[^>]*>[\s\S]*?<\/style>/gi;

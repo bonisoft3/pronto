@@ -473,16 +473,16 @@ package pronto
 		// capability vocabulary (`"group.name"` strings). Checked against
 		// #Terminal.capabilities' offer in #emit, not here.
 		//
-		// `ir` here is deliberately outside the bijection surface: no app
-		// declares a vendored unit yet, so it is not registered in
-		// objects.ts's KINDS/COLLECTIONS (or SPEC.md's kind
-		// vocabulary) pending a real consumer — same deferral as
-		// `isolation`/`transports` and the iframe/worker transports.
+		// `files` is everything the unit needs served, `src` among them: the
+		// wrapper an engineer audited, and whatever that wrapper loads beside
+		// itself. They are served as statics like any other app file, so a unit
+		// reaches no further over the network than the app already does.
 		vendored: [Name=string]: {
 			ir: *Name | string
 			isolation: "compartment" | "iframe" | "worker"
 			capabilities: [...string]
 			src: string
+			files: [...string]
 			note: string
 		}
 	}

@@ -160,7 +160,7 @@ navigation from the brief) plus data attributes:
 - **Ids are opaque tokens; structure lives in data attributes, never parsed
   out of the id string.**
 - `data-kind` — `entity | pipeline | screen | state | flow | test | decision |
-  handler | hatch | paths | diagram | auth | review`
+  handler | hatch | unit | paths | diagram | auth | review`
 - `data-of` — owner (states belong to a screen, tests to an entity/pipeline/screen)
 - `data-path` — mecha data path on entities (`crud | live | offline`)
 - `data-route` — the screen's route, on `data-kind="screen"`. The route is
@@ -241,10 +241,10 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
 - **Bijection.** Every object carries `ir`, defaulting to its name/key — the
   ir.html element id it realizes. A storyboard frame has no object of its own:
   its id is *built* as `<the screen's ir>-<state>` and compared whole. The
-  checker demands set equality both ways over nine ir kinds — {entity,
-  pipeline, screen, state, flow, test, decision, handler, hatch} — and both
-  directions are errors. An id in the program with no ir element is code no
-  reviewer signed; an id in the ir with no program object is a designed thing
+  checker demands set equality both ways over ten ir kinds — {entity,
+  pipeline, screen, state, flow, test, decision, handler, hatch, unit} — and
+  both directions are errors. An id in the program with no ir element is code
+  no reviewer signed; an id in the ir with no program object is a designed thing
   the running app silently lacks, and it is the more dangerous of the two.
   Neither is a work-in-progress state to be tolerated: one hop produced the
   program from the ir it pins, so a difference either way is a compiler defect.
