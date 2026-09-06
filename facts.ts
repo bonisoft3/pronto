@@ -16,7 +16,7 @@ export type Facts = Record<string, Record<string, unknown>[]>;
 
 export type FactEntity = {
   table: string;
-  path: string;
+  durability: string;
   fields?: { name: string; type?: string; cel?: string }[];
 };
 export type FactScreen = { name: string; entities: string[] };
@@ -50,7 +50,7 @@ export function programFacts(
   const entity: Record<string, unknown>[] = [];
   const field: Record<string, unknown>[] = [];
   for (const [name, e] of Object.entries(entities)) {
-    entity.push({ name, "table": e.table, path: e.path });
+    entity.push({ name, "table": e.table, durability: e.durability });
     for (const f of e.fields ?? []) {
       field.push({ entity: name, name: f.name, type: f.type ?? null, cel: f.cel ?? null });
     }

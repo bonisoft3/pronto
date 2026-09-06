@@ -10,14 +10,18 @@ carry CEL constraints (`this` bound to the field value); rows may carry a
 row-level CEL invariant. Schema DDL, migrations, and API routes are generated
 from the program — there is nothing to hand-configure.
 
-## Data paths
+## Durability
 
-Each entity is assigned one mecha data path:
+Each entity is assigned one durability. They name guarantees and are monotonic
+in expense, so a brief picks the cheapest that still holds:
 
-- **crud** — forms write through PostgREST; reads are reactive live queries.
-- **live** — read-only on the client; written only by pipelines, read via
-  ElectricSQL shapes.
-- **offline** — local-first with sync; reserved for briefs that ask for
+- **tab** — survives navigation. Client-held; nothing else can reach it.
+- **device** — survives a restart. Client-held.
+- **server** — survives device loss; forms write through PostgREST and the
+  client asks for each read.
+- **live** — ...and the client sees changes without asking, via ElectricSQL
+  shapes. Written only by pipelines.
+- **offline** — ...and it works with no network. For briefs that ask for
   offline capture or multi-device use.
 
 ## Pipelines
@@ -42,7 +46,7 @@ emitted `txid` column for exactly this). Delivery is at-least-once end to
 end — WAL to bus to pipelines, and WAL to shapes to screens — so every
 consumer, browser included, must be idempotent; client-minted keys and
 the proxy's duplicate-absorbing posture make retries safe. The CDC
-publication covers crud-path tables only: that scoping, not consumer
+publication covers server-durability tables only: that scoping, not consumer
 discipline, is what makes pipeline feedback loops unrepresentable.
 
 ## Screens and the shell

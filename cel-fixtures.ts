@@ -82,7 +82,7 @@ export function celFixtures(): Finding[] {
   // Whether program_cel.cue imports strings is structural, not a substring of
   // the rendering: a literal may spell it, and CUE refuses an unused import.
   const imports = (cel: string) => {
-    const site: CelSite = { entity: "E", path: "tab", col: "c", cel };
+    const site: CelSite = { entity: "E", durability: "tab", col: "c", cel };
     return renderCel("p", [site], new Map([[cel, IR[cel]]])).includes('import "strings"');
   };
   if (!imports("this.size() <= 8")) say("a rune bound must import strings");

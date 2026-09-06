@@ -126,20 +126,38 @@ package pronto
 	name:  string
 	ir:    *name | string
 	table: string
-	// Durability, and it is monotonic in expense: `tab` lives in an in-memory
-	// collection and survives navigation; `device` survives a restart; the
-	// three server tiers survive device loss. The emitter derives everything
-	// from this — table, trigger, publication entry, policy, outbox — so a
-	// reviewer can see the cost someone chose.
+	// Every value names a guarantee, and they are monotonic in expense:
+	//
+	//   tab      survives navigation
+	//   device   survives a restart
+	//   server   survives device loss; the client asks for it each time
+	//   live     ...and the client sees changes without asking
+	//   offline  ...and it works with no network
+	//
+	// It reads as one ladder and decomposes as two questions — what holds the
+	// truth, and what the client keeps of it:
+	//
+	//                | keeps nothing | keeps to the tab | keeps to the device
+	//   client truth |       —       |       tab        |       device
+	//   server truth |     server    |       live       |       offline
+	//
+	// so `tab` is to `device` as `live` is to `offline`: the same question of
+	// whether the client's copy survives a restart, asked once on each side.
+	// The decomposition is worth reading and not worth authoring — an enum
+	// names the five valid points, where two fields would also name a sixth
+	// that cannot exist.
+	//
+	// The emitter derives everything from this — table, trigger, publication
+	// entry, policy, outbox — so a reviewer can see the cost someone chose.
 	//
 	// Visibility is a different axis. A tab or device entity is private by
 	// construction, with no policy to write, which is why `access` is not
 	// merely optional for them but meaningless: nothing else can reach it.
-	path: "crud" | "live" | "offline" | "tab" | "device"
-	if path == "tab" || path == "device" {
+	durability: "server" | "live" | "offline" | "tab" | "device"
+	if durability == "tab" || durability == "device" {
 		access?: _|_
 	}
-	if path != "tab" && path != "device" {
+	if durability != "tab" && durability != "device" {
 		access?: #Access
 	}
 	// "pipeline" entities are never mutated by forms; role-level enforcement
@@ -171,7 +189,7 @@ package pronto
 	// only: its SQL rendering (a partial unique index) waits for a
 	// server-tier consumer.
 	uniques: *[] | [...{name: string, cols: [...string], where?: string}]
-	if path != "tab" && path != "device" {
+	if durability != "tab" && durability != "device" {
 		uniques: [...{where?: _|_}]
 	}
 
@@ -190,7 +208,7 @@ package pronto
 	// fresh tab collection is seeded at open. A row the reader deletes
 	// therefore stays deleted for as long as its store lives.
 	seed: [...{[string]: string | int | bool}]
-	if path == "device" {
+	if durability == "device" {
 		// Not deferred — the tier is the wrong home for a stated row. A device
 		// collection outlives the page, so its birth and the terminal's boot
 		// are different moments and the rule above has nothing to hang on:

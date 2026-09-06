@@ -11,16 +11,20 @@
 -- likes — so an ir claim with no witness is a finding, while a program fact no
 -- diagram draws is not.
 
--- LOOSE against CLOSED. A diagram labels its nodes `Article (crud)`, and the
+-- LOOSE against CLOSED. A diagram labels its nodes `Article (server)`, and the
 -- tier is a claim about durability: a row that dies with the tab and a row that
 -- outlives the device are different promises to the reader.
+--
+-- Any kind, not only a tier the enum still lists. Gating on that list would let
+-- a renamed tier pass as an unrecognized word, which is how a rename disables
+-- the check that guards it. A node carrying no kind is not a claim, and NULL
+-- fails the comparison on its own.
 SELECT 'error' AS severity,
        'ir.html' AS path,
-       'diagram draws ' || d.name || ' as (' || d.kind || '), program declares ' || e.path AS message
+       'diagram draws ' || d.name || ' as (' || d.kind || '), program declares ' || e.durability AS message
 FROM diagram_node d
 JOIN entity e ON e.name = d.name
-WHERE d.kind IN ('crud', 'live', 'tab', 'device', 'offline')
-  AND d.kind <> e.path
+WHERE d.kind <> e.durability
 
 UNION ALL
 
@@ -43,7 +47,7 @@ SELECT 'error',
        'diagram draws ' || d.name || ' as (' || d.kind || '), which the program declares no entity for'
 FROM diagram_node d
 LEFT JOIN entity e ON e.name = d.name
-WHERE d.kind IN ('crud', 'live', 'tab', 'device', 'offline')
+WHERE d.kind IN ('server', 'live', 'tab', 'device', 'offline')
   AND e.name IS NULL
 
 UNION ALL

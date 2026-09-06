@@ -23,7 +23,7 @@ const here = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
  * against a VARCHAR then fails on a cast. Declaring the types costs one table
  * here and removes the dependency on what a sample happened to contain. */
 const SCHEMA: Record<string, Record<string, string>> = {
-  entity: { name: "VARCHAR", table: "VARCHAR", path: "VARCHAR" },
+  entity: { name: "VARCHAR", table: "VARCHAR", durability: "VARCHAR" },
   field: { entity: "VARCHAR", name: "VARCHAR", type: "VARCHAR", cel: "VARCHAR" },
   screen: { name: "VARCHAR" },
   reads: { screen: "VARCHAR", entity: "VARCHAR" },

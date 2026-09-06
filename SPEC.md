@@ -162,7 +162,8 @@ navigation from the brief) plus data attributes:
 - `data-kind` — `entity | pipeline | screen | state | flow | test | decision |
   handler | hatch | unit | paths | diagram | auth | review`
 - `data-of` — owner (states belong to a screen, tests to an entity/pipeline/screen)
-- `data-path` — mecha data path on entities (`crud | live | offline`)
+- `data-durability` — durability on entities (`tab | device | server | live |
+  offline`), the guarantee ladder of `#Entity.durability`
 - `data-route` — the screen's route, on `data-kind="screen"`. The route is
   design, not prose: the ir's frame-to-storybook links are generated from it,
   and the bijection checker compares it against the program's `#Screen.route`.

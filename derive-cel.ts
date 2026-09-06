@@ -15,14 +15,14 @@ import { cueConstraint, sqlCheck } from "./cel-emit.ts";
 
 export type Entity = {
   table: string;
-  path: string;
+  durability: string;
   fields: { name: string; cel?: string }[];
   invariant?: { cel: string };
 };
 
 /** Where a constraint is stated. `col` is the column a field-level `this`
  * stands for, or null for an entity's row-level invariant. */
-export type CelSite = { entity: string; path: string; col: string | null; cel: string };
+export type CelSite = { entity: string; durability: string; col: string | null; cel: string };
 
 const BROWSER = new Set(["tab", "device"]);
 
@@ -31,9 +31,9 @@ export function celSites(entities: Record<string, Entity>): CelSite[] {
   const sites: CelSite[] = [];
   for (const [entity, e] of Object.entries(entities)) {
     for (const f of e.fields ?? []) {
-      if (f.cel !== undefined) sites.push({ entity, path: e.path, col: f.name, cel: f.cel });
+      if (f.cel !== undefined) sites.push({ entity, durability: e.durability, col: f.name, cel: f.cel });
     }
-    if (e.invariant !== undefined) sites.push({ entity, path: e.path, col: null, cel: e.invariant.cel });
+    if (e.invariant !== undefined) sites.push({ entity, durability: e.durability, col: null, cel: e.invariant.cel });
   }
   return sites;
 }
@@ -65,12 +65,12 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
     const mine = sites.filter((s) => s.entity === entity);
     const lines: string[] = [];
     // A browser tier emits no table, so a CHECK body would render nowhere.
-    const checks = BROWSER.has(mine[0].path)
+    const checks = BROWSER.has(mine[0].durability)
       ? []
       : mine.filter((s) => s.col !== null).map((s) => `\t\t${quoteKey(s.col!)}: ${JSON.stringify(sql(s))}`);
     if (checks.length > 0) lines.push(`\tchecks: {\n${checks.join("\n")}\n\t}`);
     const invariant = mine.find((s) => s.col === null);
-    if (invariant !== undefined && !BROWSER.has(invariant.path)) {
+    if (invariant !== undefined && !BROWSER.has(invariant.durability)) {
       lines.push(`\tinvariant: check: ${JSON.stringify(sql(invariant))}`);
     }
     const seed: string[] = [];

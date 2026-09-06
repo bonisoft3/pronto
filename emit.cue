@@ -84,6 +84,20 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		// via Prefer: return=representation so clients can awaitTxId against
 		// the shape stream (006_txid.sql restamps it on UPDATE).
 		["  \"txid\" BIGINT DEFAULT pg_current_xact_id()::text::bigint"],
+		// Platform column, never a #Field: the tenancy floor's scope. GENERATED
+		// so Postgres refuses a client-supplied value — the derivation cannot be
+		// made to lie without a trigger defending it. NOT NULL because a NULL
+		// scope fails `= ANY()`, which would make the row invisible to every
+		// role while the audit reported the table protected.
+		//
+		// Only plain `owned` has a derivation yet. `shared` is excluded on
+		// purpose: its scope is not the owner's, it is every scope a share grants
+		// the reader, so flooring it on the owner alone would cut every sharee off
+		// from what was shared with them. The other modes are likewise pending,
+		// and until then their tables show up in rls_unprotected, which is true.
+		[if T.e.access != _|_ if T.e.access.mode == "owned" if T.e.access.shared == _|_ {
+			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('user:' || \"\(T.e.access.owner)\") STORED NOT NULL"
+		}],
 		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
 	])
 	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
@@ -129,9 +143,39 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 }
 
 // One entity's RLS block. Policy names are deterministic:
-// <table>_<role>_<action>. Every mode grants service ALL — pipelines and
-// the auth service write with the service token, RLS never blocks them.
+// <table>_<role>_<action>. Every mode grants service ALL; the floor binds
+// PUBLIC and 001 exempts service from it by role attribute.
 #policySql: P={
+	// These reasons are read by a person out of rls_exempt, so each says why
+	// rather than naming a code. Empty means floored. The one that is not
+	// self-evident from the string: a per-object share is unfloorable because
+	// there is no scope both parties hold that does not also grant everything
+	// else the owner has.
+	_exempt: string
+	if P.e.access.mode == "owned" if P.e.access.shared != _|_ {
+		_exempt: "owned with a per-object share via \(P.e.access.shared.via): finer than tenancy, guarded by its own policies"
+	}
+	if P.e.access.mode == "owned" if P.e.access.shared == _|_ {_exempt: ""}
+	if P.e.access.mode == "public-read" {_exempt: "public by declaration: no tenancy to isolate"}
+	if P.e.access.mode == "service-only" if P._t != "app_user" {
+		_exempt: "service-only: no app_user reaches it"
+	}
+	if P.e.access.mode == "service-only" if P._t == "app_user" {
+		_exempt: "service-only except a person reading their own row, which the self-select policy alone allows"
+	}
+	if P.e.access.mode == "through" {
+		// A child is exactly as floorable as its parent, so `pending` is only
+		// honest when the parent itself could be floored. Under a shared parent
+		// the child inherits the share, and no trigger will change that.
+		_p: P.entities[P.e.access.parent]
+		if P._p.access.mode == "owned" if P._p.access.shared == _|_ {
+			_exempt: "pending: through \(P.e.access.parent), whose scope derivation is a trigger not yet written"
+		}
+		if !(P._p.access.mode == "owned" && P._p.access.shared == _|_) {
+			_exempt: "through \(P.e.access.parent), which is itself exempt: the child inherits its visibility"
+		}
+	}
+
 	e: #Entity
 	entities: [string]: #Entity // parent lookup for through mode
 	_t: P.e.table
@@ -201,6 +245,16 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	}
 	out: strings.Join(list.Concat([
 		P._pre,
+		// The floor's text lives in mecha's rls.sql and is called, never
+		// restated, so a generator cannot emit a subtly wrong one.
+		[if P.e.access.mode == "owned" if P.e.access.shared == _|_ {"CALL rls_protect('\(P._t)');"}],
+		// Everything the floor does not cover says so, because an audit that is
+		// permanently non-empty is one nobody reads. Two kinds of reason live
+		// here: a permanent one, where the visibility is genuinely not tenancy,
+		// and a `pending:` one, where the derivation is simply not built.
+		[if P._exempt != "" {
+			"INSERT INTO mecha.rls_exempt VALUES ('public.\(P._t)', '\(P._exempt)') ON CONFLICT DO NOTHING;"
+		}],
 		["ALTER TABLE \(P._t) ENABLE ROW LEVEL SECURITY;"],
 		P._appUser,
 		["CREATE POLICY \(P._t)_service_all ON \(P._t) FOR ALL TO service USING (true) WITH CHECK (true);"],
@@ -344,21 +398,21 @@ _cdcTableField: "__table"
 	migrations: [...string]
 	_tables: {for _, s in S.code.surface.screens for r in s.reads {(S.code.state.entities[r.entity].table): true}}
 	_tablePath: {for _, s in S.code.surface.screens for r in s.reads {
-		(S.code.state.entities[r.entity].table): S.code.state.entities[r.entity].path
+		(S.code.state.entities[r.entity].table): S.code.state.entities[r.entity].durability
 	}}
 	// A form's entity joins the registry even when no screen reads it: a
 	// write-only table — one a form appends to and only a pipeline reads back —
 	// must still be known to the store or create() refuses the table id.
 	_tables: {for _, s in S.code.surface.screens for f in s.forms {(S.code.state.entities[f.entity].table): true}}
 	_tablePath: {for _, s in S.code.surface.screens for f in s.forms {
-		(S.code.state.entities[f.entity].table): S.code.state.entities[f.entity].path
+		(S.code.state.entities[f.entity].table): S.code.state.entities[f.entity].durability
 	}}
 	// A fold's private pair joins the registry the same way: no region names it
 	// and no form writes it, but the terminal reads it on every projection, and
 	// a table the store does not know has no collection to read.
 	_tables: {for _, p in S.code.state.pipelines if p.fold != _|_ {(p.fold.pair.table): true}}
 	_tablePath: {for _, p in S.code.state.pipelines if p.fold != _|_ {
-		(p.fold.pair.table): [for _, e in S.code.state.entities if e.table == p.fold.pair.table {e.path}][0]
+		(p.fold.pair.table): [for _, e in S.code.state.entities if e.table == p.fold.pair.table {e.durability}][0]
 	}}
 
 	// Browser-only tiers. They are collections like any other — read by a
@@ -516,14 +570,14 @@ _cdcTableField: "__table"
 	// Gates 010 on the same set _uniqueLines renders: server-tier uniques
 	// (where the schema admits no `where`), so the list never names a
 	// migration the bundle does not hold.
-	_uniqueTables: [for _, e in M.code.state.entities if e.path != "tab" && e.path != "device" if len(e.uniques) > 0 {e.table}]
-	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.path != "tab" && e.path != "device" {e}]
+	_uniqueTables: [for _, e in M.code.state.entities if e.durability != "tab" && e.durability != "device" if len(e.uniques) > 0 {e.table}]
+	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.durability != "tab" && e.durability != "device" {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	// Same predicate as #emit._serverOn, and it has to be: the cluster mounts
 	// this list as configs, so a migration named here without a database to
 	// run it is a compose file referring to a service that was never emitted.
-	_server: len([for _, e in M.code.state.entities if e.path != "tab" && e.path != "device" {e}]) > 0 ||
+	_server: len([for _, e in M.code.state.entities if e.durability != "tab" && e.durability != "device" {e}]) > 0 ||
 		M.code.capabilities.auth != _|_
 	list: [for f in M._all if M._server {f}]
 	_all: [
@@ -684,9 +738,9 @@ _cdcTableField: "__table"
 	// nothing server-side is derived for them at all: no table, no restamp
 	// trigger, no publication entry, no policy, no seed — which is the whole
 	// point of separating durability from visibility.
-	_serverEntities: [for e in E._entities if e.path != "tab" && e.path != "device" {e}]
-	_localEntities: [for e in E._entities if e.path == "tab" || e.path == "device" {e}]
-	_cdcTables: strings.Join([for e in _entities if e.path == "crud" {e.table}], ",")
+	_serverEntities: [for e in E._entities if e.durability != "tab" && e.durability != "device" {e}]
+	_localEntities: [for e in E._entities if e.durability == "tab" || e.durability == "device" {e}]
+	_cdcTables: strings.Join([for e in _entities if e.durability == "server" {e.table}], ",")
 	_pub: "\(E.code.meta.name)_cdc"
 	// The loop is the fourth component (see #DefaultLoop); it owns the verb
 	// surface and the argv doctrine.
@@ -917,7 +971,13 @@ _cdcTableField: "__table"
 					    CREATE ROLE \(r) NOLOGIN;
 					  END IF;
 					"""
-				}], "\n") + "\nEND $$;\n"
+				}], "\n") + "\nEND $$;\n" + strings.Join(_bypass, "")
+
+				// The tenancy floor binds PUBLIC, which includes service. A pipeline
+				// and the auth service read every tenant's rows by definition, so
+				// their exemption is a role attribute — visible in pg_roles, and so
+				// auditable — rather than an absence from a TO list.
+				_bypass: [if E._authOn {"\nALTER ROLE service BYPASSRLS;\n"}]
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
@@ -992,7 +1052,7 @@ _cdcTableField: "__table"
 				"""
 					},
 					"""
-						-- No crud-path entity: nothing to publish, nothing to grant.
+						-- No server-durability entity: nothing to publish, nothing to grant.
 
 						""",
 				][0]
