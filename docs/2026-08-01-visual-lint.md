@@ -44,8 +44,8 @@ at the top of `createShell`:
 
 - it runs **before** the auth gate, so `auth.required: true` never reaches
   the login ceremony and no `/auth` call is made;
-- it runs **before** the store selection, so neither `data-crud.js` (the
-  `/crud` gateway) nor `data.js` (PGlite) is imported;
+- it runs **before** the store is built, so `data-crud.js` (the `/crud`
+  gateway) is never imported;
 - it returns before nav chrome and before the navigation stack.
 
 `storybook.js` then substitutes a read-only fixture store whose `create`/

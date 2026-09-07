@@ -1,9 +1,9 @@
 # What omnishell must grow to interpret pronto's emission
 
 Date: 2026-07-30
-Status: v0 implemented in `plugins/omnishell/interpreter/` (shell.js, data.js,
-screen.js — vanilla ES modules, no build step; store is PGlite booted from the
-emitted migrations, pipelines run as declared browser shims). The todo app
+Status: v0 implemented in `plugins/omnishell/interpreter/` (shell.js,
+data-crud.js, screen.js — vanilla ES modules, no build step; the PGlite store
+this v0 described was never reached by an app and is gone). The todo app
 runs end to end. Open per-ask gaps: icon registry (no multi-screen app yet),
 island loading (stub throws), CSS scoping (raw injection, dedupe only),
 Jessie/SES enforcement.
