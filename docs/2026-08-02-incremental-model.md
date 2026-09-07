@@ -276,7 +276,10 @@ The model is wired end to end and measured against the running cluster.
   once between them (46 views on realworld's feed, 7 on an article). The
   view's own changes wake the region, computed by the engine against the
   actual query rather than guessed from a predicate over one table's raw
-  change set.
+  change set. A whole-table read — no predicate, no embed, no cap — gets no
+  view: the collection already is that set, kept current by the same event
+  stream a view would be fed from, and the snapshot is sorted at read. Its
+  subscription still carries the delta.
 - **The sink applies the delta.** A row the change set does not name keeps its
   node, its bindings and its nested regions. Skipping happens only when the
   pass can account for itself: a wake with no change set, or a change naming
@@ -306,8 +309,12 @@ Still open:
   reconsider-everything path. Harmless, since first paint *is* a full pass,
   but it is the one place "first paint is not a special case" is not yet
   literally true.
-- Ordering in a set-oriented engine. `fractional-indexing` and `sorted-btree`
-  suggest db-ivm already carries the answer; unverified.
+- Ordering in a set-oriented engine. A maintained view keeps its order by
+  moving array elements, so a bulk write costs the length of the view per
+  row, quadratic in the table (`subscribe-smoke.js`, "a whole-table read is
+  served by the collection"). A whole-table read sidesteps it by taking no
+  view; a filtered or capped read still pays it. Whether `fractional-indexing`
+  or `sorted-btree` in db-ivm removes that cost is unverified.
 - Whether an LIS reorder pass is worth ~15 lines over our own `order` array.
   Not yet: 13 moves cost 0.1 ms at 20 rows and 0.9 ms at 200, and it has never
   appeared in a profile.
