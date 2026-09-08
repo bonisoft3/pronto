@@ -25,9 +25,10 @@ import type { ParsedExpr } from "./cel-emit.ts";
 import { enumValues } from "./cel-emit.ts";
 import { parseCel } from "./cel.ts";
 import { celFixtures } from "./cel-fixtures.ts";
-import { DENIED, jessieFacts, jessieSelfTest } from "./jessie.ts";
+import { DENIED, jessieFacts, jessieSelfTest, splitCompletion } from "./jessie.ts";
 import { ownedTokens, styleSelfTest } from "./styles.ts";
 import { celSites, renderCel, renderIr } from "./derive-cel.ts";
+import { renderValidations, resolveEdges, type VEntity, validationLint, validationsSelfTest } from "./validations.ts";
 import { claims, irAccepts, irPaths, LEDGER } from "./acceptance.ts";
 import { declarations, irIds, irRoutes, KINDS } from "./objects.ts";
 import { irDiagrams } from "./diagrams.ts";
@@ -204,10 +205,12 @@ export async function derive(appDir: string): Promise<void> {
   const program = await Deno.readTextFile(`${appDir}/program.cue`);
   const pkg = /^package (\w+)$/m.exec(program)?.[1] ?? fail(`${appDir}/program.cue names no package`);
 
-  // The CEL derivation unifies back into the entities this export reads, and
-  // a constraint the previous run derived would judge a row the current run's
-  // cel admits — so the file is removed before the program is read, not after.
+  // Both derivations unify back into the entities this export reads, so a
+  // constraint the previous run derived would judge a row the current run's
+  // cel admits, and a module it split would be emitted for a source the
+  // current run never read — the files go before the program is read.
   await Deno.remove(`${appDir}/program_cel.cue`).catch(() => {});
+  await Deno.remove(`${appDir}/program_validations.cue`).catch(() => {});
 
   // One export, not one per question: cue dominates this loop, so a second
   // invocation costs more than everything else derivation does.
@@ -232,7 +235,9 @@ export async function derive(appDir: string): Promise<void> {
   }).output();
   if (!exported.success) fail("cue export of the entities, the ir source and the decision ids failed");
   const exp: {
-    entities: Record<string, Entity>;
+    // The export carries a whole #Entity; each module declares the slice it
+    // reads, and this pass reads both the lint slice and the validation one.
+    entities: Record<string, Entity & VEntity>;
     ir: string;
     decisions: Record<string, string>;
     tests: Record<string, string[]>;
@@ -240,6 +245,12 @@ export async function derive(appDir: string): Promise<void> {
     program: Record<string, unknown>;
   } = JSON.parse(new TextDecoder().decode(exported.stdout));
   const entities = exp.entities;
+  // `program` is exported whole, so the slices the table registry needs are
+  // read off it rather than added to the expression above.
+  const { surface, state } = exp.program as unknown as {
+    surface: { screens: Record<string, { forms?: { id: string; entity: string }[] }> };
+    state: { pipelines?: Record<string, { fold?: { pair: { table: string } } }> };
+  };
   const notes = await decisionNotes(appDir, exp.ir, exp.decisions);
   const byTable = new Map(Object.entries(entities).map(([name, e]) => [e.table, name]));
   for (const [ename, e] of Object.entries(entities)) {
@@ -247,6 +258,32 @@ export async function derive(appDir: string): Promise<void> {
       if (u.where !== undefined && parseFilterSpec(u.where) === null) {
         fail(`entity ${ename}: uniques "${u.name}" where "${u.where}" is outside the translatable fragment subset`);
       }
+    }
+  }
+
+  // A validation's module joins the handlers in `modules` below, so the
+  // denylist and the completion rule reach it through the same fact rows.
+  const TAG = "$validation$";
+  const modules: { path: string; references: string[]; completion: string }[] = [];
+  const validated: { entity: string; name: string; edges: ReturnType<typeof resolveEdges>; statements: string; completion: string }[] = [];
+  for (const [ename, e] of Object.entries(entities)) {
+    for (const [vname, v] of Object.entries(e.validations ?? {})) {
+      const why = validationLint(entities, ename, vname);
+      if (why !== null) fail(why);
+      const src = await Deno.readTextFile(`${appDir}/${v.src}`).catch(() => null);
+      if (src === null) fail(`entity ${ename}: validations "${vname}" src ${v.src} is not a file`);
+      if (src.includes(TAG)) fail(`entity ${ename}: validations "${vname}": ${v.src} contains the quote tag ${TAG}`);
+      const split = splitCompletion(src);
+      if (split === null) fail(`entity ${ename}: validations "${vname}": ${v.src} must end in an arrow function`);
+      const facts = jessieFacts(src);
+      modules.push({ path: v.src, ...facts });
+      // A handler's denied name is a fact row a query reports; a validation's
+      // is a refusal here, because its source is embedded in a migration and
+      // there is no later seat that would catch it.
+      for (const name of facts.references) {
+        fail(`entity ${ename}: validations "${vname}": ${v.src} reaches ${name} (${DENIED.find((d) => d.name === name)!.reason})`);
+      }
+      validated.push({ entity: ename, name: vname, edges: resolveEdges(entities, ename, v.via), ...split });
     }
   }
 
@@ -408,6 +445,36 @@ export async function derive(appDir: string): Promise<void> {
   }
   screens.sort((a, b) => (a.name < b.name ? -1 : 1));
 
+  // The tables the terminal will register, in the set #shellConfig._tables
+  // builds: every screen's reads, every form's entity, and each fold's private
+  // pair. A validation's edge is read out of that registry at the store seat,
+  // so an edge to a table outside it has no collection to read and the seat
+  // would throw at the first write. The write of program_validations.cue waits
+  // for this, so a refused derivation leaves no artifact for the emitter.
+  const held = new Set<string>();
+  for (const s of screens) for (const name of s.entities) held.add(entities[name].table);
+  for (const [sname, s] of Object.entries(surface.screens)) {
+    for (const f of s.forms ?? []) {
+      if (entities[f.entity] === undefined) fail(`screen ${sname}: form ${f.id} names undeclared entity ${f.entity}`);
+      held.add(entities[f.entity].table);
+    }
+  }
+  for (const p of Object.values(state.pipelines ?? {})) {
+    if (p.fold !== undefined) held.add(p.fold.pair.table);
+  }
+  for (const v of validated) {
+    for (const edge of v.edges) {
+      if (held.has(edge.table)) continue;
+      fail(
+        `entity ${v.entity}: validations "${v.name}" walk to ${edge.table}, ` +
+          `which no screen reads and no form writes, so the store cannot judge it`,
+      );
+    }
+  }
+  if (validated.length > 0) {
+    await Deno.writeTextFile(`${appDir}/program_validations.cue`, renderValidations(pkg, validated));
+  }
+
   // A machine is vetted against the PUBLISHED #Machine (machine.cue), never a
   // local restatement of it; the two structural preconditions the schema
   // cannot see — the empty-row agreement, and the pinned pk a synthesized
@@ -517,12 +584,14 @@ export async function derive(appDir: string): Promise<void> {
 
   // What each declared handler reaches for. Read here so the denylist is a
   // join rather than a scan repeated per file at lint.
-  const modules: { path: string; references: string[]; completion: string }[] = [];
   for (const name of [...available].sort()) {
     const rel = `shell/handlers/${name}.js`;
     const src = await Deno.readTextFile(`${appDir}/${rel}`).catch(() => null);
     if (src !== null) modules.push({ path: rel, ...jessieFacts(src) });
   }
+  // A validation's module and a handler's are pushed by two passes, so the
+  // fact rows are ordered here rather than by either.
+  modules.sort((a, b) => (a.path < b.path ? -1 : 1));
 
   // Hashed after every write above, so a derived file's row is what derive left
   // on disk and a source's row is what it read.
@@ -539,6 +608,7 @@ export async function derive(appDir: string): Promise<void> {
     [".pronto/cel.json", true],
     ["program_cel.cue", true],
     ["program_derived.cue", true],
+    ...(validated.length > 0 ? [["program_validations.cue", true]] : []),
   ] as [string, boolean][]) {
     artifacts.push({ path, sha256: await sha(path), derived });
   }
@@ -683,8 +753,10 @@ function selfTest(): void {
   for (const f of styleFailures) console.error(`FAIL ${f}`);
   const jessieFailures = jessieSelfTest();
   for (const f of jessieFailures) console.error(`FAIL ${f}`);
+  const validationFailures = validationsSelfTest();
+  for (const f of validationFailures) console.error(`FAIL ${f}`);
 
-  let failed = celFindings.length + styleFailures.length + jessieFailures.length;
+  let failed = celFindings.length + styleFailures.length + jessieFailures.length + validationFailures.length;
   if (!rendered.includes(wantKey)) {
     failed++;
     console.error(`FAIL a backslash in a decision id:\n  got  ${JSON.stringify(rendered.split("_irNotes: {")[1]?.split("\n")[1])}\n  want ${JSON.stringify(wantKey)}`);
@@ -755,7 +827,7 @@ function selfTest(): void {
   if (failed > 0) Deno.exit(1);
   console.error(
     `derive self-test: ${notes.length + scans.length + maps.length + 1} derivation cases, ` +
-      "the cel fixtures, the style scanner and the jessie scanner passed",
+      "the cel fixtures, the style scanner, the jessie scanner and the validation resolver passed",
   );
 }
 

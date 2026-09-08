@@ -160,7 +160,8 @@ navigation from the brief) plus data attributes:
 - **Ids are opaque tokens; structure lives in data attributes, never parsed
   out of the id string.**
 - `data-kind` — `entity | pipeline | screen | state | flow | test | decision |
-  handler | hatch | unit | paths | diagram | auth | review`
+  handler | validation | hatch | unit | paths | diagram | auth | review` — on a
+  `validation`, `data-of` names the entity that owns it
 - `data-of` — owner (states belong to a screen, tests to an entity/pipeline/screen)
 - `data-durability` — durability on entities (`tab | device | server | live |
   offline`), the guarantee ladder of `#Entity.durability`
@@ -363,7 +364,7 @@ reachable and a gate it cannot satisfy is a gate it will route around:
 10. Mermaid blocks parse; CEL spans parse.
 11. `app.ir.sha256` matches the current ir.html (program staleness) — the
     bijection checker's precondition, reported there.
-12. ir↔program bijection: set equality both ways over the nine checked kinds,
+12. ir↔program bijection: set equality both ways over the eleven checked kinds,
     plus id uniqueness on each side, plus each screen's `data-route` equal to
     its `#Screen.route`.
 13. Every `cel:` has its parsed IR in `.pronto/cel.json`, and every derived

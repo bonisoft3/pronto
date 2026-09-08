@@ -1,0 +1,182 @@
+// A validation's edges resolve against the schema's own references, so the
+// server seat's WHERE and the store seat's filter come from one declaration.
+import { quoteKey } from "./cue.ts";
+
+export type Edge = { table: string; key: string; from: string };
+export type VEntity = {
+  table: string;
+  durability: string;
+  fields: { name: string; ref?: string }[];
+  uniques?: { name: string }[];
+  validations?: Record<string, { src: string; via: string[] }>;
+};
+
+const LOCAL = new Set(["tab", "device"]);
+
+// A `ref` is emitted as REFERENCES <ref>(id) (emit.cue), so the column an edge
+// joins on is `id` whichever way it is walked, and the entity whose id that is
+// must declare the field.
+const byId = (entities: Record<string, VEntity>, ename: string, name: string) => {
+  if (!entities[name].fields.some((f) => f.name === "id")) {
+    throw new Error(`entity ${ename}: validations walk to ${name} by id, and ${name} declares no id field`);
+  }
+};
+
+export function resolveEdges(entities: Record<string, VEntity>, ename: string, via: string[]): Edge[] {
+  const self = entities[ename];
+  const byTable = new Map(Object.entries(entities).map(([n, e]) => [e.table, { name: n, e }]));
+  const edges = via.map((v) => {
+    const forward = self.fields.find((f) => f.name === v && f.ref !== undefined);
+    if (forward !== undefined) {
+      const target = byTable.get(forward.ref!);
+      if (target === undefined) throw new Error(`entity ${ename}: via "${v}" refs table ${forward.ref}, which no entity declares`);
+      if (!LOCAL.has(self.durability) && LOCAL.has(target.e.durability)) {
+        throw new Error(`entity ${ename}: via "${v}" walks to ${target.name}, a ${target.e.durability} entity the server seat cannot read`);
+      }
+      byId(entities, ename, target.name);
+      return { table: forward.ref!, key: "id", from: v };
+    }
+    const m = /^([A-Za-z]\w*)\.(\w+)$/.exec(v);
+    if (m !== null) {
+      const other = entities[m[1]];
+      const field = other?.fields.find((f) => f.name === m[2]);
+      if (other === undefined || field === undefined || field.ref !== self.table) {
+        throw new Error(`entity ${ename}: via "${v}" names no field of ${m[1]} that refs ${self.table}`);
+      }
+      if (!LOCAL.has(self.durability) && LOCAL.has(other.durability)) {
+        throw new Error(`entity ${ename}: via "${v}" walks to ${m[1]}, a ${other.durability} entity the server seat cannot read`);
+      }
+      byId(entities, ename, ename);
+      return { table: other.table, key: m[2], from: "id" };
+    }
+    throw new Error(`entity ${ename}: via "${v}" is neither a ref field of ${ename} nor "<Entity>.<field>" whose field refs ${self.table}`);
+  });
+  const seen = new Set<string>();
+  for (const e of edges) {
+    if (seen.has(e.table)) {
+      throw new Error(`entity ${ename}: validations walk to ${e.table} twice; state.rows holds one row set per table`);
+    }
+    seen.add(e.table);
+  }
+  return edges;
+}
+
+// Postgres truncates an over-long identifier instead of refusing it, which
+// would silently collapse two predicates onto one function.
+const NAMELEN = 63;
+
+export function validationLint(entities: Record<string, VEntity>, ename: string, vname: string): string | null {
+  const self = entities[ename];
+  if ((self.uniques ?? []).some((u) => u.name === vname)) {
+    return `entity ${ename}: validations "${vname}" shares its name with a unique; the two share the refusal vocabulary`;
+  }
+  for (const fn of [`${self.table}_validation_${vname.replaceAll("-", "_")}`, `${self.table}_validate`]) {
+    if (new TextEncoder().encode(fn).length > NAMELEN) {
+      return `entity ${ename}: validations "${vname}": the function name ${fn} exceeds Postgres's ${NAMELEN}-byte identifier limit`;
+    }
+  }
+  try {
+    resolveEdges(entities, ename, self.validations![vname].via);
+  } catch (e) {
+    return (e as Error).message;
+  }
+  return null;
+}
+
+/** program_validations.cue: the resolved edges and the split module of every
+ * validation, unified back into the entities the emitter reads. */
+export function renderValidations(
+  pkg: string,
+  list: { entity: string; name: string; edges: Edge[]; statements: string; completion: string }[],
+): string {
+  const byEntity = new Map<string, typeof list>();
+  for (const v of list) byEntity.set(v.entity, [...(byEntity.get(v.entity) ?? []), v]);
+  const lines: string[] = [];
+  for (const [entity, vs] of byEntity) {
+    lines.push(`\t${quoteKey(entity)}: validations: {`);
+    for (const v of vs) {
+      const edges = v.edges.map((e) => `{table: ${JSON.stringify(e.table)}, key: ${JSON.stringify(e.key)}, from: ${JSON.stringify(e.from)}}`);
+      lines.push(`\t\t${quoteKey(v.name)}: {`);
+      lines.push(`\t\t\tedges: [${edges.join(", ")}]`);
+      lines.push(`\t\t\tmodule: {statements: ${JSON.stringify(v.statements)}, completion: ${JSON.stringify(v.completion)}}`);
+      lines.push(`\t\t}`);
+    }
+    lines.push(`\t}`);
+  }
+  return [
+    "// generated by pronto from the validations in program.cue — do not edit",
+    "//",
+    "// `edges` are the reads both seats make, resolved from the schema's refs;",
+    "// `module` is the Jessie source split at its completion for the plv8 body.",
+    `package ${pkg}`,
+    "",
+    "code: state: entities: {",
+    ...lines,
+    "}",
+    "",
+  ].join("\n");
+}
+
+export function validationsSelfTest(): string[] {
+  const failures: string[] = [];
+  const entities: Record<string, VEntity> = {
+    Article: { table: "article", durability: "server", fields: [{ name: "id" }, { name: "author_id", ref: "app_user" }] },
+    Favorite: {
+      table: "favorite",
+      durability: "server",
+      fields: [{ name: "id" }, { name: "article_id", ref: "article" }],
+      uniques: [{ name: "uq_favorite_pair" }],
+      validations: { "own-article": { src: "shell/validations/own-article.js", via: ["article_id"] } },
+    },
+    Draft: { table: "draft", durability: "device", fields: [{ name: "id" }, { name: "article_id", ref: "article" }] },
+    Tag: { table: "tag", durability: "server", fields: [{ name: "slug" }] },
+    ArticleTag: { table: "article_tag", durability: "server", fields: [{ name: "id" }, { name: "tag_id", ref: "tag" }] },
+    Review: { table: "review", durability: "server", fields: [{ name: "id" }, { name: "article_id", ref: "article" }, { name: "reply_to_id", ref: "article" }] },
+  };
+  const cases: { name: string; entity: string; via: string[]; want: Edge[] | string }[] = [
+    { name: "a forward edge is the referenced row by its id", entity: "Favorite", via: ["article_id"], want: [{ table: "article", key: "id", from: "article_id" }] },
+    { name: "a backward edge is every row pointing here", entity: "Article", via: ["Favorite.article_id"], want: [{ table: "favorite", key: "article_id", from: "id" }] },
+    { name: "a device entity may walk to a server entity", entity: "Draft", via: ["article_id"], want: [{ table: "article", key: "id", from: "article_id" }] },
+    { name: "a server entity may not walk to a device entity", entity: "Article", via: ["Draft.article_id"], want: "the server seat cannot read" },
+    { name: "a field without ref is not an edge", entity: "Favorite", via: ["id"], want: "is neither a ref field" },
+    { name: "a backward edge must ref this entity", entity: "Favorite", via: ["Article.author_id"], want: "names no field of Article that refs favorite" },
+    { name: "a forward edge needs an id on the entity it walks to", entity: "ArticleTag", via: ["tag_id"], want: "walk to Tag by id, and Tag declares no id field" },
+    { name: "a backward edge needs an id on this entity", entity: "Tag", via: ["ArticleTag.tag_id"], want: "walk to Tag by id, and Tag declares no id field" },
+    { name: "two edges may not name one table", entity: "Review", via: ["article_id", "reply_to_id"], want: "twice" },
+  ];
+  for (const t of cases) {
+    let got: Edge[] | string;
+    try {
+      got = resolveEdges(entities, t.entity, t.via);
+    } catch (e) {
+      got = (e as Error).message;
+    }
+    const ok = typeof t.want === "string"
+      ? typeof got === "string" && got.includes(t.want)
+      : JSON.stringify(got) === JSON.stringify(t.want);
+    if (!ok) failures.push(`validations ${t.name}: got ${JSON.stringify(got)}`);
+  }
+  const clash = validationLint(
+    { ...entities, Favorite: { ...entities.Favorite, validations: { uq_favorite_pair: { src: "x.js", via: [] } } } },
+    "Favorite",
+    "uq_favorite_pair",
+  );
+  if (clash === null || !clash.includes("shares its name with a unique")) failures.push(`validations name clash: got ${clash}`);
+  const longName = "a-name-long-enough-that-the-function-it-emits-does-not-fit";
+  const tooLong = validationLint(
+    { ...entities, Favorite: { ...entities.Favorite, validations: { [longName]: { src: "x.js", via: [] } } } },
+    "Favorite",
+    longName,
+  );
+  if (tooLong === null || !tooLong.includes(`exceeds Postgres's ${NAMELEN}-byte identifier limit`)) {
+    failures.push(`validations identifier length: got ${tooLong}`);
+  }
+  const rendered = renderValidations("realworld", [{
+    entity: "Favorite", name: "own-article", edges: [{ table: "article", key: "id", from: "article_id" }],
+    statements: "", completion: "(state, event) => true",
+  }]);
+  if (!rendered.includes(`"own-article": {`) || !rendered.includes(`completion: "(state, event) => true"`)) {
+    failures.push(`validations render: got ${rendered}`);
+  }
+  return failures;
+}

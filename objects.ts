@@ -19,6 +19,7 @@ export const KINDS = [
   "test",
   "decision",
   "handler",
+  "validation",
   "hatch",
   "unit",
 ] as const;
@@ -98,6 +99,11 @@ export function declarations(code: Record<string, any>): Declaration[] {
   for (const [key, screen] of Object.entries(code.surface.screens as Record<string, any>)) {
     for (const state of screen.states as string[]) {
       out.push({ kind: "state", id: `${screen.ir}-${state}`, where: `screens.${key}.states.${state}` });
+    }
+  }
+  for (const [key, entity] of Object.entries(code.state.entities as Record<string, any>)) {
+    for (const [name, v] of Object.entries((entity.validations ?? {}) as Record<string, { ir: string }>)) {
+      out.push({ kind: "validation", id: v.ir, where: `entities.${key}.validations.${name}` });
     }
   }
   return out;

@@ -6,7 +6,10 @@ package pronto
 
 #Tier: "cli" | "container" | "k8s" | "cloud"
 
-#Jessie: string & =~"\\.js$"
+// A path relative to the app directory, resolved by derive and by the
+// terminal's module loader. No scheme and no `..`: the source is read from the
+// app's own tree and embedded in emitted artifacts.
+#Jessie: string & =~"^([a-z0-9_-]+/)*[a-z0-9_-]+\\.js$"
 
 // Starting points for #Design. A preset is named rather than implicit so a
 // reviewer can see which opinion an app took, and so adding a second is a data
@@ -193,6 +196,11 @@ package pronto
 		uniques: [...{where?: _|_}]
 	}
 
+	// Rung five of validation: a Jessie predicate over the row and its
+	// references, run by the store before an optimistic write and by Postgres
+	// before commit. Named because the name is the refusal, as a unique's is.
+	validations: [Name=string]: #Validation & {name: Name}
+
 	// Bootstrap rows: the rows a store holds before anyone writes one. A
 	// server tier renders them into 900_seed.sql; a `tab` entity has no
 	// migration to render into, so the terminal writes them itself when it
@@ -224,6 +232,22 @@ package pronto
 		// reader's own at device.
 		seed: []
 	}
+}
+
+#Validation: {
+	name: string & =~"^[a-z][a-z0-9-]*$"
+	ir:   *name | string
+	src:  #Jessie
+	// The references the predicate may follow. A field of the entity that
+	// carries `ref` walks forward to the one referenced row; "<Entity>.<field>"
+	// whose field refs this entity walks backward to every row pointing here.
+	via:  *[] | [...string]
+	note: string
+	// Resolved by derive (program_validations.cue): each edge as the SQL and
+	// the store read it: rows of `table` whose `key` equals the row's `from`.
+	edges?: [...{table: string, key: string, from: string}]
+	// The module split at its completion, for the plv8 body.
+	module?: {statements: string, completion: string}
 }
 
 #Pipeline: {

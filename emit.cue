@@ -123,6 +123,87 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	out: strings.Join([for r in S._rows {r.out}], "\n")
 }
 
+// A SECURITY DEFINER read under FORCE ROW LEVEL SECURITY is still scoped by
+// the caller's app.scopes unless the definer itself bypasses RLS, so the role
+// that owns these functions decides whether the server seat judges against the
+// truth or against one caller's slice.
+#validationPrecondition: """
+	DO $$ BEGIN
+	  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolbypassrls)) THEN
+	    RAISE EXCEPTION 'validation triggers require a migration role that bypasses RLS (superuser or BYPASSRLS): %', current_user;
+	  END IF;
+	END $$;
+	"""
+
+// A validated table's plv8 predicates and the trigger that hands them their
+// world. The trigger is SECURITY DEFINER so the server seat judges against
+// the truth, and it refuses with check_violation because PostgREST maps a
+// bare plv8 exception to 500, which the client outbox would retry forever.
+// AFTER, so a row the caller's RLS refuses never reaches the definer's read:
+// the predicate cannot be used as an oracle for rows the caller cannot write.
+// It also puts stored generated columns and the restamped txid in `event.row`.
+#validationSql: V={
+	e: #Entity
+	_fn: {for n, _ in V.e.validations {(n): "\(V.e.table)_validation_\(strings.Replace(n, "-", "_", -1))"}}
+	// The statements carry their own line break, so a module that is a bare
+	// arrow function leaves no blank line above the completion.
+	_statements: {for n, v in V.e.validations {
+		(n): [if v.module.statements != "" {v.module.statements + "\n"}, ""][0]
+	}}
+	// text, not boolean: a predicate that answers neither is the app's program
+	// error, and only a value the wrapper can tell apart from a verdict lets it
+	// raise a different ERRCODE for it. REVOKE, because PostgREST publishes
+	// every function the anon role may execute as an /rpc/ endpoint.
+	_functions: [for n, v in V.e.validations {
+		"""
+		CREATE OR REPLACE FUNCTION \(V._fn[n])(state jsonb, event jsonb) RETURNS text
+		LANGUAGE plv8 IMMUTABLE AS $validation$
+		\(V._statements[n])const verdict = (\(v.module.completion))(state, event);
+		return verdict === true ? "true" : verdict === false ? "false" : "answered " + typeof verdict;
+		$validation$;
+
+		REVOKE EXECUTE ON FUNCTION \(V._fn[n])(jsonb, jsonb) FROM PUBLIC;
+		"""
+	}]
+	_reads: {for n, v in V.e.validations {
+		(n): strings.Join([for ed in v.edges {
+			"'\(ed.table)', (SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM \(ed.table) r WHERE r.\"\(ed.key)\" = NEW.\"\(ed.from)\")"
+		}], ", ")
+	}}
+	// IS DISTINCT FROM, so a null answer takes the program-error arm rather
+	// than passing: an unanswered predicate refuses.
+	_checks: [for n, _ in V.e.validations {
+		"""
+		  v := \(V._fn[n])(jsonb_build_object('items', items, 'rows', jsonb_build_object(\(V._reads[n]))), event);
+		  IF v = 'false' THEN
+		    RAISE EXCEPTION USING ERRCODE = 'check_violation', MESSAGE = 'validation \(V.e.table).\(n)';
+		  ELSIF v IS DISTINCT FROM 'true' THEN
+		    RAISE EXCEPTION USING ERRCODE = 'raise_exception', MESSAGE = 'predicate \(V.e.table).\(n) ' || coalesce(v, 'answered nothing');
+		  END IF;
+		"""
+	}]
+	out: strings.Join(list.Concat([V._functions, [
+		"""
+		CREATE OR REPLACE FUNCTION \(V.e.table)_validate() RETURNS trigger
+		LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+		DECLARE
+		  items jsonb;
+		  event jsonb;
+		  v text;
+		BEGIN
+		  items := CASE WHEN TG_OP = 'UPDATE' THEN jsonb_build_array(to_jsonb(OLD)) ELSE '[]'::jsonb END;
+		  event := jsonb_build_object('type', lower(TG_OP), 'row', to_jsonb(NEW));
+		\(strings.Join(V._checks, "\n"))
+		  RETURN NULL;
+		END $$;
+
+		DROP TRIGGER IF EXISTS \(V.e.table)_validate ON \(V.e.table);
+		CREATE TRIGGER \(V.e.table)_validate AFTER INSERT OR UPDATE ON \(V.e.table)
+		  FOR EACH ROW EXECUTE FUNCTION \(V.e.table)_validate();
+		"""
+	]]), "\n\n")
+}
+
 // The app_user USING clause of an owned entity. `qual` prefixes the row's
 // own columns: the table name in the entity's policies, the parent alias
 // when a through-mode child inlines this clause. `table` is the owned
@@ -432,6 +513,7 @@ _cdcTableField: "__table"
 	// reconciles surviving browser-tier rows against them at first load.
 	_partialUniques: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where != _|_ {cols: u.cols, where: u.where}]}}
 	_partialTables: [for t, ps in S._partialUniques if len(ps) > 0 {t}]
+	_validatedTables: [for _, e in S.code.state.entities if S._tables[e.table] != _|_ if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	// The seeds #appMigrations.seeded leaves out: a browser tier has no
 	// migration to render into, so the terminal is told the rows instead.
 	_localSeeds: {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
@@ -510,6 +592,13 @@ _cdcTableField: "__table"
 				}
 			}
 		}
+		if len(S._validatedTables) > 0 {
+			validations: {
+				for _, e in S.code.state.entities if S._tables[e.table] != _|_ for n, v in e.validations {
+					(e.table): {(n): {src: v.src, edges: v.edges}}
+				}
+			}
+		}
 		if len(S._seededLocal) > 0 {
 			seed: S._localSeeds
 		}
@@ -571,6 +660,7 @@ _cdcTableField: "__table"
 	// (where the schema admits no `where`), so the list never names a
 	// migration the bundle does not hold.
 	_uniqueTables: [for _, e in M.code.state.entities if e.durability != "tab" && e.durability != "device" if len(e.uniques) > 0 {e.table}]
+	_validatedTables: [for _, e in M.code.state.entities if e.durability != "tab" && e.durability != "device" if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.durability != "tab" && e.durability != "device" {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
@@ -589,6 +679,7 @@ _cdcTableField: "__table"
 		if len(M.accessed) > 0 {"services/database/migrations/005_policies.sql"},
 		"services/database/migrations/006_txid.sql",
 		"services/database/migrations/007_publication.sql",
+		if len(M._validatedTables) > 0 {"services/database/migrations/008_validations.sql"},
 		if len(M._uniqueTables) > 0 {"services/database/migrations/010_composite_uniques.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
@@ -739,6 +830,9 @@ _cdcTableField: "__table"
 	// trigger, no publication entry, no policy, no seed — which is the whole
 	// point of separating durability from visibility.
 	_serverEntities: [for e in E._entities if e.durability != "tab" && e.durability != "device" {e}]
+	// Server entities with validations, as a list so len() is decidable in
+	// cue 0.16 (see #shellConfig's guard note).
+	_validated: [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
 	_localEntities: [for e in E._entities if e.durability == "tab" || e.durability == "device" {e}]
 	_cdcTables: strings.Join([for e in _entities if e.durability == "server" {e.table}], ",")
 	_pub: "\(E.code.meta.name)_cdc"
@@ -941,15 +1035,19 @@ _cdcTableField: "__table"
 		if E._serverOn {
 			"services/database/migrations/000_extensions.sql": {
 				format: "sql"
-				// gen_random_uuid() is core since PostgreSQL 13; the slot stays so
-				// apps needing real extensions keep a stable migration order.
+				// plv8 is required exactly when a server entity declares
+				// validations: it is the language their predicates run in.
+				// gen_random_uuid() is core since PostgreSQL 13, so an app
+				// without validations needs no extension at all. No
+				// IF NOT EXISTS: these migrations run once, at initdb, on a
+				// fresh data directory.
 				// auth_uid() reads the sub claim PostgREST stashes in
 				// request.jwt.claims; NULL outside a request or for tokens
 				// without a sub (anon).
-				_prelude: """
-					-- no extensions required
-
-					"""
+				_prelude: [
+					if len(E._validated) > 0 {"CREATE EXTENSION plv8;\n"},
+					if len(E._validated) == 0 {"-- no extensions required\n"},
+				][0]
 				if !E._authOn {
 					text: _prelude
 				}
@@ -1071,6 +1169,15 @@ _cdcTableField: "__table"
 					text: strings.Join([for ent in E._entities if ent.access != _|_ {
 						(#policySql & {e: ent, entities: E.code.state.entities}).out
 					}], "\n\n") + "\n"
+				}
+			}
+			if len(E._validated) > 0 {
+				"services/database/migrations/008_validations.sql": {
+					format: "sql"
+					text: strings.Join(list.Concat([
+						[#validationPrecondition],
+						[for ent in E._validated {(#validationSql & {e: ent}).out}],
+					]), "\n\n") + "\n"
 				}
 			}
 
@@ -1277,6 +1384,9 @@ _cdcTableField: "__table"
 		}
 		for _, h in E.code.surface.handlers {
 			"\(h.src)": {format: "jessie", src: h.src}
+		}
+		for _, e in E.code.state.entities for _, v in e.validations {
+			"\(v.src)": {format: "jessie", src: v.src}
 		}
 		"tests/pairs.yaml": {
 			format: "yaml"
