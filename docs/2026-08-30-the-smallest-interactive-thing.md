@@ -173,9 +173,7 @@ consumed; the `routes[].reads` restatement in shell.yaml had no runtime
 consumer at all and is deleted rather than rederived. The derivation
 (`derive.ts`, run by `write.ts` before its export) writes each app's
 `program_derived.cue`, and its first run caught a real drift: thenote served
-`shell/handlers/label-items.js` on a screen whose markup binds it nowhere —
-`data-adapter` is read by no interpreter code since row-backed widgets
-retired.
+`shell/handlers/label-items.js` on a screen whose markup binds it nowhere.
 
 ### 4. Two small removals
 
@@ -197,16 +195,14 @@ that produced this doc:
   two states and a fixed order, and dies the moment the order is conditional —
   at which point you write the reduce you would have written anyway. **The
   general answer to computed writes is the reduce, and it already exists.**
-- **No app-defined statecharts.** Zag's machines are statechart-shaped but not
-  data: `props()`, `initialState()` and `context()` are functions, and every
-  action and guard in the `states:` block is a *string naming a JS
-  implementation*. XState's JSON has the same property. A CUE-declared machine
-  is only declarative if the action vocabulary is closed and terminal-owned —
-  which is what `terminal.cue:128` already does by publishing kinds and their
-  parts. The split to hold: **durable state is rows** (reduces, IVM, replay);
-  **transient interaction state is a machine** (open/closed, highlighted index,
-  focus trap) and belongs to the widget tier, never to a row. A button has no
-  transient state and therefore no machine.
+- **No app-defined statecharts with code in them.** A statechart library's
+  machine is statechart-shaped but not data: every action and guard in the
+  `states:` block is a *string naming a JS implementation*. XState's JSON has
+  the same property. A CUE-declared machine is only declarative if the action
+  vocabulary is closed and terminal-owned. The split to hold: **durable state
+  is rows** (reduces, IVM, replay); **transient interaction state is a
+  machine** (open/closed, highlighted index, focus trap), never a row. A button
+  has no transient state and therefore no machine.
 - **Not Phoenix, not Elm.** Both replace the layer that works (the data path,
   the durability ladder, the tab-tier cluster) to fix the layer that does not
   (controls and feedback latency). LiveView additionally has no `device` tier
@@ -220,11 +216,7 @@ than implementing them**: there is nothing to compare once `reads` and
 `files.handlers` are derived from the markup instead of restated beside it.
 
 R2, R3, R5 and R6 stand unchanged, and R5 remains the highest-value rule in
-either doc. R4 stands, with its finding intact: `terminal.cue:128` advertises
-three row-backed widget kinds, and `screen.js:917` silently skips every
-`[data-widget]` containing a `[data-live]`, so none of them has ever mounted.
-That is a terminal self-check, not an app-side one, and it is unaffected by
-anything here.
+either doc.
 
 ## Ranked plan
 

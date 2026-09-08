@@ -87,8 +87,8 @@ silent, and costs the user instead — which is why the bar is stated here.
   tokens. A row keeps its node across a refresh, so focus, scroll and a
   half-played animation survive it; a write the cluster has not confirmed
   wears a badge; an edit the user typed and has not sent is never overwritten.
-  Its widget tier drives real accessible controls from markup plus a pure
-  adapter, and its control primitives make the unstylable ones themeable.
+  A field control is the platform's own, styled by tokens; a richer one is
+  a component the app authors in CUE over rows and a machine.
   Every screen × state renders in the storybook against fixtures — that is the
   review surface, and appearance there is a token resolution, so the dark twin
   is a palette to supply, not a feature to design.

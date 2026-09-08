@@ -1,13 +1,11 @@
 # The component tier: what an app may author, what the terminal keeps
 
-Written after adopting the Zag date picker into thenote, from the questions
-that adoption raised. `2026-08-02-terminal-doctrine.md` establishes the role
-vocabulary, `-hatch.md` the island, `-incremental-model.md` the semantics.
-This doc answers a narrower question those three leave open: **who may author
-a widget, and in what language.**
+`2026-08-02-terminal-doctrine.md` establishes the role vocabulary,
+`-incremental-model.md` the semantics. This doc answers a narrower question
+those leave open: **who may author a component, and in what language.**
 
-The claim: **the widget tier is not one problem but three, separated by what a
-component needs from the DOM.** Most of what a component library exists to do
+The claim: **a component is not one problem but three, separated by what it
+needs from the DOM.** Most of what a component library exists to do
 — place a popover, dismiss it, move focus — has become browser primitives, and
 in that light the platform's share collapses to a dispatcher and an effect
 vocabulary. What is left over is state, and state is already what the
@@ -20,8 +18,7 @@ Measured in this tree on 2026-08-03, not recalled.
 **The isolation constraint.** A dynamic `import()` issued after SES
 `lockdown()` never settles — it does not reject, the promise has no other end.
 The same URL imports in ~0ms before lockdown and loses a 6s race after it.
-Every edge from `screen.js` to a widget kind is static because of this; see
-`reference_ses_lockdown_dynamic_import`. `page.evaluate` cannot use `import()`
+Every edge out of `screen.js` is a static import because of this. `page.evaluate` cannot use `import()`
 at all once SES is loaded (`SES_IMPORT_REJECTED`) — probe with
 `addScriptTag({type: "module"})`.
 
@@ -325,16 +322,3 @@ Ordered by what would change the design if answered badly.
    run in a Compartment, but the completion-value contract admits one value
    per module, so composing them is a packaging question that is not yet
    answered.
-
-## First move, when this resumes
-
-Rebuild thenote's date picker as tier 1 plus tier 2: `popover` and
-`commandfor` in `note.html`, anchor positioning in `note.css`, the day grid as
-a region whose rows come from a machine. Nothing in the platform changes to
-begin, which is the point — if it lands, the widget tier is app-side, and the
-measurements say it should be. Pick a small accessibility contract for the
-*second* one (a stepper, a segmented control) rather than the combobox, whose
-virtual-focus behaviour is the part with no declarative precedent.
-
-`interestfor` is missing in every engine, so hover-opened menus still need
-script whatever else is decided.

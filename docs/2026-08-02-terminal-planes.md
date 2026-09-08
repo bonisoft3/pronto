@@ -1,6 +1,6 @@
 # The terminal's three planes: state, capabilities, surface
 
-Continuation of `2026-08-02-terminal-doctrine.md` and `2026-08-02-terminal-hatch.md`,
+Continuation of `2026-08-02-terminal-doctrine.md`,
 read both first. Those left a real/designed/speculated split and a hatch rung with
 no CUE type at all. This session gave the doctrine's four surfaces — collections,
 markup, returned requests, capability object — a concrete, *uniform* CUE shape,

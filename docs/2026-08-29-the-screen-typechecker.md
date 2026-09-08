@@ -25,16 +25,15 @@ Measured in this tree on 2026-08-29, not recalled. A prototype checker
   `.files.{handlers,shared}`, and `state.entities[*].{table,fields[*].name}`.
   Read with `cue export . -e code --out json`, which `check-bijection` already
   does.
-- The terminal publishes its own half as data too:
-  `terminal.capabilities.widgets` gives each kind's exact `parts` list
-  (`terminal.cue:128`), and `text-formats`, `auth` and `isolation` are beside
-  it. Nothing has to be invented or kept in sync by hand.
+- The terminal publishes its own half as data too: `text-formats`, `auth`
+  and `isolation` in `terminal.cue`. Nothing has to be invented or kept in
+  sync by hand.
 - The markup vocabulary the interpreter actually reads is small and closed:
   `data-live`, `data-filter`, `data-order`, `data-select`, `data-reads`,
   `data-text`, `data-text-format`, `data-value`, `data-empty`,
   `data-empty-row`, `data-form`, `data-entity`, `data-action`, `data-target`,
-  `data-handler`, `data-on-*`, `data-on-mutation`, `data-widget`,
-  `data-part`, `data-hatch`, `data-enter`, `data-exit`, `data-item`.
+  `data-handler`, `data-on-*`, `data-on-mutation`, `data-hatch`,
+  `data-enter`, `data-exit`, `data-item`.
 - **The prototype found four real drifts across four apps**, listed under the
   rules below. It found them in under two seconds.
 
@@ -44,8 +43,8 @@ An app's screens are assembly: HTML the compiler writes directly, not CUE it
 derives. The compiler "owns their consistency" with `reads`/`forms`
 (`schema.cue`, `#Screen.files`) — owns it, meaning nothing enforces it. So a
 screen can read a collection its program never declares, address a form by the
-wrong name, bind a column that does not exist, or use a widget seam the
-terminal retired, and every one of those is discovered by running the cluster
+wrong name, or bind a column that does not exist, and every one of those is
+discovered by running the cluster
 and reading a console.
 
 That is the loop: edit markup → `docker compose up --build` → drive
@@ -98,17 +97,6 @@ The field-set half is what would have caught this session's
 `binding {body} not in row`: see R6.
 
 Ready.
-
-### R4 — a widget is a kind the terminal serves, with parts it has
-
-`data-widget` must name a kind in `terminal.capabilities.widgets`, every
-`data-part` under it must be in that kind's published `parts`, and a `root`
-part must be present.
-
-Clean on all four apps — which is the finding. See "Not the app's fault"
-below.
-
-Ready, and cheap, because the roster is published data.
 
 ### R5 — every `{field}` placeholder resolves
 
@@ -176,33 +164,6 @@ It should **replace** `check-screens` rather than sit beside it: the token-fork
 rule is one more rule of the same kind, over the same files, and two commands
 in the rulemap is two things to fail separately.
 
-## Not the app's fault
-
-R4 finds nothing, and that is the most interesting result here.
-
-`terminal.cue:128` publishes five widget kinds, three of them row-backed
-(combobox, select, listbox) — their items are a live region's rows. thenote's
-note screen declares a combobox correctly: right kind, right parts, a nested
-`data-live="label"` region for its items. It has never mounted.
-
-`screen.js:917`, the first line of the only mount path:
-
-    if (root.querySelector("[data-live]") !== null) return;
-
-Every row-backed widget is silently skipped. `widget.js`'s header says as
-much — *"Only field-backed kinds remain… Row-backed selection is the platform
-`<select>`'s job"* — while `screen.js:902` still comments that "hydrateRegion
-mounts it below", a path that no longer exists. So the terminal advertises
-three kinds it cannot mount, an app used one exactly as advertised, and the
-result was six visual criticals nobody could trace.
-
-No app-side checker finds this, because the app is right. The check that
-finds it is a **terminal self-check**: every kind in
-`capabilities.widgets` must have a mount path, asserted where the roster is
-declared. That belongs with the widget work, not here — but it is the reason
-the widget tier feels untrustworthy, and it is one stale guard, not a design
-problem.
-
 ## Ranked plan
 
 1. **R5 + R1 + R7** — one new `check-assembly.ts`, absorbing
@@ -213,9 +174,6 @@ problem.
    browser-tier precondition and costs nothing to state now.
 3. **R2** — worth doing with, not before, giving the filter grammar a single
    parse; otherwise this is the third hand-maintained reader of it.
-4. **R4 plus the terminal self-check** — do them together, as the first step
-   of any widget-tier work. A roster that advertises what it cannot mount is
-   what makes the tier feel like a place to route around.
 
 ## Rules worth carrying
 
@@ -225,6 +183,6 @@ problem.
 - **A rule that reports the platform's own grammar as an error is not ready.**
   Both R2 and R5 were wrong on their first draft and looked right; they were
   fixed by running them over four real apps, not by rereading them.
-- **Check against published data, never a copy.** The widget roster, the text
-  formats, the entity fields are all exported already. A checker that
+- **Check against published data, never a copy.** The text formats and the
+  entity fields are exported already. A checker that
   hard-codes any of them becomes the next thing that drifts.

@@ -8,9 +8,9 @@ ships the popover/dialog/anchor primitives. `2026-08-29-the-screen-typechecker.m
 supplies the R4 finding this doc finally answers. The forcing consumer is
 `apps/omnishell-shadcn-ui` (its brief.md is the product statement).
 
-The claim: **the widget tier's replacement is CUE-authored components that
-expand to the existing binding vocabulary, and their behavioral ingredient is
-a terminal-owned interpreter of the XState-JSON data subset.** The doc that
+The claim: **a component is CUE-authored, expands to the existing binding
+vocabulary, and its behavioral ingredient is a terminal-owned interpreter of
+the XState-JSON data subset.** The doc that
 landed yesterday rejected app-defined statecharts; its own argument contains
 the escape clause — *"a CUE-declared machine is only declarative if the
 action vocabulary is closed and terminal-owned"* — and a machine whose only
@@ -21,11 +21,6 @@ meets it. That action is `put`, which the reduce machinery already owns.
 
 Read out of this tree on 2026-08-30.
 
-- `plugins/omnishell/terminal.cue:128` advertises five widget kinds; the three
-  row-backed ones (combobox, select, listbox) have never mounted —
-  `screen.js` (mountFieldWidgets' first guard) skips every `[data-widget]`
-  containing a `[data-live]`. thenote used one exactly as advertised; the only
-  reference to its adapter was the dead `data-adapter` seam PR #1640 retired.
 - XState 5.32.5: zero dependencies, config round-trips byte-identical,
   evaluates under `lockdown()` in a Compartment with a frozen no-op console;
   `after` is unavailable by construction because timers are the terminal's
@@ -209,7 +204,7 @@ would swallow the derived events); nesting/`final`/`onDone` (no consumer,
 and root `on:` took the urgency off).
 
 **Choosing machine vs reduce.** Both spellings are first-class and the
-choice is the author's, per widget. The value curve: the machine is
+choice is the author's, per component. The value curve: the machine is
 strongest at the pure-data end (zero code, component-generated) and the
 many-states end (the chart is a complete inventory a reviewer reads by
 set-difference), weakest in the middle — two states around real arithmetic,
@@ -246,31 +241,13 @@ entity completely (fields in `data-empty-row` or synthesized, transitions in
 
 ## Ranked plan
 
-1. **`#Machine` + the interpreter.** Publish the definition in
-   `terminal.cue`; `screen.js` executes `data-machine` through `step()` with
-   the synthesized fallback row; lint vets hand-authored JSON and the
-   empty-row agreement. *Done when:* the colour-cycling button runs from
-   markup alone and replays under `?seed=`.
-2. **The expansion mechanism + `omnishell--switch`.** Tags expand at emit;
-   the switch demo screen ships zero app JavaScript and zero
-   `data-empty-row`. The consumer app is `apps/omnishell-shadcn-ui`.
-3. **`omnishell--tabs`.** The forcing consumer for component-generated
-   discrimination; panels are `data-state` projection.
-4. **Item 4.** Tab tables with no entity, per the shape above.
-5. **Graduation.** The proven components enter the terminal's roster; the
-   three row-backed widget kinds and the stale `[data-widget]` guard are
-   deleted rather than fixed.
-6. **Chart-derived test paths.** A walker over the subset enumerates every
-   (state, event, guard-branch) arrow and drives the linkedom harness
-   through it, asserting row fields — every machine ships with every arrow
-   exercised. Row closure is what makes the witnesses constructible: a
-   branch witness is a single row, shaped by `context`, the assigns, and
-   any `cel:` enum. *Done when:* the gallery's machines get arrow coverage
-   with no per-machine test code.
-7. **The v2 grammar** (value positions, `context`, `raise`, root `on:`,
-   `after` lifecycle, row closure). *Done when:* the Fibonacci autoplayer
-   of the design session runs from markup plus three one-line Jessie
-   modules, and a leaf reading `state.rows` fails loudly.
+What is left of it.
+
+- **Tab tables with no entity**, per the shape above.
+- **The v2 grammar** (value positions, `context`, `raise`, root `on:`,
+  `after` lifecycle, row closure). *Done when:* the Fibonacci autoplayer
+  of the design session runs from markup plus three one-line Jessie
+  modules, and a leaf reading `state.rows` fails loudly.
 
 ## Rules worth carrying
 

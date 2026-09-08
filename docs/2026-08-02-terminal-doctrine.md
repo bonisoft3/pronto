@@ -20,12 +20,12 @@ composition. Its seams are **protocols**, which forces boundaries rather than
 leaving them to taste. And it was shaped by things breaking: the CDC feedback
 loop, the publication scoping, txid confirmation.
 
-The terminal has nine concerns and no substrate — router, renderer, form
-engine, data binder, state machine, motion system, widget host, sandbox,
-fixture harness. It **invents** where the cluster borrows (`data-live`,
-`data-item`, `data-text` have no prior art), and the parts that feel solid are
-exactly the borrowed ones: PostgREST filter syntax inside `data-filter`, Zag's
-own `data-part`, CSS custom properties, SES from the ocap tradition.
+The terminal has eight concerns and no substrate — router, renderer, form
+engine, data binder, state machine, motion system, sandbox, fixture harness.
+It **invents** where the cluster borrows (`data-live`, `data-item`,
+`data-text` have no prior art), and the parts that feel solid are exactly the
+borrowed ones: PostgREST filter syntax inside `data-filter`, CSS custom
+properties, SES from the ocap tradition.
 
 The structural cause, which is the useful part:
 
@@ -46,9 +46,9 @@ that cannot say no. Build the hatch before adding vocabulary.
 - **Collections** — all state, including the session and the route. Read-only
   where a unit should not write. This is the data interface every unit
   receives; it is not an invented abstraction, it already exists.
-- **Markup** — slots. The element carrying `data-widget` or `data-island`
-  *is* the slot; nothing new is needed. Loading policy would be another
-  attribute on the same element.
+- **Markup** — slots. The element carrying `data-hatch` *is* the slot;
+  nothing new is needed. Loading policy would be another attribute on the
+  same element.
 - **Returned requests** — Jessie's effect channel. A role returns a
   description; the host performs it.
 - **A capability object** — hatches only, and see the open question below.
@@ -59,7 +59,6 @@ bring their own build:
 | unit | receives | own build |
 |---|---|---|
 | island | its arguments, nothing else | no |
-| widget | collections through an adapter | no |
 | region | collections, its filter | no |
 | screen | collections, params, capabilities | no |
 | hatch | collections, capabilities | yes |
@@ -134,8 +133,7 @@ Do not confuse these.
 
 **Real, in code and tested:** collections with an adapter seam
 (`@mecha/collections`, two adapters); Jessie roles `island` and `adapter`, both
-evaluated in SES compartments with no endowments; the widget tier (a generic
-Zag dispatcher plus a pure adapter, ~60 lines of omnishell); keyed
+evaluated in SES compartments with no endowments; keyed
 reconciliation; the navigation stack on the Navigation API with push-versus-
 traverse scroll semantics; the motion vocabulary; design tokens compiled from
 the program with a lint refusing redeclaration; the bijection checker.
@@ -148,9 +146,8 @@ subscriptions as a general form.
 
 **Speculated:** adopting single-spa (measured at 8 KB gzipped, indivisible, not
 adopted); channel-versus-object for the hatch; screen-level versus region-level
-hatch — leaning region, because the widget tier already built the mount point,
-the adapter bridge and the form participation, so a region hatch is that
-machinery with the code coming from a bundle instead of an import.
+hatch — leaning region, so a region hatch is the region's mount point and
+form participation with the code coming from a bundle instead of an import.
 
 ## Open questions
 

@@ -1,8 +1,8 @@
 # The incremental model: one graph, two tiers
 
 Written alongside the realworld/Conduit compile, from questions that compile
-raised. `2026-08-02-terminal-doctrine.md` and `-hatch.md` establish the role
-vocabulary; this doc supplies the semantics under it, and the reading list for
+raised. `2026-08-02-terminal-doctrine.md` establishes the role vocabulary;
+this doc supplies the semantics under it, and the reading list for
 where that semantics is already worked out.
 
 The claim: **TEA gave pronto its vocabulary and cannot give it its
