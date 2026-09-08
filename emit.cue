@@ -90,13 +90,34 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		// scope fails `= ANY()`, which would make the row invisible to every
 		// role while the audit reported the table protected.
 		//
-		// Only plain `owned` has a derivation yet. `shared` is excluded on
-		// purpose: its scope is not the owner's, it is every scope a share grants
-		// the reader, so flooring it on the owner alone would cut every sharee off
-		// from what was shared with them. The other modes are likewise pending,
-		// and until then their tables show up in rls_unprotected, which is true.
-		[if T.e.access != _|_ if T.e.access.mode == "owned" if T.e.access.shared == _|_ {
+		// Carrying a scope and being floored are separate. A per-object share
+		// cannot be floored -- the floor is restrictive, so it ANDs, and a sharee
+		// holds no scope the owner's row carries -- but the column is still what
+		// a shape predicate names and what a child's trigger copies. So `shared`
+		// gets the column and stays out of `rls_protect`; the exemption below
+		// says so, and the permissive share policies keep governing CRUD.
+		[if T.e.access != _|_ if T.e.access.mode == "owned" {
 			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('user:' || \"\(T.e.access.owner)\") STORED NOT NULL"
+		}],
+		// A child of a composition takes its parent's scope. Not GENERATED: a
+		// generated column cannot reach another table, so a trigger defends it
+		// instead (emitted beside the policies). NOT NULL holds because Postgres
+		// checks it after BEFORE triggers, so a child of no parent is refused.
+		[if T.e.access != _|_ if T.e.access.mode == "through" {
+			"  \"scope_id\" TEXT NOT NULL"
+		}],
+		// A constant: every subject holds `public:` (subject_scopes in rls.sql
+		// says what a public row reached by scope rather than by exemption buys).
+		// Writes stay with the permissive policies below and the table grants.
+		[if T.e.access != _|_ if T.e.access.mode == "public-read" {
+			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('public:') STORED NOT NULL"
+		}],
+		// The identity table under `service-only`, which is the one place a
+		// person reads their own row (the self-select policy below says why).
+		// Its own id IS its scope, so `user:<me>` matches exactly that row --
+		// the policy and the shape predicate come out as the same statement.
+		[if T.e.access != _|_ if T.e.access.mode == "service-only" if T.e.table == "app_user" {
+			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('user:' || \"id\") STORED NOT NULL"
 		}],
 		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
 	])
@@ -237,7 +258,7 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		_exempt: "owned with a per-object share via \(P.e.access.shared.via): finer than tenancy, guarded by its own policies"
 	}
 	if P.e.access.mode == "owned" if P.e.access.shared == _|_ {_exempt: ""}
-	if P.e.access.mode == "public-read" {_exempt: "public by declaration: no tenancy to isolate"}
+	if P.e.access.mode == "public-read" {_exempt: ""}
 	if P.e.access.mode == "service-only" if P._t != "app_user" {
 		_exempt: "service-only: no app_user reaches it"
 	}
@@ -245,16 +266,37 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		_exempt: "service-only except a person reading their own row, which the self-select policy alone allows"
 	}
 	if P.e.access.mode == "through" {
-		// A child is exactly as floorable as its parent, so `pending` is only
-		// honest when the parent itself could be floored. Under a shared parent
-		// the child inherits the share, and no trigger will change that.
+		// A child is exactly as floorable as its parent: floored under a floored
+		// one, exempt under a shared one, whose share it inherits. A parent
+		// that carries no scope -- service-only, unless it is app_user -- has
+		// none to hand down, and the composition is a schema error.
 		_p: P.entities[P.e.access.parent]
-		if P._p.access.mode == "owned" if P._p.access.shared == _|_ {
-			_exempt: "pending: through \(P.e.access.parent), whose scope derivation is a trigger not yet written"
-		}
-		if !(P._p.access.mode == "owned" && P._p.access.shared == _|_) {
+		_pFloored: bool
+		if P._p.access.mode == "owned" {_pFloored: P._p.access.shared == _|_}
+		if P._p.access.mode == "public-read" {_pFloored: true}
+		if P._p.access.mode == "through" {_pFloored: false}
+		if P._p.access.mode == "service-only" {_pFloored: false}
+		_pScoped: bool & (P._p.access.mode != "through" && (P._p.access.mode != "service-only" || P._p.table == "app_user")) & true
+		if P._pFloored {_exempt: ""}
+		if !P._pFloored {
 			_exempt: "through \(P.e.access.parent), which is itself exempt: the child inherits its visibility"
 		}
+	}
+
+	// A composition's scope is its parent's, written by mecha.scope_from_parent
+	// (rls.sql says why a trigger and not a generated column). Called, never
+	// restated, like the floor.
+	_scopeTrigger: [...string]
+	if P.e.access.mode != "through" {_scopeTrigger: []}
+	if P.e.access.mode == "through" {
+		_parentTable: P.entities[P.e.access.parent].table
+		_scopeTrigger: [
+			"""
+			DROP TRIGGER IF EXISTS \(P._t)_scope ON \(P._t);
+			CREATE TRIGGER \(P._t)_scope BEFORE INSERT OR UPDATE ON \(P._t)
+			  FOR EACH ROW EXECUTE FUNCTION mecha.scope_from_parent('\(P._parentTable)', 'id', '\(P.e.access.on)');
+			""",
+		]
 	}
 
 	e: #Entity
@@ -287,14 +329,15 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		// The parent's owned USING is inlined one level, its row columns
 		// re-qualified by the alias p; a through parent is a schema error.
 		_parent: P.entities[P.e.access.parent]
-		// The join casts the parent pk when the child's on-column differs in
-		// type (a live-path child keys the parent's uuid as text); Postgres
-		// has no cross-type = operator for uuid.
+		// The join casts the child's on-column when it differs in type from
+		// the parent pk (a live-path child keys the parent's uuid as text);
+		// Postgres has no cross-type = operator for uuid. The child's side, so
+		// the parent's key index serves the lookup.
 		_onType: [for f in P.e.fields if f.name == P.e.access.on {f.type}][0]
 		_pkType: [for f in P._parent.fields if f.pk {f.type}][0]
-		_pid: [if P._onType == P._pkType {"p.id"}, "p.id::\(_sqlType[P._onType])"][0]
+		_onCast: [if P._onType == P._pkType {""}, "::\(_sqlType[P._pkType])"][0]
 		_pre: []
-		_expr: "EXISTS (SELECT 1 FROM \(P._parent.table) p WHERE \(P._pid) = \(P._t).\(P.e.access.on) AND (\((#ownedUsing & {a: P._parent.access, qual: "p", table: P._parent.table}).out)))"
+		_expr: "EXISTS (SELECT 1 FROM \(P._parent.table) p WHERE p.id = \(P._t).\(P.e.access.on)\(P._onCast) AND (\((#ownedUsing & {a: P._parent.access, qual: "p", table: P._parent.table}).out)))"
 		_appUser: [
 			"CREATE POLICY \(P._t)_app_user_all ON \(P._t) FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr));",
 		]
@@ -324,11 +367,42 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 			_appUser: []
 		}
 	}
+	// A row the floor does not deliver reaches the sync path one shape at a
+	// time, keyed on a column mecha.shape_key declares (rls.sql says what
+	// declaring one asserts). Three edges, each a fact the policies above
+	// encode: a shared entity by its own key, its grant table by the sharee,
+	// a composition by its parent. Only where the parent is shared: a floored
+	// parent's children already carry its scope.
+	_pkName: [for f in P.e.fields if f.pk {f.name}][0]
+	_isShared: bool
+	if P.e.access.mode == "owned" {_isShared: P.e.access.shared != _|_}
+	if P.e.access.mode != "owned" {_isShared: false}
+	_underShared: bool
+	if P.e.access.mode == "through" {_underShared: P._p.access.mode == "owned" && P._p.access.shared != _|_}
+	if P.e.access.mode != "through" {_underShared: false}
+	_shapeKeys: [...string]
+	if P._isShared {
+		_shapeKeys: [
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P._t)', '\(P._pkName)', 'public.\(P._t)', '\(P._pkName)') ON CONFLICT DO NOTHING;",
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P.e.access.shared.via)', '\(P.e.access.shared.user)', 'subject', 'id') ON CONFLICT DO NOTHING;",
+		]
+	}
+	if P._underShared {
+		_shapeKeys: [
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P._t)', '\(P.e.access.on)', 'public.\(P._p.table)', '\([for f in P._p.fields if f.pk {f.name}][0])') ON CONFLICT DO NOTHING;",
+		]
+	}
+	if !P._isShared if !P._underShared {_shapeKeys: []}
+
 	out: strings.Join(list.Concat([
 		P._pre,
+		P._scopeTrigger,
 		// The floor's text lives in mecha's rls.sql and is called, never
 		// restated, so a generator cannot emit a subtly wrong one.
-		[if P.e.access.mode == "owned" if P.e.access.shared == _|_ {"CALL rls_protect('\(P._t)');"}],
+		// Floored is what `_exempt` empty means, and this is the one place it
+		// is read for that.
+		[if P._exempt == "" {"CALL rls_protect('\(P._t)');"}],
+		P._shapeKeys,
 		// Everything the floor does not cover says so, because an audit that is
 		// permanently non-empty is one nobody reads. Two kinds of reason live
 		// here: a permanent one, where the visibility is genuinely not tenancy,
@@ -340,6 +414,27 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		P._appUser,
 		["CREATE POLICY \(P._t)_service_all ON \(P._t) FOR ALL TO service USING (true) WITH CHECK (true);"],
 	]), "\n")
+}
+
+// A publication over a table list. Created when absent, and brought up to the
+// list when present: this file replays on a fresh volume only, and a database
+// that outlives one would otherwise publish every table but the newest.
+#publication: P={
+	name:   string
+	tables: [...string]
+	out: """
+		DO $$ DECLARE t text; BEGIN
+		  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '\(P.name)') THEN
+		    CREATE PUBLICATION \(P.name) FOR TABLE \(strings.Join(P.tables, ",")) WITH (publish_generated_columns = stored);
+		  END IF;
+		  FOREACH t IN ARRAY ARRAY[\(strings.Join([for t in P.tables {"'\(t)'"}], ","))] LOOP
+		    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables
+		                   WHERE pubname = '\(P.name)' AND schemaname = 'public' AND tablename = t) THEN
+		      EXECUTE format('ALTER PUBLICATION \(P.name) ADD TABLE %I', t);
+		    END IF;
+		  END LOOP;
+		END $$;
+		"""
 }
 
 // Column conduit stamps onto every bus row naming the table it came from. Not
@@ -835,6 +930,7 @@ _cdcTableField: "__table"
 	_validated: [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
 	_localEntities: [for e in E._entities if e.durability == "tab" || e.durability == "device" {e}]
 	_cdcTables: strings.Join([for e in _entities if e.durability == "server" {e.table}], ",")
+	_syncTables: [for e in E._serverEntities {e.table}]
 	_pub: "\(E.code.meta.name)_cdc"
 	// The loop is the fourth component (see #DefaultLoop); it owns the verb
 	// surface and the argv doctrine.
@@ -1024,6 +1120,9 @@ _cdcTableField: "__table"
 	// is served by caddy alone. Auth is identity the cluster keeps, so it
 	// counts as server-side state too.
 	_serverOn: len(E._serverEntities) > 0 || E.code.capabilities.auth != _|_
+	// A server entity syncs through a gate the auth service answers, so a
+	// cluster with one and no auth plane would 502 every shape.
+	_gated: bool & (E._serverOn == false || E._authOn) & true
 	cluster: capabilities: server: E._serverOn
 
 	files: [string]: #File
@@ -1062,7 +1161,7 @@ _cdcTableField: "__table"
 			}
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"
-				_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._authOn {"service"}]])
+				_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._authOn {"service"}], [if E._serverOn {"electric"}]])
 				text: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
 					"""
 					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
@@ -1075,7 +1174,21 @@ _cdcTableField: "__table"
 				// and the auth service read every tenant's rows by definition, so
 				// their exemption is a role attribute — visible in pg_roles, and so
 				// auditable — rather than an absence from a TO list.
-				_bypass: [if E._authOn {"\nALTER ROLE service BYPASSRLS;\n"}]
+				//
+				// Electric is the same case and the dangerous one: it reads the WAL
+				// for every tenant, and a role without BYPASSRLS gets `{}` from
+				// current_scopes(), so every shape yields an empty snapshot with no
+				// error.
+				_bypass: [
+					if E._authOn {"\nALTER ROLE service BYPASSRLS;\n"},
+					// A dev credential; cluster.cue, at the URL naming this role, says
+					// what a deployment does with both.
+					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN PASSWORD 'electric';\n" +
+						"GRANT USAGE ON SCHEMA public TO electric;\n" +
+						"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
+						"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n" +
+						""},
+				]
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
@@ -1136,21 +1249,25 @@ _cdcTableField: "__table"
 				// error that aborts initdb — so the publication is emitted only when
 				// there is something to publish.
 				text: [
-					if len(E._cdcTables) > 0 {
+					if len(E._syncTables) > 0 {
 						"""
-				DO $$ BEGIN
-				  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '\(E._pub)') THEN
-				    CREATE PUBLICATION \(E._pub) FOR TABLE \(E._cdcTables) WITH (publish_generated_columns = stored);
-				  END IF;
-				END $$;
+				\([if len(E._cdcTables) > 0 {(#publication & {name: E._pub, tables: strings.Split(E._cdcTables, ",")}).out}, "-- No server-durability entity: nothing for the bus to read."][0])
 
-				\(strings.Join([for t in strings.Split(E._cdcTables, ",") {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
+				-- Electric's own publication, declared rather than left to it.
+				-- ELECTRIC_MANUAL_TABLE_PUBLISHING makes it validate this instead of
+				-- building one, which is what lets its role hold only REPLICATION and
+				-- SELECT: creating a publication needs CREATE on the database, and
+				-- adding a table to one needs ownership of that table. A sync service
+				-- that owns the app's tables can drop them.
+				\((#publication & {name: "electric_publication_default", tables: E._syncTables}).out)
+
+				\(strings.Join([for t in E._syncTables {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
 				GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
 
 				"""
 					},
 					"""
-						-- No server-durability entity: nothing to publish, nothing to grant.
+						-- No synced entity: nothing to publish, nothing to grant.
 
 						""",
 				][0]

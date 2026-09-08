@@ -294,7 +294,7 @@ projection that writes onto the row of the region that OWNS the list, which is
 a different mechanism and wants its own walk against the refusals, not a
 fourth clause bolted on here.
 
-The keyboard splits three ways, and only the third is unresolved:
+The keyboard splits three ways:
 
 - **The element owns it.** Radio group, select, checkbox, disclosure, slider.
   Native controls supply the whole APG contract — roving tabstop, arrows,
@@ -312,49 +312,13 @@ The keyboard splits three ways, and only the third is unresolved:
   element nobody bound, so the container could not name a row of the list
   inside it.
 - **Needs a roving tabstop:** tablist, toolbar, menubar. APG moves real DOM
-  focus between the items here, and nothing in the interpreter calls `focus()`.
-  This one is still open, and it is open for a reason no projection reaches:
-  moving focus is a DOM write with a reader on the other end of it.
+  focus between the items here, and moving focus is a DOM write with a reader
+  on the other end of it. `2026-09-03-the-reader-is-also-a-writer.md` states
+  it: the reader is the second WRITER, and the terminal holds the only pen.
 
-Jessie should not be what closes the third case, and the reason is not that a
-module would be wrong. The chart will never model everything, and it is not
-supposed to: what belongs in it is what is genuinely more elegant and less
-bug-prone stated as a chart, and everything else belongs on the rung below.
-truco's `{"type": "sitting"}` guard is a fair inhabitant of that rung — a
-predicate about the table, not about the row.
-
-The keyboard is different only because nobody has asked the question yet.
-Reaching for a module first would settle by default what should be settled on
-the merits: whether a declarative spelling exists that is better than a module,
-not merely possible. Until someone has looked, deferring is what keeps the
-question open — which is what the catalog is already doing.
-
-The shape a declarative answer would have to take is worth recording, because
-the row-backed spelling has already moved the ground. The pick is a FORM
-there, not a transition — so nothing about roving focus is the machine's
-problem any more, and the arithmetic that made it one is gone with it. What
-is left is a key that submits a form: with `next` and `prev` projected onto
-each row, ArrowDown submits the neighbour's, writing the same one column the
-tab's own click writes. No machine, no guard, no arithmetic. The precedent is
-narrow but real — a form with no submit button already submits on `change`,
-inferred from its shape.
-
-First built as a spike against a TABLIST — the one pattern APG gives no
-virtual-focus model, and so the hardest place to have started. It stopped on
-two things, and both are worth keeping because they say where the boundary
-runs.
-
-Focus did not follow. `next` is a column of the row whose form fired, so a
-second press moved only if the first moved focus, and nothing in the
-interpreter calls `focus()`. The linkedom tier cannot even decide it — it
-answers `focus()` and never sets `activeElement`. For a LISTBOX the question
-never arises, and that is the argument for reaching for virtual focus rather
-than teaching the terminal to move focus: the pattern that needs no focus move
-is the one this vocabulary can state.
-
-And an arrow key has to cancel its own event or the page scrolls under the
-reader. The catalog's `accept-menu-no-context` asserted the whole set of events
-the interpreter cancels, because the menu declines `contextmenu` on the grounds
+An arrow key has to cancel its own event or the page scrolls under the reader.
+The catalog's `accept-menu-no-context` asserted the whole set of events the
+interpreter cancels, because the menu declines `contextmenu` on the grounds
 that a transition cannot cancel what it answered. A keydown cancel made that
 assertion false while leaving the decision true — the claim it rests on is
 about a MACHINE's dispatch, and the set was a proxy for it. The test now
@@ -362,10 +326,6 @@ measures the machine's dispatch directly, and the decision says what it always
 depended on: every cancel the interpreter makes belongs to a gesture the markup
 declared, and a machine's event dispatch is not one. That list may grow; the
 claim does not.
-
-What is left open is the roving tabstop, and it is open because moving focus
-is a DOM write with a reader on the other end of it — not because a projection
-is missing.
 
 ## Rules worth carrying
 

@@ -174,22 +174,13 @@ The walk's partition and the ends' partition differ on one lane, and that is not
 an accident to tidy away: the calendar's arrows walk the month while Home is the
 start of a *week*, so a component names them separately.
 
-## What this did not open
+## Beyond this doc
 
-- **Aggregates.** A sum is a read across rows and a region hands its template
-  one. Deferred deliberately; it is a tier question rather than a clause.
-- **The roving tabstop.** Still open, and the doc's stated reason is not the
-  sharp one. "A DOM write with a reader on the other end" is true of rendering
-  too. The real problem is that **the user is also a writer**: Tab moves focus
-  with no row changing, and a terminal re-asserting focus each refresh is a
-  focus-stealing loop. The shape of an answer is already in the algebra —
-  `focusin` is an event key, so the DOM's own moves report back as causes and
-  the terminal performs focus only when a chart moves the column. Disagreement
-  becomes unrepresentable rather than managed. Its acceptance lives at the
-  Playwright tier: linkedom answers `focus()` and never sets `activeElement`.
-- **Home and End on the data table.** The palette has them; the table does not,
-  because its order is a map and reversing it means reversing every clause of
-  that map rather than one literal.
+Aggregates and the roving tabstop are `2026-09-03-the-reader-is-also-a-writer.md`'s:
+a fold has two seats and a projection clause would be a third, weaker
+spelling of both; and the user is also a WRITER. Home and End on the data
+table are a chord naming the grid's ends, stated on the data-table screen
+where a reader meets it.
 
 ## A miss means two different things
 

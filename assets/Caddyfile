@@ -26,10 +26,33 @@
   }
   handle /electric/* {
     uri strip_prefix /electric
-    reverse_proxy electric:3000 {
-      flush_interval -1
-      transport http {
-        read_timeout 300s
+    # Electric names four parameters the server must own, and a client that
+    # reaches it directly owns all of them: `table` chooses any table, `where`
+    # IS the authorization filter. Caddy cannot decide them -- that means asking
+    # which scopes a subject holds -- so it asks the gatekeeper, which already
+    # can, and which compares what was authorized against what arrives here.
+    #
+    # Unconditional, and it has to be: an Electric reachable without this is
+    # the hole. Every cluster with an electric service has an auth service for
+    # exactly that reason.
+    # `route`, because Caddy orders directives by its own table and not by the
+    # order they are written: `uri` sorts ahead of `forward_auth`, so outside a
+    # route the secret is added BEFORE the gate sees the request and the gate
+    # refuses the parameter the proxy itself just set. Inside, these run as
+    # written.
+    route {
+      forward_auth auth:9999 {
+        uri /auth/shape/verify
+      }
+      # Electric takes its secret as a query parameter, added by an authorizing
+      # proxy and never sent by a client. It is set after the gate, so a client
+      # that supplies its own is refused there rather than silently overwritten.
+      uri query secret {$ELECTRIC_SECRET}
+      reverse_proxy electric:3000 {
+        flush_interval -1
+        transport http {
+          read_timeout 300s
+        }
       }
     }
   }
