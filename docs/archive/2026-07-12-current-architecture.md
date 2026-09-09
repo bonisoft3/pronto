@@ -1,9 +1,11 @@
-# Design: Pronto — Current Architecture
+> **Archived.** What still holds is `../../CONTRIBUTING.md`, which puts the
+> pieces together against HEAD. Kept for the arguments it makes that nothing
+> else records: the browser-first loop, the in-browser TDD verbs, the
+> Starlark-versus-JS graph-engine measurement, and the Deno-over-Bun rationale.
 
-Date: 2026-07-12
-Status: DRAFT (consolidates and supersedes the two lineage docs in `docs/`)
+# Design: Pronto — Current Architecture (2026-07-12)
 
-Related: `PRONTOUI.md` — prontoui, the planned self-hosting browser IDE (the escape-hatch stress test for this architecture).
+Related: `plugins/pronto/docs/2026-07-19-prontoui.md` — prontoui, the planned self-hosting browser IDE (the escape-hatch stress test for this architecture).
 
 ## Concept
 

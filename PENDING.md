@@ -12,7 +12,7 @@ restating it.
 
 Wave 7 closed this line: the roving tabstop, `data-focus`, parallel charts,
 typeahead and the chord all landed, and the accordion, the four menu surfaces
-and the menubar consume them. `docs/2026-09-03-the-reader-is-also-a-writer.md`
+and the menubar consume them. `plugins/omnishell/docs/2026-09-03-the-reader-is-also-a-writer.md`
 carries the argument; the ir carries the per-component reasons. What is left:
 
 - **The browser-tier fold seat has no consumer**, and neither of the two
@@ -66,10 +66,6 @@ needed the header's value to stop being a field. The ir carries each
 
 The v2 grammar landed with PR #1642. What did not:
 
-- **The doc.** `docs/2026-08-30-machines-not-widgets.md` has no v2 section, so
-  value positions, `context`, `raise`, `after`, root-level `on:`, closure over
-  the row, the layering rungs and the machine-vs-reduce curve live only in
-  session notes.
 - **`schema-vet` at the store chokepoint.** Half of it landed: `writeLint`
   (`interpreter/lint.ts`, run from `derive.ts`) judges column spelling against
   the entity's declared field types over browser-tier writes, which is what
@@ -162,7 +158,39 @@ translator emits them, so cursor routes still reach PostgREST.
   only. A service worker would serve real repeat visitors better than any of the
   ranked paths.
 
+## Schema evolution
+
+Designed twice, built never: `grep -rn atlas` finds only the two docs that
+design it, and every app's migrations are hand-numbered SQL that initdb replays
+into a fresh container. `libraries/mecha/docs/2026-08-09-atlas-migrations.md` is the design,
+constrained by what Atlas measurably does — the community binary's `migrate
+diff` drops most of what a pronto schema declares, so only `migrate apply` is
+usable and the emitter must own the diff. `libraries/mecha/docs/2026-08-31-owner-stamping-default-hygiene.md` is the clause that makes the split hold: owner stamping
+moves to the access layer so `schema.sql` stays purely structural, and
+`#Field.default` narrows to built-ins. Neither has a consumer asking for it,
+which is why it has not moved; the cost of not having it is that a column
+addition is a new database.
+
+## The capability boundary
+
+Five questions `plugins/omnishell/docs/2026-08-02-terminal-doctrine.md` has carried since
+2026-08-02, listed here because a question about the platform is pending work
+rather than a doc's furniture. That doc keeps each one's argument.
+
+- **Do subscriptions generalise** from `data-live` to timers, keyboard,
+  presence? The one with live consumers: MediaPipe's frame-by-frame camera and
+  `sensors."device-orientation"`, both declared-but-ungrantable in
+  `terminal.cue`, both blocked on this.
+- **Is "returned requests" right for every Jessie role**, or only the pure
+  mapping ones?
+- **Is there a Msg equivalent** — a closed vocabulary of what a vendored unit
+  may emit?
+- **What does a merge-policy role receive?** The store tracks row origins and
+  pre-sync state; nothing states the policy over them.
+- **Where does presence live?** Shared but not durable; neither tier owns that
+  quadrant.
+
 ## prontoui
 
-Designed in full in `PRONTOUI.md`, no code. The first app written in Pronto
+Designed in full in `docs/2026-07-19-prontoui.md`, no code. The first app written in Pronto
 itself, and the escape-hatch doctrine's stress test.

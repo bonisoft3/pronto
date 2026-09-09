@@ -1,12 +1,12 @@
 # One ladder, one grammar
 
-Written from the design conversation that followed `2026-08-30-machines-not-widgets.md`,
+Written from the design conversation that followed `plugins/omnishell/docs/2026-08-30-machines-not-widgets.md`,
 turning the reduce contract's "feels ad-hoc" complaint into the system's actual
 shape. The ground: `2026-08-02-incremental-model.md` (the loop),
-`2026-08-03-component-tier.md` (the tiers and the IVM operator set),
+`plugins/omnishell/docs/2026-08-03-component-tier.md` (the tiers and the IVM operator set),
 `2026-08-12-derived-counts-the-reader-is-inside.md` (why private folds of a
 stream disagree), `2026-08-29-the-screen-typechecker.md` (R2's one-parse
-argument), and `2026-08-30-the-smallest-interactive-thing.md` (the refusal
+argument), and `plugins/omnishell/docs/2026-08-30-the-smallest-interactive-thing.md` (the refusal
 event this doc leans on).
 
 The claim: **the DOM is the bottom rung of the durability ladder, not the view

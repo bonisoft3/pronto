@@ -1,10 +1,10 @@
 # Validation is a rung
 
 Built on this branch; the sequence at the end is its commit order. The
-ground: `2026-08-30-machines-not-widgets.md` (value positions hold a Jessie
+ground: `plugins/omnishell/docs/2026-08-30-machines-not-widgets.md` (value positions hold a Jessie
 reference; refusal is the machine's error event),
 `2026-08-31-one-ladder-one-grammar.md` (a withdrawn write reaches the fold as
-`refused`; one writer per fact), `2026-08-27-events-and-the-clock.md` (a
+`refused`; one writer per fact), `plugins/omnishell/docs/2026-08-27-events-and-the-clock.md` (a
 compartment with nothing endowed), and `apps/chess`'s `referee.js`, whose
 header says the thing this doc generalizes: legality is data, and the rules
 are a reduce.

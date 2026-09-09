@@ -58,7 +58,7 @@ Jessie handlers running in SES Compartments, each receiving its arguments and
 nothing else — no DOM, no store, no ambient authority; time and randomness
 are injected. A handler returns a description of an effect for the shell to
 perform (Elm's `Cmd`, not `update` — a handler never receives the whole
-model); see `docs/2026-08-02-terminal-doctrine.md` for the full comparison
+model); see `plugins/omnishell/docs/2026-08-02-terminal-doctrine.md` for the full comparison
 and why "handler," not "island" or "update."
 
 ## Capability

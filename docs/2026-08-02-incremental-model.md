@@ -1,13 +1,13 @@
 # The incremental model: one graph, two tiers
 
 Written alongside the realworld/Conduit compile, from questions that compile
-raised. `2026-08-02-terminal-doctrine.md` establishes the role vocabulary;
+raised. `plugins/omnishell/docs/2026-08-02-terminal-doctrine.md` establishes the role vocabulary;
 this doc supplies the semantics under it, and the reading list for
 where that semantics is already worked out.
 
 The claim: **TEA gave pronto its vocabulary and cannot give it its
-semantics.** `view`, `Cmd`, `Sub` name the roles well, and the terminal-hatch
-doc already reads the island role as `Cmd` correctly. But TEA is silent on
+semantics.** `view`, `Cmd`, `Sub` name the roles well, and the island
+role reads as `Cmd` correctly. But TEA is silent on
 *when to recompute*, and that silence is where every open question in the
 terminal actually lives. Incremental computation — self-adjusting computation
 on the UI side, incremental view maintenance on the data side — is the theory
@@ -362,7 +362,7 @@ each a hand-written approximation of "connect the result, not the template."
 `plugins/omnishell/src/lint/playwright/` holds nine DOM checks —
 theme-stability, focus-order, touch-targets, horizontal-overflow,
 interactive-overlap, constrained-images, cls, console-messages,
-viewport-bounds. `2026-08-01-visual-lint.md` records that **no emitted app is a
+viewport-bounds. `plugins/omnishell/docs/2026-08-01-visual-lint.md` records that **no emitted app is a
 consumer**. By the prelude's own rule, a check no verb reaches does not exist.
 
 Both runtimes declare their own checks, and each declaration carries the layer

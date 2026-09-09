@@ -1,7 +1,7 @@
 # The screen typechecker
 
 Written from building a browser-tier app end to end in one sitting, and from
-what the loop cost while doing it. `2026-08-01-visual-lint.md` is the ground:
+what the loop cost while doing it. `plugins/omnishell/docs/2026-08-01-visual-lint.md` is the ground:
 it settled which checks need a rendered page and which do not. This doc is
 about the ones that need neither a page nor a cluster, and are not written.
 

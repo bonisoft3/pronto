@@ -4,7 +4,7 @@
 # pool and everything else queues behind them. Measured on the nine-table
 # article route: slowest shape 20 027 ms on 1.1 against 142 ms on h2, and the
 # screen rendered in 1 552 ms against 647 ms
-# (plugins/pronto/docs/2026-08-09-connection-ceiling.md). h2 multiplexes every
+# (libraries/mecha/docs/2026-08-09-connection-ceiling.md). h2 multiplexes every
 # stream over one connection, so the cap stops being something to count against.
 #
 # Browsers negotiate h2 only over TLS — none of them speak cleartext h2 — so the

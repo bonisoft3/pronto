@@ -1,6 +1,6 @@
 # The terminal's three planes: state, capabilities, surface
 
-Continuation of `2026-08-02-terminal-doctrine.md`,
+Continuation of `plugins/omnishell/docs/2026-08-02-terminal-doctrine.md`,
 read both first. Those left a real/designed/speculated split and a hatch rung with
 no CUE type at all. This session gave the doctrine's four surfaces — collections,
 markup, returned requests, capability object — a concrete, *uniform* CUE shape,
@@ -468,7 +468,8 @@ Confirmed acceptable to break every consumer:
   apps/iris, not to thenote's recompile.
 - `os-bridge`/`network-peer` stay declared-but-empty; `sensors."device-
   orientation"` stays declared-but-refused pending Q3 (does "returned
-  requests" generalize to continuous subscriptions?) from the hatch doc — MediaPipe's
+  requests" generalize to continuous subscriptions?), stated in
+  `plugins/omnishell/docs/2026-08-02-terminal-doctrine.md` — MediaPipe's
   frame-by-frame case and now device-orientation are two independent pieces of
   evidence Q3 needs answering before either can be granted, not something
   this spec resolves.

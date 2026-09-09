@@ -82,7 +82,7 @@ The sayt TDD loop gets a browser tier so a dev cycle never waits on CI. A small 
 | `verify@browser` | Pixelmatch rendered storyboard states against the pinned ir.html |
 | `integrate@browser` | Shims only — cross-service integration stays CI-tier, by declared contract |
 
-Everything deterministic runs offline; the LLM is only re-invoked when the brief or ir.html change. See [`DESIGN.md`](DESIGN.md) for the full loop design.
+Everything deterministic runs offline; the LLM is only re-invoked when the brief or ir.html change. See [`docs/archive/2026-07-12-current-architecture.md`](docs/archive/2026-07-12-current-architecture.md) for the full browser-loop design.
 
 ## Drift detection
 
@@ -149,8 +149,8 @@ What you give up in expressiveness (real-time collaboration, GPU compute, sub-10
 ## Design documents
 
 - [`SPEC.md`](SPEC.md) — the artifact spec: brief, ir, program
-- [`DESIGN.md`](DESIGN.md) — current design
-- [`PRONTOUI.md`](PRONTOUI.md) — prontoui, the self-hosting browser IDE
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how the pieces fit, and where to change each one
+- [`docs/2026-07-19-prontoui.md`](docs/2026-07-19-prontoui.md) — prontoui, the self-hosting browser IDE
 - [`prelude.md`](prelude.md) — shared component knowledge, implicit context of every compile
 - `docs/` — the dated design record (lineage)
 
