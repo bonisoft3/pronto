@@ -62,6 +62,12 @@
   handle /auth/* {
     reverse_proxy auth:9999
   }
+  # The wake. Ships unconditionally like /auth, and mounted WITH its prefix
+  # for the same reason: the ticker answers POST /poke and 404s everything
+  # else, so stripping would 404 every poke.
+  handle /poke {
+    reverse_proxy ticker:9998
+  }
   # The blob plane. Ships unconditionally, like /auth — in a cluster
   # without the blobs services the upstreams never resolve and these
   # unused routes just 502.

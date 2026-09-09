@@ -297,6 +297,11 @@ package pronto
 	// and n rather than the quotient.
 	fold?: {
 		src: *"pipelines/\(name).js" | string
+		// The sink column the terminal re-projects optimistically. Named here
+		// because the interpreter is generic: without it the projection has to
+		// guess, and a guess that is right for one app is silently `undefined`
+		// for the next.
+		projects: string
 		// Sink column holding the newest source txid the count includes. NOT
 		// the sink's own txid, which is stamped when the sink row is written —
 		// strictly after the read, so it counts rows it never saw.
@@ -347,6 +352,67 @@ package pronto
 	// a fold needs none — it already runs at every tier.
 	if trigger == "cdc" if raw == _|_ if fold == _|_ {
 		shim: *"pipelines/\(name).browser.js" | string
+	}
+}
+
+// The columns mecha writes on a tick, for the entity a #Schedule emits into.
+// Spelled here rather than injected at emit so the entity a reviewer reads is
+// the entity that exists. The ticker writes all five LAST, after the
+// declaration's own values, so nothing an app states can overwrite them.
+//
+// Combine with `list.Concat([#tickFields, [...]])`: cue 0.16 supersedes `+` on
+// lists and says so as an error, not a warning.
+#tickFields: [
+	{name: "id", type: "uuid", pk: true},
+	{name: "schedule", type: "text"},
+	{name: "tick_at", type: "timestamptz"},
+	// The tick was decided and not run: its lateness budget had passed. A
+	// pipeline reading this table skips these, and Forbid never waits on one.
+	{name: "late", type: "bool"},
+	{name: "caller", type: "text", required: false},
+]
+
+// A periodic wake, declared. The clock is the cluster's; what an app states
+// is which occurrences it wants and what row each one becomes.
+//
+// Occurrence semantics, deliberately not reconciliation: a tick names an
+// instant, can be missed, and fires at most once for that instant. A pipeline
+// whose job is "make this predicate false, repeatedly" wants #Pipeline's own
+// trigger instead — it needs no identity, no watermark and no lateness.
+#Schedule: S={
+	name: string
+	ir:   *name | string
+	// Five fields, the only grammar. `n/step` means n to the end of the field,
+	// so `5/10` in minutes is 5, 15, 25 … 55.
+	cron:     string
+	timeZone: *"UTC" | string
+	suspend:  *false | bool
+	// Older than this and a tick is recorded `late` and not run: the moment it
+	// was defending has passed. Floors at the coarsest clock any tier runs, or
+	// every tick is late on arrival.
+	maxLatenessSeconds: *300 | int & >=60
+	// Forbid declines to emit while the previous tick is unanswered, without
+	// advancing the watermark — a delay, never a drop. It is backpressure as
+	// much as concurrency control: a pipeline that has stopped answering stops
+	// receiving.
+	concurrency: *"Allow" | "Forbid"
+	// The entity a tick becomes a row in, and what the declaration sets on it.
+	// Mecha owns `id`, `schedule`, `tick_at`, `late` and `caller` on that
+	// entity and writes them last, so `values` can overwrite none of them.
+	// It must be durability "server": the publication carries those, and a tick
+	// nothing reads is not a tick.
+	emits: {
+		entity: string
+		values: {[string]: bool | int | string}
+	}
+	// Where a pipeline says it answered a tick, and the filter that says so.
+	// A DIFFERENT entity from `emits.entity`, and necessarily: the tick table
+	// is a CDC source, so the pipeline reading it cannot write back to it
+	// without feeding itself. The answer lands in a sink — durability "live",
+	// which the publication excludes.
+	done?: {entity: string, filter: string}
+	if S.concurrency == "Forbid" {
+		done: {entity: string, filter: string}
 	}
 }
 
@@ -486,6 +552,7 @@ package pronto
 		// the name's numeric prefix orders it among the emitted migrations.
 		rawMigrations?: [...{name: string, src: string}]
 		pipelines: [Name=string]: #Pipeline & {name: Name}
+		schedules: [Name=string]: #Schedule & {name: Name}
 	}
 
 	capabilities: {
@@ -546,6 +613,13 @@ package pronto
 		description: string
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		tiers: [...#Tier]
+		// Tiers where something outside the cluster pokes the ticker. The
+		// compose clock is emitted by cluster.cue and needs no declaration;
+		// k8s and cloud do, because their clock lives in a deploy tree mecha
+		// does not write, and the original bug was not that the clock was in
+		// the wrong place but that nothing could tell. #emit refuses a cloud
+		// tier that declares a schedule and no clock here.
+		clocks: [...#Tier]
 		// A program names its decisions and nothing more: `note` is derived
 		// from the prose of the ir element `ir` names (pronto derive.ts), so the
 		// reviewed artifact is the only place the rationale is written.

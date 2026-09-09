@@ -198,9 +198,9 @@ JOIN owned_token o ON o.token = s.token
 
 UNION ALL
 
--- CLOSED against CLOSED. A Jessie module evaluates in an SES compartment with
--- no endowments, so a denied identifier would be undefined or nondeterministic
--- at runtime; the reason travels with the name rather than with the query.
+-- CLOSED against CLOSED. The list holds only what the compartment lets through
+-- — names that reach an evaluator — so each entry carries its own reason and
+-- the reason travels with the name rather than with the query.
 SELECT 'error',
        r.path,
        'denylisted identifier: ' || r.name || ' (' || d.reason || ')'

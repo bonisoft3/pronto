@@ -15,7 +15,6 @@ export const DENIED: { name: string; reason: string }[] = [
   "fetch",
   "XMLHttpRequest",
   "WebSocket",
-  "eval",
   "Function",
   "globalThis",
   "import",
@@ -23,6 +22,17 @@ export const DENIED: { name: string; reason: string }[] = [
     "Date",
   ].map((name) => ({ name, reason: "handlers run in an SES compartment with no endowments" })),
   { name: "Math.random", reason: "handlers must be deterministic" },
+  // Listed again with the reason that actually holds: SES censors `eval` and
+  // `import` only in their DIRECT forms, when it rewrites the source. Probed
+  // against the vendored SES at the interpreter's own lockdown — `(0,eval)`
+  // and `const e = eval` both reach a working evaluator and return 2, and
+  // `Function("return 1")()` returns 1. The compartment confines them, it does
+  // not remove them, so the name is what the scan has to catch.
+  {
+    name: "eval",
+    reason:
+      "reached indirectly it evaluates arbitrary source inside the compartment; SES rejects only the direct call form",
+  },
   { name: "plv8", reason: "a validation is handed its world; it queries nothing" },
   { name: "this", reason: "Jessie has no this; in plv8 it would reach the global object" },
 ];
@@ -155,6 +165,13 @@ const label = "a Date for the window";
       name: "fetch is denylisted",
       source: `(state, event) => fetch("/x");\n`,
       expect: ["fetch"],
+    },
+    {
+      // Neither of these is a direct call, so SES lets both through to a
+      // working evaluator; the scan is the only thing that sees them.
+      name: "eval reached indirectly is denylisted",
+      source: `(state, event) => ({ a: (0, eval)("1+1"), b: (() => { const e = eval; return e("1+1"); })() });\n`,
+      expect: ["eval"],
     },
     {
       name: "Math.random is denylisted",

@@ -726,6 +726,7 @@ _cdcTableField: "__table"
 				// without either (decision-optimistic-fold).
 				if p.fold != _|_ {
 					fold:      p.fold.src
+					projects:  p.fold.projects
 					watermark: p.fold.watermark
 					dedupe:    p.fold.dedupe
 					retracted: p.fold.retracted
@@ -776,6 +777,7 @@ _cdcTableField: "__table"
 		"services/database/migrations/007_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/008_validations.sql"},
 		if len(M._uniqueTables) > 0 {"services/database/migrations/010_composite_uniques.sql"},
+		if len(M.code.state.schedules) > 0 {"services/database/migrations/020_schedule.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
 	]
@@ -876,6 +878,7 @@ _cdcTableField: "__table"
 				name: "\(D.code.meta.name)-\(pl.name)"
 				file: "docker/\(D.code.meta.name)-\(pl.name).yaml"
 			}]
+			schedules: [for _, sc in D.code.state.schedules {sc.name}]
 		}
 	}
 }
@@ -931,6 +934,37 @@ _cdcTableField: "__table"
 	_localEntities: [for e in E._entities if e.durability == "tab" || e.durability == "device" {e}]
 	_cdcTables: strings.Join([for e in _entities if e.durability == "server" {e.table}], ",")
 	_syncTables: [for e in E._serverEntities {e.table}]
+
+	// The refusal that would have caught the original bug: a cloud-tier app
+	// whose schedules nothing wakes. At compose the cluster emits its own clock,
+	// so the tier is self-evidently covered; above it the clock lives in a
+	// deploy tree this emitter does not write, and the failure is silent — the
+	// pipelines simply never run. Declaring the clock is what makes the absence
+	// loud, and `meta.clocks` is where the app says so.
+	_clockDeclared: {
+		for t in E.code.meta.tiers if t != "container" if t != "cli" {
+			if len(E.code.state.schedules) > 0 {
+				(t): true & list.Contains(E.code.meta.clocks, t)
+			}
+		}
+	}
+
+	// A schedule's two entities, checked here because #Schedule cannot see them.
+	// Both rules are the publication's: it carries "server" and excludes "live",
+	// so a tick has to be the first to be read at all, and an outcome has to be
+	// the second or the pipeline answering a tick would feed itself the answer.
+	// Unifying against the enum is not vacuous — `durability` carries no default.
+	_scheduleShape: {
+		for _, sc in E.code.state.schedules {
+			(sc.name): {
+				emits: E.code.state.entities[sc.emits.entity].durability & "server"
+				if sc.done != _|_ {
+					done:     E.code.state.entities[sc.done.entity].durability & "live"
+					distinct: true & (sc.emits.entity != sc.done.entity)
+				}
+			}
+		}
+	}
 	_pub: "\(E.code.meta.name)_cdc"
 	// The loop is the fourth component (see #DefaultLoop); it owns the verb
 	// surface and the argv doctrine.
@@ -1308,6 +1342,76 @@ _cdcTableField: "__table"
 				"services/database/migrations/010_composite_uniques.sql": {
 					format: "sql"
 					text:   strings.Join(E._uniqueLines, "\n") + "\n"
+				}
+			}
+			if len(E.code.state.schedules) > 0 {
+				// mecha's mechanism, never authored by an app: the DDL is fixed
+				// and only the seed varies. One row per declaration, and the
+				// seed is an upsert on the name so a redeploy restates the
+				// schedule without resetting the watermark it has earned.
+				"services/database/migrations/020_schedule.sql": {
+					format: "sql"
+					text: """
+						CREATE TABLE IF NOT EXISTS schedule (
+						  name                 TEXT PRIMARY KEY,
+						  cron                 TEXT NOT NULL,
+						  time_zone            TEXT NOT NULL DEFAULT 'UTC',
+						  suspended            BOOLEAN NOT NULL DEFAULT FALSE,
+						  max_lateness_seconds INTEGER NOT NULL DEFAULT 300,
+						  concurrency_policy   TEXT NOT NULL DEFAULT 'Allow'
+						                         CHECK (concurrency_policy IN ('Allow', 'Forbid')),
+						  done_entity          TEXT,
+						  done_filter          TEXT,
+						  emits_entity         TEXT NOT NULL,
+						  emits_values         JSONB NOT NULL DEFAULT '{}',
+						  last_tick_at         TIMESTAMPTZ,
+						  CHECK (concurrency_policy <> 'Forbid'
+						         OR (done_entity IS NOT NULL AND done_filter IS NOT NULL))
+						);
+
+						-- 002_grants' ALTER DEFAULT PRIVILEGES reaches every table made after
+						-- it, this one included, so without this a logged-in user can read and
+						-- rewrite the mechanism. That is not a disclosure, it is an escalation:
+						-- the ticker reads emits_entity and emits_values from here and writes
+						-- them as `service`, which bypasses RLS, so whoever can repoint the
+						-- column has rows inserted wherever they choose, once per poke — and
+						-- `suspended` stops every schedule in the app. No policy is declared
+						-- because none is wanted: `service` holds BYPASSRLS and nothing else
+						-- has any business here.
+						-- RLS is what denies them: 002 grants to the roles by name, not to
+						-- PUBLIC, so revoking PUBLIC would leave every one of them in place.
+						-- The revoke below is belt to that brace, and is conditional because
+						-- which roles exist depends on whether the app has auth.
+						ALTER TABLE schedule ENABLE ROW LEVEL SECURITY;
+						DO $$
+						DECLARE r TEXT;
+						BEGIN
+						  FOREACH r IN ARRAY ARRAY['anon', 'app_user'] LOOP
+						    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+						      EXECUTE format('REVOKE ALL ON schedule FROM %I', r);
+						    END IF;
+						  END LOOP;
+						END
+						$$;
+
+						\(strings.Join([for _, sc in E.code.state.schedules {
+							"""
+						INSERT INTO schedule (name, cron, time_zone, suspended, max_lateness_seconds,
+						                      concurrency_policy, done_entity, done_filter,
+						                      emits_entity, emits_values)
+						VALUES (\((#sqlLit & {v: sc.name}).out), \((#sqlLit & {v: sc.cron}).out), \((#sqlLit & {v: sc.timeZone}).out), \(sc.suspend), \(sc.maxLatenessSeconds),
+						        \((#sqlLit & {v: sc.concurrency}).out), \([if sc.done != _|_ {(#sqlLit & {v: E.code.state.entities[sc.done.entity].table}).out}, "NULL"][0]), \([if sc.done != _|_ {(#sqlLit & {v: sc.done.filter}).out}, "NULL"][0]),
+						        \((#sqlLit & {v: E.code.state.entities[sc.emits.entity].table}).out), \((#sqlLit & {v: json.Marshal(sc.emits.values)}).out))
+						ON CONFLICT (name) DO UPDATE SET
+						  cron = EXCLUDED.cron, time_zone = EXCLUDED.time_zone,
+						  suspended = EXCLUDED.suspended,
+						  max_lateness_seconds = EXCLUDED.max_lateness_seconds,
+						  concurrency_policy = EXCLUDED.concurrency_policy,
+						  done_entity = EXCLUDED.done_entity, done_filter = EXCLUDED.done_filter,
+						  emits_entity = EXCLUDED.emits_entity, emits_values = EXCLUDED.emits_values;
+						"""
+						}], "\n"))
+						"""
 				}
 			}
 			"services/database/migrations/006_txid.sql": {
