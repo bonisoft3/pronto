@@ -965,7 +965,8 @@ _cdcTableField: "__table"
 			}
 		}
 	}
-	_pub: "\(E.code.meta.name)_cdc"
+	_pkg: strings.Replace(E.code.meta.name, "-", "_", -1)
+	_pub: "\(_pkg)_cdc"
 	// The loop is the fourth component (see #DefaultLoop); it owns the verb
 	// surface and the argv doctrine.
 	loop: prontoloop.#Loop
@@ -1460,7 +1461,7 @@ _cdcTableField: "__table"
 								cdcMode:                   "logrepl"
 								snapshotMode:              "never"
 								"logrepl.publicationName": E._pub
-								"logrepl.slotName":        "\(E.code.meta.name)_conduit_slot"
+								"logrepl.slotName":        "\(E._pkg)_conduit_slot"
 								// Without this the http connector re-decodes the payload
 								// against the captured Avro schema and chokes post-encode.
 								"logrepl.withAvroSchema": "false"
@@ -1636,7 +1637,7 @@ _cdcTableField: "__table"
 				// keeps bayt's schema live at generate time.
 				@extern(embed)
 
-				package \(E.code.meta.name)
+				package \(E._pkg)
 
 				import (
 					bayt "github.com/bonisoft3/bayt/core:bayt"
@@ -1652,11 +1653,11 @@ _cdcTableField: "__table"
 
 				_baytData: _ @embed(file="bayt.json")
 
-				project: _\(E.code.meta.name)
-				_\(E.code.meta.name): bayt.#project & _baytData
+				project: _\(E._pkg)
+				_\(E._pkg): bayt.#project & _baytData
 
 				depManifestsIn: {[string]: _}
-				_render: (bayt.#render & {project: _\(E.code.meta.name), depManifests: depManifestsIn})
+				_render: (bayt.#render & {project: _\(E._pkg), depManifests: depManifestsIn})
 
 				"""
 		}

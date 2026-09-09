@@ -59,10 +59,8 @@ async function exportBundle(): Promise<Bundle> {
   if (JSON.stringify(keys) !== JSON.stringify(manifest)) {
     fail(`manifest and files disagree:\n  manifest: ${manifest}\n  files: ${keys}`);
   }
-  // bayt resolves a project from the `apps/<meta.name>` its export names, and
-  // meta.name is the emitted package name too, so it can carry no hyphen. The
-  // scan that would catch a mismatch runs over the build graph with no app in
-  // hand to name, which is why this is checked here instead.
+  // The scan that would catch a mismatch runs over the build graph with no app
+  // in hand to name, which is why this is checked here instead.
   const dir = (bundle.files["bayt.json"]?.data as { dir?: string } | undefined)?.dir;
   if (dir !== undefined) {
     // Compared in the spelling a bayt.json holds, which is always
@@ -70,8 +68,8 @@ async function exportBundle(): Promise<Bundle> {
     const here = Deno.realPathSync(appDir).replaceAll("\\", "/");
     if (here !== dir && !here.endsWith(`/${dir}`)) {
       fail(
-        `bayt.json names dir "${dir}" but this app is at "${here}": a project's ` +
-          `dir is apps/<meta.name>, so the directory's own name must be meta.name`,
+        `bayt.json names dir "${dir}" but this app is at "${here}": the dir a ` +
+          `project names must be the directory the app is in`,
       );
     }
   }

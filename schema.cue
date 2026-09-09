@@ -607,7 +607,9 @@ package pronto
 	}
 
 	meta: {
-		name: string
+		// Also the app's directory name, which is why a hyphen is admitted;
+		// the emission folds it where an identifier is required.
+		name: =~"^[a-z][a-z0-9-]*$"
 		// One line for the entry page's meta description. The hash router gives
 		// every route this same description, so it names the app, not a screen.
 		description: string
