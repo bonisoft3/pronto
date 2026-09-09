@@ -1,0 +1,5 @@
+say:
+  test:
+    do: "deno run --allow-read=.,../ --allow-env battery.ts --self-test"
+  lint:
+    do: "deno check --config deno.json *.ts"

@@ -1,0 +1,393 @@
+// Property and chaos testing battery for Jessie handlers and validations.
+//
+// Combines boundary-biased constraint generation with seed corpus sampling,
+// deterministic fuel metering, and deep-freeze immutability checks.
+
+import fc from "npm:fast-check@3.23.2";
+import type { ParsedExpr } from "./cel-emit.ts";
+import { arbitraryHandlerInput, arbitrarySelfTest, arbitraryValidationInput, type EntityDef, type FieldDef } from "./arbitrary.ts";
+import { type FuelHarness, instrumentJessie, instrumentSelfTest } from "./instrument.ts";
+
+const SES_URL = new URL("../omnishell/interpreter/vendor/ses.umd.min.js", import.meta.url).href;
+
+let sesBooted = false;
+export async function bootSes(): Promise<void> {
+  if (!sesBooted) {
+    if (!(globalThis as unknown as { Compartment?: unknown }).Compartment) {
+      try {
+        await import(SES_URL);
+      } catch {
+        // SES not readable under tight sandboxes (e.g. --allow-read=.)
+      }
+    }
+    const g = globalThis as unknown as { __prontoLockdown?: boolean; lockdown?: (opt: { errorTaming: string }) => void };
+    if (!g.__prontoLockdown && typeof g.lockdown === "function") {
+      g.__prontoLockdown = true;
+      g.lockdown({ errorTaming: "unsafe" });
+    }
+    sesBooted = true;
+  }
+}
+
+export function deepFreeze<T>(obj: T): T {
+  if (obj === null || typeof obj !== "object") return obj;
+  Object.freeze(obj);
+  for (const val of Object.values(obj as Record<string, unknown>)) {
+    if (val !== null && typeof val === "object" && !Object.isFrozen(val)) {
+      deepFreeze(val);
+    }
+  }
+  return obj;
+}
+
+export type BatteryOptions = {
+  numRuns?: number;
+  fuelLimit?: number;
+  seed?: number;
+};
+
+export type TestResult = {
+  name: string;
+  kind: "handler" | "validation";
+  runs: number;
+  maxFuelConsumed: number;
+  ok: boolean;
+  error?: string;
+};
+
+export async function testHandler(
+  name: string,
+  source: string,
+  inputArb: fc.Arbitrary<{ state: unknown; event: unknown }>,
+  options: BatteryOptions = {},
+): Promise<TestResult> {
+  await bootSes();
+  const fuelLimit = options.fuelLimit ?? 100_000;
+  const { harnessSource } = instrumentJessie(source, fuelLimit);
+
+  // deno-lint-ignore no-explicit-any
+  const comp = (globalThis as any).Compartment ? new (globalThis as any).Compartment({}) : null;
+  const factory = (comp ? comp.evaluate(harnessSource) : (0, eval)(harnessSource)) as (b: number) => FuelHarness;
+  const harness = factory(fuelLimit);
+
+  let maxFuel = 0;
+  try {
+    fc.assert(
+      fc.property(inputArb, ({ state, event }) => {
+        const frozenState = deepFreeze(structuredClone(state));
+        const frozenEvent = deepFreeze(structuredClone(event));
+
+        const res1 = harness.run(frozenState, frozenEvent);
+        const fuel1 = harness.getConsumed();
+        if (fuel1 > maxFuel) maxFuel = fuel1;
+
+        // Invariant: Determinism (identical inputs yield identical result and fuel)
+        const res2 = harness.run(frozenState, frozenEvent);
+        const fuel2 = harness.getConsumed();
+        if (fuel1 !== fuel2) return false;
+        if (JSON.stringify(res1) !== JSON.stringify(res2)) return false;
+
+        // Invariant: Return shape ({ updates: [...] } or primitive)
+        if (typeof res1 === "object" && res1 !== null && "updates" in res1) {
+          const updates = (res1 as { updates?: unknown }).updates;
+          if (!Array.isArray(updates)) return false;
+          for (const u of updates) {
+            if (typeof u !== "object" || u === null) return false;
+            const op = (u as { op?: unknown }).op;
+            if (typeof op !== "string" || !["put", "patch", "delete", "insert"].includes(op)) return false;
+          }
+        }
+
+        return true;
+      }),
+      { numRuns: options.numRuns ?? 100, seed: options.seed },
+    );
+
+    return {
+      name,
+      kind: "handler",
+      runs: options.numRuns ?? 100,
+      maxFuelConsumed: maxFuel,
+      ok: true,
+    };
+  } catch (err) {
+    return {
+      name,
+      kind: "handler",
+      runs: options.numRuns ?? 100,
+      maxFuelConsumed: maxFuel,
+      ok: false,
+      error: (err as Error).message,
+    };
+  }
+}
+
+export async function testValidation(
+  name: string,
+  source: string,
+  inputArb: fc.Arbitrary<{ state: unknown; event: unknown }>,
+  options: BatteryOptions = {},
+): Promise<TestResult> {
+  await bootSes();
+  const fuelLimit = options.fuelLimit ?? 100_000;
+  const { harnessSource } = instrumentJessie(source, fuelLimit);
+
+  // deno-lint-ignore no-explicit-any
+  const comp = (globalThis as any).Compartment ? new (globalThis as any).Compartment({}) : null;
+  const factory = (comp ? comp.evaluate(harnessSource) : (0, eval)(harnessSource)) as (b: number) => FuelHarness;
+  const harness = factory(fuelLimit);
+
+  let maxFuel = 0;
+  try {
+    fc.assert(
+      fc.property(inputArb, ({ state, event }) => {
+        const frozenState = deepFreeze(structuredClone(state));
+        const frozenEvent = deepFreeze(structuredClone(event));
+
+        const res1 = harness.run(frozenState, frozenEvent);
+        const fuel1 = harness.getConsumed();
+        if (fuel1 > maxFuel) maxFuel = fuel1;
+
+        // Invariant: Validation must return a boolean
+        if (typeof res1 !== "boolean") return false;
+
+        // Invariant: Determinism
+        const res2 = harness.run(frozenState, frozenEvent);
+        const fuel2 = harness.getConsumed();
+        if (fuel1 !== fuel2) return false;
+        if (res1 !== res2) return false;
+
+        return true;
+      }),
+      { numRuns: options.numRuns ?? 100, seed: options.seed },
+    );
+
+    return {
+      name,
+      kind: "validation",
+      runs: options.numRuns ?? 100,
+      maxFuelConsumed: maxFuel,
+      ok: true,
+    };
+  } catch (err) {
+    return {
+      name,
+      kind: "validation",
+      runs: options.numRuns ?? 100,
+      maxFuelConsumed: maxFuel,
+      ok: false,
+      error: (err as Error).message,
+    };
+  }
+}
+
+function readValidationsFromCue(appDir: string): Map<string, { entity: string; edges: { table: string; key: string; from: string }[] }> {
+  const map = new Map<string, { entity: string; edges: { table: string; key: string; from: string }[] }>();
+  try {
+    const text = Deno.readTextFileSync(`${appDir}/program_validations.cue`);
+    const entRe = /(\w+):\s*validations:\s*\{([\s\S]*?)\n\t\}/g;
+    let entMatch;
+    while ((entMatch = entRe.exec(text)) !== null) {
+      const entity = entMatch[1];
+      const body = entMatch[2];
+      const valRe = /"([^"]+)":\s*\{\s*edges:\s*\[([\s\S]*?)\]/g;
+      let valMatch;
+      while ((valMatch = valRe.exec(body)) !== null) {
+        const name = valMatch[1];
+        const edgesRaw = valMatch[2];
+        const edgeRe = /\{table:\s*"([^"]+)",\s*key:\s*"([^"]+)",\s*from:\s*"([^"]+)"\}/g;
+        const edges: { table: string; key: string; from: string }[] = [];
+        let edgeMatch;
+        while ((edgeMatch = edgeRe.exec(edgesRaw)) !== null) {
+          edges.push({ table: edgeMatch[1], key: edgeMatch[2], from: edgeMatch[3] });
+        }
+        map.set(name, { entity, edges });
+      }
+    }
+  } catch {
+    // cue optional
+  }
+  return map;
+}
+
+export async function runBatteryOnApp(appDir: string, options: BatteryOptions = {}): Promise<TestResult[]> {
+  const factsPath = `${appDir}/.pronto/facts.json`;
+  const celPath = `${appDir}/.pronto/cel.json`;
+
+  const factsText = await Deno.readTextFile(factsPath);
+  const facts = JSON.parse(factsText);
+
+  let irs = new Map<string, ParsedExpr>();
+  try {
+    const celText = await Deno.readTextFile(celPath);
+    irs = new Map(Object.entries(JSON.parse(celText)));
+  } catch {
+    // cel.json optional if no constraints
+  }
+
+  const entities: Record<string, EntityDef> = {};
+  for (const e of facts.entity ?? []) {
+    entities[e.name] = {
+      table: e.table,
+      durability: e.durability,
+      fields: [],
+    };
+  }
+  for (const f of facts.field ?? []) {
+    if (entities[f.entity]) {
+      const fieldDef: FieldDef = {
+        name: f.name,
+        type: f.type ?? undefined,
+        cel: f.cel ?? undefined,
+      };
+      entities[f.entity].fields?.push(fieldDef);
+    }
+  }
+
+  const cueValidations = readValidationsFromCue(appDir);
+  const results: TestResult[] = [];
+  const modules = facts.handler ?? [];
+
+  for (const mod of modules) {
+    const modPath = `${appDir}/${mod.path}`;
+    const source = await Deno.readTextFile(modPath);
+    const isValidation = mod.path.startsWith("shell/validations/");
+
+    if (isValidation) {
+      const valName = mod.path.replace(/^shell\/validations\//, "").replace(/\.js$/, "");
+      const decl = cueValidations.get(valName);
+      const targetEntity = decl ? entities[decl.entity] : Object.values(entities)[0];
+      const edges = decl?.edges ?? [];
+      const inputArb = arbitraryValidationInput(targetEntity, edges, entities, irs);
+      const res = await testValidation(mod.path, source, inputArb, options);
+      results.push(res);
+    } else {
+      const inputArb = arbitraryHandlerInput(entities, undefined, irs);
+      const res = await testHandler(mod.path, source, inputArb, options);
+      results.push(res);
+    }
+  }
+
+  return results;
+}
+
+export async function batterySelfTest(): Promise<string[]> {
+  const failures: string[] = [
+    ...arbitrarySelfTest(),
+    ...instrumentSelfTest(),
+  ];
+
+  const cleanHandler = `
+(state, event) => {
+  const rows = state.rows?.game ?? [];
+  const want = String(event.id ?? "");
+  if (want === "") return { updates: [] };
+  const updates = [];
+  for (const g of rows) {
+    const should = g.id === want ? "yes" : "no";
+    if ((g.current ?? "no") !== should) {
+      updates.push({ op: "patch", entity: "game", id: g.id, row: { current: should } });
+    }
+  }
+  return { updates };
+};
+`;
+
+  const inputArb = fc.record({
+    state: fc.record({
+      rows: fc.record({
+        game: fc.array(
+          fc.record({
+            id: fc.string({ minLength: 1, maxLength: 4 }),
+            current: fc.constantFrom("yes", "no"),
+          }),
+          { minLength: 0, maxLength: 3 },
+        ),
+      }),
+    }),
+    event: fc.record({
+      id: fc.string({ minLength: 0, maxLength: 4 }),
+    }),
+  });
+
+  // Regression: Clean handler must execute deterministically and register fuel consumption
+  const resClean = await testHandler("clean-resume", cleanHandler, inputArb, { numRuns: 30 });
+  if (!resClean.ok) {
+    failures.push(`battery clean handler failed: ${resClean.error}`);
+  }
+  if (resClean.maxFuelConsumed <= 0) {
+    failures.push("battery clean handler consumed 0 fuel");
+  }
+
+  // Regression: In-place mutations to state must throw TypeError via deepFreeze
+  const mutatingHandler = `
+(state, event) => {
+  state.rows.game.push({ id: "leak" });
+  return { updates: [] };
+};
+`;
+  const resMut = await testHandler("mutating-handler", mutatingHandler, inputArb, { numRuns: 10 });
+  if (resMut.ok) {
+    failures.push("battery mutating handler was not rejected by deep freeze");
+  }
+
+  // Regression: Non-terminating loop must exhaust fuel and throw RangeError
+  const loopHandler = `(state, event) => { while (true) {} };`;
+  const resLoop = await testHandler("infinite-loop-handler", loopHandler, inputArb, { numRuns: 5, fuelLimit: 500 });
+  if (resLoop.ok || !resLoop.error?.includes("Jessie fuel limit exceeded")) {
+    failures.push("battery infinite loop was not stopped by fuel exhaustion");
+  }
+
+  // Regression: Validations must return boolean and evaluate deterministically
+  const cleanValidation = `
+(state, event) => {
+  const articles = state.rows?.article ?? [];
+  return articles.every((a) => a.author_id !== event.row?.user_id);
+};
+`;
+  const valInputArb = fc.record({
+    state: fc.record({
+      rows: fc.record({
+        article: fc.array(
+          fc.record({ author_id: fc.string({ minLength: 1, maxLength: 4 }) }),
+          { minLength: 0, maxLength: 3 },
+        ),
+      }),
+    }),
+    event: fc.record({
+      row: fc.record({ user_id: fc.string({ minLength: 1, maxLength: 4 }) }),
+    }),
+  });
+
+  const resVal = await testValidation("clean-validation", cleanValidation, valInputArb, { numRuns: 30 });
+  if (!resVal.ok) {
+    failures.push(`battery clean validation failed: ${resVal.error}`);
+  }
+
+  return failures;
+}
+
+if (import.meta.main) {
+  const target = Deno.args[0];
+  if (!target || target === "--self-test") {
+    const fails = await batterySelfTest();
+    if (fails.length > 0) {
+      for (const f of fails) console.error(`FAIL ${f}`);
+      Deno.exit(1);
+    }
+    console.log("battery self-test passed");
+    Deno.exit(0);
+  }
+
+  const results = await runBatteryOnApp(target);
+  let failed = 0;
+  for (const r of results) {
+    if (r.ok) {
+      console.log(`PASS ${r.name} (${r.runs} runs, max ${r.maxFuelConsumed} steps)`);
+    } else {
+      console.error(`FAIL ${r.name}: ${r.error}`);
+      failed++;
+    }
+  }
+  if (failed > 0) Deno.exit(1);
+}

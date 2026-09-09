@@ -803,6 +803,13 @@ _cdcTableField: "__table"
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
 				for name, c in D.terminal.surface.checks {(name): c}
+				fuel: {
+					verb: "test"
+					cmds: [
+						"deno run --allow-read=.,../../plugins --allow-env ../../plugins/pronto/battery.ts --self-test",
+					]
+					note: "fuel metering and deterministic chaos testing battery"
+				}
 			}
 		}
 	}
