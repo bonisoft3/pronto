@@ -63,6 +63,7 @@ import {
   slotRegions,
   type StopRegion,
   templateArity,
+  undeclaredSlot,
   unknownColumns,
   unwitnessedControls,
   unwitnessedSlot,
@@ -358,6 +359,10 @@ export async function derive(appDir: string): Promise<void> {
           `${name}.html: slot region "${slot.table}" (filter ${JSON.stringify(slot.filter ?? "")}) ` +
             `may bind more than one row: ${why}`,
         );
+      }
+      const unsaid = undeclaredSlot(slot);
+      if (unsaid !== null) {
+        fail(`${name}.html: slot region "${slot.table}" (filter ${JSON.stringify(slot.filter ?? "")}) ${unsaid}`);
       }
     }
     for (const kinded of kindedRegions(html)) {
