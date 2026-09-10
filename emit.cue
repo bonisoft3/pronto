@@ -800,6 +800,10 @@ _cdcTableField: "__table"
 			// Both runtimes declare checks about their own surfaces; the loop
 			// routes each to the verb it names. A name collision across the two
 			// is a conflict here rather than a silent overwrite.
+			verbs: {
+				for name, c in D.cluster.surface.verbs {(name): c}
+				for name, c in D.terminal.surface.verbs {(name): c}
+			}
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
 				for name, c in D.terminal.surface.checks {(name): c}
