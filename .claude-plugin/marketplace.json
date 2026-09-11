@@ -1,0 +1,45 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "bonisoft3-pronto",
+  "description": "The outer loop, plus the third-party plugins a turn borrows — pinned, because nothing here ships with them",
+  "owner": {
+    "name": "bonisoft3",
+    "url": "https://www.bonisoft3.com/"
+  },
+  "plugins": [
+    {
+      "name": "pronto",
+      "description": "The outer loop. Drives one turn of design, the sayt TDD loop, and review, routing each obligation to the budget that can settle it.",
+      "version": "0.1.0",
+      "author": {
+        "name": "bonisoft3",
+        "url": "https://www.bonisoft3.com/"
+      },
+      "source": "./",
+      "category": "development",
+      "tags": [
+        "outer-loop",
+        "design",
+        "review",
+        "sayt",
+        "workflow"
+      ]
+    },
+    {
+      "name": "frontend-design",
+      "description": "Distinctive, production-grade frontend interfaces. A turn borrows it at step 1, where the job is generating a canvas from nothing — never at the designer seat, which reviews against ir.html and the token scale.",
+      "version": "1.1.0",
+      "author": {
+        "name": "Prithvi Rajasekaran & Alexander Bricken"
+      },
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-code.git",
+        "path": "plugins/frontend-design",
+        "ref": "main",
+        "sha": "e62465d553ecbf1697219ffbb3c11b4fef14d5bf"
+      },
+      "category": "development"
+    }
+  ]
+}

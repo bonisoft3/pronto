@@ -1,5 +1,18 @@
 say:
   test:
+    # The shorthand replaces the builtin's command; the rule below sorts ahead of
+    # it on priority, because the builtin carries stop:true and a rule sorted
+    # after it is emitted and never runs.
     do: "deno run --allow-read=.,../ --allow-env battery.ts --self-test"
+    rulemap:
+      loop:
+        priority: -1
+        cmds:
+          - do: "deno run --allow-read=. check-loop.ts --self-test"
+  # lint is not a #verb: it carries its own rulemap with no builtin wiring, so a
+  # `do:` here type-checks, exports, and never reaches lint.rules.
   lint:
-    do: "deno check --config deno.json *.ts"
+    rulemap:
+      types:
+        cmds:
+          - do: "deno check --config deno.json *.ts"
