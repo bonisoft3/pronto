@@ -9,6 +9,12 @@ say:
         priority: -1
         cmds:
           - do: "deno run --allow-read=. check-loop.ts --self-test"
+      # emit.cue's output pinned against a small program; testdata/ is outside
+      # every `./...` pattern, so no app or scan evaluates it.
+      emit:
+        priority: -1
+        cmds:
+          - do: "cue vet -c ./testdata/emit"
   # lint is not a #verb: it carries its own rulemap with no builtin wiring, so a
   # `do:` here type-checks, exports, and never reaches lint.rules.
   lint:

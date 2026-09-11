@@ -103,9 +103,13 @@ review (the working tree, or the paths this turn changed) and `ir` is the ir
 they review it against. The script refuses to run without both rather than
 review a placeholder.
 
-Do not fan out step 3. Verbs contend on one tree, one compose stack and one docker
-daemon; parallel builds collide and the inner loop is already fast. The parallelism
-belongs to the reviewable budget, which is exactly where the cost is.
+Whether to split step 3 across worktrees is a case-by-case call, made with Claude
+Code's own machinery: a subagent with worktree isolation. When work from separate
+worktrees or branches comes back together, merge only the hand-written sources —
+the brief, `ir.html`, the app's own `.cue`, handlers, stylesheets and tests. Never
+merge a file `write.ts` emits: resolve a conflict in one by taking either side,
+then re-run `write.ts` and re-pin the ir's sha256. The same holds when a platform
+branch regenerated an app's emissions.
 
 Each seat's blocking findings re-enter step 3 as work. The platform advisor is
 advisory forever — read it, never gate on it.

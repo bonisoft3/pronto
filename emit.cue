@@ -608,6 +608,11 @@ _cdcTableField: "__table"
 	// reconciles surviving browser-tier rows against them at first load.
 	_partialUniques: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where != _|_ {cols: u.cols, where: u.where}]}}
 	_partialTables: [for t, ps in S._partialUniques if len(ps) > 0 {t}]
+	// A local table's `required: false` columns and their types, which the
+	// terminal fills on stored rows that predate them (data-crud.js fill).
+	// Server tables are left out: Postgres answers a missing value as null.
+	_optional: {for _, e in S.code.state.entities if S._local[e.table] != _|_ {(e.table): [for f in e.fields if !f.required {name: f.name, type: f.type}]}}
+	_optionalTables: [for t, cs in S._optional if len(cs) > 0 {t}]
 	_validatedTables: [for _, e in S.code.state.entities if S._tables[e.table] != _|_ if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	// The seeds #appMigrations.seeded leaves out: a browser tier has no
 	// migration to render into, so the terminal is told the rows instead.
@@ -684,6 +689,13 @@ _cdcTableField: "__table"
 			partialUniques: {
 				for t, ps in S._partialUniques if len(ps) > 0 {
 					(t): ps
+				}
+			}
+		}
+		if len(S._optionalTables) > 0 {
+			optional: {
+				for t, cs in S._optional if len(cs) > 0 {
+					(t): cs
 				}
 			}
 		}
