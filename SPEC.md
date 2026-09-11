@@ -14,6 +14,20 @@ plus their satellites: `acceptance.md` (transcluded checklist), `DESIGN.md`
 (visual identity), `brief.html` (presentation), and agent cards under
 `plugins/pronto/agents/`.
 
+### DESIGN.md
+
+The role layer, and the app's one design declaration. Its YAML frontmatter —
+between the file's first two `---` lines — is the design block: exactly the
+fields of pronto's `#Design` (`preset`, `colors`, `dark`, `rounded`,
+`spacing`, `motion`, `control`, `measures`, `type`, `component`, `shell`),
+every one optional, the named preset supplying the rest. It carries the app's
+own overrides and additions, `var(--…)` references included, never the
+resolved palette. `program.cue` embeds the file and derives its design from it
+through `#DesignMd`, restating nothing; a frontmatter key `#Design` lacks, a
+value of the wrong shape, or a file without a frontmatter is an error at
+`cue vet`. The body is the argument for the values — the comparison, the
+verdicts, and what each token means — in prose.
+
 ## brief.md
 
 The product-altitude source: a plain markdown file. The compiler reads

@@ -190,6 +190,47 @@ rather than a doc's furniture. That doc keeps each one's argument.
 - **Where does presence live?** Shared but not durable; neither tier owns that
   quadrant.
 
+## A second whole vocabulary
+
+`docs/2026-09-09-a-scale-is-a-quotation.md` refuses an app seam on `#Design` until
+a second whole vocabulary exists that an app measurably lands on more than the
+shipping one. Primer Primitives 11.10.0 now supplies two of the nine dimensions:
+`text` and `leading` quote its base typography ladder, and `#scale` carries the
+measurement that decided them.
+
+Four of its other ladders stay unadopted, each because Open Props or pronto
+already occupies the dimension and a replacement has to beat what is there:
+
+- `--base-size-*`, 33 steps, against Open Props' seventeen in `space`.
+- `--base-duration-*` and `--base-easing-*`, 12 and 5, against Open Props'
+  eighty-one curves in `motion`.
+- `--borderWidth-*` against `rule`, which carries a units argument on top:
+  `--borderWidth-thin` is `0.0625rem` where `--border-size-1` is `1px`.
+- the `zIndex` ladder against `layer`.
+
+`#Scale.joined` states that as a constraint: two buckets in one joining dimension
+fail `cue vet`, so each argument has to be won before the composition compiles.
+
+## Layout by construction
+
+`docs/2026-09-08-design-scale-and-token-oracle.md` argues it under "Layout is what
+a vocabulary cannot constrain": a layout vocabulary reimplemented from Every
+Layout's primitives, spacing owned by the parent, binding new screens. Considered
+and not discarded; it is a new screen vocabulary, larger than the change that
+found the need for it.
+
+## Tokens as DTCG
+
+`docs/2026-09-08-design-scale-and-token-oracle.md` decides it under "The next
+vocabulary": DTCG at the platform with two rules stricter than the spec, vendors
+chosen per app in a resolver document, shadcn's names as the role contract,
+appearance as modifiers, Tailwind v4 for rungs and class grammar, and
+`apps/materialweb` as the reference composition; `apps/primer` reaches Primer's
+DTCG alone. Tailwind's palette ships static, `dark:` is how an app twins it over a
+computed default, an app claims dark only if it covers it, and rendered markdown
+takes `prose`. The doc's "Order of work" sequences it and records the RealWorld
+spike that put identity ahead of vocabulary.
+
 ## prontoui
 
 Designed in full in `docs/2026-07-19-prontoui.md`, no code. The first app written in Pronto

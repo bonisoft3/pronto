@@ -11,8 +11,8 @@
 # door is https, on a certificate mkcert issued and the developer trusted once.
 # "just setup" writes the pair (the cluster declares it as a setup check);
 # "mise exec -- mkcert -install" trusts it. The plain listener stays bound
-# INSIDE the container for the healthcheck and is no longer published, so there
-# is no plain-http path left to drift onto.
+# INSIDE the container for the healthcheck and is not published, so there is no
+# plain-http path to drift onto.
 (app) {
   # The interpreter ships as plain ES modules plus a vendored data-plane
   # driver measured in hundreds of KiB; compression at the door is what keeps

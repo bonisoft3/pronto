@@ -11,6 +11,7 @@
 import type { IrAccept, IrPath } from "./acceptance.ts";
 import type { Edge, Node } from "./diagrams.ts";
 import { labelledKind } from "./diagrams.ts";
+import type { Exception, Literal, Step } from "./styles.ts";
 
 export type Facts = Record<string, Record<string, unknown>[]>;
 
@@ -315,11 +316,112 @@ export function mergeFacts(...parts: Facts[]): Facts {
  */
 export function styleFacts(
   owned: Iterable<string>,
-  screens: { path: string; tokens: Iterable<string> }[],
+  app: { path: string; tokens: Iterable<string> }[],
 ): Facts {
   return {
     owned_token: [...owned].map((token) => ({ token })),
-    screen_token: screens.flatMap((s) => [...s.tokens].map((token) => ({ path: s.path, token }))),
+    app_token: app.flatMap((s) => [...s.tokens].map((token) => ({ path: s.path, token }))),
+  };
+}
+
+/**
+ * The literal rule's two sides, both off one cue export: what the shared layer
+ * publishes under a name, and what an app's stylesheets write as a number.
+ *
+ * `exception_reason` carries the closed enum so the query joins against data
+ * rather than restating the list, the way `denied_identifier` already does; and
+ * `design_budget` carries the declared pending count, because a ceiling the
+ * query invented would not be a diff a reviewer sees.
+ */
+export function literalFacts(
+  steps: Step[],
+  sheets: { path: string; literals: Literal[]; exceptions: Exception[] }[],
+  reasons: readonly string[],
+  pendingLiterals: number,
+): Facts {
+  return {
+    scale_step: steps,
+    app_literal: sheets.flatMap((s) => s.literals.map((l) => ({ path: s.path, ...l }))),
+    literal_exception: sheets.flatMap((s) => s.exceptions.map((e) => ({ path: s.path, ...e }))),
+    exception_reason: reasons.map((reason) => ({ reason })),
+    design_budget: [{ pending_literals: pendingLiterals }],
+  };
+}
+
+/**
+ * The bytes a vendored vocabulary declares, and the names this platform refuses
+ * of them. One hop upstream of the design.css rules below: those hold each
+ * app's block equal to the export, and these hold the export equal to the
+ * archive it quotes.
+ */
+export function vendorFacts(vendored: {
+  sources: { name: string; origin: string; version: string }[];
+  declarations: { source: string; token: string; value: string }[];
+  exclusions: { source: string; pattern: string; reason: string }[];
+}): Facts {
+  return {
+    vendor_source: vendored.sources.map(({ name, origin, version }) => ({ name, origin, version })),
+    vendor_declaration: vendored.declarations,
+    vendor_exclusion: vendored.exclusions,
+  };
+}
+
+/**
+ * What #scale publishes, and where each step's bytes are answerable. A step's
+ * `source` is its bucket's, so the quotation joins it to the archive its own
+ * bucket names rather than to whichever tree declares the name; `kind` says
+ * whether there is an archive at all.
+ */
+export function scaleFacts(
+  sources: { name: string; kind: string; origin: string; version: string }[],
+  published: { token: string; value: string; source: string; kind: string }[],
+): Facts {
+  return {
+    scale_source: sources,
+    scale_declaration: published,
+  };
+}
+
+/**
+ * The emitted design.css read back as rows. It comes out of the same export as
+ * the CSS itself, so these grade the emission rather than whatever happens to be
+ * checked in.
+ *
+ * `block` is the selector a token is declared under; the emitter owns exactly
+ * two — `:where(html)` for the rungs and `:root` for the roles — and the
+ * invariants name the third if one ever appears.
+ */
+export function designCssFacts(
+  declarations: {
+    selector: string;
+    token: string;
+    value: string;
+    colored: boolean;
+    refs: string[];
+  }[],
+): Facts {
+  return {
+    design_declaration: declarations.map((d) => ({
+      block: d.selector,
+      token: d.token,
+      value: d.value,
+      colored: d.colored,
+    })),
+    design_reference: declarations.flatMap((d) =>
+      d.refs.map((ref) => ({ block: d.selector, token: d.token, ref }))
+    ),
+  };
+}
+
+/** What the image serves, and what each stylesheet asks it for; invariants.sql's
+ * import rule says why that is a join. */
+export function importFacts(
+  served: { file: string; target: string }[],
+  imports: { path: string; target: string; line: number; resolved: string | null }[],
+): Facts {
+  return {
+    served_file: served,
+    app_import: imports,
   };
 }
 
@@ -336,4 +438,10 @@ export function jessieFactRows(
     handler_reference: modules.flatMap((m) => m.references.map((name) => ({ path: m.path, name }))),
     handler: modules.map((m) => ({ path: m.path, completion: m.completion })),
   };
+}
+
+/** A SHA-256 digest as lowercase hex, the one spelling every artifact row uses. */
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
 }

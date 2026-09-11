@@ -1,0 +1,11 @@
+{
+  "name": "primer",
+  "origin": "@primer/primitives",
+  "version": "11.10.0",
+  "license": "MIT, (c) GitHub, Inc.",
+  "url": "https://registry.npmjs.org/@primer/primitives/-/primitives-11.10.0.tgz",
+  "integrity": "sha512-ihZxIst4Izry284StKFjpbYvX6R/IBFTLu+qiuAmR93PsKF2hdjoabhSYwKI8iCxOUx94jVP55bI3NoY7STjYQ==",
+  "files": [
+    "dist/css/base/typography/typography.css"
+  ]
+}

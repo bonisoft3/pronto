@@ -26,7 +26,19 @@ import { enumValues } from "./cel-emit.ts";
 import { parseCel } from "./cel.ts";
 import { celFixtures } from "./cel-fixtures.ts";
 import { DENIED, jessieFacts, jessieSelfTest, splitCompletion } from "./jessie.ts";
-import { ownedTokens, styleSelfTest } from "./styles.ts";
+import {
+  EXCEPTION_REASONS,
+  type Scale,
+  ownedTokens,
+  resolveImports,
+  scaleDeclarations,
+  scaleSources,
+  scaleSteps,
+  scanStylesheet,
+  styleSelfTest,
+  tokenDeclarations,
+} from "./styles.ts";
+import { scalesSelfTest } from "./scales.ts";
 import { celSites, renderCel, renderIr } from "./derive-cel.ts";
 import { renderValidations, resolveEdges, type VEntity, validationLint, validationsSelfTest } from "./validations.ts";
 import { claims, irAccepts, irPaths, LEDGER } from "./acceptance.ts";
@@ -35,15 +47,20 @@ import { irDiagrams } from "./diagrams.ts";
 import {
   acceptanceFacts,
   artifactFacts,
+  designCssFacts,
+  importFacts,
   mergeFacts,
   jessieFactRows,
   styleFacts,
+  literalFacts,
   bijectionFacts,
   celFacts,
   diagramFacts,
   type FactChart,
   programFacts,
   renderFacts,
+  scaleFacts,
+  sha256Hex,
 } from "./facts.ts";
 // The rules themselves live with the vocabulary they check — the terminal
 // publishes its markup's grammar AND its grammar's rules (omnishell/lint.ts);
@@ -224,6 +241,17 @@ export async function derive(appDir: string): Promise<void> {
         "decisions: {for k, v in code.meta.decisions {(k): v.ir}}, " +
         "tests: {for k, t in code.meta.tests {(k): t.accepts}}, " +
         "paths: {for k, s in code.surface.screens {(k): {for n, p in s.paths {(n): p.accepts}}}}, " +
+        // Both sides of the literal rule's join, out of this one export, and the
+        // shared stylesheets the emission itself carries. Read off disk instead, a missing or stale file
+        // would yield an empty step set and a green lint. The checked-in copies are held equal to these by the
+        // artifact hashes, so nothing is lost by grading the emission.
+        "scale: out.scale, design: code.surface.design, " +
+        "designCss: out.files[\"shell/design.css\"].text, " +
+        "shellCss: out.files[\"shell/shell.css\"].text, " +
+        "entry: out.terminal.surface.entry, " +
+        "statics: [for s in out.cluster.meta.statics {file: s.file, target: s.target}], " +
+        "shared: {for k, s in code.surface.screens {(k): s.files.shared}}, " +
+        "pendingLiterals: code.meta.design.pendingLiterals, " +
         // `program` rather than `code`: a field named for the value it holds would
         // shadow it inside the struct literal and export an incomplete `_`.
         "program: code}",
@@ -243,6 +271,14 @@ export async function derive(appDir: string): Promise<void> {
     decisions: Record<string, string>;
     tests: Record<string, string[]>;
     paths: Record<string, Record<string, string[]>>;
+    scale: Scale;
+    design: Record<string, Record<string, string>>;
+    designCss: string;
+    shellCss: string;
+    entry: string;
+    statics: { file: string; target: string }[];
+    shared: Record<string, string[]>;
+    pendingLiterals: number;
     program: Record<string, unknown>;
   } = JSON.parse(new TextDecoder().decode(exported.stdout));
   const entities = exp.entities;
@@ -577,15 +613,36 @@ export async function derive(appDir: string): Promise<void> {
   }
   // The palette's one declaration: the shared layer owns a token, a screen may
   // only consume it. Read here rather than at lint so the rule is a join.
-  const shared = (await Promise.all(
-    ["shell/shell.css", "shell/design.css"].map((f) => Deno.readTextFile(`${appDir}/${f}`).catch(() => "")),
-  )).join("\n");
-  const screenTokens: { path: string; tokens: Iterable<string> }[] = [];
-  for (const s of screens) {
-    const rel = `shell/screens/${s.name}.css`;
-    const css = await Deno.readTextFile(`${appDir}/${rel}`).catch(() => null);
-    if (css !== null) screenTokens.push({ path: rel, tokens: ownedTokens(css) });
+  const shared = `${exp.shellCss}\n${exp.designCss}`;
+  // The screens' own stylesheets and every shared one a screen names. The shared
+  // set is a declaration (#Screen.files.shared) rather than a directory walk, so
+  // a path in it that does not open is a stylesheet the program says exists and
+  // does not — never a file to skip, which would drop it from both token rules.
+  const sharedPaths = new Set(Object.values(exp.shared).flat());
+  const appCss: { path: string; css: string }[] = [];
+  for (const rel of [...screens.map((s) => `shell/screens/${s.name}.css`), ...[...sharedPaths].sort()]) {
+    appCss.push({ path: rel, css: await Deno.readTextFile(`${appDir}/${rel}`).catch(() => fail(`${rel} does not open`)) });
   }
+  const scanned = appCss.map(({ path, css }) => ({ path, ...scanStylesheet(css) }));
+  const appTokens = scanned.map(({ path, tokens }) => ({ path, tokens }));
+  const literals = scanned.map(({ path, literals, exceptions }) => ({ path, literals, exceptions }));
+  // Where each stylesheet's imports resolve from. A screen's CSS is injected as
+  // a <style> in the document, so an @import in it resolves against the
+  // document's directory (#Screen.files.shared says so, and is what makes
+  // `shared/screen.css` the spelling); a shared sheet is reached as a stylesheet
+  // in its own right, so its own served directory is the base.
+  const servedAt = new Map(exp.statics.map((s) => [s.file, s.target]));
+  const servedDir = (file: string): string => {
+    const target = servedAt.get(file) ??
+      fail(`${file} is read as a stylesheet and served nowhere, so nothing can reach it`);
+    return target.slice(0, target.lastIndexOf("/"));
+  };
+  const documentDir = servedDir(exp.entry);
+  const imports = resolveImports([
+    ...appCss.map((s) => ({ ...s, base: sharedPaths.has(s.path) ? servedDir(s.path) : documentDir })),
+    { path: "shell/design.css", css: exp.designCss, base: documentDir },
+    { path: "shell/shell.css", css: exp.shellCss, base: documentDir },
+  ]);
 
   // What each declared handler reaches for. Read here so the denylist is a
   // join rather than a scan repeated per file at lint.
@@ -600,14 +657,12 @@ export async function derive(appDir: string): Promise<void> {
 
   // Hashed after every write above, so a derived file's row is what derive left
   // on disk and a source's row is what it read.
-  const sha = async (path: string) => {
-    const bytes = await Deno.readFile(`${appDir}/${path}`);
-    return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
-      .map((b) => b.toString(16).padStart(2, "0")).join("");
-  };
+  const shaText = (text: string) => sha256Hex(new TextEncoder().encode(text));
+  const sha = async (path: string) => sha256Hex(await Deno.readFile(`${appDir}/${path}`));
   const artifacts: { path: string; sha256: string; derived: boolean }[] = [];
   for (const [path, derived] of [
     ["program.cue", false],
+    ["DESIGN.md", false],
     [exp.ir, false],
     [LEDGER, false],
     [".pronto/cel.json", true],
@@ -617,6 +672,18 @@ export async function derive(appDir: string): Promise<void> {
   ] as [string, boolean][]) {
     artifacts.push({ path, sha256: await sha(path), derived });
   }
+  // The stylesheets the rules above read, so that editing one and not
+  // regenerating is a stale-row finding rather than a green literal lint over
+  // yesterday's numbers. A screen's row hashes the STRING scanned rather than a
+  // second read of the path: re-reading here would let a write between the scan
+  // and the hash produce a row that matches a file no rule was derived from,
+  // which is the race the guard exists to close.
+  for (const { path, css } of appCss) artifacts.push({ path, sha256: await shaText(css), derived: false });
+  // design.css is emitted, so it is graded by the declaration rules rather than
+  // scanned, and its row exists only to catch a hand-edit to the emission.
+  // Hashed off disk because that is the artifact the claim is about, and
+  // because write.ts prefixes a provenance header the export does not carry.
+  artifacts.push({ path: "shell/design.css", sha256: await sha("shell/design.css"), derived: true });
 
   await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
   await Deno.writeTextFile(
@@ -627,7 +694,11 @@ export async function derive(appDir: string): Promise<void> {
       bijection,
       artifactFacts(artifacts),
       celFacts(sites, [...irs.keys()]),
-      styleFacts(ownedTokens(shared), screenTokens),
+      styleFacts(ownedTokens(shared), appTokens),
+      literalFacts(scaleSteps(exp.scale, exp.design), literals, EXCEPTION_REASONS, exp.pendingLiterals),
+      scaleFacts(scaleSources(exp.scale), scaleDeclarations(exp.scale)),
+      designCssFacts(tokenDeclarations(exp.designCss)),
+      importFacts(exp.statics, imports),
       jessieFactRows(DENIED, modules),
       { enum_value },
       diagramFacts(diagrams.nodes, diagrams.edges),
@@ -760,8 +831,11 @@ function selfTest(): void {
   for (const f of jessieFailures) console.error(`FAIL ${f}`);
   const validationFailures = validationsSelfTest();
   for (const f of validationFailures) console.error(`FAIL ${f}`);
+  const scaleFailures = scalesSelfTest();
+  for (const f of scaleFailures) console.error(`FAIL ${f}`);
 
-  let failed = celFindings.length + styleFailures.length + jessieFailures.length + validationFailures.length;
+  let failed = celFindings.length + styleFailures.length + jessieFailures.length + validationFailures.length +
+    scaleFailures.length;
   if (!rendered.includes(wantKey)) {
     failed++;
     console.error(`FAIL a backslash in a decision id:\n  got  ${JSON.stringify(rendered.split("_irNotes: {")[1]?.split("\n")[1])}\n  want ${JSON.stringify(wantKey)}`);
@@ -832,7 +906,7 @@ function selfTest(): void {
   if (failed > 0) Deno.exit(1);
   console.error(
     `derive self-test: ${notes.length + scans.length + maps.length + 1} derivation cases, ` +
-      "the cel fixtures, the style scanner, the jessie scanner and the validation resolver passed",
+      "the cel fixtures, the style scanner, the jessie scanner, the validation resolver and the tree reader passed",
   );
 }
 

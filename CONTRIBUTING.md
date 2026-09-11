@@ -7,8 +7,14 @@ individual decisions. This page is the map between them.
 
 A note on one filename: `DESIGN.md` is **an app's** design system here, not
 pronto's architecture. `emit.cue` lists it beside `brief.html`, `ir.html` and
-`acceptance.md` as a ladder satellite, and `schema.cue` reads the design
-tokens out of its frontmatter. Pronto's own architecture is this file.
+`acceptance.md` as a ladder satellite, and its YAML frontmatter **is** the
+app's design block: exactly the fields of `schema.cue`'s `#Design`, every one
+optional, read by `#DesignMd` from the text `program.cue` embeds
+(`@embed(file="DESIGN.md", type=text)`), so the program restates none of it. A
+key `#Design` lacks, or a file with no frontmatter, fails `cue vet`. The body
+is the argument for the values. `derive.ts` hashes the file as a source, so an
+edit without a rebuild is a stale-row finding at `check-facts`. Pronto's own
+architecture is this file.
 
 ## The ladder, and what is deterministic about it
 

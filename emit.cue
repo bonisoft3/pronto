@@ -26,6 +26,7 @@ import (
 	prontobuild "github.com/bonisoft3/pronto/builders:bayt"
 	"github.com/bonisoft3/pronto/clusters:mecha"
 	prontoloop "github.com/bonisoft3/pronto/loops:sayt"
+	"github.com/bonisoft3/pronto/scales"
 	"github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
@@ -572,6 +573,13 @@ _cdcTableField: "__table"
 #shellConfig: S={
 	code: #App
 	migrations: [...string]
+	// The terminal's measured floors, carried into the file the visual battery
+	// reads. #scale publishes the same struct as --min-*, so the rung an author
+	// is sent to and the threshold a tap target is held to are one declaration.
+	floors: [string]: int
+	// Whether the cluster runs an auth and a crud service: #serverOn, the
+	// predicate that emits them, carried into the file the visual battery reads.
+	server: bool
 	_tables: {for _, s in S.code.surface.screens for r in s.reads {(S.code.state.entities[r.entity].table): true}}
 	_tablePath: {for _, s in S.code.surface.screens for r in s.reads {
 		(S.code.state.entities[r.entity].table): S.code.state.entities[r.entity].durability
@@ -595,7 +603,8 @@ _cdcTableField: "__table"
 	// data-live region, mutated by a form — but the terminal builds them from
 	// a local factory instead of an Electric shape, so they cannot be listed
 	// among the tables it subscribes.
-	_local: {for t, p in S._tablePath if p == "tab" || p == "device" {(t): p}}
+	_localTables: {for _, e in S.code.state.entities if !e.server {(e.table): true}}
+	_local: {for t, p in S._tablePath if S._localTables[t] != _|_ {(t): p}}
 	_tableKeys: {for _, s in S.code.surface.screens for r in s.reads {
 		(S.code.state.entities[r.entity].table): [for f in S.code.state.entities[r.entity].fields if f.pk {f.name}][0]
 	}}
@@ -633,7 +642,9 @@ _cdcTableField: "__table"
 		}
 	}}
 	out: {
-		app: S.code.meta.name
+		app:    S.code.meta.name
+		floors: S.floors
+		server: S.server
 		if S.code.capabilities.auth != _|_ {
 			auth: S.code.capabilities.auth
 		}
@@ -762,21 +773,30 @@ _cdcTableField: "__table"
 	}
 }
 
+// Whether an app's cluster keeps server-side state: an entity on a server tier,
+// or auth, which is identity the cluster keeps. The one predicate the cluster's
+// services, its migrations and the emitted shell.yaml all follow.
+#serverOn: S={
+	// Only what the answer reads, so a caller hands over no seed rows.
+	servers: [...bool]
+	auth:    bool
+	out:     list.Contains(S.servers, true) || S.auth
+}
+
 #appMigrations: M={
 	code: #App
 	// Gates 010 on the same set _uniqueLines renders: server-tier uniques
 	// (where the schema admits no `where`), so the list never names a
 	// migration the bundle does not hold.
-	_uniqueTables: [for _, e in M.code.state.entities if e.durability != "tab" && e.durability != "device" if len(e.uniques) > 0 {e.table}]
-	_validatedTables: [for _, e in M.code.state.entities if e.durability != "tab" && e.durability != "device" if len([for n, _ in e.validations {n}]) > 0 {e.table}]
-	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.durability != "tab" && e.durability != "device" {e}]
+	_uniqueTables: [for _, e in M.code.state.entities if e.server if len(e.uniques) > 0 {e.table}]
+	_validatedTables: [for _, e in M.code.state.entities if e.server if len([for n, _ in e.validations {n}]) > 0 {e.table}]
+	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
-	// Same predicate as #emit._serverOn, and it has to be: the cluster mounts
-	// this list as configs, so a migration named here without a database to
-	// run it is a compose file referring to a service that was never emitted.
-	_server: len([for _, e in M.code.state.entities if e.durability != "tab" && e.durability != "device" {e}]) > 0 ||
-		M.code.capabilities.auth != _|_
+	// The cluster mounts this list as configs, so it follows the predicate that
+	// emits the database: a migration named without one would be a compose file
+	// referring to a service that was never emitted.
+	_server: (#serverOn & {servers: [for _, e in M.code.state.entities {e.server}], auth: M.code.capabilities.auth != _|_}).out
 	list: [for f in M._all if M._server {f}]
 	_all: [
 		"services/database/migrations/000_extensions.sql",
@@ -918,6 +938,19 @@ _cdcTableField: "__table"
 	code:     #App
 	cluster:  mecha.#Cluster
 	terminal: omnishell.#Terminal
+	// The vocabulary this bundle was emitted against, restated so the literal
+	// lint reads both sides of its join out of ONE export: a rule whose step set
+	// can arrive empty reports zero findings, which reads as green. Concrete and
+	// closed, so this is not an app seam — an app naming a step differently
+	// conflicts rather than overrides.
+	scale: #scale
+	// Every vocabulary REGISTERED under scales/. An imported package's
+	// unreferenced fields are never evaluated, so scales/vocabulary.cue would
+	// grade a tree only on the day #scale drew a bucket from it; dereferencing
+	// them here puts a registration under every app's own `cue export` on the day
+	// build.ts writes it. Non-hidden for the reason #Scale's prefixes and sourced
+	// are: a guard nothing evaluates is a guard nothing has.
+	registered: {for n, v in scales {(n): v}}
 
 	// DDL emits parents first (a `ref` REFERENCES needs its target); the
 	// order comes from #App.entityOrder or declaration order.
@@ -950,11 +983,11 @@ _cdcTableField: "__table"
 	// nothing server-side is derived for them at all: no table, no restamp
 	// trigger, no publication entry, no policy, no seed — which is the whole
 	// point of separating durability from visibility.
-	_serverEntities: [for e in E._entities if e.durability != "tab" && e.durability != "device" {e}]
+	_serverEntities: [for e in E._entities if e.server {e}]
 	// Server entities with validations, as a list so len() is decidable in
 	// cue 0.16 (see #shellConfig's guard note).
 	_validated: [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
-	_localEntities: [for e in E._entities if e.durability == "tab" || e.durability == "device" {e}]
+	_localEntities: [for e in E._entities if !e.server {e}]
 	_cdcTables: strings.Join([for e in _entities if e.durability == "server" {e.table}], ",")
 	_syncTables: [for e in E._serverEntities {e.table}]
 
@@ -1016,11 +1049,41 @@ _cdcTableField: "__table"
 	][0]
 
 	// The design block becomes CSS here and only here.
-	_design:    E.code.surface.design
+	_design: E.code.surface.design
+	// The scale block, read straight off #scale — platform data with no app
+	// seam, so this text is the same in every app. :where(html) is specificity
+	// (0,0,0) against :root's (0,1,0), which is what makes a role beat a rung
+	// by construction: an app naming --sp-md wins over --size-3 without an
+	// ordering argument, and a screen may shadow a step from its own :root
+	// without a specificity war. It is also the selector Open Props ships with.
+	//
+	// One comprehension over the buckets, so a bucket added to the vocabulary is
+	// emitted with no edit here and the emitted name is prefix + key by
+	// construction. The order is #scale.buckets' declaration order, which is
+	// where that decision is stated.
+	_scaleCss: """
+		/* The value vocabulary, composed from several sources, each bucket under
+		   its own source's upstream names. #scale says which sources those are;
+		   naming them here too would make this sentence false at the next
+		   registration. A rung, unlike a role, means only
+		   "the Nth one": it is what an author reaches for when no role fits,
+		   which is exactly the case that otherwise produces a number. Nothing
+		   here has an appearance, so nothing here has a dark twin — what
+		   changes with the appearance is which rung a role points at, one
+		   namespace up, where the twin is closed. */
+		:where(html) {
+		\(strings.Join(list.Concat([
+			for _, b in #scale.buckets {[for k, v in b.steps {"  \(b.prefix)\(k): \(v);"}]},
+	]), "\n"))
+		}
+		"""
 	_designCss: """
 
-		/* Design system values, from DESIGN.md's frontmatter by way of the
-		   program's design block. A screen that redeclares one of these has
+		\(E._scaleCss)
+
+		/* Design system values, from DESIGN.md's frontmatter, which the program
+		   reads as its design block: the roles the preset publishes, each colour
+		   carrying both appearances. A screen that redeclares one of these has
 		   forked the system — the shared layer is the only declaration. */
 		:root {
 		\(strings.Join(list.Concat([
@@ -1032,6 +1095,10 @@ _cdcTableField: "__table"
 			[for k, v in E._design.rounded {"  --r-\(k): \(v);"}],
 			[for k, v in E._design.spacing {"  --sp-\(k): \(v);"}],
 			[for k, v in E._design.motion {"  --motion-\(k): \(v);"}],
+			[for k, v in E._design.control {"  --control-\(k): \(v);"}],
+			[for k, v in E._design.measures {"  --measure-\(k): \(v);"}],
+			[for k, v in E._design.type {"  --type-\(k): \(v);"}],
+			[for k, v in E._design.component {"  --c-\(k): \(v);"}],
 			[
 				"  --shell-bg: var(--\(E._design.shell.bg));",
 				"  --shell-fg: var(--\(E._design.shell.fg));",
@@ -1173,11 +1240,9 @@ _cdcTableField: "__table"
 	// the blob plane follows the program's flag.
 	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
 	cluster: capabilities: blobs: E.code.capabilities.blobs
-	// The data plane follows the program's own durability choices: an entity
-	// on a server tier is state the cluster has to keep, and an app with none
-	// is served by caddy alone. Auth is identity the cluster keeps, so it
-	// counts as server-side state too.
-	_serverOn: len(E._serverEntities) > 0 || E.code.capabilities.auth != _|_
+	// The data plane follows #serverOn: an app with no server-side state is
+	// served by caddy alone.
+	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
 	// A server entity syncs through a gate the auth service answers, so a
 	// cluster with one and no auth plane would 502 every shape.
 	_gated: bool & (E._serverOn == false || E._authOn) & true
@@ -1588,7 +1653,7 @@ _cdcTableField: "__table"
 		}
 		"shell/shell.yaml": {
 			format: "yaml"
-			data: (#shellConfig & {"code": E.code, migrations: E._migrations}).out
+			data: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, server: E._serverOn}).out
 		}
 		"\(E.terminal.surface.entry)": {
 			format: "text"

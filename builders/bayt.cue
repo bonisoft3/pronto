@@ -34,6 +34,17 @@ import (
 		testCmd:  string
 	}
 
+	// What the program itself reads: every cue file of the package, the
+	// bayt.json its bayt.cue embeds, and the DESIGN.md program.cue embeds. Each
+	// stage that runs cue over the app carries this set in the framework-side
+	// slot, so a stage-level `globs` adds to it rather than replacing it.
+	_program: srcs: defaultGlobs: {
+		// Ordered, so the emitted COPY line does not follow the key names.
+		"pronto-cue":    {glob: "*.cue", priority: 1}
+		"pronto-bayt":   {glob: "bayt.json", priority: 2}
+		"pronto-design": {glob: "DESIGN.md", priority: 3}
+	}
+
 	project: core.#project & {
 		dir: "apps/\(B.meta.app)"
 		// The app's runtime is pronto's own compose.yaml. Including it puts the
@@ -44,22 +55,21 @@ import (
 			"setup": sayt.setup & {
 				dockerfile: from: ref: "workspaceroot:setup"
 			}
-			"lint": sayt.lint & mise.exec & {
-				srcs: globs: ["brief.html", "ir.html", "acceptance.md", "program.cue"]
+			"lint": sayt.lint & mise.exec & B._program & {
+				srcs: globs: ["brief.html", "ir.html", "acceptance.md"]
 				cmd: builtin: do: "cue vet ./..."
 			}
-			"build": sayt.build & mise.exec & {
+			"build": sayt.build & mise.exec & B._program & {
 				// ir.html and acceptance.md are build inputs: derive.ts reads the
 				// diagrams and the ledger into .pronto/facts.json. Both are listed
 				// because the fingerprint is what decides a rebuild, and the ledger
 				// is pinned by nothing else — ir.html at least moves program.cue's
 				// meta.ir.sha256 when it changes.
-				srcs: globs: ["program.cue", "ir.html", "acceptance.md", "shell/**", "pipelines/**"]
+				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**"]
 				cmd: builtin: do: B.meta.buildCmd
 				dockerfile: from: ref: ":setup"
 			}
-			"test": sayt.test & mise.exec & {
-				srcs: globs: ["program.cue"]
+			"test": sayt.test & mise.exec & B._program & {
 				cmd: builtin: do: B.meta.testCmd
 			}
 			"launch": sayt.launch & {

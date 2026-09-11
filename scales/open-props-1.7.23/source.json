@@ -1,0 +1,16 @@
+{
+  "name": "openprops",
+  "origin": "open-props",
+  "version": "1.7.23",
+  "license": "MIT, (c) 2021 Adam Argyle",
+  "url": "https://registry.npmjs.org/open-props/-/open-props-1.7.23.tgz",
+  "integrity": "sha512-+xyrJmxV9QUBFbSwPROYhOg/FLXry+uuPr4R+B5EaE4556Oc18/8ZC/fL5A+/lbRSwNvA0Alh+C0KpyFWLmLZg==",
+  "files": [
+    "sizes.min.css",
+    "borders.min.css",
+    "shadows.min.css",
+    "easings.min.css",
+    "zindex.min.css",
+    "aspects.min.css"
+  ]
+}

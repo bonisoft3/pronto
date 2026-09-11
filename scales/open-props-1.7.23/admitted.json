@@ -1,0 +1,96 @@
+{
+  "admit": [
+    {
+      "bucket": "size",
+      "prefix": "--size-",
+      "keys": "^(00|000|[0-9]+)$",
+      "dimension": "space"
+    },
+    {
+      "bucket": "border",
+      "prefix": "--border-",
+      "keys": "^size-[0-9]+$",
+      "dimension": "rule"
+    },
+    {
+      "bucket": "ease",
+      "prefix": "--ease-",
+      "keys": "^([0-9]+|[a-z]+(-[a-z]+)*(-[0-9]+)?)$",
+      "dimension": "motion"
+    },
+    {
+      "bucket": "layer",
+      "prefix": "--layer-",
+      "keys": "^([0-9]+|important)$",
+      "dimension": "layer"
+    },
+    {
+      "bucket": "ratio",
+      "prefix": "--ratio-",
+      "keys": "^[a-z]+$",
+      "dimension": "ratio"
+    }
+  ],
+  "refused": [
+    {
+      "pattern": "^--size-px-",
+      "reason": "a device-pixel spelling of the rem ladder; two names for one step are two answers to one question"
+    },
+    {
+      "pattern": "^--size-relative-",
+      "reason": "keyed to the element's own font size, so it is comparable to no rung and normalises to nothing"
+    },
+    {
+      "pattern": "^--size-fluid-",
+      "reason": "a clamp() against the viewport: a range is a decision, and a ladder has no standing to name one operand of it"
+    },
+    {
+      "pattern": "^--size-content-",
+      "reason": "a page width in ch, which is a measure — the app's own identity (#Design.measures), never a rung"
+    },
+    {
+      "pattern": "^--size-header-",
+      "reason": "a page width in ch, which is a measure — the app's own identity (#Design.measures), never a rung"
+    },
+    {
+      "pattern": "^--size-(xxs|xs|sm|md|lg|xl|xxl)$",
+      "reason": "word-shaped page widths that would collide with the role namespace's own sm/md/lg/xl"
+    },
+    {
+      "pattern": "^--radius-[1-6]$",
+      "reason": "radii are a role here: #Design.rounded names three, and which corner an app rounds is its identity"
+    },
+    {
+      "pattern": "^--radius-drawn-",
+      "reason": "a hand-drawn corner is an illustration, not a length"
+    },
+    {
+      "pattern": "^--radius-blob-",
+      "reason": "a blob is an illustration, not a length"
+    },
+    {
+      "pattern": "^--radius-conditional-",
+      "reason": "a clamp() against the viewport, refused for the reason --size-fluid-* is"
+    },
+    {
+      "pattern": "^--radius-round$",
+      "reason": "radii are a role here; #Design.rounded.full is this value under a name that says what it is for"
+    },
+    {
+      "pattern": "^--shadow-color$",
+      "reason": "a bare `220 3% 15%` component triple, which is not a <color> and cannot be light-dark()'s argument"
+    },
+    {
+      "pattern": "^--shadow-strength",
+      "reason": "a percentage the upstream shadows compose with --shadow-color; the composed inks are roles here (#shadowInks)"
+    },
+    {
+      "pattern": "^--inner-shadow-",
+      "reason": "under a --shadow- prefix its key renders --shadow-inner-N, which is not an upstream name"
+    },
+    {
+      "pattern": "^--shadow-[1-6]$",
+      "reason": "the geometry is quoted and the colour is not: upstream writes hsl(var(--shadow-color)/var(--shadow-strength-N)), so this scale republishes the same six names over its own twinned inks"
+    }
+  ]
+}

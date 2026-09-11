@@ -1,18 +1,35 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@std/encoding@1.0.5": "1.0.5",
+    "jsr:@std/streams@^1.0.9": "1.1.2",
+    "jsr:@std/tar@0.1.6": "0.1.6",
     "jsr:@std/yaml@1.0.5": "1.0.5",
     "npm:@bufbuild/cel-spec@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/cel@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/protobuf@2.14.1": "2.14.1",
+    "npm:@types/css-tree@2.3.10": "2.3.10",
     "npm:@types/node@*": "22.15.15",
     "npm:acorn-walk@8.3.4": "8.3.4",
     "npm:acorn@8.14.0": "8.14.0",
+    "npm:css-tree@3.1.0": "3.1.0",
     "npm:fast-check@3.23.2": "3.23.2",
     "npm:linkedom@0.18.4": "0.18.4",
     "npm:mermaid@11.9.0": "11.9.0_cytoscape@3.34.2"
   },
   "jsr": {
+    "@std/encoding@1.0.5": {
+      "integrity": "ecf363d4fc25bd85bd915ff6733a7e79b67e0e7806334af15f4645c569fefc04"
+    },
+    "@std/streams@1.1.2": {
+      "integrity": "0249bf9b78a999f57032ca4d8e7ccaa57579090242640b35ddc948fbb745d3af"
+    },
+    "@std/tar@0.1.6": {
+      "integrity": "7f06a5359518262207e1c28ea965fd552dff3ba2047d2e9225339af287b1f3a4",
+      "dependencies": [
+        "jsr:@std/streams"
+      ]
+    },
     "@std/yaml@1.0.5": {
       "integrity": "71ba3d334305ee2149391931508b2c293a8490f94a337eef3a09cade1a2a2742"
     }
@@ -92,6 +109,9 @@
       "dependencies": [
         "langium"
       ]
+    },
+    "@types/css-tree@2.3.10": {
+      "integrity": "sha512-WcaBazJ84RxABvRttQjjFWgTcHvZR9jGr0Y3hccPkHjFyk/a3N8EuxjKr+QfrwjoM5b1yI1Uj1i7EzOAAwBwag=="
     },
     "@types/d3-array@3.2.2": {
       "integrity": "sha512-hOLWVbm7uRza0BYXpIIW5pxfrKe0W+D5lrFiAEYR+pb6w3N2SwSMaJbXdUfSEv+dT4MfHBLtn5js0LAWaO6otw=="
@@ -332,6 +352,13 @@
         "domhandler",
         "domutils",
         "nth-check"
+      ]
+    },
+    "css-tree@3.1.0": {
+      "integrity": "sha512-0eW44TGN5SQXU1mWSkKwFstI/22X2bG1nYzZTYMAWjylYURhse752YgbE4Cx46AC+bAvI+/dYTPRk1LqSUnu6w==",
+      "dependencies": [
+        "mdn-data",
+        "source-map-js"
       ]
     },
     "css-what@6.2.2": {
@@ -734,6 +761,9 @@
       "integrity": "sha512-TI3V8YYWvkVf3KJe1dRkpnjs68JUPyEa5vjKrp1XEEJUAOaQc+Qj+L1qWbPd0SJuAdQkFU0h73sXXqwDYxsiDA==",
       "bin": true
     },
+    "mdn-data@2.12.2": {
+      "integrity": "sha512-IEn+pegP1aManZuckezWCO+XZQDplx1366JoVhTpMpBB1sPey/SbveZQUosKiKiGYjg1wH4pMlNgXbCiYgihQA=="
+    },
     "mermaid@11.9.0_cytoscape@3.34.2": {
       "integrity": "sha512-YdPXn9slEwO0omQfQIsW6vS84weVQftIyyTGAZCwM//MGhPzL1+l6vO6bkf0wnP4tHigH1alZ5Ooy3HXI2gOag==",
       "dependencies": [
@@ -835,6 +865,9 @@
     },
     "safer-buffer@2.1.2": {
       "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="
+    },
+    "source-map-js@1.2.1": {
+      "integrity": "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="
     },
     "stylis@4.4.0": {
       "integrity": "sha512-5Z9ZpRzfuH6l/UAvCPAPUo3665Nk2wLaZU3x+TLHKVzIz33+sbJqbtrYoC3KD4/uVOr2Zp+L0LySezP9OHV9yA=="

@@ -1,0 +1,22 @@
+{
+  "admit": [
+    {
+      "bucket": "textSize",
+      "prefix": "--base-text-size-",
+      "keys": "^[0-9]?[a-z]+$",
+      "dimension": "text"
+    },
+    {
+      "bucket": "textLineHeight",
+      "prefix": "--base-text-lineHeight-",
+      "keys": "^[a-z]+$",
+      "dimension": "leading"
+    }
+  ],
+  "refused": [
+    {
+      "pattern": "^--base-text-weight-",
+      "reason": "the ladder is the identity function on the specification's own numbers: --base-text-weight-medium IS 500, and a longer spelling of what the author already wrote is a rename rather than a vocabulary. The corpus writes font-weight 229 times over nine spellings and runs past the ladder's top step — 700 x25, 650 x11 and 800 x9 all sit outside a ladder that ends at 600 — so no property in PROPERTY_DIMENSION carries the dimension one would need"
+    }
+  ]
+}

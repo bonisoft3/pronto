@@ -4,12 +4,35 @@
 // the bijection checker matches these against the pinned IR.
 package pronto
 
+import (
+	"list"
+	"encoding/yaml"
+	"strings"
+
+	"github.com/bonisoft3/pronto/scales"
+	"github.com/bonisoft3/pronto/terminals:omnishell"
+)
+
 #Tier: "cli" | "container" | "k8s" | "cloud"
 
 // A path relative to the app directory, resolved by derive and by the
 // terminal's module loader. No scheme and no `..`: the source is read from the
 // app's own tree and embedded in emitted artifacts.
 #Jessie: string & =~"^([a-z0-9_-]+/)*[a-z0-9_-]+\\.js$"
+
+// The seven pre-composed shadow inks. Open Props' elevation carries a real
+// dark story that light-dark() cannot take — --shadow-color is a bare
+// `220 3% 15%` component triple and --shadow-strength a percentage, and
+// neither is a <color> — so the strengths are pre-composed into finished
+// colours and declared as ROLES, where the twin is closed. #scale.shadow is
+// then geometry alone.
+//
+// Required of every preset below, in both halves. #scale.shadow depends on
+// these names, so a preset that omitted them would export cleanly and emit
+// `--shadow-1: 0 1px 2px -1px var(--shadow-ink-10)` with nothing declaring
+// the ink: invalid at computed-value time, and every elevation silently gone.
+#shadowInks: ["shadow-ink-3", "shadow-ink-4", "shadow-ink-5", "shadow-ink-6",
+	"shadow-ink-7", "shadow-ink-8", "shadow-ink-10"]
 
 // Starting points for #Design. A preset is named rather than implicit so a
 // reviewer can see which opinion an app took, and so adding a second is a data
@@ -18,11 +41,17 @@ package pronto
 // The token NAMES are the schema contract and the platform's; the hex is the
 // designer's to evolve.
 #designPresets: [Name=string]: {
-	colors: [string]:  string
-	dark: [string]:    string
-	rounded: [string]: string
-	spacing: [string]: string
-	motion: [string]:  string
+	colors: [string]: string
+	colors: {for n in #shadowInks {(n): string}}
+	dark: [string]: string
+	dark: {for n in #shadowInks {(n): string}}
+	rounded: [string]:  string
+	spacing: [string]:  string
+	motion: [string]:   string
+	control: [string]:   string
+	measures: [string]:  string
+	type: [string]:      string
+	component: [string]: #Reference
 }
 #designPresets: press: {
 	// Identity for an editorial reading surface; the default an app takes
@@ -36,6 +65,13 @@ package pronto
 		surface:         "#FFFFFF"
 		border:          "#E4E1D9"
 		"surface-muted": "#EFEDE6"
+		"shadow-ink-3":  "hsl(220 3% 15% / 3%)"
+		"shadow-ink-4":  "hsl(220 3% 15% / 4%)"
+		"shadow-ink-5":  "hsl(220 3% 15% / 5%)"
+		"shadow-ink-6":  "hsl(220 3% 15% / 6%)"
+		"shadow-ink-7":  "hsl(220 3% 15% / 7%)"
+		"shadow-ink-8":  "hsl(220 3% 15% / 8%)"
+		"shadow-ink-10": "hsl(220 3% 15% / 10%)"
 	}
 	dark: {
 		primary:         "#E9E7E2"
@@ -46,16 +82,245 @@ package pronto
 		surface:         "#1C1E1F"
 		border:          "#2E3133"
 		"surface-muted": "#24272A"
+		"shadow-ink-3":  "hsl(220 40% 2% / 27%)"
+		"shadow-ink-4":  "hsl(220 40% 2% / 28%)"
+		"shadow-ink-5":  "hsl(220 40% 2% / 29%)"
+		"shadow-ink-6":  "hsl(220 40% 2% / 30%)"
+		"shadow-ink-7":  "hsl(220 40% 2% / 31%)"
+		"shadow-ink-8":  "hsl(220 40% 2% / 32%)"
+		"shadow-ink-10": "hsl(220 40% 2% / 34%)"
 	}
 	rounded: {sm: "4px", md: "8px", full: "999px"}
+	// px, not var(--size-N). Three of the four are exactly a rung, which is
+	// evidence the roles were already right rather than a reason to make them
+	// indirections: rewriting them would convert six apps' --sp-* from device
+	// px to rem, identical at a 16px root and not above it, while the two apps
+	// that declare `spacing` concretely would keep the literals and fork the
+	// corpus on the very role meant to show the two namespaces meeting.
 	spacing: {sm: "8px", md: "16px", lg: "24px", xl: "40px"}
 	motion: {fast: "110ms", base: "180ms", ease: "cubic-bezier(.2, 0, 0, 1)", shift: "6px"}
+	// A control's geometry, which sm/md/lg/xl could not say: that ladder
+	// orders spacing by size and is silent about which BOX gets which, so a
+	// control's height and inset had no name and became a number. pad-x is a
+	// role pointing at a role — the worked example of the two layers meeting.
+	control: {
+		"h-xs":  "28px", "h-sm": "32px", h: "36px", "h-lg": "40px"
+		"pad-x": "var(--sp-md)"
+	}
+	// Page-level widths. Identity, not scale: no vocabulary contains 720px,
+	// and pretending one does is how a measure stays a bare number. press
+	// declares none, so every entry is the app's own.
+	measures: {}
+	// Six purposes and two leadings, each value a step Primer publishes, so the
+	// identity is spelled in the vocabulary rather than beside it. A purpose
+	// decides its size and its leading together, the shape Material's typescale
+	// takes and a bare ladder cannot state. #Design.type states the tier's rules.
+	type: {
+		display:           "2.5rem"
+		title:             "2rem"
+		subtitle:          "1.25rem"
+		body:              "1rem"
+		caption:           "0.875rem"
+		label:             "0.75rem"
+		// TWO leadings, not one per purpose. The vendored ladder has five steps and
+		// two roles at one norm raise, so a preset that named four would leave an
+		// app a single free value and any override it made would cascade. Prose and headings are the two readings a
+		// leading actually decides; a purpose that needs a third names it, and has
+		// three steps left to name it with.
+		"leading-title": "1.25"
+		"leading-body":  "1.625"
+	}
+	// Geometry ordered by ELEMENT CLASS rather than by size: field-radius,
+	// selector-radius, box-radius. This is the one thing an ordered sm/md/full
+	// ladder cannot state whatever it is filled with — press orders radii by
+	// size and other systems order them by which control wears them — so it is a
+	// tier and not another rung. press declares none.
+	component: {}
 }
 
-// The design system's values, mirroring DESIGN.md's frontmatter — that file
-// argues the identity and this carries it, the same division the ir and the
-// program keep for behaviour. The emitter alone turns these into CSS;
-// check-screens guards the fork.
+// The joins the scanner implements. A bucket's dimension says which norm()
+// runs over its steps and which properties' literals can reach them, so this is
+// the set of dimensions in which a literal can be REFUSED — not a taxonomy of
+// tokens. Read that way it settles its own membership: `token`, `root` and
+// `shadow-color` classify a LITERAL and are correctly absent, and `opaque` is a
+// bucket that publishes a name and joins nothing, because an elevation is a
+// list rather than a value and a touch floor is a decision. Getting the last
+// one wrong is live: `min` under `space` would answer `padding: 24px` with
+// "use --min-touch".
+//
+// Closed, and the closedness buys a check rather than a second list: styles.ts
+// looks a bucket's dimension up in its norm() dispatch table and raises when
+// there is no case, so neither language carries a copy of the other's members.
+#Dimension: "space" | "rule" | "radius" | "motion" | "layer" | "ratio" |
+	"text" | "leading" | "opaque"
+
+// A value that names another token rather than holding one. The one level of
+// indirection styles.ts resolves, so a shape it cannot read is a reference that
+// applies to nothing in silence.
+#Reference: string & =~"^var\\(--[a-zA-Z0-9_-]+\\)$"
+
+// Where a bucket's bytes came from. A scale composes more than one: the
+// terminal's measured floors are not a vendor's, and no vendor publishes every
+// dimension this corpus needs.
+//
+// `kind` says which of the two a source is, but it is NOT what exempts one from
+// the quotation. A `quoted` source names an archive vendored under scales/, and
+// invariants.sql holds every step drawn from it equal to a declaration in those
+// bytes AND demands that the bytes declare the name at all — so an invented rung
+// under a vendor's prefix is an error rather than a join that matches nothing.
+// Both of those key on the vendored TREE answering the bucket's source name,
+// because a label a line can change is a label that can buy an exemption. `url`
+// and `integrity` describe the archive scales/refresh.ts re-fetches and
+// scales/build.ts quotes, so only a quotation may carry them.
+#Source: {
+	kind:    "quoted" | "own"
+	origin:  string
+	version: string
+	if kind == "quoted" {
+		url:       string
+		integrity: string
+	}
+	// An own source has no archive, so it has no version an archive could pin;
+	// the only honest one is this repository. A constraint as well as a rule: a relabelled vendor source,
+	// `{kind: "own", origin: "open-props", version: "1.7.23"}`, fails here before
+	// THE WITNESS in invariants.sql reads it.
+	if kind == "own" {
+		version: "this repository"
+	}
+}
+
+// One ladder under one prefix. The emitted name is prefix + key, so it IS the
+// upstream name and a release bump is a `curl | diff`; and a step's dimension is
+// its bucket's by construction, so nothing matches a token name against an
+// ordered prefix list — which is what makes a nested prefix harmless, argued at
+// #Scale.prefixes where the index is built.
+#Bucket: {
+	prefix:    scales.#Prefix
+	dimension: #Dimension
+	source:    string
+	steps: [string]: string
+}
+
+#Scale: S={
+	sources: [Name=string]: #Source
+	buckets: [Name=string]: #Bucket
+	// Both of these are non-hidden because a hidden field is evaluated only where
+	// something dereferences it, and neither of these is dereferenced anywhere:
+	// a guard nothing evaluates is a guard nothing has. Non-hidden, they ride
+	// #emit's `scale`, so `cue export` fails before the writer emits a byte, and
+	// `cue vet -c ./...` names the bucket at test.
+	//
+	// Building the index IS the uniqueness check — two buckets under one prefix
+	// write two different names into one key and conflict here — which is a
+	// collision the emitter could not resolve. A NESTED prefix is not a collision
+	// but a vocabulary: Open Props publishes --size-1 beside the --size-px-1 its
+	// admitted.json refuses, and nothing matches a name against this map.
+	prefixes: {for n, b in S.buckets {(b.prefix): n}}
+	// A bucket naming a source the scale does not carry would emit bytes with no
+	// provenance, which is the one thing a vendored vocabulary owes. Keyed by
+	// bucket so the error names it.
+	sourced: {for n, b in S.buckets {(n): S.sources[b.source] & #Source}}
+	// Two buckets in one JOINING dimension both answer a literal, and nothing in
+	// the composition says which of the two names a rule should teach. Adoption is
+	// a replacement argument per dimension rather than an addition, and this is
+	// that argument as a constraint; a dimension that ever needs two buckets gets
+	// a declared order rather than a tie-break.
+	//
+	// `opaque` is exempt because a step there publishes a name and joins nothing —
+	// scaleSteps skips the dimension before it offers — so `shadow` and `min`
+	// cannot compete for a norm.
+	joined: {for n, b in S.buckets if b.dimension != "opaque" {(b.dimension): n}}
+}
+
+// The value vocabulary this platform ships, drawn from the generated files under
+// scales/ — which scales/build.ts writes from the archives vendored beside them —
+// and from pronto's own. The composition is written out because the order of
+// these lines is the order the rung block is emitted in, which is the one thing
+// about the vocabulary that is neither the vendor's nor derivable — and a bucket
+// the generator publishes that this list drops is caught by the admission rule in
+// invariants.sql, which asks the archive rather than this list.
+//
+// Not a #designPresets entry: a preset is one identity among several, this is
+// the vocabulary every identity is spelled in. And it has no app seam at all —
+// an app that needs a length the scale lacks names a ROLE, which is a
+// decision, rather than a rung, which is not. That is what keeps a scale from
+// becoming a junk drawer.
+//
+// A step carries no dark twin because a rung has no appearance: 1rem is 1rem
+// in both. What changes with the appearance is WHICH rung a role points at,
+// and that indirection lives one namespace up, where the twin is closed.
+//
+// Only values come in: Open Props' animations pack is 23 shorthands unusable
+// without the 25 @keyframes beside them, and a vocabulary that ships rules is
+// a stylesheet, not a vocabulary.
+#scale: #Scale & {
+	sources: {
+		openprops: scales.openprops.source
+		primer:    scales.primer.source
+		pronto: {kind: "own", origin: "pronto", version: "this repository"}
+		terminal: {kind: "own", origin: "omnishell", version: "this repository"}
+	}
+	buckets: {
+		size:   scales.openprops.buckets.size
+		border: scales.openprops.buckets.border
+		// Geometry only, and pronto's own: the six upstream NAMES republished over
+		// the twinned ink roles, for the reason #shadowInks gives. Every preset
+		// carries the inks, so these var()s never dangle.
+		shadow: {
+			prefix:    "--shadow-"
+			dimension: "opaque"
+			source:    "pronto"
+			steps: {
+				"1": "0 1px 2px -1px var(--shadow-ink-10)"
+				"2": "0 3px 5px -2px var(--shadow-ink-4), 0 7px 14px -5px var(--shadow-ink-6)"
+				"3": "0 -1px 3px 0 var(--shadow-ink-3), 0 1px 2px -5px var(--shadow-ink-3), 0 2px 5px -5px var(--shadow-ink-5), 0 4px 12px -5px var(--shadow-ink-6), 0 12px 15px -5px var(--shadow-ink-8)"
+				"4": "0 -2px 5px 0 var(--shadow-ink-3), 0 1px 1px -2px var(--shadow-ink-4), 0 2px 2px -2px var(--shadow-ink-4), 0 5px 5px -2px var(--shadow-ink-5), 0 9px 9px -2px var(--shadow-ink-6), 0 16px 16px -2px var(--shadow-ink-7)"
+				"5": "0 -1px 2px 0 var(--shadow-ink-3), 0 2px 1px -2px var(--shadow-ink-4), 0 5px 5px -2px var(--shadow-ink-4), 0 10px 10px -2px var(--shadow-ink-5), 0 20px 20px -2px var(--shadow-ink-6), 0 40px 40px -2px var(--shadow-ink-8)"
+				"6": "0 -1px 2px 0 var(--shadow-ink-3), 0 3px 2px -2px var(--shadow-ink-4), 0 7px 5px -2px var(--shadow-ink-4), 0 12px 10px -2px var(--shadow-ink-5), 0 22px 18px -2px var(--shadow-ink-6), 0 41px 33px -2px var(--shadow-ink-7), 0 100px 80px -2px var(--shadow-ink-8)"
+			}
+		}
+		ease:  scales.openprops.buckets.ease
+		layer: scales.openprops.buckets.layer
+		ratio: scales.openprops.buckets.ratio
+		// The terminal's own measured floors, read off the terminal rather than
+		// restated; omnishell.#Terminal.capabilities.floors argues the one
+		// declaration. Device px, because a body's reach is not keyed to a font size.
+		min: {
+			prefix:    "--min-"
+			dimension: "opaque"
+			source:    "terminal"
+			steps: {for n, px in omnishell.#Terminal.capabilities.floors {(n): "\(px)px"}}
+		}
+		// Type quotes Primer's base ladder, and what decides it is step economy
+		// rather than coverage. Over the corpus the literal rule reads —
+		// `select count(*) from app_literal where dimension = 'text'`, 484 rows —
+		// Primer's six steps join 215 and Tailwind 4.3.3's thirteen join 216: one
+		// occurrence for seven more emitted names, because every Primer step joins
+		// something and six of the thirteen (3xl, 5xl..9xl) publish a name no
+		// stylesheet here writes. 35.8 occurrences a step against 16.6.
+		//
+		// Leading is a tie at 63 of 196, two joining steps each. The two ladders
+		// spell tight, snug, normal and relaxed identically and differ only at
+		// `loose`, which nothing writes, so it follows its size from one vendor
+		// rather than splitting a designed pair — and #Scale.joined refuses a
+		// second bucket in either dimension.
+		//
+		// The weight ladder declared beside them is refused in the tree's own
+		// admitted.json. Primer's functional sheet is not vendored at all:
+		// --text-body-*, --text-title-* and --fontStack-* name purposes rather than
+		// values, and --fontStack-sansSerif opens "Mona Sans VF", so quoting it
+		// would put a vendor's display face in every app's rung block.
+		text:    scales.primer.buckets.textSize
+		leading: scales.primer.buckets.textLineHeight
+	}
+}
+
+// The design system's values. An app states them once, as the YAML
+// frontmatter of its DESIGN.md, and program.cue reads them through #DesignMd
+// below — the file's body argues the identity and its frontmatter carries it,
+// the same division the ir and the program keep for behaviour. Every field is
+// optional: the preset supplies what the app does not say. The emitter alone
+// turns these into CSS; the fact-store join (invariants.sql) guards the fork.
 #Design: D={
 	// The starting set this app took. Naming a token below replaces that one
 	// and leaves the rest, exactly as `motion` works.
@@ -81,12 +346,83 @@ package pronto
 	// the preset supplies the defaults and naming one here replaces it.
 	motion: [string]: string
 	motion: {for k, v in D._preset.motion {(k): *v | string}}
+	// Lengths a screen reaches for by role rather than by rung. #scale is the
+	// vocabulary beneath these and has no app seam; a length the scale lacks
+	// is named HERE, because a decision belongs in the app's own block and a
+	// rung does not.
+	control: [string]: string
+	control: {for k, v in D._preset.control {(k): *v | string}}
+	measures: [string]: string
+	measures: {for k, v in D._preset.measures {(k): *v | string}}
+	// A named size or leading, emitted --type-*, chosen so it collides with no
+	// vendored ladder's prefix. A key spelled leading-* is a line-height and any
+	// other is a font size, because a role's dimension is read off its name and a
+	// font size and a line-height are refused toward different properties — so
+	// unlike --motion-*, where a time and an easing share one name space and the
+	// norm tells them apart, these two cannot.
+	//
+	// A purpose is named from `display, title, subtitle, heading, lead, body,
+	// body-small, label, caption, overline, code`, each with an optional
+	// `leading-<stem>` twin: Primer's functional layer read as a list of
+	// purposes, so a reader who knows that vocabulary knows this one. What a
+	// purpose is worth is the app's or its preset's.
+	//
+	// A role carries its VALUE. A role that aliased a rung would win its norm, and
+	// `best` keeps one step per (dimension, norm), so the rung would drop out of
+	// what the lint can name in that app and the app's identity would move under a
+	// vendor's release. A role aliases another ROLE only to say "the same value as
+	// that purpose", which is also the one legal spelling of it, since two roles
+	// at one norm raise.
+	type: [string]: string
+	type: {for k, v in D._preset.type {(k): *v | string}}
+	// Keys are <element>-<property> and values POINT AT a role or a rung, so the
+	// tier says which geometry a class of control wears without inventing a value.
+	// A constraint, not a convention: this tier publishes no step, so a literal
+	// here would put a value into :root under a name no ladder quotes, no literal
+	// rule reads and no role space grades — the junk drawer the tier exists to
+	// avoid. The target must itself be published, which scaleSteps closes by
+	// resolving every declared token's one-level reference, this tier included.
+	//
+	// Emitted --c-*, and like control and measures it publishes no step: which box
+	// gets which is a decision, not a value to refuse a literal toward.
+	component: [string]: #Reference
+	component: {for k, v in D._preset.component {(k): *v | string}}
 	// Which colour the terminal's own chrome resolves to; the shell has no
 	// opinion about which swatch is a background.
 	shell: {
 		bg:   *"neutral" | string
 		fg:   *"primary" | string
 		rule: *"border" | string
+	}
+}
+
+// The reader of an app's DESIGN.md: `text` is the file, embedded by program.cue
+// (`_designMd: _ @embed(file="DESIGN.md", type=text)` under `@extern(embed)`),
+// and `design` is its YAML frontmatter — the lines between a first line that is
+// exactly `---` and the next such line — unified with #Design, so that a key
+// #Design lacks, a value of the wrong shape and a file without a frontmatter
+// are all errors at `cue vet` and at export. The frontmatter is the one
+// declaration: program.cue restates none of it (`surface: design:
+// (pronto.#DesignMd & {text: _designMd}).design`), and it carries the app's own
+// overrides and additions, `var(--…)` references included — never the resolved
+// palette, so the preset keeps filling the rest. An empty frontmatter is the
+// preset as it is.
+#DesignMd: {
+	text:   string
+	_lines: strings.Split(text, "\n")
+	// A fence is a whole line, so a CRLF ending, trailing space or a byte before
+	// the opening fence is not one, and a `---` in the body cannot be mistaken
+	// for the closing fence: the first one after the opening line closes it.
+	_closes: [for i, l in _lines if i > 0 && l == "---" {i}]
+	_fenced: _lines[0] == "---" && len(_closes) > 0
+	// The error sits on `design` itself, so it surfaces wherever the design is
+	// read rather than only where the reader is inspected. An empty frontmatter
+	// unmarshals to top, which is the preset untouched.
+	if _fenced {
+		design: #Design & yaml.Unmarshal(strings.Join(list.Slice(_lines, 1, _closes[0]), "\n"))
+	}
+	if !_fenced {
+		design: error("DESIGN.md has no frontmatter: the design block is the YAML between a first line that is exactly --- and the next such line")
 	}
 }
 
@@ -157,6 +493,9 @@ package pronto
 	// construction, with no policy to write, which is why `access` is not
 	// merely optional for them but meaningless: nothing else can reach it.
 	durability: "server" | "live" | "offline" | "tab" | "device"
+	// Whether the rows live in the cluster: every tier but the two browser ones.
+	// The one spelling of that boundary; the emitter reads this, never the names.
+	server: durability != "tab" && durability != "device"
 	if durability == "tab" || durability == "device" {
 		access?: _|_
 	}
@@ -627,5 +966,12 @@ package pronto
 		// reviewed artifact is the only place the rationale is written.
 		decisions: [Id=string]: {ir: *Id | string, note: string}
 		tests: [Id=string]: #Test & {id: Id}
+		// The literal debt this app still carries: how many declarations wear
+		// `/* pronto-literal: pending */`. Checked for EQUALITY, not a ceiling —
+		// fixing a site without lowering the number fails, adding one without
+		// raising it fails, and raising it is a diff here that a reviewer sees.
+		// Debt is strictly monotone downward, and zero is the default because an
+		// app that has never reached for the hatch should not have to say so.
+		design: pendingLiterals: *0 | int & >=0
 	}
 }
