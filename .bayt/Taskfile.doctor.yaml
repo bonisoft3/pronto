@@ -1,0 +1,12 @@
+# generated from bayt.cue — do not edit
+tasks:
+  default:
+    run: always
+    status:
+    - "{{if eq OS \"windows\"}}mise tool-stub ../../plugins/bayt/runtime/nu.toml ../../plugins/bayt/runtime/bayt.nu{{else}}../../plugins/bayt/runtime/bayt{{end}} fingerprint --manifest '{{.TASKFILE_DIR}}/bayt.doctor.json' --stamp-file .task/bayt/doctor.hash"
+    vars:
+      BAYTW: "{{if eq OS \"windows\"}}mise tool-stub ../../plugins/bayt/runtime/nu.toml ../../plugins/bayt/runtime/bayt.nu{{else}}../../plugins/bayt/runtime/bayt{{end}} cache run --manifest '{{.TASKFILE_DIR}}/bayt.doctor.json' --"
+    cmds:
+    - "{{.BAYTW}} mise doctor"
+    - defer: "{{if not .EXIT_CODE}}{{if eq OS \"windows\"}}mise tool-stub ../../plugins/bayt/runtime/nu.toml ../../plugins/bayt/runtime/bayt.nu{{else}}../../plugins/bayt/runtime/bayt{{end}} fingerprint --manifest '{{.TASKFILE_DIR}}/bayt.doctor.json' --stamp-file .task/bayt/doctor.hash --update-stamp{{end}}"
+version: "3"

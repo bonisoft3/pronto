@@ -1,0 +1,298 @@
+{
+  "_generated_from": "bayt.cue (do not edit)",
+  "dockerfile": {
+    "preamble": [],
+    "preambleCopyContexts": [],
+    "from": {
+      "ref": ":setup",
+      "name": "plugins_pronto-setup"
+    },
+    "add": [],
+    "mounts": [],
+    "secrets": {},
+    "extra_hosts": [],
+    "epilogue": [],
+    "copy": [],
+    "healthcheck": null,
+    "expose": [],
+    "entrypoint": null,
+    "incremental": false,
+    "cmd": null
+  },
+  "name": "build",
+  "project": "plugins_pronto",
+  "dir": "plugins/pronto",
+  "activate": "mise x --",
+  "srcs": {
+    "globs": [
+      "*.ts",
+      "scales/*.ts",
+      "deno.json",
+      "deno.lock"
+    ],
+    "exclude": []
+  },
+  "outs": {
+    "globs": [],
+    "exclude": []
+  },
+  "state": {
+    "globs": []
+  },
+  "env": {},
+  "synthetics": {
+    "bayt": {
+      "name": "build_bayt",
+      "project": "plugins_pronto",
+      "dir": "plugins/pronto",
+      "activate": "",
+      "srcs": {
+        "globs": [],
+        "exclude": []
+      },
+      "outs": {
+        "globs": [
+          ".bayt/compose.build.yaml",
+          ".bayt/Dockerfile.build",
+          ".bayt/bayt.build.json",
+          ".bayt/Taskfile.yml",
+          ".bayt/Taskfile.bayt.yml",
+          ".bayt/Taskfile.build.yaml"
+        ],
+        "exclude": []
+      },
+      "env": {},
+      "visibility": "internal",
+      "deps": [],
+      "transitiveDeps": [],
+      "transitiveCrossDeps": [],
+      "chainedDeps": [],
+      "cmds": [],
+      "cache": {
+        "full": false,
+        "similar": false
+      },
+      "upClosure": [
+        "plugins/pronto/.bayt/compose.build.yaml",
+        "plugins/pronto/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.build.yaml",
+        "plugins/omnishell/.bayt/compose.setup.yaml"
+      ]
+    },
+    "outs": {
+      "name": "build_outs",
+      "project": "plugins_pronto",
+      "dir": "plugins/pronto",
+      "activate": "",
+      "srcs": {
+        "globs": [],
+        "exclude": []
+      },
+      "outs": {
+        "globs": [],
+        "exclude": []
+      },
+      "env": {},
+      "visibility": "internal",
+      "deps": [],
+      "transitiveDeps": [],
+      "transitiveCrossDeps": [],
+      "chainedDeps": [],
+      "cmds": [],
+      "cache": {
+        "full": false,
+        "similar": false
+      },
+      "upClosure": [
+        "plugins/pronto/.bayt/compose.build.yaml",
+        "plugins/pronto/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.build.yaml",
+        "plugins/omnishell/.bayt/compose.setup.yaml"
+      ]
+    },
+    "srcs": {
+      "name": "build_srcs",
+      "project": "plugins_pronto",
+      "dir": "plugins/pronto",
+      "activate": "",
+      "srcs": {
+        "globs": [],
+        "exclude": []
+      },
+      "outs": {
+        "globs": [
+          "*.ts",
+          "scales/*.ts",
+          "deno.json",
+          "deno.lock"
+        ],
+        "exclude": []
+      },
+      "env": {},
+      "visibility": "internal",
+      "deps": [],
+      "transitiveDeps": [
+        "setup_srcs"
+      ],
+      "transitiveCrossDeps": [
+        {
+          "name": "build_srcs",
+          "project": "plugins_omnishell",
+          "dir": "plugins/omnishell",
+          "outs": {
+            "globs": [
+              "src/**/*",
+              "test/**/*",
+              "interpreter/**/*",
+              "check-handlers.ts",
+              "check-machines.ts",
+              "check-markup.ts",
+              "check-visual.ts",
+              "read-markup.ts",
+              "package.json",
+              "bun.lock",
+              "tsconfig.json",
+              "bunfig.toml"
+            ],
+            "exclude": []
+          }
+        },
+        {
+          "project": "plugins_pronto",
+          "name": "setup_srcs",
+          "dir": "plugins/pronto",
+          "outs": {
+            "globs": [
+              "*.ts",
+              "scales/*.ts",
+              "deno.json",
+              "deno.lock"
+            ],
+            "exclude": []
+          }
+        }
+      ],
+      "chainedDeps": [],
+      "cmds": [],
+      "cache": {
+        "full": false,
+        "similar": false
+      },
+      "upClosure": [
+        "plugins/pronto/.bayt/compose.build.yaml",
+        "plugins/pronto/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.build.yaml",
+        "plugins/omnishell/.bayt/compose.setup.yaml"
+      ]
+    }
+  },
+  "taskfile": {
+    "run": "when_changed",
+    "incremental": true,
+    "preconditions": []
+  },
+  "visibility": "internal",
+  "emitsSrcs": true,
+  "deps": [
+    "setup",
+    "build_srcs"
+  ],
+  "sameProjectDeps": [
+    "setup"
+  ],
+  "transitiveDeps": [
+    "setup"
+  ],
+  "transitiveCrossDeps": [
+    {
+      "name": "build_srcs",
+      "project": "plugins_omnishell",
+      "dir": "plugins/omnishell",
+      "outs": {
+        "globs": [
+          "src/**/*",
+          "test/**/*",
+          "interpreter/**/*",
+          "check-handlers.ts",
+          "check-machines.ts",
+          "check-markup.ts",
+          "check-visual.ts",
+          "read-markup.ts",
+          "package.json",
+          "bun.lock",
+          "tsconfig.json",
+          "bunfig.toml"
+        ],
+        "exclude": []
+      }
+    }
+  ],
+  "upClosure": [
+    "plugins/pronto/.bayt/compose.build.yaml",
+    "plugins/pronto/.bayt/compose.setup.yaml",
+    "plugins/omnishell/.bayt/compose.build.yaml",
+    "plugins/omnishell/.bayt/compose.setup.yaml"
+  ],
+  "chainedDeps": [
+    {
+      "name": "setup",
+      "project": "plugins_pronto",
+      "dir": "plugins/pronto",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    },
+    {
+      "name": "build_srcs",
+      "project": "plugins_omnishell",
+      "dir": "plugins/omnishell",
+      "outs": {
+        "globs": [
+          "src/**/*",
+          "test/**/*",
+          "interpreter/**/*",
+          "check-handlers.ts",
+          "check-machines.ts",
+          "check-markup.ts",
+          "check-visual.ts",
+          "read-markup.ts",
+          "package.json",
+          "bun.lock",
+          "tsconfig.json",
+          "bunfig.toml"
+        ],
+        "exclude": []
+      }
+    }
+  ],
+  "cmds": [
+    {
+      "srcs": {
+        "globs": [
+          "*.ts",
+          "scales/*.ts",
+          "deno.json",
+          "deno.lock"
+        ],
+        "exclude": [],
+        "defaultGlobs": null,
+        "defaultExclude": null
+      },
+      "shell": "sh",
+      "do": "sh -c 'deno check --config deno.json *.ts'",
+      "name": "builtin",
+      "stop": false
+    }
+  ],
+  "cache": {
+    "full": false,
+    "similar": false
+  },
+  "vscode": {
+    "group": {
+      "kind": "build",
+      "isDefault": true
+    }
+  }
+}

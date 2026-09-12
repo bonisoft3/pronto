@@ -1,0 +1,8 @@
+# generated from bayt.cue — do not edit
+include:
+- path: ./compose.setup.yaml
+  required: false
+- path: ./compose.build.yaml
+  required: false
+- path: ../../../plugins/omnishell/.bayt/compose.bayt.yaml
+  required: false

@@ -1,0 +1,40 @@
+# generated from bayt.cue — do not edit
+services:
+  plugins_pronto-build:
+    build:
+      additional_contexts:
+        plugins_omnishell-build_srcs: service:plugins_omnishell-build_srcs
+        plugins_pronto-setup: service:plugins_pronto-setup
+      context: ..
+      dockerfile: .bayt/Dockerfile.build
+      target: build
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-plugins_pronto-build:${BAYT_IMAGE_TAG:-latest}
+    scale: 0
+  plugins_pronto-build_bayt:
+    build:
+      additional_contexts:
+        plugins_pronto-setup_bayt: service:plugins_pronto-setup_bayt
+        plugins_omnishell-build_bayt: service:plugins_omnishell-build_bayt
+      context: ..
+      dockerfile: .bayt/Dockerfile.build
+      target: build_bayt
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-plugins_pronto-build_bayt:latest
+    scale: 0
+  plugins_pronto-build_srcs:
+    build:
+      additional_contexts:
+        plugins_pronto-setup_srcs: service:plugins_pronto-setup_srcs
+      context: ..
+      dockerfile: .bayt/Dockerfile.build
+      target: build_srcs
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-plugins_pronto-build_srcs:latest
+    scale: 0

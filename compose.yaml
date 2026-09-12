@@ -1,0 +1,6 @@
+# Thin wrapper so `docker compose config` from this directory finds the
+# bayt-generated graph instead of walking up to the repo root (which
+# exposes a root-level `integrate` service that runs an unrelated
+# act-based CI workflow). Same shape as plugins/omnishell/compose.yaml.
+include:
+  - path: ./.bayt/compose.yaml

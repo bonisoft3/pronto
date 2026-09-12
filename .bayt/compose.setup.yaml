@@ -1,0 +1,32 @@
+# generated from bayt.cue — do not edit
+services:
+  plugins_pronto-setup:
+    build:
+      context: ..
+      dockerfile: .bayt/Dockerfile.setup
+      target: setup
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-plugins_pronto-setup:${BAYT_IMAGE_TAG:-latest}
+    scale: 0
+  plugins_pronto-setup_bayt:
+    build:
+      context: ..
+      dockerfile: .bayt/Dockerfile.setup
+      target: setup_bayt
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-plugins_pronto-setup_bayt:latest
+    scale: 0
+  plugins_pronto-setup_srcs:
+    build:
+      context: ..
+      dockerfile: .bayt/Dockerfile.setup
+      target: setup_srcs
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-plugins_pronto-setup_srcs:latest
+    scale: 0

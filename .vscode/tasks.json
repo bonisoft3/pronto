@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "command": "mise x -- sh",
+      "args": [
+        "-c",
+        "sh -c 'deno check --config deno.json *.ts'"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "label": "build",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/plugins/pronto"
+      }
+    }
+  ]
+}
