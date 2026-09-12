@@ -1,0 +1,20 @@
+{
+  "name": "bonisoft3-pronto",
+  "interface": {
+    "displayName": "Pronto"
+  },
+  "plugins": [
+    {
+      "name": "pronto",
+      "source": {
+        "source": "local",
+        "path": "."
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development"
+    }
+  ]
+}

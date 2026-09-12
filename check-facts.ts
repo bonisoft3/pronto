@@ -200,16 +200,53 @@ function inlineViews(facts: Facts): string {
   return Object.entries(SCHEMA).map(([t, cols]) => valuesView(t, cols, facts[t] ?? [])).join("\n");
 }
 
+function miseEnv(): Record<string, string> | undefined {
+  if (Deno.build.os !== "windows") return undefined;
+  const keep = [
+    "APPDATA", "COMSPEC", "HOME", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "PATH", "PATHEXT",
+    "PROCESSOR_ARCHITECTURE", "ProgramData", "ProgramFiles", "SystemRoot", "TEMP",
+    "TMP", "USERPROFILE", "USERNAME", "WINDIR", "MISE_TRUSTED_CONFIG_PATHS", "MISE_WINDOWS_SHIM_MODE",
+  ];
+  const env = Object.fromEntries(keep.flatMap((name) => {
+    const value = Deno.env.get(name);
+    return value === undefined ? [] : [[name, value]];
+  }));
+  const path = [
+    `${env.USERPROFILE}\\.local\\bin`,
+    `${env.USERPROFILE}\\.local\\share\\mise\\shims`,
+    `${env.LOCALAPPDATA}\\mise\\bin`,
+    `${env.LOCALAPPDATA}\\mise\\shims`,
+    `${env.ProgramFiles}\\Git\\cmd`,
+    `${env.ProgramFiles}\\Git\\bin`,
+    `${env.SystemRoot}\\System32`,
+    env.SystemRoot,
+  ].filter((value) => !value.startsWith("undefined"));
+  return { ...env, PATH: path.join(";") };
+}
+
+function miseBin(env: Record<string, string> | undefined): string {
+  if (Deno.build.os !== "windows") return "mise";
+  return `${env?.LOCALAPPDATA}\\mise\\bin\\mise.exe`;
+}
+
 /** duckdb over one script. A non-zero exit is a precondition failure — the tool
  * missing, or the SQL itself refusing to parse — and raises with duckdb's own
  * words rather than grading as findings. */
 async function query(sql: string, cwd: string): Promise<Finding[]> {
-  const duck = await new Deno.Command("mise", {
-    args: ["x", "--", "duckdb", "-json", "-c", sql],
+  const env = miseEnv();
+  const child = new Deno.Command(miseBin(env), {
+    args: ["x", "--", "duckdb", "-json"],
     cwd,
+    clearEnv: Deno.build.os === "windows",
+    env,
+    stdin: "piped",
     stdout: "piped",
     stderr: "piped",
-  }).output();
+  }).spawn();
+  const input = child.stdin.getWriter();
+  await input.write(new TextEncoder().encode(sql));
+  await input.close();
+  const duck = await child.output();
   if (!duck.success) {
     throw new Error(`duckdb refused the queries: ${new TextDecoder().decode(duck.stderr).trim()}`);
   }

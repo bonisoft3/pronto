@@ -1,0 +1,27 @@
+{
+  "name": "pronto",
+  "version": "0.1.0",
+  "description": "A Codex-native outer loop for Pronto design, implementation, verification, and consequence-based review.",
+  "author": {
+    "name": "bonisoft3",
+    "url": "https://github.com/bonisoft3"
+  },
+  "repository": "https://github.com/bonisoft3/pronto",
+  "license": "MIT",
+  "keywords": ["pronto", "sayt", "review", "workflow", "coding"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Pronto",
+    "shortDescription": "A consequence-based outer loop for Codex.",
+    "longDescription": "Routes mechanical checks to Sayt and consequential design or code decisions to a small, scoped Codex review panel.",
+    "developerName": "bonisoft3",
+    "category": "Development",
+    "capabilities": ["Write"],
+    "websiteURL": "https://github.com/bonisoft3/pronto",
+    "defaultPrompt": [
+      "Use Pronto to implement this slice: ",
+      "Run a Pronto review of this change: ",
+      "Design and deliver this Pronto app change: "
+    ]
+  }
+}
