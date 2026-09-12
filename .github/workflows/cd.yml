@@ -1,0 +1,57 @@
+# Publish this component's CUE module to the Central Registry.
+#
+# GitHub reads workflows only from a repository's root .github/, so this file
+# is inert in the monorepo and active only in the mirror, where copybara moves
+# the component directory to the root (copy.bara.sky) and stages .mirror/cue.mod
+# there as cue.mod. The module the publish reads is that staged one.
+#
+# The trigger is a plain `v*` tag, which the monorepo's own cd.yml creates here
+# after locating the mirror commit by its GitOrigin-RevId trailer. Tagging the
+# monorepo is what releases this module; nothing publishes from a branch.
+#
+# Prerequisite, configured once per module and not by this file: a trust entry
+# on cue.dev binding this workflow to publish under the module path that
+# cue.mod/module.cue declares. Without it the OIDC login below is refused.
+
+name: cd
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pinned to the version the module declares in language.version, so the
+      # tool that validates on publish is the tool the module is written for.
+      - name: Set up CUE
+        uses: cue-lang/setup-cue@v1.0.1
+        with:
+          version: 'v0.16.1'
+
+      # OIDC login to registry.cue.works — no token, no secret. The identity is
+      # this workflow, which is what the cue.dev trust entry names.
+      - name: Authenticate to CUE Central Registry
+        uses: cue-labs/registry-login-action@v1
+
+      # --check reads without writing: cue.mod/module.cue states its deps, and
+      # a stale version there fails here rather than publishing a module whose
+      # dependencies name something the registry no longer serves. The write
+      # form would dirty the tree the publish below requires clean.
+      - name: Dependencies are tidy
+        run: cue mod tidy --check
+
+      # `source: kind: "git"` in module.cue makes publish reject an unclean
+      # working tree, so nothing may write to the checkout before this runs.
+      - name: Publish CUE module
+        run: cue mod publish "${GITHUB_REF_NAME}"
