@@ -7,27 +7,12 @@ import fc from "npm:fast-check@3.23.2";
 import type { ParsedExpr } from "./cel-emit.ts";
 import { arbitraryHandlerInput, arbitrarySelfTest, arbitraryValidationInput, type EntityDef, type FieldDef } from "./arbitrary.ts";
 import { type FuelHarness, instrumentJessie, instrumentSelfTest } from "./instrument.ts";
-
-const SES_URL = new URL("../omnishell/interpreter/vendor/ses.umd.min.js", import.meta.url).href;
-
-let sesBooted = false;
-export async function bootSes(): Promise<void> {
-  if (!sesBooted) {
-    if (!(globalThis as unknown as { Compartment?: unknown }).Compartment) {
-      try {
-        await import(SES_URL);
-      } catch {
-        // SES not readable under tight sandboxes (e.g. --allow-read=.)
-      }
-    }
-    const g = globalThis as unknown as { __prontoLockdown?: boolean; lockdown?: (opt: { errorTaming: string }) => void };
-    if (!g.__prontoLockdown && typeof g.lockdown === "function") {
-      g.__prontoLockdown = true;
-      g.lockdown({ errorTaming: "unsafe" });
-    }
-    sesBooted = true;
-  }
-}
+// The cage is the terminal's, asked for rather than rebuilt: it owns HOW app
+// source runs — the ses pin, the lockdown, the bare compartment — and this file
+// owns WHAT to run in it, which is the instrumented harness arbitrary.ts feeds.
+// A battery that built its own compartment could measure a handler under an
+// authority production never grants, and report green for it.
+import { evaluateCaged } from "../omnishell/interpreter/jessie.js";
 
 export function deepFreeze<T>(obj: T): T {
   if (obj === null || typeof obj !== "object") return obj;
@@ -61,13 +46,25 @@ export async function testHandler(
   inputArb: fc.Arbitrary<{ state: unknown; event: unknown }>,
   options: BatteryOptions = {},
 ): Promise<TestResult> {
-  await bootSes();
   const fuelLimit = options.fuelLimit ?? 100_000;
-  const { harnessSource } = instrumentJessie(source, fuelLimit);
-
-  // deno-lint-ignore no-explicit-any
-  const comp = (globalThis as any).Compartment ? new (globalThis as any).Compartment({}) : null;
-  const factory = (comp ? comp.evaluate(harnessSource) : (0, eval)(harnessSource)) as (b: number) => FuelHarness;
+  // Instrumenting is about THIS module — source the rewriter cannot meter is
+  // that module's defect — so it is reported as a result and the run goes on to
+  // the next one. Building the cage is not: a missing compartment is a fact
+  // about the environment, true of every module, and it propagates.
+  let harnessSource: string;
+  try {
+    ({ harnessSource } = instrumentJessie(source, fuelLimit));
+  } catch (err) {
+    return {
+      name,
+      kind: "handler",
+      runs: options.numRuns ?? 100,
+      maxFuelConsumed: 0,
+      ok: false,
+      error: (err as Error).message,
+    };
+  }
+  const factory = await evaluateCaged(harnessSource) as (b: number) => FuelHarness;
   const harness = factory(fuelLimit);
 
   let maxFuel = 0;
@@ -128,13 +125,23 @@ export async function testValidation(
   inputArb: fc.Arbitrary<{ state: unknown; event: unknown }>,
   options: BatteryOptions = {},
 ): Promise<TestResult> {
-  await bootSes();
   const fuelLimit = options.fuelLimit ?? 100_000;
-  const { harnessSource } = instrumentJessie(source, fuelLimit);
-
-  // deno-lint-ignore no-explicit-any
-  const comp = (globalThis as any).Compartment ? new (globalThis as any).Compartment({}) : null;
-  const factory = (comp ? comp.evaluate(harnessSource) : (0, eval)(harnessSource)) as (b: number) => FuelHarness;
+  // Per-module where the module is at fault, propagating where the cage is —
+  // testHandler above says why.
+  let harnessSource: string;
+  try {
+    ({ harnessSource } = instrumentJessie(source, fuelLimit));
+  } catch (err) {
+    return {
+      name,
+      kind: "validation",
+      runs: options.numRuns ?? 100,
+      maxFuelConsumed: 0,
+      ok: false,
+      error: (err as Error).message,
+    };
+  }
+  const factory = await evaluateCaged(harnessSource) as (b: number) => FuelHarness;
   const harness = factory(fuelLimit);
 
   let maxFuel = 0;
@@ -362,6 +369,30 @@ export async function batterySelfTest(): Promise<string[]> {
   const resVal = await testValidation("clean-validation", cleanValidation, valInputArb, { numRuns: 30 });
   if (!resVal.ok) {
     failures.push(`battery clean validation failed: ${resVal.error}`);
+  }
+
+  // Regression: the harness runs CONFINED, not merely instrumented. Every case
+  // above measures the fuel counter and the freeze, and all of them pass just
+  // as well when the source is run with this process's own globals in scope —
+  // which is what the battery used to fall back to when the ses bundle was
+  // unreadable. A handler is what production runs in a compartment endowing
+  // nothing, so the authority it can see is the thing to assert on: `fetch`
+  // and `Deno` are both real here and neither may reach the module.
+  const confinedHandler = `
+(state, event) => {
+  if (typeof fetch !== "undefined") throw new Error("fetch reached a handler");
+  if (typeof Deno !== "undefined") throw new Error("Deno reached a handler");
+  return { updates: [] };
+};
+`;
+  const resCaged = await testHandler("confinement", confinedHandler, inputArb, { numRuns: 5 });
+  if (!resCaged.ok) {
+    failures.push(`the fuel harness ran outside the compartment: ${resCaged.error}`);
+  }
+  // And the realm around it was sealed: a compartment on an unlocked realm
+  // still shares mutable intrinsics with everything else in the process.
+  if ((globalThis as { __prontoLockdown?: boolean }).__prontoLockdown !== true) {
+    failures.push("the realm was never locked down, so the compartment shares mutable intrinsics");
   }
 
   return failures;
