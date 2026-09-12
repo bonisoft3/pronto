@@ -622,6 +622,33 @@ _cdcTableField: "__table"
 	// Server tables are left out: Postgres answers a missing value as null.
 	_optional: {for _, e in S.code.state.entities if S._local[e.table] != _|_ {(e.table): [for f in e.fields if !f.required {name: f.name, type: f.type}]}}
 	_optionalTables: [for t, cs in S._optional if len(cs) > 0 {t}]
+	// What the terminal's markup rules judge a screen against (check-markup.ts):
+	// the columns a filter may name, the pk, unique field or declared unique
+	// that witnesses a slot's cardinality, the tier and type a machine region's
+	// writes are held to, and the values a data-when may state. Scoped to the
+	// tables the terminal registers, and to the field attributes those rules
+	// read — shell.yaml carries one projection of the program per reader, and
+	// this is the checker's.
+	_schema: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ {
+		(e.table): {
+			durability: e.durability
+			fields: [for f in e.fields {
+				name: f.name
+				type: f.type
+				if f.pk {pk: true}
+				if f.unique != _|_ {unique: f.unique}
+				if f.default != _|_ {default: f.default}
+				if e.enums[f.name] != _|_ {enum: e.enums[f.name]}
+			}]
+			if len(e.uniques) > 0 {
+				uniques: [for u in e.uniques {
+					name: u.name
+					cols: u.cols
+					if u.where != _|_ {where: u.where}
+				}]
+			}
+		}
+	}}
 	_validatedTables: [for _, e in S.code.state.entities if S._tables[e.table] != _|_ if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	// The seeds #appMigrations.seeded leaves out: a browser tier has no
 	// migration to render into, so the terminal is told the rows instead.
@@ -668,6 +695,11 @@ _cdcTableField: "__table"
 		if len(S._local) > 0 {
 			local: S._local
 		}
+
+		// Unguarded, unlike the optional keys below: a markup rule's schema is
+		// what makes its findings true, and a checker reading an absent key
+		// would grade every screen against an app that declares nothing.
+		schema: S._schema
 
 		// Primary key per table, only where it is not "id": the terminal's
 		// synced collections key rows by it (a pipeline sink like note_progress
@@ -826,7 +858,12 @@ _cdcTableField: "__table"
 		surface: {
 			// --allow-env is mermaid's: the diagram parse reads the environment as it
 			// initialises, where the CEL parse beside it does not.
-			buildCmd: "deno run --allow-read=. --allow-write=. --allow-run=cue --allow-env ../../plugins/pronto/write.ts ."
+			// Two spawns, both named: `cue` for the export the emission is read
+			// from and the vet each chart is held to, `deno` for the terminal's
+			// markup reader — the grammar's readings are the terminal's, and a
+			// compiler published on its own reaches them over a pipe rather than
+			// through an import (derive.ts).
+			buildCmd: "deno run --allow-read=. --allow-write=. --allow-run=cue,deno --allow-env ../../plugins/pronto/write.ts ."
 			testCmd:  "cue vet -c ./..."
 			pipelineFiles: [for _, p in D.code.state.pipelines {"docker/\(D.code.meta.name)-\(p.name).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop

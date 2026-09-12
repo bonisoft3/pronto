@@ -19,8 +19,6 @@
 // `ir` names — so the ir, the artifact under review, is the authority, and
 // program.cue names its decisions without restating them.
 
-import { fileURLToPath } from "node:url";
-import { parseFilterSpec } from "../omnishell/interpreter/fragment.js";
 import type { ParsedExpr } from "./cel-emit.ts";
 import { enumValues } from "./cel-emit.ts";
 import { parseCel } from "./cel.ts";
@@ -62,35 +60,36 @@ import {
   scaleFacts,
   sha256Hex,
 } from "./facts.ts";
-// The rules themselves live with the vocabulary they check — the terminal
-// publishes its markup's grammar AND its grammar's rules (omnishell/lint.ts);
-// this pass only walks an app's screens and applies them.
-import {
-  type Entity,
-  kindedRegions,
-  kindLint,
-  type MachineRegion,
-  machineRegions,
-  machineWrites,
-  parallelLint,
-  focusLint,
-  roveLint,
-  stopRegions,
-  scanScreen,
-  slotRegions,
-  type StopRegion,
-  templateArity,
-  undeclaredSlot,
-  unknownColumns,
-  unwitnessedControls,
-  unwitnessedSlot,
-  type Write,
-  writeLint,
-  machineLint,
-} from "../omnishell/interpreter/lint.ts";
-import { machineShape } from "../omnishell/interpreter/fragment.js";
-
 type Spec = { col: string; op: string; value?: string }[] | null;
+
+/**
+ * The markup projection, as the terminal's reader prints it — read-markup.ts's
+ * header is the contract, and this is the half of it this pass reads.
+ *
+ * The readings are the terminal's own: it publishes the markup's grammar, so
+ * it publishes what a sentence in that grammar says. They arrive over a pipe
+ * rather than through an import because pronto is published on its own, where
+ * a path into the terminal's tree resolves to nothing.
+ */
+type MachineProjection = {
+  table: string;
+  machine: string;
+  emptyRow?: string;
+  filter?: string;
+  refs: string[];
+  assignStrings: string[];
+  filterSpec: Spec;
+};
+type ScreenProjection = { tables: string[]; handlers: string[]; machines: MachineProjection[] };
+
+/** The slice of a program's entity this pass reads off its own export; every
+ * module it hands the entities to declares the slice it reads for itself. */
+type Entity = {
+  table: string;
+  durability: string;
+  fields: { name: string; type: string; cel?: string }[];
+  invariant?: { cel: string };
+};
 
 import { quoteKey } from "./cue.ts";
 
@@ -249,6 +248,10 @@ export async function derive(appDir: string): Promise<void> {
         "designCss: out.files[\"shell/design.css\"].text, " +
         "shellCss: out.files[\"shell/shell.css\"].text, " +
         "entry: out.terminal.surface.entry, " +
+        // The terminal's own paths: what this pass spawns to read the markup,
+        // and the published schema it vets each chart against.
+        "markupReader: out.terminal.surface.markupReader, " +
+        "machineSchema: out.terminal.surface.machineSchema, " +
         "statics: [for s in out.cluster.meta.statics {file: s.file, target: s.target}], " +
         "shared: {for k, s in code.surface.screens {(k): s.files.shared}}, " +
         "pendingLiterals: code.meta.design.pendingLiterals, " +
@@ -276,6 +279,8 @@ export async function derive(appDir: string): Promise<void> {
     designCss: string;
     shellCss: string;
     entry: string;
+    markupReader: string;
+    machineSchema: string;
     statics: { file: string; target: string }[];
     shared: Record<string, string[]>;
     pendingLiterals: number;
@@ -290,13 +295,6 @@ export async function derive(appDir: string): Promise<void> {
   };
   const notes = await decisionNotes(appDir, exp.ir, exp.decisions);
   const byTable = new Map(Object.entries(entities).map(([name, e]) => [e.table, name]));
-  for (const [ename, e] of Object.entries(entities)) {
-    for (const u of e.uniques ?? []) {
-      if (u.where !== undefined && parseFilterSpec(u.where) === null) {
-        fail(`entity ${ename}: uniques "${u.name}" where "${u.where}" is outside the translatable fragment subset`);
-      }
-    }
-  }
 
   // A validation's module joins the handlers in `modules` below, so the
   // denylist and the completion rule reach it through the same fact rows.
@@ -354,9 +352,9 @@ export async function derive(appDir: string): Promise<void> {
     return site === undefined ? null : enumValues(irs.get(site.cel)!);
   };
 
-  // The app's declared Jessie modules, by basename: what a machine's value
-  // positions may reference, and what tells an assign's reference from its
-  // literals.
+  // The app's declared Jessie modules, by basename: what tells a machine
+  // assign's reference from its literals, since a string in that position is a
+  // module exactly where one is declared under the name.
   const available = new Set<string>();
   try {
     for await (const f of Deno.readDir(`${appDir}/shell/handlers`)) {
@@ -366,123 +364,41 @@ export async function derive(appDir: string): Promise<void> {
     if (!(e instanceof Deno.errors.NotFound)) throw e;
   }
 
+  // What the screens say, as the terminal reads them. Spawned like the export
+  // above and from the same directory, so the path the program's terminal
+  // declares is the path that resolves; --no-config because every module the
+  // reader loads is a static import of its own.
+  const read = await new Deno.Command("deno", {
+    args: ["run", "--no-lock", "--no-check", "--no-config", "--allow-read=.", exp.markupReader, "."],
+    cwd: appDir,
+    stdout: "piped",
+    stderr: "inherit",
+  }).output();
+  if (!read.success) fail(`${exp.markupReader} refused this app's markup`);
+  const { screens: projected }: { screens: Record<string, ScreenProjection> } = JSON.parse(
+    new TextDecoder().decode(read.stdout),
+  );
+
   const screens: { name: string; entities: string[]; handlers: string[] }[] = [];
-  const machines: { screen: string; region: MachineRegion }[] = [];
-  for await (const f of Deno.readDir(`${appDir}/shell/screens`)) {
-    if (!f.isFile || !f.name.endsWith(".html")) continue;
-    const name = f.name.slice(0, -".html".length);
-    const html = await Deno.readTextFile(`${appDir}/shell/screens/${f.name}`);
-    const { tables, handlers, filters } = scanScreen(html);
-    const named = tables.map((t) =>
+  const machines: { screen: string; region: MachineProjection }[] = [];
+  for (const [name, screen] of Object.entries(projected)) {
+    const named = screen.tables.map((t) =>
       byTable.get(t) ?? fail(`${name}.html reads "${t}", the table of no declared entity`)
     );
-    for (const { table, filter } of filters) {
-      const entity = entities[
-        byTable.get(table) ?? fail(`${name}.html filters "${table}", the table of no declared entity`)
-      ];
-      const bad = unknownColumns(filter, entity.fields.map((f) => f.name));
-      if (bad.length > 0) {
-        fail(`${name}.html: data-filter="${filter}" names ${bad.join(", ")} — not fields of "${table}"`);
-      }
-    }
-    for (const slot of slotRegions(html)) {
-      const entity = entities[
-        byTable.get(slot.table) ?? fail(`${name}.html reads "${slot.table}", the table of no declared entity`)
-      ];
-      const why = unwitnessedSlot(slot.filter, entity);
-      if (why !== null) {
-        fail(
-          `${name}.html: slot region "${slot.table}" (filter ${JSON.stringify(slot.filter ?? "")}) ` +
-            `may bind more than one row: ${why}`,
-        );
-      }
-      const unsaid = undeclaredSlot(slot);
-      if (unsaid !== null) {
-        fail(`${name}.html: slot region "${slot.table}" (filter ${JSON.stringify(slot.filter ?? "")}) ${unsaid}`);
-      }
-    }
-    for (const kinded of kindedRegions(html)) {
-      const ename = byTable.get(kinded.table) ??
-        fail(`${name}.html reads "${kinded.table}", the table of no declared entity`);
-      const why = kindLint(kinded.whens, entities[ename], enumsOf(ename));
-      if (why !== null) fail(`${name}.html: region "${kinded.table}": ${why}`);
-    }
     // A machine's leaves are handler modules like any other: its references
     // (and the assign strings that resolve) join the screen's derived
     // files.handlers so the loader can fetch them.
     const machineNames = new Set<string>();
-    // Every machine region on the screen that writes the same table is judged
-    // together: one region's spelling is only inconsistent against another's.
-    const writes = new Map<string, Write[]>();
-    let regions: MachineRegion[];
-    try {
-      regions = machineRegions(html);
-    } catch (e) {
-      fail(`${name}.html: ${(e as Error).message}`);
-    }
-    const grouped = new Set<string>();
-    for (const region of regions) {
-      let parsed: Parameters<typeof machineLint>[0];
-      try {
-        parsed = JSON.parse(region.machine);
-      } catch {
-        fail(`${name}.html: data-machine is not JSON`);
-      }
-      const why = machineLint(parsed, available);
-      if (why !== null) fail(`${name}.html: data-machine: ${why}`);
-      const shape = machineShape(parsed);
-      for (const r of shape.refs) machineNames.add(r);
-      for (const s of shape.assignStrings) if (available.has(s)) machineNames.add(s);
-      if (region.emptyRow !== undefined && parsed.context !== undefined) {
-        const row = JSON.parse(region.emptyRow);
-        for (const [k, v] of Object.entries(parsed.context)) {
-          if (k in row && row[k] !== v) {
-            fail(
-              `${name}.html: data-empty-row["${k}"] is ${JSON.stringify(row[k])} but the machine's ` +
-                `context says ${JSON.stringify(v)} — one fact, two values`,
-            );
-          }
-        }
-      }
-      writes.set(region.table, [
-        ...(writes.get(region.table) ?? []),
-        ...machineWrites(parsed, region.emptyRow),
-      ]);
-      // The group's own rule, run once per group rather than once per chart.
-      const group = region.parallel.join("\u0000");
-      if (region.parallel.length > 1 && !grouped.has(group)) {
-        grouped.add(group);
-        const why = parallelLint(region.parallel.map((c) => JSON.parse(c)));
-        if (why !== null) fail(`${name}.html: region "${region.table}": ${why}`);
-      }
+    for (const region of screen.machines) {
+      for (const r of region.refs) machineNames.add(r);
+      for (const s of region.assignStrings) if (available.has(s)) machineNames.add(s);
       machines.push({ screen: name, region });
     }
-    for (const [attr, rule] of [["data-rove", roveLint], ["data-focus", focusLint]] as const) {
-      let stops: StopRegion[];
-      try {
-        stops = stopRegions(html, attr);
-      } catch (e) {
-        fail(`${name}.html: ${(e as Error).message}`);
-      }
-      const declared = (table: string) =>
-        entities[byTable.get(table) ?? fail(`${name}.html reads "${table}", the table of no declared entity`)];
-      for (const region of stops) {
-        const why = rule(region, declared(region.table), region.outer === undefined ? undefined : declared(region.outer));
-        if (why !== null) fail(`${name}.html: region "${region.table}": ${why}`);
-      }
-    }
-    for (const [table, cols] of writes) {
-      const entity = entities[
-        byTable.get(table) ?? fail(`${name}.html reads "${table}", the table of no declared entity`)
-      ];
-      const why = writeLint(cols, entity);
-      if (why !== null) fail(`${name}.html: region "${table}": ${why}`);
-    }
-    // After the machine rules: a control's cover depends on what its region's
-    // machine answers, and an unparseable machine is that pass's finding.
-    for (const why of templateArity(html)) fail(`${name}.html: ${why}`);
-    for (const why of unwitnessedControls(html)) fail(`${name}.html: ${why}`);
-    screens.push({ name, entities: [...new Set(named)].sort(), handlers: [...new Set([...handlers, ...machineNames])].sort() });
+    screens.push({
+      name,
+      entities: [...new Set(named)].sort(),
+      handlers: [...new Set([...screen.handlers, ...machineNames])].sort(),
+    });
   }
   screens.sort((a, b) => (a.name < b.name ? -1 : 1));
 
@@ -535,17 +451,18 @@ export async function derive(appDir: string): Promise<void> {
       return fail(msg);
     };
     for (const [i, { screen, region }] of machines.entries()) {
-      let parsed: { field: string; initial: string };
-      try {
-        parsed = JSON.parse(region.machine);
-      } catch {
-        die(`${screen}.html: data-machine is not JSON`);
-      }
+      // The reader refuses a data-machine that is not JSON, so a chart that
+      // reaches this parses.
+      const parsed = JSON.parse(region.machine) as {
+        field: string;
+        initial: string;
+        context?: Record<string, unknown>;
+      };
       const file = `.pronto/machine-${i}.json`;
       await Deno.writeTextFile(`${appDir}/${file}`, region.machine);
       files.push(file);
       if (region.emptyRow !== undefined) {
-        const row = JSON.parse(region.emptyRow);
+        const row = JSON.parse(region.emptyRow) as Record<string, unknown>;
         if (row[parsed.field] !== parsed.initial) {
           die(
             `${screen}.html: data-empty-row["${parsed.field}"] is ${
@@ -553,16 +470,24 @@ export async function derive(appDir: string): Promise<void> {
             } but the machine's initial is "${parsed.initial}" — one fact, two values`,
           );
         }
-      } else if (!((parseFilterSpec(region.filter) as Spec) ?? []).some((p) => p.col === "id" && p.op === "eq")) {
+        for (const [k, v] of Object.entries(parsed.context ?? {})) {
+          if (k in row && row[k] !== v) {
+            die(
+              `${screen}.html: data-empty-row["${k}"] is ${JSON.stringify(row[k])} but the machine's ` +
+                `context says ${JSON.stringify(v)} — one fact, two values`,
+            );
+          }
+        }
+      } else if (!(region.filterSpec ?? []).some((p) => p.col === "id" && p.op === "eq")) {
         die(`${screen}.html: a machine region with no data-empty-row must pin its id with an eq filter`);
       }
     }
-    // Module-relative like the TS imports above, so a relocated appDir — a
-    // nested app, a downstream consumer through the CUE module cache — vets
-    // against the same published file the plugin ships.
-    const machineCue = fileURLToPath(new URL("../omnishell/machine.cue", import.meta.url));
     const vet = await new Deno.Command("cue", {
-      args: ["vet", "-d", "#Machine", machineCue, ...files],
+      // The published #Machine, named by the terminal the program targets
+      // rather than by a path into a plugin directory: a consumer keeping the
+      // terminal elsewhere says where by unifying machineSchema, and vets
+      // against the file it ships.
+      args: ["vet", "-d", "#Machine", exp.machineSchema, ...files],
       cwd: appDir,
       stderr: "inherit",
     }).output();

@@ -517,6 +517,12 @@ import (
 	// the parsed `cel` of each field. A browser tier declares none: no table
 	// is emitted for it, so its constraints reach only CUE.
 	checks: [string]: string
+	// The values a column admits, by column name, derived from the same parsed
+	// `cel` (program_cel.cue) — only for the constraints that close the set. It
+	// is the emitted answer to "which kinds are declarable", which the
+	// terminal's markup rules judge a data-when against; a checker parsing the
+	// cel itself would be a second front end for the one constraint language.
+	enums: [string]: [...string]
 	// Composite uniques the per-field `unique` flag cannot express. Declared
 	// rather than written as assembly SQL because the shell needs them too: a
 	// row's natural key is what an upsert resolves against, and what an

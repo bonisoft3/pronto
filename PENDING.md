@@ -67,7 +67,7 @@ needed the header's value to stop being a field. The ir carries each
 The v2 grammar landed with PR #1642. What did not:
 
 - **`schema-vet` at the store chokepoint.** Half of it landed: `writeLint`
-  (`interpreter/lint.ts`, run from `derive.ts`) judges column spelling against
+  (`interpreter/lint.ts`, run from `check-markup.ts`) judges column spelling against
   the entity's declared field types over browser-tier writes, which is what
   killed the number-vs-text class. What it does not do is judge a VALUE — the
   CEL invariants ship in `shell.yaml` and nothing enforces them, and the check

@@ -11,7 +11,7 @@
 //                      states what each block is for.
 
 import type { ParsedExpr } from "./cel-emit.ts";
-import { cueConstraint, sqlCheck } from "./cel-emit.ts";
+import { cueConstraint, enumValues, sqlCheck } from "./cel-emit.ts";
 
 export type Entity = {
   table: string;
@@ -85,6 +85,17 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
       seed.push(`\t\t${quoteKey(s.col)}?: ${c.cue}`);
     }
     if (seed.length > 0) lines.push(`\tseed: [...{\n${seed.join("\n")}\n\t}]`);
+    // The declarable values of every column whose constraint closes its set,
+    // off the same IR the CUE constraint above is rendered from. A disjunction
+    // states them to CUE and answers no reader that has to LIST them, which is
+    // what the terminal's markup rules and the emitted shell.yaml both need.
+    const enums: string[] = [];
+    for (const s of mine) {
+      if (s.col === null) continue;
+      const values = enumValues(ir(s.cel));
+      if (values !== null) enums.push(`\t\t${quoteKey(s.col)}: ${JSON.stringify(values)}`);
+    }
+    if (enums.length > 0) lines.push(`\tenums: {\n${enums.join("\n")}\n\t}`);
     if (lines.length > 0) blocks.push(`${quoteKey(entity)}: {\n${lines.join("\n")}\n}`);
   }
   const body = blocks.map((b) => b.split("\n").map((l) => `\t${l}`).join("\n")).join("\n");
@@ -93,9 +104,11 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
     "//",
     "// `checks` are the SQL CHECK bodies emit.cue renders into the table DDL;",
     "// `seed` carries what each field-level cel says about the field's own",
-    "// value, which is what vets a stated row. An invariant binds `this` to the",
-    "// ROW, and a predicate over several columns constrains no single field's",
-    "// value, so it derives a CHECK body and nothing for CUE.",
+    "// value, which is what vets a stated row; `enums` lists the values a",
+    "// closed constraint admits, for the readers that cannot enumerate a CUE",
+    "// disjunction. An invariant binds `this` to the ROW, and a predicate over",
+    "// several columns constrains no single field's value, so it derives a",
+    "// CHECK body and nothing for CUE.",
     `package ${pkg}`,
     "",
     ...(usesStrings ? ['import "strings"', ""] : []),
