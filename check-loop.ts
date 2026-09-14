@@ -126,14 +126,22 @@ function agentNames(fails: Failure[]): Set<string> {
     });
     return new Set();
   }
-  const declared = manifest.agents ?? ["./agents"];
-  const dirs: string[] = Array.isArray(declared) ? declared : [declared];
+  const declared = manifest.agents;
+  const paths: unknown[] = declared === undefined ? list("agents", ".md")
+    : Array.isArray(declared) ? declared : [declared];
   const names = new Set<string>();
-  for (const dir of dirs) {
-    for (const path of list(dir.replace(/^\.\//, ""), ".md")) {
-      const name = frontmatter(read(path)!).get("name");
-      if (name) names.add(name);
+  for (const path of paths) {
+    if (typeof path !== "string" || !path.endsWith(".md")) {
+      fails.push({ where: ".claude-plugin/plugin.json", want: "agents entries name individual .md files", got: String(path) });
+      continue;
     }
+    const body = read(path);
+    if (body === null) {
+      fails.push({ where: path, want: "a declared agent file", got: "absent" });
+      continue;
+    }
+    const name = frontmatter(body).get("name");
+    if (name) names.add(name);
   }
   return names;
 }

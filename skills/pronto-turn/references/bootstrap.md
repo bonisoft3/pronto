@@ -33,14 +33,13 @@ installation; do not substitute `main` or `latest` for a missing release.
 
 3. Bootstrap writes `pronto/config.cue`, `pronto/generate_tool.cue`, `.mise.toml`, and
    `.say.yaml`. The first two are the source; `sayt generate` recreates the
-   last two. Bootstrap knows only Pronto's requirements. When choosing a
-   terminal, cluster, or builder, unify its exported project requirements into
-   `pronto` in package `prontoproject`, then run
-   `./saytw --script tools.nu cue cmd generate ./pronto`.
+   last two. Bootstrap knows only Pronto's requirements.
 
-4. Create and inspect the project lock, then install and check the toolchain:
+4. Inspect and trust `.mise.toml`, create the project lock, then install and
+   check the toolchain:
 
    ```sh
+   ./saytw --script tools.nu mise trust .mise.toml
    ./saytw --script tools.nu mise lock
    ./saytw setup
    ./saytw doctor
@@ -50,8 +49,13 @@ installation; do not substitute `main` or `latest` for a missing release.
 
    `mise lock` is the explicit lock-writing operation. Inspect its resolved
    versions, artifact URLs and checksums; retain `mise.lock` with the project.
-   Repeat lock → setup → doctor whenever adapter unification changes tools.
    Do not disable locked mode to make generation pass.
+
+When choosing a terminal, cluster, or builder, unify its exported project
+requirements into `pronto` in package `prontoproject`, then run
+`./saytw --script tools.nu cue cmd generate ./pronto`. Inspect the generated
+configuration and repeat trust → lock → setup → doctor before generation uses
+the new tools.
 
 Host plugins and project configuration are separate installations. Use the
 host's supported plugin installer, then restart or reload when required by

@@ -76,6 +76,16 @@ if (!args?.context || !args?.ir) {
 }
 const context = args.context
 const ir = args.ir
+const routes = args.routes
+for (const name of ['review', 'risk', 'advisor']) {
+  const route = routes?.[name]
+  if (typeof route?.model !== 'string' || !route.model.trim() ||
+      !['low', 'medium', 'high', 'xhigh', 'max'].includes(route.effort)) {
+    throw new Error(`studio-review needs args.routes.${name} with model and effort`)
+  }
+}
+const routeOptions = (name) => ({ model: routes[name].model, effort: routes[name].effort })
+const seatRoute = (seat) => routeOptions(seat === 'backend' ? 'risk' : 'review')
 
 // pipeline, not parallel: a seat's findings start verifying while the slower
 // seats are still reading. The barrier would cost the fast seats their lead.
@@ -92,7 +102,7 @@ const reviewed = await pipeline(
         `If your surface is untouched by this turn, that is outcome nothing_to_report and it ` +
         `is a good result. If you needed to look at something you could not reach, that is ` +
         `could_not_look and you must name what stopped you. Never report one as the other.`,
-      { label: `seat:${seat}`, phase: 'Seats', agentType: `pronto:${seat}`, schema: FINDINGS },
+      { label: `seat:${seat}`, phase: 'Seats', agentType: `pronto:${seat}`, schema: FINDINGS, ...seatRoute(seat) },
     ),
   (review, seat) => {
     // A seat that died and a seat that found nothing are different results, and
@@ -118,7 +128,7 @@ const reviewed = await pipeline(
             `Read the actual code and the ir before answering. A finding survives only if the ` +
             `property genuinely does not hold. Default to refuted:true when you are uncertain — ` +
             `a false finding costs an inner-loop pass, and the seat can raise it again.`,
-          { label: `verify:${seat}:${f.id}`, phase: 'Verify', schema: VERDICT },
+          { label: `verify:${seat}:${f.id}`, phase: 'Verify', schema: VERDICT, ...seatRoute(seat) },
           // A verifier that did not answer did not refute. Both ways of failing
           // to answer — a null return, and a throw parallel() turns into one —
           // land in the same bucket, which is neither confirmed nor dropped.
@@ -172,7 +182,7 @@ const advisory = await agent(
     `The seats reported these confirmed blocking findings:\n` +
     (confirmed.map((f) => `- [${f.seat}] ${f.required_property}`).join('\n') || '- none') +
     `\n\nYou are advisory forever. Nothing you write gates this turn; say what you see.`,
-  { label: 'advisor', phase: 'Advisory', agentType: 'pronto:platform-advisor' },
+  { label: 'advisor', phase: 'Advisory', agentType: 'pronto:platform-advisor', ...routeOptions('advisor') },
 )
 
 return { confirmed, unverified, advisories, silent, unseen, advisory }

@@ -9,6 +9,7 @@ say:
         priority: -1
         cmds:
           - do: "deno run --allow-read=. check-loop.ts --self-test"
+          - do: "deno test --config deno.json --allow-read workflow_test.ts"
       # emit.cue's output pinned against a small program; testdata/ is outside
       # every `./...` pattern, so no app or scan evaluates it.
       emit:

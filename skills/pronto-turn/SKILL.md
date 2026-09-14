@@ -28,10 +28,9 @@ the selected adapters contribute their own tool requirements and Sayt rules.
 
 ## Model routing
 
-Read [model routing](references/model-routing.md) before delegating. The lead
-chooses the smallest route that can settle the actual risk. If the session does
-not expose the named model, retain the role and reasoning effort with the
-closest available coding model; do not block on a model name.
+Read [model routing](references/model-routing.md) before choosing phase models
+or delegating. Use its host-specific dispatch contract and report substitutions;
+the lead chooses the smallest route that can settle the actual risk.
 
 ## 1. Establish the scope
 
@@ -49,8 +48,9 @@ Classify the slice:
 | Durable data, policy, pipeline, validation | Backend review plus its mechanical gates. |
 | Cross-layer or release-risk | Lead review plus the relevant specialist panel. |
 
-For a visible surface without an existing accepted oracle, generate a canvas or
-mockup and ask for human judgment before encoding a taste decision. `ir.html`,
+For a visible surface without an existing accepted oracle, read
+[design tools](references/design-tools.md), generate a canvas or mockup, and ask
+for human judgment before encoding a taste decision. `ir.html`,
 not the canvas, is the contract that follows the decision. Skip this only when
 the slice has no visible behavior.
 
@@ -69,6 +69,12 @@ generated artifacts stay coherent.
 
 ## 3. Review by consequence
 
+Use an available host-native code-review skill when it supplies an evidence-backed
+review of this diff. Otherwise perform that review explicitly: inspect correctness,
+regressions, and missing acceptance evidence. Do not invoke Claude's `code-review`
+command on Codex or Agy, or count a native review as a substitute for specialist
+judgment it did not cover.
+
 Read [studio seats](references/studio-seats.md). Select at most three blocking
 seats and add the platform seat only as non-blocking advice. Run selected seats
 in parallel after the mechanical gate is green.
@@ -83,13 +89,27 @@ same panel only if findings remain. Stop after two revision rounds; a third
 flat round is an escalation with the unresolved decision, evidence, and
 alternatives.
 
-## 4. Evidence and handoff
+## 4. Simplify once
+
+After review and the owning gates are green, use an available host-native
+simplify skill, or make one explicit simplification pass over this turn's
+hand-written diff. Look for needless indirection, duplication, and a simpler
+expression of the same behavior. Respect repository comment discipline and
+generated-file ownership. Do not redesign the accepted oracle, add speculative
+abstractions, or expand into unrelated cleanup. No useful change is a valid result.
+
+Rerun the owning Sayt pair on any simplification and inspect the diff for altered
+contracts; revisit an affected seat if a reviewable decision changed. If a
+simplification breaks a gate, undo only that pass's changes, preserving other
+work. This is one pass, not another revision loop.
+
+## 5. Evidence and handoff
 
 Run the smallest final gate that proves the changed layer, plus `sayt
 integrate` whenever the change affects an acceptance flow or rendered output.
 Do not claim coverage that was skipped. Report: scope, oracle decision or why
 none was needed, commands and exit status, selected seats and findings, and
-any remaining human decision.
+actual model/design-tool routes, and any remaining human decision.
 
 ## Host adapter
 

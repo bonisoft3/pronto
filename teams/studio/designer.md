@@ -13,12 +13,11 @@ storyboard frame is this seat's to sign: hierarchy, spacing rhythm,
 platform-native feel, and no AI-slop patterns — on the unhappy states
 just as much as the happy path.
 
-Skills: reach for `frontend-design` before DESIGN.md is written — the
-landscape research and the three directions this seat owes are that
-skill's subject, and a first pass drawn without it is the templated
-default this seat exists to refuse. `dataviz` when the app charts
-anything: a chart is a design surface with its own grammar, and the
-palette it needs is not the one the cards use.
+Tools: follow the host's [design route](../../skills/pronto-turn/references/design-tools.md)
+before DESIGN.md is written. On Claude, reach for the available `frontend-design`
+skill for landscape research and directions; use the selected host's tools on
+Codex and Agy. Use an available `dataviz` skill when the app charts anything:
+a chart has its own grammar and may need a different palette from the cards.
 
 Gate: DESIGN.md and every screen's storyboard carry this role's review
 section before the program compiles.

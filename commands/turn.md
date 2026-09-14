@@ -32,6 +32,11 @@ Three rules hold for the whole turn:
 
 ## The steps
 
+Read `${CLAUDE_PLUGIN_ROOT}/skills/pronto-turn/references/model-routing.md` for
+the phase defaults and native dispatch contract. Pass explicit model choices
+when delegating, including the Sayt implementer and studio workflow. Skills
+that run in this conversation retain its model; report that actual route.
+
 ### 0. Bootstrap and preflight — abort gate
 
 If this repository is not bootstrapped, read
@@ -50,7 +55,8 @@ thing it exists to say.
 
 ### 1. Design — escalation gate
 
-Invoke the `design` skill and put the turn's visible surface on a canvas. Its job
+Read `${CLAUDE_PLUGIN_ROOT}/skills/pronto-turn/references/design-tools.md`.
+Invoke the available `design` skill and put the turn's visible surface on a canvas. Its job
 is to write the oracle *before* the code exists — without it, "done" means
 whatever the implementer decided it meant.
 
@@ -103,10 +109,11 @@ stall, and a stall escalates rather than burning the third pass.
 
 Five studio seats reviewing one artifact is embarrassingly parallel, and it is the
 slow part of the turn. Run `${CLAUDE_PLUGIN_ROOT}/workflows/studio-review.js` with
-the Workflow tool, with `args: {context, ir}` — `context` is what the seats
+the Workflow tool, with `args: {context, ir, routes}` — `context` is what the seats
 review (the working tree, or the paths this turn changed) and `ir` is the ir
-they review it against. The script refuses to run without both rather than
-review a placeholder.
+they review it against. Populate `routes` from the shared model-routing
+contract. The script requires the artifacts and all three model/effort routes
+before dispatching any agent.
 
 Whether to split step 3 across worktrees is a case-by-case call, made with Claude
 Code's own machinery: a subagent with worktree isolation. When work from separate
@@ -122,7 +129,7 @@ advisory forever — read it, never gate on it.
 The script needs no interpreter on the machine; it runs inside the harness. What
 it does need is the Workflow tool. If that is unavailable, say so and run the
 seats serially with the Agent tool — and report that the turn was reviewed
-serially, because a fan-out that silently became a sequence is a different turn
+serially, with the same explicit seat and verifier routes, because a fan-out that silently became a sequence is a different turn
 than the one that was asked for.
 
 ### 6. Simplify — once
@@ -149,6 +156,9 @@ Report the turn as a table: step, gate, outcome. Name every step that escalated 
 every step you skipped, with the reason. Never collapse "nothing to review here"
 into "I could not look" — they are different outcomes and a summary that merges them
 hides the second one.
+
+Include actual model and design-tool routes, including host substitutions or
+inherited choices; a requested model is not evidence that it ran.
 
 Then suggest `/code-review ultra` at the branch boundary. This command cannot launch
 it — it is user-triggered and billed — so it is a suggestion, and the user types it.
