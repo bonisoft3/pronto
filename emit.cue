@@ -876,6 +876,22 @@ _cdcTableField: "__table"
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
 				for name, c in D.terminal.surface.checks {(name): c}
+				derive: {
+					verb: "lint"
+					cmds: ["deno run --allow-read=. ../../plugins/pronto/derive.ts --self-test"]
+					note: "compiler derivation self-test"
+				}
+				types: {
+					verb: "lint"
+					cmds: ["deno check --config ../../plugins/pronto/deno.json ../../plugins/pronto/*.ts ../../plugins/pronto/scales/*.ts"]
+					note: "compiler type check"
+				}
+				facts: {
+					verb: "lint"
+					priority: 1
+					cmds: ["deno run --allow-read=.,../../plugins/pronto --allow-run --allow-env=APPDATA,COMSPEC,HOME,HOMEDRIVE,HOMEPATH,LOCALAPPDATA,PATH,PATHEXT,PROCESSOR_ARCHITECTURE,ProgramData,ProgramFiles,SystemRoot,TEMP,TMP,USERPROFILE,USERNAME,WINDIR,MISE_TRUSTED_CONFIG_PATHS,MISE_WINDOWS_SHIM_MODE ../../plugins/pronto/check-facts.ts ."]
+					note: "compiler facts check"
+				}
 				fuel: {
 					verb: "test"
 					cmds: [
