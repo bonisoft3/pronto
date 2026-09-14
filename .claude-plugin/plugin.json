@@ -1,6 +1,6 @@
 {
   "name": "pronto",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The outer loop. Drives one turn of design, the sayt TDD loop, and review, routing each obligation to the budget that can settle it.",
   "agents": [
     "./agents/pipeline-designer.md",

@@ -5,7 +5,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.3.0"
+#Version:     "0.3.1"
 #SaytVersion: "0.39.1"
 
 #Tools: {
