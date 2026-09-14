@@ -12,8 +12,4 @@ includes:
     taskfile: ./Taskfile.build.yaml
     dir: ../
     optional: true
-  plugins_omnishell:
-    taskfile: ../../../plugins/omnishell/Taskfile.yml
-    dir: ../../../plugins/omnishell/
-    optional: true
 version: "3"

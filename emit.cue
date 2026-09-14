@@ -7,7 +7,7 @@
 // and their entries carry `src`. Where a derived config's consumer cannot
 // reference a file, the content is inlined via @embed at the reference site.
 //
-// Not emitted here: .mise.toml (scaffold-owned) and the ir view (ir.html is
+// Not emitted here: .mise.toml (bootstrap CUE-owned) and the ir view (ir.html is
 // the pinned artifact itself). bayt.cue is emitted as a thin stub over
 // bayt.json (the build seat's export), and the sayt verbs run on their
 // builtins against emitted files (tasks.json, compose.yaml, .say.yaml lint
@@ -27,6 +27,7 @@ import (
 	"github.com/bonisoft3/pronto/clusters:mecha"
 	prontoloop "github.com/bonisoft3/pronto/loops:sayt"
 	"github.com/bonisoft3/pronto/scales"
+	"github.com/bonisoft3/pronto/distribution"
 	"github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
@@ -856,15 +857,10 @@ _cdcTableField: "__table"
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
 		surface: {
-			// --allow-env is mermaid's: the diagram parse reads the environment as it
-			// initialises, where the CEL parse beside it does not.
-			// Two spawns, both named: `cue` for the export the emission is read
-			// from and the vet each chart is held to, `deno` for the terminal's
-			// markup reader — the grammar's readings are the terminal's, and a
-			// compiler published on its own reaches them over a pipe rather than
-			// through an import (derive.ts).
-			buildCmd: "deno run --allow-read=. --allow-write=. --allow-run=cue,deno --allow-env ../../plugins/pronto/write.ts ."
-			testCmd:  "cue vet -c ./..."
+			sources: pronto: *"../../plugins/pronto" | string
+			_distribution: distribution.#Project & {runtime: "\(sources.pronto)"}
+			buildCmd: [if sources.pronto != "" {"deno run --allow-read --allow-write=. --allow-run --allow-env \(sources.pronto)/write.ts ."}, "sayt build"][0]
+			testCmd: "cue vet -c ./..."
 			pipelineFiles: [for _, p in D.code.state.pipelines {"docker/\(D.code.meta.name)-\(p.name).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop
 			// routes each to the verb it names. A name collision across the two
@@ -876,29 +872,13 @@ _cdcTableField: "__table"
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
 				for name, c in D.terminal.surface.checks {(name): c}
-				derive: {
-					verb: "lint"
-					cmds: ["deno run --allow-read=. ../../plugins/pronto/derive.ts --self-test"]
-					note: "compiler derivation self-test"
+				for name in ["derive", "types", "facts"] {
+					(name): {verb: "lint", cmds: [_distribution.checks[name]], note: "Pronto compiler \(name)"}
 				}
-				types: {
-					verb: "lint"
-					cmds: ["deno check --config ../../plugins/pronto/deno.json ../../plugins/pronto/*.ts ../../plugins/pronto/scales/*.ts"]
-					note: "compiler type check"
-				}
-				facts: {
-					verb: "lint"
-					priority: 1
-					cmds: ["deno run --allow-read=.,../../plugins/pronto --allow-run --allow-env=APPDATA,COMSPEC,HOME,HOMEDRIVE,HOMEPATH,LOCALAPPDATA,PATH,PATHEXT,PROCESSOR_ARCHITECTURE,ProgramData,ProgramFiles,SystemRoot,TEMP,TMP,USERPROFILE,USERNAME,WINDIR,MISE_TRUSTED_CONFIG_PATHS,MISE_WINDOWS_SHIM_MODE ../../plugins/pronto/check-facts.ts ."]
-					note: "compiler facts check"
-				}
-				fuel: {
-					verb: "test"
-					cmds: [
-						"deno run --allow-read=.,../../plugins --allow-env ../../plugins/pronto/battery.ts --self-test",
-					]
-					note: "fuel metering and deterministic chaos testing battery"
-				}
+				facts: priority: 1
+			}
+			if sources.pronto == "" {
+				sayYaml: _distribution.say
 			}
 		}
 	}
@@ -910,6 +890,7 @@ _cdcTableField: "__table"
 	out: prontobuild.#Build & {
 		meta: {
 			app:      D.code.meta.name
+			local:    D.loop.surface.sources.pronto != ""
 			buildCmd: D.loop.surface.buildCmd
 			testCmd:  D.loop.surface.testCmd
 		}

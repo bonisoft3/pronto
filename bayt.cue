@@ -34,12 +34,6 @@ _pronto: bayt.#project & {
 		// them means. `sh -c` because the glob is the shell's to expand, and
 		// `mise.exec` wraps a single argv.
 		"build": sayt.build & mise.exec & {
-			// battery.ts asks the terminal for the compartment it meters
-			// handlers in, so the typecheck reads the interpreter beside it.
-			// The dep materialises omnishell's sources at their natural path,
-			// and the globs that target publishes already carry interpreter/**.
-			// Not circular: omnishell's project takes no pronto target.
-			deps: ["plugins_omnishell:build:srcs"]
 			srcs: globs: ["*.ts", "scales/*.ts", "deno.json", "deno.lock"]
 			cmd: "builtin": {
 				shell: "sh"

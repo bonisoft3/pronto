@@ -25,11 +25,21 @@ import (
 // validate a build graph directly by unifying against it.
 #Project: core.#project
 
+#Toolchain: {
+	...
+	tools: {"github:bonisoft3/bayt": "0.52.1", ...}
+	say: say: {
+		...
+		generate: rulemap: {"auto-bayt": priority: 2, ...}
+	}
+}
+
 // The canonical pronto build graph for one app, authored as the program's
 // `build:` seat.
 #Build: B={
 	meta: {
 		app:      string
+		local:    *true | bool
 		buildCmd: string
 		testCmd:  string
 	}
@@ -40,20 +50,31 @@ import (
 	// slot, so a stage-level `globs` adds to it rather than replacing it.
 	_program: srcs: defaultGlobs: {
 		// Ordered, so the emitted COPY line does not follow the key names.
-		"pronto-cue":    {glob: "*.cue", priority: 1}
-		"pronto-bayt":   {glob: "bayt.json", priority: 2}
+		"pronto-cue": {glob: "*.cue", priority: 1}
+		"pronto-bayt": {glob: "bayt.json", priority: 2}
 		"pronto-design": {glob: "DESIGN.md", priority: 3}
+		if !B.meta.local {
+			"pronto-module": {glob: "cue.mod/**", priority: 4}
+			"pronto-config": {glob: "pronto/**", priority: 5}
+			"pronto-sayt": {glob: ".say.yaml", priority: 6}
+		}
 	}
 
 	project: core.#project & {
-		dir: "apps/\(B.meta.app)"
+		dir: [if B.meta.local {"apps/\(B.meta.app)"}, "."][0]
+		if !B.meta.local {name: B.meta.app}
+
 		// The app's runtime is pronto's own compose.yaml. Including it puts the
 		// runtime services and the bayt targets in ONE compose project, which is
 		// what lets a target declare depends_on against a service.
 		compose: includes: ["compose.yaml"]
 		targets: {
 			"setup": sayt.setup & {
-				dockerfile: from: ref: "workspaceroot:setup"
+				if B.meta.local {dockerfile: from: ref: "workspaceroot:setup"}
+				if !B.meta.local {
+					mise.install
+					dockerfile: core.nubox
+				}
 			}
 			"lint": sayt.lint & mise.exec & B._program & {
 				srcs: globs: ["brief.html", "ir.html", "acceptance.md"]
@@ -65,8 +86,8 @@ import (
 				// because the fingerprint is what decides a rebuild, and the ledger
 				// is pinned by nothing else — ir.html at least moves program.cue's
 				// meta.ir.sha256 when it changes.
-				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**"]
-				cmd: builtin: do: B.meta.buildCmd
+				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**", if !B.meta.local {".omnishell/**"}]
+				cmd: builtin: do:      B.meta.buildCmd
 				dockerfile: from: ref: ":setup"
 			}
 			"test": sayt.test & mise.exec & B._program & {
@@ -95,15 +116,14 @@ import (
 						"ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
 						"ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
 						"ENV DENO_DIR=/deno-cache",
-						"COPY --from=root plugins/omnishell /omnishell",
+						[if B.meta.local {"COPY --from=root plugins/omnishell /omnishell"}, "COPY --from=root .omnishell /omnishell"][0],
 						"RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts",
 					]
 				}
 				cmd: "builtin": null
 				compose: {
-					// Relative to .bayt/, where the fragment lands: up past the app and
-					// apps/ to the monorepo root.
-					build: additional_contexts: root: "../../.."
+					// Compose resolves this from .bayt/, not the app directory.
+					build: additional_contexts: root: [if B.meta.local {"../../.."}, ".."][0]
 					// Plain HTTP, so the checker measures no secure context and
 					// anything gated on one is uncovered. Nothing in the battery
 					// reads such an API.

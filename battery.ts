@@ -12,7 +12,11 @@ import { type FuelHarness, instrumentJessie, instrumentSelfTest } from "./instru
 // owns WHAT to run in it, which is the instrumented harness arbitrary.ts feeds.
 // A battery that built its own compartment could measure a handler under an
 // authority production never grants, and report green for it.
-import { evaluateCaged } from "../omnishell/interpreter/jessie.js";
+import { pathToFileURL } from "node:url";
+
+const cageModule = Deno.env.get("PRONTO_CAGE_MODULE");
+if (!cageModule) throw new Error("PRONTO_CAGE_MODULE must name the terminal's evaluator module");
+const { evaluateCaged } = await import(cageModule.startsWith("file:") ? cageModule : pathToFileURL(cageModule).href);
 
 export function deepFreeze<T>(obj: T): T {
   if (obj === null || typeof obj !== "object") return obj;

@@ -13,7 +13,12 @@
 // (Atlas) is mecha's reserved surface.
 package mecha
 
-import impl "github.com/bonisoft3/mecha:cluster"
+import (
+	impl "github.com/bonisoft3/mecha:cluster"
+	toolchain "github.com/bonisoft3/mecha/toolchain"
+)
+
+#Project: {tools: toolchain.#Tools, ...}
 
 #Cluster: impl.#Cluster
 #Static:  impl.#Static

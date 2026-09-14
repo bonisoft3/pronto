@@ -3,6 +3,10 @@
 Commands own the cheap, decidable work. Models are selected only for reasoning,
 implementation, or review that survives those commands.
 
+The named models below are Codex routes. On Claude and Agy, use available
+host-native models matched to the role and reasoning budget; do not pass Codex
+model identifiers or dispatch syntax to another host.
+
 | Work | Model and effort | Why |
 | --- | --- | --- |
 | Lead: scope, tradeoffs, architecture, durable-policy approval | `gpt-6-astra`, high | This is the small set of decisions where a wrong abstraction is costly. |

@@ -3,7 +3,7 @@ say:
     # The shorthand replaces the builtin's command; the rule below sorts ahead of
     # it on priority, because the builtin carries stop:true and a rule sorted
     # after it is emitted and never runs.
-    do: "deno run --allow-read=.,../ --allow-env battery.ts --self-test"
+    do: "with-env {PRONTO_CAGE_MODULE: ('../omnishell/interpreter/jessie.js' | path expand)} { deno run --allow-read=.,../ --allow-env battery.ts --self-test }"
     rulemap:
       loop:
         priority: -1
@@ -15,6 +15,14 @@ say:
         priority: -1
         cmds:
           - do: "cue vet -c ./testdata/emit"
+      distribution:
+        priority: -1
+        cmds:
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env bootstrap_test.ts"
+      types:
+        priority: -1
+        cmds:
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run types_test.ts"
   # lint is not a #verb: it carries its own rulemap with no builtin wiring, so a
   # `do:` here type-checks, exports, and never reaches lint.rules.
   lint:

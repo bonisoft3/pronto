@@ -1,9 +1,9 @@
 ---
 name: pronto-turn
-description: "Drive a Pronto coding turn: establish a design oracle when needed, use Sayt as the mechanical gate, then apply a small consequence-based Codex review panel."
+description: "Drive a Pronto coding turn: establish a design oracle when needed, use Sayt as the mechanical gate, then apply a small consequence-based review panel."
 ---
 
-# Pronto turn for Codex
+# Pronto turn
 
 Use this skill when the user asks to implement, deliver, review, or take a
 Pronto app through its outer loop. The working tree is the durable state. Do
@@ -13,6 +13,18 @@ Pronto distinguishes two budgets. A command settles a checkable fact; an agent
 reviews a decision whose consequences a command cannot judge. Never use an
 agent to pronounce a command green, and do not spend a panel of agents on a
 change whose only remaining question is mechanically decidable.
+
+## Bootstrap before the turn
+
+When starting or adopting a Pronto project, or completing an unfinished
+bootstrap, read [the bootstrap contract](references/bootstrap.md) even if
+`sayt` already works. Inspect the target's Pronto configuration and generated
+toolchain, not just CLI availability; preserve an established project's module
+and adapter choices. The agent owns this small seed phase: do not ask the user to
+install a global CLI and do not invent a Pronto CLI. Once Sayt is running, CUE
+is reached with `./saytw --script tools.nu cue`, never through an agent-plugin
+installation path. Bootstrap does not select a terminal, cluster, or builder;
+the selected adapters contribute their own tool requirements and Sayt rules.
 
 ## Model routing
 
@@ -79,9 +91,9 @@ Do not claim coverage that was skipped. Report: scope, oracle decision or why
 none was needed, commands and exit status, selected seats and findings, and
 any remaining human decision.
 
-## Codex translation
+## Host adapter
 
-Use Codex subagents for selected studio seats. Do not invoke Claude `Workflow`,
-Claude command syntax, `${CLAUDE_PLUGIN_ROOT}`, or Claude-only skill names.
-The existing `workflows/studio-review.js` is a Claude harness adapter, not a
-source of truth; the role briefs and Pronto artifacts are the portable parts.
+Use the host's native subagent facility for selected studio seats. Do not use
+another host's command syntax, environment variables, or proprietary skill
+names. `workflows/studio-review.js` is a Claude adapter, not a source of truth;
+the role briefs and Pronto artifacts are portable.

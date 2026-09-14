@@ -4,5 +4,3 @@ include:
   required: false
 - path: ./compose.build.yaml
   required: false
-- path: ../../../plugins/omnishell/.bayt/compose.bayt.yaml
-  required: false

@@ -13,6 +13,7 @@
 
 import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive } from "./derive.ts";
+import { projectSay } from "./project-config.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Bundle = { manifest: string[]; files: Record<string, EmitFile> };
@@ -54,6 +55,7 @@ async function exportBundle(): Promise<Bundle> {
   }).output();
   if (!exported.success) fail("cue export failed");
   const bundle: Bundle = JSON.parse(new TextDecoder().decode(exported.stdout));
+  bundle.files[".say.yaml"].data = await projectSay(appDir, bundle.files[".say.yaml"].data);
   const keys = Object.keys(bundle.files).sort();
   const manifest = [...bundle.manifest].sort();
   if (JSON.stringify(keys) !== JSON.stringify(manifest)) {
@@ -66,7 +68,7 @@ async function exportBundle(): Promise<Bundle> {
     // Compared in the spelling a bayt.json holds, which is always
     // forward-slashed where realPathSync answers in the platform's own.
     const here = Deno.realPathSync(appDir).replaceAll("\\", "/");
-    if (here !== dir && !here.endsWith(`/${dir}`)) {
+    if (dir !== "." && here !== dir && !here.endsWith(`/${dir}`)) {
       fail(
         `bayt.json names dir "${dir}" but this app is at "${here}": the dir a ` +
           `project names must be the directory the app is in`,

@@ -74,9 +74,7 @@
       },
       "upClosure": [
         "plugins/pronto/.bayt/compose.build.yaml",
-        "plugins/pronto/.bayt/compose.setup.yaml",
-        "plugins/omnishell/.bayt/compose.build.yaml",
-        "plugins/omnishell/.bayt/compose.setup.yaml"
+        "plugins/pronto/.bayt/compose.setup.yaml"
       ]
     },
     "outs": {
@@ -105,9 +103,7 @@
       },
       "upClosure": [
         "plugins/pronto/.bayt/compose.build.yaml",
-        "plugins/pronto/.bayt/compose.setup.yaml",
-        "plugins/omnishell/.bayt/compose.build.yaml",
-        "plugins/omnishell/.bayt/compose.setup.yaml"
+        "plugins/pronto/.bayt/compose.setup.yaml"
       ]
     },
     "srcs": {
@@ -136,29 +132,6 @@
       ],
       "transitiveCrossDeps": [
         {
-          "name": "build_srcs",
-          "project": "plugins_omnishell",
-          "dir": "plugins/omnishell",
-          "outs": {
-            "globs": [
-              "src/**/*",
-              "test/**/*",
-              "interpreter/**/*",
-              "check-handlers.ts",
-              "check-machines.ts",
-              "check-markup.ts",
-              "check-visual.ts",
-              "read-markup.ts",
-              "runtime/**/*",
-              "package.json",
-              "bun.lock",
-              "tsconfig.json",
-              "bunfig.toml"
-            ],
-            "exclude": []
-          }
-        },
-        {
           "project": "plugins_pronto",
           "name": "setup_srcs",
           "dir": "plugins/pronto",
@@ -181,9 +154,7 @@
       },
       "upClosure": [
         "plugins/pronto/.bayt/compose.build.yaml",
-        "plugins/pronto/.bayt/compose.setup.yaml",
-        "plugins/omnishell/.bayt/compose.build.yaml",
-        "plugins/omnishell/.bayt/compose.setup.yaml"
+        "plugins/pronto/.bayt/compose.setup.yaml"
       ]
     }
   },
@@ -195,8 +166,7 @@
   "visibility": "internal",
   "emitsSrcs": true,
   "deps": [
-    "setup",
-    "build_srcs"
+    "setup"
   ],
   "sameProjectDeps": [
     "setup"
@@ -204,36 +174,10 @@
   "transitiveDeps": [
     "setup"
   ],
-  "transitiveCrossDeps": [
-    {
-      "name": "build_srcs",
-      "project": "plugins_omnishell",
-      "dir": "plugins/omnishell",
-      "outs": {
-        "globs": [
-          "src/**/*",
-          "test/**/*",
-          "interpreter/**/*",
-          "check-handlers.ts",
-          "check-machines.ts",
-          "check-markup.ts",
-          "check-visual.ts",
-          "read-markup.ts",
-          "runtime/**/*",
-          "package.json",
-          "bun.lock",
-          "tsconfig.json",
-          "bunfig.toml"
-        ],
-        "exclude": []
-      }
-    }
-  ],
+  "transitiveCrossDeps": [],
   "upClosure": [
     "plugins/pronto/.bayt/compose.build.yaml",
-    "plugins/pronto/.bayt/compose.setup.yaml",
-    "plugins/omnishell/.bayt/compose.build.yaml",
-    "plugins/omnishell/.bayt/compose.setup.yaml"
+    "plugins/pronto/.bayt/compose.setup.yaml"
   ],
   "chainedDeps": [
     {
@@ -242,29 +186,6 @@
       "dir": "plugins/pronto",
       "outs": {
         "globs": [],
-        "exclude": []
-      }
-    },
-    {
-      "name": "build_srcs",
-      "project": "plugins_omnishell",
-      "dir": "plugins/omnishell",
-      "outs": {
-        "globs": [
-          "src/**/*",
-          "test/**/*",
-          "interpreter/**/*",
-          "check-handlers.ts",
-          "check-machines.ts",
-          "check-markup.ts",
-          "check-visual.ts",
-          "read-markup.ts",
-          "runtime/**/*",
-          "package.json",
-          "bun.lock",
-          "tsconfig.json",
-          "bunfig.toml"
-        ],
         "exclude": []
       }
     }

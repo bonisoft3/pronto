@@ -33,8 +33,9 @@ Read out of this tree on 2026-09-12.
 - **The detector tests for a sibling checkout.** `plugins/sayt/auto-bayt.nu:47`
   probes `<distribution>/../bayt/core/generate.nu`; `:50` runs the local
   generator with `--runtime plugins/bayt`, `:52` falls through to `^bayt
-  generate` from PATH. `auto-terminal.nu` is its twin, and both have tests that
-  pin each branch.
+  generate` from the project toolchain. Terminal selection is not a Sayt
+  builtin: `terminals/omnishell.cue` contributes its installation requirements
+  and generation commands when selected. Bootstrap itself selects no terminal.
 - **All five modules publish.** `registry.cue.works` serves
   `github.com/bonisoft3/{sayt,bayt,omnishell,mecha,pronto}`. sayt and bayt also
   ship a GitHub release that `mise install github:bonisoft3/<tool>` fetches —

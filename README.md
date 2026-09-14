@@ -1,8 +1,15 @@
 # Pronto
 
-Pronto is a programming language where the source code is markdown and the compiler is an LLM. It compiles to a constrained target architecture — [mecha](../../libraries/mecha) for data, [omnishell](../omnishell) for UI, and [sayt](../sayt)/[bayt](../bayt) for build/deploy — producing applications that run identically from a single browser tab to a cloud cluster.
+Pronto is a programming language where the source code is markdown and the compiler is an LLM. It compiles to a constrained target architecture — [mecha](https://github.com/bonisoft3/mecha) for data, [omnishell](https://github.com/bonisoft3/omnishell) for UI, and [sayt](https://github.com/bonisoft3/sayt)/[bayt](https://github.com/bonisoft3/bayt) for build/deploy — producing applications that run identically from a single browser tab to a cloud cluster.
 
 The insight: AI can generate anything, but "anything" is where bugs live. Pronto constrains generation to an architecture where entire categories of bugs — deployment drift, data inconsistency, infrastructure misconfiguration — cannot exist. The same way Rust constrains C to gain memory safety, Pronto constrains AI-generated code to gain architectural safety.
+
+## Installation
+
+To start a Pronto project, follow the [bootstrap contract](skills/pronto-turn/references/bootstrap.md).
+CUE generates the project configuration; Sayt installs and runs the pinned
+source distribution. Bootstrap selects no terminal, cluster, or builder.
+The chosen CUE adapters contribute their tools and lifecycle rules by unification.
 
 ## The review ladder
 
@@ -57,7 +64,7 @@ Pronto cannot express every computation. Three escapes, ranked; all appear as bo
 | **Container** | Full escape | Real container at compose/k8s/cloud tiers; at browser tier it binds to a **declared shim** (mock or degraded WASM stand-in), consistent with mecha's best-effort browser consistency model |
 | **Vendored UI component** (terminal-tier hatch) | Trusted, audited component mounted by the terminal at a declared point; CUE-contracted props-in/events-out with declared isolation (compartment, iframe, or worker) and capabilities | Browser surface, every tier |
 
-The browser-tier shim is the same move [snapcards](../../guis/snapcards) uses to swap Ollama for an in-browser model behind one interface. Declaring the shim forces the interface contract to be precise enough to mock — pressure in the right direction. (Live-in-tab containers via container2wasm/v86 exist as an opt-in, at emulation speed; WebContainers-class products require commercial licenses.)
+The browser-tier shim supplies an in-browser implementation behind the same interface. Declaring the shim forces the interface contract to be precise enough to mock — pressure in the right direction. (Live-in-tab containers via container2wasm/v86 exist as an opt-in, at emulation speed; WebContainers-class products require commercial licenses.)
 
 ## Browser-first, ejected from day one
 
@@ -113,9 +120,9 @@ No code changes between scales. Components swap — PGlite for PostgreSQL, MSW f
 ### The loop
 
 Development turns **the loop** — the lifecycle contract (the ten verbs, the
-TDD cascade, CI), default implementation [sayt](../sayt) (`sayt:loop`,
+TDD cascade, CI), default implementation [sayt](https://github.com/bonisoft3/sayt) (`sayt:loop`,
 rostered as `pronto/loops:sayt`) — and the loop drives **the build graph**,
-default [bayt](../bayt) (rostered as `pronto/builders:bayt`, handed the
+default [bayt](https://github.com/bonisoft3/bayt) (rostered as `pronto/builders:bayt`, handed the
 program's build seat as concrete `bayt.json`). Programs target a cluster,
 users touch a terminal, developers turn the loop; all four seats are
 published CUE, overridable by unification, versioned and forked by module

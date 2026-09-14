@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -55,3 +55,19 @@ jobs:
       # working tree, so nothing may write to the checkout before this runs.
       - name: Publish CUE module
         run: cue mod publish "${GITHUB_REF_NAME}"
+
+      - name: Stage source distribution
+        run: |
+          mkdir -p dist pronto-stage
+          tar cf - --exclude=.git --exclude=.github --exclude=node_modules --exclude=dist --exclude=pronto-stage . | tar xf - -C pronto-stage
+          for triple in linux-x64 linux-arm64 linux-armv7 macos-x64 macos-arm64 windows-x64 windows-arm64; do
+            tar czf "dist/pronto-${triple}.tar.gz" -C pronto-stage .
+          done
+          (cd dist && sha256sum *.tar.gz > checksums.txt)
+
+      - name: Publish source distribution
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

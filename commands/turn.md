@@ -32,7 +32,12 @@ Three rules hold for the whole turn:
 
 ## The steps
 
-### 0. Preflight — abort gate
+### 0. Bootstrap and preflight — abort gate
+
+If this repository is not bootstrapped, read
+`${CLAUDE_PLUGIN_ROOT}/skills/pronto-turn/references/bootstrap.md` and perform its seed phase before
+running the doctor. That contract is shared with Codex and Agy; this command
+does not replace it with a Claude-specific installer.
 
 Run `sayt doctor` and read which tiers are ready. If a tier this turn needs is
 missing, stop and name it. Do not route around a missing tool; `sayt setup` or a
