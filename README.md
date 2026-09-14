@@ -6,10 +6,24 @@ The insight: AI can generate anything, but "anything" is where bugs live. Pronto
 
 ## Installation
 
-To start a Pronto project, follow the [bootstrap contract](skills/pronto-turn/references/bootstrap.md).
-CUE generates the project configuration; Sayt installs and runs the pinned
-source distribution. Bootstrap selects no terminal, cluster, or builder.
-The chosen CUE adapters contribute their tools and lifecycle rules by unification.
+Install the Pronto plugin for your agent. The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill, specialist studio seats, and project bootstrap knowledge.
+
+**Antigravity (`agy`):**
+```bash
+agy plugin install https://github.com/bonisoft3/pronto.git
+```
+
+**Claude Code (`claude`):**
+```bash
+claude plugin marketplace add bonisoft3/pronto
+claude plugin install pronto@bonisoft3-pronto
+```
+
+**Codex (`codex`):**
+```bash
+codex plugin marketplace add bonisoft3/pronto
+codex plugin add pronto@bonisoft3-pronto
+```
 
 ## The review ladder
 
