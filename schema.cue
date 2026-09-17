@@ -523,6 +523,19 @@ import (
 	// terminal's markup rules judge a data-when against; a checker parsing the
 	// cel itself would be a second front end for the one constraint language.
 	enums: [string]: [...string]
+	// What the same parsed `cel` says about a column an enum does not close
+	// (program_cel.cue): the range an int admits, the length a string admits,
+	// the pattern it must match. Named in terms that belong to no constraint
+	// language, because the reader is a battery that has to PROPOSE a value the
+	// program would accept — an answer neither a CUE disjunction nor a SQL
+	// CHECK gives. Every key is optional and absent means unbounded.
+	bounds: [string]: {
+		intMin?:  int
+		intMax?:  int
+		sizeMin?: int
+		sizeMax?: int
+		regex?:   string
+	}
 	// Composite uniques the per-field `unique` flag cannot express. Declared
 	// rather than written as assembly SQL because the shell needs them too: a
 	// row's natural key is what an upsert resolves against, and what an
@@ -916,6 +929,12 @@ import (
 			mode:     *"passkey" | string
 			self?: {path: string, name?: {table: string, column: string}}
 		}
+		// The app ships a native host beside the web one, so every route owes
+		// its web affordances a native peer: check-parity reads this key to
+		// know the pairing is claimed, and reports a field or action that
+		// exists on one side alone. The host itself is the terminal's; this
+		// only says the app asks for it.
+		native: *false | bool
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
 		blobs: *false | bool

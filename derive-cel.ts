@@ -12,6 +12,7 @@
 
 import type { ParsedExpr } from "./cel-emit.ts";
 import { cueConstraint, enumValues, sqlCheck } from "./cel-emit.ts";
+import { BOUND_KEYS, extractBounds, type FieldBounds } from "./bounds.ts";
 
 export type Entity = {
   table: string;
@@ -45,6 +46,17 @@ export function renderIr(irs: Map<string, ParsedExpr>): string {
 }
 
 import { quoteKey } from "./cue.ts";
+
+/** One column's value domain as a CUE struct, or null where the constraint
+ * bounds nothing this reading recognises. The keys are stated in a fixed
+ * order, so the line a column renders to depends on the constraint and not on
+ * the order its conjuncts were written in. */
+function boundsCue(bounds: FieldBounds): string | null {
+  const stated = BOUND_KEYS
+    .filter((k) => bounds[k] !== undefined)
+    .map((k) => `${k}: ${JSON.stringify(bounds[k])}`);
+  return stated.length === 0 ? null : `{${stated.join(", ")}}`;
+}
 
 /** program_cel.cue, or the reason a constraint has no rendering. */
 export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, ParsedExpr>): string {
@@ -96,6 +108,20 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
       if (values !== null) enums.push(`\t\t${quoteKey(s.col)}: ${JSON.stringify(values)}`);
     }
     if (enums.length > 0) lines.push(`\tenums: {\n${enums.join("\n")}\n\t}`);
+    // What the same IR says about a value the set does not close: the range an
+    // int admits, the length a string admits, the pattern it must match. A
+    // reader that has to PROPOSE a value needs this and cannot get it from a
+    // CUE disjunction or a SQL CHECK, and reading it here is what keeps the
+    // constraint language behind one front end. A column whose constraint
+    // closes its set says so under `enums` and nothing here — bounds.ts's
+    // self-test holds that.
+    const bounds: string[] = [];
+    for (const s of mine) {
+      if (s.col === null) continue;
+      const stated = boundsCue(extractBounds(ir(s.cel)));
+      if (stated !== null) bounds.push(`\t\t${quoteKey(s.col)}: ${stated}`);
+    }
+    if (bounds.length > 0) lines.push(`\tbounds: {\n${bounds.join("\n")}\n\t}`);
     if (lines.length > 0) blocks.push(`${quoteKey(entity)}: {\n${lines.join("\n")}\n}`);
   }
   const body = blocks.map((b) => b.split("\n").map((l) => `\t${l}`).join("\n")).join("\n");
@@ -106,7 +132,9 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
     "// `seed` carries what each field-level cel says about the field's own",
     "// value, which is what vets a stated row; `enums` lists the values a",
     "// closed constraint admits, for the readers that cannot enumerate a CUE",
-    "// disjunction. An invariant binds `this` to the ROW, and a predicate over",
+    "// disjunction, and `bounds` states what an open one admits — a range, a",
+    "// length, a pattern — for the readers that have to propose a value.",
+    "// An invariant binds `this` to the ROW, and a predicate over",
     "// several columns constrains no single field's value, so it derives a",
     "// CHECK body and nothing for CUE.",
     `package ${pkg}`,

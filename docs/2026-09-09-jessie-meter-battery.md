@@ -35,7 +35,7 @@ Code cannot show why AST metering lives strictly in test harnesses and not
 production runtimes:
 
 - **Production runtimes (`screen.js`, plv8) must run pristine code.** Injecting
-  `--__fuel <= 0` at every loop head and function entry inflates code size,
+  a `__fuel()` call at every loop head and function entry inflates code size,
   disrupts JIT compiler inline caches and loop unrolling, and complicates source
   maps.
 - **Production failure modes differ from test failure modes.** In production,
@@ -67,11 +67,13 @@ production runtimes:
   schema constraints (rejection sampling). When an entity field specifies
   `this in ["house", "hotseat"]` or `this.size() == 64`, rejection sampling
   wastes 99.9% of generator iterations.
-- `plugins/pronto/arbitrary.ts` parses the CEL AST directly into `FieldBounds`,
-  synthesizing exact `fc.constantFrom(...)`, `fc.integer({ min, max })`, or
-  `fc.string({ minLength, maxLength })` generators. Seeds from `program.cue`
-  are blended with point mutations, ensuring realistic structured data meets
-  hostile boundary values without sampling waste.
+- `plugins/pronto/bounds.ts` parses the CEL AST into `FieldBounds`, which
+  `derive-cel.ts` renders into `program_cel.cue` and `emit.cue` carries into
+  `shell/shell.yaml` beside each field. `plugins/omnishell/arbitrary.ts` reads
+  that domain and synthesizes exact `fc.constantFrom(...)`,
+  `fc.integer({ min, max })`, or `fc.string({ minLength, maxLength })`
+  generators — the terminal generates rows without speaking the constraint
+  language, and no sampling is wasted.
 
 ### 4. Deep-freeze immutability vs. Proxy interceptors
 
@@ -92,8 +94,9 @@ production runtimes:
   lint however cheap it looks"), execution batteries belong in `test`. Fuel
   metering executes hundreds of randomized property iterations inside SES
   Compartments.
-- `plugins/pronto/emit.cue` declares `fuel` under `#DefaultLoop.checks` with
-  `verb: "test"`, automatically emitting the check into every app's `.say.yaml`.
-- `plugins/pronto/.say.yaml` wires `just sayt -d plugins/pronto test` to run
-  `battery.ts --self-test` directly.
+- `plugins/omnishell/terminal.cue` declares `battery` under `checks` with
+  `verb: "test"`, automatically emitting `omnishell check battery .` into every
+  app's `.say.yaml`.
+- `plugins/omnishell/.say.yaml` wires `just sayt -d plugins/omnishell test` to
+  run `check-battery.ts --self-test` directly.
 

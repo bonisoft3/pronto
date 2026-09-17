@@ -16,6 +16,5 @@ aqua.minisign = false
 # test verb vets testdata/emit against it.
 "github:cue-lang/cue" = "0.16.1"
 # Every program this plugin ships is a deno program — derive.ts, write.ts,
-# battery.ts, check-facts.ts, check-loop.ts — and deno.json pins what they
-# import.
+# check-facts.ts, check-loop.ts — and deno.json pins what they import.
 "github:denoland/deno" = "v2.3.7"

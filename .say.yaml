@@ -3,7 +3,7 @@ say:
     # The shorthand replaces the builtin's command; the rule below sorts ahead of
     # it on priority, because the builtin carries stop:true and a rule sorted
     # after it is emitted and never runs.
-    do: "with-env {PRONTO_CAGE_MODULE: ('../omnishell/interpreter/jessie.js' | path expand)} { deno run --allow-read=.,../ --allow-env battery.ts --self-test }"
+    do: "deno run --allow-read=. bounds.ts"
     rulemap:
       loop:
         priority: -1

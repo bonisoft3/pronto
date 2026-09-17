@@ -581,6 +581,9 @@ _cdcTableField: "__table"
 	// Whether the cluster runs an auth and a crud service: #serverOn, the
 	// predicate that emits them, carried into the file the visual battery reads.
 	server: bool
+	// Whether the app claims a native host beside the web one, carried into the
+	// file the parity check reads to know a route's affordances are owed a peer.
+	native: bool
 	_tables: {for _, s in S.code.surface.screens for r in s.reads {(S.code.state.entities[r.entity].table): true}}
 	_tablePath: {for _, s in S.code.surface.screens for r in s.reads {
 		(S.code.state.entities[r.entity].table): S.code.state.entities[r.entity].durability
@@ -623,13 +626,19 @@ _cdcTableField: "__table"
 	// Server tables are left out: Postgres answers a missing value as null.
 	_optional: {for _, e in S.code.state.entities if S._local[e.table] != _|_ {(e.table): [for f in e.fields if !f.required {name: f.name, type: f.type}]}}
 	_optionalTables: [for t, cs in S._optional if len(cs) > 0 {t}]
-	// What the terminal's markup rules judge a screen against (check-markup.ts):
-	// the columns a filter may name, the pk, unique field or declared unique
-	// that witnesses a slot's cardinality, the tier and type a machine region's
-	// writes are held to, and the values a data-when may state. Scoped to the
-	// tables the terminal registers, and to the field attributes those rules
+	// What the terminal's own checks judge an app against: the columns a filter
+	// may name, the pk, unique field or declared unique that witnesses a slot's
+	// cardinality, the tier and type a machine region's writes are held to, the
+	// values a data-when may state (check-markup.ts), and the domain a
+	// generated row's column is drawn from (check-battery.ts). Scoped to the
+	// tables the terminal registers, and to the field attributes those checks
 	// read — shell.yaml carries one projection of the program per reader, and
-	// this is the checker's.
+	// this is the terminal's.
+	//
+	// `enum` and `bounds` are the two halves of one answer, apart because they
+	// are read apart: the closed set a markup rule holds a data-when to, and
+	// everything an open constraint still says about a value — which only the
+	// battery asks for, and which it takes as one object.
 	_schema: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ {
 		(e.table): {
 			durability: e.durability
@@ -640,6 +649,7 @@ _cdcTableField: "__table"
 				if f.unique != _|_ {unique: f.unique}
 				if f.default != _|_ {default: f.default}
 				if e.enums[f.name] != _|_ {enum: e.enums[f.name]}
+				if e.bounds[f.name] != _|_ {bounds: e.bounds[f.name]}
 			}]
 			if len(e.uniques) > 0 {
 				uniques: [for u in e.uniques {
@@ -673,6 +683,9 @@ _cdcTableField: "__table"
 		app:    S.code.meta.name
 		floors: S.floors
 		server: S.server
+		if S.native {
+			native: true
+		}
 		if S.code.capabilities.auth != _|_ {
 			auth: S.code.capabilities.auth
 		}
@@ -1687,7 +1700,7 @@ _cdcTableField: "__table"
 		}
 		"shell/shell.yaml": {
 			format: "yaml"
-			data: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, server: E._serverOn}).out
+			data: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, server: E._serverOn, native: E.code.capabilities.native}).out
 		}
 		"\(E.terminal.surface.entry)": {
 			format: "text"

@@ -47,11 +47,13 @@ Read out of this tree on 2026-09-12.
   enums, CEL checks — under `schema:`. `shell/handlers/*.js` are authored as
   expressions whose role, endowments and completion contract the terminal
   assigns.
-- **The CEL seam is already cut.** `plugins/pronto/arbitrary.ts:50` is
-  `extractBounds(ir): FieldBounds`; `:105` is
-  `arbitraryField(field, bounds)`. `FieldBounds` (`:28`) is
-  `{enumValues?, intMin?, intMax?, sizeMin?, sizeMax?, regex?}` — a value
-  domain that names no language.
+- **The CEL seam is cut, and `shell.yaml` is what crosses it.**
+  `plugins/pronto/bounds.ts` is `extractBounds(ir): FieldBounds`;
+  `plugins/omnishell/arbitrary.ts` is `arbitraryField(field, bounds)`.
+  `FieldBounds` is `{enumValues?, intMin?, intMax?, sizeMin?, sizeMax?,
+  regex?}` — a value domain that names no language — and it rides the same
+  `schema:` key the markup rules already read, as `enum` and `bounds` per
+  field.
 
 ## Pronto configures its batteries
 

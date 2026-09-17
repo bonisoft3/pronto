@@ -10,11 +10,8 @@
 package omnishell
 
 import (
-	"path"
-	"encoding/json"
 	impl "github.com/bonisoft3/omnishell:terminal"
 	toolchain "github.com/bonisoft3/omnishell/toolchain"
-	dist "github.com/bonisoft3/pronto/distribution"
 )
 
 #Project: {
@@ -39,16 +36,6 @@ import (
 			cmds: [if runtime == "" {#Generate}, if runtime != "" {_localGenerate}]
 			note: "terminal assets and source layout"
 		}
-		checks: fuel: {
-			verb: "test"
-			cmds: [(dist.#Run & {
-				runtime: _prontoRuntime
-				args:    "let cage = \(_cage); with-env {PRONTO_CAGE_MODULE: $cage} { run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-env ($pronto | path join battery.ts) --self-test }"
-			}).out]
-			note: "fuel metering against the terminal's compartment"
-		}
-		_prontoRuntime: [if runtime != "" {path.Join([runtime, "../../pronto"])}, ""][0]
-		_cage: [if runtime != "" {"(" + json.Marshal(path.Join([runtime, "../interpreter/jessie.js"])) + " | path expand)"}, "(run-mise exec -- omnishell where cage | str trim)"][0]
 		_localGenerate: "if $nu.os-info.name == 'windows' { ^pwsh -NoProfile -File \(runtime)/omnishell.ps1 mode . --local } else { ^\(runtime)/omnishell mode . --local } | save --force program_terminal.cue"
 	}
 }
