@@ -76,7 +76,7 @@ Pronto cannot express every computation. Three escapes, ranked; all appear as bo
 | **Pre-compiled WASM** (preferred) | Sandboxed; touches Pronto state only through its CUE-contracted interface | Every tier — the same `.wasm` runs in the tab, in CDC pipelines, and server-side |
 | **External API endpoint** | Clean trust boundary: the Pronto database is only touched by Pronto; beyond HTTP is the external world | Every tier |
 | **Container** | Full escape | Real container at compose/k8s/cloud tiers; at browser tier it binds to a **declared shim** (mock or degraded WASM stand-in), consistent with mecha's best-effort browser consistency model |
-| **Vendored UI component** (terminal-tier hatch) | Trusted, audited component mounted by the terminal at a declared point; CUE-contracted props-in/events-out with declared isolation (compartment, iframe, or worker) and capabilities | Browser surface, every tier |
+| **Vendored unit** (terminal-tier hatch) | Trusted, audited component or worker mounted by the terminal at a declared point; CUE-contracted props-in/events-out with declared isolation (compartment, iframe, or worker) and capabilities | Browser surface, every tier |
 
 The browser-tier shim supplies an in-browser implementation behind the same interface. Declaring the shim forces the interface contract to be precise enough to mock — pressure in the right direction. (Live-in-tab containers via container2wasm/v86 exist as an opt-in, at emulation speed; WebContainers-class products require commercial licenses.)
 

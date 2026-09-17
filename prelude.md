@@ -120,9 +120,9 @@ terminal does not offer fails to compile.
 
 ## Escape hatches
 
-Ranked: pre-compiled WASM behind a CUE contract, then a vendored component
-at the terminal tier (declared isolation and capabilities), then an
-external API endpoint,
+Ranked: pre-compiled WASM behind a CUE contract, then a vendored unit at the
+terminal tier (a component or a worker, with declared isolation and
+capabilities), then an external API endpoint,
 then a container (with a declared shim at the browser tier). Every escape is a
 box in ir.html; an app with none says so in its Decisions section.
 
