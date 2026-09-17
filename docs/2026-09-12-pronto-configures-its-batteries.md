@@ -28,8 +28,9 @@ Read out of this tree on 2026-09-12.
   `runtime: *"" | string`; `:30` computes a depth-relative prefix
   (`strings.Repeat("../", G._m._depth)`); `:32` makes every invocation token a
   two-branch list whose second branch is the bare token `bayt`.
-  `plugins/omnishell/terminal.cue:241` and `:248` are the twin for the
-  terminal.
+  `plugins/omnishell/terminal.cue:241` and `:249` are the twin for the
+  terminal, whose local branch names a mise task rather than a path, so both
+  branches are one word and neither asks which OS it is on.
 - **The detector tests for a sibling checkout.** `plugins/sayt/auto-bayt.nu:47`
   probes `<distribution>/../bayt/core/generate.nu`; `:50` runs the local
   generator with `--runtime plugins/bayt`, `:52` falls through to `^bayt

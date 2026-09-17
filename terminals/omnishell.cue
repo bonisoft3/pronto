@@ -36,6 +36,6 @@ import (
 			cmds: [if runtime == "" {#Generate}, if runtime != "" {_localGenerate}]
 			note: "terminal assets and source layout"
 		}
-		_localGenerate: "if $nu.os-info.name == 'windows' { ^pwsh -NoProfile -File \(runtime)/omnishell.ps1 mode . --local } else { ^\(runtime)/omnishell mode . --local } | save --force program_terminal.cue"
+		_localGenerate: "mise run omnishell -- mode . --local | save --force program_terminal.cue"
 	}
 }

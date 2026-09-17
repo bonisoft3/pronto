@@ -32,7 +32,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text"
+	format: "sql" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -1806,6 +1806,17 @@ _cdcTableField: "__table"
 		".vscode/tasks.json": {
 			format: "json"
 			data:   E.loop.surface.tasksJson
+		}
+
+		// The terminal's own toolchain stanza, in the drop-in directory mise
+		// merges beside the hand-owned config rather than in it: a contributor
+		// that writes its own file can be withdrawn by deleting one, and the
+		// config a person authors stays a thing a person authored.
+		if E.terminal.surface.miseConf != "" {
+			".config/mise/conf.d/omnishell.toml": {
+				format: "toml"
+				text:   E.terminal.surface.miseConf
+			}
 		}
 	}
 
