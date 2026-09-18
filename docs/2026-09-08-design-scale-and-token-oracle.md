@@ -967,14 +967,17 @@ So an app that claims dark gets a reasonable dark by default, overrides any
 element by writing its own `dark:` colour, and reaches dark contrast by
 construction through roles.
 
-**Contrast is graded on the rendered page, by axe-core.** Its `color-contrast`
-rule is the standard one — it resolves what is actually behind the text, applies
-the large-text thresholds and accounts for opacity — and it reads Tailwind's oklch
-values in both appearances, verified in the same Chromium run. It runs in the
-battery on every route, once per appearance the app claims. A violation is
-critical, because correctness is mandatory; a node axe cannot decide, text over a
-gradient or an image, is its own counted finding rather than a pass; and the
-message names the computed twin. Nothing measures a rendered pair today.
+**Contrast is graded on the rendered page, by the criterion's own arithmetic
+over the computed colours.** The battery's `text-contrast` reads each text run's
+colour and the flat colour painted behind it — the nearest opaque background up
+the ancestors, composited through any translucent ones, with no image, opacity,
+filter or blend on the way and nothing painted between — and holds the pair to
+the large-text or body floor, once per appearance the page claims through
+`color-scheme`. A pair under the floor is an error, because correctness is
+mandatory. A backdrop that is not a flat colour — text over an image, a gradient
+or a translucent stack — is not decided, and is skipped rather than guessed at:
+a finding is exact or absent, and a check that reports only what it knows is one
+that stays a gate.
 
 Surveyed and out, from each package's tarball and the registry:
 
@@ -1041,24 +1044,23 @@ lands. One transformation per pull request, none stacked.
    emits no font variables; and `prose` draws backticks round inline code and
    quote marks round blockquotes until configured.
 1. **Land `feat/design-vocabulary` as it stands.**
-2. **The contrast check**, above, in the battery.
-3. **Appearance is declared.** Closure binds only claimed appearances, and
+2. **Appearance is declared.** Closure binds only claimed appearances, and
    `color-scheme` and the battery's dark pass follow the claim.
-4. **DTCG as the export.** `#Design` exports `.tokens.json`, validated
+3. **DTCG as the export.** `#Design` exports `.tokens.json`, validated
    against the 2025.10 schemas, from the frontmatter DESIGN.md declares.
-5. **The role contract.** shadcn's names, with `-foreground` on-colours and
+4. **The role contract.** shadcn's names, with `-foreground` on-colours and
    `--chart-*` for series; the shell chrome takes the nearest published names,
    shadcn's `--sidebar-*` set being the candidate.
-6. **Tailwind.** `theme.css` quoted by digest and converted to DTCG, the compiler
+5. **Tailwind.** `theme.css` quoted by digest and converted to DTCG, the compiler
    run over template classes at generate, the class rules, the layer order and
    preflight, the computed dark default, the text scale and `prose`. Open Props,
    the Primer type quotation and `press.type` leave the platform.
-7. **Resolver modifiers.** The contrast axis and named themes, closed per
+6. **Resolver modifiers.** The contrast axis and named themes, closed per
    context; `apps/primer` wears Primer's fourteen themes from Primer's own DTCG.
-8. **Identity at creation.** A seed colour through M3's engine in Deno, a font
+7. **Identity at creation.** A seed colour through M3's engine in Deno, a font
    pairing, a radius and a density, taken from the brief rather than left at the
    defaults that make these apps look alike. `apps/materialweb` is the reference.
-9. **Regenerate every app.**
+8. **Regenerate every app.**
 
 Deferred until something asks for it: the CUE port of the M3 engine, Every
 Layout's primitives as `@utility`, and Typeset.
