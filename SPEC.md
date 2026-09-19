@@ -183,7 +183,8 @@ navigation from the brief) plus data attributes:
   design, not prose: the ir's frame-to-storybook links are generated from it,
   and the bijection checker compares it against the program's `#Screen.route`.
 - `data-from` / `data-to` — pipeline topology
-- `data-accepts` — space-separated acceptance ids a test or path realizes
+- `data-accepts` — space-separated acceptance ids a test or path realizes;
+  a program test's `accepts` is derived from its element's
 
 The hop-2 bijection checker walks `[data-kind]` elements and matches CUE
 back-references against literal id strings — it never splits an id to recover
@@ -222,7 +223,9 @@ Each invariant is a paragraph — `id`, `data-kind="test"`, `data-of`,
 `<code class="cel">` spans (CEL: total, effect-free, protovalidate/Kubernetes
 lineage). The attributes keep coverage linting deterministic; the LLM at the
 program rung translates the paragraph into executable tests that
-back-reference the paragraph id, extending the bijection over behavior.
+back-reference the paragraph id, extending the bijection over behavior; a
+test's `accepts` is derived from that paragraph's `data-accepts`, so the
+design is the one statement of what a test settles.
 
 Bindings are injected, never ambient: `input` (given data, plus `input.now`
 for the clock), `output`, `error` (`error.kind`, `error.field`).

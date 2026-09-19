@@ -891,6 +891,8 @@ import (
 	id: string
 	ir: *id | string
 	of: string
+	// Derived from the `data-accepts` of the ir element `ir` names (pronto
+	// derive.ts): the design is the one statement of what a test settles.
 	accepts: [...string]
 	says:  string
 	given: _
