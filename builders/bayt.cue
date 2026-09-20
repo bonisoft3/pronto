@@ -19,6 +19,7 @@ import (
 	core "github.com/bonisoft3/bayt/core:bayt"
 	sayt "github.com/bonisoft3/bayt/stacks/sayt"
 	mise "github.com/bonisoft3/bayt/stacks/mise"
+	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 )
 
 // bayt's own project schema, re-exported so a compiler (or anyone) can
@@ -43,6 +44,46 @@ import (
 		buildCmd: string
 		testCmd:  string
 	}
+	// The runtime, as the cluster states it: one bayt target per service,
+	// with bare names. Lowered into this project below.
+	cluster: mecha.#Cluster
+
+	// A cluster target lowered into this project. bayt names a service
+	// `<project>-<target>`, so `depends_on` keys take the prefix; the bare
+	// name stays as the service's network alias, which is what the
+	// Caddyfile, the pipelines and every `@database:5432` URL address. Each
+	// dependency is also an image-only dep, so the entry closures carry the
+	// fragments of what they wait on. Rebuilt field by field rather than
+	// unified: unifying a qualified `depends_on` onto the bare one would keep
+	// both key sets.
+	_lower: L={
+		name: string
+		in:   _
+		out: {
+			for f, v in L.in if f != "compose" && f != "deps" {(f): v}
+			deps: [for k, _ in (B._waits & {t: L.in}).out {":\(k):outs"}]
+			compose: {
+				for f, v in L.in.compose if f != "depends_on" {(f): v}
+				depends_on: {for k, v in (B._waits & {t: L.in}).out {("\(B.project.name)-\(k)"): v}}
+				networks: default: aliases: [L.name]
+			}
+		}
+	}
+	// What a target waits on; a target that waits on nothing has no field.
+	_waits: W={
+		t: _
+		out: [if W.t.compose.depends_on != _|_ {W.t.compose.depends_on}, {}][0]
+	}
+	_clusterTargets: {for n, t in B.cluster.surface.targets if t != null {(n): t}}
+	// Every key a cluster target waits on names a cluster target. A hatch
+	// that nulls a service leaves the aggregate waiting on a name no service
+	// answers to, which compose would report at `up` and this reports at
+	// export.
+	_dangling: [
+		for n, t in B._clusterTargets for k, _ in (B._waits & {"t": t}).out
+		if !list.Contains([for m, _ in B._clusterTargets {m}], k) {"\(n) waits on \(k)"},
+	]
+	_dangling: []
 
 	// What the program itself reads: every cue file of the package, the
 	// bayt.json its bayt.cue embeds, and the DESIGN.md program.cue embeds. Each
@@ -64,11 +105,8 @@ import (
 		dir: [if B.meta.local {"apps/\(B.meta.app)"}, "."][0]
 		if !B.meta.local {name: B.meta.app}
 
-		// The app's runtime is pronto's own compose.yaml. Including it puts the
-		// runtime services and the bayt targets in ONE compose project, which is
-		// what lets a target declare depends_on against a service.
-		compose: includes: ["compose.yaml"]
 		targets: {
+			for n, t in B._clusterTargets {(n): (B._lower & {"name": n, "in": t}).out}
 			"setup": sayt.setup & {
 				if B.meta.local {dockerfile: from: ref: "workspaceroot:setup"}
 				if !B.meta.local {
@@ -93,9 +131,9 @@ import (
 			"test": sayt.test & mise.exec & B._program & {
 				cmd: builtin: do: B.meta.testCmd
 			}
-			"launch": sayt.launch & {
-				dockerfile: from: ref: ":build"
-			}
+			// The cluster's aggregate; the sayt template gives it the entry
+			// flags and the profile `skaffold dev` fires on.
+			"launch": sayt.launch
 			// The visual battery. `sayt.integrate` is already `up: true, manual:
 			// true` — a load-by-name point kept off the bare-up stack — which is
 			// the shape this needs: a browser cannot reach a running caddy from a
@@ -106,8 +144,10 @@ import (
 				// artifacts the srcs below carry, and the ladder regenerates them
 				// at the build rung before ever reaching integrate — depending on
 				// the build image would couple the battery to a toolchain it does
-				// not use.
-				deps: []
+				// not use. The plane it drives is an image-only dep, so the entry
+				// closure carries every fragment the aggregate waits on and loads
+				// on its own — the dindbox tier runs it that way.
+				deps: [":launch:outs"]
 				srcs: globs: ["shell/shell.yaml", "shell/screens/**"]
 				dockerfile: {
 					from: name: core.lock.images.playwright
@@ -128,13 +168,11 @@ import (
 					// anything gated on one is uncovered. Nothing in the battery
 					// reads such an API.
 					environment: APP_URL: "http://caddy:8080"
-					// caddy and not launch, though launch is the aggregate the whole
-					// runtime hangs off: bayt mirrors every depends_on key as a
-					// build context, and launch declares no build, which compose
-					// rejects. The verb brings the runtime up first and this
-					// closure joins the same project, so the plane is already
-					// there — see the visual check in omnishell/terminal.cue.
-					depends_on: caddy: condition: "service_healthy"
+					// The aggregate the whole runtime hangs off, healthy: loaded on its
+					// own the closure brings the plane up, and under the verb, which
+					// brought it up first, this is a health check — see the visual
+					// check in omnishell/terminal.cue. Qualified, as bayt names it.
+					depends_on: "\(project.name)-launch": condition: "service_healthy"
 					command: [
 						"deno", "run", "--node-modules-dir=auto",
 						"--allow-read", "--allow-write", "--allow-net",

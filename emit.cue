@@ -898,9 +898,11 @@ _cdcTableField: "__table"
 }
 
 #DefaultBuild: D={
-	code: #App
-	loop: prontoloop.#Loop
+	code:    #App
+	loop:    prontoloop.#Loop
+	cluster: mecha.#Cluster
 	out: prontobuild.#Build & {
+		"cluster": D.cluster
 		meta: {
 			app:      D.code.meta.name
 			local:    D.loop.surface.sources.pronto != ""
@@ -951,7 +953,6 @@ _cdcTableField: "__table"
 	// requiring a sign-in to read one would put the ladder behind the thing it
 	// exists to review.
 	_ladder: [for f in ["brief.html", "ir.html", "acceptance.md", "DESIGN.md"] {
-		source: "ladder-\(f)"
 		file:   f
 		target: "/srv/docs/\(f)"
 		watch:  true
@@ -961,6 +962,17 @@ _cdcTableField: "__table"
 		meta: {
 			app: D.code.meta.name
 			statics: list.Concat([D.statics, D._ladder])
+		}
+		// The cluster's auth service and JWT envs follow the program's auth
+		// block; the blob plane follows the program's flag; the data plane
+		// follows #serverOn, so an app with no server-side state is served by
+		// caddy alone. Set here, where the instance is built, because the
+		// same instance reaches the build seat and the emitter; #emit restates
+		// them as constraints.
+		capabilities: {
+			auth:   D.code.capabilities.auth != _|_
+			blobs:  D.code.capabilities.blobs
+			server: (#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out
 		}
 		state: {
 			migrations: (#appMigrations & {"code": D.code}).list
@@ -1083,14 +1095,14 @@ _cdcTableField: "__table"
 			"""
 				// Compiled escape hatches (ir.html: \(strings.Join(list.SortStrings([for hn, _ in E.code.capabilities.hatches {hn}]), ", ")))
 				// live in program.cue's cluster unification; this redeclaration
-				// is the out-of-band human override seam (add a cluster service,
+				// is the out-of-band human override seam (add a cluster target,
 				// modify one, null to drop one; extend the terminal).
 				"""
 		},
 		"""
 			// Escape hatches: none (ir.html) — the default runtime,
 			// redeclared unchanged. A program whose ir declares a hatch
-			// unifies its overrides right here (add a cluster service,
+			// unifies its overrides right here (add a cluster target,
 			// modify one, null to drop one; extend the terminal).
 			""",
 	][0]
@@ -1283,12 +1295,10 @@ _cdcTableField: "__table"
 	// policies without tokens (or vice versa) is not a supported state.
 	_authOn: E.code.capabilities.auth != _|_ || len(E._accessed) > 0
 
-	// The cluster's auth service and JWT envs follow the program's auth block;
-	// the blob plane follows the program's flag.
+	// The cluster handed in must be the program's: #DefaultCluster derives
+	// these from the code, and a cluster that disagrees conflicts here.
 	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
 	cluster: capabilities: blobs: E.code.capabilities.blobs
-	// The data plane follows #serverOn: an app with no server-side state is
-	// served by caddy alone.
 	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
 	// A server entity syncs through a gate the auth service answers, so a
 	// cluster with one and no auth plane would 502 every shape.
@@ -1750,15 +1760,15 @@ _cdcTableField: "__table"
 			data: pairs: [for _, t in E.code.meta.tests {t}]
 		}
 		// The runtime is fixed by default, and its pieces are owned by their
-		// implementations: mecha publishes the virtual cluster, omnishell the
-		// virtual terminal, and this emitter is their fixed composition.
+		// implementations: mecha publishes the virtual cluster as bayt targets,
+		// omnishell the virtual terminal, and the build seat is their fixed
+		// composition — so the runtime compose is bayt's, under .bayt/. This
+		// root exists for what resolves a project by its nearest compose file:
+		// sayt's project-dir walk, and every `docker compose up launch` run
+		// from the app directory with no -f.
 		"compose.yaml": {
 			format: "yaml"
-			data:   E.cluster.compose
-		}
-		"docker/shell.Dockerfile": {
-			format: "text"
-			text:   E.cluster.shellDockerfile
+			data: include: [{path: "./.bayt/compose.yaml"}]
 		}
 		"bayt.json": {
 			format: "json"

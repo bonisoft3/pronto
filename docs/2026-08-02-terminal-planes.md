@@ -25,7 +25,7 @@ and `sayt.#Loop`:
 - **surface** — what a layer exposes for something else to compose against.
   Reused, not coined here — the original doctrine doc already used the word for
   mecha ("its own surface is only the composition") before this session applied
-  it to markup. `#Cluster.surface.services` is the compose graph's input;
+  it to markup. `#Cluster.surface.targets` is the build graph's input;
   `#Terminal.surface` is what's served to a browser; `#App.surface` is the
   semantic screen/handler declarations `#Terminal.surface` is a file-path
   projection of; `#Loop.surface` is nearly everything it has, because a dev-loop

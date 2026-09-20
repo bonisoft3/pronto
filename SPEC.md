@@ -307,8 +307,9 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   thin bayt.cue stub — lives with the roster in
   [`builders/bayt.cue`](builders/bayt.cue).
 - **The loop runs on builtins.** The emitter emits the files the loop's
-  builtin verbs expect — `.vscode/tasks.json`, `compose.yaml` (the local
-  virtual cluster; `launch` drives its gate service), and `.say.yaml`
+  builtin verbs expect — `.vscode/tasks.json`, `compose.yaml` (an include of
+  the compose bayt emits for the cluster's targets; `launch` drives its
+  aggregate), and `.say.yaml`
   carrying the checks, each filed under the verb whose layer it needs —
   `lint` for the ones that read files, `test` and `integrate` for the ones
   that need a mounted screen or a running cluster. A check the terminal
