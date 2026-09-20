@@ -66,6 +66,23 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
     await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"]);
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
+    const duckdb = JSON.parse(await cue(app, ["export", ".mise.toml", "--out", "json"])).tools["http:duckdb"];
+    const assets: Record<string, string> = {
+      "linux-x64": "linux-amd64",
+      "linux-arm64": "linux-arm64",
+      "linux-x64-musl": "linux-amd64-musl",
+      "linux-arm64-musl": "linux-arm64-musl",
+      "macos-x64": "osx-amd64",
+      "macos-arm64": "osx-arm64",
+      "windows-x64": "windows-amd64",
+      "windows-arm64": "windows-arm64",
+    };
+    assert(duckdb.platforms, "DuckDB must declare its supported platforms");
+    assert(!("url" in duckdb), "DuckDB must not fall back to a glibc URL on an unsupported platform");
+    assert(JSON.stringify(Object.keys(duckdb.platforms).sort()) === JSON.stringify(Object.keys(assets).sort()), "DuckDB platform coverage differs");
+    for (const [platform, asset] of Object.entries(assets)) {
+      assert(duckdb.platforms[platform].url === `https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-${asset}.zip`, `DuckDB selects the wrong asset for ${platform}`);
+    }
     assert(!/omnishell|mecha|\/Users\/|\.\.\/plugins/.test(mise + say), "bootstrap leaked a battery or source path");
     await cue(app, ["cmd", "generate", "./pronto"]);
     assert(mise === await Deno.readTextFile(join(app, ".mise.toml")), "Mise generation drifted");

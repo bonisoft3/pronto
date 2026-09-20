@@ -41,21 +41,32 @@ installation; do not substitute `main` or `latest` for a missing release.
    ```sh
    ./saytw --script tools.nu mise trust .mise.toml
    ./saytw --script tools.nu mise lock
+   ./saytw --script tools.nu nu -c 'with-env {MISE_LOCKED: "0"} { ^mise install }'
    ./saytw setup
    ./saytw doctor
    ./saytw generate
    ./saytw lint
    ```
 
-   `mise lock` is the explicit lock-writing operation. Inspect its resolved
-   versions, artifact URLs and checksums; retain `mise.lock` with the project.
-   Do not disable locked mode to make generation pass.
+   The initial install records HTTP artifact URLs and checksums for the current
+   platform; `mise lock` alone leaves these entries incomplete. The checksums
+   pin the downloaded bytes, not an independent upstream attestation. Sayt
+   supplies Nushell and Mise; the override is scoped to that install. Setting
+   `MISE_LOCKED=0` outside `saytw setup` does not work: Sayt clears the
+   launcher's bootstrap override so project locking prevails. Subsequent setup,
+   doctor, generation, and lint stay locked. Inspect the resolved versions,
+   artifact URLs and checksums; retain `mise.lock` with the project. Do not
+   disable locked mode to make generation pass.
+
+   Already-installed tools may be skipped without filling their lock entries.
+   If an entry remains incomplete, repeat the scoped install with
+   `--force <tool>` (for example, `^mise install --force http:duckdb`), then
+   recheck the lock. Other platforms need their own bootstrap install.
 
 When choosing a terminal, cluster, or builder, unify its exported project
 requirements into `pronto` in package `prontoproject`, then run
 `./saytw --script tools.nu cue cmd generate ./pronto`. Inspect the generated
-configuration and repeat trust → lock → setup → doctor before generation uses
-the new tools.
+configuration and repeat step 4 for the new tools.
 
 Host plugins and project configuration are separate installations. Use the
 host's supported plugin installer, then restart or reload when required by

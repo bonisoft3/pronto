@@ -16,7 +16,20 @@ import (
 	"github:bonisoft3/sayt":   #SaytVersion
 	"http:duckdb": {
 		version: "1.5.5"
-		url:     "https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-{{ os(macos=\"osx\") }}-{{ arch(x64=\"amd64\") }}.zip"
+		platforms: {
+			for platform, asset in {
+				"linux-x64":        "linux-amd64"
+				"linux-arm64":      "linux-arm64"
+				"linux-x64-musl":   "linux-amd64-musl"
+				"linux-arm64-musl": "linux-arm64-musl"
+				"macos-x64":        "osx-amd64"
+				"macos-arm64":      "osx-arm64"
+				"windows-x64":      "windows-amd64"
+				"windows-arm64":    "windows-arm64"
+			} {
+				"\(platform)": url: "https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-\(asset).zip"
+			}
+		}
 	}
 }
 
