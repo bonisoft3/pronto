@@ -34,7 +34,7 @@ and `sayt.#Loop`:
   it doesn't always earn its own nesting level: where it would only ever hold
   one field (`#Terminal`, `#Loop` — both just `app`), it collapses to a bare
   top-level field instead of a wrapper. `#App` (five real fields: `name`, `ir`,
-  `tiers`, `decisions`, `tests`) and `#Cluster` (`app` *and* `mechaPath`) keep a
+  `tiers`, `decisions`, `tests`) and `#Cluster` (`app`, `images`, the door) keep a
   real bucket. The rule is "let the content decide," not "always four."
 
 Why *returned requests* never became a bucket, despite being one of the
@@ -396,7 +396,7 @@ ones — it's dead in the final shape and isn't implemented.)
 		lint:     [Name=string]: {cmd: string, note: string} // e.g. caddy
 	}
 
-	meta: {app: string, mechaPath: string, statics: [...#Static]}
+	meta: {app: string, images: {[string]: #From}, statics: [...#Static], ...}
 }
 ```
 

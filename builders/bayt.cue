@@ -45,45 +45,8 @@ import (
 		testCmd:  string
 	}
 	// The runtime, as the cluster states it: one bayt target per service,
-	// with bare names. Lowered into this project below.
+	// with bare names, lowered into this project by mecha's own #Runtime.
 	cluster: mecha.#Cluster
-
-	// A cluster target lowered into this project. bayt names a service
-	// `<project>-<target>`, so `depends_on` keys take the prefix; the bare
-	// name stays as the service's network alias, which is what the
-	// Caddyfile, the pipelines and every `@database:5432` URL address. Each
-	// dependency is also an image-only dep, so the entry closures carry the
-	// fragments of what they wait on. Rebuilt field by field rather than
-	// unified: unifying a qualified `depends_on` onto the bare one would keep
-	// both key sets.
-	_lower: L={
-		name: string
-		in:   _
-		out: {
-			for f, v in L.in if f != "compose" && f != "deps" {(f): v}
-			deps: [for k, _ in (B._waits & {t: L.in}).out {":\(k):outs"}]
-			compose: {
-				for f, v in L.in.compose if f != "depends_on" {(f): v}
-				depends_on: {for k, v in (B._waits & {t: L.in}).out {("\(B.project.name)-\(k)"): v}}
-				networks: default: aliases: [L.name]
-			}
-		}
-	}
-	// What a target waits on; a target that waits on nothing has no field.
-	_waits: W={
-		t: _
-		out: [if W.t.compose.depends_on != _|_ {W.t.compose.depends_on}, {}][0]
-	}
-	_clusterTargets: {for n, t in B.cluster.surface.targets if t != null {(n): t}}
-	// Every key a cluster target waits on names a cluster target. A hatch
-	// that nulls a service leaves the aggregate waiting on a name no service
-	// answers to, which compose would report at `up` and this reports at
-	// export.
-	_dangling: [
-		for n, t in B._clusterTargets for k, _ in (B._waits & {"t": t}).out
-		if !list.Contains([for m, _ in B._clusterTargets {m}], k) {"\(n) waits on \(k)"},
-	]
-	_dangling: []
 
 	// What the program itself reads: every cue file of the package, the
 	// bayt.json its bayt.cue embeds, and the DESIGN.md program.cue embeds. Each
@@ -105,8 +68,8 @@ import (
 		dir: [if B.meta.local {"apps/\(B.meta.app)"}, "."][0]
 		if !B.meta.local {name: B.meta.app}
 
+		targets: (mecha.#Runtime & {"project": project.name, "cluster": B.cluster}).targets
 		targets: {
-			for n, t in B._clusterTargets {(n): (B._lower & {"name": n, "in": t}).out}
 			"setup": sayt.setup & {
 				if B.meta.local {dockerfile: from: ref: "workspaceroot:setup"}
 				if !B.meta.local {

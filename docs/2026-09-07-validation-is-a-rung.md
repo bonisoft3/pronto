@@ -74,11 +74,12 @@ day.
   since a delete carries no schema to prepare. `upsertBy` already answers "does my
   row exist" from the local collection before choosing insert or update —
   the store consults its own copy before the wire.
-- **Migrations are compose configs, and the image is plain Postgres.**
-  `cluster.cue:80-83` mounts the emitted migrations by name into
-  `/docker-entrypoint-initdb.d/`; `services/database/Dockerfile` is
-  `postgres:18-trixie` plus `postgresql-18-wal2json` from PGDG apt. The
-  emitted `000_extensions.sql` reads "no extensions required".
+- **Migrations are layers on mecha's database image.** The cluster's
+  database target (`cluster.cue`) copies the emitted migrations into
+  `/docker-entrypoint-initdb.d/`; the image it starts from
+  (`libraries/mecha/bayt.cue`, `database-image`) is `postgres:18-trixie`
+  plus `postgresql-18-wal2json` from PGDG apt and plv8. The emitted
+  `000_extensions.sql` reads "no extensions required".
 - **PGDG apt does not carry plv8.** The trixie and bookworm indexes for amd64
   and arm64 hold zero `postgresql-*-plv8` packages while holding wal2json.
   Pigsty packages `postgresql-18-plv8` 3.2.4 for Debian 12/13 and Ubuntu
