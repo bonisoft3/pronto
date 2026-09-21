@@ -11,6 +11,7 @@
 import type { IrAccept, IrPath } from "./acceptance.ts";
 import type { Edge, Node } from "./diagrams.ts";
 import { labelledKind } from "./diagrams.ts";
+import { parseHTML } from "npm:linkedom@0.18.4";
 import type { Exception, Literal, Step } from "./styles.ts";
 
 export type Facts = Record<string, Record<string, unknown>[]>;
@@ -437,6 +438,101 @@ export function jessieFactRows(
     denied_identifier: denied.map((d) => ({ name: d.name, reason: d.reason })),
     handler_reference: modules.flatMap((m) => m.references.map((name) => ({ path: m.path, name }))),
     handler: modules.map((m) => ({ path: m.path, completion: m.completion })),
+  };
+}
+
+export type FactTemplateMsgRef = { screen: string; path: string; key: string };
+export type FactTemplateProse = { screen: string; path: string; selector: string; text: string };
+
+export function scanTemplateI18n(html: string, screen: string, path: string): {
+  msgRefs: FactTemplateMsgRef[];
+  prose: FactTemplateProse[];
+} {
+  const msgRefs: FactTemplateMsgRef[] = [];
+  const prose: FactTemplateProse[] = [];
+
+  const refMatches = html.matchAll(/\{msg\.([a-zA-Z0-9_]+)\}/g);
+  const seenKeys = new Set<string>();
+  for (const m of refMatches) {
+    const key = m[1];
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      msgRefs.push({ screen, path, key });
+    }
+  }
+
+  const clean = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+
+  const { document } = parseHTML(clean) as unknown as { document: { querySelectorAll(sel: string): unknown[] } };
+
+  for (const el of (document.querySelectorAll ? (document.querySelectorAll("*") as any[]) : [])) {
+    const tag = (el.tagName ? el.tagName.toLowerCase() : "element");
+    const cls = el.className ? `.${String(el.className).split(" ")[0]}` : "";
+
+    for (const attr of ["aria-label", "placeholder", "title"]) {
+      if (el.hasAttribute && el.hasAttribute(attr)) {
+        const val = (el.getAttribute(attr) || "").trim();
+        if (val && !/^\{[^{}]+\}$/.test(val) && /[a-zA-ZÀ-ÿ]{2,}/.test(val)) {
+          prose.push({
+            screen,
+            path,
+            selector: `${tag}${cls}[${attr}]`,
+            text: val.length > 50 ? val.slice(0, 47) + "..." : val,
+          });
+        }
+      }
+    }
+
+    const hasDataText = (el.hasAttribute && el.hasAttribute("data-text") && el.getAttribute("data-text")?.startsWith("{")) ||
+      (el.closest?.("[data-text]")?.getAttribute("data-text")?.startsWith("{") ?? false);
+    if (hasDataText) continue;
+
+    for (const child of el.childNodes || []) {
+      if (child.nodeType === 3) {
+        const raw = (child.textContent || "").trim();
+        if (!raw) continue;
+        if (/^\{[^{}]+\}$/.test(raw)) continue;
+        if (/^[0-9\s.,:+\/()·—✕♣♥♠♦%#$@!?|<>=\x22\x27\*-]+$/.test(raw)) continue;
+        if (/[a-zA-ZÀ-ÿ]{2,}/.test(raw)) {
+          prose.push({
+            screen,
+            path,
+            selector: `${tag}${cls}`,
+            text: raw.length > 50 ? raw.slice(0, 47) + "..." : raw,
+          });
+        }
+      }
+    }
+  }
+
+  return { msgRefs, prose };
+}
+
+export function i18nFacts(
+  defaultLocale: string | null,
+  locales: string[],
+  catalogs: Record<string, Record<string, string | Record<string, string>>>,
+  msgRefs: FactTemplateMsgRef[],
+  prose: FactTemplateProse[],
+): Facts {
+  if (defaultLocale === null) return {};
+  return {
+    i18n_meta: [{ default_locale: defaultLocale }],
+    i18n_locale: locales.map((locale) => ({ locale })),
+    // One row per arm, because a fact column is a scalar: the view unnests the
+    // file recursively and a nested struct would stop binding. A sentence with
+    // no arms is one row whose `arm` is empty.
+    message_catalog: Object.entries(catalogs).flatMap(([locale, msgs]) =>
+      Object.entries(msgs).flatMap(([key, value]) =>
+        typeof value === "string"
+          ? [{ locale, key, arm: "", value }]
+          : Object.entries(value).map(([arm, text]) => ({ locale, key, arm, value: text }))
+      )
+    ),
+    template_msg_ref: msgRefs,
+    template_prose: prose,
   };
 }
 

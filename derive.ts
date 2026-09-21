@@ -59,8 +59,12 @@ import {
   celFacts,
   diagramFacts,
   type FactChart,
+  i18nFacts,
+  type FactTemplateMsgRef,
+  type FactTemplateProse,
   programFacts,
   renderFacts,
+  scanTemplateI18n,
   scaleFacts,
   sha256Hex,
 } from "./facts.ts";
@@ -317,10 +321,22 @@ export async function derive(appDir: string): Promise<void> {
   const entities = exp.entities;
   // `program` is exported whole, so the slices the table registry needs are
   // read off it rather than added to the expression above.
-  const { surface, state } = exp.program as unknown as {
+  const { surface, state, meta: appMeta } = exp.program as unknown as {
     surface: { screens: Record<string, { forms?: { id: string; entity: string }[] }> };
     state: { pipelines?: Record<string, { fold?: { pair: { table: string } } }> };
+    meta?: { i18n?: { default?: string; locales?: Record<string, { path: string }> } };
   };
+  const defaultLocale = appMeta?.i18n?.default ?? null;
+  const locales = Object.keys(appMeta?.i18n?.locales ?? {});
+  const catalogs: Record<string, Record<string, string | Record<string, string>>> = {};
+  for (const loc of locales) {
+    const text = await Deno.readTextFile(`${appDir}/messages/${loc}.json`).catch(() => null);
+    if (text !== null) {
+      try {
+        catalogs[loc] = JSON.parse(text);
+      } catch (_) {}
+    }
+  }
   const notes = await decisionNotes(appDir, exp.ir, exp.decisions);
   const byTable = new Map(Object.entries(entities).map(([name, e]) => [e.table, name]));
 
@@ -409,7 +425,15 @@ export async function derive(appDir: string): Promise<void> {
 
   const screens: { name: string; entities: string[]; handlers: string[] }[] = [];
   const machines: { screen: string; region: MachineProjection }[] = [];
+  const allMsgRefs: FactTemplateMsgRef[] = [];
+  const allProse: FactTemplateProse[] = [];
   for (const [name, screen] of Object.entries(projected)) {
+    if (defaultLocale !== null) {
+      const html = await Deno.readTextFile(`${appDir}/shell/screens/${name}.html`);
+      const { msgRefs, prose } = scanTemplateI18n(html, name, `shell/screens/${name}.html`);
+      allMsgRefs.push(...msgRefs);
+      allProse.push(...prose);
+    }
     const named = screen.tables.map((t) =>
       byTable.get(t) ?? fail(`${name}.html reads "${t}", the table of no declared entity`)
     );
@@ -661,6 +685,7 @@ export async function derive(appDir: string): Promise<void> {
       jessieFactRows(DENIED, modules),
       { enum_value },
       diagramFacts(diagrams.nodes, diagrams.edges),
+      i18nFacts(defaultLocale, locales, catalogs, allMsgRefs, allProse),
     )),
   );
 
@@ -890,10 +915,22 @@ function selfTest(): void {
       console.error(`FAIL ${t.name}: body reads ${JSON.stringify(note)}, want ${JSON.stringify(t.note)}`);
     }
   }
+  // Template i18n scan assertions: unlocalized prose and msg refs.
+  const i18nSample = '<section><h1 data-text="{msg.hello}">Fallback</h1><p>Unlocalized prose</p><span aria-label="Missing key">★</span></section>';
+  const { msgRefs, prose } = scanTemplateI18n(i18nSample, "sample", "sample.html");
+  if (msgRefs.length !== 1 || msgRefs[0].key !== "hello") {
+    failed++;
+    console.error(`FAIL i18n scan: expected 1 msgRef ('hello'), got ${JSON.stringify(msgRefs)}`);
+  }
+  if (prose.length !== 2) {
+    failed++;
+    console.error(`FAIL i18n scan: expected 2 prose leaks (p and aria-label), got ${JSON.stringify(prose)}`);
+  }
+
   if (failed > 0) Deno.exit(1);
   console.error(
     `derive self-test: ${notes.length + scans.length + maps.length + 1} derivation cases, ` +
-      "the cel fixtures, the style scanner, the jessie scanner, the validation resolver and the tree reader passed",
+      "the cel fixtures, the style scanner, the jessie scanner, the validation resolver, the tree reader and the i18n template scanner passed",
   );
 }
 

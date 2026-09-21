@@ -28,6 +28,11 @@ import (
 
 #Generate: "if ('program.cue' | path exists) { use tools.nu [run-mise]; run-mise exec -- omnishell materialize .; run-mise exec -- omnishell mode . | save --force program_terminal.cue }"
 
+// Re-exported beside #Terminal because the emitter reads it directly: CUE has
+// no Intl, so the entry document's direction is resolved from the app's default
+// tag against this list.
+#RtlLanguages: impl.#RtlLanguages
+
 #Terminal: impl.#Terminal & {
 	surface: {
 		runtime: string

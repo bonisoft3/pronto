@@ -40,6 +40,34 @@ import (
 
 _caddyfileAsset: _ @embed(file="assets/Caddyfile", type=text)
 
+// The one address a route answers at in one locale: the locale's prefix, empty
+// for the default, ahead of that locale's own pattern. Three emitted artifacts
+// read it — the Caddyfile's matcher list, the sitemap's <loc> and its hreflang
+// alternates — and they must agree, because a sitemap naming an address the
+// door does not route is a 404 handed to a crawler on purpose.
+#address: A={
+	route: _
+	i18n?: _
+	_prefix: [
+		if A.i18n != _|_ if A.tag != A.i18n.default {"/" + A.i18n.locales[A.tag].path},
+		"",
+	][0]
+	_pattern: [if A.i18n != _|_ if A.route.paths != _|_ {A.route.paths[A.tag]}, A.route.path][0]
+	// The bare prefix reads /es rather than /es/, and the default locale's root
+	// keeps the slash it cannot drop.
+	_joined: strings.TrimSuffix(A._prefix + A._pattern, "/")
+	tag:     string | *""
+	out:     [if A._joined == "" {"/"}, A._joined][0]
+}
+
+// A pattern's :params in the order it holds them. A translated spelling may
+// order them differently from the default's, so a capture is read back by
+// name and never by position.
+#params: P={
+	pattern: string
+	out: [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimPrefix(seg, ":")}]
+}
+
 _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: "BIGINT", timestamptz: "TIMESTAMPTZ", tsvector: "TSVECTOR"}
 
 #colSql: C={
@@ -629,8 +657,9 @@ _cdcTableField: "__table"
 	// What the terminal's own checks judge an app against: the columns a filter
 	// may name, the pk, unique field or declared unique that witnesses a slot's
 	// cardinality, the tier and type a machine region's writes are held to, the
-	// values a data-when may state (check-markup.ts), and the domain a
-	// generated row's column is drawn from (check-battery.ts). Scoped to the
+	// values a data-when may state (check-markup.ts), the currency and
+	// scale a money binding formats with, and the domain a generated row's
+	// column is drawn from (check-battery.ts). Scoped to the
 	// tables the terminal registers, and to the field attributes those checks
 	// read — shell.yaml carries one projection of the program per reader, and
 	// this is the terminal's.
@@ -650,6 +679,7 @@ _cdcTableField: "__table"
 				if f.default != _|_ {default: f.default}
 				if e.enums[f.name] != _|_ {enum: e.enums[f.name]}
 				if e.bounds[f.name] != _|_ {bounds: e.bounds[f.name]}
+				if f.money != _|_ {money: f.money}
 			}]
 			if len(e.uniques) > 0 {
 				uniques: [for u in e.uniques {
@@ -679,6 +709,60 @@ _cdcTableField: "__table"
 			}
 		}
 	}}
+	if S.code.meta.i18n != _|_ {
+		_msg: S.code.meta.i18n._msg
+		// The first segment a slugged route resolves to, per locale, and the
+		// only place a catalogue's value is held to the URL-safe shape: the
+		// authored pattern constrains the default locale's address alone, and
+		// a translated value is an address in exactly the same way.
+		_segment: {for n, s in S.code.surface.screens if s.slug != _|_ {
+			(n): {for tag, _ in S.code.meta.i18n.locales {
+				(tag): S._msg[tag][s.slug] & =~"^[a-z0-9]+(-[a-z0-9]+)*$"
+			}}
+		}}
+		// The strip label a route wears, per locale, resolved the way a slug's
+		// segment is and held to nothing but being a word: a catalogue missing
+		// the key is a cue error here, before any check runs.
+		_navLabel: {for n, s in S.code.surface.screens if s.label != _|_ {
+			(n): {for tag, _ in S.code.meta.i18n.locales {
+				(tag): S._msg[tag][s.label] & =~"\\S"
+			}}
+		}}
+		// Every route's pattern in every declared locale, WITHOUT the locale
+		// prefix — routeHref composes that from i18n.locales[tag].path. Only
+		// the first segment translates; the rest, literal or `:param`, are
+		// carried verbatim. An unslugged route keeps its authored pattern in
+		// every locale, which is what the default says.
+		_pattern: {for n, s in S.code.surface.screens {
+			(n): {for tag, _ in S.code.meta.i18n.locales {
+				(tag): *s.route | string
+				if s.slug != _|_ {
+					(tag): "/" + strings.Join(list.Concat([[S._segment[n][tag]], strings.Split(s.route, "/")[2:]]), "/")
+				}
+			}}
+		}}
+		// The routes of one locale, keyed by the pattern they resolve to, which
+		// is what makes two decidable constraints cue errors at emission rather
+		// than live 404s: within a locale no two routes may share a pattern,
+		// and no default-locale pattern may be a declared locale's own prefix —
+		// or /es is both the Spanish home and the route whose Portuguese slug
+		// is `es`. Both hold over ALL routes, slugged and not, because after
+		// the prefix is stripped they are matched from one table.
+		//
+		// `routes` reads each address back out of here rather than off
+		// `_pattern`, so emitting a route is what runs the checks.
+		_seen: {for tag, _ in S.code.meta.i18n.locales {
+			(tag): {
+				for n, _ in S.code.surface.screens {(S._pattern[n][tag]): n}
+				if tag == S.code.meta.i18n.default {
+					for t, l in S.code.meta.i18n.locales {("/" + l.path): "\(t) prefix"}
+				}
+			}
+		}}
+		_addressOf: {for n, _ in S.code.surface.screens {
+			(n): {for tag, t in S._seen {(tag): [for p, sn in t if sn == n {p}][0]}}
+		}}
+	}
 	out: {
 		app:    S.code.meta.name
 		floors: S.floors
@@ -689,14 +773,43 @@ _cdcTableField: "__table"
 		if S.code.capabilities.auth != _|_ {
 			auth: S.code.capabilities.auth
 		}
+		// Projected, not copied: the catalogues are the emitter's input and the
+		// resolved patterns on each route are what survives them.
+		if S.code.meta.i18n != _|_ {
+			i18n: {default: S.code.meta.i18n.default, locales: S.code.meta.i18n.locales}
+		}
 
 		// Optional keys are emitted only where they differ from the default,
 		// so shell.yaml stays stable for the ordinary screen.
-		routes: [for _, s in S.code.surface.screens {
+		routes: [for n, s in S.code.surface.screens {
 			path:   s.route
 			screen: s.name
+			// `path` IS the default locale's pattern, not a second spelling
+			// beside it: unifying the two makes a slugged route whose authored
+			// first segment disagrees with the default catalogue's value a cue
+			// error rather than a live 404. An unslugged route resolves to what
+			// it authored, so the unification is an identity.
+			if S.code.meta.i18n != _|_ {
+				path: S._addressOf[n][S.code.meta.i18n.default]
+			}
+			// Emitted iff a slug is declared: every declared tag, the default
+			// included, and each pattern WITHOUT the locale prefix.
+			if s.slug != _|_ {
+				slug:  s.slug
+				paths: S._addressOf[n]
+			}
+			if s.prerender {
+				prerender: true
+			}
+			// `label` is the default-language spelling and the whole of what an
+			// app with no catalogues carries; `key` and `labels` are the same
+			// pair `slug` and `paths` are, for the word instead of the address.
 			nav: {
 				label: s.title
+				if s.label != _|_ {
+					key:    s.label
+					labels: S._navLabel[n]
+				}
 				if !s.strip {strip: false}
 			}
 			files:  s.files
@@ -889,7 +1002,24 @@ _cdcTableField: "__table"
 					(name): {verb: "lint", cmds: [_distribution.checks[name]], note: "Pronto compiler \(name)"}
 				}
 				facts: priority: 1
+				// Declaring a route crawlable is a promise the build can write it,
+				// and a promise nothing exercises is one that breaks silently. The
+				// writer runs wherever a route declares it, over every declared
+				// locale, into a directory it throws away: what is graded is that
+				// each document renders, not the bytes. On `test` rather than
+				// `lint` because it boots the interpreter against the fixture
+				// store, which is not static verification.
+				if len([for _, s in D.code.surface.screens if s.prerender {s}]) > 0 {
+					prerender: {verb: "test", cmds: [_prerender], note: "Pronto prerender"}
+				}
 			}
+			// The origin is the launch door's, because the canonical and hreflang
+			// links a crawler compares are absolute and a deployed origin is the
+			// deployment's to name.
+			_prerender: (distribution.#Run & {
+				runtime: "\(sources.pronto)"
+				args:    "let out = (mktemp -d); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read $\"--allow-write=($out)\" ($pronto | path join prerender.ts) . $out https://localhost:8443; rm -rf $out"
+			}).out
 			if sources.pronto == "" {
 				sayYaml: _distribution.say
 			}
@@ -920,6 +1050,13 @@ _cdcTableField: "__table"
 	out: omnishell.#Terminal & {
 		app:         D.code.meta.name
 		description: D.code.meta.description
+		if D.code.meta.i18n != _|_ {
+			language: D.code.meta.i18n.default
+			// The base language decides, because a tag's region never does.
+			if list.Contains(omnishell.#RtlLanguages, strings.Split(D.code.meta.i18n.default, "-")[0]) {
+				direction: "rtl"
+			}
+		}
 		surface: {
 			screens: [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css}]
 			handlers: list.SortStrings([for i, _ in D._handlerSet {i}])
@@ -933,6 +1070,11 @@ _cdcTableField: "__table"
 			// A unit's whole directory, not just its src: the wrapper's own
 			// imports are files the browser fetches by name.
 			units: list.SortStrings([for f, _ in D._unitSet {f}])
+			messages: [
+				if D.code.meta.i18n != _|_ for tag, _ in D.code.meta.i18n.locales {
+					"messages/\(tag).json"
+				},
+			]
 		}
 	}
 }
@@ -958,10 +1100,18 @@ _cdcTableField: "__table"
 		watch:  true
 	}]
 
+	// What a crawler asks for by name. Served from the root, not under the
+	// terminal's shell/ prefix: neither file is read anywhere else.
+	_crawl: [for f in ["robots.txt", "sitemap.xml"] {
+		file:   f
+		target: "/srv/\(f)"
+		watch:  true
+	}]
+
 	out: mecha.#Cluster & {
 		meta: {
 			app: D.code.meta.name
-			statics: list.Concat([D.statics, D._ladder])
+			statics: list.Concat([D.statics, D._ladder, D._crawl])
 			// mecha's images, reached through the monorepo's bayt federation.
 			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "rclone-s3"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
 		}
@@ -1217,7 +1367,7 @@ _cdcTableField: "__table"
 		   byline. All four ellipsis rules are load-bearing: nowrap alone
 		   cannot shrink, and min-width: 0 is what lets a flex item shrink
 		   below its content width at all. */
-		body > nav .shell-me { margin-left: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
+		body > nav .shell-me { margin-inline-start: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
 		body > nav .shell-who { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
 		body > nav .shell-who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		body > nav .shell-who .name:empty { display: none; }
@@ -1225,8 +1375,12 @@ _cdcTableField: "__table"
 		body > nav .shell-who .handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 		/* De-emphasis comes from weight alone: layered opacity on --shell-fg
 		   lands below 4.5:1 contrast on both themes' nav ground. */
+		/* A short word is still a target: "sair" sets 23px of text, under the
+		   24px minimum a finger needs, so the box keeps the floor the label
+		   does not. */
 		body > nav .shell-signout { font-weight: 400;
-		  display: inline-flex; align-items: center; min-height: 24px; }
+		  display: inline-flex; align-items: center; justify-content: center;
+		  min-height: 24px; min-width: 24px; }
 
 		/* Not a preference to weigh against the design: durations collapse
 		   and the interpreter's exit path, which waits on running animations,
@@ -1302,6 +1456,83 @@ _cdcTableField: "__table"
 	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
 	cluster: capabilities: blobs: E.code.capabilities.blobs
 	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
+	// The served route table, resolved once: shell.yaml IS this, and the
+	// Caddyfile's own matcher list is read out of the same addresses, so the
+	// door and the router cannot disagree about what a route is.
+	_shell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, server: E._serverOn, native: E.code.capabilities.native}).out
+	// The locales in one order, so every artifact that lists them lists them the
+	// same way and a regenerated file has no spurious diff.
+	_locales: list.SortStrings([if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}])
+	// Every address a route answers at, flattened for the door's matcher list.
+	_addressed: list.FlattenN([for r in E._shell.routes {E._spellings[r.screen]}], 1)
+	// The locales a reader can be sent TO. The default is where they already
+	// are, so it names no redirect — only the captures that mean "stay".
+	_others: [for tag in E._locales if E._shell.i18n != _|_ if tag != E._shell.i18n.default {tag}]
+	// Every declared tag, plus the bare language of each, which is the whole of
+	// what negotiateLocale will look at: it tries the exact tag, then the first
+	// declared tag sharing its language. Longest first, because Go's alternation
+	// is leftmost-FIRST and `pt` would otherwise swallow `pt-BR`.
+	_alternatives: list.Concat([(E._byLength & {of: E._localeOrder}).out, (E._byLength & {of: E._baseOrder}).out])
+	// Down from the longest actually declared, rather than from a guessed
+	// ceiling: a tag is a BCP 47 subtag chain with no length a compiler may
+	// assume, and one left out of the alternation is a language the door
+	// cannot see at all.
+	_byLength: B={
+		of: [...string]
+		out: [
+			for n in list.Range(list.Max(list.Concat([[0], [for s in B.of {len(s)}]])), 0, -1)
+			for s in B.of if len(s) == n {s},
+		]
+	}
+	// Declaration order, not sorted: negotiateLocale resolves a bare language to
+	// the FIRST declared tag carrying it, and shell.yaml's order is that one.
+	_localeOrder: [if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}]
+	_baseOf: {for tag in E._localeOrder {(tag): strings.Split(tag, "-")[0]}}
+	// A language already spelled as a tag needs no second alternative.
+	_baseOrder: [
+		for i, tag in E._localeOrder
+		let b = E._baseOf[tag]
+		if b != tag
+		if len([for j, o in E._localeOrder if j < i if E._baseOf[o] == b {o}]) == 0 {b},
+	]
+	// What a capture means. A bare language means the first declared tag that
+	// carries it, which is what makes `pt-PT` read as `pt-BR`.
+	_meansLocale: {
+		for tag in E._localeOrder {(tag): tag}
+		for b in E._baseOrder {(b): [for tag in E._localeOrder if E._baseOf[tag] == b {tag}][0]}
+	}
+	// An app whose every route is behind a session has nothing to offer a
+	// crawler but its login wall, so it offers nothing and says so in robots.
+	// A comprehension rather than `==`, which errors on a field an app without
+	// an auth block never declares instead of reading as false.
+	_public: [
+		if E._shell.auth != _|_ if E._shell.auth.required {false},
+		true,
+	][0]
+	// A crawler is offered the routes it can actually reach: a `:param` segment
+	// holds a row id, and an address invented for one is a 404 or, worse,
+	// somebody's row. Naming only the static routes is not a hedge — it is the
+	// whole of what the app can promise exists without reading the database.
+	// Every locale's spelling is asked, not only the default's: nothing makes a
+	// route's params the same in each, which is why the prerender check walks
+	// them one by one too.
+	_crawlable: [
+		if E._public for r in E._shell.routes
+		if len([for a in E._spellings[r.screen] if strings.Contains(a, ":") {a}]) == 0 {r},
+	]
+	// Every address one route answers at, per route, so both the flat list the
+	// door reads and the per-route grouping the sitemap needs come from one
+	// composition.
+	_spellings: {
+		for r in E._shell.routes {
+			(r.screen): [
+				if E._shell.i18n == _|_ {(#address & {route: r}).out},
+				if E._shell.i18n != _|_ for tag in E._locales {
+					(#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out
+				},
+			]
+		}
+	}
 	// A server entity syncs through a gate the auth service answers, so a
 	// cluster with one and no auth plane would 502 every shape.
 	_gated: bool & (E._serverOn == false || E._authOn) & true
@@ -1708,11 +1939,247 @@ _cdcTableField: "__table"
 		}
 		"docker/Caddyfile": {
 			format: "caddyfile"
-			text:   _caddyfileAsset
+			// The asset's last block, recomposed here because both halves are
+			// per-app. A route is a real path now — the router reads
+			// location.pathname — so this is what lets a deep link reach a document
+			// at all: the prerendered one where the build wrote it, the terminal's
+			// entry otherwise, and a 404 for a path that is neither.
+			_anchor: """
+				  handle {
+				    root * /srv
+				    header Cache-Control "no-cache"
+				    file_server
+				  }
+				"""
+			// The default locale is served unprefixed, so its prefixed spelling is an
+			// alias and answers 301 rather than a second copy of the document.
+			// handle_path strips the matched prefix, leaving {uri} as path AND query —
+			// /pt-br/regras?lang=es becomes /regras?lang=es, and `lang` is a wire
+			// parameter the redirect has no business dropping. The bare prefix matches
+			// no wildcard, so it is rewritten into one rather than redirected on its
+			// own: a second `redir` could only name a literal target and would lose
+			// the query there (measured, caddy 2.10.0).
+			// The entry document lives under shell/ and answers at every route,
+			// so its own directory is a location rather than an address: a
+			// reader who lands there is served the document and told by the
+			// router that /shell/ is no route of this app. It is the app's root
+			// they meant.
+			_entry: """
+			    @entry path /\(E.terminal.surface.entry) /\(strings.TrimSuffix(E.terminal.surface.entry, "index.html"))
+			    redir @entry / permanent
+
+			"""
+			_alias: [
+				if E._shell.i18n != _|_ {"""
+				    @unprefixed path /\(E._shell.i18n.locales[E._shell.i18n.default].path)
+				    rewrite @unprefixed /\(E._shell.i18n.locales[E._shell.i18n.default].path)/
+				    handle_path /\(E._shell.i18n.locales[E._shell.i18n.default].path)/* {
+				      redir {uri} permanent
+				    }
+
+				"""},
+				"",
+			][0]
+			// The reader's language decided at the door, so a reader whose
+			// language is not the address's is moved before a document is built
+			// rather than after one has booted and thrown itself away.
+			//
+			// This is not a second implementation of negotiateLocale. That
+			// function reads navigator.languages — an ordered list with no
+			// q-values — and takes the first declared tag, exact before bare
+			// language. The capture below is that same rule compiled: one
+			// alternation of the declared tags and their languages, longest
+			// first, matched leftmost against the header the browser builds from
+			// the same ordered list. negotiation_test.ts runs a corpus
+			// through both and refuses a disagreement.
+			//
+			// `?lang=` is excluded: it is the wire's own parameter and the
+			// terminal answers it, on the terms a plain route's language gets.
+			_defaultAddress: {for r in E._shell.routes {(r.screen): (#address & {route: r, i18n: E._shell.i18n, tag: E._shell.i18n.default}).out}}
+			// Caddy path matchers are exact, so a :param segment widens to `*`
+			// the way the served matcher list does.
+			_widened: {for s, a in _defaultAddress {(s): "/" + strings.Join([
+				for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
+					[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
+				},
+			], "/")}}
+			_branches: [
+				for r in E._shell.routes for tag in E._others
+				let here = _defaultAddress[r.screen]
+				let there = (#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out
+				let names = (#params & {pattern: here}).out
+				// Segment by segment, because a :param is a whole segment and
+				// replacing the "/:" that introduces it would leave its name
+				// behind in the pattern.
+				let at = [
+					if len(names) == 0 {"          path \(here)"},
+					"          path_regexp \(r.screen) ^/" + strings.Join([
+						for seg in strings.Split(strings.TrimPrefix(here, "/"), "/") {
+							[if strings.HasPrefix(seg, ":") {"([^/]+)"}, seg][0]
+						},
+					], "/") + "$",
+				][0]
+				// Read back by name: a translated spelling is free to put the
+				// same :params in another order.
+				let target = [
+					if len(names) == 0 {there},
+					strings.Join([
+						for seg in strings.Split(there, "/") {
+							[
+								if strings.HasPrefix(seg, ":") {"{re.\(r.screen).\([for i, n in names if n == strings.TrimPrefix(seg, ":") {i + 1}][0])}"},
+								seg,
+							][0]
+						},
+					], "/"),
+				][0]
+				let captures = [for c, l in E._meansLocale if l == tag {c}]
+				{"""
+				        @\(r.screen)_\(E._shell.i18n.locales[tag].path) {
+				\(at)
+				          not query lang=*
+				          vars_regexp {re.lang.1} (?i)^(\(strings.Join(captures, "|")))$
+				        }
+				        redir @\(r.screen)_\(E._shell.i18n.locales[tag].path) \(target) 302
+				"""},
+			]
+			_negotiate: [
+				if E._shell.i18n == _|_ {""},
+				if len(E._others) == 0 {""},
+				"""
+				    route {
+				      @negotiable path \(strings.Join(list.SortStrings([for _, w in _widened {w}]), " "))
+				      header @negotiable Vary Accept-Language
+				      @lang header_regexp lang Accept-Language (?i)(?:^|,)\\s*(\(strings.Join(E._alternatives, "|")))\\b
+				      handle @lang {
+				\(strings.Join(_branches, "\n"))
+				      }
+				    }
+
+				""",
+			][0]
+			_addressed: E._addressed
+			// The same addresses as caddy path matchers. A `:param` segment widens to
+			// `*`: its value is a row id the door cannot know. The trailing slash is
+			// trimmed so a locale's bare prefix reads `/es` rather than `/es/`; both
+			// spellings are then listed, because a caddy path matcher is exact and a
+			// reader who types the slash is at the same route.
+			_matcher: {for a in _addressed {
+				let widened = strings.TrimSuffix("/" + strings.Join([
+					for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
+						[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
+					},
+				], "/"), "/")
+				([if widened == "" {"/"}, widened][0]): true
+			}}
+			_matchers: list.SortStrings([
+				for a, _ in _matcher {a},
+				for a, _ in _matcher if a != "/" {a + "/"},
+			])
+			// `route`, because caddy orders directives by its own table and the
+			// catch-all `handle` sorts ahead of both `handle_path` and `route`:
+			// written outside one, the alias is answered 200 by the file server
+			// before its redirect is ever reached (measured, caddy 2.10.0). Inside,
+			// these run as written, and the path-scoped `handle` blocks above still
+			// take their requests first.
+			//
+			// `@file` ahead of `@route`, and not one `try_files` over both: try_files
+			// rewrites to its LAST candidate when none exist, so a single directive
+			// naming the entry answers every missing asset with the entry document at
+			// 200 instead of 404 (measured, caddy 2.10.0). Here a request that names
+			// no file and no route reaches file_server unrewritten, which is the 404
+			// a crawler is owed.
+			_served: """
+				  route {
+				\(_entry)\(_alias)\(_negotiate)    handle {
+				      root * /srv
+				      header Cache-Control "no-cache"
+				      @file file {path} {path}/index.html
+				      rewrite @file {http.matchers.file.relative}
+				      @route path \(strings.Join(_matchers, " "))
+				      rewrite @route /\(E.terminal.surface.entry)
+				      file_server
+				    }
+				  }
+				"""
+			// An asset the anchor is absent from indexes out of range here, rather
+			// than emitting a proxy that silently 404s every deep link.
+			_split: strings.SplitN(_caddyfileAsset, _anchor, 2)
+			text:   _split[0] + _served + _split[1]
+		}
+		// Both crawler files are caddy templates, served from the origin root.
+		// `$o` is the origin of the request being answered — see the Caddyfile
+		// for why the build cannot write one instead. Only a file that names an
+		// address declares it, so a refusal carries no unread variable.
+		_origin: "{{- $o := printf \"%s://%s\" (placeholder \"http.request.scheme\") .Req.Host -}}"
+		"robots.txt": {
+			format: "text"
+			// An app behind a session is not a site: every address answers with
+			// the same login wall, and inviting a crawler in only puts that wall
+			// in search results under the app's own name. It names no origin
+			// either — the whole of what it has to say is the refusal.
+			text: [
+				if E._public {"""
+					\(_origin)
+					# generated by pronto from program.cue — do not edit
+					User-agent: *
+					Allow: /
+
+					Sitemap: {{$o}}/sitemap.xml
+
+					"""},
+				"""
+					# generated by pronto from program.cue — do not edit
+					User-agent: *
+					Disallow: /
+
+					""",
+			][0]
+		}
+		"sitemap.xml": {
+			format: "text"
+			_o:     "{{$o}}"
+			// One <url> per crawlable route per locale, each carrying the whole
+			// alternate set including itself — which is what the protocol asks
+			// for: a crawler reaching any one address learns every other, and
+			// the three spellings of a page are read as one page rather than as
+			// near-duplicates competing with each other.
+			_urls: [
+				if E._shell.i18n == _|_ for r in E._crawlable {
+					"  <url><loc>\(_o)\((#address & {route: r}).out)</loc></url>"
+				},
+				if E._shell.i18n != _|_ for r in E._crawlable for tag in E._locales {
+					strings.Join(list.Concat([
+						["  <url>", "    <loc>\(_o)\((#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out)</loc>"],
+						[for other in E._locales {
+							"    <xhtml:link rel=\"alternate\" hreflang=\"\(other)\" href=\"\(_o)\((#address & {route: r, i18n: E._shell.i18n, tag: other}).out)\"/>"
+						}],
+						// x-default names the default locale's unprefixed
+						// address: where a crawler sends a reader whose language
+						// matches no alternate.
+						["    <xhtml:link rel=\"alternate\" hreflang=\"x-default\" href=\"\(_o)\((#address & {route: r, i18n: E._shell.i18n, tag: E._shell.i18n.default}).out)\"/>"],
+						["  </url>"],
+					]), "\n")
+				},
+			]
+			text: strings.Join(list.Concat([
+				[
+					if len(_urls) > 0 {_origin},
+					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+					"<!-- generated by pronto from program.cue — do not edit -->",
+					// The xhtml namespace is what the alternates are spelled in,
+					// so a single-locale app declares no namespace it never uses.
+					[
+						if E._shell.i18n != _|_ {"<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:xhtml=\"http://www.w3.org/1999/xhtml\">"},
+						"<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">",
+					][0],
+				],
+				_urls,
+				["</urlset>", ""],
+			]), "\n")
 		}
 		"shell/shell.yaml": {
 			format: "yaml"
-			data: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, server: E._serverOn, native: E.code.capabilities.native}).out
+			data: E._shell
 		}
 		"\(E.terminal.surface.entry)": {
 			format: "text"

@@ -148,6 +148,11 @@ const SCHEMA: Record<string, Record<string, string>> = {
     stroke: "VARCHAR",
     label: "VARCHAR",
   },
+  i18n_meta: { default_locale: "VARCHAR" },
+  i18n_locale: { locale: "VARCHAR" },
+  message_catalog: { locale: "VARCHAR", key: "VARCHAR", arm: "VARCHAR", value: "VARCHAR" },
+  template_msg_ref: { screen: "VARCHAR", path: "VARCHAR", key: "VARCHAR" },
+  template_prose: { screen: "VARCHAR", path: "VARCHAR", selector: "VARCHAR", text: "VARCHAR" },
 };
 
 const quote = (c: string) => `"${c}"`;

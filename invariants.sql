@@ -604,4 +604,41 @@ SELECT 'error',
 FROM handler h
 WHERE h.completion = 'other'
 
+UNION ALL
+
+-- CLOSED against CLOSED. An app declaring i18n must not leave unlocalized
+-- prose in screen templates: every natural language string must carry
+-- data-text="{msg.*}" or be a row binding.
+SELECT 'error',
+       p.path,
+       'unlocalized static text in <' || p.selector || '>: "' || p.text || '" — must carry data-text="{msg.*}" or be parameterized'
+FROM template_prose p
+WHERE EXISTS (SELECT 1 FROM i18n_meta)
+
+UNION ALL
+
+-- CLOSED against CLOSED. A template referencing {msg.key} must find that key
+-- in every declared locale catalog.
+SELECT 'error',
+       r.path,
+       'template references {msg.' || r.key || '}, which is missing from messages/' || l.locale || '.json'
+FROM template_msg_ref r
+CROSS JOIN i18n_locale l
+LEFT JOIN message_catalog m ON m.locale = l.locale AND m.key = r.key
+WHERE m.key IS NULL
+
+UNION ALL
+
+-- CLOSED against CLOSED. Every key present in the default catalog must exist
+-- in every secondary locale catalog (catalog completeness).
+SELECT 'error',
+       'messages/' || l.locale || '.json',
+       'missing message key "' || d.key || '" declared in default locale messages/' || m.default_locale || '.json'
+FROM i18n_meta m
+JOIN message_catalog d ON d.locale = m.default_locale
+CROSS JOIN i18n_locale l
+LEFT JOIN message_catalog s ON s.locale = l.locale AND s.key = d.key
+WHERE s.key IS NULL
+
 ORDER BY path, message
+

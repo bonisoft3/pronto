@@ -35,9 +35,23 @@ _pronto: bayt.#project & {
 		// `mise.exec` wraps a single argv.
 		"build": sayt.build & mise.exec & {
 			srcs: globs: ["*.ts", "scales/*.ts", "deno.json", "deno.lock"]
+			// Two files reach across the plugin boundary into omnishell's
+			// interpreter — prerender.ts renders through the storybook, and
+			// negotiation_test.ts holds the door's language rule against the
+			// terminal's. This context carries pronto alone, so neither module
+			// resolves here and neither can be typechecked here; both are, at
+			// the repo tier, by `just lint`, where omnishell is a sibling.
+			//
+			// Named rather than globbed away: a third file reaching out lands
+			// in this list's absence and turns the image red, which is the
+			// decision arriving at whoever wrote the import.
 			cmd: "builtin": {
 				shell: "sh"
-				do:    "sh -c 'deno check --config deno.json *.ts'"
+				// Flattened to one line: the substitution is expanded by the shell
+				// that builds this command, so a newline surviving into the inner
+				// `sh -c` ends the deno call and runs every later filename as a
+				// command of its own.
+				do:    "sh -c 'deno check --config deno.json $(ls *.ts | grep -vx -e prerender.ts -e negotiation_test.ts | tr \"\\n\" \" \")'"
 			}
 			dockerfile: from: ref: ":setup"
 		}

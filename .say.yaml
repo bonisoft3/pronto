@@ -24,6 +24,12 @@ say:
         priority: -1
         cmds:
           - do: "deno test --config deno.json --allow-read --allow-write --allow-run types_test.ts"
+      # The door's language rule against the terminal's, over an emitted
+      # Caddyfile: two runtimes that cannot share code and must not disagree.
+      negotiation:
+        priority: -1
+        cmds:
+          - do: "deno test --config deno.json --allow-read negotiation_test.ts"
   # lint is not a #verb: it carries its own rulemap with no builtin wiring, so a
   # `do:` here type-checks, exports, and never reaches lint.rules.
   lint:

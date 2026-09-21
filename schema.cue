@@ -441,6 +441,18 @@ import (
 	// value. Its SQL CHECK body and its CUE constraint are derived from the
 	// parsed expression (program_cel.cue), never written beside it.
 	cel?: string
+	// An amount of money, counted in whole minor units. The column stays an
+	// integer — a currency is not a type, it is what an integer counts, and a
+	// new #Field.type member would move every app's DDL — and this is where the
+	// terminal's data-text-format="money" reads the code and the scale from.
+	// `minorUnits: 0` is a ledger in whole reais; 2 is the ordinary cents.
+	money?: {
+		currency:   string & =~"^[A-Z]{3}$" // ISO 4217
+		minorUnits: *2 | int & >=0 & <=4
+	}
+	if money != _|_ {
+		type: "int" | "bigint"
+	}
 }
 
 // Row visibility, enforced as RLS policies (005_policies.sql). The four
@@ -810,6 +822,29 @@ import (
 	ir:    *name | string
 	title: string
 	route: string // may contain one `:param` segment; params reach filters, hidden values, and `{param.x}` interpolation
+	// The message key this route's FIRST segment is drawn from — regras /
+	// reglas / rules. Declaring it makes the route addressable in every
+	// locale; the segments after the first, literal or `:param`, are carried
+	// verbatim. The key lands in the catalogue a translator already works in,
+	// so a locale missing a slug is the finding a locale missing a button
+	// label already is.
+	slug?: string
+	// The message key the terminal draws this route's STRIP label from, the
+	// counterpart of `slug` for the word rather than the address. `title`
+	// stays the default-language spelling and is what an app declaring no
+	// catalogues shows; declaring this makes the strip speak every locale the
+	// app does. It needs meta.i18n: a key with no catalogue to answer it is a
+	// reference error out of the emitter, the way a slug's is.
+	label?: string
+	// Written as a document per locale at build, so a crawler receives HTML
+	// rather than a shell that assembles itself. Only a route with no `:param`
+	// can be: the rows a /article/:slug would need do not exist when the build
+	// runs.
+	prerender: *false | bool
+	if S.prerender {route: =~"^[^:]*$"}
+	// A slugged route's authored pattern is what the default locale's
+	// catalogue must agree with, so it needs a first segment to translate.
+	if S.slug != _|_ {route: =~"^/[a-z0-9][a-z0-9-]*(/|$)"}
 	// filter/select are PostgREST query fragments passed through verbatim;
 	// `{param.x}` placeholders resolve in the interpreter.
 	// Derived from the markup (program_derived.cue). An assembly screen's html
@@ -900,6 +935,35 @@ import (
 	then:  string // CEL over injected input/output/error
 }
 
+// A locale is ONE BCP 47 tag and nothing beside it: `pt` and `pt-BR` are
+// different locales, not spellings of one, and the tag is the key so there is
+// nowhere to write a second, disagreeing name for either.
+#I18n: I={
+	// The locale served unprefixed, and the one x-default names. A default
+	// naming a locale the app does not carry is a root resolving to nothing,
+	// so it is constrained to a key of `locales`.
+	default: string & or([for tag, _ in I.locales {tag}])
+	locales: [=~"^[a-z]{2,3}(-[A-Z][a-z]{3})?(-([A-Z]{2}|[0-9]{3}))?$"]: {
+		// The URL segment, lowercased: pt-BR -> pt-br. Carried by the default
+		// too, whose segment addresses no document and exists to be 301'd away
+		// from.
+		path: string & =~"^[a-z0-9]+(-[a-z0-9]+)*$"
+	}
+	// The app's own message files, written in the app package as
+	//   catalogues: _ @embed(glob="messages/*.json")
+	// because @embed resolves against the directory it is written in. #emit
+	// projects them away: shell.yaml carries resolved paths, not catalogues.
+	// A value is a sentence, or the flat map of arms an element's
+	// data-msg-plural / data-msg-select picks one of (plugins/omnishell
+	// terminal.cue, capabilities."message-arms"). A slug resolved out of a
+	// catalogue still unifies against a segment below, so a key spelled as a
+	// map where a URL is wanted stays a cue error.
+	catalogues: [=~"^messages/[^/]+\\.json$"]: [string]: string | {[string]: string}
+	// The catalogue of each declared locale, keyed by tag — what a route's
+	// `slug` is resolved against.
+	_msg: {for tag, _ in I.locales {(tag): I.catalogues["messages/\(tag).json"]}}
+}
+
 #App: {
 	state: {
 		entities: [Name=string]: #Entity & {name: Name}
@@ -920,8 +984,9 @@ import (
 		// chrome, keyed on `required`, and calls the auth service at `service`.
 		// Presence also switches the cluster's auth plane on (#emit).
 		// `self` names the signed-in person's own page for the strip the
-		// terminal draws: `path` is a route whose :params it fills from the
-		// session user, and `name` the table and column the name they chose
+		// terminal draws: `route` is a route's screen name, whose :params the
+		// terminal fills from the session user and whose localized pattern it
+		// composes; and `name` the table and column the name they chose
 		// lives in, read live so a rename reaches the strip as it reaches a
 		// byline. Omitted by an app that has no page for a person — and then
 		// the one identity always on screen leads nowhere.
@@ -929,7 +994,7 @@ import (
 			required: bool
 			service:  string
 			mode:     *"passkey" | string
-			self?: {path: string, name?: {table: string, column: string}}
+			self?: {route: string, name?: {table: string, column: string}}
 		}
 		// The app ships a native host beside the web one, so every route owes
 		// its web affordances a native peer: check-parity reads this key to
@@ -993,6 +1058,7 @@ import (
 		// reviewed artifact is the only place the rationale is written.
 		decisions: [Id=string]: {ir: *Id | string, note: string}
 		tests: [Id=string]: #Test & {id: Id}
+		i18n?: #I18n
 		// The literal debt this app still carries: how many declarations wear
 		// `/* pronto-literal: pending */`. Checked for EQUALITY, not a ceiling —
 		// fixing a site without lowering the number fails, adding one without

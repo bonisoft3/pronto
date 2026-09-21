@@ -6,7 +6,7 @@ import (
 )
 
 #Version:     "0.3.1"
-#SaytVersion: "0.39.1"
+#SaytVersion: "0.39.2"
 
 #Tools: {
 	...

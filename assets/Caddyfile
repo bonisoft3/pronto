@@ -82,6 +82,28 @@
   handle /health {
     respond "ok" 200
   }
+  # The two files a crawler asks for by name, and neither works anywhere but
+  # the origin root. Both name absolute URLs — a sitemap <loc> and the Sitemap:
+  # line are defined to be absolute — and the build cannot know the origin: the
+  # same image answers on https://localhost:8443 and on the deployed door. So
+  # they ship as templates and caddy composes the origin from the request that
+  # arrived, which is by definition the one the crawler is indexing. `mime`,
+  # because templates otherwise only run on text/html and file_server types
+  # these by extension.
+  handle /robots.txt {
+    root * /srv
+    templates {
+      mime text/plain
+    }
+    file_server
+  }
+  handle /sitemap.xml {
+    root * /srv
+    templates {
+      mime application/xml text/xml
+    }
+    file_server
+  }
   handle /omnishell/* {
     uri strip_prefix /omnishell
     root * /omnishell
