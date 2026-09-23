@@ -40,30 +40,40 @@ url = "https://github.com/cue-lang/cue/releases/download/v0.16.1/cue_v0.16.1_win
 url_api = "https://api.github.com/repos/cue-lang/cue/releases/assets/391635255"
 
 [[tools."github:denoland/deno"]]
-version = "v2.3.7"
+version = "2.9.7"
 backend = "github:denoland/deno"
 
 [tools."github:denoland/deno"."platforms.linux-arm64"]
-checksum = "sha256:fbf420aee4469094bd91e595dd78814c94737dfb1d26e640b13aa938a9663cf8"
-url = "https://github.com/denoland/deno/releases/download/v2.3.7/deno-aarch64-unknown-linux-gnu.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/266620959"
+checksum = "sha256:c832298b1ad4422481334855f6003e0f54145762c5a134f20a489511d2f65bbf"
+url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-aarch64-unknown-linux-gnu.zip"
+url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568418344"
+
+[tools."github:denoland/deno"."platforms.linux-arm64-musl"]
+checksum = "sha256:c832298b1ad4422481334855f6003e0f54145762c5a134f20a489511d2f65bbf"
+url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-aarch64-unknown-linux-gnu.zip"
+url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568418344"
 
 [tools."github:denoland/deno"."platforms.linux-x64"]
-checksum = "sha256:63f55a621441fbbc8830324baf3d9c7a94928c7fb6b8ad54265dc9442dcd1dd2"
-url = "https://github.com/denoland/deno/releases/download/v2.3.7/deno-x86_64-unknown-linux-gnu.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/266621026"
+checksum = "sha256:c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490"
+url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-unknown-linux-gnu.zip"
+url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568461950"
+
+[tools."github:denoland/deno"."platforms.linux-x64-musl"]
+checksum = "sha256:c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490"
+url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-unknown-linux-gnu.zip"
+url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568461950"
 
 [tools."github:denoland/deno"."platforms.macos-arm64"]
-checksum = "sha256:764389a4d499c56e7b950d4d7d9bb52a9a55b87717d25f6ce65faee895dfa2f0"
-url = "https://github.com/denoland/deno/releases/download/v2.3.7/deno-aarch64-apple-darwin.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/266694481"
+checksum = "sha256:5cd46d6268f6f78f5d88bdc7159d20bd44cdaa4b3303474839f87ec6fe7ae25c"
+url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-aarch64-apple-darwin.zip"
+url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568561366"
 
 [tools."github:denoland/deno"."platforms.macos-x64"]
-checksum = "sha256:49655e8059ffd59976bf23f9ed0d843c9c6e33ceb3d0e780bd3d87ee5e051734"
-url = "https://github.com/denoland/deno/releases/download/v2.3.7/deno-x86_64-apple-darwin.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/266642498"
+checksum = "sha256:95daaff11c116a52ad54785e7914c8e9c9cdcaba793c5ed929c74ca2d8e6259a"
+url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-apple-darwin.zip"
+url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568516488"
 
 [tools."github:denoland/deno"."platforms.windows-x64"]
-checksum = "sha256:5c3b396d190efa2c348a1935cbfec8e7eac2d428efef3b413174ebebbb6817d4"
-url = "https://github.com/denoland/deno/releases/download/v2.3.7/deno-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/266623519"
+checksum = "sha256:a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238"
+url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568431369"

@@ -537,7 +537,10 @@ export function i18nFacts(
 }
 
 /** A SHA-256 digest as lowercase hex, the one spelling every artifact row uses. */
+// Uint8Array is generic over its buffer since TypeScript 5.7, while
+// WebCrypto takes only ArrayBuffer; casting inside keeps the signature
+// open to standard callers like TextEncoder whose buffers are ArrayBufferLike.
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>))]
     .map((b) => b.toString(16).padStart(2, "0")).join("");
 }
