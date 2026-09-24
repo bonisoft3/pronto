@@ -184,7 +184,7 @@ function document_(route: Route, tag: string, at: string, markup: string): strin
     }
   };
   doc.documentElement.setAttribute("lang", tag);
-  doc.documentElement.setAttribute("dir", directionOf(tag));
+  doc.documentElement.setAttribute("dir", directionOf(tag) ?? "ltr");
   // The entry's title is the loading placeholder the shell overwrites, and its
   // description is the app's one line in one language. This document says what
   // it is instead, in the language it is in.
