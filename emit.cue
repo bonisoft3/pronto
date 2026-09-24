@@ -126,27 +126,27 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		// a shape predicate names and what a child's trigger copies. So `shared`
 		// gets the column and stays out of `rls_protect`; the exemption below
 		// says so, and the permissive share policies keep governing CRUD.
-		[if T.e.access != _|_ if T.e.access.mode == "owned" {
+		[if T.e.access != _|_ if T.e.access.scope == "private" {
 			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('user:' || \"\(T.e.access.owner)\") STORED NOT NULL"
 		}],
 		// A child of a composition takes its parent's scope. Not GENERATED: a
 		// generated column cannot reach another table, so a trigger defends it
 		// instead (emitted beside the policies). NOT NULL holds because Postgres
 		// checks it after BEFORE triggers, so a child of no parent is refused.
-		[if T.e.access != _|_ if T.e.access.mode == "through" {
+		[if T.e.access != _|_ if T.e.access.scope == "folder" {
 			"  \"scope_id\" TEXT NOT NULL"
 		}],
 		// A constant: every subject holds `public:` (subject_scopes in rls.sql
 		// says what a public row reached by scope rather than by exemption buys).
 		// Writes stay with the permissive policies below and the table grants.
-		[if T.e.access != _|_ if T.e.access.mode == "public-read" {
+		[if T.e.access != _|_ if T.e.access.scope == "public" {
 			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('public:') STORED NOT NULL"
 		}],
-		// The identity table under `service-only`, which is the one place a
+		// The identity table under `internal`, which is the one place a
 		// person reads their own row (the self-select policy below says why).
 		// Its own id IS its scope, so `user:<me>` matches exactly that row --
 		// the policy and the shape predicate come out as the same statement.
-		[if T.e.access != _|_ if T.e.access.mode == "service-only" if T.e.table == "app_user" {
+		[if T.e.access != _|_ if T.e.access.scope == "internal" if T.e.table == "app_user" {
 			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('user:' || \"id\") STORED NOT NULL"
 		}],
 		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
@@ -255,9 +255,9 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	]]), "\n\n")
 }
 
-// The app_user USING clause of an owned entity. `qual` prefixes the row's
+// The app_user USING clause of a private entity. `qual` prefixes the row's
 // own columns: the table name in the entity's policies, the parent alias
-// when a through-mode child inlines this clause. `table` is the owned
+// when a folder-scope child inlines this clause. `table` is the private
 // entity's table regardless of qual — it names the shared-arm helper.
 #ownedUsing: U={
 	a:     #Access
@@ -284,32 +284,32 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	// there is no scope both parties hold that does not also grant everything
 	// else the owner has.
 	_exempt: string
-	if P.e.access.mode == "owned" if P.e.access.shared != _|_ {
-		_exempt: "owned with a per-object share via \(P.e.access.shared.via): finer than tenancy, guarded by its own policies"
+	if P.e.access.scope == "private" if P.e.access.shared != _|_ {
+		_exempt: "private with a per-object share via \(P.e.access.shared.via): finer than tenancy, guarded by its own policies"
 	}
-	if P.e.access.mode == "owned" if P.e.access.shared == _|_ {_exempt: ""}
-	if P.e.access.mode == "public-read" {_exempt: ""}
-	if P.e.access.mode == "service-only" if P._t != "app_user" {
-		_exempt: "service-only: no app_user reaches it"
+	if P.e.access.scope == "private" if P.e.access.shared == _|_ {_exempt: ""}
+	if P.e.access.scope == "public" {_exempt: ""}
+	if P.e.access.scope == "internal" if P._t != "app_user" {
+		_exempt: "internal: no app_user reaches it"
 	}
-	if P.e.access.mode == "service-only" if P._t == "app_user" {
-		_exempt: "service-only except a person reading their own row, which the self-select policy alone allows"
+	if P.e.access.scope == "internal" if P._t == "app_user" {
+		_exempt: "internal except a person reading their own row, which the self-select policy alone allows"
 	}
-	if P.e.access.mode == "through" {
+	if P.e.access.scope == "folder" {
 		// A child is exactly as floorable as its parent: floored under a floored
 		// one, exempt under a shared one, whose share it inherits. A parent
-		// that carries no scope -- service-only, unless it is app_user -- has
+		// that carries no scope -- internal, unless it is app_user -- has
 		// none to hand down, and the composition is a schema error.
 		_p: P.entities[P.e.access.parent]
 		_pFloored: bool
-		if P._p.access.mode == "owned" {_pFloored: P._p.access.shared == _|_}
-		if P._p.access.mode == "public-read" {_pFloored: true}
-		if P._p.access.mode == "through" {_pFloored: false}
-		if P._p.access.mode == "service-only" {_pFloored: false}
-		_pScoped: bool & (P._p.access.mode != "through" && (P._p.access.mode != "service-only" || P._p.table == "app_user")) & true
+		if P._p.access.scope == "private" {_pFloored: P._p.access.shared == _|_}
+		if P._p.access.scope == "public" {_pFloored: true}
+		if P._p.access.scope == "folder" {_pFloored: false}
+		if P._p.access.scope == "internal" {_pFloored: false}
+		_pScoped: bool & (P._p.access.scope != "folder" && (P._p.access.scope != "internal" || P._p.table == "app_user")) & true
 		if P._pFloored {_exempt: ""}
 		if !P._pFloored {
-			_exempt: "through \(P.e.access.parent), which is itself exempt: the child inherits its visibility"
+			_exempt: "folder \(P.e.access.parent), which is itself exempt: the child inherits its visibility"
 		}
 	}
 
@@ -317,8 +317,8 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	// (rls.sql says why a trigger and not a generated column). Called, never
 	// restated, like the floor.
 	_scopeTrigger: [...string]
-	if P.e.access.mode != "through" {_scopeTrigger: []}
-	if P.e.access.mode == "through" {
+	if P.e.access.scope != "folder" {_scopeTrigger: []}
+	if P.e.access.scope == "folder" {
 		_parentTable: P.entities[P.e.access.parent].table
 		_scopeTrigger: [
 			"""
@@ -330,9 +330,9 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	}
 
 	e: #Entity
-	entities: [string]: #Entity // parent lookup for through mode
+	entities: [string]: #Entity // parent lookup for folder scope
 	_t: P.e.table
-	if P.e.access.mode == "owned" {
+	if P.e.access.scope == "private" {
 		_using: (#ownedUsing & {a: P.e.access, qual: P._t, table: P._t}).out
 		// The helper runs as the migration superuser, so its read of the via
 		// table bypasses RLS — the cycle-break #ownedUsing relies on. auth_uid()
@@ -355,9 +355,9 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 			"CREATE POLICY \(P._t)_app_user_delete ON \(P._t) FOR DELETE TO app_user USING (\(P._using));",
 		]
 	}
-	if P.e.access.mode == "through" {
-		// The parent's owned USING is inlined one level, its row columns
-		// re-qualified by the alias p; a through parent is a schema error.
+	if P.e.access.scope == "folder" {
+		// The parent's private USING is inlined one level, its row columns
+		// re-qualified by the alias p; a folder parent is a schema error.
 		_parent: P.entities[P.e.access.parent]
 		// The join casts the child's on-column when it differs in type from
 		// the parent pk (a live-path child keys the parent's uuid as text);
@@ -372,18 +372,18 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 			"CREATE POLICY \(P._t)_app_user_all ON \(P._t) FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr));",
 		]
 	}
-	if P.e.access.mode == "public-read" {
+	if P.e.access.scope == "public" {
 		_pre: []
 		_appUser: [
 			"CREATE POLICY \(P._t)_app_user_select ON \(P._t) FOR SELECT TO app_user USING (true);",
 		]
 	}
-	if P.e.access.mode == "service-only" {
+	if P.e.access.scope == "internal" {
 		_pre: []
 		// The one exception, and it is the terminal's: at boot the shell reads
 		// the signed-in row back out of app_user to tell a live account from a
 		// token naming one that is gone (interpreter/shell.js accountLives).
-		// It reads with the person's own token, so a service-only app_user
+		// It reads with the person's own token, so an internal app_user
 		// answers zero rows, the shell concludes the account is gone, drops
 		// the session and shows the door — on every reload, to everybody. A
 		// person reading their own row discloses nobody; resolving anyone
@@ -405,11 +405,11 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	// parent's children already carry its scope.
 	_pkName: [for f in P.e.fields if f.pk {f.name}][0]
 	_isShared: bool
-	if P.e.access.mode == "owned" {_isShared: P.e.access.shared != _|_}
-	if P.e.access.mode != "owned" {_isShared: false}
+	if P.e.access.scope == "private" {_isShared: P.e.access.shared != _|_}
+	if P.e.access.scope != "private" {_isShared: false}
 	_underShared: bool
-	if P.e.access.mode == "through" {_underShared: P._p.access.mode == "owned" && P._p.access.shared != _|_}
-	if P.e.access.mode != "through" {_underShared: false}
+	if P.e.access.scope == "folder" {_underShared: P._p.access.scope == "private" && P._p.access.shared != _|_}
+	if P.e.access.scope != "folder" {_underShared: false}
 	_shapeKeys: [...string]
 	if P._isShared {
 		_shapeKeys: [
@@ -650,7 +650,7 @@ _cdcTableField: "__table"
 	_partialUniques: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where != _|_ {cols: u.cols, where: u.where}]}}
 	_partialTables: [for t, ps in S._partialUniques if len(ps) > 0 {t}]
 	// A local table's `required: false` columns and their types, which the
-	// terminal fills on stored rows that predate them (data-crud.js fill).
+	// terminal fills on stored rows that predate them (data-sync.js fill).
 	// Server tables are left out: Postgres answers a missing value as null.
 	_optional: {for _, e in S.code.state.entities if S._local[e.table] != _|_ {(e.table): [for f in e.fields if !f.required {name: f.name, type: f.type}]}}
 	_optionalTables: [for t, cs in S._optional if len(cs) > 0 {t}]
@@ -698,12 +698,12 @@ _cdcTableField: "__table"
 	_unitNames: [for n, _ in S.code.capabilities.vendored {n}]
 	_access: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.access != _|_ {
 		(e.table): {
-			mode: e.access.mode
-			if e.access.mode == "owned" {
+			scope: e.access.scope
+			if e.access.scope == "private" {
 				owner: e.access.owner
 				if e.access.shared != _|_ {shared: e.access.shared}
 			}
-			if e.access.mode == "through" {
+			if e.access.scope == "folder" {
 				parent: S.code.state.entities[e.access.parent].table
 				on:     e.access.on
 			}
@@ -800,6 +800,9 @@ _cdcTableField: "__table"
 			}
 			if s.prerender {
 				prerender: true
+			}
+			if s.ssr != _|_ {
+				ssr: s.ssr
 			}
 			// `label` is the default-language spelling and the whole of what an
 			// app with no catalogues carries; `key` and `labels` are the same
@@ -1047,6 +1050,7 @@ _cdcTableField: "__table"
 	_handlerSet: {for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}}
 	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
 	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
+	_validationSet: {for _, e in D.code.state.entities for _, v in e.validations {(v.src): true}}
 	out: omnishell.#Terminal & {
 		app:         D.code.meta.name
 		description: D.code.meta.description
@@ -1067,6 +1071,7 @@ _cdcTableField: "__table"
 			folds: list.SortStrings([
 				for _, pl in D.code.state.pipelines if pl.fold != _|_ {pl.fold.src},
 			])
+			validations: list.SortStrings([for s, _ in D._validationSet {s}])
 			// A unit's whole directory, not just its src: the wrapper's own
 			// imports are files the browser fetches by name.
 			units: list.SortStrings([for f, _ in D._unitSet {f}])
@@ -2181,6 +2186,10 @@ _cdcTableField: "__table"
 			format: "yaml"
 			data: E._shell
 		}
+		"shell/shell.json": {
+			format: "json"
+			data: E._shell
+		}
 		"\(E.terminal.surface.entry)": {
 			format: "text"
 			text:   E.terminal.surface.assets.html
@@ -2192,6 +2201,10 @@ _cdcTableField: "__table"
 		"\(E.terminal.surface.boot)": {
 			format: "text"
 			text:   E.terminal.surface.assets.boot
+		}
+		"\(E.terminal.surface.sw)": {
+			format: "text"
+			text:   E.terminal.surface.assets.sw
 		}
 		"shell/design.css": {
 			format: "css"

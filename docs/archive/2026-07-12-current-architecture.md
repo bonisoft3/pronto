@@ -5,7 +5,7 @@
 
 # Design: Pronto — Current Architecture (2026-07-12)
 
-Related: `plugins/pronto/docs/2026-07-19-prontoui.md` — prontoui, the planned self-hosting browser IDE (the escape-hatch stress test for this architecture).
+Related: [`2026-07-19-prontoui.md`](2026-07-19-prontoui.md) — prontoui, the planned self-hosting browser IDE (the escape-hatch stress test for this architecture).
 
 ## Concept
 
@@ -125,7 +125,7 @@ A Starlark (starlark-rust) wasm module for the graph engine was prototyped and r
 
 ## Compile conflict resolution
 
-Recompiling an unchanged brief may produce different ir.html/CUE (model or prompt changes); the merge-conflict workflow is specified in [SPEC.md](SPEC.md) ("Compile diffs"). Compile diffs are productive; model improvements surface as reviewable changes, not silent mutations.
+Recompiling an unchanged brief may produce different ir.html/CUE (model or prompt changes); the merge-conflict workflow is specified in [SPEC.md](../../SPEC.md) ("Compile diffs"). Compile diffs are productive; model improvements surface as reviewable changes, not silent mutations.
 
 ## Local runtime: Deno
 

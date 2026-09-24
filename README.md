@@ -171,9 +171,14 @@ What you give up in expressiveness (real-time collaboration, GPU compute, sub-10
 
 - [`SPEC.md`](SPEC.md) — the artifact spec: brief, ir, program
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how the pieces fit, and where to change each one
-- [`docs/2026-07-19-prontoui.md`](docs/2026-07-19-prontoui.md) — prontoui, the self-hosting browser IDE
 - [`prelude.md`](prelude.md) — shared component knowledge, implicit context of every compile
+- [`docs/2026-08-02-terminal-planes.md`](docs/2026-08-02-terminal-planes.md) — terminal planes, storage tiers, state, capabilities, and surface
+- [`docs/2026-08-31-one-ladder-one-grammar.md`](docs/2026-08-31-one-ladder-one-grammar.md) — the durability ladder, DOM as bottom rung
+- [`docs/2026-09-09-i18n-is-a-contract.md`](docs/2026-09-09-i18n-is-a-contract.md) — i18n as an export-time contract
+- [`docs/2026-09-17-localized-urls.md`](docs/2026-09-17-localized-urls.md) — localized routing, BCP 47 paths, and Caddy try_files
+- [`docs/2026-09-23-pronto-omnishell-ssr.md`](docs/2026-09-23-pronto-omnishell-ssr.md) — Materialized SSR (M-SSR), zero-JS resumability, differential sequence hydration
 - `docs/` — the dated design record (lineage)
+- `docs/archive/` — historical and superseded design documents (including [`2026-07-19-prontoui.md`](docs/archive/2026-07-19-prontoui.md))
 
 ## License
 

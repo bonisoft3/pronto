@@ -34,6 +34,7 @@ type Route = {
   path: string;
   screen: string;
   prerender?: boolean;
+  ssr?: "ssg" | "ssr" | "spa";
   paths?: Record<string, string>;
   files: { html: string; css: string };
   states?: string[];
@@ -149,7 +150,7 @@ for (const route of crawlable) {
     });
     const frame = mount.querySelector(".storybook .frame");
     if (!frame) fail(`route ${route.screen} rendered no frame under [${tag}]`);
-    await write(at, document_(route, tag, at, frame!.innerHTML));
+    await write(at, await document_(route, tag, at, frame!.innerHTML));
     written++;
   }
 }
@@ -159,7 +160,7 @@ console.log(`${written} document(s) under ${outDir.pathname}`);
  * this locale's identity in its head. Reusing the entry rather than composing a
  * head here is what keeps the prerendered page and the live one loading the
  * same assets: the entry is where the terminal declares them. */
-function document_(route: Route, tag: string, at: string, markup: string): string {
+async function document_(route: Route, tag: string, at: string, markup: string): Promise<string> {
   const doc = parse(entryHtml);
   const head = doc.querySelector("head") ?? fail(`${SHELL}/index.html has no head`);
   const app = doc.getElementById("app") ?? fail(`${SHELL}/index.html has no #app to mount into`);
@@ -217,6 +218,28 @@ function document_(route: Route, tag: string, at: string, markup: string): strin
   const style = doc.createElement("style");
   style.textContent = screenCss.get(route.files.css)!;
   head.append(style);
+
+  // Materialized SSR (M-SSR) dual-witness metadata:
+  // pronto-cas: Content-addressed structural hash of the rendered screen markup.
+  // pronto-lsn: Monotonic data clock sequence number (0 for static build-time SSG).
+  const casBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(markup));
+  const casHash = Array.from(new Uint8Array(casBuf)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+
+  const metaCas = doc.createElement("meta");
+  metaCas.setAttribute("name", "pronto-cas");
+  metaCas.setAttribute("content", casHash);
+  head.append(metaCas);
+
+  const metaLsn = doc.createElement("meta");
+  metaLsn.setAttribute("name", "pronto-lsn");
+  metaLsn.setAttribute("content", "0");
+  head.append(metaLsn);
+
+  const stateScript = doc.createElement("script");
+  stateScript.setAttribute("id", "__PRONTO_STATE__");
+  stateScript.setAttribute("type", "application/json");
+  stateScript.textContent = JSON.stringify({ lsn: 0, cas: casHash });
+  head.append(stateScript);
 
   // The entry boots with a config path relative to the document, which resolves
   // under shell/ there and under this route's path here. The call is the same

@@ -1,4 +1,4 @@
-> **Lineage document.** Kept for history; the current design is [../DESIGN.md](../DESIGN.md). Superseded on: ir.html as a six-language IR with direct codegen to TypeScript/React.
+> **Lineage document.** Kept for history; the current design is [../../SPEC.md](../../SPEC.md). Superseded on: ir.html as a six-language IR with direct codegen to TypeScript/React.
 
 # Design: Pronto — Programming Through Markdown
 

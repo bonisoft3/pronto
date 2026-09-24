@@ -68,7 +68,7 @@ day.
 - **The reduce is called `(state, event)`.** `screen.js` builds
   `state = {items: getRows(), rows: await worldOf()}` and machine-v2 fixes
   every value position — guard, assign, delay — to the same two arguments.
-- **The store's write surface is five functions.** `data-crud.js:924-1047`:
+- **The store's write surface is five functions.** `data-sync.js:924-1047`:
   `write`, `add`, `patch`, `upsertBy`, `drop`, each taking `onRefused`, each
   calling the client after `ensurePrepared` — `drop` is the one exception,
   since a delete carries no schema to prepare. `upsertBy` already answers "does my

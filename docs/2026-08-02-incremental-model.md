@@ -25,7 +25,7 @@ Measured in this tree on 2026-08-02, not recalled:
   maintaining *ordered* and top-K results. It is compiled into
   `plugins/omnishell/interpreter/vendor/mecha-client.js`.
 - The engine is entered through `createLiveQueryCollection`, which
-  `@mecha/client` re-exports along with the predicate vocabulary. `data-crud.js`
+  `@mecha/client` re-exports along with the predicate vocabulary. `data-sync.js`
   builds one view per distinct read and the region wakes on that view's own
   changes. *(When this doc was written none of that existed: every read was
   `toArray()` re-filtered and re-sorted on each wake, and `subscribeChanges`

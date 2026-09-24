@@ -86,7 +86,7 @@ absent from `cache-smokes` in `plugins/omnishell/.vscode/tasks.json`, so
 `just test` never runs it.
 
 **The incremental read path**: `lt`/`gt`/`gte`/`lte` are exported from the
-predicate vocabulary and no translator emits them — `data-crud.js` refuses a
+predicate vocabulary and no translator emits them — `data-sync.js` refuses a
 spec carrying one — so cursor routes still reach PostgREST;
 `currentStateAsChanges` has no caller outside the vendored client, so first
 paint is still a full pass.

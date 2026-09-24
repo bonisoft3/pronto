@@ -24,7 +24,7 @@ Read out of this tree on 2026-08-31. Line numbers are current — the machine
 work moved them.
 
 - **Every rung has private state, invisible upward, already.** Electric never
-  sees tab/device collections (`data-crud.js:330` — and the sync plane is
+  sees tab/device collections (`data-sync.js:330` — and the sync plane is
   unscoped, so the terminal re-applies visibility itself). The collections
   never see the DOM's private facts: `screen.js:398-405` is the dirty-hold —
   an input with unsent text refuses the store's re-bind until submit/reset.
@@ -34,7 +34,7 @@ work moved them.
   `NonRetriableError` is the executor's rollback contract
   (`mecha-client.ts:159`). Downward: the dirty-hold above. Neither is a merge.
 - **One grammar already has three readers.** `parseFilterSpec`
-  (`data-crud.js:79`) feeds the snapshot predicates (`:123`), the maintained
+  (`data-sync.js:79`) feeds the snapshot predicates (`:123`), the maintained
   view's clause builder (`:419` via `:402`), and — R2's complaint — the
   checkers would be a third hand-maintained reader.
 - **The reduce's world is whole tables.** `data-reads` splits bare names and

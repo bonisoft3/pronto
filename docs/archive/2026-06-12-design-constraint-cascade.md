@@ -1,4 +1,4 @@
-> **Lineage document.** Kept for history; the current technical design is [../DESIGN.md](../DESIGN.md). The business/startup analysis here still stands.
+> **Lineage document.** Kept for history; the current technical design is [../../SPEC.md](../../SPEC.md). The business/startup analysis here still stands.
 
 # Design: Pronto — AI App Builder With Constraint-Cascade Architecture
 

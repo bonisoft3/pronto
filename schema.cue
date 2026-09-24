@@ -455,22 +455,26 @@ import (
 	}
 }
 
-// Row visibility, enforced as RLS policies (005_policies.sql). The four
-// modes are the whole vocabulary; an entity without `access` gets no RLS.
+// Row visibility, enforced as RLS policies (005_policies.sql). Modeled after the
+// Google Drive access model:
+//   scope: "private"   - owned by user, optional shared list
+//   scope: "folder"    - inherited access from parent entity
+//   scope: "public"    - public read-only to anyone
+//   scope: "internal"  - restricted to backend services
 // Column names (`owner`, `on`, `user`) are of the entity's own table;
-// `via` is a table name, `parent` an entity name whose access is owned.
+// `via` is a table name, `parent` an entity name whose access is private.
 #Access: {
-	mode:  "owned"
-	owner: string
+	scope:  "private"
+	owner:  string
 	shared?: {via: string, on: string, user: string}
 } | {
-	mode:   "through"
+	scope:  "folder"
 	parent: string
 	on:     string
 } | {
-	mode: "public-read"
+	scope: "public"
 } | {
-	mode: "service-only"
+	scope: "internal"
 }
 
 #Entity: {
@@ -842,6 +846,14 @@ import (
 	// runs.
 	prerender: *false | bool
 	if S.prerender {route: =~"^[^:]*$"}
+
+	// Rendering strategy:
+	//   ssg: static pre-render at build time (prerender: true)
+	//   ssr: server-rendered (data visibility decided by #Entity.access)
+	//   spa: client-side single page app shell
+	ssr: *"spa" | "ssg" | "ssr"
+	if S.prerender {ssr: "ssg"}
+	if S.ssr == "ssg" {prerender: true}
 	// A slugged route's authored pattern is what the default locale's
 	// catalogue must agree with, so it needs a first segment to translate.
 	if S.slug != _|_ {route: =~"^/[a-z0-9][a-z0-9-]*(/|$)"}
