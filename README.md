@@ -146,6 +146,10 @@ pin.
 
 The frontend is the cluster's **virtual terminal**. As in the block-mode terminals of mainframe lineage, a screen is rendered from data and the only way back is submitting a form — but this terminal carries its own replica of its slice of the cluster: reads are local and reactive, writes land locally first and travel the same CDC guarantees, so offline is the default condition rather than an error state. What remains of client computation is Elm-shaped — pure `(state, event) → state'` handlers, effects owned entirely by the shell. A 3270 with a database in its pocket, attached to a cluster that can live in the same tab.
 
+### The unified lattice
+
+Pronto does not coordinate cross-cutting concerns (durability tiers, effect safety spectrum, RLS authorization, offline queueing, and test fuel budgets) through procedural pipelines or middleware stacks. Instead, every concern is an orthogonal dimension of a **bounded join-semilattice**. CUE unification (`&`) is the mathematical Greatest Lower Bound ($\sqcap$): database schema, interaction lifecycles, and verification tiers intersect into a single deterministic fixed point. Contradictions fail closed at compile time (`cue vet`) before code runs.
+
 ## Philosophy
 
 Programming languages exist on a spectrum from "express anything" to "express safely." AI code generation today is at the "assembly" end: infinite output space, probabilistic correctness. Pronto moves it toward the "Rust" end by fixing the target:
@@ -177,6 +181,7 @@ What you give up in expressiveness (real-time collaboration, GPU compute, sub-10
 - [`docs/2026-09-09-i18n-is-a-contract.md`](docs/2026-09-09-i18n-is-a-contract.md) — i18n as an export-time contract
 - [`docs/2026-09-17-localized-urls.md`](docs/2026-09-17-localized-urls.md) — localized routing, BCP 47 paths, and Caddy try_files
 - [`docs/2026-09-23-pronto-omnishell-ssr.md`](docs/2026-09-23-pronto-omnishell-ssr.md) — Materialized SSR (M-SSR), zero-JS resumability, differential sequence hydration
+- [`docs/2026-09-25-the-unified-lattice.md`](docs/2026-09-25-the-unified-lattice.md) — cross-cutting concerns via CUE unification: durability, effect safety spectrum, interaction lifecycles, and verification budgets
 - `docs/` — the dated design record (lineage)
 - `docs/archive/` — historical and superseded design documents (including [`2026-07-19-prontoui.md`](docs/archive/2026-07-19-prontoui.md))
 

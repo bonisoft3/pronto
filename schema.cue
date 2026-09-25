@@ -503,6 +503,16 @@ import (
 	scope: "internal"
 }
 
+#Durability: "server" | "live" | "offline" | "tab" | "device"
+
+#DurabilityEffectLevel: {
+	tab:     "ephemeral"
+	device:  "ephemeral"
+	offline: "compensable"
+	live:    "compensable"
+	server:  "replicated"
+}
+
 #Entity: E={
 	name:  string
 	ir:    *name | string
@@ -543,7 +553,7 @@ import (
 	// Visibility is a different axis. A tab or device entity is private by
 	// construction, with no policy to write, which is why `access` is not
 	// merely optional for them but meaningless: nothing else can reach it.
-	durability: "server" | "live" | "offline" | "tab" | "device"
+	durability: #Durability
 	// Whether the rows live in the cluster: every tier but the two browser ones.
 	// The one spelling of that boundary; the emitter reads this, never the names.
 	server: durability != "tab" && durability != "device"
