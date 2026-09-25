@@ -300,6 +300,22 @@ export function celFacts(sites: { entity: string; col: string | null; cel: strin
   };
 }
 
+/** Which design object encloses which, as a parser builds the tree and not as
+ * the text reads: objects.ts and derive.ts scan the ir with patterns, which see
+ * an element's attributes and never its ancestors, so one `</section>` dropped
+ * from an entity leaves every object after it inside that entity with nothing
+ * noticing. Only enclosed objects yield a row. */
+export function nestingFacts(irHtml: string): Facts {
+  type El = { id: string; getAttribute(n: string): string | null; parentElement: { closest(sel: string): El | null } | null };
+  const { document } = parseHTML(irHtml) as unknown as { document: { querySelectorAll(sel: string): El[] } };
+  const ir_nest: { id: string; kind: string; inside: string; inside_kind: string }[] = [];
+  for (const el of document.querySelectorAll("[data-kind]")) {
+    const up = el.parentElement?.closest("[data-kind]");
+    if (up) ir_nest.push({ id: el.id, kind: el.getAttribute("data-kind") ?? "", inside: up.id, inside_kind: up.getAttribute("data-kind") ?? "" });
+  }
+  return { ir_nest };
+}
+
 /** Several builders contribute to one table — `claim` and `pairing` each come
  * from two — so parts are concatenated. Spreading them into one object literal
  * would keep only the last. */
@@ -431,13 +447,15 @@ export function importFacts(
  * of identifiers it may not reach for. The scan and the query read one list.
  */
 export function jessieFactRows(
-  denied: { name: string; reason: string }[],
-  modules: { path: string; references: string[]; completion: string }[],
+  denied: { name: string; reason: string; exceptRole?: string }[],
+  modules: { path: string; references: string[]; completion: string; role: string }[],
 ): Facts {
   return {
-    denied_identifier: denied.map((d) => ({ name: d.name, reason: d.reason })),
+    // "" is no exception, because a join against NULL would drop the row and
+    // with it the rule.
+    denied_identifier: denied.map((d) => ({ name: d.name, reason: d.reason, except_role: d.exceptRole ?? "" })),
     handler_reference: modules.flatMap((m) => m.references.map((name) => ({ path: m.path, name }))),
-    handler: modules.map((m) => ({ path: m.path, completion: m.completion })),
+    handler: modules.map((m) => ({ path: m.path, completion: m.completion, role: m.role })),
   };
 }
 

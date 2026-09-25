@@ -8,19 +8,34 @@
 
 /** Identifiers a Jessie module may not reach for, and why. Rows, so the scan
  * below and the query that reports them read the same list. */
-export const DENIED: { name: string; reason: string }[] = [
+/** `exceptRole` is the one role whose compartment IS endowed with the name, so
+ * the scan stops calling it a reach. Every other role still fails on it, and
+ * a role the platform does not endow fails at runtime where it is seen. */
+export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
   ...[
     "window",
-  "document",
-  "fetch",
-  "XMLHttpRequest",
-  "WebSocket",
-  "Function",
-  "globalThis",
-  "import",
-  "require",
-    "Date",
+    "document",
+    "fetch",
+    "XMLHttpRequest",
+    "WebSocket",
+    "Function",
+    "globalThis",
+    "import",
+    "require",
   ].map((name) => ({ name, reason: "handlers run in an SES compartment with no endowments" })),
+  // An adapter reads the tz database through Intl, and a formatter takes a
+  // Date; the cage still refuses the clock itself — `Date.now()` and a bare
+  // `new Date()` throw under SES's taming.
+  {
+    name: "Date",
+    reason: "handlers run in an SES compartment with no endowments",
+    exceptRole: "adapter",
+  },
+  {
+    name: "Intl",
+    reason: "only an adapter's compartment is endowed with Intl",
+    exceptRole: "adapter",
+  },
   { name: "Math.random", reason: "handlers must be deterministic" },
   // Listed again with the reason that actually holds: SES censors `eval` and
   // `import` only in their DIRECT forms, when it rewrites the source. Probed

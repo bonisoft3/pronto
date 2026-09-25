@@ -591,6 +591,8 @@ SELECT 'error',
        'denylisted identifier: ' || r.name || ' (' || d.reason || ')'
 FROM handler_reference r
 JOIN denied_identifier d ON d.name = r.name
+JOIN handler h ON h.path = r.path
+WHERE d.except_role <> h.role
 
 UNION ALL
 
@@ -640,5 +642,23 @@ CROSS JOIN i18n_locale l
 LEFT JOIN message_catalog s ON s.locale = l.locale AND s.key = d.key
 WHERE s.key IS NULL
 
-ORDER BY path, message
+UNION ALL
 
+-- LOOSE, and about the ir alone. A design object belongs to the document and
+-- not to another object, with three exceptions the ir's own layout makes: a
+-- screen holds its storyboard states and its paths block, and a handler may
+-- hold the tests that settle it. Anything else enclosed is a closing tag that
+-- went missing — nesting is valid HTML, so no validator says so, and every
+-- other reader of the ir scans attributes and cannot see an ancestor. The
+-- message names the first stray object per enclosure, which is where the tag is
+-- owed; the count is what it swallowed.
+SELECT 'error',
+       'ir.html',
+       format('#{} ({}) is never closed: {} design object(s) sit inside it, the first being #{} ({})',
+              inside, inside_kind, count(*), first(id), first(kind))
+FROM ir_nest
+WHERE NOT ((kind IN ('state', 'paths') AND inside_kind = 'screen')
+        OR (kind = 'test' AND inside_kind = 'handler'))
+GROUP BY inside, inside_kind
+
+ORDER BY path, message

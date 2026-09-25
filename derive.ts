@@ -56,6 +56,7 @@ import {
   styleFacts,
   literalFacts,
   bijectionFacts,
+  nestingFacts,
   celFacts,
   diagramFacts,
   type FactChart,
@@ -88,7 +89,7 @@ type MachineProjection = {
   assignStrings: string[];
   filterSpec: Spec;
 };
-type ScreenProjection = { tables: string[]; handlers: string[]; machines: MachineProjection[] };
+type ScreenProjection = { tables: string[]; handlers: string[]; adapters: string[]; machines: MachineProjection[] };
 
 /** The slice of a program's entity this pass reads off its own export; every
  * module it hands the entities to declares the slice it reads for itself. */
@@ -166,14 +167,24 @@ export function decisionNote(body: string): string {
 
 export function renderDerived(
   pkg: string,
-  screens: { name: string; entities: string[]; handlers: string[] }[],
+  screens: { name: string; entities: string[]; handlers: string[]; adapters: string[] }[],
+  // The app's own Jessie modules, by basename: an adapter it does not ship is
+  // the terminal's, and the route names the path the terminal serves it at.
+  available: Set<string>,
   decisions: { id: string; note: string }[],
   tests: { id: string; accepts: string[] }[],
 ): string {
-  const blocks = screens.map(({ name, entities, handlers }) => {
+  const blocks = screens.map(({ name, entities, handlers, adapters }) => {
     const reads = entities.map((e) => `{entity: "${e}"}`).join(", ");
     const mods = handlers.map((h) => `"shell/handlers/${h}.js"`).join(", ");
-    return `\t${quoteKey(name)}: {\n\t\treads: [${reads}]\n\t\tfiles: handlers: [${mods}]\n\t}`;
+    // An adapter is listed apart from the reduces: the role decides the cage a
+    // module loads in, and a checker cannot ask about a role it cannot see.
+    // The terminal serves its own under /omnishell/components/, so an app that
+    // ships none of its own carries no copy to drift.
+    const adapterMods = adapters
+      .map((a) => (available.has(a) ? `"shell/handlers/${a}.js"` : `"/omnishell/components/${a}.js"`))
+      .join(", ");
+    return `\t${quoteKey(name)}: {\n\t\treads: [${reads}]\n\t\tfiles: {handlers: [${mods}], adapters: [${adapterMods}]}\n\t}`;
   });
   // JSON escapes are CUE escapes, and CUE reads `\(` as interpolation only
   // after a backslash JSON.stringify would have doubled.
@@ -343,7 +354,7 @@ export async function derive(appDir: string): Promise<void> {
   // A validation's module joins the handlers in `modules` below, so the
   // denylist and the completion rule reach it through the same fact rows.
   const TAG = "$validation$";
-  const modules: { path: string; references: string[]; completion: string }[] = [];
+  const modules: { path: string; references: string[]; completion: string; role: string }[] = [];
   const validated: { entity: string; name: string; edges: ReturnType<typeof resolveEdges>; statements: string; completion: string }[] = [];
   for (const [ename, e] of Object.entries(entities)) {
     for (const [vname, v] of Object.entries(e.validations ?? {})) {
@@ -355,7 +366,7 @@ export async function derive(appDir: string): Promise<void> {
       const split = splitCompletion(src);
       if (split === null) fail(`entity ${ename}: validations "${vname}": ${v.src} must end in an arrow function`);
       const facts = jessieFacts(src);
-      modules.push({ path: v.src, ...facts });
+      modules.push({ path: v.src, ...facts, role: "validation" });
       // A handler's denied name is a fact row a query reports; a validation's
       // is a refusal here, because its source is embedded in a migration and
       // there is no later seat that would catch it.
@@ -423,7 +434,7 @@ export async function derive(appDir: string): Promise<void> {
     new TextDecoder().decode(read.stdout),
   );
 
-  const screens: { name: string; entities: string[]; handlers: string[] }[] = [];
+  const screens: { name: string; entities: string[]; handlers: string[]; adapters: string[] }[] = [];
   const machines: { screen: string; region: MachineProjection }[] = [];
   const allMsgRefs: FactTemplateMsgRef[] = [];
   const allProse: FactTemplateProse[] = [];
@@ -450,6 +461,7 @@ export async function derive(appDir: string): Promise<void> {
       name,
       entities: [...new Set(named)].sort(),
       handlers: [...new Set([...screen.handlers, ...machineNames])].sort(),
+      adapters: [...new Set(screen.adapters)].sort(),
     });
   }
   screens.sort((a, b) => (a.name < b.name ? -1 : 1));
@@ -586,7 +598,7 @@ export async function derive(appDir: string): Promise<void> {
   } catch (e) {
     fail(`${LEDGER}: ${(e as Error).message}`);
   }
-  await Deno.writeTextFile(`${appDir}/program_derived.cue`, renderDerived(pkg, screens, notes, accepts));
+  await Deno.writeTextFile(`${appDir}/program_derived.cue`, renderDerived(pkg, screens, available, notes, accepts));
 
   let bijection: ReturnType<typeof bijectionFacts>;
   try {
@@ -627,12 +639,19 @@ export async function derive(appDir: string): Promise<void> {
     { path: "shell/shell.css", css: exp.shellCss, base: documentDir },
   ]);
 
-  // What each declared handler reaches for. Read here so the denylist is a
-  // join rather than a scan repeated per file at lint.
+  // What each declared handler reaches for, and in which role: the denylist is
+  // a join, and a name one role is endowed with is a reach in every other. A
+  // module named in two roles gets a row per role, so the reach is judged
+  // against each cage it actually runs in.
+  const adapterNames = new Set(screens.flatMap((s) => s.adapters));
+  const handlerNames = new Set(screens.flatMap((s) => s.handlers.map((h) => h.replace(/^.*\//, "").replace(/\.js$/, ""))));
   for (const name of [...available].sort()) {
     const rel = `shell/handlers/${name}.js`;
     const src = await Deno.readTextFile(`${appDir}/${rel}`).catch(() => null);
-    if (src !== null) modules.push({ path: rel, ...jessieFacts(src) });
+    if (src === null) continue;
+    const facts = jessieFacts(src);
+    const roles = [...(adapterNames.has(name) ? ["adapter"] : []), ...(handlerNames.has(name) || !adapterNames.has(name) ? ["handler"] : [])];
+    for (const role of roles) modules.push({ path: rel, ...facts, role });
   }
   // A validation's module and a handler's are pushed by two passes, so the
   // fact rows are ordered here rather than by either.
@@ -675,6 +694,7 @@ export async function derive(appDir: string): Promise<void> {
       programFacts(entities, screens, charts),
       ledger,
       bijection,
+      nestingFacts(irHtml),
       artifactFacts(artifacts),
       celFacts(sites, [...irs.keys()]),
       styleFacts(ownedTokens(shared), appTokens),
@@ -804,7 +824,7 @@ function selfTest(): void {
 
   // Rendering, not just transforming: the key is where a backslash gets a
   // second chance to be read as an escape.
-  const rendered = renderDerived("p", [], [{ id: "decision\\blob", note: 'a "q" and a \\ and \\(x)' }], [
+  const rendered = renderDerived("p", [], new Set(), [{ id: "decision\\blob", note: 'a "q" and a \\ and \\(x)' }], [
     { id: "test-one", accepts: ["accept-a", "accept-b"] },
     { id: "test-none", accepts: [] },
   ]);

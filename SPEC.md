@@ -348,11 +348,22 @@ constrains no one field's value.
 
 Known gaps, deliberate at alpha: the
 pairs runner behind `tests/pairs.yaml` is unbuilt; derived entities rely on
-convention, not roles, to stay pipeline-only-writable; and **schema
-evolution is unsolved** — initdb SQL only runs on a fresh volume. The
-declared direction is migration diffing on a schema emitted
-deterministically from `#Field`, on the surface mecha reserves for it
-(Atlas).
+convention, not roles, to stay pipeline-only-writable. What an entity is — a
+durable identity (a Cap'n Proto type id, with ordinals for fields) that
+statements attach to — and what may be stated about it are
+[`docs/2026-09-21-an-entity-is-what-everything-points-at.md`](docs/2026-09-21-an-entity-is-what-everything-points-at.md);
+with identity recorded, the author's whole surface for evolution is one
+declaration and retirement. A rename is refused rather than inferred: what a
+holder reads is keyed by name, so telling a rename from a drop beside an add
+decides which message to print, not which change to permit. Three rules above
+are what that design replaces and are normative until it lands: an entity's id is its
+PascalCase name and a `[[wikilink]]`'s text is that id (one snake label, with
+the type id as a `data-type-id` attribute no model writes); the bijection
+compares `ir` strings (it gains *identities only grow*); and "Compile diffs"
+asks for a semantic differ that identity is what makes sound. What keeps
+it — the changes a program may express, and the four readers that refuse the
+rest — is
+[`docs/2026-09-24-refusing-a-schema-change.md`](docs/2026-09-24-refusing-a-schema-change.md).
 
 ## Verify is agent-driven
 

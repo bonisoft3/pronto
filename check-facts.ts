@@ -21,6 +21,7 @@ import {
   importFacts,
   literalFacts,
   mergeFacts,
+  nestingFacts,
   scaleFacts,
   sha256Hex,
   styleFacts,
@@ -93,9 +94,9 @@ const SCHEMA: Record<string, Record<string, string>> = {
   cel_site: { entity: "VARCHAR", col: "VARCHAR", cel: "VARCHAR" },
   cel_ir: { cel: "VARCHAR" },
   owned_token: { token: "VARCHAR" },
-  denied_identifier: { name: "VARCHAR", reason: "VARCHAR" },
+  denied_identifier: { name: "VARCHAR", reason: "VARCHAR", except_role: "VARCHAR" },
   handler_reference: { path: "VARCHAR", name: "VARCHAR" },
-  handler: { path: "VARCHAR", completion: "VARCHAR" },
+  handler: { path: "VARCHAR", completion: "VARCHAR", role: "VARCHAR" },
   app_token: { path: "VARCHAR", token: "VARCHAR" },
   scale_step: { token: "VARCHAR", dimension: "VARCHAR", norm: "VARCHAR", kind: "VARCHAR" },
   app_literal: {
@@ -132,6 +133,7 @@ const SCHEMA: Record<string, Record<string, string>> = {
   served_file: { file: "VARCHAR", target: "VARCHAR" },
   app_import: { path: "VARCHAR", line: "BIGINT", target: "VARCHAR", resolved: "VARCHAR" },
   ir_route: { id: "VARCHAR", route: "VARCHAR" },
+  ir_nest: { id: "VARCHAR", kind: "VARCHAR", inside: "VARCHAR", inside_kind: "VARCHAR" },
   program_route: { id: "VARCHAR", route: "VARCHAR", where: "VARCHAR" },
   diagram_node: {
     diagram: "BIGINT",
@@ -259,6 +261,18 @@ async function query(sql: string, cwd: string): Promise<Finding[]> {
   return text === "" ? [] : JSON.parse(text);
 }
 
+const FIXTURE_IR = `
+<section id="Shut" data-kind="entity"></section>
+<section id="board" data-kind="screen">
+  <figure id="board-empty" data-kind="state"></figure>
+  <script data-kind="paths" type="application/json">[]</script>
+</section>
+<section id="reorder" data-kind="handler"><p id="test-reorder" data-kind="test"></p></section>
+<section id="Open" data-kind="entity">
+<section id="Swallowed" data-kind="entity"></section>
+<section id="ledger" data-kind="screen"></section>
+`;
+
 /**
  * The style rules run over their own fixture, by the file that IS the rule of
  * record. One stylesheet per case, each at its own path, so a case is graded by
@@ -298,6 +312,7 @@ async function fixtureFailures(appDir: string, scale: Scale = FIXTURE_SCALE): Pr
       fixtureServed(),
       resolveImports(LITERAL_CASES.map((c, i) => ({ path: casePath(i), css: c.css, base: "/srv" }))),
     ),
+    nestingFacts(FIXTURE_IR),
   );
   const sql = `${inlineViews(facts)}\n${await invariants}`;
   const findings = await query(sql, appDir);
@@ -320,6 +335,14 @@ async function fixtureFailures(appDir: string, scale: Scale = FIXTURE_SCALE): Pr
       );
     }
   });
+  // One entity left open, swallowing the entity and the screen after it; the
+  // screen's own state and paths, and the handler's test, are the three
+  // enclosures the ir's layout makes and must not be convicted with it.
+  const nested = byPath.get("ir.html") ?? [];
+  byPath.delete("ir.html");
+  if (nested.length !== 1 || !nested[0].message.includes("#Open (entity) is never closed: 2 design object(s)")) {
+    failures.push(`want one unclosed entity holding two objects, got ${JSON.stringify(nested.map((f) => f.message))}`);
+  }
   // A rule the fixture satisfies must report nothing anywhere else either: an
   // emptiness guard firing here would mean the fixture stopped carrying a table.
   for (const [path, rows] of byPath) {

@@ -159,7 +159,7 @@
     }
   },
   "taskfile": {
-    "run": "when_changed",
+    "run": "once",
     "incremental": true,
     "preconditions": []
   },

@@ -14,6 +14,18 @@ import (
 	"github:denoland/deno":    "v2.3.7"
 	"github:bonisoft3/pronto": #Version
 	"github:bonisoft3/sayt":   #SaytVersion
+	// Applies the schema changes an app declares, against a database that
+	// already holds a schema (check-replay.ts). `bin` because the release
+	// asset is a bare pgroll.win.amd64.exe / pgroll.macos.arm64, and mise
+	// only strips dash-separated os/arch suffixes on its own.
+	"github:xataio/pgroll": {version: "0.16.3", bin: "pgroll"}
+	// Compares every proto the app does not withhold against its own git
+	// history (check-proto.ts).
+	"github:bufbuild/buf": "1.73.0"
+	// Reads every SQL file the app does not withhold (check-sql.ts). A single
+	// binary per platform, windows included, so the lint runs wherever the
+	// toolchain does.
+	"github:sbdchd/squawk": "2.66.0"
 	"http:duckdb": {
 		version: "1.5.5"
 		platforms: {
@@ -55,7 +67,11 @@ import (
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
+		identity: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check ."}).out
 		facts: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
+		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
+		proto: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."}).out
+		replay: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write --allow-run --allow-env ($pronto | path join check-replay.ts) ."}).out
 	}
 	say: say: {
 		...

@@ -14,6 +14,9 @@
 import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive } from "./derive.ts";
 import { projectSay } from "./project-config.ts";
+import { generateTypeSQL } from "./type-sql.ts";
+import { generateProto, type ProtoEntity } from "./type-proto.ts";
+import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Bundle = { manifest: string[]; files: Record<string, EmitFile> };
@@ -32,17 +35,36 @@ const HEADER: Record<string, string> = {
   text: "",
 };
 
+// A migration applies whole or not at all: one that fails part-way leaves a
+// schema the steps after it cannot assume, and the two timeouts bound how long a
+// single statement may hold a lock before it gives the database back. The
+// transaction is also what lets an index be built plainly — CONCURRENTLY is
+// wanted only outside one, and cannot run inside one.
+//
+// Emitted text only. `src` assembly files are copied verbatim further down, and
+// wrapping SQL a person authored would change what they wrote.
+const MIGRATION = /^services\/database\/migrations\/[^/]+\.sql$/;
+const PROLOGUE = "SET lock_timeout = '5s';\nSET statement_timeout = '60s';\n\nBEGIN;\n\n";
+
 function fail(msg: string): never {
   console.error(`pronto write: ${msg}`);
   Deno.exit(1);
 }
 
+/** SQL with its provenance header, wrapped where the file is a migration. */
+function sqlFile(rel: string, body: string): string {
+  if (!MIGRATION.test(rel)) return HEADER.sql + body;
+  return HEADER.sql + PROLOGUE + body + (body.endsWith("\n") ? "" : "\n") + "\nCOMMIT;\n";
+}
+
 const appDir = Deno.args[0] ?? fail("usage: write.ts <appDir>  (runs `cue export` in appDir — needs --allow-run=cue)");
 
 function render(rel: string, f: EmitFile): string {
+  if (f.format === "type-sql" || f.format === "carrier-sql") return sqlFile(rel, generateTypeSQL(f.data as { precision: number; scale: number }[]));
+  if (f.format === "proto") return generateProto(f.data as Record<string, ProtoEntity>);
   if (f.format === "json") return JSON.stringify(f.data, null, 2) + "\n"; // no comment syntax, no header
   const header = HEADER[f.format] ?? fail(`${rel}: unknown format ${f.format}`);
-  if (f.text !== undefined) return header + f.text;
+  if (f.text !== undefined) return f.format === "sql" ? sqlFile(rel, f.text) : header + f.text;
   if (f.format === "yaml") return header + stringify(f.data, { lineWidth: -1 });
   return fail(`${rel}: no text and format ${f.format} is not structured`);
 }
@@ -56,6 +78,7 @@ async function exportBundle(): Promise<Bundle> {
   }).output();
   if (!exported.success) fail("cue export failed");
   const bundle: Bundle = JSON.parse(new TextDecoder().decode(exported.stdout));
+  checkTypeSeeds(bundle.files["schema/entities.proto"].data as Record<string, TypeEntity>);
   bundle.files[".say.yaml"].data = await projectSay(appDir, bundle.files[".say.yaml"].data);
   const keys = Object.keys(bundle.files).sort();
   const manifest = [...bundle.manifest].sort();

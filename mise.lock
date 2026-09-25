@@ -77,3 +77,35 @@ url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568516488"
 checksum = "sha256:a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238"
 url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568431369"
+
+[[tools.protoc]]
+version = "33.0"
+backend = "aqua:protocolbuffers/protobuf/protoc"
+
+[tools.protoc."platforms.linux-arm64"]
+checksum = "sha256:4b96bc91f8b54d829b8c3ca2207ff1ceb774843321e4fa5a68502faece584272"
+url = "https://github.com/protocolbuffers/protobuf/releases/download/v33.0/protoc-33.0-linux-aarch_64.zip"
+
+[tools.protoc."platforms.linux-arm64-musl"]
+checksum = "sha256:4b96bc91f8b54d829b8c3ca2207ff1ceb774843321e4fa5a68502faece584272"
+url = "https://github.com/protocolbuffers/protobuf/releases/download/v33.0/protoc-33.0-linux-aarch_64.zip"
+
+[tools.protoc."platforms.linux-x64"]
+checksum = "sha256:d99c011b799e9e412064244f0be417e5d76c9b6ace13a2ac735330fa7d57ad8f"
+url = "https://github.com/protocolbuffers/protobuf/releases/download/v33.0/protoc-33.0-linux-x86_64.zip"
+
+[tools.protoc."platforms.linux-x64-musl"]
+checksum = "sha256:d99c011b799e9e412064244f0be417e5d76c9b6ace13a2ac735330fa7d57ad8f"
+url = "https://github.com/protocolbuffers/protobuf/releases/download/v33.0/protoc-33.0-linux-x86_64.zip"
+
+[tools.protoc."platforms.macos-arm64"]
+checksum = "sha256:3cf55dd47118bd2efda9cd26b74f8bbbfcf5beb1bf606bc56ad4c001b543f6d3"
+url = "https://github.com/protocolbuffers/protobuf/releases/download/v33.0/protoc-33.0-osx-aarch_64.zip"
+
+[tools.protoc."platforms.macos-x64"]
+checksum = "sha256:e4e50a703147a92d1a5a2d3a34c9e41717f67ade67d4be72b9a466eb8f22fe87"
+url = "https://github.com/protocolbuffers/protobuf/releases/download/v33.0/protoc-33.0-osx-x86_64.zip"
+
+[tools.protoc."platforms.windows-x64"]
+checksum = "sha256:3742cd49c8b6bd78b6760540367eb0ff62fa70a1032e15dafe131bfaf296986a"
+url = "https://github.com/protocolbuffers/protobuf/releases/download/v33.0/protoc-33.0-win64.zip"

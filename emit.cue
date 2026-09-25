@@ -32,13 +32,30 @@ import (
 )
 
 #File: {
-	format: "sql" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml"
+	format: "sql" | "type-sql" | "carrier-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
 }
 
 _caddyfileAsset: _ @embed(file="assets/Caddyfile", type=text)
+_cdcTypesAsset: _ @embed(file="assets/cdc-types.blobl", type=text)
+_cdcCarriersAsset: _cdcTypesAsset
+
+// The type a bus row's column is converted to, by its label: the physical
+// labels a program may still use name their type, and a tsvector is an
+// index, not a value anyone states, so it passes through.
+_busType: {for k, v in #typeAlias if k != "tsvector" {(k): v}, for k, _ in #types {(k): k}}
+_busCarrier: _busType
+
+// The types cdc-types.blobl has a measured bus spelling for — the
+// asset's own dispatch, stated once here beside it and held equal to it by
+// cdc-types.integration.test.ts. A server column of any other type would
+// wedge its whole table at runtime, every change to it dropped by every
+// pipeline and visible only in a log, so it is refused where the app is built.
+_busTypes: ["string", "bool", "int32", "int64", "double", "uuid", "timestamp", "date", "time", "timezone", "duration", "decimal"]
+_busCarriers: _busTypes
+_busConvertible: or(_busTypes)
 
 // The one address a route answers at in one locale: the locale's prefix, empty
 // for the default, ahead of that locale's own pattern. Three emitted artifacts
@@ -68,14 +85,19 @@ _caddyfileAsset: _ @embed(file="assets/Caddyfile", type=text)
 	out: [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimPrefix(seg, ":")}]
 }
 
-_sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: "BIGINT", timestamptz: "TIMESTAMPTZ", tsvector: "TSVECTOR"}
+_sqlType: {
+	text: "TEXT", int: "INTEGER", bigint: "BIGINT", timestamptz: "TIMESTAMPTZ", tsvector: "TSVECTOR"
+	uuid: "uuid"
+	for k, c in #Carrier if k != "uuid" {(k): c.sql}
+}
 
 #colSql: C={
 	f: #Field
+	_type: [if C.f.type == "decimal" {"portable_decimal_\(C.f.precision)_\(C.f.scale)"}, _sqlType[C.f.type]][0]
 	// The column's derived CHECK body; absent where the field states no cel.
 	check?: string
 	_frags: list.Concat([
-		["\"\(C.f.name)\"", _sqlType[C.f.type]],
+		["\"\(C.f.name)\"", C._type],
 		[if C.f.generated != _|_ {"GENERATED ALWAYS AS (\(C.f.generated)) STORED"}],
 		[if C.f.pk {"PRIMARY KEY"}],
 		[if C.f.generated == _|_ if C.f.default != _|_ {"DEFAULT \(C.f.default)"}],
@@ -155,10 +177,13 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 }
 
 #sqlLit: L={
-	v: string | int | bool
+	v: _
 	out: [
+		if L.v == null {"NULL"},
 		if (L.v & string) != _|_ {"'" + strings.Replace(L.v, "'", "''", -1) + "'"},
 		if (L.v & bool) != _|_ {[if L.v {"true"}, "false"][0]},
+		if (L.v & {...}) != _|_ {"'" + strings.Replace(json.Marshal(L.v), "'", "''", -1) + "'"},
+		if (L.v & [..._]) != _|_ {"'" + strings.Replace(json.Marshal(L.v), "'", "''", -1) + "'"},
 		"\(L.v)",
 	][0]
 }
@@ -168,7 +193,13 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	_rows: [for r in S.e.seed {
 		_cols: [for f in S.e.fields if r[f.name] != _|_ {f.name}]
 		out: "INSERT INTO \(S.e.table) (" + strings.Join(_cols, ", ") + ") VALUES (" +
-			strings.Join([for c in _cols {(#sqlLit & {v: r[c]}).out}], ", ") +
+			strings.Join([for f in S.e.fields if r[f.name] != _|_ {
+				if #Carrier[f.type] != _|_ {
+					_type: [if f.type == "decimal" {"portable_decimal_\(f.precision)_\(f.scale)"}, #Carrier[f.type].sql][0]
+					"public.\(_type)_from_json(\((#sqlLit & {v: json.Marshal(r[f.name])}).out)::json)"
+				}
+				if #Carrier[f.type] == _|_ {(#sqlLit & {v: r[f.name]}).out}
+			}], ", ") +
 			") ON CONFLICT (id) DO NOTHING;"
 	}]
 	out: strings.Join([for r in S._rows {r.out}], "\n")
@@ -274,6 +305,19 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 	out: "\(U.qual).\(U.a.owner) = auth_uid()" + U._shared
 }
 
+// One policy, restated rather than created. Postgres has no CREATE POLICY IF
+// NOT EXISTS, so the drop is how a migration carrying a corrected rule reaches
+// a database that already holds the old one — the same restatement rls_protect
+// does for the tenancy policy it owns. Inside the migration's transaction the
+// drop and the create are one step, so no window exists in which the table is
+// enabled for RLS with this policy missing.
+#policy: {
+	name:  string
+	table: string
+	rest:  string
+	out:   "DROP POLICY IF EXISTS \(name) ON \(table);\nCREATE POLICY \(name) ON \(table) \(rest);"
+}
+
 // One entity's RLS block. Policy names are deterministic:
 // <table>_<role>_<action>. Every mode grants service ALL; the floor binds
 // PUBLIC and 001 exempts service from it by role attribute.
@@ -349,10 +393,10 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 			},
 		]
 		_appUser: [
-			"CREATE POLICY \(P._t)_app_user_select ON \(P._t) FOR SELECT TO app_user USING (\(P._using));",
-			"CREATE POLICY \(P._t)_app_user_insert ON \(P._t) FOR INSERT TO app_user WITH CHECK (\(P._t).\(P.e.access.owner) = auth_uid());",
-			"CREATE POLICY \(P._t)_app_user_update ON \(P._t) FOR UPDATE TO app_user USING (\(P._using));",
-			"CREATE POLICY \(P._t)_app_user_delete ON \(P._t) FOR DELETE TO app_user USING (\(P._using));",
+			(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (\(P._using))"}).out,
+			(#policy & {name: "\(P._t)_app_user_insert", table: P._t, rest: "FOR INSERT TO app_user WITH CHECK (\(P._t).\(P.e.access.owner) = auth_uid())"}).out,
+			(#policy & {name: "\(P._t)_app_user_update", table: P._t, rest: "FOR UPDATE TO app_user USING (\(P._using))"}).out,
+			(#policy & {name: "\(P._t)_app_user_delete", table: P._t, rest: "FOR DELETE TO app_user USING (\(P._using))"}).out,
 		]
 	}
 	if P.e.access.scope == "folder" {
@@ -369,13 +413,13 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		_pre: []
 		_expr: "EXISTS (SELECT 1 FROM \(P._parent.table) p WHERE p.id = \(P._t).\(P.e.access.on)\(P._onCast) AND (\((#ownedUsing & {a: P._parent.access, qual: "p", table: P._parent.table}).out)))"
 		_appUser: [
-			"CREATE POLICY \(P._t)_app_user_all ON \(P._t) FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr));",
+			(#policy & {name: "\(P._t)_app_user_all", table: P._t, rest: "FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr))"}).out,
 		]
 	}
 	if P.e.access.scope == "public" {
 		_pre: []
 		_appUser: [
-			"CREATE POLICY \(P._t)_app_user_select ON \(P._t) FOR SELECT TO app_user USING (true);",
+			(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (true)"}).out,
 		]
 	}
 	if P.e.access.scope == "internal" {
@@ -390,7 +434,7 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		// else's still needs the SECURITY DEFINER path.
 		if P._t == "app_user" {
 			_appUser: [
-				"CREATE POLICY app_user_self_select ON app_user FOR SELECT TO app_user USING (id = auth_uid());",
+				(#policy & {name: "app_user_self_select", table: "app_user", rest: "FOR SELECT TO app_user USING (id = auth_uid())"}).out,
 			]
 		}
 		if P._t != "app_user" {
@@ -442,7 +486,7 @@ _sqlType: {uuid: "UUID", text: "TEXT", bool: "BOOLEAN", int: "INTEGER", bigint: 
 		}],
 		["ALTER TABLE \(P._t) ENABLE ROW LEVEL SECURITY;"],
 		P._appUser,
-		["CREATE POLICY \(P._t)_service_all ON \(P._t) FOR ALL TO service USING (true) WITH CHECK (true);"],
+		[(#policy & {name: "\(P._t)_service_all", table: P._t, rest: "FOR ALL TO service USING (true) WITH CHECK (true)"}).out],
 	]), "\n")
 }
 
@@ -477,6 +521,8 @@ _cdcTableField: "__table"
 	sourceTable: string
 	sinkTable:   string
 	sinkPk:      string
+	// {table: {column: carrier}} over the publication; see cdc-carriers.blobl.
+	carriers: [string]: [string]: string
 	// Auth'd clusters put every table behind RLS, so the transform's reads
 	// and writes carry the service token; ${SERVICE_JWT} is benthos env
 	// interpolation, resolved from the transform service's environment.
@@ -512,8 +558,18 @@ _cdcTableField: "__table"
 			// otherwise costs a PostgREST GET first. Which messages are its own
 			// is the mapping's decision — this only spares the malformed.
 			{mapping: "root = if this.exists(\"data\") && this.data.type() == \"string\" && this.data.length() > 0 { this } else { deleted() }"},
-			R._fetch,
-			{bloblang: R.p.transform.bloblang},
+			// The bus row in carrier form, so a mapping reads the values
+			// PostgREST and the client hold rather than conduit's text
+			// spellings. Inside a `try` with the fetch and the transform: a
+			// failed processor does not stop the ones after it, so without this
+			// a refused row still pays a PostgREST GET, still runs the app's
+			// mapping over unconverted values, and reaches the catch with the
+			// transform's output in hand instead of the row that refused.
+			{"try": [
+				{bloblang: "let carriers = \(json.Marshal(R.carriers))\n" + _cdcTypesAsset},
+				R._fetch,
+				{bloblang: R.p.transform.bloblang},
+			]},
 			// A failed processor leaves the message untouched and carries on, so
 			// without this a throwing mapping silently POSTs the CloudEvent
 			// envelope and the only trace is PostgREST rejecting a column named
@@ -563,8 +619,8 @@ _cdcTableField: "__table"
 		_windowSeconds: (#durationSeconds & {d: R.p.window}).out
 	}
 	_metaLines: list.Concat([
-		[if R._hasCutoff {"meta cutoff = (timestamp_unix() - \(R._windowSeconds)).ts_format(\"2006-01-02T15:04:05Z\", \"UTC\")"}],
-		[if R._hasNowts {"meta nowts = now()"}],
+		[if R._hasCutoff {"meta cutoff = (timestamp_unix() - \(R._windowSeconds)).ts_format(\"2006-01-02T15:04:05.000000Z\", \"UTC\")"}],
+		[if R._hasNowts {"meta nowts = now().ts_format(\"2006-01-02T15:04:05.000000Z\", \"UTC\")"}],
 	])
 	_rootLine: [if R.p.set != _|_ {"root = " + json.Marshal(R.p.set)}, "root = {}"][0]
 	_url: "${CRUD_URL}/\(R.sinkTable)?" + strings.Replace(
@@ -652,7 +708,7 @@ _cdcTableField: "__table"
 	// A local table's `required: false` columns and their types, which the
 	// terminal fills on stored rows that predate them (data-sync.js fill).
 	// Server tables are left out: Postgres answers a missing value as null.
-	_optional: {for _, e in S.code.state.entities if S._local[e.table] != _|_ {(e.table): [for f in e.fields if !f.required {name: f.name, type: f.type}]}}
+	_optional: {for _, e in S.code.state.entities if S._local[e.table] != _|_ {(e.table): [for f in e.fields if !f.required && !f.retired {name: f.name, type: f.type}]}}
 	_optionalTables: [for t, cs in S._optional if len(cs) > 0 {t}]
 	// What the terminal's own checks judge an app against: the columns a filter
 	// may name, the pk, unique field or declared unique that witnesses a slot's
@@ -671,9 +727,13 @@ _cdcTableField: "__table"
 	_schema: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ {
 		(e.table): {
 			durability: e.durability
-			fields: [for f in e.fields {
+			// A retired field is a column the database keeps and an ordinal the
+			// program remembers; the bundle is told of neither.
+			fields: [for f in e.fields if !f.retired {
 				name: f.name
 				type: f.type
+				required: f.required
+				if f.type == "decimal" {precision: f.precision, scale: f.scale}
 				if f.pk {pk: true}
 				if f.unique != _|_ {unique: f.unique}
 				if f.default != _|_ {default: f.default}
@@ -831,6 +891,18 @@ _cdcTableField: "__table"
 		// would grade every screen against an app that declares nothing.
 		schema: S._schema
 
+		// The type table (types.cue), served rather than restated. The
+		// client canonicalizes a value with code — Electric hands it an
+		// interval as `PT30M` — and judges the result by the entry here, so
+		// what canonical IS has one statement and the transformations have no
+		// say in it. A holder meeting a `beyond` name it does not implement
+		// refuses the table.
+		types: {
+			types:   #types
+			aliases: #typeAlias
+		}
+		carriers: types
+
 		// Primary key per table, only where it is not "id": the terminal's
 		// synced collections key rows by it (a pipeline sink like note_progress
 		// keys on its subject column, and keying such a table on the missing
@@ -947,10 +1019,6 @@ _cdcTableField: "__table"
 
 #appMigrations: M={
 	code: #App
-	// Gates 010 on the same set _uniqueLines renders: server-tier uniques
-	// (where the schema admits no `where`), so the list never names a
-	// migration the bundle does not hold.
-	_uniqueTables: [for _, e in M.code.state.entities if e.server if len(e.uniques) > 0 {e.table}]
 	_validatedTables: [for _, e in M.code.state.entities if e.server if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
@@ -965,12 +1033,12 @@ _cdcTableField: "__table"
 		"services/database/migrations/001_roles.sql",
 		"services/database/migrations/002_grants.sql",
 		"services/database/migrations/003_publication.sql",
+		"services/database/migrations/003_types.sql",
 		"services/database/migrations/004_create_tables.sql",
 		if len(M.accessed) > 0 {"services/database/migrations/005_policies.sql"},
 		"services/database/migrations/006_txid.sql",
 		"services/database/migrations/007_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/008_validations.sql"},
-		if len(M._uniqueTables) > 0 {"services/database/migrations/010_composite_uniques.sql"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/020_schedule.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
@@ -1001,10 +1069,31 @@ _cdcTableField: "__table"
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
 				for name, c in D.terminal.surface.checks {(name): c}
-				for name in ["derive", "types", "facts"] {
+				for name in ["derive", "types", "facts", "proto"] {
 					(name): {verb: "lint", cmds: [_distribution.checks[name]], note: "Pronto compiler \(name)"}
 				}
 				facts: priority: 1
+				// Only where there is SQL to read: an app whose every entity is
+				// a browser tier emits no migration and authors none, so the
+				// pass would grade an empty set.
+				if len([for _, e in D.code.state.entities if e.server {e}]) > 0 {
+					sql: {verb: "lint", cmds: [_distribution.checks.sql], note: "Pronto compiler sql"}
+					// On `integrate`, because it grades a built image, and after
+					// the rule that builds one. Nothing in the verb states that
+					// ordering: the rulemap sorts by priority and then by NAME,
+					// so at the default priority "replay" would run before the
+					// "visual" rule whose `up --build` produces the image — and
+					// it would then grade whatever the machine happened to hold,
+					// which reads exactly like a verdict about this tree. The
+					// priority is what says "after the images exist"; the
+					// alphabet is not a contract.
+					replay: {verb: "integrate", priority: 1, cmds: [_distribution.checks.replay], note: "Pronto compiler replay"}
+				}
+				// Only where something was minted: an app with no identities has
+				// none to lose, and the check would grade an empty snapshot.
+				if len([for _, e in D.code.state.entities if e.id != _|_ {e}]) > 0 {
+					identity: {verb: "lint", cmds: [_distribution.checks.identity], note: "Pronto compiler identity"}
+				}
 				// Declaring a route crawlable is a promise the build can write it,
 				// and a promise nothing exercises is one that breaks silently. The
 				// writer runs wherever a route declares it, over every declared
@@ -1047,7 +1136,12 @@ _cdcTableField: "__table"
 
 #DefaultTerminal: D={
 	code: #App
-	_handlerSet: {for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}}
+	// An adapter the terminal serves is the terminal's file and not the app's,
+	// so only an app's own module joins the set.
+	_handlerSet: {
+		for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}
+		for _, s in D.code.surface.screens for i in s.files.adapters if !strings.HasPrefix(i, "/") {(i): true}
+	}
 	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
 	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
 	_validationSet: {for _, e in D.code.state.entities for _, v in e.validations {(v.src): true}}
@@ -1205,6 +1299,11 @@ _cdcTableField: "__table"
 	_validated: [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
 	_localEntities: [for e in E._entities if !e.server {e}]
 	_cdcTables: strings.Join([for e in _entities if e.durability == "server" {e.table}], ",")
+	// Every table the publication carries, column by column, as the carrier
+	// cdc-carriers.blobl converts a bus row into before a pipeline reads it.
+	_cdcCarriers: {for e in _entities if e.durability == "server" {
+		(e.table): {for f in e.fields if _busCarrier[f.type] != _|_ {(f.name): _busCarrier[f.type] & _busConvertible}}
+	}}
 	_syncTables: [for e in E._serverEntities {e.table}]
 
 	// The refusal that would have caught the original bug: a cloud-tier app
@@ -1451,6 +1550,8 @@ _cdcTableField: "__table"
 
 	_accessed: (#appMigrations & {"code": E.code}).accessed
 	_raw: (#appMigrations & {"code": E.code}).raw
+	// Optional, and absent in every app that has never changed a live schema.
+	_pgroll: [if E.code.state.migrations != _|_ {E.code.state.migrations}, {}][0]
 	// The auth plane switches on as one: declaring #App.auth or any entity
 	// access implies the roles, auth_uid(), and service-token plumbing —
 	// policies without tokens (or vice versa) is not a supported state.
@@ -1545,24 +1646,59 @@ _cdcTableField: "__table"
 
 	files: [string]: #File
 	files: {
+		"schema/entities.proto": {
+			format: "proto"
+			data: E.code.state.entities
+		}
+		// The app's own buf module, so `buf breaking` runs inside the app and
+		// reaches for nothing above it: an app copybara'd into a repo of its
+		// own carries this file and compares the same way there, where the
+		// path from the repo root to the app is no longer the one it is here.
+		//
+		// `path: .` and not the schema directory, because the set is meant to
+		// be discovered: every proto the app holds is read — the emitted one
+		// and any a hatch brought with it — so adding a proto cannot quietly
+		// escape the comparison. A hatch withholds its own by path on the
+		// command line (check-proto.ts), which leaves this file the same
+		// whatever an app declares.
+		//
+		// WIRE_JSON rather than WIRE: the emitter writes json_name on every
+		// field, so the JSON a holder reads is keyed by name, and a rename
+		// that binary decoding would survive breaks it.
+		"buf.yaml": {
+			format: "yaml"
+			data: {
+				version: "v2"
+				modules: [{path: "."}]
+				breaking: use: ["WIRE_JSON"]
+			}
+		}
 		// The server-side surface, emitted only where there is a server to run
 		// it: an app whose every entity is a browser tier has no schema, no
 		// publication, no bus wiring and no pipeline file, and the cluster it
 		// targets instantiates none of the services these configure.
 		if E._serverOn {
+			"services/database/migrations/003_types.sql": {
+				format: "type-sql"
+				data: [for _, e in E.code.state.entities if e.server for f in e.fields if f.type == "decimal" {precision: f.precision, scale: f.scale}]
+			}
 			"services/database/migrations/000_extensions.sql": {
 				format: "sql"
 				// plv8 is required exactly when a server entity declares
 				// validations: it is the language their predicates run in.
 				// gen_random_uuid() is core since PostgreSQL 13, so an app
-				// without validations needs no extension at all. No
-				// IF NOT EXISTS: these migrations run once, at initdb, on a
-				// fresh data directory.
+				// without validations needs no extension at all.
+				//
+				// IF NOT EXISTS because a migration is restated, not replayed
+				// once: a correction below it reaches a database that already
+				// holds the extension, and CREATE EXTENSION alone would abort
+				// the whole file before the correction ran.
+				//
 				// auth_uid() reads the sub claim PostgREST stashes in
 				// request.jwt.claims; NULL outside a request or for tokens
 				// without a sub (anon).
 				_prelude: [
-					if len(E._validated) > 0 {"CREATE EXTENSION plv8;\n"},
+					if len(E._validated) > 0 {"CREATE EXTENSION IF NOT EXISTS plv8;\n"},
 					if len(E._validated) == 0 {"-- no extensions required\n"},
 				][0]
 				if !E._authOn {
@@ -1690,12 +1826,26 @@ _cdcTableField: "__table"
 						""",
 				][0]
 			}
+			// Tables, their indexes and their composite uniques in one step. A
+			// unique index belongs to the transaction that creates its table:
+			// the constraint is then never briefly absent, and an index built
+			// over a table the same transaction created blocks no writer, which
+			// is what makes plain CREATE INDEX — rather than CONCURRENTLY, which
+			// cannot run in a transaction — the right statement here.
+			//
+			// Composite unique names are uq_<table>_<cols>, and a violation is
+			// what the app's duplicate refusal reads: the Caddyfile injects
+			// resolution=ignore-duplicates, which PostgREST targets at the
+			// PRIMARY KEY — a client-minted uuid that never collides — so a
+			// repeated pair reaches this index and comes back 23505 rather than
+			// merging silently.
 			"services/database/migrations/004_create_tables.sql": {
 				format: "sql"
 				_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 				text: strings.Join(list.Concat([
 					[for ent in E._serverEntities {(#tableSql & {e: ent}).out}],
 					[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
+					[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
 				]), "\n\n") + "\n"
 			}
 			if len(E._accessed) > 0 {
@@ -1716,18 +1866,6 @@ _cdcTableField: "__table"
 				}
 			}
 
-			// Composite uniques, from the entities' own declarations. Names are
-			// uq_<table>_<cols>, and a violation is what the app's duplicate refusal
-			// reads: the Caddyfile injects resolution=ignore-duplicates, which
-			// PostgREST targets at the PRIMARY KEY — a client-minted uuid that never
-			// collides — so a repeated pair reaches this index and comes back 23505
-			// rather than merging silently.
-			if len(E._uniqueLines) > 0 {
-				"services/database/migrations/010_composite_uniques.sql": {
-					format: "sql"
-					text:   strings.Join(E._uniqueLines, "\n") + "\n"
-				}
-			}
 			if len(E.code.state.schedules) > 0 {
 				// mecha's mechanism, never authored by an app: the DDL is fixed
 				// and only the seed varies. One row per declaration, and the
@@ -1820,6 +1958,14 @@ _cdcTableField: "__table"
 			}
 			for rm in E._raw {
 				"services/database/migrations/\(rm.name)": {format: "sql", src: rm.src}
+			}
+			// Beside the initdb set, not among it: these are applied by pgroll
+			// against a schema that already exists, and the cluster mounts
+			// `_all` — the files initdb replays on a fresh volume — which these
+			// are not. A fresh volume gets the schema from the migrations above
+			// and is baselined; these carry it forward from there.
+			for name, m in E._pgroll {
+				"services/database/pgroll/\(name).json": {format: "json", data: m}
 			}
 			if len(E._seeded) > 0 {
 				"services/database/migrations/900_seed.sql": {
@@ -1919,6 +2065,7 @@ _cdcTableField: "__table"
 						sourceTable: E.code.state.entities[pl.from].table
 						sinkTable:   E.code.state.entities[pl.to].table
 						sinkPk: [for fld in E.code.state.entities[pl.to].fields if fld.pk {fld.name}][0]
+						carriers: E._cdcCarriers
 						authOn: E._authOn
 					}).out
 				}
@@ -2221,6 +2368,7 @@ _cdcTableField: "__table"
 			}
 			"\(s.files.css)": {format: "css", src: s.files.css}
 			for i in s.files.handlers {"\(i)": {format: "jessie", src: i}}
+			for i in s.files.adapters if !strings.HasPrefix(i, "/") {"\(i)": {format: "jessie", src: i}}
 		}
 		for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {
 			if pl.fold == _|_ {

@@ -426,9 +426,35 @@ import (
 	}
 }
 
+// An entity's durable identity: 64 random bits, Cap'n Proto's form, minted by
+// identity.ts and never by the compiling model. Why a name cannot be this is
+// docs/2026-09-21-an-entity-is-what-everything-points-at.md.
+#TypeId: string & =~"^0x[89a-f][0-9a-f]{15}$"
+
+// A field's type is a portable type the table names (types.cue), or one of the
+// physical labels an older program still spells.
+#Type: or([for _name, _ in #types {_name}])
+#LegacyType: or([for _name, _ in #typeAlias {_name}])
+
 #Field: {
 	name: string
-	type: "uuid" | "text" | "bool" | "int" | "bigint" | "timestamptz" | "tsvector"
+	// Which field of its entity this is, for as long as the entity lives. The
+	// name is a label over it; a holder that keeps rows keeps them by this.
+	ordinal?: int & >0
+	// A field is never removed, because an ordinal that was forgotten can be
+	// minted again over rows that still mean the old thing.
+	retired: *false | bool
+	// What is left of a retired field is its place: nothing writes it, so it
+	// cannot be demanded, and nothing reads it, so it forbids nothing.
+	if retired {
+		required: false
+		cel?:     _|_
+	}
+	type: #Type | #LegacyType
+	if type == "decimal" {
+		precision!: int & >=1 & <=38
+		scale!: int & >=0 & <=precision
+	}
 	pk:       *false | bool
 	required: *true | bool
 	ref?:     string // referenced table; DDL: REFERENCES <ref>(id) ON DELETE CASCADE
@@ -451,7 +477,7 @@ import (
 		minorUnits: *2 | int & >=0 & <=4
 	}
 	if money != _|_ {
-		type: "int" | "bigint"
+		type: "int32" | "int64" | "int" | "bigint"
 	}
 }
 
@@ -477,10 +503,19 @@ import (
 	scope: "internal"
 }
 
-#Entity: {
+#Entity: E={
 	name:  string
 	ir:    *name | string
 	table: string
+	id?:   #TypeId
+	// Ordinals are 1..n: none exceeds the count and no two agree. That every
+	// field HAS one is identity.ts's to say, because a field an author just
+	// added has none until it mints, and it has to be able to read the program
+	// to do that.
+	fields: [...{ordinal?: <=len(E.fields)}]
+	// A stated row meets its types' canonical forms where it meets its cel.
+	seed: [...{for f in E.fields if #TypeConstraint[f.type] != _|_ {(f.name)?: #TypeConstraint[f.type].valid}}]
+	_ordinals: {for f in E.fields if f.ordinal != _|_ {"\(f.ordinal)": f.name}}
 	// Every value names a guarantee, and they are monotonic in expense:
 	//
 	//   tab      survives navigation
@@ -913,6 +948,10 @@ import (
 		if S.markup != _|_ {
 			handlers: *[] | [...string]
 		}
+		// The control adapters the screen's markup names (data-value-adapter).
+		// Apart from handlers because the role decides the cage: an adapter ends
+		// in a map of pure functions, and its compartment is endowed with Intl.
+		adapters: *[] | [...string]
 		// Stylesheets under shell/shared/ this screen imports. Screen CSS is
 		// injected as a <style> in the document head, so an @import inside it
 		// resolves against /shell/ — `@import url("shared/screen.css")`.
@@ -987,6 +1026,23 @@ import (
 		// writer copies each src into services/database/migrations/<name>, and
 		// the name's numeric prefix orders it among the emitted migrations.
 		rawMigrations?: [...{name: string, src: string}]
+		// Changes to a schema that already exists, as pgroll migrations, keyed
+		// by the version they create; each is emitted to
+		// services/database/pgroll/<name>.json and applied in key order.
+		//
+		// Separate from the migrations above because they answer a different
+		// question. Those build the schema on a fresh volume, where initdb
+		// replays every one of them and records nothing — which is why they
+		// have to be written to survive being applied twice. These are applied
+		// against a database that already holds a schema, through pgroll, which
+		// keeps a ledger of what it has run: a migration here runs once, and
+		// running it again is a no-op rather than an error. So they are written
+		// plainly, with no IF NOT EXISTS and no DO block to swallow a duplicate
+		// — the spellings that cost the checks their sight.
+		//
+		// #PgRollMigration is pgroll's own published grammar (pgroll.cue), so
+		// an operation this does not accept is one pgroll would not accept.
+		migrations?: [Name=string]: #PgRollMigration
 		pipelines: [Name=string]: #Pipeline & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
 	}
@@ -1017,9 +1073,29 @@ import (
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
 		blobs: *false | bool
-		// Escape hatches, bijection surface only (ir kind "hatch"): the actual
-		// service definition is the program's cluster unification beside it.
-		hatches: [Name=string]: {ir: *Name | string, kind: "container", note: string}
+		// Escape hatches (ir kind "hatch"): what pronto is told not to look
+		// inside. A `container` hatch withholds a service, whose definition is
+		// the program's cluster unification beside it. A `sql` or `proto` hatch
+		// withholds files from the lint that reads every other one — squawk over
+		// the SQL, buf breaking over the protos — and `files` names them,
+		// app-relative, as exact paths.
+		//
+		// Inspection is default-on, so a file nobody declares here is a file the
+		// lint reads: adding SQL or a proto cannot quietly escape the checks,
+		// and escaping them is a declaration. Because every hatch carries `ir`,
+		// that declaration is also an element in ir.html, which is what makes an
+		// exemption reviewable rather than a line in a tool's config.
+		hatches: [Name=string]: H={
+			ir:   *Name | string
+			kind: "container" | "sql" | "proto"
+			note: string
+			// Only a file kind names files, and it must: a `sql` or `proto`
+			// hatch withholding nothing is an exemption that reads as one and
+			// protects no file.
+			if H.kind != "container" {
+				files!: [string, ...string]
+			}
+		}
 		// Terminal-tier hatch: a vendored unit running inside the terminal, under
 		// one of `isolation`'s boundaries, requesting a subset of the terminal's
 		// capability vocabulary (`"group.name"` strings). Checked against

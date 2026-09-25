@@ -18,3 +18,4 @@ aqua.minisign = false
 # Every program this plugin ships is a deno program — derive.ts, write.ts,
 # check-facts.ts, check-loop.ts — and deno.json pins what they import.
 "github:denoland/deno" = "v2.9.7"
+"protoc" = "33.0"
