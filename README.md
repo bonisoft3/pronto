@@ -182,6 +182,7 @@ What you give up in expressiveness (real-time collaboration, GPU compute, sub-10
 - [`docs/2026-09-17-localized-urls.md`](docs/2026-09-17-localized-urls.md) — localized routing, BCP 47 paths, and Caddy try_files
 - [`docs/2026-09-23-pronto-omnishell-ssr.md`](docs/2026-09-23-pronto-omnishell-ssr.md) — Materialized SSR (M-SSR), zero-JS resumability, differential sequence hydration
 - [`docs/2026-09-25-the-unified-lattice.md`](docs/2026-09-25-the-unified-lattice.md) — cross-cutting concerns via CUE unification: durability, effect safety spectrum, interaction lifecycles, and verification budgets
+- [`../omnishell/docs/2026-09-24-unbreakable-machines.md`](../omnishell/docs/2026-09-24-unbreakable-machines.md) — unbreakable machines, closed effects, DuckDB synthetic seeds, statechart storybook battery, and formal verification
 - `docs/` — the dated design record (lineage)
 - `docs/archive/` — historical and superseded design documents (including [`2026-07-19-prontoui.md`](docs/archive/2026-07-19-prontoui.md))
 
