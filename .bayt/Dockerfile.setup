@@ -7,7 +7,7 @@ ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo
 RUN --mount=type=cache,target=/zypper-store,id=/zypper-store,sharing=shared --mount=type=cache,target=/var/cache/zypp,id=plugins_pronto-setup:/var/cache/zypp,sharing=locked s=/zypper-store; d=/var/cache/zypp/packages; mkdir -p "$s" "$d"; cp -r "$s"/. "$d"/ 2>/dev/null || true; zypper -n modifyservice --no-refresh --all && sed -i 's|http://|https://|g' /etc/zypp/repos.d/*.repo || exit; zypper -n modifyrepo --keep-packages --all && zypper -n install findutils=4.10.0-160000.2.2 which=2.23-160000.2.2 git-core=2.51.0-160000.1.2 || exit; cd "$d" && for f in */*.rpm */*/*.rpm; do [ -f "$f" ] || continue; o="$s/$f"; [ -e "$o" ] && continue; mkdir -p "$(dirname "$o")"; t="$(mktemp "$(dirname "$o")/.pXXXXXX")" && cp "$f" "$t" && mv -f "$t" "$o"; done; zypper -n modifyrepo --no-keep-packages --all || true
 COPY --parents *.ts scales/*.ts deno.json deno.lock ./
 ENV MISE_ALWAYS_KEEP_DOWNLOAD=1
-COPY --parents [m]ise.toml [.]mise.toml [m]ise.lock ./
+COPY --parents [m]ise.toml [.]mise.toml [m]ise.lock [.]tool-versions ./
 RUN --mount=type=cache,target=/root/.local/share/mise/downloads,id=plugins_pronto:/root/.local/share/mise/downloads,sharing=locked --mount=type=cache,target=/mise-tarball-store,id=/mise-tarball-store,sharing=shared d=/root/.local/share/mise/downloads; s=/mise-tarball-store; mkdir -p "$d" "$s"; cp -r "$s"/. "$d"/ 2>/dev/null || true; mise install || exit; cd "$d" && for f in */*/*; do [ -f "$f" ] || continue; o="$s/$f"; [ -e "$o" ] && continue; mkdir -p "$(dirname "$o")"; t="$(mktemp "$(dirname "$o")/.pXXXXXX")" && cp "$f" "$t" && mv -f "$t" "$o"; done; :
 COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.setup.yaml .bayt/bayt.setup.json ./.bayt/
 
