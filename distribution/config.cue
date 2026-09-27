@@ -5,13 +5,21 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.3.1"
-#SaytVersion: "0.39.2"
+#Version:     "0.3.2"
+#SaytVersion: "0.39.3"
+
+// The mise tools that carry the three trees a browser bundle reads, for a
+// checkout with no monorepo sibling to read them from.
+#Runtimes: {
+	pronto:    "github:bonisoft3/pronto"
+	omnishell: "github:bonisoft3/omnishell"
+	mecha:     "github:bonisoft3/mecha"
+}
 
 #Tools: {
 	...
 	"github:cue-lang/cue":     "0.16.1"
-	"github:denoland/deno":    "v2.3.7"
+	"github:denoland/deno":    "v2.9.7"
 	"github:bonisoft3/pronto": #Version
 	"github:bonisoft3/sayt":   #SaytVersion
 	// Applies the schema changes an app declares, against a database that
@@ -49,13 +57,19 @@ import (
 #Run: {
 	runtime: string
 	args:    string
-	root: [if runtime != "" {json.Marshal(runtime)}, "(run-mise where github:bonisoft3/pronto | str trim)"][0]
+	root: [if runtime != "" {json.Marshal(runtime)}, "(run-mise where \(#Runtimes.pronto) | str trim)"][0]
 	out: "use tools.nu [run-mise]; let pronto = \(root); \(args)"
 }
 
 #Project: P={
 	_valid:  saycfg.say & P.say.say
 	runtime: *"" | string
+	// The interpreter's root and mecha's, which the bundler reads from: a
+	// sibling path in the monorepo, the installed distribution elsewhere.
+	omnishell: *"" | string
+	mecha:     *"" | string
+	_omnishell: [if P.omnishell != "" {json.Marshal(P.omnishell)}, "(run-mise where \(#Runtimes.omnishell) | str trim)"][0]
+	_mecha: [if P.mecha != "" {json.Marshal(P.mecha)}, "(run-mise where \(#Runtimes.mecha) | str trim)"][0]
 	tools:   #Tools
 	mise: {
 		...
@@ -64,6 +78,9 @@ import (
 	}
 	_run: #Run & {runtime: "\(P.runtime)"}
 	write: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join write.ts) ."}).out
+	// The browser tier's artifact: the app bundled into dist/browser/index.html,
+	// under the path prefix `sayt release@pages --base=/<prefix>` names.
+	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out

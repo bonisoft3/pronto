@@ -1,4 +1,4 @@
-// pronto writer: materializes a program's emission bundle onto disk.
+// pronto writer: materializes a program's emission onto disk.
 //
 //   deno run --allow-read=apps/todo --allow-write=apps/todo --allow-run=cue \
 //     plugins/pronto/write.ts apps/todo
@@ -7,19 +7,21 @@
 // Structured entries (`data`) serialize to YAML; raw entries (`text`) are
 // written verbatim with a provenance header; `src` entries are assembly files
 // authored in place — verified present, copied only when target ≠ src, never
-// headed. Files recorded in the previous run's .pronto/manifest.json but
-// absent from the current bundle are removed, so renamed targets leave no
-// stale emissions.
+// headed. .pronto/manifest.json records what the writer wrote, and a recorded
+// file absent from the current emission is removed, so renamed targets leave no
+// stale emissions; a file authored in place is never recorded, so the sweep
+// cannot reach it.
 
 import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive } from "./derive.ts";
+import { entries, ifMissing } from "./missing.ts";
 import { projectSay } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
-type Bundle = { manifest: string[]; files: Record<string, EmitFile> };
+type Emission = { manifest: string[]; files: Record<string, EmitFile> };
 
 // jessie/bloblang/js entries always carry `src`, never `text`, so they need
 // no header; a `text:` entry in one of them is meant to fail render()'s
@@ -69,7 +71,7 @@ function render(rel: string, f: EmitFile): string {
   return fail(`${rel}: no text and format ${f.format} is not structured`);
 }
 
-async function exportBundle(): Promise<Bundle> {
+async function exportEmission(): Promise<Emission> {
   const exported = await new Deno.Command("cue", {
     args: ["export", ".", "-e", "out", "--out", "json"],
     cwd: appDir,
@@ -77,17 +79,17 @@ async function exportBundle(): Promise<Bundle> {
     stderr: "inherit",
   }).output();
   if (!exported.success) fail("cue export failed");
-  const bundle: Bundle = JSON.parse(new TextDecoder().decode(exported.stdout));
-  checkTypeSeeds(bundle.files["schema/entities.proto"].data as Record<string, TypeEntity>);
-  bundle.files[".say.yaml"].data = await projectSay(appDir, bundle.files[".say.yaml"].data);
-  const keys = Object.keys(bundle.files).sort();
-  const manifest = [...bundle.manifest].sort();
+  const emission: Emission = JSON.parse(new TextDecoder().decode(exported.stdout));
+  checkTypeSeeds(emission.files["schema/entities.proto"].data as Record<string, TypeEntity>);
+  emission.files[".say.yaml"].data = await projectSay(appDir, emission.files[".say.yaml"].data);
+  const keys = Object.keys(emission.files).sort();
+  const manifest = [...emission.manifest].sort();
   if (JSON.stringify(keys) !== JSON.stringify(manifest)) {
     fail(`manifest and files disagree:\n  manifest: ${manifest}\n  files: ${keys}`);
   }
   // The scan that would catch a mismatch runs over the build graph with no app
   // in hand to name, which is why this is checked here instead.
-  const dir = (bundle.files["bayt.json"]?.data as { dir?: string } | undefined)?.dir;
+  const dir = (emission.files["bayt.json"]?.data as { dir?: string } | undefined)?.dir;
   if (dir !== undefined) {
     // Compared in the spelling a bayt.json holds, which is always
     // forward-slashed where realPathSync answers in the platform's own.
@@ -99,51 +101,91 @@ async function exportBundle(): Promise<Bundle> {
       );
     }
   }
-  return bundle;
+  return emission;
 }
 
-async function writeBundle(bundle: Bundle): Promise<void> {
-  const manifest = [...bundle.manifest].sort();
-  for (const rel of manifest) {
-    if (rel.startsWith("/") || rel.split("/").includes("..")) fail(`unsafe path: ${rel}`);
-    const f = bundle.files[rel];
-    const path = `${appDir}/${rel}`;
-    const dir = path.slice(0, path.lastIndexOf("/"));
-    if (f.src !== undefined) {
-      if (f.text !== undefined || f.data !== undefined) fail(`${rel}: src is exclusive with text/data`);
-      if (f.src.startsWith("/") || f.src.split("/").includes("..")) fail(`unsafe src: ${f.src}`);
-      let stat;
-      try {
-        stat = await Deno.stat(`${appDir}/${f.src}`);
-      } catch {
-        fail(`${rel}: missing assembly source ${f.src}`);
-      }
-      if (!stat.isFile) fail(`${rel}: assembly source ${f.src} is not a file`);
-      if (f.src !== rel) {
-        if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
-        await Deno.writeTextFile(path, await Deno.readTextFile(`${appDir}/${f.src}`));
-      }
+const unsafe = (p: string) => p.split("/").some((s) => s === "" || s === "." || s === "..");
+const parent = (p: string) => p.slice(0, p.lastIndexOf("/"));
+
+const empty = async (dir: string) => (await entries(dir, null))?.length === 0;
+
+/** The paths the last run recorded, vetted whole before any is acted on. */
+async function recorded(manifestPath: string): Promise<string[]> {
+  const text = await ifMissing(Deno.readTextFile(manifestPath), null);
+  if (text === null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    fail(`${manifestPath}: ${(e as Error).message}`);
+  }
+  const paths: unknown = (parsed as { written?: unknown } | null)?.written;
+  if (!Array.isArray(paths) || paths.some((p) => typeof p !== "string" || unsafe(p))) {
+    fail(`${manifestPath} is not {written: [...]} of paths inside the app: restore it, or delete it and sweep the last run's emissions by hand`);
+  }
+  return paths as string[];
+}
+
+/** Everything the run will write, rendered, so nothing on disk moves for an emission the writer refuses. */
+async function rendered(emission: Emission): Promise<Map<string, string>> {
+  const contents = new Map<string, string>();
+  for (const rel of [...emission.manifest].sort()) {
+    if (unsafe(rel)) fail(`unsafe path: ${rel}`);
+    const f = emission.files[rel];
+    if (f.src === undefined) {
+      contents.set(rel, render(rel, f));
       continue;
     }
-    if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
-    await Deno.writeTextFile(path, render(rel, f));
+    if (f.text !== undefined || f.data !== undefined) fail(`${rel}: src is exclusive with text/data`);
+    if (unsafe(f.src)) fail(`unsafe src: ${f.src}`);
+    const stat = await ifMissing(Deno.stat(`${appDir}/${f.src}`), null) ?? fail(`${rel}: missing assembly source ${f.src}`);
+    if (!stat.isFile) fail(`${rel}: assembly source ${f.src} is not a file`);
+    if (f.src !== rel) {
+      contents.set(rel, await Deno.readTextFile(`${appDir}/${f.src}`));
+      continue;
+    }
+    // A file the writer emitted cannot become the author's by being named in
+    // place: its banner says whose it is.
+    const header = HEADER[f.format];
+    if (header && (await Deno.readTextFile(`${appDir}/${rel}`)).startsWith(header)) {
+      fail(`${rel}: is a pronto emission, not an authored file: delete it and author it`);
+    }
   }
-
-  const manifestPath = `${appDir}/.pronto/manifest.json`;
-  let previous: string[] = [];
-  try {
-    previous = JSON.parse(await Deno.readTextFile(manifestPath));
-  } catch (e) {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
-  }
-  for (const rel of previous) {
-    if (!bundle.files[rel]) await Deno.remove(`${appDir}/${rel}`).catch(() => {});
-  }
-  await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
-  await Deno.writeTextFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  return contents;
 }
 
-const derivedText = () => Deno.readTextFile(`${appDir}/program_derived.cue`).catch(() => "");
+/** Writes the emission and returns the paths it wrote. */
+async function writeEmission(emission: Emission): Promise<string[]> {
+  const contents = await rendered(emission);
+  const written = [...contents.keys()];
+  const manifestPath = `${appDir}/.pronto/manifest.json`;
+  // Swept before anything is written, so a rename never removes its own target
+  // where the filesystem folds case; recorded before anything is written, so a
+  // run that dies midway leaves nothing the next one cannot find.
+  const stale: string[] = [];
+  for (const rel of await recorded(manifestPath)) {
+    if (emission.files[rel]) continue;
+    const info = await ifMissing(Deno.lstat(`${appDir}/${rel}`), null);
+    if (info === null) continue;
+    if (info.isDirectory) fail(`${rel}: recorded as written, but is now a directory`);
+    stale.push(`${appDir}/${rel}`);
+  }
+  for (const path of stale) {
+    await Deno.remove(path);
+    for (let dir = parent(path); dir !== appDir && await empty(dir); dir = parent(dir)) await Deno.remove(dir);
+  }
+  await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
+  await Deno.writeTextFile(manifestPath, JSON.stringify({ written }, null, 2) + "\n");
+  for (const [rel, text] of contents) {
+    const path = `${appDir}/${rel}`;
+    const dir = parent(path);
+    if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(path, text);
+  }
+  return written;
+}
+
+const derivedText = () => ifMissing(Deno.readTextFile(`${appDir}/program_derived.cue`), "");
 
 // Markup-derived declarations regenerate before the export that reads them —
 // and once more after the write, because a component screen's html is itself
@@ -151,15 +193,13 @@ const derivedText = () => Deno.readTextFile(`${appDir}/program_derived.cue`).cat
 // screens. A run that moved one re-derives and re-exports once; a derivation
 // still moving after that is a bug, never a longer loop.
 await derive(appDir);
-let bundle = await exportBundle();
-await writeBundle(bundle);
+let written = await writeEmission(await exportEmission());
 const settled = await derivedText();
 await derive(appDir);
 if ((await derivedText()) !== settled) {
-  bundle = await exportBundle();
-  await writeBundle(bundle);
+  written = await writeEmission(await exportEmission());
   const again = await derivedText();
   await derive(appDir);
   if ((await derivedText()) !== again) fail("derivation did not settle in two passes");
 }
-console.error(`pronto write: ${bundle.manifest.length} files → ${appDir}`);
+console.error(`pronto write: ${written.length} files written → ${appDir}`);

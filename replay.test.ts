@@ -190,6 +190,23 @@ Deno.test("declared migrations are named without their extension, in applied ord
   }
 });
 
+Deno.test({ name: "a dangling link is the app's file, not the image's", ignore: Deno.build.os === "windows" }, async () => {
+  // stat follows the link and reports its missing target as absence, which
+  // sent a reader to mecha's copy when the fault was the app's own link; the
+  // link is what lstat sees.
+  const dir = await Deno.makeTempDir({ prefix: "replay-locate-link-" });
+  try {
+    await Deno.mkdir(`${dir}/services/database/migrations`, { recursive: true });
+    await Deno.symlink(`${dir}/nowhere.sql`, `${dir}/services/database/migrations/004_create_tables.sql`);
+    assertEquals(
+      await locate(dir, "/docker-entrypoint-initdb.d/004_create_tables.sql"),
+      "services/database/migrations/004_create_tables.sql",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("a finding lands on the app's own file when it has one", async () => {
   // And on the image's otherwise: a step the cluster contributed is not the
   // app's to fix, and sending a reader to a path they cannot open is worse

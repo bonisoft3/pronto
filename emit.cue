@@ -687,7 +687,7 @@ _cdcTableField: "__table"
 		(p.fold.pair.table): [for _, e in S.code.state.entities if e.table == p.fold.pair.table {e.durability}][0]
 	}}
 
-	// Browser-only tiers. They are collections like any other — read by a
+	// Browser-only durabilities. They are collections like any other — read by a
 	// data-live region, mutated by a form — but the terminal builds them from
 	// a local factory instead of an Electric shape, so they cannot be listed
 	// among the tables it subscribes.
@@ -702,7 +702,7 @@ _cdcTableField: "__table"
 	_naturalKeys: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where == _|_ {u.cols}]}}
 	_uniqueTables: [for t, ks in S._naturalKeys if len(ks) > 0 {t}]
 	// Partial uniques travel apart, as the whole invariant: the terminal
-	// reconciles surviving browser-tier rows against them at first load.
+	// reconciles surviving browser-durability rows against them at first load.
 	_partialUniques: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where != _|_ {cols: u.cols, where: u.where}]}}
 	_partialTables: [for t, ps in S._partialUniques if len(ps) > 0 {t}]
 	// A local table's `required: false` columns and their types, which the
@@ -712,7 +712,7 @@ _cdcTableField: "__table"
 	_optionalTables: [for t, cs in S._optional if len(cs) > 0 {t}]
 	// What the terminal's own checks judge an app against: the columns a filter
 	// may name, the pk, unique field or declared unique that witnesses a slot's
-	// cardinality, the tier and type a machine region's writes are held to, the
+	// cardinality, the durability and type a machine region's writes are held to, the
 	// values a data-when may state (check-markup.ts), the currency and
 	// scale a money binding formats with, and the domain a generated row's
 	// column is drawn from (check-battery.ts). Scoped to the
@@ -751,7 +751,7 @@ _cdcTableField: "__table"
 		}
 	}}
 	_validatedTables: [for _, e in S.code.state.entities if S._tables[e.table] != _|_ if len([for n, _ in e.validations {n}]) > 0 {e.table}]
-	// The seeds #appMigrations.seeded leaves out: a browser tier has no
+	// The seeds #appMigrations.seeded leaves out: a browser durability has no
 	// migration to render into, so the terminal is told the rows instead.
 	_localSeeds: {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
 	_seededLocal: [for t, _ in S._localSeeds {t}]
@@ -977,7 +977,7 @@ _cdcTableField: "__table"
 				if p.fold == _|_ {shim: p.shim}
 
 				// A fold names its module rather than a shim, and the terminal
-				// runs it at both browser tiers: the PGlite sink, and the
+				// runs it at both browser durabilities: the PGlite sink, and the
 				// optimistic projection over the synced sink. The watermark and
 				// dedupe key travel with it — the projection cannot be sound
 				// without either (decision-optimistic-fold).
@@ -997,7 +997,7 @@ _cdcTableField: "__table"
 				trigger: "schedule"
 			}
 
-			// Raw pipelines have no shim: the browser tier lists them and skips.
+			// Raw pipelines have no shim: the terminal lists them and skips.
 			if p.raw != _|_ {
 				name: p.name
 				to:   S.code.state.entities[p.to].table
@@ -1007,7 +1007,7 @@ _cdcTableField: "__table"
 	}
 }
 
-// Whether an app's cluster keeps server-side state: an entity on a server tier,
+// Whether an app's cluster keeps server-side state: an entity of a cluster durability,
 // or auth, which is identity the cluster keeps. The one predicate the cluster's
 // services, its migrations and the emitted shell.yaml all follow.
 #serverOn: S={
@@ -1054,8 +1054,22 @@ _cdcTableField: "__table"
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
 		surface: {
-			sources: pronto: *"../../plugins/pronto" | string
-			_distribution: distribution.#Project & {runtime: "\(sources.pronto)"}
+			sources: {
+				pronto: *"../../plugins/pronto" | string
+				// The siblings follow pronto: an app that installs pronto as a
+				// distribution has no monorepo beside it.
+				omnishell: string
+				mecha:     string
+				if pronto == "" {
+					omnishell: *"" | string
+					mecha:     *"" | string
+				}
+				if pronto != "" {
+					omnishell: *"../../plugins/omnishell" | string
+					mecha:     *"../../libraries/mecha" | string
+				}
+			}
+			_distribution: distribution.#Project & {runtime: "\(sources.pronto)", omnishell: "\(sources.omnishell)", mecha: "\(sources.mecha)"}
 			buildCmd: [if sources.pronto != "" {"deno run --allow-read --allow-write=. --allow-run --allow-env \(sources.pronto)/write.ts ."}, "sayt build"][0]
 			testCmd: "cue vet -c ./..."
 			pipelineFiles: [for _, p in D.code.state.pipelines {"docker/\(D.code.meta.name)-\(p.name).yaml"}]
@@ -1065,6 +1079,19 @@ _cdcTableField: "__table"
 			verbs: {
 				for name, c in D.cluster.surface.verbs {(name): c}
 				for name, c in D.terminal.surface.verbs {(name): c}
+				// The pages target: the bundle is the artifact, and the tag pushed
+				// is what makes the app's mirror bundle it again and deploy it.
+				// The tags on HEAD under this app's prefix are release.nu's own
+				// reading of what it just created.
+				if list.Contains(D.code.meta.targets, "pages") {
+					pages: {
+						verb:     "release"
+						platform: "pages"
+						cmds: [_distribution.bundle]
+						publish: ["use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag"]
+						note: "Pronto release@pages"
+					}
+				}
 			}
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
@@ -1074,7 +1101,7 @@ _cdcTableField: "__table"
 				}
 				facts: priority: 1
 				// Only where there is SQL to read: an app whose every entity is
-				// a browser tier emits no migration and authors none, so the
+				// a browser durability emits no migration and authors none, so the
 				// pass would grade an empty set.
 				if len([for _, e in D.code.state.entities if e.server {e}]) > 0 {
 					sql: {verb: "lint", cmds: [_distribution.checks.sql], note: "Pronto compiler sql"}
@@ -1306,17 +1333,32 @@ _cdcTableField: "__table"
 	}}
 	_syncTables: [for e in E._serverEntities {e.table}]
 
-	// The refusal that would have caught the original bug: a cloud-tier app
-	// whose schedules nothing wakes. At compose the cluster emits its own clock,
-	// so the tier is self-evidently covered; above it the clock lives in a
-	// deploy tree this emitter does not write, and the failure is silent — the
-	// pipelines simply never run. Declaring the clock is what makes the absence
-	// loud, and `meta.clocks` is where the app says so.
+	// The refusal that would have caught the original bug: a target whose
+	// schedules nothing wakes. At compose the cluster emits its own clock; at a
+	// target the clock lives in a deploy tree this emitter does not write, and
+	// the failure is silent — the pipelines simply never run. Declaring the
+	// clock is what makes the absence loud, and `meta.clocks` is where the app
+	// says so.
 	_clockDeclared: {
-		for t in E.code.meta.tiers if t != "container" if t != "cli" {
-			if len(E.code.state.schedules) > 0 {
+		for t in E.code.meta.targets {
+			if len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0 {
 				(t): true & list.Contains(E.code.meta.clocks, t)
 			}
+		}
+	}
+
+	// A unit is a worker the browser fetches past the bundled document's shim,
+	// so a program with one cannot be bundled yet; a closed tab ticks no
+	// schedule; one user shares with nobody, while the client opens a keyed
+	// shape per grant that the page's cluster does not serve; and a validation
+	// runs in plv8, which PGlite has none of. The pages target is refused rather
+	// than released broken. A suspended schedule runs nowhere and refuses nothing.
+	_pagesBundle: {
+		if list.Contains(E.code.meta.targets, "pages") {
+			units:       true & (len(E.code.capabilities.vendored) == 0)
+			schedules:   true & (len([for _, s in E.code.state.schedules if !s.suspend {s}]) == 0)
+			shared:      true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
+			validations: true & (len(E._validated) == 0)
 		}
 	}
 
@@ -1674,7 +1716,7 @@ _cdcTableField: "__table"
 			}
 		}
 		// The server-side surface, emitted only where there is a server to run
-		// it: an app whose every entity is a browser tier has no schema, no
+		// it: an app whose every entity is a browser durability has no schema, no
 		// publication, no bus wiring and no pipeline file, and the cluster it
 		// targets instantiates none of the services these configure.
 		if E._serverOn {
@@ -1802,10 +1844,14 @@ _cdcTableField: "__table"
 				// crud table at all, and `FOR TABLE` with an empty list is a syntax
 				// error that aborts initdb — so the publication is emitted only when
 				// there is something to publish.
+				// The fence marks what runs from the tier a WAL reader first exists
+				// at: PGlite below it skips the statements between `-- tier: <tier>`
+				// and `-- tier: any` by that marker, not by their shape.
+				_wal: #Tier & "container"
 				text: [
 					if len(E._syncTables) > 0 {
 						"""
-				\([if len(E._cdcTables) > 0 {(#publication & {name: E._pub, tables: strings.Split(E._cdcTables, ",")}).out}, "-- No server-durability entity: nothing for the bus to read."][0])
+				\([if len(E._cdcTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: strings.Split(E._cdcTables, ",")}).out + "\n-- tier: any"}, "-- No server-durability entity: nothing for the bus to read."][0])
 
 				-- Electric's own publication, declared rather than left to it.
 				-- ELECTRIC_MANUAL_TABLE_PUBLISHING makes it validate this instead of
@@ -1813,9 +1859,11 @@ _cdcTableField: "__table"
 				-- SELECT: creating a publication needs CREATE on the database, and
 				-- adding a table to one needs ownership of that table. A sync service
 				-- that owns the app's tables can drop them.
+				-- tier: \(_wal)
 				\((#publication & {name: "electric_publication_default", tables: E._syncTables}).out)
 
 				\(strings.Join([for t in E._syncTables {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
+				-- tier: any
 				GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
 
 				"""
@@ -2446,6 +2494,74 @@ _cdcTableField: "__table"
 		".vscode/tasks.json": {
 			format: "json"
 			data:   E.loop.surface.tasksJson
+		}
+
+		// The pages target's ceremony and its mirror's release. goreleaser is
+		// the shim iris uses, builds skipped and the GitHub release disabled,
+		// so release.nu has a file to run and nothing to publish; the
+		// workflow bundles and deploys the app on its mirror, where copybara
+		// moves it to the root GitHub reads. Inert here.
+		if list.Contains(E.code.meta.targets, "pages") {
+			".goreleaser.yaml": {
+				format: "yaml"
+				// Its own dist, since --clean wipes it and the bundle's is dist/browser.
+				data: {version: 2, project_name: E.code.meta.name, dist: "dist/goreleaser", builds: [{builder: "zig", skip: true}], release: {disable: true}}
+			}
+			".github/workflows/cd.yml": {
+				format: "yaml"
+				text:   """
+					# Release the app to GitHub Pages: bundle it into one document and deploy it.
+					#
+					# GitHub reads workflows only from a repository's root .github/, so this
+					# file is inert in the monorepo and active in the mirror, where copybara
+					# moves it to the root. The trigger is the plain `v*` tag the monorepo's
+					# cd.yml creates here once the mirror holds the tagged commit; nothing
+					# publishes from a branch, and a dispatch redeploys what main holds.
+					#
+					# The release verb builds the document as a developer would, a snapshot
+					# since the tag is the release already. The site is a project site, so
+					# the document is bundled for the repository's path prefix and doubles
+					# as the site's 404.html, which is what makes a deep link boot.
+
+					name: cd
+
+					on:
+					  push:
+					    tags:
+					      - 'v*'
+					  workflow_dispatch:
+
+					permissions:
+					  contents: read
+					  pages: write
+					  id-token: write
+
+					concurrency:
+					  group: pages
+					  cancel-in-progress: false
+
+					jobs:
+					  pages:
+					    runs-on: ubuntu-24.04
+					    environment:
+					      name: github-pages
+					      url: ${{ steps.deploy.outputs.page_url }}
+					    steps:
+					      - uses: actions/checkout@v7
+					      # The released sayt at the version the toolchain pins, its mise cached.
+					      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
+					        with:
+					          version: v\(distribution.#SaytVersion)
+					      - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"
+					        working-directory: \(E.build.project.dir)
+					      - uses: actions/configure-pages@v5
+					      - uses: actions/upload-pages-artifact@v4
+					        with:
+					          path: \(E.build.project.dir)/dist/browser
+					      - id: deploy
+					        uses: actions/deploy-pages@v4
+					"""
+			}
 		}
 
 		// The terminal's own toolchain stanza, in the drop-in directory mise

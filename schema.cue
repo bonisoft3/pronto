@@ -13,7 +13,15 @@ import (
 	"github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
-#Tier: "cli" | "container" | "k8s" | "cloud"
+// A target is a place a program is released to and verified against, the word
+// after `@` in `sayt release@<target>`. A tier is what mecha's cluster is made
+// of there, ordered so the SQL fence `-- tier: <tier>` reads "from this tier
+// up": a publication fenced at container runs on compose and on both clouds,
+// and PGlite skips it in a page or an edge object. pages runs at browser,
+// cloudflare at edge, gcp and aws at cloud; compose is the container tier
+// every app develops on and no target.
+#Target: "pages" | "cloudflare" | "gcp" | "aws"
+#Tier:   "browser" | "edge" | "container" | "cloud"
 
 // A path relative to the app directory, resolved by derive and by the
 // terminal's module loader. No scheme and no `..`: the source is read from the
@@ -554,7 +562,7 @@ import (
 	// construction, with no policy to write, which is why `access` is not
 	// merely optional for them but meaningless: nothing else can reach it.
 	durability: #Durability
-	// Whether the rows live in the cluster: every tier but the two browser ones.
+	// Whether the rows live in the cluster: every durability but the two the browser keeps.
 	// The one spelling of that boundary; the emitter reads this, never the names.
 	server: durability != "tab" && durability != "device"
 	if durability == "tab" || durability == "device" {
@@ -607,9 +615,9 @@ import (
 	// `where` makes the unique partial: it holds only over rows matching the
 	// predicate, stated in the data-plane fragment grammar. A partial unique
 	// is a slot's cardinality witness ("at most one row wears this flag"),
-	// never a natural key — upserts cannot resolve against it. Browser tiers
-	// only: its SQL rendering (a partial unique index) waits for a
-	// server-tier consumer.
+	// never a natural key — upserts cannot resolve against it. Browser
+	// durabilities only: its SQL rendering (a partial unique index) waits for
+	// a cluster consumer.
 	uniques: *[] | [...{name: string, cols: [...string], where?: string}]
 	if durability != "tab" && durability != "device" {
 		uniques: [...{where?: _|_}]
@@ -621,7 +629,7 @@ import (
 	validations: [Name=string]: #Validation & {name: Name}
 
 	// Bootstrap rows: the rows a store holds before anyone writes one. A
-	// server tier renders them into 900_seed.sql; a `tab` entity has no
+	// cluster durability renders them into 900_seed.sql; a `tab` entity has no
 	// migration to render into, so the terminal writes them itself when it
 	// first opens the collection (shell.yaml `seed:`).
 	//
@@ -629,8 +637,8 @@ import (
 	// on CDC events, so before the first mutation the derived row exists only
 	// if the schema bootstrap made it.
 	//
-	// Both tiers keep the same rule — the rows are written once against an
-	// empty store and never reconsidered — because at both tiers the store's
+	// Both keep the same rule — the rows are written once against an
+	// empty store and never reconsidered — because at both the store's
 	// birth is what triggers them: a fresh database runs the migration, a
 	// fresh tab collection is seeded at open. A row the reader deletes
 	// therefore stays deleted for as long as its store lives.
@@ -1143,14 +1151,14 @@ import (
 		// every route this same description, so it names the app, not a screen.
 		description: string
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
-		tiers: [...#Tier]
-		// Tiers where something outside the cluster pokes the ticker. The
-		// compose clock is emitted by cluster.cue and needs no declaration;
-		// k8s and cloud do, because their clock lives in a deploy tree mecha
-		// does not write, and the original bug was not that the clock was in
-		// the wrong place but that nothing could tell. #emit refuses a cloud
-		// tier that declares a schedule and no clock here.
-		clocks: [...#Tier]
+		targets: [...#Target]
+		// Targets where something outside the cluster pokes the ticker. The
+		// compose clock is emitted by cluster.cue and needs no declaration; a
+		// target's clock lives in a deploy tree mecha does not write, and the
+		// original bug was not that the clock was in the wrong place but that
+		// nothing could tell. #emit refuses a target that declares a schedule
+		// and no clock here.
+		clocks: [...#Target]
 		// A program names its decisions and nothing more: `note` is derived
 		// from the prose of the ir element `ir` names (pronto derive.ts), so the
 		// reviewed artifact is the only place the rationale is written.

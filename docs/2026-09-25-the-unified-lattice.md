@@ -65,7 +65,7 @@ dimensions:
                    exterior                           abort         Saga Task (250)
 ```
 
-### Dimension 1: Durability Tier ([`#Durability`](../schema.cue#L506))
+### Dimension 1: Durability ([`#Durability`](../schema.cue#L506))
 Monotonic in expense and survival scope:
 - `tab`: Survives navigation within the current tab; held in memory.
 - `device`: Survives tab and browser restarts; persisted in client SQLite/IndexedDB.
@@ -109,7 +109,7 @@ cross-cutting requirements do not require pipeline glue. They evaluate as greate
 lower bounds:
 
 ### 1. Durability $\sqcap$ Effect Safety Level
-The entity's durability tier statically bounds the admissible effect levels on it:
+The entity's durability statically bounds the admissible effect levels on it:
 ```cue
 #DurabilityEffectLevel: {
 	tab:     "ephemeral"
@@ -132,7 +132,7 @@ When a transition emits a `compensable` (Level 2) effect:
 - Zombie client states become mathematically impossible.
 
 ### 3. Durability $\sqcap$ Authorization
-Browser-tier rows (`tab`, `device`) are private by construction. Cluster rows (`server`, `live`, `offline`) require access rules:
+Browser-durability rows (`tab`, `device`) are private by construction. Cluster rows (`server`, `live`, `offline`) require access rules:
 ```cue
 if durability == "tab" || durability == "device" { access?: _|_ }
 if durability != "tab" && durability != "device" { access?: #Access }

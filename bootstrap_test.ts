@@ -29,10 +29,10 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
     }
     const modules = [
       ["plugins/bayt", "bayt", "0.52.1"],
-      ["plugins/sayt", "sayt", "0.39.2"],
-      ["libraries/mecha", "mecha", "0.1.3"],
-      ["plugins/omnishell", "omnishell", "0.2.2"],
-      ["plugins/pronto", "pronto", "0.3.1"],
+      ["plugins/sayt", "sayt", "0.39.3"],
+      ["libraries/mecha", "mecha", "0.1.4"],
+      ["plugins/omnishell", "omnishell", "0.2.3"],
+      ["plugins/pronto", "pronto", "0.3.2"],
     ];
     async function copy(source: string, target: string): Promise<void> {
       await Deno.mkdir(target, { recursive: true });
@@ -62,7 +62,7 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
     const app = join(scratch, "consumer with spaces");
     await Deno.mkdir(app);
     await cue(app, ["mod", "init", "example.com/consumer@v0"]);
-    await cue(app, ["mod", "get", "github.com/bonisoft3/pronto@v0.3.1"]);
+    await cue(app, ["mod", "get", "github.com/bonisoft3/pronto@v0.3.2"]);
     await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"]);
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
@@ -93,6 +93,11 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
     await cue(app, ["cmd", "generate", "./pronto"]);
     assert((await Deno.readTextFile(join(app, ".say.yaml"))).includes("omnishell materialize"), "terminal did not contribute its commands");
     assert((await Deno.readTextFile(join(app, ".mise.toml"))).includes("github:bonisoft3/omnishell"), "terminal did not contribute its tool");
+    // The cluster pins its own tree as the terminal does: the bundler an app
+    // outside the monorepo runs finds mecha where mise put it, or not at all.
+    await Deno.writeTextFile(join(app, "pronto/cluster.cue"), 'package prontoproject\nimport cluster "github.com/bonisoft3/pronto/clusters:mecha"\npronto: cluster.#Project\n');
+    await cue(app, ["cmd", "generate", "./pronto"]);
+    assert((await Deno.readTextFile(join(app, ".mise.toml"))).includes("github:bonisoft3/mecha"), "cluster did not contribute its tool");
     await Deno.writeTextFile(join(app, "pronto/builder.cue"), 'package prontoproject\nimport builder "github.com/bonisoft3/pronto/builders:bayt"\npronto: builder.#Toolchain\npronto: say: say: generate: rulemap: custom: {priority: 3, cmds: [{do: "print custom"}]}\n');
     const previousRegistry = Deno.env.get("CUE_REGISTRY");
     const previousCache = Deno.env.get("CUE_CACHE_DIR");

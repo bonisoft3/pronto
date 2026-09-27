@@ -101,6 +101,7 @@ type Entity = {
 };
 
 import { quoteKey } from "./cue.ts";
+import { entries, ifMissing } from "./missing.ts";
 
 const STYLE = /<style\b[^>]*>[\s\S]*?<\/style>/gi;
 const OPEN_TAG = /<([a-z][a-z0-9]*)\s[^>]*>/gi;
@@ -269,8 +270,8 @@ export async function derive(appDir: string): Promise<void> {
   // constraint the previous run derived would judge a row the current run's
   // cel admits, and a module it split would be emitted for a source the
   // current run never read — the files go before the program is read.
-  await Deno.remove(`${appDir}/program_cel.cue`).catch(() => {});
-  await Deno.remove(`${appDir}/program_validations.cue`).catch(() => {});
+  await ifMissing(Deno.remove(`${appDir}/program_cel.cue`), undefined);
+  await ifMissing(Deno.remove(`${appDir}/program_validations.cue`), undefined);
 
   // One export, not one per question: cue dominates this loop, so a second
   // invocation costs more than everything else derivation does.
@@ -341,12 +342,16 @@ export async function derive(appDir: string): Promise<void> {
   const locales = Object.keys(appMeta?.i18n?.locales ?? {});
   const catalogs: Record<string, Record<string, string | Record<string, string>>> = {};
   for (const loc of locales) {
-    const text = await Deno.readTextFile(`${appDir}/messages/${loc}.json`).catch(() => null);
-    if (text !== null) {
-      try {
-        catalogs[loc] = JSON.parse(text);
-      } catch (_) {}
+    const text = await ifMissing(Deno.readTextFile(`${appDir}/messages/${loc}.json`), null);
+    if (text === null) fail(`messages/${loc}.json is declared in i18n.locales and missing`);
+    let catalog: unknown;
+    try {
+      catalog = JSON.parse(text);
+    } catch (e) {
+      fail(`messages/${loc}.json does not parse: ${(e as Error).message}`);
     }
+    if (catalog === null || typeof catalog !== "object" || Array.isArray(catalog)) fail(`messages/${loc}.json is not an object`);
+    catalogs[loc] = catalog as Record<string, string | Record<string, string>>;
   }
   const notes = await decisionNotes(appDir, exp.ir, exp.decisions);
   const byTable = new Map(Object.entries(entities).map(([name, e]) => [e.table, name]));
@@ -360,7 +365,7 @@ export async function derive(appDir: string): Promise<void> {
     for (const [vname, v] of Object.entries(e.validations ?? {})) {
       const why = validationLint(entities, ename, vname);
       if (why !== null) fail(why);
-      const src = await Deno.readTextFile(`${appDir}/${v.src}`).catch(() => null);
+      const src = await ifMissing(Deno.readTextFile(`${appDir}/${v.src}`), null);
       if (src === null) fail(`entity ${ename}: validations "${vname}" src ${v.src} is not a file`);
       if (src.includes(TAG)) fail(`entity ${ename}: validations "${vname}": ${v.src} contains the quote tag ${TAG}`);
       const split = splitCompletion(src);
@@ -411,12 +416,8 @@ export async function derive(appDir: string): Promise<void> {
   // assign's reference from its literals, since a string in that position is a
   // module exactly where one is declared under the name.
   const available = new Set<string>();
-  try {
-    for await (const f of Deno.readDir(`${appDir}/shell/handlers`)) {
-      if (f.isFile && f.name.endsWith(".js")) available.add(f.name.slice(0, -".js".length));
-    }
-  } catch (e) {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  for (const f of await entries(`${appDir}/shell/handlers`)) {
+    if (f.isFile && f.name.endsWith(".js")) available.add(f.name.slice(0, -".js".length));
   }
 
   // What the screens say, as the terminal reads them. Spawned like the export
@@ -503,60 +504,84 @@ export async function derive(appDir: string): Promise<void> {
   if (machines.length > 0) {
     await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
     const files: string[] = [];
-    // fail() is Deno.exit, which runs no finally blocks — so every failure
-    // path inside this block goes through die(), or the machine-*.json temps
-    // outlive the run.
-    const die: (msg: string) => never = (msg) => {
+    // A refusal in this block is thrown, not exited, so the machine-*.json
+    // temps go on every way out; fail() runs no finally block. A temp that
+    // will not go is reported, and the refusal is what the run dies with.
+    class Refused extends Error {}
+    const refuse: (msg: string) => never = (msg) => {
+      throw new Refused(msg);
+    };
+    let refused: string | undefined;
+    try {
+      for (const [i, { screen, region }] of machines.entries()) {
+        // The reader refuses a data-machine that is not JSON, so a chart that
+        // reaches this parses.
+        const parsed = JSON.parse(region.machine) as {
+          field: string;
+          initial: string;
+          context?: Record<string, unknown>;
+        } | null;
+        if (typeof parsed?.field !== "string" || typeof parsed.initial !== "string") {
+          refuse(`${screen}.html: data-machine names no field and initial`);
+        }
+        const file = `.pronto/machine-${i}.json`;
+        await Deno.writeTextFile(`${appDir}/${file}`, region.machine);
+        files.push(file);
+        if (region.emptyRow !== undefined) {
+          let parsedRow: unknown;
+          try {
+            parsedRow = JSON.parse(region.emptyRow);
+          } catch (e) {
+            refuse(`${screen}.html: data-empty-row does not parse: ${(e as Error).message}`);
+          }
+          if (parsedRow === null || typeof parsedRow !== "object" || Array.isArray(parsedRow)) {
+            refuse(`${screen}.html: data-empty-row is not an object`);
+          }
+          const row = parsedRow as Record<string, unknown>;
+          if (row[parsed.field] !== parsed.initial) {
+            refuse(
+              `${screen}.html: data-empty-row["${parsed.field}"] is ${
+                JSON.stringify(row[parsed.field])
+              } but the machine's initial is "${parsed.initial}" — one fact, two values`,
+            );
+          }
+          for (const [k, v] of Object.entries(parsed.context ?? {})) {
+            if (k in row && row[k] !== v) {
+              refuse(
+                `${screen}.html: data-empty-row["${k}"] is ${JSON.stringify(row[k])} but the machine's ` +
+                  `context says ${JSON.stringify(v)} — one fact, two values`,
+              );
+            }
+          }
+        } else if (!(region.filterSpec ?? []).some((p) => p.col === "id" && p.op === "eq")) {
+          refuse(`${screen}.html: a machine region with no data-empty-row must pin its id with an eq filter`);
+        }
+      }
+      const vet = await new Deno.Command("cue", {
+        // The published #Machine, named by the terminal the program targets
+        // rather than by a path into a plugin directory: a consumer keeping the
+        // terminal elsewhere says where by unifying machineSchema, and vets
+        // against the file it ships.
+        args: ["vet", "-d", "#Machine", exp.machineSchema, ...files],
+        cwd: appDir,
+        stderr: "inherit",
+      }).output();
+      if (!vet.success) refuse("a data-machine does not fit the published #Machine");
+    } catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      refused = e.message;
+    } finally {
       for (const file of files) {
         try {
           Deno.removeSync(`${appDir}/${file}`);
-        } catch { /* already gone */ }
-      }
-      return fail(msg);
-    };
-    for (const [i, { screen, region }] of machines.entries()) {
-      // The reader refuses a data-machine that is not JSON, so a chart that
-      // reaches this parses.
-      const parsed = JSON.parse(region.machine) as {
-        field: string;
-        initial: string;
-        context?: Record<string, unknown>;
-      };
-      const file = `.pronto/machine-${i}.json`;
-      await Deno.writeTextFile(`${appDir}/${file}`, region.machine);
-      files.push(file);
-      if (region.emptyRow !== undefined) {
-        const row = JSON.parse(region.emptyRow) as Record<string, unknown>;
-        if (row[parsed.field] !== parsed.initial) {
-          die(
-            `${screen}.html: data-empty-row["${parsed.field}"] is ${
-              JSON.stringify(row[parsed.field])
-            } but the machine's initial is "${parsed.initial}" — one fact, two values`,
-          );
+        } catch (e) {
+          if (e instanceof Deno.errors.NotFound) continue;
+          console.error(`pronto derive: ${file}: ${(e as Error).message}`);
+          refused ??= `${file} was left behind`;
         }
-        for (const [k, v] of Object.entries(parsed.context ?? {})) {
-          if (k in row && row[k] !== v) {
-            die(
-              `${screen}.html: data-empty-row["${k}"] is ${JSON.stringify(row[k])} but the machine's ` +
-                `context says ${JSON.stringify(v)} — one fact, two values`,
-            );
-          }
-        }
-      } else if (!(region.filterSpec ?? []).some((p) => p.col === "id" && p.op === "eq")) {
-        die(`${screen}.html: a machine region with no data-empty-row must pin its id with an eq filter`);
       }
     }
-    const vet = await new Deno.Command("cue", {
-      // The published #Machine, named by the terminal the program targets
-      // rather than by a path into a plugin directory: a consumer keeping the
-      // terminal elsewhere says where by unifying machineSchema, and vets
-      // against the file it ships.
-      args: ["vet", "-d", "#Machine", exp.machineSchema, ...files],
-      cwd: appDir,
-      stderr: "inherit",
-    }).output();
-    if (!vet.success) die("a data-machine does not fit the published #Machine");
-    for (const file of files) await Deno.remove(`${appDir}/${file}`).catch(() => {});
+    if (refused !== undefined) fail(refused);
   }
 
   // The fact store, last: it is a projection of everything above, so anything
@@ -647,9 +672,7 @@ export async function derive(appDir: string): Promise<void> {
   const handlerNames = new Set(screens.flatMap((s) => s.handlers.map((h) => h.replace(/^.*\//, "").replace(/\.js$/, ""))));
   for (const name of [...available].sort()) {
     const rel = `shell/handlers/${name}.js`;
-    const src = await Deno.readTextFile(`${appDir}/${rel}`).catch(() => null);
-    if (src === null) continue;
-    const facts = jessieFacts(src);
+    const facts = jessieFacts(await Deno.readTextFile(`${appDir}/${rel}`));
     const roles = [...(adapterNames.has(name) ? ["adapter"] : []), ...(handlerNames.has(name) || !adapterNames.has(name) ? ["handler"] : [])];
     for (const role of roles) modules.push({ path: rel, ...facts, role });
   }

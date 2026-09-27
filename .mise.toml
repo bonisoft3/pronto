@@ -19,3 +19,20 @@ aqua.minisign = false
 # check-facts.ts, check-loop.ts — and deno.json pins what they import.
 "github:denoland/deno" = "v2.9.7"
 "protoc" = "33.0"
+# check-proto.ts compares every proto the app does not withhold against its git history.
+"github:bufbuild/buf" = "1.73.0"
+
+# check-facts.ts and check-replay.ts run the fact store and the replay through
+# duckdb; http: and per platform for the reasons distribution/config.cue gives.
+[tools."http:duckdb"]
+version = "1.5.5"
+url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-{{ os(macos="osx") }}-{{ arch(x64="amd64") }}.zip'
+
+[tools."http:duckdb".platforms]
+linux-x64 = { url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-linux-amd64.zip' }
+linux-arm64 = { url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-linux-arm64.zip' }
+linux-x64-musl = { url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-linux-amd64-musl.zip' }
+linux-arm64-musl = { url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-linux-arm64-musl.zip' }
+macos-arm64 = { url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-osx-arm64.zip' }
+macos-x64 = { url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-osx-amd64.zip' }
+windows-x64 = { url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-windows-amd64.zip' }

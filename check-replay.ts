@@ -42,6 +42,7 @@
 
 import { fileURLToPath } from "node:url";
 import { exportJson } from "./cue.ts";
+import { entries, exists } from "./missing.ts";
 
 type Finding = { severity: "error" | "advisory"; path: string; message: string };
 
@@ -103,17 +104,10 @@ const BASELINE = "00_initdb";
 
 /** The versions the app declares, in the order pgroll applies them. */
 export async function pgrollMigrations(appDir: string): Promise<string[]> {
-  const found: string[] = [];
-  try {
-    for await (const entry of Deno.readDir(`${appDir}/${PGROLL_DIR}`)) {
-      if (entry.isFile && entry.name.endsWith(".json")) found.push(entry.name.replace(/\.json$/, ""));
-    }
-  } catch (error) {
-    // An app that has never changed a live schema declares none, and the
-    // directory is simply absent; anything else is this pass's problem.
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
-  }
-  return found.sort();
+  // An app that has never changed a live schema declares none, and the
+  // directory is simply absent.
+  const found = await entries(`${appDir}/${PGROLL_DIR}`);
+  return found.filter((e) => e.isFile && e.name.endsWith(".json")).map((e) => e.name.replace(/\.json$/, "")).sort();
 }
 
 /**
@@ -232,16 +226,10 @@ async function steps(container: string, initdb: string): Promise<string[]> {
 export async function locate(appDir: string, scriptPath: string): Promise<string> {
   const name = scriptPath.split("/").pop() ?? scriptPath;
   const owned = `services/database/migrations/${name}`;
-  try {
-    await Deno.stat(`${appDir}/${owned}`);
-    return owned;
-  } catch (error) {
-    // Absence is the answer this asks for. Anything else — a directory that
-    // cannot be read, a broken link — would otherwise be reported as "this step
-    // is the image's", sending a person to a file that is not the one at fault.
-    if (error instanceof Deno.errors.NotFound) return `the database image's ${name}`;
-    throw error;
-  }
+  // Absence is the answer this asks for. A dangling link is still the app's
+  // file, and a directory that cannot be read is raised: either, reported as
+  // the image's, would send a person to a file that is not the one at fault.
+  return (await exists(`${appDir}/${owned}`)) ? owned : `the database image's ${name}`;
 }
 
 async function main(appDir: string): Promise<number> {

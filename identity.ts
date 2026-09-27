@@ -12,6 +12,7 @@
 
 import { boundTypes, boundCarriers } from "./type-table.ts";
 import { exportJson } from "./cue.ts";
+import { ifMissing } from "./missing.ts";
 
 export type FieldId = { name: string; type: string; retired: boolean; precision?: number; scale?: number };
 export type EntityId = { name: string; fields: Record<string, FieldId> };
@@ -115,12 +116,8 @@ async function exportEntities(appDir: string): Promise<ProgramEntity[]> {
 }
 
 async function readSnapshot(appDir: string): Promise<Identities | undefined> {
-  try {
-    return JSON.parse(await Deno.readTextFile(`${appDir}/${SNAPSHOT}`));
-  } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return undefined;
-    throw e;
-  }
+  const text = await ifMissing(Deno.readTextFile(`${appDir}/${SNAPSHOT}`), undefined);
+  return text === undefined ? undefined : JSON.parse(text);
 }
 
 /** 64 random bits with the top one set, as `capnp id` mints them. */

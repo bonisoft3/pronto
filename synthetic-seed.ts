@@ -1,3 +1,5 @@
+import { exists, ifMissing } from "./missing.ts";
+
 export type SyntheticSeedOptions = {
   count?: number;
   seed?: number;
@@ -143,27 +145,16 @@ export async function generateSyntheticSeeds(
   const seed = options.seed ?? 0.42;
 
   if (!options.forceFresh) {
-    const seedsPath = `${appDir}/.pronto/seeds.json`;
-    try {
-      const raw = await Deno.readTextFile(seedsPath);
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
-        return parsed as TableRows;
-      }
-    } catch (e) {
-      if (!(e instanceof Deno.errors.NotFound)) throw e;
+    const raw = await ifMissing(Deno.readTextFile(`${appDir}/.pronto/seeds.json`), null);
+    const parsed = raw === null ? null : JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
+      return parsed as TableRows;
     }
   }
 
-  const factsPath = `${appDir}/.pronto/facts.json`;
-  let facts: FactsJson = {};
-  try {
-    const raw = await Deno.readTextFile(factsPath);
-    facts = JSON.parse(raw);
-  } catch (e) {
-    if (!(e instanceof Deno.errors.NotFound)) throw e;
-    return {};
-  }
+  const factsText = await ifMissing(Deno.readTextFile(`${appDir}/.pronto/facts.json`), null);
+  if (factsText === null) throw new Error(`${appDir}/.pronto/facts.json is missing: run derive first`);
+  const facts: FactsJson = JSON.parse(factsText);
 
   const entities = facts.entity ?? [];
   if (entities.length === 0) return {};
@@ -341,13 +332,7 @@ if (import.meta.main) {
   } else {
     for await (const entry of Deno.readDir("apps")) {
       if (entry.isDirectory) {
-        const factsPath = `apps/${entry.name}/.pronto/facts.json`;
-        try {
-          await Deno.stat(factsPath);
-        } catch (e) {
-          if (e instanceof Deno.errors.NotFound) continue;
-          throw e;
-        }
+        if (!(await exists(`apps/${entry.name}/.pronto/facts.json`))) continue;
         await writeSyntheticSeeds(`apps/${entry.name}`, { forceFresh: true });
       }
     }
