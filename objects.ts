@@ -2,8 +2,8 @@
 //
 // Compared kinds are the ones whose CUE objects carry `ir`. Not compared:
 // `paths` and `diagram` are narration checked through their screen, `auth` has
-// no program object with an id, `review` is the virtual team's work product
-// linted against the team file.
+// no program object with an id, `review` is the virtual team's work product,
+// which no CUE object realizes.
 //
 // The ir is scanned with a regex rather than a DOM parser: this runs inside the
 // derivation, with --allow-read and --allow-run=cue and no network. Ids are

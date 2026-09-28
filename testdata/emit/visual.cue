@@ -1,4 +1,4 @@
-// The visual battery's compose commands, pinned: both run under mise's env,
+// Visual lint's compose commands, pinned: both run under mise's env,
 // where the app publishes COMPOSE_PROJECT_NAME, and the closure run names the
 // project that env publishes, else the app's own — never a literal the
 // environment cannot override.

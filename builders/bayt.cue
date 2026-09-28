@@ -97,7 +97,7 @@ import (
 			// The cluster's aggregate; the sayt template gives it the entry
 			// flags and the profile `skaffold dev` fires on.
 			"launch": sayt.launch
-			// The visual battery. `sayt.integrate` is already `up: true, manual:
+			// Visual lint. `sayt.integrate` is already `up: true, manual:
 			// true` — a load-by-name point kept off the bare-up stack — which is
 			// the shape this needs: a browser cannot reach a running caddy from a
 			// build RUN, so the check is the container's CMD and the verdict is
@@ -106,7 +106,7 @@ import (
 				// No :build dep. The screens this photographs are checked-in
 				// artifacts the srcs below carry, and the ladder regenerates them
 				// at the build rung before ever reaching integrate — depending on
-				// the build image would couple the battery to a toolchain it does
+				// the build image would couple visual lint to a toolchain it does
 				// not use. The plane it drives is an image-only dep, so the entry
 				// closure carries every fragment the aggregate waits on and loads
 				// on its own — the dindbox tier runs it that way.
@@ -128,7 +128,7 @@ import (
 					// Compose resolves this from .bayt/, not the app directory.
 					build: additional_contexts: root: [if B.meta.local {"../../.."}, ".."][0]
 					// Plain HTTP, so the checker measures no secure context and
-					// anything gated on one is uncovered. Nothing in the battery
+					// anything gated on one is uncovered. Nothing in visual lint
 					// reads such an API.
 					environment: APP_URL: "http://caddy:8080"
 					// The aggregate the whole runtime hangs off, healthy: loaded on its

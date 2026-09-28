@@ -62,48 +62,23 @@ Omnishell's doctrine — single data path, forms-only mutations, reactive live q
 
 1. **CUE absorbs pure derivations.** Computed fields, filters, and validation live in the program itself. CUE is total: every expression terminates.
 2. **Remaining handlers are authored in [Jessie](https://github.com/endojs/Jessie)** — the defined safe subset of JavaScript (strict functional core; no `this`, no classes, no ambient authority). Still JS syntax, so LLM fluency is untouched.
-3. **Enforced twice**: statically by the Jessie grammar at compile time, dynamically by running each handler inside an SES Compartment (the mechanism behind MetaMask Snaps).
+3. **Enforced twice**: statically by a gate on the names Jessie denies at compile time, dynamically by running each handler inside an SES Compartment (the mechanism behind MetaMask Snaps).
 4. **Deterministic by construction**: time and randomness arrive as inputs injected by the runtime, never ambient — the same discipline Temporal enforces on workflow code.
 
 Net property: nothing in a Pronto application runs with ambient authority.
 
 ## Escape hatches
 
-Pronto cannot express every computation. Three escapes, ranked; all appear as boxes in ir.html so every hole in the guarantees is visible in the design doc:
+Pronto cannot express every computation. Four escapes, ranked; all appear as boxes in ir.html so every hole in the guarantees is visible in the design doc:
 
 | Escape | Guarantee | Runs where |
 |--------|-----------|-----------|
 | **Pre-compiled WASM** (preferred) | Sandboxed; touches Pronto state only through its CUE-contracted interface | Every tier — the same `.wasm` runs in the tab, in CDC pipelines, and server-side |
-| **External API endpoint** | Clean trust boundary: the Pronto database is only touched by Pronto; beyond HTTP is the external world | Every tier |
-| **Container** | Full escape | Real container at the container and cloud tiers; at the browser tier it binds to a **declared shim** (mock or degraded WASM stand-in), consistent with mecha's best-effort browser consistency model |
 | **Vendored unit** (terminal-tier hatch) | Trusted, audited component or worker mounted by the terminal at a declared point; CUE-contracted props-in/events-out with declared isolation (compartment, iframe, or worker) and capabilities | Browser surface, every tier |
+| **Container** | Full escape | Real container at the container and cloud tiers; at the browser tier it binds to a **declared shim** (mock or degraded WASM stand-in), consistent with mecha's best-effort browser consistency model |
+| **External API endpoint** | Clean trust boundary: the Pronto database is only touched by Pronto; beyond HTTP is the external world | Every tier |
 
 The browser-tier shim supplies an in-browser implementation behind the same interface. Declaring the shim forces the interface contract to be precise enough to mock — pressure in the right direction. (Live-in-tab containers via container2wasm/v86 exist as an opt-in, at emulation speed; WebContainers-class products require commercial licenses.)
-
-## Browser-first, ejected from day one
-
-The entire development loop runs in a browser tab:
-
-- **Authoring**: brief editing + LLM API calls
-- **Compilation**: CUE evaluated by a WASM build of the CUE evaluator (pinned to the same version bayt uses, so exports are byte-identical everywhere), in a Web Worker
-- **Running**: mecha `@browser` — PGlite behind a fetch shim, bloblang/jq WASM pipelines — proven on truco
-- **Version control**: a virtual filesystem (OPFS) holding a real git repo; commits and pushes go to the remote via the GitHub REST API
-
-There is no "eject" moment because the app is ejected from day one: the repo is the source of truth from the first commit, and the tab is just a checkout that happens to also be a runtime. The scaffold commit includes the sayt/bayt files, so cloning to a laptop gives `sayt launch` immediately. The tab is the inner loop; `git push` is the promotion gesture; CI runs the real sayt/bayt lifecycle — containers, integration tests, deploys.
-
-### The inner loop: sayt verbs in the tab
-
-The sayt TDD loop gets a browser tier so a dev cycle never waits on CI. A small JS verb-runner ("sayt-lite") reads the same bayt target definitions from the OPFS checkout and writes the same merkle stamps — the verbs, incrementality, and cascade are shared; only the executor is a browser port:
-
-| Verb | In the tab |
-|------|-----------|
-| `lint@browser` | `cue vet` + IR↔CUE bijection check + Jessie grammar gate + `DOMParser`/`CSSStyleSheet` on screens + mermaid/bloblang parse — the constraint cascade, sub-second |
-| `build@browser` | `cue export` in a worker → OPFS (byte-identical to CI), then wire PGlite, the fetch shim, Compartments, omnishell config |
-| `test@browser` | Contract pairs in Compartments; data-path tests on fresh PGlite (real Postgres semantics); pipeline tests through bloblang/jq wasm; storyboard-path flow tests driving screens in a hidden iframe |
-| `verify@browser` | Pixelmatch rendered storyboard states against the pinned ir.html |
-| `integrate@browser` | Shims only — cross-service integration stays CI-tier, by declared contract |
-
-Everything deterministic runs offline; the LLM is only re-invoked when the brief or ir.html change. See [`docs/archive/2026-07-12-current-architecture.md`](docs/archive/2026-07-12-current-architecture.md) for the full browser-loop design.
 
 ## Drift detection
 
@@ -114,17 +89,17 @@ Deterministic at every rung below the top:
 | brief ↔ ir.html | LLM judgment, human-reviewed — this is the design step | No (by nature) |
 | ir.html ↔ program.cue | Id back-reference bijection check | Yes |
 | program.cue ↔ outputs | `cue export` is a pure function of the program | Yes |
-| Behavior | Test pairs (data in the program) run against the app in a worker | Yes |
-| Visual / flow | State and path diffs on the rendered ir.html | Yes |
+| Behavior | Omnishell's battery and machine walk over the program's modules and charts, and the app's own drivers against the running app | Yes |
+| Visual / flow | Visual lint over the rendered app | Yes |
 
 ## The virtual cluster
 
-Pronto programs don't target machines; they target a **virtual cluster**, the way Java targets a virtual machine. The virtual cluster is mecha's contract surface — a Postgres-shaped store, a CRUD gateway, a CDC event bus, pipeline workers, live query shapes — and every tier realizes that contract with different components, from a multi-cloud deployment all the way down to a single browser tab:
+Pronto programs don't target machines; they target a **virtual cluster**, the way Java targets a virtual machine. The virtual cluster is mecha's contract surface — a Postgres-shaped store, a CRUD gateway, a CDC event bus, pipeline workers, live query shapes — and every tier realizes that contract with different components, from a cloud deployment all the way down to a single browser tab:
 
 ```
 Browser ──────── Edge ──────── Container ──────── Cloud
  PGlite         PGlite in a    Docker Compose     managed services
- fetch shim     Durable Object                    Crossplane
+ fetch shim     Durable Object                    controllers
  one user       single writer  full               full
  eventual       consistent     consistent         consistent
 ```
@@ -148,7 +123,7 @@ The frontend is the cluster's **virtual terminal**. As in the block-mode termina
 
 ### The unified lattice
 
-Pronto does not coordinate cross-cutting concerns (durabilities, effect safety spectrum, RLS authorization, offline queueing, and test fuel budgets) through procedural pipelines or middleware stacks. Instead, every concern is an orthogonal dimension of a **bounded join-semilattice**. CUE unification (`&`) is the mathematical Greatest Lower Bound ($\sqcap$): database schema, interaction lifecycles, and verification tiers intersect into a single deterministic fixed point. Contradictions fail closed at compile time (`cue vet`) before code runs.
+Pronto does not coordinate cross-cutting concerns (durabilities, effect safety spectrum, RLS authorization, offline queueing, and test fuel budgets) through procedural pipelines or middleware stacks. Instead, every concern is an orthogonal dimension of a **bounded join-semilattice**. CUE unification (`&`) is the mathematical Greatest Lower Bound ($\sqcap$): database schema, interaction lifecycles, and verification tiers intersect into a single deterministic fixed point. Most contradictions fail closed at compile time (`cue vet`) before code runs; [the lattice](docs/lattice.md#which-joins-the-code-enforces) lists the joins checked later, at lint or when the writer runs, and those not checked yet.
 
 ## Philosophy
 
@@ -158,7 +133,7 @@ Programming languages exist on a spectrum from "express anything" to "express sa
 - **Data inconsistency** — mecha guarantees at-least-once delivery with idempotent sinks
 - **Infrastructure misconfiguration** — the program generates all infrastructure; there is nothing to hand-configure
 - **State management bugs** — omnishell enforces a single data path and forms-only mutations; handlers cannot perform effects
-- **Runtime surprises** — errors fail at `cue vet` time, not runtime; the constraint cascade catches them before anything runs
+- **Runtime surprises** — most errors fail at `cue vet` time, not runtime ([the joins checked later, or not yet](docs/lattice.md#which-joins-the-code-enforces)); the constraint cascade catches them before anything runs
 
 What you give up in expressiveness (real-time collaboration, GPU compute, sub-100ms distributed state) you gain in correctness for the large class of applications that don't need those things: CRUD apps, SaaS tools, dashboards, content management, workflow automation, internal tools, admin panels.
 
@@ -176,16 +151,17 @@ What you give up in expressiveness (real-time collaboration, GPU compute, sub-10
 - [`SPEC.md`](SPEC.md) — the artifact spec: brief, ir, program
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how the pieces fit, and where to change each one
 - [`prelude.md`](prelude.md) — shared component knowledge, implicit context of every compile
-- [`docs/2026-08-02-terminal-planes.md`](docs/2026-08-02-terminal-planes.md) — terminal planes, storage tiers, state, capabilities, and surface
-- [`docs/2026-08-31-one-ladder-one-grammar.md`](docs/2026-08-31-one-ladder-one-grammar.md) — the durability ladder, DOM as bottom rung
-- [`docs/2026-09-09-i18n-is-a-contract.md`](docs/2026-09-09-i18n-is-a-contract.md) — i18n as an export-time contract
-- [`docs/2026-09-17-localized-urls.md`](docs/2026-09-17-localized-urls.md) — localized routing, BCP 47 paths, and Caddy try_files
-- [`docs/2026-09-23-pronto-omnishell-ssr.md`](docs/2026-09-23-pronto-omnishell-ssr.md) — Materialized SSR (M-SSR), zero-JS resumability, differential sequence hydration
-- [`docs/2026-09-25-the-unified-lattice.md`](docs/2026-09-25-the-unified-lattice.md) — cross-cutting concerns via CUE unification: durability, effect safety spectrum, interaction lifecycles, and verification budgets
-- [`docs/2026-09-25-release-targets.md`](docs/2026-09-25-release-targets.md) — release targets: a program declares them, each is a sayt platform on a tier of mecha's ladder, `release@pages` bundles the app into one HTML file for one user, `release@cloudflare` hosts it in one Durable Object on the free plan for everyone, `release@gcp` and `release@aws` run mecha's images on each cloud's managed services above a floor of one small database, and why each can be built
-- [`../omnishell/docs/2026-09-24-unbreakable-machines.md`](../omnishell/docs/2026-09-24-unbreakable-machines.md) — unbreakable machines, closed effects, DuckDB synthetic seeds, statechart storybook battery, and formal verification
-- `docs/` — the dated design record (lineage)
-- `docs/archive/` — historical and superseded design documents (including [`2026-07-19-prontoui.md`](docs/archive/2026-07-19-prontoui.md))
+- [`docs/component-contracts.md`](docs/component-contracts.md) — component contracts: each part's state, capabilities, and surface, and how data flows between them
+- [`docs/lattice.md`](docs/lattice.md#views-folds-and-the-dom) — the durability ladder, DOM as bottom rung
+- [`docs/localization.md`](docs/localization.md#catalogues) — i18n as a contract, refused before release rather than falling back
+- [`docs/localization.md`](docs/localization.md#addresses) — localized routing, BCP 47 paths, and Caddy's path matchers
+- [`docs/screens.md`](docs/screens.md#how-a-routes-first-document-is-rendered) — server-side rendering: a route's ssr mode crossed with its read scope, pronto's policy over omnishell's mechanism, and which cells are built
+- [`docs/lattice.md`](docs/lattice.md#which-joins-the-code-enforces) — cross-cutting concerns via CUE unification: durability, effect safety spectrum, interaction lifecycles, and verification budgets, and which joins the code enforces
+- [`docs/release-targets.md`](docs/release-targets.md) — release targets: a program declares them, each is a sayt platform on a tier of mecha's ladder, `release@pages` bundles the app into one HTML file for one user, and `release@cloudflare` (one Durable Object on the free plan for everyone), `release@gcp`, `release@aws`, `release@azure` and `release@k8s` (mecha's images on managed services above a floor of one small database) are designed and not built
+- [`../omnishell/docs/machines.md`](../omnishell/docs/machines.md) — unbreakable machines, closed effects, DuckDB synthetic seeds, statechart storybook battery, and formal verification
+- `docs/` — one document per subsystem, and the decisions not yet built
+- [`docs/index.md`](docs/index.md) — every document, with its type and status
+- `docs/archive/` — the superseded design whose business analysis still stands ([`2026-06-12-design-constraint-cascade.md`](docs/archive/2026-06-12-design-constraint-cascade.md))
 
 ## License
 

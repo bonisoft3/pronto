@@ -658,12 +658,12 @@ _cdcTableField: "__table"
 #shellConfig: S={
 	code: #App
 	migrations: [...string]
-	// The terminal's measured floors, carried into the file the visual battery
+	// The terminal's measured floors, carried into the file visual lint
 	// reads. #scale publishes the same struct as --min-*, so the rung an author
 	// is sent to and the threshold a tap target is held to are one declaration.
 	floors: [string]: int
 	// Whether the cluster runs an auth and a crud service: #serverOn, the
-	// predicate that emits them, carried into the file the visual battery reads.
+	// predicate that emits them, carried into the file visual lint reads.
 	server: bool
 	// Whether the app claims a native host beside the web one, carried into the
 	// file the parity check reads to know a route's affordances are owed a peer.
@@ -976,11 +976,9 @@ _cdcTableField: "__table"
 				aggregate: p.transform.aggregate
 				if p.fold == _|_ {shim: p.shim}
 
-				// A fold names its module rather than a shim, and the terminal
-				// runs it at both browser durabilities: the PGlite sink, and the
-				// optimistic projection over the synced sink. The watermark and
-				// dedupe key travel with it — the projection cannot be sound
-				// without either (decision-optimistic-fold).
+				// A fold names its module rather than a shim. The terminal's
+				// projection of the synced sink counts contributions and does not
+				// run the module (docs/pipelines-and-schedules.md#below-the-cluster).
 				if p.fold != _|_ {
 					fold:      p.fold.src
 					projects:  p.fold.projects
@@ -1844,9 +1842,8 @@ _cdcTableField: "__table"
 				// crud table at all, and `FOR TABLE` with an empty list is a syntax
 				// error that aborts initdb — so the publication is emitted only when
 				// there is something to publish.
-				// The fence marks what runs from the tier a WAL reader first exists
-				// at: PGlite below it skips the statements between `-- tier: <tier>`
-				// and `-- tier: any` by that marker, not by their shape.
+				// The publications and the replica identity need a WAL reader, so
+				// they go inside the fence (libraries/mecha/docs/browser.md#the-fence).
 				_wal: #Tier & "container"
 				text: [
 					if len(E._syncTables) > 0 {

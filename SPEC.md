@@ -1,3 +1,9 @@
+---
+type: reference
+title: Pronto artifact spec
+description: What a conforming brief.md, ir.html and program.cue contain, and the lints that enforce it.
+---
+
 # Pronto artifact spec — brief & ir (alpha)
 
 Status: DRAFT alpha. Normative example: [`apps/thenote`](../../apps/thenote)
@@ -147,9 +153,8 @@ team file lists its roles as links/transclusions of role cards
 product IS the ir: one `data-kind="review"` section per listed role
 (verdict + findings), linted deterministically by extracting the team
 file's role links — like acceptance coverage. Provenance: the ir head
-carries `pronto-team` (the reference) and recompiles by a different team
-are different compiles; hashing the composed team markdown into the pin
-chain follows when the team first exercises.
+carries `pronto-team` (the reference), and recompiles by a different team
+are different compiles.
 
 ## ir.html
 
@@ -241,28 +246,23 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   and paths, flows, tests, decisions), `cluster:`, `terminal:`, `loop:`,
   and `build:` (the harness seats — defaulted via
   `pronto.#DefaultCluster`/`#DefaultTerminal`/`#DefaultLoop`/
-  `#DefaultBuild` in program.cue; the runtime trio is redeclared in
-  bayt.cue as the out-of-band override seams). The loop (default sayt,
+  `#DefaultBuild` in program.cue, and
+  [overridden in bayt.cue](docs/component-contracts.md#the-five-parts)). The loop (default sayt,
   rostered as `pronto/loops:sayt`) owns the verb surface; the build
   (default bayt, rostered as `pronto/builders:bayt`) owns the build
   graph, exported concrete as `bayt.json`. `out: pronto.#emit & {code,
   cluster, terminal, loop, build}` derives the emission.
-- **The manifest is part of the program.** `cue export -e out` yields
-  `manifest` (the sorted list of every file the program emits) and `files`
-  (path → `{format, text | data}`). Raw formats (sql, caddyfile, html, css,
-  cue) render to strings inside CUE; structured formats stay structs for the
-  writer to serialize — bayt's `#render` division of labor. `write.ts` walks
-  the bundle onto disk, and is the app's `build` task.
-- **Pinning.** `app.ir.sha256` is the sha256 of the ir.html the program was
+- **Pinning.** `meta.ir.sha256` is the sha256 of the ir.html the program was
   compiled from; the brief→ir→program chain is hash-linked end to end. The
-  bijection checker verifies the pin before it compares anything: against an
-  ir the program was not compiled from, every difference below is noise.
+  bijection checker must verify the pin before it compares anything, since
+  against an ir the program was not compiled from every difference below is
+  noise; none does ([pending](PENDING.md#the-compiler)).
 - **Bijection.** Every object carries `ir`, defaulting to its name/key — the
   ir.html element id it realizes. A storyboard frame has no object of its own:
   its id is *built* as `<the screen's ir>-<state>` and compared whole. The
-  checker demands set equality both ways over ten ir kinds — {entity,
-  pipeline, screen, state, flow, test, decision, handler, hatch, unit} — and
-  both directions are errors. An id in the program with no ir element is code
+  checker demands set equality both ways over eleven ir kinds — {entity,
+  pipeline, screen, state, flow, test, decision, handler, validation, hatch,
+  unit} — and both directions are errors. An id in the program with no ir element is code
   no reviewer signed; an id in the ir with no program object is a designed thing
   the running app silently lacks, and it is the more dangerous of the two.
   Neither is a work-in-progress state to be tolerated: one hop produced the
@@ -277,65 +277,12 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   *are* compared, because they carry `ir` — and a handler is arbitrary code in
   an SES compartment, the largest escape from the declarative surface and
   precisely what a bijection exists to police.
-- **Emitted surface**: the cluster's data plane (migrations, the CDC
-  pipeline, one stream transform per program pipeline, the gateway), the
-  terminal's shell surface, `tests/pairs.yaml`, and the loop and build
-  surfaces. What each runtime demands of the emission — and why — lives
-  with that runtime and its roster seam; the mechanism and its rationale
-  ride `emit.cue` beside the code.
-- **The runtime is published CUE, owned by its implementations.** *Virtual
-  cluster*, *virtual terminal*, *loop*, and *build* are contracts; mecha,
-  omnishell, sayt, and bayt are the default implementations, and others
-  can exist. Each implementation lives with its product and publishes its
-  *role* as a CUE package. **Pronto owns the roster by indirection**: the
-  re-export files under [`clusters/`](clusters/), [`terminals/`](terminals/),
-  [`loops/`](loops/), and [`builders/`](builders/) are the seam — each
-  carries what pronto relies on from its tool, so consumers name the
-  runtime through pronto while the internals stay with their owner.
-  Adding an implementation is adding one re-export file; pinning or
-  forking these modules is pronto's versioning and forking story.
-  Pronto's emitter is their fixed composition — that is the whole "pronto
-  runtime". **Escape hatches are CUE unification on a seam that always
-  exists**: hatches compiled from the ir land in program.cue's cluster
-  unification (`cluster: services: <name>: {...}` plus its launch-gate
-  dep) — they are program output, like every other compiled object. The
-  emitted bayt.cue redeclares the runtime trio unchanged; that
-  redeclaration is the *out-of-band human* override seam (add a service,
-  modify one, `null` drops one) — ir's "escape hatches: none" ⇔ neither
-  the program's cluster unification nor the redeclaration carries changes.
-  The build seat's handoff contract — concrete bayt.json embedded by a
-  thin bayt.cue stub — lives with the roster in
-  [`builders/bayt.cue`](builders/bayt.cue).
-- **The loop runs on builtins.** The emitter emits the files the loop's
-  builtin verbs expect — `.vscode/tasks.json`, `compose.yaml` (an include of
-  the compose bayt emits for the cluster's targets; `launch` drives its
-  aggregate), and `.say.yaml`
-  carrying the checks, each filed under the verb whose layer it needs —
-  `lint` for the ones that read files, `test` and `integrate` for the ones
-  that need a mounted screen or a running cluster. A check the terminal
-  publishes lands in every app's `.say.yaml`; an app adds its own beside
-  them. The doctrine — argv-shaped commands, which
-  check lands at which verb, agent-driven verify — rides the loop
-  contract itself ([`plugins/sayt/loop.cue`](../sayt/loop.cue), rostered
-  as [`loops/sayt.cue`](loops/sayt.cue)).
-- **The shell surface is files, not a DSL.** Screen semantics — bindings,
-  forms (`data-entity`/`data-action` + native constraint validation), states —
-  live in the directly generated HTML/CSS/Jessie. `shell/shell.yaml` is only
-  a file map: route → `{html, css, handlers}` plus nav labels and the boot
-  `tables` list (derived from the screens' reads). Nothing the runtime
-  consumes is stated twice.
-- **Assembly files.** ir.html defines the units; the foreign-language files —
-  HTML, CSS, Jessie, bloblang, SQL beyond the derived DDL — are the assembly
-  the compiler emits directly, living in the app tree (`shell/screens/*`,
-  `pipelines/*.blobl`). program.cue is the link map: it derives what is
-  derivable, references assembly by path (`src` entries; the writer verifies
-  presence and copies only when target ≠ src), and inlines content via
-  `@embed` only where a consumer cannot reference a file (rpk's mapping).
-  Trivial static stack text (migration preludes) may stay in CUE;
-  pronto-owned static assets (the Caddyfile) ship under
-  `plugins/pronto/assets/`, embedded at export.
-- **Not emitted**: `.mise.toml` (scaffold-owned), the ir view (ir.html is
-  itself the pinned artifact).
+
+**The bijection is total.** No kind and no write is exempt by durability: a
+handler that updates only a `tab` entity owes its ir element as one writing the
+database does. Levying ir coverage by what a write reaches is
+[review by consequence](docs/decisions/2026-08-27-review-by-consequence.md),
+not built.
 
 A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
 parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as
@@ -346,24 +293,48 @@ entity's `invariant:` binds `this` to the row instead of the value, so it
 derives a CHECK body and nothing for CUE: a predicate over several columns
 constrains no one field's value.
 
-Known gaps, deliberate at alpha: the
-pairs runner behind `tests/pairs.yaml` is unbuilt; derived entities rely on
-convention, not roles, to stay pipeline-only-writable. What an entity is — a
-durable identity (a Cap'n Proto type id, with ordinals for fields) that
-statements attach to — and what may be stated about it are
-[`docs/2026-09-21-an-entity-is-what-everything-points-at.md`](docs/2026-09-21-an-entity-is-what-everything-points-at.md);
-with identity recorded, the author's whole surface for evolution is one
-declaration and retirement. A rename is refused rather than inferred: what a
-holder reads is keyed by name, so telling a rename from a drop beside an add
-decides which message to print, not which change to permit. Three rules above
-are what that design replaces and are normative until it lands: an entity's id is its
-PascalCase name and a `[[wikilink]]`'s text is that id (one snake label, with
-the type id as a `data-type-id` attribute no model writes); the bijection
-compares `ir` strings (it gains *identities only grow*); and "Compile diffs"
-asks for a semantic differ that identity is what makes sound. What keeps
-it — the changes a program may express, and the four readers that refuse the
-rest — is
-[`docs/2026-09-24-refusing-a-schema-change.md`](docs/2026-09-24-refusing-a-schema-change.md).
+### Field types
+
+A field's type is one of fifteen portable types, and the type system is the
+compiler's alone. Each type names a standard and a **canonical string, such
+that two values are equal if and only if their canonical strings are**
+([why](docs/types-and-identity.md#portable-types)).
+
+| Type | Standard | Canonical form | String order is value order |
+|---|---|---|---|
+| `string` | Unicode | UTF-8 scalar values, no U+0000, no normalisation | [text order](docs/types-and-identity.md#portable-types) |
+| `bool` | proto3 | `true`, `false` | — |
+| `int32` | proto3 | decimal digits, no leading zeros, no `-0` | no |
+| `int64` | proto3 | the same, as a JSON string | no |
+| `double` | IEEE 754 | RFC 8785 number; `NaN` and `±Infinity` refused | no |
+| `bytes` | RFC 4648 | canonical Base64 | — |
+| `uuid` | RFC 9562 | lowercase, hyphenated | yes |
+| `timestamp` | RFC 3339 | UTC with `Z`, exactly six fractional digits | yes |
+| `date` | RFC 3339 | `YYYY-MM-DD` | yes |
+| `time` | RFC 3339 | `HH:MM:SS.ffffff` | yes |
+| `timezone` | IANA tzdb | a canonical zone name | — |
+| `duration` | RFC 3339 App. A | total seconds, `PT5400S`; no month or day component | no |
+| `decimal` | XSD 1.1 | exact fixed point, no leading zeros, no exponent | no |
+| `json` | RFC 8259 | the text as given; unindexed | — |
+| `geojson` | RFC 7946 | a GeoJSON geometry or feature | — |
+
+Where the last column says no, values compare through the type's comparator;
+where it says —, the type has no order, and a column that asks for one is
+refused. `types.cue` states each type as data — its pattern, its order, and
+`beyond`, the closed vocabulary of checks a pattern cannot say (`calendar`,
+`int64-range`, `duration-range`, `tzdb`, `decimal-profile`, `scalar-values`,
+`finite-numbers`, `ring-closure`) — and a holder meeting a check it does not
+implement refuses the table rather than skipping it. Why, and where each
+boundary makes a value canonical, is
+[types and identity](docs/types-and-identity.md).
+
+An entity is a durable identity — a Cap'n Proto type id, with ordinals for its
+fields — that only `identity.ts` mints and `.pronto/identity.json` keeps
+append-only ([workflow](GUIDE.md#identity),
+[argument](docs/types-and-identity.md#identity)).
+The `ir` strings the bijection compares are the ids, PascalCase for entities,
+and a `[[wikilink]]`'s text is that id. What a change may do with an identity
+is [schema changes](docs/schema-change-admission.md#what-pronto-admits).
 
 ## Verify is agent-driven
 
@@ -379,7 +350,9 @@ All deterministic, all pre-LLM, reported as structured findings
 (`{severity, path, message}` JSON). A finding fails its verb unless its
 severity says otherwise: a check that cannot reach part of what it grades
 reports that as `advisory`, because an app carrying one has no way to make it
-reachable and a gate it cannot satisfy is a gate it will route around:
+reachable and a gate it cannot satisfy is a gate it will route around. Lints
+1–3, 8, 9 and 11 and the CEL half of 10 have no checker
+([pending](PENDING.md#the-compiler)):
 
 1. Every brief `[[id]]` resolves to an ir.html element id.
 2. Every `![[]]` transclusion target exists.
@@ -391,7 +364,7 @@ reachable and a gate it cannot satisfy is a gate it will route around:
 8. Frontmatter conforms to the harness schema.
 9. `pronto-brief-sha256` matches the current brief.md (staleness).
 10. Mermaid blocks parse; CEL spans parse.
-11. `app.ir.sha256` matches the current ir.html (program staleness) — the
+11. `meta.ir.sha256` matches the current ir.html (program staleness) — the
     bijection checker's precondition, reported there.
 12. ir↔program bijection: set equality both ways over the eleven checked kinds,
     plus id uniqueness on each side, plus each screen's `data-route` equal to
@@ -404,9 +377,21 @@ reachable and a gate it cannot satisfy is a gate it will route around:
     contradiction; an ir fact is loose, so a claim with no witness is a finding
     while a program fact no diagram draws is not. `.mise.toml` is
     scaffold-owned, so a new app carries the `http:duckdb` pin the rule needs.
-    Severity gates the exit as the visual battery's does: a contradiction
+    Severity gates the exit as visual lint's does: a contradiction
     between two rungs is an error, an acceptance claim nothing has settled yet
     is a warning — the ledger exists to track that work, not to fail on it.
+15. The design literal lint, from the same fact store: a CSS literal equal to a
+    published rung of the same dimension (`styles.ts`'s table: `rule`, `space`,
+    `radius`, `motion`, `layer`, `ratio`, `text`, `leading`) is a `warning`
+    naming the token, a role before a rung; a root `font-size` is an `error`.
+    `/* pronto-literal: derived */` or `pending` excuses the next declaration
+    alone — `derived` only in a block that references a token, `pending`
+    counted by `meta.design.pendingLiterals` with equality, any other reason an
+    `error`. Every published rung equals the vendored bytes under `scales/` it
+    quotes, joined on (source, token): the quotation, the witness, the
+    contradiction, the admission and the provenance rules, all `error`, with
+    emptiness an `error` too. Why a scale, and why a quotation:
+    [the design scale](docs/design-scale.md).
 
 ## Compile diffs
 

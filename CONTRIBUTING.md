@@ -1,121 +1,102 @@
+---
+type: howto
+title: Contributing to pronto
+description: Changing pronto itself — the two invariants, the commands, where a compiler check is declared, and where each subsystem is argued.
+---
+
 # Contributing to pronto
 
-How the pieces fit, and where to change each one. `README.md` is the pitch,
-`SPEC.md` is normative — what a conforming `brief.md` and `ir.html` must
-contain, enforced by lints — and `docs/` holds the dated arguments behind
-individual decisions. This page is the map between them.
+For changing pronto itself. [`README.md`](README.md) is the concept,
+[`GUIDE.md`](GUIDE.md) the app author's tour, [`SPEC.md`](SPEC.md) the
+normative artifact spec, and [`prelude.md`](prelude.md) what every compilation
+assumes. `DESIGN.md` in this repository always means an app's design block
+([`SPEC.md`](SPEC.md#designmd)). Which file owns what is
+[the compiler's map](docs/compiler.md#where-each-part-lives).
 
-A note on one filename: `DESIGN.md` is **an app's** design system here, not
-pronto's architecture. `emit.cue` lists it beside `brief.html`, `ir.html` and
-`acceptance.md` as a ladder satellite, and its YAML frontmatter **is** the
-app's design block: exactly the fields of `schema.cue`'s `#Design`, every one
-optional, read by `#DesignMd` from the text `program.cue` embeds
-(`@embed(file="DESIGN.md", type=text)`), so the program restates none of it. A
-key `#Design` lacks, or a file with no frontmatter, fails `cue vet`. The body
-is the argument for the values. `derive.ts` hashes the file as a source, so an
-edit without a rebuild is a stale-row finding at `check-facts`. Pronto's own
-architecture is this file.
+## Two invariants
 
-## The ladder, and what is deterministic about it
+**The program is data, and `cue export` is the backend.** Everything an app
+becomes is `cue export -e out` over its `program.cue`, and `write.ts` only
+materializes it and records it in `.pronto/manifest.json`. An emitted file is
+never edited; the change goes where it derives from, in `emit.cue` or the
+program. Only the two model hops are probabilistic, and everything below the
+program is a pure function and a check
+([the ladder](docs/compiler.md#the-ladder)).
 
+**Nothing a model wrote runs with ambient authority**
+([the constraint cascade](docs/compiler.md#the-constraint-cascade)). A change
+that grants a handler a clock or a network ends the argument.
+
+## Workflows
+
+```bash
+just build   # deno check over every *.ts
+just lint    # the same check, as sayt's lint rulemap
+just test    # the .say.yaml rulemap: bounds.ts, check-loop.ts --self-test,
+             # cue vet -c ./testdata/emit, and the *_test.ts / *.test.ts suites
+deno task test:integration   # types through Postgres, PostgREST and Electric; needs Docker
 ```
-brief.md ── LLM ──▶ ir.html ── LLM (narrow) ──▶ program.cue ── cue export ──▶ everything
- product              engineering                machine              mecha YAML, omnishell
- altitude             altitude                   altitude             config, HTML/CSS, handlers
-```
 
-Three artifacts, one per audience, and the reason there are three is that each
-is reviewed by someone different. `brief.md` is what a product person writes.
-`ir.html` is the design doc an engineer signs — boxes, arrows, screen sketches,
-numbered decisions — and it renders in any browser with no tooling. `program.cue`
-is a compiler intermediate that happens to be committed; nobody reviews it.
+From the repository root, `just sayt -d plugins/pronto <verb>` runs the same.
+`testdata/emit` pins `emit.cue`'s output against a small program; it sits
+outside every `./...` pattern, so no app or scan evaluates it.
 
-**Only the first hop is probabilistic, and that is the rung a human is
-reviewing anyway.** Everything below it is checkable, which is the property the
-whole design is arranged around:
+**Adding a test file**: the `test` rulemap in `.say.yaml` names test files one
+by one, so a suite that is not listed there runs only when someone globs it by
+hand. **Adding a compiler check**: its command goes in `distribution/config.cue`
+under `checks`, and `#DefaultLoop` in `emit.cue` declares it under the verb
+whose layer it needs, which files it into every app's `.say.yaml`
+([checks and verbs](docs/component-contracts.md#checks-and-verbs)).
+Findings are `{severity, path, message}` JSON ([SPEC](SPEC.md#lints)).
 
-| Rung | Mechanism | Deterministic |
-|---|---|---|
-| brief ↔ ir | LLM judgment, human-reviewed — this *is* the design step | no |
-| ir ↔ program | id bijection (`objects.ts`) | yes |
-| program ↔ outputs | `cue export` is a pure function | yes |
-| behaviour | test pairs, data in the program | yes |
-| visual | the battery over rendered screens | yes |
+## The subsystems
 
-`ir.html` is a stage rather than a projection *of* the program, and that was a
-deliberate trade: a projection can never hold information the program lacks,
-which defeats the point of reviewing architecture before it is frozen. The cost
-is the second hop, and the bijection check is what contains it.
+**The compiler** turns a brief into an app through three artifacts, two model
+hops and deterministic rungs below them; it holds the program to the ir by a
+total bijection, emits every output from one export, and reaches the parts it
+configures only through their CUE surfaces and published commands:
+[compiler.md](docs/compiler.md).
 
-## The compiler
+**Component contracts** are what the app and the cluster, terminal, loop and
+build graph it runs on each declare — state, capabilities, surface — and how
+data moves among them as one graph:
+[component-contracts.md](docs/component-contracts.md).
 
-| File | Owns |
-|---|---|
-| `schema.cue` | what may be declared — `#Entity`, `#Pipeline`, `#Screen`, `#Flow`, `#App` |
-| `emit.cue` | emission: every output the program becomes |
-| `derive.ts` | derivation from screen markup — reads, handler lists, decisions |
-| `write.ts` | materializing the emission bundle onto disk |
-| `objects.ts` | the bijection surface: which ids each rung defines, under what kind |
-| `facts.ts` / `check-facts.ts` | the fact store, and the invariants two rungs owe each other |
-| `jessie.ts` | what a Jessie module may reference and what it evaluates to |
-| `acceptance.ts` | the acceptance ledger and the ir's claims about it |
+**Types and identity**: fifteen portable types, each equal exactly when its
+canonical strings are, rendered into each boundary's own hook, and an entity's
+minted type id and field ordinals, so a name is a label nothing is keyed on:
+[types-and-identity.md](docs/types-and-identity.md).
 
-The four seats a program targets are declared as CUE, one file each:
-`clusters/mecha.cue`, `terminals/omnishell.cue`, `loops/sayt.cue`,
-`builders/bayt.cue`. A program is not coupled to any of them beyond the seat's
-shape — that is what makes the seat a seat.
+**Schema changes** admit additions and retirements and refuse renames, drops
+and retypes, through four readers that each see what the others cannot:
+[schema-change-admission.md](docs/schema-change-admission.md).
 
-## What the constraint cascade buys
+**The lattice** is the durability ladder and the dimensions declared beside
+it, with the joins the code refuses and the validation rung:
+[lattice.md](docs/lattice.md).
 
-The thesis is one sentence: **the smaller the surface an LLM must write, the
-higher its success rate.** Mecha and omnishell exist to reduce an application
-to infra config, HTML/CSS, and small pure handlers, and every layer below is
-arranged to keep computation out of the LLM's hands:
+**Access** compiles each entity's declared mode into mecha's tenancy floor and
+the policies inside it, mirrored in the browser, and gives a reader inside an
+aggregate they cannot see an exact count: [access.md](docs/access.md).
 
-1. **CUE absorbs pure derivation** — computed fields, filters, validation. CUE
-   is total, so every expression terminates and no second total language is
-   needed.
-2. **Handlers are Jessie** — a defined safe subset of JS: no `this`, no
-   classes, no ambient authority. JS syntax keeps LLM fluency, and a defined
-   grammar makes constrained decoding possible.
-3. **Enforcement is dual** — the grammar gate at compile time, an SES
-   Compartment at runtime.
-4. **Time and randomness are injected**, never ambient.
+**Pipelines and schedules** keep derived entities from another's changes and
+turn periodic work into rows:
+[pipelines-and-schedules.md](docs/pipelines-and-schedules.md).
 
-The net property, and it is the one to protect: **nothing in a pronto
-application runs with ambient authority.** A change that grants a handler a
-clock or a network is not a feature, it is the end of the argument — see
-`plugins/omnishell/docs/2026-08-02-terminal-doctrine.md` for the open question
-this leaves.
+**Localization** derives catalogues, addresses, the door's negotiation and
+crawlable documents from one declaration, and keeps `Intl` the terminal's: [localization.md](docs/localization.md).
 
-## Escape hatches, ranked
+**The design scale** quotes vendored rungs beneath an app's roles and refuses a
+literal wherever a rung exists: [design-scale.md](docs/design-scale.md).
 
-Every escape is a box in `ir.html`, so a hole in the guarantees is visible in
-the design doc an engineer reviews. In order of preference:
+**Screens** are derived from their markup where the markup is the authority,
+checked against the program where the program is, and rendered per route by a
+policy pronto owns over omnishell's mechanism: [screens.md](docs/screens.md).
 
-1. **Pre-compiled WASM** — sandboxed, the interface is a CUE contract, and the
-   same `.wasm` runs at every tier. The only escape that leaves vertical
-   scaling untouched.
-2. **External API endpoint** — a full escape with a clean trust boundary: the
-   pronto-managed database is only ever touched by pronto.
-3. **Container** — a full escape realized per tier, binding at browser tier to
-   a *declared shim*. Declaring the shim is what forces a mockable interface.
+**Release targets** project each target a program declares into a sayt
+`release@<target>` rule on one tier: [release-targets.md](docs/release-targets.md).
 
-## The loop
-
-`just build`, `just test`, `just integrate` in this directory. The
-determinism the ladder claims is only real if you check it, so the checkers
-are the fast tier: the bijection, the fact invariants, the Jessie grammar
-gate, and `cue vet` against the stack schemas all run without a cluster.
-
-Recompiling an unchanged brief may legitimately produce a different ir —
-models and prompts move — and that diff is productive rather than a fault.
-`SPEC.md`'s "Compile diffs" specifies the merge workflow.
-
-## Where the arguments live
-
-`docs/` carries pronto's own: the ladder and its grammar, the incremental
-model, what must be reviewed versus merely checked, the screen typechecker,
-validation. The terminal's arguments are `plugins/omnishell/docs/`, the
-cluster's are `libraries/mecha/docs/`, and `PENDING.md` is what is argued and
-not yet built.
+The terminal's arguments are [omnishell's index](../omnishell/docs/index.md),
+the cluster's [mecha's](../../libraries/mecha/docs/index.md), and what is argued
+and not built is [`PENDING.md`](PENDING.md). Everything else:
+[docs/index.md](docs/index.md).

@@ -90,8 +90,8 @@ imitation alone is a bar met at second place.
 Reference platforms. Responsive is not a property a screen has, it is a
 property it has *somewhere*: the elected set is the latest iPhone, the latest
 Samsung, and Chrome on a MacBook, and a surface is unfinished until it is
-gorgeous on all three rather than merely unbroken on one. The structural
-batteries do not answer this and cannot — a card can pass overflow, tap-target
+gorgeous on all three rather than merely unbroken on one. Visual lint's
+structural checks do not answer this and cannot — a card can pass overflow, tap-target
 and overlap and still break a headline mid-word because a thumbnail took two
 thirds of its column. Look at the screen at the width, and treat "no findings"
 as the beginning of the review rather than the end of it. A layout tuned only

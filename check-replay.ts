@@ -15,8 +15,10 @@
 // a rename spelled by dynamic EXECUTE lands here like a plain one.
 //
 // It also applies the set a second time, which is the other thing no reader of
-// the text finds: 005_policies.sql emits CREATE POLICY, which squawk reports
-// nothing about and Postgres refuses on the second pass.
+// the text finds: a step that cannot be applied twice never lets a correction
+// below it reach a database that already exists. The emitter restates its
+// objects (DROP POLICY IF EXISTS before CREATE POLICY, CREATE OR REPLACE,
+// DROP TRIGGER IF EXISTS).
 //
 // The database is the app's own image, resolved through the generated compose
 // rather than named here: it is the one carrying plv8, and its name is the

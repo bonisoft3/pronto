@@ -13,13 +13,8 @@ import (
 	"github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
-// A target is a place a program is released to and verified against, the word
-// after `@` in `sayt release@<target>`. A tier is what mecha's cluster is made
-// of there, ordered so the SQL fence `-- tier: <tier>` reads "from this tier
-// up": a publication fenced at container runs on compose and on both clouds,
-// and PGlite skips it in a page or an edge object. pages runs at browser,
-// cloudflare at edge, gcp and aws at cloud; compose is the container tier
-// every app develops on and no target.
+// A target is where a program is released; a tier, a rung of mecha's ladder
+// (docs/release-targets.md#targets-platforms-and-tiers).
 #Target: "pages" | "cloudflare" | "gcp" | "aws"
 #Tier:   "browser" | "edge" | "container" | "cloud"
 
@@ -436,7 +431,7 @@ import (
 
 // An entity's durable identity: 64 random bits, Cap'n Proto's form, minted by
 // identity.ts and never by the compiling model. Why a name cannot be this is
-// docs/2026-09-21-an-entity-is-what-everything-points-at.md.
+// docs/types-and-identity.md#identity.
 #TypeId: string & =~"^0x[89a-f][0-9a-f]{15}$"
 
 // A field's type is a portable type the table names (types.cue), or one of the
@@ -704,16 +699,18 @@ import (
 		src: *"pipelines/\(name).blobl" | string // assembly file holding the mapping
 		bloblang: string // its content — inlined where the consumer cannot reference files
 	}
-	// The BROWSER-side transform, written as a fold: empty(key), step(acc, row),
-	// combine(a, b), result(acc), with `harden` supplied by SES. It replaces
-	// `shim` — the shim contract is (rows) => one row on id, which cannot state
-	// a keyed aggregate — and it additionally lets the terminal project the
-	// sink optimistically, resuming the fold over rows the sink has not counted.
+	// A keyed aggregate's transform, written as a fold: empty(key),
+	// step(acc, row), combine(a, b), result(acc), with `harden` supplied by
+	// SES. Nothing runs the module at any tier
+	// (docs/pipelines-and-schedules.md#below-the-cluster): the declaration is
+	// the served contract that `projects`, `watermark` and `pair` hang off. It
+	// replaces `shim`, whose (rows) => one row on id cannot state a keyed
+	// aggregate.
 	//
 	// The container keeps its bloblang. rpk can run this module (it embeds
-	// goja), and an earlier revision did, but nothing lints a JavaScript string
-	// inside a pipeline YAML while `redpanda-connect lint` does catch a broken
-	// mapping — so the sharing bought less than the lost build-time check cost.
+	// goja), but nothing lints a JavaScript string inside a pipeline YAML while
+	// `redpanda-connect lint` does catch a broken mapping — so the sharing
+	// bought less than the lost build-time check cost.
 	// Convert a container transform only where the aggregate is substantial
 	// enough that two expressions of it could genuinely diverge.
 	//
@@ -734,8 +731,8 @@ import (
 		// strictly after the read, so it counts rows it never saw.
 		watermark: string
 		// Source columns uniquely identifying one contribution (the table's
-		// composite unique). The reader's rows are collapsed on it: the server
-		// holds one, so counting duplicates shows a total that cannot exist.
+		// composite unique). The projection reads `key`, not these, to hold the
+		// reader to one row.
 		dedupe: [...string]
 		// Source column that, when set, means the row has been retracted.
 		retracted: string
@@ -773,10 +770,11 @@ import (
 	// filter uses {cutoff}: cutoff = now - window.
 	window?: string
 	set?: {[string]: bool | int | string} // PATCH body for action "update"
-	// Browser tier cannot run bloblang; per the escape-hatch doctrine a cdc
-	// pipeline binds to a declared shim there: a pure ES module, rows → sink
-	// row. Scheduled and raw pipelines have no shim (no browser analogue), and
-	// a fold needs none — it already runs at every tier.
+	// A cdc pipeline's browser twin of its bloblang: a pure ES module, rows →
+	// sink row, declared and served. The page's cluster runs no stream, so
+	// nothing executes it (docs/pipelines-and-schedules.md#below-the-cluster).
+	// Scheduled and raw pipelines have no shim, and a fold names its module
+	// instead.
 	if trigger == "cdc" if raw == _|_ if fold == _|_ {
 		shim: *"pipelines/\(name).browser.js" | string
 	}
@@ -878,7 +876,7 @@ import (
 	name:  string
 	ir:    *name | string
 	title: string
-	route: string // may contain one `:param` segment; params reach filters, hidden values, and `{param.x}` interpolation
+	route: string // may contain `:param` segments; params reach filters, hidden values, and `{param.x}` interpolation
 	// The message key this route's FIRST segment is drawn from — regras /
 	// reglas / rules. Declaring it makes the route addressable in every
 	// locale; the segments after the first, literal or `:param`, are carried

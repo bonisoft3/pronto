@@ -1,12 +1,11 @@
 #!/usr/bin/env -S deno run --allow-read=.
 // The outer loop's checkable budget, levied on the loop itself.
 //
-// `docs/2026-08-27-what-must-be-reviewed.md` splits every obligation in two:
-// checkable is mechanical and total, reviewable is expensive and levied by
-// consequence. The turn command and its workflow scripts are prose an agent
-// reads, so nothing downstream would notice a verb that does not exist, an
-// agentType naming no card, or a phase title the progress tree never groups
-// under. Those are all checkable, so none of them are reviewed.
+// Checking is mechanical and total (docs/compiler.md, "The bijection"). The
+// turn command and its workflow scripts are prose an agent reads, so nothing
+// downstream would notice a verb that does not exist, an agentType naming no
+// card, or a phase title the progress tree never groups under. Those are all
+// checkable, so they are checked here rather than left to review.
 
 /**
  * The lifecycle verbs, plus the CLI's own `help`. A project may declare custom

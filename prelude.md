@@ -1,3 +1,9 @@
+---
+type: reference
+title: The pronto prelude
+description: The component knowledge implicit in every brief-to-ir compilation — entities, durability, pipelines, screens, capability, identity, hatches, the team, the loop, tiers and tests.
+---
+
 # The pronto prelude
 
 Implicit context for every brief → ir compilation. A brief never re-describes
@@ -17,10 +23,10 @@ in expense, so a brief picks the cheapest that still holds:
 
 - **tab** — survives navigation. Client-held; nothing else can reach it.
 - **device** — survives a restart. Client-held.
-- **server** — survives device loss; forms write through PostgREST and the
-  client asks for each read.
-- **live** — ...and the client sees changes without asking, via ElectricSQL
-  shapes. Written only by pipelines.
+- **server** — survives device loss; forms write through PostgREST. Like
+  `live` and `offline`, it reaches the client through an ElectricSQL shape, and
+  only [the CDC publication](#liveness-and-delivery) sets it apart.
+- **live** — ...and the client sees changes without asking.
 - **offline** — ...and it works with no network. For briefs that ask for
   offline capture or multi-device use.
 
@@ -46,8 +52,9 @@ emitted `txid` column for exactly this). Delivery is at-least-once end to
 end — WAL to bus to pipelines, and WAL to shapes to screens — so every
 consumer, browser included, must be idempotent; client-minted keys and
 the proxy's duplicate-absorbing posture make retries safe. The CDC
-publication covers server-durability tables only: that scoping, not consumer
-discipline, is what makes pipeline feedback loops unrepresentable.
+publication covers server-durability tables only, so a pipeline must write a
+sink that is not `server`, or it feeds its own input; nothing refuses one that
+does.
 
 ## Screens and the shell
 
@@ -58,8 +65,9 @@ Jessie handlers running in SES Compartments, each receiving its arguments and
 nothing else — no DOM, no store, no ambient authority; time and randomness
 are injected. A handler returns a description of an effect for the shell to
 perform (Elm's `Cmd`, not `update` — a handler never receives the whole
-model); see `plugins/omnishell/docs/2026-08-02-terminal-doctrine.md` for the full comparison
-and why "handler," not "island" or "update."
+model); see [`plugins/omnishell/docs/terminal.md`](../omnishell/docs/terminal.md) for the full comparison
+and [component contracts](docs/component-contracts.md#rejected) for why
+"handler," not "island" or "update."
 
 ## Capability
 
@@ -122,8 +130,8 @@ terminal does not offer fails to compile.
 
 Ranked: pre-compiled WASM behind a CUE contract, then a vendored unit at the
 terminal tier (a component or a worker, with declared isolation and
-capabilities), then an external API endpoint,
-then a container (with a declared shim at the browser tier). Every escape is a
+capabilities), then a container (with a declared shim at the browser tier),
+then an external API endpoint. Every escape is a
 box in ir.html; an app with none says so in its Decisions section.
 
 ## The virtual team
@@ -173,9 +181,11 @@ layer, not grounds for demoting a check to a slower one.
 
 ## Tiers
 
-The same program runs in a browser tab, at cli (native binaries), container
-(Docker Compose), k8s, and cloud. A brief's `cluster:` harness slot declares which the app
-targets; nothing in the program changes between them.
+Pronto names four rungs of
+[mecha's ladder](../../libraries/mecha/README.md#4-vertical-scalability-down-and-up)
+— `browser`, `edge`, `container`, which is mecha's single machine, and `cloud`
+— of which the browser and the container are built; where an app is released,
+and what each target refuses, is [release targets](docs/release-targets.md).
 
 ## Tests
 

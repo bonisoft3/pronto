@@ -498,7 +498,7 @@ async function main(appDir: string): Promise<void> {
   const sql = `${views(factsPath, present, live)}\n${await invariants}`;
   const findings = await query(sql, appDir);
   console.log(JSON.stringify(findings, null, 2));
-  // Severity gates the exit, as the visual battery already does: a contradiction
+  // Severity gates the exit, as visual lint already does: a contradiction
   // between two rungs is an error, while a promise nothing has settled yet is
   // work the ledger is meant to track rather than a program that is wrong.
   if (findings.some((f) => f.severity === "error")) Deno.exit(1);

@@ -14,7 +14,7 @@ The inner loop is sayt's: pick the verb pair for the layer, ping-pong until
 green, advance the cascade. It is total, mechanical and free, and it settles
 everything a command can settle.
 
-This is the outer loop. Its whole job is routing — `docs/2026-08-27-what-must-be-reviewed.md`
+This is the outer loop. Its whole job is routing — `docs/decisions/2026-08-27-review-by-consequence.md`
 splits every obligation into *checkable* and *reviewable*, and a turn sends each
 one to the budget that can decide it. Checkable goes to a verb. Reviewable goes
 to a seat, bounded. Nothing else happens here.

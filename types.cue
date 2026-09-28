@@ -9,9 +9,8 @@
 // a name it does not implement refuses the table, not the value, because the
 // alternative is a check silently not run.
 //
-// Which standard each type obeys is the Pronto type system doc's table
-// (docs/2026-09-23-pronto-type-system.md); an entry states what a
-// holder reads, and nothing reads prose.
+// Which standard each type obeys is SPEC.md's field types table; an entry
+// states what a holder reads, and nothing reads prose.
 package pronto
 
 import "list"

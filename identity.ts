@@ -7,8 +7,8 @@
 // The snapshot (.pronto/identity.json) is history, not a derivation: only `mint`
 // writes it and only by growing it, so a program that lost an identity cannot
 // launder the loss by regenerating. The argument is
-// docs/2026-09-21-an-entity-is-what-everything-points-at.md, "Identity is
-// append-only, and no model mints it".
+// docs/types-and-identity.md#identity, "Identity is append-only, and no model
+// mints it".
 
 import { boundTypes, boundCarriers } from "./type-table.ts";
 import { exportJson } from "./cue.ts";

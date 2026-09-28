@@ -1,3 +1,11 @@
+---
+type: decision
+title: "Design: Pronto — AI App Builder With Constraint-Cascade Architecture"
+description: The startup-mode design — constraint-cascade generation and a scale-to-zero runtime against the prompt-to-app category — whose business analysis still stands.
+status: superseded
+superseded_by: ../../SPEC.md
+---
+
 > **Lineage document.** Kept for history; the current technical design is [../../SPEC.md](../../SPEC.md). The business/startup analysis here still stands.
 
 # Design: Pronto — AI App Builder With Constraint-Cascade Architecture
