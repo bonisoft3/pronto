@@ -1,4 +1,4 @@
-/** Portable, bounded values in the Pronto language type system. */
+/** Portable, bounded values: the types a type table may name. */
 export type PortableType =
   | "string"
   | "bool"
@@ -52,7 +52,7 @@ export type TypeCheck =
   | "ring-closure"
 export type CarrierCheck = TypeCheck
 
-/** One type entry, as the program states it (pronto's types.cue). */
+/** One type entry, as the caller's type table states it. */
 export type TypeEntry = {
   sql?: string
   base: string[]
@@ -719,7 +719,7 @@ export type Carriers = Types
  * here rather than applied in part.
  */
 export function types(table: TypeTable): Types {
-  if (table === undefined || table === null) fail("a type table is required; a program emits one into shell.yaml as `carriers` or `types`")
+  if (table === undefined || table === null) fail("a type table is required, as `carriers` or `types`")
   record(table.types, "the type table's types")
   record(table.aliases, "the type table's aliases")
   const held = new Map<PortableType, Held>()

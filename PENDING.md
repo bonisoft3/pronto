@@ -149,7 +149,7 @@ is manual, and a migration left declared after its effect moved into the
 entity fails every fresh-volume replay.
 
 **A hatch may withhold an emitted file.** `withheld()` in `check-sql.ts` and
-`check-proto.ts` accepts any path, `004_create_tables.sql` or
+`check-proto.ts` accepts any path, `005_create_tables.sql` or
 `schema/entities.proto` included. A path `.pronto/manifest.json` lists should
 be an error.
 
@@ -226,10 +226,10 @@ cadence finer than the resolution of the clock at a declared target keeps pace
 on a laptop and never where that clock runs, and nothing compares them, since
 `meta.clocks` names targets and no clock declares a resolution.
 
-**No program declares a schedule.** No app and no `testdata/emit` program has a
-`#Schedule`, so `020_schedule.sql`, `_scheduleShape` and `_clockDeclared` are
-pinned by nothing. A schedule in `testdata/emit` would pin them the way the
-emitter's other output is pinned.
+**No app declares a schedule.** `testdata/emit/schedule.cue` pins the seed and
+where the table comes from, but `_scheduleShape` and `_clockDeclared` are hidden
+fields of `#emit` it never references, so `cue vet` does not evaluate them: its
+program still passes with the schedule emitting into a `live` entity.
 
 ## Localization
 

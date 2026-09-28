@@ -29,7 +29,7 @@ reach the terminal as `local` collections
 ([omnishell's side](../../omnishell/docs/data.md#declaration-follows-durability)).
 The cluster rungs each get a table with `txid`, the policies its access
 declares, an Electric shape and the outbox. `server` alone is a
-change-capture source: `007_publication.sql` carries `server` tables and no
+change-capture source: `008_publication.sql` carries `server` tables and no
 other, which keeps a pipeline's sink from feeding the pipelines. Nothing else
 in the emission tells the three cluster rungs apart, so `live` and `offline`
 cost at the client what `server` costs, and the ladder is not yet monotonic in

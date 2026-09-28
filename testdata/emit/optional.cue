@@ -60,7 +60,7 @@ _code: pronto.#App & {
 		name:        "emit"
 		description: "the optional-column list"
 		ir: sha256: ""
-		tiers: []
+		targets: []
 		clocks: []
 		decisions: {}
 		tests: {}

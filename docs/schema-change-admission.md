@@ -79,7 +79,7 @@ retypes in plain SQL, and it is the only reader of authored hatch SQL as text:
 the migrations a model writes outside the vocabulary. It cannot see inside a
 `DO` block. Two rules are relaxed. `prefer-bigint-over-int` is excluded
 everywhere, because integer width is the type table's decision.
-`ban-create-domain-with-constraint` is forgiven in `003_types.sql` alone,
+`ban-create-domain-with-constraint` is forgiven in `004_types.sql` alone,
 because the `portable_*` domains carry their `CHECK` by design.
 
 **buf breaking** compares every proto under the app with the app's own git
@@ -109,7 +109,7 @@ which is why it sees what the text readers cannot.
 The replay then applies the whole set a second time, onto a copy, with each
 statement isolated. A step that cannot be applied twice is a finding, since a
 correction below it never reaches a database that already exists; the only
-failures forgiven are `003_types.sql`'s domains and casts, which have no `IF NOT
+failures forgiven are `004_types.sql`'s domains and casts, which have no `IF NOT
 EXISTS` spelling that squawk could still read.
 
 It runs on `integrate` because it grades a built image, and at `priority: 1`
@@ -135,27 +135,34 @@ finding in derived output is to fix the emitter
 
 A fresh volume gets its schema from the emitted migrations, which initdb
 applies. A database that already holds a schema is changed by pgroll
-migrations, declared in `code.state.migrations` in pgroll's own grammar
-(`#PgRollMigration`, so an operation pgroll lacks fails `cue vet`) and emitted
-to `services/database/pgroll/<name>.json`. pgroll keeps a ledger, so a
-migration runs once and running it again is a no-op; that is what lets these be
-written plainly, with no `IF NOT EXISTS` and no `DO` block to hide from squawk.
+migrations, declared in `code.state.migrations` in the grammar mecha's cluster
+takes them in, which is pgroll's own, so an operation pgroll lacks fails
+`cue vet`. A migration's key is its name: lowercase letters, digits and `_`,
+opening with a letter or digit, never the baseline's `00_initdb`, and never
+stated again as a `name` field inside it, which the pinned pgroll refuses.
+They are not emitted as files: `#DefaultCluster` hands them to the cluster,
+whose migrate step applies each one the database's ledger lacks, before the
+readers start ([mecha's schema](../../../libraries/mecha/docs/schema.md#carrying-a-live-database-forward)).
+pgroll keeps a ledger, so a migration runs once and running it again is a
+no-op; that is what lets these be written plainly, with no `IF NOT EXISTS` and
+no `DO` block to hide from squawk.
 
 The two paths must not claim the same column:
 
 1. A change to a live schema starts as a pgroll migration, and the entity does
    **not** declare it, so a fresh volume lacks it and the migration applies.
 2. Once every deployment has run it, the change moves into the entity and the
-   migration is deleted.
+   migration is deleted. A live database takes the deletion in its stride: the
+   migrate step applies only what its ledger lacks.
 
-The replay checks this. After its two passes it runs `pgroll init`, baselines
-the initdb schema as `00_initdb`, and starts each declared migration in name
+The replay checks this. After its two passes it reads the migrations out of the
+app's migrate image, runs that image's `pgroll init`, baselines the initdb
+schema under the name the cluster publishes, and starts each migration in name
 order, reading the catalog after each exactly as for the initdb steps. A
 migration that does not apply, such as one adding a column the entity already
-declares, is an error, and so is one pgroll's ledger shows it skipped. Nothing
-yet applies these migrations to a running cluster
-([mecha's pending](../../../libraries/mecha/PENDING.md#schema)), and step 2 is
-a manual discipline ([pending](../PENDING.md#schema-changes)).
+declares, is an error at `code.state.migrations.<name>`, and so is one pgroll's
+ledger shows it skipped. Step 2 is a manual discipline
+([pending](../PENDING.md#schema-changes)).
 
 ## Rejected
 

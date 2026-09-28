@@ -104,12 +104,13 @@ What the emitter holds, at `cue vet`:
 - **What a release target owes a schedule** is
   [release targets'](release-targets.md#what-a-release-is).
 
-The emitter writes the `schedule` table as `020_schedule.sql`: RLS on and no
-policy, since the ticker writes whatever `emits_entity` names as `service`, so
-a reader able to repoint it could insert rows anywhere. The table is seeded
-by an upsert on the name, so a redeploy restates a schedule without resetting
-its watermark, and its `CHECK` refuses a `Forbid` without `done` in the row
-itself. The cluster gets a ticker and a clock only when a schedule exists.
+The `schedule` table is mecha's: the cluster is handed the schedules' names,
+and its database image creates the table as `020_schedule.sql`
+([mecha's schema](../../../libraries/mecha/docs/schema.md#how-a-schema-reaches-the-database)),
+with a ticker and a clock beside it. The emitter seeds it in
+`021_schedule_seed.sql`, by an upsert on the name, so a redeploy restates a
+schedule without resetting its watermark, and the table's `CHECK` refuses a
+`Forbid` without `done` in the row itself.
 
 ## Rejected
 

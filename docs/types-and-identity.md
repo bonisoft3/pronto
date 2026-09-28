@@ -83,7 +83,7 @@ Every reader judges by that entry:
 
 | holder | hook | what it does |
 |---|---|---|
-| PostgreSQL | `type-sql.ts` → `003_types.sql` | a `portable_*` domain with its `CHECK` per type, and the representation functions PostgREST calls as casts at its boundary |
+| PostgreSQL | `type-sql.ts` → `004_types.sql` | a `portable_*` domain with its `CHECK` per type, and the representation functions PostgREST calls as casts at its boundary |
 | Electric | the mecha client's `normalizeRow(t.fields, value, "electric")`, in the shape's `write` wrapper | canonicalizes each synced row on arrival, before it can become an optimistic original or reach the outbox |
 | a write from the terminal | the mecha client's `normalizeRow` | canonicalizes before the write, and a value it cannot canonicalize throws |
 | the bus | `assets/cdc-types.blobl`, prepended to every pipeline | turns Conduit's Postgres text output into canonical form; an unexpected spelling throws, and the pipeline logs and drops the event |

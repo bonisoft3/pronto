@@ -11,6 +11,7 @@ import (
 
 	"github.com/bonisoft3/pronto/scales"
 	"github.com/bonisoft3/pronto/terminals:omnishell"
+	grammar "github.com/bonisoft3/mecha/pgroll"
 )
 
 // A target is where a program is released; a tier, a rung of mecha's ladder
@@ -484,7 +485,7 @@ import (
 	}
 }
 
-// Row visibility, enforced as RLS policies (005_policies.sql). Modeled after the
+// Row visibility, enforced as RLS policies (006_policies.sql). Modeled after the
 // Google Drive access model:
 //   scope: "private"   - owned by user, optional shared list
 //   scope: "folder"    - inherited access from parent entity
@@ -571,7 +572,7 @@ import (
 	writers: *"forms" | "pipeline"
 	fields: [...#Field]
 	// DDL: CREATE INDEX IF NOT EXISTS idx_<table>_<on> ON <table>
-	// USING <using> (<on>); emitted after the tables in 004.
+	// USING <using> (<on>); emitted after the tables in 005.
 	indexes?: [...{on: string, using: *"btree" | "gin"}]
 	// Row-level constraint, `this` bound to the row. Its CHECK body is derived
 	// like a field's, but only its CHECK: a predicate over several columns is
@@ -1041,10 +1042,12 @@ import (
 		// Hand-authored SQL beyond the schema vocabulary, as assembly files; the
 		// writer copies each src into services/database/migrations/<name>, and
 		// the name's numeric prefix orders it among the emitted migrations.
+		// Three digits no other startup file holds, then `_`: mecha's cluster
+		// refuses any other name.
 		rawMigrations?: [...{name: string, src: string}]
 		// Changes to a schema that already exists, as pgroll migrations, keyed
-		// by the version they create; each is emitted to
-		// services/database/pgroll/<name>.json and applied in key order.
+		// by the version they create; the cluster is given them
+		// (#DefaultCluster) and applies them in key order.
 		//
 		// Separate from the migrations above because they answer a different
 		// question. Those build the schema on a fresh volume, where initdb
@@ -1056,9 +1059,10 @@ import (
 		// plainly, with no IF NOT EXISTS and no DO block to swallow a duplicate
 		// — the spellings that cost the checks their sight.
 		//
-		// #PgRollMigration is pgroll's own published grammar (pgroll.cue), so
-		// an operation this does not accept is one pgroll would not accept.
-		migrations?: [Name=string]: #PgRollMigration
+		// Typed by the grammar mecha's cluster is given them in, which is
+		// pgroll's own, so an operation this does not accept is one pgroll
+		// would not accept.
+		migrations?: [grammar.#Name]: grammar.#Migration
 		pipelines: [Name=string]: #Pipeline & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
 	}

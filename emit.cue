@@ -134,7 +134,7 @@ _sqlType: {
 		}],
 		// Platform column, never a #Field: the write's transaction id, returned
 		// via Prefer: return=representation so clients can awaitTxId against
-		// the shape stream (006_txid.sql restamps it on UPDATE).
+		// the shape stream (007_txid.sql restamps it on UPDATE).
 		["  \"txid\" BIGINT DEFAULT pg_current_xact_id()::text::bigint"],
 		// Platform column, never a #Field: the tenancy floor's scope. GENERATED
 		// so Postgres refuses a client-supplied value — the derivation cannot be
@@ -1021,23 +1021,22 @@ _cdcTableField: "__table"
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
-	// The cluster mounts this list as configs, so it follows the predicate that
-	// emits the database: a migration named without one would be a compose file
-	// referring to a service that was never emitted.
+	// The cluster copies this list into its database image, so it follows the
+	// predicate that emits the database: a migration named without one would be
+	// a copy into a target that was never emitted.
 	_server: (#serverOn & {servers: [for _, e in M.code.state.entities {e.server}], auth: M.code.capabilities.auth != _|_}).out
 	list: [for f in M._all if M._server {f}]
 	_all: [
 		"services/database/migrations/000_extensions.sql",
 		"services/database/migrations/001_roles.sql",
 		"services/database/migrations/002_grants.sql",
-		"services/database/migrations/003_publication.sql",
-		"services/database/migrations/003_types.sql",
-		"services/database/migrations/004_create_tables.sql",
-		if len(M.accessed) > 0 {"services/database/migrations/005_policies.sql"},
-		"services/database/migrations/006_txid.sql",
-		"services/database/migrations/007_publication.sql",
-		if len(M._validatedTables) > 0 {"services/database/migrations/008_validations.sql"},
-		if len(M.code.state.schedules) > 0 {"services/database/migrations/020_schedule.sql"},
+		"services/database/migrations/004_types.sql",
+		"services/database/migrations/005_create_tables.sql",
+		if len(M.accessed) > 0 {"services/database/migrations/006_policies.sql"},
+		"services/database/migrations/007_txid.sql",
+		"services/database/migrations/008_publication.sql",
+		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
+		if len(M.code.state.schedules) > 0 {"services/database/migrations/021_schedule_seed.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
 	]
@@ -1237,7 +1236,7 @@ _cdcTableField: "__table"
 			app: D.code.meta.name
 			statics: list.Concat([D.statics, D._ladder, D._crawl])
 			// mecha's images, reached through the monorepo's bayt federation.
-			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "rclone-s3"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
+			images: {for s in ["database", "migrate", "mesh", "conduit", "auth", "ticker", "clock", "rclone-s3"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth
 		// block; the blob plane follows the program's flag; the data plane
@@ -1252,6 +1251,7 @@ _cdcTableField: "__table"
 		}
 		state: {
 			migrations: (#appMigrations & {"code": D.code}).list
+			if D.code.state.migrations != _|_ {pgroll: D.code.state.migrations}
 			pipelines: [for _, pl in D.code.state.pipelines {
 				name: "\(D.code.meta.name)-\(pl.name)"
 				file: "docker/\(D.code.meta.name)-\(pl.name).yaml"
@@ -1590,11 +1590,10 @@ _cdcTableField: "__table"
 
 	_accessed: (#appMigrations & {"code": E.code}).accessed
 	_raw: (#appMigrations & {"code": E.code}).raw
-	// Optional, and absent in every app that has never changed a live schema.
-	_pgroll: [if E.code.state.migrations != _|_ {E.code.state.migrations}, {}][0]
 	// The auth plane switches on as one: declaring #App.auth or any entity
-	// access implies the roles, auth_uid(), and service-token plumbing —
-	// policies without tokens (or vice versa) is not a supported state.
+	// access implies the roles and service-token plumbing — policies without
+	// tokens (or vice versa) is not a supported state. The auth_uid() the
+	// policies call is the database image's (mecha's tenancy floor).
 	_authOn: E.code.capabilities.auth != _|_ || len(E._accessed) > 0
 
 	// The cluster handed in must be the program's: #DefaultCluster derives
@@ -1718,7 +1717,7 @@ _cdcTableField: "__table"
 		// publication, no bus wiring and no pipeline file, and the cluster it
 		// targets instantiates none of the services these configure.
 		if E._serverOn {
-			"services/database/migrations/003_types.sql": {
+			"services/database/migrations/004_types.sql": {
 				format: "type-sql"
 				data: [for _, e in E.code.state.entities if e.server for f in e.fields if f.type == "decimal" {precision: f.precision, scale: f.scale}]
 			}
@@ -1733,25 +1732,10 @@ _cdcTableField: "__table"
 				// once: a correction below it reaches a database that already
 				// holds the extension, and CREATE EXTENSION alone would abort
 				// the whole file before the correction ran.
-				//
-				// auth_uid() reads the sub claim PostgREST stashes in
-				// request.jwt.claims; NULL outside a request or for tokens
-				// without a sub (anon).
-				_prelude: [
+				text: [
 					if len(E._validated) > 0 {"CREATE EXTENSION IF NOT EXISTS plv8;\n"},
 					if len(E._validated) == 0 {"-- no extensions required\n"},
 				][0]
-				if !E._authOn {
-					text: _prelude
-				}
-				if E._authOn {
-					text: _prelude + "\n" + """
-						CREATE OR REPLACE FUNCTION auth_uid() RETURNS uuid LANGUAGE sql STABLE AS $$
-						  SELECT nullif(current_setting('request.jwt.claims', true)::json->>'sub','')::uuid
-						$$;
-
-						"""
-				}
 			}
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"
@@ -1797,7 +1781,7 @@ _cdcTableField: "__table"
 
 				// Auth'd grants: anon can connect (USAGE) but touches no table —
 				// every row read or written goes through app_user or service,
-				// where 005's policies decide.
+				// where 006's policies decide.
 				if E._authOn {
 					text: """
 						GRANT USAGE ON SCHEMA public TO anon, app_user, service;
@@ -1807,21 +1791,9 @@ _cdcTableField: "__table"
 						"""
 				}
 			}
-			// Names and order match the set baked into mecha's database image, so
-			// compose config mounts shadow the baked files one-for-one.
-			// 003 must shadow the baked conduit_pub: FOR ALL TABLES re-opens the
-			// pipeline feedback loop and trips 42P10 (mechanism at 007).
-			"services/database/migrations/003_publication.sql": {
+			"services/database/migrations/008_publication.sql": {
 				format: "sql"
-				text: """
-					-- Shadows the baked FOR ALL TABLES publication. The app publication
-					-- is created in 007_publication.sql, after the tables it names exist.
-
-					"""
-			}
-			"services/database/migrations/007_publication.sql": {
-				format: "sql"
-				// Runs after 004_create_tables: FOR TABLE fails on missing tables
+				// Runs after 005_create_tables: FOR TABLE fails on missing tables
 				// and initdb aborts on the first error. FOR TABLE <crud tables>,
 				// never FOR ALL TABLES — derived-table upserts must not re-feed the
 				// pipelines that wrote them, and conduit's `tables` setting does not
@@ -1884,7 +1856,7 @@ _cdcTableField: "__table"
 			// PRIMARY KEY — a client-minted uuid that never collides — so a
 			// repeated pair reaches this index and comes back 23505 rather than
 			// merging silently.
-			"services/database/migrations/004_create_tables.sql": {
+			"services/database/migrations/005_create_tables.sql": {
 				format: "sql"
 				_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 				text: strings.Join(list.Concat([
@@ -1894,7 +1866,7 @@ _cdcTableField: "__table"
 				]), "\n\n") + "\n"
 			}
 			if len(E._accessed) > 0 {
-				"services/database/migrations/005_policies.sql": {
+				"services/database/migrations/006_policies.sql": {
 					format: "sql"
 					text: strings.Join([for ent in E._entities if ent.access != _|_ {
 						(#policySql & {e: ent, entities: E.code.state.entities}).out
@@ -1902,7 +1874,7 @@ _cdcTableField: "__table"
 				}
 			}
 			if len(E._validated) > 0 {
-				"services/database/migrations/008_validations.sql": {
+				"services/database/migrations/009_validations.sql": {
 					format: "sql"
 					text: strings.Join(list.Concat([
 						[#validationPrecondition],
@@ -1912,57 +1884,15 @@ _cdcTableField: "__table"
 			}
 
 			if len(E.code.state.schedules) > 0 {
-				// mecha's mechanism, never authored by an app: the DDL is fixed
-				// and only the seed varies. One row per declaration, and the
-				// seed is an upsert on the name so a redeploy restates the
-				// schedule without resetting the watermark it has earned.
-				"services/database/migrations/020_schedule.sql": {
+				// The table is mecha's: the cluster, handed the schedules' names,
+				// places it in the database as 020_schedule.sql, and this seeds it
+				// after, one row per declaration. An upsert on the name, so a
+				// redeploy restates the schedule without resetting the watermark it
+				// has earned.
+				"services/database/migrations/021_schedule_seed.sql": {
 					format: "sql"
-					text: """
-						CREATE TABLE IF NOT EXISTS schedule (
-						  name                 TEXT PRIMARY KEY,
-						  cron                 TEXT NOT NULL,
-						  time_zone            TEXT NOT NULL DEFAULT 'UTC',
-						  suspended            BOOLEAN NOT NULL DEFAULT FALSE,
-						  max_lateness_seconds INTEGER NOT NULL DEFAULT 300,
-						  concurrency_policy   TEXT NOT NULL DEFAULT 'Allow'
-						                         CHECK (concurrency_policy IN ('Allow', 'Forbid')),
-						  done_entity          TEXT,
-						  done_filter          TEXT,
-						  emits_entity         TEXT NOT NULL,
-						  emits_values         JSONB NOT NULL DEFAULT '{}',
-						  last_tick_at         TIMESTAMPTZ,
-						  CHECK (concurrency_policy <> 'Forbid'
-						         OR (done_entity IS NOT NULL AND done_filter IS NOT NULL))
-						);
-
-						-- 002_grants' ALTER DEFAULT PRIVILEGES reaches every table made after
-						-- it, this one included, so without this a logged-in user can read and
-						-- rewrite the mechanism. That is not a disclosure, it is an escalation:
-						-- the ticker reads emits_entity and emits_values from here and writes
-						-- them as `service`, which bypasses RLS, so whoever can repoint the
-						-- column has rows inserted wherever they choose, once per poke — and
-						-- `suspended` stops every schedule in the app. No policy is declared
-						-- because none is wanted: `service` holds BYPASSRLS and nothing else
-						-- has any business here.
-						-- RLS is what denies them: 002 grants to the roles by name, not to
-						-- PUBLIC, so revoking PUBLIC would leave every one of them in place.
-						-- The revoke below is belt to that brace, and is conditional because
-						-- which roles exist depends on whether the app has auth.
-						ALTER TABLE schedule ENABLE ROW LEVEL SECURITY;
-						DO $$
-						DECLARE r TEXT;
-						BEGIN
-						  FOREACH r IN ARRAY ARRAY['anon', 'app_user'] LOOP
-						    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
-						      EXECUTE format('REVOKE ALL ON schedule FROM %I', r);
-						    END IF;
-						  END LOOP;
-						END
-						$$;
-
-						\(strings.Join([for _, sc in E.code.state.schedules {
-							"""
+					text: strings.Join([for _, sc in E.code.state.schedules {
+						"""
 						INSERT INTO schedule (name, cron, time_zone, suspended, max_lateness_seconds,
 						                      concurrency_policy, done_entity, done_filter,
 						                      emits_entity, emits_values)
@@ -1977,11 +1907,10 @@ _cdcTableField: "__table"
 						  done_entity = EXCLUDED.done_entity, done_filter = EXCLUDED.done_filter,
 						  emits_entity = EXCLUDED.emits_entity, emits_values = EXCLUDED.emits_values;
 						"""
-						}], "\n"))
-						"""
+					}], "\n")
 				}
 			}
-			"services/database/migrations/006_txid.sql": {
+			"services/database/migrations/007_txid.sql": {
 				format: "sql"
 				// A column DEFAULT only fires on INSERT; updates restamp here so
 				// every write's response row carries the txid that committed it.
@@ -2004,102 +1933,97 @@ _cdcTableField: "__table"
 			for rm in E._raw {
 				"services/database/migrations/\(rm.name)": {format: "sql", src: rm.src}
 			}
-			// Beside the initdb set, not among it: these are applied by pgroll
-			// against a schema that already exists, and the cluster mounts
-			// `_all` — the files initdb replays on a fresh volume — which these
-			// are not. A fresh volume gets the schema from the migrations above
-			// and is baselined; these carry it forward from there.
-			for name, m in E._pgroll {
-				"services/database/pgroll/\(name).json": {format: "json", data: m}
-			}
 			if len(E._seeded) > 0 {
 				"services/database/migrations/900_seed.sql": {
 					format: "sql"
 					text: strings.Join([for se in E._seeded {(#seedSql & {e: se}).out}], "\n") + "\n"
 				}
 			}
-			"docker/conduit-pipeline.yaml": {
-				format: "yaml"
-				data: {
-					version: "2.2"
-					pipelines: [{
-						id:     "cdc-to-bus"
-						status: "running"
-						connectors: [{
-							id:     "postgres-source"
-							type:   "source"
-							plugin: "builtin:postgres"
-							settings: {
-								url:                       "${DATABASE_URL}"
-								tables:                    E._cdcTables // derived tables are excluded: no CDC loops
-								cdcMode:                   "logrepl"
-								snapshotMode:              "never"
-								"logrepl.publicationName": E._pub
-								"logrepl.slotName":        "\(E._pkg)_conduit_slot"
-								// Without this the http connector re-decodes the payload
-								// against the captured Avro schema and chokes post-encode.
-								"logrepl.withAvroSchema": "false"
-							}
-						}, {
-							id:     "bus-destination"
-							type:   "destination"
-							plugin: "standalone:http"
-							settings: {
-								url: "http://mesh-events:3500/v1.0/publish/redis-streams/cdc-events"
-								// The probe is a HEAD, which dapr's publish endpoint 404s.
-								validateConnection: "false"
-							}
+			// Only a cluster whose change feed runs has a conduit to configure.
+			if E.cluster.capabilities.capture {
+				"docker/conduit-pipeline.yaml": {
+					format: "yaml"
+					data: {
+						version: "2.2"
+						pipelines: [{
+							id:     "cdc-to-bus"
+							status: "running"
+							connectors: [{
+								id:     "postgres-source"
+								type:   "source"
+								plugin: "builtin:postgres"
+								settings: {
+									url:                       "${DATABASE_URL}"
+									tables:                    E._cdcTables // derived tables are excluded: no CDC loops
+									cdcMode:                   "logrepl"
+									snapshotMode:              "never"
+									"logrepl.publicationName": E._pub
+									"logrepl.slotName":        "\(E._pkg)_conduit_slot"
+									// Without this the http connector re-decodes the payload
+									// against the captured Avro schema and chokes post-encode.
+									"logrepl.withAvroSchema": "false"
+								}
+							}, {
+								id:     "bus-destination"
+								type:   "destination"
+								plugin: "standalone:http"
+								settings: {
+									url: "http://mesh-events:3500/v1.0/publish/redis-streams/cdc-events"
+									// The probe is a HEAD, which dapr's publish endpoint 404s.
+									validateConnection: "false"
+								}
+							}]
+							processors: [{
+								// Which table changed, carried in the row itself. The bus
+								// is one topic for every table and each pipeline reads all
+								// of it, so a consumer has to tell its own source's events
+								// apart; column shape cannot do it (favorite and bookmark
+								// are column-identical, and inferring from a witness column
+								// silently mis-fires the moment a sibling table grows one).
+								// Both sides are stamped because a delete's After is empty
+								// and restore-deleted-row back-fills it from Before.
+								id:     "stamp-collection-after"
+								plugin: "builtin:field.set"
+								// Guarded, and the guard is the whole point: a delete carries an
+								// EMPTY After, and setting a field on it CREATES one — which makes
+								// restore-deleted-row believe there is a row worth keeping, so it
+								// skips the back-fill and the delete reaches the bus as {__table}
+								// and nothing else. Every un-favourite then fails to recount and
+								// the sink only ratchets up.
+								condition: "{{ if .Payload.After }}true{{ else }}false{{ end }}"
+								settings: {
+									field: ".Payload.After.\(_cdcTableField)"
+									value: "{{ index .Metadata \"opencdc.collection\" }}"
+								}
+							}, {
+								id:        "stamp-collection-before"
+								plugin:    "builtin:field.set"
+								condition: "{{ if .Payload.Before }}true{{ else }}false{{ end }}"
+								settings: {
+									field: ".Payload.Before.\(_cdcTableField)"
+									value: "{{ index .Metadata \"opencdc.collection\" }}"
+								}
+							}, {
+								id:     "stringify-after"
+								plugin: "builtin:json.encode"
+								settings: field: ".Payload.After"
+							}, {
+								id:     "stringify-before"
+								plugin: "builtin:json.encode"
+								settings: field: ".Payload.Before"
+							}, {
+								// The http destination posts only Payload.After, and a
+								// delete's After is empty — back-fill from Before so every
+								// bus message carries the changed row.
+								id:     "restore-deleted-row"
+								plugin: "builtin:field.set"
+								settings: {
+									field: ".Payload.After"
+									value: "{{ if .Payload.After }}{{ printf \"%s\" .Payload.After }}{{ else }}{{ printf \"%s\" .Payload.Before }}{{ end }}"
+								}
+							}]
 						}]
-						processors: [{
-							// Which table changed, carried in the row itself. The bus
-							// is one topic for every table and each pipeline reads all
-							// of it, so a consumer has to tell its own source's events
-							// apart; column shape cannot do it (favorite and bookmark
-							// are column-identical, and inferring from a witness column
-							// silently mis-fires the moment a sibling table grows one).
-							// Both sides are stamped because a delete's After is empty
-							// and restore-deleted-row back-fills it from Before.
-							id:     "stamp-collection-after"
-							plugin: "builtin:field.set"
-							// Guarded, and the guard is the whole point: a delete carries an
-							// EMPTY After, and setting a field on it CREATES one — which makes
-							// restore-deleted-row believe there is a row worth keeping, so it
-							// skips the back-fill and the delete reaches the bus as {__table}
-							// and nothing else. Every un-favourite then fails to recount and
-							// the sink only ratchets up.
-							condition: "{{ if .Payload.After }}true{{ else }}false{{ end }}"
-							settings: {
-								field: ".Payload.After.\(_cdcTableField)"
-								value: "{{ index .Metadata \"opencdc.collection\" }}"
-							}
-						}, {
-							id:        "stamp-collection-before"
-							plugin:    "builtin:field.set"
-							condition: "{{ if .Payload.Before }}true{{ else }}false{{ end }}"
-							settings: {
-								field: ".Payload.Before.\(_cdcTableField)"
-								value: "{{ index .Metadata \"opencdc.collection\" }}"
-							}
-						}, {
-							id:     "stringify-after"
-							plugin: "builtin:json.encode"
-							settings: field: ".Payload.After"
-						}, {
-							id:     "stringify-before"
-							plugin: "builtin:json.encode"
-							settings: field: ".Payload.Before"
-						}, {
-							// The http destination posts only Payload.After, and a
-							// delete's After is empty — back-fill from Before so every
-							// bus message carries the changed row.
-							id:     "restore-deleted-row"
-							plugin: "builtin:field.set"
-							settings: {
-								field: ".Payload.After"
-								value: "{{ if .Payload.After }}{{ printf \"%s\" .Payload.After }}{{ else }}{{ printf \"%s\" .Payload.Before }}{{ end }}"
-							}
-						}]
-					}]
+					}
 				}
 			}
 			for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {

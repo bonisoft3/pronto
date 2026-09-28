@@ -47,7 +47,7 @@ const EXCLUDED_RULES = ["prefer-bigint-over-int"];
  */
 const FORGIVEN: { rule: string; path: string } = {
   rule: "ban-create-domain-with-constraint",
-  path: "services/database/migrations/003_types.sql",
+  path: "services/database/migrations/004_types.sql",
 };
 
 /** Every *.sql under the app, app-relative, in a stable order. */

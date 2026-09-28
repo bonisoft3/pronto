@@ -50,7 +50,6 @@ say:
       schema-evolution:
         priority: -1
         cmds:
-          - do: "deno test --no-config --allow-read pgroll.test.ts"
           - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-run --allow-env replay.test.ts withheld.test.ts"
       # The door's language rule against the terminal's, over an emitted
       # Caddyfile: two runtimes that cannot share code and must not disagree.

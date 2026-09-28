@@ -19,7 +19,7 @@ author's examples are [the guide's](../GUIDE.md#access).
 ## The four modes
 
 The model is Google Drive's. `#policySql` and `#tableSql` in
-[`emit.cue`](../emit.cue) write, per mode, into `005_policies.sql` and the
+[`emit.cue`](../emit.cue) write, per mode, into `006_policies.sql` and the
 table:
 
 | Mode | `scope_id` | Floor | What `app_user` may do |
@@ -71,10 +71,10 @@ and "everyone's" to the server.
 The owner column names a row's subject, and `WITH CHECK (owner =
 auth_uid())` refuses a spoofed one. When the client omits it, the apps fill it
 with a column default, `default: "auth_uid()"` on the field, so `auth_uid()`,
-created in `000_extensions.sql`, must exist before `004_create_tables.sql`
-creates the table. Moving the stamp to an emitted trigger beside the policies
-is [owner stamping](decisions/2026-08-31-owner-stamping.md), which is not
-built.
+which mecha's database image defines in its tenancy floor `003_rls.sql`, must
+exist before `005_create_tables.sql` creates the table. Moving the stamp to an
+emitted trigger beside the policies is
+[owner stamping](decisions/2026-08-31-owner-stamping.md), which is not built.
 
 ## A count the reader is inside of
 

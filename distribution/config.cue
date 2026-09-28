@@ -22,11 +22,6 @@ import (
 	"github:denoland/deno":    "v2.9.7"
 	"github:bonisoft3/pronto": #Version
 	"github:bonisoft3/sayt":   #SaytVersion
-	// Applies the schema changes an app declares, against a database that
-	// already holds a schema (check-replay.ts). `bin` because the release
-	// asset is a bare pgroll.win.amd64.exe / pgroll.macos.arm64, and mise
-	// only strips dash-separated os/arch suffixes on its own.
-	"github:xataio/pgroll": {version: "0.16.3", bin: "pgroll"}
 	// Compares every proto the app does not withhold against its own git
 	// history (check-proto.ts).
 	"github:bufbuild/buf": "1.73.0"

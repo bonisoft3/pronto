@@ -34,17 +34,21 @@
 // precondition failure rather than a clean bill of health.
 //
 // What is the cluster's about that database — which target runs it, and where
-// its image applies scripts from — is read from `cluster.surface.schema`,
-// which mecha publishes. This pass replays what a cluster declares; it does not
-// know how mecha lays an image out, and a second copy of that layout here is
-// exactly the thing that would rot without anyone noticing.
+// its image applies scripts from; which target applies the pgroll migrations,
+// where its image holds them, and the name the baseline takes — is read from
+// `cluster.surface.schema`, which mecha publishes. This pass replays what a
+// cluster declares; it does not know how mecha lays an image out, and a second
+// copy of that layout here is exactly the thing that would rot without anyone
+// noticing. For the same reason the pgroll migrations are read out of the
+// migrate image and applied by the pgroll it carries: the set and the binary
+// graded are the ones the cluster runs, and no second pgroll is pinned here.
 //
 // Findings print as {severity, path, message} JSON (SPEC.md lint format);
 // exit 1 when any error is reported.
 
 import { fileURLToPath } from "node:url";
 import { exportJson } from "./cue.ts";
-import { entries, exists } from "./missing.ts";
+import { exists } from "./missing.ts";
 
 type Finding = { severity: "error" | "advisory"; path: string; message: string };
 
@@ -67,7 +71,7 @@ const REPLAY_DB = "pronto_replay";
  * 14 domains and 42 casts here all fail the same way and are all forgiven; a
  * `CREATE FUNCTION` without `OR REPLACE` added beside them is not.
  */
-const FORGIVEN_SECOND_PASS = "services/database/migrations/003_types.sql";
+const FORGIVEN_SECOND_PASS = "services/database/migrations/004_types.sql";
 
 /**
  * The two spellings forgiven there, and nothing else that already exists.
@@ -92,24 +96,16 @@ export const forgivable = (error: string) => FORGIVEN_DUPLICATE.some((p) => p.te
 /** Named so a run interrupted before its cleanup can be swept by the next one. */
 const CONTAINER_PREFIX = "pronto-replay-";
 
-/** Where the app declares changes for a schema that already exists. */
-const PGROLL_DIR = "services/database/pgroll";
+/** Where a finding about a pgroll migration sends its reader: the program. */
+const declaredAt = (name: string) => `code.state.migrations.${name}`;
 
 /**
- * The ledger name for the schema initdb built, which the declared migrations
- * start from. It is this pass's own and not an app's to use: the emitted
- * migrations are numbered 000, 001, … so a first pgroll migration named in that
- * habit could land on it, and the collision would read as pgroll silently
- * declining to apply a migration rather than as a name that was taken.
+ * The versions a migrate image holds, in the order the cluster applies them,
+ * from a listing of its directory. Byte order, which is the runner's.
  */
-const BASELINE = "00_initdb";
-
-/** The versions the app declares, in the order pgroll applies them. */
-export async function pgrollMigrations(appDir: string): Promise<string[]> {
-  // An app that has never changed a live schema declares none, and the
-  // directory is simply absent.
-  const found = await entries(`${appDir}/${PGROLL_DIR}`);
-  return found.filter((e) => e.isFile && e.name.endsWith(".json")).map((e) => e.name.replace(/\.json$/, "")).sort();
+export function pgrollMigrations(listing: string): string[] {
+  return listing.split("\n").map((l) => l.trim()).filter((l) => l.endsWith(".json")).map((l) => l.replace(/\.json$/, ""))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /**
@@ -183,7 +179,7 @@ async function run(cmd: string, args: string[], opts: { cwd?: string; stdin?: st
 }
 
 /** What the cluster publishes about its database (mecha's cluster.cue). */
-type Published = { target: string; initdb: string };
+type Published = { target: string; initdb: string; pgroll?: { target: string; dir: string; baseline: string } };
 
 type Service = {
   image?: string;
@@ -193,12 +189,13 @@ type Service = {
 type Config = { services?: Record<string, Service> };
 
 /**
- * The service running the cluster's database, as compose resolves it in
- * whatever repo this is. Picked by build context and not by name alone: the
- * cluster the app instantiates declares a database of its own under a name that
- * ends the same way, and only one of the two is built out of this directory.
+ * The service running one of the cluster's targets — its database, its
+ * migrate step — as compose resolves it in whatever repo this is. Picked by
+ * build context and not by name alone: the cluster the app instantiates
+ * declares a database of its own under a name that ends the same way, and only
+ * one of the two is built out of this directory.
  */
-export function databaseService(config: Config, appDir: string, target: string) {
+export function targetService(config: Config, appDir: string, target: string) {
   for (const [name, svc] of Object.entries(config.services ?? {})) {
     if (!name.endsWith(`-${target}`) || !svc.image) continue;
     if (svc.build?.context !== appDir) continue;
@@ -210,9 +207,10 @@ export function databaseService(config: Config, appDir: string, target: string) 
 /**
  * What initdb applies, in the order it applies it — read out of the image
  * rather than off the app's migrations directory, because that directory is not
- * the whole schema. mecha copies its own rls.sql in as 002a_rls.sql, and the
- * app's 005 calls the procedure it defines; a replay of the app's files alone
- * stops there claiming the app is broken, which is a fact about the replay.
+ * the whole schema. The image carries mecha's tenancy floor, whose procedure the
+ * app's policies call; a replay of the app's files alone stops there claiming
+ * the app is broken, which is a fact about the replay. Byte order is initdb's
+ * own: mecha's cluster refuses a step name under which the two would differ.
  */
 async function steps(container: string, initdb: string): Promise<string[]> {
   const listed = await run("docker", ["exec", container, "sh", "-c", `ls -1 ${initdb}/*.sql 2>/dev/null || true`]);
@@ -245,18 +243,28 @@ async function main(appDir: string): Promise<number> {
     throw new Error("this app's every entity is a browser tier: it has no schema to replay");
   }
   const published = await exportJson<Published>(appDir, "cluster.surface.schema");
-  const service = databaseService(JSON.parse(config.stdout), await Deno.realPath(appDir), published.target);
+  const services = JSON.parse(config.stdout) as Config;
+  const root = await Deno.realPath(appDir);
+  const service = targetService(services, root, published.target);
   if (service === undefined) throw new Error("no database service in the generated compose: this app has no server tier to replay");
 
   const present = await run("docker", ["image", "inspect", service.image]);
   if (!present.ok) {
     throw new Error(`${service.image} is not built — build the app before replaying its migrations`);
   }
+  // Published only by a cluster given pgroll migrations.
+  const migrator = published.pgroll === undefined ? undefined : targetService(services, root, published.pgroll.target);
+  if (published.pgroll !== undefined && migrator === undefined) {
+    throw new Error(`the cluster publishes a ${published.pgroll.target} target the generated compose does not run: regenerate the app`);
+  }
+  if (migrator !== undefined && !(await run("docker", ["image", "inspect", migrator.image])).ok) {
+    throw new Error(`${migrator.image} is not built — build the app before replaying its migrations`);
+  }
 
   // Anything THIS app's replay left behind before it started: the container is
   // removed in a `finally`, which a SIGKILL — an interrupted run, a timeout —
-  // never reaches, and a machine that collects them runs out of ports and
-  // memory without ever saying why.
+  // never reaches, and a machine that collects them runs out of memory without
+  // ever saying why.
   //
   // Scoped to the service, because the sweep is indiscriminate within its
   // prefix: two apps replaying at once on one machine would otherwise tear down
@@ -280,21 +288,10 @@ async function main(appDir: string): Promise<number> {
   }
   const started = await run("docker", [
     "run", "-d", "--name", container,
-    // pgroll runs here, not in the container, so the database needs a port on
-    // this side. An ephemeral one, because a fixed one collides with whatever
-    // else the machine is running.
-    "-p", "127.0.0.1::5432",
     ...settings.flatMap((k) => ["-e", `${k}=${env[k]}`]),
     service.image,
   ]);
   if (!started.ok) throw new Error(`could not start ${service.image}: ${started.stderr}`);
-
-  const mapped = await run("docker", ["port", container, "5432/tcp"]);
-  if (!mapped.ok) throw new Error(`could not read the database's published port: ${mapped.stderr}`);
-  const port = mapped.stdout.split("\n")[0].trim().split(":").pop();
-  if (port === undefined || !/^\d+$/.test(port)) {
-    throw new Error(`could not read a port out of \`docker port\`: ${mapped.stdout}`);
-  }
 
   const user = env.POSTGRES_USER;
   const psql = (db: string, sql: string, extra: string[] = []) =>
@@ -332,7 +329,7 @@ async function main(appDir: string): Promise<number> {
       // stopping at its first error.
       //
       // A step is one transaction under ON_ERROR_STOP, so a single failure
-      // ends the file: 003_types.sql aborts at its first CREATE DOMAIN, around
+      // ends the file: 004_types.sql aborts at its first CREATE DOMAIN, around
       // line 10 of 515, and the 42 CREATE CASTs and 57 functions below it are
       // never tried. Forgiving that file then forgave everything under it,
       // including anything a later emitter change puts there. ON_ERROR_ROLLBACK
@@ -404,36 +401,42 @@ async function main(appDir: string): Promise<number> {
     // judge an operation — `pgroll validate` needs a database too, so there is
     // no cheaper place for this than the one that already has one.
     //
-    // init and baseline first: the schema the steps above built is where these
-    // start from, and baseline is what records it as that starting point. A
-    // second `migrate` is then a no-op rather than an error, which is the
-    // property that lets these migrations be written plainly.
-    const declared = await pgrollMigrations(appDir);
-    if (declared.includes(BASELINE)) {
-      throw new Error(`${PGROLL_DIR}/${BASELINE}.json takes the name this pass baselines the initdb schema under; call it something else`);
-    }
+    // init and baseline first, as the cluster's migrate target runs them: the
+    // schema the steps above built is where these start from, and baseline is
+    // what records it as that starting point.
     const unapplied: Finding[] = [];
-    if (declared.length > 0) {
-      const url = `postgres://${user}:${env.POSTGRES_PASSWORD}@localhost:${port}/${REPLAY_DB}?sslmode=disable`;
-      const pgroll = (args: string[]) => run("mise", ["x", "--", "pgroll", ...args, "--postgres-url", url], { cwd: appDir });
+    if (published.pgroll !== undefined && migrator !== undefined) {
+      const { dir, baseline } = published.pgroll;
+      const listed = await run("docker", ["run", "--rm", "--entrypoint", "ls", migrator.image, dir]);
+      if (!listed.ok) throw new Error(`could not list ${dir} in ${migrator.image}: ${listed.stderr}`);
+      const declared = pgrollMigrations(listed.stdout);
+      // The migrate image's pgroll, inside the replay database's network
+      // namespace, so it reaches that database on loopback and the host needs
+      // neither a published port nor a pgroll of its own.
+      const pgroll = (args: string[]) =>
+        run("docker", [
+          "run", "--rm", "--network", `container:${container}`, "--entrypoint", "pgroll",
+          "-e", `PGROLL_PG_URL=postgres://${user}:${env.POSTGRES_PASSWORD}@127.0.0.1:5432/${REPLAY_DB}?sslmode=disable`,
+          migrator.image, ...args,
+        ]);
       const init = await pgroll(["init"]);
-      if (!init.ok) throw new Error(`pgroll init failed: ${init.stderr}`);
-      // Into a directory of its own, never the app's: baseline writes a
-      // placeholder migration beside the ones it finds, and a check that leaves
-      // a file in the tree it is grading has changed the thing it measured.
-      const baselineDir = await Deno.makeTempDir({ prefix: "pronto-baseline-" });
-      const based = await pgroll(["baseline", BASELINE, baselineDir, "--json", "--yes"]);
-      await Deno.remove(baselineDir, { recursive: true });
+      if (!init.ok) throw new Error(`pgroll init failed: ${plain(init.stderr)}`);
+      // baseline writes a placeholder migration into the directory it is
+      // given; this one is the throwaway container's.
+      const based = await pgroll(["baseline", baseline, "/tmp", "--yes"]);
       if (!based.ok) throw new Error(`pgroll baseline failed: ${plain(based.stderr)}`);
       // One at a time, with the catalog read after each, so these steps are
       // compared exactly as the initdb ones are. Applying them in a batch would
       // leave a rename inside a pgroll migration unexamined by the very
       // comparison this pass exists for.
       let step = rows.reduce((highest, r) => Math.max(highest, r.step), 0);
-      let applied = { ok: true, stdout: "", stderr: "" };
+      let refused: { name: string; stderr: string } | undefined;
       for (const name of declared) {
-        applied = await pgroll(["start", `${PGROLL_DIR}/${name}.json`, "--complete"]);
-        if (!applied.ok) break;
+        const applied = await pgroll(["start", `${dir}/${name}.json`, "--complete"]);
+        if (!applied.ok) {
+          refused = { name, stderr: applied.stderr };
+          break;
+        }
         step += 1;
         const state = await psql(
           REPLAY_DB,
@@ -441,21 +444,21 @@ async function main(appDir: string): Promise<number> {
           ["-t", "-A"],
         );
         if (!state.ok) throw new Error(`catalog read after ${name} failed: ${state.stderr}`);
-        applied_steps.push({ step, mig: `${PGROLL_DIR}/${name}.json` });
+        applied_steps.push({ step, mig: declaredAt(name) });
         for (const r of JSON.parse(state.stdout) as Omit<Row, "step" | "mig">[]) {
-          rows.push({ step, mig: `${PGROLL_DIR}/${name}.json`, ...r });
+          rows.push({ step, mig: declaredAt(name), ...r });
         }
       }
-      if (!applied.ok) {
+      if (refused !== undefined) {
         unapplied.push({
           severity: "error",
-          path: PGROLL_DIR,
-          message: `does not apply to the schema the migrations built: ${plain(applied.stderr)}`,
+          path: declaredAt(refused.name),
+          message: `does not apply to the schema the steps before it built: ${plain(refused.stderr)}`,
         });
       } else {
         // Declared but never run is the failure this would otherwise hide: a
         // migration pgroll skipped is one nobody's database will get either.
-        const ran = await psql(REPLAY_DB, "SELECT name FROM pgroll.migrations WHERE migration_type = 'pgroll';", ["-t", "-A"]);
+        const ran = await psql(REPLAY_DB, "SELECT name FROM pgroll.migrations WHERE schema = 'public' AND migration_type = 'pgroll';", ["-t", "-A"]);
         // An unread ledger is not an empty one. Left unchecked this query's
         // failure — a pgroll whose ledger shape moved under the pin — makes
         // `seen` empty and reports every declared migration as skipped, which
@@ -466,7 +469,7 @@ async function main(appDir: string): Promise<number> {
           if (!seen.has(name)) {
             unapplied.push({
               severity: "error",
-              path: `${PGROLL_DIR}/${name}.json`,
+              path: declaredAt(name),
               message: "is declared but pgroll did not apply it",
             });
           }

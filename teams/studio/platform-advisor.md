@@ -59,11 +59,11 @@ than a matter of taste:
 - No volumes. Hot reload is `develop: watch`, and a bind mount that
   shadows what the image built is a second source of truth for what is
   running — the class of bug that only reproduces on the machine that has
-  the mount. Files a container needs at start are `configs`, which is how
-  the migrations reach initdb. State that survives a restart is a decision
-  someone makes and names, not something a volume quietly grants: here
-  nothing survives `compose down`, so every recreate re-runs initdb and a
-  schema change costs exactly one restart.
+  the mount. Files a container needs at start are baked into its image,
+  which is how the migrations reach initdb. State that survives a restart
+  is a decision someone makes and names, not something a volume quietly
+  grants: here nothing survives `compose down`, so every recreate re-runs
+  initdb and a schema change costs exactly one restart.
 
 Explore unconstrained, port deliberately. The platform's guarantees are what
 make a port worth paying for; they are not where an idea should be born. A

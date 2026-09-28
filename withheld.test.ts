@@ -35,7 +35,7 @@ Deno.test("a rawMigration written in place is not skipped as its own copy", () =
 
 Deno.test("the domain rule is forgiven only in the file pronto derives", () => {
   const reported = [
-    { file: "/app/services/database/migrations/003_types.sql", line: 9, rule_name: "ban-create-domain-with-constraint", message: "m" },
+    { file: "/app/services/database/migrations/004_types.sql", line: 9, rule_name: "ban-create-domain-with-constraint", message: "m" },
     { file: "/app/services/database/sql/011_owner.sql", line: 2, rule_name: "ban-create-domain-with-constraint", message: "m" },
   ];
   const found = sqlFindings(reported, "/app");

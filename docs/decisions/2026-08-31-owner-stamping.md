@@ -17,10 +17,10 @@ the policies, and none of it is built.
 
 ## Where the coupling comes from
 
-The platform keeps `auth_uid()` on the replaceable side: its `CREATE OR
-REPLACE FUNCTION` and every policy calling it are emitted as rules. The bridge
-into data-holding DDL is authored, because `#Field.default` takes any SQL
-expression, and seven fields use it to stamp an owner:
+The platform keeps `auth_uid()` on the replaceable side: mecha's database image
+restates it with the tenancy floor, and every policy calling it is emitted as a
+rule. The bridge into data-holding DDL is authored, because `#Field.default`
+takes any SQL expression, and seven fields use it to stamp an owner:
 
 | app | field | access |
 |---|---|---|
@@ -38,10 +38,9 @@ nowhere to say it: `public` names no owner, so realworld states the owner
 twice, as the default and in `011_owner_writes.sql`. An `owner` on `public`
 would give the stamp a column to read for all seven.
 
-The cost: the data-holding steps must follow `auth_uid()` for a bare database
-to replay them, and they stop being reorderable among themselves.
-`000_extensions.sql` must precede `004_create_tables.sql`, and nothing states
-that where a check could read it.
+The cost: the data-holding steps must follow `auth_uid()` for a database to
+replay them, so the floor's `003_rls.sql` must precede `005_create_tables.sql`,
+and nothing states that where a check could read it.
 
 ## The stamp beside the policies
 
@@ -94,8 +93,6 @@ live.
 
 - **A differ that models `auth_uid()`** — a tool's feature set, to buy what
   deleting seven lines buys with nothing.
-- **An image with the functions pre-baked** — the leak moves into an image
-  nobody remembers.
 - **One generic stamp through `TG_ARGV`** — plpgsql cannot assign
   `NEW.<column>` by name without rewriting the row through hstore or jsonb;
   per-table three-liners are cheaper.

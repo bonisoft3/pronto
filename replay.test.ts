@@ -4,7 +4,7 @@
 
 import { assertEquals } from "jsr:@std/assert@1";
 import { fileURLToPath } from "node:url";
-import { databaseService, forgivable, locate, pgrollMigrations, plain } from "./check-replay.ts";
+import { targetService, forgivable, locate, pgrollMigrations, plain } from "./check-replay.ts";
 
 type Row = { step: number; mig: string; rel: number; tbl: string; col: string; typ: string; ordinal: number };
 type Finding = { severity: string; path: string | null; message: string };
@@ -143,7 +143,7 @@ Deno.test("the database service is picked by build context, not by name alone", 
   // The cluster an app instantiates declares a database of its own under a
   // name ending the same way; only one of the two is built out of this
   // directory. `target` is the cluster's published name for it.
-  const picked = databaseService({
+  const picked = targetService({
     services: {
       "libraries_mecha-database": { image: "cluster:latest", build: { context: "/repo/libraries/mecha" } },
       "apps_realworld-database": { image: "app:latest", build: { context: "/repo/apps/realworld" } },
@@ -167,27 +167,14 @@ Deno.test("the diagnosis survives the frames pgroll draws after it", () => {
   assertEquals(plain(stderr), 'failed: column "body" does not exist');
 });
 
-Deno.test("an app that has never changed a live schema declares no migrations", async () => {
-  // The directory is simply absent, which is an answer and not a failure.
-  const dir = await Deno.makeTempDir({ prefix: "replay-none-" });
-  try {
-    assertEquals(await pgrollMigrations(dir), []);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
+Deno.test("declared migrations are named without their extension, in applied order", () => {
+  assertEquals(pgrollMigrations("03_c.json\n01_a.json\n02_b.json\nnotes.txt\n"), ["01_a", "02_b", "03_c"]);
 });
 
-Deno.test("declared migrations are named without their extension, in applied order", async () => {
-  const dir = await Deno.makeTempDir({ prefix: "replay-decl-" });
-  try {
-    await Deno.mkdir(`${dir}/services/database/pgroll`, { recursive: true });
-    for (const n of ["03_c.json", "01_a.json", "02_b.json", "notes.txt"]) {
-      await Deno.writeTextFile(`${dir}/services/database/pgroll/${n}`, "{}");
-    }
-    assertEquals(await pgrollMigrations(dir), ["01_a", "02_b", "03_c"]);
-  } finally {
-    await Deno.remove(dir, { recursive: true });
-  }
+Deno.test("applied order is byte order, as the migrate target applies them", () => {
+  // localeCompare puts "1_z" before "10_a"; the runner globs and compares
+  // under LC_ALL=C, where "_" sorts after every digit.
+  assertEquals(pgrollMigrations("10_a.json\n1_z.json\n0_b.json\n"), ["0_b", "10_a", "1_z"]);
 });
 
 Deno.test({ name: "a dangling link is the app's file, not the image's", ignore: Deno.build.os === "windows" }, async () => {
@@ -197,10 +184,10 @@ Deno.test({ name: "a dangling link is the app's file, not the image's", ignore: 
   const dir = await Deno.makeTempDir({ prefix: "replay-locate-link-" });
   try {
     await Deno.mkdir(`${dir}/services/database/migrations`, { recursive: true });
-    await Deno.symlink(`${dir}/nowhere.sql`, `${dir}/services/database/migrations/004_create_tables.sql`);
+    await Deno.symlink(`${dir}/nowhere.sql`, `${dir}/services/database/migrations/005_create_tables.sql`);
     assertEquals(
-      await locate(dir, "/docker-entrypoint-initdb.d/004_create_tables.sql"),
-      "services/database/migrations/004_create_tables.sql",
+      await locate(dir, "/docker-entrypoint-initdb.d/005_create_tables.sql"),
+      "services/database/migrations/005_create_tables.sql",
     );
   } finally {
     await Deno.remove(dir, { recursive: true });
@@ -214,14 +201,14 @@ Deno.test("a finding lands on the app's own file when it has one", async () => {
   const dir = await Deno.makeTempDir({ prefix: "replay-locate-" });
   try {
     await Deno.mkdir(`${dir}/services/database/migrations`, { recursive: true });
-    await Deno.writeTextFile(`${dir}/services/database/migrations/004_create_tables.sql`, "");
+    await Deno.writeTextFile(`${dir}/services/database/migrations/005_create_tables.sql`, "");
     assertEquals(
-      await locate(dir, "/docker-entrypoint-initdb.d/004_create_tables.sql"),
-      "services/database/migrations/004_create_tables.sql",
+      await locate(dir, "/docker-entrypoint-initdb.d/005_create_tables.sql"),
+      "services/database/migrations/005_create_tables.sql",
     );
     assertEquals(
-      await locate(dir, "/docker-entrypoint-initdb.d/002a_rls.sql"),
-      "the database image's 002a_rls.sql",
+      await locate(dir, "/docker-entrypoint-initdb.d/003_rls.sql"),
+      "the database image's 003_rls.sql",
     );
   } finally {
     await Deno.remove(dir, { recursive: true });
