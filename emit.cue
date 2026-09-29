@@ -1575,7 +1575,7 @@ _cdcTableField: "__table"
 		.shell-login button { font: inherit; font-weight: 600; padding: 8px 10px;
 		  border-radius: var(--r-sm, 6px); border: 1px solid var(--shell-rule);
 		  background: var(--shell-fg); color: var(--shell-bg);
-		  cursor: pointer; }
+		  cursor: pointer; min-height: 44px; }
 		.shell-login .login-hint { margin: 0; font-weight: 400; font-size: .875rem;
 		  color: var(--shell-fg); }
 		.shell-login .login-guest { background: var(--surface);
