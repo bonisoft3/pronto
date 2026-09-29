@@ -28,11 +28,11 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
       return decoder.decode(result.stdout);
     }
     const modules = [
-      ["plugins/bayt", "bayt", "0.52.1"],
-      ["plugins/sayt", "sayt", "0.39.3"],
-      ["libraries/mecha", "mecha", "0.1.4"],
-      ["plugins/omnishell", "omnishell", "0.2.3"],
-      ["plugins/pronto", "pronto", "0.3.2"],
+      ["plugins/bayt", "bayt", "0.54.0"],
+      ["plugins/sayt", "sayt", "0.39.4"],
+      ["libraries/mecha", "mecha", "0.2.0"],
+      ["plugins/omnishell", "omnishell", "0.3.0"],
+      ["plugins/pronto", "pronto", "0.4.0"],
     ];
     async function copy(source: string, target: string): Promise<void> {
       await Deno.mkdir(target, { recursive: true });
@@ -62,7 +62,7 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
     const app = join(scratch, "consumer with spaces");
     await Deno.mkdir(app);
     await cue(app, ["mod", "init", "example.com/consumer@v0"]);
-    await cue(app, ["mod", "get", "github.com/bonisoft3/pronto@v0.3.2"]);
+    await cue(app, ["mod", "get", "github.com/bonisoft3/pronto@v0.4.0"]);
     await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"]);
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
