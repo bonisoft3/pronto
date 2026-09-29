@@ -204,7 +204,7 @@
         "defaultExclude": null
       },
       "shell": "sh",
-      "do": "sh -c 'deno check --config deno.json $(ls *.ts | grep -vx -e prerender.ts -e negotiation_test.ts | tr \"\\n\" \" \")'",
+      "do": "deno run --allow-read=. --allow-run check-build.ts",
       "name": "builtin",
       "stop": false
     }

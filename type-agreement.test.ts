@@ -19,10 +19,12 @@
 // vocabulary is dead, since a `beyond` nothing reads is a claim — which the
 // json entry was, spelling RFC 8785, until it was measured.
 import { assert, assertEquals } from "jsr:@std/assert@1";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { boundTypes, typeTable } from "./type-table.ts";
 import type { TypeCheck, TypeField } from "./portable-types.ts";
 
-const dir = new URL(".", import.meta.url).pathname;
+const dir = fileURLToPath(new URL(".", import.meta.url));
 const table = typeTable();
 const types = boundTypes();
 
@@ -95,10 +97,10 @@ async function programAccepts(typeName: string, value: unknown): Promise<boolean
   const scratch = await Deno.makeTempDir({ prefix: "type-agreement-" });
   try {
     await Deno.writeTextFile(
-      `${scratch}/table.cue`,
-      (await Deno.readTextFile(`${dir}/types.cue`)).replace(/^package pronto$/m, "package probe"),
+      join(scratch, "table.cue"),
+      (await Deno.readTextFile(join(dir, "types.cue"))).replace(/^package pronto$/m, "package probe"),
     );
-    await Deno.writeTextFile(`${scratch}/case.cue`, `package probe\n\nx: ${JSON.stringify(value)} & #TypeConstraint["${typeName}"].valid\n`);
+    await Deno.writeTextFile(join(scratch, "case.cue"), `package probe\n\nx: ${JSON.stringify(value)} & #TypeConstraint["${typeName}"].valid\n`);
     const out = await new Deno.Command("cue", {
       args: ["export", "table.cue", "case.cue", "-e", "x"],
       cwd: scratch,

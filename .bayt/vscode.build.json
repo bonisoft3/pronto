@@ -6,7 +6,7 @@
       "command": "mise x -- sh",
       "args": [
         "-c",
-        "sh -c 'deno check --config deno.json $(ls *.ts | grep -vx -e prerender.ts -e negotiation_test.ts | tr \"\\n\" \" \")'"
+        "deno run --allow-read=. --allow-run check-build.ts"
       ],
       "group": {
         "kind": "build",

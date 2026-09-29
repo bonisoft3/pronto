@@ -31,8 +31,7 @@ _pronto: bayt.#project & {
 
 		// Typecheck-only build, no emitted artifact: every consumer runs these
 		// .ts files directly under deno, so the typecheck is what building
-		// them means. `sh -c` because the glob is the shell's to expand, and
-		// `mise.exec` wraps a single argv.
+		// them means.
 		"build": sayt.build & mise.exec & {
 			srcs: globs: ["*.ts", "scales/*.ts", "deno.json", "deno.lock"]
 			// Two files reach across the plugin boundary into omnishell's
@@ -47,11 +46,7 @@ _pronto: bayt.#project & {
 			// decision arriving at whoever wrote the import.
 			cmd: "builtin": {
 				shell: "sh"
-				// Flattened to one line: the substitution is expanded by the shell
-				// that builds this command, so a newline surviving into the inner
-				// `sh -c` ends the deno call and runs every later filename as a
-				// command of its own.
-				do:    "sh -c 'deno check --config deno.json $(ls *.ts | grep -vx -e prerender.ts -e negotiation_test.ts | tr \"\\n\" \" \")'"
+				do:    "deno run --allow-read=. --allow-run check-build.ts"
 			}
 			dockerfile: from: ref: ":setup"
 		}
