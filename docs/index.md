@@ -32,6 +32,7 @@
 * [Owner stamping](decisions/2026-08-31-owner-stamping.md) - decision, unbuilt: Moves a row's owner stamp from the apps' `default: "auth_uid()"` column defaults to an emitted per-table BEFORE INSERT trigger beside the policies, and narrows `#Field.default` to what a bare Postgres has, so the data-holding steps need nothing from the rules.
 * [The next vocabulary](decisions/2026-09-08-the-next-vocabulary.md) - decision, accepted: Chooses the platform's next token layer — DTCG as the format, Tailwind's namespaces as the grammar, shadcn's names as the roles — for the names a model will write, of which only the contrast grading is built.
 * [Pronto written in pronto](decisions/2026-09-27-pronto-written-in-pronto.md) - decision, unbuilt: The whole development loop in a browser tab — authoring, compilation, running and version control, with sayt's verbs run by an in-tab executor, inside an IDE that is itself a pronto app — none of which exists yet.
+* [Hybrid machines](decisions/2026-09-29-hybrid-machines.md) - decision, unbuilt: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-exterior tiers.
 
 # Archive
 
