@@ -91,3 +91,48 @@ Deno.test("a buf line that carries no file:line is still reported", () => {
   assertEquals(found.length, 1);
   assertEquals(found[0].severity, "error");
 });
+
+Deno.test("a clone missing the target branch fetches it from origin", async () => {
+  // A PR checkout checks out the merge commit shallowly, so the target branch
+  // has no local ref until fetched; without healing, the run aborts before comparing.
+  const remote = await Deno.makeTempDir({ prefix: "pronto-remote-" });
+  const local = await Deno.makeTempDir({ prefix: "pronto-local-" });
+  try {
+    const gitRun = (cwd: string, ...args: string[]) =>
+      new Deno.Command("git", { args, cwd, stdout: "null", stderr: "null" }).output();
+
+    await gitRun(remote, "init", "-q", "-b", "main");
+    await gitRun(remote, "config", "user.name", "Test");
+    await gitRun(remote, "config", "user.email", "test@example.com");
+    await Deno.writeTextFile(`${remote}/test.txt`, "base\n");
+    await gitRun(remote, "add", ".");
+    await gitRun(remote, "commit", "-q", "-m", "init");
+
+    await gitRun(remote, "checkout", "-q", "-b", "pr-branch");
+    await Deno.writeTextFile(`${remote}/test.txt`, "pr change\n");
+    await gitRun(remote, "commit", "-q", "-a", "-m", "pr");
+
+    await gitRun(local, "init", "-q");
+    await gitRun(local, "remote", "add", "origin", remote);
+    await gitRun(local, "fetch", "--depth=1", "origin", "pr-branch:pr-branch");
+    await gitRun(local, "checkout", "-q", "pr-branch");
+
+    await new Deno.Command("deno", {
+      args: ["run", "-A", fileURLToPath(new URL("./check-proto.ts", import.meta.url)), local, "main"],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+
+    const verifyMain = await new Deno.Command("git", {
+      args: ["rev-parse", "--verify", "main^{commit}"],
+      cwd: local,
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    assertEquals(verifyMain.success, true);
+  } finally {
+    await Deno.remove(remote, { recursive: true });
+    await Deno.remove(local, { recursive: true });
+  }
+});
+

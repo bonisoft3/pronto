@@ -116,15 +116,31 @@ async function main(appDir: string, branch: string) {
     console.log(JSON.stringify([], null, 2));
     return;
   }
-  // A branch missing from a repository which HAS history is a misconfiguration
-  // — a renamed default branch, a shallow clone — and passing it silently would
+  // A branch missing from a repository which HAS history is fetched from origin;
+  // if still missing, it is a misconfiguration, and passing it silently would
   // leave a gate that reads green while comparing nothing.
-  const known = await new Deno.Command("git", {
+  let known = await new Deno.Command("git", {
     args: ["rev-parse", "--verify", `${branch}^{commit}`],
     cwd: appDir,
     stdout: "null",
     stderr: "null",
   }).output();
+  if (!known.success) {
+    const fetch = await new Deno.Command("git", {
+      args: ["fetch", "--depth=1", "origin", `${branch}:${branch}`],
+      cwd: appDir,
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    if (fetch.success) {
+      known = await new Deno.Command("git", {
+        args: ["rev-parse", "--verify", `${branch}^{commit}`],
+        cwd: appDir,
+        stdout: "null",
+        stderr: "null",
+      }).output();
+    }
+  }
   if (!known.success) {
     throw new Error(`this repository has history but no "${branch}" to compare against; name the branch to compare with as the second argument`);
   }
