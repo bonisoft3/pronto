@@ -531,7 +531,7 @@ export function scanTemplateI18n(html: string, screen: string, path: string): {
 export function i18nFacts(
   defaultLocale: string | null,
   locales: string[],
-  catalogs: Record<string, Record<string, string | Record<string, string>>>,
+  catalogs: Record<string, Record<string, unknown>>,
   msgRefs: FactTemplateMsgRef[],
   prose: FactTemplateProse[],
 ): Facts {
@@ -546,7 +546,9 @@ export function i18nFacts(
       Object.entries(msgs).flatMap(([key, value]) =>
         typeof value === "string"
           ? [{ locale, key, arm: "", value }]
-          : Object.entries(value).map(([arm, text]) => ({ locale, key, arm, value: text }))
+          : Array.isArray(value)
+          ? [{ locale, key, arm: "", value: JSON.stringify(value) }]
+          : Object.entries(value as Record<string, string>).map(([arm, text]) => ({ locale, key, arm, value: text }))
       )
     ),
     template_msg_ref: msgRefs,

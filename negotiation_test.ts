@@ -33,7 +33,7 @@ for await (const entry of Deno.readDir(APPS)) {
   } catch {
     continue;
   }
-  if (shell.i18n === undefined) continue;
+  if (shell.i18n === undefined || Object.keys(shell.i18n.locales ?? {}).length <= 1) continue;
   doors.push({
     name: entry.name,
     i18n: shell.i18n,

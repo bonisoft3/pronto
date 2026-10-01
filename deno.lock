@@ -8,12 +8,14 @@
     "jsr:@david/shell@0.7": "0.7.0",
     "jsr:@david/which@~0.7.3": "0.7.3",
     "jsr:@std/assert@1": "1.0.19",
+    "jsr:@std/assert@1.0.11": "1.0.11",
     "jsr:@std/bytes@^1.0.6": "1.0.6",
     "jsr:@std/encoding@1.0.5": "1.0.5",
     "jsr:@std/encoding@1.0.7": "1.0.7",
     "jsr:@std/fmt@1": "1.0.10",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
+    "jsr:@std/internal@^1.0.5": "1.0.14",
     "jsr:@std/io@0.225": "0.225.3",
     "jsr:@std/path@1": "1.1.6",
     "jsr:@std/path@^1.1.6": "1.1.6",
@@ -63,6 +65,12 @@
     },
     "@david/which@0.7.3": {
       "integrity": "ad6697179c4a153b774c59d06ebc056c4f87a9c27117ff74eecb120c245a2aea"
+    },
+    "@std/assert@1.0.11": {
+      "integrity": "2461ef3c368fe88bc60e186e7744a93112f16fd110022e113a0849e94d1c83c1",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.5"
+      ]
     },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",

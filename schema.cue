@@ -23,6 +23,7 @@ import (
 // terminal's module loader. No scheme and no `..`: the source is read from the
 // app's own tree and embedded in emitted artifacts.
 #Jessie: string & =~"^([a-z0-9_-]+/)*[a-z0-9_-]+\\.js$"
+#SafeEndowment: "Intl" | "TextEncoder" | "TextDecoder" | "URL" | "URLSearchParams"
 
 // The seven pre-composed shadow inks. Open Props' elevation carries a real
 // dark story that light-dark() cannot take — --shadow-color is a bare
@@ -471,18 +472,6 @@ import (
 	// value. Its SQL CHECK body and its CUE constraint are derived from the
 	// parsed expression (program_cel.cue), never written beside it.
 	cel?: string
-	// An amount of money, counted in whole minor units. The column stays an
-	// integer — a currency is not a type, it is what an integer counts, and a
-	// new #Field.type member would move every app's DDL — and this is where the
-	// terminal's data-text-format="money" reads the code and the scale from.
-	// `minorUnits: 0` is a ledger in whole reais; 2 is the ordinary cents.
-	money?: {
-		currency:   string & =~"^[A-Z]{3}$" // ISO 4217
-		minorUnits: *2 | int & >=0 & <=4
-	}
-	if money != _|_ {
-		type: "int32" | "int64" | "int" | "bigint"
-	}
 }
 
 // Row visibility, enforced as RLS policies (006_policies.sql). Modeled after the
@@ -503,6 +492,7 @@ import (
 	on:     string
 } | {
 	scope: "public"
+	write?: bool
 } | {
 	scope: "internal"
 }
@@ -842,6 +832,69 @@ import (
 	}
 }
 
+// A Mecha statechart executed inside PostgreSQL — transactions, trigger reducers,
+// finite timeouts, and deterministic relational effects. Level 3 effect limit.
+#RelationalOp: "insert" | "ensure" | "upsert" | "accumulate" | "update" | "delete"
+
+#RelationalEffect: {
+	op:            #RelationalOp
+	table:         string
+	values?:       {[string]: _}
+	key?:          [...string]
+	where?:        {[string]: _}
+	accumulate?:   [...string]
+	updateValues?: {[string]: _}
+}
+
+#FunctionEffect: {
+	call:  string
+	args?: {[string]: _}
+}
+
+#NotifyEffect: {
+	notify:  string
+	payload: string
+}
+
+#MechaEffect: #RelationalEffect | #FunctionEffect | #NotifyEffect
+
+#MechaAction: {
+	assign?: {[string]: _}
+	effect?: #MechaEffect | [...#MechaEffect]
+	raise?:  string
+}
+
+#MechaTransition: {
+	target?:  string
+	guard?:   string
+	actions?: #MechaAction | [...#MechaAction]
+}
+
+#MechaTransitionValue: string | #MechaTransition | [...#MechaTransition]
+
+#MechaState: {
+	type?:    "final" | "normal"
+	on?: [Event=string]: #MechaTransitionValue
+	after?: [DelayMs=string]: #MechaTransitionValue
+	entry?: #MechaAction | [...#MechaAction]
+	exit?:  #MechaAction | [...#MechaAction]
+}
+
+#MechaMachine: {
+	name:    string
+	ir?:     string
+	entity:  string
+	timing?: "BEFORE" | "AFTER"
+	field?:   string
+	initial?: string
+	states?: [StateName=string]: #MechaState
+	on?: {
+		insert?: #MechaAction | [...#MechaAction]
+		update?: #MechaAction | [...#MechaAction]
+		delete?: #MechaAction | [...#MechaAction]
+	}
+}
+
 #FormField: {
 	name: string
 	// "file" (blobs on): the shell PUTs the picked file to
@@ -1065,6 +1118,7 @@ import (
 		migrations?: [grammar.#Name]: grammar.#Migration
 		pipelines: [Name=string]: #Pipeline & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
+		machines?: [Name=string]: #MechaMachine & {name: Name}
 	}
 
 	capabilities: {
@@ -1143,6 +1197,7 @@ import (
 		handlers: [Name=string]: {ir: *Name | string, of: string, src: #Jessie, note: string}
 		design: #Design
 		flows: [Name=string]: #Flow & {name: Name}
+		endowments?: [Path=string]: [...#SafeEndowment]
 	}
 
 	meta: {

@@ -40,27 +40,36 @@ the app's own column, which a locale's region may default.
 
 A catalogue is standard JSON, `messages/<tag>.json`, embedded by the app
 package and handed to `meta.i18n.catalogues`, so translators and translation
-management systems read it without a converter. A value is one sentence or a
-flat map of arms that `data-msg-plural` (the CLDR category of a count column)
-or `data-msg-select` (a column's own value) picks from.
+management systems read it without a converter. Values are standard sentences
+or ICU MessageFormat strings supporting arguments (`{name}`), plurals
+(`{count, plural, one {# item} other {# items}}`), and selects
+(`{gender, select, f {ela} m {ele} other {elu}}`).
+
+In omnishell, message strings with ICU syntax are parsed into
+JSON Abstract Syntax Trees (ASTs) via `messages.ts` (backed by
+`@formatjs/icu-messageformat-parser`) while plain strings are preserved intact. At run time,
+omnishell's pure SES evaluator (`evaluateAst` in `screen.js`) evaluates the ASTs
+with zero external dependencies using endowed `Intl.PluralRules` and
+`Intl.NumberFormat`. Screens bind messages through standard `{msg.key}`
+placeholders without ad-hoc attribute helpers.
 
 Completeness is refused at two points. A `slug` or `label` key is resolved by
 the emitter, so a locale missing one is a reference error at `cue vet`, and a
-slug that resolves to a map, or to text that is not a URL segment, fails the
+slug that resolves to an AST, or to text that is not a URL segment, fails the
 same way. Every other key is found by `check i18n` (omnishell's
 `check-i18n.ts`, at `test` wherever catalogues are declared), which renders
-every route and storyboard state under every declared locale. A missing key
-falls back to the default catalogue, so it finds:
+every route and storyboard state under every declared locale. It validates that:
 
-- a sentence in the default language where another was due;
-- a screen that renders identically in two locales;
-- an un-interpolated `{msg.…}`;
-- a map of arms missing an arm;
-- a chrome key (`chrome_signin`, `chrome_signout`, a nav label) the terminal
-  would otherwise speak in English.
+- every required CLDR plural category for each declared locale is supplied in the AST;
+- select options agree across all declared locales;
+- no obsolete attributes (`data-msg-plural`, `data-msg-select`) exist in templates;
+- an arm is text and never names another `{msg.key}`;
+- a screen does not render identically in two locales;
+- no un-interpolated `{msg.…}` placeholders leak into the DOM;
+- every chrome key (`chrome_signin`, `chrome_signout`, nav labels) is translated.
 
 A pseudo-locale pass (`en-XA`, `ar-XB`) then renders under a decorated
-catalogue total over every key and arm, and reports prose that reached no
+catalogue total over every key, and reports prose that reached no
 catalogue.
 
 ## Addresses

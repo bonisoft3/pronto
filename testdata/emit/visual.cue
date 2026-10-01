@@ -8,6 +8,6 @@ import pronto "github.com/bonisoft3/pronto"
 
 _visual: (pronto.#DefaultTerminal & {code: _code}).out.surface.checks.visual.cmds
 visualBoot: _visual[0]
-visualBoot: "mise exec -- docker compose up -d --wait --build launch"
+visualBoot: "mise exec -- docker compose -p (^mise exec -- printenv COMPOSE_PROJECT_NAME | complete | get stdout | str trim | str replace -r '^$' 'emit') up -d --wait --build launch"
 visualRun: _visual[len(_visual)-1]
 visualRun: "mise exec -- docker compose -p (^mise exec -- printenv COMPOSE_PROJECT_NAME | complete | get stdout | str trim | str replace -r '^$' 'emit') --profile '*' -f .bayt/compose.integrate.closure.yaml up bayt --abort-on-container-failure --exit-code-from bayt --build --remove-orphans --attach-dependencies"

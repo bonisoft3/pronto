@@ -64,20 +64,29 @@ three tiers are mathematically pure, closed over rows, and replayable.
 
 ## 2. Mecha Machines (Relational Core & Transactions)
 
-- **Role**: Transactional schema evolutions (migrations), trigger-based aggregates,
-  and watermark tracking.
+- **Role**: Statecharts executed inside PostgreSQL — transactions, trigger reducers,
+  timed turn deadlines, and ticker-driven schedules.
 - **Inbound Events**:
-  - `WAL_COMMIT`: Transaction committed at an LSN boundary with commit timestamp.
-  - `TRIGGER_FIRE`: Row-level trigger invocation inside a transaction.
-  - `DUE_SWEEP`: `stream_due` row claimed via `FOR UPDATE SKIP LOCKED`.
-  - `MIGRATION_STEP`: DDL migration phase transition.
+  - `mutation`: Relational write (`INSERT`, `UPDATE`, `DELETE`) on a floored table.
+  - `after`: Relative timer deadline on an active state (`after: 15s`), evaluated
+    against row timestamp bounds under PostgreSQL role timeouts.
+  - `schedule`: Scheduled calendar/interval wake emitted by Mecha's ticker
+    (`020_schedule.sql`).
 - **Outbound Effects**:
-  - `EXECUTE_DDL`: Transactional migrations.
-  - `UPSERT_RELATIONAL`: Internal table writes within the active transaction.
-  - `SCHEDULE_DUE`: Write to `stream_due` for deferred execution against the watermark.
-  - `ADVANCE_WATERMARK`: Atomically advance `stream_consumer` offset.
-- **Contract**: Single database transaction boundary. Zero external network calls.
-  Every transition is atomic with the sink write.
+  - Closed relational operations:
+    - `insert`: Strict append (`INSERT INTO ...`). Fails loudly on unique collision.
+    - `ensure`: Idempotent insert (`INSERT ... ON CONFLICT DO NOTHING`). Inserts if absent,
+      no-op if existing.
+    - `upsert`: State replacement (`INSERT ... ON CONFLICT (key) DO UPDATE SET ... = EXCLUDED...`).
+    - `accumulate`: Delta accumulation (`INSERT ... ON CONFLICT (key) DO UPDATE SET col = col + EXCLUDED.col`).
+    - `delete`: Row deletion (`DELETE FROM ... WHERE ...`).
+  - Domain functions:
+    - `call`: Parameterized execution of declared, schema-vetted PL/pgSQL functions.
+  - Cluster notifications:
+    - `notify`: Transactional `pg_notify` to wake local daemons (PostgREST reload, ticker).
+- **Contract**: Strictly Level 3. Single database transaction boundary. Zero external
+  network calls. All statements bounded by role-level PostgreSQL timeouts
+  (`statement_timeout = '5s'`).
 
 ---
 
@@ -292,6 +301,20 @@ domains:
      statecharts: `idle` → `alert` → `attack` → `pain` → `dead`) + Mecha (save states).
    - *Invariant*: Monster AI and game progression remain 100% formal, verifiable XState data
      charts while rendering and physics run at an uncapped 144 FPS.
+
+---
+
+## Adoption across Repository Flagship Applications (`./apps`)
+
+Every existing application in `./apps` with a PostgreSQL backend (migrations, publications, and RLS policies) derives tangible architectural guarantees from Hybrid Machines, finite statement timeouts, and level-3 relational effects:
+
+| Application | Existing Mechanism | Hybrid Machine Adoption & Guarantees |
+|---|---|---|
+| **[`apps/truco`](file:///Users/davi/code/trash/apps/truco)** | Hand-written `challenge_expire_check()` trigger and RLS status checks in `012_lobby.sql`. | **Adopted (`010_machines.sql`)**: Challenge lifecycle (`pending` $\rightarrow$ `accepted` \| `declined` \| `expired`) is compiled from `#MechaMachine` with finite timeout `after: {"60000": "expired"}`. Enforces initial state, valid transitions, immutability of final states, and timeout guards without custom trigger boilerplate. |
+| **[`apps/xpense`](file:///Users/davi/code/trash/apps/xpense)** | Hand-written PL/pgSQL trigger arithmetic in `011_ledger_writes.sql` (`expense_maintain_stats_ivm`). | **Relational Effects Candidate**: Balance rollups and monthly counts on `month_stat` and `category_month_stat` map directly to Mecha's deterministic `accumulate` and `upsert` relational effects. Recurring expense generation maps to Mecha Ticker schedules. |
+| **[`apps/thenote`](file:///Users/davi/code/trash/apps/thenote)** | Note sharing (`011_share_trigger.sql`) and card positioning triggers (`013_item_position_trigger.sql`). | **Lock & Concurrency Limits**: Strict PostgreSQL statement timeouts (`SET statement_timeout = '60s'`, role limits `5s`) prevent gateway timeouts and cascading lock starvation during concurrent multi-user board dragging. |
+| **[`apps/ponto`](file:///Users/davi/code/trash/apps/ponto)** | Manual shift duration checks and punch validations (`012_duration_checks.sql`). | **Open Punch Auto-Expiry**: Active punch sessions run as finite machines; forgotten punch-outs are flagged or closed automatically by Ticker schedules. |
+| **[`apps/chess`](file:///Users/davi/code/trash/apps/chess)** | In-browser referee state machine and local time controls. | **Authoritative Turn Clocks**: Match state (`playing` $\rightarrow$ `over`) with strict termination reasons (`checkmate`, `resignation`, `flag`) backed by database-level clock expiration checks, preventing client clock manipulation. |
 
 ---
 

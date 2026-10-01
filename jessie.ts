@@ -23,9 +23,8 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
     "import",
     "require",
   ].map((name) => ({ name, reason: "handlers run in an SES compartment with no endowments" })),
-  // An adapter reads the tz database through Intl, and a formatter takes a
-  // Date; the cage still refuses the clock itself — `Date.now()` and a bare
-  // `new Date()` throw under SES's taming.
+  // A formatter takes a Date; the cage still refuses the clock itself —
+  // `Date.now()` and a bare `new Date()` throw under SES's taming.
   {
     name: "Date",
     reason: "handlers run in an SES compartment with no endowments",
@@ -33,9 +32,18 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
   },
   {
     name: "Intl",
-    reason: "only an adapter's compartment is endowed with Intl",
+    reason: "only an adapter or a module granted Intl via manifest endowments is endowed with Intl",
     exceptRole: "adapter",
   },
+  ...[
+    "TextEncoder",
+    "TextDecoder",
+    "URL",
+    "URLSearchParams",
+  ].map((name) => ({
+    name,
+    reason: "safe platform primitives require opt-in via manifest endowments",
+  })),
   { name: "Math.random", reason: "handlers must be deterministic" },
   // Listed again with the reason that actually holds: SES censors `eval` and
   // `import` only in their DIRECT forms, when it rewrites the source. Probed
@@ -51,6 +59,14 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
   { name: "plv8", reason: "a validation is handed its world; it queries nothing" },
   { name: "this", reason: "Jessie has no this; in plv8 it would reach the global object" },
 ];
+
+export const SAFE_ENDOWMENTS = new Set([
+  "Intl",
+  "TextEncoder",
+  "TextDecoder",
+  "URL",
+  "URLSearchParams",
+]);
 
 /**
  * Walks the source outside its comments and its string and template bodies,
@@ -153,15 +169,21 @@ function lastStatement(stripped: string): string {
 
 /** The denied names a module reaches for, and which of the two completion
  * shapes it ends in — `other` where it is neither. */
-export function jessieFacts(source: string): { references: string[]; completion: string } {
+export function jessieFacts(source: string, grantedEndowments: string[] = []): { references: string[]; completion: string } {
   const stripped = stripAtoms(source);
-  const references = DENIED
-    .filter(({ name }) =>
-      name === "Math.random"
-        ? /\bMath\s*\.\s*random\b/.test(stripped)
-        : new RegExp(`\\b${name}\\b`).test(stripped)
-    )
-    .map(({ name }) => name);
+  const endowments = new Set(grantedEndowments);
+  const unpermittedEndowments = [...endowments].filter((name) => !SAFE_ENDOWMENTS.has(name));
+  const references = [
+    ...DENIED
+      .filter(({ name }) => {
+        if (endowments.has(name) && SAFE_ENDOWMENTS.has(name)) return false;
+        return name === "Math.random"
+          ? /\bMath\s*\.\s*random\b/.test(stripped)
+          : new RegExp(`\\b${name}\\b`).test(stripped);
+      })
+      .map(({ name }) => name),
+    ...unpermittedEndowments,
+  ];
   const last = lastStatement(stripped);
   const completion = ARROW_HEAD.test(last) ? "arrow" : OBJECT_HEAD.test(last) ? "object" : "other";
   return { references, completion };
@@ -174,7 +196,7 @@ export function jessieSelfTest(): string[] {
 const label = "a Date for the window";
 (state, event) => ({ updates: renumber(state.items) });
 `;
-  const cases: { name: string; source: string; expect: string[] }[] = [
+  const cases: { name: string; source: string; granted?: string[]; expect: string[] }[] = [
     { name: "clean handler passes", source: good, expect: [] },
     {
       name: "fetch is denylisted",
@@ -210,12 +232,29 @@ const label = "a Date for the window";
     },
     { name: "plv8 is denylisted", source: `(state, event) => plv8.execute("select 1");\n`, expect: ["plv8"] },
     { name: "this is denylisted", source: `(state, event) => this.rows;\n`, expect: ["this"] },
+    {
+      name: "safe platform endowments without opt-in are denylisted",
+      source: `(state, event) => ({ u: new URL("https://example.com"), t: new TextEncoder().encode("hi"), i: typeof Intl });\n`,
+      expect: ["Intl", "TextEncoder", "URL"],
+    },
+    {
+      name: "safe platform endowments with opt-in pass",
+      source: `(state, event) => ({ u: new URL("https://example.com"), t: new TextEncoder().encode("hi"), i: typeof Intl });\n`,
+      granted: ["Intl", "URL", "TextEncoder"],
+      expect: [],
+    },
+    {
+      name: "unpermitted endowment opt-in is denylisted",
+      source: `(state, event) => 1;\n`,
+      granted: ["fetch"],
+      expect: ["fetch"],
+    },
   ];
   const failures: string[] = [];
   for (const t of cases) {
     // The rows, not the wording a query wraps them in: a denied name referenced,
     // and a completion value that is neither shape.
-    const f = jessieFacts(t.source);
+    const f = jessieFacts(t.source, t.granted ?? []);
     const got = [
       ...f.references,
       ...(f.completion === "other" ? ["completion:other"] : []),

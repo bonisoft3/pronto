@@ -10,7 +10,7 @@
 // pipelines only fire on CDC), CDC for crud-path tables only (derived
 // tables get none — that is what prevents pipeline loops), and one
 // idempotent stream transform per program pipeline. Schema evolution
-// (Atlas) is mecha's reserved surface.
+// (pgroll) is mecha's reserved surface.
 package mecha
 
 import (

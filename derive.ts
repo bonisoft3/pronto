@@ -334,13 +334,16 @@ export async function derive(appDir: string): Promise<void> {
   // `program` is exported whole, so the slices the table registry needs are
   // read off it rather than added to the expression above.
   const { surface, state, meta: appMeta } = exp.program as unknown as {
-    surface: { screens: Record<string, { forms?: { id: string; entity: string }[] }> };
+    surface: {
+      screens: Record<string, { forms?: { id: string; entity: string }[] }>;
+      endowments?: Record<string, string[]>;
+    };
     state: { pipelines?: Record<string, { fold?: { pair: { table: string } } }> };
     meta?: { i18n?: { default?: string; locales?: Record<string, { path: string }> } };
   };
   const defaultLocale = appMeta?.i18n?.default ?? null;
   const locales = Object.keys(appMeta?.i18n?.locales ?? {});
-  const catalogs: Record<string, Record<string, string | Record<string, string>>> = {};
+  const catalogs: Record<string, Record<string, unknown>> = {};
   for (const loc of locales) {
     const text = await ifMissing(Deno.readTextFile(`${appDir}/messages/${loc}.json`), null);
     if (text === null) fail(`messages/${loc}.json is declared in i18n.locales and missing`);
@@ -351,7 +354,7 @@ export async function derive(appDir: string): Promise<void> {
       fail(`messages/${loc}.json does not parse: ${(e as Error).message}`);
     }
     if (catalog === null || typeof catalog !== "object" || Array.isArray(catalog)) fail(`messages/${loc}.json is not an object`);
-    catalogs[loc] = catalog as Record<string, string | Record<string, string>>;
+    catalogs[loc] = catalog as Record<string, unknown>;
   }
   const notes = await decisionNotes(appDir, exp.ir, exp.decisions);
   const byTable = new Map(Object.entries(entities).map(([name, e]) => [e.table, name]));
@@ -361,6 +364,7 @@ export async function derive(appDir: string): Promise<void> {
   const TAG = "$validation$";
   const modules: { path: string; references: string[]; completion: string; role: string }[] = [];
   const validated: { entity: string; name: string; edges: ReturnType<typeof resolveEdges>; statements: string; completion: string }[] = [];
+  const surfaceEndowments = surface.endowments ?? {};
   for (const [ename, e] of Object.entries(entities)) {
     for (const [vname, v] of Object.entries(e.validations ?? {})) {
       const why = validationLint(entities, ename, vname);
@@ -370,7 +374,8 @@ export async function derive(appDir: string): Promise<void> {
       if (src.includes(TAG)) fail(`entity ${ename}: validations "${vname}": ${v.src} contains the quote tag ${TAG}`);
       const split = splitCompletion(src);
       if (split === null) fail(`entity ${ename}: validations "${vname}": ${v.src} must end in an arrow function`);
-      const facts = jessieFacts(src);
+      const granted = surfaceEndowments[v.src] ?? surfaceEndowments[v.src.split("/").pop() ?? ""] ?? [];
+      const facts = jessieFacts(src, granted);
       modules.push({ path: v.src, ...facts, role: "validation" });
       // A handler's denied name is a fact row a query reports; a validation's
       // is a refusal here, because its source is embedded in a migration and
@@ -672,7 +677,8 @@ export async function derive(appDir: string): Promise<void> {
   const handlerNames = new Set(screens.flatMap((s) => s.handlers.map((h) => h.replace(/^.*\//, "").replace(/\.js$/, ""))));
   for (const name of [...available].sort()) {
     const rel = `shell/handlers/${name}.js`;
-    const facts = jessieFacts(await Deno.readTextFile(`${appDir}/${rel}`));
+    const granted = surfaceEndowments[rel] ?? surfaceEndowments[`${name}.js`] ?? [];
+    const facts = jessieFacts(await Deno.readTextFile(`${appDir}/${rel}`), granted);
     const roles = [...(adapterNames.has(name) ? ["adapter"] : []), ...(handlerNames.has(name) || !adapterNames.has(name) ? ["handler"] : [])];
     for (const role of roles) modules.push({ path: rel, ...facts, role });
   }
@@ -864,7 +870,6 @@ function selfTest(): void {
   for (const f of validationFailures) console.error(`FAIL ${f}`);
   const scaleFailures = scalesSelfTest();
   for (const f of scaleFailures) console.error(`FAIL ${f}`);
-
   let failed = celFindings.length + styleFailures.length + jessieFailures.length + validationFailures.length +
     scaleFailures.length;
   if (!rendered.includes(wantKey)) {

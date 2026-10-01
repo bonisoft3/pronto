@@ -148,7 +148,13 @@ async function main(appDir: string, branch: string) {
   const stderr = new TextDecoder().decode(out.stderr).trim();
   // buf reports breakages on stdout and exits non-zero; a non-zero exit with
   // nothing on stdout is buf failing to run, which is not a clean verdict.
-  if (!out.success && stdout === "") throw new Error(`buf breaking failed: ${stderr || `exit ${out.code}`}`);
+  if (!out.success && stdout === "") {
+    if (stderr.includes("no .proto files were targeted") && skip.size > 0) {
+      console.log(JSON.stringify([], null, 2));
+      return;
+    }
+    throw new Error(`buf breaking failed: ${stderr || `exit ${out.code}`}`);
+  }
 
   const found = findings(stdout);
   console.log(JSON.stringify(found, null, 2));

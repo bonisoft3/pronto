@@ -38,8 +38,8 @@ import (
 	src?:   string // assembly file authored in place; writer verifies presence
 }
 
-_caddyfileAsset: _ @embed(file="assets/Caddyfile", type=text)
-_cdcTypesAsset: _ @embed(file="assets/cdc-types.blobl", type=text)
+_caddyfileAsset:   _ @embed(file="assets/Caddyfile", type=text)
+_cdcTypesAsset:    _ @embed(file="assets/cdc-types.blobl", type=text)
 _cdcCarriersAsset: _cdcTypesAsset
 
 // The type a bus row's column is converted to, by its label: the physical
@@ -54,7 +54,7 @@ _busCarrier: _busType
 // wedge its whole table at runtime, every change to it dropped by every
 // pipeline and visible only in a log, so it is refused where the app is built.
 _busTypes: ["string", "bool", "int32", "int64", "double", "uuid", "timestamp", "date", "time", "timezone", "duration", "decimal"]
-_busCarriers: _busTypes
+_busCarriers:    _busTypes
 _busConvertible: or(_busTypes)
 
 // The one address a route answers at in one locale: the locale's prefix, empty
@@ -72,9 +72,9 @@ _busConvertible: or(_busTypes)
 	_pattern: [if A.i18n != _|_ if A.route.paths != _|_ {A.route.paths[A.tag]}, A.route.path][0]
 	// The bare prefix reads /es rather than /es/, and the default locale's root
 	// keeps the slash it cannot drop.
-	_joined: strings.TrimSuffix(A._prefix + A._pattern, "/")
+	_joined: strings.TrimSuffix(A._prefix+A._pattern, "/")
 	tag:     string | *""
-	out:     [if A._joined == "" {"/"}, A._joined][0]
+	out: [if A._joined == "" {"/"}, A._joined][0]
 }
 
 // A pattern's :params in the order it holds them. A translated spelling may
@@ -180,10 +180,11 @@ _sqlType: {
 	v: _
 	out: [
 		if L.v == null {"NULL"},
+		if (L.v & {raw: string}) != _|_ {L.v.raw},
 		if (L.v & string) != _|_ {"'" + strings.Replace(L.v, "'", "''", -1) + "'"},
 		if (L.v & bool) != _|_ {[if L.v {"true"}, "false"][0]},
 		if (L.v & {...}) != _|_ {"'" + strings.Replace(json.Marshal(L.v), "'", "''", -1) + "'"},
-		if (L.v & [..._]) != _|_ {"'" + strings.Replace(json.Marshal(L.v), "'", "''", -1) + "'"},
+		if (L.v & [...]) != _|_ {"'" + strings.Replace(json.Marshal(L.v), "'", "''", -1) + "'"},
 		"\(L.v)",
 	][0]
 }
@@ -282,8 +283,301 @@ _sqlType: {
 		DROP TRIGGER IF EXISTS \(V.e.table)_validate ON \(V.e.table);
 		CREATE TRIGGER \(V.e.table)_validate AFTER INSERT OR UPDATE ON \(V.e.table)
 		  FOR EACH ROW EXECUTE FUNCTION \(V.e.table)_validate();
-		"""
+		""",
 	]]), "\n\n")
+}
+
+#mechaEffectSql: EF={
+	effect: #MechaEffect
+
+	_isRel:    (EF.effect & #RelationalEffect) != _|_
+	_isCall:   (EF.effect & #FunctionEffect) != _|_
+	_isNotify: (EF.effect & #NotifyEffect) != _|_
+
+	_rel: EF.effect
+	_cols: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values {"\"\(c)\""}]}, []][0]
+	_rawKeys: [if _isRel {[if _rel["key"] != _|_ {_rel.key}, ["id"]][0]}, []][0]
+	_keys: [if _isRel {[for k in _rawKeys {"\"\(k)\""}]}, []][0]
+	_vals: [if _isRel if _rel["values"] != _|_ {[for _, val in _rel.values {(#sqlLit & {v: val}).out}]}, []][0]
+	_updates: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {"\"\(c)\" = EXCLUDED.\"\(c)\""}]}, []][0]
+	_setClauses: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values if (_rel["where"] != _|_ || !list.Contains(_rawKeys, c)) {"\"\(c)\" = \((#sqlLit & {v: _rel.values[c]}).out)"}]}, []][0]
+	_customUpdates: [if _isRel if _rel["updateValues"] != _|_ {[for c, val in _rel.updateValues {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
+	_accUpdates: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {
+		if _rel["accumulate"] != _|_ {
+			if list.Contains(_rel.accumulate, c) {
+				"\"\(c)\" = \"\(_rel.table)\".\"\(c)\" + EXCLUDED.\"\(c)\""
+			}
+			if !list.Contains(_rel.accumulate, c) {
+				"\"\(c)\" = EXCLUDED.\"\(c)\""
+			}
+		}
+		if _rel["accumulate"] == _|_ {
+			"\"\(c)\" = \"\(_rel.table)\".\"\(c)\" + EXCLUDED.\"\(c)\""
+		}
+	}]}, []][0]
+	_wherePreds: [if _isRel if _rel["where"] != _|_ {[for c, val in _rel.where {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
+	_keyPreds: [if _isRel if _rel["values"] != _|_ {[for k in _rawKeys if _rel.values[k] != _|_ {"\"\(k)\" = \((#sqlLit & {v: _rel.values[k]}).out)"}]}, []][0]
+	_preds: [if _isRel {[if _rel["where"] != _|_ {_wherePreds}, _keyPreds][0]}, []][0]
+
+	_relSql: [
+		if _isRel && _rel.op == "insert" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
+		if _isRel && _rel.op == "ensure" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
+		if _isRel && _rel.op == "upsert" {
+			[if len(_customUpdates) > 0 {
+				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
+			}, {
+				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_updates, ", "));"
+			}][0]
+		},
+		if _isRel && _rel.op == "accumulate" {
+			[if len(_customUpdates) > 0 {
+				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
+			}, {
+				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_accUpdates, ", "));"
+			}][0]
+		},
+		if _isRel && _rel.op == "update" {
+			if len(_preds) > 0 {
+				"        UPDATE \"\(_rel.table)\" SET \(strings.Join(_setClauses, ", ")) WHERE \(strings.Join(_preds, " AND "));"
+			}
+			if len(_preds) == 0 {
+				"        UPDATE \"\(_rel.table)\" SET \(strings.Join(_setClauses, ", "));"
+			}
+		},
+		if _isRel && _rel.op == "delete" {"        DELETE FROM \"\(_rel.table)\" WHERE \(strings.Join(_preds, " AND "));"},
+		"",
+	][0]
+
+	_callArgs: [if _isCall && EF.effect["args"] != _|_ {[for _, a in EF.effect.args {(#sqlLit & {v: a}).out}]}, []][0]
+	_callSql: [if _isCall {"        PERFORM \(EF.effect.call)(\(strings.Join(_callArgs, ", ")));"}, ""][0]
+
+	_notifySql: [if _isNotify {"        PERFORM pg_notify('\(EF.effect.notify)', \((#sqlLit & {v: EF.effect.payload}).out));"}, ""][0]
+
+	out: [if _isRel {_relSql}, if _isCall {_callSql}, if _isNotify {_notifySql}, ""][0]
+}
+
+#mechaActionSql: AC={
+	action: #MechaAction
+
+	_effList: [if AC.action["effect"] != _|_ {
+		[if (AC.action.effect & [...]) != _|_ {AC.action.effect}, [AC.action.effect]][0]
+	}, []][0]
+
+	_assigns: [if AC.action["assign"] != _|_ {[
+		for col, val in AC.action.assign {
+			"        NEW.\"\(col)\" := \((#sqlLit & {v: val}).out);"
+		},
+	]}, []][0]
+
+	_effects: [
+		for eff in _effList {
+			(#mechaEffectSql & {effect: eff}).out
+		},
+	]
+
+	_raise: [if AC.action["raise"] != _|_ {[
+		"        RAISE EXCEPTION '\(AC.action.raise)' USING ERRCODE = 'check_violation';",
+	]}, []][0]
+
+	out: strings.Join(list.Concat([_assigns, _effects, _raise]), "\n")
+}
+
+#mechaStateSql: ST={
+	table: string
+	field: string
+	name:  string
+	state: #MechaState
+
+	_type: [if ST.state["type"] != _|_ {ST.state["type"]}, "normal"][0]
+	_isFinal: _type == "final"
+
+	_finalBlock: """
+		    IF OLD."\(ST.field)" = '\(ST.name)' THEN
+		      RAISE EXCEPTION 'cannot transition from final state % on %', OLD."\(ST.field)", '\(ST.table)' USING ERRCODE = 'check_violation';
+		    END IF;
+		"""
+
+	_onTransitions: [if ST.state["on"] != _|_ {[
+		for ev, tr in ST.state.on
+		for t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
+			if t["target"] != _|_ {target: t.target}
+			event: ev
+			if t["guard"] != _|_ {guard: t.guard}
+			actions: [if t["actions"] != _|_ {[if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0]}, []][0]
+		},
+	]}, []][0]
+
+	_afterTransitions: [if ST.state["after"] != _|_ {[
+		for d, tr in ST.state.after
+		for t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
+			if t["target"] != _|_ {target: t.target}
+			event:   "after"
+			delayMs: d
+			if t["guard"] != _|_ {guard: t.guard}
+			actions: [if t["actions"] != _|_ {[if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0]}, []][0]
+		},
+	]}, []][0]
+
+	_allTransitions: list.Concat([_onTransitions, _afterTransitions])
+
+	_validTargets: [for t in _allTransitions if t["target"] != _|_ {t.target}]
+	_validTargetLits: [for t in _validTargets {"'\(t)'"}]
+
+	_timeoutChecks: [for t in _afterTransitions {
+		"""
+		      -- Timeout check: state \(ST.name) expires after \(t.delayMs)ms
+		      IF NEW."\(ST.field)" <> '\(t.target)' AND OLD.created_at < (now() - interval '\(t.delayMs) milliseconds') THEN
+		        RAISE EXCEPTION '% in state % has expired (timeout after %ms)', '\(ST.table)', '\(ST.name)', '\(t.delayMs)' USING ERRCODE = 'check_violation';
+		      END IF;
+		"""
+	}]
+
+	_transitionBranches: [for t in _allTransitions {
+		_guardLine: [if t["guard"] != _|_ {
+			"""
+			        IF NOT (\(t.guard)) THEN
+			          RAISE EXCEPTION 'guard failed on % transition from % to %', '\(ST.table)', '\(ST.name)', '\(t.target)' USING ERRCODE = 'check_violation';
+			        END IF;
+			"""
+		}, ""][0]
+		_actionLines: [for a in t.actions {(#mechaActionSql & {action: a}).out}]
+		"""
+		      IF NEW."\(ST.field)" = '\(t.target)' THEN
+		\(_guardLine)\(strings.Join(_actionLines, "\n"))
+		        RETURN NEW;
+		      END IF;
+		"""
+	}]
+
+	_normalBlock: """
+		    IF OLD."\(ST.field)" = '\(ST.name)' THEN
+		\(strings.Join(_timeoutChecks, "\n"))
+		      IF NEW."\(ST.field)" NOT IN (\(strings.Join(_validTargetLits, ", "))) THEN
+		        RAISE EXCEPTION 'invalid transition on % from % to %', '\(ST.table)', OLD."\(ST.field)", NEW."\(ST.field)" USING ERRCODE = 'check_violation';
+		      END IF;
+
+		\(strings.Join(_transitionBranches, "\n"))
+		      RETURN NEW;
+		    END IF;
+		"""
+
+	out: [if _isFinal {_finalBlock}, _normalBlock][0]
+}
+
+#mechaMachineSql: S={
+	machine: #MechaMachine
+	entities: [string]: #Entity
+
+	_table: [if S.entities[S.machine.entity] != _|_ {S.entities[S.machine.entity].table}, S.machine.entity][0]
+
+	_stateMachineSql: [if S.machine["states"] != _|_ {
+		_field:  S.machine.field
+		_fnName: "trg_\(_table)_\(_field)_machine"
+
+		_stateNames: [for s, _ in S.machine.states {s}]
+		_stateLitList: [for s in _stateNames {"'\(s)'"}]
+		_checkConstraint: """
+			ALTER TABLE "\(_table)" DROP CONSTRAINT IF EXISTS "\(_table)_\(_field)_check";
+			ALTER TABLE "\(_table)" ADD CONSTRAINT "\(_table)_\(_field)_check" CHECK ("\(_field)" IN (\(strings.Join(_stateLitList, ", ")))) NOT VALID;
+			"""
+
+		_stateBlocks: [for sName, sBody in S.machine.states {
+			(#mechaStateSql & {
+				table: _table
+				field: _field
+				name:  sName
+				state: sBody
+			}).out
+		}]
+
+		_triggerBody: """
+			CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
+			LANGUAGE plpgsql
+			SECURITY DEFINER
+			SET search_path = public, pg_catalog AS $$
+			BEGIN
+			  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = NEW."\(_field)" THEN
+			    RETURN NEW;
+			  END IF;
+
+			  IF TG_OP = 'INSERT' THEN
+			    IF NEW."\(_field)" <> '\(S.machine.initial)' THEN
+			      RAISE EXCEPTION 'new % must start in initial state % (got %)', '\(_table)', '\(S.machine.initial)', NEW."\(_field)" USING ERRCODE = 'check_violation';
+			    END IF;
+			    RETURN NEW;
+			  END IF;
+
+			  IF TG_OP = 'UPDATE' THEN
+			\(strings.Join(_stateBlocks, "\n"))
+			  END IF;
+
+			  RETURN NEW;
+			END $$;
+
+			DROP TRIGGER IF EXISTS "\(_fnName)" ON "\(_table)";
+			CREATE TRIGGER "\(_fnName)"
+			  BEFORE INSERT OR UPDATE ON "\(_table)"
+			  FOR EACH ROW
+			  EXECUTE FUNCTION "\(_fnName)"();
+			"""
+
+		_checkConstraint + "\n\n" + _triggerBody
+	}, ""][0]
+
+	_lifecycleMachineSql: [if S.machine["on"] != _|_ {
+		_fnName: "trg_\(_table)_\(S.machine.name)_reducer"
+		_insertActions: [if S.machine.on["insert"] != _|_ {
+			[for a in [if (S.machine.on.insert & [...]) != _|_ {S.machine.on.insert}, [S.machine.on.insert]][0] {
+				(#mechaActionSql & {action: a}).out
+			}]
+		}, []][0]
+		_updateActions: [if S.machine.on["update"] != _|_ {
+			[for a in [if (S.machine.on.update & [...]) != _|_ {S.machine.on.update}, [S.machine.on.update]][0] {
+				(#mechaActionSql & {action: a}).out
+			}]
+		}, []][0]
+		_deleteActions: [if S.machine.on["delete"] != _|_ {
+			[for a in [if (S.machine.on.delete & [...]) != _|_ {S.machine.on.delete}, [S.machine.on.delete]][0] {
+				(#mechaActionSql & {action: a}).out
+			}]
+		}, []][0]
+
+		_timing: [if S.machine["timing"] != _|_ {S.machine.timing}, "AFTER"][0]
+
+		_reducerBody: """
+			CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
+			LANGUAGE plpgsql
+			SECURITY DEFINER
+			SET search_path = public, pg_catalog AS $$
+			BEGIN
+			  IF TG_OP = 'INSERT' THEN
+			\(strings.Join(_insertActions, "\n"))
+			    RETURN NEW;
+			  END IF;
+
+			  IF TG_OP = 'UPDATE' THEN
+			\(strings.Join(_updateActions, "\n"))
+			    RETURN NEW;
+			  END IF;
+
+			  IF TG_OP = 'DELETE' THEN
+			\(strings.Join(_deleteActions, "\n"))
+			    RETURN OLD;
+			  END IF;
+
+			  RETURN COALESCE(NEW, OLD);
+			END $$;
+
+			DROP TRIGGER IF EXISTS "\(_fnName)" ON "\(_table)";
+			CREATE TRIGGER "\(_fnName)"
+			  \(_timing) INSERT OR UPDATE OR DELETE ON "\(_table)"
+			  FOR EACH ROW
+			  EXECUTE FUNCTION "\(_fnName)"();
+			"""
+		_reducerBody
+	}, ""][0]
+
+	out: [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
 }
 
 // The app_user USING clause of a private entity. `qual` prefixes the row's
@@ -344,7 +638,7 @@ _sqlType: {
 		// one, exempt under a shared one, whose share it inherits. A parent
 		// that carries no scope -- internal, unless it is app_user -- has
 		// none to hand down, and the composition is a schema error.
-		_p: P.entities[P.e.access.parent]
+		_p:        P.entities[P.e.access.parent]
 		_pFloored: bool
 		if P._p.access.scope == "private" {_pFloored: P._p.access.shared == _|_}
 		if P._p.access.scope == "public" {_pFloored: true}
@@ -418,9 +712,12 @@ _sqlType: {
 	}
 	if P.e.access.scope == "public" {
 		_pre: []
-		_appUser: [
-			(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (true)"}).out,
-		]
+		_appUser: list.Concat([
+			[(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (true)"}).out],
+			[if P.e.access["write"] != _|_ if P.e.access.write == true {
+				(#policy & {name: "\(P._t)_app_user_write", table: P._t, rest: "FOR ALL TO app_user USING (true) WITH CHECK (true)"}).out
+			}],
+		])
 	}
 	if P.e.access.scope == "internal" {
 		_pre: []
@@ -441,6 +738,7 @@ _sqlType: {
 			_appUser: []
 		}
 	}
+
 	// A row the floor does not deliver reaches the sync path one shape at a
 	// time, keyed on a column mecha.shape_key declares (rls.sql says what
 	// declaring one asserts). Three edges, each a fact the policies above
@@ -494,7 +792,7 @@ _sqlType: {
 // list when present: this file replays on a fresh volume only, and a database
 // that outlives one would otherwise publish every table but the newest.
 #publication: P={
-	name:   string
+	name: string
 	tables: [...string]
 	out: """
 		DO $$ DECLARE t text; BEGIN
@@ -713,8 +1011,7 @@ _cdcTableField: "__table"
 	// What the terminal's own checks judge an app against: the columns a filter
 	// may name, the pk, unique field or declared unique that witnesses a slot's
 	// cardinality, the durability and type a machine region's writes are held to, the
-	// values a data-when may state (check-markup.ts), the currency and
-	// scale a money binding formats with, and the domain a generated row's
+	// values a data-when may state (check-markup.ts), and the domain a generated row's
 	// column is drawn from (check-battery.ts). Scoped to the
 	// tables the terminal registers, and to the field attributes those checks
 	// read — shell.yaml carries one projection of the program per reader, and
@@ -730,8 +1027,8 @@ _cdcTableField: "__table"
 			// A retired field is a column the database keeps and an ordinal the
 			// program remembers; the bundle is told of neither.
 			fields: [for f in e.fields if !f.retired {
-				name: f.name
-				type: f.type
+				name:     f.name
+				type:     f.type
 				required: f.required
 				if f.type == "decimal" {precision: f.precision, scale: f.scale}
 				if f.pk {pk: true}
@@ -739,7 +1036,6 @@ _cdcTableField: "__table"
 				if f.default != _|_ {default: f.default}
 				if e.enums[f.name] != _|_ {enum: e.enums[f.name]}
 				if e.bounds[f.name] != _|_ {bounds: e.bounds[f.name]}
-				if f.money != _|_ {money: f.money}
 			}]
 			if len(e.uniques) > 0 {
 				uniques: [for u in e.uniques {
@@ -833,6 +1129,7 @@ _cdcTableField: "__table"
 		if S.code.capabilities.auth != _|_ {
 			auth: S.code.capabilities.auth
 		}
+
 		// Projected, not copied: the catalogues are the emitter's input and the
 		// resolved patterns on each route are what survives them.
 		if S.code.meta.i18n != _|_ {
@@ -852,6 +1149,7 @@ _cdcTableField: "__table"
 			if S.code.meta.i18n != _|_ {
 				path: S._addressOf[n][S.code.meta.i18n.default]
 			}
+
 			// Emitted iff a slug is declared: every declared tag, the default
 			// included, and each pattern WITHOUT the locale prefix.
 			if s.slug != _|_ {
@@ -864,6 +1162,7 @@ _cdcTableField: "__table"
 			if s.ssr != _|_ {
 				ssr: s.ssr
 			}
+
 			// `label` is the default-language spelling and the whole of what an
 			// app with no catalogues carries; `key` and `labels` are the same
 			// pair `slug` and `paths` are, for the word instead of the address.
@@ -967,6 +1266,9 @@ _cdcTableField: "__table"
 				}
 			}
 		}
+		if S.code.surface.endowments != _|_ {
+			endowments: S.code.surface.endowments
+		}
 		"migrations": S.migrations
 		pipelines: [for _, p in S.code.state.pipelines {
 			if p.trigger == "cdc" if p.raw == _|_ {
@@ -1011,8 +1313,8 @@ _cdcTableField: "__table"
 #serverOn: S={
 	// Only what the answer reads, so a caller hands over no seed rows.
 	servers: [...bool]
-	auth:    bool
-	out:     list.Contains(S.servers, true) || S.auth
+	auth: bool
+	out:  list.Contains(S.servers, true) || S.auth
 }
 
 #appMigrations: M={
@@ -1020,6 +1322,7 @@ _cdcTableField: "__table"
 	_validatedTables: [for _, e in M.code.state.entities if e.server if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
+	machines: [if M.code.state.machines != _|_ {[for _, m in M.code.state.machines {m}]}, []][0]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	// The cluster copies this list into its database image, so it follows the
 	// predicate that emits the database: a migration named without one would be
@@ -1036,6 +1339,7 @@ _cdcTableField: "__table"
 		"services/database/migrations/007_txid.sql",
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
+		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/021_schedule_seed.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
@@ -1076,6 +1380,7 @@ _cdcTableField: "__table"
 			verbs: {
 				for name, c in D.cluster.surface.verbs {(name): c}
 				for name, c in D.terminal.surface.verbs {(name): c}
+
 				// The pages target: the bundle is the artifact, and the tag pushed
 				// is what makes the app's mirror bundle it again and deploy it.
 				// The tags on HEAD under this app's prefix are release.nu's own
@@ -1113,11 +1418,13 @@ _cdcTableField: "__table"
 					// alphabet is not a contract.
 					replay: {verb: "integrate", priority: 1, cmds: [_distribution.checks.replay], note: "Pronto compiler replay"}
 				}
+
 				// Only where something was minted: an app with no identities has
 				// none to lose, and the check would grade an empty snapshot.
 				if len([for _, e in D.code.state.entities if e.id != _|_ {e}]) > 0 {
 					identity: {verb: "lint", cmds: [_distribution.checks.identity], note: "Pronto compiler identity"}
 				}
+
 				// Declaring a route crawlable is a promise the build can write it,
 				// and a promise nothing exercises is one that breaks silently. The
 				// writer runs wherever a route declares it, over every declared
@@ -1167,6 +1474,7 @@ _cdcTableField: "__table"
 		for _, s in D.code.surface.screens for i in s.files.adapters if !strings.HasPrefix(i, "/") {(i): true}
 	}
 	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
+	_rendererSet: {for _, s in D.code.surface.screens if s.files.renderers != _|_ for i in s.files.renderers {(i): true}}
 	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
 	_validationSet: {for _, e in D.code.state.entities for _, v in e.validations {(v.src): true}}
 	out: omnishell.#Terminal & {
@@ -1182,6 +1490,7 @@ _cdcTableField: "__table"
 		surface: {
 			screens: [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css}]
 			handlers: list.SortStrings([for i, _ in D._handlerSet {i}])
+			renderers: list.SortStrings([for i, _ in D._rendererSet {i}])
 			// The union of what screens import, so the served set is exactly what
 			// something references — an unreferenced file under shell/shared/ is
 			// never built and cannot pretend to be part of the app.
@@ -1245,8 +1554,8 @@ _cdcTableField: "__table"
 		// same instance reaches the build seat and the emitter; #emit restates
 		// them as constraints.
 		capabilities: {
-			auth:   D.code.capabilities.auth != _|_
-			blobs:  D.code.capabilities.blobs
+			auth:  D.code.capabilities.auth != _|_
+			blobs: D.code.capabilities.blobs
 			server: (#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out
 		}
 		state: {
@@ -1353,9 +1662,9 @@ _cdcTableField: "__table"
 	// than released broken. A suspended schedule runs nowhere and refuses nothing.
 	_pagesBundle: {
 		if list.Contains(E.code.meta.targets, "pages") {
-			units:       true & (len(E.code.capabilities.vendored) == 0)
-			schedules:   true & (len([for _, s in E.code.state.schedules if !s.suspend {s}]) == 0)
-			shared:      true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
+			units: true & (len(E.code.capabilities.vendored) == 0)
+			schedules: true & (len([for _, s in E.code.state.schedules if !s.suspend {s}]) == 0)
+			shared: true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
 		}
 	}
@@ -1687,7 +1996,7 @@ _cdcTableField: "__table"
 	files: {
 		"schema/entities.proto": {
 			format: "proto"
-			data: E.code.state.entities
+			data:   E.code.state.entities
 		}
 		// The app's own buf module, so `buf breaking` runs inside the app and
 		// reaches for nothing above it: an app copybara'd into a repo of its
@@ -1746,7 +2055,7 @@ _cdcTableField: "__table"
 					    CREATE ROLE \(r) NOLOGIN;
 					  END IF;
 					"""
-				}], "\n") + "\nEND $$;\n" + strings.Join(_bypass, "")
+				}], "\n") + "\nEND $$;\n" + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
 
 				// The tenancy floor binds PUBLIC, which includes service. A pipeline
 				// and the auth service read every tenant's rows by definition, so
@@ -1765,7 +2074,23 @@ _cdcTableField: "__table"
 						"GRANT USAGE ON SCHEMA public TO electric;\n" +
 						"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
 						"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n" +
-						""},
+						""
+					},
+				]
+
+				_timeouts: [
+					"\n-- Finite machine bounds: statement, lock, and idle timeouts.\n" +
+					"ALTER ROLE anon SET statement_timeout = '5s';\n" +
+					"ALTER ROLE anon SET lock_timeout = '2s';\n" +
+					"ALTER ROLE anon SET idle_in_transaction_session_timeout = '10s';\n",
+					if E._authOn {
+						"ALTER ROLE app_user SET statement_timeout = '5s';\n" +
+						"ALTER ROLE app_user SET lock_timeout = '2s';\n" +
+						"ALTER ROLE app_user SET idle_in_transaction_session_timeout = '10s';\n" +
+						"ALTER ROLE service SET statement_timeout = '30s';\n" +
+						"ALTER ROLE service SET lock_timeout = '5s';\n" +
+						"ALTER ROLE service SET idle_in_transaction_session_timeout = '60s';\n"
+					},
 				]
 			}
 			"services/database/migrations/002_grants.sql": {
@@ -1883,6 +2208,14 @@ _cdcTableField: "__table"
 				}
 			}
 
+			_machines: [if E.code.state.machines != _|_ {[for _, m in E.code.state.machines {m}]}, []][0]
+			if len(_machines) > 0 {
+				"services/database/migrations/010_machines.sql": {
+					format: "sql"
+					text: strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities}).out}], "\n\n") + "\n"
+				}
+			}
+
 			if len(E.code.state.schedules) > 0 {
 				// The table is mecha's: the cluster, handed the schedules' names,
 				// places it in the database as 020_schedule.sql, and this seeds it
@@ -1939,6 +2272,7 @@ _cdcTableField: "__table"
 					text: strings.Join([for se in E._seeded {(#seedSql & {e: se}).out}], "\n") + "\n"
 				}
 			}
+
 			// Only a cluster whose change feed runs has a conduit to configure.
 			if E.cluster.capabilities.capture {
 				"docker/conduit-pipeline.yaml": {
@@ -2035,7 +2369,7 @@ _cdcTableField: "__table"
 						sinkTable:   E.code.state.entities[pl.to].table
 						sinkPk: [for fld in E.code.state.entities[pl.to].fields if fld.pk {fld.name}][0]
 						carriers: E._cdcCarriers
-						authOn: E._authOn
+						authOn:   E._authOn
 					}).out
 				}
 			}
@@ -2123,7 +2457,8 @@ _cdcTableField: "__table"
 				for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
 					[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
 				},
-			], "/")}}
+			], "/")
+			}}
 			_branches: [
 				for r in E._shell.routes for tag in E._others
 				let here = _defaultAddress[r.screen]
@@ -2153,8 +2488,7 @@ _cdcTableField: "__table"
 						},
 					], "/"),
 				][0]
-				let captures = [for c, l in E._meansLocale if l == tag {c}]
-				{"""
+				let captures = [for c, l in E._meansLocale if l == tag {c}] {"""
 				        @\(r.screen)_\(E._shell.i18n.locales[tag].path) {
 				\(at)
 				          not query lang=*
@@ -2185,7 +2519,7 @@ _cdcTableField: "__table"
 			// spellings are then listed, because a caddy path matcher is exact and a
 			// reader who types the slash is at the same route.
 			_matcher: {for a in _addressed {
-				let widened = strings.TrimSuffix("/" + strings.Join([
+				let widened = strings.TrimSuffix("/"+strings.Join([
 					for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
 						[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
 					},
@@ -2300,11 +2634,11 @@ _cdcTableField: "__table"
 		}
 		"shell/shell.yaml": {
 			format: "yaml"
-			data: E._shell
+			data:   E._shell
 		}
 		"shell/shell.json": {
 			format: "json"
-			data: E._shell
+			data:   E._shell
 		}
 		"\(E.terminal.surface.entry)": {
 			format: "text"
@@ -2338,6 +2672,9 @@ _cdcTableField: "__table"
 			"\(s.files.css)": {format: "css", src: s.files.css}
 			for i in s.files.handlers {"\(i)": {format: "jessie", src: i}}
 			for i in s.files.adapters if !strings.HasPrefix(i, "/") {"\(i)": {format: "jessie", src: i}}
+			if s.files.renderers != _|_ {
+				for i in s.files.renderers {"\(i)": {format: "jessie", src: i}}
+			}
 		}
 		for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {
 			if pl.fold == _|_ {
