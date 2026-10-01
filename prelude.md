@@ -18,8 +18,8 @@ from the program — there is nothing to hand-configure.
 
 ## Durability
 
-Each entity is assigned one durability. They name guarantees and are monotonic
-in expense, so a brief picks the cheapest that still holds:
+Each entity is assigned one durability from `#Durability` (`tab`, `device`, `server`, `live`, `offline`).
+They name storage guarantees and are monotonic in expense, so a brief picks the cheapest that still holds:
 
 - **tab** — survives navigation. Client-held; nothing else can reach it.
 - **device** — survives a restart. Client-held.
@@ -29,6 +29,8 @@ in expense, so a brief picks the cheapest that still holds:
 - **live** — ...and the client sees changes without asking.
 - **offline** — ...and it works with no network. For briefs that ask for
   offline capture or multi-device use.
+
+Below the relational durability ladder, the host-runtime **kinetic plane** operates at **`frame`** granularity (a host-runtime ring buffer memory model, not a schema lattice durability point; distinct from Mecha's cluster wake `ticker`). Ephemeral simulation state incurs zero persistence overhead and promotes upward to relational entities (`tab`, `device`) on discrete milestones.
 
 ## Pipelines
 
@@ -68,6 +70,14 @@ perform (Elm's `Cmd`, not `update` — a handler never receives the whole
 model); see [`plugins/omnishell/docs/terminal.md`](../omnishell/docs/terminal.md) for the full comparison
 and [component contracts](docs/component-contracts.md#rejected) for why
 "handler," not "island" or "update."
+
+### Determinism and time travel
+
+Because handlers are pure functions over injected state and events ($s_{t+1} = \text{handler}(s_t, e_t)$), any state is an exact fold over history:
+
+$$s_t = \text{fold}(\text{seed}, [e_0, \dots, e_t])$$
+
+This yields **rollback invariance**: rewinding to an earlier state and replaying identical events produces a bit-exact identical outcome. In the relational plane, this manifests as tamper-evident transaction auditing and instant state restoration. In the kinetic plane (ephemeral states below `tab`), Omnishell's `KineticHost` couples this fold with a fixed-step accumulator and snapshot ring buffer to grant interactive games and physical simulations frame-accurate pause, seek, single-step, and timeline branching out of the box.
 
 ## Capability
 

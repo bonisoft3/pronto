@@ -15,7 +15,7 @@
 # Subsystems
 
 * [The compiler and its review ladder](compiler.md) - concept: How a brief becomes an app — two model hops above deterministic rungs, what `cue export` emits and where it lands, what the bijection holds a person to sign, and how pronto reaches the parts it configures.
-* [Component contracts](component-contracts.md) - concept: What each part of a pronto program — the app, the terminal, the cluster, the loop and the build graph — declares as its state, its capabilities and its surface, and how data flows between them as one graph.
+* [Component contracts](component-contracts.md) - concept: What each part of a pronto program — the app, the terminal, the cluster, the loop and the build graph — declares as its state, its capabilities and its surface, how data flows between them as one graph, and the dual-plane kinetic contract for universal time travel.
 * [Types and identity](types-and-identity.md) - concept: What a field's value is and what an entity is: fifteen portable types, each equal exactly when its canonical strings are, and a minted type id with ordinals, so a name is a label nothing is keyed on.
 * [Schema changes](schema-change-admission.md) - concept: What pronto admits when an entity changes — additions and retirements, never a rename, drop or retype — and the four readers that refuse the rest, each seeing what the others cannot.
 * [The lattice](lattice.md) - concept: The durability ladder and the dimensions declared beside it — visibility, effect level, validation, fuel — how one writer per fact keeps the ladder free of merges, and which combinations the code refuses today.

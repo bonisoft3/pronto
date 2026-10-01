@@ -130,6 +130,19 @@ embeds, a filter the store cannot translate) stay PostgREST queries, re-run
 when a table they depend on changes. The collections are the change signal,
 never a clock.
 
+## Dual planes and the kinetic contract
+
+Pronto separates application state into two planes:
+1. **The relational plane**: Durable entities (`tab`, `device`, `server`, `live`) queryable via PostgREST and synchronized via ElectricSQL shapes. Mutations occur on-demand via forms and pure Jessie handlers.
+2. **The kinetic plane**: Ephemeral high-frequency states living below `tab` (e.g. 35Hz, 60Hz, 120Hz physics loops, 3D simulations, and canvas interactions).
+
+Rather than abandoning determinism at the kinetic boundary, Omnishell's runtime provides `createKineticHost` governed by the pure engine contract (see [Kinetic host](../../omnishell/docs/kinetic.md)):
+- **`initState(seed)`**: Returns immutable initial state.
+- **`advanceFrame(state, cmd)`**: Pure fixed-step transition step.
+- **`saveState(state)`** and **`loadState(snapshot)`**: Formally verify the algebraic isomorphism $\text{loadState} \circ \text{saveState} = \text{id}$.
+
+The kinetic host decouples simulation ticks from variable display refresh rates, maintains an in-memory snapshot ring buffer, and injects a deterministic Mulberry32 PRNG. This extends Pronto's universal time travel from low-frequency database transactions down to frame-by-frame physics scrubbing, rollback networking, and timeline branching.
+
 ## Rejected
 
 - **Returned requests as a namespace beside state** — it repeats MVC's

@@ -65,7 +65,7 @@ Omnishell's doctrine — single data path, forms-only mutations, reactive live q
 3. **Enforced twice**: statically by a gate on the names Jessie denies at compile time, dynamically by running each handler inside an SES Compartment (the mechanism behind MetaMask Snaps).
 4. **Deterministic by construction**: time and randomness arrive as inputs injected by the runtime, never ambient — the same discipline Temporal enforces on workflow code.
 
-Net property: nothing in a Pronto application runs with ambient authority.
+Net property: nothing in a Pronto application runs with ambient authority. For fixed-step simulation time travel, see [kinetic.md](../omnishell/docs/kinetic.md).
 
 ## Escape hatches
 

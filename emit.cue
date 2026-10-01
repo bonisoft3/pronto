@@ -1467,6 +1467,7 @@ _cdcTableField: "__table"
 
 #DefaultTerminal: D={
 	code: #App
+	boot?: string
 	// An adapter the terminal serves is the terminal's file and not the app's,
 	// so only an app's own module joins the set.
 	_handlerSet: {
@@ -1488,6 +1489,9 @@ _cdcTableField: "__table"
 			}
 		}
 		surface: {
+			if D.boot != _|_ {
+				assets: boot: D.boot
+			}
 			screens: [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css}]
 			handlers: list.SortStrings([for i, _ in D._handlerSet {i}])
 			renderers: list.SortStrings([for i, _ in D._rendererSet {i}])

@@ -18,10 +18,15 @@ program. That holds only for the joins the code states:
 
 An entity takes one durability, the cheapest that still holds: `tab`,
 `device`, `server`, `live`, `offline`, monotonic in expense
-([what each promises](../prelude.md#durability)). `#Entity` in
-[`schema.cue`](../schema.cue) reads it as two questions, where the truth lives
-and what the client keeps of it; an enum names the five points that exist,
-where two fields would also name a sixth that cannot.
+([what each promises](../prelude.md#durability)). Below `tab`, the host-runtime kinetic plane
+operates at `frame` granularity (a host memory model, distinct from schema
+lattice durability and distinct from Mecha's cluster wake `ticker`) —
+ephemeral, fixed-step simulation state held in a memory ring buffer with
+deterministic time-travel and zero ambient authority, promoting upward to
+relational entities on discrete milestones.
+`#Entity` in [`schema.cue`](../schema.cue) reads relational durability as two
+questions, where the truth lives and what the client keeps of it; an enum names
+the five points that exist, where two fields would also name a sixth that cannot.
 
 The emitter derives everything from the word. `tab` and `device` emit no
 table, trigger, publication entry, policy or seed SQL, take no `access`, and
@@ -49,6 +54,8 @@ reaches it is the event, a whitelisted, serializable lift of DOM facts with a
 closed schema. A native fact keeps its DOM name (`animationName`, `key`); a
 fact the terminal synthesizes takes a name no DOM event has (`id`, `from`,
 `seed`).
+
+Because every handler in the reduce fold is a pure function over injected state and events with zero ambient authority, every state in the lattice is an exact fold over history ($s_t = \text{fold}(\text{seed}, [e_0, \dots, e_t])$). This algebraic determinism guarantees universal time travel: an auditor or developer can scrub to any past transaction, while below `tab` the kinetic host applies the same fold frame-by-frame.
 
 ## Conflict resolution
 
