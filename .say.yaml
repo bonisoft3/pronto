@@ -59,6 +59,12 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-run --allow-env duckstream.test.ts"
+      # A pages release's derived rows: their SQL, and a bundled page whose
+      # PGlite boots holding them; bundling needs the omnishell and mecha trees.
+      bundle:
+        priority: -1
+        cmds:
+          - do: "mise exec -- deno test --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts"
       # The door's language rule against the terminal's, over an emitted
       # Caddyfile: two runtimes that cannot share code and must not disagree.
       negotiation:

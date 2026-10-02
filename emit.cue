@@ -1475,7 +1475,19 @@ _cdcTableField: "__table"
 					mecha:     *"../../libraries/mecha" | string
 				}
 			}
-			_distribution: distribution.#Project & {runtime: "\(sources.pronto)", omnishell: "\(sources.omnishell)", mecha: "\(sources.mecha)"}
+			_distribution: distribution.#Project & {
+				runtime:   "\(sources.pronto)"
+				omnishell: "\(sources.omnishell)"
+				mecha:     "\(sources.mecha)"
+				// What only the cluster's streams and computations write lands in
+				// live tables, which the page ships as they stood at bundling.
+				if len(D.code.state.pipelines)+len(D.code.state.computations) > 0 {
+					derived: {
+						tables: list.SortStrings([for _, e in D.code.state.entities if e.durability == "live" {e.table}])
+						streams: list.SortStrings([for _, p in D.code.state.pipelines {"\(D.code.meta.name)-\(p.name)"}])
+					}
+				}
+			}
 			buildCmd: [if sources.pronto != "" {"deno run --allow-read --allow-write=. --allow-run --allow-env \(sources.pronto)/write.ts ."}, "sayt build"][0]
 			testCmd: "cue vet -c ./..."
 			pipelineFiles: [for _, p in D.code.state.pipelines {"docker/\(D.code.meta.name)-\(p.name).yaml"}]
@@ -1494,7 +1506,7 @@ _cdcTableField: "__table"
 					pages: {
 						verb:     "release"
 						platform: "pages"
-						cmds: [_distribution.bundle]
+						cmds: [if len(_distribution.derived.tables) > 0 {_distribution.derive}, _distribution.bundle]
 						publish: ["use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag"]
 						note: "Pronto release@pages"
 					}
@@ -1540,6 +1552,7 @@ _cdcTableField: "__table"
 				if len([for _, s in D.code.surface.screens if s.prerender {s}]) > 0 {
 					prerender: {verb: "test", cmds: [_prerender], note: "Pronto prerender"}
 				}
+
 				// A computation's tests run it as mecha's compute service does.
 				if len(D.code.state.computations) > 0 {
 					computations: {verb: "test", cmds: [_distribution.checks.computations], note: "Pronto computations"}
@@ -1580,7 +1593,7 @@ _cdcTableField: "__table"
 }
 
 #DefaultTerminal: D={
-	code: #App
+	code:  #App
 	boot?: string
 	// An adapter the terminal serves is the terminal's file and not the app's,
 	// so only an app's own module joins the set.
@@ -1685,11 +1698,11 @@ _cdcTableField: "__table"
 			}]
 			schedules: [for _, sc in D.code.state.schedules {sc.name}]
 			computations: [for _, c in D.code.state.computations {
-				name:     "\(D.code.meta.name)-\(c.name)"
-				file:     c.src
-				every:    c.every
+				name:  "\(D.code.meta.name)-\(c.name)"
+				file:  c.src
+				every: c.every
 				to: [for t in c.to {D.code.state.entities[t].table}]
-				wasm:     c.wasm
+				wasm: c.wasm
 				// A sink in the publication would feed the change it answers.
 				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
 			}]

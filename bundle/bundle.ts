@@ -8,7 +8,7 @@
 // or `</script`, and both occur in SES and in screens: the data rides as
 // base64, and the module has the two sequences escaped.
 //
-//   deno run -A --config bundle/deno.json bundle/bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--out <dir>]
+//   deno run -A --config bundle/deno.json bundle/bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>]
 //
 // The interpreter is omnishell's and the cluster is mecha's, so both roots are
 // named by the caller; the module resolves `omnishell/` and `mecha-browser/`
@@ -18,6 +18,10 @@
 // does: the shell reads it from its config, takes it off every address it
 // matches and puts it on every address it composes, and the same document is
 // written as 404.html, which is what makes a deep link boot instead of 404.
+//
+// --derived names the rows the app's streams and computations derive, as
+// derived.ts writes them, run after the migrations: the page runs neither, so
+// what they derive ships as it stood when the page was bundled.
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -29,7 +33,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const app = path.resolve(args.shift() ?? fail('usage: bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--out <dir>]'))
+const app = path.resolve(args.shift() ?? fail('usage: bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>]'))
 const flags: Record<string, string> = {}
 while (args.length) {
   const flag = args.shift()!
@@ -40,7 +44,7 @@ const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha roo
 const base = (flags['--base'] ?? '').replace(/\/$/, '')
 if (base && !base.startsWith('/')) fail(`--base is a path from the site root, such as /truco, not ${base}`)
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/browser'))
-for (const flag of Object.keys(flags)) if (!['--omnishell', '--mecha', '--base', '--out'].includes(flag)) fail(`unknown flag ${flag}`)
+for (const flag of Object.keys(flags)) if (!['--omnishell', '--mecha', '--base', '--derived', '--out'].includes(flag)) fail(`unknown flag ${flag}`)
 
 const read = (p: string) => Deno.readTextFile(path.join(app, p))
 const shell = JSON.parse(await read('shell/shell.json')) as {
@@ -103,13 +107,22 @@ for (const p of Object.keys(files)) if (p.endsWith('.css')) files[p] = inline(p,
 // An app with no migration has no cluster to boot: its document carries the
 // files alone, and the page runs the shell without PGlite.
 const clustered = shell.migrations.length > 0
-const sql = clustered ? [await Deno.readTextFile(path.join(mecha, 'services/database/rls/rls.sql')), ...(await Promise.all(shell.migrations.map(read)))] : []
+const derived = flags['--derived']
+if (derived && !clustered) fail('--derived names rows for a cluster, and this app has no migration')
+const steps = ['rls.sql', ...shell.migrations, ...(derived ? [derived] : [])]
+const sql = clustered
+  ? [
+    await Deno.readTextFile(path.join(mecha, 'services/database/rls/rls.sql')),
+    ...(await Promise.all(shell.migrations.map(read))),
+    ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : []),
+  ]
+  : []
 // A publication and a replica identity are a WAL reader's, which the page has
 // none of: the cluster skips them by the fence the emitter and an author write,
 // read here by the cluster's own grammar, so one outside a fence is refused.
 const { browserTier } = (await import(String(pathToFileURL(path.join(mecha, 'packages/mecha-browser/fence.ts'))))) as { browserTier: (sql: string) => string }
 for (const [i, text] of sql.entries()) {
-  if (/\bPUBLICATION\b|REPLICA IDENTITY/.test(browserTier(text))) fail(`${i === 0 ? 'rls.sql' : shell.migrations[i - 1]} names a publication or a replica identity outside a container-tier fence`)
+  if (/\bPUBLICATION\b|REPLICA IDENTITY/.test(browserTier(text))) fail(`${steps[i]} names a publication or a replica identity outside a container-tier fence`)
 }
 
 // The module's map: the cluster's pins, rebased from where they are written,
@@ -196,4 +209,4 @@ await Deno.writeTextFile(path.join(out, 'index.html'), html)
 // A host that answers an unknown path with 404.html serves the same document
 // there, and the deep link boots.
 if (base) await Deno.writeTextFile(path.join(out, '404.html'), html)
-console.error(`bundle: ${out}/index.html, ${(html.length / 1024 / 1024).toFixed(2)} MB, ${Object.keys(files).length} files, ${clustered ? `${sql.length} sql` : 'no cluster'}`)
+console.error(`bundle: ${out}/index.html, ${(html.length / 1024 / 1024).toFixed(2)} MB, ${Object.keys(files).length} files, ${clustered ? `${sql.length} sql${derived ? ', derived rows last' : ''}` : 'no cluster'}`)

@@ -2,6 +2,7 @@ package distribution
 
 import (
 	"encoding/json"
+	"strings"
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
@@ -73,9 +74,18 @@ import (
 	}
 	_run: #Run & {runtime: "\(P.runtime)"}
 	write: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join write.ts) ."}).out
+	// The live tables a pages release fills from the settled container
+	// cluster, and the streams that cluster runs; none where the app runs no
+	// stream and no computation.
+	derived: {
+		tables: *[] | [...string]
+		streams: *[] | [...string]
+	}
+	_derivedOut: "dist/derived.sql"
+	derive: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle derived.ts) . --tables \(strings.Join(P.derived.tables, ","))\([if len(P.derived.streams) > 0 {" --streams \(strings.Join(P.derived.streams, ","))"}, ""][0]) --out \(P._derivedOut)"}).out
 	// The browser tier's artifact: the app bundled into dist/browser/index.html,
 	// under the path prefix `sayt release@pages --base=/<prefix>` names.
-	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")"}).out
+	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out

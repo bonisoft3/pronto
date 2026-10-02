@@ -118,14 +118,40 @@ a broken release, for a program with:
   keyed shape per grant, which the page's cluster does not serve;
 - a validation, which runs in plv8, and PGlite has none.
 
-The page runs no pipeline and serves no blob, and nothing refuses a program
-that declares either ([pending](../PENDING.md#release-targets)).
-`bundle/page.ts` hands `createCluster` only `{db, sql, tables, log}` and the
-bundle carries no pipeline file, so xpense targets `pages`, declares
-`recount-months` and `recount-buckets`, and nothing in the page fills
-`MonthStat` or `CategoryMonthStat`; `_pagesBundle` does not read
+**The derived rows ship as the release found them.** The page runs no stream
+and no computation, so for a program that declares either the rule first runs
+[`derived.ts`](../bundle/derived.ts): it brings the app's container cluster up
+under a compose project of its own, waits until it has settled, writes every
+live table — the tables a stream or a computation writes without feeding the
+publication — to `dist/derived.sql`, and tears the cluster down. The bundler
+takes that file with `--derived` and the page runs it after the migrations,
+each table emptied and refilled whole, so a seeded row the derivation no longer
+produces is gone. The file is a release artifact, rebuilt at every release and
+never committed. A write in the page recounts nothing: the archive the page
+holds is read-mostly, and its derived tables answer the rows it was bundled
+with ([pending](../PENDING.md#release-targets)).
+
+Settled is a quiet window, opened once every stream's inputs are up, every
+bus group has been delivered all of its stream with nothing pending, and every
+computation has run once, and closed by any movement in the transform's
+counters, which each read and post a stream makes advances, or in the
+database's row writes. The window outlasts the slowest computation's cadence
+and Postgres's statistics flush: a computation logs a run and nothing when it
+looks and finds its reads unchanged, so its cadence is the one bound on its
+having looked at rows that no longer move. Golaberto's ratings look every 300
+seconds, so its release settles in about six minutes after the build.
+
+The rule needs what `sayt launch` needs — Docker and the app's compose, whose
+images build from the trees the compose names — on the machine that releases,
+the mirror's workflow runner included. An app with no stream and no computation
+releases without it.
+
+The page serves no blob, and nothing refuses a program that declares one
+([pending](../PENDING.md#release-targets)): `_pagesBundle` does not read
 `capabilities.blobs`, and the shim routes only `/crud`, `/auth` and
-`/electric`.
+`/electric`. A duckstream is neither a stream nor a computation, so xpense
+targets `pages`, declares `recount-months` and `recount-buckets`, and nothing
+in the page fills `MonthStat` or `CategoryMonthStat`.
 
 ## cloudflare
 

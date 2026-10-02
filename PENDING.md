@@ -400,9 +400,21 @@ Only `pages` is emitted, and each design is
 **`verify@<target>` is not emitted**
 ([the design](docs/release-targets.md#what-a-release-is)).
 
-**The page runs no pipeline and serves no blob, and `pages` refuses neither**
-([pages](docs/release-targets.md#pages)); either mecha's `pipeline` package runs
-in the page, or the target refuses both.
+**The page derives nothing live** ([pages](docs/release-targets.md#pages)).
+Its streams' and computations' rows are the release's, so a result recorded in
+the page moves no table, chance or rating; the derivation running in the page
+on DuckStream's machinery is what closes it.
+
+**A duckstream's sink is empty in the page** ([pages](docs/release-targets.md#pages)):
+the release derives the rows of streams and computations, and xpense's
+`MonthStat` and `CategoryMonthStat` are neither's.
+
+**Settling waits out the slowest computation's cadence**
+([pages](docs/release-targets.md#pages)): compute says nothing when a look
+finds its reads unchanged, so a release cannot see that one has looked.
+
+**The page serves no blob, and `pages` does not refuse one**
+([pages](docs/release-targets.md#pages)).
 
 **A unit cannot be bundled** ([pages](docs/release-targets.md#pages)). Bundling
 it needs three changes the terminal owns: `hatch.js` admitting `blob:`, the
