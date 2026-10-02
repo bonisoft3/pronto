@@ -56,6 +56,13 @@ export function withheld(hatches: Record<string, Hatch>): Map<string, string> {
   return out;
 }
 
+/** Whether `branch` holds a proto under the app. ls-tree lists the subtree
+ * of the directory it runs in, and reads a pathspec literally, not as a glob,
+ * so the names are filtered here. */
+export async function holdsProto(appDir: string, branch: string): Promise<boolean> {
+  return (await git(appDir, "ls-tree", "-r", "--name-only", branch)).split("\n").some((f) => f.endsWith(".proto"));
+}
+
 /**
  * buf's git input for the app, whatever repo it is sitting in. The common dir
  * is asked for rather than assumed because a worktree's `.git` is a file that
@@ -83,7 +90,7 @@ export function findings(stdout: string): Finding[] {
 }
 
 async function main(appDir: string, branch: string) {
-  // Three absences, and only the middle one is an answer. They are settled
+  // Some absences are answers and some are failures. All are settled
   // before the hatches are read: whether git can answer at all does not depend
   // on what the app declares, and asking first keeps the failure about the
   // missing repository rather than about a CUE export that ran in a tree the
@@ -104,8 +111,8 @@ async function main(appDir: string, branch: string) {
     throw new Error(`${appDir} is not in a git repository, so there is no history to compare against`);
   }
 
-  // A repository with no commits yet has nothing to compare against, and that
-  // is the one absence this treats as an answer.
+  // A repository with no commits yet has nothing to compare against, which is
+  // an answer.
   const anyHistory = await new Deno.Command("git", {
     args: ["rev-parse", "--verify", "HEAD"],
     cwd: appDir,
@@ -143,6 +150,13 @@ async function main(appDir: string, branch: string) {
   }
   if (!known.success) {
     throw new Error(`this repository has history but no "${branch}" to compare against; name the branch to compare with as the second argument`);
+  }
+
+  // A branch that holds no proto of this app has published no schema a change
+  // could break, the same answer as a repository with no commits.
+  if (!(await holdsProto(appDir, branch))) {
+    console.log(JSON.stringify([], null, 2));
+    return;
   }
 
   const hatches = await exportJson<Record<string, Hatch>>(appDir, "code.capabilities.hatches");

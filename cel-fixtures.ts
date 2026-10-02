@@ -24,6 +24,7 @@ const IR: Record<string, ParsedExpr> = {
   "this": {"expr":{"identExpr":{"name":"this"}}},
   "this == 'strings.x'": {"expr":{"callExpr":{"function":"_==_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"stringValue":"strings.x"}}]}}},
   "this in [1.5, 2.5]": {"expr":{"callExpr":{"function":"@in","args":[{"identExpr":{"name":"this"}},{"listExpr":{"elements":[{"constExpr":{"doubleValue":1.5}},{"constExpr":{"doubleValue":2.5}}]}}]}}},
+  "has(this.a) == has(this.b)": {"expr":{"callExpr":{"function":"_==_","args":[{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"a","testOnly":true}},{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"b","testOnly":true}}]}}},
   "this.startsWith('x')": {"expr":{"callExpr":{"target":{"identExpr":{"name":"this"}},"function":"startsWith","args":[{"constExpr":{"stringValue":"x"}}]}}},
 };
 
@@ -41,9 +42,11 @@ const FIXTURES: { cel: string; col: string | null; sql: string | null; cue: stri
   { cel: "this.size() > 0", col: "c", sql: "char_length(c) > 0", cue: "strings.MinRunes(1)", values: null },
   { cel: "this.size() <= 8", col: "c", sql: "char_length(c) <= 8", cue: "strings.MaxRunes(8)", values: null },
   { cel: "this.matches('^x$')", col: "c", sql: "c ~ '^x$'", cue: `=~ "^x$"`, values: null },
-  { cel: "this.trim().size() > 0", col: "c", sql: "char_length(btrim(c)) > 0", cue: `=~ "\\\\S"`, values: null },
+  { cel: "this.trim().size() > 0", col: "c", sql: String.raw`char_length(regexp_replace(c, '^[\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$', '', 'g')) > 0`, cue: String.raw`=~ "[^\\s\\v\\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"`, values: null },
   { cel: "this >= 0 && this <= 1", col: "c", sql: "c >= 0 AND c <= 1", cue: ">=0 & <=1", values: null },
   { cel: "this.a <= this.b", col: null, sql: "a <= b", cue: null, values: null },
+  // Unparenthesized, `a IS NOT NULL = b IS NOT NULL` compares a boolean with b.
+  { cel: "has(this.a) == has(this.b)", col: null, sql: "(a IS NOT NULL) = (b IS NOT NULL)", cue: null, values: null },
   { cel: "this in [1.5, 2.5]", col: "c", sql: "c IN (1.5, 2.5)", cue: "(1.5 | 2.5)", values: null },
   // `this` is one thing or the other, and reading it the wrong way renders
   // silently wrong SQL: a member of a scalar under the field convention, a

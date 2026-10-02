@@ -5,7 +5,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { fileURLToPath } from "node:url";
 import { findings as sqlFindings, withheld as sqlWithheld } from "./check-sql.ts";
-import { findings as protoFindings, gitInput, withheld as protoWithheld } from "./check-proto.ts";
+import { findings as protoFindings, gitInput, holdsProto, withheld as protoWithheld } from "./check-proto.ts";
 
 Deno.test("only a sql-kind hatch withholds SQL", () => {
   // A container hatch withholds a service, and a proto hatch a proto; neither
@@ -58,18 +58,18 @@ Deno.test("the git input carries a subdir in a monorepo and none at a repo root"
   assertEquals(gitInput("/r/.git", "", "main"), "/r/.git#branch=main");
 });
 
+const run = (cwd: string) =>
+  new Deno.Command("deno", {
+    args: ["run", "-A", fileURLToPath(new URL("./check-proto.ts", import.meta.url)), cwd],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+
 Deno.test("a tree with no repository is refused, a repository with no commits is an answer", async () => {
   // These two absences fail `rev-parse --verify HEAD` identically — both exit
   // 128 — so reading that alone reported "no history" about a tree that was
   // never a checkout, and the pass went green having compared nothing. Only the
   // second is genuinely nothing-to-compare-against.
-  const run = (cwd: string) =>
-    new Deno.Command("deno", {
-      args: ["run", "-A", fileURLToPath(new URL("./check-proto.ts", import.meta.url)), cwd],
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
-
   const root = await Deno.makeTempDir({ prefix: "pronto-norepo-" });
   try {
     const bare = await run(root);
@@ -80,6 +80,49 @@ Deno.test("a tree with no repository is refused, a repository with no commits is
     const fresh = await run(root);
     assertEquals(fresh.success, true);
     assertEquals(new TextDecoder().decode(fresh.stdout).trim(), "[]");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("an app the branch holds no proto of is an answer", async () => {
+  // buf's git input names the app's subdir on the branch, and a new app's
+  // subdir is not there: buf failed to read the input and the pass went red
+  // before the app was ever merged.
+  const root = await Deno.makeTempDir({ prefix: "pronto-newapp-" });
+  const git = (...args: string[]) =>
+    new Deno.Command("git", { args: ["-c", "user.name=t", "-c", "user.email=t@t", ...args], cwd: root }).output();
+  try {
+    await git("init", "-q", "-b", "main");
+    await Deno.writeTextFile(`${root}/README`, "");
+    await git("add", "README");
+    await git("commit", "-q", "-m", "root");
+    await Deno.mkdir(`${root}/apps/fresh/schema`, { recursive: true });
+    await Deno.writeTextFile(`${root}/apps/fresh/schema/entities.proto`, 'syntax = "proto3";\n');
+    const out = await run(`${root}/apps/fresh`);
+    assertEquals(out.success, true, new TextDecoder().decode(out.stderr));
+    assertEquals(new TextDecoder().decode(out.stdout).trim(), "[]");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("an app whose branch holds a proto is compared", async () => {
+  // ls-tree reads a pathspec literally, never as a glob, so asking it for
+  // '*.proto' found nothing on any branch and buf breaking ran for no app.
+  const root = await Deno.makeTempDir({ prefix: "pronto-held-" });
+  const git = (...args: string[]) =>
+    new Deno.Command("git", { args: ["-c", "user.name=t", "-c", "user.email=t@t", ...args], cwd: root }).output();
+  try {
+    await git("init", "-q", "-b", "main");
+    await Deno.mkdir(`${root}/apps/held/schema`, { recursive: true });
+    await Deno.mkdir(`${root}/apps/bare`, { recursive: true });
+    await Deno.writeTextFile(`${root}/apps/held/schema/entities.proto`, 'syntax = "proto3";\n');
+    await Deno.writeTextFile(`${root}/apps/bare/README`, "");
+    await git("add", ".");
+    await git("commit", "-q", "-m", "root");
+    assertEquals(await holdsProto(`${root}/apps/held`, "main"), true);
+    assertEquals(await holdsProto(`${root}/apps/bare`, "main"), false);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

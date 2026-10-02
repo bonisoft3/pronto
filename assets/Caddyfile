@@ -124,7 +124,12 @@
 # WebAuthn outright, where http://localhost is a secure context and passkeys
 # work. mkcert puts the root in the host trust store instead, where the browser
 # can see it.
-https://localhost:8443 {
+#
+# `caddy` is the same door as the integrate closure's checkers reach it, over
+# the protocol a reader gets: Electric holds one long-poll per table a screen
+# reads, and on HTTP/1.1's six connections per host a screen reading more
+# tables stalls behind them.
+https://localhost:8443, https://caddy:8443 {
   tls /certs/localhost.pem /certs/localhost-key.pem
   import app
 }

@@ -79,6 +79,11 @@ const SQL_CMP: Record<string, string> = {
 
 const sqlString = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
+// CEL's trim() strips Unicode White_Space; Postgres's btrim() and RE2's \s strip
+// ASCII alone, so a body of a non-breaking space would pass both and fail CEL.
+const SQL_SPACE = String.raw`[\s\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]`;
+const CUE_SPACE = String.raw`\\s\\v\\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}`;
+
 function sqlConst(c: Const): string {
   if (c.stringValue !== undefined) return sqlString(c.stringValue);
   if (c.int64Value !== undefined) return c.int64Value;
@@ -122,7 +127,8 @@ function sql(e: Expr, col: string | null): { text: string; prec: number } {
   if (c.function in SQL_CMP) {
     if (args.length !== 2) return unsupported(`${c.function} with ${args.length} arguments`);
     const [l, r] = args.map((a) => sql(a, col));
-    const wrap = (x: { text: string; prec: number }) => (x.prec < 3 ? `(${x.text})` : x.text);
+    // SQL comparisons do not chain.
+    const wrap = (x: { text: string; prec: number }) => (x.prec <= 3 ? `(${x.text})` : x.text);
     return { text: `${wrap(l)} ${SQL_CMP[c.function]} ${wrap(r)}`, prec: 3 };
   }
   if (c.function === "@in") {
@@ -136,7 +142,9 @@ function sql(e: Expr, col: string | null): { text: string; prec: number } {
   if (c.target !== undefined) {
     const recv = sql(c.target, col).text;
     if (c.function === "size" && args.length === 0) return { text: `char_length(${recv})`, prec: 4 };
-    if (c.function === "trim" && args.length === 0) return { text: `btrim(${recv})`, prec: 4 };
+    if (c.function === "trim" && args.length === 0) {
+      return { text: `regexp_replace(${recv}, '^${SQL_SPACE}+|${SQL_SPACE}+$', '', 'g')`, prec: 4 };
+    }
     if (c.function === "matches" && args.length === 1) {
       const re = args[0].constExpr?.stringValue ?? unsupported("matches() over a non-literal pattern");
       return { text: `${recv} ~ ${sqlString(re)}`, prec: 3 };
@@ -207,7 +215,7 @@ function cue(e: Expr, used: { strings: boolean }): string {
       const tc = call(lc.target);
       if (tc?.function === "trim" && tc.target !== undefined && isThis(tc.target)) {
         const nonEmpty = (c.function === "_>_" && n === 0) || (c.function === "_>=_" && n === 1);
-        return nonEmpty ? `=~ "\\\\S"` : unsupported(`${c.function} ${n} on trim().size()`);
+        return nonEmpty ? `=~ "[^${CUE_SPACE}]"` : unsupported(`${c.function} ${n} on trim().size()`);
       }
     }
     if (isThis(lhs)) {

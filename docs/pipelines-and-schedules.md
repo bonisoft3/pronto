@@ -116,6 +116,38 @@ with a ticker and a clock beside it. The emitter seeds it in
 schedule without resetting its watermark, and the table's `CHECK` refuses a
 `Forbid` without `done` in the row itself.
 
+## Computations
+
+A value no pure transform over one change can compute — a season simulated
+twenty thousand times, a rating refit over a decade — is a computation
+([the numeric stage](archive/2026-09-30-numeric-stage.md)). A `#Computation`
+names its module (`src`, `computations/<name>.js` unless stated), the `live`
+entities it alone writes (`to`), how often it is looked at (`every` seconds)
+and the committed Wasm modules its jobs call (`wasm`). mecha's compute service
+runs it; [its header](../../../libraries/mecha/services/compute/main.ts) is the
+contract, from the lake snapshot to the writes. The module is one file that
+imports nothing, and exports exactly four names:
+
+- `reads`, the tables whose change reruns it;
+- `queries`, `{name: SQL}` over those tables, each answering plain rows;
+- `plan(inputs, seed, outputs)`, the Wasm jobs, asked again with the answers
+  until it adds none;
+- `finish(inputs, outputs)`, `{sink table: rows}`, each the sink's whole
+  content.
+
+Its language is the header's: ES module text as the service's SES Compartment
+admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
+`eval(` in a string, and top-level await are each refused — without the
+clock, randomness, time zone and locale.
+
+What pronto holds: write fails on a module or Wasm file that is not there; the
+module joins the fact rows as the `computation` role, so `lint` reports a
+denied identifier in it as in a handler (a scan, not a Jessie parser); `lint`
+loads each module as the service loads it at startup, so one the service would
+refuse fails there, naming its file and SES's rule, rather than taking the
+service down; and `test` runs the app's `computations/` tests under the
+service's own pins, the module in the same cage and the jobs on the same Wasm.
+
 ## Rejected
 
 - **Materializing every derived value** — a live query over rows the reader

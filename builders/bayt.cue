@@ -127,10 +127,9 @@ import (
 				compose: {
 					// Compose resolves this from .bayt/, not the app directory.
 					build: additional_contexts: root: [if B.meta.local {"../../.."}, ".."][0]
-					// Plain HTTP, so the checker measures no secure context and
-					// anything gated on one is uncovered. Nothing in visual lint
-					// reads such an API.
-					environment: APP_URL: "http://caddy:8080"
+					// The TLS door, so the browser speaks h2 as a reader's does (see
+					// the Caddyfile's door). Its certificate names localhost only.
+					environment: APP_URL: "https://caddy:8443"
 					// The aggregate the whole runtime hangs off, healthy: loaded on its
 					// own the closure brings the plane up, and under the verb, which
 					// brought it up first, this is a health check — see the visual
@@ -140,6 +139,7 @@ import (
 						"deno", "run", "--node-modules-dir=auto",
 						"--allow-read", "--allow-write", "--allow-net",
 						"--allow-env", "--allow-run", "--allow-sys",
+						"--unsafely-ignore-certificate-errors=caddy",
 						"/omnishell/check-visual.ts", ".",
 					]
 				}

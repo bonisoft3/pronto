@@ -338,7 +338,10 @@ export async function derive(appDir: string): Promise<void> {
       screens: Record<string, { forms?: { id: string; entity: string }[] }>;
       endowments?: Record<string, string[]>;
     };
-    state: { pipelines?: Record<string, { fold?: { pair: { table: string } } }> };
+    state: {
+      pipelines?: Record<string, { fold?: { pair: { table: string } } }>;
+      computations?: Record<string, { src: string; wasm: string[] }>;
+    };
     meta?: { i18n?: { default?: string; locales?: Record<string, { path: string }> } };
   };
   const defaultLocale = appMeta?.i18n?.default ?? null;
@@ -385,6 +388,18 @@ export async function derive(appDir: string): Promise<void> {
       }
       validated.push({ entity: ename, name: vname, edges: resolveEdges(entities, ename, v.via), ...split });
     }
+  }
+
+  // A computation's module joins the fact rows in a role of its own: the cage
+  // mecha's compute service runs it in endows none of the denied names, and
+  // what it completes in is its exports, so no completion shape applies.
+  for (const [cname, c] of Object.entries(state.computations ?? {})) {
+    const src = await ifMissing(Deno.readTextFile(`${appDir}/${c.src}`), null);
+    if (src === null) fail(`computation ${cname}: src ${c.src} is not a file`);
+    for (const w of c.wasm) {
+      if ((await ifMissing(Deno.stat(`${appDir}/${w}`), null)) === null) fail(`computation ${cname}: wasm ${w} is not a file`);
+    }
+    modules.push({ path: c.src, references: jessieFacts(src).references, completion: "exports", role: "computation" });
   }
 
   // One parse per distinct constraint, and then the parser is done: the IR
@@ -703,6 +718,7 @@ export async function derive(appDir: string): Promise<void> {
   ] as [string, boolean][]) {
     artifacts.push({ path, sha256: await sha(path), derived });
   }
+  for (const c of Object.values(state.computations ?? {})) artifacts.push({ path: c.src, sha256: await sha(c.src), derived: false });
   // The stylesheets the rules above read, so that editing one and not
   // regenerating is a stale-row finding rather than a green literal lint over
   // yesterday's numbers. A screen's row hashes the STRING scanned rather than a

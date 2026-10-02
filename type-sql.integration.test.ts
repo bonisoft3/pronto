@@ -2,7 +2,7 @@ import { generateTypeSQL } from "./type-sql.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
 const POSTGREST = "postgrest/postgrest:v12.2.3@sha256:0a46780309a604cdc8b56c776c6e5e15788ce58174d709e40459ab5a2d44d228";
-const ELECTRIC = "1203bbwv79.registry.depot.dev/f5k5087x1b/electric:1.8.0@sha256:7b6aed2d5fd356a5e5edd5290eeec0b19859ab798d3cbdb7d9d223fbb872a5ab";
+const ELECTRIC = "docker.io/bonitao/electric:1.8.0@sha256:7b6aed2d5fd356a5e5edd5290eeec0b19859ab798d3cbdb7d9d223fbb872a5ab";
 
 function fail(message: string): never {
   throw new Error(message);

@@ -20,6 +20,8 @@ import (
 
 #Project: {tools: toolchain.#Tools, ...}
 
-#Cluster: impl.#Cluster
+#Cluster: impl.#Cluster & {
+	meta: door: *"${CADDY_TLS_HOST_PORT:-0}:8443" | string
+}
 #Runtime: impl.#Runtime
 #Static:  impl.#Static

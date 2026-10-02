@@ -37,4 +37,5 @@
 # Archive
 
 * [Design: Pronto — AI App Builder With Constraint-Cascade Architecture](archive/2026-06-12-design-constraint-cascade.md) - decision, superseded: The startup-mode design — constraint-cascade generation and a scale-to-zero runtime against the prompt-to-app category — whose business analysis still stands.
+* [A numeric stage](archive/2026-09-30-numeric-stage.md) - decision, built: A pronto rung for computation bloblang and Jessie cannot carry — a compute service fed by the lake, writing back through CRUD; proposed on JAX, revised to Jessie planning Wasm jobs on Deno.
 * [DuckStream tempo and derivation invariants](archive/2026-10-01-duckstream-tempo-and-derivation.md) - decision, built: Replaces physical pipeline flags with application-level tempo (hot vs cold) and operator endowments, proving screen-mutation feedback loops statically in CUE and verifying SQL algebra via DuckDB AST serialization. Contract moved to [pipelines and schedules](pipelines-and-schedules.md#the-shapes).

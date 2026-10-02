@@ -84,6 +84,12 @@ import (
 		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
 		proto: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."}).out
 		replay: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write --allow-run --allow-env ($pronto | path join check-replay.ts) ."}).out
+		// Under the compute service's own pins, as it runs them: queries over
+		// DuckDB, the cage's workers, the wasm.
+		computations: (_run & {args: "run-mise exec -- deno test --config (\(P._mecha) | path join services compute deno.json) --frozen --permit-no-files --unstable-worker-options --allow-read --allow-ffi --allow-env computations"}).out
+		// Each module loaded as the service loads it at startup, so one it
+		// would refuse fails here; the emitter appends the modules' paths.
+		admit: (_run & {args: "run-mise exec -- deno run --config (\(P._mecha) | path join services compute deno.json) --frozen --unstable-worker-options --allow-read --allow-env (\(P._mecha) | path join services compute admit.ts)"}).out
 	}
 	say: say: {
 		...

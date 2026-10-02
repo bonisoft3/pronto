@@ -1134,6 +1134,7 @@ _cdcTableField: "__table"
 				required: f.required
 				if f.type == "decimal" {precision: f.precision, scale: f.scale}
 				if f.pk {pk: true}
+				if f.ref != _|_ {ref: f.ref}
 				if f.unique != _|_ {unique: f.unique}
 				if f.default != _|_ {default: f.default}
 				if e.enums[f.name] != _|_ {enum: e.enums[f.name]}
@@ -1539,6 +1540,15 @@ _cdcTableField: "__table"
 				if len([for _, s in D.code.surface.screens if s.prerender {s}]) > 0 {
 					prerender: {verb: "test", cmds: [_prerender], note: "Pronto prerender"}
 				}
+				// A computation's tests run it as mecha's compute service does.
+				if len(D.code.state.computations) > 0 {
+					computations: {verb: "test", cmds: [_distribution.checks.computations], note: "Pronto computations"}
+					admit: {
+						verb: "lint"
+						cmds: [strings.Join([_distribution.checks.admit, for _, c in D.code.state.computations {json.Marshal(c.src)}], " ")]
+						note: "Pronto computations admitted"
+					}
+				}
 			}
 			// The origin is the launch door's, because the canonical and hreflang
 			// links a crawler compares are absolute and a deployed origin is the
@@ -1653,7 +1663,7 @@ _cdcTableField: "__table"
 			app: D.code.meta.name
 			statics: list.Concat([D.statics, D._ladder, D._crawl])
 			// mecha's images, reached through the monorepo's bayt federation.
-			images: {for s in ["database", "migrate", "mesh", "conduit", "auth", "ticker", "clock", "rclone-s3"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
+			images: {for s in ["database", "migrate", "mesh", "conduit", "auth", "ticker", "clock", "compute", "rclone-s3"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth
 		// block; the blob plane follows the program's flag; the data plane
@@ -1674,6 +1684,15 @@ _cdcTableField: "__table"
 				file: "docker/\(D.code.meta.name)-\(pl.name).yaml"
 			}]
 			schedules: [for _, sc in D.code.state.schedules {sc.name}]
+			computations: [for _, c in D.code.state.computations {
+				name:     "\(D.code.meta.name)-\(c.name)"
+				file:     c.src
+				every:    c.every
+				to: [for t in c.to {D.code.state.entities[t].table}]
+				wasm:     c.wasm
+				// A sink in the publication would feed the change it answers.
+				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
+			}]
 		}
 	}
 }
@@ -2621,9 +2640,13 @@ _cdcTableField: "__table"
 				        redir @\(r.screen)_\(E._shell.i18n.locales[tag].path) \(target) 302
 				"""},
 			]
+			// Caddy refuses an empty path matcher at provision, so a program with
+			// no route emits neither this block nor `_rewrite` below.
+			_routeless: len(E._shell.routes) == 0
 			_negotiate: [
 				if E._shell.i18n == _|_ {""},
 				if len(E._others) == 0 {""},
+				if _routeless {""},
 				"""
 				    route {
 				      @negotiable path \(strings.Join(list.SortStrings([for _, w in _widened {w}]), " "))
@@ -2667,6 +2690,14 @@ _cdcTableField: "__table"
 			// 200 instead of 404 (measured, caddy 2.10.0). Here a request that names
 			// no file and no route reaches file_server unrewritten, which is the 404
 			// a crawler is owed.
+			_rewrite: [
+				if _routeless {""},
+				"""
+					      @route path \(strings.Join(_matchers, " "))
+					      rewrite @route /\(E.terminal.surface.entry)
+
+					""",
+			][0]
 			_served: """
 				  route {
 				\(_entry)\(_alias)\(_negotiate)    handle {
@@ -2674,9 +2705,7 @@ _cdcTableField: "__table"
 				      header Cache-Control "no-cache"
 				      @file file {path} {path}/index.html
 				      rewrite @file {http.matchers.file.relative}
-				      @route path \(strings.Join(_matchers, " "))
-				      rewrite @route /\(E.terminal.surface.entry)
-				      file_server
+				\(_rewrite)      file_server
 				    }
 				  }
 				"""

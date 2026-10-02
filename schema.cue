@@ -664,6 +664,21 @@ import (
 	module?: {statements: string, completion: string}
 }
 
+// A numeric program (docs/pipelines-and-schedules.md#computations): a module
+// run by mecha's compute service, whose services/compute/main.ts states the
+// contract.
+#Computation: {
+	name: string
+	src:  *"computations/\(name).js" | string
+	// The live entities it alone writes, each with its whole output.
+	to: [...string] & [_, ...]
+	// Seconds between looks at whether its reads changed.
+	every: *60 | int & >0
+	// App-relative paths of the committed wasm modules its jobs call, each
+	// named in a job by its file's stem.
+	wasm: *[] | [...string]
+}
+
 #Pipeline: {
 	name:    string
 	ir:      *name | string
@@ -1154,6 +1169,7 @@ import (
 		// would not accept.
 		migrations?: [grammar.#Name]: grammar.#Migration
 		pipelines: [Name=string]: #Pipeline & {name: Name}
+		computations: [Name=string]: #Computation & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
 		machines?: [Name=string]: #MechaMachine & {name: Name}
 		sagas?: [Name=string]: #Saga & {name: Name}
@@ -1176,6 +1192,10 @@ import (
 			service:  string
 			mode:     *"passkey" | string
 			self?: {route: string, name?: {table: string, column: string}}
+			// Where sign-in is not required, the strip offers a guest a passkey:
+			// one gesture that signs in, or keeps the guest's identity under a
+			// new passkey.
+			promote: *false | bool
 		}
 		// The app ships a native host beside the web one, so every route owes
 		// its web affordances a native peer: check-parity reads this key to
