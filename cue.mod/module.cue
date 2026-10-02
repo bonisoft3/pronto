@@ -26,7 +26,7 @@ source: {
 // fails when one of these versions falls behind.
 deps: {
 	"github.com/bonisoft3/bayt@v0": {
-		v:       "v0.54.0"
+		v:       "v0.56.0"
 		default: true
 	}
 	"github.com/bonisoft3/mecha@v0": {
@@ -38,7 +38,7 @@ deps: {
 		default: true
 	}
 	"github.com/bonisoft3/sayt@v0": {
-		v:       "v0.39.4"
+		v:       "v0.40.0"
 		default: true
 	}
 }

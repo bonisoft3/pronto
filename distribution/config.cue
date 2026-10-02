@@ -6,7 +6,7 @@ import (
 )
 
 #Version:     "0.4.0"
-#SaytVersion: "0.39.4"
+#SaytVersion: "0.40.0"
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.
