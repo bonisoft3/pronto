@@ -2,7 +2,7 @@
 type: decision
 title: "Hybrid machines: omnishell, mecha, duckstream and cortex"
 description: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-exterior tiers.
-status: unbuilt
+status: partially-built
 ---
 
 # Hybrid machines: omnishell, mecha, duckstream and cortex
@@ -23,15 +23,16 @@ This decision unifies them into one XState-JSON machine model partitioned into f
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        Cortex Machine                                  │
 │     Orchestrates sagas, child lifecycles, and Level 4 exterior IO      │
+│     (Native DBOS Workflows embedded over PostgreSQL)                   │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
          ┌─────────────────────────┼──────────────────────────┐
          ▼                         ▼                          ▼
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────────┐
 │ Omnishell        │     │ Mecha            │     │ DuckStream           │
-│ Browser UI, DOM  │     │ Relational core  │     │ Streaming IVM (d2ts) │
-│ Max: Level 2     │     │ Max: Level 3     │     │ DuckLake / JAX batch │
-│ (Compensable)    │     │ (Replicated)     │     │ Max: Level 3 (Lake)  │
+│ Browser UI, DOM  │     │ Relational core  │     │ Server: Feldera DBSP │
+│ Max: Level 2     │     │ Max: Level 3     │     │ Lake: Parquet/Arrow  │
+│ (Compensable)    │     │ (Replicated)     │     │ Browser: DuckDB-WASM │
 └──────────────────┘     └──────────────────┘     └──────────────────────┘
 ```
 
@@ -42,8 +43,8 @@ three tiers are mathematically pure, closed over rows, and replayable.
 |---|---|---|---|
 | **Omnishell** | `tab` or `device` row in client memory | **Level 2** (compensable) | Walked by Chinese Postman tour; posed by Storybook battery |
 | **Mecha** | `server` entity row in PostgreSQL | **Level 3** (replicated) | ACID transaction; rolled back natively on error |
-| **DuckStream** | Pipeline state or lake catalog row | **Level 3** (lake/relational) | `delta ≡ recompute`; deterministic over immutable Parquet |
-| **Cortex** | Instance row in `stream_attempt` | **Level 4** (exterior) | Temporal-style event sourcing; durable claim before act |
+| **DuckStream** | Pipeline state or lake catalog row | **Level 3** (lake/relational) | `delta ≡ recompute`; Feldera continuous circuits on server, DuckDB-WASM reactive recompute in browser |
+| **Cortex** | Instance row in `saga` / DBOS state | **Level 4** (exterior) | DBOS durable execution; atomic PostgreSQL transaction co-location before exterior act |
 
 ---
 
@@ -92,34 +93,44 @@ three tiers are mathematically pure, closed over rows, and replayable.
 
 ## 3. DuckStream Machines (Streaming IVM & Lake Compute)
 
-- **Role**: High-throughput streaming joins and window aggregations via modern Flink SQL,
-  executed in `d2ts` / `@tanstack/db` collections, paired with batch matrix derivations
-  over DuckLake.
+- **Role**: High-throughput streaming joins and window aggregations via **Feldera (DBSP)**
+  on the server paired with **DuckLake / DuckDB** for batch matrix derivations, and emulated
+  reactively in the browser via **DuckDB-WASM**.
+- **Server Tier (Feldera DBSP in Docker)**:
+  - Consumes PostgreSQL logical replication / WAL (via Debezium, Conduit, or direct PG CDC).
+  - Feldera's Calcite compiler compiles SQL continuous queries into native Rust DBSP circuits
+    inside containerized environments. No local Rust toolchain or native Windows binaries needed.
+  - Provably satisfies $\text{Delta} \equiv \text{Recompute}$ across full CDC changelogs
+    (inserts, updates with before-images, retractions).
+  - Emits maintained operational views back to PostgreSQL and flushes columnar Parquet
+    partitions into DuckLake.
+- **Client Tier Emulation (DuckDB-WASM)**:
+  - Feldera circuits cannot run natively in single-threaded browser JS.
+  - The client emulates streaming IVM by exploiting the identity $\text{Delta} \equiv \text{Recompute}$
+    over bounded client datasets (<50,000 rows):
+    Whenever the local sync engine (Electric/pg-sync) pulls change sets into local Arrow tables,
+    **DuckDB-WASM** reactively re-evaluates the view query in 1–5ms inside a WebWorker.
+  - Zero need for homebrewed polyglot JavaScript SQL engines or `d2ts` compilers: DuckDB-WASM
+    executes standard SQL directly over local Apache Arrow memory.
 - **Inbound Events**:
   - `DIFF_BATCH`: Inbound changes from Postgres WAL (`insert`, `update` with before-image,
     `delete`).
-  - `WATERMARK_ADVANCED`: Monotone watermark reached a window boundary.
+  - `WATERMARK_ADVANCED`: Monotone watermark reached a window boundary (LSN / commit timestamp).
   - `WINDOW_CLOSED`: Interval or tumbling window ready for consolidation.
   - `LAKE_PARTITION_READY`: New Parquet files flushed to DuckLake.
   - `JAX_BATCH_DONE` / `JAX_BATCH_FAILED`: Python subprocess completed tensor computation.
 - **Outbound Effects**:
-  - `D2TS_CONSOLIDATE`: Differential dataflow step emitting consolidated diffs.
+  - `DBSP_STEP`: Differential circuit step emitting incremental changelog deltas.
   - `SYNC_TO_POSTGRES`: Flush maintained view rows back to PostgreSQL.
-  - `EVICT_EXPIRED_JOIN_STATE`: Retract state outside the interval join window.
+  - `PUBLISH_PARQUET`: Append partition to DuckLake directory.
   - `ATTACH_DUCKLAKE`: Mount Parquet dataset in DuckDB.
-  - `DISPATCH_JAX_SUBPROCESS`: Execute deterministic matrix kernel (e.g. TF-IDF) over Arrow memory.
-  - `PUBLISH_PARQUET`: Write transformed Arrow table to DuckLake data directory.
+  - `DISPATCH_JAX_SUBPROCESS`: Execute deterministic matrix kernel (e.g. TF-IDF) over Arrow IPC.
 - **State Eviction & Watermarks**:
   - Unbounded stream-stream joins are forbidden; joins must be **interval joins**
     (`c.time BETWEEN i.time AND i.time + INTERVAL '10' MINUTE`) or **temporal joins**
     (`FOR SYSTEM_TIME AS OF`).
   - Watermarks are driven strictly by the **database commit timestamp / LSN**, never wall
     clock. Consumer lag delays output but preserves 100% calculation correctness.
-- **Heavy Compute (DuckLake + Arrow + JAX)**:
-  - High-dimensional matrices (TF-IDF, embeddings) bypass row-by-row Postgres storage.
-  - Metadata in Postgres (`pg_ducklake`), data in Parquet partitions, zero-copy scan via
-    DuckDB Arrow IPC, vectorized numerical kernels executed by JAX, output committed back to
-    the lake. Pure batch derivation: `delta ≡ recompute`.
 
 ---
 
@@ -127,20 +138,94 @@ three tiers are mathematically pure, closed over rows, and replayable.
 
 - **Role**: Top-level coordination of multi-tier sagas and exterior interactions. The
   only tier permitted to emit Level 4 effects.
+- **Durable Engine: DBOS (Database-Oriented Operating System)**:
+  - Built on Michael Stonebraker and Matei Zaharia's architecture where PostgreSQL is the
+    single operating system for workflow state.
+  - **No external daemon / broker**: DBOS runs embedded inside the application backend process
+    (Deno / Node.js) with zero sidecars (`daprd`) or external orchestrator clusters (Temporal).
+  - **Single Transaction Boundary**: A saga step can execute domain mutations in PostgreSQL and
+    record its step state/idempotency claim within the **exact same ACID commit**.
+  - **Replaces Ad-hoc Runners**: Fully provides battle-tested lease renewal, zombie worker
+    detection, exponential backoff with jitter, dead-letter re-entry, and workflow versioning.
+- **Saga Representation**:
+  - Sagas and saga steps are persisted in the `saga` table (and DBOS system tables):
+    ```sql
+    CREATE TABLE IF NOT EXISTS "saga" (
+      "id"              TEXT PRIMARY KEY,
+      "name"            TEXT NOT NULL,
+      "idempotency_key" TEXT NOT NULL,
+      "payload"         JSONB NOT NULL DEFAULT '{}'::jsonb,
+      "status"          TEXT NOT NULL DEFAULT 'pending',
+      "outcome"         JSONB,
+      "created_at"      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+      "settled_at"      TIMESTAMPTZ,
+      UNIQUE ("name", "idempotency_key")
+    );
+    ```
 - **Inbound Events**:
   - Child machine completion (`OMNISHELL_SUBMITTED`, `MECHA_MIGRATED`,
     `DUCKSTREAM_CONSOLIDATED`).
   - Peer response (`CALL_SUCCEEDED`, `CALL_FAILED`).
-  - Reconciliation timer (`RECONCILE_DUE`).
+  - Compensation trigger (`SAGA_ABORT`).
 - **Outbound Effects** (Level 4 - Exterior):
   - `DISPATCH_EXTERNAL_ACT`: Outbound network calls (payment gateways, emails, webhooks)
-    following the three-phase protocol:
-    `insert stream_attempt (in_flight) → call peer → update stream_attempt (settled)`.
+    guarded by DBOS step idempotency keys.
   - `SPAWN_CHILD_MACHINE`: Instantiate or resume a Mecha, DuckStream, or Omnishell flow.
   - `COMPENSATE`: Execute compensating rollback steps across child machines.
 - **Contract**: Temporal-style durable execution. If a process dies while an act is in
   flight, restart enters `unknown` and queries the peer via its idempotency key; it
-  never re-issues the call.
+  never blindly re-issues the call.
+
+---
+
+## 5. How Hybrid Machines Drive Cortex and DuckStream
+
+Hybrid state machines in Pronto compile transitions that seamlessly trigger across tiers:
+
+```
+┌────────────────────────────────────────────────────────┐
+│               #MechaMachine Transition                 │
+│         (PostgreSQL BEFORE / AFTER Trigger)            │
+└───────────┬────────────────────────────────┬───────────┘
+            │                                │
+     #SagaEffect                      #StreamEffect
+            │                                │
+            ▼                                ▼
+┌────────────────────────┐      ┌────────────────────────┐
+│     Cortex / DBOS      │      │       DuckStream       │
+│  INSERT INTO "saga"    │      │  pg_notify stream bus  │
+│  (Level-4 Exterior IO) │      │  (Feldera IVM circuit) │
+└────────────────────────┘      └────────────────────────┘
+```
+
+1. **Driving Cortex from a Machine Transition (`#SagaEffect`)**:
+   A state transition in PostgreSQL (e.g. an order moving to `confirmed`) can declare:
+   ```cue
+   actions: [{
+       effect: {
+           saga: "process_payment"
+           idempotencyKey: "NEW.id"
+           payload: {amount: NEW.total, customer_id: NEW.customer_id}
+       }
+   }]
+   ```
+   The compiler emits an atomic `INSERT INTO "saga" (...) VALUES (...) ON CONFLICT DO NOTHING`
+   and sends `PERFORM pg_notify('cortex_saga_queue', ...)` inside the **same database transaction**.
+   DBOS picks up the row and executes the external payment gateway call with full Level-4 durability.
+
+2. **Driving DuckStream from a Machine Transition (`#StreamEffect`)**:
+   When a machine executes state changes that feed analytical pipelines or require an explicit
+   derivation sweep:
+   ```cue
+   actions: [{
+       effect: {
+           stream: "recount_ledger"
+           signal: "refresh"
+       }
+   }]
+   ```
+   The compiler emits a signaling notification `pg_notify('duckstream_recount_ledger', ...)`
+   or mutates source rows captured by Feldera's CDC connector.
 
 ---
 
@@ -310,11 +395,11 @@ Every existing application in `./apps` with a PostgreSQL backend (migrations, pu
 
 | Application | Existing Mechanism | Hybrid Machine Adoption & Guarantees |
 |---|---|---|
-| **[`apps/truco`](file:///Users/davi/code/trash/apps/truco)** | Hand-written `challenge_expire_check()` trigger and RLS status checks in `012_lobby.sql`. | **Adopted (`010_machines.sql`)**: Challenge lifecycle (`pending` $\rightarrow$ `accepted` \| `declined` \| `expired`) is compiled from `#MechaMachine` with finite timeout `after: {"60000": "expired"}`. Enforces initial state, valid transitions, immutability of final states, and timeout guards without custom trigger boilerplate. |
-| **[`apps/xpense`](file:///Users/davi/code/trash/apps/xpense)** | Hand-written PL/pgSQL trigger arithmetic in `011_ledger_writes.sql` (`expense_maintain_stats_ivm`). | **Relational Effects Candidate**: Balance rollups and monthly counts on `month_stat` and `category_month_stat` map directly to Mecha's deterministic `accumulate` and `upsert` relational effects. Recurring expense generation maps to Mecha Ticker schedules. |
-| **[`apps/thenote`](file:///Users/davi/code/trash/apps/thenote)** | Note sharing (`011_share_trigger.sql`) and card positioning triggers (`013_item_position_trigger.sql`). | **Lock & Concurrency Limits**: Strict PostgreSQL statement timeouts (`SET statement_timeout = '60s'`, role limits `5s`) prevent gateway timeouts and cascading lock starvation during concurrent multi-user board dragging. |
-| **[`apps/ponto`](file:///Users/davi/code/trash/apps/ponto)** | Manual shift duration checks and punch validations (`012_duration_checks.sql`). | **Open Punch Auto-Expiry**: Active punch sessions run as finite machines; forgotten punch-outs are flagged or closed automatically by Ticker schedules. |
-| **[`apps/chess`](file:///Users/davi/code/trash/apps/chess)** | In-browser referee state machine and local time controls. | **Authoritative Turn Clocks**: Match state (`playing` $\rightarrow$ `over`) with strict termination reasons (`checkmate`, `resignation`, `flag`) backed by database-level clock expiration checks, preventing client clock manipulation. |
+| **[`apps/truco`](../../../../apps/truco)** | Hand-written `challenge_expire_check()` trigger and RLS status checks in `012_lobby.sql`. | **Adopted (`010_machines.sql`)**: Challenge lifecycle (`pending` $\rightarrow$ `accepted` \| `declined` \| `expired`) is compiled from `#MechaMachine` with finite timeout `after: {"60000": "expired"}`. Enforces initial state, valid transitions, immutability of final states, and timeout guards without custom trigger boilerplate. |
+| **[`apps/xpense`](../../../../apps/xpense)** | Hand-written PL/pgSQL trigger arithmetic in `011_ledger_writes.sql` (`expense_maintain_stats_ivm`). | **Relational Effects Candidate**: Balance rollups and monthly counts on `month_stat` and `category_month_stat` map directly to Mecha's deterministic `accumulate` and `upsert` relational effects. Recurring expense generation maps to Mecha Ticker schedules. |
+| **[`apps/thenote`](../../../../apps/thenote)** | Note sharing (`011_share_trigger.sql`) and card positioning triggers (`013_item_position_trigger.sql`). | **Lock & Concurrency Limits**: Strict PostgreSQL statement timeouts (`SET statement_timeout = '60s'`, role limits `5s`) prevent gateway timeouts and cascading lock starvation during concurrent multi-user board dragging. |
+| **[`apps/ponto`](../../../../apps/ponto)** | Manual shift duration checks and punch validations (`012_duration_checks.sql`). | **Open Punch Auto-Expiry**: Active punch sessions run as finite machines; forgotten punch-outs are flagged or closed automatically by Ticker schedules. |
+| **[`apps/chess`](../../../../apps/chess)** | In-browser referee state machine and local time controls. | **Authoritative Turn Clocks**: Match state (`playing` $\rightarrow$ `over`) with strict termination reasons (`checkmate`, `resignation`, `flag`) backed by database-level clock expiration checks, preventing client clock manipulation. |
 
 ---
 

@@ -179,10 +179,10 @@ _sqlType: {
 #sqlLit: L={
 	v: _
 	out: [
-		if L.v == null {"NULL"},
-		if (L.v & {raw: string}) != _|_ {L.v.raw},
-		if (L.v & string) != _|_ {"'" + strings.Replace(L.v, "'", "''", -1) + "'"},
-		if (L.v & bool) != _|_ {[if L.v {"true"}, "false"][0]},
+		if (L.v & null) != _|_ if (L.v & (string | bool | number | {...} | [...])) == _|_ {"NULL"},
+		if (L.v & {raw: string}) != _|_ {(L.v & {raw: string}).raw},
+		if (L.v & string) != _|_ {"'" + strings.Replace((L.v & string), "'", "''", -1) + "'"},
+		if (L.v & bool) != _|_ {[if (L.v & bool) {"true"}, "false"][0]},
 		if (L.v & {...}) != _|_ {"'" + strings.Replace(json.Marshal(L.v), "'", "''", -1) + "'"},
 		if (L.v & [...]) != _|_ {"'" + strings.Replace(json.Marshal(L.v), "'", "''", -1) + "'"},
 		"\(L.v)",
@@ -289,10 +289,13 @@ _sqlType: {
 
 #mechaEffectSql: EF={
 	effect: #MechaEffect
+	op:     *"INSERT" | "UPDATE" | "DELETE"
 
 	_isRel:    (EF.effect & #RelationalEffect) != _|_
 	_isCall:   (EF.effect & #FunctionEffect) != _|_
 	_isNotify: (EF.effect & #NotifyEffect) != _|_
+	_isSaga:   (EF.effect & #SagaEffect) != _|_
+	_isStream: (EF.effect & #StreamEffect) != _|_
 
 	_rel: EF.effect
 	_cols: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values {"\"\(c)\""}]}, []][0]
@@ -315,28 +318,31 @@ _sqlType: {
 			"\"\(c)\" = \"\(_rel.table)\".\"\(c)\" + EXCLUDED.\"\(c)\""
 		}
 	}]}, []][0]
+
 	_wherePreds: [if _isRel if _rel["where"] != _|_ {[for c, val in _rel.where {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
+	_rawWherePred: [if _isRel if _rel["rawWhere"] != _|_ {[_rel.rawWhere]}, []][0]
 	_keyPreds: [if _isRel if _rel["values"] != _|_ {[for k in _rawKeys if _rel.values[k] != _|_ {"\"\(k)\" = \((#sqlLit & {v: _rel.values[k]}).out)"}]}, []][0]
-	_preds: [if _isRel {[if _rel["where"] != _|_ {_wherePreds}, _keyPreds][0]}, []][0]
+	_explicitPreds: list.Concat([_wherePreds, _rawWherePred])
+	_preds: [if _isRel {[if len(_explicitPreds) > 0 {_explicitPreds}, _keyPreds][0]}, []][0]
 
 	_relSql: [
-		if _isRel && _rel.op == "insert" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
-		if _isRel && _rel.op == "ensure" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
-		if _isRel && _rel.op == "upsert" {
+		if _isRel if _rel["op"] != _|_ if _rel.op == "insert" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
+		if _isRel if _rel["op"] != _|_ if _rel.op == "ensure" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
+		if _isRel if _rel["op"] != _|_ if _rel.op == "upsert" {
 			[if len(_customUpdates) > 0 {
 				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
 			}, {
 				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_updates, ", "));"
 			}][0]
 		},
-		if _isRel && _rel.op == "accumulate" {
+		if _isRel if _rel["op"] != _|_ if _rel.op == "accumulate" {
 			[if len(_customUpdates) > 0 {
 				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
 			}, {
 				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_accUpdates, ", "));"
 			}][0]
 		},
-		if _isRel && _rel.op == "update" {
+		if _isRel if _rel["op"] != _|_ if _rel.op == "update" {
 			if len(_preds) > 0 {
 				"        UPDATE \"\(_rel.table)\" SET \(strings.Join(_setClauses, ", ")) WHERE \(strings.Join(_preds, " AND "));"
 			}
@@ -344,20 +350,97 @@ _sqlType: {
 				"        UPDATE \"\(_rel.table)\" SET \(strings.Join(_setClauses, ", "));"
 			}
 		},
-		if _isRel && _rel.op == "delete" {"        DELETE FROM \"\(_rel.table)\" WHERE \(strings.Join(_preds, " AND "));"},
+		if _isRel if _rel["op"] != _|_ if _rel.op == "delete" {"        DELETE FROM \"\(_rel.table)\" WHERE \(strings.Join(_preds, " AND "));"},
 		"",
 	][0]
 
-	_callArgs: [if _isCall && EF.effect["args"] != _|_ {[for _, a in EF.effect.args {(#sqlLit & {v: a}).out}]}, []][0]
-	_callSql: [if _isCall {"        PERFORM \(EF.effect.call)(\(strings.Join(_callArgs, ", ")));"}, ""][0]
+	_callArgs: [if _isCall if EF.effect["args"] != _|_ {[for _, a in EF.effect.args {(#sqlLit & {v: a}).out}]}, []][0]
+	_callSql: [if _isCall if EF.effect["call"] != _|_ {"        PERFORM \(EF.effect.call)(\(strings.Join(_callArgs, ", ")));"}, ""][0]
 
-	_notifySql: [if _isNotify {"        PERFORM pg_notify('\(EF.effect.notify)', \((#sqlLit & {v: EF.effect.payload}).out));"}, ""][0]
+	_notifySql: [if _isNotify if EF.effect["notify"] != _|_ {"        PERFORM pg_notify('\(EF.effect.notify)', \((#sqlLit & {v: EF.effect.payload}).out));"}, ""][0]
 
-	out: [if _isRel {_relSql}, if _isCall {_callSql}, if _isNotify {_notifySql}, ""][0]
+	_defaultKey: [if EF.op == "DELETE" {"OLD.id::text"}, "NEW.id::text"][0]
+
+	_rawSagaKey: [
+		if _isSaga if EF.effect["idempotencyKey"] != _|_ {
+			[
+				if (EF.effect.idempotencyKey & {raw: string}) != _|_ {
+					(EF.effect.idempotencyKey & {raw: string}).raw + "::text"
+				},
+				if (EF.effect.idempotencyKey & string) != _|_ {
+					[
+						if strings.HasPrefix((EF.effect.idempotencyKey & string), "NEW.") || strings.HasPrefix((EF.effect.idempotencyKey & string), "OLD.") {
+							(EF.effect.idempotencyKey & string) + "::text"
+						},
+						"'" + strings.Replace((EF.effect.idempotencyKey & string), "'", "''", -1) + "'",
+					][0]
+				},
+				_defaultKey,
+			][0]
+		},
+		_defaultKey,
+	][0]
+
+	_sagaPayload: [
+		if _isSaga if EF.effect["payload"] != _|_ {
+			"jsonb_build_object(" + strings.Join([for k, v in EF.effect.payload {
+				_valSql: [
+					if (v & {raw: string}) != _|_ {(v & {raw: string}).raw},
+					if (v & string) != _|_ if strings.HasPrefix((v & string), "NEW.") || strings.HasPrefix((v & string), "OLD.") {(v & string)},
+					if (v & string) != _|_ if !strings.HasPrefix((v & string), "NEW.") && !strings.HasPrefix((v & string), "OLD.") {"'" + strings.Replace((v & string), "'", "''", -1) + "'"},
+					if (v & bool) != _|_ {[if (v & bool) {"true"}, "false"][0]},
+					if (v & number) != _|_ {"\(v)"},
+					if (v & {...}) != _|_ {"'" + strings.Replace(json.Marshal(v), "'", "''", -1) + "'::jsonb"},
+					if (v & [...]) != _|_ {"'" + strings.Replace(json.Marshal(v), "'", "''", -1) + "'::jsonb"},
+					"null",
+				][0]
+				"'\(k)', " + _valSql
+			}], ", ") + ")"
+		},
+		"'{}'::jsonb"
+	][0]
+
+	_sagaSql: [if _isSaga {
+		"""
+		        INSERT INTO "saga" ("id", "name", "idempotency_key", "payload", "status")
+		        VALUES (gen_random_uuid()::text, '\(EF.effect.saga)', \(_rawSagaKey), \(_sagaPayload)::jsonb, 'pending')
+		        ON CONFLICT ("name", "idempotency_key") DO NOTHING;
+		        PERFORM pg_notify('cortex_saga_queue', jsonb_build_object('saga', '\(EF.effect.saga)', 'key', \(_rawSagaKey))::text);
+		"""
+	}, ""][0]
+
+	_streamSignal: [if _isStream if EF.effect["signal"] != _|_ {EF.effect.signal}, "refresh"][0]
+	_rawStreamKey: [
+		if _isStream if EF.effect["key"] != _|_ {
+			[
+				if (EF.effect.key & {raw: string}) != _|_ {
+					(EF.effect.key & {raw: string}).raw + "::text"
+				},
+				if (EF.effect.key & string) != _|_ {
+					[
+						if strings.HasPrefix((EF.effect.key & string), "NEW.") || strings.HasPrefix((EF.effect.key & string), "OLD.") {
+							(EF.effect.key & string) + "::text"
+						},
+						"'" + strings.Replace((EF.effect.key & string), "'", "''", -1) + "'",
+					][0]
+				},
+				_defaultKey,
+			][0]
+		},
+		_defaultKey,
+	][0]
+	_streamSql: [if _isStream {
+		"""
+		        PERFORM pg_notify('duckstream_\(EF.effect.stream)', jsonb_build_object('signal', '\(_streamSignal)', 'table', TG_TABLE_NAME, 'id', \(_rawStreamKey))::text);
+		"""
+	}, ""][0]
+
+	out: [if _isRel {_relSql}, if _isCall {_callSql}, if _isNotify {_notifySql}, if _isSaga {_sagaSql}, if _isStream {_streamSql}, ""][0]
 }
 
 #mechaActionSql: AC={
 	action: #MechaAction
+	op:     *"INSERT" | "UPDATE" | "DELETE"
 
 	_effList: [if AC.action["effect"] != _|_ {
 		[if (AC.action.effect & [...]) != _|_ {AC.action.effect}, [AC.action.effect]][0]
@@ -371,7 +454,7 @@ _sqlType: {
 
 	_effects: [
 		for eff in _effList {
-			(#mechaEffectSql & {effect: eff}).out
+			(#mechaEffectSql & {effect: eff, op: AC.op}).out
 		},
 	]
 
@@ -440,7 +523,7 @@ _sqlType: {
 			        END IF;
 			"""
 		}, ""][0]
-		_actionLines: [for a in t.actions {(#mechaActionSql & {action: a}).out}]
+		_actionLines: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
 		"""
 		      IF NEW."\(ST.field)" = '\(t.target)' THEN
 		\(_guardLine)\(strings.Join(_actionLines, "\n"))
@@ -528,17 +611,17 @@ _sqlType: {
 		_fnName: "trg_\(_table)_\(S.machine.name)_reducer"
 		_insertActions: [if S.machine.on["insert"] != _|_ {
 			[for a in [if (S.machine.on.insert & [...]) != _|_ {S.machine.on.insert}, [S.machine.on.insert]][0] {
-				(#mechaActionSql & {action: a}).out
+				(#mechaActionSql & {action: a, op: "INSERT"}).out
 			}]
 		}, []][0]
 		_updateActions: [if S.machine.on["update"] != _|_ {
 			[for a in [if (S.machine.on.update & [...]) != _|_ {S.machine.on.update}, [S.machine.on.update]][0] {
-				(#mechaActionSql & {action: a}).out
+				(#mechaActionSql & {action: a, op: "UPDATE"}).out
 			}]
 		}, []][0]
 		_deleteActions: [if S.machine.on["delete"] != _|_ {
 			[for a in [if (S.machine.on.delete & [...]) != _|_ {S.machine.on.delete}, [S.machine.on.delete]][0] {
-				(#mechaActionSql & {action: a}).out
+				(#mechaActionSql & {action: a, op: "DELETE"}).out
 			}]
 		}, []][0]
 
@@ -579,6 +662,25 @@ _sqlType: {
 
 	out: [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
 }
+
+#sagaTableSql: """
+	CREATE TABLE IF NOT EXISTS "saga" (
+	  "id"              TEXT PRIMARY KEY,
+	  "name"            TEXT NOT NULL,
+	  "idempotency_key" TEXT NOT NULL,
+	  "payload"         JSONB NOT NULL DEFAULT '{}'::jsonb,
+	  "status"          TEXT NOT NULL DEFAULT 'pending',
+	  "outcome"         JSONB,
+	  "created_at"      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+	  "settled_at"      TIMESTAMPTZ,
+	  UNIQUE ("name", "idempotency_key")
+	);
+
+	CREATE INDEX IF NOT EXISTS "idx_saga_status" ON "saga" ("status") WHERE "status" = 'pending';
+
+	ALTER TABLE "saga" ENABLE ROW LEVEL SECURITY;
+	REVOKE ALL ON "saga" FROM anon, app_user, electric;
+	"""
 
 // The app_user USING clause of a private entity. `qual` prefixes the row's
 // own columns: the table name in the entity's policies, the parent alias
@@ -1323,6 +1425,7 @@ _cdcTableField: "__table"
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	machines: [if M.code.state.machines != _|_ {[for _, m in M.code.state.machines {m}]}, []][0]
+	sagas:    [if M.code.state.sagas != _|_ {[for _, s in M.code.state.sagas {s}]}, []][0]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	// The cluster copies this list into its database image, so it follows the
 	// predicate that emits the database: a migration named without one would be
@@ -1340,6 +1443,7 @@ _cdcTableField: "__table"
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
+		if len(M.sagas) > 0 {"services/database/migrations/015_sagas.sql"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/021_schedule_seed.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
@@ -2220,6 +2324,14 @@ _cdcTableField: "__table"
 				}
 			}
 
+			_sagas: [if E.code.state.sagas != _|_ {[for _, s in E.code.state.sagas {s}]}, []][0]
+			if len(_sagas) > 0 {
+				"services/database/migrations/015_sagas.sql": {
+					format: "sql"
+					text:   #sagaTableSql + "\n"
+				}
+			}
+
 			if len(E.code.state.schedules) > 0 {
 				// The table is mecha's: the cluster, handed the schedules' names,
 				// places it in the database as 020_schedule.sql, and this seeds it
@@ -2394,6 +2506,14 @@ _cdcTableField: "__table"
 			for _, pl in E.code.state.pipelines if pl.raw != _|_ {
 				"docker/\(E.code.meta.name)-\(pl.name).yaml": {format: "yaml", src: pl.src}
 				"\(pl.src)": {format: "yaml", src: pl.src}
+			}
+
+			_duckstreams: [if E.code.state.duckstreams != _|_ {[for _, d in E.code.state.duckstreams {d}]}, []][0]
+			for _, ds in _duckstreams {
+				"pipelines/duckstream/\(ds.name).sql": {
+					format: "sql"
+					text:   ds.sql + "\n"
+				}
 			}
 		}
 		"docker/Caddyfile": {

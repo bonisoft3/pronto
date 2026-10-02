@@ -29,9 +29,10 @@ type Kind = typeof KINDS[number];
  * Program collection backing each kind whose ids are read straight off `ir`;
  * bucket/field locate it under #App's state/capabilities/surface/meta split.
  */
-const COLLECTIONS: Record<string, { bucket: string; field: string; kind: Kind }> = {
+const COLLECTIONS: Record<string, { bucket: string; field: string; kind: Kind; optional?: boolean }> = {
   entities: { bucket: "state", field: "entities", kind: "entity" },
   pipelines: { bucket: "state", field: "pipelines", kind: "pipeline" },
+  duckstreams: { bucket: "state", field: "duckstreams", kind: "pipeline", optional: true },
   screens: { bucket: "surface", field: "screens", kind: "screen" },
   flows: { bucket: "surface", field: "flows", kind: "flow" },
   tests: { bucket: "meta", field: "tests", kind: "test" },
@@ -85,9 +86,10 @@ type Declaration = { kind: Kind; id: string; where: string };
 
 export function declarations(code: Record<string, any>): Declaration[] {
   const out: Declaration[] = [];
-  for (const [collection, { bucket, field, kind }] of Object.entries(COLLECTIONS)) {
+  for (const [collection, { bucket, field, kind, optional }] of Object.entries(COLLECTIONS)) {
     const objects = code[bucket]?.[field];
     if (objects === undefined || objects === null || typeof objects !== "object") {
+      if (optional) continue;
       throw new Error(
         `program export has no \`${bucket}.${field}\` map: it does not unify with #App`,
       );

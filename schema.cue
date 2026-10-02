@@ -6,6 +6,7 @@ package pronto
 
 import (
 	"list"
+	"encoding/json"
 	"encoding/yaml"
 	"strings"
 
@@ -842,13 +843,14 @@ import (
 	values?:       {[string]: _}
 	key?:          [...string]
 	where?:        {[string]: _}
+	rawWhere?:     string
 	accumulate?:   [...string]
 	updateValues?: {[string]: _}
 }
 
 #FunctionEffect: {
 	call:  string
-	args?: {[string]: _}
+	args?: [..._] | {[string]: _}
 }
 
 #NotifyEffect: {
@@ -856,7 +858,19 @@ import (
 	payload: string
 }
 
-#MechaEffect: #RelationalEffect | #FunctionEffect | #NotifyEffect
+#SagaEffect: {
+	saga:            string
+	idempotencyKey?: string | {raw: string}
+	payload?:        {[string]: _}
+}
+
+#StreamEffect: {
+	stream:  string
+	signal?: "refresh" | "checkpoint" | "flush"
+	key?:    string | {raw: string}
+}
+
+#MechaEffect: #RelationalEffect | #FunctionEffect | #NotifyEffect | #SagaEffect | #StreamEffect
 
 #MechaAction: {
 	assign?: {[string]: _}
@@ -893,6 +907,29 @@ import (
 		update?: #MechaAction | [...#MechaAction]
 		delete?: #MechaAction | [...#MechaAction]
 	}
+}
+
+// A Cortex durable saga executed via DBOS over PostgreSQL — Level 4 exterior effects,
+// automatic step idempotency, and transactional compensation.
+#Saga: {
+	name:        string
+	ir:          *name | string
+	entity?:     string
+	steps?:      [...string]
+	timeout?:    string
+	maxRetries?: int
+}
+
+// A DuckStream streaming IVM pipeline executed via Feldera on the server
+// and emulated reactively via DuckDB-WASM in the client browser.
+#DuckStreamPipeline: {
+	name:       string
+	ir:         *name | string
+	sql:        string
+	sources:    [...string]
+	sink:       string
+	tempo:      *"hot" | "cold"
+	operators?: [...("tumble" | "hop" | "session" | "distinct" | "interval_join" | "cross_join")]
 }
 
 #FormField: {
@@ -1085,7 +1122,7 @@ import (
 	_msg: {for tag, _ in I.locales {(tag): I.catalogues["messages/\(tag).json"]}}
 }
 
-#App: {
+#App: A={
 	state: {
 		entities: [Name=string]: #Entity & {name: Name}
 		// DDL table-order override: must list every entity, parents before
@@ -1119,6 +1156,8 @@ import (
 		pipelines: [Name=string]: #Pipeline & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
 		machines?: [Name=string]: #MechaMachine & {name: Name}
+		sagas?: [Name=string]: #Saga & {name: Name}
+		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
 	}
 
 	capabilities: {
@@ -1230,4 +1269,103 @@ import (
 		// app that has never reached for the hatch should not have to say so.
 		design: pendingLiterals: *0 | int & >=0
 	}
+
+	// Static proof of the mutation loop: a cold pipeline cannot feed an active screen mutation loop D(E)
+	_hotViolations: [
+		if A.state.duckstreams != _|_
+		let eLookup = {
+			for eName, e in A.state.entities {
+				(eName): eName
+				if e.table != _|_ {
+					(e.table): eName
+				}
+			}
+		}
+		for plName, pl in A.state.duckstreams if pl.tempo == "cold"
+		let plSinkEntity = [if eLookup[pl.sink] != _|_ {eLookup[pl.sink]}, pl.sink][0]
+		let plSourceEntities = [for s in pl.sources {[if eLookup[s] != _|_ {eLookup[s]}, s][0]}]
+		for sName, s in A.surface.screens
+		let sReadsEntities = [if s.reads != _|_ for r in s.reads if r.entity != _|_ {[if eLookup[r.entity] != _|_ {eLookup[r.entity]}, r.entity][0]}]
+		let sFormsEntities = [if s.forms != _|_ for f in s.forms if f.entity != _|_ {[if eLookup[f.entity] != _|_ {eLookup[f.entity]}, f.entity][0]}]
+		if list.Contains(sReadsEntities, plSinkEntity)
+		if len([for fe in sFormsEntities if list.Contains(plSourceEntities, fe) {fe}]) > 0
+		{
+			pipeline: plName
+			screen:   sName
+			sink:     pl.sink
+		}
+	]
+	_hotRefusal: [if len(_hotViolations) == 0 {true}, "cold pipeline cannot feed an active screen mutation loop: \(_hotViolations[0].pipeline) feeds \(_hotViolations[0].sink) on screen \(_hotViolations[0].screen)"][0] & true
+
+	_machineActions: [
+		if A.state.machines != _|_
+		for mName, m in A.state.machines {
+			machine: mName
+			actions: list.Concat([
+				[if m.on != _|_ for _, actList in m.on for act in [if (actList & [...]) != _|_ {actList}, [actList]][0] {act}],
+				[if m.states != _|_ for _, st in m.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
+				[if m.states != _|_ for _, st in m.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
+				[if m.states != _|_ for _, st in m.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+				[if m.states != _|_ for _, st in m.states if st.after != _|_ for _, tr in st.after for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+			])
+		}
+	]
+
+	_declaredSagas: [for sName, _ in [if A.state.sagas != _|_ {A.state.sagas}, {}][0] {sName}]
+	_undeclaredSagas: [
+		for ma in _machineActions
+		for act in ma.actions
+		for eff in [if act.effect != _|_ {[if (act.effect & [...]) != _|_ {act.effect}, [act.effect]][0]}, []][0]
+		if (eff & #SagaEffect) != _|_
+		if !list.Contains(_declaredSagas, eff.saga)
+		{
+			machine: ma.machine
+			saga:    eff.saga
+		}
+	]
+	_sagaRefusal: [if len(_undeclaredSagas) == 0 {true}, "machine \(_undeclaredSagas[0].machine) references undeclared saga: \(_undeclaredSagas[0].saga)"][0] & true
+
+	_declaredStreams: [for dsName, _ in [if A.state.duckstreams != _|_ {A.state.duckstreams}, {}][0] {dsName}]
+	_undeclaredStreams: [
+		for ma in _machineActions
+		for act in ma.actions
+		for eff in [if act.effect != _|_ {[if (act.effect & [...]) != _|_ {act.effect}, [act.effect]][0]}, []][0]
+		if (eff & #StreamEffect) != _|_
+		if !list.Contains(_declaredStreams, eff.stream)
+		{
+			machine: ma.machine
+			stream:  eff.stream
+		}
+	]
+	_streamRefusal: [if len(_undeclaredStreams) == 0 {true}, "machine \(_undeclaredStreams[0].machine) references undeclared duckstream: \(_undeclaredStreams[0].stream)"][0] & true
+
+	_deleteActions: [
+		if A.state.machines != _|_
+		for mName, m in A.state.machines {
+			machine: mName
+			actions: list.Concat([
+				[if m.on != _|_ if m.on.delete != _|_ for act in [if (m.on.delete & [...]) != _|_ {m.on.delete}, [m.on.delete]][0] {act}],
+				[
+					if m.states != _|_
+					for _, st in m.states
+					if st.on != _|_ if st.on.delete != _|_
+					for tr in [if (st.on.delete & string) != _|_ {[]}, if (st.on.delete & [...]) != _|_ {st.on.delete}, [st.on.delete]][0]
+					if tr.actions != _|_
+					for a in [if (tr.actions & [...]) != _|_ {tr.actions}, [tr.actions]][0]
+					{a}
+				],
+			])
+		}
+	]
+
+	_deleteNewViolations: [
+		for da in _deleteActions
+		for act in da.actions
+		if strings.Contains(json.Marshal(act), "NEW.")
+		{
+			machine: da.machine
+			action:  json.Marshal(act)
+		}
+	]
+	_deleteNewRefusal: [if len(_deleteNewViolations) == 0 {true}, "machine \(_deleteNewViolations[0].machine) references NEW in delete action: \(_deleteNewViolations[0].action)"][0] & true
 }

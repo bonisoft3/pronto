@@ -28,8 +28,12 @@ the other case, and its answer is a per-reader pair
 
 ## The shapes
 
-Four are `#Pipeline`s and one a `#Schedule`, both in [`schema.cue`](../schema.cue):
+Four are `#Pipeline`s, one a `#DuckStreamPipeline`, and one a `#Schedule`, all in [`schema.cue`](../schema.cue):
 
+- **A DuckStream pipeline** (`#DuckStreamPipeline`): continuous streaming incremental view maintenance over local or replicated sources.
+  - `tempo: *"hot" | "cold"`: `hot` runs sub-second DBSP differential circuits on the server and reactive DuckDB-WASM in the browser for active screens and running counters. `cold` flushes batched partitions into lake storage.
+  - **Static loop proof**: CUE statically proves that no screen mutates entity $E$ (`forms`) while reading a cold pipeline whose sources include $E$ (`_hotViolations`), refusing broken UI feedback loops at compile time.
+  - **Operator endowments**: advanced relational operators (`tumble`, `hop`, `session`, `distinct`, `cross_join`, `interval_join`) are declared in `operators` and checked against DuckDB's parsed AST at lint time. Windowing operators require `tempo: "cold"`.
 - **A CDC pipeline** (`trigger: "cdc"`, the default): `from`, `to`, a consumer
   `group`, and a `transform` whose `aggregate` is the PostgREST query it reads
   and whose bloblang is the mapping. Without `key` it emits one sink row; with

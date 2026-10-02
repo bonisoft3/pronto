@@ -37,3 +37,4 @@
 # Archive
 
 * [Design: Pronto — AI App Builder With Constraint-Cascade Architecture](archive/2026-06-12-design-constraint-cascade.md) - decision, superseded: The startup-mode design — constraint-cascade generation and a scale-to-zero runtime against the prompt-to-app category — whose business analysis still stands.
+* [DuckStream tempo and derivation invariants](archive/2026-10-01-duckstream-tempo-and-derivation.md) - decision, built: Replaces physical pipeline flags with application-level tempo (hot vs cold) and operator endowments, proving screen-mutation feedback loops statically in CUE and verifying SQL algebra via DuckDB AST serialization. Contract moved to [pipelines and schedules](pipelines-and-schedules.md#the-shapes).

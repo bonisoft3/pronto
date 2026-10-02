@@ -345,4 +345,387 @@ out: (pronto.#emit & {
   assertStringIncludes(sql, 'UPDATE "category_month_stat" SET "spent" = GREATEST(0, category_month_stat.spent - OLD.amount) WHERE "bucket" = OLD.bucket;');
 });
 
+Deno.test("hybrid machines drive cortex sagas and duckstream pipelines", async () => {
+  const cueCode = `
+package test
+
+import "bonisoft.org/plugins/pronto"
+
+app: pronto.#App & {
+  meta: {
+    name: "test-hybrid"
+    description: "test"
+    ir: sha256: ""
+    targets: []
+    clocks: []
+    decisions: {}
+    tests: {}
+  }
+  state: {
+    entities: {
+      Order: {
+        table: "orders"
+        durability: "server"
+        fields: [
+          {name: "id", type: "uuid", pk: true},
+          {name: "status", type: "string"},
+          {name: "total", type: "decimal", precision: 12, scale: 2},
+          {name: "created_at", type: "timestamp"},
+        ]
+      }
+    }
+    machines: {
+      OrderMachine: {
+        name: "OrderMachine"
+        entity: "orders"
+        field: "status"
+        initial: "pending"
+        states: {
+          pending: {
+            on: {
+              confirm: {
+                target: "confirmed"
+                actions: [{
+                  effect: {
+                    saga: "process_payment"
+                    idempotencyKey: "NEW.id"
+                    payload: {amount: "NEW.total", store: "main"}
+                  }
+                }, {
+                  effect: {
+                    stream: "order_analytics"
+                    signal: "refresh"
+                  }
+                }]
+              }
+            }
+          }
+          confirmed: {type: "final"}
+        }
+      }
+    }
+    sagas: {
+      process_payment: {
+        name: "process_payment"
+        steps: ["authorize", "capture"]
+      }
+    }
+    duckstreams: {
+      order_analytics: {
+        name: "order_analytics"
+        sql: "SELECT count(*) as total_orders FROM orders WHERE status = 'confirmed'"
+        sources: ["orders"]
+        sink: "order_metrics"
+      }
+    }
+  }
+  capabilities: {hatches: {}, vendored: {}}
+  surface: {
+    screens: board: {
+      title: "Board"
+      route: "/"
+      markup: "<main></main>"
+      reads: [{entity: "Order"}]
+      forms: []
+      states: []
+    }
+    handlers: {}
+    design: {}
+    flows: {}
+  }
+}
+
+_terminal: (pronto.#DefaultTerminal & {code: app}).out
+_cluster: (pronto.#DefaultCluster & {code: app, statics: []}).out
+_loop: (pronto.#DefaultLoop & {code: app, terminal: _terminal, cluster: _cluster}).out
+_build: (pronto.#DefaultBuild & {code: app, loop: _loop, cluster: _cluster}).out
+out: (pronto.#emit & {
+  code:     app
+  cluster:  _cluster
+  terminal: _terminal
+  loop:     _loop
+  build:    _build
+}).files
+`;
+
+  const child = new Deno.Command("cue", {
+    args: ["export", "-", "-e", "out", "--out", "json"],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(cueCode));
+  await writer.close();
+  const res = await child.output();
+  assertEquals(res.success, true);
+
+  const files = JSON.parse(new TextDecoder().decode(res.stdout));
+
+  // 1. Verify 010_machines.sql contains saga insertion and stream signal
+  const machineSql = files["services/database/migrations/010_machines.sql"]?.text;
+  assertEquals(typeof machineSql, "string");
+  assertStringIncludes(machineSql, 'INSERT INTO "saga" ("id", "name", "idempotency_key", "payload", "status")');
+  assertStringIncludes(machineSql, "VALUES (gen_random_uuid()::text, 'process_payment', NEW.id::text, jsonb_build_object('amount', NEW.total, 'store', 'main')::jsonb, 'pending')");
+  assertStringIncludes(machineSql, "PERFORM pg_notify('cortex_saga_queue', jsonb_build_object('saga', 'process_payment', 'key', NEW.id::text)::text);");
+  assertStringIncludes(machineSql, "PERFORM pg_notify('duckstream_order_analytics', jsonb_build_object('signal', 'refresh', 'table', TG_TABLE_NAME, 'id', NEW.id::text)::text);");
+
+  // 2. Verify 015_sagas.sql migration is emitted
+  const sagaSql = files["services/database/migrations/015_sagas.sql"]?.text;
+  assertEquals(typeof sagaSql, "string");
+  assertStringIncludes(sagaSql, 'CREATE TABLE IF NOT EXISTS "saga"');
+  assertStringIncludes(sagaSql, 'UNIQUE ("name", "idempotency_key")');
+  assertStringIncludes(sagaSql, 'ALTER TABLE "saga" ENABLE ROW LEVEL SECURITY;');
+  assertStringIncludes(sagaSql, 'REVOKE ALL ON "saga" FROM anon, app_user, electric;');
+
+  // 3. Verify duckstream pipeline SQL is emitted
+  const streamSql = files["pipelines/duckstream/order_analytics.sql"]?.text;
+  assertEquals(typeof streamSql, "string");
+  assertStringIncludes(streamSql, "SELECT count(*) as total_orders FROM orders WHERE status = 'confirmed'");
+});
+
+Deno.test("a machine referencing an undeclared saga or duckstream is refused at compile time", async () => {
+  const cueCode = `
+package test
+import "bonisoft.org/plugins/pronto"
+
+app: pronto.#App & {
+  meta: {
+    name: "test-app"
+  }
+  state: {
+    entities: {
+      Order: {
+        table: "orders"
+        durability: "offline"
+        fields: [{name: "id", type: "uuid", pk: true}]
+      }
+    }
+    machines: {
+      OrderLifecycle: {
+        name: "OrderLifecycle"
+        entity: "Order"
+        on: {
+          insert: [
+            {
+              effect: {
+                saga: "undeclared_saga"
+              }
+            }
+          ]
+        }
+      }
+    }
+    sagas: {}
+    duckstreams: {}
+  }
+  capabilities: {hatches: {}, vendored: {}}
+  surface: {
+    screens: {}
+    handlers: {}
+    design: {}
+    flows: {}
+  }
+}
+`;
+
+  const child = new Deno.Command("cue", {
+    args: ["vet", "-c", "-"],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(cueCode));
+  await writer.close();
+  const res = await child.output();
+  assertEquals(res.success, false);
+  const err = new TextDecoder().decode(res.stderr);
+  assertStringIncludes(err, "machine OrderLifecycle references undeclared saga: undeclared_saga");
+});
+
+Deno.test("a machine referencing NEW in delete action is refused at compile time", async () => {
+  const cueCode = `
+package test
+import "bonisoft.org/plugins/pronto"
+
+app: pronto.#App & {
+  meta: {
+    name: "test-app"
+  }
+  state: {
+    entities: {
+      Order: {
+        table: "orders"
+        durability: "offline"
+        fields: [{name: "id", type: "uuid", pk: true}]
+      }
+    }
+    machines: {
+      OrderLifecycle: {
+        name: "OrderLifecycle"
+        entity: "Order"
+        on: {
+          delete: [
+            {
+              effect: {
+                saga: "cleanup_order"
+                idempotencyKey: "NEW.id"
+              }
+            }
+          ]
+        }
+      }
+    }
+    sagas: {
+      cleanup_order: {
+        name: "cleanup_order"
+      }
+    }
+    duckstreams: {}
+  }
+  capabilities: {hatches: {}, vendored: {}}
+  surface: {
+    screens: {}
+    handlers: {}
+    design: {}
+    flows: {}
+  }
+}
+`;
+
+  const child = new Deno.Command("cue", {
+    args: ["vet", "-c", "-"],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(cueCode));
+  await writer.close();
+  const res = await child.output();
+  assertEquals(res.success, false);
+  const err = new TextDecoder().decode(res.stderr);
+  assertStringIncludes(err, "machine OrderLifecycle references NEW in delete action");
+  assertStringIncludes(err, "NEW.id");
+});
+
+Deno.test("mecha machine compiles function calls, combined where/rawWhere, and prefixed stream keys", async () => {
+  const cueCode = `
+package test
+
+import "bonisoft.org/plugins/pronto"
+
+app: pronto.#App & {
+  meta: {
+    name: "test-composite"
+    description: "test"
+    ir: sha256: ""
+    targets: []
+    clocks: []
+    decisions: {}
+    tests: {}
+  }
+  state: {
+    entities: {
+      Item: {
+        table: "item"
+        durability: "server"
+        fields: [
+          {name: "id", type: "uuid", pk: true},
+          {name: "month", type: "string"},
+          {name: "amount", type: "decimal", precision: 12, scale: 2},
+        ]
+      }
+    }
+    machines: {
+      ItemMachine: {
+        name: "ItemMachine"
+        entity: "item"
+        timing: "AFTER"
+        on: {
+          insert: [
+            {
+              effect: {
+                call: "pg_advisory_xact_lock"
+                args: [{raw: "hashtext('test_lock')::bigint"}]
+              }
+            },
+            {
+              effect: {
+                op: "update"
+                table: "item_summary"
+                where: {month: {raw: "NEW.month"}}
+                rawWhere: "\\"active\\" = true"
+                values: {
+                  spent: {raw: "item_summary.spent + NEW.amount"}
+                }
+              }
+            },
+            {
+              effect: {
+                stream: "item_stream"
+                key: "NEW.month"
+              }
+            },
+          ]
+        }
+      }
+    }
+    duckstreams: {
+      item_stream: {
+        name: "item_stream"
+        sql: "SELECT count(*) FROM item"
+        sources: ["item"]
+        sink: "item_stat"
+      }
+    }
+  }
+  capabilities: {hatches: {}, vendored: {}}
+  surface: {
+    screens: {}
+    handlers: {}
+    design: {}
+    flows: {}
+  }
+}
+
+_terminal: (pronto.#DefaultTerminal & {code: app}).out
+_cluster: (pronto.#DefaultCluster & {code: app, statics: []}).out
+_loop: (pronto.#DefaultLoop & {code: app, terminal: _terminal, cluster: _cluster}).out
+_build: (pronto.#DefaultBuild & {code: app, loop: _loop, cluster: _cluster}).out
+out: (pronto.#emit & {
+  code:     app
+  cluster:  _cluster
+  terminal: _terminal
+  loop:     _loop
+  build:    _build
+}).files
+`;
+
+  const child = new Deno.Command("cue", {
+    args: ["export", "-", "-e", "out", "--out", "json"],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(cueCode));
+  await writer.close();
+  const res = await child.output();
+  assertEquals(res.success, true);
+
+  const files = JSON.parse(new TextDecoder().decode(res.stdout));
+  const sql = files["services/database/migrations/010_machines.sql"]?.text;
+  assertEquals(typeof sql, "string");
+  assertStringIncludes(sql, "PERFORM pg_advisory_xact_lock(hashtext('test_lock')::bigint);");
+  assertStringIncludes(sql, 'UPDATE "item_summary" SET "spent" = item_summary.spent + NEW.amount WHERE "month" = NEW.month AND "active" = true;');
+  assertStringIncludes(sql, "PERFORM pg_notify('duckstream_item_stream', jsonb_build_object('signal', 'refresh', 'table', TG_TABLE_NAME, 'id', NEW.month::text)::text);");
+});
+
+
 
