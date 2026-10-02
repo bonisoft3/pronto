@@ -117,19 +117,19 @@
 # The published door. Hostname-scoped: a port-only address would make the
 # automation policy a catch-all and conflict with :8080's default.
 #
-# The certificate is mkcert's, mounted from the host rather than issued here.
-# `tls internal` would be simpler and is wrong for this: Caddy's root would
-# live inside the container, so no browser on the host could ever trust it, and
-# an untrusted certificate is worse than plain http — the interstitial blocks
+# The certificate is mkcert's when the host issued one, mounted rather than
+# issued here: a browser on the host trusts only mkcert's root, and an
+# untrusted certificate is worse than plain http — the interstitial blocks
 # WebAuthn outright, where http://localhost is a secure context and passkeys
-# work. mkcert puts the root in the host trust store instead, where the browser
-# can see it.
+# work. Without that pair, Caddy issues its own (CADDY_TLS, set as the
+# container starts): the integrate closure's browser runs inside compose and
+# ignores the certificate, so integrate needs no host step at all.
 #
 # `caddy` is the same door as the integrate closure's checkers reach it, over
 # the protocol a reader gets: Electric holds one long-poll per table a screen
 # reads, and on HTTP/1.1's six connections per host a screen reading more
 # tables stalls behind them.
 https://localhost:8443, https://caddy:8443 {
-  tls /certs/localhost.pem /certs/localhost-key.pem
+  tls {$CADDY_TLS:internal}
   import app
 }
