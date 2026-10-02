@@ -1174,7 +1174,22 @@ import (
 		machines?: [Name=string]: #MechaMachine & {name: Name}
 		sagas?: [Name=string]: #Saga & {name: Name}
 		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
+		// Seed rows held as data rather than stated: a JSON file beside the
+		// program, outside its package, keyed by entity name —
+		// {"<Entity>": [row, ...]}. A row in the package is re-judged by every
+		// evaluation of the program, so an archive of thousands taxes every
+		// export, vet and check; held here, its rows are judged against #Seed
+		// only when it or the entities change (seed.ts), and render into
+		// 900_seed.sql beside the stated ones. An entity's rows have one home:
+		// stated or held, never both.
+		seed?: {src: string}
 	}
+
+	// What state.seed.src must satisfy, for `cue vet -d`: a server entity's
+	// rows under every constraint its own `seed` carries. Closed, so a row of
+	// an entity that is not a server one, or of none, is refused — a tab
+	// entity's rows are the program's own and render into shell.yaml.
+	#Seed: {for n, e in A.state.entities if e.server {(n)?: e.seed}}
 
 	capabilities: {
 		// Passed through to shell.yaml verbatim: the terminal owns the login

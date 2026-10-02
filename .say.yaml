@@ -29,6 +29,12 @@ say:
         priority: -1
         cmds:
           - do: "deno test --config deno.json --allow-read --allow-write --allow-run types_test.ts"
+      # Held seed rows: their rendering into 900_seed.sql and their judgement,
+      # which shells out to cue in a scratch package.
+      seed:
+        priority: -1
+        cmds:
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run=cue seed_test.ts"
       identity:
         priority: -1
         cmds:

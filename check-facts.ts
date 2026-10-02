@@ -91,6 +91,8 @@ const SCHEMA: Record<string, Record<string, string>> = {
     b_missing: "VARCHAR",
   },
   artifact: { path: "VARCHAR", sha256: "VARCHAR", derived: "BOOLEAN" },
+  // A held seed file judged against its entities under this key (seed.ts).
+  seed_vetted: { src: "VARCHAR", key: "VARCHAR" },
   cel_site: { entity: "VARCHAR", col: "VARCHAR", cel: "VARCHAR" },
   cel_ir: { cel: "VARCHAR" },
   owned_token: { token: "VARCHAR" },

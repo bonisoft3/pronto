@@ -15,9 +15,16 @@ export function checkTypeSeeds(entities: Record<string, TypeEntity>): void {
         if (!(field.name in row) || row[field.name] === null) continue;
         if (table.aliases[field.type] !== undefined) continue;
         const value = row[field.name];
-        const normalized = types.normalizeValue(field, value);
+        const where = `${entity}.seed[${index}].${field.name}`;
+        let normalized: unknown;
+        try {
+          normalized = types.normalizeValue(field, value);
+        } catch (e) {
+          // The client's refusal names the value, never the row it sits in.
+          throw new Error(`${where}: ${(e as Error).message}`, { cause: e });
+        }
         if (JSON.stringify(normalized) !== JSON.stringify(value)) {
-          throw new Error(`${entity}.seed[${index}].${field.name}: noncanonical ${field.type}`);
+          throw new Error(`${where}: noncanonical ${field.type}`);
         }
       }
     }

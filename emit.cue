@@ -32,7 +32,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "type-sql" | "carrier-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml"
+	format: "sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -189,21 +189,29 @@ _sqlType: {
 	][0]
 }
 
-#seedSql: S={
-	e: #Entity
-	_rows: [for r in S.e.seed {
-		_cols: [for f in S.e.fields if r[f.name] != _|_ {f.name}]
-		out: "INSERT INTO \(S.e.table) (" + strings.Join(_cols, ", ") + ") VALUES (" +
-			strings.Join([for f in S.e.fields if r[f.name] != _|_ {
+// What the writer renders 900_seed.sql from (seed.ts): a seeded server entity's
+// columns, each with the function its carrier type reads a JSON literal
+// through, and the rows the program states; the rows state.seed holds the
+// writer reads from `src` itself. Every server entity is listed where a seed
+// file is declared, because which of them it holds rows for is the file's to
+// say.
+#seedData: S={
+	code: #App
+	_held: S.code.state.seed != _|_
+	out: {
+		if S._held {src: S.code.state.seed.src}
+		entities: [for _, e in S.code.state.entities if e.server if S._held || len(e.seed) > 0 {
+			name:  e.name
+			table: e.table
+			columns: [for f in e.fields {
+				name: f.name
 				if #Carrier[f.type] != _|_ {
-					_type: [if f.type == "decimal" {"portable_decimal_\(f.precision)_\(f.scale)"}, #Carrier[f.type].sql][0]
-					"public.\(_type)_from_json(\((#sqlLit & {v: json.Marshal(r[f.name])}).out)::json)"
+					from: "public.\([if f.type == "decimal" {"portable_decimal_\(f.precision)_\(f.scale)"}, #Carrier[f.type].sql][0])_from_json"
 				}
-				if #Carrier[f.type] == _|_ {(#sqlLit & {v: r[f.name]}).out}
-			}], ", ") +
-			") ON CONFLICT (id) DO NOTHING;"
-	}]
-	out: strings.Join([for r in S._rows {r.out}], "\n")
+			}]
+			rows: e.seed
+		}]
+	}
 }
 
 // A SECURITY DEFINER read under FORCE ROW LEVEL SECURITY is still scoped by
@@ -1424,6 +1432,7 @@ _cdcTableField: "__table"
 	code: #App
 	_validatedTables: [for _, e in M.code.state.entities if e.server if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
+	_seedFile: len(M.seeded) > 0 || M.code.state.seed != _|_
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	machines: [if M.code.state.machines != _|_ {[for _, m in M.code.state.machines {m}]}, []][0]
 	sagas:    [if M.code.state.sagas != _|_ {[for _, s in M.code.state.sagas {s}]}, []][0]
@@ -1447,7 +1456,7 @@ _cdcTableField: "__table"
 		if len(M.sagas) > 0 {"services/database/migrations/015_sagas.sql"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/021_schedule_seed.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
-		if len(M.seeded) > 0 {"services/database/migrations/900_seed.sql"},
+		if M._seedFile {"services/database/migrations/900_seed.sql"},
 	]
 }
 
@@ -2033,7 +2042,7 @@ _cdcTableField: "__table"
 
 		"""
 
-	_seeded: (#appMigrations & {"code": E.code}).seeded
+	_seedFile: (#appMigrations & {"code": E.code})._seedFile
 
 	_migrations: (#appMigrations & {"code": E.code}).list
 
@@ -2414,10 +2423,10 @@ _cdcTableField: "__table"
 			for rm in E._raw {
 				"services/database/migrations/\(rm.name)": {format: "sql", src: rm.src}
 			}
-			if len(E._seeded) > 0 {
+			if E._seedFile {
 				"services/database/migrations/900_seed.sql": {
-					format: "sql"
-					text: strings.Join([for se in E._seeded {(#seedSql & {e: se}).out}], "\n") + "\n"
+					format: "seed-sql"
+					data:   (#seedData & {code: E.code}).out
 				}
 			}
 

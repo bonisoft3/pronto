@@ -19,6 +19,7 @@ import { projectSay } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
+import { parseHeld, seedSql, type SeedData } from "./seed.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Emission = { manifest: string[]; files: Record<string, EmitFile> };
@@ -63,6 +64,13 @@ const appDir = Deno.args[0] ?? fail("usage: write.ts <appDir>  (runs `cue export
 
 function render(rel: string, f: EmitFile): string {
   if (f.format === "type-sql" || f.format === "carrier-sql") return sqlFile(rel, generateTypeSQL(f.data as { precision: number; scale: number }[]));
+  if (f.format === "seed-sql") {
+    const data = f.data as SeedData;
+    // Read, not judged: derive judged these bytes, and check-facts holds the
+    // file to the hash it judged.
+    const held = data.src === undefined ? {} : parseHeld(data.src, Deno.readTextFileSync(`${appDir}/${data.src}`));
+    return sqlFile(rel, seedSql(data, held));
+  }
   if (f.format === "proto") return generateProto(f.data as Record<string, ProtoEntity>);
   if (f.format === "json") return JSON.stringify(f.data, null, 2) + "\n"; // no comment syntax, no header
   const header = HEADER[f.format] ?? fail(`${rel}: unknown format ${f.format}`);

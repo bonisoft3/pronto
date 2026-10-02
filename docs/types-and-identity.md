@@ -64,9 +64,9 @@ cannot express, named from a closed vocabulary (`calendar`, `int64-range`,
 
 Every reader judges by that entry:
 
-- **CUE** unifies every seed row with `#TypeConstraint[type].valid` at
-  `cue vet`, and `write.ts` then runs the `beyond` checks over the seeds
-  (`type-check.ts`).
+- **CUE** unifies every seed row with `#TypeConstraint[type].valid` — a stated
+  one at `cue vet`, a held one when `derive.ts` judges the seed file — and the
+  `beyond` checks then run over both (`type-check.ts`).
 - **The terminal** reads the table from `shell.yaml` as `carriers`. The client
   canonicalizes each value with its own code and asserts the result against the
   entry. A table naming a type it cannot write, or a check it does not run, is

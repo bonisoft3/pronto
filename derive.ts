@@ -43,6 +43,8 @@ import {
 import { scalesSelfTest } from "./scales.ts";
 import { celSites, renderCel, renderIr } from "./derive-cel.ts";
 import { renderValidations, resolveEdges, type VEntity, validationLint, validationsSelfTest } from "./validations.ts";
+import { oneHome, parseHeld, seedKey, vetHeld } from "./seed.ts";
+import type { TypeEntity } from "./type-check.ts";
 import { claims, irAccepts, irPaths, LEDGER } from "./acceptance.ts";
 import { declarations, irIds, irRoutes, KINDS } from "./objects.ts";
 import { irDiagrams } from "./diagrams.ts";
@@ -341,6 +343,7 @@ export async function derive(appDir: string): Promise<void> {
     state: {
       pipelines?: Record<string, { fold?: { pair: { table: string } } }>;
       computations?: Record<string, { src: string; wasm: string[] }>;
+      seed?: { src: string };
     };
     meta?: { i18n?: { default?: string; locales?: Record<string, { path: string }> } };
   };
@@ -604,6 +607,32 @@ export async function derive(appDir: string): Promise<void> {
     if (refused !== undefined) fail(refused);
   }
 
+  // Held seed rows are judged here, once per change to them or to what judges
+  // them, because judging them costs more than evaluating the program does: the
+  // verdict is recorded under seedKey, and a recorded key is a verdict already
+  // given. check-facts holds the file to its artifact row, so an edit that skips
+  // this pass is a lint failure, never an unjudged row in 900_seed.sql.
+  const seedSrc = state.seed?.src;
+  const seed_vetted: { src: string; key: string }[] = [];
+  if (seedSrc !== undefined) {
+    const bytes = await Deno.readFile(`${appDir}/${seedSrc}`).catch((e) => fail(`${seedSrc}: state.seed names it, and it does not open: ${e.message}`));
+    const key = await seedKey(bytes, entities, await Deno.readTextFile(`${appDir}/program_cel.cue`));
+    const previous = await ifMissing(Deno.readTextFile(`${appDir}/.pronto/facts.json`), null);
+    const vetted = previous !== null &&
+      ((JSON.parse(previous).seed_vetted ?? []) as { src: string; key: string }[]).some((r) => r.src === seedSrc && r.key === key);
+    if (!vetted) {
+      try {
+        const held = parseHeld(seedSrc, new TextDecoder().decode(bytes));
+        oneHome(seedSrc, entities as Record<string, { seed?: Record<string, unknown>[] }>, held);
+        // The export is CUE's, so every field's type is one types.cue names.
+        await vetHeld(appDir, seedSrc, held, entities as unknown as Record<string, TypeEntity>);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+    }
+    seed_vetted.push({ src: seedSrc, key });
+  }
+
   // The fact store, last: it is a projection of everything above, so anything
   // that failed the derivation never reaches a row.
   const enum_value: Record<string, unknown>[] = [];
@@ -715,6 +744,7 @@ export async function derive(appDir: string): Promise<void> {
     ["program_cel.cue", true],
     ["program_derived.cue", true],
     ...(validated.length > 0 ? [["program_validations.cue", true]] : []),
+    ...(seedSrc !== undefined ? [[seedSrc, false]] : []),
   ] as [string, boolean][]) {
     artifacts.push({ path, sha256: await sha(path), derived });
   }
@@ -749,6 +779,7 @@ export async function derive(appDir: string): Promise<void> {
       importFacts(exp.statics, imports),
       jessieFactRows(DENIED, modules),
       { enum_value },
+      seed_vetted.length > 0 ? { seed_vetted } : {},
       diagramFacts(diagrams.nodes, diagrams.edges),
       i18nFacts(defaultLocale, locales, catalogs, allMsgRefs, allProse),
     )),
