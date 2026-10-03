@@ -116,7 +116,12 @@ depth-relative prefixes in generated invocations, and a mode chosen **at
 generation**. In the monorepo an app's `loop.surface.sources` default to the
 sibling checkouts; a bootstrapped consumer's `generate` writes
 `program_pronto.cue` setting `sources: pronto: ""`, and every command then
-finds the installed distribution with `run-mise where` as it runs.
+finds the installed distribution with `run-mise where` as it runs. Where pronto
+sits inside the app's CUE module, `write.ts` writes that file instead, from the
+layout it finds: pronto as the app names it, the app's directory under the
+module's root, and the root and the runtime's directory as mecha names them.
+A mirror that holds the app at its root and the runtime under `.runtime/` is
+one such layout, and its build regenerates what copybara wrote.
 
 Each brings what the others cannot. sayt bootstraps the rest and carries the
 cross-platform concern, which is why it alone ships per-platform binaries;

@@ -43,6 +43,11 @@ import (
 	meta: {
 		app:      string
 		local:    *true | bool
+		// Where the app sits under the workspace root, and where pronto sits
+		// as the app sees it; program_pronto.cue states both where write.ts
+		// finds them.
+		dir:    *"apps/\(app)" | string
+		pronto: *"../../plugins/pronto" | string
 		buildCmd: string
 		testCmd:  string
 		// The held seed rows (state.seed.src), which the writer judges and
@@ -74,8 +79,13 @@ import (
 	}
 
 	// Where pronto's scripts sit as a target's command sees them: the
-	// monorepo's tree beside the app, or the mirror's installed release.
-	_pronto: [if B.meta.local {"../../plugins/pronto"}, "$$(mise where github:bonisoft3/pronto)"][0]
+	// workspace's tree, or the mirror's installed release.
+	_pronto: [if B.meta.local {B.meta.pronto}, "$$(mise where github:bonisoft3/pronto)"][0]
+	// From the app up to the workspace root, the root as compose sees it from
+	// .bayt/, and the runtime's directory under the root.
+	_up: [if B.meta.dir != "" {strings.Repeat("../", len(strings.Split(B.meta.dir, "/")))}, ""][0]
+	_root: strings.TrimSuffix("../\(_up)", "/")
+	_runtime: strings.TrimPrefix(strings.TrimSuffix(B.meta.pronto, "plugins/pronto"), _up)
 
 	// The app's own integrate checks that run beside the stack: a container on
 	// the runtime's compose network, reaching the app at the TLS door, whose
@@ -104,8 +114,11 @@ import (
 	_browser: len([for _, c in B.checks if c.browser {c}]) > 0
 
 	project: core.#project & {
-		dir: [if B.meta.local {"apps/\(B.meta.app)"}, "."][0]
+		dir: [if B.meta.local {B.meta.dir}, "."][0]
 		if !B.meta.local {name: B.meta.app}
+		// At a mirror's root, the monorepo's name, which its images and
+		// compose project keep.
+		if B.meta.local && B.meta.dir == "" {name: "apps_\(B.meta.app)"}
 
 		targets: (mecha.#Runtime & {"project": project.name, "cluster": B.cluster}).targets
 		targets: {
@@ -158,14 +171,14 @@ import (
 						"ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
 						"ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
 						"ENV DENO_DIR=/deno-cache",
-						[if B.meta.local {"COPY --from=root plugins/omnishell /omnishell"}, "COPY --from=root .omnishell /omnishell"][0],
+						[if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=root .omnishell /omnishell"][0],
 						"RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts",
 					]
 				}
 				cmd: "builtin": null
 				compose: {
 					// Compose resolves this from .bayt/, not the app directory.
-					build: additional_contexts: root: [if B.meta.local {"../../.."}, ".."][0]
+					build: additional_contexts: root: [if B.meta.local {B._root}, ".."][0]
 					// The TLS door, so the browser speaks h2 as a reader's does (see
 					// the Caddyfile's door), whose certificate Caddy's own CA signs.
 					environment: APP_URL: "https://caddy:8443"
@@ -223,7 +236,7 @@ import (
 						if B.meta.local {
 							copy: [{
 								from: name: "root"
-								srcs: ["cue.mod", ".bayt", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
+								srcs: ["cue.mod", for p in [".bayt", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"] {B._runtime + p}]
 								dst:     "/monorepo/"
 								parents: true
 							}]
@@ -231,7 +244,7 @@ import (
 					}
 					compose: {
 						// Compose resolves this from .bayt/, not the app directory.
-						if B.meta.local {build: additional_contexts: root: "../../.."}
+						if B.meta.local {build: additional_contexts: root: B._root}
 						volumes: ["//var/run/docker.sock:/var/run/docker.sock"]
 						// The tag the host's images carry, which the compose the
 						// replay reads interpolates into their names.
@@ -270,7 +283,7 @@ import (
 						if B.meta.local {
 							copy: [{
 								from: name: "root"
-								srcs: ["plugins/omnishell", "libraries/mecha"]
+								srcs: [for p in ["plugins/omnishell", "libraries/mecha"] {B._runtime + p}]
 								dst:     "/monorepo/"
 								parents: true
 							}]
@@ -278,7 +291,7 @@ import (
 					}
 					compose: {
 						// Compose resolves this from .bayt/, not the app directory.
-						if B.meta.local {build: additional_contexts: root: "../../.."}
+						if B.meta.local {build: additional_contexts: root: B._root}
 						// The TLS door, whose certificate Caddy's own CA signs.
 						environment: APP_URL: "https://caddy:8443"
 						depends_on: "\(project.name)-launch": condition: "service_healthy"

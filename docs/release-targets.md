@@ -109,6 +109,19 @@ file to a project site. A private repository on a free plan has no Pages, so
 the site lives on the mirror. An app at the root of its own public repository
 tags `vX.Y.Z`, and the same workflow deploys it without a mirror.
 
+golaberto's mirror holds the app at its root and its runtime under `.runtime/`,
+copybara rewriting every path the generated files name to that layout. The
+app's `program_pronto.cue` states the layout, so `sayt` builds, launches,
+lints, tests and releases the mirror as it stands, and a build there
+regenerates what copybara wrote; `.github/mirror_test.sh` holds the two to each
+other. Its lint leaves out the facts rule, whose artifact hashes are of the
+monorepo's bytes. The alternatives each cost the runtime a concept: links break
+on checkout and on Windows; vendoring or a package registry versions the
+runtime apart from the app it was generated with; an image as the interface
+makes docker a hard dependency of bayt; and a root taken from the environment
+means the generated `Taskfile.yml` and compose files no longer run as they
+stand.
+
 **The refusals.** `emit.cue` refuses the target, a `cue vet` error rather than
 a broken release, for a program with:
 

@@ -1480,8 +1480,9 @@ _cdcTableField: "__table"
 					mecha:     *"" | string
 				}
 				if pronto != "" {
-					omnishell: *"../../plugins/omnishell" | string
-					mecha:     *"../../libraries/mecha" | string
+					let root = strings.TrimSuffix(pronto, "plugins/pronto")
+					omnishell: *"\(root)plugins/omnishell" | string
+					mecha:     *"\(root)libraries/mecha" | string
 				}
 			}
 			_distribution: distribution.#Project & {
@@ -1524,10 +1525,14 @@ _cdcTableField: "__table"
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
 				for name, c in D.terminal.surface.checks {(name): c}
-				for name in ["derive", "types", "facts", "proto"] {
+				for name in ["derive", "types", "proto"] {
 					(name): {verb: "lint", cmds: [_distribution.checks[name]], note: "Pronto compiler \(name)"}
 				}
-				facts: priority: 1
+				// A runtime inside the app is a mirror's, whose sync rewrote the
+				// imports the facts hash; the monorepo holds them.
+				if !_mirrored {
+					facts: {verb: "lint", priority: 1, cmds: [_distribution.checks.facts], note: "Pronto compiler facts"}
+				}
 				// Only where there is SQL to read: an app whose every entity is
 				// a browser durability emits no migration and authors none, so the
 				// pass would grade an empty set.
@@ -1584,6 +1589,7 @@ _cdcTableField: "__table"
 			// The origin is the launch door's, because the canonical and hreflang
 			// links a crawler compares are absolute and a deployed origin is the
 			// deployment's to name.
+			_mirrored: sources.pronto != "" && !strings.HasPrefix(sources.pronto, "../")
 			_prerender: (distribution.#Run & {
 				runtime: "\(sources.pronto)"
 				args:    "let out = (mktemp -d); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read $\"--allow-write=($out)\" ($pronto | path join prerender.ts) . $out https://localhost:8443; rm -rf $out"
@@ -1604,6 +1610,7 @@ _cdcTableField: "__table"
 		meta: {
 			app:      D.code.meta.name
 			local:    D.loop.surface.sources.pronto != ""
+			if local {pronto: D.loop.surface.sources.pronto}
 			buildCmd: D.loop.surface.buildCmd
 			testCmd:  D.loop.surface.testCmd
 			if D.code.state.seed != _|_ {seed: D.code.state.seed.src}
@@ -2178,7 +2185,14 @@ _cdcTableField: "__table"
 			format: "yaml"
 			data: {
 				version: "v2"
-				modules: [{path: "."}]
+				// A mirror's runtime sits inside the app, with protos of its own.
+				let pronto = E.loop.surface.sources.pronto
+				modules: [
+					if pronto != "" && !strings.HasPrefix(pronto, "../") {
+						{path: ".", excludes: [strings.TrimSuffix(pronto, "/plugins/pronto")]}
+					},
+					{path: "."},
+				][0:1]
 				breaking: use: ["WIRE_JSON"]
 			}
 		}
@@ -2952,6 +2966,9 @@ _cdcTableField: "__table"
 				// Its own dist, since --clean wipes it and the bundle's is dist/browser.
 				data: {version: 2, project_name: E.code.meta.name, dist: "dist/goreleaser", builds: [{builder: "zig", skip: true}], release: {disable: true}}
 			}
+			// An app at the mirror's root releases from there.
+			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]
+			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
 			".github/workflows/cd.yml": {
 				format: "yaml"
 				text:   """
@@ -2997,12 +3014,11 @@ _cdcTableField: "__table"
 					      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
 					        with:
 					          version: v\(distribution.#SaytVersion)
-					      - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"
-					        working-directory: \(E.build.project.dir)
+					      - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"\(pagesDir)
 					      - uses: actions/configure-pages@v5
 					      - uses: actions/upload-pages-artifact@v4
 					        with:
-					          path: \(E.build.project.dir)/dist/browser
+					          path: \(pagesPrefix)dist/browser
 					      - id: deploy
 					        uses: actions/deploy-pages@v4
 					"""

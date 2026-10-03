@@ -28,7 +28,7 @@ type Hatch = { kind: string; files?: string[]; note: string };
 type RawMigration = { name: string; src: string };
 
 /** Directories that hold no SQL of the app's own. */
-const SKIP = new Set(["node_modules", ".git", ".bayt", ".omc", ".pronto", "dist", "build"]);
+const SKIP = new Set(["node_modules", "dist", "build"]);
 
 /**
  * Integer width is the type table's decision, not the linter's: an app that
@@ -56,7 +56,8 @@ async function sqlFiles(appDir: string): Promise<string[]> {
   const walk = async (dir: string, prefix: string) => {
     for await (const entry of Deno.readDir(dir)) {
       if (entry.isDirectory) {
-        if (SKIP.has(entry.name)) continue;
+        // A dot directory is tooling's, a mirror's .runtime among them.
+        if (entry.name.startsWith(".") || SKIP.has(entry.name)) continue;
         await walk(`${dir}/${entry.name}`, `${prefix}${entry.name}/`);
       } else if (entry.isFile && entry.name.endsWith(".sql")) {
         found.push(`${prefix}${entry.name}`);
