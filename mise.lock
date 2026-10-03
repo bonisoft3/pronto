@@ -9,7 +9,17 @@ checksum = "sha256:e928fa64061ddb5144d93df30fe48f3451231b0e77ea5ade684cb7b53037c
 url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Linux-aarch64.tar.gz"
 url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280183"
 
+[tools."github:bufbuild/buf"."platforms.linux-arm64-musl"]
+checksum = "sha256:e928fa64061ddb5144d93df30fe48f3451231b0e77ea5ade684cb7b53037cc66"
+url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Linux-aarch64.tar.gz"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280183"
+
 [tools."github:bufbuild/buf"."platforms.linux-x64"]
+checksum = "sha256:f8092c1be08d5606a8d22b4ae0e4079dd690154cebb4894dc5e24a5046093aff"
+url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Linux-x86_64.tar.gz"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280270"
+
+[tools."github:bufbuild/buf"."platforms.linux-x64-musl"]
 checksum = "sha256:f8092c1be08d5606a8d22b4ae0e4079dd690154cebb4894dc5e24a5046093aff"
 url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Linux-x86_64.tar.gz"
 url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280270"
@@ -115,8 +125,14 @@ backend = "http:duckdb"
 checksum = "blake3:2ec12466e06a0ff8da4728e5ab05b7e2a83fcae92388c06e305d57fd901f6e28"
 url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-arm64.zip"
 
+[tools."http:duckdb"."platforms.linux-arm64-musl"]
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-arm64.zip"
+
 [tools."http:duckdb"."platforms.linux-x64"]
 checksum = "blake3:2e647c2cc552cdb0fb3d078dcc3b60fa30f6f2b4a3b5db06e4d1ada20e44b484"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip"
+
+[tools."http:duckdb"."platforms.linux-x64-musl"]
 url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip"
 
 [tools."http:duckdb"."platforms.macos-arm64"]
