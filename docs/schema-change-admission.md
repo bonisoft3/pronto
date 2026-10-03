@@ -106,6 +106,12 @@ t; CREATE TABLE t` restarts it at 1, so on name and number alone an identical
 recreate reads as no change. A catalog state does not care how it was reached,
 which is why it sees what the text readers cannot.
 
+The replay is a service of the app's build graph, `replay`, whose exit code is
+the verdict. It drives the host's daemon through its socket, since only that
+daemon holds the images the runtime was built into, and runs under a compose
+project of its own, `<app>-replay`, so its `--remove-orphans` cannot take the
+running cluster down.
+
 The replay then applies the whole set a second time, onto a copy, with each
 statement isolated. A step that cannot be applied twice is a finding, since a
 correction below it never reaches a database that already exists; the only

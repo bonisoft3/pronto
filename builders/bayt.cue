@@ -62,7 +62,15 @@ import (
 			"pronto-config": {glob: "pronto/**", priority: 5}
 			"pronto-sayt": {glob: ".say.yaml", priority: 6}
 		}
+		// What program.cue embeds besides DESIGN.md.
+		"pronto-pipelines": {glob: "[p]ipelines/*.blobl", priority: 7}
+		"pronto-messages": {glob: "[m]essages/*.json", priority: 8}
+		"pronto-boot": {glob: "[s]hell/boot.js", priority: 9}
 	}
+
+	// Where pronto's scripts sit as a target's command sees them: the
+	// monorepo's tree beside the app, or the mirror's installed release.
+	_pronto: [if B.meta.local {"../../plugins/pronto"}, "$$(mise where github:bonisoft3/pronto)"][0]
 
 	project: core.#project & {
 		dir: [if B.meta.local {"apps/\(B.meta.app)"}, "."][0]
@@ -150,6 +158,54 @@ import (
 				// generate-time error instead.
 				_runsChecker: list.Contains(compose.command, "/omnishell/check-visual.ts")
 				_runsChecker: true
+			}
+			// The migration replay starts throwaway databases from the images the
+			// runtime was built into, so it drives the host's daemon through its
+			// socket; a daemon of its own would hold none of those images. The
+			// image is setup's plus the app's pinned toolchain (cue, deno,
+			// duckdb), the docker CLI, and, in the monorepo, the module the
+			// program evaluates in.
+			if B.cluster.capabilities.server {
+				"replay": sayt.integrate & mise.install & B._program & {
+					deps: [":setup"]
+					// The generated compose names the images and the database's
+					// settings; the migrations are where findings point.
+					srcs: globs: [".bayt/compose*.yaml", "services/database/migrations/**"]
+					dockerfile: {
+						from: ref: ":setup"
+						defaultPreamble: {
+							"docker": {priority: -10, copy: {
+								from: {name: core.lock.images.docker}
+								srcs: ["/usr/local/bin/docker"]
+								dst:  "/usr/local/bin/docker"
+							}}
+							"docker-compose": {priority: -9, copy: {
+								from: {name: core.lock.images.docker}
+								srcs: ["/usr/local/libexec/docker/cli-plugins/docker-compose"]
+								dst:  "/usr/local/libexec/docker/cli-plugins/docker-compose"
+							}}
+						}
+						// The compose the replay reads includes the root's and mecha's.
+						if B.meta.local {
+							copy: [{
+								from: name: "root"
+								srcs: ["cue.mod", ".bayt", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
+								dst:     "/monorepo/"
+								parents: true
+							}]
+						}
+					}
+					compose: {
+						// Compose resolves this from .bayt/, not the app directory.
+						if B.meta.local {build: additional_contexts: root: "../../.."}
+						volumes: ["//var/run/docker.sock:/var/run/docker.sock"]
+						// The tag the host's images carry, which the compose the
+						// replay reads interpolates into their names.
+						environment: BAYT_IMAGE_TAG: "${BAYT_IMAGE_TAG:-latest}"
+						// `$$` so compose leaves the substitution to the container's shell.
+						command: ["mise", "x", "--", "sh", "-c", "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."]
+					}
+				}
 			}
 		}
 	}

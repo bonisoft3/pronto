@@ -1542,7 +1542,16 @@ _cdcTableField: "__table"
 					// which reads exactly like a verdict about this tree. The
 					// priority is what says "after the images exist"; the
 					// alphabet is not a contract.
-					replay: {verb: "integrate", priority: 1, cmds: [_distribution.checks.replay], note: "Pronto compiler replay"}
+					//
+					// In the build graph's replay service, whose verdict is its exit
+					// code. A project of its own: --remove-orphans under the runtime's
+					// would take the runtime down, as nothing of it is in this closure.
+					replay: {
+						verb:     "integrate"
+						priority: 1
+						cmds: ["mise exec -- docker compose -p \(D.code.meta.name)-replay --profile '*' -f .bayt/compose.replay.closure.yaml up bayt --abort-on-container-failure --exit-code-from bayt --build --remove-orphans"]
+						note: "Pronto compiler replay"
+					}
 				}
 
 				// Only where something was minted: an app with no identities has
