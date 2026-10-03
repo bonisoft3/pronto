@@ -1,0 +1,4 @@
+# A build of this tree (its own images, or an app's toolchain image taking it
+# whole) receives its sources, never the host's installs or build output.
+**/node_modules
+**/dist
