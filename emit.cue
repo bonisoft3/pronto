@@ -1668,6 +1668,150 @@ _cdcTableField: "__table"
 	}
 }
 
+#faviconMime: {
+	".svg":  "image/svg+xml"
+	".png":  "image/png"
+	".ico":  "image/x-icon"
+	".webp": "image/webp"
+	".jpg":  "image/jpeg"
+	".jpeg": "image/jpeg"
+}
+
+#faviconPlan: F={
+	raw?: _
+	_rawItems: [
+		if F.raw != _|_ {
+			if (F.raw & [...]) != _|_ { F.raw }
+			if (F.raw & [...]) == _|_ { [F.raw] }
+		},
+		[],
+	][0]
+
+	items: [
+		for it in _rawItems {
+			let isStr = (it & string) != _|_
+			let rawHref = [
+				if isStr { it },
+				if !isStr && it.href != _|_ { it.href },
+				""
+			][0]
+
+			let isSvgMarkup = isStr && strings.HasPrefix(rawHref, "<svg")
+			let isDataUri = strings.HasPrefix(rawHref, "data:")
+			let isHttp = strings.HasPrefix(rawHref, "http://") || strings.HasPrefix(rawHref, "https://") || strings.HasPrefix(rawHref, "//")
+			let hasDotDot = strings.Contains(rawHref, "..")
+
+			let ext = [for e, _ in #faviconMime if strings.HasSuffix(rawHref, e) { e }, ""][0]
+			let hasValidExt = ext != ""
+
+			let isEmojiText = !strings.HasPrefix(rawHref, "<svg") && !isDataUri && !isHttp && !strings.Contains(rawHref, "/") && !strings.Contains(rawHref, ".") && len(strings.Runes(rawHref)) <= 8 && !regexp.Match("^[a-zA-Z0-9_-]+$", rawHref)
+			let isEmoji = isStr && isEmojiText
+
+			let isStructuredInvalid = !isStr && (strings.HasPrefix(rawHref, "<svg") || isEmojiText)
+			let isValid = !hasDotDot && !isStructuredInvalid && (isSvgMarkup || isDataUri || isHttp || isEmoji || hasValidExt)
+
+			let isPath = !isSvgMarkup && !isDataUri && !isHttp && !isEmoji
+
+			let itemErr = [
+				if hasDotDot { "favicon path may not contain '..': '\(rawHref)'" },
+				if isStructuredInvalid { "structured favicon href must be a file path, data URI, or URL, not raw SVG markup or emoji: '\(rawHref)'" },
+				if !isValid { "unsupported favicon format or missing extension: '\(rawHref)' (supported: .ico, .png, .svg, .webp, .jpg, .jpeg, emoji, SVG markup, data:, https://)" },
+				"",
+			][0]
+
+			let clean = strings.TrimPrefix(strings.TrimPrefix(rawHref, "./"), "/")
+			let inShell = strings.HasPrefix(clean, "shell/")
+
+			let itemHref = [
+				if isSvgMarkup || isEmoji { "./favicon.svg" },
+				if isDataUri || isHttp { rawHref },
+				if inShell { "./" + strings.TrimPrefix(clean, "shell/") },
+				if !inShell { "/" + clean },
+				rawHref,
+			][0]
+
+			let inferredType = [
+				if isSvgMarkup || isEmoji || strings.HasPrefix(rawHref, "data:image/svg+xml") { "image/svg+xml" },
+				if hasValidExt { #faviconMime[ext] },
+				if strings.HasPrefix(rawHref, "data:image/x-icon") { "image/x-icon" },
+				if strings.HasPrefix(rawHref, "data:image/png") { "image/png" },
+				if strings.HasPrefix(rawHref, "data:image/webp") { "image/webp" },
+				if strings.HasPrefix(rawHref, "data:image/jpeg") { "image/jpeg" },
+				"",
+			][0]
+
+			let itemType = [
+				if !isStr && it.type != _|_ { it.type },
+				if inferredType != "" { inferredType },
+				"",
+			][0]
+
+			let itemRel = [
+				if !isStr && it.rel != _|_ { it.rel },
+				"icon",
+			][0]
+
+			let itemSizes = [
+				if !isStr && it.sizes != _|_ { it.sizes },
+				"",
+			][0]
+
+			let escapedText = strings.Replace(strings.Replace(rawHref, "&", "&amp;", -1), "<", "&lt;", -1)
+			let itemSvg = [
+				if isSvgMarkup { rawHref },
+				if isEmoji { "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">\(escapedText)</text></svg>\n" },
+				"",
+			][0]
+
+			let staticFile = [
+				if isSvgMarkup || isEmoji { "shell/favicon.svg" },
+				if isPath && isValid { clean },
+				"",
+			][0]
+
+			let staticTarget = [
+				if staticFile != "" { "/srv/\(staticFile)" },
+				"",
+			][0]
+
+			let itemRelEsc = strings.Replace(strings.Replace(itemRel, "&", "&amp;", -1), "\"", "&quot;", -1)
+			let itemTypeEsc = strings.Replace(strings.Replace(itemType, "&", "&amp;", -1), "\"", "&quot;", -1)
+			let itemSizesEsc = strings.Replace(strings.Replace(itemSizes, "&", "&amp;", -1), "\"", "&quot;", -1)
+			let itemHrefEsc = strings.Replace(strings.Replace(itemHref, "&", "&amp;", -1), "\"", "&quot;", -1)
+
+			valid:   isValid
+			err:     itemErr
+			rel:     itemRel
+			href:    itemHref
+			type:    itemType
+			sizes:   itemSizes
+			svgText: itemSvg
+			file:    staticFile
+			target:  staticTarget
+			tag:     "<link rel=\"\(itemRelEsc)\"" + [if itemType != "" { " type=\"\(itemTypeEsc)\"" }, ""][0] + [if itemSizes != "" { " sizes=\"\(itemSizesEsc)\"" }, ""][0] + " href=\"\(itemHrefEsc)\">"
+		}
+	]
+
+	_svgItems: [for x in items if x.svgText != "" { x }]
+	_svgCount: len(_svgItems)
+	_pathConflict: len([for x in items if x.svgText == "" && x.file == "shell/favicon.svg" { x }])
+	_errors: [for x in items if !x.valid { x.err }]
+
+	svgFile: [if _svgCount == 1 { _svgItems[0].svgText }, ""][0]
+	links:   strings.Join([for x in items if x.valid { x.tag }], "\n")
+
+	_staticMap: {
+		for x in items if x.valid && x.target != "" {
+			(x.target): {
+				file:   x.file
+				target: x.target
+				watch:  true
+			}
+		}
+	}
+	statics: [for _, s in _staticMap { s }]
+}
+
 #DefaultCluster: D={
 	code: #App
 	statics: [...mecha.#Static]
@@ -1697,10 +1841,14 @@ _cdcTableField: "__table"
 		watch:  true
 	}]
 
+	_favicon: #faviconPlan & {
+		if D.code.meta.favicon != _|_ { raw: D.code.meta.favicon }
+	}
+
 	out: mecha.#Cluster & {
 		meta: {
 			app: D.code.meta.name
-			statics: list.Concat([D.statics, D._ladder, D._crawl])
+			statics: list.Concat([D.statics, D._ladder, D._crawl, _favicon.statics])
 			// mecha's images, reached through the monorepo's bayt federation.
 			images: {for s in ["database", "migrate", "mesh", "conduit", "auth", "ticker", "clock", "compute", "rclone-s3"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
 		}
@@ -2159,6 +2307,10 @@ _cdcTableField: "__table"
 	// cluster with one and no auth plane would 502 every shape.
 	_gated: bool & (E._serverOn == false || E._authOn) & true
 	cluster: capabilities: server: E._serverOn
+
+	_favicon: #faviconPlan & {
+		if E.code.meta.favicon != _|_ { raw: E.code.meta.favicon }
+	}
 
 	files: [string]: #File
 	files: {
@@ -2842,8 +2994,15 @@ _cdcTableField: "__table"
 			data:   E._shell
 		}
 		"\(E.terminal.surface.entry)": {
+			let _parts = strings.Split(E.terminal.surface.assets.html, "<link rel=\"icon\" href=\"data:,\">")
+			_markerCheck: [if E.code.meta.favicon == _|_ || len(_parts) == 2 { true }, "omnishell html asset must contain exactly one <link rel=\"icon\" href=\"data:,\"> marker, found \(len(_parts) - 1)"][0] & true
 			format: "text"
-			text:   E.terminal.surface.assets.html
+			text: [
+				if E.code.meta.favicon != _|_ if len(_parts) == 2 {
+					_parts[0] + _favicon.links + _parts[1]
+				},
+				E.terminal.surface.assets.html,
+			][0]
 		}
 		"\(E.terminal.surface.css)": {
 			format: "text"
@@ -2860,6 +3019,12 @@ _cdcTableField: "__table"
 		"shell/design.css": {
 			format: "css"
 			text:   E._designCss
+		}
+		if _favicon.svgFile != "" {
+			"shell/favicon.svg": {
+				format: "text"
+				text:   _favicon.svgFile
+			}
 		}
 		for _, s in E.code.surface.screens {
 			// A CUE-authored screen (markup) emits its html; an assembly screen

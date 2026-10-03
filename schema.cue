@@ -1137,6 +1137,15 @@ import (
 	_msg: {for tag, _ in I.locales {(tag): I.catalogues["messages/\(tag).json"]}}
 }
 
+#FaviconItem: {
+	href:   string & !~"\\.\\." & !~"^<svg"
+	rel:    *"icon" | string
+	type?:  string
+	sizes?: string
+}
+
+#Favicon: string | #FaviconItem | [...(string | #FaviconItem)]
+
 #App: A={
 	state: {
 		entities: [Name=string]: #Entity & {name: Name}
@@ -1281,6 +1290,7 @@ import (
 		// One line for the entry page's meta description. The hash router gives
 		// every route this same description, so it names the app, not a screen.
 		description: string
+		favicon?:    #Favicon
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		targets: [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
@@ -1403,4 +1413,11 @@ import (
 		}
 	]
 	_deleteNewRefusal: [if len(_deleteNewViolations) == 0 {true}, "machine \(_deleteNewViolations[0].machine) references NEW in delete action: \(_deleteNewViolations[0].action)"][0] & true
+
+	_favicon: #faviconPlan & {
+		if A.meta.favicon != _|_ { raw: A.meta.favicon }
+	}
+	_faviconValidRefusal: [if len(_favicon._errors) == 0 { true }, _favicon._errors[0]][0] & true
+	_faviconSvgRefusal: [if _favicon._svgCount <= 1 { true }, "at most one SVG markup or emoji favicon may be declared"][0] & true
+	_faviconConflictRefusal: [if _favicon._svgCount == 0 || _favicon._pathConflict == 0 { true }, "cannot declare an emoji or SVG favicon alongside shell/favicon.svg"][0] & true
 }

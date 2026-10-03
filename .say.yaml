@@ -77,6 +77,10 @@ say:
         priority: -1
         cmds:
           - do: "deno test --config deno.json --allow-read negotiation_test.ts"
+      favicon:
+        priority: -1
+        cmds:
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env favicon_test.ts"
   # lint is not a #verb: it carries its own rulemap with no builtin wiring, so a
   # `do:` here type-checks, exports, and never reaches lint.rules.
   lint:

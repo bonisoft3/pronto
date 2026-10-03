@@ -39,7 +39,7 @@ unification.
 
 | | state | capabilities | surface | identity |
 |---|---|---|---|---|
-| `#App` | `entities`, `pipelines`, `schedules`, `migrations`, `rawMigrations` | requested: `auth`, `native`, `blobs`, `hatches`, `vendored` | `screens`, `handlers`, `design`, `flows` | `meta`: `name`, `ir`, `targets`, `clocks`, `decisions`, `tests`, `i18n` |
+| `#App` | `entities`, `pipelines`, `schedules`, `migrations`, `rawMigrations` | requested: `auth`, `native`, `blobs`, `hatches`, `vendored` | `screens`, `handlers`, `design`, `flows` | `meta`: `name`, `ir`, `targets`, `clocks`, `decisions`, `tests`, `i18n`, `favicon` |
 | `#Terminal` | `navigation: true` | offered: `auth`, `text-formats`, `message-arms`, `renderer`, `sensors`, `background`, `hardware`, `os-bridge`, `network-peer`, `isolation`, `hatch`, `floors` | the entry page and its `assets`, the served file lists, `verbs`, `checks`, `statics` | `app`, `description`, `language`, `direction` |
 | `#Cluster` | `migrations`, `pipelines`, `schedules` (names only) | switches: `server`, `auth`, `blobs` | `targets`, `verbs`, `checks` | `meta`: `app`, `images`, the door, `statics` |
 | `#Loop` | — | — | `sources`, `buildCmd`, `testCmd`, `verbs`, `checks`, `sayYaml`, `tasksJson` | `meta.app` |
@@ -116,6 +116,19 @@ build: checks: "paint": {
 	note: "the painted colours against the ground truth"
 }
 ```
+
+## Web platform envelope: Favicons & App Icons
+
+An app declares browser and home screen icons under `#App.meta.favicon`:
+
+- **String shorthand**:
+  - Short glyph, emoji, or text (e.g. `"🚀"`, `"R&D"`): synthesized into an SVG vector icon at `shell/favicon.svg` and linked as `<link rel="icon" type="image/svg+xml" href="./favicon.svg">`.
+  - Raw SVG markup (e.g. `"<svg xmlns=..."`): written directly to `shell/favicon.svg` and linked as SVG.
+  - Local asset path (e.g. `"favicon.ico"`, `"shell/favicon.svg"`): paths under `shell/...` are linked under base (`./...`), while other paths are linked from origin root (`/...`) with leading `./` or `/` normalized; registered as cluster statics (`/srv/...`). Supported formats: `.ico`, `.png`, `.svg`, `.webp`, `.jpg`, `.jpeg`.
+  - Remote URL (e.g. `"https://..."`): linked verbatim without cluster static registration.
+  - Data URI (e.g. `"data:image/svg+xml,..."`): linked with HTML attribute quotes escaped (`&quot;`).
+- **Structured item or list**: `#FaviconItem` (`rel`, `sizes`, `type`, `href`). Local assets are registered as cluster statics (`/srv/...`), resolved per path rule, and inlined into data URIs during single-file page bundles (`bundle.ts`).
+- **Door**: Caddy serves the first match among `/favicon.ico`, `/shell/favicon.ico`, `/favicon.svg`, `/shell/favicon.svg`, `/favicon.png`, and `/shell/favicon.png` with `Cache-Control: no-cache`. If none exist, unsolicited probes receive a 204 No Content response to satisfy Lighthouse audits without spurious 404 logs.
 
 ## One graph
 

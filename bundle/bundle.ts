@@ -196,6 +196,28 @@ let html = await read('shell/index.html')
 html = replace(html, '<link rel="stylesheet" href="./shell.css">', `<style>${files['shell/shell.css']}</style>`)
 html = replace(html, '<link rel="stylesheet" href="./design.css">', `<style>${files['shell/design.css']}</style>`)
 html = html.replace(/<link rel="modulepreload"[^>]*>\n/g, '').replace(/<script type="speculationrules">[\s\S]*?<\/script>\n/, '')
+
+for (const match of html.matchAll(/<link\s+[^>]*rel=["'][^"']*\bicon\b[^"']*["'][^>]*>/gi)) {
+  const tag = match[0]
+  const hrefMatch = tag.match(/href=["']([^"']+)["']/)
+  if (!hrefMatch) continue
+  const href = hrefMatch[1]
+  if (href.startsWith('data:') || href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//')) continue
+  const relPath = href.startsWith('./') ? path.join('shell', href.slice(2)) : href.startsWith('/') ? href.slice(1) : href
+  const fullPath = path.join(app, relPath)
+  const ext = path.extname(fullPath).toLowerCase()
+  const mime =
+    ext === '.svg' ? 'image/svg+xml' :
+    ext === '.png' ? 'image/png' :
+    ext === '.ico' ? 'image/x-icon' :
+    ext === '.webp' ? 'image/webp' :
+    ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+    fail(`shell/index.html: unsupported favicon asset format: ${ext}`)
+  const data = await Deno.readFile(fullPath)
+  const dataUri = `data:${mime};base64,${encodeBase64(data)}`
+  const inlinedTag = tag.replace(hrefMatch[0], () => `href="${dataUri}"`)
+  html = html.replace(tag, () => inlinedTag)
+}
 html = replace(
   html,
   '<script type="module" src="./boot.js"></script>',

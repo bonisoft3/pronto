@@ -4,10 +4,20 @@
   # driver measured in hundreds of KiB; compression at the door is what keeps
   # a cold cache from paying for that in seconds on a slow link.
   encode zstd gzip
-  # Chromium probes /favicon.ico unsolicited; answering 204 prevents console
-  # errors that break Best Practices audits without paying for an asset.
+  # Chromium probes /favicon.ico unsolicited; serve the file if present, or
+  # answer 204 to prevent console errors that break Best Practices audits
+  # without paying for an asset.
   handle /favicon.ico {
-    respond "" 204
+    root * /srv
+    @favicon file /favicon.ico /shell/favicon.ico /favicon.svg /shell/favicon.svg /favicon.png /shell/favicon.png
+    handle @favicon {
+      header Cache-Control "no-cache"
+      rewrite {http.matchers.file.relative}
+      file_server
+    }
+    handle {
+      respond "" 204
+    }
   }
   handle /crud/* {
     uri strip_prefix /crud
