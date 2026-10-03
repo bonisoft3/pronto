@@ -98,6 +98,10 @@ import (
 		priority?: int
 		// Playwright's base, with its browsers; without, setup's image.
 		browser: *false | true
+		// The cluster's database and the secret its sessions are signed under,
+		// for a check that grades or seeds what the app stores. Only a cluster
+		// with a database publishes them.
+		database: *false | true
 		// What the commands read beyond tests/**, which every check carries.
 		srcs: *[] | [...string]
 		// The loop's rule: the check's closure up under the runtime's own
@@ -292,8 +296,14 @@ import (
 					compose: {
 						// Compose resolves this from .bayt/, not the app directory.
 						if B.meta.local {build: additional_contexts: root: B._root}
-						// The TLS door, whose certificate Caddy's own CA signs.
-						environment: APP_URL: "https://caddy:8443"
+						environment: {
+							// The TLS door, whose certificate Caddy's own CA signs.
+							APP_URL: "https://caddy:8443"
+							if c.database {
+								DATABASE_URL:     B.cluster.surface.databaseUrl
+								PGRST_JWT_SECRET: B.cluster.surface.jwtSecret
+							}
+						}
 						depends_on: "\(project.name)-launch": condition: "service_healthy"
 						// `$$` so compose leaves a variable to the container's shell.
 						command: ["mise", "x", "--", "sh", "-c", strings.Join([for x in c.cmds {strings.Replace(x, "$", "$$", -1)}], " && ")]

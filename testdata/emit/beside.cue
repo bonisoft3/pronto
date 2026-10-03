@@ -32,3 +32,6 @@ besideNoBrowser: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _c
 // The tests import omnishell and mecha by relative path, which resolve in the
 // image only where the trees sit beside the app as they do in the monorepo.
 besideTrees: _besideTargets["check-plain"].dockerfile.copy[0] & {from: name: "root", srcs: ["plugins/omnishell", "libraries/mecha"], dst: "/monorepo/", parents: true}
+// A check reaches the database only when it asks to: the URL carries the
+// superuser's credentials.
+besideNoDatabase: (_besideTargets["check-plain"].compose.environment.DATABASE_URL == _|_) & true
