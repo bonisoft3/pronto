@@ -379,6 +379,12 @@ driven the way `apps/truco/tests/acceptance.ts` drives it — and at ~18ms per
 page of checks, walking every beat costs less than one of the sleeps it
 replaced.
 
+## The build graph
+
+**Pronto apps don't use `sayt.depot`** until bayt writes the depot flatten
+from its own manifests: no app emits `depot.yaml` or `depot.json`, and no app
+build reads or writes the Depot bake cache. Checked 2026-10-02.
+
 ## Release targets
 
 Only `pages` is emitted, and each design is

@@ -64,14 +64,7 @@ import (
 		}
 	}
 
-	// Every app takes depot's registry cache and build/run split. The ids come
-	// from the environment CI sets; `local` stands in elsewhere so an image
-	// name stays a valid reference, and a local run builds rather than pulls.
-	project: core.#project & (sayt.depot & {
-		projectId: "${DEPOT_PROJECT_ID:-local}"
-		orgId:     "${DEPOT_ORG_ID:-local}"
-		scope:     "\(B.meta.app)-bake-cache-v1"
-	}).out & {
+	project: core.#project & {
 		dir: [if B.meta.local {"apps/\(B.meta.app)"}, "."][0]
 		if !B.meta.local {name: B.meta.app}
 
