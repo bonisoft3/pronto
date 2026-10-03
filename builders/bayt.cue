@@ -43,6 +43,9 @@ import (
 		local:    *true | bool
 		buildCmd: string
 		testCmd:  string
+		// The held seed rows (state.seed.src), which the writer judges and
+		// renders into the seed migration.
+		seed?: string
 	}
 	// The runtime, as the cluster states it: one bayt target per service,
 	// with bare names, lowered into this project by mecha's own #Runtime.
@@ -95,7 +98,7 @@ import (
 				// because the fingerprint is what decides a rebuild, and the ledger
 				// is pinned by nothing else — ir.html at least moves program.cue's
 				// meta.ir.sha256 when it changes.
-				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**", if !B.meta.local {".omnishell/**"}]
+				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**", if !B.meta.local {".omnishell/**"}, if B.meta.seed != _|_ {B.meta.seed}]
 				cmd: builtin: do:      B.meta.buildCmd
 				dockerfile: from: ref: ":setup"
 			}
@@ -184,6 +187,9 @@ import (
 								srcs: ["/usr/local/libexec/docker/cli-plugins/docker-compose"]
 								dst:  "/usr/local/libexec/docker/cli-plugins/docker-compose"
 							}}
+							// Ahead of setup's lazybox, whose `docker` is a stub that
+							// fetches a CLI through mise on every run.
+							"docker-path": {priority: -8, line: "ENV PATH=/usr/local/bin:$PATH"}
 						}
 						// The compose the replay reads includes the root's and mecha's.
 						if B.meta.local {
