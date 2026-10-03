@@ -43,7 +43,7 @@ unification.
 | `#Terminal` | `navigation: true` | offered: `auth`, `text-formats`, `message-arms`, `renderer`, `sensors`, `background`, `hardware`, `os-bridge`, `network-peer`, `isolation`, `hatch`, `floors` | the entry page and its `assets`, the served file lists, `verbs`, `checks`, `statics` | `app`, `description`, `language`, `direction` |
 | `#Cluster` | `migrations`, `pipelines`, `schedules` (names only) | switches: `server`, `auth`, `blobs` | `targets`, `verbs`, `checks` | `meta`: `app`, `images`, the door, `statics` |
 | `#Loop` | — | — | `sources`, `buildCmd`, `testCmd`, `verbs`, `checks`, `sayYaml`, `tasksJson` | `meta.app` |
-| `#Build` | — | — | `project`, bayt's `#project` | `meta`, plus the `cluster` it lowers |
+| `#Build` | — | — | `project`, bayt's `#project`; `checks` beside the stack | `meta`, plus the `cluster` it lowers |
 
 **State** is data that persists and is queried. It is domain-shaped on the app
 (entities), infrastructure-shaped on the terminal (the navigation stack, which
@@ -90,6 +90,32 @@ by verb. So a check the terminal publishes (visual lint, `check markup`,
 The checks are invariants of that part's own surface, the way `auth` is its
 doctrine: an app cannot be expected to re-derive that a tap target has a
 minimum size, and apps that each did would each do it differently.
+
+An app's own check that talks to the running app is declared on the build
+seat, `build: checks: <name>: {cmds, note}`, because what it needs is a
+container: the build graph gives each one a service beside the stack, on the
+runtime's compose network, that waits on the launch aggregate healthy and
+reaches the app at `https://caddy:8443` (`APP_URL`, which omnishell's
+`baseUrl` honours). Caddy's own CA signs the certificate there, so a command
+ignores errors for `caddy`. `#emit` files the rule under `integrate`, under the
+check's `priority`; the rule brings the stack up if it is not, and its verdict
+is the container's exit code. The image is setup's — the trees and the app's
+pinned toolchain, under `mise x` — or, with `browser: true`, the same toolchain
+on playwright's base. It carries `tests/**`, plus whatever `srcs` names.
+
+```cue
+build: checks: "favorites": {
+	priority: 1
+	cmds: ["deno run --config tests/deno.json --no-lock --allow-env --allow-read --allow-net --unsafely-ignore-certificate-errors=caddy tests/favorites.ts ."]
+	note: "a favourite is counted by the pipelines"
+}
+build: checks: "paint": {
+	browser: true
+	srcs: ["fixtures/**"]
+	cmds: ["deno run -A --unsafely-ignore-certificate-errors=caddy tests/paint.ts ."]
+	note: "the painted colours against the ground truth"
+}
+```
 
 ## One graph
 

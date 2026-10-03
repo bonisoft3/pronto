@@ -114,22 +114,23 @@
   import app
 }
 
-# The published door. Hostname-scoped: a port-only address would make the
-# automation policy a catch-all and conflict with :8080's default.
+# The published door, by the two names it answers (mecha's docs/proxy.md, "The
+# certificate"). Hostname-scoped: a port-only address would make the automation
+# policy a catch-all and conflict with :8080's default.
 #
-# The certificate is mkcert's when the host issued one, mounted rather than
-# issued here: a browser on the host trusts only mkcert's root, and an
-# untrusted certificate is worse than plain http — the interstitial blocks
-# WebAuthn outright, where http://localhost is a secure context and passkeys
-# work. Without that pair, Caddy issues its own (CADDY_TLS, set as the
-# container starts): the integrate closure's browser runs inside compose and
-# ignores the certificate, so integrate needs no host step at all.
-#
-# `caddy` is the same door as the integrate closure's checkers reach it, over
-# the protocol a reader gets: Electric holds one long-poll per table a screen
-# reads, and on HTTP/1.1's six connections per host a screen reading more
-# tables stalls behind them.
-https://localhost:8443, https://caddy:8443 {
+# localhost, for a person's browser: mkcert's pair when the host issued one
+# (CADDY_TLS, set as the container starts), Caddy's own CA otherwise.
+https://localhost:8443 {
   tls {$CADDY_TLS:internal}
+  import app
+}
+
+# caddy, for the integrate checkers on the cluster's network, so they speak the
+# protocol a reader gets: Electric holds one long-poll per table a screen reads,
+# and on HTTP/1.1's six connections per host a screen reading more stalls. Its
+# own block, so mkcert's localhost-only pair never leaves this name to a public
+# CA.
+https://caddy:8443 {
+  tls internal
   import app
 }

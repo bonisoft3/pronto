@@ -1549,7 +1549,7 @@ _cdcTableField: "__table"
 					replay: {
 						verb:     "integrate"
 						priority: 1
-						cmds: ["mise exec -- docker compose -p \(D.code.meta.name)-replay --profile '*' -f .bayt/compose.replay.closure.yaml up bayt --abort-on-container-failure --exit-code-from bayt --build --remove-orphans"]
+						cmds: [(omnishell.#ClosureUp & {project: "\(D.code.meta.name)-replay", target: "replay"}).out]
 						note: "Pronto compiler replay"
 					}
 				}
@@ -1853,6 +1853,8 @@ _cdcTableField: "__table"
 	// The build graph is the fifth (see #DefaultBuild); its resolved value
 	// is emitted as bayt.json for the bayt.cue stub to embed.
 	build: prontobuild.#Build
+	// A check the build graph runs beside the stack is the loop's to schedule.
+	loop: surface: checks: {for name, c in E.build.checks {(name): c.rule}}
 
 	_hatchSeam: [
 		if len(E.code.capabilities.hatches) > 0 {

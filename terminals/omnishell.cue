@@ -33,6 +33,9 @@ import (
 // tag against this list.
 #RtlLanguages: impl.#RtlLanguages
 
+#ComposeProject: impl.#ComposeProject
+#ClosureUp:      impl.#ClosureUp
+
 #Terminal: impl.#Terminal & {
 	surface: {
 		runtime: string

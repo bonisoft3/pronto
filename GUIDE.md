@@ -78,7 +78,10 @@ with no live service (`tests/*.test.ts`, `check machines`, `check battery`),
 `integrate` for anything that needs the cluster up (the migration replay, the
 scheduled pipelines, visual lint). `sayt launch` brings the cluster up,
 minting a local TLS pair on first run. An app adds a check as
-`loop: surface: checks: <name>: {verb, cmds, note}` in its program; it never
+`loop: surface: checks: <name>: {verb, cmds, note}` in its program, and one
+that talks to the running app as `build: checks: <name>: {cmds, note}`, which
+runs in a container beside the stack
+([checks and verbs](docs/component-contracts.md#checks-and-verbs)); it never
 invents a verb or a script nobody runs.
 
 On the running shell, `?storybook` renders every screen × state against

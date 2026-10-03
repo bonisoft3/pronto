@@ -15,11 +15,13 @@ package bayt
 
 import (
 	"list"
+	"strings"
 
 	core "github.com/bonisoft3/bayt/core:bayt"
 	sayt "github.com/bonisoft3/bayt/stacks/sayt"
 	mise "github.com/bonisoft3/bayt/stacks/mise"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
+	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
 // bayt's own project schema, re-exported so a compiler (or anyone) can
@@ -74,6 +76,32 @@ import (
 	// Where pronto's scripts sit as a target's command sees them: the
 	// monorepo's tree beside the app, or the mirror's installed release.
 	_pronto: [if B.meta.local {"../../plugins/pronto"}, "$$(mise where github:bonisoft3/pronto)"][0]
+
+	// The app's own integrate checks that run beside the stack: a container on
+	// the runtime's compose network, reaching the app at the TLS door, whose
+	// exit code is the verdict. One container per check rather than one per
+	// app, so each keeps its own rule, priority and verdict on the loop.
+	checks: [Name=string]: C={
+		// Run in order from the app's directory, under its toolchain's mise.
+		cmds: [string, ...string]
+		note:      string
+		priority?: int
+		// Playwright's base, with its browsers; without, setup's image.
+		browser: *false | true
+		// What the commands read beyond tests/**, which every check carries.
+		srcs: *[] | [...string]
+		// The loop's rule: the check's closure up under the runtime's own
+		// compose project, so a stack already up is the one it reaches and one
+		// that is not comes up first. The closure holds the whole runtime, so
+		// --remove-orphans takes down only what the closure does not name.
+		rule: {
+			verb: "integrate"
+			if C.priority != _|_ {priority: C.priority}
+			note: C.note
+			cmds: [(omnishell.#ClosureUp & {project: (omnishell.#ComposeProject & {app: B.meta.app}).out, target: "check-\(Name)"}).out]
+		}
+	}
+	_browser: len([for _, c in B.checks if c.browser {c}]) > 0
 
 	project: core.#project & {
 		dir: [if B.meta.local {"apps/\(B.meta.app)"}, "."][0]
@@ -139,7 +167,7 @@ import (
 					// Compose resolves this from .bayt/, not the app directory.
 					build: additional_contexts: root: [if B.meta.local {"../../.."}, ".."][0]
 					// The TLS door, so the browser speaks h2 as a reader's does (see
-					// the Caddyfile's door). Its certificate names localhost only.
+					// the Caddyfile's door), whose certificate Caddy's own CA signs.
 					environment: APP_URL: "https://caddy:8443"
 					// The aggregate the whole runtime hangs off, healthy: loaded on its
 					// own the closure brings the plane up, and under the verb, which
@@ -210,6 +238,52 @@ import (
 						environment: BAYT_IMAGE_TAG: "${BAYT_IMAGE_TAG:-latest}"
 						// `$$` so compose leaves the substitution to the container's shell.
 						command: ["mise", "x", "--", "sh", "-c", "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."]
+					}
+				}
+			}
+			// Playwright's base with mise: its browsers need the libraries of the
+			// distribution they were built for, so the toolchain comes to them.
+			if B._browser {
+				"browser": sayt.setup & {
+					dockerfile: {
+						from: name: core.lock.images.playwright
+						defaultPreamble: {
+							"lazybox-copy": {priority: -10, line: "COPY --from=\(core.lock.images.lazybox) /lazybox/ /root/.local/share/lazybox/"}
+							"path-env": {priority: -9, line: "ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH"}
+							"mise-trusted": {priority: -8, line: "ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo"}
+						}
+					}
+					cmd: "builtin": null
+				}
+			}
+			for name, c in B.checks {
+				let base = [if c.browser {":browser"}, ":setup"][0]
+				// The image is the base plus the app's pinned toolchain, and, in
+				// the monorepo, the trees the tests import, where their relative
+				// imports find them.
+				"check-\(name)": sayt.integrate & mise.install & {
+					// The plane is an image-only dep, as visual lint's is.
+					deps: [base, ":launch:outs"]
+					srcs: globs: list.Concat([["tests/**"], c.srcs])
+					dockerfile: {
+						from: ref: base
+						if B.meta.local {
+							copy: [{
+								from: name: "root"
+								srcs: ["plugins/omnishell", "libraries/mecha"]
+								dst:     "/monorepo/"
+								parents: true
+							}]
+						}
+					}
+					compose: {
+						// Compose resolves this from .bayt/, not the app directory.
+						if B.meta.local {build: additional_contexts: root: "../../.."}
+						// The TLS door, whose certificate Caddy's own CA signs.
+						environment: APP_URL: "https://caddy:8443"
+						depends_on: "\(project.name)-launch": condition: "service_healthy"
+						// `$$` so compose leaves a variable to the container's shell.
+						command: ["mise", "x", "--", "sh", "-c", strings.Join([for x in c.cmds {strings.Replace(x, "$", "$$", -1)}], " && ")]
 					}
 				}
 			}
