@@ -1706,7 +1706,7 @@ _cdcTableField: "__table"
 			app: D.code.meta.name
 			statics: list.Concat([D.statics, D._ladder, D._crawl, _favicon.statics])
 			// mecha's images, reached through the monorepo's bayt federation.
-			images: {for s in ["database", "migrate", "mesh", "conduit", "auth", "ticker", "clock", "compute", "rclone-s3"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
+			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth
 		// block; the blob plane follows the program's flag; the data plane
