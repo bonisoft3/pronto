@@ -1,6 +1,9 @@
-// cdc-types.blobl, run by the transform image the cluster pins, over the
-// bus spellings conduit was measured to produce on 2026-09-22 (ponto, realworld
-// and thenote stacks): Postgres text output, and integers as JSON strings.
+// cdc-types.blobl, run by the transform image the cluster pins, over the bus
+// spellings conduit v0.14.0 was measured to produce: Postgres text for a
+// domain column (2026-09-22, ponto, realworld and thenote stacks), and native
+// JSON for a base-typed one (2026-10-03, a logrepl pipeline over int4, bool,
+// float8, uuid, date and text columns). Conduit decodes a column whose type it
+// knows and passes a domain, whose OID it does not, through as text.
 
 import { typeTable } from "./type-table.ts";
 
@@ -30,9 +33,9 @@ const cases: { name: string; row: Row; want: Row | string }[] = [
   {
     name: "conduit's measured spellings",
     row: {
-      __table: "t", ts: "2026-09-22 14:18:21.84623+00", d: "08:00:00", n: "1", b: "9007199254740993",
-      x: "37.10", ok: "t", day: "2031-03-19", u: "98BDD8ED-CCCC-44C2-820C-11236FA5F63E", tm: "14:18:21.5",
-      f: "1.5", s: "x", txid: 978, search: "'a':1",
+      __table: "t", ts: "2026-09-22 14:18:21.84623+00", d: "08:00:00", n: 1, b: "9007199254740993",
+      x: "37.10", ok: true, day: "2031-03-19T00:00:00Z", u: "98bdd8ed-cccc-44c2-820c-11236fa5f63e", tm: "14:18:21.5",
+      f: 1.5, s: "x", txid: 978, search: "'a':1",
     },
     want: {
       __table: "t", ts: "2026-09-22T14:18:21.846230Z", d: "PT28800S", n: 1, b: "9007199254740993",
@@ -41,24 +44,31 @@ const cases: { name: string; row: Row; want: Row | string }[] = [
     },
   },
   {
-    name: "whole seconds, hours past a day, negative zero, nulls",
+    name: "whole seconds, hours past a day, negative zero, extremes, nulls",
     row: {
-      __table: "t", ts: "2026-09-22 14:18:23+00", d: "25:00:00.500000", n: "7", b: "0", x: "-0.00", ok: "f",
-      day: null, u: null, tm: "00:00:00", f: "2", s: null, txid: 979,
+      __table: "t", ts: "2026-09-22 14:18:23+00", d: "25:00:00.500000", n: -2147483648, b: "0", x: "-0.00", ok: false,
+      day: "0001-01-01T00:00:00Z", u: null, tm: "00:00:00", f: 1e+300, s: "", txid: 979,
     },
     want: {
-      __table: "t", ts: "2026-09-22T14:18:23.000000Z", d: "PT90000.5S", n: 7, b: "0", x: "0", ok: false,
-      day: null, u: null, tm: "00:00:00.000000", f: 2, s: null, txid: 979,
+      __table: "t", ts: "2026-09-22T14:18:23.000000Z", d: "PT90000.5S", n: -2147483648, b: "0", x: "0", ok: false,
+      day: "0001-01-01", u: null, tm: "00:00:00.000000", f: 1e+300, s: "", txid: 979,
     },
   },
   { name: "a table the map does not name", row: { __table: "other", at: "2026-09-22 14:18:23+00" }, want: { __table: "other", at: "2026-09-22 14:18:23+00" } },
   { name: "a duration with a day part", row: { __table: "t", d: "1 day 02:00:00" }, want: "duration is not clock text" },
-  // Conduit spells every column as text. A JSON number is a spelling nobody
+  // An int64 is a domain, spelled as text. A JSON number is a spelling nobody
   // measured, and past 2^53 it would already have lost digits.
-  { name: "an integer as a JSON number", row: { __table: "t", b: 9007199254740993 }, want: "integer is not decimal text" },
-  { name: "a bool as a JSON bool", row: { __table: "t", ok: true }, want: "bool is not t or f" },
-  { name: "a row with no table stamp", row: { n: "1" }, want: "conduit stamped __table" },
-  { name: "a type with no measured spelling", row: { __table: "g", blob: "\\x00ff" }, want: "no measured bus spelling for bytes" },
+  { name: "an int64 as a JSON number", row: { __table: "t", b: 9007199254740993 }, want: "integer is not decimal text" },
+  // A base-typed column's spelling is the native one; the text a domain had
+  // is now a spelling nobody measured.
+  { name: "a bool as Postgres text", row: { __table: "t", ok: "t" }, want: "bool is not a JSON boolean" },
+  { name: "an int32 as Postgres text", row: { __table: "t", n: "1" }, want: "int32 is not a JSON integer" },
+  { name: "an int32 with a fraction", row: { __table: "t", n: 1.5 }, want: "int32 is not a JSON integer" },
+  { name: "a double as Postgres text", row: { __table: "t", f: "1.5" }, want: "double is not a JSON number" },
+  { name: "a date as Postgres text", row: { __table: "t", day: "2031-03-19" }, want: "date is not RFC 3339 midnight UTC" },
+  { name: "an uppercase uuid", row: { __table: "t", u: "98BDD8ED-CCCC-44C2-820C-11236FA5F63E" }, want: "uuid is not lowercase" },
+  { name: "a row with no table stamp", row: { n: 1 }, want: "conduit stamped __table" },
+  { name: "a type with no measured bus spelling", row: { __table: "g", blob: "\\x00ff" }, want: "no measured bus spelling for bytes" },
 ];
 
 // The bus is the third holder that converts — the client and the domains are

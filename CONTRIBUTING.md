@@ -34,7 +34,7 @@ just build   # deno check over every *.ts
 just lint    # the same check, as sayt's lint rulemap
 just test    # the .say.yaml rulemap: bounds.ts, check-loop.ts --self-test,
              # cue vet -c ./testdata/emit, and the *_test.ts / *.test.ts suites
-deno task test:integration   # types through Postgres, PostgREST and Electric; needs Docker
+deno task test:integration   # types through Postgres, PostgREST and Electric, and the door over an Electric 5xx; needs Docker
 ```
 
 From the repository root, `just sayt -d plugins/pronto <verb>` runs the same.

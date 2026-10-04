@@ -93,6 +93,8 @@ const SCHEMA: Record<string, Record<string, string>> = {
   artifact: { path: "VARCHAR", sha256: "VARCHAR", derived: "BOOLEAN" },
   // A held seed file judged against its entities under this key (seed.ts).
   seed_vetted: { src: "VARCHAR", key: "VARCHAR" },
+  // How a browser syncs each server entity's table, and why (sync.cue #App.#sync).
+  sync_mode: { entity: "VARCHAR", table: "VARCHAR", mode: "VARCHAR", reason: "VARCHAR" },
   cel_site: { entity: "VARCHAR", col: "VARCHAR", cel: "VARCHAR" },
   cel_ir: { cel: "VARCHAR" },
   owned_token: { token: "VARCHAR" },

@@ -175,10 +175,10 @@ app: pronto.#App & {
         title: "Ledger"
         route: "/ledger"
         markup: "<main></main>"
-        reads: [{entity: "CategoryMonthStat"}]
+        reads: [{table: "category_month_stat", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []}]
         forms: [{
           id: "add_expense"
-          entity: "expense"
+          entity: "Expense"
           action: "create"
           fields: []
         }]

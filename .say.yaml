@@ -21,6 +21,7 @@ say:
         priority: -1
         cmds:
           - do: "cue vet -c ./testdata/emit"
+          - do: "deno test --no-config --allow-read --allow-run=cue sync.test.ts"
       distribution:
         priority: -1
         cmds:

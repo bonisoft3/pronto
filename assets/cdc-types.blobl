@@ -1,8 +1,10 @@
-# The bus row, in carrier form. Conduit spells a column as Postgres's text
-# output — `2026-09-22 14:18:21.84623+00`, `08:00:00`, `"1"` — and every
-# pipeline's mapping would otherwise have to know each spelling. This runs
-# first, so a mapping reads `this.data` as the carriers the entities declare,
-# the same strings PostgREST and the client hold.
+# The bus row, in carrier form. Conduit decodes a column of a base type
+# natively — an integer as a JSON number, a date as RFC 3339 midnight UTC —
+# and passes a domain through as Postgres's text output (`2026-09-22
+# 14:18:21.84623+00`, `08:00:00`, `"1"`), and every pipeline's mapping would
+# otherwise have to know each spelling. This runs first, so a mapping reads
+# `this.data` as the carriers the entities declare, the same strings PostgREST
+# and the client hold.
 #
 # `$carriers` is prepended by emit.cue: {table: {column: carrier}} over the
 # tables the publication carries. A column it does not name (__table, txid,
@@ -49,15 +51,11 @@ map pg_decimal {
 }
 
 map pg_bool {
-  root = match this {
-    "t" => true,
-    "f" => false,
-    _ => throw("bool is not t or f: " + this.string()),
-  }
+  root = if this.type() != "bool" { throw("bool is not a JSON boolean: " + this.string()) } else { this }
 }
 
-# conduit spells every column as Postgres text, integers included; a JSON
-# number would have been truncated past 2^53 before this mapping saw it.
+# An int64 is a domain, so conduit spells it as Postgres text; a JSON number
+# would have been truncated past 2^53 before this mapping saw it.
 map pg_integer {
   root = if this.type() != "string" || !this.re_match("^-?[0-9]+$") {
     throw("integer is not decimal text: " + this.string())
@@ -66,8 +64,39 @@ map pg_integer {
   }
 }
 
+# An int32 is a base integer, which conduit decodes as a JSON number; read
+# with use_number, so a fraction or an exponent is still visible here.
+map pg_int32 {
+  root = if this.type() != "number" || !this.string().re_match("^-?[0-9]+$") {
+    throw("int32 is not a JSON integer: " + this.string())
+  } else {
+    this.int64()
+  }
+}
+
+map pg_double {
+  root = if this.type() != "number" { throw("double is not a JSON number: " + this.string()) } else { this.number() }
+}
+
+map pg_uuid {
+  root = if this.type() != "string" || !this.re_match("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$") {
+    throw("uuid is not lowercase and hyphenated: " + this.string())
+  } else {
+    this
+  }
+}
+
+# A date is a time.Time to conduit, so it arrives as that day's midnight UTC.
 map pg_date {
-  root = if !this.re_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") { throw("date is not YYYY-MM-DD: " + this) } else { this }
+  root = if this.type() != "string" || !this.re_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$") {
+    throw("date is not RFC 3339 midnight UTC: " + this.string())
+  } else {
+    this.slice(0, 10)
+  }
+}
+
+map pg_text {
+  root = if this.type() != "string" { throw("text is not a JSON string: " + this.string()) } else { this }
 }
 
 # A column no carrier names, or a null, passes through as it came.
@@ -80,12 +109,12 @@ map carrier {
       this.type == "decimal" => this.value.apply("pg_decimal"),
       this.type == "bool" => this.value.apply("pg_bool"),
       this.type == "date" => this.value.apply("pg_date"),
-      this.type == "int32" => this.value.apply("pg_integer").int64(),
+      this.type == "int32" => this.value.apply("pg_int32"),
       this.type == "int64" => this.value.apply("pg_integer"),
-      this.type == "double" => this.value.number(),
-      this.type == "uuid" => this.value.lowercase(),
-      this.type == "string" => this.value,
-      this.type == "timezone" => this.value,
+      this.type == "double" => this.value.apply("pg_double"),
+      this.type == "uuid" => this.value.apply("pg_uuid"),
+      this.type == "string" => this.value.apply("pg_text"),
+      this.type == "timezone" => this.value.apply("pg_text"),
       _ => throw("no measured bus spelling for " + this.type + "; measure conduit's before publishing one"),
     }
   }

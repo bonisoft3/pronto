@@ -19,17 +19,83 @@ every attribute it may carry is its [REFERENCE](../../omnishell/REFERENCE.md).
 ## Derived from the markup
 
 `derive.ts` reads each screen through the terminal's own markup reader and
-writes its `reads` (the entities its regions read) and `files.handlers` (every
-module `data-handler` and `data-on-*` bind) into `program_derived.cue`, which
-unifies into the program. Both are required on `#Screen`, so a screen the
-derived file misses fails the export, and so does an html file for a screen the
-program no longer declares. A screen authored in CUE has no html before its
-first export, so it starts from empty lists and `write.ts` re-derives until the
-derived file holds what the emitted markup says.
+writes three lists into `program_derived.cue`, which unifies into the program:
 
-**Two statements of one fact need a checker, or one of them derived.** Reads
-and handlers are derived, so no check compares them: a rule comparing a
+- `reads`, every read the markup makes as the terminal routes it (`#Read`): its
+  table, whether it is a `data-live` region, a reduce's `data-reads` or a
+  named `data-read-*`, whether an enclosing region nests it, its route (`server`, `snapshot`, `whole` or `view`, from
+  omnishell's `routeOf`), its filter's clauses as column and op, the tables its
+  select embeds, its cap, and every column an order it can be in names;
+- `writes`, every write it states (`#Write`), by table: a form, a chart's
+  effect, and each region's reduces (`data-on-<event>`, a drag's
+  `data-handler`) as op `reduce` on its table;
+- `files.handlers`, every module `data-handler` and `data-on-*` bind.
+
+They are facts, never decisions. All three are required on `#Screen`, so a
+screen the derived file misses fails the export, and so does an html file for a
+screen the program no longer declares. A screen authored in CUE has no html
+before its first export, so it starts from empty lists and `write.ts` re-derives
+until the derived file holds what the emitted markup says.
+
+**Two statements of one fact need a checker, or one of them derived.** Reads,
+writes and handlers are derived, so no check compares them: a rule comparing a
 restatement with the markup would be grading a copy.
+
+### The reads decide how a table syncs
+
+What the program concludes from the reads is CUE's: `sync.cue` computes
+`#App.#sync`, every server entity's sync mode with its reason, and it lands on
+`#Entity.sync`. A table loads **on demand** — its shape opened from now and each
+view's rows loaded as a subset snapshot — only when nothing could read its
+collection as if it were the table:
+
+- it is not `offline`, the rung that keeps the whole table on the device
+  ([lattice](lattice.md));
+- everyone may read it, since a view cannot restate a narrower visibility;
+- every read of it is a view the engine maintains, or one the server computes;
+  a reduce's `data-reads`, a named read, a whole read, a snapshot read (a
+  boolean, range or pattern clause), a view ordered by a column the engine
+  does not order and any read of a table not everyone may read all read the
+  collection, and so does such a read's embed;
+- no view of it, and no view joining it, is read once per row of a list (one
+  inside an item template, or a named one a region stamps, and so on out
+  through the lists stamping that region): each row would ask
+  for its own subset where an eager table loads once. A view nested only in
+  slots reads once, as a slot binds one row, and so does one in a list whose
+  filter pins a key or a unique of its table with `eq` (a game's goals under
+  the one game). The reader names the lists stamping each read (`#Read.lists`)
+  rather than the rule taking a declaration, so the markup that stamps the
+  rows is what decides;
+- every column such a view filters on, and every order column of a capped one,
+  is a type Electric compares (`subset` in [the type table](types-and-identity.md));
+- no capped view orders it by free text (an `order: "text"` type with no
+  pattern, `string`): Postgres picks the rows inside the cap by the cluster's
+  collation and the view orders them by the reader's locale, so the two can
+  hold different rows. Pinning the view's comparison to the server's was
+  rejected: TanStack offers a lexical order or a browser locale, and neither
+  is ICU root;
+- no fold, validation, visibility rule or the signed-in strip reads it outside
+  a region;
+- no screen has a reduce, whatever event it is bound to: its updates and
+  effects name their own entities, which the markup cannot say, so a reduce on
+  any screen keeps every server table eager. Declaring the entities a reduce's
+  module writes was rejected while no app with an on-demand table has one: it
+  is a statement of code a checker would have to grade;
+- no screen upserts it or deletes from it by filter, and its key is a type
+  Electric compares: a write by key loads a row
+  no view loaded as a view of its key, so the key a form or an effect carries
+  may come from anywhere on the screen. Asking instead that the screen hold a
+  view of the table, or that the write sit in the region whose row it names,
+  was rejected: an effect binds its key by interpolation, from any row, and a
+  view of the table on the same screen proves nothing about which rows it
+  loaded.
+
+Every other server table is **eager**. derive writes each mode and its first
+reason into the fact store as `sync_mode`, and `shell.yaml` names the on-demand
+tables under `sync`. An author cannot state a mode: one the rule contradicts
+fails to unify. The terminal raises a ProgramError at any read that would take
+an on-demand collection for the table ([data](../../omnishell/docs/data.md)),
+which is where a drift between the rule and the store shows.
 
 ## Checked against the program
 
@@ -140,6 +206,12 @@ fetching the template whose `pronto-cas` differs — has no reader
 
 - **Comparing a restatement of reads or handlers with the markup** — derive
   them, and there is no second statement to drift.
+- **Deciding a table's sync mode in derive.ts** — derive projects the markup,
+  and a rule over the projection, the entities and the type table is the kind
+  of conclusion the rest of the program draws in CUE; in TypeScript it was a
+  second front end for the program, with its own copy of the type table.
+- **Declaring a sync mode per entity** — the reads already say it, and a
+  declaration could claim on-demand for a table a screen scans whole.
 - **A content hash in a public path** — it breaks every shared link at the next
   deploy, fragments a crawler's index, and needs a canonical back to the
   unhashed URL, conceding that URL was the identity. Hashes belong on internal

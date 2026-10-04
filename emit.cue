@@ -85,17 +85,26 @@ _busConvertible: or(_busTypes)
 	out: [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimPrefix(seg, ":")}]
 }
 
+// A column's PostgreSQL type: its domain where the type keeps one (types.cue
+// `column`), else the base type itself. decimal's domain is per field.
 _sqlType: {
 	text: "TEXT", int: "INTEGER", bigint: "BIGINT", timestamptz: "TIMESTAMPTZ", tsvector: "TSVECTOR"
-	uuid: "uuid"
-	for k, c in #Carrier if k != "uuid" {(k): c.sql}
+	for k, c in #Carrier if k != "decimal" {(k): [if c.column == "domain" {c.sql}, c.pg][0]}
 }
 
 #colSql: C={
-	f: #Field
+	f:     #Field
+	table: string
 	_type: [if C.f.type == "decimal" {"portable_decimal_\(C.f.precision)_\(C.f.scale)"}, _sqlType[C.f.type]][0]
 	// The column's derived CHECK body; absent where the field states no cel.
 	check?: string
+	// What a checked type admits beyond its base type, named so a refusal
+	// says which column's type it was.
+	_typeCheck: [
+		if #Carrier[C.f.type] != _|_ if #Carrier[C.f.type].column == "checked" {
+			"CONSTRAINT \"\(C.table)_\(C.f.name)_type\" CHECK (\"\(C.f.name)\" IS NULL OR public.portable_\(C.f.type)_valid(\"\(C.f.name)\") IS TRUE)"
+		},
+	]
 	_frags: list.Concat([
 		["\"\(C.f.name)\"", C._type],
 		[if C.f.generated != _|_ {"GENERATED ALWAYS AS (\(C.f.generated)) STORED"}],
@@ -104,6 +113,7 @@ _sqlType: {
 		[if C.f.generated == _|_ if !C.f.pk && C.f.required {"NOT NULL"}],
 		[if C.f.unique != _|_ if C.f.unique {"UNIQUE"}],
 		[if C.f.ref != _|_ {"REFERENCES \(C.f.ref)(id) ON DELETE CASCADE"}],
+		C._typeCheck,
 		[if C.check != _|_ {"CHECK (\(C.check))"}],
 	])
 	out: strings.Join(_frags, " ")
@@ -130,7 +140,7 @@ _sqlType: {
 	e: #Entity
 	_lines: list.Concat([
 		[for fld in T.e.fields {
-			"  " + (#colSql & {f: fld, if T.e.checks[fld.name] != _|_ {check: T.e.checks[fld.name]}}).out
+			"  " + (#colSql & {f: fld, table: T.e.table, if T.e.checks[fld.name] != _|_ {check: T.e.checks[fld.name]}}).out
 		}],
 		// Platform column, never a #Field: the write's transaction id, returned
 		// via Prefer: return=representation so clients can awaitTxId against
@@ -190,11 +200,11 @@ _sqlType: {
 }
 
 // What the writer renders 900_seed.sql from (seed.ts): a seeded server entity's
-// columns, each with the function its carrier type reads a JSON literal
-// through, and the rows the program states; the rows state.seed holds the
-// writer reads from `src` itself. Every server entity is listed where a seed
-// file is declared, because which of them it holds rows for is the file's to
-// say.
+// columns, each with its type and, for a domain type, the function that reads
+// a JSON literal into it, and the rows the program states; the rows state.seed
+// holds the writer reads from `src` itself. Every server entity is listed
+// where a seed file is declared, because which of them it holds rows for is
+// the file's to say.
 #seedData: S={
 	code: #App
 	_held: S.code.state.seed != _|_
@@ -206,7 +216,10 @@ _sqlType: {
 			columns: [for f in e.fields {
 				name: f.name
 				if #Carrier[f.type] != _|_ {
-					from: "public.\([if f.type == "decimal" {"portable_decimal_\(f.precision)_\(f.scale)"}, #Carrier[f.type].sql][0])_from_json"
+					type: f.type
+					if #Carrier[f.type].column == "domain" {
+						from: "public.\([if f.type == "decimal" {"portable_decimal_\(f.precision)_\(f.scale)"}, #Carrier[f.type].sql][0])_from_json"
+					}
 				}
 			}]
 			rows: e.seed
@@ -1076,24 +1089,10 @@ _cdcTableField: "__table"
 	// Whether the app claims a native host beside the web one, carried into the
 	// file the parity check reads to know a route's affordances are owed a peer.
 	native: bool
-	_tables: {for _, s in S.code.surface.screens for r in s.reads {(S.code.state.entities[r.entity].table): true}}
-	_tablePath: {for _, s in S.code.surface.screens for r in s.reads {
-		(S.code.state.entities[r.entity].table): S.code.state.entities[r.entity].durability
-	}}
-	// A form's entity joins the registry even when no screen reads it: a
-	// write-only table — one a form appends to and only a pipeline reads back —
-	// must still be known to the store or create() refuses the table id.
-	_tables: {for _, s in S.code.surface.screens for f in s.forms {(S.code.state.entities[f.entity].table): true}}
-	_tablePath: {for _, s in S.code.surface.screens for f in s.forms {
-		(S.code.state.entities[f.entity].table): S.code.state.entities[f.entity].durability
-	}}
-	// A fold's private pair joins the registry the same way: no region names it
-	// and no form writes it, but the terminal reads it on every projection, and
-	// a table the store does not know has no collection to read.
-	_tables: {for _, p in S.code.state.pipelines if p.fold != _|_ {(p.fold.pair.table): true}}
-	_tablePath: {for _, p in S.code.state.pipelines if p.fold != _|_ {
-		(p.fold.pair.table): [for _, e in S.code.state.entities if e.table == p.fold.pair.table {e.durability}][0]
-	}}
+	// The tables the terminal registers, each with the durability it builds
+	// the collection from (#App.#collections says which).
+	_tables: {for t, _ in S.code.#collections {(t): true}}
+	_tablePath: {for t, n in S.code.#collections {(t): S.code.state.entities[n].durability}}
 
 	// Browser-only durabilities. They are collections like any other — read by a
 	// data-live region, mutated by a form — but the terminal builds them from
@@ -1101,9 +1100,7 @@ _cdcTableField: "__table"
 	// among the tables it subscribes.
 	_localTables: {for _, e in S.code.state.entities if !e.server {(e.table): true}}
 	_local: {for t, p in S._tablePath if S._localTables[t] != _|_ {(t): p}}
-	_tableKeys: {for _, s in S.code.surface.screens for r in s.reads {
-		(S.code.state.entities[r.entity].table): [for f in S.code.state.entities[r.entity].fields if f.pk {f.name}][0]
-	}}
+	_tableKeys: {for t, n in S.code.#collections {(t): S.code._syncKey[n]}}
 	_nonIdKeys: {for t, k in S._tableKeys if k != "id" {(t): k}}
 	// Natural keys only: a partial unique (`where:`) witnesses a slot's
 	// cardinality but cannot resolve an upsert, so it stays out of `uniques:`.
@@ -1158,6 +1155,8 @@ _cdcTableField: "__table"
 		}
 	}}
 	_validatedTables: [for _, e in S.code.state.entities if S._tables[e.table] != _|_ if len([for n, _ in e.validations {n}]) > 0 {e.table}]
+	// A browser tier has no sync to compare.
+	_onDemand: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.server if e.sync == "on-demand" {(e.table): "on-demand"}}
 	// The seeds #appMigrations.seeded leaves out: a browser durability has no
 	// migration to render into, so the terminal is told the rows instead.
 	_localSeeds: {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
@@ -1319,6 +1318,13 @@ _cdcTableField: "__table"
 		// "id" collapses every row onto one key).
 		if len(S._nonIdKeys) > 0 {
 			keys: S._nonIdKeys
+		}
+
+		// The tables a browser loads on demand (#Entity.sync): the terminal
+		// opens their shapes from now and loads each view's rows as a subset.
+		// Every other table syncs whole, so only these are named.
+		if len(S._onDemand) > 0 {
+			sync: S._onDemand
 		}
 
 		// RLS mirror for the terminal, in table-name space (through-parents

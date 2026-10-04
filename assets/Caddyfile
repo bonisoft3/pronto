@@ -54,6 +54,15 @@
         transport http {
           read_timeout 300s
         }
+        # Electric's 5xx reaches the client without its text: mecha's services/proxy/Caddyfile says why.
+        @fault status 5xx
+        handle_response @fault {
+          copy_response_headers {
+            exclude Content-Type Content-Length Content-Encoding Server
+          }
+          header Content-Type application/json
+          respond `{"message":"electric failed"}` {rp.status_code}
+        }
       }
     }
   }

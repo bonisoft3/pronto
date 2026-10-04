@@ -13,7 +13,7 @@ export type Held = Record<string, Row[]>;
 /** The emission's `seed-sql` entry (emit.cue #seedData). */
 export type SeedData = {
   src?: string;
-  entities: { name: string; table: string; columns: { name: string; from?: string }[]; rows: Row[] }[];
+  entities: { name: string; table: string; columns: { name: string; type?: string; from?: string }[]; rows: Row[] }[];
 };
 
 /** A seed file, as {"<Entity>": [row, ...]}; anything else is refused. */
@@ -77,9 +77,18 @@ export function seedSql(data: SeedData, held: Held): string {
       const present = e.columns.filter((c) => c.name in row);
       const values = present.map((c) => {
         const v = row[c.name];
-        if (c.from === undefined) return literal(`${where}.${c.name}`, v);
-        literal(`${where}.${c.name}`, v);
-        return `${c.from}(${quote(marshal(v))}::json)`;
+        const at = `${where}.${c.name}`;
+        if (c.from !== undefined) {
+          literal(at, v);
+          return `${c.from}(${quote(marshal(v))}::json)`;
+        }
+        // A JSON null is absence, as PostgREST stores it.
+        if (c.type === "json" && v === null) return "NULL";
+        // A base-typed column reads the value as SQL spells it; its CHECK
+        // judges it there, as a domain's representation function would.
+        if (c.type === "json" || c.type === "geojson") return `${quote(marshal(v))}::json`;
+        if (c.type === "double" && typeof v === "number" && Number.isFinite(v)) return String(v);
+        return literal(at, v);
       });
       return `INSERT INTO ${e.table} (${present.map((c) => c.name).join(", ")}) VALUES (${values.join(", ")}) ON CONFLICT (id) DO NOTHING;`;
     }).join("\n"));

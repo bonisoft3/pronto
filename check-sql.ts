@@ -39,11 +39,12 @@ const EXCLUDED_RULES = ["prefer-bigint-over-int"];
 
 /**
  * The one rule forgiven, and only in the file pronto derives from the type
- * table. Every portable_* domain carries its CHECK by design — that is what
- * makes the domain the canonical form rather than a naked base type — and
- * squawk prefers table constraints because a domain constraint is awkward to
- * change later. Changing one is a type-system change, which is the checks'
- * subject rather than something to hide from them.
+ * table. Every portable_* domain carries its CHECK by design — a domain is
+ * kept only where PostgREST needs its representation functions, and its
+ * bounds belong with them — and squawk prefers table constraints because a
+ * domain constraint is awkward to change later. Changing one is a type-system
+ * change, which is the checks' subject rather than something to hide from
+ * them.
  */
 const FORGIVEN: { rule: string; path: string } = {
   rule: "ban-create-domain-with-constraint",

@@ -48,7 +48,11 @@ _code: pronto.#App & {
 			title:  "Board"
 			route:  "/"
 			markup: "<main></main>"
-			reads: [{entity: "Game"}, {entity: "Square"}, {entity: "Profile"}]
+			reads: [
+				{table: "game", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []},
+				{table: "square", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []},
+				{table: "profile", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []},
+			]
 			forms: []
 			states: []
 		}

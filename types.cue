@@ -21,16 +21,35 @@ let _day = "(0[1-9]|[12][0-9]|3[01])"
 let _clock = "([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}"
 
 #TypeEntry: {
+	// The PostgreSQL type a column of it is built over.
+	pg: string
+	// How PostgreSQL holds it. PostgREST is liberal in what it accepts and
+	// strict in what it sends, so a type needs a domain only where Postgres's
+	// default JSON output is not the canonical spelling: the domain carries the
+	// representation functions PostgREST calls as casts. Every other type
+	// is a column of its `pg` type, under a CHECK where the type admits less
+	// than `pg` does ("checked", the predicate portable_<type>_valid in
+	// 004_types.sql) and bare where it does not ("plain").
+	column: "domain" | "checked" | "plain"
+	// Whether Electric's where-clause evaluator compares a column of it: in a
+	// subset's `where`, and in the cursor a capped view pages past its cap on.
+	// A domain is opaque to it ("Could not select an operator overload", and
+	// no cast out of one parses), and a json value has no equality operator in
+	// Postgres and no path operator in Electric. A table whose views filter on
+	// a column that is not syncs whole (#App.#sync). Measured against Electric
+	// 1.8.0, and held there by type-sql.integration.test.ts.
+	subset: bool
 	// The domain that holds it in PostgreSQL; type-sql.ts writes them and
-	// type-sql.test.ts holds these names to those. Absent for the one
-	// type with no single domain: a decimal's is per precision and scale
-	// (portable_decimal_18_2), so a field names it and the type cannot.
+	// type-sql.test.ts holds these names to those. Absent for a type with no
+	// domain, and for the one domain type that has no single domain: a
+	// decimal's is per precision and scale (portable_decimal_18_2), so a field
+	// names it and the type cannot.
 	sql?: string
 	// The type names a transport may report a value of this type under.
-	// Electric names the column's base type rather than its domain, so a
-	// holder registers its parser under each of these as well as under `sql`.
-	// This is not the type the domain is built over: several are spellings of
-	// one type, and a type may be reported as any of them.
+	// Electric names a domain column by its base type, so a holder registers
+	// its parser under each of these as well as under `sql`. This is not `pg`:
+	// several are spellings of one type, and a type may be reported as any of
+	// them.
 	base: [...string]
 	// What kind of JSON the value is on every wire.
 	json: "string" | "number" | "boolean" | "value"
@@ -42,13 +61,15 @@ let _clock = "([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}"
 	// The range a number type admits, where it has one.
 	min?: int
 	max?: int
-	// How two canonical values compare. "text" is a plain `<` over the string,
-	// which is also what the view engine compares with (db-ivm's compareKeys),
-	// so a maintained view may order by a "text" type and by a number or a
+	// How two canonical values compare. "text" is the string's own order, so
+	// a maintained view may order by a "text" type and by a number or a
 	// boolean the engine orders natively — and by no other, because an int64,
 	// a duration and a decimal are canonical STRINGS whose text order is not
-	// their value order. "none" is refused where a column asks for order,
-	// never guessed.
+	// their value order. A "text" type with a pattern is spelled in characters
+	// every collation orders alike; one without is free text, which Postgres
+	// orders by its collation and the view engine by the reader's locale
+	// (#App.#sync). "none" is refused where a column asks for order, never
+	// guessed.
 	order: "text" | "number" | "boolean" | "integer" | "decimal" | "duration" | "none"
 	// What the pattern cannot say, by name.
 	beyond: [...#TypeCheck]
@@ -71,24 +92,24 @@ let _clock = "([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}"
 
 #types: [Name=string]: #TypeEntry
 #types: {
-	string: {sql: "portable_string", base: ["text", "varchar", "bpchar", "tsvector"], json: "string", refuse: "\\x00", order: "text", beyond: ["scalar-values"]}
-	bool: {sql: "portable_bool", base: ["bool", "boolean"], json: "boolean", order: "boolean", beyond: []}
-	int32: {sql: "portable_int32", base: ["int2", "int4", "integer", "smallint"], json: "number", min: -2147483648, max: 2147483647, order: "number", beyond: []}
-	int64: {sql: "portable_int64", base: ["int8", "bigint"], json: "string", pattern: "^(0|-?[1-9][0-9]*)$", order: "integer", beyond: ["int64-range"]}
-	double: {sql: "portable_double", base: ["float4", "float8", "double precision", "real"], json: "number", order: "number", beyond: []}
-	bytes: {sql: "portable_bytes", base: ["bytea"], json: "string", pattern: "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$", order: "none", beyond: []}
-	uuid: {sql: "portable_uuid", base: ["uuid"], json: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", order: "text", beyond: []}
-	timestamp: {sql: "portable_timestamp", base: ["timestamptz", "timestamp with time zone"], json: "string", pattern: "^\(_year)-\(_month)-\(_day)T\(_clock)Z$", order: "text", beyond: ["calendar"]}
-	duration: {sql: "portable_duration", base: ["interval"], json: "string", pattern: "^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$", order: "duration", beyond: ["duration-range"]}
-	decimal: {base: ["numeric", "decimal"], json: "string", pattern: "^(0|-?[1-9][0-9]*|-?(0|[1-9][0-9]*)\\.[0-9]*[1-9])$", order: "decimal", beyond: ["decimal-profile"]}
-	date: {sql: "portable_date", base: ["date"], json: "string", pattern: "^\(_year)-\(_month)-\(_day)$", order: "text", beyond: ["calendar"]}
-	time: {sql: "portable_time", base: ["time", "time without time zone"], json: "string", pattern: "^\(_clock)$", order: "text", beyond: []}
-	timezone: {sql: "portable_timezone", base: [], json: "string", pattern: "^[A-Za-z0-9+_/-]+$", order: "none", beyond: ["tzdb"]}
-	// RFC 8259 and not RFC 8785: the domain's base type is `json`, which keeps
-	// the text it was given, and no holder reorders keys. Two spellings of one
+	string: {pg: "text", column: "plain", subset: true, base: ["text", "varchar", "bpchar", "tsvector"], json: "string", refuse: "\\x00", order: "text", beyond: ["scalar-values"]}
+	bool: {pg: "boolean", column: "plain", subset: true, base: ["bool", "boolean"], json: "boolean", order: "boolean", beyond: []}
+	int32: {pg: "integer", column: "plain", subset: true, base: ["int2", "int4", "integer", "smallint"], json: "number", min: -2147483648, max: 2147483647, order: "number", beyond: []}
+	int64: {pg: "bigint", column: "domain", subset: false, sql: "portable_int64", base: ["int8", "bigint"], json: "string", pattern: "^(0|-?[1-9][0-9]*)$", order: "integer", beyond: ["int64-range"]}
+	double: {pg: "double precision", column: "checked", subset: true, base: ["float4", "float8", "double precision", "real"], json: "number", order: "number", beyond: []}
+	bytes: {pg: "bytea", column: "domain", subset: false, sql: "portable_bytes", base: ["bytea"], json: "string", pattern: "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$", order: "none", beyond: []}
+	uuid: {pg: "uuid", column: "plain", subset: true, base: ["uuid"], json: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", order: "text", beyond: []}
+	timestamp: {pg: "timestamptz", column: "domain", subset: false, sql: "portable_timestamp", base: ["timestamptz", "timestamp with time zone"], json: "string", pattern: "^\(_year)-\(_month)-\(_day)T\(_clock)Z$", order: "text", beyond: ["calendar"]}
+	duration: {pg: "interval", column: "domain", subset: false, sql: "portable_duration", base: ["interval"], json: "string", pattern: "^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$", order: "duration", beyond: ["duration-range"]}
+	decimal: {pg: "numeric", column: "domain", subset: false, base: ["numeric", "decimal"], json: "string", pattern: "^(0|-?[1-9][0-9]*|-?(0|[1-9][0-9]*)\\.[0-9]*[1-9])$", order: "decimal", beyond: ["decimal-profile"]}
+	date: {pg: "date", column: "checked", subset: true, base: ["date"], json: "string", pattern: "^\(_year)-\(_month)-\(_day)$", order: "text", beyond: ["calendar"]}
+	time: {pg: "time(6)", column: "domain", subset: false, sql: "portable_time", base: ["time", "time without time zone"], json: "string", pattern: "^\(_clock)$", order: "text", beyond: []}
+	timezone: {pg: "text", column: "checked", subset: true, base: ["text"], json: "string", pattern: "^[A-Za-z0-9+_/-]+$", order: "none", beyond: ["tzdb"]}
+	// RFC 8259 and not RFC 8785: the column is `json`, which keeps the text it
+	// was given, and no holder reorders keys. Two spellings of one
 	// value therefore both stand, which is why a json column has no order.
-	json: {sql: "portable_json", base: ["json", "jsonb"], json: "value", order: "none", beyond: ["scalar-values", "finite-numbers"]}
-	geojson: {sql: "portable_geojson", base: ["geometry", "geography"], json: "value", order: "none", beyond: ["scalar-values", "finite-numbers", "ring-closure"]}
+	json: {pg: "json", column: "checked", subset: false, base: ["json", "jsonb"], json: "value", order: "none", beyond: ["scalar-values", "finite-numbers"]}
+	geojson: {pg: "json", column: "checked", subset: false, base: ["json", "jsonb", "geometry", "geography"], json: "value", order: "none", beyond: ["scalar-values", "finite-numbers", "ring-closure"]}
 }
 #carriers: #types
 

@@ -66,7 +66,7 @@ app: pronto.#App & {
       title: "Board"
       route: "/"
       markup: "<main></main>"
-      reads: [{entity: "Challenge"}]
+      reads: [{table: "challenge", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []}]
       forms: []
       states: []
     }
@@ -187,7 +187,7 @@ app: pronto.#App & {
       title: "Board"
       route: "/"
       markup: "<main></main>"
-      reads: [{entity: "Expense"}]
+      reads: [{table: "expense", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []}]
       forms: []
       states: []
     }
@@ -302,7 +302,7 @@ app: pronto.#App & {
       title: "Board"
       route: "/"
       markup: "<main></main>"
-      reads: [{entity: "Expense"}]
+      reads: [{table: "expense", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []}]
       forms: []
       states: []
     }
@@ -425,7 +425,7 @@ app: pronto.#App & {
       title: "Board"
       route: "/"
       markup: "<main></main>"
-      reads: [{entity: "Order"}]
+      reads: [{table: "orders", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []}]
       forms: []
       states: []
     }

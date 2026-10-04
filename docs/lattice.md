@@ -35,10 +35,15 @@ reach the terminal as `local` collections
 The cluster rungs each get a table with `txid`, the policies its access
 declares, an Electric shape and the outbox. `server` alone is a
 change-capture source: `008_publication.sql` carries `server` tables and no
-other, which keeps a pipeline's sink from feeding the pipelines. Nothing else
-in the emission tells the three cluster rungs apart, so `live` and `offline`
-cost at the client what `server` costs, and the ladder is not yet monotonic in
-expense there ([pending](../PENDING.md#the-lattice)).
+other, which keeps a pipeline's sink from feeding the pipelines.
+
+At the client, `offline` is the rung that keeps the whole table: its
+collection syncs eagerly, before a screen reads it, so the device holds every
+row when the network goes. Every other cluster rung syncs as its screens'
+reads allow, and `#App.#sync` derives which ([screens](screens.md#the-reads-decide-how-a-table-syncs)):
+on demand where every read is a view whose subset Electric can state, eagerly
+otherwise. Nothing else tells `server` from `live` at the client
+([pending](../PENDING.md#the-lattice)).
 
 ## Views, folds and the DOM
 
@@ -109,6 +114,7 @@ replay and a `put` be stated twice.
 | durability × seed, partial unique | `#Entity`: `device` refuses `seed`; a unique's `where` only below the cluster | yes, `cue vet` |
 | durability × validation edge | `validations.ts`: a cluster entity's edge to a `tab` or `device` one | yes, when `derive.ts` runs |
 | durability × schedule | `_scheduleShape`: `emits` is `server`, `done` is another, `live` entity | yes, `cue vet` |
+| durability × sync | `#App.#sync` (`sync.cue`): `offline` is eager, a browser rung has no mode, an authored mode the rule contradicts fails to unify | yes, `cue vet` |
 | target × program | `_pagesBundle` ([release targets](release-targets.md)) | yes, `cue vet` |
 | effect level × `refused` arrow | `machineLint`, for an effect stating level 2; one naming no level escapes | partly, at lint ([machines](../../omnishell/docs/machines.md#effects)) |
 | durability × effect level | `#DurabilityEffectLevel`, in `schema.cue` and omnishell's `machine.cue` | no ([pending](../PENDING.md#the-lattice)) |

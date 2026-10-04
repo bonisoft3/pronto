@@ -1,6 +1,9 @@
 // The PostgREST domain-representation functions are intentionally adjacent to
 // their domains. PostgreSQL itself does not apply casts to domains; PostgREST
 // discovers these casts and invokes the registered functions at its boundary.
+//
+// A type whose column is "checked" (types.cue) has no domain: its predicate,
+// portable_<type>_valid, is what emit.cue's column CHECK calls.
 
 export type DecimalProfile = Readonly<{ precision: number; scale: number }>;
 
@@ -37,10 +40,10 @@ function validateProfiles(profiles: readonly DecimalProfile[]): DecimalProfile[]
 // something nobody asks for.
 const domain = (name: string, base: string, check: string) => `CREATE DOMAIN public.${name} AS ${base} CHECK (VALUE IS NULL OR COALESCE((${check}), false));`;
 
-const representation = (name: string, jsonIn: string, textIn: string, jsonOut: string, jsonNull = false) => `
+const representation = (name: string, jsonIn: string, textIn: string, jsonOut: string) => `
 CREATE OR REPLACE FUNCTION public.${name}_from_json(value json)
 RETURNS public.${name}
-LANGUAGE sql IMMUTABLE ${jsonNull ? "CALLED ON NULL INPUT" : "STRICT"} PARALLEL SAFE
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
 RETURN ${jsonIn};
 
 CREATE OR REPLACE FUNCTION public.${name}_from_text(value text)
@@ -61,10 +64,13 @@ CREATE CAST (public.${name} AS json) WITH FUNCTION public.${name}_to_json(public
  * Base type DDL. `generateTypeSQL` appends the only parameterized
  * types: decimal domains whose precision and scale are declared by fields.
  */
-export const TYPE_SQL = String.raw`-- portable type domains for PostgreSQL 18 and PostgREST 12.2.3
+export const TYPE_SQL = String.raw`-- portable type domains and column predicates for PostgreSQL 18 and PostgREST 12.2.3
 --
--- This migration is deliberately one-shot. Domains cannot be altered safely
--- into a different type contract, so a changed type is a new migration.
+-- Regenerated whole whenever a type changes: no pronto database is deployed,
+-- so a dev or CI volume is rebuilt from it. A deployed database would take a
+-- changed type as a migration of its own (plugins/pronto/docs/
+-- schema-change-admission.md, "Retyping a column from a domain to its base
+-- type").
 SET search_path = public, pg_catalog;
 
 CREATE OR REPLACE FUNCTION public.portable_json_scalar_text(value json, expected text)
@@ -93,7 +99,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.portable_finite_double(value double precision)
+CREATE OR REPLACE FUNCTION public.portable_double_valid(value double precision)
 RETURNS boolean
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
 RETURN value <> 'Infinity'::double precision
@@ -105,11 +111,16 @@ RETURNS boolean
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
 RETURN value ~ '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$';
 
-CREATE OR REPLACE FUNCTION public.portable_timezone(value text)
+CREATE OR REPLACE FUNCTION public.portable_timezone_valid(value text)
 RETURNS boolean
 LANGUAGE sql STABLE STRICT PARALLEL SAFE
 RETURN (value = 'UTC' OR value LIKE '%/%')
   AND EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = value);
+
+CREATE OR REPLACE FUNCTION public.portable_date_valid(value date)
+RETURNS boolean
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+RETURN value >= date '0001-01-01' AND value < date '10000-01-01';
 
 CREATE OR REPLACE FUNCTION public.portable_duration_valid(value interval)
 RETURNS boolean
@@ -140,7 +151,7 @@ BEGIN
   EXCEPTION WHEN numeric_value_out_of_range OR invalid_text_representation THEN
     RETURN false;
   END;
-  RETURN portable_finite_double(binary64) AND source = binary64::text::numeric;
+  RETURN portable_double_valid(binary64) AND source = binary64::text::numeric;
 END;
 $$;
 
@@ -260,7 +271,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.portable_geojson_valid(value json)
+CREATE OR REPLACE FUNCTION public.portable_geojson_object_valid(value json)
 RETURNS boolean
 LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE
 AS $$
@@ -278,7 +289,7 @@ BEGIN
     WHEN 'FeatureCollection' THEN
       IF json_object_field(value, 'features') IS NULL OR json_typeof(value -> 'features') IS DISTINCT FROM 'array' THEN RETURN false; END IF;
       FOR item IN SELECT json_array_elements(value -> 'features') LOOP
-        IF portable_geojson_valid(item) IS NOT TRUE OR item ->> 'type' IS DISTINCT FROM 'Feature' THEN RETURN false; END IF;
+        IF portable_geojson_object_valid(item) IS NOT TRUE OR item ->> 'type' IS DISTINCT FROM 'Feature' THEN RETURN false; END IF;
       END LOOP;
       RETURN true;
     ELSE RETURN portable_geojson_geometry_valid(value);
@@ -286,35 +297,22 @@ BEGIN
 END;
 $$;
 
-${domain("portable_string", "text", "true")}
-${domain("portable_bool", "boolean", "true")}
-${domain("portable_int32", "integer", "true")}
-${domain("portable_int64", "bigint", "true")}
-${domain("portable_double", "double precision", "portable_finite_double(VALUE)")}
-${domain("portable_bytes", "bytea", "true")}
-${domain("portable_uuid", "uuid", "true")}
-${domain("portable_timestamp", "timestamptz", "VALUE >= timestamptz '0001-01-01 00:00:00+00' AND VALUE < timestamptz '10000-01-01 00:00:00+00'")}
-${domain("portable_date", "date", "VALUE >= date '0001-01-01' AND VALUE < date '10000-01-01'")}
-${domain("portable_time", "time(6)", "VALUE < time '24:00:00'")}
-${domain("portable_timezone", "text", "portable_timezone(VALUE)")}
-${domain("portable_duration", "interval", "portable_duration_valid(VALUE)")}
-${domain("portable_json", "json", "portable_json_valid(VALUE)")}
-${domain("portable_geojson", "json", "portable_json_valid(VALUE) AND portable_geojson_valid(VALUE)")}
+CREATE OR REPLACE FUNCTION public.portable_geojson_valid(value json)
+RETURNS boolean
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+RETURN portable_json_valid(value) AND portable_geojson_object_valid(value);
 
-${representation("portable_string", "portable_json_scalar_text(value, 'string')::public.portable_string", "value::public.portable_string", "to_json(value::text)")}
-${representation("portable_bool", "portable_json_scalar_text(value, 'boolean')::boolean::public.portable_bool", "CASE value WHEN 'true' THEN true WHEN 'false' THEN false ELSE portable_reject('portable_bool must be true or false')::boolean END::public.portable_bool", "to_json(value::boolean)")}
-${representation("portable_int32", "CASE WHEN portable_canonical_integer(portable_json_scalar_text(value, 'number'), -2147483648, 2147483647) THEN portable_json_scalar_text(value, 'number')::integer ELSE portable_reject('portable_int32 must be a canonical JSON integer')::integer END::public.portable_int32", "CASE WHEN portable_canonical_integer(value, -2147483648, 2147483647) THEN value::integer ELSE portable_reject('portable_int32 must be canonical')::integer END::public.portable_int32", "to_json(value::integer)")}
+${domain("portable_int64", "bigint", "true")}
+${domain("portable_bytes", "bytea", "true")}
+${domain("portable_timestamp", "timestamptz", "VALUE >= timestamptz '0001-01-01 00:00:00+00' AND VALUE < timestamptz '10000-01-01 00:00:00+00'")}
+${domain("portable_time", "time(6)", "VALUE < time '24:00:00'")}
+${domain("portable_duration", "interval", "portable_duration_valid(VALUE)")}
+
 ${representation("portable_int64", "CASE WHEN portable_canonical_integer(portable_json_scalar_text(value, 'string'), -9223372036854775808, 9223372036854775807) THEN portable_json_scalar_text(value, 'string')::bigint ELSE portable_reject('portable_int64 must be a canonical JSON string')::bigint END::public.portable_int64", "CASE WHEN portable_canonical_integer(value, -9223372036854775808, 9223372036854775807) THEN value::bigint ELSE portable_reject('portable_int64 must be canonical')::bigint END::public.portable_int64", "to_json(value::text)")}
-${representation("portable_double", "portable_json_scalar_text(value, 'number')::double precision::public.portable_double", "value::double precision::public.portable_double", "to_json(value::double precision)")}
 ${representation("portable_bytes", "CASE WHEN portable_base64(portable_json_scalar_text(value, 'string')) THEN decode(portable_json_scalar_text(value, 'string'), 'base64') ELSE portable_reject('portable_bytes must be strict base64')::bytea END::public.portable_bytes", "CASE WHEN portable_base64(value) THEN decode(value, 'base64') ELSE portable_reject('portable_bytes must be strict base64')::bytea END::public.portable_bytes", "to_json(replace(encode(value::bytea, 'base64'), E'\\n', ''))")}
-${representation("portable_uuid", "CASE WHEN portable_json_scalar_text(value, 'string') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN portable_json_scalar_text(value, 'string')::uuid ELSE portable_reject('portable_uuid must be lowercase and hyphenated')::uuid END::public.portable_uuid", "CASE WHEN value ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN value::uuid ELSE portable_reject('portable_uuid must be lowercase and hyphenated')::uuid END::public.portable_uuid", "to_json(lower(value::uuid::text))")}
 ${representation("portable_timestamp", "CASE WHEN portable_json_scalar_text(value, 'string') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$' THEN portable_json_scalar_text(value, 'string')::timestamptz ELSE portable_reject('portable_timestamp must be UTC with exactly six fractional digits')::timestamptz END::public.portable_timestamp", "CASE WHEN value ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$' THEN value::timestamptz ELSE portable_reject('portable_timestamp must be UTC with exactly six fractional digits')::timestamptz END::public.portable_timestamp", `to_json(to_char(value::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`)}
-${representation("portable_date", "CASE WHEN portable_json_scalar_text(value, 'string') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN portable_json_scalar_text(value, 'string')::date ELSE portable_reject('portable_date must be RFC 3339 full-date')::date END::public.portable_date", "CASE WHEN value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN value::date ELSE portable_reject('portable_date must be RFC 3339 full-date')::date END::public.portable_date", "to_json(to_char(value::date, 'YYYY-MM-DD'))")}
 ${representation("portable_time", "CASE WHEN portable_json_scalar_text(value, 'string') ~ '^[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}$' AND portable_json_scalar_text(value, 'string') < '24:00:00.000000' THEN portable_json_scalar_text(value, 'string')::time ELSE portable_reject('portable_time must be HH:mm:ss.ffffff before 24:00')::time END::public.portable_time", "CASE WHEN value ~ '^[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}$' AND value < '24:00:00.000000' THEN value::time ELSE portable_reject('portable_time must be HH:mm:ss.ffffff before 24:00')::time END::public.portable_time", "to_json(to_char(value::time, 'HH24:MI:SS.US'))")}
-${representation("portable_timezone", "portable_json_scalar_text(value, 'string')::public.portable_timezone", "value::public.portable_timezone", "to_json(value::text)")}
 ${representation("portable_duration", "CASE WHEN portable_json_scalar_text(value, 'string') ~ '^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$' THEN (substring(portable_json_scalar_text(value, 'string') FROM 3 FOR char_length(portable_json_scalar_text(value, 'string')) - 3) || ' seconds')::interval ELSE portable_reject('portable_duration must be canonical total seconds at microsecond precision')::interval END::public.portable_duration", "CASE WHEN value ~ '^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$' THEN (substring(value FROM 3 FOR char_length(value) - 3) || ' seconds')::interval ELSE portable_reject('portable_duration must be canonical total seconds at microsecond precision')::interval END::public.portable_duration", "to_json('PT' || trim_scale(extract(epoch FROM value::interval))::text || 'S')")}
-${representation("portable_json", "COALESCE(value, 'null'::json)::public.portable_json", "value::json::public.portable_json", "value::json", true)}
-${representation("portable_geojson", "value::public.portable_geojson", "value::json::public.portable_geojson", "value::json")}
 `;
 
 function decimalRepresentation(profile: DecimalProfile): string {

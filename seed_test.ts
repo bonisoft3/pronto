@@ -5,32 +5,49 @@ const team: SeedData["entities"][number] = {
   name: "Team",
   table: "team",
   columns: [
-    { name: "id", from: "public.portable_uuid_from_json" },
-    { name: "name", from: "public.portable_string_from_json" },
-    { name: "rank" },
-    { name: "active" },
+    { name: "id", type: "uuid" },
+    { name: "name", type: "string" },
+    { name: "rank", type: "int32" },
+    { name: "active", type: "bool" },
+    { name: "motto", type: "int64", from: "public.portable_int64_from_json" },
+    { name: "rating", type: "double" },
+    { name: "crest", type: "json" },
+    { name: "ground", type: "geojson" },
   ],
   rows: [],
 };
 
-// CUE's json.Marshal spellings, escapes included, which every 900_seed.sql
-// already holds: a different spelling would move every seeded app's migration.
-Deno.test("a row renders as the CUE renderer spelled it", () => {
+// A domain column reads CUE's json.Marshal spelling, escapes included, through
+// its representation function; a base-typed column reads the SQL literal, and
+// its CHECK judges it as the domain's function would have.
+Deno.test("a row renders each column the way its type is held", () => {
   const sql = seedSql({ src: "seed.json", entities: [team] }, {
-    Team: [{ name: "D'Ávila ", id: "06000000-0000-4000-8000-000000000001", active: true, rank: 3 }],
+    Team: [{
+      name: "D'Ávila\u2028", id: "06000000-0000-4000-8000-000000000001", active: true, rank: 3,
+      motto: "9007199254740993\u2028", rating: 1.5, crest: { a: [1, "\u2028"] }, ground: { type: "Point", coordinates: [1, 2] },
+    }],
   });
   assert.equal(
     sql,
-    "INSERT INTO team (id, name, rank, active) VALUES (" +
-      `public.portable_uuid_from_json('"06000000-0000-4000-8000-000000000001"'::json), ` +
-      `public.portable_string_from_json('"D''Ávila\\u2028"'::json), 3, true) ON CONFLICT (id) DO NOTHING;\n`,
+    "INSERT INTO team (id, name, rank, active, motto, rating, crest, ground) VALUES (" +
+      `'06000000-0000-4000-8000-000000000001', 'D''Ávila\u2028', 3, true, ` +
+      `public.portable_int64_from_json('"9007199254740993\\u2028"'::json), 1.5, ` +
+      `'{"a":[1,"\\u2028"]}'::json, '{"type":"Point","coordinates":[1,2]}'::json) ON CONFLICT (id) DO NOTHING;\n`,
   );
+});
+
+// Regression: a seeded JSON null was the json value null while PostgREST stores
+// one as SQL NULL, so a seeded row and an API write disagreed. A JSON null is
+// absence, of a json column as of every other.
+Deno.test("a json column's null is SQL NULL", () => {
+  const sql = seedSql({ entities: [{ ...team, rows: [{ id: "a", crest: null }] }] }, {});
+  assert.equal(sql, `INSERT INTO team (id, crest) VALUES ('a', NULL) ON CONFLICT (id) DO NOTHING;\n`);
 });
 
 Deno.test("stated rows render without a seed file, and an entity with none renders nothing", () => {
   const stated = { ...team, rows: [{ id: "a" }] };
   const sql = seedSql({ entities: [{ ...team, name: "Empty", table: "empty" }, stated] }, {});
-  assert.equal(sql, `INSERT INTO team (id) VALUES (public.portable_uuid_from_json('"a"'::json)) ON CONFLICT (id) DO NOTHING;\n`);
+  assert.equal(sql, `INSERT INTO team (id) VALUES ('a') ON CONFLICT (id) DO NOTHING;\n`);
 });
 
 Deno.test("a held row is refused where nothing would judge or render it", () => {

@@ -559,6 +559,16 @@ import (
 	if durability != "tab" && durability != "device" {
 		access?: #Access
 	}
+	// How a browser syncs the table: "eager" takes the whole shape before a
+	// screen reads it, "on-demand" only the rows a maintained view asks for.
+	// #App.#sync decides it for every server entity (sync.cue), so an authored
+	// value it contradicts fails to unify.
+	if server {
+		sync: "eager" | "on-demand"
+	}
+	if !server {
+		sync?: _|_
+	}
 	// "pipeline" entities are never mutated by forms; role-level enforcement
 	// is an open question in SPEC.md.
 	writers: *"forms" | "pipeline"
@@ -979,6 +989,45 @@ import (
 	fields: [...#FormField]
 }
 
+// One read a screen's markup makes, as the terminal reads and routes it
+// (omnishell lint.ts screenAccess, fragment.js routeOf). Derived, never
+// authored.
+#Read: {
+	table: string
+	// data-live, data-reads (a reduce's whole table) or data-read-<name>.
+	kind: "live" | "reads" | "named"
+	// Inside an enclosing region, its placeholders resolved against that
+	// region's row.
+	nested: bool
+	// The lists stamping it, as indices into the screen's reads: each region
+	// whose item template it is inside, each naming that template, and the
+	// lists stamping those in turn. It is read once per row of each; with
+	// none, once, as a slot binds one row.
+	lists: [...int]
+	// How the store serves it as far as the markup decides: computed by the
+	// server, filtered by the client ("snapshot"), the collection itself
+	// ("whole"), or maintained by the view engine ("view").
+	route: "server" | "snapshot" | "whole" | "view"
+	// The filter's clauses, and the tables its select embeds as the markup
+	// names them (a foreign-key hint names none); both absent where the server
+	// computes it.
+	clauses?: [...{col: string, op: string}]
+	embeds?: [...string]
+	limit?: int & >0
+	// Every column an order it can be in names.
+	orders: [...string]
+}
+
+// One write a screen's markup states: a form, a chart's effect, or a reduce
+// (data-on-<event>, a drag's data-handler), op "reduce" on its region's table,
+// whose updates and effects may write any table by any op. Derived, never
+// authored.
+#Write: {
+	table: string
+	op:     "create" | "update" | "delete" | "upsert" | "reduce" | "navigate"
+	filter?: string
+}
+
 #Screen: S={
 	name:  string
 	ir:    *name | string
@@ -1015,19 +1064,19 @@ import (
 	// A slugged route's authored pattern is what the default locale's
 	// catalogue must agree with, so it needs a first segment to translate.
 	if S.slug != _|_ {route: =~"^/[a-z0-9][a-z0-9-]*(/|$)"}
-	// filter/select are PostgREST query fragments passed through verbatim;
-	// `{param.x}` placeholders resolve in the interpreter.
 	// Derived from the markup (program_derived.cue). An assembly screen's html
 	// exists before any derivation, so a screen the derived file misses is a
 	// stale generation and the export fails incomplete rather than shipping a
-	// screen whose reads and handlers are silently empty. A CUE-authored
+	// screen whose reads, writes and handlers are silently empty. A CUE-authored
 	// screen alone carries the bootstrap default: its html does not exist
 	// before the first export, so the first derivation cannot see it —
 	// write.ts's fixpoint re-derives after writing and re-exports until the
 	// derived file holds what the emitted markup says.
-	reads!: [...{entity: string, order?: string, filter?: string, select?: string}]
+	reads!: [...#Read]
+	writes!: [...#Write]
 	if S.markup != _|_ {
-		reads: *[] | [...{entity: string, order?: string, filter?: string, select?: string}]
+		reads:  *[] | [...#Read]
+		writes: *[] | [...#Write]
 	}
 	// A component-bearing screen is authored HERE, in CUE: `markup` is the
 	// screen's whole HTML, composed by interpolating component definitions
@@ -1331,7 +1380,7 @@ import (
 		let plSinkEntity = [if eLookup[pl.sink] != _|_ {eLookup[pl.sink]}, pl.sink][0]
 		let plSourceEntities = [for s in pl.sources {[if eLookup[s] != _|_ {eLookup[s]}, s][0]}]
 		for sName, s in A.surface.screens
-		let sReadsEntities = [if s.reads != _|_ for r in s.reads if r.entity != _|_ {[if eLookup[r.entity] != _|_ {eLookup[r.entity]}, r.entity][0]}]
+		let sReadsEntities = [if s.reads != _|_ for r in s.reads {[if eLookup[r.table] != _|_ {eLookup[r.table]}, r.table][0]}]
 		let sFormsEntities = [if s.forms != _|_ for f in s.forms if f.entity != _|_ {[if eLookup[f.entity] != _|_ {eLookup[f.entity]}, f.entity][0]}]
 		if list.Contains(sReadsEntities, plSinkEntity)
 		if len([for fe in sFormsEntities if list.Contains(plSourceEntities, fe) {fe}]) > 0

@@ -8,9 +8,12 @@
 // into the program — so `cue export` stays the one source the emitter and the
 // checkers read, and the markup is the authority.
 //
-// Derived per screen: `reads` as the SET of entities the markup touches
-// (sorted, deduped, no filter/order/select — those live in the markup alone),
-// and `files.handlers` as shell/handlers/<name>.js for every handler name.
+// Derived per screen: `reads`, every read the markup makes as the terminal
+// routes it (#Read: its table, kind, nesting, route, filter clauses, embeds,
+// cap and order columns), verbatim from the reader, `writes`, every write it states (#Write), and
+// `files.handlers` as shell/handlers/<name>.js for every handler name. They
+// are facts, not decisions: what a program concludes from them — which tables
+// a browser loads on demand (sync.cue) — is CUE's to say.
 // Screen names come from shell/screens/*.html; a stale html file for a screen
 // the program no longer declares fails the export rather than deriving in
 // silence.
@@ -72,6 +75,21 @@ import {
   sha256Hex,
 } from "./facts.ts";
 type Spec = { col: string; op: string; value?: string }[] | null;
+/** A read and a write as the reader prints them and program_derived.cue
+ * states them (#Read, #Write). */
+type Read = {
+  table: string;
+  kind: "live" | "reads" | "named";
+  nested: boolean;
+  lists: number[];
+  route: "server" | "snapshot" | "whole" | "view";
+  clauses?: { col: string; op: string }[];
+  embeds?: string[];
+  limit?: number;
+  orders: string[];
+};
+type Write = { table: string; op: string; filter?: string };
+type DerivedScreen = { name: string; reads: Read[]; writes: Write[]; handlers: string[]; adapters: string[] };
 
 /**
  * The markup projection, as the terminal's reader prints it — read-markup.ts's
@@ -90,8 +108,9 @@ type MachineProjection = {
   refs: string[];
   assignStrings: string[];
   filterSpec: Spec;
+  writes: Write[];
 };
-type ScreenProjection = { tables: string[]; handlers: string[]; adapters: string[]; machines: MachineProjection[] };
+type ScreenProjection = { handlers: string[]; adapters: string[]; reads: Read[]; writes: Write[]; machines: MachineProjection[] };
 
 /** The slice of a program's entity this pass reads off its own export; every
  * module it hands the entities to declares the slice it reads for itself. */
@@ -168,17 +187,20 @@ export function decisionNote(body: string): string {
   return text.replace(/\.$/, "");
 }
 
+/** A derived read or write as a CUE struct; JSON is CUE here, keys and all. */
+const row = (value: object): string =>
+  `{${Object.entries(value).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")}}`;
+
 export function renderDerived(
   pkg: string,
-  screens: { name: string; entities: string[]; handlers: string[]; adapters: string[] }[],
+  screens: DerivedScreen[],
   // The app's own Jessie modules, by basename: an adapter it does not ship is
   // the terminal's, and the route names the path the terminal serves it at.
   available: Set<string>,
   decisions: { id: string; note: string }[],
   tests: { id: string; accepts: string[] }[],
 ): string {
-  const blocks = screens.map(({ name, entities, handlers, adapters }) => {
-    const reads = entities.map((e) => `{entity: "${e}"}`).join(", ");
+  const blocks = screens.map(({ name, reads, writes, handlers, adapters }) => {
     const mods = handlers.map((h) => `"shell/handlers/${h}.js"`).join(", ");
     // An adapter is listed apart from the reduces: the role decides the cage a
     // module loads in, and a checker cannot ask about a role it cannot see.
@@ -187,7 +209,9 @@ export function renderDerived(
     const adapterMods = adapters
       .map((a) => (available.has(a) ? `"shell/handlers/${a}.js"` : `"/omnishell/components/${a}.js"`))
       .join(", ");
-    return `\t${quoteKey(name)}: {\n\t\treads: [${reads}]\n\t\tfiles: {handlers: [${mods}], adapters: [${adapterMods}]}\n\t}`;
+    const list = (rows: object[]) => rows.length === 0 ? "[]" : `[\n${rows.map((r) => `\t\t\t${row(r)},`).join("\n")}\n\t\t]`;
+    return `\t${quoteKey(name)}: {\n\t\treads: ${list(reads)}\n\t\twrites: ${list(writes)}\n` +
+      `\t\tfiles: {handlers: [${mods}], adapters: [${adapterMods}]}\n\t}`;
   });
   // JSON escapes are CUE escapes, and CUE reads `\(` as interpolation only
   // after a backslash JSON.stringify would have doubled.
@@ -301,6 +325,9 @@ export async function derive(appDir: string): Promise<void> {
         "statics: [for s in out.cluster.meta.statics {file: s.file, target: s.target}], " +
         "shared: {for k, s in code.surface.screens {(k): s.files.shared}}, " +
         "pendingLiterals: code.meta.design.pendingLiterals, " +
+        // Which tables a browser loads on demand and why, as the program
+        // decides it from the reads and writes the last derivation projected.
+        "sync: code.#sync, " +
         // `program` rather than `code`: a field named for the value it holds would
         // shadow it inside the struct literal and export an incomplete `_`.
         "program: code}",
@@ -330,6 +357,7 @@ export async function derive(appDir: string): Promise<void> {
     statics: { file: string; target: string }[];
     shared: Record<string, string[]>;
     pendingLiterals: number;
+    sync: Record<string, { table: string; mode: string; reason: string }>;
     program: Record<string, unknown>;
   } = JSON.parse(new TextDecoder().decode(exported.stdout));
   const entities = exp.entities;
@@ -458,7 +486,7 @@ export async function derive(appDir: string): Promise<void> {
     new TextDecoder().decode(read.stdout),
   );
 
-  const screens: { name: string; entities: string[]; handlers: string[]; adapters: string[] }[] = [];
+  const screens: DerivedScreen[] = [];
   const machines: { screen: string; region: MachineProjection }[] = [];
   const allMsgRefs: FactTemplateMsgRef[] = [];
   const allProse: FactTemplateProse[] = [];
@@ -469,9 +497,9 @@ export async function derive(appDir: string): Promise<void> {
       allMsgRefs.push(...msgRefs);
       allProse.push(...prose);
     }
-    const named = screen.tables.map((t) =>
-      byTable.get(t) ?? fail(`${name}.html reads "${t}", the table of no declared entity`)
-    );
+    for (const t of new Set([...screen.reads, ...screen.writes].map((r) => r.table))) {
+      if (!byTable.has(t)) fail(`${name}.html names "${t}", the table of no declared entity`);
+    }
     // A machine's leaves are handler modules like any other: its references
     // (and the assign strings that resolve) join the screen's derived
     // files.handlers so the loader can fetch them.
@@ -483,21 +511,22 @@ export async function derive(appDir: string): Promise<void> {
     }
     screens.push({
       name,
-      entities: [...new Set(named)].sort(),
+      reads: screen.reads,
+      writes: screen.writes,
       handlers: [...new Set([...screen.handlers, ...machineNames])].sort(),
       adapters: [...new Set(screen.adapters)].sort(),
     });
   }
   screens.sort((a, b) => (a.name < b.name ? -1 : 1));
 
-  // The tables the terminal will register, in the set #shellConfig._tables
-  // builds: every screen's reads, every form's entity, and each fold's private
-  // pair. A validation's edge is read out of that registry at the store seat,
+  // The tables the terminal will register, in the set #App.#collections
+  // builds: every screen's reads and writes, every form's entity, and each
+  // fold's private pair. A validation's edge is read out of that registry at the store seat,
   // so an edge to a table outside it has no collection to read and the seat
   // would throw at the first write. The write of program_validations.cue waits
   // for this, so a refused derivation leaves no artifact for the emitter.
   const held = new Set<string>();
-  for (const s of screens) for (const name of s.entities) held.add(entities[name].table);
+  for (const s of screens) for (const r of [...s.reads, ...s.writes]) held.add(r.table);
   for (const [sname, s] of Object.entries(surface.screens)) {
     for (const f of s.forms ?? []) {
       if (entities[f.entity] === undefined) fail(`screen ${sname}: form ${f.id} names undeclared entity ${f.entity}`);
@@ -766,7 +795,14 @@ export async function derive(appDir: string): Promise<void> {
   await Deno.writeTextFile(
     `${appDir}/.pronto/facts.json`,
     renderFacts(mergeFacts(
-      programFacts(entities, screens, charts),
+      programFacts(
+        entities,
+        screens.map((s) => ({
+          name: s.name,
+          entities: screenEntities(s.reads, machines.filter((m) => m.screen === s.name).map((m) => m.region), byTable),
+        })),
+        charts,
+      ),
       ledger,
       bijection,
       nestingFacts(irHtml),
@@ -779,12 +815,19 @@ export async function derive(appDir: string): Promise<void> {
       importFacts(exp.statics, imports),
       jessieFactRows(DENIED, modules),
       { enum_value },
+      { sync_mode: Object.entries(exp.sync).map(([entity, s]) => ({ entity, ...s })) },
       seed_vetted.length > 0 ? { seed_vetted } : {},
       diagramFacts(diagrams.nodes, diagrams.edges),
       i18nFacts(defaultLocale, locales, catalogs, allMsgRefs, allProse),
     )),
   );
 
+}
+
+/** The entities a screen needs a collection for, its `reads` fact: each
+ * table it reads, and each its charts' effects write. */
+function screenEntities(reads: { table: string }[], charts: { writes: Write[] }[], byTable: Map<string, string>): string[] {
+  return [...new Set([...reads, ...charts.flatMap((c) => c.writes)].map((r) => byTable.get(r.table) as string))].sort();
 }
 
 function selfTest(): void {
@@ -906,6 +949,22 @@ function selfTest(): void {
   ]);
   const wantKey = '\t"decision\\\\blob": "a \\"q\\" and a \\\\ and \\\\(x)"';
   const wantAccepts = '_irAccepts: {\n\t"test-one": ["accept-a","accept-b"]\n\t"test-none": []\n}\n\ncode: meta: tests: [Id=string]: accepts: _irAccepts[Id]\n';
+  // A screen's reads and writes, the rows sync.cue decides which tables load
+  // on demand from.
+  const block = renderDerived("p", [{
+    name: "jogo",
+    reads: [
+      { table: "goal", kind: "live", nested: true, lists: [], route: "view", clauses: [{ col: "game_id", op: "eq" }], embeds: ["player"], limit: 5, orders: ["minute", "id"] },
+      { table: "game", kind: "live", nested: false, lists: [], route: "server", orders: [] },
+    ],
+    writes: [{ table: "goal", op: "delete", filter: "game_id=eq.{id}" }],
+    handlers: [],
+    adapters: [],
+  }], new Set(), [], []);
+  const wantBlock = '\tjogo: {\n\t\treads: [\n' +
+    '\t\t\t{table: "goal", kind: "live", nested: true, lists: [], route: "view", clauses: [{"col":"game_id","op":"eq"}], embeds: ["player"], limit: 5, orders: ["minute","id"]},\n' +
+    '\t\t\t{table: "game", kind: "live", nested: false, lists: [], route: "server", orders: []},\n\t\t]\n' +
+    '\t\twrites: [\n\t\t\t{table: "goal", op: "delete", filter: "game_id=eq.{id}"},\n\t\t]\n';
   // The cel emitters are pinned here too: one self-test, wired to one rule.
   const celFindings = celFixtures();
   for (const f of celFindings) console.error(`FAIL ${f.message}`);
@@ -926,6 +985,22 @@ function selfTest(): void {
   if (!rendered.endsWith(wantAccepts)) {
     failed++;
     console.error(`FAIL a test's citations render as its constraint:\n  got  ${JSON.stringify(rendered.slice(-wantAccepts.length))}\n  want ${JSON.stringify(wantAccepts)}`);
+  }
+  // Regression: the facts' `reads` held only the tables a screen reads, where
+  // it holds every table the screen needs a collection for, a chart's effect's
+  // among them, as it did when the markup reader projected one table list.
+  const needed = JSON.stringify(screenEntities(
+    [{ table: "match" }],
+    [{ writes: [{ table: "score", op: "create" }, { table: "match", op: "update" }] }],
+    new Map([["match", "Match"], ["score", "Score"]]),
+  ));
+  if (needed !== '["Match","Score"]') {
+    failed++;
+    console.error(`FAIL a screen's facts name the tables a chart's effects write:\n  got  ${needed}\n  want ["Match","Score"]`);
+  }
+  if (!block.includes(wantBlock)) {
+    failed++;
+    console.error(`FAIL a screen's reads and writes render as rows:\n  got  ${JSON.stringify(block)}\n  want ${JSON.stringify(wantBlock)}`);
   }
   // The element must exist; what it cites may be nothing.
   const acceptsCases: { name: string; elements: string[]; irOf: Record<string, string>; want?: string; throws?: string }[] = [
@@ -1025,7 +1100,7 @@ function selfTest(): void {
   if (failed > 0) Deno.exit(1);
   console.error(
     `derive self-test: ${notes.length + scans.length + maps.length + 1} derivation cases, ` +
-      "the cel fixtures, the style scanner, the jessie scanner, the validation resolver, the tree reader and the i18n template scanner passed",
+      "the cel fixtures, the style scanner, the jessie scanner, the validation resolver, the reads and writes, the tree reader and the i18n template scanner passed",
   );
 }
 

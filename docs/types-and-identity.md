@@ -54,7 +54,9 @@ types; `tsvector` is an index, not a value anyone states
 
 ## The type table
 
-`types.cue` states each type once, as data: its PostgreSQL domain, the base
+`types.cue` states each type once, as data: the PostgreSQL type a column of it
+is built over (`pg`), how the column holds it (`column`, below), its domain
+where it has one (`sql`), whether Electric compares it (`subset`), the base
 names a transport may report it under, its JSON kind, the canonical `pattern`
 (written in the intersection of RE2 and JavaScript: no lookaround, no
 backreference), its range, its `order`, and `beyond`, the checks a pattern
@@ -79,14 +81,50 @@ Every reader judges by that entry:
   client accepts as canonical the pattern admits, and whatever the pattern
   admits and the client refuses is named by a `beyond` check.
 
+## A domain only where the output needs one
+
+PostgREST is the boundary, and it follows the robustness principle: liberal in
+what it accepts, strict in what it sends. So a type needs a `portable_*` domain
+only where Postgres's default JSON output is not the canonical spelling, and
+the domain carries the representation functions PostgREST calls as casts. That
+is six types, each `column: "domain"`: `int64` (a bare number, where canonical
+is a string), `decimal` (`1.50`, where canonical is `"1.5"`), `timestamp`
+(`+00:00` and no micros), `time` (no fraction), `duration` (`01:00:00`, where
+canonical is `PT3600S`) and `bytes` (`\x01`, where canonical is base64).
+
+A JSON null is absence, for `json` as for every other type: PostgREST hands a
+column with no cast a JSON null as SQL NULL, `900_seed.sql` writes SQL NULL,
+the clients read either as `null`, and a required `json` field refuses a null
+as a required field of any type does. A domain could read that null as the json
+value null instead (a `CALLED ON NULL INPUT` representation), and it is not
+kept: it would make `json` the one type whose null is a value, a required
+`json` field the one that takes a null, and the stored value one that no
+client can tell from absence.
+
+Every other type is a column of its `pg` type. `string`, `bool`, `int32` and
+`uuid` are bare (`plain`); `double` (finite), `date` (in range), `timezone` (in
+the tz database), `json` and `geojson` carry a named column `CHECK` calling
+`portable_<type>_valid`, the predicate their domain carried, written once in
+`004_types.sql` (`checked`). Input PostgREST no longer refuses, `"1"` into an
+`int32` or an uppercase `uuid`, is accepted on purpose; the output stays
+canonical, which `type-sql.integration.test.ts` measures for all fifteen.
+
+A domain is opaque to Electric's where-clause evaluator: `"home_score" = 1`
+fails "Could not select an operator overload", and no cast out of a domain
+parses. Measured against Electric 1.8.0, every base column but a json or
+geojson one compares, so `subset` is true for those seven and for no domain, and the
+integration test holds each entry to Electric. A table whose views filter on a
+column `subset` refuses syncs whole ([screens](screens.md#the-reads-decide-how-a-table-syncs)).
+DuckDB reads a base column as its own type rather than as text.
+
 ## Where each boundary makes a value canonical
 
 | holder | hook | what it does |
 |---|---|---|
-| PostgreSQL | `type-sql.ts` → `004_types.sql` | a `portable_*` domain with its `CHECK` per type, and the representation functions PostgREST calls as casts at its boundary |
+| PostgreSQL | `type-sql.ts` → `004_types.sql` | a `portable_*` domain and the representation functions PostgREST calls as casts, for the six types whose default output is not canonical; a `portable_<type>_valid` predicate each `checked` column's `CHECK` calls |
 | Electric | the mecha client's `normalizeRow(t.fields, value, "electric")`, in the shape's `write` wrapper | canonicalizes each synced row on arrival, before it can become an optimistic original or reach the outbox |
 | a write from the terminal | the mecha client's `normalizeRow` | canonicalizes before the write, and a value it cannot canonicalize throws |
-| the bus | `assets/cdc-types.blobl`, prepended to every pipeline | turns Conduit's Postgres text output into canonical form; an unexpected spelling throws, and the pipeline logs and drops the event |
+| the bus | `assets/cdc-types.blobl`, prepended to every pipeline | turns Conduit's output into canonical form: a domain as Postgres's text, a base column as Conduit decodes it natively; an unexpected spelling throws, and the pipeline logs and drops the event |
 | the lake | `libraries/mecha/packages/lake/src/lake-types.ts` | projects typed columns inside DuckDB, before Arrow builds JavaScript values |
 | the emitted `.proto` | `type-proto.ts` | `timestamp` and `duration` as well-known types, `json` and `geojson` as `Value`, the rest as scalars or strings |
 
@@ -196,7 +234,11 @@ shape fingerprint among them, is [pending](../PENDING.md#types-and-identity).
   validates RFC 3339, not the canonical form; `time.Duration` validates Go's
   syntax (`1h30m`), not the RFC's.
 - **RFC 8785 for `json`.** Nothing canonicalizes key order: the client keeps the
-  order it was handed and the domain's base type keeps its text.
+  order it was handed and the `json` column keeps its text.
+- **A domain for every type.** It made input strict at PostgREST, at the price
+  of a column no Electric subset can compare and DuckDB reads as text. Where
+  the default output is already canonical, the domain bought only the input
+  check, and the robustness principle says not to buy that at the boundary.
 - **Encodings as types** (`sint32`, `fixed64`, `uint32`): the same values with
   different wire bytes. An encoding is a construction, not a statement.
 - **`email` and `uri` as types.** They have an RFC syntax and no canonical form

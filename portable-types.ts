@@ -54,6 +54,12 @@ export type CarrierCheck = TypeCheck
 
 /** One type entry, as the caller's type table states it. */
 export type TypeEntry = {
+  /** The PostgreSQL type a column of it is built over. */
+  pg: string
+  /** A PostgreSQL domain, a base column under a CHECK, or a bare base column. */
+  column: "domain" | "checked" | "plain"
+  /** Whether Electric's where-clause evaluator compares a column of it. */
+  subset: boolean
   sql?: string
   base: string[]
   json: "string" | "number" | "boolean" | "value"

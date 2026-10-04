@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "test:integration": "deno test --no-config --allow-read --allow-write --allow-run=docker,cue --allow-net=127.0.0.1 type-sql.integration.test.ts cdc-types.integration.test.ts"
+    "test:integration": "deno test --no-config --allow-read --allow-write --allow-run=docker,cue --allow-net=127.0.0.1 type-sql.integration.test.ts cdc-types.integration.test.ts caddy-fault.integration.test.ts"
   },
   "imports": {
     "@david/dax": "jsr:@david/dax@0.50.0"

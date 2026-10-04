@@ -57,7 +57,15 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
       initdbWasmModule: await WebAssembly.compile(initdb),
       fsBundle: new Blob([data]),
     })
-    cluster = await createCluster({ db, sql, tables, log: console.error })
+    // A change the cluster lost leaves a table no read can trust again, so
+    // the page dies of it where its boot would.
+    cluster = await createCluster({
+      db, sql, tables, log: console.error,
+      fail: (e) => {
+        document.body.textContent = `page failed: ${e.message}`
+        reportError(e)
+      },
+    })
   }
   createShell({ config: './shell.json', mount: document.getElementById('app') })
 })().catch((e) => {
