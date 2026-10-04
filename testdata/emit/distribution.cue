@@ -32,3 +32,7 @@ externalSaytSources:   _externalBuild.targets.build.srcs.defaultGlobs["pronto-sa
 // build image without them refuses the program.
 _seededBuild: (pronto.#DefaultBuild & {code: _code & {state: seed: src: "seed.json"}, loop: _loop, cluster: _cluster}).out.project
 seedSources: list.Contains(_seededBuild.targets.build.srcs.globs, "seed.json") & true
+// Installed apps verify releases as the monorepo's do: off, globally and per
+// backend, since mise reads attestations from a rate-limited GitHub API.
+_settings: _project.mise.settings
+attestationsOff: [_settings.github_attestations, _settings.slsa, _settings.github.slsa, _settings.github.github_attestations, _settings.aqua.github_attestations, _settings.aqua.cosign, _settings.aqua.slsa, _settings.aqua.minisign] & [false, false, false, false, false, false, false, false]

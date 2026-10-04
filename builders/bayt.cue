@@ -30,10 +30,12 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.58.0", ...}
+	tools: {"github:bonisoft3/bayt": "0.58.1", ...}
 	say: say: {
 		...
-		generate: rulemap: {"auto-bayt": priority: 2, ...}
+		// The commands restated: a rule the config names replaces sayt's
+		// builtin of that name, so the priority alone would leave bayt unrun.
+		generate: rulemap: {"auto-bayt": {priority: 2, cmds: [{use: "./auto-bayt.nu", do: "auto-bayt"}]}, ...}
 	}
 }
 
@@ -117,6 +119,16 @@ import (
 	}
 	_browser: len([for _, c in B.checks if c.browser {c}]) > 0
 
+	// An installed app takes mecha's images by name (#DefaultCluster), and each
+	// build that starts from one resolves the name through a context switch:
+	// the pinned release, unless MONOREPO_COMPOSE_MODE says to build it from
+	// mecha's sources, whose fragments mecha/service.yaml includes from where
+	// MONOREPO_MECHA_PATH says. Neither variable is set outside the monorepo.
+	_mechaContexts: {for s, pin in mecha.published {
+		"libraries_mecha-\(s)-image": "${MONOREPO_COMPOSE_MODE:-docker-image://\(pin)}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-\(s)-image}"
+	}}
+	_mechaRuntime: mecha.#Runtime & {"project": project.name, "cluster": B.cluster}
+
 	project: core.#project & {
 		dir: [if B.meta.local {B.meta.dir}, "."][0]
 		if !B.meta.local {name: B.meta.app}
@@ -124,7 +136,17 @@ import (
 		// compose project keep.
 		if B.meta.local && B.meta.dir == "" {name: "apps_\(B.meta.app)"}
 
-		targets: (mecha.#Runtime & {"project": project.name, "cluster": B.cluster}).targets
+		targets: B._mechaRuntime.targets
+		if !B.meta.local {
+			compose: includes: ["mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"]
+			targets: {for k, t in B._mechaRuntime.targets
+				if t != null && t.dockerfile != _|_ && t.dockerfile.from != null
+				if t.dockerfile.from.name != _|_
+				if B._mechaContexts[t.dockerfile.from.name] != _|_ {
+					(k): compose: build: additional_contexts: (t.dockerfile.from.name): B._mechaContexts[t.dockerfile.from.name]
+				}
+			}
+		}
 		targets: {
 			"setup": sayt.setup & {
 				if B.meta.local {dockerfile: from: ref: "workspaceroot:setup"}
@@ -143,7 +165,7 @@ import (
 				// because the fingerprint is what decides a rebuild, and the ledger
 				// is pinned by nothing else — ir.html at least moves program.cue's
 				// meta.ir.sha256 when it changes.
-				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**", if !B.meta.local {".omnishell/**"}, if B.meta.seed != _|_ {B.meta.seed}]
+				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**", if !B.meta.local {".omnishell/**"}, if !B.meta.local {"saytw"}, if B.meta.seed != _|_ {B.meta.seed}]
 				cmd: builtin: do:      B.meta.buildCmd
 				dockerfile: from: ref: ":setup"
 			}
@@ -212,8 +234,9 @@ import (
 			// socket; a daemon of its own would hold none of those images. The
 			// image is setup's plus the app's pinned toolchain (cue, deno,
 			// duckdb), the docker CLI, and, in the monorepo, the module the
-			// program evaluates in.
-			if B.cluster.capabilities.server {
+			// program evaluates in. Not yet for an installed app, which the
+			// loop does not replay either.
+			if B.cluster.capabilities.server && B.meta.local {
 				"replay": sayt.integrate & mise.install & B._program & {
 					deps: [":setup"]
 					// The generated compose names the images and the database's
@@ -281,7 +304,8 @@ import (
 				"check-\(name)": sayt.integrate & mise.install & {
 					// The plane is an image-only dep, as visual lint's is.
 					deps: [base, ":launch:outs"]
-					srcs: globs: list.Concat([["tests/**"], c.srcs])
+					// An installed app's tests import omnishell's materialized tree.
+					srcs: globs: list.Concat([["tests/**"], [if !B.meta.local {".omnishell/**"}], c.srcs])
 					dockerfile: {
 						from: ref: base
 						if B.meta.local {

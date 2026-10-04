@@ -25,7 +25,7 @@ say:
       distribution:
         priority: -1
         cmds:
-          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env bootstrap_test.ts"
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env bootstrap_test.ts layout_test.ts"
       types:
         priority: -1
         cmds:

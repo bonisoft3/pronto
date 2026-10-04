@@ -209,7 +209,9 @@ function pathFrom(base: string, target: string): string {
  * states the terminal's: this pronto as the app names it, the app's directory
  * under its CUE module's root, and that root and the runtime's directory as the
  * cluster names them. A pronto outside that module is an installed one, whose
- * program_pronto.cue setup writes. */
+ * program_pronto.cue setup writes; an app declaring an installed pronto keeps
+ * that layout whichever pronto writes it, as an app built in its own
+ * repository does inside the monorepo. */
 async function writeLayout(): Promise<void> {
   const real = (p: string | URL) => Deno.realPathSync(p).replaceAll("\\", "/").replace(/\/+$/, "");
   const app = real(appDir);
@@ -220,6 +222,9 @@ async function writeLayout(): Promise<void> {
     root = root.slice(0, root.lastIndexOf("/"));
   }
   if (!pronto.startsWith(`${root}/`)) return;
+  const path = `${appDir}/program_pronto.cue`;
+  const declared = await ifMissing(Deno.readTextFile(path), "");
+  if (/^loop:\s*surface:\s*sources:\s*pronto:\s*""\s*$/m.test(declared)) return;
   const program = await Deno.readTextFile(`${appDir}/program.cue`);
   const named = pathFrom(app, pronto);
   if (!named.endsWith("plugins/pronto")) fail(`pronto at ${pronto} is not a runtime's plugins/pronto`);
@@ -236,8 +241,7 @@ async function writeLayout(): Promise<void> {
     `cluster: meta: runtime: ${JSON.stringify(named.slice(0, -"plugins/pronto".length))}`,
     "",
   ].join("\n");
-  const path = `${appDir}/program_pronto.cue`;
-  if ((await ifMissing(Deno.readTextFile(path), null)) !== text) await Deno.writeTextFile(path, text);
+  if (declared !== text) await Deno.writeTextFile(path, text);
 }
 
 // Markup-derived declarations regenerate before the export that reads them —

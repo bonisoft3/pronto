@@ -1504,7 +1504,7 @@ _cdcTableField: "__table"
 					}
 				}
 			}
-			buildCmd: [if sources.pronto != "" {"deno run --allow-read --allow-write=. --allow-run --allow-env \(sources.pronto)/write.ts ."}, "sayt build"][0]
+			buildCmd: [if sources.pronto != "" {"deno run --allow-read --allow-write=. --allow-run --allow-env \(sources.pronto)/write.ts ."}, "./saytw build"][0]
 			testCmd: "cue vet -c ./..."
 			pipelineFiles: [for _, p in D.code.state.pipelines {"docker/\(D.code.meta.name)-\(p.name).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop
@@ -1557,11 +1557,18 @@ _cdcTableField: "__table"
 					// In the build graph's replay service, whose verdict is its exit
 					// code. A project of its own: --remove-orphans under the runtime's
 					// would take the runtime down, as nothing of it is in this closure.
-					replay: {
-						verb:     "integrate"
-						priority: 1
-						cmds: [(omnishell.#ClosureUp & {project: "\(D.code.meta.name)-replay", target: "replay"}).out]
-						note: "Pronto compiler replay"
+					//
+					// Not yet for an installed app: in the monorepo its image would
+					// lack the module the program evaluates in and the runtime at
+					// HEAD, which images take from neither mise.local.toml nor the
+					// root.
+					if sources.pronto != "" {
+						replay: {
+							verb:     "integrate"
+							priority: 1
+							cmds: [(omnishell.#ClosureUp & {project: "\(D.code.meta.name)-replay", target: "replay"}).out]
+							note: "Pronto compiler replay"
+						}
 					}
 				}
 
@@ -1677,6 +1684,11 @@ _cdcTableField: "__table"
 #DefaultCluster: D={
 	code: #App
 	statics: [...mecha.#Static]
+	// Whether the app is built in the runtime's workspace, as #DefaultBuild's
+	// meta.local: an installed app takes mecha's images by name, which its
+	// build resolves to the pinned release or, in the monorepo, to mecha's
+	// sources (builders/bayt.cue).
+	local: *true | bool
 
 	// The review ladder's artifacts, served beside the app by caddy's catch-all
 	// /srv root. One directory is load-bearing, not tidiness: brief.html links
@@ -1718,9 +1730,20 @@ _cdcTableField: "__table"
 	out: mecha.#Cluster & {
 		meta: {
 			app: D.code.meta.name
+			// An installed app is its workspace's root, and its runtime sits where
+			// mise put it, outside the app: every static is then the app's own
+			// file (omnishell's materialized into .omnishell/), fingerprinted and
+			// copied from the build context.
+			if !D.local {
+				root:    ""
+				runtime: "../"
+			}
 			statics: list.Concat([D.statics, D._ladder, D._crawl, _envelope.statics])
-			// mecha's images, reached through the monorepo's bayt federation.
-			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute"] {(s): {ref: "libraries_mecha:\(s)-image"}}}
+			// mecha's images, reached through the monorepo's bayt federation,
+			// or by name where the app is installed.
+			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute"] {
+				(s): [if D.local {{ref: "libraries_mecha:\(s)-image"}}, {name: "libraries_mecha-\(s)-image"}][0]
+			}}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth
 		// block; the blob plane follows the program's flag; the data plane
@@ -2225,6 +2248,22 @@ _cdcTableField: "__table"
 	cluster: capabilities: server: E._serverOn
 
 	files: [string]: #File
+	// The compose files an installed app's closures include, one per
+	// MONOREPO_COMPOSE_MODE (builders/bayt.cue): `service` builds mecha's images
+	// from its fragments, where MONOREPO_MECHA_PATH puts mecha's tree; unset
+	// pulls the pinned ones and needs no service.
+	if !E.build.meta.local {
+		files: {
+			"mecha/service.yaml": {
+				format: "yaml"
+				data: include: [for s, _ in mecha.published {"../${MONOREPO_MECHA_PATH}/.bayt/compose.\(s)-image.yaml"}]
+			}
+			"mecha/docker-image.yaml": {
+				format: "yaml"
+				data: {}
+			}
+		}
+	}
 	files: {
 		"schema/entities.proto": {
 			format: "proto"
@@ -3020,7 +3059,9 @@ _cdcTableField: "__table"
 		// from the app directory with no -f.
 		"compose.yaml": {
 			format: "yaml"
-			data: include: [{path: "./.bayt/compose.yaml"}]
+			// bayt's aggregate holds no closure, so the project's own includes,
+			// mecha's mode file among them, are restated here.
+			data: include: [{path: "./.bayt/compose.yaml"}, for i in E.build.project.compose.includes {path: i}]
 		}
 		"bayt.json": {
 			format: "json"

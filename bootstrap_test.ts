@@ -28,11 +28,11 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
       return decoder.decode(result.stdout);
     }
     const modules = [
-      ["plugins/bayt", "bayt", "0.58.0"],
+      ["plugins/bayt", "bayt", "0.58.1"],
       ["plugins/sayt", "sayt", "0.42.0"],
       ["libraries/mecha", "mecha", "0.3.1"],
-      ["plugins/omnishell", "omnishell", "0.4.0"],
-      ["plugins/pronto", "pronto", "0.5.0"],
+      ["plugins/omnishell", "omnishell", "0.4.1"],
+      ["plugins/pronto", "pronto", "0.5.1"],
     ];
     async function copy(source: string, target: string): Promise<void> {
       await Deno.mkdir(target, { recursive: true });
@@ -62,7 +62,7 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
     const app = join(scratch, "consumer with spaces");
     await Deno.mkdir(app);
     await cue(app, ["mod", "init", "example.com/consumer@v0"]);
-    await cue(app, ["mod", "get", "github.com/bonisoft3/pronto@v0.5.0"]);
+    await cue(app, ["mod", "get", "github.com/bonisoft3/pronto@v0.5.1"]);
     await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"]);
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
@@ -107,6 +107,7 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
         await cue(app, ["cmd", "generate", "./pronto"]);
         const merged = await projectSay(app, { say: { generate: { rulemap: { pronto: { priority: 1 } } } } }) as {say: {generate: {rulemap: Record<string, {priority: number}>}}};
         assert(merged.say.generate.rulemap["auto-bayt"].priority === 2, "writer dropped builder ordering");
+        assert((await Deno.readTextFile(join(app, ".say.yaml"))).includes("do: auto-bayt"), "builder ordering dropped bayt's generator");
         assert(merged.say.generate.rulemap.custom.priority === 3, "writer dropped the consumer rule");
       }
       const fixture = join(repo, "apps/jsfb");

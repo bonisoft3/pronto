@@ -6,7 +6,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.5.0"
+#Version:     "0.5.1"
 #SaytVersion: "0.42.0"
 
 // The mise tools that carry the three trees a browser bundle reads, for a
@@ -69,7 +69,18 @@ import (
 	tools:   #Tools
 	mise: {
 		...
-		settings: {locked: true, lockfile: true}
+		settings: {
+			locked:   true
+			lockfile: true
+			// Releases are not verified against GitHub's attestation API, which
+			// is rate-limited unauthenticated, as in every monorepo app. The
+			// global toggles go alongside the backend-scoped ones, which do not
+			// override them.
+			github_attestations: false
+			slsa:                false
+			github: {slsa: false, github_attestations: false}
+			aqua: {github_attestations: false, cosign: false, slsa: false, minisign: false}
+		}
 		tools: P.tools
 	}
 	_run: #Run & {runtime: "\(P.runtime)"}
