@@ -30,7 +30,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.52.1", ...}
+	tools: {"github:bonisoft3/bayt": "0.58.0", ...}
 	say: say: {
 		...
 		generate: rulemap: {"auto-bayt": priority: 2, ...}

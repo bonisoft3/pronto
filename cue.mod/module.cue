@@ -26,19 +26,19 @@ source: {
 // fails when one of these versions falls behind.
 deps: {
 	"github.com/bonisoft3/bayt@v0": {
-		v:       "v0.57.0"
+		v:       "v0.58.0"
 		default: true
 	}
 	"github.com/bonisoft3/mecha@v0": {
-		v:       "v0.2.0"
+		v:       "v0.3.1"
 		default: true
 	}
 	"github.com/bonisoft3/omnishell@v0": {
-		v:       "v0.3.0"
+		v:       "v0.4.0"
 		default: true
 	}
 	"github.com/bonisoft3/sayt@v0": {
-		v:       "v0.41.1"
+		v:       "v0.42.0"
 		default: true
 	}
 }
