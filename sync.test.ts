@@ -2,7 +2,7 @@
 // of cue over testdata/emit's #syncCase, because a value that fails to unify
 // cannot sit in the package `cue vet` holds.
 
-const dir = new URL("./testdata/emit", import.meta.url).pathname;
+const dir = new URL("./testdata/emit", import.meta.url);
 
 function goal(goal: string, field = "Goal"): { ok: boolean; out: string } {
   const expr = `(#syncCase & {reads: [_view], goal: ${goal}}).app.state.entities.${field}.sync`;

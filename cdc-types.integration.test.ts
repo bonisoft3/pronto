@@ -97,7 +97,7 @@ Deno.test("the asset handles exactly the types the emitter admits", async () => 
   const dispatch = [...(await Deno.readTextFile(ASSET)).matchAll(/this\.type == "([a-z0-9]+)"/g)].map((m) => m[1]);
   const exported = new Deno.Command("cue", {
     args: ["export", ".", "-e", "_busTypes"],
-    cwd: new URL(".", import.meta.url).pathname,
+    cwd: new URL(".", import.meta.url),
     stdout: "piped",
     stderr: "piped",
   }).outputSync();

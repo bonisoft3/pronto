@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { decodeBase64, encodeBase64 } from "jsr:@std/encoding@1.0.7/base64";
 
 async function exportCue(appCue: string): Promise<{ files: Record<string, { text?: string; data?: unknown }>; statics: { file: string; target: string; watch: boolean }[] }> {
@@ -429,7 +430,7 @@ Deno.test("path traversal with .. in wellKnown is refused at compile time", asyn
 Deno.test("bundle.ts inlines manifest.webmanifest and its local icons into standalone single-file bundle", async () => {
   const app = await Deno.makeTempDir({ prefix: "bundle-envelope-test-" });
   try {
-    const here = path.dirname(new URL(import.meta.url).pathname);
+    const here = path.dirname(fileURLToPath(import.meta.url));
     const repo = path.resolve(here, "../..");
 
     await Deno.mkdir(path.join(app, "shell"), { recursive: true });
@@ -507,7 +508,7 @@ Deno.test("bundle.ts inlines manifest.webmanifest and its local icons into stand
 Deno.test("bundle.ts fails loudly when an inlined icon file is missing on disk rather than falling back or swallowing", async () => {
   const app = await Deno.makeTempDir({ prefix: "bundle-missing-icon-test-" });
   try {
-    const here = path.dirname(new URL(import.meta.url).pathname);
+    const here = path.dirname(fileURLToPath(import.meta.url));
     const repo = path.resolve(here, "../..");
 
     await Deno.mkdir(path.join(app, "shell"), { recursive: true });
@@ -788,7 +789,7 @@ Deno.test("remote and protocol-relative favicons are derived into manifest icons
 Deno.test("bundle.ts preserves absolute start_url and scope under --base", async () => {
   const app = await Deno.makeTempDir({ prefix: "bundle-manifest-base-test-" });
   try {
-    const here = path.dirname(new URL(import.meta.url).pathname);
+    const here = path.dirname(fileURLToPath(import.meta.url));
     const repo = path.resolve(here, "../..");
 
     await Deno.mkdir(path.join(app, "shell"), { recursive: true });

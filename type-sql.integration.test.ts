@@ -63,7 +63,7 @@ Deno.test({ name: "PostgREST answers every type canonically, and Electric compar
     args: ["export", ".", "--out", "json", "-e",
       `[for t in ${JSON.stringify(types)} {(#colSql & {f: {name: "\\(t)_value", type: t, required: true, if t == "decimal" {precision: 18, scale: 2}}, table: "type_http_smoke"}).out}, ` +
         `(#colSql & {f: {name: "json_optional", type: "json", required: false}, table: "type_http_smoke"}).out]`],
-    cwd: new URL(".", import.meta.url).pathname,
+    cwd: new URL(".", import.meta.url),
     stdout: "piped",
     stderr: "piped",
   }).output();
