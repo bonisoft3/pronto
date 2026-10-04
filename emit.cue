@@ -1634,7 +1634,6 @@ _cdcTableField: "__table"
 			if local {pronto: D.loop.surface.sources.pronto}
 			buildCmd: D.loop.surface.buildCmd
 			testCmd:  D.loop.surface.testCmd
-			if D.code.state.seed != _|_ {seed: D.code.state.seed.src}
 		}
 	}
 }

@@ -52,42 +52,58 @@ import (
 		pronto: *"../../plugins/pronto" | string
 		buildCmd: string
 		testCmd:  string
-		// The held seed rows (state.seed.src), which the writer judges and
-		// renders into the seed migration.
-		seed?: string
 	}
 	// The runtime, as the cluster states it: one bayt target per service,
 	// with bare names, lowered into this project by mecha's own #Runtime.
 	cluster: mecha.#Cluster
 
-	// What the program itself reads: every cue file of the package, the
-	// bayt.json its bayt.cue embeds, and the DESIGN.md program.cue embeds. Each
-	// stage that runs cue over the app carries this set in the framework-side
-	// slot, so a stage-level `globs` adds to it rather than replacing it.
-	_program: srcs: defaultGlobs: {
-		// Ordered, so the emitted COPY line does not follow the key names.
-		"pronto-cue": {glob: "*.cue", priority: 1}
-		"pronto-bayt": {glob: "bayt.json", priority: 2}
-		"pronto-design": {glob: "DESIGN.md", priority: 3}
-		if !B.meta.local {
-			"pronto-module": {glob: "cue.mod/**", priority: 4}
-			"pronto-config": {glob: "pronto/**", priority: 5}
-			"pronto-sayt": {glob: ".say.yaml", priority: 6}
+	// A stage that runs cue over the app: it starts from the image the program
+	// evaluates in and reads the app's whole tree, since its subpackages, embeds
+	// and derived sources are its own to add. The set sits in the
+	// framework-side slot, so a stage-level `globs` adds to it.
+	_program: {
+		deps: [B._base]
+		dockerfile: from: ref: B._base
+		srcs: {
+			defaultGlobs: "pronto-tree": {glob: "**"}
+			// Generated, the checks' own, or local to a checkout.
+			defaultExclude: {
+				"pronto-bayt": *{glob: ".bayt/**"} | null
+				"pronto-tests": {glob: "tests/**"}
+				"pronto-task": {glob: ".task/**"}
+				"pronto-node": {glob: "**/node_modules/**"}
+			}
 		}
-		// What program.cue embeds besides DESIGN.md.
-		"pronto-pipelines": {glob: "[p]ipelines/*.blobl", priority: 7}
-		"pronto-messages": {glob: "[m]essages/*.json", priority: 8}
-		"pronto-boot": {glob: "[s]hell/boot.js", priority: 9}
 	}
 
 	// Where pronto's scripts sit as a target's command sees them: the
 	// workspace's tree, or the mirror's installed release.
 	_pronto: [if B.meta.local {B.meta.pronto}, "$$(mise where github:bonisoft3/pronto)"][0]
+	// The image the program evaluates in.
+	_base: [if B.meta.local {":program"}, ":setup"][0]
 	// From the app up to the workspace root, the root as compose sees it from
 	// .bayt/, and the runtime's directory under the root.
 	_up: [if B.meta.dir != "" {strings.Repeat("../", len(strings.Split(B.meta.dir, "/")))}, ""][0]
 	_root: strings.TrimSuffix("../\(_up)", "/")
 	_runtime: strings.TrimPrefix(strings.TrimSuffix(B.meta.pronto, "plugins/pronto"), _up)
+	// In the monorepo, workspace trees copied to where the app's relative paths
+	// find them: `_top` from the root, `_paths` from the runtime's directory.
+	// Compose resolves the root context from .bayt/, not the app directory.
+	_fromRoot: {
+		_top: *[] | [...string]
+		_paths: [...string]
+		_exclude: *[] | [...string]
+		dockerfile: copy: [{
+			from: name: "root"
+			srcs: list.Concat([_top, [for p in _paths {B._runtime + p}]])
+			dst:     "/monorepo/"
+			parents: true
+			exclude: _exclude
+		}]
+		compose: build: additional_contexts: root: B._root
+	}
+	// The trees an app's tests import.
+	_testTrees: ["plugins/omnishell", "libraries/mecha"]
 
 	// The app's own integrate checks that run beside the stack: a container on
 	// the runtime's compose network, reaching the app at the TLS door, whose
@@ -170,29 +186,37 @@ import (
 			}
 		}
 		targets: {
-			"setup": sayt.setup & {
+			// The app's pinned toolchain, on the workspace's setup in the
+			// monorepo.
+			"setup": sayt.setup & mise.install & {
 				if B.meta.local {dockerfile: from: ref: "workspaceroot:setup"}
-				if !B.meta.local {
-					mise.install
-					dockerfile: core.nubox
+				if !B.meta.local {dockerfile: core.nubox}
+			}
+			// The module the program evaluates in, after the toolchain so an edit
+			// to it leaves the install cached. A mirror's setup carries its own.
+			if B.meta.local {
+				"program": sayt.setup & (B._fromRoot & {
+					_top: ["cue.mod"]
+					_paths: ["plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
+					_exclude: ["**/docs/**", "**/testdata/**", "**/*_test.*", "**/*.test.*"]
+				}) & {
+					deps: [":setup"]
+					dockerfile: from: ref: ":setup"
+					// A build stage, never a container.
+					compose: scale: 0
 				}
 			}
+			// lint and test carry their check as the RUN, so a bake runs them and
+			// an unchanged one is a cache hit.
 			"lint": sayt.lint & mise.exec & B._program & {
-				srcs: globs: ["brief.html", "ir.html", "acceptance.md"]
 				cmd: builtin: do: "cue vet ./..."
 			}
 			"build": sayt.build & mise.exec & B._program & {
-				// ir.html and acceptance.md are build inputs: derive.ts reads the
-				// diagrams and the ledger into .pronto/facts.json. Both are listed
-				// because the fingerprint is what decides a rebuild, and the ledger
-				// is pinned by nothing else — ir.html at least moves program.cue's
-				// meta.ir.sha256 when it changes.
-				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**", if !B.meta.local {"saytw"}, if B.meta.seed != _|_ {B.meta.seed}]
-				cmd: builtin: do:      B.meta.buildCmd
-				dockerfile: from: ref: ":setup"
+				cmd: builtin: do: B.meta.buildCmd
 			}
-			"test": sayt.test & mise.exec & B._program & {
-				cmd: builtin: do: B.meta.testCmd
+			"test": sayt.test & mise.exec & {
+				cmd: builtin: do:      B.meta.testCmd
+				dockerfile: from: ref: ":build"
 			}
 			// The cluster's aggregate; the sayt template gives it the entry
 			// flags and the profile `skaffold dev` fires on.
@@ -254,18 +278,16 @@ import (
 			// The migration replay starts throwaway databases from the images the
 			// runtime was built into, so it drives the host's daemon through its
 			// socket; a daemon of its own would hold none of those images. The
-			// image is setup's plus the app's pinned toolchain (cue, deno,
-			// duckdb), the docker CLI, and, in the monorepo, the module the
-			// program evaluates in. Not yet for an installed app, which the
-			// loop does not replay either.
+			// image is the program's plus the docker CLI. Not yet for an installed
+			// app, which the loop does not replay either.
 			if B.cluster.capabilities.server && B.meta.local {
-				"replay": sayt.integrate & mise.install & B._program & {
-					deps: [":setup"]
-					// The generated compose names the images and the database's
-					// settings; the migrations are where findings point.
-					srcs: globs: [".bayt/compose*.yaml", "services/database/migrations/**"]
+				// The generated compose names the images and the database's
+				// settings, and the app's includes the root's.
+				"replay": sayt.integrate & B._program & B._fromRoot & {
+					_paths: [".bayt"]
+					srcs: defaultExclude: "pronto-bayt": null
+					cmd: "builtin": null
 					dockerfile: {
-						from: ref: ":setup"
 						defaultPreamble: {
 							"docker": {priority: -10, copy: {
 								from: {name: core.lock.images.docker}
@@ -281,19 +303,8 @@ import (
 							// fetches a CLI through mise on every run.
 							"docker-path": {priority: -8, line: "ENV PATH=/usr/local/bin:$PATH"}
 						}
-						// The compose the replay reads includes the root's and mecha's.
-						if B.meta.local {
-							copy: [{
-								from: name: "root"
-								srcs: ["cue.mod", for p in [".bayt", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"] {B._runtime + p}]
-								dst:     "/monorepo/"
-								parents: true
-							}]
-						}
 					}
 					compose: {
-						// Compose resolves this from .bayt/, not the app directory.
-						if B.meta.local {build: additional_contexts: root: B._root}
 						volumes: ["//var/run/docker.sock:/var/run/docker.sock"]
 						// The tag the host's images carry, which the compose the
 						// replay reads interpolates into their names.
@@ -306,7 +317,7 @@ import (
 			// Playwright's base with mise: its browsers need the libraries of the
 			// distribution they were built for, so the toolchain comes to them.
 			if B._browser {
-				"browser": sayt.setup & {
+				"browser": sayt.setup & mise.install & {
 					dockerfile: {
 						from: name: core.lock.images.playwright
 						defaultPreamble: {
@@ -315,28 +326,19 @@ import (
 							"mise-trusted": {priority: -8, line: "ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo"}
 						}
 					}
-					cmd: "builtin": null
 				}
 			}
 			for name, c in B.checks {
 				let base = [if c.browser {":browser"}, ":setup"][0]
-				// The image is the base plus the app's pinned toolchain, and, in
-				// the monorepo, the trees the tests import, where their relative
-				// imports find them.
-				"check-\(name)": sayt.integrate & mise.install & {
+				// The image is the base, which carries the toolchain, plus, in the
+				// monorepo, the trees the tests import.
+				"check-\(name)": sayt.integrate & {
+					if B.meta.local {B._fromRoot & {_paths: B._testTrees}}
 					// The plane is an image-only dep, as visual lint's is.
 					deps: [base, ":launch:outs"]
 					srcs: globs: list.Concat([["tests/**"], c.srcs])
 					dockerfile: {
 						from: ref: base
-						if B.meta.local {
-							copy: [{
-								from: name: "root"
-								srcs: [for p in ["plugins/omnishell", "libraries/mecha"] {B._runtime + p}]
-								dst:     "/monorepo/"
-								parents: true
-							}]
-						}
 						// An installed app's tests import omnishell from /omnishell
 						// (tests/deno.json maps `omnishell/` there).
 						if !B.meta.local {
@@ -344,8 +346,6 @@ import (
 						}
 					}
 					compose: {
-						// Compose resolves this from .bayt/, not the app directory.
-						if B.meta.local {build: additional_contexts: root: B._root}
 						if !B.meta.local {build: additional_contexts: (B._omnishell): B._omnishellContext}
 						environment: {
 							// The TLS door, whose certificate Caddy's own CA signs.

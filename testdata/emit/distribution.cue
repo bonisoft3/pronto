@@ -1,7 +1,6 @@
 package emit
 
 import (
-	"list"
 	"strings"
 	pronto "github.com/bonisoft3/pronto"
 	dist "github.com/bonisoft3/pronto/distribution"
@@ -25,13 +24,12 @@ externalDirectory:   _externalBuild.dir & "."
 externalProjectName: (_externalBuild.name == _code.meta.name) & true
 localProjectName: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.name == "apps_\(_code.meta.name)") & true
 externalVisualContext: (_externalBuild.targets.integrate.compose.build.additional_contexts.root == _|_) & true
-externalModuleSources: _externalBuild.targets.build.srcs.defaultGlobs["pronto-module"].glob & "cue.mod/**"
-externalConfigSources: _externalBuild.targets.build.srcs.defaultGlobs["pronto-config"].glob & "pronto/**"
-externalSaytSources:   _externalBuild.targets.build.srcs.defaultGlobs["pronto-sayt"].glob & ".say.yaml"
-// Held seed rows are a build input: the writer judges and renders them, and a
-// build image without them refuses the program.
-_seededBuild: (pronto.#DefaultBuild & {code: _code & {state: seed: src: "seed.json"}, loop: _loop, cluster: _cluster}).out.project
-seedSources: list.Contains(_seededBuild.targets.build.srcs.globs, "seed.json") & true
+// The app's whole tree is the build's input: a list of named files missed the
+// subpackages, embeds and derived sources apps add, and the image refused the
+// program. The module, config, .say.yaml and held seed rows all ride in on it,
+// so what it excludes is pinned: an exclude that took one of them would refuse
+// the program the same way.
+externalTreeExcludes: [for _, e in _externalBuild.targets.build.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", "**/node_modules/**"]
 // Installed apps verify releases as the monorepo's do: off, globally and per
 // backend, since mise reads attestations from a rate-limited GitHub API.
 _settings: _project.mise.settings

@@ -60,7 +60,8 @@ installedNoReplayRule:   (_external.surface.checks.replay == _|_) & true
 // Commands reach sayt through the wrapper the app commits, at its pin.
 installedBuildCmd: _external.surface.buildCmd & "./saytw build"
 localReplayTarget: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.replay != _|_) & true
-installedBuildWrapper: list.Contains(_installedProject.targets.build.srcs.globs, "saytw") & true
+// The wrapper reaches the build image on the app's whole tree.
+installedBuildWrapper: _installedProject.targets.build.srcs.defaultGlobs["pronto-tree"].glob & "**"
 
 // An installed app prerenders with the terminal its mise installed, and
 // type-checks pronto's own modules, not its tests, which import its siblings.
