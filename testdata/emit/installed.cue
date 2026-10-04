@@ -72,3 +72,19 @@ installedTypes:     _external.surface.checks.types.cmds[0] & =~"--exclude \\[\\*
 // PATH: mise makes no shim for a `path:` version.
 _installedTerminal: (pronto.#DefaultTerminal & {code: _code}).out.surface & {runtime: ""}
 installedHandlers: _installedTerminal.checks.handlers.cmds[0] & "use tools.nu [run-mise]; run-mise exec -- omnishell check handlers ."
+// An installed app's pages release installs its pinned tools first.
+_pagesCode: pronto.#App & {
+	for k, v in _code if k != "meta" {(k): v}
+	meta: {
+		for k, v in _code.meta if k != "targets" {(k): v}
+		targets: ["pages"]
+	}
+}
+_pagesInstalled: (pronto.#emit & {
+	code:     _pagesCode
+	cluster:  _installedCluster
+	terminal: _installedTerm
+	loop:     _external
+	build:    _installedBuild
+}).files[".github/workflows/cd.yml"].text
+installedPagesSetup: _pagesInstalled & =~"\n      - run: sayt setup\n      - run: sayt release@pages"

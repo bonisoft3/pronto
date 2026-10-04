@@ -3144,6 +3144,10 @@ _cdcTableField: "__table"
 			// An app at the mirror's root releases from there.
 			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]
 			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
+			// An installed app's tools, the runtime among them, are its pinned
+			// releases, which setup installs; a mirror carrying the runtime in
+			// its tree has nothing to install first.
+			let pagesSetup = [if !E.build.meta.local {"\n      - run: sayt setup"}, ""][0]
 			".github/workflows/cd.yml": {
 				format: "yaml"
 				text:   """
@@ -3188,7 +3192,7 @@ _cdcTableField: "__table"
 					      # The released sayt at the version the toolchain pins, its mise cached.
 					      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
 					        with:
-					          version: v\(distribution.#SaytVersion)
+					          version: v\(distribution.#SaytVersion)\(pagesSetup)
 					      - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"\(pagesDir)
 					      - uses: actions/configure-pages@v5
 					      - uses: actions/upload-pages-artifact@v4
