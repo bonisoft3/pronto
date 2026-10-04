@@ -1053,6 +1053,8 @@ import (
 	// runs.
 	prerender: *false | bool
 	if S.prerender {route: =~"^[^:]*$"}
+	priority?:   number & >=0.0 & <=1.0
+	changefreq?: "always" | "hourly" | "daily" | "weekly" | "monthly" | "yearly" | "never"
 
 	// Rendering strategy:
 	//   ssg: static pre-render at build time (prerender: true)
@@ -1195,6 +1197,68 @@ import (
 }
 
 #Favicon: string | #FaviconItem | [...(string | #FaviconItem)]
+
+#PreconnectItem: {
+	href:         string & !~"\\.\\." & ( =~"^https?://" | =~"^//" )
+	crossorigin?: bool
+}
+
+#Preconnect: string | #PreconnectItem
+
+#ManifestIcon: {
+	src:      string
+	sizes?:   string
+	type?:    string
+	purpose?: *"any" | "maskable" | "monochrome" | "any maskable"
+}
+
+#Manifest: {
+	name?:             string
+	short_name?:       string
+	description?:      string
+	start_url?:        string
+	display?:          *"standalone" | "fullscreen" | "minimal-ui" | "browser"
+	background_color?: string
+	theme_color?:      string
+	icons?:            [...#ManifestIcon]
+	scope?:            string
+	orientation?:      string
+	dir?:              "auto" | "ltr" | "rtl"
+	lang?:             string
+	[string]:          _
+}
+
+#Social: {
+	title?:       string
+	description?: string
+	image?:       string
+	imageAlt?:    string
+	card?:        *"summary_large_image" | "summary" | "app" | "player"
+	type?:        *"website" | string
+	site?:        string
+	creator?:     string
+	url?:         string
+}
+
+#Llms: {
+	text?:     string
+	file?:     string
+	fullText?: string
+	fullFile?: string
+}
+
+#WellKnownItem: string | {
+	text?: string
+	file?: string
+}
+
+#Sitemap: bool | #SitemapConfig
+
+#SitemapConfig: {
+	enabled?: bool
+	exclude?: [...string]
+	extra?:   [...string]
+}
 
 #App: A={
 	state: {
@@ -1340,7 +1404,15 @@ import (
 		// One line for the entry page's meta description. The hash router gives
 		// every route this same description, so it names the app, not a screen.
 		description: string
-		favicon?:    #Favicon
+		favicon?:     #Favicon
+		manifest?:    bool | #Manifest
+		social?:      #Social
+		llms?:        bool | #Llms
+		wellKnown?:   [string]: #WellKnownItem
+		preconnect?:  string | #PreconnectItem | [...(string | #PreconnectItem)]
+		dnsPrefetch?: string | [...string]
+		themeColor?:  string
+		sitemap?:     #Sitemap
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		targets: [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
@@ -1470,6 +1542,14 @@ import (
 	_faviconValidRefusal: [if len(_favicon._errors) == 0 { true }, _favicon._errors[0]][0] & true
 	_faviconSvgRefusal: [if _favicon._svgCount <= 1 { true }, "at most one SVG markup or emoji favicon may be declared"][0] & true
 	_faviconConflictRefusal: [if _favicon._svgCount == 0 || _favicon._pathConflict == 0 { true }, "cannot declare an emoji or SVG favicon alongside shell/favicon.svg"][0] & true
+
+	_envelope: #envelopePlan & {
+		meta:         A.meta
+		surface:      A.surface
+		state:        A.state
+		capabilities: A.capabilities
+	}
+	_envelopeRefusal: [if len(_envelope._errors) == 0 { true }, _envelope._errors[0]][0] & true
 }
 
 #faviconMime: {
@@ -1511,14 +1591,30 @@ import (
 			let isEmojiText = !strings.HasPrefix(rawHref, "<svg") && !isDataUri && !isHttp && !strings.Contains(rawHref, "/") && !strings.Contains(rawHref, ".") && len(strings.Runes(rawHref)) <= 8 && !regexp.Match("^[a-zA-Z0-9_-]+$", rawHref)
 			let isEmoji = isStr && isEmojiText
 
+			let rawRel = [
+				if !isStr if it.rel != _|_ { it.rel },
+				"icon",
+			][0]
+
+			let rawType = [
+				if !isStr if it.type != _|_ { it.type },
+				"",
+			][0]
+
+			let isAppleTouch = rawRel == "apple-touch-icon"
+			let isAppleTouchUnusable = ext == ".svg" || ext == ".webp" || ext == ".ico" || isSvgMarkup || isEmoji || strings.HasPrefix(rawHref, "data:image/svg") || strings.HasPrefix(rawHref, "data:image/webp") || strings.HasPrefix(rawHref, "data:image/x-icon")
+			let isAppleTouchUsable = !isAppleTouchUnusable && (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || strings.HasPrefix(rawHref, "data:image/png") || strings.HasPrefix(rawHref, "data:image/jpeg") || ((ext == "" || isHttp) && (rawType == "image/png" || rawType == "image/jpeg")))
+			let isAppleTouchInvalid = isAppleTouch && !isAppleTouchUsable
+
 			let isStructuredInvalid = !isStr && (strings.HasPrefix(rawHref, "<svg") || isEmojiText)
-			let isValid = !hasDotDot && !isStructuredInvalid && (isSvgMarkup || isDataUri || isHttp || isEmoji || hasValidExt)
+			let isValid = !hasDotDot && !isStructuredInvalid && !isAppleTouchInvalid && (isSvgMarkup || isDataUri || isHttp || isEmoji || hasValidExt)
 
 			let isPath = !isSvgMarkup && !isDataUri && !isHttp && !isEmoji
 
 			let itemErr = [
 				if hasDotDot { "favicon path may not contain '..': '\(rawHref)'" },
 				if isStructuredInvalid { "structured favicon href must be a file path, data URI, or URL, not raw SVG markup or emoji: '\(rawHref)'" },
+				if isAppleTouchInvalid { "apple-touch-icon format not supported on Safari on iOS; must be PNG or JPEG: '\(rawHref)'" },
 				if !isValid { "unsupported favicon format or missing extension: '\(rawHref)' (supported: .ico, .png, .svg, .webp, .jpg, .jpeg, emoji, SVG markup, data:, https://)" },
 				"",
 			][0]
@@ -1545,15 +1641,12 @@ import (
 			][0]
 
 			let itemType = [
-				if !isStr && it.type != _|_ { it.type },
+				if rawType != "" { rawType },
 				if inferredType != "" { inferredType },
 				"",
 			][0]
 
-			let itemRel = [
-				if !isStr && it.rel != _|_ { it.rel },
-				"icon",
-			][0]
+			let itemRel = rawRel
 
 			let itemSizes = [
 				if !isStr && it.sizes != _|_ { it.sizes },
@@ -1596,13 +1689,43 @@ import (
 		}
 	]
 
+	_explicitAppleTouch: [for x in items if x.valid if x.rel == "apple-touch-icon" { x }]
+	_pngOrJpegFavicons: [
+		for x in items
+		if x.valid
+		if x.rel != "apple-touch-icon"
+		if !strings.HasSuffix(x.href, ".svg") && !strings.HasSuffix(x.href, ".webp") && !strings.HasSuffix(x.href, ".ico")
+		if x.type == "image/png" || x.type == "image/jpeg" || strings.HasSuffix(x.href, ".png") || strings.HasSuffix(x.href, ".jpg") || strings.HasSuffix(x.href, ".jpeg") || strings.HasPrefix(x.href, "data:image/png") || strings.HasPrefix(x.href, "data:image/jpeg")
+		{ x }
+	]
+	_touchSizedFavicons: [
+		for x in _pngOrJpegFavicons
+		if strings.Contains(x.sizes, "180") || strings.Contains(x.sizes, "192") || strings.Contains(x.sizes, "512")
+		{ x }
+	]
+	_bestAppleTouch: [
+		if len(_touchSizedFavicons) > 0 { _touchSizedFavicons[0] },
+		if len(_pngOrJpegFavicons) > 0 { _pngOrJpegFavicons[0] },
+		null
+	][0]
+	_autoAppleTouchTag: [
+		if len(_explicitAppleTouch) == 0 && _bestAppleTouch != null {
+			let escHref = strings.Replace(strings.Replace(_bestAppleTouch.href, "&", "&amp;", -1), "\"", "&quot;", -1)
+			"<link rel=\"apple-touch-icon\" href=\"\(escHref)\">"
+		},
+		""
+	][0]
+
 	_svgItems: [for x in items if x.svgText != "" { x }]
 	_svgCount: len(_svgItems)
 	_pathConflict: len([for x in items if x.svgText == "" && x.file == "shell/favicon.svg" { x }])
 	_errors: [for x in items if !x.valid { x.err }]
 
 	svgFile: [if _svgCount == 1 { _svgItems[0].svgText }, ""][0]
-	links:   strings.Join([for x in items if x.valid { x.tag }], "\n")
+	links: strings.Join(list.Concat([
+		[for x in items if x.valid { x.tag }],
+		[if _autoAppleTouchTag != "" { _autoAppleTouchTag }]
+	]), "\n")
 
 	_staticMap: {
 		for x in items if x.valid && x.target != "" {
@@ -1615,3 +1738,818 @@ import (
 	}
 	statics: [for _, s in _staticMap { s }]
 }
+
+#hintsPlan: H={
+	preconnect:  *[] | _
+	dnsPrefetch: *[] | _
+
+	_preconnectList: [if (H.preconnect & [...]) != _|_ { H.preconnect }, [H.preconnect]][0]
+	_dnsPrefetchList: [if (H.dnsPrefetch & [...]) != _|_ { H.dnsPrefetch }, [H.dnsPrefetch]][0]
+
+	_preconnectItems: [
+		for p in _preconnectList if p != _|_ {
+			let isStr = (p & string) != _|_
+			let hasHref = (p & {href: string}) != _|_
+			let isCross = [if !isStr for k, v in p if k == "crossorigin" if v == true { true }, false][0]
+			let rawHref = [if isStr { p }, if hasHref { p.href }, ""][0]
+			let isValid = (strings.HasPrefix(rawHref, "https://") || strings.HasPrefix(rawHref, "http://") || strings.HasPrefix(rawHref, "//")) && !strings.Contains(rawHref, "..") && !strings.Contains(rawHref, " ") && !strings.Contains(rawHref, "\t") && !strings.Contains(rawHref, "\n")
+			let err = [if !isValid { "preconnect href must begin with https://, http://, or // and contain no whitespace: '\(rawHref)'" }, ""][0]
+			let escHref = strings.Replace(strings.Replace(rawHref, "&", "&amp;", -1), "\"", "&quot;", -1)
+			let itemTag = "<link rel=\"preconnect\" href=\"\(escHref)\"" + [if isCross { " crossorigin" }, ""][0] + ">"
+			valid: isValid
+			href:  rawHref
+			error: err
+			tag:   itemTag
+		}
+	]
+
+	_dnsPrefetchItems: [
+		for d in _dnsPrefetchList if d != _|_ {
+			let rawHref = d
+			let isValid = (strings.HasPrefix(rawHref, "https://") || strings.HasPrefix(rawHref, "http://") || strings.HasPrefix(rawHref, "//")) && !strings.Contains(rawHref, "..") && !strings.Contains(rawHref, " ") && !strings.Contains(rawHref, "\t") && !strings.Contains(rawHref, "\n")
+			let err = [if !isValid { "dns-prefetch href must begin with https://, http://, or // and contain no whitespace: '\(rawHref)'" }, ""][0]
+			let escHref = strings.Replace(strings.Replace(rawHref, "&", "&amp;", -1), "\"", "&quot;", -1)
+			let itemTag = "<link rel=\"dns-prefetch\" href=\"\(escHref)\">"
+			valid: isValid
+			href:  rawHref
+			error: err
+			tag:   itemTag
+		}
+	]
+
+	_errors: [
+		for x in _preconnectItems if !x.valid { x.error },
+		for x in _dnsPrefetchItems if !x.valid { x.error },
+	]
+
+	tags: list.Concat([
+		[for x in _dnsPrefetchItems if x.valid { x.tag }],
+		[for x in _preconnectItems if x.valid { x.tag }],
+	])
+	links: strings.Join(tags, "\n")
+}
+
+#manifestPlan: M={
+	raw:          *null | _
+	meta:         _
+	favicon:      #faviconPlan
+	screens:      *null | _
+	design:       *null | _
+	capabilities: *null | _
+
+	_isAuthRequired: [
+		if M.capabilities != null if M.capabilities.auth != _|_ if M.capabilities.auth.required == true { true },
+		false
+	][0]
+
+	_enabled: M.raw != null && M.raw != false
+	_isObj:   _enabled && (M.raw & bool) == _|_ && (M.raw & {}) != _|_
+
+	_hasIcons: _isObj && M.raw.icons != _|_
+	_rawIcons: [if _hasIcons { M.raw.icons }, []][0]
+
+	_derivedIcons: [
+		if _hasIcons {
+			[
+				for ic in _rawIcons {
+					let s = ic.src
+					let isSvg = strings.HasSuffix(s, ".svg") || (ic.type != _|_ && ic.type == "image/svg+xml")
+					src: [
+						if strings.HasPrefix(s, "./shell/") { "/shell/" + strings.TrimPrefix(s, "./shell/") },
+						if strings.HasPrefix(s, "shell/") { "/shell/" + strings.TrimPrefix(s, "shell/") },
+						if strings.HasPrefix(s, "./") { "/" + strings.TrimPrefix(s, "./") },
+						if strings.HasPrefix(s, "//") || strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "data:") { s },
+						if strings.HasPrefix(s, "/") { s },
+						"/" + s,
+					][0]
+					if ic.type != _|_ { type: ic.type }
+					if ic.sizes != _|_ { sizes: ic.sizes }
+					if (ic.sizes == _|_) && isSvg { sizes: "any" }
+					if ic.purpose != _|_ { purpose: ic.purpose }
+				}
+			]
+		},
+		[
+			for it in M.favicon.items if it.valid if it.href != "" if !strings.HasPrefix(it.href, "data:") {
+				let isRemote = strings.HasPrefix(it.href, "https://") || strings.HasPrefix(it.href, "http://") || strings.HasPrefix(it.href, "//")
+				src: [
+					if isRemote { it.href },
+					if strings.HasPrefix(it.href, "./") { "/shell/" + strings.TrimPrefix(it.href, "./") },
+					if strings.HasPrefix(it.href, "/") { it.href },
+					"/shell/" + it.href,
+				][0]
+				if it.type != "" { type: it.type }
+				if it.sizes != "" { sizes: it.sizes }
+				if it.sizes == "" && it.type == "image/svg+xml" { sizes: "any" }
+			}
+		],
+	][0]
+
+	_hasShortcuts: _isObj && M.raw.shortcuts != _|_
+	_rawShortcuts: [if _hasShortcuts { M.raw.shortcuts }, []][0]
+
+	_staticScreens: [
+		if M.screens != null && !_isAuthRequired
+		for sName, s in M.screens
+		if s.route != _|_ && s.route != "/" && !strings.Contains(s.route, ":") {
+			name: [if s.title != _|_ { s.title }, sName][0]
+			url:  s.route
+		}
+	]
+
+	_derivedShortcuts: [
+		if _hasShortcuts { _rawShortcuts },
+		[for idx, sc in _staticScreens if idx < 4 { sc }],
+	][0]
+
+	_hasTheme: _isObj && M.raw.theme_color != _|_
+	_hasBg:    _isObj && M.raw.background_color != _|_
+
+	_designLightColor: [
+		if M.design != null if M.design.colors != _|_ if M.design.colors.surface != _|_ { strings.ToLower(M.design.colors.surface) },
+		""
+	][0]
+	_bgColor: [if _hasBg { M.raw.background_color }, if _designLightColor != "" { _designLightColor }, "#ffffff"][0]
+	_designDarkColor: [
+		if M.design != null if M.design.dark != _|_ if M.design.dark.surface != _|_ { strings.ToLower(M.design.dark.surface) },
+		""
+	][0]
+
+	_explicitTheme: [
+		if _hasTheme { M.raw.theme_color },
+		if M.meta.themeColor != _|_ { M.meta.themeColor },
+		""
+	][0]
+
+	_themeColor: [
+		if _explicitTheme != "" { _explicitTheme },
+		if _enabled { _designLightColor },
+		"",
+	][0]
+
+	_manifestData: {
+		name: [if _isObj if M.raw.name != _|_ { M.raw.name }, M.meta.name][0]
+		short_name: [if _isObj if M.raw.short_name != _|_ { M.raw.short_name }, [if _isObj if M.raw.name != _|_ { M.raw.name }, M.meta.name][0]][0]
+		description: [if _isObj if M.raw.description != _|_ { M.raw.description }, M.meta.description][0]
+		start_url: [if _isObj if M.raw.start_url != _|_ { M.raw.start_url }, "/"][0]
+		scope: [if _isObj if M.raw.scope != _|_ { M.raw.scope }, "/"][0]
+		display: [if _isObj if M.raw.display != _|_ { M.raw.display }, "standalone"][0]
+		background_color: _bgColor
+		theme_color: _themeColor
+		if len(_derivedIcons) > 0 { icons: _derivedIcons }
+		if len(_derivedShortcuts) > 0 { shortcuts: _derivedShortcuts }
+		if _isObj if M.raw.orientation != _|_ { orientation: M.raw.orientation }
+		if _isObj if M.raw.dir != _|_ { dir: M.raw.dir }
+		if _isObj if M.raw.lang != _|_ { lang: M.raw.lang }
+		if _isObj {
+			for k, v in M.raw if !list.Contains(["name", "short_name", "description", "start_url", "display", "background_color", "theme_color", "icons", "shortcuts", "scope", "orientation", "dir", "lang"], k) {
+				(k): v
+			}
+		}
+	}
+
+	_iconErrors: [
+		for ic in _rawIcons
+		if ic.src != _|_
+		if strings.Contains(ic.src, "..")
+		{ "manifest icon src may not contain '..': '\(ic.src)'" }
+	]
+
+	_errors: _iconErrors
+
+	enabled:  _enabled && len(_errors) == 0
+	data:     _manifestData
+	jsonText: [if enabled { json.Marshal(_manifestData) + "\n" }, ""][0]
+
+	_appNameEsc: strings.Replace(strings.Replace(_manifestData.short_name, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_themeColorEsc: strings.Replace(strings.Replace(_themeColor, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_darkColorEsc: strings.Replace(strings.Replace(_designDarkColor, "&", "&amp;", -1), "\"", "&quot;", -1)
+
+	_themeTags: [
+		if _explicitTheme != "" {
+			["<meta name=\"theme-color\" content=\"\(_themeColorEsc)\">"]
+		},
+		if _explicitTheme == "" && _enabled {
+			if _designDarkColor != "" && _designDarkColor != _designLightColor {
+				[
+					"<meta name=\"theme-color\" media=\"(prefers-color-scheme: light)\" content=\"\(_themeColorEsc)\">",
+					"<meta name=\"theme-color\" media=\"(prefers-color-scheme: dark)\" content=\"\(_darkColorEsc)\">"
+				]
+			}
+			if _designDarkColor == "" || _designDarkColor == _designLightColor {
+				["<meta name=\"theme-color\" content=\"\(_themeColorEsc)\">"]
+			}
+		},
+		[]
+	][0]
+
+	tags: list.Concat([
+		[if enabled { "<link rel=\"manifest\" href=\"/manifest.webmanifest\">" }],
+		_themeTags,
+		[
+			if enabled { "<meta name=\"mobile-web-app-capable\" content=\"yes\">" },
+			if enabled { "<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\">" },
+			if enabled { "<meta name=\"apple-mobile-web-app-title\" content=\"\(_appNameEsc)\">" },
+		]
+	])
+	links: strings.Join(tags, "\n")
+
+	statics: [
+		if enabled
+		for ic in _derivedIcons
+		let s = ic.src
+		if !strings.HasPrefix(s, "data:") && !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") && !strings.HasPrefix(s, "//") && !strings.Contains(s, "..") {
+			let clean = strings.TrimPrefix(s, "/")
+			file:   clean
+			target: "/srv/" + clean
+			watch:  true
+		}
+	]
+}
+
+#socialPlan: S={
+	raw:  *null | _
+	meta: _
+
+	_enabled: S.raw != null
+	_isObj:   _enabled && (S.raw & bool) == _|_ && (S.raw & {}) != _|_
+
+	_title: [if _isObj if S.raw.title != _|_ { S.raw.title }, S.meta.name][0]
+	_desc: [if _isObj if S.raw.description != _|_ { S.raw.description }, S.meta.description][0]
+	_type: [if _isObj if S.raw.type != _|_ { S.raw.type }, "website"][0]
+	_card: [if _isObj if S.raw.card != _|_ { S.raw.card }, if _hasImage { "summary_large_image" }, "summary"][0]
+
+	_hasImage: _isObj && S.raw.image != _|_
+	_rawImage: [if _hasImage { S.raw.image }, ""][0]
+	_hasDotDot: strings.Contains(_rawImage, "..")
+	_isProtocolRelative: strings.HasPrefix(_rawImage, "//")
+	_isHttp: strings.HasPrefix(_rawImage, "http://") || strings.HasPrefix(_rawImage, "https://")
+	_isData: strings.HasPrefix(_rawImage, "data:")
+
+	_cleanImage: strings.TrimPrefix(strings.TrimPrefix(_rawImage, "./"), "/")
+
+	_hasUrl: _isObj && S.raw.url != _|_
+	_rawUrl: [if _hasUrl { S.raw.url }, ""][0]
+	_isUrlHttp: strings.HasPrefix(_rawUrl, "http://") || strings.HasPrefix(_rawUrl, "https://")
+
+	_origin: [
+		if strings.HasPrefix(_rawUrl, "https://") {
+			"https://" + strings.Split(strings.TrimPrefix(_rawUrl, "https://"), "/")[0]
+		},
+		if strings.HasPrefix(_rawUrl, "http://") {
+			"http://" + strings.Split(strings.TrimPrefix(_rawUrl, "http://"), "/")[0]
+		},
+		"",
+	][0]
+
+	_imageUrl: [
+		if !_hasImage { "" },
+		if _isHttp { _rawImage },
+		if _hasUrl && !_isHttp && _isUrlHttp {
+			_origin + "/" + _cleanImage
+		},
+		"",
+	][0]
+
+	_errors: [
+		if _hasDotDot { "social image path may not contain '..': '\(_rawImage)'" },
+		if _isProtocolRelative {
+			"social.image must not be protocol-relative ('\(_rawImage)'); OpenGraph and Twitter cards require explicit https:// or http://"
+		},
+		if _isData {
+			"social.image must not be a data URI ('\(_rawImage)'); OpenGraph and Twitter cards require explicit https:// or http://"
+		},
+		if _hasImage && !_isHttp && !_hasUrl && !_isProtocolRelative {
+			"social.image '\(_rawImage)' is a local path but social.url is not declared; OpenGraph and Twitter cards require absolute image URLs"
+		},
+		if _hasUrl && !_isUrlHttp {
+			"social.url must begin with https:// or http://: '\(_rawUrl)'"
+		},
+	]
+
+	_titleEsc: strings.Replace(strings.Replace(_title, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_descEsc: strings.Replace(strings.Replace(_desc, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_typeEsc: strings.Replace(strings.Replace(_type, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_cardEsc: strings.Replace(strings.Replace(_card, "&", "&amp;", -1), "\"", "&quot;", -1)
+	_imgEsc: strings.Replace(strings.Replace(_imageUrl, "&", "&amp;", -1), "\"", "&quot;", -1)
+
+	tags: [
+		if _enabled { "<meta property=\"og:type\" content=\"\(_typeEsc)\">" },
+		if _enabled { "<meta property=\"og:title\" content=\"\(_titleEsc)\">" },
+		if _enabled { "<meta property=\"og:description\" content=\"\(_descEsc)\">" },
+		if _hasUrl {
+			let uEsc = strings.Replace(strings.Replace(_rawUrl, "&", "&amp;", -1), "\"", "&quot;", -1)
+			"<meta property=\"og:url\" content=\"\(uEsc)\">"
+		},
+		if _hasImage && _imageUrl != "" { "<meta property=\"og:image\" content=\"\(_imgEsc)\">" },
+		if _isObj if S.raw.imageAlt != _|_ if _hasImage && _imageUrl != "" {
+			let altEsc = strings.Replace(strings.Replace(S.raw.imageAlt, "&", "&amp;", -1), "\"", "&quot;", -1)
+			"<meta property=\"og:image:alt\" content=\"\(altEsc)\">"
+		},
+		if _enabled { "<meta name=\"twitter:card\" content=\"\(_cardEsc)\">" },
+		if _enabled { "<meta name=\"twitter:title\" content=\"\(_titleEsc)\">" },
+		if _enabled { "<meta name=\"twitter:description\" content=\"\(_descEsc)\">" },
+		if _hasImage && _imageUrl != "" { "<meta name=\"twitter:image\" content=\"\(_imgEsc)\">" },
+		if _isObj if S.raw.site != _|_ {
+			let sEsc = strings.Replace(strings.Replace(S.raw.site, "&", "&amp;", -1), "\"", "&quot;", -1)
+			"<meta name=\"twitter:site\" content=\"\(sEsc)\">"
+		},
+		if _isObj if S.raw.creator != _|_ {
+			let cEsc = strings.Replace(strings.Replace(S.raw.creator, "&", "&amp;", -1), "\"", "&quot;", -1)
+			"<meta name=\"twitter:creator\" content=\"\(cEsc)\">"
+		},
+	]
+	links: strings.Join(tags, "\n")
+
+	static: [
+		if _enabled && _hasImage && !_isHttp && !_hasDotDot && _hasUrl {
+			file:   _cleanImage
+			target: "/srv/\(_cleanImage)"
+			watch:  true
+		},
+	]
+}
+
+#llmsPlan: L={
+	raw:          *null | _
+	meta:         *null | _
+	surface:      *null | _
+	state:        *null | _
+	capabilities: *null | _
+
+	_enabled: L.raw != null && L.raw != false
+	_isObj:   _enabled && (L.raw & bool) == _|_ && (L.raw & {}) != _|_
+
+	_hasText:     _isObj && L.raw.text != _|_
+	_hasFullText: _isObj && L.raw.fullText != _|_
+	_hasFile:     _isObj && L.raw.file != _|_
+	_hasFullFile: _isObj && L.raw.fullFile != _|_
+
+	_rawFile:     [if _hasFile { L.raw.file }, ""][0]
+	_rawFullFile: [if _hasFullFile { L.raw.fullFile }, ""][0]
+
+	_isRawBool:      (L.raw & bool) != _|_
+	_synthBrief:     _isRawBool && L.raw == true
+	_synthFull:      _isRawBool && L.raw == true
+
+	_isAuthRequired: [
+		if L.capabilities != null if L.capabilities.auth != _|_ if L.capabilities.auth.required == true { true },
+		false
+	][0]
+
+	_appName: [if L.meta != null if L.meta.name != _|_ { L.meta.name }, "App"][0]
+	_appDesc: [if L.meta != null if L.meta.description != _|_ { L.meta.description }, ""][0]
+
+	_authSummary: [
+		if _isAuthRequired {
+			"Authentication is required to access protected routes."
+		},
+		"Publicly accessible web application."
+	][0]
+
+	_screenSummaries: [
+		if L.surface != null if L.surface.screens != _|_
+		for sName, s in L.surface.screens
+		if s.route != _|_ && !strings.Contains(s.route, ":") {
+			let title = [if s.title != _|_ { s.title }, sName][0]
+			let route = s.route
+			"- [\(title)](\(route)): \(sName) screen"
+		}
+	]
+
+	_publicEntityNames: [
+		if L.state != null if L.state.entities != _|_
+		for eName, ent in L.state.entities
+		let entAccess = [for k, v in ent if k == "access" { v }, {scope: ""}][0]
+		if entAccess.scope == "public" {
+			eName
+		}
+	]
+
+	_entitySummaries: [
+		for eName in _publicEntityNames {
+			"- `\(eName)`: domain entity"
+		}
+	]
+
+	_synthBriefText: strings.Join(list.Concat([
+		[
+			"# \(_appName)",
+			"",
+			if _appDesc != "" { "> \(_appDesc)\n" },
+			"## Overview",
+			_authSummary,
+			"",
+			"## Screens",
+		],
+		[if len(_screenSummaries) > 0 { strings.Join(_screenSummaries, "\n") }, "None declared."][0:1],
+		[
+			"",
+			"## Data Models",
+		],
+		[if len(_entitySummaries) > 0 { strings.Join(_entitySummaries, "\n") }, "None declared."][0:1],
+		[""]
+	]), "\n")
+
+	_tableToEntity: {
+		if L.state != null if L.state.entities != _|_
+		for eName, ent in L.state.entities {
+			(ent.table): eName
+		}
+	}
+
+	_screenDetails: [
+		if L.surface != null if L.surface.screens != _|_
+		for sName, s in L.surface.screens
+		if s.route != _|_ && !strings.Contains(s.route, ":") {
+			let title = [if s.title != _|_ { s.title }, sName][0]
+			let route = s.route
+			let publicReadsMap = {
+				if s.reads != _|_
+				for r in s.reads
+				if _tableToEntity[r.table] != _|_
+				let eName = _tableToEntity[r.table]
+				if list.Contains(_publicEntityNames, eName) {
+					(eName): true
+				}
+			}
+			let publicReads = [for eName, _ in publicReadsMap { eName }]
+			let reads = [if len(publicReads) > 0 { strings.Join(publicReads, ", ") }, "none"][0]
+			"""
+			### Screen: \(title)
+			- Route: `\(route)`
+			- Reads: \(reads)
+			"""
+		}
+	]
+
+	_entityDetails: [
+		if L.state != null if L.state.entities != _|_
+		for eName in _publicEntityNames {
+			let ent = L.state.entities[eName]
+			let fields = [
+				if ent.fields != _|_
+				for f in ent.fields
+				let fRetired = [for k, v in f if k == "retired" { v }, false][0]
+				if fRetired == false {
+					let fName = [if f.name != _|_ { f.name }, "field"][0]
+					let fType = [if f.type != _|_ { f.type }, "string"][0]
+					"  - `\(fName)` (\(fType))"
+				}
+			]
+			let fieldsStr = [if len(fields) > 0 { strings.Join(fields, "\n") }, "  - (no fields)"][0]
+			"""
+			### Entity: \(eName)
+			Fields:
+			\(fieldsStr)
+			"""
+		}
+	]
+
+	_synthFullText: strings.Join(list.Concat([
+		[
+			"# \(_appName) - Full Specification",
+			"",
+			if _appDesc != "" { "> \(_appDesc)\n" },
+			"## Architecture",
+			_authSummary,
+			"",
+			"## Screens Specification",
+		],
+		[if len(_screenDetails) > 0 { strings.Join(_screenDetails, "\n\n") }, "None declared."][0:1],
+		[
+			"",
+			"## Data Models Schema",
+		],
+		[if len(_entityDetails) > 0 { strings.Join(_entityDetails, "\n\n") }, "None declared."][0:1],
+		[""]
+	]), "\n")
+
+	_errors: [
+		if _hasText && _hasFile {
+			"llms cannot declare both text and file"
+		},
+		if _hasFullText && _hasFullFile {
+			"llms cannot declare both fullText and fullFile"
+		},
+		if _hasFile && (strings.Contains(_rawFile, "..") || strings.HasPrefix(_rawFile, "/")) {
+			"llms file may not contain '..' or begin with '/': '\(_rawFile)'"
+		},
+		if _hasFullFile && (strings.Contains(_rawFullFile, "..") || strings.HasPrefix(_rawFullFile, "/")) {
+			"llms fullFile may not contain '..' or begin with '/': '\(_rawFullFile)'"
+		},
+		if _isAuthRequired && _enabled && (_synthBrief || _synthFull) {
+			"llms auto-synthesis cannot be enabled when capabilities.auth.required is true"
+		},
+	]
+
+	files: {
+		if _hasText && !_hasFile {
+			"llms.txt": {
+				format: "text"
+				text:   L.raw.text
+			}
+		}
+		if _synthBrief {
+			"llms.txt": {
+				format: "text"
+				text:   _synthBriefText
+			}
+		}
+		if _hasFullText && !_hasFullFile {
+			"llms-full.txt": {
+				format: "text"
+				text:   L.raw.fullText
+			}
+		}
+		if _synthFull {
+			"llms-full.txt": {
+				format: "text"
+				text:   _synthFullText
+			}
+		}
+	}
+
+	statics: [
+		if (_hasText || _synthBrief) && !_hasFile {
+			file:   "llms.txt"
+			target: "/srv/llms.txt"
+			watch:  true
+		},
+		if _hasFile && !_hasText && !strings.Contains(_rawFile, "..") {
+			file:   _rawFile
+			target: "/srv/llms.txt"
+			watch:  true
+		},
+		if (_hasFullText || _synthFull) && !_hasFullFile {
+			file:   "llms-full.txt"
+			target: "/srv/llms-full.txt"
+			watch:  true
+		},
+		if _hasFullFile && !_hasFullText && !strings.Contains(_rawFullFile, "..") {
+			file:   _rawFullFile
+			target: "/srv/llms-full.txt"
+			watch:  true
+		},
+	]
+}
+
+#wellKnownPlan: W={
+	raw: *null | _
+
+	_enabled: W.raw != null
+	_rawMap: [if _enabled && (W.raw & bool) == _|_ && (W.raw & {}) != _|_ { W.raw }, {}][0]
+
+	_errors: list.Concat([
+		[
+			for name, _ in _rawMap
+			if name == "" || name == "." || strings.Contains(name, "..") || strings.Contains(name, "/")
+			{ "wellKnown key may not contain '..' or '/' and may not be empty or '.': '\(name)'" }
+		],
+		[
+			for name, item in _rawMap
+			if (item & {}) != _|_
+			if item.text != _|_ && item.file != _|_
+			{ "wellKnown '\(name)' cannot declare both text and file" }
+		],
+		[
+			for name, item in _rawMap
+			if (item & {}) != _|_
+			if item.text == _|_ && item.file == _|_
+			{ "wellKnown '\(name)' must declare either text or file" }
+		],
+		[
+			for _, item in _rawMap
+			if (item & {}) != _|_
+			if item.file != _|_
+			if strings.Contains(item.file, "..") || strings.HasPrefix(item.file, "/")
+			{ "wellKnown file may not contain '..' or begin with '/': '\(item.file)'" }
+		],
+	])
+
+	files: {
+		for name, item in _rawMap {
+			let isStr = (item & string) != _|_
+			let hasText = (item & {}) != _|_ && item.text != _|_
+			let hasFile = (item & {}) != _|_ && item.file != _|_
+			if (isStr || hasText) && !hasFile {
+				let content = [if isStr { item }, if hasText { item.text }, ""][0]
+				".well-known/\(name)": {
+					format: "text"
+					text:   content
+				}
+			}
+		}
+	}
+
+	statics: list.Concat([
+		[
+			for name, item in _rawMap
+			let isStr = (item & string) != _|_
+			let hasText = (item & {}) != _|_ && item.text != _|_
+			let hasFile = (item & {}) != _|_ && item.file != _|_
+			if (isStr || hasText) && !hasFile && name != "" && name != "." && !strings.Contains(name, "..") && !strings.Contains(name, "/")
+			{
+				file:   ".well-known/\(name)"
+				target: "/srv/.well-known/\(name)"
+				watch:  true
+			}
+		],
+		[
+			for name, item in _rawMap
+			let hasText = (item & {}) != _|_ && item.text != _|_
+			let hasFile = (item & {}) != _|_ && item.file != _|_
+			if hasFile && !hasText
+			if name != "" && name != "." && !strings.Contains(name, "..") && !strings.Contains(name, "/") && !strings.Contains(item.file, "..") && !strings.HasPrefix(item.file, "/")
+			{
+				file:   item.file
+				target: "/srv/.well-known/\(name)"
+				watch:  true
+			}
+		],
+	])
+}
+
+#sitemapPlan: S={
+	raw:          *null | _
+	meta:         *null | _
+	capabilities: *null | _
+
+	_isExplicitBool: (S.raw & bool) != _|_
+	_isExplicitObj:  (S.raw & {}) != _|_
+	_isDeclared:     S.raw != null
+
+	_isAuthRequired: [
+		if S.capabilities != null if S.capabilities.auth != _|_ if S.capabilities.auth.required == true { true },
+		false
+	][0]
+
+	enabled: [
+		if _isExplicitBool { S.raw },
+		if _isExplicitObj if S.raw.enabled != _|_ { S.raw.enabled },
+		true
+	][0]
+
+	declared: _isDeclared
+
+	_exclude: [if _isExplicitObj if S.raw.exclude != _|_ { S.raw.exclude }, []][0]
+	_extra:   [if _isExplicitObj if S.raw.extra != _|_ { S.raw.extra }, []][0]
+
+	_excludeErrors: [
+		for ex in _exclude
+		if !strings.HasPrefix(ex, "/")
+		{ "sitemap exclude path must begin with '/': '\(ex)'" }
+	]
+
+	_extraErrors: [
+		for ext in _extra
+		if !strings.HasPrefix(ext, "/") && !strings.HasPrefix(ext, "http://") && !strings.HasPrefix(ext, "https://")
+		{ "sitemap extra path must begin with '/', 'http://', or 'https://': '\(ext)'" },
+		for ext in _extra
+		if strings.Contains(ext, "{{") || strings.Contains(ext, "}}")
+		{ "sitemap extra path may not contain template delimiters '{{' or '}}': '\(ext)'" }
+	]
+
+	_authConflictErrors: [
+		if _isAuthRequired && _isDeclared && enabled {
+			"sitemap cannot be enabled when capabilities.auth.required is true"
+		}
+	]
+
+	_errors: list.Concat([_excludeErrors, _extraErrors, _authConflictErrors])
+
+	exclude: _exclude
+	extra:   _extra
+
+	tag: [
+		if enabled && _isDeclared { "<link rel=\"sitemap\" type=\"application/xml\" href=\"/sitemap.xml\">" },
+		""
+	][0]
+}
+
+#envelopePlan: P={
+	meta:         _
+	surface:      *null | _
+	state:        *null | _
+	capabilities: *null | _
+
+	favicon: #faviconPlan & {
+		if P.meta.favicon != _|_ { raw: P.meta.favicon }
+	}
+
+	hints: #hintsPlan & {
+		if P.meta.preconnect != _|_ { preconnect: P.meta.preconnect }
+		if P.meta.dnsPrefetch != _|_ { dnsPrefetch: P.meta.dnsPrefetch }
+	}
+
+	manifest: #manifestPlan & {
+		meta:         P.meta
+		favicon:      P.favicon
+		capabilities: P.capabilities
+		if P.surface != null {
+			if P.surface.screens != _|_ { screens: P.surface.screens }
+			if P.surface.design != _|_ { design: P.surface.design }
+		}
+		if P.meta.manifest != _|_ { raw: P.meta.manifest }
+	}
+
+	social: #socialPlan & {
+		meta: P.meta
+		if P.meta.social != _|_ { raw: P.meta.social }
+	}
+
+	llms: #llmsPlan & {
+		meta:         P.meta
+		surface:      P.surface
+		state:        P.state
+		capabilities: P.capabilities
+		if P.meta.llms != _|_ { raw: P.meta.llms }
+	}
+
+	wellKnown: #wellKnownPlan & {
+		if P.meta.wellKnown != _|_ { raw: P.meta.wellKnown }
+	}
+
+	sitemap: #sitemapPlan & {
+		meta:         P.meta
+		capabilities: P.capabilities
+		if P.meta.sitemap != _|_ { raw: P.meta.sitemap }
+	}
+
+	_errors: list.Concat([
+		P.hints._errors,
+		P.manifest._errors,
+		P.social._errors,
+		P.llms._errors,
+		P.wellKnown._errors,
+		P.sitemap._errors,
+	])
+
+	_hasEnvelopeInjections: P.meta.favicon != _|_ || P.hints.links != "" || P.manifest.links != "" || P.social.links != "" || P.sitemap.tag != ""
+
+	headLinks: [
+		if !_hasEnvelopeInjections {
+			"<link rel=\"icon\" href=\"data:,\">"
+		},
+		if _hasEnvelopeInjections {
+			strings.Join([
+				for s in [
+					P.hints.links,
+					[if P.meta.favicon != _|_ { P.favicon.links }, "<link rel=\"icon\" href=\"data:,\">"][0],
+					P.manifest.links,
+					P.social.links,
+					P.sitemap.tag,
+				] if s != "" { s }
+			], "\n")
+		},
+	][0]
+
+	files: {
+		if P.favicon.svgFile != "" {
+			"shell/favicon.svg": {
+				format: "text"
+				text:   P.favicon.svgFile
+			}
+		}
+		if P.manifest.jsonText != "" {
+			"shell/manifest.webmanifest": {
+				format: "text"
+				text:   P.manifest.jsonText
+			}
+		}
+		for k, f in P.llms.files {
+			(k): f
+		}
+		for k, f in P.wellKnown.files {
+			(k): f
+		}
+	}
+
+	_rawStatics: list.Concat([
+		P.favicon.statics,
+		[
+			if P.manifest.enabled {
+				file:   "shell/manifest.webmanifest"
+				target: "/srv/shell/manifest.webmanifest"
+				watch:  true
+			},
+			if P.manifest.enabled {
+				file:   "shell/manifest.webmanifest"
+				target: "/srv/manifest.webmanifest"
+				watch:  true
+			},
+		],
+		P.manifest.statics,
+		P.social.static,
+		P.llms.statics,
+		P.wellKnown.statics,
+	])
+
+	_staticMap: {
+		for s in _rawStatics if s != _|_ if s.target != "" {
+			(s.target): s
+		}
+	}
+	statics: [for _, s in _staticMap { s }]
+}
+

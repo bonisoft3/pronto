@@ -191,6 +191,9 @@ async function document_(route: Route, tag: string, at: string, markup: string):
   // it is instead, in the language it is in.
   doc.querySelector("title")?.remove();
   doc.querySelector('meta[name="description"]')?.remove();
+  doc.querySelector('link[rel="canonical"]')?.remove();
+  const ogUrl = doc.querySelector('meta[property="og:url"]');
+  if (ogUrl) ogUrl.setAttribute("content", new URL(at, site).href);
   const heading = doc.createElement("title");
   const h1 = parse(`<body>${markup}</body>`).querySelector("h1");
   if (!h1) fail(`route ${route.screen} renders no h1 under [${tag}], so the document has no title`);

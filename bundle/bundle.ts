@@ -197,25 +197,90 @@ html = replace(html, '<link rel="stylesheet" href="./shell.css">', `<style>${fil
 html = replace(html, '<link rel="stylesheet" href="./design.css">', `<style>${files['shell/design.css']}</style>`)
 html = html.replace(/<link rel="modulepreload"[^>]*>\n/g, '').replace(/<script type="speculationrules">[\s\S]*?<\/script>\n/, '')
 
-for (const match of html.matchAll(/<link\s+[^>]*rel=["'][^"']*\bicon\b[^"']*["'][^>]*>/gi)) {
-  const tag = match[0]
-  const hrefMatch = tag.match(/href=["']([^"']+)["']/)
-  if (!hrefMatch) continue
-  const href = hrefMatch[1]
-  if (href.startsWith('data:') || href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//')) continue
-  const relPath = href.startsWith('./') ? path.join('shell', href.slice(2)) : href.startsWith('/') ? href.slice(1) : href
-  const fullPath = path.join(app, relPath)
-  const ext = path.extname(fullPath).toLowerCase()
+const isExternal = (url: string) =>
+  url.startsWith('data:') ||
+  url.startsWith('http://') ||
+  url.startsWith('https://') ||
+  url.startsWith('//')
+
+// Mirrors #faviconPlan href emission in schema.cue (./ relative to shell/, / relative to root).
+const resolveShellAsset = (appPath: string, href: string): string | null => {
+  if (isExternal(href)) return null
+  if (href === '/manifest.webmanifest') return path.join(appPath, 'shell', 'manifest.webmanifest')
+  if (href.startsWith('/')) return path.join(appPath, href.slice(1))
+  return path.join(appPath, 'shell', href.replace(/^\.\//, ''))
+}
+
+// Mirrors #manifestPlan icon emission in schema.cue (all local paths relative to root).
+const resolveManifestIcon = (appPath: string, src: string): string | null =>
+  isExternal(src) ? null : path.join(appPath, src.startsWith('/') ? src.slice(1) : src.replace(/^\.\//, ''))
+
+const inlineAsset = async (filePath: string, label: string): Promise<string> => {
+  const ext = path.extname(filePath).toLowerCase()
   const mime =
     ext === '.svg' ? 'image/svg+xml' :
     ext === '.png' ? 'image/png' :
     ext === '.ico' ? 'image/x-icon' :
     ext === '.webp' ? 'image/webp' :
     ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
-    fail(`shell/index.html: unsupported favicon asset format: ${ext}`)
-  const data = await Deno.readFile(fullPath)
-  const dataUri = `data:${mime};base64,${encodeBase64(data)}`
-  const inlinedTag = tag.replace(hrefMatch[0], () => `href="${dataUri}"`)
+    fail(`${label}: unsupported asset format: ${ext}`)
+  const data = await Deno.readFile(filePath)
+  return `data:${mime};base64,${encodeBase64(data)}`
+}
+
+for (const match of html.matchAll(/<link\s+[^>]*rel=["'][^"']*\bicon\b[^"']*["'][^>]*>/gi)) {
+  const tag = match[0]
+  const hrefMatch = tag.match(/href=["']([^"']+)["']/)
+  if (!hrefMatch) continue
+  const fullPath = resolveShellAsset(app, hrefMatch[1])
+  if (fullPath) {
+    const dataUri = await inlineAsset(fullPath, 'shell/index.html')
+    const inlinedTag = tag.replace(hrefMatch[0], () => `href="${dataUri}"`)
+    html = html.replace(tag, () => inlinedTag)
+  }
+}
+
+for (const match of html.matchAll(/<link\s+[^>]*rel=["']manifest["'][^>]*>/gi)) {
+  const tag = match[0]
+  const hrefMatch = tag.match(/href=["']([^"']+)["']/)
+  if (!hrefMatch) continue
+  const fullPath = resolveShellAsset(app, hrefMatch[1])
+  if (!fullPath) continue
+  const manifestText = await Deno.readTextFile(fullPath)
+  const manifestObj: Record<string, unknown> = JSON.parse(manifestText)
+  const cleanBase = base ? (base.endsWith('/') ? base : base + '/') : undefined
+  const rebasePath = (u: string): string => {
+    if (u.includes('://') || u.startsWith('//')) return u
+    if (cleanBase) return u.startsWith('/') ? cleanBase + u.slice(1) : cleanBase + u.replace(/^\.\//, '')
+    return u.startsWith('./') ? '/' + u.slice(2) : u
+  }
+
+  if (typeof manifestObj.start_url === 'string') {
+    manifestObj.start_url = rebasePath(manifestObj.start_url)
+  }
+  if (typeof manifestObj.scope === 'string') {
+    manifestObj.scope = rebasePath(manifestObj.scope)
+  }
+  if (Array.isArray(manifestObj.shortcuts)) {
+    for (const sc of manifestObj.shortcuts as Array<Record<string, unknown>>) {
+      if (typeof sc.url === 'string') {
+        sc.url = rebasePath(sc.url)
+      }
+    }
+  }
+  if (Array.isArray(manifestObj.icons)) {
+    for (const icon of manifestObj.icons as Array<Record<string, unknown>>) {
+      if (typeof icon.src === 'string') {
+        const iconPath = resolveManifestIcon(app, icon.src)
+        if (iconPath) {
+          icon.src = await inlineAsset(iconPath, 'manifest icon')
+        }
+      }
+    }
+  }
+  const inlinedManifestJson = JSON.stringify(manifestObj)
+  const manifestDataUri = `data:application/manifest+json;base64,${encodeBase64(new TextEncoder().encode(inlinedManifestJson))}`
+  const inlinedTag = tag.replace(hrefMatch[0], () => `href="${manifestDataUri}"`)
   html = html.replace(tag, () => inlinedTag)
 }
 html = replace(

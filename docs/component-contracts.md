@@ -117,7 +117,11 @@ build: checks: "paint": {
 }
 ```
 
-## Web platform envelope: Favicons & App Icons
+## Web platform envelope
+
+An app's inner domain is its state ([entities and pipelines](#what-each-part-declares)) and surface ([screens](screens.md)). Between the client runtime and the outside world sits the **web platform envelope**: the metadata, HTTP door routing, and discovery documents declared under `#App.meta` that browsers, OS shells, crawlers, and LLMs read before or outside screen execution.
+
+### Favicons & App Icons (`meta.favicon`)
 
 An app declares browser and home screen icons under `#App.meta.favicon`:
 
@@ -128,7 +132,63 @@ An app declares browser and home screen icons under `#App.meta.favicon`:
   - Remote URL (e.g. `"https://..."`): linked verbatim without cluster static registration.
   - Data URI (e.g. `"data:image/svg+xml,..."`): linked with HTML attribute quotes escaped (`&quot;`).
 - **Structured item or list**: `#FaviconItem` (`rel`, `sizes`, `type`, `href`). Local assets are registered as cluster statics (`/srv/...`), resolved per path rule, and inlined into data URIs during single-file page bundles (`bundle.ts`).
+- **Safari on iOS apple-touch-icon constraint & auto-derivation**: Safari on iOS strictly refuses SVG, WebP, ICO, raw SVG markup, and emoji for `apple-touch-icon`. Declaring an explicit `rel: "apple-touch-icon"` with any unsupported format fails compilation loudly (enforced strictly by extension and content prefix, ignoring spoofed MIME types). When no explicit `apple-touch-icon` is declared, the compiler automatically derives `<link rel="apple-touch-icon" href="...">` if a PNG or JPEG favicon is available, prioritizing touch sizes (180x180, 192x192, 512x512). If only SVG, WebP, or emoji favicons are present, no invalid apple-touch-icon tag is emitted.
 - **Door**: Caddy serves the first match among `/favicon.ico`, `/shell/favicon.ico`, `/favicon.svg`, `/shell/favicon.svg`, `/favicon.png`, and `/shell/favicon.png` with `Cache-Control: no-cache`. If none exist, unsolicited probes receive a 204 No Content response to satisfy Lighthouse audits without spurious 404 logs.
+
+### Web App Manifest & Mobile Chrome (`meta.manifest`, `meta.themeColor`)
+
+Declared via `meta.manifest: bool | #Manifest` and `meta.themeColor: string`:
+
+- **Schema defaults**: When `manifest: true`, fields default from `#App.meta` (`name`, `short_name`, `description`). `display` defaults to `"standalone"`, `start_url` and `scope` to `"/"`, `background_color` to `"#ffffff"`. When omitted, icons are inferred from local and remote `#App.meta.favicon` declarations (including SVG, PNG, WebP, and ICO).
+- **Adaptive theme color**: When `meta.themeColor` is omitted, the compiler derives adaptive `<meta name="theme-color" media="(prefers-color-scheme: light)" content="...">` and `<meta name="theme-color" media="(prefers-color-scheme: dark)" content="...">` meta tags directly from `surface.design` tokens (`colors.surface` vs `dark.surface`).
+- **PWA shortcuts derivation**: When `manifest.shortcuts` is omitted, shortcuts are automatically inferred from top non-root static screens in `surface.screens` (mapping `title` to `name` and `route` to `url`). When `capabilities.auth.required == true`, auto-deriving PWA shortcuts is suppressed behind the login wall unless explicitly authored in `manifest.shortcuts`.
+- **Head injection**: Emits `<link rel="manifest" href="/manifest.webmanifest">`, adaptive `<meta name="theme-color">`, `<meta name="mobile-web-app-capable" content="yes">`, `<meta name="apple-mobile-web-app-status-bar-style" content="default">`, and `<meta name="apple-mobile-web-app-title">`.
+- **Door**: Caddy routes `/manifest.webmanifest` and `/shell/manifest.webmanifest` with `Content-Type: application/manifest+json` and issues a `308` permanent redirect for `/manifest.json`.
+- **Statics**: Local icons declared in manifest or inferred from favicons are registered as cluster statics under `/srv/`. Remote and protocol-relative icon URLs are preserved without local static registration.
+- **Bundling**: `bundle.ts` parses the manifest, preserves absolute or rewrites relative `start_url` and `scope` under `--base`, inlines referenced local icon files as base64 data URIs, and serializes the manifest as a `data:application/manifest+json;base64,...` URI on `<link rel="manifest">`. Referenced local icon files must exist on disk; missing files fail bundling loudly.
+
+### SEO, Social Cards & OpenGraph (`meta.social`)
+
+Declared via `meta.social: #Social`:
+
+- **Tags emitted**: OpenGraph (`og:title`, `og:description`, `og:type`, `og:image`, `og:image:alt`, `og:url`) and Twitter Card (`twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`, `twitter:site`, `twitter:creator`).
+- **Defaults**: `title` and `description` inherit from `#App.meta`. `card` defaults to `"summary_large_image"` if `image` is set, else `"summary"`. `type` defaults to `"website"`.
+- **Absolute URLs & local images**: Social card scrapers require absolute image URLs. When `image` is a local asset path, `url` must be declared (refused at compile time otherwise), resolving the image against the origin extracted from `url` and mounting it as a cluster static under `/srv/` (root-hosted in cluster deployments). Protocol-relative URLs (`//`) and path traversal (`..`) are refused at compile time.
+- **Canonical links**: Authored per-route by prerenderers rather than statically in the shared SPA shell to prevent client-routed non-root paths from falsely canonicalizing to root.
+
+### Crawler & LLM Discovery (`meta.llms`)
+
+Declared via `meta.llms: bool | #Llms`:
+
+- **Auto-synthesis (`llms: true`)**: When enabled without manual files, the compiler automatically synthesizes `/llms.txt` (concise overview, authentication model, screens, entity index) and `/llms-full.txt` (full AST/IR specification with complete field types and screen reads). When `capabilities.auth.required == true`, auto-synthesizing schema is refused at compile time to protect private data models.
+- **Author overrides**: `text` or `file` for `/llms.txt`, and `fullText` or `fullFile` for `/llms-full.txt`. When manual `text` or `file` is supplied, `/llms-full.txt` is not synthesized unless `fullText` or `fullFile` is explicitly declared. Declaring both `text` and `file` for the same document is refused at compile time.
+- **Cluster statics**: Emits `srv/llms.txt` and `srv/llms-full.txt`.
+- **Door**: Caddy serves `/llms.txt` and `/llms-full.txt` with `Content-Type: text/markdown; charset=utf-8` and `Cache-Control: no-cache`.
+
+### Sitemaps & Search Engine Discovery (`meta.sitemap`)
+
+Declared via `meta.sitemap: bool | #SitemapConfig`:
+
+- **Intelligent priority and change frequency**: Root routes (`/`) infer priority `1.0`. Screens with entity reads infer priority `0.8` and `"daily"` change frequency. Static screens infer priority `0.6` and `"weekly"` or `"monthly"` frequency. Screen-level author declarations (`screen.priority`, `screen.changefreq`) override inferred defaults.
+- **Auth conflict refusal**: When `capabilities.auth.required == true`, declaring `sitemap: true` or an enabled sitemap is refused at compile time because all routes are behind authentication and robots.txt declares `Disallow: /`.
+- **Exclusion & Extra routes**: `exclude` (`[...string]`, prefix-matched, must start with `/`) filters screens out of `sitemap.xml`. `extra` (`[...string]`, must start with `/`, `http://`, or `https://`) appends external or unmapped URLs with XML entities properly escaped.
+- **Head injection & robots.txt**: When declared, emits `<link rel="sitemap" type="application/xml" href="/sitemap.xml">` in the document head and advertises `Sitemap: {{$o}}/sitemap.xml` in `robots.txt`. When `sitemap: false`, sitemap generation, statics, and robots.txt declarations are disabled.
+
+### Platform Well-Knowns (`meta.wellKnown`)
+
+Declared via `meta.wellKnown: [string]: #WellKnownItem`:
+
+- **Payload options**: `#WellKnownItem` supports string shorthand (text) or `{text?: string, file?: string}`. Declaring both `text` and `file` is refused at compile time.
+- **Static emission**: Files are mounted under `/srv/.well-known/<name>`. Keys containing `/` or `..` and file paths containing `..` are compile-time refusals.
+- **Door**: Caddy serves extensionless files under `/.well-known/*` (such as Apple App Site Association `apple-app-site-association` or asset links) with `Content-Type: application/json`.
+
+### Early Resource Hints (`meta.preconnect`, `meta.dnsPrefetch`)
+
+Declared via `meta.preconnect: string | #PreconnectItem | [...(string | #PreconnectItem)]` and `meta.dnsPrefetch: string | [...string]`:
+
+- **Ordering**: Injected at the head of envelope links, preceding favicons, manifests, and social tags.
+- **Crossorigin**: Preconnect accepts origin string shorthand (`"https://fonts.googleapis.com"`) or `#PreconnectItem` with `crossorigin: true` (emitting `<link rel="preconnect" href="..." crossorigin>`).
+- **Validation**: Origins must begin with `https://`, `http://`, or `//` and cannot contain whitespace, newlines, or `..`.
 
 ## One graph
 

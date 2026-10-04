@@ -19,6 +19,29 @@
       respond "" 204
     }
   }
+  # Web App Manifest: serve with application/manifest+json; alias /manifest.json.
+  handle /manifest.webmanifest {
+    root * /srv
+    @manifest file /manifest.webmanifest /shell/manifest.webmanifest
+    handle @manifest {
+      header Content-Type "application/manifest+json"
+      header Cache-Control "no-cache"
+      rewrite {http.matchers.file.relative}
+      file_server
+    }
+    handle {
+      respond "" 404
+    }
+  }
+  handle /shell/manifest.webmanifest {
+    root * /srv
+    header Content-Type "application/manifest+json"
+    header Cache-Control "no-cache"
+    file_server
+  }
+  handle /manifest.json {
+    redir /manifest.webmanifest 308
+  }
   handle /crud/* {
     uri strip_prefix /crud
     @post method POST
@@ -112,6 +135,40 @@
     templates {
       mime application/xml text/xml
     }
+    file_server
+  }
+  # LLM discovery documents. Served from the root with markdown typing.
+  handle /llms.txt {
+    root * /srv
+    @llms file /llms.txt
+    handle @llms {
+      header Content-Type "text/markdown; charset=utf-8"
+      header Cache-Control "no-cache"
+      file_server
+    }
+    handle {
+      respond "" 404
+    }
+  }
+  handle /llms-full.txt {
+    root * /srv
+    @llmsfull file /llms-full.txt
+    handle @llmsfull {
+      header Content-Type "text/markdown; charset=utf-8"
+      header Cache-Control "no-cache"
+      file_server
+    }
+    handle {
+      respond "" 404
+    }
+  }
+  # Platform well-knowns (Universal Links, App Links, passkeys).
+  # iOS apple-app-site-association has no file extension; set application/json.
+  handle /.well-known/* {
+    root * /srv
+    @extensionless path_regexp ^/\.well-known/[^/.]+$
+    header @extensionless Content-Type "application/json"
+    header Cache-Control "no-cache"
     file_server
   }
   handle /omnishell/* {
