@@ -6,7 +6,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.5.1"
+#Version:     "0.5.2"
 #SaytVersion: "0.42.0"
 
 // The mise tools that carry the three trees a browser bundle reads, for a
@@ -99,7 +99,8 @@ import (
 	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
-		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
+		// An installed pronto has no siblings, which its own tests import.
+		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir \([if P.runtime == "" {"--exclude [*_test.ts *.test.ts] "}, ""][0])'*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
 		identity: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check ."}).out
 		facts: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
 		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out

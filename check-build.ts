@@ -1,4 +1,4 @@
-const excluded = new Set(["prerender.ts", "negotiation_test.ts"]);
+const excluded = new Set(["negotiation_test.ts"]);
 const files = [...Deno.readDirSync(".")]
   .filter((entry) => entry.isFile && entry.name.endsWith(".ts") && !excluded.has(entry.name))
   .map((entry) => entry.name)

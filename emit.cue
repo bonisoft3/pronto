@@ -1605,8 +1605,11 @@ _cdcTableField: "__table"
 			_mirrored: sources.pronto != "" && !strings.HasPrefix(sources.pronto, "../")
 			_prerender: (distribution.#Run & {
 				runtime: "\(sources.pronto)"
-				args:    "let out = (mktemp -d); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read $\"--allow-write=($out)\" ($pronto | path join prerender.ts) . $out https://localhost:8443; rm -rf $out"
+				args:    "let out = (mktemp -d); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read $\"--allow-write=($out)\" ($pronto | path join prerender.ts) . $out https://localhost:8443\(_prerenderTerminal); rm -rf $out"
 			}).out
+			// An installed app renders with the terminal it serves, materialized
+			// beside it; in the monorepo prerender.ts finds pronto's sibling.
+			_prerenderTerminal: [if sources.pronto == "" {" .omnishell"}, ""][0]
 			if sources.pronto == "" {
 				sayYaml: _distribution.say
 			}

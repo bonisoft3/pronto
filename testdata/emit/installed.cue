@@ -45,3 +45,10 @@ installedNoReplayRule:   (_external.surface.checks.replay == _|_) & true
 installedBuildCmd: _external.surface.buildCmd & "./saytw build"
 localReplayTarget: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.replay != _|_) & true
 installedBuildWrapper: list.Contains(_installedProject.targets.build.srcs.globs, "saytw") & true
+
+// An installed app prerenders with the terminal materialized beside it, and
+// type-checks pronto's own modules, not its tests, which import its siblings.
+_prerendered: _code & {surface: screens: board: prerender: true}
+_prerenderedLoop: (pronto.#DefaultLoop & {code: _prerendered, terminal: (pronto.#DefaultTerminal & {code: _prerendered}).out, cluster: (pronto.#DefaultCluster & {code: _prerendered, statics: []}).out}).out & {surface: sources: pronto: ""}
+installedPrerender: _prerenderedLoop.surface.checks.prerender.cmds[0] & =~"prerender\\.ts\\) \\. \\$out https://localhost:8443 \\.omnishell;"
+installedTypes:     _external.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts\\]"
