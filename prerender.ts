@@ -5,9 +5,10 @@
 //   deno run --no-lock --node-modules-dir=none --allow-read --allow-write=<outDir> \
 //     plugins/pronto/prerender.ts <appDir> <outDir> <origin> [<omnishellDir>]
 //
-// The renderer is omnishell's, read from <omnishellDir>: the app's materialized
-// .omnishell where pronto is installed, the sibling tree in the monorepo (the
-// default), so nothing here names a path outside pronto's own tree.
+// The renderer is omnishell's, read from <omnishellDir>: the installed
+// omnishell's root (mise where) where pronto is installed, the sibling tree in
+// the monorepo (the default), so nothing here names a path outside pronto's own
+// tree.
 //
 // A route declaring `prerender` is addressable at (tag == i18n.default ? "" :
 // "/" + i18n.locales[tag].path) + its pattern in that locale, and this writes

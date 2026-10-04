@@ -20,11 +20,11 @@ externalBuild:          _external.surface.sayYaml.say.build.do & dist.#Project.w
 _project:               dist.#Project
 sourcePin:              _project.mise.tools."github:bonisoft3/pronto" & dist.#Version
 bootstrapHasNoTerminal: strings.Contains(_project.write, "omnishell") & false
-_externalBuild: (pronto.#DefaultBuild & {code: _code, loop: _external, cluster: _cluster}).out.project
+_externalBuild: (pronto.#DefaultBuild & {code: _code, loop: _external, cluster: _cluster, terminal: _terminal}).out.project
 externalDirectory:   _externalBuild.dir & "."
 externalProjectName: (_externalBuild.name == _code.meta.name) & true
 localProjectName: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.name == "apps_\(_code.meta.name)") & true
-externalVisualContext: _externalBuild.targets.integrate.compose.build.additional_contexts.root & ".."
+externalVisualContext: (_externalBuild.targets.integrate.compose.build.additional_contexts.root == _|_) & true
 externalModuleSources: _externalBuild.targets.build.srcs.defaultGlobs["pronto-module"].glob & "cue.mod/**"
 externalConfigSources: _externalBuild.targets.build.srcs.defaultGlobs["pronto-config"].glob & "pronto/**"
 externalSaytSources:   _externalBuild.targets.build.srcs.defaultGlobs["pronto-sayt"].glob & ".say.yaml"

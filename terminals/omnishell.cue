@@ -26,7 +26,13 @@ import (
 	}
 }
 
-#Generate: "if ('program.cue' | path exists) { use tools.nu [run-mise]; run-mise exec -- omnishell materialize .; run-mise exec -- omnishell mode . | save --force program_terminal.cue }"
+#Generate: "if ('program.cue' | path exists) { use tools.nu [run-mise]; run-mise exec -- omnishell mode . | save --force program_terminal.cue }"
+
+// The image of omnishell's runtime tree an installed app's images copy from,
+// as pronto pins it: the consumer pins what it builds on, as with mecha's
+// images (clusters/mecha.cue). From the pin line an omnishell release prints.
+published: runtime: =~"^bonitao/omnishell:[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
+published: runtime: "bonitao/omnishell:0.0.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 // Re-exported beside #Terminal because the emitter reads it directly: CUE has
 // no Intl, so the entry document's direction is resolved from the app's default

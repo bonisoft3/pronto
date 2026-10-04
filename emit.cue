@@ -1607,9 +1607,9 @@ _cdcTableField: "__table"
 				runtime: "\(sources.pronto)"
 				args:    "let out = (mktemp -d); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read $\"--allow-write=($out)\" ($pronto | path join prerender.ts) . $out https://localhost:8443\(_prerenderTerminal); rm -rf $out"
 			}).out
-			// An installed app renders with the terminal it serves, materialized
-			// beside it; in the monorepo prerender.ts finds pronto's sibling.
-			_prerenderTerminal: [if sources.pronto == "" {" .omnishell"}, ""][0]
+			// An installed app renders with the terminal its mise installed; in
+			// the monorepo prerender.ts finds pronto's sibling.
+			_prerenderTerminal: [if sources.pronto == "" {" (run-mise where \(distribution.#Runtimes.omnishell) | str trim)"}, ""][0]
 			if sources.pronto == "" {
 				sayYaml: _distribution.say
 			}
@@ -1621,8 +1621,13 @@ _cdcTableField: "__table"
 	code:    #App
 	loop:    prontoloop.#Loop
 	cluster: mecha.#Cluster
+	// The terminal, whose own statics an installed app's build serves from
+	// omnishell's image; required there, unread in the monorepo's layout.
+	terminal?: omnishell.#Terminal
+	if D.loop.surface.sources.pronto == "" {terminal: omnishell.#Terminal}
 	out: prontobuild.#Build & {
 		"cluster": D.cluster
+		if D.terminal != _|_ {terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]}
 		meta: {
 			app:      D.code.meta.name
 			local:    D.loop.surface.sources.pronto != ""
@@ -1734,14 +1739,17 @@ _cdcTableField: "__table"
 		meta: {
 			app: D.code.meta.name
 			// An installed app is its workspace's root, and its runtime sits where
-			// mise put it, outside the app: every static is then the app's own
-			// file (omnishell's materialized into .omnishell/), fingerprinted and
-			// copied from the build context.
+			// mise put it, outside the app: every static the cluster serves is
+			// then the app's own file, fingerprinted and copied from the build
+			// context.
 			if !D.local {
 				root:    ""
 				runtime: "../"
 			}
-			statics: list.Concat([D.statics, D._ladder, D._crawl, _envelope.statics])
+			// An installed app's caddy takes omnishell's own statics from its
+			// image, which the build adds (builders/bayt.cue); the cluster
+			// serves the app's.
+			statics: list.Concat([[for s in D.statics if D.local || !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
 			// mecha's images, reached through the monorepo's bayt federation,
 			// or by name where the app is installed.
 			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute"] {
@@ -2262,6 +2270,14 @@ _cdcTableField: "__table"
 				data: include: [for s, _ in mecha.published {"../${MONOREPO_MECHA_PATH}/.bayt/compose.\(s)-image.yaml"}]
 			}
 			"mecha/docker-image.yaml": {
+				format: "yaml"
+				data: {}
+			}
+			"omnishell/service.yaml": {
+				format: "yaml"
+				data: include: ["../${MONOREPO_OMNISHELL_PATH}/.bayt/compose.runtime-image.yaml"]
+			}
+			"omnishell/docker-image.yaml": {
 				format: "yaml"
 				data: {}
 			}

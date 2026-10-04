@@ -30,7 +30,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.58.1", ...}
+	tools: {"github:bonisoft3/bayt": "0.58.2", ...}
 	say: say: {
 		...
 		// The commands restated: a rule the config names replaces sayt's
@@ -129,6 +129,20 @@ import (
 	}}
 	_mechaRuntime: mecha.#Runtime & {"project": project.name, "cluster": B.cluster}
 
+	// omnishell reaches an installed app's images the same way, as one image of
+	// its runtime tree (omnishell's runtime-image target), named here and
+	// switched by the same mode; mecha/ and omnishell/ hold the fragments.
+	_omnishell: "plugins_omnishell-runtime-image"
+	_omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishell.published.runtime)}${MONOREPO_COMPOSE_MODE:+:\(_omnishell)}"
+	// The terminal's statics served from omnishell's tree (target /omnishell/),
+	// which an installed app's caddy copies from that image; the cluster serves
+	// the app's own (#DefaultCluster). Named from omnishell's root.
+	terminalStatics: *[] | [...{file: string, target: string, ...}]
+	// Without them an installed caddy would serve no interpreter: an installed
+	// app hands its terminal to #DefaultBuild.
+	if !B.meta.local {terminalStatics: [_, ...]}
+	_runtimeStatics: [for s in B.terminalStatics if strings.HasPrefix(s.target, "/omnishell/") {s}]
+
 	project: core.#project & {
 		dir: [if B.meta.local {B.meta.dir}, "."][0]
 		if !B.meta.local {name: B.meta.app}
@@ -138,7 +152,15 @@ import (
 
 		targets: B._mechaRuntime.targets
 		if !B.meta.local {
-			compose: includes: ["mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"]
+			compose: includes: ["mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml", "omnishell/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"]
+			if len(B._runtimeStatics) > 0 {
+				targets: caddy: {
+					dockerfile: defaultCopy: {for s in B._runtimeStatics {
+						(s.target): {from: name: B._omnishell, srcs: [s.file], dst: s.target}
+					}}
+					compose: build: additional_contexts: (B._omnishell): B._omnishellContext
+				}
+			}
 			targets: {for k, t in B._mechaRuntime.targets
 				if t != null && t.dockerfile != _|_ && t.dockerfile.from != null
 				if t.dockerfile.from.name != _|_
@@ -165,7 +187,7 @@ import (
 				// because the fingerprint is what decides a rebuild, and the ledger
 				// is pinned by nothing else — ir.html at least moves program.cue's
 				// meta.ir.sha256 when it changes.
-				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**", if !B.meta.local {".omnishell/**"}, if !B.meta.local {"saytw"}, if B.meta.seed != _|_ {B.meta.seed}]
+				srcs: globs: ["ir.html", "acceptance.md", "shell/**", "pipelines/**", "services/**", if !B.meta.local {"saytw"}, if B.meta.seed != _|_ {B.meta.seed}]
 				cmd: builtin: do:      B.meta.buildCmd
 				dockerfile: from: ref: ":setup"
 			}
@@ -197,14 +219,14 @@ import (
 						"ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
 						"ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
 						"ENV DENO_DIR=/deno-cache",
-						[if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=root .omnishell /omnishell"][0],
+						[if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0],
 						"RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts",
 					]
 				}
 				cmd: "builtin": null
 				compose: {
 					// Compose resolves this from .bayt/, not the app directory.
-					build: additional_contexts: root: [if B.meta.local {B._root}, ".."][0]
+					build: additional_contexts: [if B.meta.local {{root: B._root}}, {(B._omnishell): B._omnishellContext}][0]
 					// The TLS door, so the browser speaks h2 as a reader's does (see
 					// the Caddyfile's door), whose certificate Caddy's own CA signs.
 					environment: APP_URL: "https://caddy:8443"
@@ -304,8 +326,7 @@ import (
 				"check-\(name)": sayt.integrate & mise.install & {
 					// The plane is an image-only dep, as visual lint's is.
 					deps: [base, ":launch:outs"]
-					// An installed app's tests import omnishell's materialized tree.
-					srcs: globs: list.Concat([["tests/**"], [if !B.meta.local {".omnishell/**"}], c.srcs])
+					srcs: globs: list.Concat([["tests/**"], c.srcs])
 					dockerfile: {
 						from: ref: base
 						if B.meta.local {
@@ -316,10 +337,16 @@ import (
 								parents: true
 							}]
 						}
+						// An installed app's tests import omnishell from /omnishell
+						// (tests/deno.json maps `omnishell/` there).
+						if !B.meta.local {
+							copy: [{from: name: B._omnishell, srcs: ["/"], dst: "/omnishell"}]
+						}
 					}
 					compose: {
 						// Compose resolves this from .bayt/, not the app directory.
 						if B.meta.local {build: additional_contexts: root: B._root}
+						if !B.meta.local {build: additional_contexts: (B._omnishell): B._omnishellContext}
 						environment: {
 							// The TLS door, whose certificate Caddy's own CA signs.
 							APP_URL: "https://caddy:8443"
