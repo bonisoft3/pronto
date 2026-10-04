@@ -25,3 +25,10 @@ import (
 }
 #Runtime: impl.#Runtime
 #Static:  impl.#Static
+
+// The mecha images an app takes by name, as pronto pins them: the consumer
+// pins what it builds on, so a pronto release names a mecha release's images
+// and an app pinning pronto gets them through it. One per service of
+// impl.#Images, from the pin lines a mecha release prints; empty until its
+// first image release.
+published: impl.#Published & {}
