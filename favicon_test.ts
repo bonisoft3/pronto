@@ -462,7 +462,7 @@ Deno.test("relative ./ paths are normalized and cluster statics are deduplicated
 Deno.test("bundle.ts inlines local favicon and apple-touch-icon into single-file HTML bundle", async () => {
   const app = await Deno.makeTempDir({ prefix: "bundle-favicon-test-" });
   try {
-    const here = path.dirname(new URL(import.meta.url).pathname);
+    const here = import.meta.dirname!;
     const repo = path.resolve(here, "../..");
 
     await Deno.mkdir(path.join(app, "shell"), { recursive: true });
