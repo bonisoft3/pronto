@@ -4,11 +4,9 @@
 // markup says (#Screen.reads and .writes, as the terminal routes them) and off
 // what the program says the terminal reads outside any region.
 //
-// A table is on demand only when nothing could read its collection as if it
-// were the table: the collection holds the rows some view asked for, so a read
-// that is not one of those views would see a short list and render it as the
-// whole. The terminal raises a ProgramError at each such read (data-sync.js
-// `whole`), which is where a drift between this rule and the store shows.
+// Whole-collection requirements outside a query remain eager. A region or
+// named read acquires its own subset or complete snapshot while active, so
+// one broad read does not dictate how another screen loads the same table.
 package pronto
 
 import (
@@ -40,7 +38,7 @@ import (
 		// CUE refuses.
 		let why = list.Concat([[for w in _syncEager if w.entity == n {w.why}], [if _syncRead[n] == _|_ {"no screen reads it"}]])
 		mode: [if len(why) > 0 {"eager"}, "on-demand"][0]
-		reason: [for w in why {w}, "every read of it is a view whose filter Electric compares, or the server's"][0]
+		reason: [for w in why {w}, "each active query demands its own subset or complete snapshot"][0]
 	}}}
 
 	// A pattern, not a comprehension over the entities: the rule reads the
@@ -59,56 +57,22 @@ import (
 	}}}
 	// Electric compares it (types.cue `subset`).
 	_syncCompares: {for n, cols in _syncTypes {(n): {for c, t in cols if t.subset {(c): true}}}}
-	// The view engine does not order by it.
-	_syncUnordered: {for n, cols in _syncTypes {(n): {for c, t in cols if !list.Contains(["text", "number", "boolean"], t.order) {(c): true}}}}
-	// A "text" type with no canonical spelling is free text, ordered by a
-	// collation: Postgres's (the cluster's ICU root) in a subset, the reader's
-	// locale in the view engine (TanStack's default localeCompare). A spelled
-	// one (a uuid, a date) is digits, lowercase hex and fixed punctuation, which
-	// every collation orders alike.
-	_syncCollated: {for n, cols in _syncTypes {(n): {for c, t in cols if t.order == "text" && t.pattern == _|_ {(c): true}}}}
-	// The columns that pin one row of it: its key, a unique field, a declared
-	// unique holding over every row.
-	_syncWitnesses: {for n, e in A.state.entities {(n): list.Concat([
-		[for f in e.fields if f.pk {[f.name]}],
-		[for f in e.fields if f.unique != _|_ if f.unique {[f.name]}],
-		[for u in e.uniques if u.where == _|_ {u.cols}],
-	])}}
 	_syncRestricted: {for n, e in A.state.entities if e.access != _|_ if e.access.scope != "public" {(n): e.access.scope}}
 
-	// Every read, judged as data-sync.js serves it. One the server computes
-	// (an fts, an unparsed select, an embed of a table with no collection)
-	// only watches its table. One the view engine maintains loads its rows,
-	// and its embeds' by key, as subsets. Any other reads the collection
-	// itself, and the collections of what it embeds.
-	_syncReads: [for sn, s in A.surface.screens for r in s.reads {
-		at:     "\(sn).html"
-		read:   r
-		entity: _syncByTable[r.table]
-		let embeds = [if r.embeds != _|_ {r.embeds}, []][0]
-		served: r.route == "server" || len([for t in embeds if #collections[t] == _|_ {t}]) > 0
-		// The entities it joins: once it is not served, every table it embeds
-		// has a collection, so an entity.
-		joined: [for t in embeds if _syncByTable[t] != _|_ {_syncByTable[t]}]
-		hidden: [for x in joined if _syncRestricted[x] != _|_ {x}]
-		unsorted: [for c in r.orders if _syncUnordered[entity][c] != _|_ {c}]
-		// isMaintainable's program half: a view keeps no row of a table it
-		// cannot restate the visibility of, its own or a joined one's.
-		restricted: _syncRestricted[entity] != _|_
-		viewed:     !served && r.kind == "live" && r.route == "view" && !restricted && len(hidden) == 0 && len(unsorted) == 0
-		scanned: !served && !viewed
-		// Read once per row of a list stamping it, unless the list's filter
-		// pins one row of its table with eq.
-		perRow: len([for i in r.lists
-			let stamper = s.reads[i]
-			let stamperEq = {for c in [if stamper.clauses != _|_ {stamper.clauses}, []][0] if c.op == "eq" {(c.col): true}}
-			let stamperKeys = [if _syncByTable[stamper.table] != _|_ {_syncWitnesses[_syncByTable[stamper.table]]}, []][0]
-			if len([for w in stamperKeys if len(w) > 0 && len([for c in w if stamperEq[c] == _|_ {c}]) == 0 {w}]) == 0 {i}]) > 0
-	}]
-	_syncRead: {for v in _syncReads if !v.scanned {
-		(v.entity): true
-		if v.viewed for x in v.joined {(x): true}
-	}}
+	_syncRead: {
+		for _, screen in A.surface.screens for read in screen.reads {
+			(_syncByTable[read.table]): true
+			if read.embeds != _|_ for table in read.embeds if _syncByTable[table] != _|_ {(_syncByTable[table]): true}
+		}
+	}
+	_syncServed: [for sn, screen in A.surface.screens for read in screen.reads
+		let joined = [if read.embeds != _|_ {read.embeds}, [for t, _ in #collections {t}]][0]
+		if read.route == "server" || len([for t in joined if #collections[t] == _|_ {t}]) > 0 {
+			at: "\(sn).html"
+			// Markup has no schema to resolve foreign-key column relations.
+			// All matching refs cover nested joins without widening unrelated tables.
+			tables: list.Concat([[read.table], joined, [for t in joined for _, e in A.state.entities for f in e.fields if f.name == t if f.ref != _|_ {f.ref}]])
+		}]
 
 	// The screens with a reduce, whatever event it is bound to.
 	_syncReducing: [for sn, s in A.surface.screens if len([for w in s.writes if w.op == "reduce" {w}]) > 0 {sn}]
@@ -136,66 +100,19 @@ import (
 		// A view keeps no row whose visibility it cannot restate.
 		[for n, scope in _syncRestricted {entity: n, why: "\(n) is \(scope), and a view cannot restate its visibility"}],
 
-		// The reads that take the collection for the table.
-		list.Concat([for v in _syncReads if v.scanned {
-			let blamed = [
-				if v.read.kind == "reads" {"\(v.at) reads it whole for a reduce (data-reads)"},
-				if v.read.kind == "named" {"\(v.at) reads it through a named read, which no view is proved to serve"},
-				if v.read.route == "whole" {"\(v.at) reads the whole table"},
-				if v.read.route == "snapshot" {
-					let op = [for c in v.read.clauses if !list.Contains(["eq", "neq", "null", "notnull"], c.op) {c.op}][0]
-					"\(v.at) filters it with \([if op == "true" || op == "false" {"is.\(op)"}, op][0]), which the view engine cannot state"
-				},
-				if v.restricted {"\(v.at) reads it, and a view cannot restate its visibility"},
-				if len(v.hidden) > 0 {"\(v.at) embeds \(v.hidden[0]), whose visibility a join cannot restate"},
-				"\(v.at) orders it by \(v.unsorted[0]), which the view engine does not order",
-			][0]
-			list.Concat([[{entity: v.entity, why: blamed}], [for x in v.joined {entity: x, why: "\(v.at) embeds it in a read of \(v.entity) the view engine does not maintain"}]])
-		}]),
-
-		// The views whose subsets Electric cannot state.
-		list.Concat([for v in _syncReads if v.viewed {
-			list.Concat([[for c in v.read.clauses if _syncCompares[v.entity][c.col] == _|_ {
-				entity: v.entity
-				why:    "\(v.at) filters it on \(c.col), which Electric cannot compare"
+		// An opaque keyed effect may name a row no view holds. Whole-table
+		// mutations demand their snapshot at runtime; keyed effects still need
+		// a key Electric can compare to load that row.
+		[if len(_syncReducing) > 0 for n, e in A.state.entities if e.server
+			if _syncCompares[n][_syncKey[n]] == _|_ {
+				entity: n
+				why:    "\(_syncReducing[0]).html writes from a reduce, and Electric cannot compare \(n)'s key to load a row it targets"
 			}],
-				// TanStack pushes an order down only with a cap, and pages past
-				// the cap with a cursor comparing the order's columns.
-				[if v.read.limit != _|_ for c in v.read.orders if _syncCompares[v.entity][c] == _|_ {
-					entity: v.entity
-					why:    "\(v.at) caps it ordered by \(c), and the cursor past the cap compares it, which Electric cannot"
-				}],
-				// Postgres picks the rows inside the cap by its order, and the
-				// view shows them by its own: where the two differ, the view
-				// holds rows an eager table would not show.
-				[if v.read.limit != _|_ for c in v.read.orders if _syncCollated[v.entity][c] != _|_ {
-					entity: v.entity
-					why:    "\(v.at) caps it ordered by \(c), which Postgres orders by its collation and the view engine by the reader's locale"
-				}],
-				// A join loads the embedded rows by key, as a view of that table
-				// would.
-				[for x in v.joined if _syncCompares[x][_syncKey[x]] == _|_ {
-					entity: x
-					why:    "\(v.at) joins it on \(_syncKey[x]), which Electric cannot compare"
-				}]])
-		}]),
-
-		// A view read once per row of a list asks for its rows, and its
-		// joins' by key, once per row, where an eager table loads once. One
-		// nested only in slots, or in a list whose filter pins one row, reads
-		// once.
-		list.Concat([for v in _syncReads if v.viewed && v.perRow {
-			list.Concat([[{entity: v.entity, why: "\(v.at) reads it once per row of a list"}],
-				[for x in v.joined {entity: x, why: "\(v.at) joins it in a read once per row of a list"}]])
-		}]),
-
-		// A reduce is code, whatever event it is bound to: each update it
-		// returns and each effect names its own entity (screen.js applyUpdates,
-		// applyEffects), so the markup cannot say which tables it writes, and a
-		// put, an upsert and a delete by filter read the table to find the row.
-		[if len(_syncReducing) > 0 for n, e in A.state.entities if e.server {
-			entity: n
-			why:    "\(_syncReducing[0]).html writes from a reduce, whose updates and effects may write any table"
+		// Server results never demand a local snapshot. Their invalidations
+		// watch collections, whose deletes only fire for rows already held.
+		[for served in _syncServed for t in served.tables if _syncByTable[t] != _|_ {
+			entity: _syncByTable[t]
+			why:    "\(served.at) watches it to invalidate a server-computed read"
 		}],
 
 		// The writes that find their row in the collection. One by key loads
@@ -207,8 +124,6 @@ import (
 			let wn = _syncByTable[w.table]
 			let pk = _syncKey[wn]
 			let refused = [
-				if w.op == "upsert" {"\(at) upserts it, which finds the row by natural key in the table"},
-				if w.op == "delete" && w.filter != _|_ {"\(at) deletes from it by filter, which finds the rows in the table"},
 				if (w.op == "update" || w.op == "delete") && _syncCompares[wn][pk] == _|_ {"\(at) \(w.op)s a row of it by \(pk), which Electric cannot compare to load the row"},
 			]
 			if len(refused) > 0 {entity: wn, why: refused[0]}],

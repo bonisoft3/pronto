@@ -20,11 +20,13 @@ import { generateTypeSQL } from "./type-sql.ts";
 import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
 import { parseHeld, seedSql, type SeedData } from "./seed.ts";
+import { releaseManifest, type ReleaseContent } from "./release.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Emission = {
   manifest: string[];
   files: Record<string, EmitFile>;
+  release: { enabled: boolean; runtime: string; assets: { path: string; src: string }[]; runtimeAssets: { path: string; src: string }[] };
   terminal: { surface: { runtime: string; documentRenderer: string; documentConfig: string } };
   build?: { meta?: { local?: boolean } };
   cluster?: { meta?: { root?: string; statics?: { file: string }[] } };
@@ -261,6 +263,18 @@ async function renderDocuments(emission: Emission): Promise<Map<string, string>>
 /** Writes the emission and returns the paths it wrote. */
 async function writeEmission(emission: Emission): Promise<string[]> {
   const contents = await rendered(emission);
+  if (emission.release.enabled) {
+    const assets = new Map<string, ReleaseContent>();
+    for (const asset of emission.release.assets) {
+      assets.set(asset.path, contents.get(asset.src) ?? await Deno.readFile(`${appDir}/${asset.src}`));
+    }
+    const surface = emission.terminal.surface;
+    const runtimeRoot = surface.runtime === "" ? await terminalPath({ terminalRuntime: "" }, "", appDir) : `${appDir}/`;
+    for (const asset of emission.release.runtimeAssets) {
+      assets.set(asset.path, await Deno.readFile(`${runtimeRoot}${asset.src}`));
+    }
+    contents.set("shell/release.json", JSON.stringify(await releaseManifest(emission.release.runtime, assets), null, 2) + "\n");
+  }
   const documents = Object.keys(emission.files).filter((rel) => emission.files[rel].format === "document");
   const written = [...contents.keys(), ...documents].sort();
   const manifestPath = `${appDir}/.pronto/manifest.json`;
@@ -269,7 +283,7 @@ async function writeEmission(emission: Emission): Promise<string[]> {
   // run that dies midway leaves nothing the next one cannot find.
   const stale: string[] = [];
   for (const rel of await recorded(manifestPath)) {
-    if (emission.files[rel]) continue;
+    if (emission.files[rel] || (rel === "shell/release.json" && emission.release.enabled)) continue;
     const info = await ifMissing(Deno.lstat(`${appDir}/${rel}`), null);
     if (info === null) continue;
     if (info.isDirectory) fail(`${rel}: recorded as written, but is now a directory`);

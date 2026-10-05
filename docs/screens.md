@@ -43,59 +43,51 @@ restatement with the markup would be grading a copy.
 
 ### The reads decide how a table syncs
 
+Durability decides where data survives and how it stays current. Demand decides
+when and how much to load, derived from the reads already present in the
+screens. Delaying an eager collection's first subscription is lazy activation;
+it still loads the whole shape. On-demand loading instead obtains the queried
+subset. No additional app-authored loading mode is needed.
+
 What the program concludes from the reads is CUE's: `sync.cue` computes
 `#App.#sync`, every server entity's sync mode with its reason, and it lands on
-`#Entity.sync`. A table loads **on demand** — its shape opened from now and each
-view's rows loaded as a subset snapshot — only when nothing could read its
-collection as if it were the table:
+`#Entity.sync`. Read tables can load **on demand**: the shape opens from now,
+then each active query obtains the rows it needs. A broad query on another
+screen does not force this screen to download the table.
 
-- it is not `offline`, the rung that keeps the whole table on the device
-  ([lattice](lattice.md));
-- everyone may read it, since a view cannot restate a narrower visibility;
-- every read of it is a view the engine maintains, or one the server computes;
-  a reduce's `data-reads`, a named read, a whole read, a snapshot read (a
-  boolean, range or pattern clause), a view ordered by a column the engine
-  does not order and any read of a table not everyone may read all read the
-  collection, and so does such a read's embed;
-- no view of it, and no view joining it, is read once per row of a list (one
-  inside an item template, or a named one a region stamps, and so on out
-  through the lists stamping that region): each row would ask
-  for its own subset where an eager table loads once. A view nested only in
-  slots reads once, as a slot binds one row, and so does one in a list whose
-  filter pins a key or a unique of its table with `eq` (a game's goals under
-  the one game). The reader names the lists stamping each read (`#Read.lists`)
-  rather than the rule taking a declaration, so the markup that stamps the
-  rows is what decides;
-- every column such a view filters on, and every order column of a capped one,
-  is a type Electric compares (`subset` in [the type table](types-and-identity.md));
-- no capped view orders it by free text (an `order: "text"` type with no
-  pattern, `string`): Postgres picks the rows inside the cap by the cluster's
-  collation and the view orders them by the reader's locale, so the two can
-  hold different rows. Pinning the view's comparison to the server's was
-  rejected: TanStack offers a lexical order or a browser locale, and neither
-  is ICU root;
-- no fold, validation, visibility rule or the signed-in strip reads it outside
-  a region;
-- no screen has a reduce, whatever event it is bound to: its updates and
-  effects name their own entities, which the markup cannot say, so a reduce on
-  any screen keeps every server table eager. Declaring the entities a reduce's
-  module writes was rejected while no app with an on-demand table has one: it
-  is a statement of code a checker would have to grade;
-- no screen upserts it or deletes from it by filter, and its key is a type
-  Electric compares: a write by key loads a row
-  no view loaded as a view of its key, so the key a form or an effect carries
-  may come from anywhere on the screen. Asking instead that the screen hold a
-  view of the table, or that the write sit in the region whose row it names,
-  was rejected: an effect binds its key by interpolation, from any row, and a
-  view of the table on the same screen proves nothing about which rows it
-  loaded.
+The runtime chooses per query, using the existing filter, order, embeds and
+carrier metadata:
 
-Every other server table is **eager**. derive writes each mode and its first
-reason into the fact store as `sync_mode`, and `shell.yaml` names the on-demand
-tables under `sync`. An author cannot state a mode: one the rule contradicts
-fails to unify. The terminal raises a ProgramError at any read that would take
-an on-demand collection for the table ([data](../../omnishell/docs/data.md)),
-which is where a drift between the rule and the store shows.
+- A maintainable query loads its subset and its embeds by key. Identical
+  queries share a view, including nested queries. Distinct nested filters can
+  issue distinct requests; this reduces unrelated rows, not necessarily the
+  request count.
+- A local whole or snapshot query demands complete snapshots of its base and
+  embedded tables before evaluating. This includes unsupported predicates,
+  unordered caps, unsupported joined keys and capped free-text ordering:
+  Postgres collation and browser ordering need not choose the same rows.
+- Offset paging, full-text search and other server queries remain server reads.
+  Their registered base and embedded collections stay eager: a server result
+  loads no local subset, and a collection only signals deletion of rows it
+  already holds. Markup records hinted and nested dependencies; foreign-key
+  column relations resolve through schema refs. Other tables can remain on demand.
+
+A subscription retains its demands while active. A named read retains them
+until it settles, even if its screen leaves. Releasing demand releases the
+view, but does not promise immediate eviction of rows cached by Electric.
+
+Entity-wide requirements remain **eager**: `offline` durability, restricted
+visibility, folds, validations, access dependencies and the signed-in strip.
+Keyed writes also require a key Electric can compare to load an unseen row;
+unsupported keys keep their write targets eager. Opaque mutations that need
+the complete table demand it when executed and retain that view for later
+writes. Tables with no screen reads remain eager.
+
+derive writes each mode and its first reason into the fact store as
+`sync_mode`, and `shell.yaml` names the on-demand tables under `sync`. An author
+cannot override the derived mode. The terminal refuses incidental partial
+collection reads by validation, visibility and fold code; query snapshot reads
+instead acquire explicit completeness ([data](../../omnishell/docs/data.md)).
 
 ## Checked against the program
 
@@ -266,7 +258,7 @@ kept document at once, however old.
   of conclusion the rest of the program draws in CUE; in TypeScript it was a
   second front end for the program, with its own copy of the type table.
 - **Declaring a sync mode per entity** — the reads already say it, and a
-  declaration could claim on-demand for a table a screen scans whole.
+  declaration could claim on-demand for a table a validation requires whole.
 - **A content hash in a public path** — it breaks every shared link at the next
   deploy, fragments a crawler's index, and needs a canonical back to the
   unhashed URL, conceding that URL was the identity. Hashes belong on internal

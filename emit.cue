@@ -1099,6 +1099,7 @@ _cdcBeforeField: "__before"
 // same path language as the manifest.
 #shellConfig: S={
 	code: #App
+	liveUpdates: bool
 	migrations: [...string]
 	// The terminal's measured floors, carried into the file visual lint
 	// reads. #scale publishes the same struct as --min-*, so the rung an author
@@ -1231,6 +1232,7 @@ _cdcBeforeField: "__before"
 	}
 	out: {
 		app:    S.code.meta.name
+		if S.liveUpdates {liveUpdates: true}
 		floors: S.floors
 		server: S.server
 		if S.native {
@@ -1617,6 +1619,7 @@ _cdcBeforeField: "__before"
 #DefaultTerminal: D={
 	code:  #App
 	boot?: string
+	liveUpdates: *false | bool
 	// An adapter the terminal serves is the terminal's file and not the app's,
 	// so only an app's own module joins the set.
 	_handlerSet: {
@@ -1645,6 +1648,7 @@ _cdcBeforeField: "__before"
 	]
 	out: omnishell.#Terminal & {
 		app:         D.code.meta.name
+		liveUpdates: D.liveUpdates
 		description: D.code.meta.description
 		if D.code.meta.i18n != _|_ {
 			language: D.code.meta.i18n.default
@@ -1657,7 +1661,7 @@ _cdcBeforeField: "__before"
 			if D.boot != _|_ {
 				assets: boot: D.boot
 			}
-			screens: [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css}]
+			screens: [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css, shared: s.files.shared}]
 			handlers: list.SortStrings([for i, _ in D._handlerSet {i}])
 			renderers: list.SortStrings([for i, _ in D._rendererSet {i}])
 			// The union of what screens import, so the served set is exactly what
@@ -2210,7 +2214,7 @@ _cdcBeforeField: "__before"
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
 	// door and the router cannot disagree about what a route is.
-	_shell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, server: E._serverOn, native: E.code.capabilities.native}).out
+	_shell: (#shellConfig & {"code": E.code, liveUpdates: E.terminal.liveUpdates, migrations: E._migrations, floors: E.terminal.capabilities.floors, server: E._serverOn, native: E.code.capabilities.native}).out
 	// The locales in one order, so every artifact that lists them lists them the
 	// same way and a regenerated file has no spurious diff.
 	_locales: list.SortStrings([if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}])
@@ -3396,4 +3400,20 @@ _cdcBeforeField: "__before"
 	}
 
 	manifest: list.SortStrings([for p, _ in files {p}])
+	release: {
+		enabled: E.terminal.liveUpdates
+		runtime: omnishell.published.runtime
+		_declarations: [for s in list.Concat([E.terminal.surface.statics, E.cluster.meta.statics])
+			if strings.HasPrefix(s.target, "/srv/shell/") || strings.HasPrefix(s.target, "/srv/messages/") || strings.HasPrefix(s.target, "/srv/omnishell/") || s.target == "/srv/offline-first-sw.js"
+			let servedPath = strings.TrimPrefix(s.target, "/srv/")
+			if servedPath != "shell/release.json" {{path: servedPath, src: s.file}}]
+		// Docker copies cluster statics in order; the last destination wins.
+		_served: {for i, s in _declarations
+			if !list.Contains([for later in _declarations[i+1:] {later.path}], s.path) {(s.path): s}}
+		assets: [for p in list.SortStrings([for p, _ in _served {p}]) {_served[p]}]
+		runtimeAssets: [for s in E.terminal.surface.statics if strings.HasPrefix(s.target, "/omnishell/") {
+			path: strings.TrimPrefix(s.target, "/")
+			src:  s.file
+		}]
+	}
 }

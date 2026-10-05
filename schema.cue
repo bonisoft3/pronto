@@ -560,7 +560,7 @@ import (
 		access?: #Access
 	}
 	// How a browser syncs the table: "eager" takes the whole shape before a
-	// screen reads it, "on-demand" only the rows a maintained view asks for.
+	// screen reads it; "on-demand" loads what each active query demands.
 	// #App.#sync decides it for every server entity (sync.cue), so an authored
 	// value it contradicts fails to unify.
 	if server {
@@ -1012,9 +1012,8 @@ import (
 	// server, filtered by the client ("snapshot"), the collection itself
 	// ("whole"), or maintained by the view engine ("view").
 	route: "server" | "snapshot" | "whole" | "view"
-	// The filter's clauses, and the tables its select embeds as the markup
-	// names them (a foreign-key hint names none); both absent where the server
-	// computes it.
+	// Server-computed filters omit clauses. Embed dependencies include nested
+	// relations, named by table or foreign-key column even for server selects.
 	clauses?: [...{col: string, op: string}]
 	embeds?: [...string]
 	limit?: int & >0

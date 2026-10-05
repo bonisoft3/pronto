@@ -41,8 +41,9 @@ At the client, `offline` is the rung that keeps the whole table: its
 collection syncs eagerly, before a screen reads it, so the device holds every
 row when the network goes. Every other cluster rung syncs as its screens'
 reads allow, and `#App.#sync` derives which ([screens](screens.md#the-reads-decide-how-a-table-syncs)):
-on demand where every read is a view whose subset Electric can state, eagerly
-otherwise. Nothing else tells `server` from `live` at the client
+on demand per active query, unless a validation, access rule or other
+whole-collection requirement makes it eager. Each query obtains its subset or
+explicitly demands a complete snapshot. Nothing else tells `server` from `live` at the client
 ([pending](../PENDING.md#the-lattice)).
 
 ## Views, folds and the DOM

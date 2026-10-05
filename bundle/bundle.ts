@@ -195,6 +195,11 @@ const replace = (html: string, from: string | RegExp, to: string) => {
 let html = await read('shell/index.html')
 html = replace(html, '<link rel="stylesheet" href="./shell.css">', `<style>${files['shell/shell.css']}</style>`)
 html = replace(html, '<link rel="stylesheet" href="./design.css">', `<style>${files['shell/design.css']}</style>`)
+html = html.replace(/<link rel="stylesheet" href="([^"]+)">/g, (_match, href) => {
+  const p = new URL(href, 'file:///shell/').pathname.slice(1)
+  if (!(p in files)) fail(`shell/index.html links ${p}, which shell.json does not serve`)
+  return `<style>${files[p]}</style>`
+})
 html = html.replace(/<link rel="modulepreload"[^>]*>\n/g, '').replace(/<script type="speculationrules">[\s\S]*?<\/script>\n/, '')
 
 const isExternal = (url: string) =>

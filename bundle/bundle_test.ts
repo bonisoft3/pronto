@@ -25,13 +25,16 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       await Deno.mkdir(path.dirname(path.join(app, p)), { recursive: true })
       await Deno.writeTextFile(path.join(app, p), text)
     }
-    await write('shell/shell.json', JSON.stringify({ routes: [], migrations: ['m/001.sql', 'm/900_seed.sql'], tables: [] }))
+    await write('shell/shell.json', JSON.stringify({ routes: [{ files: { css: 'shell/screens/home.css', shared: ['shell/shared/chrome.css'] } }], migrations: ['m/001.sql', 'm/900_seed.sql'], tables: [] }))
     await write('shell/shell.css', '')
     await write('shell/design.css', '')
+    await write('shell/screens/home.css', '')
+    await write('shell/shared/chrome.css', 'body { padding-top: 72px; }')
     await write('shell/index.html', [
       '<!doctype html><html><head>',
       '<link rel="stylesheet" href="./shell.css">',
       '<link rel="stylesheet" href="./design.css">',
+      '<link rel="stylesheet" href="../shell/shared/chrome.css">',
       '</head><body><div id="app"></div>',
       '<script type="module" src="./boot.js"></script>',
       '</body></html>',
@@ -60,6 +63,9 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       stderr: 'inherit',
     }).output()
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
+    const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
+    assert.ok(html.includes('<style>body { padding-top: 72px; }</style>'))
+    assert.ok(!/<link rel="stylesheet"/.test(html))
 
     // The page's own boot, minus the browser: its payload read from the
     // document, PGlite under the cluster's pins, and createCluster running the sql.
