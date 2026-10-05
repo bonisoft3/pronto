@@ -1,5 +1,5 @@
 // The door and the terminal must choose the same language, or a reader is
-// redirected to one page and shown another.
+// answered with one page and shown another.
 //
 // They cannot share code: negotiateLocale runs in a browser against
 // navigator.languages, and the door runs in caddy against the Accept-Language
@@ -54,7 +54,7 @@ function door({ i18n, caddyfile }: Door, header: string): string {
   for (const [, prefix, captures] of caddyfile.matchAll(/@\w+_([\w-]+) \{[^}]*?vars_regexp \{re\.lang\.1\} \(\?i\)\^\(([^)]+)\)\$/gs)) {
     if (!new RegExp(`^(${captures})$`, "i").test(capture[1])) continue;
     const tag = Object.entries(i18n.locales).find(([, l]) => l.path === prefix)?.[0];
-    if (tag === undefined) throw new Error(`the Caddyfile redirects to /${prefix}, which names no declared locale`);
+    if (tag === undefined) throw new Error(`the Caddyfile answers with /${prefix}, which names no declared locale`);
     return tag;
   }
   return i18n.default;

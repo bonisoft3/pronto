@@ -1,5 +1,49 @@
 # The cluster's one door, h2 over TLS: libraries/mecha/docs/proxy.md.
+
+# Every file the door serves, answered with its validator: mecha's caddy
+# writes each file's content hash beside it as `<file>.etag` (cluster.cue),
+# since the ETag file_server would derive is mtime and size, which an image
+# built with clamped mtimes reduces to size. `encode` suffixes it per coding and
+# strips that suffix from a revalidation. The sidecars themselves are no
+# content.
+(files) {
+  file_server {
+    etag_file_extensions .etag
+    hide *.etag
+  }
+}
+
+# A file answered through `templates`, its arguments the media types rendered.
+# `templates` deletes the ETag, since what a template renders is in general no
+# function of the file; these render the file and the deployment's origin, so
+# the file's validator names the answer. The last `header`
+# copies it as file_server sets it; once the template has run, the second puts
+# it back, and the first drops the copy, deferred ops running innermost first.
+# A revalidation of an unchanged file is answered 304 by file_server, which no
+# template reads. `route`, so they run as written.
+(templated) {
+  route {
+    header {
+      -X-Template-Validator
+      defer
+    }
+    header {
+      match header X-Template-Validator "\"*"
+      >ETag {http.response.header.X-Template-Validator}
+    }
+    templates {
+      mime {args[0:]}
+    }
+    header >X-Template-Validator {http.response.header.ETag}
+    import files
+  }
+}
+
 (app) {
+  # The origin every absolute address the app answers is spelled against,
+  # read by a template as `http.vars.origin`. The deployment's, never the
+  # request's: this door answers any Host (mecha's docs/proxy.md, "The origin").
+  vars origin {$ORIGIN}
   # The interpreter ships as plain ES modules plus a vendored data-plane
   # driver measured in hundreds of KiB; compression at the door is what keeps
   # a cold cache from paying for that in seconds on a slow link.
@@ -13,7 +57,7 @@
     handle @favicon {
       header Cache-Control "no-cache"
       rewrite {http.matchers.file.relative}
-      file_server
+      import files
     }
     handle {
       respond "" 204
@@ -27,7 +71,7 @@
       header Content-Type "application/manifest+json"
       header Cache-Control "no-cache"
       rewrite {http.matchers.file.relative}
-      file_server
+      import files
     }
     handle {
       respond "" 404
@@ -37,7 +81,7 @@
     root * /srv
     header Content-Type "application/manifest+json"
     header Cache-Control "no-cache"
-    file_server
+    import files
   }
   handle /manifest.json {
     redir /manifest.webmanifest 308
@@ -119,23 +163,14 @@
   # the origin root. Both name absolute URLs — a sitemap <loc> and the Sitemap:
   # line are defined to be absolute — and the build cannot know the origin: the
   # same image answers on https://localhost:8443 and on the deployed door. So
-  # they ship as templates and caddy composes the origin from the request that
-  # arrived, which is by definition the one the crawler is indexing. `mime`,
-  # because templates otherwise only run on text/html and file_server types
-  # these by extension.
+  # they ship as templates spelling the origin above.
   handle /robots.txt {
     root * /srv
-    templates {
-      mime text/plain
-    }
-    file_server
+    import templated text/plain
   }
   handle /sitemap.xml {
     root * /srv
-    templates {
-      mime application/xml text/xml
-    }
-    file_server
+    import templated application/xml text/xml
   }
   # LLM discovery documents. Served from the root with markdown typing.
   handle /llms.txt {
@@ -144,7 +179,7 @@
     handle @llms {
       header Content-Type "text/markdown; charset=utf-8"
       header Cache-Control "no-cache"
-      file_server
+      import files
     }
     handle {
       respond "" 404
@@ -156,7 +191,7 @@
     handle @llmsfull {
       header Content-Type "text/markdown; charset=utf-8"
       header Cache-Control "no-cache"
-      file_server
+      import files
     }
     handle {
       respond "" 404
@@ -169,20 +204,20 @@
     @extensionless path_regexp ^/\.well-known/[^/.]+$
     header @extensionless Content-Type "application/json"
     header Cache-Control "no-cache"
-    file_server
+    import files
   }
   handle /omnishell/* {
     uri strip_prefix /omnishell
     root * /omnishell
-    # Statics revalidate every load (Last-Modified 304s): dev-loop edits and
+    # Statics revalidate every load (304s on their validator): dev-loop edits and
     # redeployed bundles must never be pinned by the browser's heuristic cache.
     header Cache-Control "no-cache"
-    file_server
+    import files
   }
   handle {
     root * /srv
     header Cache-Control "no-cache"
-    file_server
+    import files
   }
 }
 

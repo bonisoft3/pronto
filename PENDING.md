@@ -349,15 +349,26 @@ no cluster, and belongs in omnishell's `interpreter/lint.ts`; the placeholder
 rule must resolve `param.*`, `{now}`, dotted embeds and `data-empty-row`
 fields, and read a region's own `data-filter` against the enclosing row.
 
-**No rendered document ships, and a route's `ssr` is read by nothing**
-([screens](docs/screens.md#how-a-routes-first-document-is-rendered)).
+**A route over private or folder reads cannot be rendered on request**, and
+`#emit` refuses `ssr: "ssr"` there and in an app behind a sign-in
+([screens](docs/screens.md#how-a-routes-first-document-is-rendered)). A document
+request carries no credential: the token lives in one tab's sessionStorage, by
+design one guest per tab. Rendering per session needs a cookie session — a new
+auth concept, with CSRF, cross-tab sign-out and changed guest semantics — and
+`private, no-store` would give it no offline value.
 
-**The dual witness has no reader.** `prerender.ts` writes `pronto-cas`,
-`pronto-lsn` and `__PRONTO_STATE__`, and nothing reads them. The design: rows
-since `pronto-lsn` stream in as deltas, a template whose `pronto-cas` differs
-is fetched by hash and applied when `__prontoBusy()` is idle, and template,
-bundle and stylesheet live under content-addressed paths. Every asset is served
-under a stable path with `no-cache`.
+**No JSON-LD is rendered from rows.** Mapping an entity to a schema.org type is
+a declaration nothing derives, so it would be a new knob.
+
+**A row's address is in no sitemap, and nothing purges a CDN.** The sitemap
+lists no `:param` address on purpose, and purging belongs to each release
+target; inside the stack the renderer's own cache is the purged one, and
+downstream gets `public, no-cache` with an ETag.
+
+**The pages target ships no documents.** Rows would need the server renderer
+running over the in-page cluster at bundle time, and a `:param` route's
+documents (golaberto: about 12 000 players times 6 locales) would pass Pages'
+1 GB limit, so a deep link keeps `404.html`.
 
 **A screen's states are not derived from what it reads.** A `tab` or `device`
 read is total and synchronous, so it has no `loading`, `gone` or

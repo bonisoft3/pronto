@@ -24,6 +24,7 @@ _syncFields: [
 	goal?: {...}
 	more?: {...}
 	pipelines?: {...}
+	route: *"/jogo/:id" | string
 	app: pronto.#App & {
 		state: {
 			entities: {
@@ -39,7 +40,7 @@ _syncFields: [
 		surface: {
 			screens: jogo: {
 				title:   "Jogo"
-				route:   "/jogo/:id"
+				"route": route
 				"reads": reads
 				"writes": [if writes != _|_ {writes}, []][0]
 				forms: []

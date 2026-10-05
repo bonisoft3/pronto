@@ -274,10 +274,9 @@ export function notesFor(
   });
 }
 
-/** notesFor over the ir the program pins. */
 // A path the terminal names: from the app for a checkout, from the installed
 // omnishell's root (where the app's mise put it) for an install.
-async function terminalPath(exp: { terminalRuntime: string }, path: string, appDir: string): Promise<string> {
+export async function terminalPath(exp: { terminalRuntime: string }, path: string, appDir: string): Promise<string> {
   if (exp.terminalRuntime !== "") return path;
   const where = await new Deno.Command("mise", {
     args: ["where", "github:bonisoft3/omnishell"],
@@ -289,6 +288,7 @@ async function terminalPath(exp: { terminalRuntime: string }, path: string, appD
   return `${new TextDecoder().decode(where.stdout).trim()}/${path}`;
 }
 
+/** notesFor over the ir the program pins. */
 async function decisionNotes(
   appDir: string,
   source: string,

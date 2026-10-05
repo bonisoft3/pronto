@@ -106,26 +106,30 @@ terminal compose the address in the page's locale, so the same markup addresses
 `/regras` and `/ar/reglas`, and a language switcher is the same link with
 `data-locale`. A hand-written `href="/regras"` would send an Argentine reader
 to the Portuguese document. The router reads `location.pathname`: a hash is
-invisible to the server, so no prerendering could make `#/reglas` a document.
+invisible to the server, so no rendered document could answer `#/reglas`.
 
 **The terminal resolves a page's locale** in the order omnishell's
 [reference](../../omnishell/REFERENCE.md#placeholders) gives, and the
-prerenderer and the storybook are handed the locale they render. The order puts
+document renderer and the storybook are handed the locale they render. The order puts
 present intent above a standing preference: `Accept-Language` is declared once
 to a browser for every site, so it beats an app's default and never overrides a
 choice made in the app or a link someone was handed.
 
 ## Crawlable documents
 
-`prerender: true`, allowed only on a route with no `:param`, renders one
-document per locale carrying `lang`, `dir`, a canonical link, `hreflang`
-siblings and `x-default`. Only a param-less route can be one, because the rows
-an `/article/:slug` needs do not exist at build. The choice is per route since
+`prerender: true`, allowed only on a route with no `:param` and no rows the
+server holds ([how a route's first document is
+rendered](screens.md#how-a-routes-first-document-is-rendered)), renders one
+document per locale, and a route rendered on request (`ssr: "ssr"`) one per
+request; each carries `lang`, `dir`, its title in that language, an absolute
+canonical, its `hreflang` siblings and `x-default`, absolute against the
+deployment's origin ([mecha's proxy](../../../libraries/mecha/docs/proxy.md#the-origin))
+— a prerendered one through the door, as the sitemap is. Only a param-less route can be prerendered, because the rows an
+`/article/:slug` needs do not exist at build. The choice is per route since
 the split falls inside apps: shadcnui's documentation routes are content,
 thenote's `/note/:id` would be harmed by indexing, and realworld's
-`/article/:slug` is content and parameterized. What the `prerender` check
-grades, and that nothing ships the documents, is
-[screens](screens.md#how-a-routes-first-document-is-rendered). A public app's
+`/article/:slug` is content and parameterized. How either is rendered and
+served is [screens](screens.md#how-a-routes-first-document-is-rendered). A public app's
 `sitemap.xml` lists every route without a `:param` once per locale, each entry carrying the
 whole alternate set and `x-default`, so a crawler reaching one spelling learns
 the others and reads them as one page rather than near-duplicates.

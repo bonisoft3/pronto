@@ -275,8 +275,10 @@ money are the terminal's value formats
 ([where locale-dependent code runs](docs/localization.md#where-locale-dependent-code-runs)).
 
 A screen opts into a localized address with `slug: "<key>"`, localizes its nav
-word with `label: "<key>"`, and, on a route with no `:param`, asks for one
-crawlable document per locale with `prerender: true`
+word with `label: "<key>"`, and, on a route with no `:param` over no rows the
+server holds, asks for one crawlable document per locale with `prerender:
+true`; a route over public reads
+asks to be rendered with its rows on request with `ssr: "ssr"`
 ([addresses](docs/localization.md#addresses),
 [crawlable documents](docs/localization.md#crawlable-documents)). An internal
 link names a route rather than a path — `<a data-route="<screen>">`, with

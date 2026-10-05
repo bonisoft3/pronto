@@ -151,10 +151,11 @@ Declared via `meta.manifest: bool | #Manifest` and `meta.themeColor: string`:
 
 Declared via `meta.social: #Social`:
 
-- **Tags emitted**: OpenGraph (`og:title`, `og:description`, `og:type`, `og:image`, `og:image:alt`, `og:url`) and Twitter Card (`twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`, `twitter:site`, `twitter:creator`).
+- **Tags emitted**: OpenGraph (`og:title`, `og:description`, `og:type`, `og:image`, `og:image:alt`) and Twitter Card (`twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`, `twitter:site`, `twitter:creator`).
 - **Defaults**: `title` and `description` inherit from `#App.meta`. `card` defaults to `"summary_large_image"` if `image` is set, else `"summary"`. `type` defaults to `"website"`.
-- **Absolute URLs & local images**: Social card scrapers require absolute image URLs. When `image` is a local asset path, `url` must be declared (refused at compile time otherwise), resolving the image against the origin extracted from `url` and mounting it as a cluster static under `/srv/` (root-hosted in cluster deployments). Protocol-relative URLs (`//`) and path traversal (`..`) are refused at compile time.
-- **Canonical links**: Authored per-route by prerenderers rather than statically in the shared SPA shell to prevent client-routed non-root paths from falsely canonicalizing to root.
+- **The origin is the deployment's**: a card names no address of its own. The app's absolute addresses are spelled against one origin, the deployment's `ORIGIN`, stated beside the auth service's origin ([mecha's proxy](../../../libraries/mecha/docs/proxy.md#the-origin)); the image never holds it. `#Social` has no `url`, so declaring one is a compile error rather than a second statement of the origin that the build would fix into an image every deployment runs.
+- **Local images**: Social card scrapers require absolute image URLs. A local `image` is mounted as a cluster static under `/srv/` and named from the root (`/preview.png`) in the entry; a rendered document spells it absolute against the origin. A remote `https://` or `http://` image is named as written. Protocol-relative URLs (`//`), data URIs and path traversal (`..`) are refused at compile time.
+- **Per address**: the card above is the entry's, spelled for the app, and the entry is the shell every client-routed address is answered with, so it names no `og:url`, as it names no canonical: either would claim the root for every address. A [rendered document](screens.md#how-a-routes-first-document-is-rendered) (`ssg` or `ssr`) states its own canonical, absolute against the deployment's origin, and its card follows it: `og:url` is the canonical (dropped where the address has none), `og:title` and `twitter:title` are the page's title, a local image is absolute; the rest of the card stands. An address meant to be shared with a scraper-readable image is one that is rendered.
 
 ### Crawler & LLM Discovery (`meta.llms`)
 
@@ -172,7 +173,7 @@ Declared via `meta.sitemap: bool | #SitemapConfig`:
 - **Intelligent priority and change frequency**: Root routes (`/`) infer priority `1.0`. Screens with entity reads infer priority `0.8` and `"daily"` change frequency. Static screens infer priority `0.6` and `"weekly"` or `"monthly"` frequency. Screen-level author declarations (`screen.priority`, `screen.changefreq`) override inferred defaults.
 - **Auth conflict refusal**: When `capabilities.auth.required == true`, declaring `sitemap: true` or an enabled sitemap is refused at compile time because all routes are behind authentication and robots.txt declares `Disallow: /`.
 - **Exclusion & Extra routes**: `exclude` (`[...string]`, prefix-matched, must start with `/`) filters screens out of `sitemap.xml`. `extra` (`[...string]`, must start with `/`, `http://`, or `https://`) appends external or unmapped URLs with XML entities properly escaped.
-- **Head injection & robots.txt**: When declared, emits `<link rel="sitemap" type="application/xml" href="/sitemap.xml">` in the document head and advertises `Sitemap: {{$o}}/sitemap.xml` in `robots.txt`. When `sitemap: false`, sitemap generation, statics, and robots.txt declarations are disabled.
+- **Head injection & robots.txt**: When declared, emits `<link rel="sitemap" type="application/xml" href="/sitemap.xml">` in the document head and advertises `Sitemap: {{$o}}/sitemap.xml` in `robots.txt`, `$o` being the deployment's origin as the door holds it. When `sitemap: false`, sitemap generation, statics, and robots.txt declarations are disabled.
 
 ### Platform Well-Knowns (`meta.wellKnown`)
 

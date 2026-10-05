@@ -198,7 +198,6 @@ Deno.test("social cards emit OpenGraph, Twitter, and canonical metadata", async 
       social: {
         title: "Social Preview"
         description: "Explore the new release"
-        url: "https://demo.example.com"
         image: "preview.png"
         imageAlt: "Preview screenshot"
         card: "summary_large_image"
@@ -217,14 +216,18 @@ Deno.test("social cards emit OpenGraph, Twitter, and canonical metadata", async 
   assertStringIncludes(indexHtml, '<meta property="og:type" content="website">');
   assertStringIncludes(indexHtml, '<meta property="og:title" content="Social Preview">');
   assertStringIncludes(indexHtml, '<meta property="og:description" content="Explore the new release">');
-  assertStringIncludes(indexHtml, '<meta property="og:url" content="https://demo.example.com">');
+  // The shell answers every client-routed address, so it names none; a
+  // rendered document's og:url is its canonical.
+  assertEquals(indexHtml.includes("og:url"), false);
   assertEquals(indexHtml.includes('rel="canonical"'), false);
-  assertStringIncludes(indexHtml, '<meta property="og:image" content="https://demo.example.com/preview.png">');
+  // From the root: the origin is the deployment's, and a rendered document
+  // spells it absolute against that (omnishell's document.js).
+  assertStringIncludes(indexHtml, '<meta property="og:image" content="/preview.png">');
   assertStringIncludes(indexHtml, '<meta property="og:image:alt" content="Preview screenshot">');
   assertStringIncludes(indexHtml, '<meta name="twitter:card" content="summary_large_image">');
   assertStringIncludes(indexHtml, '<meta name="twitter:title" content="Social Preview">');
   assertStringIncludes(indexHtml, '<meta name="twitter:description" content="Explore the new release">');
-  assertStringIncludes(indexHtml, '<meta name="twitter:image" content="https://demo.example.com/preview.png">');
+  assertStringIncludes(indexHtml, '<meta name="twitter:image" content="/preview.png">');
   assertStringIncludes(indexHtml, '<meta name="twitter:site" content="@demo">');
   assertStringIncludes(indexHtml, '<meta name="twitter:creator" content="@alice">');
 
@@ -568,13 +571,16 @@ Deno.test("llms metadata emits statics from external workspace files", async () 
   assertEquals(stat2?.file, "docs/llms-full.md");
 });
 
-Deno.test("local social image without social.url is refused at compile time", async () => {
+// The origin is the deployment's ORIGIN, stated once beside the auth origin;
+// a card naming its own was a second statement of it, fixed at build time in
+// an image every deployment runs.
+Deno.test("a social card names no origin of its own", async () => {
   const stderr = await assertCueFails(`
     meta: {
-      name: "social-missing-url"
-      description: "missing url"
+      name: "social-own-url"
+      description: "an origin of its own"
       social: {
-        image: "preview.png"
+        url: "https://demo.example.com"
       }
       ir: sha256: ""
       targets: []
@@ -583,8 +589,7 @@ Deno.test("local social image without social.url is refused at compile time", as
       tests: {}
     }
   `);
-  assertStringIncludes(stderr, "_envelopeRefusal");
-  assertStringIncludes(stderr, "social.url is not declared");
+  assertStringIncludes(stderr, "url: field not allowed");
 });
 
 Deno.test("llms declaring both text and file is refused at compile time", async () => {
@@ -692,50 +697,6 @@ Deno.test("manifest icon inferred from emoji favicon points to /shell/favicon.sv
 
   const stat = res.statics.find((s) => s.target === "/srv/shell/favicon.svg");
   assertEquals(stat?.file, "shell/favicon.svg");
-});
-
-Deno.test("social.url with path extracts origin for og:image", async () => {
-  const res = await exportCue(`
-    meta: {
-      name: "social-path-app"
-      description: "social url with path"
-      social: {
-        url: "https://demo.example.com/games/chess"
-        image: "preview.png"
-      }
-      ir: sha256: ""
-      targets: []
-      clocks: []
-      decisions: {}
-      tests: {}
-    }
-  `);
-
-  const indexHtml = res.files["shell/index.html"]?.text ?? "";
-  assertStringIncludes(indexHtml, '<meta property="og:url" content="https://demo.example.com/games/chess">');
-  assertEquals(indexHtml.includes('rel="canonical"'), false);
-  assertStringIncludes(indexHtml, '<meta property="og:image" content="https://demo.example.com/preview.png">');
-  assertStringIncludes(indexHtml, '<meta name="twitter:image" content="https://demo.example.com/preview.png">');
-});
-
-Deno.test("social.url non-absolute is refused at compile time", async () => {
-  const stderr = await assertCueFails(`
-    meta: {
-      name: "social-bad-url"
-      description: "non-absolute url"
-      social: {
-        url: "example.com"
-        image: "preview.png"
-      }
-      ir: sha256: ""
-      targets: []
-      clocks: []
-      decisions: {}
-      tests: {}
-    }
-  `);
-  assertStringIncludes(stderr, "_envelopeRefusal");
-  assertStringIncludes(stderr, "social.url must begin with https:// or http://");
 });
 
 Deno.test("wellKnown empty item is refused at compile time", async () => {
@@ -1329,8 +1290,7 @@ Deno.test("meta.sitemap: false disables sitemap.xml, statics, and robots.txt Sit
   `);
 
   assertEquals(res.files["sitemap.xml"], undefined);
-  const sitemapStat = res.statics.find((s) => s.target === "/srv/sitemap.xml");
-  assertEquals(sitemapStat, undefined);
+  assertEquals(res.statics.filter((s) => s.target.startsWith("/srv/sitemap.xml")), []);
 
   const robotsTxt = res.files["robots.txt"]?.text ?? "";
   assertEquals(robotsTxt.includes("Sitemap:"), false);
@@ -1579,7 +1539,9 @@ Deno.test("preconnect without crossorigin does not emit crossorigin attribute", 
   `);
   const indexHtml = res.files["shell/index.html"]?.text ?? "";
   assertStringIncludes(indexHtml, '<link rel="preconnect" href="https://fonts.googleapis.com">');
-  assertEquals(indexHtml.includes("crossorigin"), false);
+  // The entry's own fetch preload of shell.json is crossorigin by necessity, so
+  // only the hint is asked.
+  assertEquals(indexHtml.includes('<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin'), false);
 });
 
 Deno.test("llms file with leading slash is refused at compile time", async () => {
@@ -1666,7 +1628,6 @@ Deno.test("social image with data URI is refused at compile time", async () => {
       name: "social-data-uri"
       description: "testing data URI image"
       social: {
-        url: "https://example.com"
         image: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg"
       }
       ir: sha256: ""

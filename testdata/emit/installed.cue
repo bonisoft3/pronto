@@ -11,7 +11,8 @@ import (
 )
 
 // An installed terminal names its files from omnishell's root (omnishell mode).
-_installedTerm: (pronto.#DefaultTerminal & {code: _code}).out & {surface: {runtime: "", interpreterRoot: "interpreter", componentsRoot: "components", markupReader: "read-markup.ts", machineSchema: "machine.cue"}}
+_installedSurface: {runtime: "", interpreterRoot: "interpreter", componentsRoot: "components", markupReader: "read-markup.ts", documentRenderer: "render-documents.ts", documentConfig: "server/deno.json", machineSchema: "machine.cue"}
+_installedTerm: (pronto.#DefaultTerminal & {code: _code}).out & {surface: _installedSurface}
 _installedCluster: (pronto.#DefaultCluster & {code: _code, statics: _installedTerm.surface.statics, local: false}).out
 _installedBuild: (pronto.#DefaultBuild & {code: _code, loop: _external, cluster: _installedCluster, terminal: _installedTerm}).out
 _installedProject: _installedBuild.project
@@ -63,16 +64,24 @@ localReplayTarget: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: 
 // The wrapper reaches the build image on the app's whole tree.
 installedBuildWrapper: _installedProject.targets.build.srcs.defaultGlobs["pronto-tree"].glob & "**"
 
-// An installed app prerenders with the terminal its mise installed, and
-// type-checks pronto's own modules, not its tests, which import its siblings.
-_prerendered: _code & {surface: screens: board: prerender: true}
-_prerenderedLoop: (pronto.#DefaultLoop & {code: _prerendered, terminal: (pronto.#DefaultTerminal & {code: _prerendered}).out, cluster: (pronto.#DefaultCluster & {code: _prerendered, statics: []}).out}).out & {surface: sources: pronto: ""}
-installedPrerender: _prerenderedLoop.surface.checks.prerender.cmds[0] & =~"prerender\\.ts\\) \\. \\$out https://localhost:8443 \\(run-mise where github:bonisoft3/omnishell \\| str trim\\);"
+// An installed app type-checks pronto's own modules, not its tests, which
+// import their siblings.
 installedTypes:     _external.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts\\]"
 // An installed terminal's checks reach omnishell through the app's mise, not
 // PATH: mise makes no shim for a `path:` version.
 _installedTerminal: (pronto.#DefaultTerminal & {code: _code}).out.surface & {runtime: ""}
 installedHandlers: _installedTerminal.checks.handlers.cmds[0] & "use tools.nu [run-mise]; run-mise exec -- omnishell check handlers ."
+
+// An installed app's route rendered on request is served by omnishell's
+// renderer, copied from the runtime image whose root is omnishell's, as the
+// workspace's tree holds it; nothing of it is read from the app's directory.
+_ssrApp: (#syncCase & {reads: [_view]}).app & {surface: screens: jogo: {ssr: "ssr", files: {handlers: [], adapters: []}}} & {capabilities: auth: {required: false, service: "/auth"}}
+_ssrTerm: (pronto.#DefaultTerminal & {code: _ssrApp}).out & {surface: _installedSurface}
+_ssrCluster: (pronto.#DefaultCluster & {code: _ssrApp, statics: _ssrTerm.surface.statics, local: false}).out
+_ssrLoop: (pronto.#DefaultLoop & {code: _ssrApp, terminal: _ssrTerm, cluster: _ssrCluster}).out & {surface: sources: pronto: ""}
+_ssrRender: (pronto.#DefaultBuild & {code: _ssrApp, loop: _ssrLoop, cluster: _ssrCluster, terminal: _ssrTerm}).out.project.targets.render
+installedRenderCopy: [for c in _ssrRender.dockerfile.copy if c.from.name != _|_ if c.from.name == "plugins_omnishell-runtime-image" {"\(c.srcs[0]) \(c.dst)"}] & ["/interpreter /render/plugins/omnishell/interpreter", "/server /render/plugins/omnishell/server"]
+installedRenderContext: _ssrRender.compose.build.additional_contexts & {"plugins_omnishell-runtime-image": _omnishellContext}
 // An installed app's pages release installs its pinned tools first.
 _pagesCode: pronto.#App & {
 	for k, v in _code if k != "meta" {(k): v}

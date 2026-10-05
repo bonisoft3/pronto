@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	bayt "github.com/bonisoft3/bayt/core:bayt"
 	prontobuild "github.com/bonisoft3/pronto/builders:bayt"
 	"github.com/bonisoft3/pronto/clusters:mecha"
 	prontoloop "github.com/bonisoft3/pronto/loops:sayt"
@@ -32,7 +33,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml"
+	format: "sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -83,6 +84,25 @@ _busConvertible: or(_busTypes)
 #params: P={
 	pattern: string
 	out: [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimPrefix(seg, ":")}]
+}
+
+// A route's pattern in one locale, WITHOUT the locale prefix — routeHref
+// composes that from i18n.locales[tag].path. Only the first segment
+// translates; the rest, literal or `:param`, are carried verbatim. An
+// unslugged route keeps its authored pattern in every locale.
+//
+// The one place a catalogue's value is held to the URL-safe shape: the
+// authored pattern constrains the default locale's address alone, and a
+// translated value is an address in exactly the same way.
+#localePattern: P={
+	screen: _
+	i18n:   _
+	tag:    string
+	_segment: [if P.screen.slug != _|_ {P.i18n._msg[P.tag][P.screen.slug] & =~"^[a-z0-9]+(-[a-z0-9]+)*$"}]
+	out: [
+		for seg in P._segment {"/" + strings.Join(list.Concat([[seg], strings.Split(P.screen.route, "/")[2:]]), "/")},
+		P.screen.route,
+	][0]
 }
 
 // A column's PostgreSQL type: its domain where the type keeps one (types.cue
@@ -1176,24 +1196,6 @@ _cdcTableField: "__table"
 		}
 	}}
 	if S.code.meta.i18n != _|_ {
-		_msg: S.code.meta.i18n._msg
-		// The first segment a slugged route resolves to, per locale, and the
-		// only place a catalogue's value is held to the URL-safe shape: the
-		// authored pattern constrains the default locale's address alone, and
-		// a translated value is an address in exactly the same way.
-		_segment: {for n, s in S.code.surface.screens if s.slug != _|_ {
-			(n): {for tag, _ in S.code.meta.i18n.locales {
-				(tag): S._msg[tag][s.slug] & =~"^[a-z0-9]+(-[a-z0-9]+)*$"
-			}}
-		}}
-		// The strip label a route wears, per locale, resolved the way a slug's
-		// segment is and held to nothing but being a word: a catalogue missing
-		// the key is a cue error here, before any check runs.
-		_navLabel: {for n, s in S.code.surface.screens if s.label != _|_ {
-			(n): {for tag, _ in S.code.meta.i18n.locales {
-				(tag): S._msg[tag][s.label] & =~"\\S"
-			}}
-		}}
 		// Every route's pattern in every declared locale, WITHOUT the locale
 		// prefix — routeHref composes that from i18n.locales[tag].path. Only
 		// the first segment translates; the rest, literal or `:param`, are
@@ -1201,10 +1203,7 @@ _cdcTableField: "__table"
 		// every locale, which is what the default says.
 		_pattern: {for n, s in S.code.surface.screens {
 			(n): {for tag, _ in S.code.meta.i18n.locales {
-				(tag): *s.route | string
-				if s.slug != _|_ {
-					(tag): "/" + strings.Join(list.Concat([[S._segment[n][tag]], strings.Split(s.route, "/")[2:]]), "/")
-				}
+				(tag): (#localePattern & {screen: s, i18n: S.code.meta.i18n, "tag": tag}).out
 			}}
 		}}
 		// The routes of one locale, keyed by the pattern they resolve to, which
@@ -1274,14 +1273,11 @@ _cdcTableField: "__table"
 			}
 
 			// `label` is the default-language spelling and the whole of what an
-			// app with no catalogues carries; `key` and `labels` are the same
-			// pair `slug` and `paths` are, for the word instead of the address.
+			// app with no catalogues carries; `key` names the word in each
+			// catalogue, which the strip reads as a screen reads one.
 			nav: {
 				label: s.title
-				if s.label != _|_ {
-					key:    s.label
-					labels: S._navLabel[n]
-				}
+				if s.label != _|_ {key: s.label}
 				if !s.strip {strip: false}
 			}
 			files:  s.files
@@ -1578,17 +1574,6 @@ _cdcTableField: "__table"
 					identity: {verb: "lint", cmds: [_distribution.checks.identity], note: "Pronto compiler identity"}
 				}
 
-				// Declaring a route crawlable is a promise the build can write it,
-				// and a promise nothing exercises is one that breaks silently. The
-				// writer runs wherever a route declares it, over every declared
-				// locale, into a directory it throws away: what is graded is that
-				// each document renders, not the bytes. On `test` rather than
-				// `lint` because it boots the interpreter against the fixture
-				// store, which is not static verification.
-				if len([for _, s in D.code.surface.screens if s.prerender {s}]) > 0 {
-					prerender: {verb: "test", cmds: [_prerender], note: "Pronto prerender"}
-				}
-
 				// A computation's tests run it as mecha's compute service does.
 				if len(D.code.state.computations) > 0 {
 					computations: {verb: "test", cmds: [_distribution.checks.computations], note: "Pronto computations"}
@@ -1599,17 +1584,7 @@ _cdcTableField: "__table"
 					}
 				}
 			}
-			// The origin is the launch door's, because the canonical and hreflang
-			// links a crawler compares are absolute and a deployed origin is the
-			// deployment's to name.
 			_mirrored: sources.pronto != "" && !strings.HasPrefix(sources.pronto, "../")
-			_prerender: (distribution.#Run & {
-				runtime: "\(sources.pronto)"
-				args:    "let out = (mktemp -d); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read $\"--allow-write=($out)\" ($pronto | path join prerender.ts) . $out https://localhost:8443\(_prerenderTerminal); rm -rf $out"
-			}).out
-			// An installed app renders with the terminal its mise installed; in
-			// the monorepo prerender.ts finds pronto's sibling.
-			_prerenderTerminal: [if sources.pronto == "" {" (run-mise where \(distribution.#Runtimes.omnishell) | str trim)"}, ""][0]
 			if sources.pronto == "" {
 				sayYaml: _distribution.say
 			}
@@ -1651,6 +1626,22 @@ _cdcTableField: "__table"
 	_rendererSet: {for _, s in D.code.surface.screens if s.files.renderers != _|_ for i in s.files.renderers {(i): true}}
 	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
 	_validationSet: {for _, e in D.code.state.entities for _, v in e.validations {(v.src): true}}
+	// The prerendered screens, each refused where its first view reads rows
+	// the server holds: its document is drawn before any read lands, so those
+	// rows push down whatever follows them when they do, and one rendered on
+	// request draws them in place. A tab or device read is the browser's, and
+	// its region the terminal's renderer judges: one that names the row it
+	// shows until its read lands (data-empty-row) is drawn from it, and one
+	// that draws nothing until then is refused there (render-documents.ts).
+	_prerendered: [
+		for n, s in D.code.surface.screens if s.prerender
+		let rows = list.SortStrings([for e, _ in {for r in s.reads let en = D.code._syncByTable[r.table] if D.code.state.entities[en].server {(en): true}} {e}]) {
+			[
+				if len(rows) > 0 {error("screen \(n) is prerendered over rows the server holds (\(strings.Join(rows, ", "))): its document is drawn before they land and moves when they do; declare ssr: \"ssr\" (plugins/pronto/docs/screens.md#how-a-routes-first-document-is-rendered)")},
+				s,
+			][0]
+		},
+	]
 	out: omnishell.#Terminal & {
 		app:         D.code.meta.name
 		description: D.code.meta.description
@@ -1684,8 +1675,21 @@ _cdcTableField: "__table"
 					"messages/\(tag).json"
 				},
 			]
+			// Every address a prerendered route answers at, in every locale.
+			// An app behind a sign-in serves every address its login wall, so
+			// it renders none.
+			if !D._walled {
+				documents: list.SortStrings([
+					for s in D._prerendered if D.code.meta.i18n == _|_ {s.route},
+					for s in D._prerendered if D.code.meta.i18n != _|_
+					for tag, _ in D.code.meta.i18n.locales {
+						(#address & {route: path: (#localePattern & {screen: s, i18n: D.code.meta.i18n, "tag": tag}).out, i18n: D.code.meta.i18n, "tag": tag}).out
+					},
+				])
+			}
 		}
 	}
+	_walled: [if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.required {true}, false][0]
 }
 
 #DefaultCluster: D={
@@ -1719,12 +1723,12 @@ _cdcTableField: "__table"
 	_crawl: [
 		for f in [
 			"robots.txt",
-			if _envelope.sitemap.enabled { "sitemap.xml" },
-		] if f != _|_ {
+			if _envelope.sitemap.enabled {"sitemap.xml"},
+		] {
 			file:   f
 			target: "/srv/\(f)"
 			watch:  true
-		}
+		},
 	]
 
 	_envelope: #envelopePlan & {
@@ -1784,7 +1788,78 @@ _cdcTableField: "__table"
 				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
 			}]
 		}
+		// The terminal's server half, where a route asks to be rendered on
+		// request (#Screen.ssr; #emit decides which routes may). It reads the
+		// app through the door, so it waits on the door, and the aggregate
+		// waits on it: a launch is up when its documents can be answered.
+		if D._rendersOnRequest {
+			surface: targets: {
+				render: bayt.healthcheck.http & {
+					cmd: "builtin": null
+					activate: ""
+					healthcheck: {
+						url: omnishell.#Render.health
+						// Healthy once every table has synced.
+						start_period: "120s"
+					}
+					// It reads the app once, as it starts: its routes, screens and
+					// catalogues through the door, its entry off this image. The door
+					// restarting restarts it (bayt's depends_on), and holding what it
+					// reads rebuilds it with them, so a deploy rolling the door's
+					// files rolls it too.
+					srcs: globs: list.Concat([
+						[omnishell.#Render.entry.source],
+						[for s in meta.statics if s.file != omnishell.#Render.entry.source if strings.HasPrefix(s.target, "/srv/shell/") || strings.HasPrefix(s.target, "/srv/messages/") {s.file}],
+					])
+					dockerfile: {
+						from: name: omnishell.#Render.image
+						workdir: omnishell.#Render.workdir
+						// The renderer's tree: from the runtime's workspace, or for an
+						// installed app from omnishell's runtime image, whose root is
+						// omnishell's.
+						copy: list.Concat([
+							[for d in omnishell.#Render.dirs {
+								[if D.local {{
+									from: {name: "root"}
+									srcs: [strings.TrimPrefix(meta.runtime+d, meta.root)]
+								}}, {
+									from: {name: omnishell.#RuntimeImage}
+									srcs: ["/\(strings.TrimPrefix(d, omnishell.#Render.home+"/"))"]
+								}][0]
+								dst: "\(omnishell.#Render.workdir)/\(d)"
+							}],
+							[{srcs: [omnishell.#Render.entry.source], dst: omnishell.#Render.entry.target}],
+						])
+						epilogue: ["RUN \(omnishell.#Render.cache)"]
+						cmd: omnishell.#Render.command
+					}
+					compose: {
+						if D.local {build: additional_contexts: root: strings.TrimSuffix("../\(meta.root)", "/")}
+						// The door, and what answers behind it: a guest is minted
+						// and every table synced before the renderer is ready.
+						depends_on: {
+							caddy:    {condition: "service_healthy"}
+							crud:     {condition: "service_healthy"}
+							electric: {condition: "service_healthy"}
+							auth:     {condition: "service_started"}
+						}
+						environment: {
+							DOOR:   "http://caddy:8080"
+							ENTRY:  omnishell.#Render.entry.target
+							ORIGIN: D.out.surface.origin
+							PORT:   "\(omnishell.#Render.port)"
+						}
+						restart: "on-failure"
+						// An edit to the entry reaches the door, which the renderer
+						// restarts with, and this copy of it.
+						develop: watch: [{action: "sync+restart", path: "../\(omnishell.#Render.entry.source)", target: omnishell.#Render.entry.target}]
+					}
+				}
+				launch: compose: depends_on: render: {condition: "service_healthy"}
+			}
+		}
 	}
+	_rendersOnRequest: list.Contains([for _, s in D.code.surface.screens {s.ssr}], "ssr")
 }
 
 // The three components of an app package — code, cluster, terminal — are
@@ -2182,6 +2257,32 @@ _cdcTableField: "__table"
 		if E._shell.auth != _|_ if E._shell.auth.required {false},
 		true,
 	][0]
+	// The routes rendered on request (#Screen.ssr), each refused where a
+	// document rendered for no one in particular could not show what the
+	// route shows. Its scope is the most restrictive of its top-level reads'
+	// (a nested read is under whatever row encloses it, and a tab or device
+	// entity is the browser's): anything but public would be a document per
+	// session, and a session reaches the door as a token in one tab's storage,
+	// never with a document request. The same for an app behind a sign-in,
+	// where every address is somebody's.
+	_onRequest: [
+		for r in E._shell.routes if r.ssr == "ssr"
+		let n = r.screen
+		let s = E.code.surface.screens[n]
+		let restricted = [
+			for read in s.reads if !read.nested
+			let en = E.code._syncByTable[read.table]
+			let e = E.code.state.entities[en] if e.server if e.access != _|_ if e.access.scope != "public" {
+				"\(en) (\(e.access.scope))"
+			},
+		] {
+			[
+				if !E._public {error("screen \(n) declares ssr: \"ssr\" in an app behind a sign-in; a document rendered per session is not built (plugins/pronto/PENDING.md#screens)")},
+				if len(restricted) > 0 {error("screen \(n) declares ssr: \"ssr\" over \(strings.Join(restricted, ", ")); a document rendered on request is rendered for no one in particular, and one rendered per session is not built (plugins/pronto/PENDING.md#screens)")},
+				n,
+			][0]
+		},
+	]
 	_envelope: #envelopePlan & {
 		meta:         E.code.meta
 		surface:      E.code.surface
@@ -2715,7 +2816,7 @@ _cdcTableField: "__table"
 				  handle {
 				    root * /srv
 				    header Cache-Control "no-cache"
-				    file_server
+				    import files
 				  }
 				"""
 			// The default locale is served unprefixed, so its prefixed spelling is an
@@ -2748,8 +2849,12 @@ _cdcTableField: "__table"
 				"",
 			][0]
 			// The reader's language decided at the door, so a reader whose
-			// language is not the address's is moved before a document is built
-			// rather than after one has booted and thrown itself away.
+			// language is not the address's is answered with the document of
+			// their own address rather than one that boots and throws itself
+			// away. Answered, not redirected: a 302 is a round trip ahead of
+			// every byte of the page, and the terminal restates the address it
+			// was answered for (shell.js show) without one. Vary says the
+			// unprefixed address is one document per language.
 			//
 			// This is not a second implementation of negotiateLocale. That
 			// function reads navigator.languages — an ordered list with no
@@ -2806,7 +2911,7 @@ _cdcTableField: "__table"
 				          not query lang=*
 				          vars_regexp {re.lang.1} (?i)^(\(strings.Join(captures, "|")))$
 				        }
-				        redir @\(r.screen)_\(E._shell.i18n.locales[tag].path) \(target) 302
+				        rewrite @\(r.screen)_\(E._shell.i18n.locales[tag].path) \(target)
 				"""},
 			]
 			// Caddy refuses an empty path matcher at provision, so a program with
@@ -2867,14 +2972,69 @@ _cdcTableField: "__table"
 
 					""",
 			][0]
+			// The addresses of the routes rendered on request, widened and in
+			// both slash spellings as `@route` below, and answered by the
+			// terminal's renderer after the door has chosen the language: what
+			// reaches it is always a locale's own address. A file the app serves
+			// is not one, for the reason `@file` precedes `@route`: a route whose
+			// first segment is a :param widens to `/*/*`, which every file under
+			// shell/ and messages/ matches.
+			_renderedAt: list.SortStrings([
+				for n in E._onRequest for a in E._spellings[n]
+				let widened = "/" + strings.Join([
+					for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
+						[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
+					},
+				], "/")
+				for w in [widened, widened + "/"] {w},
+			])
+			_render: [
+				if len(E._onRequest) == 0 {""},
+				"""
+				    @rendered {
+				      path \(strings.Join(_renderedAt, " "))
+				      not file {
+				        root /srv
+				        try_files {path} {path}/index.html
+				      }
+				    }
+				    handle @rendered {
+				      reverse_proxy render:\(omnishell.#Render.port)
+				    }
+
+				""",
+			][0]
+			// The documents rendered before any request, in both slash spellings
+			// as `@route` below. Each is a template naming the deployment's
+			// origin (`_origin` below), which is what its canonical and
+			// alternates are absolute against, answered with its file's
+			// validator as the crawler files are (the asset's `templated`).
+			_documentAt: list.SortStrings([
+				for a in E.terminal.surface.documents
+				let bare = strings.TrimSuffix(a, "/")
+				for w in [if bare == "" {"/"}, if bare != "" {bare}, if bare != "" {bare + "/"}] {w},
+			])
+			_document: [
+				if len(_documentAt) == 0 {""},
+				"""
+				    @document path \(strings.Join(_documentAt, " "))
+				    handle @document {
+				      root * /srv
+				      header Cache-Control "no-cache"
+				      try_files {path}/index.html
+				      import templated text/html
+				    }
+
+				""",
+			][0]
 			_served: """
 				  route {
-				\(_entry)\(_alias)\(_negotiate)    handle {
+				\(_entry)\(_alias)\(_negotiate)\(_render)\(_document)    handle {
 				      root * /srv
 				      header Cache-Control "no-cache"
 				      @file file {path} {path}/index.html
 				      rewrite @file {http.matchers.file.relative}
-				\(_rewrite)      file_server
+				\(_rewrite)      import files
 				    }
 				  }
 				"""
@@ -2883,11 +3043,13 @@ _cdcTableField: "__table"
 			_split: strings.SplitN(_caddyfileAsset, _anchor, 2)
 			text:   _split[0] + _served + _split[1]
 		}
-		// Both crawler files are caddy templates, served from the origin root.
-		// `$o` is the origin of the request being answered — see the Caddyfile
-		// for why the build cannot write one instead. Only a file that names an
-		// address declares it, so a refusal carries no unread variable.
-		_origin: "{{- $o := printf \"%s://%s\" (placeholder \"http.request.scheme\") .Req.Host -}}"
+		// The crawler files and the documents are caddy templates. `$o` is the
+		// deployment's origin, which the door holds — see the Caddyfile for why
+		// the build cannot write one instead — and `_o` is how a file names it.
+		// Only a file that names an address declares it, so a refusal carries no
+		// unread variable.
+		_origin: "{{- $o := placeholder \"http.vars.origin\" -}}"
+		_o:      "{{$o}}"
 		"robots.txt": {
 			format: "text"
 			// An app behind a session is not a site: every address answers with
@@ -2909,10 +3071,17 @@ _cdcTableField: "__table"
 					""",
 			][0]
 		}
+		// The terminal renders these, from the files this emission writes
+		// beside them (write.ts): a document is the screen the shell would
+		// draw first, so only the terminal can say what it holds.
+		// Their canonical and alternates are absolute, so each is spelled
+		// after `_o` and declares it, as the sitemap does.
+		for a in E.terminal.surface.documents {
+			"documents\(strings.TrimSuffix(a, "/"))/index.html": {format: "document", data: {address: a, origin: _o, declare: _origin}}
+		}
 		if E._envelope.sitemap.enabled {
 			"sitemap.xml": {
 				format: "text"
-				_o:     "{{$o}}"
 				_isAdvanced: E._envelope.sitemap.declared
 				// One <url> per crawlable route per locale, each carrying the whole
 				// alternate set including itself — which is what the protocol asks

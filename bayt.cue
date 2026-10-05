@@ -34,14 +34,14 @@ _pronto: bayt.#project & {
 		// them means.
 		"build": sayt.build & mise.exec & {
 			srcs: globs: ["*.ts", "scales/*.ts", "deno.json", "deno.lock"]
-			// Two files reach across the plugin boundary into omnishell's
-			// interpreter — prerender.ts renders through the storybook, and
-			// negotiation_test.ts holds the door's language rule against the
-			// terminal's. This context carries pronto alone, so neither module
-			// resolves here and neither can be typechecked here; both are, at
-			// the repo tier, by `just lint`, where omnishell is a sibling.
+			// One file reaches across the plugin boundary into omnishell's
+			// interpreter — negotiation_test.ts holds the door's language rule
+			// against the terminal's. This context carries pronto alone, so the
+			// module does not resolve here and cannot be typechecked here; it
+			// is, at the repo tier, by `just lint`, where omnishell is a
+			// sibling.
 			//
-			// Named rather than globbed away: a third file reaching out lands
+			// Named rather than globbed away: a second file reaching out lands
 			// in this list's absence and turns the image red, which is the
 			// decision arriving at whoever wrote the import.
 			cmd: "builtin": {

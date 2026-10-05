@@ -124,6 +124,11 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
         }
       }
       await Deno.writeTextFile(join(app, "program_pronto.cue"), 'package jsfb\nloop: surface: sources: pronto: ""\n');
+      // A prerendered route, whose document the writer renders through the
+      // installed omnishell, as it reads markup through it.
+      await Deno.writeTextFile(join(app, "program_document.cue"), 'package jsfb\ncode: surface: screens: about: {title: "About", route: "/about", prerender: true, reads: [], writes: [], forms: [], states: ["populated"], files: {handlers: [], adapters: []}}\n');
+      await Deno.writeTextFile(join(app, "shell/screens/about.html"), '<section class="screen" data-screen="about"><h1>About</h1></section>\n');
+      await Deno.writeTextFile(join(app, "shell/screens/about.css"), "");
       async function deno(script: string, args: string[]): Promise<string> {
         const result = await new Deno.Command(Deno.execPath(), {
           args: ["run", "--no-check", "--config", join(scratch, "pronto/deno.json"), "--allow-read", "--allow-write=.", "--allow-run", "--allow-env", script, ...args],
@@ -149,6 +154,7 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
         const generated = await Deno.readTextFile(join(app, ".say.yaml"));
         assert(generated.includes("custom:"), "real writer lost the consumer rule");
         assert(!generated.includes("../../plugins"), "external writer emitted a monorepo command");
+        assert((await Deno.readTextFile(join(app, "documents/about/index.html"))).includes("<h1>About</h1>"), "the installed omnishell rendered no document");
         if (pass === 1) assert(generated === written, "real writer did not settle");
         written = generated;
       }

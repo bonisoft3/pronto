@@ -997,7 +997,9 @@ import (
 	// data-live, data-reads (a reduce's whole table) or data-read-<name>.
 	kind: "live" | "reads" | "named"
 	// Inside an enclosing region, its placeholders resolved against that
-	// region's row.
+	// region's row. A route's top-level reads decide what a document rendered
+	// for no one in particular may show (#Screen.ssr); a nested one reads
+	// under whoever the enclosing row is rendered for.
 	nested: bool
 	// The lists stamping it, as indices into the screen's reads: each region
 	// whose item template it is inside, each naming that template, and the
@@ -1050,15 +1052,19 @@ import (
 	// Written as a document per locale at build, so a crawler receives HTML
 	// rather than a shell that assembles itself. Only a route with no `:param`
 	// can be: the rows a /article/:slug would need do not exist when the build
-	// runs.
+	// runs. Its document is drawn before any read lands, so one reading rows
+	// the server holds is refused (#DefaultTerminal), and so is a region that
+	// names no row to show until then (omnishell's render-documents.ts).
 	prerender: *false | bool
 	if S.prerender {route: =~"^[^:]*$"}
 	priority?:   number & >=0.0 & <=1.0
 	changefreq?: "always" | "hourly" | "daily" | "weekly" | "monthly" | "yearly" | "never"
 
 	// Rendering strategy:
-	//   ssg: static pre-render at build time (prerender: true)
-	//   ssr: server-rendered (data visibility decided by #Entity.access)
+	//   ssg: a document per locale written at generate (prerender: true)
+	//   ssr: a document rendered with its rows on request, by the terminal's
+	//        renderer, held until a read that drew it changes; only over
+	//        public top-level reads (#emit refuses the rest)
 	//   spa: client-side single page app shell
 	ssr: *"spa" | "ssg" | "ssr"
 	if S.prerender {ssr: "ssg"}
@@ -1228,6 +1234,9 @@ import (
 	[string]:          _
 }
 
+// The card names no address of its own: the origin is the deployment's
+// (mecha's ORIGIN), so a local image is spelled from the root and made
+// absolute against it where a document is rendered (component-contracts.md).
 #Social: {
 	title?:       string
 	description?: string
@@ -1237,7 +1246,6 @@ import (
 	type?:        *"website" | string
 	site?:        string
 	creator?:     string
-	url?:         string
 }
 
 #Llms: {
@@ -1988,27 +1996,10 @@ import (
 
 	_cleanImage: strings.TrimPrefix(strings.TrimPrefix(_rawImage, "./"), "/")
 
-	_hasUrl: _isObj && S.raw.url != _|_
-	_rawUrl: [if _hasUrl { S.raw.url }, ""][0]
-	_isUrlHttp: strings.HasPrefix(_rawUrl, "http://") || strings.HasPrefix(_rawUrl, "https://")
-
-	_origin: [
-		if strings.HasPrefix(_rawUrl, "https://") {
-			"https://" + strings.Split(strings.TrimPrefix(_rawUrl, "https://"), "/")[0]
-		},
-		if strings.HasPrefix(_rawUrl, "http://") {
-			"http://" + strings.Split(strings.TrimPrefix(_rawUrl, "http://"), "/")[0]
-		},
-		"",
-	][0]
-
 	_imageUrl: [
 		if !_hasImage { "" },
 		if _isHttp { _rawImage },
-		if _hasUrl && !_isHttp && _isUrlHttp {
-			_origin + "/" + _cleanImage
-		},
-		"",
+		"/" + _cleanImage,
 	][0]
 
 	_errors: [
@@ -2018,12 +2009,6 @@ import (
 		},
 		if _isData {
 			"social.image must not be a data URI ('\(_rawImage)'); OpenGraph and Twitter cards require explicit https:// or http://"
-		},
-		if _hasImage && !_isHttp && !_hasUrl && !_isProtocolRelative {
-			"social.image '\(_rawImage)' is a local path but social.url is not declared; OpenGraph and Twitter cards require absolute image URLs"
-		},
-		if _hasUrl && !_isUrlHttp {
-			"social.url must begin with https:// or http://: '\(_rawUrl)'"
 		},
 	]
 
@@ -2037,10 +2022,6 @@ import (
 		if _enabled { "<meta property=\"og:type\" content=\"\(_typeEsc)\">" },
 		if _enabled { "<meta property=\"og:title\" content=\"\(_titleEsc)\">" },
 		if _enabled { "<meta property=\"og:description\" content=\"\(_descEsc)\">" },
-		if _hasUrl {
-			let uEsc = strings.Replace(strings.Replace(_rawUrl, "&", "&amp;", -1), "\"", "&quot;", -1)
-			"<meta property=\"og:url\" content=\"\(uEsc)\">"
-		},
 		if _hasImage && _imageUrl != "" { "<meta property=\"og:image\" content=\"\(_imgEsc)\">" },
 		if _isObj if S.raw.imageAlt != _|_ if _hasImage && _imageUrl != "" {
 			let altEsc = strings.Replace(strings.Replace(S.raw.imageAlt, "&", "&amp;", -1), "\"", "&quot;", -1)
@@ -2062,7 +2043,7 @@ import (
 	links: strings.Join(tags, "\n")
 
 	static: [
-		if _enabled && _hasImage && !_isHttp && !_hasDotDot && _hasUrl {
+		if _enabled && _hasImage && !_isHttp && !_hasDotDot && !_isProtocolRelative && !_isData {
 			file:   _cleanImage
 			target: "/srv/\(_cleanImage)"
 			watch:  true

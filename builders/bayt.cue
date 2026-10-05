@@ -148,7 +148,7 @@ import (
 	// omnishell reaches an installed app's images the same way, as one image of
 	// its runtime tree (omnishell's runtime-image target), named here and
 	// switched by the same mode; mecha/ and omnishell/ hold the fragments.
-	_omnishell: "plugins_omnishell-runtime-image"
+	_omnishell: omnishell.#RuntimeImage
 	_omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishell.published.runtime)}${MONOREPO_COMPOSE_MODE:+:\(_omnishell)}"
 	// The terminal's statics served from omnishell's tree (target /omnishell/),
 	// which an installed app's caddy copies from that image; the cluster serves
@@ -175,6 +175,14 @@ import (
 						(s.target): {from: name: B._omnishell, srcs: [s.file], dst: s.target}
 					}}
 					compose: build: additional_contexts: (B._omnishell): B._omnishellContext
+				}
+			}
+			// A cluster target copying from omnishell's tree (the renderer)
+			// resolves it through the same switch.
+			targets: {for k, t in B._mechaRuntime.targets
+				if t != null && t.dockerfile != _|_ && t.dockerfile.copy != _|_
+				if len([for c in t.dockerfile.copy if c.from != _|_ if c.from.name != _|_ if c.from.name == B._omnishell {c}]) > 0 {
+					(k): compose: build: additional_contexts: (B._omnishell): B._omnishellContext
 				}
 			}
 			targets: {for k, t in B._mechaRuntime.targets
@@ -350,6 +358,8 @@ import (
 						environment: {
 							// The TLS door, whose certificate Caddy's own CA signs.
 							APP_URL: "https://caddy:8443"
+							// What the app's absolute addresses are spelled against.
+							ORIGIN: B.cluster.surface.origin
 							if c.database {
 								DATABASE_URL:     B.cluster.surface.databaseUrl
 								PGRST_JWT_SECRET: B.cluster.surface.jwtSecret

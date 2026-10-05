@@ -34,10 +34,18 @@ import (
 published: runtime: =~"^bonitao/omnishell:[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
 published: runtime: "bonitao/omnishell:0.5.0@sha256:63d6d0cd5aefe274828e096301423de0adf9d1411ff151bfc1201e6c2ec178d1"
 
+// The build context an image of an installed app copies omnishell's runtime
+// tree from: that image, or in the monorepo the target building it.
+#RuntimeImage: "plugins_omnishell-runtime-image"
+
 // Re-exported beside #Terminal because the emitter reads it directly: CUE has
 // no Intl, so the entry document's direction is resolved from the app's default
 // tag against this list.
 #RtlLanguages: impl.#RtlLanguages
+
+// Re-exported because the cluster runs it: a route rendered on request is
+// served by this target, which the emitter adds where a route asks for one.
+#Render: impl.#Render
 
 #ComposeProject: impl.#ComposeProject
 #ClosureUp:      impl.#ClosureUp
