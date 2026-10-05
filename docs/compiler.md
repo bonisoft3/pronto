@@ -120,8 +120,8 @@ finds the installed distribution with `run-mise where` as it runs. Where pronto
 sits inside the app's CUE module, `write.ts` writes that file instead, from the
 layout it finds: pronto as the app names it, the app's directory under the
 module's root, and the root and the runtime's directory as mecha names them.
-A mirror that holds the app at its root and the runtime under `.runtime/` is
-one such layout, and its build regenerates what copybara wrote.
+An [installed app's mirror](release-targets.md#pages) is the other case: the
+app alone at its root, finding the released runtime with `run-mise where`.
 
 Each brings what the others cannot. sayt bootstraps the rest and carries the
 cross-platform concern, which is why it alone ships per-platform binaries;

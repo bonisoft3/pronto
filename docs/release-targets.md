@@ -109,18 +109,20 @@ file to a project site. A private repository on a free plan has no Pages, so
 the site lives on the mirror. An app at the root of its own public repository
 tags `vX.Y.Z`, and the same workflow deploys it without a mirror.
 
-golaberto's mirror holds the app at its root and its runtime under `.runtime/`,
-copybara rewriting every path the generated files name to that layout. The
-app's `program_pronto.cue` states the layout, so `sayt` builds, launches,
-lints, tests and releases the mirror as it stands, and a build there
-regenerates what copybara wrote; `.github/mirror_test.sh` holds the two to each
-other. Its lint leaves out the facts rule, whose artifact hashes are of the
-monorepo's bytes. The alternatives each cost the runtime a concept: links break
-on checkout and on Windows; vendoring or a package registry versions the
-runtime apart from the app it was generated with; an image as the interface
-makes docker a hard dependency of bayt; and a root taken from the environment
-means the generated `Taskfile.yml` and compose files no longer run as they
-stand.
+**An installed app's mirror** is the app as its own repository: copybara's
+`installed_app` moves it to the root and leaves behind `mise.local.toml`,
+`.env` and `.bayt/.env`, the files that point the monorepo's copy at the
+runtime's sibling trees, so the mirror runs the pronto, omnishell, mecha, bayt
+and sayt releases its `.mise.toml` pins
+([design](../../../docs/superpowers/specs/2026-10-03-regenerable-mirror-design.md)).
+It is published only once, with those pins, `setup`, `build`, `lint` and
+`integrate` pass on the synced tree: [`mirror_gate.sh`](../../../.github/mirror_gate.sh),
+run by `sync.yml` and by `cd.yml` before copybara pushes. Nothing holds the
+mirror to what the monorepo would regenerate. An app need not be in sync with
+the framework, which is what anyone bumping one runtime piece outside the
+monorepo meets; a change that needs an unreleased framework change holds the
+mirror back until that release is pinned, rather than failing the pull
+request that made it, as a check of every pull request against the pins would.
 
 **The refusals.** `emit.cue` refuses the target, a `cue vet` error rather than
 a broken release, for a program with:
