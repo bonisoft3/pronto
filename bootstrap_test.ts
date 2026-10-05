@@ -30,8 +30,8 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
     const modules = [
       ["plugins/bayt", "bayt", "0.58.3"],
       ["plugins/sayt", "sayt", "0.42.0"],
-      ["libraries/mecha", "mecha", "0.4.0"],
-      ["plugins/omnishell", "omnishell", "0.5.0"],
+      ["libraries/mecha", "mecha", "0.5.0"],
+      ["plugins/omnishell", "omnishell", "0.6.0"],
       ["plugins/pronto", "pronto", "0.6.1"],
     ];
     async function copy(source: string, target: string): Promise<void> {
