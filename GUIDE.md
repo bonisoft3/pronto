@@ -304,12 +304,16 @@ prose with CEL — is [SPEC's](SPEC.md#acceptancemd), and `check-facts` warns
 about an acceptance claim nothing has settled. What runs today is the app's own
 drivers and omnishell's battery ([the ladder](docs/compiler.md#the-ladder)). An
 acceptance driver walks the checklist against the running
-app, each case citing the ids it realizes — `apps/truco/tests/acceptance.ts`,
-declared as an `integrate` check, drives the table under `?clock=manual`.
+app, each case citing the ids it realizes — `apps/truco/tests/acceptance.ts`
+(standalone readers: the `bonisoft3/truco` mirror), declared as an
+`integrate` check, drives the table under `?clock=manual`.
 Omnishell's `check battery` (at `test`) runs
 [the battery](../omnishell/docs/automated-tests-battery.md) over every handler
 and validation module; `check machines` fires every arrow of every chart;
-visual lint (at `integrate`) fails only on `critical`. Every driver reads `APP_URL`
+visual lint (at `integrate`) fails only on `critical`. The battery runs from
+the committed `.bayt` closure: render it with the cue.mod-pinned `bayt`
+(`bayt generate`) and commit `.bayt/` before the first integrate — no sayt
+verb produces it. Every driver reads `APP_URL`
 when set, so the same drivers can be pointed at any door.
 
 ## Release

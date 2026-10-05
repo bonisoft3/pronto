@@ -809,7 +809,12 @@ export async function derive(appDir: string): Promise<void> {
   // scanned, and its row exists only to catch a hand-edit to the emission.
   // Hashed off disk because that is the artifact the claim is about, and
   // because write.ts prefixes a provenance header the export does not carry.
-  artifacts.push({ path: "shell/design.css", sha256: await sha("shell/design.css"), derived: true });
+  // Absent before the first export — nothing has emitted it yet — it records
+  // a sentinel the fixpoint re-derive replaces once write.ts has written it;
+  // check-facts reports the mismatch as a stale row, never a crash, so a new
+  // app converges without a hand-made stub.
+  const designCss = await sha("shell/design.css").catch(() => null);
+  artifacts.push({ path: "shell/design.css", sha256: designCss ?? "missing", derived: true });
 
   await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
   await Deno.writeTextFile(

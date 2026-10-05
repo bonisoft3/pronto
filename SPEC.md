@@ -251,7 +251,26 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   rostered as `pronto/loops:sayt`) owns the verb surface; the build
   (default bayt, rostered as `pronto/builders:bayt`) owns the build
   graph, exported concrete as `bayt.json`. `out: pronto.#emit & {code,
-  cluster, terminal, loop, build}` derives the emission.
+  cluster, terminal, loop, build}` derives the emission. The seats wire
+  through quoted labels — `{"code": code}` — never bare ones: inside
+  `{code: code}` the value refers to the field being defined (a cycle that
+  surfaces as an incomplete value far from the cause), while a quoted label
+  does not enter the value's scope, so it resolves to the sibling. The
+  canonical shape (`apps/thenote/program.cue`):
+
+  ```cue
+  code: pronto.#App & {...}
+  terminal: (pronto.#DefaultTerminal & {"code": code}).out
+  cluster: (pronto.#DefaultCluster & {"code": code, statics: terminal.surface.statics}).out
+  loop: (pronto.#DefaultLoop & {"code": code, "cluster": cluster, "terminal": terminal}).out
+  build: (pronto.#DefaultBuild & {"code": code, "loop": loop, "cluster": cluster}).out
+  out: pronto.#emit & {"code": code, "cluster": cluster, "terminal": terminal, "loop": loop, "build": build}
+  ```
+
+  A first `generate` converges without hand-made stubs: decisions carry an
+  empty-note default until derivation writes `program_derived.cue`, and a
+  not-yet-emitted `shell/design.css` records a sentinel the fixpoint
+  re-derive replaces.
 - **Pinning.** `meta.ir.sha256` is the sha256 of the ir.html the program was
   compiled from; the brief→ir→program chain is hash-linked end to end. The
   bijection checker must verify the pin before it compares anything, since

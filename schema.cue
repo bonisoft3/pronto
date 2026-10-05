@@ -582,27 +582,29 @@ import (
 	invariant?: {cel: string, check?: string}
 	// Derived SQL CHECK bodies by column name (program_cel.cue), rendered from
 	// the parsed `cel` of each field. A browser tier declares none: no table
-	// is emitted for it, so its constraints reach only CUE.
-	checks: [string]: string
+	// is emitted for it, so its constraints reach only CUE. The empty default
+	// is what a first export holds before any derivation has run — the same
+	// first-generate rule as decisions' notes.
+	checks: *{} | {[string]: string}
 	// The values a column admits, by column name, derived from the same parsed
 	// `cel` (program_cel.cue) — only for the constraints that close the set. It
 	// is the emitted answer to "which kinds are declarable", which the
 	// terminal's markup rules judge a data-when against; a checker parsing the
 	// cel itself would be a second front end for the one constraint language.
-	enums: [string]: [...string]
+	enums: *{} | {[string]: [...string]}
 	// What the same parsed `cel` says about a column an enum does not close
 	// (program_cel.cue): the range an int admits, the length a string admits,
 	// the pattern it must match. Named in terms that belong to no constraint
 	// language, because the reader is a battery that has to PROPOSE a value the
 	// program would accept — an answer neither a CUE disjunction nor a SQL
 	// CHECK gives. Every key is optional and absent means unbounded.
-	bounds: [string]: {
+	bounds: *{} | {[string]: {
 		intMin?:  int
 		intMax?:  int
 		sizeMin?: int
 		sizeMax?: int
 		regex?:   string
-	}
+	}}
 	// Composite uniques the per-field `unique` flag cannot express. Declared
 	// rather than written as assembly SQL because the shell needs them too: a
 	// row's natural key is what an upsert resolves against, and what an
@@ -1432,8 +1434,11 @@ import (
 		clocks: [...#Target]
 		// A program names its decisions and nothing more: `note` is derived
 		// from the prose of the ir element `ir` names (pronto derive.ts), so the
-		// reviewed artifact is the only place the rationale is written.
-		decisions: [Id=string]: {ir: *Id | string, note: string}
+		// reviewed artifact is the only place the rationale is written. The
+		// empty default is what a first export holds before any derivation has
+		// run: program_derived.cue unifies the derived note over it, so a new
+		// app needs no stub file to complete its first generate.
+		decisions: [Id=string]: {ir: *Id | string, note: *"" | string}
 		tests: [Id=string]: #Test & {id: Id}
 		i18n?: #I18n
 		// The literal debt this app still carries: how many declarations wear
