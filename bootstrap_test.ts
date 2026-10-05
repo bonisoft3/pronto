@@ -28,7 +28,7 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
       return decoder.decode(result.stdout);
     }
     const modules = [
-      ["plugins/bayt", "bayt", "0.58.2"],
+      ["plugins/bayt", "bayt", "0.58.3"],
       ["plugins/sayt", "sayt", "0.42.0"],
       ["libraries/mecha", "mecha", "0.4.0"],
       ["plugins/omnishell", "omnishell", "0.5.0"],
