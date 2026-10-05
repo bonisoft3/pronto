@@ -1,6 +1,6 @@
 {
   "name": "pronto",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "A Codex-native outer loop for Pronto design, implementation, verification, and consequence-based review.",
   "author": {
     "name": "bonisoft3",
