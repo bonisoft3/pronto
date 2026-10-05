@@ -956,6 +956,7 @@ _sqlType: {
 // a database column: it exists only on the wire, so it must not collide with
 // one, hence the reserved prefix.
 _cdcTableField: "__table"
+_cdcBeforeField: "__before"
 
 #rpkPipeline: R={
 	p:           #Pipeline
@@ -2743,13 +2744,21 @@ _cdcTableField: "__table"
 									value: "{{ index .Metadata \"opencdc.collection\" }}"
 								}
 							}, {
-								id:     "stringify-after"
-								plugin: "builtin:json.encode"
-								settings: field: ".Payload.After"
-							}, {
 								id:     "stringify-before"
 								plugin: "builtin:json.encode"
 								settings: field: ".Payload.Before"
+							}, {
+								id:        "retain-before"
+								plugin:    "builtin:field.set"
+								condition: "{{ if and .Payload.After .Payload.Before }}true{{ else }}false{{ end }}"
+								settings: {
+									field: ".Payload.After.\(_cdcBeforeField)"
+									value: "{{ printf \"%s\" .Payload.Before }}"
+								}
+							}, {
+								id:     "stringify-after"
+								plugin: "builtin:json.encode"
+								settings: field: ".Payload.After"
 							}, {
 								// The http destination posts only Payload.After, and a
 								// delete's After is empty — back-fill from Before so every
