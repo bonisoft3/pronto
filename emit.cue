@@ -1745,7 +1745,9 @@ _cdcBeforeField: "__before"
 			// An installed app is its workspace's root, and its runtime sits where
 			// mise put it, outside the app: every static the cluster serves is
 			// then the app's own file, fingerprinted and copied from the build
-			// context.
+			// context. Stated here, never in program_pronto.cue: the layout
+			// file only records what the writer derived (loop sources, build
+			// dir), and the seat already knows the rest.
 			if !D.local {
 				root:    ""
 				runtime: "../"

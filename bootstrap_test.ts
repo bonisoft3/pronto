@@ -10,7 +10,7 @@ function assert(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
 }
 
-Deno.test("registry bootstrap is terminal-independent, regenerates, and preserves existing seeds", async () => {
+Deno.test("registry bootstrap seeds the default roster, regenerates, and preserves existing seeds", async () => {
   const scratch = await Deno.makeTempDir({ prefix: "pronto-distribution-" });
   const registry = new Deno.Command("cue", {
     args: ["mod", "registry", "localhost:0"], stdout: "piped", stderr: "piped",
@@ -83,12 +83,36 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
     for (const [platform, asset] of Object.entries(assets)) {
       assert(duckdb.platforms[platform].url === `https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-${asset}.zip`, `DuckDB selects the wrong asset for ${platform}`);
     }
-    assert(!/omnishell|mecha|\/Users\/|\.\.\/plugins/.test(mise + say), "bootstrap leaked a battery or source path");
+    assert(!/\/Users\/|\.\.\/plugins/.test(mise + say), "bootstrap leaked a battery or source path");
+    // The seed carries the default roster, so the first lock and install
+    // already see the whole toolchain: terminal omnishell, cluster mecha,
+    // build bayt, with each seat's commands.
+    for (const tool of ["github:bonisoft3/omnishell", "github:bonisoft3/mecha", "github:bonisoft3/bayt"]) {
+      assert(mise.includes(tool), `bootstrap did not seed the default seat for ${tool}`);
+    }
+    assert(say.includes("omnishell mode"), "bootstrap did not seed the terminal's commands");
+    assert(say.includes("do: auto-bayt"), "bootstrap did not seed the builder's commands");
     await cue(app, ["cmd", "generate", "./pronto"]);
     assert(mise === await Deno.readTextFile(join(app, ".mise.toml")), "Mise generation drifted");
-    assert(say === await Deno.readTextFile(join(app, ".say.yaml")), "Sayt generation drifted");
+    // Compared semantically, not by byte: the seed and the regeneration
+    // compose the same roster two ways (one inline expression, one file),
+    // and CUE orders the unified keys by composition, so the first
+    // regeneration only reorders. Sayt reads the rules as data, and a
+    // repeat generation is stable with itself.
+    const sayJson = async (path: string): Promise<unknown> =>
+      JSON.parse(await cue(app, ["export", path, "--out", "json"]));
+    const norm = (v: unknown): unknown =>
+      Array.isArray(v)
+        ? v.map(norm)
+        : v !== null && typeof v === "object"
+        ? Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, norm((v as Record<string, unknown>)[k])]))
+        : v;
+    const sayNorm = JSON.stringify(norm(await sayJson(join(app, ".say.yaml"))));
+    await cue(app, ["cmd", "generate", "./pronto"]);
+    assert(sayNorm === JSON.stringify(norm(await sayJson(join(app, ".say.yaml")))), "Sayt generation drifted");
+    const saySettled = await Deno.readTextFile(join(app, ".say.yaml"));
     await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"], false);
-    assert(say === await Deno.readTextFile(join(app, ".say.yaml")), "bootstrap overwrote existing configuration");
+    assert(saySettled === await Deno.readTextFile(join(app, ".say.yaml")), "bootstrap overwrote existing configuration");
     await Deno.writeTextFile(join(app, "pronto/terminal.cue"), 'package prontoproject\nimport terminal "github.com/bonisoft3/pronto/terminals:omnishell"\npronto: terminal.#Project\n');
     await cue(app, ["cmd", "generate", "./pronto"]);
     assert((await Deno.readTextFile(join(app, ".say.yaml"))).includes("omnishell mode"), "terminal did not contribute its commands");
@@ -129,13 +153,14 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
       await Deno.writeTextFile(join(app, "program_document.cue"), 'package jsfb\ncode: surface: screens: about: {title: "About", route: "/about", prerender: true, reads: [], writes: [], forms: [], states: ["populated"], files: {handlers: [], adapters: []}}\n');
       await Deno.writeTextFile(join(app, "shell/screens/about.html"), '<section class="screen" data-screen="about"><h1>About</h1></section>\n');
       await Deno.writeTextFile(join(app, "shell/screens/about.css"), "");
-      async function deno(script: string, args: string[]): Promise<string> {
+      async function deno(script: string, args: string[], success = true): Promise<string> {
         const result = await new Deno.Command(Deno.execPath(), {
           args: ["run", "--no-check", "--config", join(scratch, "pronto/deno.json"), "--allow-read", "--allow-write=.", "--allow-run", "--allow-env", script, ...args],
           cwd: app, env, stdout: "piped", stderr: "piped",
         }).output();
-        assert(result.success, decoder.decode(result.stderr));
-        return decoder.decode(result.stdout);
+        const text = decoder.decode(result.stderr);
+        assert(result.success === success, text);
+        return success ? decoder.decode(result.stdout) : text;
       }
       // The installed omnishell is this tree's, as the monorepo's
       // mise.local.toml makes it: derive reads markup through its command.
@@ -158,6 +183,22 @@ Deno.test("registry bootstrap is terminal-independent, regenerates, and preserve
         if (pass === 1) assert(generated === written, "real writer did not settle");
         written = generated;
       }
+      // A static the cluster serves but nothing holds fails at generate,
+      // not minutes later in a docker build.
+      const briefPath = join(app, "brief.html");
+      const brief = await Deno.readTextFile(briefPath);
+      await Deno.remove(briefPath);
+      const missing = await deno(join(scratch, "pronto/write.ts"), ["."], false);
+      assert(missing.includes("brief.html: no such file"), "the writer did not refuse the missing static");
+      await Deno.writeTextFile(briefPath, brief);
+      // An installed loop with a monorepo cluster layout fails the same
+      // way: the seats below name the disagreement.
+      const programPath = join(app, "program.cue");
+      const program = await Deno.readTextFile(programPath);
+      await Deno.writeTextFile(programPath, program.replace('"local": terminal.surface.runtime != ""', '"local": true'));
+      const layout = await deno(join(scratch, "pronto/write.ts"), ["."], false);
+      assert(layout.includes("kept the monorepo layout"), "the writer did not refuse the monorepo cluster layout");
+      await Deno.writeTextFile(programPath, program);
     } finally {
       if (previousRegistry === undefined) Deno.env.delete("CUE_REGISTRY"); else Deno.env.set("CUE_REGISTRY", previousRegistry);
       if (previousCache === undefined) Deno.env.delete("CUE_CACHE_DIR"); else Deno.env.set("CUE_CACHE_DIR", previousCache);

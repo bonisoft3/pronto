@@ -261,11 +261,23 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   ```cue
   code: pronto.#App & {...}
   terminal: (pronto.#DefaultTerminal & {"code": code}).out
-  cluster: (pronto.#DefaultCluster & {"code": code, statics: terminal.surface.statics}).out
+  cluster: (pronto.#DefaultCluster & {"code": code, "local": terminal.surface.runtime != "", statics: terminal.surface.statics}).out
   loop: (pronto.#DefaultLoop & {"code": code, "cluster": cluster, "terminal": terminal}).out
-  build: (pronto.#DefaultBuild & {"code": code, "loop": loop, "cluster": cluster}).out
+  build: (pronto.#DefaultBuild & {"code": code, "loop": loop, "cluster": cluster, "terminal": terminal}).out
   out: pronto.#emit & {"code": code, "cluster": cluster, "terminal": terminal, "loop": loop, "build": build}
   ```
+
+  `"local": terminal.surface.runtime != ""` on the cluster seat and
+  `"terminal": terminal` on the build seat are the installed layout,
+  derived from the terminal rather than stated: outside the monorepo the
+  terminal's runtime is empty, so the cluster serves the app's own files
+  (fingerprinted from the build context) and the build takes the
+  terminal's statics from its image. Inside the monorepo the runtime is
+  a workspace path, so both stay the workspace's own tree. One shape
+  holds in both layouts because no layout is stated. An installed app
+  whose seats disagree — an installed loop with a monorepo cluster
+  layout — serves docker copies that resolve nowhere; `write.ts`
+  refuses it with the seats named.
 
   A first `generate` converges without hand-made stubs: decisions carry an
   empty-note default until derivation writes `program_derived.cue`, and a

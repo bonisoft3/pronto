@@ -31,9 +31,12 @@ installation; do not substitute `main` or `latest` for a missing release.
    identity: inspect it and skip `mod init`. Bootstrap refuses existing seed
    or generated configuration files; reconcile them explicitly for adoption.
 
-3. Bootstrap writes `pronto/config.cue`, `pronto/generate_tool.cue`, `.mise.toml`, and
-   `.say.yaml`. The first two are the source; `sayt generate` recreates the
-   last two. Bootstrap knows only Pronto's requirements.
+3. Bootstrap writes `pronto/config.cue`, `pronto/generate_tool.cue`,
+   `.mise.toml`, and `.say.yaml`. The first two are the source;
+   `sayt generate` recreates the last two. The seed config carries the
+   default roster — terminal omnishell, cluster mecha, build bayt — so
+   the first `mise lock` and `mise install` already see the whole
+   toolchain.
 
 4. Inspect and trust `.mise.toml`, create the project lock, then install and
    check the toolchain:
@@ -63,10 +66,11 @@ installation; do not substitute `main` or `latest` for a missing release.
    `--force <tool>` (for example, `^mise install --force http:duckdb`), then
    recheck the lock. Other platforms need their own bootstrap install.
 
-When choosing a terminal, cluster, or builder, unify its exported project
-requirements into `pronto` in package `prontoproject`, then run
-`./saytw --script tools.nu cue cmd generate ./pronto`. Inspect the generated
-configuration and repeat step 4 for the new tools.
+To take another terminal, cluster, or builder, replace the corresponding
+line in `pronto/config.cue` — or split the seats into files, which
+unifies the same way — then run
+`./saytw --script tools.nu cue cmd generate ./pronto`. Inspect the
+generated configuration and repeat step 4 for the new tools.
 
 Host plugins and project configuration are separate installations. Use the
 host's supported plugin installer, then restart or reload when required by

@@ -5,6 +5,9 @@ import (
 	"tool/file"
 
 	"github.com/bonisoft3/pronto/distribution"
+	terminal "github.com/bonisoft3/pronto/terminals:omnishell"
+	"github.com/bonisoft3/pronto/clusters:mecha"
+	"github.com/bonisoft3/pronto/builders:bayt"
 )
 
 command: bootstrap: B={
@@ -20,15 +23,30 @@ command: bootstrap: B={
 	}
 	if len(_matches) == 0 {
 		directory: file.Mkdir & {$after: B._after, path: "pronto"}
+		// The default roster in one file: Pronto itself plus the seats a
+		// brief's harness names when it names none (terminal omnishell,
+		// cluster mecha, build bayt; the loop is sayt itself), so the
+		// first lock, install, and generate already see the whole
+		// toolchain. One file, stated once, in the same order as the
+		// `config` below: the same value either way (CUE orders the
+		// unified keys by composition, so the first regeneration may only
+		// reorder — semantically identical, stable thereafter). To take
+		// another implementation, replace its line here — or split the
+		// seats into files, which unifies the same way.
 		seed: file.Create & {
 			$after:   B.directory
 			filename: "pronto/config.cue"
 			contents: """
 				package prontoproject
 
-				import "github.com/bonisoft3/pronto/distribution"
+				import (
+					"github.com/bonisoft3/pronto/distribution"
+					terminal "github.com/bonisoft3/pronto/terminals:omnishell"
+					"github.com/bonisoft3/pronto/clusters:mecha"
+					"github.com/bonisoft3/pronto/builders:bayt"
+				)
 
-				pronto: distribution.#Project
+				pronto: distribution.#Project & terminal.#Project & mecha.#Project & bayt.#Toolchain
 				"""
 		}
 		tool: file.Create & {
@@ -42,6 +60,6 @@ command: bootstrap: B={
 				command: generate: bootstrap.#Generate & {project: pronto}
 				"""
 		}
-		config: #Generate & {_after: B._after, project: distribution.#Project}
+		config: #Generate & {_after: B._after, project: distribution.#Project & terminal.#Project & mecha.#Project & bayt.#Toolchain}
 	}
 }
