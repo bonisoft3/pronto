@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dependencyOrder, derivedSql, dollar } from './derived.ts'
+import { dependencyOrder, derivedSql, dollar, pipelineState, Settlement, snapshotSql } from './derived.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../../..')
@@ -16,6 +16,110 @@ Deno.test('a table follows the tables it references, and a cycle is refused', ()
 Deno.test('a row carrying the quote tag is quoted under another', () => {
   assert.deepEqual(dollar('[]'), '$derived$[]$derived$')
   assert.deepEqual(dollar('["$derived$"]'), '$derived1$["$derived$"]$derived1$')
+})
+
+const metric = (name: string, value: number, stream = 'refresh', at = 'root.input') =>
+  `${name}{label="",path="${at}",stream="${stream}"} ${value}`
+const direct = (received: number, sent = received) => [
+  metric('input_connection_up', 1), metric('input_received', received),
+  metric('input_latency_ns_count', sent), metric('output_sent', sent, 'refresh', 'root.output'),
+  metric('output_error', 0, 'refresh', 'root.output'),
+].join('\n')
+
+Deno.test('completed periodic no-op refreshes settle across the full computation cadence', () => {
+  const settlement = new Settlement(315, 0)
+  for (let seconds = 0; seconds <= 316; seconds += 2) {
+    const pipeline = pipelineState(direct(seconds / 2 + 1), ['refresh'])
+    assert.deepEqual(pipeline.active, [])
+    const observed = settlement.observe({ ...pipeline, moving: `${pipeline.failures}\nunchanged rows` }, seconds * 1000)
+    assert.equal(observed.settled, seconds >= 315)
+  }
+})
+
+Deno.test('committed changes restart settlement; pending groups, first computations and unfinished requests block export', () => {
+  const settlement = new Settlement(315, 0)
+  const state = { waiting: [] as string[], active: [] as string[], moving: 'rows A' }
+  settlement.observe(state, 0)
+  assert.equal(settlement.observe({ ...state, moving: 'rows B' }, 310000).settled, false)
+  state.moving = 'rows B'
+  assert.equal(settlement.observe(state, 624000).settled, false)
+  assert.equal(settlement.observe({ ...state, ...pipelineState(direct(50, 49), ['refresh']) }, 626000).settled, false)
+  assert.equal(settlement.observe(state, 628000).settled, true)
+  assert.equal(settlement.observe({ ...state, waiting: ['group events to drain'] }, 630000).settled, false)
+  assert.equal(settlement.observe(state, 944000).settled, false)
+  assert.equal(settlement.observe({ ...state, waiting: ['computation odds to run'] }, 945000).settled, false)
+})
+
+Deno.test('batched and filtered events finish by batch acknowledgments without equating messages with batches', () => {
+  const events = (received: number, processed: number, batches: number, acknowledged: number) => [
+    metric('input_connection_up', 1, 'events'), metric('input_received', received, 'events'),
+    metric('input_latency_ns_count', acknowledged, 'events'),
+    metric('processor_received', processed, 'events', 'root.pipeline.processors.0'),
+    metric('processor_batch_received', batches, 'events', 'root.pipeline.processors.0'),
+    metric('processor_batch_sent', 0, 'events', 'root.pipeline.processors.0'),
+    metric('output_sent', 0, 'events', 'root.output'),
+  ].join('\n')
+  assert.deepEqual(pipelineState(events(10, 10, 1, 1), ['events']).active, [])
+  assert.deepEqual(pipelineState(events(20, 20, 2, 1), ['events']).active, ['stream events to finish'])
+  assert.deepEqual(pipelineState(events(20, 10, 1, 1), ['events']).active, ['stream events to finish'])
+})
+
+Deno.test('buffer acknowledgments cover work after inputs acknowledge storage; errors fail loudly', () => {
+  const buffered = (completed: number) => direct(10, 0) + '\n' + [
+    metric('buffer_received', 10, 'refresh', 'root.buffer'),
+    metric('buffer_batch_received', 1, 'refresh', 'root.buffer'),
+    metric('buffer_latency_ns_count', completed, 'refresh', 'root.buffer'),
+  ].join('\n')
+  assert.deepEqual(pipelineState(buffered(0), ['refresh']).active, ['stream refresh buffer to drain'])
+  assert.deepEqual(pipelineState(buffered(1), ['refresh']).active, [])
+  assert.throws(() => pipelineState(direct(1) + '\n' + metric('output_error', 1, 'refresh', 'root.output'), ['refresh']), /output_error/)
+  assert.throws(() => pipelineState(direct(1) + '\n' + metric('processor_error', 1, 'refresh', 'root.pipeline.processors.0'), ['refresh']), /processor_error/)
+  assert.throws(() => pipelineState(metric('input_received', 1), ['refresh']), /completion metrics/)
+  assert.ok(pipelineState('', ['refresh']).waiting.includes('stream refresh to start'))
+})
+
+Deno.test('a committed-content snapshot sees changes immediately and preserves numeric JSON text', async () => {
+  const dir = await Deno.makeTempDir({ prefix: 'derived-snapshot-test-' })
+  try {
+    const browser = path.join(repo, 'libraries/mecha/packages/mecha-browser')
+    await Deno.writeTextFile(path.join(dir, 'snapshot.ts'), `
+      import assert from 'node:assert/strict'
+      import { PGlite } from '@electric-sql/pglite'
+      import { snapshotSql, derivedSql } from ${JSON.stringify(String(pathToFileURL(path.join(here, 'derived.ts'))))}
+      const db = await PGlite.create()
+      await db.exec(\`CREATE TABLE source (id bigint PRIMARY KEY, amount numeric, stamp timestamptz);
+        CREATE TABLE sink (id bigint PRIMARY KEY REFERENCES source(id), amount numeric);
+        CREATE SCHEMA other; CREATE TABLE other.trigger (id integer PRIMARY KEY, n integer);
+        INSERT INTO source VALUES (9007199254740993, 123456789.123456789123456789, '2026-10-06Z');
+        INSERT INTO sink SELECT id, amount FROM source; INSERT INTO other.trigger VALUES (1, 0);\`)
+      const all = [{schema:'public',name:'source'}, {schema:'public',name:'sink'}, {schema:'other',name:'trigger'}]
+      const read = async () => (await db.query(snapshotSql(all, ['source', 'sink']))).rows[0].json_build_object
+      const before = await read()
+      assert.match(before.rows.source, /9007199254740993/)
+      assert.match(before.rows.source, /123456789\\.123456789123456789/)
+      await db.exec('UPDATE source SET amount = amount')
+      assert.equal((await read()).fingerprint, before.fingerprint)
+      await db.exec('UPDATE other.trigger SET n = 1')
+      const triggered = await read()
+      assert.notEqual(triggered.fingerprint, before.fingerprint)
+      await db.exec(\`BEGIN; UPDATE source SET amount = 7; UPDATE sink SET amount = 7; COMMIT;\`)
+      const changed = await read()
+      assert.notEqual(changed.fingerprint, triggered.fingerprint)
+      assert.match(changed.rows.source, /"amount":7/)
+      assert.match(changed.rows.sink, /"amount":7/)
+      await db.exec(derivedSql(['source','sink'], {source:['id','amount','stamp'],sink:['id','amount']}, before.rows))
+      assert.equal((await read()).rows.source, before.rows.source)
+      assert.equal((await read()).rows.sink, before.rows.sink)
+      await db.close()
+    `)
+    const ran = await new Deno.Command(Deno.execPath(), {
+      args: ['run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'snapshot.ts')],
+      stdout: 'inherit', stderr: 'inherit',
+    }).output()
+    assert.equal(ran.success, true, 'the database snapshot regression failed')
+  } finally {
+    await Deno.remove(dir, { recursive: true })
+  }
 })
 
 Deno.test('a page bundled with derived rows boots holding them in place of the seed', async () => {

@@ -10,14 +10,11 @@
 // them under. The cluster is the app's compose under a project of its own,
 // built as `sayt launch` builds it, and it is torn down after, settled or not.
 //
-// Settled is a quiet window over everything that moves: the transform's
-// counters, which every read and post a stream makes advances, and the
-// database's row writes. It opens once every stream's inputs are up, every
-// bus group has been delivered all of its stream and has nothing pending, and
-// every computation has run once; it must outlast the slowest computation's
-// cadence, so each has looked at least once at rows that no longer change, and
-// Postgres's statistics flush, which a computation's look reads. Any write
-// closes it again.
+// Settlement requires unchanged committed rows for the slowest computation's
+// cadence plus its statistics flush, started inputs, drained bus groups, and
+// completed computations. Successful no-op reads leave the quiet window open;
+// outstanding pipeline work blocks export. The export's rows and fingerprint
+// share one database snapshot, checked again before the file is written.
 import * as path from 'node:path'
 
 /** Postgres's statistics land up to its idle flush interval after a commit. */
@@ -64,6 +61,85 @@ export function derivedSql(order: string[], columns: Record<string, string[]>, r
     lines.push(`INSERT INTO public.${ident(t)} (${cols}) SELECT ${cols} FROM json_populate_recordset(NULL::public.${ident(t)}, ${dollar(rows[t])});`)
   }
   return lines.join('\n') + '\n'
+}
+
+type Table = { schema: string; name: string }
+export type Snapshot = { fingerprint: string; rows: Record<string, string> }
+const literal = (s: string) => "'" + s.replaceAll("'", "''") + "'"
+
+/** Row JSON stays text through JavaScript so bigint and numeric stay exact. */
+export function snapshotSql(all: Table[], selected: string[] = []): string {
+  const fingerprints = all.map(({ schema, name }) => `SELECT ${literal(schema)} AS schema, ${literal(name)} AS name,
+    coalesce((SELECT md5(string_agg(md5(r::text), '' ORDER BY md5(r::text))) FROM ${ident(schema)}.${ident(name)} r), md5('')) AS digest`)
+  const rows = selected.map((name) => `SELECT ${literal(name)} AS name,
+    (SELECT coalesce(json_agg(r ORDER BY r::text), '[]')::text FROM public.${ident(name)} r) AS rows`)
+  return `SELECT json_build_object(
+    'fingerprint', (${fingerprints.length ? `SELECT json_agg(f ORDER BY schema, name)::text FROM (${fingerprints.join(' UNION ALL ')}) f` : "SELECT '[]'"}),
+    'rows', (${rows.length ? `SELECT json_object_agg(name, rows) FROM (${rows.join(' UNION ALL ')}) r` : "SELECT '{}'::json"}))`
+}
+
+type Metric = { name: string; labels: Record<string, string>; value: number }
+
+export function pipelineState(text: string, streams: string[]): { waiting: string[]; active: string[]; failures: string } {
+  const metrics: Metric[] = text.split('\n').filter((line) => line && !line.startsWith('#')).map((line) => {
+    const match = /^(\w+)(?:\{(.*)\})?\s+(\S+)$/.exec(line)
+    if (!match) throw new Error(`invalid transform metric: ${line}`)
+    const labels: Record<string, string> = {}
+    for (const label of (match[2] ?? '').matchAll(/(\w+)=("(?:[^"\\]|\\.)*")/g)) labels[label[1]] = JSON.parse(label[2])
+    return { name: match[1], labels, value: Number(match[3]) }
+  })
+  const waiting: string[] = [], active: string[] = []
+  for (const stream of streams) {
+    const series = metrics.filter((m) => m.labels.stream === stream)
+    const up = series.filter((m) => m.name === 'input_connection_up')
+    if (up.length === 0 || up.some((m) => !(m.value > 0))) waiting.push(`stream ${stream} to start`)
+    const count = (name: string, at: string) => {
+      const samples = series.filter((m) => m.name === name && m.labels.path === at)
+      if (samples.some((m) => !Number.isSafeInteger(m.value) || m.value < 0)) throw new Error(`stream ${stream}: invalid ${name}`)
+      return samples.length ? samples.reduce((sum, m) => sum + m.value, 0) : undefined
+    }
+    const received = count('input_received', 'root.input')
+    if (received === undefined) {
+      waiting.push(`stream ${stream} input metrics`)
+      continue
+    }
+    const first = 'root.pipeline.processors.0'
+    const batches = count('processor_batch_received', first)
+    const buffered = count('buffer_batch_received', 'root.buffer')
+    if (buffered !== undefined) {
+      if (received !== count('buffer_received', 'root.buffer') || buffered !== (count('buffer_latency_ns_count', 'root.buffer') ?? 0)) {
+        active.push(`stream ${stream} buffer to drain`)
+      }
+    } else if (batches !== undefined) {
+      if (received !== count('processor_received', first) || batches !== (count('input_latency_ns_count', 'root.input') ?? 0)) {
+        active.push(`stream ${stream} to finish`)
+      }
+    } else {
+      const sent = count('output_sent', 'root.output')
+      if (sent === undefined) throw new Error(`stream ${stream} exposes no pipeline completion metrics`)
+      if (received !== sent) active.push(`stream ${stream} to finish`)
+    }
+    for (const m of series) {
+      if ((m.name === 'processor_error' || m.name === 'output_error') && m.value > 0) {
+        throw new Error(`stream ${stream}: ${m.name} at ${m.labels.path} is ${m.value}`)
+      }
+    }
+  }
+  const failures = metrics.filter((m) => /(?:_error|_connection_failed|_connection_lost)$/.test(m.name))
+    .map((m) => JSON.stringify(m)).sort().join('\n')
+  return { waiting, active, failures }
+}
+
+export class Settlement {
+  private last = ''
+  private since: number
+  constructor(private window: number, now: number) { this.since = now }
+  observe(state: { waiting: string[]; active: string[]; moving: string }, now: number): { quiet: number; settled: boolean } {
+    if (state.waiting.length || state.moving !== this.last) this.since = now
+    this.last = state.moving
+    const quiet = (now - this.since) / 1000
+    return { quiet, settled: !state.waiting.length && !state.active.length && quiet >= this.window }
+  }
 }
 
 type Run = { ok: boolean; stdout: string; stderr: string }
@@ -118,6 +194,11 @@ async function main() {
       '-d', env.POSTGRES_DB ?? fail(`${database[0]} declares no POSTGRES_DB`), '-AtX', '-v', 'ON_ERROR_STOP=1', '-c', sql)
   const window = FLUSH + Math.max(0, ...computations.map((c) => c.every))
 
+  const snapshot = async (selected: string[] = []): Promise<Snapshot> => {
+    const all: Table[] = JSON.parse(await psql("SELECT coalesce(json_agg(json_build_object('schema', schemaname, 'name', relname)), '[]') FROM pg_stat_user_tables"))
+    return JSON.parse(await psql(snapshotSql(all, selected)))
+  }
+
   async function state() {
     for (const line of (await compose('ps', '-a', '--format', 'json')).split('\n').filter((l) => l.trim())) {
       const c = JSON.parse(line) as { Service: string; State: string; ExitCode: number }
@@ -126,14 +207,13 @@ async function main() {
       }
     }
     const waiting: string[] = []
-    let counters = ''
+    let failures = ''
+    let active: string[] = []
     if (transform && redis) {
-      const metrics = (await compose('exec', '-T', transform[0], 'wget', '-qO-', 'http://localhost:4195/metrics')).split('\n')
-      for (const s of streams) {
-        const up = metrics.filter((l) => l.startsWith('input_connection_up{') && l.includes(`stream="${s}"`))
-        if (up.length === 0 || up.some((l) => !l.endsWith(' 1'))) waiting.push(`stream ${s} to start`)
-      }
-      counters = metrics.filter((l) => !l.startsWith('#') && !l.includes('latency')).join('\n')
+      const metrics = pipelineState(await compose('exec', '-T', transform[0], 'wget', '-qO-', 'http://localhost:4195/metrics'), streams)
+      waiting.push(...metrics.waiting)
+      active = metrics.active
+      failures = metrics.failures
       const cli = (...a: string[]) => compose('exec', '-T', redis[0], 'redis-cli', '--json', ...a)
       const keys = (await compose('exec', '-T', redis[0], 'redis-cli', '--scan')).split('\n').filter((l) => l)
       for (const key of keys) {
@@ -151,12 +231,12 @@ async function main() {
       )
       for (const c of computations) if (!ran.has(c.name)) waiting.push(`computation ${c.name} to run`)
     }
-    const writes = await psql('SELECT coalesce(sum(n_tup_ins + n_tup_upd + n_tup_del), 0) FROM pg_stat_user_tables')
-    return { waiting, moving: `${counters}\n${writes}` }
+    const { fingerprint } = await snapshot()
+    return { waiting, active, moving: `${failures}\n${fingerprint}`, fingerprint }
   }
 
   async function dump() {
-    const names = tables.map((t) => `'${t}'`).join(', ')
+    const names = tables.map(literal).join(', ')
     const refs = (await psql(`
       SELECT c.relname, p.relname FROM pg_constraint k
         JOIN pg_class c ON c.oid = k.conrelid JOIN pg_class p ON p.oid = k.confrelid
@@ -164,16 +244,15 @@ async function main() {
       .split('\n').filter((l) => l).map((l) => l.split('|') as [string, string])
     const order = dependencyOrder(tables, refs)
     const columns: Record<string, string[]> = {}
-    const rows: Record<string, string> = {}
     for (const t of order) {
       columns[t] = (await psql(`
         SELECT a.attname FROM pg_attribute a
         WHERE a.attrelid = 'public.${ident(t)}'::regclass AND a.attnum > 0 AND NOT a.attisdropped AND a.attgenerated = ''
         ORDER BY a.attnum`)).split('\n').filter((l) => l)
       if (columns[t].length === 0) throw new Error(`public.${t} has no columns`)
-      rows[t] = (await psql(`SELECT coalesce(json_agg(r ORDER BY r::text), '[]') FROM public.${ident(t)} r`)).trim()
     }
-    return derivedSql(order, columns, rows)
+    const { rows, fingerprint } = await snapshot(order)
+    return { sql: derivedSql(order, columns, rows), fingerprint }
   }
 
   let failure: unknown
@@ -182,20 +261,28 @@ async function main() {
     console.error(`derived: building and launching ${project}`)
     await compose('up', '-d', '--wait', '--build', 'launch')
     const deadline = Date.now() + timeout * 1000
-    let last = '', since = Date.now(), said = ''
+    const settlement = new Settlement(window, Date.now())
+    let said = '', sql = ''
     while (true) {
-      const { waiting, moving } = await state()
-      if (waiting.length > 0 || moving !== last) since = Date.now()
-      last = moving
-      const quiet = Math.round((Date.now() - since) / 1000)
-      const now = waiting.length > 0 ? `waiting for ${waiting.join(', ')}` : `quiet, settling over ${window}s`
+      const current = await state()
+      const { quiet, settled } = settlement.observe(current, Date.now())
+      const blocked = [...current.waiting, ...current.active]
+      const now = blocked.length > 0 ? `waiting for ${blocked.join(', ')}` : `quiet, settling over ${window}s`
       if (now !== said) console.error(`derived: ${now}`)
       said = now
-      if (waiting.length === 0 && quiet >= window) break
+      if (settled) {
+        const candidate = await dump()
+        const checked = await state()
+        if (candidate.fingerprint !== current.fingerprint) settlement.observe({ ...current, moving: candidate.fingerprint }, Date.now())
+        const stable = settlement.observe(checked, Date.now()).settled
+        if (candidate.fingerprint === current.fingerprint && checked.moving === current.moving && stable) {
+          sql = candidate.sql
+          break
+        }
+      }
       if (Date.now() > deadline) throw new Error(`not settled after ${timeout}s: ${now}, quiet for ${quiet}s`)
       await new Promise((r) => setTimeout(r, POLL * 1000))
     }
-    const sql = await dump()
     await Deno.mkdir(path.dirname(out), { recursive: true })
     await Deno.writeTextFile(out, sql)
     console.error(`derived: ${out}, ${(sql.length / 1024 / 1024).toFixed(2)} MB, ${tables.length} tables`)

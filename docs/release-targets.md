@@ -146,15 +146,21 @@ never committed. A write in the page recounts nothing: the archive the page
 holds is read-mostly, and its derived tables answer the rows it was bundled
 with ([pending](../PENDING.md#release-targets)).
 
-Settled is a quiet window, opened once every stream's inputs are up, every
-bus group has been delivered all of its stream with nothing pending, and every
-computation has run once, and closed by any movement in the transform's
-counters, which each read and post a stream makes advances, or in the
-database's row writes. The window outlasts the slowest computation's cadence
-and Postgres's statistics flush: a computation logs a run and nothing when it
-looks and finds its reads unchanged, so its cadence is the one bound on its
-having looked at rows that no longer move. Golaberto's ratings look every 300
-seconds, so its release settles in about six minutes after the build.
+Settlement requires unchanged committed table contents, started stream inputs,
+drained bus groups, completed pipeline work, and at least one completed run of
+each computation. Successful no-op polls do not restart the quiet window;
+changed rows or failure counters do. Processor and output errors abort the
+export. The window outlasts the slowest computation's cadence plus a 15-second
+margin, allowing it to inspect stable inputs. Golaberto's ratings look every
+300 seconds, so its quiet window is 315 seconds.
+
+The exported tables and their content fingerprint share one database snapshot.
+A subsequent state check must still agree before the file is written. Row JSON
+stays text through the exporter so bigint and numeric values retain their
+precision. Pipeline completion requires observable counters; a stream whose
+completion cannot be established cannot be exported. Computation logs establish
+that each computation has completed once, but do not expose whether a later
+run is currently in progress.
 
 The rule needs what `sayt launch` needs — Docker and the app's compose, whose
 images build from the trees the compose names — on the machine that releases,
