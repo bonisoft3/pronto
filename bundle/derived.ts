@@ -53,13 +53,26 @@ export function dependencyOrder(tables: string[], refs: [string, string][]): str
 /** SQL replacing each table's rows with `rows[t]`, a JSON array of row
  * objects; `order` lists the tables as dependencyOrder does. */
 export function derivedSql(order: string[], columns: Record<string, string[]>, rows: Record<string, string>): string {
-  const lines = [`-- The live tables as the settled container cluster holds them: ${order.join(', ')}.`]
+  const relations = order.map((t) => `${literal(`public.${ident(t)}`)}::regclass`).join(', ')
+  const lines = [
+    'DECLARE saved pg_trigger[]; t pg_trigger;',
+    'BEGIN',
+    `SELECT coalesce(array_agg(g), '{}') INTO saved FROM pg_trigger g
+      WHERE NOT g.tgisinternal AND g.tgenabled <> 'D' AND g.tgrelid = ANY(ARRAY[${relations}]);`,
+    "FOREACH t IN ARRAY saved LOOP EXECUTE format('ALTER TABLE %s DISABLE TRIGGER %I', t.tgrelid::regclass, t.tgname); END LOOP;",
+  ]
   for (const t of [...order].reverse()) lines.push(`DELETE FROM public.${ident(t)};`)
   for (const t of order) {
     const cols = columns[t].map(ident).join(', ')
-    lines.push(`INSERT INTO public.${ident(t)} (${cols}) SELECT ${cols} FROM json_populate_recordset(NULL::public.${ident(t)}, ${dollar(rows[t])});`)
+    const selected = columns[t].map((c) => `r.${ident(c)}`).join(', ')
+    lines.push(`INSERT INTO public.${ident(t)} (${cols}) SELECT ${selected} FROM json_populate_recordset(NULL::public.${ident(t)}, ${dollar(rows[t])}) AS r;`)
   }
-  return lines.join('\n') + '\n'
+  lines.push(
+    'SET CONSTRAINTS ALL IMMEDIATE;',
+    "FOREACH t IN ARRAY saved LOOP EXECUTE format('ALTER TABLE %s ENABLE %s TRIGGER %I', t.tgrelid::regclass, CASE t.tgenabled WHEN 'A' THEN 'ALWAYS' WHEN 'R' THEN 'REPLICA' ELSE '' END, t.tgname); END LOOP;",
+    'END;',
+  )
+  return `-- The live tables as the settled container cluster holds them: ${order.join(', ')}.\nDO ${dollar(lines.join('\n'))};\n`
 }
 
 type Table = { schema: string; name: string }

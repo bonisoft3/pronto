@@ -135,6 +135,12 @@ imports nothing, and exports exactly four names:
 - `finish(inputs, outputs)`, `{sink table: rows}`, each the sink's whole
   content.
 
+Optional `onComplete` names a no-argument CRUD RPC called as the service role
+after every sink write succeeds. It must match `^[a-z_][a-z0-9_]{0,62}$`.
+The RPC must be idempotent: a failed call leaves the run retryable, and retry
+can invoke it after the sink rows have already committed. Unchanged inputs
+do not call it. This permits recording a complete computed result as history.
+
 Its language is the header's: ES module text as the service's SES Compartment
 admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
 `eval(` in a string, and top-level await are each refused — without the

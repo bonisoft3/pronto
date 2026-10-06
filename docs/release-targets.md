@@ -141,7 +141,9 @@ live table — the tables a stream or a computation writes without feeding the
 publication — to `dist/derived.sql`, and tears the cluster down. The bundler
 takes that file with `--derived` and the page runs it after the migrations,
 each table emptied and refilled whole, so a seeded row the derivation no longer
-produces is gone. The file is a release artifact, rebuilt at every release and
+produces is gone. Restoration is atomic and temporarily suspends user triggers
+on the restored tables, preventing derived rows from being computed again.
+Foreign-key checks remain active; original trigger modes are restored. The file is a release artifact, rebuilt at every release and
 never committed. A write in the page recounts nothing: the archive the page
 holds is read-mostly, and its derived tables answer the rows it was bundled
 with ([pending](../PENDING.md#release-targets)).

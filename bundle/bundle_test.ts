@@ -160,6 +160,67 @@ Deno.test('direct acknowledgments require single-message metadata; recovered nac
   assert.throws(() => pipelineState(direct(10), ['refresh'], new Map()), /batch-comparable/)
 })
 
+Deno.test('an authoritative restore suppresses derivation triggers, retains foreign keys and rolls back rows and trigger modes on failure', async () => {
+  const dir = await Deno.makeTempDir({ prefix: 'derived-restore-test-' })
+  try {
+    const browser = path.join(repo, 'libraries/mecha/packages/mecha-browser')
+    await Deno.writeTextFile(path.join(dir, 'restore.ts'), `
+      import assert from 'node:assert/strict'
+      import { PGlite } from '@electric-sql/pglite'
+      import { derivedSql } from ${JSON.stringify(String(pathToFileURL(path.join(here, 'derived.ts'))))}
+      const db = await PGlite.create()
+      await db.exec(\`CREATE TABLE source (id text PRIMARY KEY, saved text, t text);
+        CREATE TABLE sink (id text PRIMARY KEY REFERENCES source(id), n integer);
+        CREATE TABLE deferred_sink (id text PRIMARY KEY REFERENCES source(id) DEFERRABLE INITIALLY DEFERRED);
+        CREATE TABLE trigger_hits (id text);
+        CREATE FUNCTION derive() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+          INSERT INTO sink VALUES (NEW.id, 9); INSERT INTO trigger_hits VALUES (NEW.id); RETURN NEW; END $$;
+        CREATE FUNCTION noop() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+        CREATE TRIGGER derive AFTER INSERT ON source FOR EACH ROW EXECUTE FUNCTION derive();
+        CREATE TRIGGER disabled BEFORE INSERT ON source FOR EACH ROW EXECUTE FUNCTION noop();
+        CREATE TRIGGER replica BEFORE INSERT ON source FOR EACH ROW EXECUTE FUNCTION noop();
+        CREATE TRIGGER always BEFORE INSERT ON source FOR EACH ROW EXECUTE FUNCTION noop();
+        CREATE TRIGGER deferred_noop BEFORE INSERT ON deferred_sink FOR EACH ROW EXECUTE FUNCTION noop();
+        ALTER TABLE source DISABLE TRIGGER disabled;
+        ALTER TABLE source ENABLE REPLICA TRIGGER replica;
+        ALTER TABLE source ENABLE ALWAYS TRIGGER always;
+        INSERT INTO source (id) VALUES ('old'); TRUNCATE trigger_hits;\`)
+      const modes = async () => (await db.query("SELECT tgname, tgenabled FROM pg_trigger WHERE NOT tgisinternal ORDER BY tgname")).rows
+      const originalModes = await modes()
+      const restore = (sink: string, deferred_sink = '[{"id":"a"}]') => derivedSql(['source', 'sink', 'deferred_sink'], {source:['id','saved','t'], sink:['id','n'], deferred_sink:['id']}, {
+        source:'[{"id":"a","saved":"captured","t":"literal"}]', sink, deferred_sink,
+      })
+      await db.exec(restore('[{"id":"a","n":7}]'))
+      assert.deepEqual((await db.query('SELECT * FROM source')).rows, [{id:'a', saved:'captured', t:'literal'}])
+      assert.deepEqual((await db.query('SELECT * FROM sink')).rows, [{id:'a', n:7}])
+      assert.deepEqual((await db.query('SELECT * FROM trigger_hits')).rows, [])
+      assert.deepEqual((await db.query('SELECT * FROM deferred_sink')).rows, [{id:'a'}])
+      assert.deepEqual(await modes(), originalModes)
+      await db.exec("INSERT INTO source (id) VALUES ('b')")
+      assert.deepEqual((await db.query("SELECT * FROM sink WHERE id = 'b'")).rows, [{id:'b', n:9}])
+      assert.deepEqual((await db.query('SELECT * FROM trigger_hits')).rows, [{id:'b'}])
+      const before = (await db.query('SELECT * FROM sink ORDER BY id')).rows
+      await assert.rejects(() => db.exec(restore('[{"id":"missing","n":0}]')), /foreign key/)
+      assert.deepEqual((await db.query('SELECT * FROM sink ORDER BY id')).rows, before)
+      assert.deepEqual(await modes(), originalModes)
+      await assert.rejects(() => db.exec(restore('[{"id":"a","n":7}]', '[{"id":"missing"}]')), /foreign key/)
+      assert.deepEqual((await db.query('SELECT * FROM sink ORDER BY id')).rows, before)
+      assert.deepEqual((await db.query('SELECT * FROM deferred_sink')).rows, [{id:'a'}])
+      assert.deepEqual(await modes(), originalModes)
+      await db.exec("INSERT INTO source (id) VALUES ('c')")
+      assert.deepEqual((await db.query("SELECT * FROM sink WHERE id = 'c'")).rows, [{id:'c', n:9}])
+      await db.close()
+    `)
+    const ran = await new Deno.Command(Deno.execPath(), {
+      args: ['run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'restore.ts')],
+      stdout: 'inherit', stderr: 'inherit',
+    }).output()
+    assert.equal(ran.success, true, 'the authoritative restore regression failed')
+  } finally {
+    await Deno.remove(dir, { recursive: true })
+  }
+})
+
 Deno.test('a committed-content snapshot sees changes immediately and preserves numeric JSON text', async () => {
   const dir = await Deno.makeTempDir({ prefix: 'derived-snapshot-test-' })
   try {

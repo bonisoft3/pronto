@@ -1791,6 +1791,7 @@ _cdcBeforeField: "__before"
 				every: c.every
 				to: [for t in c.to {D.code.state.entities[t].table}]
 				wasm: c.wasm
+				if c.onComplete != _|_ {onComplete: c.onComplete}
 				// A sink in the publication would feed the change it answers.
 				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
 			}]

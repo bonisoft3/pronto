@@ -690,6 +690,7 @@ import (
 	// App-relative paths of the committed wasm modules its jobs call, each
 	// named in a job by its file's stem.
 	wasm: *[] | [...string]
+	onComplete?: string & =~"^[a-z_][a-z0-9_]{0,62}$"
 }
 
 #Pipeline: {

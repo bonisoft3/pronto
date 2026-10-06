@@ -3,7 +3,10 @@
 // Compartment refuses, so lint loads each the same way first.
 package emit
 
-import "strings"
+import (
+	"strings"
+	"encoding/json"
+)
 import pronto "github.com/bonisoft3/pronto"
 
 _computed: _code & {
@@ -27,6 +30,17 @@ _admit: _computedLoop.surface.checks.admit
 admitLints:       _admit.verb & "lint"
 admitLoadsModule: strings.HasSuffix(_admit.cmds[0], #"admit.ts) "computations/chances.js""#) & true
 admitUnderPins:   strings.Contains(_admit.cmds[0], "services compute deno.json") & true
+
+_withHook: _computed & {state: computations: chances: onComplete: "capture_team_odds_history"}
+_hookCluster: (pronto.#DefaultCluster & {code: _withHook, statics: []}).out
+_hookConfig: json.Unmarshal(_hookCluster.surface.targets.compute.compose.environment.COMPUTATIONS)
+completionRPCReachesRuntime: _hookConfig[0].onComplete & "capture_team_odds_history"
+_plainCluster: (pronto.#DefaultCluster & {code: _computed, statics: []}).out
+_plainConfig: json.Unmarshal(_plainCluster.surface.targets.compute.compose.environment.COMPUTATIONS)
+undeclaredCompletionRPCAbsent: (_plainConfig[0].onComplete == _|_) & true
+invalidCompletionRPCsRefused: [for rpc in ["", "Capture", "rpc/capture", "capture-name", strings.Repeat("a", 64)] {
+	((pronto.#Computation & {name: "chances", to: ["Chance"], onComplete: rpc}) == _|_) & true
+}]
 
 // Released to pages, the page runs no computation, so the release settles the
 // cluster and ships its live tables before it bundles; with no stream the
