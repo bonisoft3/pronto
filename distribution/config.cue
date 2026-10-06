@@ -6,7 +6,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.8.0"
+#Version:     "0.8.1"
 #SaytVersion: "0.42.1"
 
 // The mise tools that carry the three trees a browser bundle reads, for a

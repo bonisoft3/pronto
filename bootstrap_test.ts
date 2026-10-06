@@ -28,12 +28,23 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       return decoder.decode(result.stdout);
     }
     const modules = [
-      ["plugins/bayt", "bayt", "0.58.3"],
-      ["plugins/sayt", "sayt", "0.42.0"],
-      ["libraries/mecha", "mecha", "0.5.0"],
-      ["plugins/omnishell", "omnishell", "0.6.0"],
-      ["plugins/pronto", "pronto", "0.7.1"],
-    ];
+      ["plugins/bayt", "bayt"],
+      ["plugins/sayt", "sayt"],
+      ["libraries/mecha", "mecha"],
+      ["plugins/omnishell", "omnishell"],
+      ["plugins/pronto", "pronto"],
+    ].map(([local, name]) => [local, name, name === "sayt" ? Deno.env.get("PRONTO_SAYT_SOURCE") ?? join(repo, local) : join(repo, local)]);
+    let prontoVersion = "";
+    const versions = new Map<string, Set<string>>();
+    // Transitive pins may intentionally lag the direct ones. Publish this
+    // fixture's sources at every declared version into the isolated registry.
+    for (const [, , source] of modules) {
+      const module = JSON.parse(await cue(repo, ["export", join(source, ".mirror/cue.mod/module.cue"), "--out", "json"]));
+      for (const [name, dependency] of Object.entries(module.deps ?? {}) as [string, {v: string}][]) {
+        if (!versions.has(name)) versions.set(name, new Set());
+        versions.get(name)!.add(dependency.v);
+      }
+    }
     async function copy(source: string, target: string): Promise<void> {
       await Deno.mkdir(target, { recursive: true });
       for await (const entry of Deno.readDir(source)) {
@@ -49,20 +60,25 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
         }
       }
     }
-    for (const [local, name, version] of modules) {
-      const source = name === "sayt" ? Deno.env.get("PRONTO_SAYT_SOURCE") ?? join(repo, local) : join(repo, local);
+    for (const [, name, source] of modules) {
       const mirror = join(scratch, name);
       await copy(source, mirror);
       await Deno.mkdir(join(mirror, "cue.mod"), { recursive: true });
       await Deno.copyFile(join(source, ".mirror/cue.mod/module.cue"), join(mirror, "cue.mod/module.cue"));
       await cue(mirror, ["mod", "edit", "--source=self"]);
       await cue(mirror, ["mod", "tidy"]);
-      await cue(mirror, ["mod", "publish", `v${version}`]);
+      if (name === "pronto") {
+        prontoVersion = `v${(await cue(mirror, ["export", "./distribution", "-e", "#Version", "--out", "text"])).trim()}`;
+        versions.set("github.com/bonisoft3/pronto@v0", new Set([prontoVersion]));
+      }
+      const required = versions.get(`github.com/bonisoft3/${name}@v0`);
+      assert(required?.size, `no fixture version declared for ${name}`);
+      for (const version of required) await cue(mirror, ["mod", "publish", version]);
     }
     const app = join(scratch, "consumer with spaces");
     await Deno.mkdir(app);
     await cue(app, ["mod", "init", "example.com/consumer@v0"]);
-    await cue(app, ["mod", "get", "github.com/bonisoft3/pronto@v0.7.1"]);
+    await cue(app, ["mod", "get", `github.com/bonisoft3/pronto@${prontoVersion}`]);
     await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"]);
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
