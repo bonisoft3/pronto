@@ -51,6 +51,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
 ;(async () => {
   if (payload.cluster) {
     const { sql, tables, assets: a } = payload.cluster
+    const { schema } = JSON.parse(payload.files['shell/shell.json'])
     const [wasm, data, initdb] = await Promise.all([inflate(a.wasm), inflate(a.data), inflate(a.initdb)])
     const db = await PGlite.create({
       pgliteWasmModule: await WebAssembly.compile(wasm),
@@ -60,7 +61,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     // A change the cluster lost leaves a table no read can trust again, so
     // the page dies of it where its boot would.
     cluster = await createCluster({
-      db, sql, tables, log: console.error,
+      db, sql, tables, schema, log: console.error,
       fail: (e) => {
         document.body.textContent = `page failed: ${e.message}`
         reportError(e)

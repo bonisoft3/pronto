@@ -272,7 +272,11 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       await Deno.mkdir(path.dirname(path.join(app, p)), { recursive: true })
       await Deno.writeTextFile(path.join(app, p), text)
     }
-    await write('shell/shell.json', JSON.stringify({ routes: [{ files: { css: 'shell/screens/home.css', shared: ['shell/shared/chrome.css'] } }], migrations: ['m/001.sql', 'm/900_seed.sql'], tables: [] }))
+    await write('shell/shell.json', JSON.stringify({
+      routes: [{ files: { css: 'shell/screens/home.css', shared: ['shell/shared/chrome.css'] } }],
+      migrations: ['m/001.sql', 'm/900_seed.sql'], tables: ['tally', 'tally_read'],
+      schema: { tally: { durability: 'live' }, tally_read: { durability: 'server' } },
+    }))
     await write('shell/shell.css', '')
     await write('shell/design.css', '')
     await write('shell/screens/home.css', '')
@@ -290,6 +294,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       // The one user's row, which the cluster mints at boot.
       'CREATE TABLE app_user (id uuid PRIMARY KEY, handle text NOT NULL);',
       "CREATE TABLE tally (id text PRIMARY KEY, n int NOT NULL, scope_id text GENERATED ALWAYS AS ('public:') STORED);",
+      'CREATE VIEW tally_read WITH (security_invoker=true) AS SELECT * FROM tally;',
       'CREATE TABLE tally_note (id text PRIMARY KEY, tally_id text NOT NULL REFERENCES tally(id), note text);',
     ].join('\n'))
     // A seeded row the derivation no longer produces, which the page must not keep.
@@ -324,11 +329,12 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       const b64 = /<script type="application\\/octet-stream" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1]
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))))
       const db = await PGlite.create()
-      await createCluster({ db, sql: payload.cluster.sql, tables: payload.cluster.tables, log: console.error, fail: (e) => { throw e } })
+      await createCluster({ db, sql: payload.cluster.sql, tables: payload.cluster.tables, schema: JSON.parse(payload.files['shell/shell.json']).schema, log: console.error, fail: (e) => { throw e } })
       const rows = async (sql: string) => (await db.query(sql)).rows
       console.log(JSON.stringify({
         tally: await rows('SELECT id, n FROM tally ORDER BY id'),
         note: await rows('SELECT id, tally_id, note FROM tally_note'),
+        read: await rows('SELECT id, n FROM tally_read ORDER BY id'),
       }))
     `)
     const booted = await new Deno.Command(Deno.execPath(), {
@@ -343,6 +349,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     assert.deepEqual(JSON.parse(new TextDecoder().decode(booted.stdout)), {
       tally: [{ id: 'a', n: 2 }, { id: 'b', n: 3 }],
       note: [{ id: 'x', tally_id: 'b', note: "it's $derived$" }],
+      read: [{ id: 'a', n: 2 }, { id: 'b', n: 3 }],
     })
   } finally {
     await Deno.remove(app, { recursive: true })

@@ -6,6 +6,7 @@ package emit
 import (
 	"strings"
 	"encoding/json"
+	"list"
 )
 import pronto "github.com/bonisoft3/pronto"
 
@@ -66,22 +67,32 @@ unpagedHasNoTarget: (_unpaged.pages == _|_) & true
 // Making an authoritative input live must not remove it from the statistics
 // lake. A computation output with a default writer must still stay out.
 _freshInputs: _computed & {
-	state: entities: {
-		Goal: {table: "goal", durability: "live", fields: [{name: "id", type: "uuid", pk: true}]}
-		Retained: {table: "retained", durability: "offline", fields: [{name: "id", type: "uuid", pk: true}]}
+	state: {
+		entities: {
+			Goal: {table: "goal", durability: "live", fields: [{name: "id", type: "uuid", pk: true}]}
+			Retained: {table: "retained", durability: "offline", fields: [{name: "id", type: "uuid", pk: true}]}
+			RequestProjection: {table: "request_projection", durability: "server", writers: "pipeline", fields: [{name: "id", type: "uuid", pk: true}]}
+			ServerPipeline: {table: "server_pipeline", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}
+		}
+		pipelines: server_pipeline: {raw: true, from: "Goal", to: "ServerPipeline", group: "server-pipeline"}
 	}
 }
 _freshCluster: (pronto.#DefaultCluster & {code: _freshInputs, statics: []}).out
 _freshTerminal: (pronto.#DefaultTerminal & {code: _freshInputs}).out
 _freshLoop: (pronto.#DefaultLoop & {code: _freshInputs, cluster: _freshCluster, terminal: _freshTerminal}).out
 _freshFiles: (pronto.#emit & {
-	code: _freshInputs
-	cluster: _freshCluster
+	code:     _freshInputs
+	cluster:  _freshCluster
 	terminal: _freshTerminal
-	loop: _freshLoop
+	loop:     _freshLoop
 	build: (pronto.#DefaultBuild & {code: _freshInputs, loop: _freshLoop, cluster: _freshCluster}).out
 }).files
-_freshCDC: strings.Split(_freshFiles["services/database/migrations/008_publication.sql"].text, "-- Electric")[0]
-liveInputStillCaptured: strings.Contains(_freshCDC, "goal") & true
-offlineInputStillCaptured: strings.Contains(_freshCDC, "retained") & true
-computedOutputNotRecaptured: strings.Contains(_freshCDC, "chance") & false
+_freshCDC:                         strings.Split(_freshFiles["services/database/migrations/008_publication.sql"].text, "-- Electric")[0]
+serverInputStillCaptured:          strings.Contains(_freshCDC, "profile") & true
+liveInputStillCaptured:            strings.Contains(_freshCDC, "goal") & true
+offlineInputStillCaptured:         strings.Contains(_freshCDC, "retained") & true
+computedOutputNotRecaptured:       strings.Contains(_freshCDC, "chance") & false
+requestProjectionNotCaptured:      strings.Contains(_freshCDC, "request_projection") & false
+serverPipelineOutputNotRecaptured: strings.Contains(_freshCDC, "server_pipeline") & false
+cdcSourceTables: json.Marshal(list.SortStrings(strings.Split(
+	_freshFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["goal", "profile", "retained"])

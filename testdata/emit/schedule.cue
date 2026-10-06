@@ -4,6 +4,7 @@
 package emit
 
 import (
+	"encoding/json"
 	"list"
 	"strings"
 	pronto "github.com/bonisoft3/pronto"
@@ -11,14 +12,19 @@ import (
 
 _scheduled: _code & {
 	state: {
-		entities: Tick: {
-			table:      "tick"
-			durability: "server"
-			fields: list.Concat([pronto.#tickFields, [{name: "status", type: "text"}]])
+		entities: {
+			Tick: {
+				table:      "tick"
+				durability: "server"
+				writers:    "pipeline"
+				fields: list.Concat([pronto.#tickFields, [{name: "status", type: "text"}]])
+			}
+			TickDone: {table: "tick_done", durability: "live", fields: [{name: "id", type: "uuid", pk: true}]}
 		}
 		schedules: nightly: {
 			cron: "0 3 * * *"
 			emits: {entity: "Tick", values: status: "requested"}
+			done: {entity: "TickDone", filter: "id=eq.{id}"}
 		}
 	}
 	capabilities: auth: {required: false, service: "/auth"}
@@ -44,3 +50,9 @@ authUidNotEmitted:       strings.Contains(_scheduledFiles["\(_migrations)/000_ex
 // the seed among the migrations after it.
 scheduleSeedMigrated: list.Contains(_scheduledCluster.state.migrations, "\(_migrations)/021_schedule_seed.sql") & true
 schedulePlaced: len([for c in _scheduledCluster.surface.targets.database.dockerfile.copy if c.dst == "/docker-entrypoint-initdb.d/020_schedule.sql" {c}]) & 1
+
+_scheduledCDC: strings.Split(_scheduledFiles["\(_migrations)/008_publication.sql"].text, "-- Electric")[0]
+scheduleServiceInputCaptured: strings.Contains(_scheduledCDC, "tick") & true
+scheduleOutcomeNotRecaptured: strings.Contains(_scheduledCDC, "tick_done") & false
+scheduleCDCSourceTables: json.Marshal(list.SortStrings(strings.Split(
+	_scheduledFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["profile", "tick"])

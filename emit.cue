@@ -1939,8 +1939,9 @@ _cdcBeforeField: "__before"
 		for _, c in E.code.state.computations for n in c.to {(n): true}
 		for _, s in E.code.state.schedules if s.done != _|_ {(s.done.entity): true}
 	}
+	_cdcScheduledInputs: {for _, s in E.code.state.schedules {(s.emits.entity): true}}
 	_cdcEntities: [for n, e in E.code.state.entities if e.server
-		if e.durability == "server" || (e.writers == "forms" && E._cdcOutputs[n] == _|_) {e}]
+		if (e.writers == "forms" || E._cdcScheduledInputs[n] != _|_) && E._cdcOutputs[n] == _|_ {e}]
 	_cdcTables: strings.Join([for e in E._cdcEntities {e.table}], ",")
 	// Every table the publication carries, column by column, as the carrier
 	// cdc-carriers.blobl converts a bus row into before a pipeline reads it.
@@ -2558,7 +2559,7 @@ _cdcBeforeField: "__before"
 				text: [
 					if len(E._syncTables) > 0 {
 						"""
-				\([if len(E._cdcTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: strings.Split(E._cdcTables, ",")}).out + "\n-- tier: any"}, "-- No server-durability entity: nothing for the bus to read."][0])
+				\([if len(E._cdcTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: strings.Split(E._cdcTables, ",")}).out + "\n-- tier: any"}, "-- No authoritative source entity: nothing for the bus to read."][0])
 
 				-- Electric's own publication, declared rather than left to it.
 				-- ELECTRIC_MANUAL_TABLE_PUBLISHING makes it validate this instead of
