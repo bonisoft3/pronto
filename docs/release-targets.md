@@ -149,18 +149,22 @@ with ([pending](../PENDING.md#release-targets)).
 Settlement requires unchanged committed table contents, started stream inputs,
 drained bus groups, completed pipeline work, and at least one completed run of
 each computation. Successful no-op polls do not restart the quiet window;
-changed rows or failure counters do. Processor and output errors abort the
-export. The window outlasts the slowest computation's cadence plus a 15-second
-margin, allowing it to inspect stable inputs. Golaberto's ratings look every
-300 seconds, so its quiet window is 315 seconds.
+changed rows or failure counters do. Repeated failures prevent settlement. The
+window outlasts the slowest computation's cadence plus a 15-second margin,
+allowing it to inspect stable inputs. Golaberto's ratings look every 300 seconds,
+so its quiet window is 315 seconds.
+
+Pipeline completion is checked at each original input, before any split or
+filter changes its batch size. Input processor counters or a declared
+single-message generator establish comparable acknowledgment counts; inputs
+bound to the app's Redis use its pending and delivery state. Buffers must also
+drain. Inputs without observable completion are refused.
 
 The exported tables and their content fingerprint share one database snapshot.
 A subsequent state check must still agree before the file is written. Row JSON
 stays text through the exporter so bigint and numeric values retain their
-precision. Pipeline completion requires observable counters; a stream whose
-completion cannot be established cannot be exported. Computation logs establish
-that each computation has completed once, but do not expose whether a later
-run is currently in progress.
+precision. Computation logs establish that each computation has completed once,
+but do not expose whether a later run is currently in progress.
 
 The rule needs what `sayt launch` needs — Docker and the app's compose, whose
 images build from the trees the compose names — on the machine that releases,

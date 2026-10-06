@@ -11,14 +11,13 @@
 // built as `sayt launch` builds it, and it is torn down after, settled or not.
 //
 // Settlement requires unchanged committed rows for the slowest computation's
-// cadence plus its statistics flush, started inputs, drained bus groups, and
+// cadence plus a settlement margin, started inputs, drained bus groups, and
 // completed computations. Successful no-op reads leave the quiet window open;
 // outstanding pipeline work blocks export. The export's rows and fingerprint
 // share one database snapshot, checked again before the file is written.
 import * as path from 'node:path'
 
-/** Postgres's statistics land up to its idle flush interval after a commit. */
-const FLUSH = 15
+const MARGIN = 15
 const POLL = 5
 
 function fail(msg: string): never {
@@ -80,7 +79,27 @@ export function snapshotSql(all: Table[], selected: string[] = []): string {
 
 type Metric = { name: string; labels: Record<string, string>; value: number }
 
-export function pipelineState(text: string, streams: string[]): { waiting: string[]; active: string[]; failures: string } {
+type Input = { generate?: { batch_size?: number }; redis_streams?: { url?: string }; broker?: { inputs: Input[] } }
+type Completion = 'single' | 'bus'
+type Bus = { url: string; aliases: ReadonlySet<string> }
+
+export function singleMessageInput(input: Input): boolean {
+  return input.generate !== undefined && (input.generate.batch_size ?? 1) === 1
+}
+
+export function inputCompletions(input: Input, stream: string, bus?: Bus, at = 'root.input'): Map<string, Completion> {
+  if (input.broker) return new Map(input.broker.inputs.flatMap((child, i) => [...inputCompletions(child, stream, bus, `${at}.broker.inputs.${i}`)]))
+  if (singleMessageInput(input)) return new Map([[`${stream}:${at}`, 'single']])
+  if (input.redis_streams?.url && bus) {
+    const url = new URL(input.redis_streams.url.replaceAll('${REDIS_URL}', bus.url))
+    if (url.protocol === 'redis:' && !url.search && !url.hash && bus.aliases.has(url.hostname) && (url.port || '6379') === '6379' && ['', '/', '/0'].includes(url.pathname) && !url.username && !url.password) {
+      return new Map([[`${stream}:${at}`, 'bus']])
+    }
+  }
+  return new Map()
+}
+
+export function pipelineState(text: string, streams: string[], completions: ReadonlyMap<string, Completion> = new Map()): { waiting: string[]; active: string[]; failures: string } {
   const metrics: Metric[] = text.split('\n').filter((line) => line && !line.startsWith('#')).map((line) => {
     const match = /^(\w+)(?:\{(.*)\})?\s+(\S+)$/.exec(line)
     if (!match) throw new Error(`invalid transform metric: ${line}`)
@@ -98,32 +117,35 @@ export function pipelineState(text: string, streams: string[]): { waiting: strin
       if (samples.some((m) => !Number.isSafeInteger(m.value) || m.value < 0)) throw new Error(`stream ${stream}: invalid ${name}`)
       return samples.length ? samples.reduce((sum, m) => sum + m.value, 0) : undefined
     }
-    const received = count('input_received', 'root.input')
+    const inputPaths = series.filter((m) => m.name === 'input_received').map((m) => m.labels.path)
+    const leaves = [...new Set(inputPaths)].filter((at) => !inputPaths.some((child) => child.startsWith(`${at}.`)))
+    const inputs = (name: string) => leaves.reduce((sum, at) => sum + (count(name, at) ?? 0), 0)
+    const received = leaves.length ? inputs('input_received') : undefined
     if (received === undefined) {
       waiting.push(`stream ${stream} input metrics`)
       continue
     }
-    const first = 'root.pipeline.processors.0'
-    const batches = count('processor_batch_received', first)
     const buffered = count('buffer_batch_received', 'root.buffer')
     if (buffered !== undefined) {
-      if (received !== count('buffer_received', 'root.buffer') || buffered !== (count('buffer_latency_ns_count', 'root.buffer') ?? 0)) {
+      if (buffered !== (count('buffer_latency_ns_count', 'root.buffer') ?? 0)) {
         active.push(`stream ${stream} buffer to drain`)
       }
-    } else if (batches !== undefined) {
-      if (received !== count('processor_received', first) || batches !== (count('input_latency_ns_count', 'root.input') ?? 0)) {
-        active.push(`stream ${stream} to finish`)
-      }
-    } else {
-      const sent = count('output_sent', 'root.output')
-      if (sent === undefined) throw new Error(`stream ${stream} exposes no pipeline completion metrics`)
-      if (received !== sent) active.push(`stream ${stream} to finish`)
     }
-    for (const m of series) {
-      if ((m.name === 'processor_error' || m.name === 'output_error') && m.value > 0) {
-        throw new Error(`stream ${stream}: ${m.name} at ${m.labels.path} is ${m.value}`)
+    let unfinished = false
+    for (const at of leaves) {
+      const first = `${at}.processors.0`
+      const batches = count('processor_batch_received', first)
+      const completed = count('input_latency_ns_count', at) ?? 0
+      const kind = completions.get(`${stream}:${at}`)
+      if (batches !== undefined) {
+        unfinished ||= count('input_received', at) !== count('processor_received', first) || batches !== completed
+      } else if (kind === 'single') {
+        unfinished ||= count('input_received', at) !== completed
+      } else if (kind !== 'bus') {
+        throw new Error(`stream ${stream} exposes no batch-comparable completion metrics`)
       }
     }
+    if (unfinished) active.push(`stream ${stream} to finish`)
   }
   const failures = metrics.filter((m) => /(?:_error|_connection_failed|_connection_lost)$/.test(m.name))
     .map((m) => JSON.stringify(m)).sort().join('\n')
@@ -149,7 +171,7 @@ async function run(cmd: string, args: string[], cwd: string): Promise<Run> {
   return { ok: out.success, stdout: new TextDecoder().decode(out.stdout), stderr: new TextDecoder().decode(out.stderr) }
 }
 
-type Service = { environment?: Record<string, string>; build?: { context?: string } }
+type Service = { environment?: Record<string, string>; build?: { context?: string }; develop?: { watch?: { path: string; target?: string }[] }; networks?: Record<string, { aliases?: string[] } | null> }
 
 async function main() {
   const args = Deno.args.slice()
@@ -188,11 +210,25 @@ async function main() {
   const computations = compute
     ? (JSON.parse(compute[1].environment?.COMPUTATIONS ?? fail(`${compute[0]} declares no COMPUTATIONS`)) as { name: string; every: number }[])
     : []
+  const bus: Bus | undefined = redis && transform?.[1].environment?.REDIS_URL
+    ? { url: transform[1].environment.REDIS_URL, aliases: new Set([redis[0], ...Object.values(redis[1].networks ?? {}).flatMap((n) => n?.aliases ?? [])]) }
+    : undefined
+  const completions = new Map<string, Completion>()
+  if (transform) {
+    for (const stream of streams) {
+      const source = transform[1].develop?.watch?.find((w) => w.target === `/pipelines/${stream}.yaml`)
+      if (!source) fail(`${transform[0]} declares no pipeline source for ${stream}`)
+      const exported = await run('cue', ['export', source.path, '--out', 'json'], app)
+      if (!exported.ok) throw new Error(`reading ${source.path} failed:\n${exported.stderr}`)
+      const pipeline = JSON.parse(exported.stdout) as { input: Input }
+      for (const [key, kind] of inputCompletions(pipeline.input, stream, bus)) completions.set(key, kind)
+    }
+  }
   const env = database[1].environment ?? {}
   const psql = (sql: string) =>
     compose('exec', '-T', database[0], 'psql', '-U', env.POSTGRES_USER ?? fail(`${database[0]} declares no POSTGRES_USER`),
       '-d', env.POSTGRES_DB ?? fail(`${database[0]} declares no POSTGRES_DB`), '-AtX', '-v', 'ON_ERROR_STOP=1', '-c', sql)
-  const window = FLUSH + Math.max(0, ...computations.map((c) => c.every))
+  const window = MARGIN + Math.max(0, ...computations.map((c) => c.every))
 
   const snapshot = async (selected: string[] = []): Promise<Snapshot> => {
     const all: Table[] = JSON.parse(await psql("SELECT coalesce(json_agg(json_build_object('schema', schemaname, 'name', relname)), '[]') FROM pg_stat_user_tables"))
@@ -210,7 +246,7 @@ async function main() {
     let failures = ''
     let active: string[] = []
     if (transform && redis) {
-      const metrics = pipelineState(await compose('exec', '-T', transform[0], 'wget', '-qO-', 'http://localhost:4195/metrics'), streams)
+      const metrics = pipelineState(await compose('exec', '-T', transform[0], 'wget', '-qO-', 'http://localhost:4195/metrics'), streams, completions)
       waiting.push(...metrics.waiting)
       active = metrics.active
       failures = metrics.failures

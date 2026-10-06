@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dependencyOrder, derivedSql, dollar, pipelineState, Settlement, snapshotSql } from './derived.ts'
+import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotSql } from './derived.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../../..')
@@ -20,16 +20,16 @@ Deno.test('a row carrying the quote tag is quoted under another', () => {
 
 const metric = (name: string, value: number, stream = 'refresh', at = 'root.input') =>
   `${name}{label="",path="${at}",stream="${stream}"} ${value}`
-const direct = (received: number, sent = received) => [
+const direct = (received: number, sent = received, acknowledged = sent) => [
   metric('input_connection_up', 1), metric('input_received', received),
-  metric('input_latency_ns_count', sent), metric('output_sent', sent, 'refresh', 'root.output'),
+  metric('input_latency_ns_count', acknowledged), metric('output_sent', sent, 'refresh', 'root.output'),
   metric('output_error', 0, 'refresh', 'root.output'),
 ].join('\n')
 
 Deno.test('completed periodic no-op refreshes settle across the full computation cadence', () => {
   const settlement = new Settlement(315, 0)
   for (let seconds = 0; seconds <= 316; seconds += 2) {
-    const pipeline = pipelineState(direct(seconds / 2 + 1), ['refresh'])
+    const pipeline = pipelineState(direct(seconds / 2 + 1), ['refresh'], inputCompletions({generate:{}}, 'refresh'))
     assert.deepEqual(pipeline.active, [])
     const observed = settlement.observe({ ...pipeline, moving: `${pipeline.failures}\nunchanged rows` }, seconds * 1000)
     assert.equal(observed.settled, seconds >= 315)
@@ -43,7 +43,7 @@ Deno.test('committed changes restart settlement; pending groups, first computati
   assert.equal(settlement.observe({ ...state, moving: 'rows B' }, 310000).settled, false)
   state.moving = 'rows B'
   assert.equal(settlement.observe(state, 624000).settled, false)
-  assert.equal(settlement.observe({ ...state, ...pipelineState(direct(50, 49), ['refresh']) }, 626000).settled, false)
+  assert.equal(settlement.observe({ ...state, ...pipelineState(direct(50, 49), ['refresh'], inputCompletions({generate:{}}, 'refresh')) }, 626000).settled, false)
   assert.equal(settlement.observe(state, 628000).settled, true)
   assert.equal(settlement.observe({ ...state, waiting: ['group events to drain'] }, 630000).settled, false)
   assert.equal(settlement.observe(state, 944000).settled, false)
@@ -54,8 +54,8 @@ Deno.test('batched and filtered events finish by batch acknowledgments without e
   const events = (received: number, processed: number, batches: number, acknowledged: number) => [
     metric('input_connection_up', 1, 'events'), metric('input_received', received, 'events'),
     metric('input_latency_ns_count', acknowledged, 'events'),
-    metric('processor_received', processed, 'events', 'root.pipeline.processors.0'),
-    metric('processor_batch_received', batches, 'events', 'root.pipeline.processors.0'),
+    metric('processor_received', processed, 'events', 'root.input.processors.0'),
+    metric('processor_batch_received', batches, 'events', 'root.input.processors.0'),
     metric('processor_batch_sent', 0, 'events', 'root.pipeline.processors.0'),
     metric('output_sent', 0, 'events', 'root.output'),
   ].join('\n')
@@ -64,18 +64,100 @@ Deno.test('batched and filtered events finish by batch acknowledgments without e
   assert.deepEqual(pipelineState(events(20, 10, 1, 1), ['events']).active, ['stream events to finish'])
 })
 
-Deno.test('buffer acknowledgments cover work after inputs acknowledge storage; errors fail loudly', () => {
-  const buffered = (completed: number) => direct(10, 0) + '\n' + [
+Deno.test('buffer acknowledgments cover work after inputs acknowledge storage', () => {
+  const buffered = (completed: number) => direct(10, 0, 1) + '\n' + [
     metric('buffer_received', 10, 'refresh', 'root.buffer'),
     metric('buffer_batch_received', 1, 'refresh', 'root.buffer'),
     metric('buffer_latency_ns_count', completed, 'refresh', 'root.buffer'),
+    metric('processor_received', 10, 'refresh', 'root.input.processors.0'),
+    metric('processor_batch_received', 1, 'refresh', 'root.input.processors.0'),
   ].join('\n')
   assert.deepEqual(pipelineState(buffered(0), ['refresh']).active, ['stream refresh buffer to drain'])
   assert.deepEqual(pipelineState(buffered(1), ['refresh']).active, [])
-  assert.throws(() => pipelineState(direct(1) + '\n' + metric('output_error', 1, 'refresh', 'root.output'), ['refresh']), /output_error/)
-  assert.throws(() => pipelineState(direct(1) + '\n' + metric('processor_error', 1, 'refresh', 'root.pipeline.processors.0'), ['refresh']), /processor_error/)
-  assert.throws(() => pipelineState(metric('input_received', 1), ['refresh']), /completion metrics/)
+  assert.throws(() => pipelineState(direct(1), ['refresh']), /batch-comparable completion metrics/)
   assert.ok(pipelineState('', ['refresh']).waiting.includes('stream refresh to start'))
+})
+
+Deno.test('a buffer drains independently of original input transactions that expand before storage', () => {
+  const expanded = (received: number, inputCompleted: number, bufferCompleted: number) => [
+    metric('input_connection_up', 1), metric('input_received', received),
+    metric('input_latency_ns_count', inputCompleted),
+    metric('processor_received', received, 'refresh', 'root.input.processors.0'),
+    metric('processor_batch_received', received, 'refresh', 'root.input.processors.0'),
+    metric('buffer_received', 14, 'refresh', 'root.buffer'),
+    metric('buffer_batch_received', 14, 'refresh', 'root.buffer'),
+    metric('buffer_latency_ns_count', bufferCompleted, 'refresh', 'root.buffer'),
+  ].join('\n')
+  const metadata = inputCompletions({generate:{}}, 'refresh')
+  assert.deepEqual(pipelineState(expanded(1, 1, 14), ['refresh'], metadata).active, [])
+  assert.deepEqual(pipelineState(expanded(1, 1, 13), ['refresh'], metadata).active, ['stream refresh buffer to drain'])
+  assert.deepEqual(pipelineState(expanded(2, 1, 14), ['refresh'], metadata).active, ['stream refresh to finish'])
+})
+
+Deno.test('broker completion sums leaf message and batch counters without counting parents twice', () => {
+  const broker = (completed: number) => [
+    metric('input_connection_up', 1, 'events', 'root.input.broker.inputs.0'),
+    metric('input_connection_up', 1, 'events', 'root.input.broker.inputs.1.broker.inputs.0'),
+    metric('input_received', 10, 'events', 'root.input.broker.inputs.0'),
+    metric('input_received', 2, 'events', 'root.input.broker.inputs.1'),
+    metric('input_received', 2, 'events', 'root.input.broker.inputs.1.broker.inputs.0'),
+    metric('input_latency_ns_count', 1, 'events', 'root.input.broker.inputs.0'),
+    metric('input_latency_ns_count', completed, 'events', 'root.input.broker.inputs.1.broker.inputs.0'),
+    metric('processor_received', 10, 'events', 'root.input.broker.inputs.0.processors.0'),
+    metric('processor_batch_received', 1, 'events', 'root.input.broker.inputs.0.processors.0'),
+  ].join('\n')
+  assert.deepEqual(pipelineState(broker(2), ['events'], inputCompletions({broker:{inputs:[{}, {broker:{inputs:[{generate:{}}]}}]}}, 'events')).active, [])
+  assert.deepEqual(pipelineState(broker(1), ['events'], inputCompletions({broker:{inputs:[{}, {broker:{inputs:[{generate:{}}]}}]}}, 'events')).active, ['stream events to finish'])
+})
+
+Deno.test('input expansion completes by its original transaction; Redis completion belongs to the bus drain gate', () => {
+  const metrics = (completed: number) => [
+    metric('input_connection_up', 1, 'events', 'root.input.broker.inputs.0'),
+    metric('input_connection_up', 1, 'events', 'root.input.broker.inputs.1'),
+    metric('input_received', 10, 'events', 'root.input.broker.inputs.0'),
+    metric('input_latency_ns_count', 1, 'events', 'root.input.broker.inputs.0'),
+    metric('input_received', 1, 'events', 'root.input.broker.inputs.1'),
+    metric('input_latency_ns_count', completed, 'events', 'root.input.broker.inputs.1'),
+    metric('processor_received', 1, 'events', 'root.input.broker.inputs.1.processors.0'),
+    metric('processor_batch_received', 1, 'events', 'root.input.broker.inputs.1.processors.0'),
+    metric('processor_received', 24, 'events', 'root.pipeline.processors.0'),
+    metric('processor_batch_received', 15, 'events', 'root.pipeline.processors.0'),
+  ].join('\n')
+  const metadata = inputCompletions({broker:{inputs:[{redis_streams:{url:'${REDIS_URL}'}},{generate:{}}]}}, 'events', {url:'redis://redis:6379', aliases:new Set(['redis'])})
+  assert.deepEqual(pipelineState(metrics(1), ['events'], metadata).active, [])
+  assert.deepEqual(pipelineState(metrics(0), ['events'], metadata).active, ['stream events to finish'])
+  assert.throws(() => pipelineState(metrics(1), ['events'], inputCompletions({broker:{inputs:[{redis_streams:{url:'redis://external:6379'}},{generate:{}}]}}, 'events', {url:'redis://redis:6379', aliases:new Set(['redis'])})), /batch-comparable/)
+  assert.equal(inputCompletions({redis_streams:{url:'redis://redis:6379/0?db=1'}}, 'events', {url:'redis://redis:6379', aliases:new Set(['redis'])}).size, 0)
+  assert.equal(inputCompletions({redis_streams:{url:'${REDIS_URL}'}}, 'events', {url:'redis://redis:6379?db=1', aliases:new Set(['redis'])}).size, 0)
+  const settlement = new Settlement(315, 0)
+  const state = {...pipelineState(metrics(1), ['events'], metadata), moving:'rows'}
+  settlement.observe(state, 0)
+  assert.equal(settlement.observe({...state, waiting:['Redis group to drain']}, 315000).settled, false)
+})
+
+Deno.test('direct acknowledgments require single-message metadata; recovered nacks settle and recurring failures restart quiet', () => {
+  assert.equal(singleMessageInput({generate:{}}), true)
+  assert.equal(singleMessageInput({generate:{batch_size:1}}), true)
+  assert.equal(singleMessageInput({generate:{batch_size:10}}), false)
+  assert.equal(singleMessageInput({}), false)
+  const known = inputCompletions({generate:{}}, 'refresh')
+  const inspected = (received: number, completed: number, failed: number) => pipelineState(
+    direct(received, received - failed, completed).replace(metric('output_error', 0, 'refresh', 'root.output'), metric('output_error', failed, 'refresh', 'root.output')),
+    ['refresh'], known,
+  )
+  const settlement = new Settlement(315, 0)
+  const state = (received: number, completed: number, failed: number) => {
+    const pipeline = inspected(received, completed, failed)
+    return {...pipeline, moving: `${pipeline.failures}\nunchanged dirty queues and rows`}
+  }
+  settlement.observe(state(1, 1, 0), 0)
+  assert.equal(settlement.observe(state(2, 2, 1), 10000).settled, false)
+  assert.equal(settlement.observe(state(10, 10, 1), 325000).settled, true)
+  assert.equal(settlement.observe(state(11, 10, 1), 326000).settled, false)
+  assert.equal(settlement.observe(state(11, 11, 1), 327000).settled, true)
+  assert.equal(settlement.observe(state(12, 12, 2), 328000).settled, false)
+  assert.equal(settlement.observe(state(13, 13, 3), 640000).settled, false)
+  assert.throws(() => pipelineState(direct(10), ['refresh'], new Map()), /batch-comparable/)
 })
 
 Deno.test('a committed-content snapshot sees changes immediately and preserves numeric JSON text', async () => {
