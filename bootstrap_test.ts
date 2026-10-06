@@ -82,7 +82,13 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"]);
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
-    const duckdb = JSON.parse(await cue(app, ["export", ".mise.toml", "--out", "json"])).tools["http:duckdb"];
+    const tools = JSON.parse(await cue(app, ["export", ".mise.toml", "--out", "json"])).tools;
+    const pins = JSON.parse(await cue(repo, ["export", "plugins/pronto/.mirror/cue.mod/module.cue", "-e", "deps", "--out", "json"]));
+    for (const [, name] of modules) {
+      const version = name === "pronto" ? prontoVersion : pins[`github.com/bonisoft3/${name}@v0`].v;
+      assert(tools[`github:bonisoft3/${name}`] === version.slice(1), `${name}: bootstrap tool version differs from the direct CUE dependency`);
+    }
+    const duckdb = tools["http:duckdb"];
     const assets: Record<string, string> = {
       "linux-x64": "linux-amd64",
       "linux-arm64": "linux-arm64",
