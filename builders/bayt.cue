@@ -30,7 +30,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.58.3", ...}
+	tools: {"github:bonisoft3/bayt": "0.58.4", ...}
 	say: say: {
 		...
 		// The commands restated: a rule the config names replaces sayt's
