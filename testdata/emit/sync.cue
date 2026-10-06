@@ -74,7 +74,6 @@ _syncFields: [
 	orders: *[] | _
 }
 _view: #view
-_serverInvalidation: {mode: "eager", reason: "jogo.html watches it to invalidate a server-computed read"}
 _onDemand: {mode: "on-demand", reason: "each active query demands its own subset or complete snapshot"}
 
 syncViews: (#syncCase & {reads: [_view, #view & {clauses: [{col: "id", op: "eq"}]}]}).out & _onDemand
@@ -110,11 +109,9 @@ syncOffline: (#syncCase & {reads: [_view], goal: {table: "goal", durability: "of
 syncPrivate: (#syncCase & {reads: [_view], goal: {table: "goal", durability: "live", access: {scope: "private", owner: "player_id"}}}).out & {
 	mode: "eager", reason: "Goal is private, and a view cannot restate its visibility"
 }
-// A write by key loads a row no view loaded as a view of its key, so the key
-// may come from anywhere. A server-computed list still needs eager change
-// tracking even when the write itself can demand its target by key.
-syncUpdateElsewhere: (#syncCase & {reads: [_view, {table: "goal", kind: "live", nested: false, lists: [], route: "server", embeds: [], orders: []}], writes: [{table: "goal", op: "update"}]}).out & _serverInvalidation
-syncUpdateUnviewed: (#syncCase & {reads: [_view & {table: "player"}, {table: "goal", kind: "live", nested: false, lists: [], route: "server", embeds: [], orders: []}], writes: [{table: "goal", op: "delete"}]}).out & _serverInvalidation
+// A server-computed list observes changes without retaining dependency rows.
+syncUpdateElsewhere: (#syncCase & {reads: [_view, {table: "goal", kind: "live", nested: false, lists: [], route: "server", embeds: [], orders: []}], writes: [{table: "goal", op: "update"}]}).out & _onDemand
+syncUpdateUnviewed: (#syncCase & {reads: [_view & {table: "player"}, {table: "goal", kind: "live", nested: false, lists: [], route: "server", embeds: [], orders: []}], writes: [{table: "goal", op: "delete"}]}).out & _onDemand
 // The view of its key is one Electric must be able to compare.
 syncUpdateUncomparedKey: (#syncCase & {
 	reads: [#view & {table: "tick"}]
@@ -154,19 +151,18 @@ syncSnapshotEmbed: (#syncCase & {
 	reads: [#view & {table: "player", route: "snapshot", clauses: [{col: "done", op: "false"}], embeds: ["goal"]}]
 	writes: [{table: "goal", op: "create"}]
 }).out & _onDemand
-// An embedded table read separately on the server remains eager even when
-// the local join could demand its rows.
+// A server read does not widen a local join's demand.
 syncJoinUncomparedKey: (#syncCase & {
 	reads: [#view & {embeds: ["tick"]}, {table: "tick", kind: "live", nested: false, lists: [], route: "server", embeds: [], orders: []}]
 	more: Tick: {table: "tick", durability: "live", fields: [{name: "id", type: "int64", pk: true}, {name: "game_id", type: "uuid"}]}
-}).app.#sync.Tick & _serverInvalidation
+}).app.#sync.Tick & _onDemand
 // Nested queries demand only their own rows; identical queries share a view.
 _players: #view & {table: "player", clauses: [{col: "done", op: "eq"}]}
 syncListed: (#syncCase & {reads: [_players, #view & {nested: true, lists: [0]}]}).out & _onDemand
 syncListedJoin: (#syncCase & {reads: [_players, #view & {table: "player", nested: true, lists: [0], clauses: [{col: "id", op: "eq"}], embeds: ["goal"]}, _view]}).out & _onDemand
 syncSlotted: (#syncCase & {reads: [#view & {nested: true}]}).out & _onDemand
 syncListedOne: (#syncCase & {reads: [#view & {table: "player", clauses: [{col: "id", op: "eq"}]}, #view & {nested: true, lists: [0]}]}).out & _onDemand
-syncServer: (#syncCase & {reads: [{table: "goal", kind: "live", nested: false, lists: [], route: "server", embeds: [], orders: []}]}).out & _serverInvalidation
+syncServer: (#syncCase & {reads: [{table: "goal", kind: "live", nested: false, lists: [], route: "server", embeds: [], orders: []}]}).out & _onDemand
 syncUnread: (#syncCase & {reads: [#view & {table: "player"}]}).out & {mode: "eager", reason: "no screen reads it"}
 
 // The mode is the entity's, so an authored one that agrees stands. One the
@@ -198,27 +194,51 @@ syncAcrossScreens: (#syncCase & {
 // must be held for their external deletion to invalidate that result.
 syncServerEmbed: (#syncCase & {
 	reads: [#view & {route: "server", embeds: ["player"]}, #view & {table: "player"}]
-}).out & _serverInvalidation
+}).out & _onDemand
 syncServerEmbedElsewhere: (#syncCase & {
 	reads: [#view & {table: "player", route: "server", embeds: ["goal"]}, _view]
-}).out & _serverInvalidation
+}).out & _onDemand
 // The runtime also uses PostgREST when one embed has no local collection.
 syncMissingEmbed: (#syncCase & {
 	reads: [#view & {embeds: ["player"]}]
-}).out & _serverInvalidation
+}).out & _onDemand
 syncMissingEmbedDependency: (#syncCase & {
 	reads: [#view & {table: "player", embeds: ["goal", "unregistered"]}, _view]
-}).out & _serverInvalidation
+}).out & _onDemand
 
 // An older projection without embed metadata cannot narrow invalidations.
 syncServerOpaqueEmbed: (#syncCase & {
 	reads: [{table: "player", kind: "live", nested: false, lists: [], route: "server", orders: []}, _view]
-}).out & _serverInvalidation
+}).out & _onDemand
 
 // Markup relations can name a foreign-key column instead of its target table.
 syncServerForeignKey: (#syncCase & {
 	reads: [#view & {route: "server", embeds: ["player_id"]}, #view & {table: "player"}]
-}).app.#sync.Player & _serverInvalidation
+}).app.#sync.Player & _onDemand
 syncServerLeavesUnrelatedDemand: (#syncCase & {
 	reads: [#view & {table: "note", route: "server", embeds: ["player_id"]}, #view & {table: "player"}, _view]
 }).out & _onDemand
+
+// A joined dependency is registered even when no region reads it alone.
+syncEmbeddedCollection: (#syncCase & {reads: [#view & {embeds: ["player_id"]}]}).app.#collections.player & "Player"
+syncRequestOnly: (#syncCase & {reads: [_view], goal: {table: "goal", durability: "server"}}).out & _onDemand
+
+_visibilityDependencies: (#syncCase & {
+	reads: [#view & {route: "server"}]
+	goal: {table: "goal", durability: "live", access: {scope: "folder", parent: "Player", on: "player_id"}}
+	app: state: entities: Player: access: {scope: "folder", parent: "Owner", on: "player_id"}
+	more: {
+		Owner: {table: "owner", durability: "server", access: {scope: "private", owner: "player_id", shared: {via: "grant", on: "game_id", user: "player_id"}}, fields: _syncFields}
+		Grant: {table: "grant", durability: "server", fields: _syncFields}
+	}
+}).app.#collections
+syncUnseenParent: _visibilityDependencies.player & "Player"
+syncUnseenAncestor: _visibilityDependencies.owner & "Owner"
+syncUnseenGrant: _visibilityDependencies.grant & "Grant"
+
+// The session strip reads its name even when no screen reads that entity.
+_authOnly: (#syncCase & {reads: []}).app & {
+	capabilities: auth: {required: true, service: "/auth", self: {route: "jogo", name: {table: "goal", column: "name"}}}
+}
+syncAuthOnlyCollection: _authOnly.#collections.goal & "Goal"
+syncAuthOnlyMode: _authOnly.#sync.Goal & {mode: "eager", reason: "the strip reads the signed-in person's name from it"}

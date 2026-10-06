@@ -173,11 +173,6 @@ reads the level ([omnishell's half](../omnishell/PENDING.md#machines)) — makes
 the lattice's first join a refusal, and lets one copy of the table import the
 other.
 
-**`server` and `live` differ only in the publication**
-([the lattice](docs/lattice.md#the-durability-ladder)): `live` owes a client
-that sees changes without asking, and emits nothing `server` lacks. `offline`
-differs at the client too, where its table syncs whole.
-
 **Sync on demand takes only equality.** A view whose filter holds a boolean, a
 range or a pattern is read from the collection, so its table syncs whole
 ([screens](docs/screens.md#the-reads-decide-how-a-table-syncs)): golaberto's

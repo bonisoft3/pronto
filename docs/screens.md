@@ -66,11 +66,14 @@ carrier metadata:
   embedded tables before evaluating. This includes unsupported predicates,
   unordered caps, unsupported joined keys and capped free-text ordering:
   Postgres collation and browser ordering need not choose the same rows.
-- Offset paging, full-text search and other server queries remain server reads.
-  Their registered base and embedded collections stay eager: a server result
-  loads no local subset, and a collection only signals deletion of rows it
-  already holds. Markup records hinted and nested dependencies; foreign-key
-  column relations resolve through schema refs. Other tables can remain on demand.
+- A `server` entity always executes its read through PostgREST and opens no
+  remote subscription. Completed local commands request a fresh result.
+- Offset paging, full-text search and other server-computed live queries use
+  authorized change notifications without retaining dependency rows. Their
+  initial catch-up and resets invalidate the result, as do changes to any
+  dependency. Markup records hinted and nested dependencies; foreign-key
+  column relations resolve through schema refs. A server-computed query no
+  longer makes those tables eager.
 
 A subscription retains its demands while active. A named read retains them
 until it settles, even if its screen leaves. Releasing demand releases the

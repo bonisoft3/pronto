@@ -24,8 +24,23 @@ import (
 	// embedding one is computed by the server.
 	#collections: {
 		for _, s in A.surface.screens for r in list.Concat([s.reads, s.writes]) {(r.table): _syncByTable[r.table]}
+		if A.capabilities.auth != _|_ if A.capabilities.auth.self != _|_ if A.capabilities.auth.self.name != _|_ {
+			(A.capabilities.auth.self.name.table): _syncByTable[A.capabilities.auth.self.name.table]
+		}
+		// A server join's dependencies may never be read as regions themselves.
+		for _, s in A.surface.screens for r in s.reads if r.embeds != _|_ for t in r.embeds {
+			if _syncByTable[t] != _|_ {(t): _syncByTable[t]}
+			for _, e in A.state.entities for f in e.fields if f.name == t if f.ref != _|_ {(f.ref): _syncByTable[f.ref]}
+		}
 		for _, s in A.surface.screens for f in s.forms {(A.state.entities[f.entity].table): f.entity}
 		for _, p in A.state.pipelines if p.fold != _|_ {(p.fold.pair.table): _syncByTable[p.fold.pair.table]}
+		for _, p in A.state.pipelines if p.fold != _|_ {(A.state.entities[p.from].table): p.from}
+		// Visibility walks through parents and grants even when markup names
+		// only a child. Register every edge so ancestor metadata travels too.
+		for _, e in A.state.entities if e.access != _|_ {
+			if e.access.scope == "folder" {(A.state.entities[e.access.parent].table): e.access.parent}
+			if e.access.scope == "private" if e.access.shared != _|_ {(e.access.shared.via): _syncByTable[e.access.shared.via]}
+		}
 	}
 
 	// Each server entity's mode, and the reason for it: the first reason it
@@ -65,14 +80,6 @@ import (
 			if read.embeds != _|_ for table in read.embeds if _syncByTable[table] != _|_ {(_syncByTable[table]): true}
 		}
 	}
-	_syncServed: [for sn, screen in A.surface.screens for read in screen.reads
-		let joined = [if read.embeds != _|_ {read.embeds}, [for t, _ in #collections {t}]][0]
-		if read.route == "server" || len([for t in joined if #collections[t] == _|_ {t}]) > 0 {
-			at: "\(sn).html"
-			// Markup has no schema to resolve foreign-key column relations.
-			// All matching refs cover nested joins without widening unrelated tables.
-			tables: list.Concat([[read.table], joined, [for t in joined for _, e in A.state.entities for f in e.fields if f.name == t if f.ref != _|_ {f.ref}]])
-		}]
 
 	// The screens with a reduce, whatever event it is bound to.
 	_syncReducing: [for sn, s in A.surface.screens if len([for w in s.writes if w.op == "reduce" {w}]) > 0 {sn}]
@@ -108,12 +115,7 @@ import (
 				entity: n
 				why:    "\(_syncReducing[0]).html writes from a reduce, and Electric cannot compare \(n)'s key to load a row it targets"
 			}],
-		// Server results never demand a local snapshot. Their invalidations
-		// watch collections, whose deletes only fire for rows already held.
-		[for served in _syncServed for t in served.tables if _syncByTable[t] != _|_ {
-			entity: _syncByTable[t]
-			why:    "\(served.at) watches it to invalidate a server-computed read"
-		}],
+
 
 		// The writes that find their row in the collection. One by key loads
 		// a row no view loaded as a view of its key (data-sync.js `holding`),

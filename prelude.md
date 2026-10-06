@@ -23,9 +23,8 @@ They name storage guarantees and are monotonic in expense, so a brief picks the 
 
 - **tab** — survives navigation. Client-held; nothing else can reach it.
 - **device** — survives a restart. Client-held.
-- **server** — survives device loss; forms write through PostgREST. Like
-  `live` and `offline`, it reaches the client through an ElectricSQL shape, and
-  only [the CDC publication](#liveness-and-delivery) sets it apart.
+- **server** — survives device loss; queries fetch filtered and joined results
+  through PostgREST on request, without subscribing to remote changes.
 - **live** — ...and the client sees changes without asking.
 - **offline** — ...and it works with no network. For briefs that ask for
   offline capture or multi-device use.
@@ -41,22 +40,20 @@ enough to make that trivial.
 
 ## Liveness and delivery
 
-The store is the platform's, and nothing above it may poll or fetch: at
-cluster tier every table syncs into the shell as an Electric-shaped
-TanStack DB collection (mecha's published client,
-`libraries/mecha/packages/client`), regions render reactively from
-collections, and server-computed reads (fts, embeds) re-run when a table
-in their dependency set changes — the collections are the change signal,
-never a clock. Writes are durable offline transactions: optimistic,
-queued through an outbox, retried until delivered, and confirmed against
-the sync stream by the write's transaction id (every table carries an
-emitted `txid` column for exactly this). Delivery is at-least-once end to
-end — WAL to bus to pipelines, and WAL to shapes to screens — so every
-consumer, browser included, must be idempotent; client-minted keys and
-the proxy's duplicate-absorbing posture make retries safe. The CDC
-publication covers server-durability tables only, so a pipeline must write a
-sink that is not `server`, or it feeds its own input; nothing refuses one that
-does.
+The store owns fetching and subscriptions; application handlers do neither.
+`server` reads fetch on request. `live` reads maintain a demanded local view or
+refetch a server result when authorized dependency notifications arrive.
+Those notifications retain no table snapshot and use no polling. `offline`
+keeps its local collection behavior. A completed local command requests a
+fresh server result after delivery.
+
+Writes use durable offline transactions: optimistic, queued through an outbox,
+retried until delivered, and confirmed against the sync stream by transaction
+id. Delivery is at-least-once, so consumers must be idempotent. The CDC
+publication retains server-durability tables and also carries authoritative
+live/offline form inputs, excluding known derived outputs from that additional
+set. Choosing browser freshness therefore does not remove input data from the
+statistics lake. See [[docs/lattice#The durability ladder]].
 
 ## Screens and the shell
 

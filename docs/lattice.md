@@ -33,18 +33,21 @@ table, trigger, publication entry, policy or seed SQL, take no `access`, and
 reach the terminal as `local` collections
 ([omnishell's side](../../omnishell/docs/data.md#declaration-follows-durability)).
 The cluster rungs each get a table with `txid`, the policies its access
-declares, an Electric shape and the outbox. `server` alone is a
-change-capture source: `008_publication.sql` carries `server` tables and no
-other, which keeps a pipeline's sink from feeding the pipelines.
+declares and an outbox. Browser freshness does not decide whether authoritative
+inputs reach the statistics lake: the CDC publication retains `server` tables
+and also includes `live` or `offline` entities written by forms, except outputs
+identified by pipelines, computations or schedules. Derived outputs stay out
+of that additional input set, avoiding feedback from a result into its source.
 
-At the client, `offline` is the rung that keeps the whole table: its
-collection syncs eagerly, before a screen reads it, so the device holds every
-row when the network goes. Every other cluster rung syncs as its screens'
-reads allow, and `#App.#sync` derives which ([screens](screens.md#the-reads-decide-how-a-table-syncs)):
-on demand per active query, unless a validation, access rule or other
-whole-collection requirement makes it eager. Each query obtains its subset or
-explicitly demands a complete snapshot. Nothing else tells `server` from `live` at the client
-([pending](../PENDING.md#the-lattice)).
+At the client, `server` executes filtered and joined reads through PostgREST
+without a remote subscription. A completed local command requests a refresh.
+`live` maintains a query-specific view where possible; a server-computed live
+query instead refetches on authorized dependency notifications, without
+retaining all dependency rows. `offline` keeps the existing eager collection
+behavior. Validations, access rules and folds can independently require local
+collections; those costs belong to those features rather than to a server read.
+See [[screens#The reads decide how a table syncs]] and
+[[../../omnishell/docs/data#A region's rows]].
 
 ## Views, folds and the DOM
 

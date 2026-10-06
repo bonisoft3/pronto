@@ -1931,10 +1931,19 @@ _cdcBeforeField: "__before"
 	// cue 0.16 (see #shellConfig's guard note).
 	_validated: [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
 	_localEntities: [for e in E._entities if !e.server {e}]
-	_cdcTables: strings.Join([for e in _entities if e.durability == "server" {e.table}], ",")
+	// Browser freshness must not remove an authoritative input from the lake.
+	// Derived outputs stay excluded even when their writer takes its default.
+	_cdcOutputs: {
+		for _, p in E.code.state.pipelines {(p.to): true}
+		for _, c in E.code.state.computations for n in c.to {(n): true}
+		for _, s in E.code.state.schedules if s.done != _|_ {(s.done.entity): true}
+	}
+	_cdcEntities: [for n, e in E.code.state.entities if e.server
+		if e.durability == "server" || (e.writers == "forms" && E._cdcOutputs[n] == _|_) {e}]
+	_cdcTables: strings.Join([for e in E._cdcEntities {e.table}], ",")
 	// Every table the publication carries, column by column, as the carrier
 	// cdc-carriers.blobl converts a bus row into before a pipeline reads it.
-	_cdcCarriers: {for e in _entities if e.durability == "server" {
+	_cdcCarriers: {for e in E._cdcEntities {
 		(e.table): {for f in e.fields if _busCarrier[f.type] != _|_ {(f.name): _busCarrier[f.type] & _busConvertible}}
 	}}
 	_syncTables: [for e in E._serverEntities {e.table}]
@@ -1969,9 +1978,8 @@ _cdcBeforeField: "__before"
 	}
 
 	// A schedule's two entities, checked here because #Schedule cannot see them.
-	// Both rules are the publication's: it carries "server" and excludes "live",
-	// so a tick has to be the first to be read at all, and an outcome has to be
-	// the second or the pipeline answering a tick would feed itself the answer.
+	// A tick is a request-only authoritative input. Its outcome is a live
+	// derived output, excluded from the additional CDC input set.
 	// Unifying against the enum is not vacuous — `durability` carries no default.
 	_scheduleShape: {
 		for _, sc in E.code.state.schedules {

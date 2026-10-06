@@ -48,3 +48,26 @@ pagesBundlesRows:   strings.HasSuffix(_pages.cmds[1], " --derived dist/derived.s
 pagesDerivesAlone:  (len(_pages.cmds) == 2) & true
 _unpaged:           _computedLoop.surface.verbs
 unpagedHasNoTarget: (_unpaged.pages == _|_) & true
+
+// Making an authoritative input live must not remove it from the statistics
+// lake. A computation output with a default writer must still stay out.
+_freshInputs: _computed & {
+	state: entities: {
+		Goal: {table: "goal", durability: "live", fields: [{name: "id", type: "uuid", pk: true}]}
+		Retained: {table: "retained", durability: "offline", fields: [{name: "id", type: "uuid", pk: true}]}
+	}
+}
+_freshCluster: (pronto.#DefaultCluster & {code: _freshInputs, statics: []}).out
+_freshTerminal: (pronto.#DefaultTerminal & {code: _freshInputs}).out
+_freshLoop: (pronto.#DefaultLoop & {code: _freshInputs, cluster: _freshCluster, terminal: _freshTerminal}).out
+_freshFiles: (pronto.#emit & {
+	code: _freshInputs
+	cluster: _freshCluster
+	terminal: _freshTerminal
+	loop: _freshLoop
+	build: (pronto.#DefaultBuild & {code: _freshInputs, loop: _freshLoop, cluster: _freshCluster}).out
+}).files
+_freshCDC: strings.Split(_freshFiles["services/database/migrations/008_publication.sql"].text, "-- Electric")[0]
+liveInputStillCaptured: strings.Contains(_freshCDC, "goal") & true
+offlineInputStillCaptured: strings.Contains(_freshCDC, "retained") & true
+computedOutputNotRecaptured: strings.Contains(_freshCDC, "chance") & false
