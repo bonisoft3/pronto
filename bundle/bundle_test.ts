@@ -296,6 +296,9 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       "CREATE TABLE tally (id text PRIMARY KEY, n int NOT NULL, scope_id text GENERATED ALWAYS AS ('public:') STORED);",
       'CREATE VIEW tally_read WITH (security_invoker=true) AS SELECT * FROM tally;',
       'CREATE TABLE tally_note (id text PRIMARY KEY, tally_id text NOT NULL REFERENCES tally(id), note text);',
+      "CREATE COLLATION search (provider = icu, locale = 'und-u-ks-level1', deterministic = false);",
+      'CREATE TABLE names (name text COLLATE search);',
+      "INSERT INTO names VALUES ('Flamengo'), ('São Paulo'), ('Other');",
     ].join('\n'))
     // A seeded row the derivation no longer produces, which the page must not keep.
     await write('m/900_seed.sql', "INSERT INTO tally VALUES ('gone', 9);")
@@ -319,27 +322,41 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     assert.ok(html.includes('<style>body { padding-top: 72px; }</style>'))
     assert.ok(!/<link rel="stylesheet"/.test(html))
 
-    // The page's own boot, minus the browser: its payload read from the
-    // document, PGlite under the cluster's pins, and createCluster running the sql.
+    // Exercise the page's actual asset bootstrap with network access forbidden:
+    // accepting CREATE COLLATION without ICU silently gives case-sensitive reads.
     const browser = path.join(repo, 'libraries/mecha/packages/mecha-browser')
+    const clusterPins = path.join(browser, 'cluster.deno.json')
+    const { imports } = JSON.parse(await Deno.readTextFile(clusterPins))
+    await write('boot-imports.json', JSON.stringify({ imports: {
+      ...Object.fromEntries(Object.entries(imports).map(([k, v]) => [
+        k.startsWith('.') ? String(pathToFileURL(path.resolve(browser, k))) : k,
+        String(v).startsWith('.') ? String(pathToFileURL(path.resolve(browser, String(v)))) : v,
+      ])),
+      '@std/encoding/base64': 'jsr:@std/encoding@1.0.7/base64',
+      'mecha-browser/': String(pathToFileURL(browser + '/')),
+    } }))
     await write('boot.ts', `
-      import { PGlite } from '@electric-sql/pglite'
+      import { createPageDatabase } from ${JSON.stringify(String(pathToFileURL(path.join(here, 'database.ts'))))}
       import { createCluster } from ${JSON.stringify(String(pathToFileURL(path.join(browser, 'cluster.ts'))))}
       const html = await Deno.readTextFile(Deno.args[0])
       const b64 = /<script type="application\\/octet-stream" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1]
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))))
-      const db = await PGlite.create()
+      globalThis.fetch = () => { throw new Error('the bundled database must boot offline') }
+      const db = await createPageDatabase(payload.cluster.assets)
       await createCluster({ db, sql: payload.cluster.sql, tables: payload.cluster.tables, schema: JSON.parse(payload.files['shell/shell.json']).schema, log: console.error, fail: (e) => { throw e } })
       const rows = async (sql: string) => (await db.query(sql)).rows
       console.log(JSON.stringify({
         tally: await rows('SELECT id, n FROM tally ORDER BY id'),
         note: await rows('SELECT id, tally_id, note FROM tally_note'),
         read: await rows('SELECT id, n FROM tally_read ORDER BY id'),
+        search: await rows("SELECT name FROM names WHERE name LIKE '%flamengo%' OR name LIKE '%sao%' ORDER BY name"),
       }))
+      await db.close()
     `)
     const booted = await new Deno.Command(Deno.execPath(), {
       args: [
         'run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen',
+        '--import-map', path.join(app, 'boot-imports.json'),
         path.join(app, 'boot.ts'), path.join(app, 'dist/browser/index.html'),
       ],
       stdout: 'piped',
@@ -350,6 +367,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       tally: [{ id: 'a', n: 2 }, { id: 'b', n: 3 }],
       note: [{ id: 'x', tally_id: 'b', note: "it's $derived$" }],
       read: [{ id: 'a', n: 2 }, { id: 'b', n: 3 }],
+      search: [{ name: 'Flamengo' }, { name: 'São Paulo' }],
     })
   } finally {
     await Deno.remove(app, { recursive: true })

@@ -74,7 +74,11 @@ that a cold page boot exceeds. The projection is
 `dist/browser/index.html`: the interpreter and mecha's browser cluster as one
 `deno bundle` module written inline, the files `shell.json` serves in a base64
 table, SES from a `data:` URL, and, for an app with migrations, `rls.sql`, the
-migrations and PGlite's wasm and data as base64 of gzip, inflated at boot. The
+migrations and PGlite's wasm and data as base64 of gzip, inflated at boot.
+Every PGlite bundle also embeds the full ICU data archive and loads it before
+applying migrations, so declared collations retain case and accent semantics
+offline. ICU and PGlite versions are pinned together in the browser runtime;
+this is part of the database contract and requires no application setting. The
 page's fetch shim serves the table by path and hands `/crud`, `/auth` and
 `/electric` to [the one-user cluster](../../../libraries/mecha/docs/browser.md#the-one-user-cluster),
 which mints its user at boot, so the tenancy floor runs against a real subject

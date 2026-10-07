@@ -166,10 +166,12 @@ try {
 
 // PGlite's assets sit in Deno's cache beside the package the module resolved.
 const pglite = /^npm:(@electric-sql\/pglite)@(.+)$/.exec(map.imports['@electric-sql/pglite']) ?? fail(`${clusterPins} pins no @electric-sql/pglite`)
+const icu = /^npm:(@electric-sql\/pglite-icu-full)@(.+)$/.exec(map.imports['@electric-sql/pglite-icu-full']) ?? fail(`${clusterPins} pins no @electric-sql/pglite-icu-full`)
 const info = new Deno.Command(Deno.execPath(), { args: ['info', '--json'], stdout: 'piped' }).outputSync()
 if (!info.success) fail('deno info failed')
 const denoDir = (JSON.parse(new TextDecoder().decode(info.stdout)) as { denoDir: string }).denoDir
 const dist = path.join(denoDir, 'npm/registry.npmjs.org', pglite[1], pglite[2], 'dist')
+const icuArchive = path.join(denoDir, 'npm/registry.npmjs.org', icu[1], icu[2], 'dist/icu.76.tgz')
 const gz64 = async (f: string) => {
   const bytes = (await Deno.readFile(path.join(dist, f))) as Uint8Array<ArrayBuffer>
   return encodeBase64(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).bytes())
@@ -177,7 +179,7 @@ const gz64 = async (f: string) => {
 const payload = {
   files,
   ...(clustered
-    ? { cluster: { sql, tables: shell.tables, assets: { wasm: await gz64('pglite.wasm'), data: await gz64('pglite.data'), initdb: await gz64('initdb.wasm') } } }
+    ? { cluster: { sql, tables: shell.tables, assets: { wasm: await gz64('pglite.wasm'), data: await gz64('pglite.data'), initdb: await gz64('initdb.wasm'), icu: encodeBase64(await Deno.readFile(icuArchive)) } } }
     : {}),
 }
 
