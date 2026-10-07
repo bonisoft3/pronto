@@ -60,6 +60,7 @@ import (
 #Project: P={
 	_valid:  saycfg.say & P.say.say
 	runtime: *"" | string
+	domain:  *"" | string
 	// The interpreter's root and mecha's, which the bundler reads from: a
 	// sibling path in the monorepo, the installed distribution elsewhere.
 	omnishell: *"" | string
@@ -98,7 +99,7 @@ import (
 	// under the path prefix `sayt release@pages --base=/<prefix>` names.
 	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])"}).out
 	// The edge tier's artifact: the Cloudflare Worker + Durable Object cluster and assets in dist/cloudflare
-	cloudflare: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle cloudflare.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare"}).out
+	cloudflare: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle cloudflare.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// An installed pronto has no siblings, which its own tests import.

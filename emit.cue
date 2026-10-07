@@ -1494,6 +1494,9 @@ _cdcBeforeField: "__before"
 				runtime:   "\(sources.pronto)"
 				omnishell: "\(sources.omnishell)"
 				mecha:     "\(sources.mecha)"
+				if D.code.meta.domain != _|_ {
+					domain: "\(D.code.meta.domain)"
+				}
 				// What only the cluster's streams and computations write lands in
 				// live tables, which the page ships as they stood at bundling.
 				if len(D.code.state.pipelines)+len(D.code.state.computations) > 0 {

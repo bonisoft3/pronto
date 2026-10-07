@@ -22,8 +22,9 @@ while (args.length) {
 const omnishell = path.resolve(flags['--omnishell'] ?? fail('--omnishell names the interpreter root'))
 const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha root'))
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
+const domain = flags['--domain'] ?? ''
 for (const flag of Object.keys(flags)) {
-  if (!['--omnishell', '--mecha', '--out'].includes(flag)) fail(`unknown flag ${flag}`)
+  if (!['--omnishell', '--mecha', '--out', '--domain'].includes(flag)) fail(`unknown flag ${flag}`)
 }
 
 const publicDir = path.join(out, 'public')
@@ -544,6 +545,9 @@ export default {
 await Deno.writeTextFile(path.join(srcDir, 'index.ts'), workerTs)
 
 // 5. Emit wrangler.jsonc
+const routesSection = domain
+  ? `,\n  "routes": [\n    { "pattern": "${domain}", "custom_domain": true }\n  ]`
+  : ''
 const wranglerJsonc = `{
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "${appName}",
@@ -562,7 +566,7 @@ const wranglerJsonc = `{
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["ClusterDurableObject"] }
-  ]
+  ]${routesSection}
 }
 `
 await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), wranglerJsonc)
