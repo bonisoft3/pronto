@@ -15,9 +15,7 @@ otherwise.
 
 ## The compiler
 
-**[The ir pin](SPEC.md#programcue) is compared with nothing**:
-`apps/thenote/program.cue` pins a hash its `ir.html` no longer has, and lint
-stays green.
+**[The ir pin](SPEC.md#programcue) is compared with nothing.**
 
 **The brief's lints do not exist.** SPEC's lints 1–3, 8 and 9 have no
 implementation: nothing reads a brief's `[[id]]`, a `![[…]]` transclusion, the
@@ -88,12 +86,12 @@ mints these once. `identity.ts mint` reads only a literal `fields: [` list, so
 an emits entity spelled `list.Concat([#tickFields, [...]])`, as the guide
 writes it, cannot be minted.
 
-**`app_user` has no owner.** truco, xpense, thenote, ponto and realworld each
+**`app_user` has no owner.** truco and realworld each
 declare it under a type id of their own. Who mints it waits on whether it is
 mecha's entity an app extends or an app's entity mecha is told about.
 
 **CEL is rendered without its field's type.** `cel-emit.ts` renders a
-comparison the same way whatever the field's type, so ponto's `this > '0'` on a
+comparison the same way whatever the field's type, so `this > '0'` on a
 decimal is right in SQL and lexical in CUE, and `duration()` and subtraction
 have no rendering, so "a break fits inside its shift" cannot be stated.
 

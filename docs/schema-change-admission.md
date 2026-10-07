@@ -186,8 +186,8 @@ Comparing the data directory with the initdb steps inside one container cannot
 see that, since the container carries the steps that built it. When a pronto
 database is deployed, the retype is a pgroll `sql` step, and it is not a one-liner: Postgres
 refuses `ALTER COLUMN TYPE` on a column a generated column, a policy or a
-column-list trigger reads (golaberto's `season` and `full_name`, ponto's `day`
-and `competencia`, realworld's `slug`, every private owner policy), and
+column-list trigger reads (golaberto's `season` and `full_name`, realworld's
+`slug`, every private owner policy), and
 re-creating a generated column issues it a new `attnum`, which the replay
 reports as a column gone ([pending](../PENDING.md#the-lattice)).
 

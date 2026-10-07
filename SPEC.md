@@ -6,10 +6,7 @@ description: What a conforming brief.md, ir.html and program.cue contain, and th
 
 # Pronto artifact spec — brief & ir (alpha)
 
-Status: DRAFT alpha. Normative example: [`apps/thenote`](../../apps/thenote)
-(the golden reference, compiled through the full ladder: its ir.html is
-produced from its brief, its program.cue from that ir.html, and the
-emitted app is acceptance-verified live).
+Status: DRAFT alpha.
 Scope: all three artifacts of the review ladder.
 
 ## The app triple
@@ -256,7 +253,7 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   `{code: code}` the value refers to the field being defined (a cycle that
   surfaces as an incomplete value far from the cause), while a quoted label
   does not enter the value's scope, so it resolves to the sibling. The
-  canonical shape (`apps/thenote/program.cue`):
+  canonical shape:
 
   ```cue
   code: pronto.#App & {...}

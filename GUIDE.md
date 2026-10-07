@@ -11,8 +11,7 @@ conforming `brief.md`, `ir.html` and `program.cue` contain is
 [`SPEC.md`](SPEC.md); the component knowledge every compile assumes is
 [`prelude.md`](prelude.md); a screen, in detail, is omnishell's
 [`GUIDE.md`](../omnishell/GUIDE.md), and every attribute it may carry is
-omnishell's [`REFERENCE.md`](../omnishell/REFERENCE.md). `apps/thenote` is the
-golden reference, compiled through the whole ladder.
+omnishell's [`REFERENCE.md`](../omnishell/REFERENCE.md).
 
 ## Starting an app and running a turn
 
