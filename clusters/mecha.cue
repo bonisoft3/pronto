@@ -31,11 +31,11 @@ import (
 // and an app pinning pronto gets them through it. One per service of
 // impl.#Images, from the pin lines a mecha release prints.
 published: impl.#Published & {
-	auth:     "bonitao/mecha-auth:0.6.3@sha256:93c0b936e90694e745290e219410cc30d09f077d7d7c15051cfc98ef42efe79a"
-	clock:    "bonitao/mecha-clock:0.6.3@sha256:43fe194ea1a1956f25ddcc3cd2a69801fc31049e3c1f2596938da104f0d95bd8"
-	compute:  "bonitao/mecha-compute:0.6.3@sha256:2d73bd4000cc0cf2be29c1ba168ab78964a9e7e63f274efe6f9b939630e61ef4"
-	conduit:  "bonitao/mecha-conduit:0.6.3@sha256:5b37a9074a35a9e8a3f95aa70b8c09f226927a7d9053cfa4ffc91ee07a5c302b"
-	database: "bonitao/mecha-database:0.6.3@sha256:54f5bc93c38c2c742988d8a112863bfc6841ba364cfefc4f5bf5ae000c55347f"
-	mesh:     "bonitao/mecha-mesh:0.6.3@sha256:b8d8c6dab3a33fedf09a0ef8f3d79b71de6408f70e1c2e04194a5f47d391da8f"
-	ticker:   "bonitao/mecha-ticker:0.6.3@sha256:f4a200da2ce5689fcfb39c553c099d69c6f00174eee8820ed54ce15340b2145e"
+	auth:     "bonitao/mecha-auth:0.7.0@sha256:affa6323a601ca877b93ffe913091e59d8e12b5cdebce90195877c6447b39e3d"
+	clock:    "bonitao/mecha-clock:0.7.0@sha256:43fe194ea1a1956f25ddcc3cd2a69801fc31049e3c1f2596938da104f0d95bd8"
+	compute:  "bonitao/mecha-compute:0.7.0@sha256:0f04b8cb653afd61d3db4e177e5787f72797c6effc52c8869484198d4b72b88b"
+	conduit:  "bonitao/mecha-conduit:0.7.0@sha256:5b37a9074a35a9e8a3f95aa70b8c09f226927a7d9053cfa4ffc91ee07a5c302b"
+	database: "bonitao/mecha-database:0.7.0@sha256:cdbcdb0172fcf89f96ea15ce99ae66245d2885d00f7ad5e6c39f1277fe185512"
+	mesh:     "bonitao/mecha-mesh:0.7.0@sha256:b8d8c6dab3a33fedf09a0ef8f3d79b71de6408f70e1c2e04194a5f47d391da8f"
+	ticker:   "bonitao/mecha-ticker:0.7.0@sha256:0d2fdfc254e63ef63c6792d34838b4aef9767c763e62d9dadcdbccde45383dc2"
 }
