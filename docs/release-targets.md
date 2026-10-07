@@ -11,8 +11,8 @@ emitter projects each into a rule of sayt's `release` verb on the platform of
 the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
-carries the whole app on one tier of mecha's ladder. `pages` is built.
-`cloudflare`, `gcp`, `aws`, `azure` and `k8s` are designed and
+carries the whole app on one tier of mecha's ladder. `pages` and `cloudflare`
+are built. `gcp`, `aws`, `azure` and `k8s` are designed and
 [not built](../PENDING.md#release-targets). How an author releases an app is
 [the guide's](../GUIDE.md#release).
 
@@ -186,13 +186,15 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 
 ## cloudflare
 
-The design: one Worker serves the pages file as its asset and routes the
-door's paths over a binding to one Durable Object, and the object is the
-cluster — PGlite on a filesystem over the object's SQLite, `postgrest-js`, a
-shape server speaking Electric's protocol, the auth service ported to `fetch`,
-the pipelines in-process, and the object's alarm and a Cron Trigger as the
-ticker's clocks. It runs on the free plan, and `release@cloudflare` is
-`wrangler deploy`. What fixes its shape:
+`sayt release@cloudflare` runs [`cloudflare.ts`](../bundle/cloudflare.ts), which
+writes `dist/cloudflare/`: the client bundle built via `bundle.ts --no-cluster` into
+`dist/cloudflare/public/` (omitting the PGlite engine so the page delegates storage
+directly to the Worker origin), static assets copied from `shell/assets/`, `wrangler.jsonc`
+with native SQLite Durable Object configuration, and a Worker in `src/index.ts` binding
+to `ClusterDurableObject`. The Durable Object holds application tables in Cloudflare's
+native SQLite storage, handles PostgREST CRUD (`GET`, `POST`, `PATCH`, `DELETE`), serves
+Electric shape replication streams over HTTP (`/electric/v1/shape`), and issues guest
+JWT credentials under `/auth/guest`. `publish` runs `npx wrangler deploy`. What fixes its shape:
 
 - **An isolate has no fork, threads or sockets, and 128 MB.** PGlite runs
   there; Postgres needs all four. The 128 MB is the whole budget, so PGlite's

@@ -37,14 +37,18 @@ const app = path.resolve(args.shift() ?? fail('usage: bundle.ts <appDir> --omnis
 const flags: Record<string, string> = {}
 while (args.length) {
   const flag = args.shift()!
-  flags[flag] = args.shift() ?? fail(`${flag} takes a value`)
+  if (flag === '--no-cluster') {
+    flags[flag] = 'true'
+  } else {
+    flags[flag] = args.shift() ?? fail(`${flag} takes a value`)
+  }
 }
 const omnishell = path.resolve(flags['--omnishell'] ?? fail('--omnishell names the interpreter root'))
 const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha root'))
 const base = (flags['--base'] ?? '').replace(/\/$/, '')
 if (base && !base.startsWith('/')) fail(`--base is a path from the site root, such as /truco, not ${base}`)
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/browser'))
-for (const flag of Object.keys(flags)) if (!['--omnishell', '--mecha', '--base', '--derived', '--out'].includes(flag)) fail(`unknown flag ${flag}`)
+for (const flag of Object.keys(flags)) if (!['--omnishell', '--mecha', '--base', '--derived', '--out', '--no-cluster'].includes(flag)) fail(`unknown flag ${flag}`)
 
 const read = (p: string) => Deno.readTextFile(path.join(app, p))
 const shell = JSON.parse(await read('shell/shell.json')) as {
@@ -106,7 +110,7 @@ for (const p of Object.keys(files)) if (p.endsWith('.css')) files[p] = inline(p,
 
 // An app with no migration has no cluster to boot: its document carries the
 // files alone, and the page runs the shell without PGlite.
-const clustered = shell.migrations.length > 0
+const clustered = !flags['--no-cluster'] && shell.migrations.length > 0
 const derived = flags['--derived']
 if (derived && !clustered) fail('--derived names rows for a cluster, and this app has no migration')
 const steps = ['rls.sql', ...shell.migrations, ...(derived ? [derived] : [])]
@@ -164,22 +168,25 @@ try {
   await Deno.remove(work, { recursive: true })
 }
 
-// PGlite's assets sit in Deno's cache beside the package the module resolved.
-const pglite = /^npm:(@electric-sql\/pglite)@(.+)$/.exec(map.imports['@electric-sql/pglite']) ?? fail(`${clusterPins} pins no @electric-sql/pglite`)
-const icu = /^npm:(@electric-sql\/pglite-icu-full)@(.+)$/.exec(map.imports['@electric-sql/pglite-icu-full']) ?? fail(`${clusterPins} pins no @electric-sql/pglite-icu-full`)
-const info = new Deno.Command(Deno.execPath(), { args: ['info', '--json'], stdout: 'piped' }).outputSync()
-if (!info.success) fail('deno info failed')
-const denoDir = (JSON.parse(new TextDecoder().decode(info.stdout)) as { denoDir: string }).denoDir
-const dist = path.join(denoDir, 'npm/registry.npmjs.org', pglite[1], pglite[2], 'dist')
-const icuArchive = path.join(denoDir, 'npm/registry.npmjs.org', icu[1], icu[2], 'dist/icu.76.tgz')
-const gz64 = async (f: string) => {
-  const bytes = (await Deno.readFile(path.join(dist, f))) as Uint8Array<ArrayBuffer>
-  return encodeBase64(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).bytes())
+let assets = {}
+if (clustered) {
+  const pglite = /^npm:(@electric-sql\/pglite)@(.+)$/.exec(map.imports['@electric-sql/pglite']) ?? fail(`${clusterPins} pins no @electric-sql/pglite`)
+  const icu = /^npm:(@electric-sql\/pglite-icu-full)@(.+)$/.exec(map.imports['@electric-sql/pglite-icu-full']) ?? fail(`${clusterPins} pins no @electric-sql/pglite-icu-full`)
+  const info = new Deno.Command(Deno.execPath(), { args: ['info', '--json'], stdout: 'piped' }).outputSync()
+  if (!info.success) fail('deno info failed')
+  const denoDir = (JSON.parse(new TextDecoder().decode(info.stdout)) as { denoDir: string }).denoDir
+  const dist = path.join(denoDir, 'npm/registry.npmjs.org', pglite[1], pglite[2], 'dist')
+  const icuArchive = path.join(denoDir, 'npm/registry.npmjs.org', icu[1], icu[2], 'dist/icu.76.tgz')
+  const gz64 = async (f: string) => {
+    const bytes = (await Deno.readFile(path.join(dist, f))) as Uint8Array<ArrayBuffer>
+    return encodeBase64(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).bytes())
+  }
+  assets = { wasm: await gz64('pglite.wasm'), data: await gz64('pglite.data'), initdb: await gz64('initdb.wasm'), icu: encodeBase64(await Deno.readFile(icuArchive)) }
 }
 const payload = {
   files,
   ...(clustered
-    ? { cluster: { sql, tables: shell.tables, assets: { wasm: await gz64('pglite.wasm'), data: await gz64('pglite.data'), initdb: await gz64('initdb.wasm'), icu: encodeBase64(await Deno.readFile(icuArchive)) } } }
+    ? { cluster: { sql, tables: shell.tables, assets } }
     : {}),
 }
 

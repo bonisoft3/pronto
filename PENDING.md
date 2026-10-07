@@ -422,10 +422,8 @@ build reads or writes the Depot bake cache. Checked 2026-10-02.
 
 ## Release targets
 
-Only `pages` is emitted, and each design is
-[release targets](docs/release-targets.md)'s, built on a branch of its own.
-
-**`cloudflare` has no rule** ([the design](docs/release-targets.md#cloudflare)).
+`pages` and `cloudflare` are emitted. The remaining designs are
+[release targets](docs/release-targets.md)'s, built on a branch of their own.
 
 **`gcp` has no rule**, no `clusters/gcp.cue` and no skaffold profile in
 `builders/bayt.cue` ([the design](docs/release-targets.md#the-clouds-and-k8s)).

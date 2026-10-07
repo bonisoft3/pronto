@@ -1526,6 +1526,15 @@ _cdcBeforeField: "__before"
 						note: "Pronto release@pages"
 					}
 				}
+				if list.Contains(D.code.meta.targets, "cloudflare") {
+					cloudflare: {
+						verb:     "release"
+						platform: "cloudflare"
+						cmds: [_distribution.cloudflare]
+						publish: ["npx wrangler deploy --config dist/cloudflare/wrangler.jsonc"]
+						note: "Pronto release@cloudflare"
+					}
+				}
 			}
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
