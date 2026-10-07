@@ -53,6 +53,6 @@ schedulePlaced: len([for c in _scheduledCluster.surface.targets.database.dockerf
 
 _scheduledCDC: strings.Split(_scheduledFiles["\(_migrations)/008_publication.sql"].text, "-- Electric")[0]
 scheduleServiceInputCaptured: strings.Contains(_scheduledCDC, "tick") & true
-scheduleOutcomeNotRecaptured: strings.Contains(_scheduledCDC, "tick_done") & false
+scheduleOutcomeCaptured: strings.Contains(_scheduledCDC, "tick_done") & true
 scheduleCDCSourceTables: json.Marshal(list.SortStrings(strings.Split(
-	_scheduledFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["profile", "tick"])
+	_scheduledFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["profile", "tick", "tick_done"])

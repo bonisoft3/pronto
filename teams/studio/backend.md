@@ -8,8 +8,8 @@ pipelines and their idempotence and loop-prevention arguments, escape
 hatches and their contracts, the bijection discipline. Altitude cop in
 both directions: mechanism words out of the brief, product wishes into
 checkable structure. Knows the platform's delivery doctrine cold:
-at-least-once off the WAL everywhere, idempotent consumers, the
-publication as the loop breaker, txid-confirmed writes.
+at-least-once off the WAL everywhere, idempotent consumers, dependency
+filtering and explicit feedback arguments, txid-confirmed writes.
 
 Skills: `security-review` over the access surface. Four access modes,
 emitted RLS and hand-written raw migrations are where a pronto app keeps

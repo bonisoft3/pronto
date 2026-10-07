@@ -685,8 +685,6 @@ import (
 	src:  *"computations/\(name).js" | string
 	// The live entities it alone writes, each with its whole output.
 	to: [...string] & [_, ...]
-	// Seconds between looks at whether its reads changed.
-	every: *60 | int & >0
 	// App-relative paths of the committed wasm modules its jobs call, each
 	// named in a job by its file's stem.
 	wasm: *[] | [...string]
@@ -2538,4 +2536,3 @@ import (
 	}
 	statics: [for _, s in _staticMap { s }]
 }
-

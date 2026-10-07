@@ -1788,11 +1788,9 @@ _cdcBeforeField: "__before"
 			computations: [for _, c in D.code.state.computations {
 				name:  "\(D.code.meta.name)-\(c.name)"
 				file:  c.src
-				every: c.every
 				to: [for t in c.to {D.code.state.entities[t].table}]
 				wasm: c.wasm
 				if c.onComplete != _|_ {onComplete: c.onComplete}
-				// A sink in the publication would feed the change it answers.
 				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
 			}]
 		}
@@ -1932,16 +1930,9 @@ _cdcBeforeField: "__before"
 	// cue 0.16 (see #shellConfig's guard note).
 	_validated: [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
 	_localEntities: [for e in E._entities if !e.server {e}]
-	// Browser freshness must not remove an authoritative input from the lake.
-	// Derived outputs stay excluded even when their writer takes its default.
-	_cdcOutputs: {
-		for _, p in E.code.state.pipelines {(p.to): true}
-		for _, c in E.code.state.computations for n in c.to {(n): true}
-		for _, s in E.code.state.schedules if s.done != _|_ {(s.done.entity): true}
-	}
-	_cdcScheduledInputs: {for _, s in E.code.state.schedules {(s.emits.entity): true}}
-	_cdcEntities: [for n, e in E.code.state.entities if e.server
-		if (e.writers == "forms" || E._cdcScheduledInputs[n] != _|_) && E._cdcOutputs[n] == _|_ {e}]
+	// Derived rows can be another computation's inputs. Consumers select their
+	// dependencies; publication membership does not decide execution cycles.
+	_cdcEntities: E._serverEntities
 	_cdcTables: strings.Join([for e in E._cdcEntities {e.table}], ",")
 	// Every table the publication carries, column by column, as the carrier
 	// cdc-carriers.blobl converts a bus row into before a pipeline reads it.
@@ -2533,10 +2524,9 @@ _cdcBeforeField: "__before"
 			"services/database/migrations/008_publication.sql": {
 				format: "sql"
 				// Runs after 005_create_tables: FOR TABLE fails on missing tables
-				// and initdb aborts on the first error. FOR TABLE <crud tables>,
-				// never FOR ALL TABLES — derived-table upserts must not re-feed the
-				// pipelines that wrote them, and conduit's `tables` setting does not
-				// filter logrepl events, so the publication is the loop breaker.
+				// and initdb aborts on the first error. The explicit list limits CDC
+				// to application entities; Conduit's tables setting does not filter
+				// logrepl events.
 				// publish_generated_columns = stored: Electric sets REPLICA IDENTITY
 				// FULL, and a publication excluding generated columns from a FULL
 				// identity refuses UPDATE/DELETE (42P10). Slots belong to consumers,
@@ -2710,11 +2700,11 @@ _cdcBeforeField: "__before"
 								plugin: "builtin:postgres"
 								settings: {
 									url:                       "${DATABASE_URL}"
-									tables:                    E._cdcTables // derived tables are excluded: no CDC loops
+									tables:                    E._cdcTables
 									cdcMode:                   "logrepl"
 									snapshotMode:              "never"
 									"logrepl.publicationName": E._pub
-									"logrepl.slotName":        "\(E._pkg)_conduit_slot"
+									"logrepl.slotName":        (mecha.#ConduitSlot & {app: E.code.meta.name}).name
 									// Without this the http connector re-decodes the payload
 									// against the captured Avro schema and chokes post-encode.
 									"logrepl.withAvroSchema": "false"

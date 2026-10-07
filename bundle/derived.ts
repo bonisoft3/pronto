@@ -5,13 +5,12 @@
 //
 //   deno run -A --config bundle/deno.json bundle/derived.ts <appDir> --tables <t,...> --streams <s,...> --out <file> [--timeout <seconds>]
 //
-// --tables are the live tables, the only ones a stream or a computation writes
-// without feeding the publication; --streams are the ids the transform runs
+// --tables are the live tables to export; --streams are the ids the transform runs
 // them under. The cluster is the app's compose under a project of its own,
 // built as `sayt launch` builds it, and it is torn down after, settled or not.
 //
-// Settlement requires unchanged committed rows for the slowest computation's
-// cadence plus a settlement margin, started inputs, drained bus groups, and
+// Settlement requires unchanged committed rows for a settlement margin,
+// started inputs, drained bus groups, and
 // completed computations. Successful no-op reads leave the quiet window open;
 // outstanding pipeline work blocks export. The export's rows and fingerprint
 // share one database snapshot, checked again before the file is written.
@@ -221,12 +220,13 @@ async function main() {
   const compute = service('compute')
   if (streams.length > 0 && (!transform || !redis)) fail('--streams names streams, and the compose runs no transform and bus')
   const computations = compute
-    ? (JSON.parse(compute[1].environment?.COMPUTATIONS ?? fail(`${compute[0]} declares no COMPUTATIONS`)) as { name: string; every: number }[])
+    ? (JSON.parse(compute[1].environment?.COMPUTATIONS ?? fail(`${compute[0]} declares no COMPUTATIONS`)) as { name: string }[])
     : []
   const bus: Bus | undefined = redis && transform?.[1].environment?.REDIS_URL
     ? { url: transform[1].environment.REDIS_URL, aliases: new Set([redis[0], ...Object.values(redis[1].networks ?? {}).flatMap((n) => n?.aliases ?? [])]) }
     : undefined
-  const completions = new Map<string, Completion>()
+  const observedStreams = [...streams, ...(compute ? ['compute-events'] : [])]
+  const completions = new Map<string, Completion>(compute ? [['compute-events:root.input', 'bus']] : [])
   if (transform) {
     for (const stream of streams) {
       const source = transform[1].develop?.watch?.find((w) => w.target === `/pipelines/${stream}.yaml`)
@@ -241,7 +241,7 @@ async function main() {
   const psql = (sql: string) =>
     compose('exec', '-T', database[0], 'psql', '-U', env.POSTGRES_USER ?? fail(`${database[0]} declares no POSTGRES_USER`),
       '-d', env.POSTGRES_DB ?? fail(`${database[0]} declares no POSTGRES_DB`), '-AtX', '-v', 'ON_ERROR_STOP=1', '-c', sql)
-  const window = MARGIN + Math.max(0, ...computations.map((c) => c.every))
+  const window = MARGIN
 
   const snapshot = async (selected: string[] = []): Promise<Snapshot> => {
     const all: Table[] = JSON.parse(await psql("SELECT coalesce(json_agg(json_build_object('schema', schemaname, 'name', relname)), '[]') FROM pg_stat_user_tables"))
@@ -259,7 +259,7 @@ async function main() {
     let failures = ''
     let active: string[] = []
     if (transform && redis) {
-      const metrics = pipelineState(await compose('exec', '-T', transform[0], 'wget', '-qO-', 'http://localhost:4195/metrics'), streams, completions)
+      const metrics = pipelineState(await compose('exec', '-T', transform[0], 'wget', '-qO-', 'http://localhost:4195/metrics'), observedStreams, completions)
       waiting.push(...metrics.waiting)
       active = metrics.active
       failures = metrics.failures

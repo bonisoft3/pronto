@@ -7,8 +7,7 @@
 // service an addressable field — escape hatches unify services in, and the
 // emitter derives the data plane from the program against it: migrations in
 // mecha's canonical order (seeding pipeline-written singletons, since
-// pipelines only fire on CDC), CDC for crud-path tables only (derived
-// tables get none — that is what prevents pipeline loops), and one
+// pipelines only fire on CDC), CDC for all server-side entities, and one
 // idempotent stream transform per program pipeline. Schema evolution
 // (pgroll) is mecha's reserved surface.
 package mecha
@@ -25,6 +24,7 @@ import (
 }
 #Runtime: impl.#Runtime
 #Static:  impl.#Static
+#ConduitSlot: impl.#ConduitSlot
 
 // The mecha images an app takes by name, as pronto pins them: the consumer
 // pins what it builds on, so a pronto release names a mecha release's images

@@ -70,12 +70,20 @@ with `on_conflict` on the sink key. A mapping that throws is logged with the
 pipeline's name and the message dropped, because the next change for that key
 repairs the sink; the post itself is retried with backoff.
 
-Every stream reads the whole bus, and which messages are its own is the
-mapping's decision. **The publication is the loop breaker.** It carries
-`server` tables only, and Conduit's table setting does not filter
-logical-replication events, so a sink kept off `server` can never re-feed a
-pipeline. Every cluster table is `REPLICA IDENTITY FULL`, so a delete
-carries the row a keyed transform needs to recount its group to zero.
+Every stream reads the whole bus and selects its dependencies. The default publication
+includes all application entities stored on the server, including pipeline,
+computation and schedule outputs: a derived table can be another consumer's
+input. Browser durability and writer declarations do not suppress CDC. There
+is no general cycle analysis yet; feedback must converge under the consumer's
+own guards. Every cluster table is `REPLICA IDENTITY FULL`, so a delete carries
+the row a keyed transform needs to recount its group to zero.
+
+An existing database must migrate its publication membership when adopting
+this policy; changing the generated initdb file alone does not update a volume.
+An assembly app can narrow both the publication and Conduit's table list through
+its existing migration and `cluster.meta.conduitTemplate` seams. GolAberto's
+[[../../../apps/golaberto/cdc.cue]] does this for its known dependency graph;
+request-time views and final projections are absent from its backend feed.
 
 ## Below the cluster
 
@@ -122,8 +130,8 @@ A value no pure transform over one change can compute — a season simulated
 twenty thousand times, a rating refit over a decade — is a computation
 ([the numeric stage](archive/2026-09-30-numeric-stage.md)). A `#Computation`
 names its module (`src`, `computations/<name>.js` unless stated), the `live`
-entities it alone writes (`to`), how often it is looked at (`every` seconds)
-and the committed Wasm modules its jobs call (`wasm`). mecha's compute service
+entities it alone writes (`to`) and the committed Wasm modules its jobs call
+(`wasm`). mecha's compute service
 runs it; [its header](../../../libraries/mecha/services/compute/main.ts) is the
 contract, from the lake snapshot to the writes. The module is one file that
 imports nothing, and exports exactly four names:
@@ -138,8 +146,28 @@ imports nothing, and exports exactly four names:
 Optional `onComplete` names a no-argument CRUD RPC called as the service role
 after every sink write succeeds. It must match `^[a-z_][a-z0-9_]{0,62}$`.
 The RPC must be idempotent: a failed call leaves the run retryable, and retry
-can invoke it after the sink rows have already committed. Unchanged inputs
-do not call it. This permits recording a complete computed result as history.
+can invoke it after the sink rows have already committed. A redelivery can
+call it again even when the output rows are unchanged.
+
+The service refuses bootstrap until the source replication slot has reached
+its initial consistent point. It then runs every computation once and takes CDC deliveries
+through a framework-owned Redpanda Connect stream. Its Redis consumer group
+acknowledges only after successful HTTP completion. A stable consumer identity
+recovers pending deliveries on restart. Each delivery selects computations
+whose `reads` include the changed table, takes fresh inputs and runs them
+sequentially. PostgreSQL statistics are not a freshness gate.
+Each pure computation retains only its last query inputs and answer. Structurally
+equal fresh query results reuse that answer; publication and completion hooks
+still run. Changed inputs recompute, and failed reads never use the retained answer.
+
+Only one compute process is supported. Snapshot capture, calculation, sink
+writes and completion hooks share a single execution slot. Overlapping HTTP
+requests receive a retryable response; pending work stays in Redis. A failure
+exits the service and the unacknowledged delivery is replayed after restart.
+This is at-least-once recomputation, without LSN fencing or atomic publication
+across sink tables. There is no timed accumulation window; each relevant event
+can cause a full recomputation. Concurrent writers or replicas require a
+stronger publication protocol.
 
 Its language is the header's: ES module text as the service's SES Compartment
 admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
@@ -161,8 +189,6 @@ service's own pins, the module in the same cage and the jobs on the same Wasm.
 - **Incremental arithmetic in the sink** — under at-least-once delivery a
   redelivered delta counts twice; an absolute read makes the redelivery
   harmless.
-- **A `FOR ALL TABLES` publication** — a derived table's upsert would re-feed
-  the pipeline that wrote it.
 - **Reading the source through the door** — its `Prefer` injection clobbers
   the sink's merge resolution.
 - **A shim for a fold** — rows in, one row on `id` out cannot state a keyed

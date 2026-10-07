@@ -64,8 +64,7 @@ pagesDerivesAlone:  (len(_pages.cmds) == 2) & true
 _unpaged:           _computedLoop.surface.verbs
 unpagedHasNoTarget: (_unpaged.pages == _|_) & true
 
-// Making an authoritative input live must not remove it from the statistics
-// lake. A computation output with a default writer must still stay out.
+// Publication includes derived inputs regardless of browser durability or writer.
 _freshInputs: _computed & {
 	state: {
 		entities: {
@@ -91,8 +90,10 @@ _freshCDC:                         strings.Split(_freshFiles["services/database/
 serverInputStillCaptured:          strings.Contains(_freshCDC, "profile") & true
 liveInputStillCaptured:            strings.Contains(_freshCDC, "goal") & true
 offlineInputStillCaptured:         strings.Contains(_freshCDC, "retained") & true
-computedOutputNotRecaptured:       strings.Contains(_freshCDC, "chance") & false
-requestProjectionNotCaptured:      strings.Contains(_freshCDC, "request_projection") & false
-serverPipelineOutputNotRecaptured: strings.Contains(_freshCDC, "server_pipeline") & false
+computedOutputCaptured:       strings.Contains(_freshCDC, "chance") & true
+requestProjectionCaptured:      strings.Contains(_freshCDC, "request_projection") & true
+serverPipelineOutputCaptured: strings.Contains(_freshCDC, "server_pipeline") & true
 cdcSourceTables: json.Marshal(list.SortStrings(strings.Split(
-	_freshFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["goal", "profile", "retained"])
+	_freshFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["chance", "goal", "profile", "request_projection", "retained", "server_pipeline"])
+computeWaitsForSourceSlot: _freshCluster.surface.targets.compute.compose.environment.CDC_SLOT &
+	_freshFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings["logrepl.slotName"]
