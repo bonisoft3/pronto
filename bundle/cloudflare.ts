@@ -243,12 +243,6 @@ export class ClusterDurableObject extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    if (request.method === "POST" && path === "/poke") {
-      await this.runDueSchedules();
-      return new Response(JSON.stringify({ ok: true, swept: true }), {
-        headers: { ...corsHeaders, "content-type": "application/json" }
-      });
-    }
 
     // --- /auth/* ---
     if (request.method === "POST" && path === "/auth/guest") {
@@ -327,6 +321,9 @@ export class ClusterDurableObject extends DurableObject {
         const body = await request.json();
         const items = Array.isArray(body) ? body : [body];
         for (const item of items) {
+          if (table === "lobby") {
+            item.updated_at = new Date().toISOString();
+          }
           const keys = Object.keys(item);
           const placeholders = keys.map(() => "?").join(", ");
           const cols = keys.map(k => \`"\${k}"\`).join(", ");
@@ -358,6 +355,9 @@ export class ClusterDurableObject extends DurableObject {
           }
         }
         if (targetId) {
+          if (table === "lobby") {
+            body.updated_at = new Date().toISOString();
+          }
           const updates = Object.keys(body).map(k => \`"\${k}" = ?\`).join(", ");
           const vals = [...Object.values(body), targetId];
           this.ctx.storage.sql.exec(\`UPDATE "\${table}" SET \${updates} WHERE id = ?\`, ...vals);
@@ -596,8 +596,7 @@ export default {
       path.startsWith("/auth/") ||
       path.startsWith("/crud/") ||
       path.startsWith("/electric/") ||
-      path === "/ws" ||
-      path === "/poke"
+      path === "/ws"
     ) {
       const id = env.CLUSTER.idFromName("truco-cluster");
       const stub = env.CLUSTER.get(id);
@@ -615,12 +614,6 @@ export default {
     }
 
     return new Response("Not found", { status: 404 });
-  },
-
-  async scheduled(controller: any, env: any, ctx: ExecutionContext): Promise<void> {
-    const id = env.CLUSTER.idFromName("truco-cluster");
-    const stub = env.CLUSTER.get(id);
-    await stub.fetch(new Request("http://do.local/poke?caller=cloudflare-cron", { method: "POST" }));
   }
 };
 `
@@ -636,9 +629,6 @@ const wranglerJsonc = `{
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
-  "triggers": {
-    "crons": ["* * * * *"]
-  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
