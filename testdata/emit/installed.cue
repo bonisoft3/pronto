@@ -37,7 +37,9 @@ installedRootCompose: _installedFiles["compose.yaml"].data.include & [{path: "./
 // mecha's are: caddy serves the terminal's statics from it, the visual check
 // and every check's tests read it at /omnishell; nothing is copied into the app.
 _omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishellTerminal.published.runtime)}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
-installedCaddyStatics: [for c in _installedProject.targets.caddy.dockerfile.copy if c.dst =~ "^/omnishell/" {c}] & []
+// A grouped copy lands each source under its `dst`, so the target is per source.
+installedCaddyStatics: [for c in _installedProject.targets.caddy.dockerfile.copy for f in c.srcs
+	if [if c.parents != _|_ if c.parents {c.dst + f}, c.dst][0] =~ "^/omnishell/" {c}] & []
 installedCaddyShell: _installedProject.targets.caddy.dockerfile.defaultCopy["/omnishell/interpreter/shell.js"] & {from: name: "plugins_omnishell-runtime-image", srcs: ["interpreter/shell.js"]}
 installedCaddyContext: _installedProject.targets.caddy.compose.build.additional_contexts["plugins_omnishell-runtime-image"] & _omnishellContext
 installedVisual: list.Contains(_installedProject.targets.integrate.dockerfile.preamble, "COPY --from=plugins_omnishell-runtime-image / /omnishell") & true
