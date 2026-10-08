@@ -321,6 +321,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
     assert.ok(html.includes('<style>body { padding-top: 72px; }</style>'))
     assert.ok(!/<link rel="stylesheet"/.test(html))
+    assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
 
     // Exercise the page's actual asset bootstrap with network access forbidden:
     // accepting CREATE COLLATION without ICU silently gives case-sensitive reads.
@@ -443,3 +444,38 @@ Deno.test("the page's store behind its cluster raises a refused subset as the pr
     await Deno.remove(dir, { recursive: true })
   }
 })
+
+Deno.test('a bundled page carries no unresolvable node imports', async () => {
+  const app = await Deno.makeTempDir({ prefix: 'no-cluster-bundle-test-' })
+  try {
+    const write = async (p: string, text: string) => {
+      await Deno.mkdir(path.dirname(path.join(app, p)), { recursive: true })
+      await Deno.writeTextFile(path.join(app, p), text)
+    }
+    await write('shell/shell.json', JSON.stringify({
+      routes: [{ files: { css: 'shell/screens/home.css' } }],
+      migrations: ['m/001.sql'], tables: ['item'],
+      schema: { item: { durability: 'live' } },
+    }))
+    await write('shell/shell.css', '')
+    await write('shell/design.css', '')
+    await write('shell/screens/home.css', '')
+    await write('shell/index.html', '<!doctype html><html><head><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>')
+    await write('m/001.sql', 'CREATE TABLE item (id text PRIMARY KEY);')
+
+    const bundled = await new Deno.Command(Deno.execPath(), {
+      args: [
+        'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
+        '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
+      ],
+      stdout: 'inherit',
+      stderr: 'inherit',
+    }).output()
+    assert.deepEqual(bundled.success, true, 'bundle.ts failed')
+    const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
+    assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
+  } finally {
+    await Deno.remove(app, { recursive: true })
+  }
+})
+

@@ -146,6 +146,10 @@ const map: { imports: Record<string, string> } = {
     ...rebase(path.join(here, 'deno.json'), pins(path.join(here, 'deno.json'))),
     'omnishell/': String(pathToFileURL(path.join(omnishell, 'interpreter') + '/')),
     'mecha-browser/': String(pathToFileURL(path.join(mecha, 'packages/mecha-browser') + '/')),
+    'node:fs': String(pathToFileURL(path.join(here, 'node-shims.ts'))),
+    'node:path': String(pathToFileURL(path.join(here, 'node-shims.ts'))),
+    'fs': String(pathToFileURL(path.join(here, 'node-shims.ts'))),
+    'path': String(pathToFileURL(path.join(here, 'node-shims.ts'))),
   },
 }
 const work = await Deno.makeTempDir({ prefix: 'bundle-' })
@@ -164,6 +168,13 @@ try {
   }).outputSync()
   if (!bundled.success) fail('deno bundle failed')
   js = await Deno.readTextFile(jsFile)
+  // Browsers cannot resolve bare node:* specifiers. NodeFS in PGlite is never
+  // invoked in browser environments, so replace any dangling node:* imports with
+  // safe browser shims so that scripts parse and run without network CORS errors.
+  js = js
+    .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:fs["'];?/g, 'const $1 = { existsSync: () => false, mkdirSync: () => {} };')
+    .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:path["'];?/g, 'const $1 = { resolve: (...a) => a.filter(Boolean).join("/"), join: (...a) => a.filter(Boolean).join("/") };')
+    .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:[^"']+["'];?/g, 'const $1 = {};')
 } finally {
   await Deno.remove(work, { recursive: true })
 }
