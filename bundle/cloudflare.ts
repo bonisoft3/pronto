@@ -119,6 +119,7 @@ import { DurableObject } from "cloudflare:workers";
 
 interface ShapeEntry {
   offset: number;
+  table: string;
   message: any;
 }
 
@@ -134,7 +135,7 @@ export class ClusterDurableObject extends DurableObject {
   private tableSchemas: Record<string, Record<string, any>> = ${JSON.stringify(tableSchemas)};
   private tail: number = 0;
   private entries: ShapeEntry[] = [];
-  private waiters: Set<() => void> = new Set();
+  private waiters: Map<string, Set<() => void>> = new Map();
   private bootId: string = "cf-" + Math.random().toString(36).slice(2, 8);
 
   constructor(ctx: DurableObjectState, env: any) {
@@ -149,12 +150,15 @@ export class ClusterDurableObject extends DurableObject {
     }
   }
 
-  private notifyWaiters() {
-    for (const w of this.waiters) w();
-    this.waiters.clear();
+  private notifyWaiters(table: string) {
+    const tableWaiters = this.waiters.get(table);
+    if (tableWaiters) {
+      for (const w of tableWaiters) w();
+      tableWaiters.clear();
+    }
     const sockets = this.ctx.getWebSockets();
     for (const ws of sockets) {
-      ws.send(JSON.stringify({ type: "poke", lsn: this.tail }));
+      ws.send(JSON.stringify({ type: "poke", table, lsn: this.tail }));
     }
   }
 
@@ -171,9 +175,9 @@ export class ClusterDurableObject extends DurableObject {
         last: true
       }
     };
-    this.entries.push({ offset, message: msg });
-    if (this.entries.length > 1000) this.entries.shift();
-    this.notifyWaiters();
+    this.entries.push({ offset, table, message: msg });
+    if (this.entries.length > 2000) this.entries.shift();
+    this.notifyWaiters(table);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -298,11 +302,11 @@ export class ClusterDurableObject extends DurableObject {
           this.ctx.storage.sql.exec(\`UPDATE "\${table}" SET \${updates} WHERE id = ?\`, ...vals);
           const updated = [...this.ctx.storage.sql.exec(\`SELECT * FROM "\${table}" WHERE id = ?\`, targetId)][0] ?? { id: targetId, ...body };
           this.recordChange(table, "update", updated);
-          return new Response(JSON.stringify(updated), {
+          return new Response(JSON.stringify([updated]), {
             headers: { ...corsHeaders, "content-type": "application/json" }
           });
         }
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify([]), {
           headers: { ...corsHeaders, "content-type": "application/json" }
         });
       }
@@ -435,7 +439,7 @@ export class ClusterDurableObject extends DurableObject {
 
       // 4. Live or polling offset
       const numOffset = parseInt(offset.split("_")[0], 10);
-      const pending = this.entries.filter(e => e.offset > numOffset);
+      const pending = this.entries.filter(e => e.table === table && e.offset > numOffset);
 
       if (pending.length > 0) {
         const msgs = pending.map(e => e.message);
@@ -453,12 +457,21 @@ export class ClusterDurableObject extends DurableObject {
 
       if (live) {
         await new Promise<void>((resolve) => {
-          const done = () => { clearTimeout(t); this.waiters.delete(done); resolve(); };
+          let tableWaiters = this.waiters.get(table);
+          if (!tableWaiters) {
+            tableWaiters = new Set();
+            this.waiters.set(table, tableWaiters);
+          }
+          const done = () => {
+            clearTimeout(t);
+            tableWaiters!.delete(done);
+            resolve();
+          };
           const t = setTimeout(done, 15000);
-          this.waiters.add(done);
+          tableWaiters.add(done);
         });
 
-        const newPending = this.entries.filter(e => e.offset > numOffset);
+        const newPending = this.entries.filter(e => e.table === table && e.offset > numOffset);
         if (newPending.length > 0) {
           const msgs = newPending.map(e => e.message);
           msgs.push({
