@@ -226,7 +226,7 @@ _sqlType: {
 // where a seed file is declared, because which of them it holds rows for is
 // the file's to say.
 #seedData: S={
-	code: #App
+	code!: _
 	_held: S.code.state.seed != _|_
 	out: {
 		if S._held {src: S.code.state.seed.src}
@@ -1098,7 +1098,7 @@ _cdcBeforeField: "__before"
 // and pipeline topology to the filesystem. All paths are app-relative — the
 // same path language as the manifest.
 #shellConfig: S={
-	code: #App
+	code!:       _
 	liveUpdates: bool
 	migrations: [...string]
 	// The terminal's measured floors, carried into the file visual lint
@@ -1434,7 +1434,7 @@ _cdcBeforeField: "__before"
 }
 
 #appMigrations: M={
-	code: #App
+	code!: _
 	_validatedTables: [for _, e in M.code.state.entities if e.server if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	_seedFile: len(M.seeded) > 0 || M.code.state.seed != _|_
@@ -1467,10 +1467,15 @@ _cdcBeforeField: "__before"
 
 // Default runtime instances, parameterized by the code. program.cue wires
 // them; overrides land in bayt.cue by unification.
+//
+// An input its caller built against its definition (code, cluster, loop,
+// terminal, build) is taken as `_` here, in #emit and in the helpers above:
+// restating the definition unifies the whole value again in each consumer.
+// #emit keeps cluster and loop typed because it declares fields into them.
 #DefaultLoop: D={
-	code:     #App
-	cluster:  mecha.#Cluster
-	terminal: omnishell.#Terminal
+	code!:     _
+	cluster!:  _
+	terminal!: _
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
 		surface: {
@@ -1608,16 +1613,18 @@ _cdcBeforeField: "__before"
 }
 
 #DefaultBuild: D={
-	code:    #App
-	loop:    prontoloop.#Loop
-	cluster: mecha.#Cluster
+	code!:    _
+	loop!:    _
+	cluster!: _
 	// The terminal, whose own statics an installed app's build serves from
 	// omnishell's image; required there, unread in the monorepo's layout.
-	terminal?: omnishell.#Terminal
-	if D.loop.surface.sources.pronto == "" {terminal: omnishell.#Terminal}
+	terminal?: _
 	out: prontobuild.#Build & {
 		"cluster": D.cluster
 		if D.terminal != _|_ {terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]}
+		if D.terminal == _|_ if D.loop.surface.sources.pronto == "" {
+			terminalStatics: error("an installed app's build serves its terminal's statics: pass terminal to #DefaultBuild")
+		}
 		meta: {
 			app:      D.code.meta.name
 			local:    D.loop.surface.sources.pronto != ""
@@ -1629,8 +1636,8 @@ _cdcBeforeField: "__before"
 }
 
 #DefaultTerminal: D={
-	code:  #App
-	boot?: string
+	code!:       _
+	boot?:       string
 	liveUpdates: *false | bool
 	// An adapter the terminal serves is the terminal's file and not the app's,
 	// so only an app's own module joins the set.
@@ -1710,7 +1717,7 @@ _cdcBeforeField: "__before"
 }
 
 #DefaultCluster: D={
-	code: #App
+	code!: _
 	statics: [...mecha.#Static]
 	// Whether the app is built in the runtime's workspace, as #DefaultBuild's
 	// meta.local: an installed app takes mecha's images by name, which its
@@ -1880,18 +1887,18 @@ _cdcBeforeField: "__before"
 	_rendersOnRequest: list.Contains([for _, s in D.code.surface.screens {s.ssr}], "ssr")
 }
 
-// The three components of an app package — code, cluster, terminal — are
-// inputs; program.cue wires the defaults (#DefaultCluster/#DefaultTerminal)
-// and bayt.cue redeclares the runtime pair as the escape-hatch seams.
+// The components of an app package — code, cluster, terminal, loop, build —
+// are inputs; program.cue wires the defaults (#DefaultCluster and the rest)
+// and bayt.cue redeclares cluster, terminal and loop as the escape-hatch seams.
 #emit: E={
 	_uniqueLines: [
 		for ent in E._serverEntities for u in ent.uniques {
 			"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(ent.table) (\(strings.Join(u.cols, ", ")));"
 		},
 	]
-	code:     #App
-	cluster:  mecha.#Cluster
-	terminal: omnishell.#Terminal
+	code!:     _
+	cluster:   mecha.#Cluster
+	terminal!: _
 	// The vocabulary this bundle was emitted against, restated so the literal
 	// lint reads both sides of its join out of ONE export: a rule whose step set
 	// can arrive empty reports zero findings, which reads as green. Concrete and
@@ -2005,7 +2012,7 @@ _cdcBeforeField: "__before"
 
 	// The build graph is the fifth (see #DefaultBuild); its resolved value
 	// is emitted as bayt.json for the bayt.cue stub to embed.
-	build: prontobuild.#Build
+	build!: _
 	// A check the build graph runs beside the stack is the loop's to schedule.
 	loop: surface: checks: {for name, c in E.build.checks {(name): c.rule}}
 
@@ -2207,12 +2214,13 @@ _cdcBeforeField: "__before"
 
 		"""
 
-	_seedFile: (#appMigrations & {"code": E.code})._seedFile
+	_appMigrations: #appMigrations & {"code": E.code}
+	_seedFile: _appMigrations._seedFile
 
-	_migrations: (#appMigrations & {"code": E.code}).list
+	_migrations: _appMigrations.list
 
-	_accessed: (#appMigrations & {"code": E.code}).accessed
-	_raw: (#appMigrations & {"code": E.code}).raw
+	_accessed: _appMigrations.accessed
+	_raw:      _appMigrations.raw
 	// The auth plane switches on as one: declaring #App.auth or any entity
 	// access implies the roles and service-token plumbing — policies without
 	// tokens (or vice versa) is not a supported state. The auth_uid() the
