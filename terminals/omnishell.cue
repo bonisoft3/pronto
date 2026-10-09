@@ -32,7 +32,7 @@ import (
 // as pronto pins it: the consumer pins what it builds on, as with mecha's
 // images (clusters/mecha.cue). From the pin line an omnishell release prints.
 published: runtime: =~"^bonitao/omnishell:[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
-published: runtime: "bonitao/omnishell:0.7.2@sha256:7b7e454701f9f383b9359b935631369d4c03520b7bee82d100ed8c2b4836171d"
+published: runtime: "bonitao/omnishell:0.7.3@sha256:38acd56760255ab8ff48500efbee9c995c23789ceff3891365f8849105dd4ea7"
 
 // The build context an image of an installed app copies omnishell's runtime
 // tree from: that image, or in the monorepo the target building it.
