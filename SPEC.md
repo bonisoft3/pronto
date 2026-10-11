@@ -347,7 +347,9 @@ being the adapter on both. CUE refuses a read naming no entity; the terminal's
 `check markup`, which sees the emitted `units:` and the screens together,
 refuses a mount fed a region the unit does not read, a mount handling an event
 it does not raise, and a raise no mount on any screen handles; the mount
-refuses the first two at runtime and an undeclared raise at the seat.
+refuses the first two at runtime (as a `ProgramError`, past the region's
+outage guard) and the seat an undeclared raise, while a raise nobody handles
+is the lint's alone, since no mount is where it would be seen.
 
 **An agent is a question whose answer lands in a memo.** A unit with
 `isolation: "agent"` declares `memo: {entity, key}` — the entity whose row is
