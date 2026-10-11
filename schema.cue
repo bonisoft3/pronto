@@ -502,14 +502,6 @@ import (
 
 #Durability: "server" | "live" | "offline" | "tab" | "device"
 
-#DurabilityEffectLevel: {
-	tab:     "ephemeral"
-	device:  "ephemeral"
-	offline: "compensable"
-	live:    "compensable"
-	server:  "replicated"
-}
-
 #Entity: E={
 	name:  string
 	ir:    *name | string
