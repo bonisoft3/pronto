@@ -11,7 +11,8 @@ import "list"
 #Writer: {
 	by:   string
 	kind: "form" | "screen" | "chart" | "pipeline" | "computation" | "machine"
-	ops:  [..."create" | "update" | "delete" | "upsert" | "reduce" | #RelationalOp]
+	// A navigate writes nothing.
+	ops: [...#Write.op & !="navigate"]
 }
 
 // Every let in this file has a name of its own: CUE 0.16.1 confuses two lets

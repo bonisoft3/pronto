@@ -333,6 +333,11 @@ pair, a computation's outputs, a mecha machine's row and relational effects —
 each with its ops, and the card prints each as `kind:name op·op`. Nothing is
 authored, and nothing refuses two kinds of writer on one entity; whether a
 sink should be its pipeline's alone is open ([pending](PENDING.md#the-lattice)).
+Every op is a word of the terminal's `#Machine.#MutationOp` (omnishell
+`machine.cue`, where each is classified by what happens if it happens twice),
+re-exported by `terminals/omnishell.cue`: a form's `action`, a `#Write.op` and
+mecha's `#RelationalOp` each narrow it to the ops their performer runs, and
+none extends it.
 
 A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
 parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as

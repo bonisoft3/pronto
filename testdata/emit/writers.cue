@@ -32,7 +32,7 @@ _writersApp: pronto.#App & {
 			field:   "status"
 			initial: "pending"
 			states: {
-				pending: on: pay: {target: "paid", actions: {effect: {op: "insert", table: "count", values: {id: "NEW.id"}}}}
+				pending: on: pay: {target: "paid", actions: {effect: {op: "create", table: "count", values: {id: "NEW.id"}}}}
 				paid: type: "final"
 			}
 		}
@@ -82,6 +82,6 @@ writersForm:        _writers.Goal.writers & [{by: "board", kind: "form", ops: ["
 writersChartOwnRow: _writers.Game.writers & [{by: "Game-phase", kind: "chart", ops: ["update"]}]
 writersSink:        _writers.Tally.writers & [{by: "tally", kind: "pipeline", ops: ["upsert"]}]
 writersPair:        _writers.Pair.writers & [{by: "tally", kind: "pipeline", ops: ["upsert"]}]
-writersTwoKinds:    _writers.Count.writers & [{by: "count", kind: "pipeline", ops: ["upsert"]}, {by: "PaymentMachine", kind: "machine", ops: ["insert"]}]
+writersTwoKinds:    _writers.Count.writers & [{by: "count", kind: "pipeline", ops: ["upsert"]}, {by: "PaymentMachine", kind: "machine", ops: ["create"]}]
 writersComputation: _writers.Chance.writers & [{by: "stats", kind: "computation", ops: ["upsert"]}]
 writersMachineRow:  _writers.Payment.writers & [{by: "PaymentMachine", kind: "machine", ops: ["update"]}]

@@ -366,7 +366,7 @@ _sqlType: {
 	_preds: [if _isRel {[if len(_explicitPreds) > 0 {_explicitPreds}, _keyPreds][0]}, []][0]
 
 	_relSql: [
-		if _isRel if _rel["op"] != _|_ if _rel.op == "insert" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
+		if _isRel if _rel["op"] != _|_ if _rel.op == "create" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
 		if _isRel if _rel["op"] != _|_ if _rel.op == "ensure" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
 		if _isRel if _rel["op"] != _|_ if _rel.op == "upsert" {
 			[if len(_customUpdates) > 0 {

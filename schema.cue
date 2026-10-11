@@ -871,7 +871,13 @@ import (
 
 // A Mecha statechart executed inside PostgreSQL — transactions, trigger reducers,
 // finite timeouts, and deterministic relational effects. Level 3 effect limit.
-#RelationalOp: "insert" | "ensure" | "upsert" | "accumulate" | "update" | "delete"
+//
+// The ops mecha's interpreter performs, narrowed from the terminal's
+// #MutationOp (one grammar, defined where the author-facing chart lives and
+// classified there by what happens twice). Inside the trigger's transaction
+// atomicity absorbs the duplicate, so a strict `create` is admitted here; on
+// the change feed only the joins are (CALM, Hellerstein & Alvaro 2020).
+#RelationalOp: omnishell.#MutationOp & ("create" | "ensure" | "upsert" | "accumulate" | "update" | "delete")
 
 #RelationalEffect: {
 	op:            #RelationalOp
@@ -1095,8 +1101,8 @@ import (
 // whose updates and effects may write any table by any op. Derived, never
 // authored.
 #Write: {
-	table: string
-	op:     "create" | "update" | "delete" | "upsert" | "reduce" | "navigate"
+	table:   string
+	op:      omnishell.#MutationOp
 	filter?: string
 }
 
@@ -1234,9 +1240,10 @@ import (
 	ir:     *name | string
 	of:     string // screen
 	entity: string
-	// "navigate" flows end in a read, not a store call (a navigate form's hash
-	// change); entity names the entity the landing read targets.
-	action: "create" | "update" | "delete" | "upsert" | "navigate"
+	// The form's data-action (omnishell REFERENCE.md, "Mutations"). "navigate"
+	// flows end in a read, not a store call (a navigate form's hash change);
+	// entity names the entity the landing read targets.
+	action: omnishell.#MutationOp & ("create" | "update" | "delete" | "upsert" | "navigate")
 }
 
 #Test: {

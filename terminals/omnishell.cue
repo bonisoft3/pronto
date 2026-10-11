@@ -50,6 +50,11 @@ published: runtime: "bonitao/omnishell:0.8.0@sha256:f51c51cb45151e671fde4268ba49
 #ComposeProject: impl.#ComposeProject
 #ClosureUp:      impl.#ClosureUp
 
+// Re-exported because pronto's every op is one of these: the one mutation
+// grammar is defined where the author-facing chart lives, and a form's
+// action, a write and mecha's relational effect each narrow it.
+#MutationOp: impl.#Machine.#MutationOp
+
 #Terminal: impl.#Terminal & {
 	surface: {
 		runtime: string
