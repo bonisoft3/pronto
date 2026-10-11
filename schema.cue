@@ -1586,6 +1586,16 @@ import (
 		}
 	]
 
+	// A machine names its entity by name or table, as emit.cue resolves it.
+	_machineEntityViolations: [
+		if A.state.machines != _|_
+		for mName, m in A.state.machines
+		if len([for en, e in A.state.entities if en == m.entity || e.table == m.entity {en}]) == 0 {
+			"machine \(mName) names undeclared entity: \(m.entity)"
+		},
+	]
+	_machineEntityRefusal: [if len(_machineEntityViolations) == 0 {true}, _machineEntityViolations[0]][0] & true
+
 	_effects: [if A.state.effects != _|_ {A.state.effects}, {}][0]
 	_invokes: [
 		if A.state.machines != _|_
@@ -1621,9 +1631,6 @@ import (
 	_invokeViolations: list.Concat([
 		[for i in _invokes if !list.Contains(_effectNames, i.src) {
 			"machine \(i.machine) state \(i.state) invokes undeclared effect: \(i.src)"
-		}],
-		[for i in _invokes if len([for en, e in A.state.entities if en == i.entity || e.table == i.entity {en}]) == 0 {
-			"machine \(i.machine) invokes \(i.src) over undeclared entity: \(i.entity)"
 		}],
 		[for i in _invokes if i.others {
 			"machine \(i.machine) state \(i.state) invokes \(i.src) and declares on or after: only the effect's outcome leaves it"

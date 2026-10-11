@@ -629,9 +629,17 @@ Deno.test("an effect invoked by machines of two entities is refused", async () =
   assertStringIncludes(err, "effect charge is invoked by machines of 2 entities (Order, Payment): its NEW reads and its key need one row");
 });
 
-Deno.test("a machine invoking over an undeclared entity is refused before the effect's entity is derived", async () => {
-  const err = await refusal(paymentProgram().replace(`entity: "Payment"\n      field: "status"`, `entity: "Invoice"\n      field: "status"`));
-  assertStringIncludes(err, "machine PaymentMachine invokes charge over undeclared entity: Invoice");
+// The entity is the machine's fault, not its invoke's: a machine that invokes
+// nothing names it too, and emit.cue would index an empty list for its table.
+Deno.test("a machine naming an undeclared entity is refused, whether or not it invokes", async () => {
+  const invoking = await refusal(paymentProgram().replace(`entity: "Payment"\n      field: "status"`, `entity: "Invoice"\n      field: "status"`));
+  assertStringIncludes(invoking, "machine PaymentMachine names undeclared entity: Invoice");
+  const plain = await refusal(
+    paymentProgram({ machine: `pending: on: pay: "settled"\n        settled: type: "final"` })
+      .replace(`entity: "Payment"\n      field: "status"`, `entity: "Invoice"\n      field: "status"`)
+      .replace(/    effects: charge: \{[\s\S]*?\n    \}\n/, ""),
+  );
+  assertStringIncludes(plain, "machine PaymentMachine names undeclared entity: Invoice");
 });
 
 Deno.test("an effect of an entity the cluster does not hold is refused", async () => {

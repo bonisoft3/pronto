@@ -102,7 +102,7 @@ The program does not compile when:
 - an effect's name is not a DNS label, which its Dapr binding's must be;
 - a state that invokes also declares `on` or `after`. Only an outcome leaves it, so a
   late answer about money that moved can never land on a machine that has moved on;
-- an invoking machine names an undeclared entity;
+- a machine names an undeclared entity, invoking or not;
 - the entity's rows do not live in the cluster (`tab`, `device`). The guard that claims
   runs in the cluster, once per committed write; a browser-held row would fire the effect
   from every tab;
