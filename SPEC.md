@@ -349,6 +349,23 @@ refuses a mount fed a region the unit does not read, a mount handling an event
 it does not raise, and a raise no mount on any screen handles; the mount
 refuses the first two at runtime and an undeclared raise at the seat.
 
+**An agent is a question whose answer lands in a memo.** A unit with
+`isolation: "agent"` declares `memo: {entity, key}` — the entity whose row is
+the answer, addressed by the question's fields (Michie's memo table), which
+the mount binds as `data-prop-*` of the same names; a unit that acts on the
+world is a process hatch. CUE refuses an agent without a memo, a memo on any
+other isolation, a memo naming no entity, a key field the entity lacks, an
+entity without a unique over exactly the key fields (the natural key an answer
+resolves against), a memo entity with a column that is not text (an answer
+crosses the seat as strings), and an agent raising other than one event (a
+question has one answer). The terminal performs the memo: a question whose row
+stands is answered from the row without asking, and the unit's answer is
+upserted on the key before the chart hears the raised event, whose detail is
+the key — the chart reads the answer as a row of a table its region reads,
+which `check markup` requires. The entity's writers carry the unit as
+`unit:<name> upsert`; its card says `memo of: <unit> by <key>`, and an entity
+a unit reads says `read by: <unit> (<isolation>)`.
+
 A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
 parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as
 protobuf-JSON); every rendering is a function of that file — in

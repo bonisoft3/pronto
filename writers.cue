@@ -1,7 +1,7 @@
 // Who writes each entity's rows, read off every declaration that names it: a
 // screen's forms and what its markup writes past them, the terminal charts it
 // carries, a pipeline's sink and a fold's pair, a computation's outputs, a
-// mecha machine's row and relational effects. Nothing authors it. Two kinds
+// mecha machine's row and relational effects, a unit's memo. Nothing authors it. Two kinds
 // of writer on one entity is a fact the card shows, not a refusal
 // (PENDING.md, "Two kinds of writer on one entity").
 package pronto
@@ -10,7 +10,7 @@ import "list"
 
 #Writer: {
 	by:   string
-	kind: "form" | "screen" | "chart" | "pipeline" | "computation" | "machine"
+	kind: "form" | "screen" | "chart" | "pipeline" | "computation" | "machine" | "unit"
 	// A navigate writes nothing.
 	ops: [...#Write.op & !="navigate"]
 }
@@ -65,6 +65,8 @@ import "list"
 				[for w in _machineEffects[mn] if w.table == e.table {w.op}],
 			])}
 			if len(machineOps.out) > 0 {by: mn, kind: "machine", ops: machineOps.out}],
+		// A memo: the terminal upserts the agent's answer on the key.
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if u.memo.entity == n {by: un, kind: "unit", ops: ["upsert"]}],
 	])}}
 
 	// A pattern, not a comprehension over the entities: the rule reads the

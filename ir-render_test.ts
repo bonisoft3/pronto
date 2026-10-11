@@ -102,6 +102,28 @@ Deno.test("the card says property: value on every chip, names every field upfron
   assertEquals(drawn.length, 2);
 });
 
+Deno.test("the derived line names the units handed an entity's row, and the unit whose memo an entity is", async () => {
+  const vendored = {
+    ...program,
+    capabilities: {
+      vendored: {
+        stockfish: { isolation: "agent", ports: { reads: ["Game"], raises: ["answer"] }, memo: { entity: "Tick", key: ["fen", "nodes"] } },
+        embed: { isolation: "realm", ports: { reads: ["Game"], raises: [] } },
+      },
+    },
+  };
+  const ctx = { program: vendored, charts: new Map(), readMode: new Map([["Game", "eager"], ["Team", "eager"]]), d2: () => Promise.resolve("<svg/>") };
+  const game = await cardHtml("Game", vendored.state.entities.Game, ctx);
+  assertStringIncludes(game, "<b>read by</b> stockfish (agent), embed (realm)");
+  assertEquals(game.includes("<b>memo of</b>"), false);
+  const tick = await cardHtml("Tick", vendored.state.entities.Tick, ctx);
+  assertStringIncludes(tick, "<b>memo of</b> stockfish by fen · nodes");
+  assertEquals(tick.includes("<b>read by</b>"), false);
+  // An app with no unit says nothing: the chips are a fact, not a slot.
+  const bare = await cardHtml("Game", program.state.entities.Game, { ...ctx, program });
+  assertEquals(bare.includes("<b>read by</b>"), false);
+});
+
 Deno.test("the read chip is the read_mode fact row: a browser tier has none and prints —, a server entity without its row is a refusal, not a guess", async () => {
   const ctx = { program, charts: new Map(), readMode: new Map([["Game", "eager"]]), d2: () => Promise.resolve("<svg/>") };
   // read.cue derives a mode only `if e.server`; the card must not invent one for a tab table.

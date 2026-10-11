@@ -1504,6 +1504,17 @@ import (
 				reads:  [...string]
 				raises: [...string]
 			}
+			// An agent is a question whose answer lands in a memo (Michie's memo
+			// table, 1968: answers addressed by what was asked); a unit that
+			// acts on the world is a process hatch. `entity` is where the answer
+			// lands and `key` the question's fields — a unique of the entity,
+			// taken from the mount's data-prop-* of the same names. The terminal
+			// performs it: a question whose row exists is answered from the row
+			// and never posted; the unit's answer is upserted on the key and the
+			// one event it raises reaches the chart naming the row. #App holds
+			// the isolation, the entity, the key, the unique and the columns
+			// (text, since an answer crosses the seat as strings) to this.
+			memo?: {entity: string, key: [string, ...string]}
 			src: string
 			files: [...string]
 			note: string
@@ -1620,13 +1631,38 @@ import (
 	]
 	_machineEntityRefusal: [if len(_machineEntityViolations) == 0 {true}, _machineEntityViolations[0]][0] & true
 
-	_unitViolations: [
-		for un, u in A.capabilities.vendored
-		for r in u.ports.reads
-		if len([for en, _ in A.state.entities if en == r {en}]) == 0 {
+	_unitViolations: list.Concat([
+		[for un, u in A.capabilities.vendored for r in u.ports.reads if A.state.entities[r] == _|_ {
 			"unit \(un) reads \(r), which is no declared entity"
-		},
-	]
+		}],
+		[for un, u in A.capabilities.vendored if u.isolation == "agent" if u.memo == _|_ {
+			"unit \(un) is an agent with no memo: an agent is a question whose answer lands in a memo; a unit that acts on the world is a process hatch"
+		}],
+		[for un, u in A.capabilities.vendored if u.isolation != "agent" if u.memo != _|_ {
+			"unit \(un) is a \(u.isolation) with a memo: only an agent asks a question"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] == _|_ {
+			"unit \(un) memo names \(u.memo.entity), which is no declared entity"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if len(u.ports.raises) != 1 {
+			"unit \(un) has a memo and raises \(len(u.ports.raises)) events: a question has one answer"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
+			let me = A.state.entities[u.memo.entity]
+			for k in u.memo.key if !list.Contains([for f in me.fields {f.name}], k) {
+			"unit \(un) memo keys on \(k), which is not a field of \(u.memo.entity)"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
+			let mu = A.state.entities[u.memo.entity]
+			if len([for q in mu.uniques if q.where == _|_ if list.SortStrings(q.cols) == list.SortStrings(u.memo.key) {q}]) != 1 {
+			"unit \(un) memo on \(u.memo.entity) has no unique over exactly (\(strings.Join(u.memo.key, ", "))): the natural key an answer resolves against"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
+			let mc = A.state.entities[u.memo.entity]
+			for f in mc.fields if !f.pk if !f.retired if f.type != "string" {
+			"unit \(un) memo on \(u.memo.entity): column \(f.name) is \(f.type), and an answer crosses the seat as strings"
+		}],
+	])
 	_unitRefusal: [if len(_unitViolations) == 0 {true}, _unitViolations[0]][0] & true
 
 	_effects: [if A.state.effects != _|_ {A.state.effects}, {}][0]

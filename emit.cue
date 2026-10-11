@@ -1452,6 +1452,15 @@ _cdcBeforeField: "__before"
 							reads: [for r in v.ports.reads {S.code.state.entities[r].table}]
 							raises: v.ports.raises
 						}
+						// The memo as the terminal performs it: the table, the key
+						// and every column an answer fills.
+						if v.memo != _|_ {
+							memo: {
+								table:   S.code.state.entities[v.memo.entity].table
+								key:     v.memo.key
+								columns: [for f in S.code.state.entities[v.memo.entity].fields if !f.pk if !f.retired {f.name}]
+							}
+						}
 						src: v.src
 					}
 				}
