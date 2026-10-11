@@ -1173,6 +1173,8 @@ _cdcBeforeField: "__before"
 	// reads. #scale publishes the same struct as --min-*, so the rung an author
 	// is sent to and the threshold a tap target is held to are one declaration.
 	floors: [string]: int
+	// The terminal's hatch seats, for the detail grammar an answer crosses in.
+	hatch: [string]: {detail: {keys: int, ...}, ...}
 	// Whether the cluster runs an auth and a crud service: #serverOn, the
 	// predicate that emits them, carried into the file visual lint reads.
 	server: bool
@@ -1453,12 +1455,15 @@ _cdcBeforeField: "__before"
 							raises: v.ports.raises
 						}
 						// The memo as the terminal performs it: the table, the key
-						// and every column an answer fills.
+						// and every column an answer fills — in one event, whose
+						// detail the seat carries at most `keys` of.
 						if v.memo != _|_ {
 							memo: {
-								table:   S.code.state.entities[v.memo.entity].table
-								key:     v.memo.key
-								columns: [for f in S.code.state.entities[v.memo.entity].fields if !f.pk if !f.retired {f.name}]
+								table: S.code.state.entities[v.memo.entity].table
+								key:   v.memo.key
+								let _columns = [for f in S.code.state.entities[v.memo.entity].fields if !f.pk if !f.retired {f.name}]
+								let _carried = S.hatch[v.isolation].detail.keys
+								columns: [if len(_columns) <= _carried {_columns}, "unit \(n) memo on \(v.memo.entity) has \(len(_columns)) columns, and the \(v.isolation) seat carries an answer of at most \(_carried)"][0] & [...string]
 							}
 						}
 						src: v.src
@@ -2030,18 +2035,11 @@ _cdcBeforeField: "__before"
 		_authModeOffered: true & list.Contains(E.terminal.capabilities.auth.modes, E.code.capabilities.auth.mode)
 	}
 
-	for n, v in E.code.capabilities.vendored {
+	for _, v in E.code.capabilities.vendored {
 		_vendoredIsolationBuildable: true & list.Contains(E.terminal.capabilities.isolation, v.isolation)
 		// The unit's own entry point has to be one of the files the terminal
 		// serves, or the mount fetches a path nothing published.
 		_vendoredSrcServed: true & list.Contains(v.files, v.src)
-		// An answer carries every memo column in one event, and the seat's
-		// detail carries at most the terminal's `keys` of them.
-		if v.memo != _|_ {
-			let columns = len(E._shell.units[n].memo.columns)
-			let carried = E.terminal.capabilities.hatch[v.isolation].detail.keys
-			_vendoredMemoCarried: [if columns <= carried {true}, "unit \(n) memo on \(v.memo.entity) has \(columns) columns, and the \(v.isolation) seat carries an answer of at most \(carried)"][0] & true
-		}
 	}
 
 	// The cluster stores these. tab and device live only in the browser, so
@@ -2343,7 +2341,7 @@ _cdcBeforeField: "__before"
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
 	// door and the router cannot disagree about what a route is.
-	_shell: (#shellConfig & {"code": E.code, liveUpdates: E.terminal.liveUpdates, migrations: E._migrations, floors: E.terminal.capabilities.floors, server: E._serverOn, native: E.code.capabilities.native}).out
+	_shell: (#shellConfig & {"code": E.code, liveUpdates: E.terminal.liveUpdates, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, server: E._serverOn, native: E.code.capabilities.native}).out
 	// The locales in one order, so every artifact that lists them lists them the
 	// same way and a regenerated file has no spurious diff.
 	_locales: list.SortStrings([if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}])

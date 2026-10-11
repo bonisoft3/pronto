@@ -1,9 +1,9 @@
 // The program the external-effect tests compile, and the cue calls they share.
 
 // A program around one Payment machine whose `charging` state invokes `charge`;
-// `effect` and `entity` are spliced into the effect and the entities,
-// `machine` replaces the machine's states.
-export function paymentProgram({ effect = "", machine = "", entity = "" } = {}): string {
+// `effect`, `entity` and `vendored` are spliced into the effect, the entities
+// and the vendored units, `machine` replaces the machine's states.
+export function paymentProgram({ effect = "", machine = "", entity = "", vendored = "" } = {}): string {
   return `
 package test
 
@@ -57,7 +57,7 @@ app: pronto.#App & {
       ${effect}
     }
   }
-  capabilities: {hatches: {}, vendored: {}}
+  capabilities: {hatches: {}, vendored: {${vendored}}}
   surface: {
     screens: board: {
       title: "Board"
