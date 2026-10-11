@@ -44,6 +44,7 @@ state: effects: charge: {
 		origin:     "https://api.acquirer.example"  // the only origin the handler's fetch may reach
 		idempotent: true                             // honours our key, so re-entry calls again
 	}
+	note: "the acquirer deduplicates on Idempotency-Key"  // the claim about the peer, in prose
 	attempts: 5                                 // tries on a thrown error before the outcome is unknown
 }
 
@@ -83,7 +84,7 @@ The previous run might have died before or after its call reached the sink:
 | `true` | (absent; refused if present) | call again with the same key; the sink makes it safe |
 | `false` | `"reconcile"` (default) | ask the sink by key through the handler's `reconcile`; call only if the sink has no record of it |
 | `false` | `"unknown"` | the outcome is `unknown`; a human decides |
-| `false` | `{repeat: "<why a duplicate is acceptable>"}` | call again; the hatch carries its reason |
+| `false` | `"repeat"` | call again; the effect's `note` says why a duplicate is acceptable |
 
 Pronto cannot verify `idempotent: true`, because it is a claim about a third party. What
 pronto checks is its own side: the handler's `fetch` sends `Idempotency-Key: <ledger
@@ -112,7 +113,7 @@ The program does not compile when:
   effect;
 - a bridged sink is declared idempotent, or reconciles: past a bridge nothing is the
   platform's to promise, and a bridge answers no query by key, so the effect states
-  `unknown` or `{repeat: why}`;
+  `unknown` or `repeat`;
 - an outcome could never be delivered: the invoking state is `final`, an outcome
   targets a state the machine lacks or the invoking state itself, `onDone` and
   `onError` share a target while carrying actions, or an outcome's actions `raise`;

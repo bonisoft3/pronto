@@ -984,11 +984,15 @@ import (
 	// does not speak HTTP.
 	sink: {origin: mecha.#Origin, credential?: #Credential} | {bridge: string}
 	// What a handler does when the ledger shows an earlier entry that may have
-	// reached the sink. An idempotent sink is simply called again.
+	// reached the sink. An idempotent sink is simply called again; a repeat
+	// is called again too, and `note` says why a duplicate is acceptable.
 	{sink: idempotent: true} | {
 		sink: idempotent: false
-		reentry: *"reconcile" | "unknown" | {repeat: string & !=""}
+		reentry: *"reconcile" | "unknown" | "repeat"
 	}
+	// The judgment the compiler cannot make: the sink's idempotency and what
+	// a repeat costs are claims about a peer.
+	note: string
 	// Thrown errors tolerated before the outcome is unknown.
 	attempts: *5 | int & >=1
 	// The environment variables whose values the handler is handed at each
@@ -1692,7 +1696,7 @@ import (
 			"effect \(n) reaches bridge \(x.sink.bridge) as an idempotent sink: past a bridge nothing is the platform's to promise"
 		}],
 		[for n, x in _effects if x.sink.bridge != _|_ if !x.sink.idempotent if x.reentry == "reconcile" {
-			"effect \(n) reaches bridge \(x.sink.bridge) and reconciles: a bridge answers no query, so state reentry unknown or {repeat: why}"
+			"effect \(n) reaches bridge \(x.sink.bridge) and reconciles: a bridge answers no query, so state reentry unknown or repeat"
 		}],
 	])
 	_bridgeRefusal: [if len(_bridgeViolations) == 0 {true}, _bridgeViolations[0]][0] & true

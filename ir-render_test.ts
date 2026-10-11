@@ -62,7 +62,7 @@ const program: Program = {
         states: { pending: { on: { pay: "charging" } }, charging: { invoke: { src: "charge", onDone: "settled", onError: "failed" } }, settled: { type: "final" }, failed: { on: { retry: "pending" } } },
       },
     },
-    effects: { charge: { ir: "charge", sink: { origin: "https://api.acquirer.example", idempotent: false }, reentry: "reconcile" } },
+    effects: { charge: { ir: "charge", sink: { origin: "https://api.acquirer.example", idempotent: false }, reentry: "reconcile", note: "the acquirer answers a charge by key" } },
   },
   capabilities: {},
 };
@@ -97,7 +97,7 @@ Deno.test("the card says property: value on every chip, names every field upfron
   assertStringIncludes(html, 'data-kind="machine" id="Game-flipped" data-of="Game"');
   assertStringIncludes(html, 'data-kind="machine" id="GameMachine" data-of="Game"');
   assertStringIncludes(html, 'data-kind="effect" id="charge" data-of="GameMachine"');
-  assertStringIncludes(html, "not idempotent · re-entry &quot;reconcile&quot;");
+  assertStringIncludes(html, 'not idempotent · re-entry reconcile · <span class="note">the acquirer answers a charge by key</span>');
   assertEquals(drawn.length, 2);
 });
 

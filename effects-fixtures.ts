@@ -53,6 +53,7 @@ app: pronto.#App & {
     effects: charge: {
       input: {amount: "NEW.total", currency: "BRL"}
       sink: {origin: "https://api.acquirer.example", idempotent: true}
+      note: "the acquirer deduplicates on Idempotency-Key"
       ${effect}
     }
   }

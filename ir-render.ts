@@ -43,7 +43,7 @@ export type MechaMachine = {
   level: string;
   states: Record<string, { type?: string; on?: Record<string, unknown>; after?: Record<string, unknown>; invoke?: { src: string; onDone: unknown; onError: unknown } }>;
 };
-export type Effect = { ir: string; sink: { origin?: string; bridge?: string; idempotent?: boolean }; reentry?: unknown };
+export type Effect = { ir: string; sink: { origin?: string; bridge?: string; idempotent?: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note: string };
 export type Program = {
   state: {
     entities: Record<string, Entity>;
@@ -213,7 +213,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
 <span class="mtitle">${esc(m.title)} ${chip("level", m.level, true, LEVEL_TIP[m.level])}</span>
 <div class="canvas">${svg}</div>${
       effect === null || effect === undefined ? "" : `
-<p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", m.invoke!, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? `bridge ${effect.sink.bridge}`)} · ${effect.sink.idempotent ? "idempotent" : `not idempotent · re-entry ${esc(JSON.stringify(effect.reentry ?? "reconcile"))}`}</p>`
+<p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", m.invoke!, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? `bridge ${effect.sink.bridge}`)} · ${effect.sink.idempotent ? "idempotent" : `not idempotent · re-entry ${esc(effect.reentry ?? "reconcile")}`} · <span class="note">${esc(effect.note)}</span></p>`
     }
 </section>`;
   }));

@@ -481,8 +481,8 @@ Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpo
 Deno.test("a bridged effect states what a repeat costs: neither idempotent nor reconciled", async () => {
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: true}`)), "past a bridge nothing is the platform's to promise");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}`)), "a bridge answers no query");
-  const files = await emitFiles(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: {repeat: "a second mail is a nuisance, not a charge"}`));
-  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, { repeat: "a second mail is a nuisance, not a charge" });
+  const files = await emitFiles(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: "repeat"`));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, "repeat");
 });
 
 Deno.test("a bridge no effect reaches, or an effect reaching an undeclared bridge, is refused", async () => {
@@ -649,16 +649,25 @@ Deno.test("an effect keyed on a field the entity lacks is refused", async () => 
   assertStringIncludes(err, "effect charge keys on intent, which is not a field of Payment");
 });
 
-Deno.test("reentry is declared only for a sink that is not idempotent", async () => {
+Deno.test("reentry is declared only for a sink that is not idempotent, as a word", async () => {
   const onIdempotent = await refusal(paymentProgram({ effect: `reentry: "unknown"` }));
   assertStringIncludes(onIdempotent, "reentry");
   assertStringIncludes(onIdempotent, "field not allowed");
-  const repeatWithoutReason = await refusal(
-    paymentProgram({ effect: `reentry: {repeat: ""}` }).replace("idempotent: true", "idempotent: false"),
+  // The reason a duplicate is acceptable is the effect's note, not a field of its own.
+  const repeatWithReason = await refusal(
+    paymentProgram({ effect: `reentry: {repeat: "a second mail is a nuisance"}` }).replace("idempotent: true", "idempotent: false"),
   );
-  assertStringIncludes(repeatWithoutReason, "reentry");
+  assertStringIncludes(repeatWithReason, "reentry");
   const files = await emitFiles(paymentProgram().replace("idempotent: true", "idempotent: false"));
   assertEquals(typeof files["services/database/migrations/010_machines.sql"].text, "string");
+});
+
+// Idempotency and the cost of a repeat are claims about a peer the compiler
+// cannot check, so every effect carries the judgment in prose.
+Deno.test("an effect without a note is refused", async () => {
+  const err = await refusal(paymentProgram().replace(`      note: "the acquirer deduplicates on Idempotency-Key"\n`, ""));
+  assertStringIncludes(err, "note");
+  assertEquals(typeof (await emitFiles(paymentProgram()))["services/airlock/effects.json"], "object");
 });
 
 // The airlock's daprd sits on the cluster's own network: an origin naming a

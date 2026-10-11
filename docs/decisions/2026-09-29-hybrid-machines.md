@@ -216,7 +216,7 @@ and a compute output all replay from rows. Level 4 is the airlock, and the airlo
 hatch: one of the places where perfect time travel stops, beside the compiler's `sql`,
 `proto` and `container` hatches, each with its own declaration and its own record. The
 airlock's record is the ledger, so a replay answers the invoke from it instead of
-re-running the world; `reentry: {repeat: why}` is a hatch inside the hatch. Saga-style
+re-running the world; `reentry: "repeat"` is a hatch inside the hatch, its `note` the why. Saga-style
 resilience comes from the statechart and the ledger, not from a durable function: a
 state invokes one effect, the guard claims and enqueues in the transition's commit, the
 sink declares idempotency or its re-entry, the outcome returns as the next event, and a
