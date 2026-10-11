@@ -160,7 +160,7 @@ _sqlType: {
 	e: #Entity
 	_lines: list.Concat([
 		[for fld in T.e.fields {
-			"  " + (#colSql & {f: fld, table: T.e.table, if T.e.checks[fld.name] != _|_ {check: T.e.checks[fld.name]}}).out
+			"  " + (#colSql & {f: fld, table: T.e.table, if T.e.cel.checks[fld.name] != _|_ {check: T.e.cel.checks[fld.name]}}).out
 		}],
 		// Platform column, never a #Field: the write's transaction id, returned
 		// via Prefer: return=representation so clients can awaitTxId against
@@ -1230,8 +1230,8 @@ _cdcBeforeField: "__before"
 				if f.ref != _|_ {ref: f.ref}
 				if f.unique != _|_ {unique: f.unique}
 				if f.default != _|_ {default: f.default}
-				if e.enums[f.name] != _|_ {enum: e.enums[f.name]}
-				if e.bounds[f.name] != _|_ {bounds: e.bounds[f.name]}
+				if e.cel.enums[f.name] != _|_ {enum: e.cel.enums[f.name]}
+				if e.cel.bounds[f.name] != _|_ {bounds: e.cel.bounds[f.name]}
 			}]
 			if len(e.uniques) > 0 {
 				uniques: [for u in e.uniques {

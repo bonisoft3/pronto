@@ -336,9 +336,11 @@ sink should be its pipeline's alone is open ([pending](PENDING.md#the-lattice)).
 
 A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
 parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as
-protobuf-JSON); every rendering is a function of that file — the SQL CHECK
-bodies and the CUE field constraints in `program_cel.cue`, and the closed
-value set the terminal's per-kind template lint is judged against. An
+protobuf-JSON); every rendering is a function of that file — in
+`program_cel.cue`, the CUE field constraints under `seed` and, under one
+`#Entity.cel`, the SQL CHECK bodies, the closed value sets the terminal's
+per-kind template lint is judged against, and the bounds a battery proposes
+values within. An
 entity's `invariant:` binds `this` to the row instead of the value, so it
 derives a CHECK body and nothing for CUE: a predicate over several columns
 constrains no one field's value.

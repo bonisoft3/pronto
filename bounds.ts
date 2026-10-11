@@ -2,7 +2,7 @@
 //
 // One reading of the parsed expression, stated in terms that name no language:
 // a closed set, an integer range, a length range, a pattern. derive-cel.ts
-// renders it into program_cel.cue and emit.cue carries it into shell.yaml
+// renders it into program_cel.cue (`cel.bounds`) and emit.cue carries it into shell.yaml
 // beside the field it belongs to, which is how a reader that has to GENERATE a
 // value the program would accept gets one without a second front end for the
 // constraint language.
