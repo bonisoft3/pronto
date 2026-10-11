@@ -17,10 +17,6 @@
 // answered without the author drawing them. write.ts runs this after derive
 // and before the derive that records the regions (facts `ir_region`).
 
-/** Where the d2 the compiler draws with is pinned: this plugin's .mise.toml,
- * by its GitHub release (never aqua, whose registry meets rate limits), with
- * the lockfile's URL per platform, which is what mise's locked mode runs. */
-const PRONTO = new URL(".", import.meta.url).pathname;
 
 export type Field = { name: string; type: string; ordinal?: number; retired?: boolean; pk?: boolean; ref?: string; required?: boolean; unique?: boolean; default?: string; cel?: string };
 export type Entity = {
@@ -128,10 +124,14 @@ export function chartD2(c: { initial: string; states: Record<string, any>; on?: 
   return s;
 }
 
-/** Renders a D2 source to SVG through the pinned binary, with no browser. */
-export async function d2Svg(source: string): Promise<string> {
-  const child = new Deno.Command("mise", {
-    args: ["-C", PRONTO, "exec", "--", "d2", "--layout", "elk", "--theme", "0", "--pad", "16", "-", "-"],
+/** Renders a D2 source to SVG through the binary the app's .mise.toml pins —
+ * one GitHub release, never aqua (whose registry meets rate limits), locked
+ * per platform — the way check-facts runs duckdb; no browser. */
+export async function d2Svg(appDir: string, source: string): Promise<string> {
+  const mise = Deno.build.os === "windows" ? `${Deno.env.get("LOCALAPPDATA")}\\mise\\bin\\mise.exe` : "mise";
+  const child = new Deno.Command(mise, {
+    args: ["x", "--", "d2", "--layout", "elk", "--theme", "0", "--pad", "16", "-", "-"],
+    cwd: appDir,
     stdin: "piped",
     stdout: "piped",
     stderr: "piped",
@@ -357,7 +357,7 @@ export async function renderIr(
   irPath: string,
   program: Program,
   facts: { chart?: { table: string; field: string; machine: string }[]; sync_mode?: { entity: string; mode: string }[] },
-  d2: (source: string) => Promise<string> = d2Svg,
+  d2: (source: string) => Promise<string> = (source) => d2Svg(appDir, source),
 ): Promise<boolean> {
   const charts = new Map<string, { field: string; initial: string; states: Record<string, unknown>; on?: Record<string, unknown>; writes: string[] }[]>();
   for (const row of facts.chart ?? []) {

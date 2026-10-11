@@ -30,6 +30,9 @@ import (
 	// binary per platform, windows included, so the lint runs wherever the
 	// toolchain does.
 	"github:sbdchd/squawk": "2.66.0"
+	// Draws an entity's machines into ir.html (ir-render.ts): one binary from
+	// its GitHub release, never aqua (whose registry meets rate limits).
+	"github:terrastruct/d2": "v0.9.0"
 	"http:duckdb": {
 		version: "1.5.5"
 		platforms: {
