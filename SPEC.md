@@ -347,9 +347,13 @@ being the adapter on both. CUE refuses a read naming no entity; the terminal's
 `check markup`, which sees the emitted `units:` and the screens together,
 refuses a mount fed a region the unit does not read, a mount handling an event
 it does not raise, and a raise no mount on any screen handles; the mount
-refuses the first two at runtime (as a `ProgramError`, past the region's
-outage guard) and the seat an undeclared raise, while a raise nobody handles
-is the lint's alone, since no mount is where it would be seen.
+refuses the first two at runtime and the seat an undeclared raise, while a
+raise nobody handles is the lint's alone, since no mount is where it would be
+seen. Every refusal of the mount and the seats is a `ProgramError`: the mount
+and a memo's question run inside the region's refresh, whose outage guard
+retries anything else as a dead gateway, and an answer inside the port's
+listener, where anything else is a console line; the shell banners a
+`ProgramError` from a rejection and from the window's `error` event alike.
 
 **An agent is a question whose answer lands in a memo.** A unit with
 `isolation: "agent"` declares `memo: {entity, key}` — the entity whose row is
@@ -367,9 +371,9 @@ that grammar. The terminal performs the memo: a question whose row
 stands is answered from the row without asking, and the unit's answer is
 upserted on the key before the chart hears the raised event, whose detail is
 the key — the chart reads the answer as a row of a table its region reads,
-which `check markup` requires. An answer the store refuses is a
-`ProgramError` naming the unit and the table, bannered by the shell: no
-reduce authored the write, so it is not a `refused` event. The entity's
+which `check markup` requires. An answer the store refuses is the same
+`ProgramError`, naming the unit and the table: no reduce authored the write,
+so it is not a `refused` event. The entity's
 writers carry the unit as
 `unit:<name> upsert`; its card says `memo of: <unit> by <key>`, and an entity
 a unit reads says `read by: <unit> (<isolation>)`.
