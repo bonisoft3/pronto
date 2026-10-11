@@ -1,8 +1,10 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
-Deno.test("mecha machine compiles statechart into PostgreSQL 010_machines.sql", async () => {
-  const cueCode = `
+// A Challenge statechart whose `accept` transition performs one relational
+// effect of the given op on audit_log.
+function challengeProgram(op: string): string {
+  return `
 package test
 
 import "bonisoft.org/plugins/pronto"
@@ -45,7 +47,7 @@ app: pronto.#App & {
                 target: "accepted"
                 actions: [{
                   effect: {
-                    op: "ensure"
+                    op: "${op}"
                     table: "audit_log"
                     values: {event: "challenge_accepted"}
                   }
@@ -90,21 +92,10 @@ out: (pronto.#emit & {
 }).files
 
 `;
+}
 
-  const cmd = new Deno.Command("cue", {
-    args: ["export", "-", "-e", "out", "--out", "json"],
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "inherit",
-  });
-  const child = cmd.spawn();
-  const writer = child.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(cueCode));
-  await writer.close();
-  const res = await child.output();
-  assertEquals(res.success, true);
-
-  const files = JSON.parse(new TextDecoder().decode(res.stdout));
+Deno.test("mecha machine compiles statechart into PostgreSQL 010_machines.sql", async () => {
+  const files = await emitFiles(challengeProgram("ensure"));
   const sql = files["services/database/migrations/010_machines.sql"]?.text;
   assertEquals(typeof sql, "string");
 
@@ -131,6 +122,16 @@ out: (pronto.#emit & {
 
   // Check trigger registration
   assertStringIncludes(sql, 'CREATE TRIGGER "trg_challenge_status_machine"');
+});
+
+Deno.test("a strict create emits a bare INSERT, and an op outside #RelationalOp is refused: the word is the terminal's, matched by spelling in emit.cue", async () => {
+  const files = await emitFiles(challengeProgram("create"));
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(sql, `INSERT INTO "audit_log" ("event") VALUES ('challenge_accepted');`);
+  assertEquals(sql.includes("ON CONFLICT"), false);
+  const refused = await cue(["export", "-", "-e", "out", "--out", "json"], challengeProgram("insert"));
+  assertEquals(refused.success, false);
+  assertStringIncludes(refused.stderr, "op");
 });
 
 Deno.test("mecha machine compiles mutation lifecycle reducer with relational effects", async () => {

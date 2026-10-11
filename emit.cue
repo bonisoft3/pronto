@@ -365,7 +365,7 @@ _sqlType: {
 	_explicitPreds: list.Concat([_wherePreds, _rawWherePred])
 	_preds: [if _isRel {[if len(_explicitPreds) > 0 {_explicitPreds}, _keyPreds][0]}, []][0]
 
-	_relSql: [
+	_relBranches: [
 		if _isRel if _rel["op"] != _|_ if _rel.op == "create" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
 		if _isRel if _rel["op"] != _|_ if _rel.op == "ensure" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
 		if _isRel if _rel["op"] != _|_ if _rel.op == "upsert" {
@@ -391,8 +391,10 @@ _sqlType: {
 			}
 		},
 		if _isRel if _rel["op"] != _|_ if _rel.op == "delete" {"        DELETE FROM \"\(_rel.table)\" WHERE \(strings.Join(_preds, " AND "));"},
-		"",
-	][0]
+	]
+	// Every #RelationalOp has a branch; an op with none is a spelling the
+	// schema admits and this file does not.
+	_relSql: [if _isRel if _rel["op"] != _|_ {[if len(_relBranches) > 0 {_relBranches[0]}, error("effect on \(_rel.table): no SQL for op \(_rel.op)")][0]}, ""][0]
 
 	_callArgs: [if _isCall if EF.effect["args"] != _|_ {[for _, a in EF.effect.args {(#sqlLit & {v: a}).out}]}, []][0]
 	_callSql: [if _isCall if EF.effect["call"] != _|_ {"        PERFORM \(EF.effect.call)(\(strings.Join(_callArgs, ", ")));"}, ""][0]
