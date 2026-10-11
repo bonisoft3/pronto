@@ -11,7 +11,7 @@ status: partially-built
 coordinator, alone. Until now the door it coordinates through was half built: a `#SagaEffect` inserted a `saga` row and sent a `pg_notify`,
 and nothing read either. This record closes the door. A machine *invokes* an **external
 effect**. Mecha's **airlock** performs it against a declared **sink**. The answer comes back as
-the machine's next event. A **ledger** that pronto owns records the request, every entry
+the machine's next event. A **ledger** that pronto owns records the input, every entry
 and the outcome.
 
 ## Two kinds
@@ -40,7 +40,7 @@ record builds.
 state: effects: charge: {
 	entity:  "Payment"
 	key:     ["id"]                             // identity: the ledger key is "charge:" || NEW.id
-	request: {amount: "NEW.total", customer: "NEW.customer_id"}   // frozen in the ledger at enqueue
+	input:   {amount: "NEW.total", customer: "NEW.customer_id"}   // XState's input, frozen in the ledger at the claim
 	sink: {
 		origin:     "https://api.acquirer.example"  // the only origin the handler's fetch may reach
 		idempotent: true                             // honours our key, so re-entry calls again
@@ -116,7 +116,7 @@ The program does not compile when:
 - an outcome could never be delivered: the invoking state is `final`, an outcome
   targets a state the machine lacks or the invoking state itself, `onDone` and
   `onError` share a target while carrying actions, or an outcome's actions `raise`;
-- a `request` value reads `NEW.<col>` where `<col>` is not a field of the entity;
+- an `input` value reads `NEW.<col>` where `<col>` is not a field of the entity;
 - a credential's header is one daprd would not forward (lowercase first) or one the host
   or HTTP sets, its secret is also among the handler's `secrets`, or a secret's name is a
   variable the cluster's own services read (`SERVICE_JWT`, `POSTGRES_PASSWORD`, …);
@@ -133,7 +133,7 @@ its outcome lands.
 [`airlock.sql`](../../../../libraries/mecha/services/airlock/airlock.sql), and the
 cluster places it as it places the ticker's `schedule`. A row holds the key
 (`<effect>:<key fields>`, also the sink's idempotency key), the instance's primary key,
-the request frozen at the claim, the count of runs begun, and the outcome, set once.
+the input frozen at the claim, the count of runs begun, and the outcome, set once.
 
 Graphile Worker cannot hold this record. A finished job's row is deleted, so the same
 `job_key` enqueued again runs again (G1 below). DBOS kept finished workflows; a queue
@@ -179,7 +179,7 @@ call.
   compute's own cage shares): SES, no clock, no entropy, nothing of the host, and the
   realm's deterministic `Crypto`. Its one capability is an argument, `sink`, whose `fetch` the host
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
-  key; the others are the frozen `request` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
+  key; the others are the frozen `input` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
   "no answer", not "failed". The airlock's
   [README](../../../../libraries/mecha/services/airlock/README.md) is the contract.
 - **A thrown error** is retried by Graphile with backoff, and each retry is a re-entry.
@@ -536,7 +536,7 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 | B8 | the plane booted with the daprd's `--config` removed | — | B2 fails in it, and nothing else does: the allowlist is what refuses |
 | B9 | over gRPC, `InvokeService` to `https://example.com`, `GetMetadata`, `Shutdown`; with an HTTP-only list, then with the gRPC rule | — | with HTTP only, the page's HTML and the metadata came back; with the rule, UNIMPLEMENTED for each, `InvokeBinding` still served |
 | B10 | from a container on the default network, the daprd's port and the bridge's | 0 | neither name resolves there |
-| B11 | an effect declaring `credential: {scheme: Bearer, secret: VAULT_KEY}`, the sink recording its headers | 1 | `Authorization: Bearer <value>` arrives; the ledger's request and outcome hold no trace of the value; an effect without one sends no such header |
+| B11 | an effect declaring `credential: {scheme: Bearer, secret: VAULT_KEY}`, the sink recording its headers | 1 | `Authorization: Bearer <value>` arrives; the ledger's input and outcome hold no trace of the value; an effect without one sends no such header |
 | R1 | the mail bridge against Mailpit | 1 | 200 with the key's `Message-ID` and the invite; 422 for a 5xx refusal and for a refused STARTTLS, nothing sent in the clear; 503 with no server; 403 for an inward server |
 | S1 | Graphile's `runMigrations` after `graphile.sql` | — | `pg_dump -s -n graphile_worker` unchanged: nothing to migrate |
 | S2 | `graphile.sql` against Graphile's own install | — | the same schema and the same `migrations` rows |

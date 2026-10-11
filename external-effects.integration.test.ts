@@ -58,7 +58,7 @@ Deno.test({ name: "an invoking state's guard claims, enqueues and admits only th
       // The airlock's step seeds the row ticked; a claim clears its watermark.
       assertEquals((await psql(`SELECT last_tick_at IS NOT NULL FROM schedule WHERE name = 'airlock';`)).out, "t");
       const r = await psql(`UPDATE payment SET status = 'charging' WHERE id = '${one}';
-        SELECT row::text || ' ' || request::text FROM airlock.external_effect_ledger WHERE key = 'charge:${one}';
+        SELECT row::text || ' ' || input::text FROM airlock.external_effect_ledger WHERE key = 'charge:${one}';
         SELECT identifier || ' ' || payload::text || ' ' || job_key || ' ' || max_attempts FROM graphile_worker.added;
         SELECT cron IS NULL AND due_at IS NOT NULL AND last_tick_at IS NULL FROM schedule WHERE name = 'airlock';`);
       assertEquals(r.out.split("\n"), [

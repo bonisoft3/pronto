@@ -967,11 +967,12 @@ import (
 	entity: string
 	// The ledger key is "<name>:" and these fields of the entity: one as its
 	// text, several JSON-encoded. It is also the sink's idempotency key, so it
-	// names the instance and never the request's content.
+	// names the instance and never the input's content.
 	key: *["id"] | [string, ...string]
-	// Frozen into the ledger at enqueue: "NEW.<col>" reads the row, {raw: sql}
-	// is an expression, anything else a literal.
-	request: {[string]: _} | *{}
+	// XState's input: what the handler is handed, frozen into the ledger at
+	// the claim. "NEW.<col>" reads the row, {raw: sql} is an expression,
+	// anything else a literal.
+	input: {[string]: _} | *{}
 	// An https origin naming a host by a DNS name of two labels or more, as
 	// mecha spells it (#Origin); a name that resolves inward is not refused,
 	// since the airlock's daprd dials what its binding names, and that is the
@@ -1644,8 +1645,8 @@ import (
 		[for i in _invokes for ar in i.arrows for a in ar.actions if a.raise != _|_ {
 			"machine \(i.machine) state \(i.state): an outcome's actions raise, which would refuse the recorded outcome's delivery"
 		}],
-		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity for k, v in x.request if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in e.fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
-			"effect \(n) request \(k) reads \(v), which is not a field of \(en)"
+		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity for k, v in x.input if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in e.fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
+			"effect \(n) input \(k) reads \(v), which is not a field of \(en)"
 		}],
 		// The credential is the airlock's alone: a handler handed it could put
 		// it in a body the ledger keeps.

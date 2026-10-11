@@ -716,7 +716,7 @@ _sqlType: {
 	out: [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
 }
 
-// A jsonb_build_object over a map of request values: "NEW.<col>"/"OLD.<col>"
+// A jsonb_build_object over a map of input values: "NEW.<col>"/"OLD.<col>"
 // read the row, {raw: sql} is an expression, anything else a literal.
 #jsonbObjectSql: J={
 	values: {[string]: _}
@@ -776,8 +776,8 @@ _sqlType: {
 	pk: [...string]
 	_key:   (#ledgerKeySql & {effect: I.effect, rec: "NEW"}).out
 	out: """
-		        INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "request")
-		        VALUES (\(_key), '\(I.effect.name)', \((#ledgerRowSql & {pk: I.pk}).out), \((#jsonbObjectSql & {values: I.effect.request}).out))
+		        INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "input")
+		        VALUES (\(_key), '\(I.effect.name)', \((#ledgerRowSql & {pk: I.pk}).out), \((#jsonbObjectSql & {values: I.effect.input}).out))
 		        ON CONFLICT ("key") DO NOTHING;
 		        IF NOT FOUND THEN
 		          RAISE EXCEPTION 'external effect % was already performed: entering \(I.state) again needs a new key', \(_key) USING ERRCODE = 'unique_violation';

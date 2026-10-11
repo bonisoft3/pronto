@@ -355,7 +355,7 @@ async function refusal(code: string): Promise<string> {
 Deno.test("entering an invoking state claims the ledger and enqueues in the transition's commit", async () => {
   const files = await emitFiles(paymentProgram());
   const sql = files["services/database/migrations/010_machines.sql"].text;
-  assertStringIncludes(sql, `INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "request")`);
+  assertStringIncludes(sql, `INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "input")`);
   assertStringIncludes(sql, `VALUES ('charge:' || NEW."id"::text, 'charge', jsonb_build_object('id', NEW."id"), jsonb_build_object('amount', NEW."total", 'currency', 'BRL'))`);
   // A second claim of a performed key is refused, not skipped.
   assertStringIncludes(sql, `IF NOT FOUND THEN\n          RAISE EXCEPTION 'external effect % was already performed: entering charging again needs a new key', 'charge:' || NEW."id"::text USING ERRCODE = 'unique_violation';`);
@@ -563,9 +563,9 @@ Deno.test("an outcome that could never be delivered is refused", async () => {
   assertEquals(typeof files["services/database/migrations/010_machines.sql"].text, "string");
 });
 
-Deno.test("a request reads a field the entity has, quoted", async () => {
-  assertStringIncludes(await refusal(paymentProgram({ effect: `request: {amt: "NEW.totl"}` })), "request amt reads NEW.totl, which is not a field of Payment");
-  const files = await emitFiles(paymentProgram({ effect: `request: {"it's": "NEW.total"}` }));
+Deno.test("an input reads a field the entity has, quoted", async () => {
+  assertStringIncludes(await refusal(paymentProgram({ effect: `input: {amt: "NEW.totl"}` })), "input amt reads NEW.totl, which is not a field of Payment");
+  const files = await emitFiles(paymentProgram({ effect: `input: {"it's": "NEW.total"}` }));
   assertStringIncludes(files["services/database/migrations/010_machines.sql"].text, `'it''s', NEW."total"))`);
 });
 
