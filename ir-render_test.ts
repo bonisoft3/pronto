@@ -51,6 +51,7 @@ const program: Program = {
         writers: [{ by: "board", kind: "form", ops: ["create", "update"] }, { by: "Game-flipped", kind: "chart", ops: ["update"] }, { by: "GameMachine", kind: "machine", ops: ["update"] }],
       },
       Team: { ir: "Team", table: "team", durability: "server", level: "replicated", fields: [{ name: "id", type: "uuid", pk: true }, { name: "game_id", type: "uuid", ref: "game" }], writers: [] },
+      Tick: { ir: "Tick", table: "tick", durability: "tab", level: "local", fields: [{ name: "id", type: "uuid", pk: true }], writers: [] },
     },
     machines: {
       GameMachine: {
@@ -99,6 +100,13 @@ Deno.test("the card says property: value on every chip, names every field upfron
   assertStringIncludes(html, 'data-kind="effect" id="charge" data-of="GameMachine"');
   assertStringIncludes(html, 'not idempotent · re-entry reconcile · <span class="note">the acquirer answers a charge by key</span>');
   assertEquals(drawn.length, 2);
+});
+
+Deno.test("the read chip is the read_mode fact row: a browser tier has none and prints —, a server entity without its row is a refusal, not a guess", async () => {
+  const ctx = { program, charts: new Map(), readMode: new Map([["Game", "eager"]]), d2: () => Promise.resolve("<svg/>") };
+  // read.cue derives a mode only `if e.server`; the card must not invent one for a tab table.
+  assertStringIncludes(await cardHtml("Tick", program.state.entities.Tick, ctx), "<b>read</b> —");
+  await assertRejects(() => cardHtml("Team", program.state.entities.Team, ctx), Error, "Team is a server entity with no read_mode fact row");
 });
 
 Deno.test("an effect that is not idempotent and states no reentry is a refusal, not a guess", async () => {

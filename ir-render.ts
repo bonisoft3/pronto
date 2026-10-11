@@ -63,7 +63,7 @@ const TIP: Record<string, string> = {
   level: "",
   delivery: "what a write here can claim when delivered twice — the level's word, and at level 4 the sink's: idempotent or reconciled is exactly-once, unknown at-most-once, repeat at-least-once",
   writers: "who writes rows here, each as kind:name and its ops — a screen's forms and what its markup writes past them, the terminal's charts, pipelines, computations, machines",
-  read: "how the terminal reads it: eager syncs the whole table, lazy loads what a view asks",
+  read: "how the terminal reads a server entity's table: eager syncs it whole, lazy loads what a view asks; a browser tier has no mode",
   roles: "the database roles that may touch the table, from durability and access",
   ir: "whether ir.html carries an element for it — review by consequence: a row that reaches another device or the server does",
   pk: "primary key",
@@ -189,6 +189,12 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
   const anyAccess = Object.values(entities).some((x) => x.access !== undefined);
   const authOn = ctx.program.capabilities.auth !== undefined || anyAccess;
   const writers = e.writers.map((w) => `${w.kind}:${w.by} ${w.ops.join("·")}`);
+  // A browser tier has no read mode (#Entity `read`), and every server entity
+  // has its `read_mode` row before the card is drawn (write.ts derives first).
+  const server = e.durability !== "tab" && e.durability !== "device";
+  const readMode = !server ? "—" : ctx.readMode.get(name) ?? (() => {
+    throw new Error(`${name} is a server entity with no read_mode fact row`);
+  })();
   // Delivery is the level's word (the record's table), and at level 4 the
   // sink's: idempotent or reconciled is exactly-once, unknown at-most-once,
   // repeat at-least-once.
@@ -258,7 +264,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
 <div class="strip"><span class="lbl">refers to</span><span class="rels">${pills(refs, 4, (r) => `<a class="rel out" href="#${esc(byTable.get(r.ref)?.ir ?? r.ref)}">${esc(r.ref)}<span class="col"> via ${esc(r.col)}</span></a>`) || '<span class="why">—</span>'}</span></div>
 <div class="strip"><span class="lbl">validations</span>${validations.length === 0 ? '<span class="why">none</span>' : `<ul class="vals">${validations.map(([n, v]) => `<li><code>${esc(n)}</code> <span class="note">${esc(v.note)}</span></li>`).join("")}</ul>`}</div>
 </div>
-<div class="dline"><span class="lbl derived">derived</span><span class="chips">${chip("writers", writers.join(", ") || "—", true)}${chip("read", e.durability === "server" ? "—" : (ctx.readMode.get(name) ?? "lazy"), true)}${chip("roles", authOn ? "anon · app_user · service" : "anon", true)}${chip("ir", owed ? "required" : "optional", true)}</span>
+<div class="dline"><span class="lbl derived">derived</span><span class="chips">${chip("writers", writers.join(", ") || "—", true)}${chip("read", readMode, true)}${chip("roles", authOn ? "anon · app_user · service" : "anon", true)}${chip("ir", owed ? "required" : "optional", true)}</span>
 <details class="more"><summary>the platform’s columns</summary><p class="why"><code>created_by</code>, <code>updated_by</code> → app_user, stamped by the platform on every write; not the author’s.</p></details></div>
 ${machinePanels.join("\n")}
 </div>`;
