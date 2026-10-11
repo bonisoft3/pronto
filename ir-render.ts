@@ -61,7 +61,7 @@ const TIP: Record<string, string> = {
   id: "the entity's type id, which a schema diff keys on across renames; each field keeps a gap-free ordinal, and a retired field stays as a tombstone",
   retired: "retired: the ordinal is kept so no later field takes it; nothing writes the column",
   level: "",
-  delivery: "what a write to this entity can claim when delivered twice — derived from the level and the op",
+  delivery: "what a write here can claim when delivered twice — the level's word, and at level 4 the sink's: idempotent or reconciled is exactly-once, unknown at-most-once, repeat at-least-once",
   writers: "who writes rows here, each as kind:name and its ops — a screen's forms and what its markup writes past them, the terminal's charts, pipelines, computations, machines",
   read: "how the terminal reads it: eager syncs the whole table, lazy loads what a view asks",
   roles: "the database roles that may touch the table, from durability and access",
@@ -189,7 +189,30 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
   const anyAccess = Object.values(entities).some((x) => x.access !== undefined);
   const authOn = ctx.program.capabilities.auth !== undefined || anyAccess;
   const writers = e.writers.map((w) => `${w.kind}:${w.by} ${w.ops.join("·")}`);
-  const delivery = machines.some((m) => m.level === "external") ? "exactly-once" : e.level === "compensable" ? "at-most-once" : "exactly-once";
+  // Delivery is the level's word (the record's table), and at level 4 the
+  // sink's: idempotent or reconciled is exactly-once, unknown at-most-once,
+  // repeat at-least-once.
+  const reentryOf = (x: Effect) =>
+    x.reentry ?? (() => {
+      throw new Error(`effect ${x.ir} is not idempotent and states no reentry`);
+    })();
+  const deliveryOf = (level: string, effect: Effect | null) => {
+    if (level === "compensable") return "at-most-once";
+    if (level !== "external") return "exactly-once";
+    if (effect === null) throw new Error(`${name}: an external machine invokes no effect`);
+    if (effect.sink.idempotent) return "exactly-once";
+    return { reconcile: "exactly-once", unknown: "at-most-once", repeat: "at-least-once" }[reentryOf(effect)];
+  };
+  const panels = machines.map((m) => {
+    const effect = m.invoke === null ? null : ctx.program.state.effects?.[m.invoke] ?? (() => {
+      throw new Error(`machine ${m.id} invokes ${m.invoke}, which is no declared effect`);
+    })();
+    return { ...m, effect, delivery: deliveryOf(m.level, effect) };
+  });
+  // The pivot's word is the entity's; the classes are not totally ordered, so
+  // external machines that differ each show theirs.
+  const external = [...new Set(panels.filter((m) => m.level === "external").map((m) => m.delivery))];
+  const delivery = external.length > 0 ? external.join(" · ") : deliveryOf(e.level, null);
   const glyphs = (f: Field) => [
     f.retired ? `<span class="g"${tip(TIP.retired)}>†</span>` : "",
     f.pk ? `<span class="g pk"${tip(TIP.pk)}>pk</span>` : "",
@@ -206,20 +229,15 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
     items.slice(0, keep).map(one).join("") +
     (items.length > keep ? `<details class="more inline"><summary>+${items.length - keep}</summary><span class="rels">${items.slice(keep).map(one).join("")}</span></details>` : "");
   const validations = Object.entries(e.validations ?? {});
-  const peer = (x: Effect) =>
-    x.sink.idempotent ? "idempotent" : `not idempotent · re-entry ${
-      esc(x.reentry ?? (() => {
-        throw new Error(`effect ${x.ir} is not idempotent and states no reentry`);
-      })())
-    }`;
-  const machinePanels = await Promise.all(machines.map(async (m) => {
-    const effect = m.invoke === null ? null : ctx.program.state.effects?.[m.invoke];
+  const peer = (x: Effect) => x.sink.idempotent ? "idempotent" : `not idempotent · re-entry ${esc(reentryOf(x))}`;
+  const machinePanels = await Promise.all(panels.map(async (m) => {
+    const effect = m.effect;
     const svg = await ctx.d2(chartD2(m.chart as { initial: string; states: Record<string, any> }));
     return `<section class="machine" data-kind="machine" id="${esc(m.id)}" data-of="${esc(e.ir)}">
 <span class="lbl derived">machine</span>
-<span class="mtitle">${esc(m.title)} ${chip("level", m.level, true, LEVEL_TIP[m.level])}</span>
+<span class="mtitle">${esc(m.title)} ${chip("level", m.level, true, LEVEL_TIP[m.level])}${chip("delivery", m.delivery, true)}</span>
 <div class="canvas">${svg}</div>${
-      effect === null || effect === undefined ? "" : `
+      effect === null ? "" : `
 <p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", m.invoke!, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? `bridge ${effect.sink.bridge}`)} · ${peer(effect)} · <span class="note">${esc(effect.note)}</span></p>`
     }
 </section>`;

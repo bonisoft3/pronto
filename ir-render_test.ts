@@ -1,7 +1,7 @@
 // The entity card the compiler draws into ir.html: where it goes, that a redraw
 // replaces it and only it, what it says, and the chart it draws.
 import { assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
-import { cardHtml, chartD2, fillRegions, irRegions, type Program } from "./ir-render.ts";
+import { cardHtml, chartD2, type Effect, fillRegions, irRegions, type Program } from "./ir-render.ts";
 
 const IR = `<!doctype html><html><head><title>x</title></head><body>
 <section id="Game" data-kind="entity" data-durability="device">
@@ -106,6 +106,26 @@ Deno.test("an effect that is not idempotent and states no reentry is a refusal, 
   const bare = { ...program, state: { ...program.state, effects: { charge: { ir: "charge", sink: { origin: "https://api.acquirer.example", idempotent: false }, note: "n" } } } } as Program;
   const ctx = { program: bare, charts: new Map(), readMode: new Map([["Game", "eager"]]), d2: () => Promise.resolve("<svg/>") };
   await assertRejects(() => cardHtml("Game", bare.state.entities.Game, ctx), Error, "effect charge is not idempotent and states no reentry");
+});
+
+// The record's delivery table: level 4 with idempotent or reconcile is
+// exactly-once, with unknown at-most-once, with repeat at-least-once; the
+// entity's chip is its pivot's word and the machine's panel carries its own.
+Deno.test("delivery follows the sink: the card's chip and the machine's panel say what the effect's re-entry admits", async () => {
+  const withEffect = (charge: Effect) => ({ ...program, state: { ...program.state, effects: { charge } } } as Program);
+  const ctx = (p: Program) => ({ program: p, charts: new Map(), readMode: new Map([["Game", "eager"]]), d2: () => Promise.resolve("<svg/>") });
+  const base = { ir: "charge", sink: { origin: "https://api.acquirer.example", idempotent: false }, note: "n" };
+  for (const [reentry, word] of [["reconcile", "exactly-once"], ["unknown", "at-most-once"], ["repeat", "at-least-once"]] as const) {
+    const p = withEffect({ ...base, reentry });
+    const html = await cardHtml("Game", p.state.entities.Game, ctx(p));
+    // Once in the header, once on the machine's title line.
+    assertEquals(html.split(`<b>delivery</b> ${word}`).length - 1, 2, reentry);
+    assertStringIncludes(html, `<b>level</b> external</span><span class="chip derived"`);
+  }
+  const idempotent = withEffect({ ...base, sink: { ...base.sink, idempotent: true } });
+  assertStringIncludes(await cardHtml("Game", idempotent.state.entities.Game, ctx(idempotent)), "<b>delivery</b> exactly-once");
+  // A machine below the pivot takes its level's word: Team's replicated machine-less row is exactly-once.
+  assertStringIncludes(await cardHtml("Team", program.state.entities.Team, { ...ctx(program), readMode: new Map([["Team", "lazy"]]) }), "<b>delivery</b> exactly-once");
 });
 
 Deno.test("a chart's D2 draws every arrow by its event, an invoking state dashed, a final state as a ring", () => {
