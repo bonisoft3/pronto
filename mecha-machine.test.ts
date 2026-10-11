@@ -131,7 +131,9 @@ Deno.test("a strict create emits a bare INSERT, and an op outside #RelationalOp 
   assertEquals(sql.includes("ON CONFLICT"), false);
   const refused = await cue(["export", "-", "-e", "out", "--out", "json"], challengeProgram("insert"));
   assertEquals(refused.success, false);
-  assertStringIncludes(refused.stderr, "op");
+  // The refusal is the op's: cue names the field and the word, so a fixture
+  // that fails elsewhere does not pass as a refused op.
+  assertStringIncludes(refused.stderr, 'effect.op: conflicting values "create" and "insert"');
 });
 
 Deno.test("mecha machine compiles mutation lifecycle reducer with relational effects", async () => {
