@@ -123,8 +123,8 @@ The program does not compile when:
 - a credential's header is one daprd would not forward (lowercase first) or one the host
   or HTTP sets, its secret is also among the handler's `secrets`, or a secret's name is a
   variable the cluster's own services read (`SERVICE_JWT`, `POSTGRES_PASSWORD`, …);
-- an effect is declared with an entity on table `schedule` or `airlock_wake`, or a
-  schedule named `airlock`: the wake's own names.
+- any entity takes table `schedule` or `airlock_wake` while an effect is declared, or a
+  schedule is named `airlock`: the wake's own names.
 
 Past compile time the guard refuses, while a row is in an invoking state, a change to
 its key fields or primary key and its deletion: the row is the ledger's instance until
