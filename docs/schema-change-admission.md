@@ -180,7 +180,7 @@ the next: `PGDATA` sits on the database container's writable layer
 ([mecha's schema](../../../libraries/mecha/docs/schema.md)), and a rebuilt image
 recreates the container empty. So no migration is emitted, and the database is
 rebuilt with its migrations: a container started again from an image built
-before the split keeps its domains, and the first subset an on-demand
+before the split keeps its domains, and the first subset a lazily read
 collection asks of one is Electric's 400, a ProgramError naming the table.
 Comparing the data directory with the initdb steps inside one container cannot
 see that, since the container carries the steps that built it. When a pronto

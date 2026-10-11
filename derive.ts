@@ -13,7 +13,7 @@
 // cap and order columns), verbatim from the reader, `writes`, every write it states (#Write), and
 // `files.handlers` as shell/handlers/<name>.js for every handler name. They
 // are facts, not decisions: what a program concludes from them — which tables
-// a browser loads on demand (sync.cue) — is CUE's to say.
+// the terminal reads lazily (read.cue) — is CUE's to say.
 // Screen names come from shell/screens/*.html; a stale html file for a screen
 // the program no longer declares fails the export rather than deriving in
 // silence.
@@ -366,9 +366,9 @@ export async function derive(appDir: string): Promise<void> {
         "statics: [for s in out.cluster.meta.statics {file: s.file, target: s.target}], " +
         "shared: {for k, s in code.surface.screens {(k): s.files.shared}}, " +
         "pendingLiterals: code.meta.design.pendingLiterals, " +
-        // Which tables a browser loads on demand and why, as the program
+        // Which tables the terminal reads lazily and why, as the program
         // decides it from the reads and writes the last derivation projected.
-        "sync: code.#sync, " +
+        "read: code.#read, " +
         // `program` rather than `code`: a field named for the value it holds would
         // shadow it inside the struct literal and export an incomplete `_`.
         "program: code}",
@@ -411,7 +411,7 @@ export async function derive(appDir: string): Promise<void> {
     statics: { file: string; target: string }[];
     shared: Record<string, string[]>;
     pendingLiterals: number;
-    sync: Record<string, { table: string; mode: string; reason: string }>;
+    read: Record<string, { table: string; mode: string; reason: string }>;
     program: Record<string, unknown>;
   } = JSON.parse(new TextDecoder().decode(exported.stdout));
   const entities = exp.entities;
@@ -926,7 +926,7 @@ export async function derive(appDir: string): Promise<void> {
       importFacts(exp.statics, imports),
       jessieFactRows(DENIED, modules),
       { enum_value },
-      { sync_mode: Object.entries(exp.sync).map(([entity, s]) => ({ entity, ...s })) },
+      { read_mode: Object.entries(exp.read).map(([entity, s]) => ({ entity, ...s })) },
       seed_vetted.length > 0 ? { seed_vetted } : {},
       diagramFacts(diagrams.nodes, diagrams.edges),
       i18nFacts(defaultLocale, locales, catalogs, allMsgRefs, allProse),
@@ -1060,8 +1060,8 @@ function selfTest(): void {
   ]);
   const wantKey = '\t"decision\\\\blob": "a \\"q\\" and a \\\\ and \\\\(x)"';
   const wantAccepts = '_irAccepts: {\n\t"test-one": ["accept-a","accept-b"]\n\t"test-none": []\n}\n\nif !_deriving {\n\tcode: meta: tests: [Id=string]: accepts: _irAccepts[Id]\n}\n';
-  // A screen's reads and writes, the rows sync.cue decides which tables load
-  // on demand from.
+  // A screen's reads, writes and charts as rows; read.cue decides each
+  // table's read mode from the first two.
   const block = renderDerived("p", [{
     name: "jogo",
     reads: [

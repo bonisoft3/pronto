@@ -568,15 +568,15 @@ import (
 	if durability != "tab" && durability != "device" {
 		access?: #Access
 	}
-	// How a browser syncs the table: "eager" takes the whole shape before a
-	// screen reads it; "on-demand" loads what each active query demands.
-	// #App.#sync decides it for every server entity (sync.cue), so an authored
+	// How the terminal reads the table: "eager" takes the whole shape before
+	// a screen reads it; "lazy" loads what each active query demands.
+	// #App.#read decides it for every server entity (read.cue), so an authored
 	// value it contradicts fails to unify.
 	if server {
-		sync: "eager" | "on-demand"
+		read: "eager" | "lazy"
 	}
 	if !server {
-		sync?: _|_
+		read?: _|_
 	}
 	// Who writes rows here, derived at #App (writers.cue) from every
 	// declaration that names the entity; the card prints each as
@@ -1171,7 +1171,7 @@ import (
 	// Absent, none: derive exports the program through the previous run's
 	// derived file, so a list the projection gained must be absent-tolerant for
 	// that one export, and a stale file costs a card's writers chip, not a
-	// sync mode.
+	// read mode.
 	charts: *[] | [...#Chart]
 	// A component-bearing screen is authored HERE, in CUE: `markup` is the
 	// screen's whole HTML, composed by interpolating component definitions

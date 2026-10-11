@@ -119,7 +119,7 @@ replay and a `put` be stated twice.
 | durability × seed, partial unique | `#Entity`: `device` refuses `seed`; a unique's `where` only below the cluster | yes, `cue vet` |
 | durability × validation edge | `validations.ts`: a cluster entity's edge to a `tab` or `device` one | yes, when `derive.ts` runs |
 | durability × schedule | `_scheduleShape`: `emits` is `server`, `done` is another, `live` entity | yes, `cue vet` |
-| durability × sync | `#App.#sync` (`sync.cue`): `offline` is eager, a browser rung has no mode, an authored mode the rule contradicts fails to unify | yes, `cue vet` |
+| durability × read | `#App.#read` (`read.cue`): `offline` is eager, a browser rung has no mode, an authored mode the rule contradicts fails to unify | yes, `cue vet` |
 | target × program | `_pagesBundle` ([release targets](release-targets.md)) | yes, `cue vet` |
 | effect level × `refused` arrow | `machineLint`, for an effect stating level 2; one naming no level escapes | partly, at lint ([machines](../../omnishell/docs/machines.md#effects)) |
 | durability × effect level | `#DurabilityEffectLevel`, in `schema.cue` and omnishell's `machine.cue` | no ([pending](../PENDING.md#the-lattice)) |

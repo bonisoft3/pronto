@@ -171,9 +171,9 @@ reads the level ([omnishell's half](../omnishell/PENDING.md#machines)) — makes
 the lattice's first join a refusal, and lets one copy of the table import the
 other.
 
-**Sync on demand takes only equality.** A view whose filter holds a boolean, a
-range or a pattern is read from the collection, so its table syncs whole
-([screens](docs/screens.md#the-reads-decide-how-a-table-syncs)): golaberto's
+**A lazy read takes only equality.** A view whose filter holds a boolean, a
+range or a pattern is read from the collection, so its table is read whole
+([screens](docs/screens.md#the-reads-decide-how-a-table-is-read)): golaberto's
 `game_card`, `team_game`, `position_chance`, `standing` and its directories.
 The view engine's clause vocabulary lacks those ops, and a boolean clause is
 refused because an optimistic row lacks the schema's defaulted booleans, which
@@ -191,7 +191,7 @@ read a retyped column block `ALTER COLUMN TYPE`,
 [schema change](docs/schema-change-admission.md)).
 
 **A capped view ordered by free text keeps its table eager**
-([screens](docs/screens.md#the-reads-decide-how-a-table-syncs)): golaberto's
+([screens](docs/screens.md#the-reads-decide-how-a-table-is-read)): golaberto's
 `stage_group`, read `limit=1` by `position,name`. Postgres picks the rows inside
 the cap by ICU root and the view orders them by the reader's locale; it goes on
 demand once both sides order by one collation, which TanStack's
@@ -199,7 +199,7 @@ demand once both sides order by one collation, which TanStack's
 
 **A reduce keeps every server table eager**, whatever event it is bound to. Its
 updates and effects name their entities in code, so derive cannot read them off
-the markup; no app with an on-demand table has one today. Closing it needs the
+the markup; no app with a lazy table has one today. Closing it needs the
 entities a reduce writes stated somewhere derive reads and the store enforces.
 
 **Two kinds of writer on one entity is shown, not refused.** `#Entity.writers`

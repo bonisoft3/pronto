@@ -151,7 +151,7 @@ type Context = {
   program: Program;
   /** Terminal charts by the table they run over, parsed. */
   charts: Map<string, { field: string; initial: string; states: Record<string, unknown>; on?: Record<string, unknown>; writes: string[] }[]>;
-  /** How the terminal reads each server entity (facts `sync_mode`). */
+  /** How the terminal reads each server entity (facts `read_mode`). */
   readMode: Map<string, string>;
   d2: (source: string) => Promise<string>;
 };
@@ -353,7 +353,7 @@ export async function renderIr(
   appDir: string,
   irPath: string,
   program: Program,
-  facts: { chart?: { table: string; field: string; machine: string }[]; sync_mode?: { entity: string; mode: string }[] },
+  facts: { chart?: { table: string; field: string; machine: string }[]; read_mode?: { entity: string; mode: string }[] },
   d2: (source: string) => Promise<string> = (source) => d2Svg(appDir, source),
 ): Promise<boolean> {
   const charts = new Map<string, { field: string; initial: string; states: Record<string, unknown>; on?: Record<string, unknown>; writes: string[] }[]>();
@@ -364,7 +364,7 @@ export async function renderIr(
     list.push({ ...parsed, writes: [row.table] });
     charts.set(row.table, list);
   }
-  const readMode = new Map((facts.sync_mode ?? []).map((r) => [r.entity, r.mode === "on-demand" ? "lazy" : r.mode]));
+  const readMode = new Map((facts.read_mode ?? []).map((r) => [r.entity, r.mode]));
   const ctx: Context = { program, charts, readMode, d2 };
   const html = await Deno.readTextFile(`${appDir}/${irPath}`);
   const byIr = new Map(Object.entries(program.state.entities).map(([name, e]) => [e.ir, { name, e }]));

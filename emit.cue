@@ -1188,7 +1188,7 @@ _cdcBeforeField: "__before"
 	// among the tables it subscribes.
 	_localTables: {for _, e in S.code.state.entities if !e.server {(e.table): true}}
 	_local: {for t, p in S._tablePath if S._localTables[t] != _|_ {(t): p}}
-	_tableKeys: {for t, n in S.code.#collections {(t): S.code._syncKey[n]}}
+	_tableKeys: {for t, n in S.code.#collections {(t): S.code._readKey[n]}}
 	_nonIdKeys: {for t, k in S._tableKeys if k != "id" {(t): k}}
 	// Natural keys only: a partial unique (`where:`) witnesses a slot's
 	// cardinality but cannot resolve an upsert, so it stays out of `uniques:`.
@@ -1243,8 +1243,8 @@ _cdcBeforeField: "__before"
 		}
 	}}
 	_validatedTables: [for _, e in S.code.state.entities if S._tables[e.table] != _|_ if len([for n, _ in e.validations {n}]) > 0 {e.table}]
-	// A browser tier has no sync to compare.
-	_onDemand: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.server if e.sync == "on-demand" {(e.table): "on-demand"}}
+	// A browser tier has no read mode to compare.
+	_lazy: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.server if e.read == "lazy" {(e.table): "lazy"}}
 	// The seeds #appMigrations.seeded leaves out: a browser durability has no
 	// migration to render into, so the terminal is told the rows instead.
 	_localSeeds: {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
@@ -1385,11 +1385,11 @@ _cdcBeforeField: "__before"
 			keys: S._nonIdKeys
 		}
 
-		// The tables a browser loads on demand (#Entity.sync): the terminal
-		// opens their shapes from now and loads each view's rows as a subset.
-		// Every other table syncs whole, so only these are named.
-		if len(S._onDemand) > 0 {
-			sync: S._onDemand
+		// The tables the terminal reads lazily (#Entity.read): it opens their
+		// shapes from now and loads each view's rows as a subset. Every other
+		// table is read whole, so only these are named.
+		if len(S._lazy) > 0 {
+			read: S._lazy
 		}
 
 		// RLS mirror for the terminal, in table-name space (through-parents
