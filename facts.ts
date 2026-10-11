@@ -65,7 +65,7 @@ export function programFacts(
   const transition: Record<string, unknown>[] = [];
   for (const c of charts) {
     const m = JSON.parse(c.machine) as Chart;
-    chart.push({ screen: c.screen, "table": c.table, field: m.field, initial: m.initial });
+    chart.push({ screen: c.screen, "table": c.table, field: m.field, initial: m.initial, machine: c.machine });
     for (const [state, body] of Object.entries(m.states)) {
       chart_state.push({ screen: c.screen, "table": c.table, field: m.field, state });
       const own = body.on ?? {};
@@ -243,9 +243,6 @@ export function bijectionFacts(
   irRouteByScreen: Map<string, string | null>,
   decls: { kind: string; id: string; where: string; owed?: boolean }[],
   code: Record<string, unknown>,
-  // Kinds whose program side the ir may still lack without failing: said as an
-  // advisory until the compiler draws them (decisions/2026-10-10-hatches.md).
-  advisory: readonly string[] = [],
 ): Facts {
   const claim: Record<string, unknown>[] = [];
   for (const [kind, ids] of irByKind) {
@@ -266,23 +263,16 @@ export function bijectionFacts(
     // disagreement is a finding. A tenth compared kind is a row; the query that
     // reads them does not change. The wording is authored here rather than
     // generated, because what a finding says is what makes it actionable.
-    pairing: comparedKinds.flatMap((kind): Record<string, unknown>[] =>
-      advisory.includes(kind)
-        ? [
-          { severity: "error", kind_a: kind, rung_a: "ir", kind_b: kind, rung_b: "program", noun: kind, a_missing: "has no counterpart in program.cue", b_missing: null },
-          { severity: "advisory", kind_a: kind, rung_a: "ir", kind_b: kind, rung_b: "program", noun: kind, a_missing: null, b_missing: "has no element in ir.html yet; the compiler will draw it" },
-        ]
-        : [{
-          severity: "error",
-          kind_a: kind,
-          rung_a: "ir",
-          kind_b: kind,
-          rung_b: "program",
-          noun: kind,
-          a_missing: "has no counterpart in program.cue",
-          b_missing: "has no counterpart in ir.html",
-        }]
-    ),
+    pairing: comparedKinds.map((kind) => ({
+      severity: "error",
+      kind_a: kind,
+      rung_a: "ir",
+      kind_b: kind,
+      rung_b: "program",
+      noun: kind,
+      a_missing: "has no counterpart in program.cue",
+      b_missing: "has no counterpart in ir.html",
+    })),
     ir_route: [...irRouteByScreen].map(([id, route]) => ({ id, route })),
     program_route: Object.entries(screens).map(([key, s]) => ({
       id: s.ir,

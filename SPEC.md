@@ -182,7 +182,13 @@ navigation from the brief) plus data attributes:
   mecha machine's and an effect's their declared `ir`. Presence is by reach
   (review by consequence): a `tab` entity, its validations, its charts and the
   handlers only they name are machine-checked and owe no element; `device` or
-  above does
+  above does. **The compiler draws the entity's card**: right after an
+  `entity` element's opening tag, `write.ts` keeps a generated region
+  (`<!-- pronto:card -->…<!-- /pronto:card -->`, never hand-edited) holding
+  the card — its chips, field names, referrers, references, validations, the
+  derived line, and for an entity a machine moves, the chart as a D2 picture
+  carrying the `machine` (and `effect`) element — and links `ir/card.css` from
+  the head. The author's prose stays outside the region
 - `data-of` — owner (states belong to a screen, tests to an entity/pipeline/screen)
 - `data-durability` — durability on entities (`tab | device | server | live |
   offline`), the guarantee ladder of `#Entity.durability`

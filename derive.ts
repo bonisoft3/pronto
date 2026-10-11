@@ -798,7 +798,7 @@ export async function derive(appDir: string): Promise<void> {
       ...handlersOwed(declarations(exp.program), chartSites, programEntities, stemToIr),
       ...chartDeclarations(chartSites, programEntities),
     ];
-    bijection = bijectionFacts(KINDS, irIds(irHtml), irRoutes(irHtml), decls, exp.program, ["machine"]);
+    bijection = bijectionFacts(KINDS, irIds(irHtml), irRoutes(irHtml), decls, exp.program);
   } catch (e) {
     fail(`${exp.ir}: ${(e as Error).message}`);
   }

@@ -66,7 +66,7 @@ const SCHEMA: Record<string, Record<string, string>> = {
   field: { entity: "VARCHAR", name: "VARCHAR", type: "VARCHAR", cel: "VARCHAR" },
   screen: { name: "VARCHAR" },
   reads: { screen: "VARCHAR", entity: "VARCHAR" },
-  chart: { screen: "VARCHAR", table: "VARCHAR", field: "VARCHAR", initial: "VARCHAR" },
+  chart: { screen: "VARCHAR", table: "VARCHAR", field: "VARCHAR", initial: "VARCHAR", machine: "VARCHAR" },
   chart_state: { screen: "VARCHAR", table: "VARCHAR", field: "VARCHAR", state: "VARCHAR" },
   transition: {
     screen: "VARCHAR",

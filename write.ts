@@ -21,6 +21,7 @@ import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
 import { parseHeld, seedSql, type SeedData } from "./seed.ts";
 import { releaseManifest, type ReleaseContent } from "./release.ts";
+import { type Program, renderIr } from "./ir-render.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Emission = {
@@ -373,4 +374,22 @@ if ((await derivedText()) !== settled) {
   await derive(appDir);
   if ((await derivedText()) !== again) fail("derivation did not settle in two passes");
 }
+// The cards ir.html carries are drawn from the settled program and the emitted
+// screens; a redraw moves ir.html, whose hash the facts hold, so derive runs
+// once more to record it.
+if (await drawIr()) await derive(appDir);
 console.error(`pronto write: ${written.length} files written → ${appDir}`);
+
+async function drawIr(): Promise<boolean> {
+  const lift = (await derivedText()).includes("@tag(derive,") ? ["-t", "derive=true"] : [];
+  const out = await new Deno.Command("cue", {
+    args: ["export", ...lift, ".", "-e", "{program: code, ir: code.meta.ir.source}", "--out", "json"],
+    cwd: appDir,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!out.success) fail(new TextDecoder().decode(out.stderr));
+  const { program, ir } = JSON.parse(new TextDecoder().decode(out.stdout)) as { program: Program; ir: string };
+  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/facts.json`));
+  return await renderIr(appDir, ir, program, facts);
+}
