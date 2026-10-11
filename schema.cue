@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bonisoft3/pronto/clusters:mecha"
 	"github.com/bonisoft3/pronto/scales"
 	"github.com/bonisoft3/pronto/terminals:omnishell"
 	grammar "github.com/bonisoft3/mecha/pgroll"
@@ -688,6 +689,9 @@ import (
 	// App-relative paths of the committed wasm modules its jobs call, each
 	// named in a job by its file's stem.
 	wasm: *[] | [...string]
+	// What its module may use past the language, as an omnishell module
+	// declares Intl: Crypto among them. Undeclared, a use is a refusal.
+	endowments: *[] | [...mecha.#CageEndowment]
 	onComplete?: string & =~"^[a-z_][a-z0-9_]{0,62}$"
 }
 
@@ -885,19 +889,13 @@ import (
 	payload: string
 }
 
-#SagaEffect: {
-	saga:            string
-	idempotencyKey?: string | {raw: string}
-	payload?:        {[string]: _}
-}
-
 #StreamEffect: {
 	stream:  string
 	signal?: "refresh" | "checkpoint" | "flush"
 	key?:    string | {raw: string}
 }
 
-#MechaEffect: #RelationalEffect | #FunctionEffect | #NotifyEffect | #SagaEffect | #StreamEffect
+#MechaEffect: #RelationalEffect | #FunctionEffect | #NotifyEffect | #StreamEffect
 
 #MechaAction: {
 	assign?: {[string]: _}
@@ -913,10 +911,25 @@ import (
 
 #MechaTransitionValue: string | #MechaTransition | [...#MechaTransition]
 
+// An arrow out of an invoking state. Its actions read the ledger's outcome as
+// the PL/pgSQL variable `outcome`: {target, kind, data, reconciled}, where kind
+// is done, failed or unknown.
+#OutcomeTransition: string | {
+	target:   string
+	actions?: #MechaAction | [...#MechaAction]
+}
+
 #MechaState: {
 	type?:    "final" | "normal"
 	on?: [Event=string]: #MechaTransitionValue
 	after?: [DelayMs=string]: #MechaTransitionValue
+	// XState's invoke, whose actor is an external effect's handler: entering
+	// the state claims the effect, and only its outcome leaves.
+	invoke?: {
+		src:     string
+		onDone:  #OutcomeTransition
+		onError: #OutcomeTransition
+	}
 	entry?: #MechaAction | [...#MechaAction]
 	exit?:  #MechaAction | [...#MechaAction]
 }
@@ -936,16 +949,61 @@ import (
 	}
 }
 
-// A Cortex durable saga executed via DBOS over PostgreSQL — Level 4 exterior effects,
-// automatic step idempotency, and transactional compensation.
-#Saga: {
-	name:        string
-	ir:          *name | string
-	entity?:     string
-	steps?:      [...string]
-	timeout?:    string
-	maxRetries?: int
+// Level 4: what a machine's invoking state asks of the world outside the
+// cluster, performed by mecha's airlock against one sink and recorded in the
+// ledger (docs/decisions/2026-10-03-external-effects.md).
+#ExternalEffect: {
+	// Also the sink's Dapr binding name, so a DNS label.
+	name:   =~"^[a-z][a-z0-9-]*$"
+	ir:     *name | string
+	entity: string
+	// The ledger key is "<name>:" and these fields of the entity: one as its
+	// text, several JSON-encoded. It is also the sink's idempotency key, so it
+	// names the instance and never the request's content.
+	key: *["id"] | [string, ...string]
+	// Frozen into the ledger at enqueue: "NEW.<col>" reads the row, {raw: sql}
+	// is an expression, anything else a literal.
+	request: {[string]: _} | *{}
+	// An https origin naming a host by a DNS name of two labels or more, as
+	// mecha spells it (#Origin); a name that resolves inward is not refused,
+	// since the airlock's daprd dials what its binding names, and that is the
+	// record's residual. No userinfo: the sink's credential, where it takes
+	// one, is a header the airlock adds to every call from a declared secret,
+	// which the handler never holds. Or a declared bridge, for a sink that
+	// does not speak HTTP.
+	sink: {origin: mecha.#Origin, credential?: #Credential} | {bridge: string}
+	// What a handler does when the ledger shows an earlier entry that may have
+	// reached the sink. An idempotent sink is simply called again.
+	{sink: idempotent: true} | {
+		sink: idempotent: false
+		reentry: *"reconcile" | "unknown" | {repeat: string & !=""}
+	}
+	// Thrown errors tolerated before the outcome is unknown.
+	attempts: *5 | int & >=1
+	// The environment variables whose values the handler is handed at each
+	// call, a key to sign with being the common case. Never in the ledger.
+	secrets?: [...#SecretName]
+	// What its handler may use past the language, as an omnishell module
+	// declares Intl: Crypto to sign with, TextEncoder to give it bytes.
+	endowments?: [...mecha.#CageEndowment]
 }
+
+// What a sink reads a caller's credential from: `Authorization: Bearer <key>`
+// is `{scheme: "Bearer", secret: "KEY"}`; an `X-Api-Key` header is
+// `{header: "X-Api-Key", secret: "KEY"}`; `Basic` takes the secret already
+// base64-encoded as `user:password`. The header's first letter is uppercase,
+// which is what daprd forwards as a header, and it is none of the host's or
+// HTTP's own. A header other than Authorization follows a redirect to any
+// host, which the record states as the residual.
+#Credential: {
+	header: *"Authorization" | =~"^[A-Z][A-Za-z0-9-]*$" & !~"(?i)^(Idempotency-Key|Content-Type|Content-Length|Accept|Host|Transfer-Encoding|Traceparent|Tracestate|Baggage)$"
+	scheme?: =~"^[A-Za-z][A-Za-z0-9-]*$"
+	secret:  #SecretName
+}
+
+// An environment variable an effect declares, never one the cluster's own
+// services read.
+#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS)$"
 
 // A DuckStream streaming IVM pipeline executed via Feldera on the server
 // and emulated reactively via DuckDB-WASM in the client browser.
@@ -1303,7 +1361,13 @@ import (
 		computations: [Name=string]: #Computation & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
 		machines?: [Name=string]: #MechaMachine & {name: Name}
-		sagas?: [Name=string]: #Saga & {name: Name}
+		// Each also a Dapr output binding of the airlock's, and a handler the
+		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
+		effects?: [Name=string]: #ExternalEffect & {name: Name}
+		// What an effect's sink reaches through when it does not speak HTTP:
+		// a container on the airlock's outbound network speaking the other
+		// protocol to one declared server (mecha's #Bridge).
+		bridges?: [Name=string]: mecha.#Bridge & {name: Name}
 		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
 		// Seed rows held as data rather than stated: a JSON file beside the
 		// program, outside its package, keyed by entity name —
@@ -1402,6 +1466,9 @@ import (
 		handlers: [Name=string]: {ir: *Name | string, of: string, src: #Jessie, note: string}
 		design: #Design
 		flows: [Name=string]: #Flow & {name: Name}
+		// What a terminal module may use past the language, keyed by its
+		// app-relative path: the one spelling every loader and lint read, and
+		// a key naming no module is refused.
 		endowments?: [Path=string]: [...#SafeEndowment]
 	}
 
@@ -1486,23 +1553,111 @@ import (
 				[if m.states != _|_ for _, st in m.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
 				[if m.states != _|_ for _, st in m.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
 				[if m.states != _|_ for _, st in m.states if st.after != _|_ for _, tr in st.after for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+				[if m.states != _|_ for _, st in m.states if st.invoke != _|_ for tr in [st.invoke.onDone, st.invoke.onError] for t in [if (tr & string) != _|_ {[]}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
 			])
 		}
 	]
 
-	_declaredSagas: [for sName, _ in [if A.state.sagas != _|_ {A.state.sagas}, {}][0] {sName}]
-	_undeclaredSagas: [
-		for ma in _machineActions
-		for act in ma.actions
-		for eff in [if act.effect != _|_ {[if (act.effect & [...]) != _|_ {act.effect}, [act.effect]][0]}, []][0]
-		if (eff & #SagaEffect) != _|_
-		if !list.Contains(_declaredSagas, eff.saga)
-		{
-			machine: ma.machine
-			saga:    eff.saga
-		}
+	_entityTable: {for n, e in A.state.entities {(n): e.table, (e.table): e.table}}
+	_effects: [if A.state.effects != _|_ {A.state.effects}, {}][0]
+	_invokes: [
+		if A.state.machines != _|_
+		for mName, m in A.state.machines
+		if m.states != _|_
+		for sName, st in m.states
+		if st.invoke != _|_ {
+			machine: mName
+			state:   sName
+			entity:  m.entity
+			src:     st.invoke.src
+			others:  st.on != _|_ || st.after != _|_
+			final: [if st.type != _|_ {st.type == "final"}, false][0]
+			states: [for n, _ in m.states {n}]
+			// The outcome arrows, onDone first, each with its target and actions.
+			arrows: [for tr in [st.invoke.onDone, st.invoke.onError] {
+				target: [if (tr & string) != _|_ {tr}, tr.target][0]
+				actions: [for t in [if (tr & string) != _|_ {[]}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}]
+			}]
+		},
 	]
-	_sagaRefusal: [if len(_undeclaredSagas) == 0 {true}, "machine \(_undeclaredSagas[0].machine) references undeclared saga: \(_undeclaredSagas[0].saga)"][0] & true
+	// An invoking state is left only by its outcome, so an outcome that cannot
+	// be delivered leaves the row there for good: the guard would refuse the
+	// move, and the airlock would retry the sink until its attempts ran out.
+	_invokeViolations: list.Concat([
+		[for i in _invokes if _effects[i.src] == _|_ {
+			"machine \(i.machine) state \(i.state) invokes undeclared effect: \(i.src)"
+		}],
+		[for i in _invokes if i.others {
+			"machine \(i.machine) state \(i.state) invokes \(i.src) and declares on or after: only the effect's outcome leaves it"
+		}],
+		[for i in _invokes if _effects[i.src] != _|_ if _entityTable[_effects[i.src].entity] != _|_ if _entityTable[_effects[i.src].entity] != _entityTable[i.entity] {
+			"machine \(i.machine) state \(i.state) invokes \(i.src), an effect of \(_effects[i.src].entity), not of the machine's \(i.entity)"
+		}],
+		[for n, _ in _effects let c = len([for i in _invokes if i.src == n {i}]) if c != 1 {
+			"effect \(n) is invoked by \(c) states: exactly one invokes it, so its ledger key names one instance of one state"
+		}],
+		[for n, x in _effects if _entityTable[x.entity] == _|_ {
+			"effect \(n) names undeclared entity: \(x.entity)"
+		}],
+		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity if !e.server {
+			"effect \(n) is of \(en), whose rows do not live in the cluster: an effect fired from every tab would be performed by every tab"
+		}],
+		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity for k in x.key if !list.Contains([for f in e.fields {f.name}], k) {
+			"effect \(n) keys on \(k), which is not a field of \(en)"
+		}],
+		[for i in _invokes if i.final {
+			"machine \(i.machine) state \(i.state) invokes \(i.src) and is final: no outcome could leave it"
+		}],
+		[for i in _invokes for ar in i.arrows if !list.Contains(i.states, ar.target) {
+			"machine \(i.machine) state \(i.state) invokes \(i.src) with an outcome target that is no state: \(ar.target)"
+		}],
+		[for i in _invokes for ar in i.arrows if ar.target == i.state {
+			"machine \(i.machine) state \(i.state) invokes \(i.src) with an outcome targeting itself: the row would never leave"
+		}],
+		[for i in _invokes if i.arrows[0].target == i.arrows[1].target if len(i.arrows[0].actions) + len(i.arrows[1].actions) > 0 {
+			"machine \(i.machine) state \(i.state): onDone and onError share target \(i.arrows[0].target) and carry actions, which the guard would run for the wrong outcome"
+		}],
+		[for i in _invokes for ar in i.arrows for a in ar.actions if a.raise != _|_ {
+			"machine \(i.machine) state \(i.state): an outcome's actions raise, which would refuse the recorded outcome's delivery"
+		}],
+		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity for k, v in x.request if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in e.fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
+			"effect \(n) request \(k) reads \(v), which is not a field of \(en)"
+		}],
+		// The credential is the airlock's alone: a handler handed it could put
+		// it in a body the ledger keeps.
+		[for n, x in _effects if x.sink.credential != _|_ if x.secrets != _|_ if list.Contains(x.secrets, x.sink.credential.secret) {
+			"effect \(n) lists its credential's \(x.sink.credential.secret) among the handler's secrets"
+		}],
+		// The names an effect's cluster keeps for the wake: the ticker's
+		// schedule table, its row named airlock, and the wake's own table.
+		[if len(_effects) > 0 for en, e in A.state.entities if e.table == "schedule" || e.table == "airlock_wake" {
+			"entity \(en) takes table \(e.table), which the airlock's wake keeps"
+		}],
+		[if len(_effects) > 0 if A.state.schedules != _|_ for sn, _ in A.state.schedules if sn == "airlock" {
+			"schedule airlock is the airlock's own wake"
+		}],
+	])
+	_invokeRefusal: [if len(_invokeViolations) == 0 {true}, _invokeViolations[0]][0] & true
+
+	_declaredBridges: [if A.state.bridges != _|_ {A.state.bridges}, {}][0]
+	_bridgeViolations: list.Concat([
+		[for n, x in _effects if x.sink.bridge != _|_ if _declaredBridges[x.sink.bridge] == _|_ {
+			"effect \(n) reaches undeclared bridge: \(x.sink.bridge)"
+		}],
+		[for b, _ in _declaredBridges if len([for _, x in _effects if x.sink.bridge != _|_ if x.sink.bridge == b {x}]) == 0 {
+			"bridge \(b) is reached by no effect"
+		}],
+		// Past a bridge nothing is the platform's to promise, and a bridge
+		// answers no query by key, so a bridged effect states what a repeat
+		// costs rather than claiming idempotence or a reconciliation.
+		[for n, x in _effects if x.sink.bridge != _|_ if x.sink.idempotent {
+			"effect \(n) reaches bridge \(x.sink.bridge) as an idempotent sink: past a bridge nothing is the platform's to promise"
+		}],
+		[for n, x in _effects if x.sink.bridge != _|_ if !x.sink.idempotent if x.reentry == "reconcile" {
+			"effect \(n) reaches bridge \(x.sink.bridge) and reconciles: a bridge answers no query, so state reentry unknown or {repeat: why}"
+		}],
+	])
+	_bridgeRefusal: [if len(_bridgeViolations) == 0 {true}, _bridgeViolations[0]][0] & true
 
 	_declaredStreams: [for dsName, _ in [if A.state.duckstreams != _|_ {A.state.duckstreams}, {}][0] {dsName}]
 	_undeclaredStreams: [

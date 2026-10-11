@@ -1,0 +1,114 @@
+// The guard emitted for an invoking state, run in postgres: the claim and the
+// enqueue share the transition's commit, only the ledger's outcome leaves the
+// state, and a performed key is never claimed twice. Graphile's add_job is a
+// recording stand-in with its parameter names, so a renamed argument fails here;
+// the real queue is the airlock's to test.
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
+
+const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
+
+async function run(cmd: string, args: string[], stdin?: string) {
+  const child = new Deno.Command(cmd, { args, stdin: stdin === undefined ? "null" : "piped", stdout: "piped", stderr: "piped" }).spawn();
+  if (stdin !== undefined) {
+    const writer = child.stdin.getWriter();
+    await writer.write(new TextEncoder().encode(stdin));
+    await writer.close();
+  }
+  const res = await child.output();
+  return { ok: res.success, out: new TextDecoder().decode(res.stdout).trim(), err: new TextDecoder().decode(res.stderr) };
+}
+
+Deno.test({ name: "an invoking state's guard claims, enqueues and admits only the recorded outcome", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
+  const files = await emitFiles(paymentProgram());
+  const container = `pronto-effects-${crypto.randomUUID().slice(0, 8)}`;
+  const started = await run("docker", ["run", "-d", "--rm", "--name", container, "-e", "POSTGRES_PASSWORD=pw", POSTGRES]);
+  if (!started.ok) throw new Error(started.err);
+  const psql = (sql: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-U", "postgres"], sql);
+  try {
+    for (let i = 0; !(await run("docker", ["exec", container, "pg_isready", "-qU", "postgres"])).ok; i++) {
+      if (i > 60) throw new Error("postgres did not start");
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    const setup = await psql(`
+      CREATE ROLE anon; CREATE ROLE app_user; CREATE ROLE electric;
+      CREATE SCHEMA graphile_worker;
+      CREATE TABLE graphile_worker.added (identifier text, payload json, job_key text, max_attempts int);
+      CREATE FUNCTION graphile_worker.add_job(identifier text, payload json DEFAULT NULL, queue_name text DEFAULT NULL,
+        run_at timestamptz DEFAULT NULL, max_attempts int DEFAULT NULL, job_key text DEFAULT NULL, priority int DEFAULT NULL,
+        flags text[] DEFAULT NULL, job_key_mode text DEFAULT 'replace') RETURNS void LANGUAGE sql AS
+        $$ INSERT INTO graphile_worker.added VALUES (identifier, payload, job_key, max_attempts) $$;
+      CREATE TABLE payment (id uuid PRIMARY KEY, status text NOT NULL, total numeric(12,2) NOT NULL, failure text);
+      ${await Deno.readTextFile(new URL("../../libraries/mecha/services/ticker/schedule.sql", import.meta.url))}
+      ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/airlock.sql", import.meta.url))}
+      ${files["services/database/migrations/010_machines.sql"].text}
+      INSERT INTO payment VALUES ('00000000-0000-0000-0000-000000000001', 'pending', 12.50, NULL),
+                                 ('00000000-0000-0000-0000-000000000002', 'pending', 7.00, NULL);`);
+    if (!setup.ok) throw new Error(setup.err);
+    const one = "00000000-0000-0000-0000-000000000001";
+    const two = "00000000-0000-0000-0000-000000000002";
+
+    await t.step("a rolled-back transition claims and enqueues nothing", async () => {
+      const r = await psql(`BEGIN; UPDATE payment SET status = 'charging' WHERE id = '${one}'; ROLLBACK;
+        SELECT (SELECT count(*) FROM airlock.external_effect_ledger) || ',' || (SELECT count(*) FROM graphile_worker.added);`);
+      assertEquals(r.out, "0,0");
+    });
+
+    await t.step("a committed transition claims the ledger, enqueues once, and arms the ticker's wake", async () => {
+      // The airlock's step seeds the row ticked; a claim clears its watermark.
+      assertEquals((await psql(`SELECT last_tick_at IS NOT NULL FROM schedule WHERE name = 'airlock';`)).out, "t");
+      const r = await psql(`UPDATE payment SET status = 'charging' WHERE id = '${one}';
+        SELECT row::text || ' ' || request::text FROM airlock.external_effect_ledger WHERE key = 'charge:${one}';
+        SELECT identifier || ' ' || payload::text || ' ' || job_key || ' ' || max_attempts FROM graphile_worker.added;
+        SELECT cron IS NULL AND due_at IS NOT NULL AND last_tick_at IS NULL FROM schedule WHERE name = 'airlock';`);
+      assertEquals(r.out.split("\n"), [
+        `{"id": "${one}"} {"amount": 12.50, "currency": "BRL"}`,
+        `external_effect {"key" : "charge:${one}"} charge:${one} 30`,
+        "t",
+      ]);
+    });
+
+    await t.step("an outcome the ledger does not hold is refused", async () => {
+      const r = await psql(`UPDATE payment SET status = 'settled' WHERE id = '${one}';`);
+      assertEquals(r.ok, false);
+      assertStringIncludes(r.err, `payment leaves charging only by the recorded outcome of charge:${one}`);
+    });
+
+    await t.step("the recorded outcome leaves, and its actions read it", async () => {
+      const r = await psql(`BEGIN;
+        UPDATE airlock.external_effect_ledger SET outcome = '{"target": "failed", "kind": "unknown"}', settled_at = now() WHERE key = 'charge:${one}';
+        UPDATE payment SET status = 'failed' WHERE id = '${one}';
+        COMMIT;
+        SELECT status || ',' || failure FROM payment WHERE id = '${one}';`);
+      if (!r.ok) throw new Error(r.err);
+      assertEquals(r.out, "failed,unknown");
+    });
+
+    await t.step("entering again under a performed key is an error, never a second claim", async () => {
+      const r = await psql(`UPDATE payment SET status = 'pending' WHERE id = '${one}';
+        UPDATE payment SET status = 'charging' WHERE id = '${one}';`);
+      assertEquals(r.ok, false);
+      assertStringIncludes(r.err, `external effect charge:${one} was already performed: entering charging again needs a new key`);
+      assertEquals((await psql(`SELECT count(*) FROM graphile_worker.added;`)).out, "1");
+    });
+
+    await t.step("onDone leaves to its own target", async () => {
+      const r = await psql(`UPDATE payment SET status = 'charging' WHERE id = '${two}';
+        BEGIN;
+        UPDATE airlock.external_effect_ledger SET outcome = '{"target": "settled", "kind": "done"}' WHERE key = 'charge:${two}';
+        UPDATE payment SET status = 'settled' WHERE id = '${two}';
+        COMMIT;
+        SELECT status FROM payment WHERE id = '${two}';`);
+      if (!r.ok) throw new Error(r.err);
+      assertEquals(r.out, "settled");
+    });
+
+    await t.step("the ledger is closed to the cluster's client roles", async () => {
+      const r = await psql(`SET ROLE app_user; SELECT count(*) FROM airlock.external_effect_ledger;`);
+      assertEquals(r.ok, false);
+      assertStringIncludes(r.err, "permission denied");
+    });
+  } finally {
+    await run("docker", ["rm", "-f", container]);
+  }
+} });

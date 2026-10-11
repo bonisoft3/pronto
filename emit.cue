@@ -335,7 +335,6 @@ _sqlType: {
 	_isRel:    (EF.effect & #RelationalEffect) != _|_
 	_isCall:   (EF.effect & #FunctionEffect) != _|_
 	_isNotify: (EF.effect & #NotifyEffect) != _|_
-	_isSaga:   (EF.effect & #SagaEffect) != _|_
 	_isStream: (EF.effect & #StreamEffect) != _|_
 
 	_rel: EF.effect
@@ -402,54 +401,6 @@ _sqlType: {
 
 	_defaultKey: [if EF.op == "DELETE" {"OLD.id::text"}, "NEW.id::text"][0]
 
-	_rawSagaKey: [
-		if _isSaga if EF.effect["idempotencyKey"] != _|_ {
-			[
-				if (EF.effect.idempotencyKey & {raw: string}) != _|_ {
-					(EF.effect.idempotencyKey & {raw: string}).raw + "::text"
-				},
-				if (EF.effect.idempotencyKey & string) != _|_ {
-					[
-						if strings.HasPrefix((EF.effect.idempotencyKey & string), "NEW.") || strings.HasPrefix((EF.effect.idempotencyKey & string), "OLD.") {
-							(EF.effect.idempotencyKey & string) + "::text"
-						},
-						"'" + strings.Replace((EF.effect.idempotencyKey & string), "'", "''", -1) + "'",
-					][0]
-				},
-				_defaultKey,
-			][0]
-		},
-		_defaultKey,
-	][0]
-
-	_sagaPayload: [
-		if _isSaga if EF.effect["payload"] != _|_ {
-			"jsonb_build_object(" + strings.Join([for k, v in EF.effect.payload {
-				_valSql: [
-					if (v & {raw: string}) != _|_ {(v & {raw: string}).raw},
-					if (v & string) != _|_ if strings.HasPrefix((v & string), "NEW.") || strings.HasPrefix((v & string), "OLD.") {(v & string)},
-					if (v & string) != _|_ if !strings.HasPrefix((v & string), "NEW.") && !strings.HasPrefix((v & string), "OLD.") {"'" + strings.Replace((v & string), "'", "''", -1) + "'"},
-					if (v & bool) != _|_ {[if (v & bool) {"true"}, "false"][0]},
-					if (v & number) != _|_ {"\(v)"},
-					if (v & {...}) != _|_ {"'" + strings.Replace(json.Marshal(v), "'", "''", -1) + "'::jsonb"},
-					if (v & [...]) != _|_ {"'" + strings.Replace(json.Marshal(v), "'", "''", -1) + "'::jsonb"},
-					"null",
-				][0]
-				"'\(k)', " + _valSql
-			}], ", ") + ")"
-		},
-		"'{}'::jsonb"
-	][0]
-
-	_sagaSql: [if _isSaga {
-		"""
-		        INSERT INTO "saga" ("id", "name", "idempotency_key", "payload", "status")
-		        VALUES (gen_random_uuid()::text, '\(EF.effect.saga)', \(_rawSagaKey), \(_sagaPayload)::jsonb, 'pending')
-		        ON CONFLICT ("name", "idempotency_key") DO NOTHING;
-		        PERFORM pg_notify('cortex_saga_queue', jsonb_build_object('saga', '\(EF.effect.saga)', 'key', \(_rawSagaKey))::text);
-		"""
-	}, ""][0]
-
 	_streamSignal: [if _isStream if EF.effect["signal"] != _|_ {EF.effect.signal}, "refresh"][0]
 	_rawStreamKey: [
 		if _isStream if EF.effect["key"] != _|_ {
@@ -476,7 +427,7 @@ _sqlType: {
 		"""
 	}, ""][0]
 
-	out: [if _isRel {_relSql}, if _isCall {_callSql}, if _isNotify {_notifySql}, if _isSaga {_sagaSql}, if _isStream {_streamSql}, ""][0]
+	out: [if _isRel {_relSql}, if _isCall {_callSql}, if _isNotify {_notifySql}, if _isStream {_streamSql}, ""][0]
 }
 
 #mechaActionSql: AC={
@@ -511,6 +462,9 @@ _sqlType: {
 	field: string
 	name:  string
 	state: #MechaState
+	// The effect each invoking state of the machine claims on entry.
+	invokes: [string]: #ExternalEffect
+	pk: [...string]
 
 	_type: [if ST.state["type"] != _|_ {ST.state["type"]}, "normal"][0]
 	_isFinal: _type == "final"
@@ -542,7 +496,15 @@ _sqlType: {
 		},
 	]}, []][0]
 
-	_allTransitions: list.Concat([_onTransitions, _afterTransitions])
+	_invoking: ST.state["invoke"] != _|_
+	_invokeTransitions: [if _invoking for tr in [ST.state.invoke.onDone, ST.state.invoke.onError] {
+		[if (tr & string) != _|_ {{target: tr, actions: []}}, {
+			target:  tr.target
+			actions: [if tr["actions"] != _|_ {[if (tr.actions & [...]) != _|_ {tr.actions}, [tr.actions]][0]}, []][0]
+		}][0]
+	}]
+
+	_allTransitions: list.Concat([_onTransitions, _afterTransitions, _invokeTransitions])
 
 	_validTargets: [for t in _allTransitions if t["target"] != _|_ {t.target}]
 	_validTargetLits: [for t in _validTargets {"'\(t)'"}]
@@ -565,17 +527,30 @@ _sqlType: {
 			"""
 		}, ""][0]
 		_actionLines: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
+		_enterLines: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
 		"""
 		      IF NEW."\(ST.field)" = '\(t.target)' THEN
-		\(_guardLine)\(strings.Join(_actionLines, "\n"))
+		\(_guardLine)\(strings.Join(list.Concat([_actionLines, _enterLines]), "\n"))
 		        RETURN NEW;
 		      END IF;
 		"""
 	}]
 
+	// Only the outcome the airlock recorded leaves an invoking state, so no other
+	// writer can forge one.
+	_outcomeCheck: [if _invoking {
+		_key: (#ledgerKeySql & {effect: ST.invokes[ST.name], rec: "OLD"}).out
+		"""
+		      SELECT l."outcome" INTO outcome FROM "airlock"."external_effect_ledger" l WHERE l."key" = \(_key);
+		      IF outcome IS NULL OR outcome->>'target' IS DISTINCT FROM NEW."\(ST.field)" THEN
+		        RAISE EXCEPTION '% leaves \(ST.name) only by the recorded outcome of %', '\(ST.table)', \(_key) USING ERRCODE = 'check_violation';
+		      END IF;
+		"""
+	}, ""][0]
+
 	_normalBlock: """
 		    IF OLD."\(ST.field)" = '\(ST.name)' THEN
-		\(strings.Join(_timeoutChecks, "\n"))
+		\(strings.Join(_timeoutChecks, "\n"))\(_outcomeCheck)
 		      IF NEW."\(ST.field)" NOT IN (\(strings.Join(_validTargetLits, ", "))) THEN
 		        RAISE EXCEPTION 'invalid transition on % from % to %', '\(ST.table)', OLD."\(ST.field)", NEW."\(ST.field)" USING ERRCODE = 'check_violation';
 		      END IF;
@@ -591,6 +566,7 @@ _sqlType: {
 #mechaMachineSql: S={
 	machine: #MechaMachine
 	entities: [string]: #Entity
+	effects: [string]: #ExternalEffect
 
 	_table: [if S.entities[S.machine.entity] != _|_ {S.entities[S.machine.entity].table}, S.machine.entity][0]
 
@@ -605,12 +581,48 @@ _sqlType: {
 			ALTER TABLE "\(_table)" ADD CONSTRAINT "\(_table)_\(_field)_check" CHECK ("\(_field)" IN (\(strings.Join(_stateLitList, ", ")))) NOT VALID;
 			"""
 
+		_invokes: {for sName, sBody in S.machine.states if sBody["invoke"] != _|_ {(sName): S.effects[sBody.invoke.src]}}
+		_hasInvoke: len([for _, _ in _invokes {true}]) > 0
+		_declare: [if _hasInvoke {"DECLARE\n  outcome jsonb;\n"}, ""][0]
+		_pk: [for e in S.entities if e.table == _table for f in e.fields if f.pk != _|_ if f.pk {f.name}]
+		_initialEnter: [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk}).out + "\n"}, ""][0]
+		// A row in an invoking state is the ledger's instance until its outcome
+		// lands: its key fields and primary key stay as the ledger holds them,
+		// and it is not deleted, or the outcome could never be delivered.
+		_held: [for sName, x in _invokes {
+			_cols: list.SortStrings([for c, _ in {for f in list.Concat([x.key, _pk]) {(f): true}} {c}])
+			_key:  (#ledgerKeySql & {effect: x, rec: "OLD"}).out
+			"""
+			  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = '\(sName)' AND (\(strings.Join([for c in _cols {"OLD.\"\(c)\" IS DISTINCT FROM NEW.\"\(c)\""}], " OR "))) THEN
+			    RAISE EXCEPTION '% in \(sName) keeps its key until the outcome of %', '\(_table)', \(_key) USING ERRCODE = 'check_violation';
+			  END IF;
+			"""
+		}]
+		_deleteBlock: [if _hasInvoke {
+			"""
+			  IF TG_OP = 'DELETE' THEN
+			    IF OLD."\(_field)" IN (\(strings.Join([for sName, _ in _invokes {"'\(sName)'"}], ", "))) THEN
+			      RAISE EXCEPTION '% in % awaits an outcome and is not deleted', '\(_table)', OLD."\(_field)" USING ERRCODE = 'check_violation';
+			    END IF;
+			    RETURN OLD;
+			  END IF;
+
+			"""
+		}, ""][0]
+		_ops: [if _hasInvoke {"INSERT OR UPDATE OR DELETE"}, "INSERT OR UPDATE"][0]
+		// A ledger key is a field's text, which for a date or time is the
+		// session's to spell; pinned, so the claim's key and the outcome
+		// check's are one.
+		_locale: [if _hasInvoke {"\nSET TimeZone = 'UTC'\nSET DateStyle = 'ISO, YMD'"}, ""][0]
+
 		_stateBlocks: [for sName, sBody in S.machine.states {
 			(#mechaStateSql & {
-				table: _table
-				field: _field
-				name:  sName
-				state: sBody
+				table:   _table
+				field:   _field
+				name:    sName
+				state:   sBody
+				invokes: _invokes
+				pk:      _pk
 			}).out
 		}]
 
@@ -618,9 +630,9 @@ _sqlType: {
 			CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
 			LANGUAGE plpgsql
 			SECURITY DEFINER
-			SET search_path = public, pg_catalog AS $$
-			BEGIN
-			  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = NEW."\(_field)" THEN
+			SET search_path = public, pg_catalog\(_locale) AS $$
+			\(_declare)BEGIN
+			\(_deleteBlock)\(strings.Join([for h in _held {h + "\n"}], ""))  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = NEW."\(_field)" THEN
 			    RETURN NEW;
 			  END IF;
 
@@ -628,7 +640,7 @@ _sqlType: {
 			    IF NEW."\(_field)" <> '\(S.machine.initial)' THEN
 			      RAISE EXCEPTION 'new % must start in initial state % (got %)', '\(_table)', '\(S.machine.initial)', NEW."\(_field)" USING ERRCODE = 'check_violation';
 			    END IF;
-			    RETURN NEW;
+			\(_initialEnter)    RETURN NEW;
 			  END IF;
 
 			  IF TG_OP = 'UPDATE' THEN
@@ -640,7 +652,7 @@ _sqlType: {
 
 			DROP TRIGGER IF EXISTS "\(_fnName)" ON "\(_table)";
 			CREATE TRIGGER "\(_fnName)"
-			  BEFORE INSERT OR UPDATE ON "\(_table)"
+			  BEFORE \(_ops) ON "\(_table)"
 			  FOR EACH ROW
 			  EXECUTE FUNCTION "\(_fnName)"();
 			"""
@@ -704,24 +716,78 @@ _sqlType: {
 	out: [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
 }
 
-#sagaTableSql: """
-	CREATE TABLE IF NOT EXISTS "saga" (
-	  "id"              TEXT PRIMARY KEY,
-	  "name"            TEXT NOT NULL,
-	  "idempotency_key" TEXT NOT NULL,
-	  "payload"         JSONB NOT NULL DEFAULT '{}'::jsonb,
-	  "status"          TEXT NOT NULL DEFAULT 'pending',
-	  "outcome"         JSONB,
-	  "created_at"      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-	  "settled_at"      TIMESTAMPTZ,
-	  UNIQUE ("name", "idempotency_key")
-	);
+// A jsonb_build_object over a map of request values: "NEW.<col>"/"OLD.<col>"
+// read the row, {raw: sql} is an expression, anything else a literal.
+#jsonbObjectSql: J={
+	values: {[string]: _}
+	out: [if len(J.values) > 0 {
+		"jsonb_build_object(" + strings.Join([for k, v in J.values {
+			_valSql: [
+				if (v & {raw: string}) != _|_ {(v & {raw: string}).raw},
+				if (v & string) != _|_ if strings.HasPrefix((v & string), "NEW.") || strings.HasPrefix((v & string), "OLD.") {strings.SplitN((v & string), ".", 2)[0] + ".\"" + strings.SplitN((v & string), ".", 2)[1] + "\""},
+				if (v & string) != _|_ if !strings.HasPrefix((v & string), "NEW.") && !strings.HasPrefix((v & string), "OLD.") {"'" + strings.Replace((v & string), "'", "''", -1) + "'"},
+				if (v & bool) != _|_ {[if (v & bool) {"true"}, "false"][0]},
+				if (v & number) != _|_ {"\(v)"},
+				if (v & {...}) != _|_ {"'" + strings.Replace(json.Marshal(v), "'", "''", -1) + "'::jsonb"},
+				if (v & [...]) != _|_ {"'" + strings.Replace(json.Marshal(v), "'", "''", -1) + "'::jsonb"},
+				"null",
+			][0]
+			"'" + strings.Replace(k, "'", "''", -1) + "', " + _valSql
+		}], ", ") + ")"
+	}, "'{}'::jsonb"][0]
+}
 
-	CREATE INDEX IF NOT EXISTS "idx_saga_status" ON "saga" ("status") WHERE "status" = 'pending';
+// The instance's primary key, which the airlock's outcome UPDATE names.
+#ledgerRowSql: R={
+	pk: [...string]
+	out: "jsonb_build_object(" + strings.Join([for f in R.pk {"'\(f)', NEW.\"\(f)\""}], ", ") + ")"
+}
 
-	ALTER TABLE "saga" ENABLE ROW LEVEL SECURITY;
-	REVOKE ALL ON "saga" FROM anon, app_user, electric;
-	"""
+// The ledger key of an effect for the row `rec` (NEW or OLD) names.
+#ledgerKeySql: K={
+	effect: #ExternalEffect
+	rec:    "NEW" | "OLD"
+	// One field is the key as it is; several are JSON-encoded, so a ':' in a
+	// value cannot make two instances read as one.
+	_fields: [for f in K.effect.key {"\(K.rec).\"\(f)\"::text"}]
+	out: [
+		if len(K.effect.key) == 1 {"'\(K.effect.name):' || \(_fields[0])"},
+		"'\(K.effect.name):' || jsonb_build_array(" + strings.Join(_fields, ", ") + ")::text",
+	][0]
+}
+
+// Entering an invoking state: claim the ledger and enqueue the airlock's job in the
+// transition's own commit, and re-arm the ticker's one-shot `airlock` row, so a
+// cluster scaled to zero is woken for the job rather than owing it to a later
+// schedule (mecha's airlock.sql seeds the row). The re-arm writes only a row not
+// yet armed and never waits on one another transaction holds, so claims do not
+// queue on the one row; a claim that skips the row while the ticker is ticking
+// it is woken by that tick. A key already claimed was performed, so entering
+// again under it is an error, never a second performance.
+// What Graphile may retry beyond an effect's attempts: the ledger's `entered`
+// decides when an effect runs out (mecha's airlock.ts), and a run that fails
+// before it counts, or a crash Graphile counted, must not exhaust the queue
+// first. Graphile's own default.
+#QueueHeadroom: 25
+
+#invokeEnterSql: I={
+	effect: #ExternalEffect
+	state:  string
+	pk: [...string]
+	_key:   (#ledgerKeySql & {effect: I.effect, rec: "NEW"}).out
+	out: """
+		        INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "request")
+		        VALUES (\(_key), '\(I.effect.name)', \((#ledgerRowSql & {pk: I.pk}).out), \((#jsonbObjectSql & {values: I.effect.request}).out))
+		        ON CONFLICT ("key") DO NOTHING;
+		        IF NOT FOUND THEN
+		          RAISE EXCEPTION 'external effect % was already performed: entering \(I.state) again needs a new key', \(_key) USING ERRCODE = 'unique_violation';
+		        END IF;
+		        PERFORM graphile_worker.add_job('external_effect', json_build_object('key', \(_key)), job_key => \(_key), max_attempts => \(I.effect.attempts + #QueueHeadroom));
+		        UPDATE "public"."schedule" SET "due_at" = date_trunc('milliseconds', clock_timestamp()), "last_tick_at" = NULL
+		         WHERE "name" = 'airlock' AND "last_tick_at" IS NOT NULL
+		           AND "name" IN (SELECT "name" FROM "public"."schedule" WHERE "name" = 'airlock' FOR UPDATE SKIP LOCKED);
+		"""
+}
 
 // The app_user USING clause of a private entity. `qual` prefixes the row's
 // own columns: the table name in the entity's policies, the parent alias
@@ -1440,7 +1506,6 @@ _cdcBeforeField: "__before"
 	_seedFile: len(M.seeded) > 0 || M.code.state.seed != _|_
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	machines: [if M.code.state.machines != _|_ {[for _, m in M.code.state.machines {m}]}, []][0]
-	sagas:    [if M.code.state.sagas != _|_ {[for _, s in M.code.state.sagas {s}]}, []][0]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	// The cluster copies this list into its database image, so it follows the
 	// predicate that emits the database: a migration named without one would be
@@ -1458,7 +1523,6 @@ _cdcBeforeField: "__before"
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
-		if len(M.sagas) > 0 {"services/database/migrations/015_sagas.sql"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/021_schedule_seed.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
@@ -1599,9 +1663,14 @@ _cdcBeforeField: "__before"
 					computations: {verb: "test", cmds: [_distribution.checks.computations], note: "Pronto computations"}
 					admit: {
 						verb: "lint"
-						cmds: [strings.Join([_distribution.checks.admit, for _, c in D.code.state.computations {json.Marshal(c.src)}], " ")]
+						cmds: [strings.Join([_distribution.checks.admit, for _, c in D.code.state.computations {
+							json.Marshal([if len(c.endowments) > 0 {"\(c.src)=\(strings.Join(c.endowments, ","))"}, c.src][0])
+						}], " ")]
 						note: "Pronto computations admitted"
 					}
+				}
+				if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
+					admitEffects: {verb: "lint", cmds: [_distribution.checks.admitEffects], note: "Pronto effect handlers admitted"}
 				}
 			}
 			_mirrored: sources.pronto != "" && !strings.HasPrefix(sources.pronto, "../")
@@ -1781,7 +1850,7 @@ _cdcBeforeField: "__before"
 			statics: list.Concat([[for s in D.statics if D.local || !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
 			// mecha's images, reached through the monorepo's bayt federation,
 			// or by name where the app is installed.
-			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute"] {
+			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute", "airlock"] {
 				(s): [if D.local {{ref: "libraries_mecha:\(s)-image"}}, {name: "libraries_mecha-\(s)-image"}][0]
 			}}
 		}
@@ -1804,12 +1873,26 @@ _cdcBeforeField: "__before"
 				file: "docker/\(D.code.meta.name)-\(pl.name).yaml"
 			}]
 			schedules: [for _, sc in D.code.state.schedules {sc.name}]
+			// The emitted manifest, endpoints and handlers sit where the
+			// cluster looks for them by default.
+			effects: [if D.code.state.effects != _|_ for n, x in D.code.state.effects {
+				name: n
+				if x.sink.origin != _|_ {origin: x.sink.origin}
+				if x.sink.bridge != _|_ {bridge: x.sink.bridge}
+				// The credential's variable is required of the environment with
+				// the handler's secrets, and handed to the airlock alone.
+				_secrets: [for s, _ in {for s in list.Concat([[if x.secrets != _|_ {x.secrets}, []][0], [if x.sink.credential != _|_ {[x.sink.credential.secret]}, []][0]]) {(s): true}} {s}]
+				if len(_secrets) > 0 {secrets: _secrets}
+			}]
+			bridges: [if D.code.state.bridges != _|_ for _, b in D.code.state.bridges {b}]
 			computations: [for _, c in D.code.state.computations {
 				name:  "\(D.code.meta.name)-\(c.name)"
 				file:  c.src
 				to: [for t in c.to {D.code.state.entities[t].table}]
 				wasm: c.wasm
+				endowments: c.endowments
 				if c.onComplete != _|_ {onComplete: c.onComplete}
+				// A sink in the publication would feed the change it answers.
 				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
 			}]
 		}
@@ -1968,7 +2051,7 @@ _cdcBeforeField: "__before"
 	// says so.
 	_clockDeclared: {
 		for t in E.code.meta.targets {
-			if len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0 {
+			if len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0 || (E.code.state.effects != _|_ && len(E.code.state.effects) > 0) {
 				(t): true & list.Contains(E.code.meta.clocks, t)
 			}
 		}
@@ -2226,6 +2309,10 @@ _cdcBeforeField: "__before"
 	// tokens (or vice versa) is not a supported state. The auth_uid() the
 	// policies call is the database image's (mecha's tenancy floor).
 	_authOn: E.code.capabilities.auth != _|_ || len(E._accessed) > 0
+	// The `service` role alone also stands where a schedule or an effect is
+	// declared: the ticker writes its ticks as it, through crud, which mecha's
+	// cluster has verify the token wherever something wakes (its _serviceToken).
+	_serviceOn: E._authOn || len(E.code.state.schedules) > 0 || [if E.code.state.effects != _|_ {len(E.code.state.effects) > 0}, false][0]
 
 	// The cluster handed in must be the program's: #DefaultCluster derives
 	// these from the code, and a cluster that disagrees conflicts here.
@@ -2473,7 +2560,7 @@ _cdcBeforeField: "__before"
 			}
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"
-				_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._authOn {"service"}], [if E._serverOn {"electric"}]])
+				_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._serviceOn {"service"}], [if E._serverOn {"electric"}]])
 				text: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
 					"""
 					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
@@ -2492,7 +2579,7 @@ _cdcBeforeField: "__before"
 				// current_scopes(), so every shape yields an empty snapshot with no
 				// error.
 				_bypass: [
-					if E._authOn {"\nALTER ROLE service BYPASSRLS;\n"},
+					if E._serviceOn {"\nALTER ROLE service BYPASSRLS;\n"},
 					// A dev credential; cluster.cue, at the URL naming this role, says
 					// what a deployment does with both.
 					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN PASSWORD 'electric';\n" +
@@ -2511,7 +2598,9 @@ _cdcBeforeField: "__before"
 					if E._authOn {
 						"ALTER ROLE app_user SET statement_timeout = '5s';\n" +
 						"ALTER ROLE app_user SET lock_timeout = '2s';\n" +
-						"ALTER ROLE app_user SET idle_in_transaction_session_timeout = '10s';\n" +
+						"ALTER ROLE app_user SET idle_in_transaction_session_timeout = '10s';\n"
+					},
+					if E._serviceOn {
 						"ALTER ROLE service SET statement_timeout = '30s';\n" +
 						"ALTER ROLE service SET lock_timeout = '5s';\n" +
 						"ALTER ROLE service SET idle_in_transaction_session_timeout = '60s';\n"
@@ -2521,10 +2610,13 @@ _cdcBeforeField: "__before"
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
 				if !E._authOn {
+					// The service role beside anon where only a wake brings it:
+					// the schedule tables, which anon never reaches, are its.
+					_grantees: [if E._serviceOn {"anon, service"}, "anon"][0]
 					text: """
-						GRANT USAGE ON SCHEMA public TO anon;
-						GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
-						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon;
+						GRANT USAGE ON SCHEMA public TO \(_grantees);
+						GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \(_grantees);
+						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \(_grantees);
 
 						"""
 				}
@@ -2636,16 +2728,73 @@ _cdcBeforeField: "__before"
 			if len(_machines) > 0 {
 				"services/database/migrations/010_machines.sql": {
 					format: "sql"
-					text: strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities}).out}], "\n\n") + "\n"
+					text: strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0]}).out}], "\n\n") + "\n"
 				}
 			}
 
-			_sagas: [if E.code.state.sagas != _|_ {[for _, s in E.code.state.sagas {s}]}, []][0]
-			if len(_sagas) > 0 {
-				"services/database/migrations/015_sagas.sql": {
-					format: "sql"
-					text:   #sagaTableSql + "\n"
+			// What the airlock runs (libraries/mecha/services/airlock): one entry
+			// per effect, naming the state that invokes it and where its outcome
+			// lands; the sink as a Dapr output binding; and the handler the program
+			// authors in place.
+			_invoking: [
+				if E.code.state.machines != _|_
+				for _, m in E.code.state.machines if m.states != _|_
+				for sName, st in m.states if st.invoke != _|_
+				let x = E.code.state.effects[st.invoke.src]
+				let ent = [for en, e in E.code.state.entities if en == m.entity || e.table == m.entity {e}][0] {
+					effect: x
+					table:  ent.table
+					field:  m.field
+					state:  sName
+					onDone:  [if (st.invoke.onDone & string) != _|_ {st.invoke.onDone}, st.invoke.onDone.target][0]
+					onError: [if (st.invoke.onError & string) != _|_ {st.invoke.onError}, st.invoke.onError.target][0]
+					row: [for f in ent.fields if f.pk != _|_ if f.pk {f.name}]
+				},
+			]
+			if len(_invoking) > 0 {
+				"services/airlock/effects.json": {
+					format: "json"
+					data: effects: {for i in _invoking {
+						(i.effect.name): {
+							table:      i.table
+							field:      i.field
+							state:      i.state
+							onDone:     i.onDone
+							onError:    i.onError
+							row:        i.row
+							idempotent: i.effect.sink.idempotent
+							if !i.effect.sink.idempotent {reentry: i.effect.reentry}
+							attempts: i.effect.attempts
+							handler:  "effects/\(i.effect.name).js"
+							if i.effect.secrets != _|_ {secrets: i.effect.secrets}
+							if i.effect.sink.credential != _|_ {credential: i.effect.sink.credential}
+							if i.effect.endowments != _|_ {endowments: i.effect.endowments}
+						}
+					}}
 				}
+			}
+			for i in _invoking {
+				"services/airlock/dapr/\(i.effect.name).yaml": {
+					format: "yaml"
+					data: {
+						apiVersion: "dapr.io/v1alpha1"
+						kind:       "Component"
+						metadata: name: i.effect.name
+						spec: {
+							type:    "bindings.http"
+							version: "v1"
+							metadata: [
+								// A bridge is the cluster's own, reached in plain HTTP on the
+								// airlock's outbound network.
+								{name: "url", value: [if i.effect.sink.bridge != _|_ {"http://bridge-\(i.effect.sink.bridge):\(mecha.#BridgePort)"}, i.effect.sink.origin][0]},
+								// The sink's own status comes back to the handler, a refusal
+								// being an answer rather than a binding error.
+								{name: "errorIfNot2XX", value: "false"},
+							]
+						}
+					}
+				}
+				"effects/\(i.effect.name).js": {format: "jessie", src: "effects/\(i.effect.name).js"}
 			}
 
 			if len(E.code.state.schedules) > 0 {
@@ -3284,6 +3433,15 @@ _cdcBeforeField: "__before"
 			// bayt's aggregate holds no closure, so the project's own includes,
 			// mecha's mode file among them, are restated here.
 			data: include: [{path: "./.bayt/compose.yaml"}, for i in E.build.project.compose.includes {path: i}]
+		}
+		// The networks the cluster's targets join, which bayt declares nowhere:
+		// the project includes this in every closure, and the root above
+		// includes it beside bayt's tree.
+		if E.cluster.surface.networks != _|_ {
+			"compose.networks.yaml": {
+				format: "yaml"
+				data: networks: E.cluster.surface.networks
+			}
 		}
 		"bayt.json": {
 			format: "json"

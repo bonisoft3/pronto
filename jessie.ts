@@ -2,9 +2,10 @@
 //
 // The loader takes the compartment's completion value, so the file's last
 // top-level expression must BE that value — an arrow function for a handler's
-// reducer, an object literal for an adapter's map of pure functions. Which of
-// the two a given module owes is the role's business (screen.js ROLES), checked
-// where the role is known; this only reports which shape it ended in.
+// reducer, an object literal for an adapter's map of pure functions, or the
+// name of a binding holding one. Which a given module owes is the role's
+// business (screen.js ROLES), checked where the role is known; this only
+// reports which shape it ended in.
 
 /** Identifiers a Jessie module may not reach for, and why. Rows, so the scan
  * below and the query that reports them read the same list. */
@@ -36,6 +37,7 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
     exceptRole: "adapter",
   },
   ...[
+    "Crypto",
     "TextEncoder",
     "TextDecoder",
     "URL",
@@ -60,27 +62,68 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
   { name: "this", reason: "Jessie has no this; in plv8 it would reach the global object" },
 ];
 
-export const SAFE_ENDOWMENTS = new Set([
-  "Intl",
-  "TextEncoder",
-  "TextDecoder",
-  "URL",
-  "URLSearchParams",
-]);
+/** What a module may be granted, by the cage its role runs in: the
+ * terminal's (omnishell's interpreter/jessie.js SAFE_ENDOWMENTS) or mecha's
+ * (services/compute/language.ts ENDOWABLE). schema.cue's #SafeEndowment and
+ * mecha's #CageEndowment spell the same two lists, and endowments_test.ts
+ * holds all four together. An adapter is granted Intl without asking. */
+const TERMINAL = ["Intl", "TextEncoder", "TextDecoder", "URL", "URLSearchParams"] as const;
+const MECHA = ["Crypto", "TextEncoder", "TextDecoder", "URL", "URLSearchParams"] as const;
+export const ENDOWABLE: Record<string, readonly string[]> = {
+  handler: TERMINAL,
+  adapter: TERMINAL,
+  renderer: TERMINAL,
+  validation: TERMINAL,
+  fold: TERMINAL,
+  computation: MECHA,
+  effect: MECHA,
+};
 
 /**
  * Walks the source outside its comments and its string and template bodies,
  * emitting every character it passes and handing each atom's interior to
- * `atom` a character at a time. The scanner does not tokenize regex literals
- * or template substitutions: a regex holding a quote or an unbalanced bracket
- * is read as one, and a `${...}` holding a quote is read inside the template.
+ * `atom` a character at a time. A template's `${...}` substitutions are code
+ * and walked as code. A `/` begins a regex literal where an expression must
+ * begin — after an operator, an opening bracket, a keyword such as `return`
+ * that is not a member, or at the start — unless it would close on the opener
+ * of a comment or not close on its line. Where a token may end an expression
+ * or precede one (`}`, `of`, `await`, `yield` as names), `ambiguous` decides,
+ * and references are read both ways (jessieFacts), so a wrong guess can only
+ * add a finding.
  */
-function walkAtoms(source: string, atom: (c: string) => string): string {
+const REGEX_AFTER = /([(,=:[!&|?{;~^%*<>]|(?<![+])\+|(?<![-])-|(?<![\w$.])(return|typeof|case|do|else|in|new|delete|void|throw))$/;
+const EITHER_AFTER = /(\}|(?<![\w$.])(of|await|yield))$/;
+const regexMayBegin = (before: string, ambiguous: boolean) => {
+  const prev = before.trimEnd().slice(-16);
+  return prev === "" || REGEX_AFTER.test(prev) || (ambiguous && EITHER_AFTER.test(prev));
+};
+
+/** Where the regex literal opening at `i` closes, or -1 where none does. */
+function regexEnd(source: string, i: number): number {
+  let inClass = false;
+  for (let j = i + 1; j < source.length && source[j] !== "\n"; j++) {
+    if (source[j] === "\\") j++;
+    else if (source[j] === "[") inClass = true;
+    else if (source[j] === "]") inClass = false;
+    else if (source[j] === "/" && !inClass) return source[j + 1] === "/" || source[j + 1] === "*" ? -1 : j;
+  }
+  return -1;
+}
+
+function walkAtoms(source: string, atom: (c: string) => string, ambiguous = true): string {
+  return walk(source, 0, atom, ambiguous, false).out;
+}
+
+/** From `start` to the end, or within a substitution to its closing brace. */
+function walk(source: string, start: number, atom: (c: string) => string, ambiguous: boolean, substitution: boolean): { out: string; end: number } {
   let out = "";
-  let i = 0;
+  let depth = 0;
+  let i = start;
   while (i < source.length) {
     const c = source[i];
     const next = source[i + 1];
+    if (substitution && c === "{") depth++;
+    if (substitution && c === "}" && depth-- === 0) return { out, end: i };
     if (c === "/" && next === "/") {
       while (i < source.length && source[i] !== "\n") { out += atom(source[i]); i++; }
       continue;
@@ -96,12 +139,26 @@ function walkAtoms(source: string, atom: (c: string) => string): string {
       i += 2;
       continue;
     }
+    const end = c === "/" && regexMayBegin(out, ambiguous) ? regexEnd(source, i) : -1;
+    if (end >= 0) {
+      out += "/";
+      for (i++; i < end; i++) out += atom(source[i]);
+      out += "/";
+      i++;
+      continue;
+    }
     if (c === '"' || c === "'" || c === "`") {
       const quote = c;
       out += quote;
       i++;
       while (i < source.length && source[i] !== quote) {
-        if (source[i] === "\\") { out += atom("\\"); i++; }
+        if (source[i] === "\\") { out += atom("\\") + atom(source[i + 1] ?? ""); i += 2; continue; }
+        if (quote === "`" && source[i] === "$" && source[i + 1] === "{") {
+          const inner = walk(source, i + 2, atom, ambiguous, true);
+          out += "${" + inner.out + "}";
+          i = inner.end + 1;
+          continue;
+        }
         out += atom(source[i]);
         i++;
       }
@@ -112,12 +169,12 @@ function walkAtoms(source: string, atom: (c: string) => string): string {
     out += c;
     i++;
   }
-  return out;
+  return { out, end: i };
 }
 
 // Blanks comments and string/template-literal contents (keeping the line
 // structure) so denylist hits inside them do not count.
-const stripAtoms = (source: string) => walkAtoms(source, (c) => (c === "\n" ? "\n" : ""));
+const stripAtoms = (source: string, ambiguous = true) => walkAtoms(source, (c) => (c === "\n" ? "\n" : ""), ambiguous);
 
 // The same walk, padding every dropped character with a space, so an index
 // into the result is an index into the source.
@@ -126,6 +183,9 @@ const padAtoms = (source: string) => walkAtoms(source, (c) => (c === "\n" ? "\n"
 const ARROW_HEAD = /^(\(([^()]|\([^()]*\))*\)|[A-Za-z_$][\w$]*)\s*=>/;
 // An adapter ends in a parenthesised object literal: `({ toItems: ... })`.
 const OBJECT_HEAD = /^\(\s*\{/;
+// Or names the binding that holds it: `parseMarkdown`, alone or after the
+// declarations before it, which hold no top-level semicolon to cut at.
+const NAME = /(^|\}\s*)(?!(undefined|null|true|false|NaN|Infinity)$)[A-Za-z_$][\w$]*$/;
 
 /** The bounds of the last non-empty segment between semicolons at bracket
  * depth 0, over a copy whose atoms no longer hold brackets or semicolons. */
@@ -167,25 +227,32 @@ function lastStatement(stripped: string): string {
   return seg === null ? "" : stripped.slice(seg.start, seg.end).trim();
 }
 
-/** The denied names a module reaches for, and which of the two completion
- * shapes it ends in — `other` where it is neither. */
-export function jessieFacts(source: string, grantedEndowments: string[] = []): { references: string[]; completion: string } {
+/** The denied names a module reaches for, and which completion shape it ends
+ * in — `other` where it is none. */
+export function jessieFacts(source: string, role: string, grantedEndowments: string[] = []): { references: string[]; completion: string } {
+  const endowable = ENDOWABLE[role];
+  if (endowable === undefined) throw new Error(`jessieFacts: unknown role ${JSON.stringify(role)}`);
   const stripped = stripAtoms(source);
+  const scans = [stripped, stripAtoms(source, false)];
   const endowments = new Set(grantedEndowments);
-  const unpermittedEndowments = [...endowments].filter((name) => !SAFE_ENDOWMENTS.has(name));
-  const references = [
+  const unpermittedEndowments = [...endowments].filter((name) => !endowable.includes(name));
+  const references = [...new Set([
     ...DENIED
       .filter(({ name }) => {
-        if (endowments.has(name) && SAFE_ENDOWMENTS.has(name)) return false;
-        return name === "Math.random"
-          ? /\bMath\s*\.\s*random\b/.test(stripped)
-          : new RegExp(`\\b${name}\\b`).test(stripped);
+        if (endowments.has(name) && endowable.includes(name)) return false;
+        // A member (`sink.fetch`, `x?.fetch`) is the object's, not the global:
+        // the ways to the global object itself, globalThis and this, are
+        // denied above. A spread's `...` is not a member access.
+        const reach = name === "Math.random"
+          ? /\bMath\s*\.\s*random\b/
+          : new RegExp(`(?<![\\w$]|(?<!\\.)\\.\\s*)${name}(?![\\w$])`);
+        return scans.some((text) => reach.test(text));
       })
       .map(({ name }) => name),
     ...unpermittedEndowments,
-  ];
+  ])];
   const last = lastStatement(stripped);
-  const completion = ARROW_HEAD.test(last) ? "arrow" : OBJECT_HEAD.test(last) ? "object" : "other";
+  const completion = ARROW_HEAD.test(last) ? "arrow" : OBJECT_HEAD.test(last) ? "object" : NAME.test(last) ? "name" : "other";
   return { references, completion };
 }
 
@@ -196,7 +263,8 @@ export function jessieSelfTest(): string[] {
 const label = "a Date for the window";
 (state, event) => ({ updates: renumber(state.items) });
 `;
-  const cases: { name: string; source: string; granted?: string[]; expect: string[] }[] = [
+  // `shape` is the completion a case must end in; without it only `other` is reported.
+  const cases: { name: string; source: string; role?: string; granted?: string[]; shape?: string; expect: string[] }[] = [
     { name: "clean handler passes", source: good, expect: [] },
     {
       name: "fetch is denylisted",
@@ -219,6 +287,69 @@ const label = "a Date for the window";
       name: "Date is denylisted",
       source: `(state, event) => ({ at: Date.now() });\n`,
       expect: ["Date"],
+    },
+    {
+      name: "a completion naming the binding that holds the value passes",
+      source: `const reduce = (state, event) => state;\nreduce;\n`,
+      shape: "name",
+      expect: [],
+    },
+    {
+      name: "a regex literal holding a backtick or a bracket is one atom",
+      source: "const fence = /^ {0,3}```/;\nconst open = (s) => /[(]/.test(s) ? s / 2 : s;\n(state, event) => ({ f: fence.test(event.s), o: open(event.s) });\n",
+      expect: [],
+    },
+    {
+      name: "a division after a keyword-named member hides nothing",
+      source: `(s, e) => ({ r: e.in / fetch(e.u) / 2, o: e.of / eval(e.v) / 2 });\n`,
+      expect: ["fetch", "eval"],
+    },
+    {
+      name: "a division after an ambiguous token hides nothing",
+      source: `let i = 0; const of = 4;\n(s, e) => ({ a: i++ / fetch(e.u) / 2, b: of / fetch(e.u) / 2, c: {} / eval(e.u) / 2 });\n`,
+      expect: ["fetch", "eval"],
+    },
+    {
+      name: "a guessed regex never closes on a comment's opener",
+      source: `const cap = (row) => row.in / 2 /* the row's cap */;\nconst leak = () => plv8.execute("x"); // it's\n(state, row) => cap(row) > 0 || leak();\n`,
+      role: "validation",
+      expect: ["plv8"],
+    },
+    {
+      name: "a spread is not a member access",
+      source: `(row) => ({...globalThis}).plv8.execute("x") || ({...this}).y;\n`,
+      role: "validation",
+      expect: ["globalThis", "this"],
+    },
+    {
+      name: "a regex literal holding a denied word is no reach",
+      source: `const isDate = (s) => /Date|window/.test(s);\n(state, event) => isDate(event.s);\n`,
+      shape: "arrow",
+      expect: [],
+    },
+    {
+      name: "a template's substitution is code",
+      source: "(state, event) => `${plv8.execute('x')} and ${`${fetch(event.u)}`}`.length > 0;\n",
+      role: "validation",
+      shape: "arrow",
+      expect: ["fetch", "plv8"],
+    },
+    {
+      name: "a template's text is not",
+      source: "(state, event) => `window ${event.a} {fetch} $ {eval}`;\n",
+      shape: "arrow",
+      expect: [],
+    },
+    {
+      name: "a literal is not a name completion",
+      source: `const f = 1;\nundefined\n`,
+      expect: ["completion:other"],
+    },
+    {
+      name: "a name after the declarations before it passes",
+      source: `function reduce(state, event) { return state; }\nreduce;\n`,
+      shape: "name",
+      expect: [],
     },
     {
       name: "missing trailing arrow fails",
@@ -244,6 +375,34 @@ const label = "a Date for the window";
       expect: [],
     },
     {
+      name: "a member is the object's, not the global",
+      source: `(state, event) => ({ r: event.sink.fetch("/x"), w: event . window, d: event.$document });\n`,
+      expect: [],
+    },
+    {
+      name: "a global reached as itself is still denied",
+      source: `(state, event) => fetch(event.url).then(() => (0, window).document);\n`,
+      expect: ["window", "fetch"],
+    },
+    {
+      name: "Crypto is reached only by opt-in",
+      source: `(state, event) => Crypto.digest("SHA-256", event.bytes);\n`,
+      expect: ["Crypto"],
+    },
+    {
+      name: "a grant is judged against the role's cage",
+      source: `(state, event) => Crypto.digest("SHA-256", event.bytes);\n`,
+      granted: ["Crypto"],
+      expect: ["Crypto"],
+    },
+    {
+      name: "the same grant passes in mecha's cage",
+      source: `(state, event) => Crypto.digest("SHA-256", event.bytes);\n`,
+      role: "computation",
+      granted: ["Crypto"],
+      expect: [],
+    },
+    {
       name: "unpermitted endowment opt-in is denylisted",
       source: `(state, event) => 1;\n`,
       granted: ["fetch"],
@@ -254,10 +413,10 @@ const label = "a Date for the window";
   for (const t of cases) {
     // The rows, not the wording a query wraps them in: a denied name referenced,
     // and a completion value that is neither shape.
-    const f = jessieFacts(t.source, t.granted ?? []);
+    const f = jessieFacts(t.source, t.role ?? "handler", t.granted ?? []);
     const got = [
       ...f.references,
-      ...(f.completion === "other" ? ["completion:other"] : []),
+      ...(f.completion === "other" || t.shape !== undefined && f.completion !== t.shape ? [`completion:${f.completion}`] : []),
     ];
     const ok = got.length === t.expect.length && t.expect.every((want, i) => got[i] === want);
     if (!ok) failures.push(`jessie ${t.name}: got ${JSON.stringify(got)}`);

@@ -167,8 +167,16 @@ import (
 		if B.meta.local && B.meta.dir == "" {name: "apps_\(B.meta.app)"}
 
 		targets: B._mechaRuntime.targets
+		// What every up closure includes: an installed app's mode files, and
+		// the networks the cluster's targets join, declared in a file of the
+		// app's (emit.cue writes it). One list, since two declarations of it
+		// would conflict where both apply.
+		compose: includes: [
+			if !B.meta.local {"mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"},
+			if !B.meta.local {"omnishell/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"},
+			if B.cluster.surface.networks != _|_ {"compose.networks.yaml"},
+		]
 		if !B.meta.local {
-			compose: includes: ["mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml", "omnishell/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"]
 			if len(B._runtimeStatics) > 0 {
 				targets: caddy: {
 					dockerfile: defaultCopy: {for s in B._runtimeStatics {

@@ -172,11 +172,14 @@ stronger publication protocol.
 Its language is the header's: ES module text as the service's SES Compartment
 admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
 `eval(` in a string, and top-level await are each refused — without the
-clock, randomness, time zone and locale.
+clock, randomness, time zone and locale. `endowments` grants it what it names
+of `Crypto` (WebCrypto's deterministic-by-specification subset),
+`TextEncoder`, `TextDecoder`, `URL` and `URLSearchParams`, as a surface module
+is granted `Intl`; an undeclared one throws where it is reached.
 
 What pronto holds: write fails on a module or Wasm file that is not there; the
 module joins the fact rows as the `computation` role, so `lint` reports a
-denied identifier in it as in a handler (a scan, not a Jessie parser); `lint`
+denied identifier in it as in a handler, its declared endowments excepted (a scan, not a Jessie parser); `lint`
 loads each module as the service loads it at startup, so one the service would
 refuse fails there, naming its file and SES's rule, rather than taking the
 service down; and `test` runs the app's `computations/` tests under the

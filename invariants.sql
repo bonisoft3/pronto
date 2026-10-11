@@ -597,12 +597,12 @@ WHERE d.except_role <> h.role
 UNION ALL
 
 -- The loader takes the compartment's completion value, so the last top-level
--- expression must BE that value. Which of the two shapes a module owes is its
--- role's business; this refuses one that is neither.
+-- expression must BE that value. Which shape a module owes is its role's
+-- business; this refuses one that is none.
 SELECT 'error',
        h.path,
        'the last top-level expression must be the module''s completion value — '
-         || 'an arrow function (handler) or a parenthesised object literal (adapter)'
+         || 'an arrow function (handler), a parenthesised object literal (adapter), or the name holding one'
 FROM handler h
 WHERE h.completion = 'other'
 

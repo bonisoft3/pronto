@@ -303,6 +303,22 @@ async function decisionNotes(
 }
 
 /** Scan the app's screens and write program_derived.cue beside program.cue. */
+/** An effect's handler as a fact row, read in the airlock's cage's terms:
+ * endowed with what the effect declares, completing in its exports. */
+export async function effectModules(
+  appDir: string,
+  effects: Record<string, { endowments?: string[] }>,
+): Promise<{ path: string; references: string[]; completion: string; role: string }[]> {
+  const rows = [];
+  for (const [ename, e] of Object.entries(effects)) {
+    const path = `effects/${ename}.js`;
+    const src = await ifMissing(Deno.readTextFile(`${appDir}/${path}`), null);
+    if (src === null) fail(`effect ${ename}: its handler ${path} is not a file`);
+    rows.push({ path, references: jessieFacts(src, "effect", e.endowments ?? []).references, completion: "exports", role: "effect" });
+  }
+  return rows;
+}
+
 export async function derive(appDir: string): Promise<void> {
   const program = await Deno.readTextFile(`${appDir}/program.cue`);
   const pkg = /^package (\w+)$/m.exec(program)?.[1] ?? fail(`${appDir}/program.cue names no package`);
@@ -402,12 +418,13 @@ export async function derive(appDir: string): Promise<void> {
   // read off it rather than added to the expression above.
   const { surface, state, meta: appMeta } = exp.program as unknown as {
     surface: {
-      screens: Record<string, { forms?: { id: string; entity: string }[] }>;
+      screens: Record<string, { forms?: { id: string; entity: string }[]; files: { renderers?: string[] } }>;
       endowments?: Record<string, string[]>;
     };
     state: {
-      pipelines?: Record<string, { fold?: { pair: { table: string } } }>;
-      computations?: Record<string, { src: string; wasm: string[] }>;
+      pipelines?: Record<string, { fold?: { src: string; pair: { table: string } } }>;
+      computations?: Record<string, { src: string; wasm: string[]; endowments: string[] }>;
+      effects?: Record<string, { endowments?: string[] }>;
       seed?: { src: string };
     };
     meta?: { i18n?: { default?: string; locales?: Record<string, { path: string }> } };
@@ -445,8 +462,7 @@ export async function derive(appDir: string): Promise<void> {
       if (src.includes(TAG)) fail(`entity ${ename}: validations "${vname}": ${v.src} contains the quote tag ${TAG}`);
       const split = splitCompletion(src);
       if (split === null) fail(`entity ${ename}: validations "${vname}": ${v.src} must end in an arrow function`);
-      const granted = surfaceEndowments[v.src] ?? surfaceEndowments[v.src.split("/").pop() ?? ""] ?? [];
-      const facts = jessieFacts(src, granted);
+      const facts = jessieFacts(src, "validation", surfaceEndowments[v.src] ?? []);
       modules.push({ path: v.src, ...facts, role: "validation" });
       // A handler's denied name is a fact row a query reports; a validation's
       // is a refusal here, because its source is embedded in a migration and
@@ -459,16 +475,35 @@ export async function derive(appDir: string): Promise<void> {
   }
 
   // A computation's module joins the fact rows in a role of its own: the cage
-  // mecha's compute service runs it in endows none of the denied names, and
-  // what it completes in is its exports, so no completion shape applies.
+  // mecha's compute service runs it in endows only what it declares, and what
+  // it completes in is its exports, so no completion shape applies.
   for (const [cname, c] of Object.entries(state.computations ?? {})) {
     const src = await ifMissing(Deno.readTextFile(`${appDir}/${c.src}`), null);
     if (src === null) fail(`computation ${cname}: src ${c.src} is not a file`);
     for (const w of c.wasm) {
       if ((await ifMissing(Deno.stat(`${appDir}/${w}`), null)) === null) fail(`computation ${cname}: wasm ${w} is not a file`);
     }
-    modules.push({ path: c.src, references: jessieFacts(src).references, completion: "exports", role: "computation" });
+    modules.push({ path: c.src, references: jessieFacts(src, "computation", c.endowments).references, completion: "exports", role: "computation" });
   }
+
+  // A renderer and a fold join them as the terminal loads each: a renderer's
+  // `export default` stripped to the arrow it completes in, a fold completing
+  // in its exports.
+  const renderers = new Set(Object.values(surface.screens).flatMap((sc) => sc.files.renderers ?? []));
+  for (const path of [...renderers].sort()) {
+    const src = await ifMissing(Deno.readTextFile(`${appDir}/${path}`), null);
+    if (src === null) fail(`renderer ${path} is not a file`);
+    const facts = jessieFacts(src.replace(/^[ \t]*export[ \t]+default[ \t]+/m, ""), "renderer", surfaceEndowments[path] ?? []);
+    modules.push({ path, ...facts, role: "renderer" });
+  }
+  for (const [pname, p] of Object.entries(state.pipelines ?? {})) {
+    if (p.fold === undefined) continue;
+    const src = await ifMissing(Deno.readTextFile(`${appDir}/${p.fold.src}`), null);
+    if (src === null) fail(`pipeline ${pname}: fold ${p.fold.src} is not a file`);
+    modules.push({ path: p.fold.src, references: jessieFacts(src, "fold", surfaceEndowments[p.fold.src] ?? []).references, completion: "exports", role: "fold" });
+  }
+
+  modules.push(...await effectModules(appDir, state.effects ?? {}));
 
   // One parse per distinct constraint, and then the parser is done: the IR
   // goes to disk and everything downstream — the CHECK bodies, the CUE
@@ -789,10 +824,20 @@ export async function derive(appDir: string): Promise<void> {
   const handlerNames = new Set(screens.flatMap((s) => s.handlers.map((h) => h.replace(/^.*\//, "").replace(/\.js$/, ""))));
   for (const name of [...available].sort()) {
     const rel = `shell/handlers/${name}.js`;
-    const granted = surfaceEndowments[rel] ?? surfaceEndowments[`${name}.js`] ?? [];
-    const facts = jessieFacts(await Deno.readTextFile(`${appDir}/${rel}`), granted);
+    const src = await Deno.readTextFile(`${appDir}/${rel}`);
     const roles = [...(adapterNames.has(name) ? ["adapter"] : []), ...(handlerNames.has(name) || !adapterNames.has(name) ? ["handler"] : [])];
-    for (const role of roles) modules.push({ path: rel, ...facts, role });
+    for (const role of roles) modules.push({ path: rel, ...jessieFacts(src, role, surfaceEndowments[rel] ?? []), role });
+  }
+  // A grant is keyed by the module's path, the one spelling every loader
+  // reads; a key naming no terminal module grants nothing. A computation or
+  // an effect is granted by its own declaration, and an adapter the terminal
+  // serves is loaded under the path the route names.
+  const modulePaths = new Set([
+    ...modules.filter((m) => m.role !== "computation" && m.role !== "effect").map((m) => m.path),
+    ...[...adapterNames].filter((a) => !available.has(a)).map((a) => `/omnishell/components/${a}.js`),
+  ]);
+  for (const key of Object.keys(surfaceEndowments)) {
+    if (!modulePaths.has(key)) fail(`surface.endowments names ${key}, which is the path of no terminal module`);
   }
   // A validation's module and a handler's are pushed by two passes, so the
   // fact rows are ordered here rather than by either.
@@ -817,6 +862,7 @@ export async function derive(appDir: string): Promise<void> {
     artifacts.push({ path, sha256: await sha(path), derived });
   }
   for (const c of Object.values(state.computations ?? {})) artifacts.push({ path: c.src, sha256: await sha(c.src), derived: false });
+  for (const name of Object.keys(state.effects ?? {})) artifacts.push({ path: `effects/${name}.js`, sha256: await sha(`effects/${name}.js`), derived: false });
   // The stylesheets the rules above read, so that editing one and not
   // regenerating is a stale-row finding rather than a green literal lint over
   // yesterday's numbers. A screen's row hashes the STRING scanned rather than a

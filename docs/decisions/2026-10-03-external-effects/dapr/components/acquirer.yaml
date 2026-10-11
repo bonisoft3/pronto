@@ -1,0 +1,7 @@
+# The one sink run.sh declares; sink-undeclared has no resource.
+apiVersion: dapr.io/v1alpha1
+kind: HTTPEndpoint
+metadata:
+  name: acquirer
+spec:
+  baseUrl: http://sink-declared:8080

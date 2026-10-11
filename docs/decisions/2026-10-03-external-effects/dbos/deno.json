@@ -1,0 +1,1 @@
+{"imports":{"@dbos-inc/dbos-sdk":"npm:@dbos-inc/dbos-sdk@5.2.11","@dbos-inc/node-pg-datasource":"npm:@dbos-inc/node-pg-datasource@5.2.11","pg":"npm:pg@8.16.3"},"nodeModulesDir":"auto","lock":true}

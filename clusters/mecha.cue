@@ -24,6 +24,16 @@ import (
 }
 #Runtime: impl.#Runtime
 #Static:  impl.#Static
+// What a sink's origin may be: the airlock's daprd dials it.
+#Origin: impl.#Origin
+
+// What a computation's or an effect's module may be endowed with.
+#CageEndowment: impl.#CageEndowment
+
+// A bridge (state.bridges) and the port its daprd reaches it on.
+#Bridge:     impl.#Bridge
+#BridgePort: impl.#BridgePort
+
 #ConduitSlot: impl.#ConduitSlot
 
 // The mecha images an app takes by name, as pronto pins them: the consumer

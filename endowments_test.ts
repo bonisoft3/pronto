@@ -1,0 +1,34 @@
+// jessie.ts's ENDOWABLE against what each cage actually grants and what each
+// schema admits: a name one list gained and another did not would pass lint
+// and fail in the cage, or be refused by the schema and allowed by the scan.
+
+import { assertEquals } from "jsr:@std/assert@1.0.11";
+import { ENDOWABLE } from "./jessie.ts";
+import { SAFE_ENDOWMENTS } from "../omnishell/interpreter/jessie.js";
+import { ENDOWABLE as MECHA } from "../../libraries/mecha/services/compute/language.ts";
+
+const sorted = (xs: Iterable<string>) => [...xs].sort();
+const candidates = sorted(new Set([...Object.values(ENDOWABLE).flat(), ...Object.keys(SAFE_ENDOWMENTS), ...MECHA]));
+
+async function admitted(expr: string): Promise<string[]> {
+  const { code, stdout, stderr } = await new Deno.Command("cue", {
+    args: ["export", ".", "--out", "json", "-e", `[for n in ${JSON.stringify(candidates)} if ${expr} {n}]`],
+    cwd: new URL(".", import.meta.url),
+  }).output();
+  if (code !== 0) throw new Error(new TextDecoder().decode(stderr));
+  return sorted(JSON.parse(new TextDecoder().decode(stdout)));
+}
+
+Deno.test("a terminal module may be granted what the terminal's cage endows and the schema admits", async () => {
+  const terminal = sorted(Object.keys(SAFE_ENDOWMENTS));
+  for (const role of ["handler", "adapter", "renderer", "validation", "fold"]) assertEquals(sorted(ENDOWABLE[role]), terminal, role);
+  assertEquals(await admitted("(n & #SafeEndowment) != _|_"), terminal);
+});
+
+Deno.test("a mecha module may be granted what mecha's cages endow and the schema admits", async () => {
+  const mecha = sorted(MECHA);
+  for (const role of ["computation", "effect"]) assertEquals(sorted(ENDOWABLE[role]), mecha, role);
+  assertEquals(await admitted("([n] & #Computation.endowments) != _|_"), mecha);
+  const effect = `{name: "x", entity: "E", sink: {origin: "https://api.example.com", idempotent: true}, endowments: [n]}`;
+  assertEquals(await admitted(`(#ExternalEffect & ${effect}) != _|_`), mecha);
+});

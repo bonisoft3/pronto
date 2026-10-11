@@ -50,6 +50,9 @@ authUidNotEmitted:       strings.Contains(_scheduledFiles["\(_migrations)/000_ex
 // the seed among the migrations after it.
 scheduleSeedMigrated: list.Contains(_scheduledCluster.state.migrations, "\(_migrations)/021_schedule_seed.sql") & true
 schedulePlaced: len([for c in _scheduledCluster.surface.targets.database.dockerfile.copy if c.dst == "/docker-entrypoint-initdb.d/020_schedule.sql" {c}]) & 1
+// A schedule brings the ticker and nothing of the airlock's.
+scheduleNoAirlock: (_scheduledCluster.surface.targets.airlock == _|_) & true
+scheduleNoNetworks: (_scheduledFiles["compose.networks.yaml"] == _|_) & true
 
 _scheduledCDC: strings.Split(_scheduledFiles["\(_migrations)/008_publication.sql"].text, "-- Electric")[0]
 scheduleServiceInputCaptured: strings.Contains(_scheduledCDC, "tick") & true

@@ -1,7 +1,7 @@
 ---
 type: decision
 title: "Hybrid machines: omnishell, mecha, duckstream and cortex"
-description: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-exterior tiers.
+description: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-external tiers.
 status: partially-built
 ---
 
@@ -22,8 +22,8 @@ This decision unifies them into one XState-JSON machine model partitioned into f
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        Cortex Machine                                  │
-│     Orchestrates sagas, child lifecycles, and Level 4 exterior IO      │
-│     (Native DBOS Workflows embedded over PostgreSQL)                   │
+│     Coordinates every tier; the only tier performing Level 4 effects   │
+│     (Graphile Worker over PostgreSQL; ledger owned by pronto)          │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
          ┌─────────────────────────┼──────────────────────────┐
@@ -36,7 +36,7 @@ This decision unifies them into one XState-JSON machine model partitioned into f
 └──────────────────┘     └──────────────────┘     └──────────────────────┘
 ```
 
-The division enforces that **only Cortex may emit Level 4 (exterior) effects**. The other
+The division enforces that **only Cortex may perform Level 4 (external) effects**. The other
 three tiers are mathematically pure, closed over rows, and replayable.
 
 | Machine | Closed Over | Max Effect Level | Determinism & Replay |
@@ -44,7 +44,7 @@ three tiers are mathematically pure, closed over rows, and replayable.
 | **Omnishell** | `tab` or `device` row in client memory | **Level 2** (compensable) | Walked by Chinese Postman tour; posed by Storybook battery |
 | **Mecha** | `server` entity row in PostgreSQL | **Level 3** (replicated) | ACID transaction; rolled back natively on error |
 | **DuckStream** | Pipeline state or lake catalog row | **Level 3** (lake/relational) | `delta ≡ recompute`; Feldera continuous circuits on server, DuckDB-WASM reactive recompute in browser |
-| **Cortex** | Instance row in `saga` / DBOS state | **Level 4** (exterior) | DBOS durable execution; atomic PostgreSQL transaction co-location before exterior act |
+| **Cortex** | The coordination's states; for an external effect, its row in `external_effect_ledger` | **Level 4** (external) | Performed through mecha's airlock; the ledger claims in the transition's commit, before any call |
 
 ---
 
@@ -72,7 +72,8 @@ three tiers are mathematically pure, closed over rows, and replayable.
   - `after`: Relative timer deadline on an active state (`after: 15s`), evaluated
     against row timestamp bounds under PostgreSQL role timeouts.
   - `schedule`: Scheduled calendar/interval wake emitted by Mecha's ticker
-    (`020_schedule.sql`).
+    (`020_schedule.sql`; the same table opens `012_airlock.sql` where an effect is
+    declared, so the airlock's wake is a one-shot row of it).
 - **Outbound Effects**:
   - Closed relational operations:
     - `insert`: Strict append (`INSERT INTO ...`). Fails loudly on unique collision.
@@ -134,47 +135,19 @@ three tiers are mathematically pure, closed over rows, and replayable.
 
 ---
 
-## 4. Cortex Machines (Orchestration & Level 4 Exterior Effects)
+## 4. Cortex (Coordination and Level 4 External Effects)
 
-- **Role**: Top-level coordination of multi-tier sagas and exterior interactions. The
-  only tier permitted to emit Level 4 effects.
-- **Durable Engine: DBOS (Database-Oriented Operating System)**:
-  - Built on Michael Stonebraker and Matei Zaharia's architecture where PostgreSQL is the
-    single operating system for workflow state.
-  - **No external daemon / broker**: DBOS runs embedded inside the application backend process
-    (Deno / Node.js) with zero sidecars (`daprd`) or external orchestrator clusters (Temporal).
-  - **Single Transaction Boundary**: A saga step can execute domain mutations in PostgreSQL and
-    record its step state/idempotency claim within the **exact same ACID commit**.
-  - **Replaces Ad-hoc Runners**: Fully provides battle-tested lease renewal, zombie worker
-    detection, exponential backoff with jitter, dead-letter re-entry, and workflow versioning.
-- **Saga Representation**:
-  - Sagas and saga steps are persisted in the `saga` table (and DBOS system tables):
-    ```sql
-    CREATE TABLE IF NOT EXISTS "saga" (
-      "id"              TEXT PRIMARY KEY,
-      "name"            TEXT NOT NULL,
-      "idempotency_key" TEXT NOT NULL,
-      "payload"         JSONB NOT NULL DEFAULT '{}'::jsonb,
-      "status"          TEXT NOT NULL DEFAULT 'pending',
-      "outcome"         JSONB,
-      "created_at"      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-      "settled_at"      TIMESTAMPTZ,
-      UNIQUE ("name", "idempotency_key")
-    );
-    ```
-- **Inbound Events**:
-  - Child machine completion (`OMNISHELL_SUBMITTED`, `MECHA_MIGRATED`,
-    `DUCKSTREAM_CONSOLIDATED`).
-  - Peer response (`CALL_SUCCEEDED`, `CALL_FAILED`).
-  - Compensation trigger (`SAGA_ABORT`).
-- **Outbound Effects** (Level 4 - Exterior):
-  - `DISPATCH_EXTERNAL_ACT`: Outbound network calls (payment gateways, emails, webhooks)
-    guarded by DBOS step idempotency keys.
-  - `SPAWN_CHILD_MACHINE`: Instantiate or resume a Mecha, DuckStream, or Omnishell flow.
-  - `COMPENSATE`: Execute compensating rollback steps across child machines.
-- **Contract**: Temporal-style durable execution. If a process dies while an act is in
-  flight, restart enters `unknown` and queries the peer via its idempotency key; it
-  never blindly re-issues the call.
+Cortex coordinates across every tier, on both the pure and the impure side: frontend
+handlers and their effects, mecha transitions, DuckStream pipelines and the compute nodes
+attached to them, and the external effects only it may perform. A state invokes another
+tier's actor and answers to its outcome. A saga is such a coordination, with states that
+invoke effects and states that invoke their compensations.
+
+External effects are the first part built: a mecha state *invokes* one, the guard claims
+a ledger row in the transition's commit, mecha's airlock performs it against one declared
+sink through that sink's Dapr binding, and the outcome returns through the guard.
+[External effects](2026-10-03-external-effects.md) holds the grammar, the ledger and
+the measurements that rejected DBOS as the runtime.
 
 ---
 
@@ -188,30 +161,23 @@ Hybrid state machines in Pronto compile transitions that seamlessly trigger acro
 │         (PostgreSQL BEFORE / AFTER Trigger)            │
 └───────────┬────────────────────────────────┬───────────┘
             │                                │
-     #SagaEffect                      #StreamEffect
+     invoke                           #StreamEffect
             │                                │
             ▼                                ▼
 ┌────────────────────────┐      ┌────────────────────────┐
-│     Cortex / DBOS      │      │       DuckStream       │
-│  INSERT INTO "saga"    │      │  pg_notify stream bus  │
-│  (Level-4 Exterior IO) │      │  (Feldera IVM circuit) │
+│     Cortex / Graphile  │      │       DuckStream       │
+│  ledger claim + job    │      │  pg_notify stream bus  │
+│  (Level-4 External)    │      │  (Feldera IVM circuit) │
 └────────────────────────┘      └────────────────────────┘
 ```
 
-1. **Driving Cortex from a Machine Transition (`#SagaEffect`)**:
-   A state transition in PostgreSQL (e.g. an order moving to `confirmed`) can declare:
+1. **Driving Cortex from a machine state (`invoke`)**:
+   A state invokes a declared external effect, and only its outcome leaves it:
    ```cue
-   actions: [{
-       effect: {
-           saga: "process_payment"
-           idempotencyKey: "NEW.id"
-           payload: {amount: NEW.total, customer_id: NEW.customer_id}
-       }
-   }]
+   charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
    ```
-   The compiler emits an atomic `INSERT INTO "saga" (...) VALUES (...) ON CONFLICT DO NOTHING`
-   and sends `PERFORM pg_notify('cortex_saga_queue', ...)` inside the **same database transaction**.
-   DBOS picks up the row and executes the external payment gateway call with full Level-4 durability.
+   The guard claims a ledger row and enqueues a Graphile job in the transition's own
+   commit; [external effects](2026-10-03-external-effects.md) has the rest.
 
 2. **Driving DuckStream from a Machine Transition (`#StreamEffect`)**:
    When a machine executes state changes that feed analytical pipelines or require an explicit
@@ -226,6 +192,62 @@ Hybrid state machines in Pronto compile transitions that seamlessly trigger acro
    ```
    The compiler emits a signaling notification `pg_notify('duckstream_recount_ledger', ...)`
    or mutates source rows captured by Feldera's CDC connector.
+
+---
+
+## 6. As built, and what moves between tiers
+
+One model holds across every tier: state is a row, operators are pure functions of rows,
+every impure thing is a declared source or sink with a record, and the client reads live
+queries and writes forms. What differs per tier is only how far from pure it may stray.
+
+| Executor | Closed over | Level | Runs as | Status |
+|---|---|---|---|---|
+| Omnishell machine | a `tab`/`device` row in the client | 2 | the terminal: SES-caged Jessie, XState JSON | built |
+| Mecha machine | a `server` row in Postgres | 3 | the plpgsql guard inside the write | built |
+| Compute, whole-table | a snapshot of the tables it `reads` | 3 | Jessie planning WASI jobs over a DuckDB lake; woken by CDC invalidations through the change feed, batched and retried | built |
+| Compute, per key | one changed row and its declared edges | 3 | the same cage, warm; Conduit → compute's own daprd over gRPC, no bus; a direct write | not built |
+| Airlock | one ledger row per effect instance | 4 | Graphile Worker listening on `jobs:insert`, woken from zero by the ticker's one-shot row; one declared Dapr binding per effect; bridges for what is not HTTP | built ([external effects](2026-10-03-external-effects.md)) |
+| DuckStream | a pipeline or lake row, with history | 3 | Feldera on the feed, DuckDB-WASM in the page | grammar and static checks only; no executor |
+| Cortex | a coordination whose states are owned by tiers | 4 | the machine itself: a saga is several invoking states | a concept |
+
+**Effects and hatches.** Levels 1–3 stay inside time travel: an assign, a relational effect
+and a compute output all replay from rows. Level 4 is the airlock, and the airlock is a
+hatch: one of the places where perfect time travel stops, beside the compiler's `sql`,
+`proto` and `container` hatches, each with its own declaration and its own record. The
+airlock's record is the ledger, so a replay answers the invoke from it instead of
+re-running the world; `reentry: {repeat: why}` is a hatch inside the hatch. Saga-style
+resilience comes from the statechart and the ledger, not from a durable function: a
+state invokes one effect, the guard claims and enqueues in the transition's commit, the
+sink declares idempotency or its re-entry, the outcome returns as the next event, and a
+compensation is another invoking state. Only an effect handler holds a sink; every other
+module has the language plus declared endowments, lint-checked per role across omnishell
+and mecha.
+
+**Data transport is IVM-centric.** Down: Postgres → Electric shapes → the terminal's live
+queries, recomputed absolutely and written differentially. Up: forms → crud → Postgres,
+where machines and validations run in the write. Across: WAL → Conduit → Dapr → Redis
+Streams → pipelines and compute, at-least-once. Compute comes in three kinds by the shape
+of its input: whole-table (built, above), per key for user-facing latency (tens of
+milliseconds; not built), and analytical over the stream with history, where durability
+is the point because history is the input (DuckStream). Feldera's place is the third
+kind, not a trigger for the first two. A client-side differential engine (`d2ts`) is
+named in the seams below and is not in the tree.
+
+**What forces the unbuilt parts.** golaberto needs the analytical kind: odds are recomputed
+in micro-batches of simulation draws (odds-rust replaces 50,000-draw batches
+incrementally), which a per-row path delivers without batching semantics and a
+whole-table recompute delivers too slowly. truco needs cortex: online play is one machine
+whose states live partly in the browser (hand, optimistic plays) and partly in Postgres
+(seats, room, authority), and without one chart with per-state tier ownership a model
+writes two machines that disagree.
+
+**Open, in order.** The per-key compute path, after a spike on whether Conduit can call a
+Dapr invoke synchronously. The DuckStream executor, Feldera or DuckDB on the feed, with
+golaberto as the oracle. The cortex grammar, one XState chart with states owned by
+tiers, with truco as the oracle. Hatches as one taxonomy: what a replay owes each kind.
+The external-effects record's own open list: a client certificate for a sink, bridges
+beyond mail, a wake placed by tier.
 
 ---
 
@@ -355,8 +377,8 @@ domains:
    - *Invariant*: Sub-second full-corpus re-indexing and scoring entirely in-memory without
      an external search cluster.
 4. **Stripe / Airbnb (Escrow & Reservation Sagas)**:
-   - *Tiers*: Mecha (atomic escrow lock) + Cortex (Level 4 `charge_card` and `payout` acts via
-     `stream_attempt` claims) + Omnishell (payment status ladder).
+   - *Tiers*: Mecha (atomic escrow lock) + Cortex (Level 4 `charge_card` and `payout` external effects, claimed in
+     the ledger) + Omnishell (payment status ladder).
    - *Invariant*: Worker process crash mid-HTTP call to the payment gateway never
      double-charges; restart safely queries the peer via the idempotency key.
 

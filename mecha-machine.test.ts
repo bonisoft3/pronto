@@ -1,4 +1,5 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
 Deno.test("mecha machine compiles statechart into PostgreSQL 010_machines.sql", async () => {
   const cueCode = `
@@ -345,205 +346,330 @@ out: (pronto.#emit & {
   assertStringIncludes(sql, 'UPDATE "category_month_stat" SET "spent" = GREATEST(0, category_month_stat.spent - OLD.amount) WHERE "bucket" = OLD.bucket;');
 });
 
-Deno.test("hybrid machines drive cortex sagas and duckstream pipelines", async () => {
-  const cueCode = `
-package test
-
-import "bonisoft.org/plugins/pronto"
-
-app: pronto.#App & {
-  meta: {
-    name: "test-hybrid"
-    description: "test"
-    ir: sha256: ""
-    targets: []
-    clocks: []
-    decisions: {}
-    tests: {}
-  }
-  state: {
-    entities: {
-      Order: {
-        table: "orders"
-        durability: "server"
-        fields: [
-          {name: "id", type: "uuid", pk: true},
-          {name: "status", type: "string"},
-          {name: "total", type: "decimal", precision: 12, scale: 2},
-          {name: "created_at", type: "timestamp"},
-        ]
-      }
-    }
-    machines: {
-      OrderMachine: {
-        name: "OrderMachine"
-        entity: "orders"
-        field: "status"
-        initial: "pending"
-        states: {
-          pending: {
-            on: {
-              confirm: {
-                target: "confirmed"
-                actions: [{
-                  effect: {
-                    saga: "process_payment"
-                    idempotencyKey: "NEW.id"
-                    payload: {amount: "NEW.total", store: "main"}
-                  }
-                }, {
-                  effect: {
-                    stream: "order_analytics"
-                    signal: "refresh"
-                  }
-                }]
-              }
-            }
-          }
-          confirmed: {type: "final"}
-        }
-      }
-    }
-    sagas: {
-      process_payment: {
-        name: "process_payment"
-        steps: ["authorize", "capture"]
-      }
-    }
-    duckstreams: {
-      order_analytics: {
-        name: "order_analytics"
-        sql: "SELECT count(*) as total_orders FROM orders WHERE status = 'confirmed'"
-        sources: ["orders"]
-        sink: "order_metrics"
-      }
-    }
-  }
-  capabilities: {hatches: {}, vendored: {}}
-  surface: {
-    screens: board: {
-      title: "Board"
-      route: "/"
-      markup: "<main></main>"
-      reads: [{table: "orders", kind: "live", nested: false, lists: [], route: "whole", clauses: [], embeds: [], orders: []}]
-      forms: []
-      states: []
-    }
-    handlers: {}
-    design: {}
-    flows: {}
-  }
+async function refusal(code: string): Promise<string> {
+  const res = await cue(["vet", "-c", "-"], code);
+  assertEquals(res.success, false);
+  return res.stderr;
 }
 
-_terminal: (pronto.#DefaultTerminal & {code: app}).out
-_cluster: (pronto.#DefaultCluster & {code: app, statics: []}).out
-_loop: (pronto.#DefaultLoop & {code: app, terminal: _terminal, cluster: _cluster}).out
-_build: (pronto.#DefaultBuild & {code: app, loop: _loop, cluster: _cluster}).out
-out: (pronto.#emit & {
-  code:     app
-  cluster:  _cluster
-  terminal: _terminal
-  loop:     _loop
-  build:    _build
-}).files
-`;
+Deno.test("entering an invoking state claims the ledger and enqueues in the transition's commit", async () => {
+  const files = await emitFiles(paymentProgram());
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(sql, `INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "request")`);
+  assertStringIncludes(sql, `VALUES ('charge:' || NEW."id"::text, 'charge', jsonb_build_object('id', NEW."id"), jsonb_build_object('amount', NEW."total", 'currency', 'BRL'))`);
+  // A second claim of a performed key is refused, not skipped.
+  assertStringIncludes(sql, `IF NOT FOUND THEN\n          RAISE EXCEPTION 'external effect % was already performed: entering charging again needs a new key', 'charge:' || NEW."id"::text USING ERRCODE = 'unique_violation';`);
+  assertStringIncludes(sql, `PERFORM graphile_worker.add_job('external_effect', json_build_object('key', 'charge:' || NEW."id"::text), job_key => 'charge:' || NEW."id"::text, max_attempts => 30);`);
+  // And the ticker's one-shot row re-armed, so a cluster asleep is woken for the job.
+  // The re-arm writes only a row not yet armed and waits on no lock, so
+  // claims never queue on the one row (emit.cue).
+  assertStringIncludes(sql, `UPDATE "public"."schedule" SET "due_at" = date_trunc('milliseconds', clock_timestamp()), "last_tick_at" = NULL\n         WHERE "name" = 'airlock' AND "last_tick_at" IS NOT NULL\n           AND "name" IN (SELECT "name" FROM "public"."schedule" WHERE "name" = 'airlock' FOR UPDATE SKIP LOCKED);`);
+  // A key is a field's text, spelled the same in every session.
+  assertStringIncludes(sql, `SET search_path = public, pg_catalog\nSET TimeZone = 'UTC'\nSET DateStyle = 'ISO, YMD' AS $$`);
+  // Leaving is admitted only by the ledger's recorded outcome, keyed on the old row.
+  assertStringIncludes(sql, `SELECT l."outcome" INTO outcome FROM "airlock"."external_effect_ledger" l WHERE l."key" = 'charge:' || OLD."id"::text;`);
+  assertStringIncludes(sql, `NEW."failure" := outcome->>'kind';`);
+  assertStringIncludes(sql, "DECLARE\n  outcome jsonb;");
 
-  const child = new Deno.Command("cue", {
-    args: ["export", "-", "-e", "out", "--out", "json"],
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
-
-  const writer = child.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(cueCode));
-  await writer.close();
-  const res = await child.output();
-  assertEquals(res.success, true);
-
-  const files = JSON.parse(new TextDecoder().decode(res.stdout));
-
-  // 1. Verify 010_machines.sql contains saga insertion and stream signal
-  const machineSql = files["services/database/migrations/010_machines.sql"]?.text;
-  assertEquals(typeof machineSql, "string");
-  assertStringIncludes(machineSql, 'INSERT INTO "saga" ("id", "name", "idempotency_key", "payload", "status")');
-  assertStringIncludes(machineSql, "VALUES (gen_random_uuid()::text, 'process_payment', NEW.id::text, jsonb_build_object('amount', NEW.total, 'store', 'main')::jsonb, 'pending')");
-  assertStringIncludes(machineSql, "PERFORM pg_notify('cortex_saga_queue', jsonb_build_object('saga', 'process_payment', 'key', NEW.id::text)::text);");
-  assertStringIncludes(machineSql, "PERFORM pg_notify('duckstream_order_analytics', jsonb_build_object('signal', 'refresh', 'table', TG_TABLE_NAME, 'id', NEW.id::text)::text);");
-
-  // 2. Verify 015_sagas.sql migration is emitted
-  const sagaSql = files["services/database/migrations/015_sagas.sql"]?.text;
-  assertEquals(typeof sagaSql, "string");
-  assertStringIncludes(sagaSql, 'CREATE TABLE IF NOT EXISTS "saga"');
-  assertStringIncludes(sagaSql, 'UNIQUE ("name", "idempotency_key")');
-  assertStringIncludes(sagaSql, 'ALTER TABLE "saga" ENABLE ROW LEVEL SECURITY;');
-  assertStringIncludes(sagaSql, 'REVOKE ALL ON "saga" FROM anon, app_user, electric;');
-
-  // 3. Verify duckstream pipeline SQL is emitted
-  const streamSql = files["pipelines/duckstream/order_analytics.sql"]?.text;
-  assertEquals(typeof streamSql, "string");
-  assertStringIncludes(streamSql, "SELECT count(*) as total_orders FROM orders WHERE status = 'confirmed'");
+  // The ledger is mecha's (services/airlock/airlock.sql), placed by the cluster.
+  assertEquals(Object.keys(files).filter((f) => f.includes("migrations/015_")), []);
 });
 
-Deno.test("a machine referencing an undeclared saga or duckstream is refused at compile time", async () => {
-  const cueCode = `
-package test
-import "bonisoft.org/plugins/pronto"
+Deno.test("the airlock is handed each effect's state, outcome targets, sink and handler", async () => {
+  const files = await emitFiles(paymentProgram().replace("idempotent: true", "idempotent: false"));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data, {
+    effects: {
+      charge: {
+        table: "payment",
+        field: "status",
+        state: "charging",
+        onDone: "settled",
+        onError: "failed",
+        row: ["id"],
+        idempotent: false,
+        reentry: "reconcile",
+        attempts: 5,
+        handler: "effects/charge.js",
+      },
+    },
+  });
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data, {
+    apiVersion: "dapr.io/v1alpha1",
+    kind: "Component",
+    metadata: { name: "charge" },
+    spec: {
+      type: "bindings.http",
+      version: "v1",
+      metadata: [{ name: "url", value: "https://api.acquirer.example" }, { name: "errorIfNot2XX", value: "false" }],
+    },
+  });
+  assertEquals(JSON.parse(JSON.stringify(files["effects/charge.js"])), { format: "jessie", src: "effects/charge.js" });
+});
 
-app: pronto.#App & {
-  meta: {
-    name: "test-app"
+Deno.test("secrets are declared by their environment variables, reaching the manifest, never a value", async () => {
+  const files = await emitFiles(paymentProgram({ effect: `secrets: ["PAY_SIGNING_KEY"]` }));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.secrets, ["PAY_SIGNING_KEY"]);
+  const err = await refusal(paymentProgram({ effect: `secrets: ["pay-key"]` }));
+  assertStringIncludes(err, "secrets");
+});
+
+// The fixture's sink, swapped for a bridge declared beside the effects.
+const bridged = (bridges: string, sink = `sink: {bridge: "mail", idempotent: false}\n      reentry: "unknown"`) =>
+  paymentProgram()
+    .replace('sink: {origin: "https://api.acquirer.example", idempotent: true}', sink)
+    .replace("effects: charge:", `${bridges}\n    effects: charge:`);
+const MAIL_BRIDGE = `bridges: mail: {kind: "mail", server: "smtp.mail.example:587", domain: "airlock.example"}`;
+
+Deno.test("a sink's credential is a header the airlock adds from a declared secret, required of the environment and handed to no handler", async () => {
+  const program = paymentProgram({ effect: `secrets: ["ACQUIRER_WEBHOOK_KEY"]` }).replace(
+    `sink: {origin: "https://api.acquirer.example", idempotent: true}`,
+    `sink: {origin: "https://api.acquirer.example", idempotent: true, credential: {scheme: "Bearer", secret: "ACQUIRER_KEY"}}`,
+  );
+  const files = await emitFiles(program);
+  const manifest = JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge;
+  assertEquals(manifest.credential, { header: "Authorization", scheme: "Bearer", secret: "ACQUIRER_KEY" });
+  assertEquals(manifest.secrets, ["ACQUIRER_WEBHOOK_KEY"]);
+  const env = await cue(["export", "-", "-e", "_cluster.surface.targets.airlock.compose.environment", "--out", "json"], program);
+  assertEquals(env.success, true, env.stderr);
+  assertEquals(JSON.parse(env.stdout).ACQUIRER_KEY, "${ACQUIRER_KEY:?ACQUIRER_KEY is required: an effect declares it}");
+  assertStringIncludes(await refusal(program.replace('secret: "ACQUIRER_KEY"', 'secret: "acquirer-key"')), "credential");
+  // A header daprd forwards starts uppercase, and is none the host or HTTP sets.
+  for (const header of ["x-api-key", "Idempotency-Key", "content-type", "Host"]) {
+    assertStringIncludes(await refusal(program.replace('credential: {scheme: "Bearer", secret: "ACQUIRER_KEY"}', `credential: {header: "${header}", secret: "ACQUIRER_KEY"}`)), "header");
   }
-  state: {
-    entities: {
-      Order: {
-        table: "orders"
-        durability: "offline"
-        fields: [{name: "id", type: "uuid", pk: true}]
-      }
-    }
-    machines: {
-      OrderLifecycle: {
-        name: "OrderLifecycle"
-        entity: "Order"
-        on: {
-          insert: [
-            {
-              effect: {
-                saga: "undeclared_saga"
-              }
-            }
-          ]
+  // The credential is the airlock's alone, never also the handler's.
+  assertStringIncludes(await refusal(program.replace('secrets: ["ACQUIRER_WEBHOOK_KEY"]', 'secrets: ["ACQUIRER_KEY"]')), "effect charge lists its credential's ACQUIRER_KEY among the handler's secrets");
+  // Nor a variable the cluster's own services read.
+  assertStringIncludes(await refusal(program.replace('secret: "ACQUIRER_KEY"', 'secret: "SERVICE_JWT"')), "credential");
+  assertStringIncludes(await refusal(program.replace('secrets: ["ACQUIRER_WEBHOOK_KEY"]', 'secrets: ["POSTGRES_PASSWORD"]')), "secrets");
+  // A bridge takes no credential: past it nothing is the platform's to carry.
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false, credential: {secret: "K"}}\n      reentry: "unknown"`)), "credential");
+});
+
+Deno.test("an effect's cluster keeps the wake's names, and the service role the ticker writes as", async () => {
+  const program = paymentProgram();
+  assertStringIncludes(await refusal(paymentProgram({ entity: `Wake: {table: "airlock_wake", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}` })), "entity Wake takes table airlock_wake, which the airlock's wake keeps");
+  assertStringIncludes(await refusal(paymentProgram({ entity: `Sched: {table: "schedule", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}` })), "entity Sched takes table schedule, which the airlock's wake keeps");
+  assertStringIncludes(
+    await refusal(program.replace("machines: PaymentMachine:", `schedules: airlock: {cron: "0 3 * * *", emits: {entity: "Payment", values: status: "pending"}}\n    machines: PaymentMachine:`)),
+    "schedule airlock is the airlock's own wake",
+  );
+  // No auth plane, yet the service role, its bypass and its grants: the
+  // ticker's writes land as it.
+  const roles = (await emitFiles(program))["services/database/migrations/001_roles.sql"].text;
+  assertStringIncludes(roles, "CREATE ROLE service NOLOGIN;");
+  assertStringIncludes(roles, "ALTER ROLE service BYPASSRLS;");
+  assertEquals(roles.includes("app_user"), false);
+  assertStringIncludes((await emitFiles(program))["services/database/migrations/002_grants.sql"].text, "ON ALL TABLES IN SCHEMA public TO anon, service;");
+});
+
+Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {
+  const files = await emitFiles(bridged(MAIL_BRIDGE));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", value: "http://bridge-mail:8080" });
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, "unknown");
+});
+
+Deno.test("a bridged effect states what a repeat costs: neither idempotent nor reconciled", async () => {
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: true}`)), "past a bridge nothing is the platform's to promise");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}`)), "a bridge answers no query");
+  const files = await emitFiles(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: {repeat: "a second mail is a nuisance, not a charge"}`));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, { repeat: "a second mail is a nuisance, not a charge" });
+});
+
+Deno.test("a bridge no effect reaches, or an effect reaching an undeclared bridge, is refused", async () => {
+  assertStringIncludes(await refusal(bridged("", `sink: {bridge: "smtp", idempotent: false}`)), "effect charge reaches undeclared bridge: smtp");
+  assertStringIncludes(
+    await refusal(bridged(MAIL_BRIDGE, 'sink: {origin: "https://api.acquirer.example", idempotent: true}')),
+    "bridge mail is reached by no effect",
+  );
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE.replace("smtp.mail.example:587", "localhost:25"))), "server");
+});
+
+Deno.test("an effect declares its handler's endowments, as an omnishell module declares Intl", async () => {
+  const files = await emitFiles(paymentProgram({ effect: `endowments: ["Crypto", "TextEncoder"]` }));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.endowments, ["Crypto", "TextEncoder"]);
+  assertStringIncludes(await refusal(paymentProgram({ effect: `endowments: ["Intl"]` })), "endowments");
+});
+
+Deno.test("an effect is invoked by exactly one state", async () => {
+  const twice = await refusal(paymentProgram({ machine: `
+        pending: on: pay: "charging"
+        charging: invoke: {src: "charge", onDone: "settled", onError: "again"}
+        again: invoke: {src: "charge", onDone: "settled", onError: "failed"}
+        settled: type: "final"
+        failed: type: "final"`,
+  }));
+  assertStringIncludes(twice, "effect charge is invoked by 2 states: exactly one invokes it");
+  const never = await refusal(paymentProgram({ machine: `
+        pending: on: pay: "settled"
+        settled: type: "final"`,
+  }));
+  assertStringIncludes(never, "effect charge is invoked by 0 states");
+});
+
+Deno.test("an effect's name is a DNS label, as its Dapr endpoint's must be", async () => {
+  const err = await refusal(paymentProgram().replaceAll("charge", "charge_card"));
+  assertStringIncludes(err, "charge_card");
+});
+
+Deno.test("an initial state that invokes claims on insert", async () => {
+  const files = await emitFiles(paymentProgram({ machine: `
+        charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
+        settled: type: "final"
+        failed: type: "final"`,
+  }).replace(`initial: "pending"`, `initial: "charging"`));
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  const insertPath = sql.slice(sql.indexOf("IF TG_OP = 'INSERT' THEN"), sql.indexOf("IF TG_OP = 'UPDATE' THEN\n"));
+  assertStringIncludes(insertPath, `INSERT INTO "airlock"."external_effect_ledger"`);
+});
+
+Deno.test("a key of several fields is JSON-encoded, so a ':' in a value makes no two instances one, and the queue holds more than the attempts", async () => {
+  const files = await emitFiles(paymentProgram({ effect: `key: ["id", "failure"]\n      attempts: 2` }));
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(sql, `'charge:' || jsonb_build_array(NEW."id"::text, NEW."failure"::text)::text`);
+  assertStringIncludes(sql, "max_attempts => 27");
+});
+
+// An invoking state is left only by its outcome; a program whose outcome could
+// never be delivered would hold the row there while the airlock retried.
+Deno.test("an outcome that could never be delivered is refused", async () => {
+  const machine = (charging: string) => `
+        pending: on: pay: "charging"
+        charging: ${charging}
+        settled: type: "final"
+        failed: type: "final"`;
+  assertStringIncludes(await refusal(paymentProgram({ machine: machine(`{type: "final", invoke: {src: "charge", onDone: "settled", onError: "failed"}}`) })), "is final: no outcome could leave it");
+  assertStringIncludes(await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "setled", onError: "failed"}`) })), "an outcome target that is no state: setled");
+  assertStringIncludes(await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: "charging"}`) })), "an outcome targeting itself");
+  assertStringIncludes(
+    await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "failed", onError: {target: "failed", actions: [{assign: {failure: "x"}}]}}`) })),
+    "share target failed and carry actions",
+  );
+  assertStringIncludes(
+    await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: {target: "failed", actions: [{raise: "no"}]}}`) })),
+    "an outcome's actions raise",
+  );
+  // One target for both arrows, with no actions, is a plain join.
+  const files = await emitFiles(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "failed", onError: "failed"}`) }));
+  assertEquals(typeof files["services/database/migrations/010_machines.sql"].text, "string");
+});
+
+Deno.test("a request reads a field the entity has, quoted", async () => {
+  assertStringIncludes(await refusal(paymentProgram({ effect: `request: {amt: "NEW.totl"}` })), "request amt reads NEW.totl, which is not a field of Payment");
+  const files = await emitFiles(paymentProgram({ effect: `request: {"it's": "NEW.total"}` }));
+  assertStringIncludes(files["services/database/migrations/010_machines.sql"].text, `'it''s', NEW."total"))`);
+});
+
+Deno.test("a row in an invoking state keeps its key and is not deleted until its outcome", async () => {
+  const sql = (await emitFiles(paymentProgram({ effect: `key: ["id", "failure"]` })))["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(sql, `IF TG_OP = 'DELETE' THEN\n    IF OLD."status" IN ('charging') THEN\n      RAISE EXCEPTION '% in % awaits an outcome and is not deleted'`);
+  assertStringIncludes(sql, `IF TG_OP = 'UPDATE' AND OLD."status" = 'charging' AND (OLD."failure" IS DISTINCT FROM NEW."failure" OR OLD."id" IS DISTINCT FROM NEW."id") THEN\n    RAISE EXCEPTION '% in charging keeps its key until the outcome of %'`);
+  assertStringIncludes(sql, `BEFORE INSERT OR UPDATE OR DELETE ON "payment"`);
+  // A machine with no invoke keeps its trigger as it was.
+  const plain = (await emitFiles(paymentProgram({ machine: `
+        pending: on: pay: "settled"
+        settled: type: "final"` }).replace(/effects: charge: \{[\s\S]*?\n    \}\n/, "")))["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(plain, `BEFORE INSERT OR UPDATE ON "payment"`);
+  assertEquals(plain.includes("TG_OP = 'DELETE'"), false);
+});
+
+Deno.test("an invoke naming no declared effect is refused", async () => {
+  const err = await refusal(paymentProgram().replace(`src: "charge"`, `src: "refund"`));
+  assertStringIncludes(err, "machine PaymentMachine state charging invokes undeclared effect: refund");
+});
+
+Deno.test("an invoking state with any exit but its outcome is refused", async () => {
+  const err = await refusal(paymentProgram({ machine: `
+        pending: on: pay: "charging"
+        charging: {
+          invoke: {src: "charge", onDone: "settled", onError: "failed"}
+          on: cancel: "failed"
         }
-      }
+        settled: type: "final"
+        failed: type: "final"`,
+  }));
+  assertStringIncludes(err, "machine PaymentMachine state charging invokes charge and declares on or after: only the effect's outcome leaves it");
+});
+
+Deno.test("an effect of another entity than the machine's is refused", async () => {
+  const err = await refusal(paymentProgram({
+    entity: `Order: {table: "orders", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}`,
+  }).replace(`effects: charge: {\n      entity: "Payment"`, `effects: charge: {\n      entity: "Order"`));
+  assertStringIncludes(err, "machine PaymentMachine state charging invokes charge, an effect of Order, not of the machine's Payment");
+});
+
+Deno.test("an effect naming an undeclared entity is refused", async () => {
+  const err = await refusal(paymentProgram().replace(`effects: charge: {\n      entity: "Payment"`, `effects: charge: {\n      entity: "Invoice"`));
+  assertStringIncludes(err, "effect charge names undeclared entity: Invoice");
+});
+
+Deno.test("an effect of an entity the cluster does not hold is refused", async () => {
+  const err = await refusal(paymentProgram().replace(`durability: "server"`, `durability: "tab"`));
+  assertStringIncludes(err, "effect charge is of Payment, whose rows do not live in the cluster");
+});
+
+Deno.test("an effect keyed on a field the entity lacks is refused", async () => {
+  const err = await refusal(paymentProgram({ effect: `key: ["intent"]` }));
+  assertStringIncludes(err, "effect charge keys on intent, which is not a field of Payment");
+});
+
+Deno.test("reentry is declared only for a sink that is not idempotent", async () => {
+  const onIdempotent = await refusal(paymentProgram({ effect: `reentry: "unknown"` }));
+  assertStringIncludes(onIdempotent, "reentry");
+  assertStringIncludes(onIdempotent, "field not allowed");
+  const repeatWithoutReason = await refusal(
+    paymentProgram({ effect: `reentry: {repeat: ""}` }).replace("idempotent: true", "idempotent: false"),
+  );
+  assertStringIncludes(repeatWithoutReason, "reentry");
+  const files = await emitFiles(paymentProgram().replace("idempotent: true", "idempotent: false"));
+  assertEquals(typeof files["services/database/migrations/010_machines.sql"].text, "string");
+});
+
+// The airlock's daprd sits on the cluster's own network: an origin naming a
+// service there by its single label, or any address, would be a door inward,
+// and userinfo would put a credential where the binding's secrets belong.
+Deno.test("a sink origin is an https origin naming a DNS host, and nothing more", async () => {
+  for (const origin of [
+    "http://api.acquirer.example", "https://api.acquirer.example/v1/charges", "https://database", "https://database:5432",
+    "https://10.0.0.7", "https://169.254.169.254", "https://[::1]", "https://user:pw@api.acquirer.example",
+  ]) {
+    const err = await refusal(paymentProgram().replace("https://api.acquirer.example", origin));
+    assertStringIncludes(err, "origin");
+  }
+});
+
+Deno.test("a machine signals a duckstream pipeline", async () => {
+  const files = await emitFiles(paymentProgram({ machine: `
+        pending: on: pay: {
+          target: "charging"
+          actions: [{effect: {stream: "payment_analytics", signal: "refresh"}}]
+        }
+        charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
+        settled: type: "final"
+        failed: type: "final"`,
+  }).replace("effects: charge:", `duckstreams: payment_analytics: {
+      name: "payment_analytics"
+      sql: "SELECT count(*) AS settled FROM payment WHERE status = 'settled'"
+      sources: ["payment"]
+      sink: "payment_metrics"
     }
-    sagas: {}
-    duckstreams: {}
-  }
-  capabilities: {hatches: {}, vendored: {}}
-  surface: {
-    screens: {}
-    handlers: {}
-    design: {}
-    flows: {}
-  }
-}
-`;
+    effects: charge:`));
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(sql, "PERFORM pg_notify('duckstream_payment_analytics', jsonb_build_object('signal', 'refresh', 'table', TG_TABLE_NAME, 'id', NEW.id::text)::text);");
+  assertStringIncludes(files["pipelines/duckstream/payment_analytics.sql"].text, "SELECT count(*) AS settled FROM payment WHERE status = 'settled'");
+});
 
-  const child = new Deno.Command("cue", {
-    args: ["vet", "-c", "-"],
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
-
-  const writer = child.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(cueCode));
-  await writer.close();
-  const res = await child.output();
-  assertEquals(res.success, false);
-  const err = new TextDecoder().decode(res.stderr);
-  assertStringIncludes(err, "machine OrderLifecycle references undeclared saga: undeclared_saga");
+Deno.test("a machine referencing an undeclared duckstream is refused at compile time", async () => {
+  const err = await refusal(paymentProgram({ machine: `
+        pending: on: pay: {
+          target: "charging"
+          actions: [{effect: {stream: "undeclared_stream"}}]
+        }
+        charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
+        settled: type: "final"
+        failed: type: "final"`,
+  }));
+  assertStringIncludes(err, "machine PaymentMachine references undeclared duckstream: undeclared_stream");
 });
 
 Deno.test("a machine referencing NEW in delete action is refused at compile time", async () => {
@@ -571,20 +697,22 @@ app: pronto.#App & {
           delete: [
             {
               effect: {
-                saga: "cleanup_order"
-                idempotencyKey: "NEW.id"
+                stream: "cleanup_order"
+                key: "NEW.id"
               }
             }
           ]
         }
       }
     }
-    sagas: {
+    duckstreams: {
       cleanup_order: {
         name: "cleanup_order"
+        sql: "SELECT 1"
+        sources: ["orders"]
+        sink: "order_metrics"
       }
     }
-    duckstreams: {}
   }
   capabilities: {hatches: {}, vendored: {}}
   surface: {

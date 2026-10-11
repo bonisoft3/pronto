@@ -114,6 +114,9 @@ import (
 		// Each module loaded as the service loads it at startup, so one it
 		// would refuse fails here; the emitter appends the modules' paths.
 		admit: (_run & {args: "run-mise exec -- deno run --config (\(P._mecha) | path join services compute deno.json) --frozen --unstable-worker-options --allow-read --allow-env (\(P._mecha) | path join services compute admit.ts)"}).out
+		// Each effect's handler admitted as the airlock admits it at startup,
+		// against the manifest write emits beside it.
+		admitEffects: (_run & {args: "run-mise exec -- deno run --config (\(P._mecha) | path join services airlock deno.json) --frozen --unstable-worker-options --allow-read --allow-env (\(P._mecha) | path join services airlock admit.ts) services/airlock/effects.json ."}).out
 	}
 	say: say: {
 		...
