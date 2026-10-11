@@ -177,7 +177,7 @@ range or a pattern is read from the collection, so its table syncs whole
 `game_card`, `team_game`, `position_chance`, `standing` and its directories.
 The view engine's clause vocabulary lacks those ops, and a boolean clause is
 refused because an optimistic row lacks the schema's defaulted booleans, which
-belongs with `writers` below. A named read (`data-read-*`) counts as a whole
+belongs with the writers paragraph below. A named read (`data-read-*`) counts as a whole
 read until derive can prove an identical view on its screen serves it, and an
 `is.null` clause on a domain-typed column counts as a comparison Electric
 cannot make, though `IS NULL` needs no operator; it is the first reason ponto's
@@ -202,12 +202,13 @@ updates and effects name their entities in code, so derive cannot read them off
 the markup; no app with an on-demand table has one today. Closing it needs the
 entities a reduce writes stated somewhere derive reads and the store enforces.
 
-**`writers` is read by nothing.** `#Entity.writers: "pipeline"` marks a derived
-entity, and no lint, store check or policy consults it: a form, a reduce or an
-effect may target one, and `app_user` holds whatever write arm the access mode
-grants. Refusing a form or effect aimed at a pipeline-written entity at lint,
-and emitting no `app_user` write arm for it, would make "a sink is written by
-its pipeline alone" a rule.
+**Two kinds of writer on one entity is shown, not refused.** `#Entity.writers`
+(writers.cue) lists every declaration that writes the entity, so a sink a form
+also targets reads `pipeline:tally upsert, form:board create` on its card; no
+lint, store check or policy consults the list, and `app_user` holds whatever
+write arm the access mode grants. Refusing a form or effect aimed at a
+pipeline-written entity at lint, and emitting no `app_user` write arm for it,
+would make "a sink is written by its pipeline alone" a rule.
 
 **A `tab` or `device` write is judged by its validations alone**
 ([the lattice](docs/lattice.md#the-validation-ladder)); a judge beside

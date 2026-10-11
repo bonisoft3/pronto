@@ -43,6 +43,7 @@ _syncFields: [
 				"route": route
 				"reads": reads
 				"writes": [if writes != _|_ {writes}, []][0]
+				charts: []
 				forms: []
 				states: []
 			}
@@ -185,6 +186,7 @@ syncAcrossScreens: (#syncCase & {
 		route: "/all"
 		reads: [#view & {route: "whole", clauses: []}]
 		writes: []
+		charts: []
 		forms: []
 		states: []
 	}

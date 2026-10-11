@@ -48,8 +48,9 @@ const program: Program = {
         access: { scope: "public", write: true },
         validations: { "one-round": { note: "a round is played once" } },
         indexes: [{ on: "team_id" }],
+        writers: [{ by: "board", kind: "form", ops: ["create", "update"] }, { by: "Game-flipped", kind: "chart", ops: ["update"] }, { by: "GameMachine", kind: "machine", ops: ["update"] }],
       },
-      Team: { ir: "Team", table: "team", durability: "server", level: "replicated", fields: [{ name: "id", type: "uuid", pk: true }, { name: "game_id", type: "uuid", ref: "game" }] },
+      Team: { ir: "Team", table: "team", durability: "server", level: "replicated", fields: [{ name: "id", type: "uuid", pk: true }, { name: "game_id", type: "uuid", ref: "game" }], writers: [] },
     },
     machines: {
       GameMachine: {
@@ -63,7 +64,6 @@ const program: Program = {
     },
     effects: { charge: { ir: "charge", sink: { origin: "https://api.acquirer.example", idempotent: false }, reentry: "reconcile" } },
   },
-  surface: { screens: { board: { forms: [{ entity: "Game" }] } } },
   capabilities: {},
 };
 
@@ -78,7 +78,7 @@ Deno.test("the card says property: value on every chip, names every field upfron
       return Promise.resolve("<svg/>");
     },
   });
-  for (const chip of ["<b>durability</b> live", "<b>access</b> public · write true", "<b>id</b> 0xa5f5609cc8def322", "<b>level</b> compensable", "<b>delivery</b> exactly-once", "<b>writers</b> forms · Game · GameMachine", "<b>read</b> eager", "<b>roles</b> anon · app_user · service", "<b>ir</b> required"]) {
+  for (const chip of ["<b>durability</b> live", "<b>access</b> public · write true", "<b>id</b> 0xa5f5609cc8def322", "<b>level</b> compensable", "<b>delivery</b> exactly-once", "<b>writers</b> form:board create·update, chart:Game-flipped update, machine:GameMachine update", "<b>read</b> eager", "<b>roles</b> anon · app_user · service", "<b>ir</b> required"]) {
     assertStringIncludes(html, chip);
   }
   // Every chip explains itself; the level's sentence names its rung.

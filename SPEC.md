@@ -325,6 +325,15 @@ database does. Levying ir coverage by what a write reaches is
 [review by consequence](docs/decisions/2026-08-27-review-by-consequence.md),
 not built.
 
+**An entity's writers are derived.** `#Entity.writers` (`writers.cue`) lists
+every declaration that writes its rows — a screen's forms and what its markup
+writes past them, the terminal charts it carries (`#Screen.charts`, projected
+from the markup like its reads and writes), a pipeline's sink and a fold's
+pair, a computation's outputs, a mecha machine's row and relational effects —
+each with its ops, and the card prints each as `kind:name op·op`. Nothing is
+authored, and nothing refuses two kinds of writer on one entity; whether a
+sink should be its pipeline's alone is open ([pending](PENDING.md#the-lattice)).
+
 A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
 parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as
 protobuf-JSON); every rendering is a function of that file — the SQL CHECK

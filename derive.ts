@@ -89,7 +89,8 @@ type Read = {
   orders: string[];
 };
 type Write = { table: string; op: string; filter?: string };
-type DerivedScreen = { name: string; reads: Read[]; writes: Write[]; handlers: string[]; adapters: string[] };
+type Chart = { table: string; field: string; writes: Write[] };
+type DerivedScreen = { name: string; reads: Read[]; writes: Write[]; charts: Chart[]; handlers: string[]; adapters: string[] };
 
 /**
  * The markup projection, as the terminal's reader prints it — read-markup.ts's
@@ -200,7 +201,7 @@ export function renderDerived(
   decisions: { id: string; note: string }[],
   tests: { id: string; accepts: string[] }[],
 ): string {
-  const blocks = screens.map(({ name, reads, writes, handlers, adapters }) => {
+  const blocks = screens.map(({ name, reads, writes, charts, handlers, adapters }) => {
     const mods = handlers.map((h) => `"shell/handlers/${h}.js"`).join(", ");
     // An adapter is listed apart from the reduces: the role decides the cage a
     // module loads in, and a checker cannot ask about a role it cannot see.
@@ -210,7 +211,7 @@ export function renderDerived(
       .map((a) => (available.has(a) ? `"shell/handlers/${a}.js"` : `"/omnishell/components/${a}.js"`))
       .join(", ");
     const list = (rows: object[]) => rows.length === 0 ? "[]" : `[\n${rows.map((r) => `\t\t\t${row(r)},`).join("\n")}\n\t\t]`;
-    return `\t${quoteKey(name)}: {\n\t\treads: ${list(reads)}\n\t\twrites: ${list(writes)}\n` +
+    return `\t${quoteKey(name)}: {\n\t\treads: ${list(reads)}\n\t\twrites: ${list(writes)}\n\t\tcharts: ${list(charts)}\n` +
       `\t\tfiles: {handlers: [${mods}], adapters: [${adapterMods}]}\n\t}`;
   });
   // JSON escapes are CUE escapes, and CUE reads `\(` as interpolation only
@@ -587,6 +588,7 @@ export async function derive(appDir: string): Promise<void> {
       name,
       reads: screen.reads,
       writes: screen.writes,
+      charts: screen.machines.map((r) => ({ table: r.table, field: (JSON.parse(r.machine) as { field: string }).field, writes: r.writes })),
       handlers: [...new Set([...screen.handlers, ...machineNames])].sort(),
       adapters: [...new Set(screen.adapters)].sort(),
     });
@@ -1067,13 +1069,15 @@ function selfTest(): void {
       { table: "game", kind: "live", nested: false, lists: [], route: "server", orders: [] },
     ],
     writes: [{ table: "goal", op: "delete", filter: "game_id=eq.{id}" }],
+    charts: [{ table: "game", field: "phase", writes: [{ table: "goal", op: "update" }] }],
     handlers: [],
     adapters: [],
   }], new Set(), [], []);
   const wantBlock = '\tjogo: {\n\t\treads: [\n' +
     '\t\t\t{table: "goal", kind: "live", nested: true, lists: [], route: "view", clauses: [{"col":"game_id","op":"eq"}], embeds: ["player"], limit: 5, orders: ["minute","id"]},\n' +
     '\t\t\t{table: "game", kind: "live", nested: false, lists: [], route: "server", orders: []},\n\t\t]\n' +
-    '\t\twrites: [\n\t\t\t{table: "goal", op: "delete", filter: "game_id=eq.{id}"},\n\t\t]\n';
+    '\t\twrites: [\n\t\t\t{table: "goal", op: "delete", filter: "game_id=eq.{id}"},\n\t\t]\n' +
+    '\t\tcharts: [\n\t\t\t{table: "game", field: "phase", writes: [{"table":"goal","op":"update"}]},\n\t\t]\n';
   // The cel emitters are pinned here too: one self-test, wired to one rule.
   const celFindings = celFixtures();
   for (const f of celFindings) console.error(`FAIL ${f.message}`);

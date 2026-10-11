@@ -94,8 +94,9 @@ patching keyed nodes. Keyed and commutative per key is what lets the outbox
 replay and a `put` be stated twice.
 
 - **Read any relation; write only base facts.** Views are never written, and a
-  write goes to an address read or minted. The declared writer is `writers:`,
-  which nothing reads yet ([pending](../PENDING.md#the-lattice)).
+  write goes to an address read or minted. The writers are derived
+  (`writers.cue`) and shown on the entity's card; nothing enforces them
+  ([pending](../PENDING.md#the-lattice)).
 - **An address is not a capability.** Every write passes the store, which
   refuses a table it does not hold and runs the entity's validations, and at
   the cluster rungs the policies ([access](access.md)).

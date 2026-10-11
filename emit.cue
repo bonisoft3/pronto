@@ -1727,7 +1727,7 @@ _cdcBeforeField: "__before"
 	// that draws nothing until then is refused there (render-documents.ts).
 	_prerendered: [
 		for n, s in D.code.surface.screens if s.prerender
-		let rows = list.SortStrings([for e, _ in {for r in s.reads let en = D.code._syncByTable[r.table] if D.code.state.entities[en].server {(en): true}} {e}]) {
+		let rows = list.SortStrings([for e, _ in {for r in s.reads let en = D.code._entityByTable[r.table] if D.code.state.entities[en].server {(en): true}} {e}]) {
 			[
 				if len(rows) > 0 {error("screen \(n) is prerendered over rows the server holds (\(strings.Join(rows, ", "))): its document is drawn before they land and moves when they do; declare ssr: \"ssr\" (plugins/pronto/docs/screens.md#how-a-routes-first-document-is-rendered)")},
 				s,
@@ -2386,7 +2386,7 @@ _cdcBeforeField: "__before"
 		let s = E.code.surface.screens[n]
 		let restricted = [
 			for read in s.reads if !read.nested
-			let en = E.code._syncByTable[read.table]
+			let en = E.code._entityByTable[read.table]
 			let e = E.code.state.entities[en] if e.server if e.access != _|_ if e.access.scope != "public" {
 				"\(en) (\(e.access.scope))"
 			},

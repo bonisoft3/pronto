@@ -29,6 +29,7 @@ import pronto "github.com/bonisoft3/pronto"
 		route:   "/regras"
 		"reads": reads
 		writes: []
+		charts: []
 		forms: []
 		states: []
 		prerender: true

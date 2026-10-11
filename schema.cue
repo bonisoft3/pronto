@@ -578,9 +578,11 @@ import (
 	if !server {
 		sync?: _|_
 	}
-	// "pipeline" entities are never mutated by forms; role-level enforcement
-	// is an open question in SPEC.md.
-	writers: *"forms" | "pipeline"
+	// Who writes rows here, derived at #App (writers.cue) from every
+	// declaration that names the entity; the card prints each as
+	// `kind:by op·op`. Nothing refuses two kinds of writer on one entity
+	// (PENDING.md).
+	writers: [...#Writer]
 	fields: [...#Field]
 	// DDL: CREATE INDEX IF NOT EXISTS idx_<table>_<on> ON <table>
 	// USING <using> (<on>); emitted after the tables in 005.
@@ -1099,6 +1101,16 @@ import (
 	filter?: string
 }
 
+// One terminal chart a screen's markup carries, as the terminal projects it
+// (read-markup.ts `machines`): the row it runs over, the field it moves, and
+// its effects, each also among the screen's writes. Derived, never authored;
+// the chart's own bytes stay the terminal's (the `chart` fact row).
+#Chart: {
+	table:  string
+	field:  string
+	writes: [...#Write]
+}
+
 #Screen: S={
 	name:  string
 	ir:    *name | string
@@ -1155,6 +1167,12 @@ import (
 		reads:  *[] | [...#Read]
 		writes: *[] | [...#Write]
 	}
+	// The charts the markup carries, projected beside the reads and writes.
+	// Absent, none: derive exports the program through the previous run's
+	// derived file, so a list the projection gained must be absent-tolerant for
+	// that one export, and a stale file costs a card's writers chip, not a
+	// sync mode.
+	charts: *[] | [...#Chart]
 	// A component-bearing screen is authored HERE, in CUE: `markup` is the
 	// screen's whole HTML, composed by interpolating component definitions
 	// (their tags survive in it as inert wrappers), and files.html becomes an

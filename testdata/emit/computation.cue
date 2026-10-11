@@ -74,7 +74,7 @@ _freshInputs: _computed & {
 		entities: {
 			Goal: {table: "goal", durability: "live", fields: [{name: "id", type: "uuid", pk: true}]}
 			Retained: {table: "retained", durability: "offline", fields: [{name: "id", type: "uuid", pk: true}]}
-			RequestProjection: {table: "request_projection", durability: "server", writers: "pipeline", fields: [{name: "id", type: "uuid", pk: true}]}
+			RequestProjection: {table: "request_projection", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}
 			ServerPipeline: {table: "server_pipeline", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}
 		}
 		pipelines: server_pipeline: {raw: true, from: "Goal", to: "ServerPipeline", group: "server-pipeline"}

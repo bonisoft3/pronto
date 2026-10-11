@@ -32,6 +32,8 @@ export type Entity = {
   validations?: Record<string, { note: string }>;
   indexes?: { on: string }[];
   uniques?: unknown[];
+  /** Derived at #App (writers.cue): every declaration that writes rows here. */
+  writers: { by: string; kind: string; ops: string[] }[];
 };
 export type MechaMachine = {
   ir: string;
@@ -47,9 +49,7 @@ export type Program = {
     entities: Record<string, Entity>;
     machines?: Record<string, MechaMachine>;
     effects?: Record<string, Effect>;
-    computations?: Record<string, { to: string[] }>;
   };
-  surface: { screens: Record<string, { forms?: { entity?: string }[] }> };
   capabilities: { auth?: unknown };
 };
 
@@ -61,7 +61,7 @@ const TIP: Record<string, string> = {
   retired: "retired: the ordinal is kept so no later field takes it; nothing writes the column",
   level: "",
   delivery: "what a write to this entity can claim when delivered twice — derived from the level and the op",
-  writers: "who writes rows here: forms, machines, computations",
+  writers: "who writes rows here, each as kind:name and its ops — a screen's forms and what its markup writes past them, the terminal's charts, pipelines, computations, machines",
   read: "how the terminal reads it: eager syncs the whole table, lazy loads what a view asks",
   roles: "the database roles that may touch the table, from durability and access",
   ir: "whether ir.html carries an element for it — review by consequence: a row that reaches another device or the server does",
@@ -187,13 +187,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
   const accessValue = Object.entries(access).map(([k, v]) => k === "scope" ? String(v) : `${k} ${v}`).join(" · ") || "—";
   const anyAccess = Object.values(entities).some((x) => x.access !== undefined);
   const authOn = ctx.program.capabilities.auth !== undefined || anyAccess;
-  const writers = [
-    ...new Set([
-      ...Object.values(ctx.program.surface.screens).some((s) => (s.forms ?? []).some((f) => f.entity === name || f.entity === e.table)) ? ["forms"] : [],
-      ...machines.map((m) => m.chart.field === undefined ? [] : [m.title.split(" · ")[0]]).flat(),
-      ...Object.entries(ctx.program.state.computations ?? {}).filter(([, c]) => c.to.includes(name)).map(([n]) => n),
-    ]),
-  ];
+  const writers = e.writers.map((w) => `${w.kind}:${w.by} ${w.ops.join("·")}`);
   const delivery = machines.some((m) => m.level === "external") ? "exactly-once" : e.level === "compensable" ? "at-most-once" : "exactly-once";
   const glyphs = (f: Field) => [
     f.retired ? `<span class="g"${tip(TIP.retired)}>†</span>` : "",
@@ -239,7 +233,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
 <div class="strip"><span class="lbl">refers to</span><span class="rels">${pills(refs, 4, (r) => `<a class="rel out" href="#${esc(byTable.get(r.ref)?.ir ?? r.ref)}">${esc(r.ref)}<span class="col"> via ${esc(r.col)}</span></a>`) || '<span class="why">—</span>'}</span></div>
 <div class="strip"><span class="lbl">validations</span>${validations.length === 0 ? '<span class="why">none</span>' : `<ul class="vals">${validations.map(([n, v]) => `<li><code>${esc(n)}</code> <span class="note">${esc(v.note)}</span></li>`).join("")}</ul>`}</div>
 </div>
-<div class="dline"><span class="lbl derived">derived</span><span class="chips">${chip("writers", writers.join(" · ") || "—", true)}${chip("read", e.durability === "server" ? "—" : (ctx.readMode.get(name) ?? "lazy"), true)}${chip("roles", authOn ? "anon · app_user · service" : "anon", true)}${chip("ir", owed ? "required" : "optional", true)}</span>
+<div class="dline"><span class="lbl derived">derived</span><span class="chips">${chip("writers", writers.join(", ") || "—", true)}${chip("read", e.durability === "server" ? "—" : (ctx.readMode.get(name) ?? "lazy"), true)}${chip("roles", authOn ? "anon · app_user · service" : "anon", true)}${chip("ir", owed ? "required" : "optional", true)}</span>
 <details class="more"><summary>the platform’s columns</summary><p class="why"><code>created_by</code>, <code>updated_by</code> → app_user, stamped by the platform on every write; not the author’s.</p></details></div>
 ${machinePanels.join("\n")}
 </div>`;

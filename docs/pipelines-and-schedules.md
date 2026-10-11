@@ -22,8 +22,8 @@ A derived value is a live query until it earns materialization by
 [`pipeline-designer`](../agents/pipeline-designer.md)'s rule, which also says
 what a materialized one is made of. A value over rows the reader cannot see is
 the other case, and its answer is a per-reader pair
-([access](access.md#a-count-the-reader-is-inside-of)). A sink is marked
-`writers: "pipeline"`, which nothing enforces
+([access](access.md#a-count-the-reader-is-inside-of)). A sink's derived
+`writers` names its pipeline, which nothing enforces
 ([pending](../PENDING.md#the-lattice)).
 
 ## The shapes

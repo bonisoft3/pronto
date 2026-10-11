@@ -23,23 +23,23 @@ import (
 	// on every projection. A table outside it has no collection, so a read
 	// embedding one is computed by the server.
 	#collections: {
-		for _, s in A.surface.screens for r in list.Concat([s.reads, s.writes]) {(r.table): _syncByTable[r.table]}
+		for _, s in A.surface.screens for r in list.Concat([s.reads, s.writes]) {(r.table): A._entityByTable[r.table]}
 		if A.capabilities.auth != _|_ if A.capabilities.auth.self != _|_ if A.capabilities.auth.self.name != _|_ {
-			(A.capabilities.auth.self.name.table): _syncByTable[A.capabilities.auth.self.name.table]
+			(A.capabilities.auth.self.name.table): A._entityByTable[A.capabilities.auth.self.name.table]
 		}
 		// A server join's dependencies may never be read as regions themselves.
 		for _, s in A.surface.screens for r in s.reads if r.embeds != _|_ for t in r.embeds {
-			if _syncByTable[t] != _|_ {(t): _syncByTable[t]}
-			for _, e in A.state.entities for f in e.fields if f.name == t if f.ref != _|_ {(f.ref): _syncByTable[f.ref]}
+			if A._entityByTable[t] != _|_ {(t): A._entityByTable[t]}
+			for _, e in A.state.entities for f in e.fields if f.name == t if f.ref != _|_ {(f.ref): A._entityByTable[f.ref]}
 		}
 		for _, s in A.surface.screens for f in s.forms {(A.state.entities[f.entity].table): f.entity}
-		for _, p in A.state.pipelines if p.fold != _|_ {(p.fold.pair.table): _syncByTable[p.fold.pair.table]}
+		for _, p in A.state.pipelines if p.fold != _|_ {(p.fold.pair.table): A._entityByTable[p.fold.pair.table]}
 		for _, p in A.state.pipelines if p.fold != _|_ {(A.state.entities[p.from].table): p.from}
 		// Visibility walks through parents and grants even when markup names
 		// only a child. Register every edge so ancestor metadata travels too.
 		for _, e in A.state.entities if e.access != _|_ {
 			if e.access.scope == "folder" {(A.state.entities[e.access.parent].table): e.access.parent}
-			if e.access.scope == "private" if e.access.shared != _|_ {(e.access.shared.via): _syncByTable[e.access.shared.via]}
+			if e.access.scope == "private" if e.access.shared != _|_ {(e.access.shared.via): A._entityByTable[e.access.shared.via]}
 		}
 	}
 
@@ -61,7 +61,6 @@ import (
 	// A browser tier has no mode, and no field to hold one (#Entity).
 	state: entities: [N=string]: {sync?: A.#sync[N].mode}
 
-	_syncByTable: {for n, e in A.state.entities {(e.table): n}}
 	_syncKey: {for n, e in A.state.entities {(n): [for f in e.fields if f.pk {f.name}][0]}}
 	// Per entity, the columns of each kind, a set so a test is one lookup. The
 	// platform's txid is an int64. A column no field types keeps the engine's
@@ -76,8 +75,8 @@ import (
 
 	_syncRead: {
 		for _, screen in A.surface.screens for read in screen.reads {
-			(_syncByTable[read.table]): true
-			if read.embeds != _|_ for table in read.embeds if _syncByTable[table] != _|_ {(_syncByTable[table]): true}
+			(A._entityByTable[read.table]): true
+			if read.embeds != _|_ for table in read.embeds if A._entityByTable[table] != _|_ {(A._entityByTable[table]): true}
 		}
 	}
 
@@ -88,18 +87,18 @@ import (
 	_syncEager: list.Concat([
 		// What the terminal reads whole outside any region.
 		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: p.from, why: "the fold \(pn) projects the reader's own contribution from it"}],
-		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: _syncByTable[p.fold.pair.table], why: "the fold \(pn) reads the reader's pair from it"}],
+		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: A._entityByTable[p.fold.pair.table], why: "the fold \(pn) reads the reader's pair from it"}],
 		[for n, e in A.state.entities for vn, _ in e.validations {entity: n, why: "validation \(vn) finds the row a write changes in it"}],
 		// A validation walks forward along a ref field, or back along
 		// "<Entity>.<field>" (validations.ts resolveEdges).
 		[for n, e in A.state.entities for vn, v in e.validations for x in v.via {
-			entity: [if strings.Contains(x, ".") {strings.Split(x, ".")[0]}, for f in e.fields if f.name == x if f.ref != _|_ {_syncByTable[f.ref]}][0]
+			entity: [if strings.Contains(x, ".") {strings.Split(x, ".")[0]}, for f in e.fields if f.name == x if f.ref != _|_ {A._entityByTable[f.ref]}][0]
 			why: "validation \(n).\(vn) walks to it"
 		}],
-		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ {entity: _syncByTable[e.access.shared.via], why: "\(n)'s visibility is decided by its grants"}],
+		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ {entity: A._entityByTable[e.access.shared.via], why: "\(n)'s visibility is decided by its grants"}],
 		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "folder" {entity: e.access.parent, why: "\(n)'s visibility is decided by its parent"}],
 		[if A.capabilities.auth != _|_ if A.capabilities.auth.self != _|_ if A.capabilities.auth.self.name != _|_ {
-			entity: _syncByTable[A.capabilities.auth.self.name.table]
+			entity: A._entityByTable[A.capabilities.auth.self.name.table]
 			why:    "the strip reads the signed-in person's name from it"
 		}],
 		// Offline is the rung that keeps the table on the device.
@@ -123,7 +122,7 @@ import (
 		// bound from anywhere.
 		[for sn, s in A.surface.screens for w in s.writes
 			let at = "\(sn).html"
-			let wn = _syncByTable[w.table]
+			let wn = A._entityByTable[w.table]
 			let pk = _syncKey[wn]
 			let refused = [
 				if (w.op == "update" || w.op == "delete") && _syncCompares[wn][pk] == _|_ {"\(at) \(w.op)s a row of it by \(pk), which Electric cannot compare to load the row"},
