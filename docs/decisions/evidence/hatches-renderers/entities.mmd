@@ -1,0 +1,121 @@
+erDiagram
+  game {
+    uuid id PK
+    uuid phase_id FK
+    uuid home_id FK
+    uuid away_id FK
+    uuid stadium_id FK
+    uuid referee_id FK
+    uuid created_by FK
+    uuid updated_by FK
+    int32 round 
+    date day 
+    timestamp kickoff 
+    string home_field 
+    bool played 
+  }
+  team {
+    uuid id PK
+    uuid stadium_id FK
+    uuid created_by FK
+    uuid updated_by FK
+    string name 
+    string full_name 
+    string city 
+    string country 
+    date foundation 
+  }
+  phase {
+    uuid id PK
+    uuid championship_id FK
+    uuid created_by FK
+    uuid updated_by FK
+    string name 
+    int32 position 
+    string sort 
+    int32 bonus_points 
+    int32 bonus_points_threshold 
+  }
+  stadium {
+    uuid id PK
+    uuid created_by FK
+    uuid updated_by FK
+    string name 
+    string full_name 
+    string city 
+    string country 
+    string search_name 
+  }
+  referee {
+    uuid id PK
+    uuid created_by FK
+    uuid updated_by FK
+    string name 
+    string location 
+    string search_name 
+    string search_key 
+    string slug 
+  }
+  goal {
+    uuid id PK
+    uuid game_id FK
+    uuid player_id FK
+    uuid created_by FK
+    uuid updated_by FK
+    string side 
+    int32 minute 
+    bool penalty 
+    bool own_goal 
+    bool aet 
+  }
+  comment {
+    uuid id PK
+    uuid game_id FK
+    uuid app_user_id FK
+    string body 
+    timestamp created_at 
+  }
+  match_probability {
+    uuid id PK
+    uuid game_id FK
+    string home_name 
+    string away_name 
+    string rating_status 
+    string timeline_status 
+    string payload_json 
+  }
+  player_game {
+    uuid id PK
+    uuid game_id FK
+    uuid player_id FK
+    uuid created_by FK
+    uuid updated_by FK
+    string side 
+    int32 on_minute 
+    int32 off_minute 
+    bool yellow 
+    bool red 
+  }
+  player {
+    uuid id PK
+    uuid created_by FK
+    uuid updated_by FK
+    string name 
+    string full_name 
+    date birth 
+    string country 
+    int32 height 
+  }
+  game }o--|| phase : "phase_id"
+  game }o--|| team : "home_id"
+  game }o--|| team : "away_id"
+  game }o--|| stadium : "stadium_id"
+  game }o--|| referee : "referee_id"
+  team }o--|| stadium : "stadium_id"
+  goal }o--|| game : "game_id"
+  goal }o--|| player : "player_id"
+  comment }o--|| game : "game_id"
+  match_probability }o--|| game : "id"
+  match_probability }o--|| game : "game_id"
+  player_game }o--|| game : "game_id"
+  player_game }o--|| player : "player_id"
