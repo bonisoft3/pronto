@@ -263,7 +263,7 @@ The kinetic host decouples simulation ticks from variable display refresh rates,
   capability: they are the `isolation` axis, which boundary a unit runs behind,
   a different question from which resource it may reach.
 - **`transport` for the unit boundary** — a compartment passes no messages;
-  what varies across compartment, iframe and worker is the boundary, so the
+  what varies across compartment, realm and agent is the boundary, so the
   field is `isolation`.
 - **`pages` for screens** — "screen" is the design-layer word both Apple's and
   Android's guidelines use, while their API class names have changed twice.

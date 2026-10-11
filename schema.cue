@@ -1486,7 +1486,13 @@ import (
 		// reaches no further over the network than the app already does.
 		vendored: [Name=string]: {
 			ir: *Name | string
-			isolation: "compartment" | "iframe" | "worker"
+			// How far the unit reaches without the platform, as protection
+			// domains (Saltzer & Schroeder 1975) named by the web platform's own
+			// rungs: a `compartment` has no ambient authority; a `realm` is an
+			// iframe with its own globals and DOM (ECMA-262 realm) and may
+			// present; an `agent` is a worker with its own thread (ECMA-262
+			// agent) and reaches the network, so it may only ask.
+			isolation: "compartment" | "realm" | "agent"
 			capabilities: [...string]
 			src: string
 			files: [...string]
