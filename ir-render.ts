@@ -17,9 +17,10 @@
 // answered without the author drawing them. write.ts runs this after derive
 // and before the derive that records the regions (facts `ir_region`).
 
-/** The d2 the compiler draws with: one binary, pinned by its GitHub release
- * (never aqua, whose registry meets rate limits), ELK layout, no browser. */
-export const D2 = "github:terrastruct/d2@v0.9.0";
+/** Where the d2 the compiler draws with is pinned: this plugin's .mise.toml,
+ * by its GitHub release (never aqua, whose registry meets rate limits), with
+ * the lockfile's URL per platform, which is what mise's locked mode runs. */
+const PRONTO = new URL(".", import.meta.url).pathname;
 
 export type Field = { name: string; type: string; pk?: boolean; ref?: string; required?: boolean; unique?: boolean; default?: string; cel?: string };
 export type Entity = {
@@ -125,7 +126,7 @@ export function chartD2(c: { initial: string; states: Record<string, any>; on?: 
 /** Renders a D2 source to SVG through the pinned binary, with no browser. */
 export async function d2Svg(source: string): Promise<string> {
   const child = new Deno.Command("mise", {
-    args: ["x", D2, "--", "d2", "--layout", "elk", "--theme", "0", "--pad", "16", "-", "-"],
+    args: ["-C", PRONTO, "exec", "--", "d2", "--layout", "elk", "--theme", "0", "--pad", "16", "-", "-"],
     stdin: "piped",
     stdout: "piped",
     stderr: "piped",
