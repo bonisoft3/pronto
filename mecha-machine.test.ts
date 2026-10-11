@@ -662,6 +662,10 @@ Deno.test("reentry is declared only for a sink that is not idempotent, as a word
 Deno.test("an effect without a note is refused", async () => {
   const err = await refusal(paymentProgram().replace(`      note: "the acquirer deduplicates on Idempotency-Key"\n`, ""));
   assertStringIncludes(err, "note");
+  // An empty note is the field present and the judgment absent: `repeat` with
+  // nothing said would admit a duplicate for no stated reason.
+  const empty = await refusal(paymentProgram().replace(`note: "the acquirer deduplicates on Idempotency-Key"`, `note: ""`));
+  assertStringIncludes(empty, `app.state.effects.charge.note: invalid value "" (out of bound !="")`);
   assertEquals(typeof (await emitFiles(paymentProgram()))["services/airlock/effects.json"], "object");
 });
 

@@ -107,8 +107,8 @@ The program does not compile when:
   runs in the cluster, once per committed write; a browser-held row would fire the effect
   from every tab;
 - a `key` field is not a field of the entity;
-- an effect carries no `note`: the sink's idempotency and the cost of a repeat are
-  claims about a peer the compiler cannot check;
+- an effect carries no `note`, or an empty one: the sink's idempotency and the cost of
+  a repeat are claims about a peer the compiler cannot check;
 - `reentry` is declared on an idempotent sink;
 - `sink.origin` is not an `https` origin (scheme and host, no path);
 - an effect reaches an undeclared bridge, or a declared bridge is reached by no

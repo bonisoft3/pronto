@@ -989,7 +989,7 @@ import (
 	}
 	// The judgment the compiler cannot make: the sink's idempotency and what
 	// a repeat costs are claims about a peer.
-	note: string
+	note: string & !=""
 	// Thrown errors tolerated before the outcome is unknown.
 	attempts: *5 | int & >=1
 	// The environment variables whose values the handler is handed at each
