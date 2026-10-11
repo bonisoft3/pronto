@@ -115,7 +115,8 @@ article.ecard { display: grid; gap: 0; }
 .machine .canvas svg { max-width: 640px; }
 .fields td.x { max-width: 30ch; }
 
-.chip b { font-weight: 500; color: var(--muted); margin-right: 4px; font-family: var(--body); letter-spacing: 0.02em; }
+.chip b { font-weight: 500; color: var(--muted); margin-right: 5px; font-family: var(--body); letter-spacing: 0.02em; }
+.chip b::after { content: ":"; }
 .chip.derived b { color: var(--accent); opacity: 0.8; }
 [data-tip] { position: relative; cursor: help; }
 [data-tip]:hover::after, [data-tip]:focus-visible::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 5; background: #fff6bf; color: #1b1f2a; border: 1px solid #e3cf5a; padding: 8px 10px; font: 13px/1.4 var(--body); width: max-content; max-width: 34ch; white-space: normal; text-transform: none; letter-spacing: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
