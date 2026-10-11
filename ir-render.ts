@@ -89,29 +89,32 @@ const chip = (name: string, value: string, derived: boolean, explain = TIP[name]
 /** The D2 source of a chart: a state a box, an invoking state dashed, a final
  * state a double ring, every arrow labelled by its event. */
 export function chartD2(c: { initial: string; states: Record<string, any>; on?: Record<string, unknown> }): string {
+  // Every state is a quoted key: `true`, `false` and `null` are D2 keywords,
+  // and a chart over a boolean field names its states exactly that.
+  const q = (name: string) => JSON.stringify(name);
   let s = 'direction: right\nstart: {shape: circle; width: 28; height: 28; style.fill: "#1b1f2a"; label: ""}\n';
-  s += `start -> ${c.initial}\n`;
+  s += `start -> ${q(c.initial)}\n`;
   const target = (t: unknown) => typeof t === "string" ? t : (t as { target?: string }).target;
   const assigned = (t: unknown) => {
     const a = (t as { assign?: Record<string, unknown> }).assign;
     return a === undefined ? "" : " / " + Object.entries(a).map(([k, v]) => `${k} = ${typeof v === "string" ? v : "…"}`).join(", ");
   };
   for (const [name, st] of Object.entries(c.states)) {
-    if (st.invoke) s += `${name}: {label: "${name}\\ninvoke ${st.invoke.src}"; style.stroke-dash: 3}\n`;
-    else if (st.type === "final") s += `${name}: {shape: circle; style.double-border: true}\n`;
+    if (st.invoke) s += `${q(name)}: {label: "${name}\\ninvoke ${st.invoke.src}"; style.stroke-dash: 3}\n`;
+    else if (st.type === "final") s += `${q(name)}: {shape: circle; style.double-border: true}\n`;
     for (const [ev, t] of Object.entries(st.on ?? {})) {
       for (const cand of Array.isArray(t) ? t : [t]) {
         const to = target(cand);
-        if (to !== undefined) s += `${name} -> ${to}: "${ev}"\n`;
+        if (to !== undefined) s += `${q(name)} -> ${q(to)}: "${ev}"\n`;
       }
     }
     for (const [ms, t] of Object.entries(st.after ?? {})) {
       const to = target(t) ?? name;
-      s += `${name} -> ${to}: "after ${ms} ms${assigned(t)}"\n`;
+      s += `${q(name)} -> ${q(to)}: "after ${ms} ms${assigned(t)}"\n`;
     }
     if (st.invoke) {
-      s += `${name} -> ${target(st.invoke.onDone)}: onDone\n`;
-      s += `${name} -> ${target(st.invoke.onError)}: onError\n`;
+      s += `${q(name)} -> ${q(target(st.invoke.onDone)!)}: onDone\n`;
+      s += `${q(name)} -> ${q(target(st.invoke.onError)!)}: onError\n`;
     }
   }
   // A transition at the chart's root fires in every state: drawn once, from a
@@ -119,7 +122,7 @@ export function chartD2(c: { initial: string; states: Record<string, any>; on?: 
   const root = Object.entries(c.on ?? {}).flatMap(([ev, t]) => (Array.isArray(t) ? t : [t]).map((cand) => [ev, target(cand)] as const).filter(([, to]) => to !== undefined));
   if (root.length > 0) {
     s += 'any: {shape: circle; width: 64; height: 64; style.stroke-dash: 3; label: "any"}\n';
-    for (const [ev, to] of root) s += `any -> ${to}: "${ev}"\n`;
+    for (const [ev, to] of root) s += `any -> ${q(to!)}: "${ev}"\n`;
   }
   return s;
 }

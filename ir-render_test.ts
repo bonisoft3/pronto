@@ -103,15 +103,19 @@ Deno.test("the card says property: value on every chip, names every field upfron
 
 Deno.test("a chart's D2 draws every arrow by its event, an invoking state dashed, a final state as a ring", () => {
   const d2 = chartD2(program.state.machines!.GameMachine);
-  assertStringIncludes(d2, 'charging: {label: "charging\\ninvoke charge"; style.stroke-dash: 3}');
-  assertStringIncludes(d2, "settled: {shape: circle; style.double-border: true}");
-  assertStringIncludes(d2, 'pending -> charging: "pay"');
-  assertStringIncludes(d2, "charging -> settled: onDone");
-  assertStringIncludes(d2, 'failed -> pending: "retry"');
+  assertStringIncludes(d2, '"charging": {label: "charging\\ninvoke charge"; style.stroke-dash: 3}');
+  assertStringIncludes(d2, '"settled": {shape: circle; style.double-border: true}');
+  assertStringIncludes(d2, '"pending" -> "charging": "pay"');
+  assertStringIncludes(d2, '"charging" -> "settled": onDone');
+  assertStringIncludes(d2, '"failed" -> "pending": "retry"');
   const timer = chartD2({ initial: "on", states: { on: { after: { "1000": { assign: { n: "bump" }, target: "on" } } } } });
-  assertStringIncludes(timer, 'on -> on: "after 1000 ms / n = bump"');
+  assertStringIncludes(timer, '"on" -> "on": "after 1000 ms / n = bump"');
   // A root-level transition fires in every state: one arrow from "any".
   const selector = chartD2({ initial: "house", on: { "click@mode-trigger-house": [{ guard: { type: "seated" }, target: "house" }], "click@mode-trigger-hotseat": [{ guard: { type: "seated" }, target: "hotseat" }] }, states: { house: {}, hotseat: {} } });
-  assertStringIncludes(selector, 'any -> house: "click@mode-trigger-house"');
-  assertStringIncludes(selector, 'any -> hotseat: "click@mode-trigger-hotseat"');
+  assertStringIncludes(selector, 'any -> "house": "click@mode-trigger-house"');
+  assertStringIncludes(selector, 'any -> "hotseat": "click@mode-trigger-hotseat"');
+  // A boolean field's states are D2 keywords; quoted, they compile.
+  const flag = chartD2({ initial: "false", states: { false: { on: { click: "true" } }, true: { on: { click: "false" } } } });
+  assertStringIncludes(flag, 'start -> "false"');
+  assertStringIncludes(flag, '"false" -> "true": "click"');
 });
