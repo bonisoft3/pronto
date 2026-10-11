@@ -1513,7 +1513,9 @@ import (
 			// and never posted; the unit's answer is upserted on the key and the
 			// one event it raises reaches the chart naming the row. #App holds
 			// the isolation, the entity, the key, the unique and the columns
-			// (text, since an answer crosses the seat as strings) to this.
+			// (text, since an answer crosses the seat as strings) to this;
+			// #emit holds the column count to the seat's detail offer, since an
+			// answer carries every column in one event.
 			memo?: {entity: string, key: [string, ...string]}
 			src: string
 			files: [...string]

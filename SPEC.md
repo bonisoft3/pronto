@@ -358,7 +358,10 @@ other isolation, a memo naming no entity, a key field the entity lacks, an
 entity without a unique over exactly the key fields (the natural key an answer
 resolves against), a memo entity with a column that is not text (an answer
 crosses the seat as strings), and an agent raising other than one event (a
-question has one answer). The terminal performs the memo: a question whose row
+question has one answer); `#emit` refuses a memo with more columns than the
+terminal's `hatch.<seat>.detail.keys`, since an answer carries every column
+in one event, and the agent seat refuses — never drops — an answer outside
+that grammar. The terminal performs the memo: a question whose row
 stands is answered from the row without asking, and the unit's answer is
 upserted on the key before the chart hears the raised event, whose detail is
 the key — the chart reads the answer as a row of a table its region reads,

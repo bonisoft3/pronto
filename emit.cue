@@ -2030,11 +2030,18 @@ _cdcBeforeField: "__before"
 		_authModeOffered: true & list.Contains(E.terminal.capabilities.auth.modes, E.code.capabilities.auth.mode)
 	}
 
-	for _, v in E.code.capabilities.vendored {
+	for n, v in E.code.capabilities.vendored {
 		_vendoredIsolationBuildable: true & list.Contains(E.terminal.capabilities.isolation, v.isolation)
 		// The unit's own entry point has to be one of the files the terminal
 		// serves, or the mount fetches a path nothing published.
 		_vendoredSrcServed: true & list.Contains(v.files, v.src)
+		// An answer carries every memo column in one event, and the seat's
+		// detail carries at most the terminal's `keys` of them.
+		if v.memo != _|_ {
+			let columns = len(E._shell.units[n].memo.columns)
+			let carried = E.terminal.capabilities.hatch[v.isolation].detail.keys
+			_vendoredMemoCarried: [if columns <= carried {true}, "unit \(n) memo on \(v.memo.entity) has \(columns) columns, and the \(v.isolation) seat carries an answer of at most \(carried)"][0] & true
+		}
 	}
 
 	// The cluster stores these. tab and device live only in the browser, so
