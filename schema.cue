@@ -1056,7 +1056,8 @@ import (
 #Form: {
 	id:     string
 	entity: string
-	action: "create" | "update" | "delete" | "upsert"
+	// The form's data-action (omnishell REFERENCE.md, "Mutations").
+	action: omnishell.#MutationOp & ("create" | "update" | "delete" | "upsert")
 	// Delete forms only: a PostgREST filter fragment ({param.x} interpolates)
 	// scoping a bulk delete of every matching row, instead of the row context.
 	filter?: string

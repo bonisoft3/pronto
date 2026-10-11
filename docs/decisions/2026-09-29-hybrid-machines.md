@@ -75,8 +75,9 @@ three tiers are mathematically pure, closed over rows, and replayable.
     (`020_schedule.sql`; the same table opens `012_airlock.sql` where an effect is
     declared, so the airlock's wake is a one-shot row of it).
 - **Outbound Effects**:
-  - Closed relational operations:
-    - `insert`: Strict append (`INSERT INTO ...`). Fails loudly on unique collision.
+  - Closed relational operations (`#RelationalOp`, the terminal's `#Machine.#MutationOp`
+    narrowed to what the trigger performs):
+    - `create`: Strict append (`INSERT INTO ...`). Fails loudly on unique collision.
     - `ensure`: Idempotent insert (`INSERT ... ON CONFLICT DO NOTHING`). Inserts if absent,
       no-op if existing.
     - `upsert`: State replacement (`INSERT ... ON CONFLICT (key) DO UPDATE SET ... = EXCLUDED...`).
