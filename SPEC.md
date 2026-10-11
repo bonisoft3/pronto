@@ -188,7 +188,9 @@ navigation from the brief) plus data attributes:
   the card — its chips, field names, referrers, references, validations, the
   derived line, and for an entity a machine moves, the chart as a D2 picture
   carrying the `machine` (and `effect`) element — and links `ir/card.css` from
-  the head. The author's prose stays outside the region
+  the head. The picture comes from the `d2` the app's `.mise.toml` pins beside
+  `buf` and `duckdb` (the scaffold carries it), run in the app directory with no
+  browser. The author's prose stays outside the region
 - `data-of` — owner (states belong to a screen, tests to an entity/pipeline/screen)
 - `data-durability` — durability on entities (`tab | device | server | live |
   offline`), the guarantee ladder of `#Entity.durability`
