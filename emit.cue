@@ -1439,14 +1439,21 @@ _cdcBeforeField: "__before"
 		}
 
 		// The units a data-hatch may name, and what the terminal is allowed to
-		// do for each: the boundary to mount it behind, the capabilities it
-		// asked for (checked against the terminal's offer at compile time), and
-		// the entry point to load. The rest of `files` is served, not declared —
-		// a unit fetches its own siblings by name.
+		// do for each: the boundary to mount it behind, its ports as the
+		// terminal speaks them — the tables whose row it may be fed, the events
+		// it may raise — and the entry point to load. The rest of `files` is
+		// served, not declared — a unit fetches its own siblings by name.
 		if len(S._unitNames) > 0 {
 			units: {
 				for n, v in S.code.capabilities.vendored {
-					(n): {isolation: v.isolation, capabilities: v.capabilities, src: v.src}
+					(n): {
+						isolation: v.isolation
+						ports: {
+							reads: [for r in v.ports.reads {S.code.state.entities[r].table}]
+							raises: v.ports.raises
+						}
+						src: v.src
+					}
 				}
 			}
 		}
@@ -2019,10 +2026,6 @@ _cdcBeforeField: "__before"
 		// The unit's own entry point has to be one of the files the terminal
 		// serves, or the mount fetches a path nothing published.
 		_vendoredSrcServed: true & list.Contains(v.files, v.src)
-		for cap in v.capabilities {
-			let parts = strings.Split(cap, ".")
-			_vendoredCapabilityOffered: true & (E.terminal.capabilities[parts[0]][parts[1]] != _|_)
-		}
 	}
 
 	// The cluster stores these. tab and device live only in the browser, so

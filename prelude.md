@@ -137,7 +137,7 @@ terminal does not offer fails to compile.
 
 Ranked: pre-compiled WASM behind a CUE contract, then a vendored unit at the
 terminal tier (a realm or an agent, with declared isolation and
-capabilities), then a container (with a declared shim at the browser tier),
+ports), then a container (with a declared shim at the browser tier),
 then an external API endpoint. Every escape is a
 box in ir.html; an app with none says so in its Decisions section.
 

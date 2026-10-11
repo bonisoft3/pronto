@@ -339,6 +339,16 @@ re-exported by `terminals/omnishell.cue`: a form's `action`, a `#Write.op` and
 mecha's `#RelationalOp` each narrow it to the ops their performer runs, and
 none extends it.
 
+**A vendored unit declares its ports.** `capabilities.vendored.<unit>.ports`
+is `reads`, the entities whose rows the unit is handed (the row of the region
+its mount sits in, through `data-prop-*`), and `raises`, the events it may
+post (heard by the mount's `data-on-*`); ports and adapters, the terminal
+being the adapter on both. CUE refuses a read naming no entity; the terminal's
+`check markup`, which sees the emitted `units:` and the screens together,
+refuses a mount fed a region the unit does not read, a mount handling an event
+it does not raise, and a raise no mount on any screen handles; the mount
+refuses the first two at runtime and an undeclared raise at the seat.
+
 A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
 parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as
 protobuf-JSON); every rendering is a function of that file — in

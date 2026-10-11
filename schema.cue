@@ -1476,9 +1476,9 @@ import (
 			}
 		}
 		// Terminal-tier hatch: a vendored unit running inside the terminal, under
-		// one of `isolation`'s boundaries, requesting a subset of the terminal's
-		// capability vocabulary (`"group.name"` strings). Checked against
-		// #Terminal.capabilities' offer in #emit, not here.
+		// one of `isolation`'s boundaries, touching the app only through its
+		// `ports`. The boundary is checked against #Terminal.capabilities' offer
+		// in #emit; a port naming an undeclared entity is refused here.
 		//
 		// `files` is everything the unit needs served, `src` among them: the
 		// wrapper an engineer audited, and whatever that wrapper loads beside
@@ -1493,7 +1493,17 @@ import (
 			// present; an `agent` is a worker with its own thread (ECMA-262
 			// agent) and reaches the network, so it may only ask.
 			isolation: "compartment" | "realm" | "agent"
-			capabilities: [...string]
+			// Everything the unit touches, as entities and events (ports and
+			// adapters, Cockburn 2005): `reads` the entities whose rows it is
+			// handed, read-only, and `raises` the events it may post. The
+			// terminal is the adapter on each — the mount's data-prop-* feed off
+			// a read's row, the mount's data-on-* listener on a raise — and it
+			// refuses a row or an event outside them; its markup lint holds every
+			// mount to the same lists and asks that every raise be handled.
+			ports: {
+				reads:  [...string]
+				raises: [...string]
+			}
 			src: string
 			files: [...string]
 			note: string
@@ -1609,6 +1619,15 @@ import (
 		},
 	]
 	_machineEntityRefusal: [if len(_machineEntityViolations) == 0 {true}, _machineEntityViolations[0]][0] & true
+
+	_unitViolations: [
+		for un, u in A.capabilities.vendored
+		for r in u.ports.reads
+		if len([for en, _ in A.state.entities if en == r {en}]) == 0 {
+			"unit \(un) reads \(r), which is no declared entity"
+		},
+	]
+	_unitRefusal: [if len(_unitViolations) == 0 {true}, _unitViolations[0]][0] & true
 
 	_effects: [if A.state.effects != _|_ {A.state.effects}, {}][0]
 	_invokes: [
