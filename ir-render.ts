@@ -22,9 +22,12 @@
  * the lockfile's URL per platform, which is what mise's locked mode runs. */
 const PRONTO = new URL(".", import.meta.url).pathname;
 
-export type Field = { name: string; type: string; pk?: boolean; ref?: string; required?: boolean; unique?: boolean; default?: string; cel?: string };
+export type Field = { name: string; type: string; ordinal?: number; retired?: boolean; pk?: boolean; ref?: string; required?: boolean; unique?: boolean; default?: string; cel?: string };
 export type Entity = {
   ir: string;
+  /** The type id a diff keys on across renames (#TypeId); its fields keep
+   * gap-free ordinals and a retired one stays as a tombstone. */
+  id?: string;
   table: string;
   durability: string;
   level: string;
@@ -58,6 +61,8 @@ export type Program = {
 const TIP: Record<string, string> = {
   durability: "where the row lives, the one word the author chooses: tab · device · offline · live · server",
   access: "who may read and write the row; becomes the roles and the row-level policies",
+  id: "the entity's type id, which a schema diff keys on across renames; each field keeps a gap-free ordinal, and a retired field stays as a tombstone",
+  retired: "retired: the ordinal is kept so no later field takes it; nothing writes the column",
   level: "",
   delivery: "what a write to this entity can claim when delivered twice — derived from the level and the op",
   writers: "who writes rows here: forms, machines, computations",
@@ -158,7 +163,8 @@ function reachOf(d: Iterable<string>): string {
 export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<string> {
   const { entities } = ctx.program.state;
   const byTable = new Map(Object.entries(entities).map(([n, x]) => [x.table, { name: n, ...x }]));
-  const fields = e.fields.filter((f) => !STAMPS.has(f.name));
+  const fields = e.fields.filter((f) => !STAMPS.has(f.name) && !f.retired);
+  const retired = e.fields.filter((f) => f.retired);
   const idx = new Set((e.indexes ?? []).map((i) => i.on));
   const machines = [
     ...(ctx.charts.get(e.table) ?? []).map((c) => ({ id: `${e.ir}-${c.field}`, title: `${e.ir} · ${c.field}`, level: e.level, chart: c, invoke: null as null | string })),
@@ -187,6 +193,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
   ];
   const delivery = machines.some((m) => m.level === "external") ? "exactly-once" : e.level === "compensable" ? "at-most-once" : "exactly-once";
   const glyphs = (f: Field) => [
+    f.retired ? `<span class="g"${tip(TIP.retired)}>†</span>` : "",
     f.pk ? `<span class="g pk"${tip(TIP.pk)}>pk</span>` : "",
     f.ref ? `<a class="g fk" href="#${esc(byTable.get(f.ref)?.ir ?? f.ref)}"${tip(TIP.fk)}>→ ${esc(f.ref)}</a>` : "",
     machineField.has(f.name) ? `<span class="g mach"${tip(TIP.machine)}>machine</span>` : "",
@@ -216,13 +223,13 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
   const owed = reachOf([e.durability, ...machines.flatMap((m) => (m.chart as { writes?: string[] }).writes ?? []).map((t) => byTable.get(t)?.durability ?? "tab")]) !== "tab";
   return `<div class="card dur-${esc(e.durability)}">
 <header class="ehead">
-<span class="chips">${chip("durability", e.durability, false)}${chip("access", accessValue, false)}${chip("level", e.level, true, LEVEL_TIP[e.level])}${chip("delivery", delivery, true)}</span>
+<span class="chips">${chip("durability", e.durability, false)}${chip("access", accessValue, false)}${e.id === undefined ? "" : chip("id", e.id, false)}${chip("level", e.level, true, LEVEL_TIP[e.level])}${chip("delivery", delivery, true)}</span>
 <span class="counts">${fields.length} fields · ${referrers.length} referrers${machines.length > 0 ? ` · ${machines.length} machine${machines.length > 1 ? "s" : ""}` : ""}</span>
 </header>
 <div class="names"><span class="lbl">fields</span><span class="namelist">${fields.map(nameToken).join("")}</span>
 <details class="more"><summary>all fields, with their metadata</summary>
-<table class="fields">${fields.map((f) => `<tr><td class="k">${esc(f.name)}</td><td class="t">${esc(f.type)}</td><td class="gl">${glyphs(f)}</td><td class="x" title="${esc(rule(f))}">${esc(rule(f))}</td></tr>`).join("")}</table>
-<p class="legend"><span class="g pk">pk</span> primary key · <span class="g fk">→</span> references · <span class="g">◇</span> unique · <span class="g">≡</span> indexed · <span class="g">○</span> nullable · a rule or default in the last column</p>
+<table class="fields">${[...fields, ...retired].map((f) => `<tr${f.retired ? ' class="retired"' : ""}><td class="o">${f.ordinal ?? ""}</td><td class="k">${esc(f.name)}</td><td class="t">${esc(f.type)}</td><td class="gl">${glyphs(f)}</td><td class="x" title="${esc(rule(f))}">${esc(rule(f))}</td></tr>`).join("")}</table>
+<p class="legend">${e.id === undefined ? "" : "the first column is the field's ordinal, which a diff keys on · "}<span class="g pk">pk</span> primary key · <span class="g fk">→</span> references · <span class="g">◇</span> unique · <span class="g">≡</span> indexed · <span class="g">○</span> nullable${retired.length > 0 ? ' · <span class="g">†</span> retired' : ""} · a rule or default in the last column</p>
 </details></div>
 <div class="strips">
 <div class="strip"><span class="lbl">referenced by</span><span class="rels">${pills(referrers, 3, (r) => `<a class="rel in" href="#${esc(byTable.get(r.table)?.ir ?? r.table)}">${esc(r.table)}<span class="col">.${esc(r.col)}</span></a>`) || '<span class="why">—</span>'}</span></div>
@@ -320,6 +327,8 @@ export const CARD_CSS = `/* generated by pronto from program.cue — do not edit
 .card .fields { border-collapse: collapse; font-size: 13px; width: 100%; margin-top: 8px; }
 .card .fields td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--card-line); vertical-align: baseline; }
 .card .fields .k { font-family: ui-monospace, Menlo, monospace; } .card .fields .t { color: var(--card-muted); font-family: ui-monospace, Menlo, monospace; }
+.card .fields .o { color: var(--card-muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; width: 2.5ch; text-align: right; }
+.card .fields tr.retired td { color: var(--card-muted); text-decoration: line-through; } .card .fields tr.retired td.gl { text-decoration: none; }
 .card .fields .gl { white-space: nowrap; } .card .fields .x { color: var(--card-muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .g { font-family: ui-monospace, Menlo, monospace; font-size: 11px; margin-right: 6px; color: var(--card-muted); }
 .card .g.pk { font-weight: 600; color: var(--card-ink); } .card .g.fk { color: var(--card-accent); text-decoration: none; }

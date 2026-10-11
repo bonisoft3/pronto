@@ -33,14 +33,16 @@ const program: Program = {
     entities: {
       Game: {
         ir: "Game",
+        id: "0xa5f5609cc8def322",
         table: "game",
         durability: "live",
         level: "compensable",
         fields: [
-          { name: "id", type: "uuid", pk: true, default: "gen_random_uuid()" },
-          { name: "status", type: "string", default: "'pending'" },
-          { name: "team_id", type: "uuid", ref: "team" },
-          { name: "round", type: "int32", required: false, cel: "this >= 1" },
+          { ordinal: 1, name: "id", type: "uuid", pk: true, default: "gen_random_uuid()" },
+          { ordinal: 2, name: "status", type: "string", default: "'pending'" },
+          { ordinal: 3, name: "team_id", type: "uuid", ref: "team" },
+          { ordinal: 4, name: "round", type: "int32", required: false, cel: "this >= 1" },
+          { ordinal: 5, name: "score", type: "int32", retired: true, required: false },
           { name: "created_by", type: "uuid", ref: "app_user", required: false },
         ],
         access: { scope: "public", write: true },
@@ -76,7 +78,7 @@ Deno.test("the card says property: value on every chip, names every field upfron
       return Promise.resolve("<svg/>");
     },
   });
-  for (const chip of ["<b>durability</b> live", "<b>access</b> public · write true", "<b>level</b> compensable", "<b>delivery</b> exactly-once", "<b>writers</b> forms · Game · GameMachine", "<b>read</b> eager", "<b>roles</b> anon · app_user · service", "<b>ir</b> required"]) {
+  for (const chip of ["<b>durability</b> live", "<b>access</b> public · write true", "<b>id</b> 0xa5f5609cc8def322", "<b>level</b> compensable", "<b>delivery</b> exactly-once", "<b>writers</b> forms · Game · GameMachine", "<b>read</b> eager", "<b>roles</b> anon · app_user · service", "<b>ir</b> required"]) {
     assertStringIncludes(html, chip);
   }
   // Every chip explains itself; the level's sentence names its rung.
@@ -84,6 +86,10 @@ Deno.test("the card says property: value on every chip, names every field upfron
   // Stamps are the platform's, off the name line; the machine's field is marked.
   assertStringIncludes(html, '<span class="fname">status<i class="m mach">⚙</i></span>');
   assertEquals(html.includes('<span class="fname">created_by'), false);
+  // A retired field is a tombstone: off the name line, in the table with its ordinal kept.
+  assertEquals(html.includes('<span class="fname">score'), false);
+  assertStringIncludes(html, '<tr class="retired"><td class="o">5</td><td class="k">score</td>');
+  assertStringIncludes(html, '<td class="o">1</td><td class="k">id</td>');
   assertStringIncludes(html, '<a class="rel in" href="#Team">team<span class="col">.game_id</span></a>');
   assertStringIncludes(html, '<a class="rel out" href="#Team">team<span class="col"> via team_id</span></a>');
   assertStringIncludes(html, "<code>one-round</code> <span class=\"note\">a round is played once</span>");
