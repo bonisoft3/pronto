@@ -1,6 +1,6 @@
 // The entity card the compiler draws into ir.html: where it goes, that a redraw
 // replaces it and only it, what it says, and the chart it draws.
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cardHtml, chartD2, fillRegions, irRegions, type Program } from "./ir-render.ts";
 
 const IR = `<!doctype html><html><head><title>x</title></head><body>
@@ -99,6 +99,13 @@ Deno.test("the card says property: value on every chip, names every field upfron
   assertStringIncludes(html, 'data-kind="effect" id="charge" data-of="GameMachine"');
   assertStringIncludes(html, 'not idempotent · re-entry reconcile · <span class="note">the acquirer answers a charge by key</span>');
   assertEquals(drawn.length, 2);
+});
+
+Deno.test("an effect that is not idempotent and states no reentry is a refusal, not a guess", async () => {
+  // The schema pairs `reentry` with `idempotent: false`; the card reprints that pairing and defaults nothing.
+  const bare = { ...program, state: { ...program.state, effects: { charge: { ir: "charge", sink: { origin: "https://api.acquirer.example", idempotent: false }, note: "n" } } } } as Program;
+  const ctx = { program: bare, charts: new Map(), readMode: new Map([["Game", "eager"]]), d2: () => Promise.resolve("<svg/>") };
+  await assertRejects(() => cardHtml("Game", bare.state.entities.Game, ctx), Error, "effect charge is not idempotent and states no reentry");
 });
 
 Deno.test("a chart's D2 draws every arrow by its event, an invoking state dashed, a final state as a ring", () => {
