@@ -82,6 +82,8 @@ three tiers are mathematically pure, closed over rows, and replayable.
       no-op if existing.
     - `upsert`: State replacement (`INSERT ... ON CONFLICT (key) DO UPDATE SET ... = EXCLUDED...`).
     - `accumulate`: Delta accumulation (`INSERT ... ON CONFLICT (key) DO UPDATE SET col = col + EXCLUDED.col`).
+    - `update`: Absolute update (`UPDATE ... SET ... WHERE ...`), the rows `where`/`rawWhere`
+      name, else the row the values' key names, else every row.
     - `delete`: Row deletion (`DELETE FROM ... WHERE ...`).
   - Domain functions:
     - `call`: Parameterized execution of declared, schema-vetted PL/pgSQL functions.
