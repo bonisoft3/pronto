@@ -513,7 +513,7 @@ Deno.test("an effect is invoked by exactly one state", async () => {
         pending: on: pay: "settled"
         settled: type: "final"`,
   }));
-  assertStringIncludes(never, "effect charge is invoked by 0 states");
+  assertStringIncludes(never, "effect charge is invoked by no state: its entity is its invoking machine's, so it has none");
 });
 
 Deno.test("an effect's name is a DNS label, as its Dapr endpoint's must be", async () => {
@@ -600,16 +600,43 @@ Deno.test("an invoking state with any exit but its outcome is refused", async ()
   assertStringIncludes(err, "machine PaymentMachine state charging invokes charge and declares on or after: only the effect's outcome leaves it");
 });
 
-Deno.test("an effect of another entity than the machine's is refused", async () => {
+// The effect's entity is the invoking machine's: a second copy could only
+// agree or disagree, and the disagreeing copy once passed as the machine's.
+Deno.test("an effect's entity is derived from the machine that invokes it, and an authored one is refused", async () => {
+  const derived = await cue(["export", "-", "-e", "app.state.effects.charge.entity", "--out", "json"], paymentProgram());
+  assertEquals(derived.success, true, derived.stderr);
+  assertEquals(JSON.parse(derived.stdout), "Payment");
   const err = await refusal(paymentProgram({
+    effect: `entity: "Order"`,
     entity: `Order: {table: "orders", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}`,
-  }).replace(`effects: charge: {\n      entity: "Payment"`, `effects: charge: {\n      entity: "Order"`));
-  assertStringIncludes(err, "machine PaymentMachine state charging invokes charge, an effect of Order, not of the machine's Payment");
+  }));
+  assertStringIncludes(err, "entity");
 });
 
-Deno.test("an effect naming an undeclared entity is refused", async () => {
-  const err = await refusal(paymentProgram().replace(`effects: charge: {\n      entity: "Payment"`, `effects: charge: {\n      entity: "Invoice"`));
-  assertStringIncludes(err, "effect charge names undeclared entity: Invoice");
+// One effect reads NEW and keys on fields of one row; two machines over two
+// entities would hand it two shapes under one ledger prefix.
+Deno.test("an effect invoked by machines of two entities is refused", async () => {
+  const order = `machines: OrderMachine: {
+      name: "OrderMachine"
+      entity: "Order"
+      field: "status"
+      initial: "open"
+      states: {
+        open: on: pay: "paying"
+        paying: invoke: {src: "charge", onDone: "paid", onError: "open"}
+        paid: type: "final"
+      }
+    }
+    `;
+  const err = await refusal(paymentProgram({
+    entity: `Order: {table: "orders", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "status", type: "string"}]}`,
+  }).replace("machines: PaymentMachine:", `${order}machines: PaymentMachine:`));
+  assertStringIncludes(err, "effect charge is invoked by machines of 2 entities (Order, Payment): its NEW reads and its key need one row");
+});
+
+Deno.test("a machine invoking over an undeclared entity is refused before the effect's entity is derived", async () => {
+  const err = await refusal(paymentProgram().replace(`entity: "Payment"\n      field: "status"`, `entity: "Invoice"\n      field: "status"`));
+  assertStringIncludes(err, "machine PaymentMachine invokes charge over undeclared entity: Invoice");
 });
 
 Deno.test("an effect of an entity the cluster does not hold is refused", async () => {

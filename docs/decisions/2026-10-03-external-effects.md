@@ -38,7 +38,6 @@ record builds.
 
 ```cue
 state: effects: charge: {
-	entity:  "Payment"
 	key:     ["id"]                             // identity: the ledger key is "charge:" || NEW.id
 	input:   {amount: "NEW.total", customer: "NEW.customer_id"}   // XState's input, frozen in the ledger at the claim
 	sink: {
@@ -96,20 +95,21 @@ shows the declaration is honoured end to end.
 The program does not compile when:
 
 - an `invoke.src` names no declared effect;
-- an effect is invoked by no state, or by more than one, so a ledger key names one
+- an effect is invoked by no state, by more than one, or by machines of two
+  entities: its `entity` is the invoking machine's, and a ledger key names one
   instance of one state;
 - an effect's name is not a DNS label, which its Dapr binding's must be;
 - a state that invokes also declares `on` or `after`. Only an outcome leaves it, so a
   late answer about money that moved can never land on a machine that has moved on;
-- the effect's `entity` is not the machine's;
+- an invoking machine names an undeclared entity;
 - the entity's rows do not live in the cluster (`tab`, `device`). The guard that claims
   runs in the cluster, once per committed write; a browser-held row would fire the effect
   from every tab;
 - a `key` field is not a field of the entity;
 - `reentry` is declared on an idempotent sink;
 - `sink.origin` is not an `https` origin (scheme and host, no path);
-- an effect names an undeclared entity, reaches an undeclared bridge, or a declared
-  bridge is reached by no effect;
+- an effect reaches an undeclared bridge, or a declared bridge is reached by no
+  effect;
 - a bridged sink is declared idempotent, or reconciles: past a bridge nothing is the
   platform's to promise, and a bridge answers no query by key, so the effect states
   `unknown` or `{repeat: why}`;

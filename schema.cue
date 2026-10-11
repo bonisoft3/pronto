@@ -962,8 +962,10 @@ import (
 // ledger (docs/decisions/2026-10-03-external-effects.md).
 #ExternalEffect: {
 	// Also the sink's Dapr binding name, so a DNS label.
-	name:   =~"^[a-z][a-z0-9-]*$"
-	ir:     *name | string
+	name: =~"^[a-z][a-z0-9-]*$"
+	ir:   *name | string
+	// Derived (#App): the entity of the one machine whose state invokes it,
+	// which is the row its NEW reads and its key fields come from.
 	entity: string
 	// The ledger key is "<name>:" and these fields of the entity: one as its
 	// text, several JSON-encoded. It is also the sink's idempotency key, so it
@@ -1388,7 +1390,7 @@ import (
 		machines?: [Name=string]: #MechaMachine & {name: Name}
 		// Each also a Dapr output binding of the airlock's, and a handler the
 		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
-		effects?: [Name=string]: #ExternalEffect & {name: Name}
+		effects?: [Name=string]: #ExternalEffect & {name: Name, entity: A._effectEntityNames[Name][0]}
 		// What an effect's sink reaches through when it does not speak HTTP:
 		// a container on the airlock's outbound network speaking the other
 		// protocol to one declared server (mecha's #Bridge).
@@ -1583,7 +1585,6 @@ import (
 		}
 	]
 
-	_entityTable: {for n, e in A.state.entities {(n): e.table, (e.table): e.table}}
 	_effects: [if A.state.effects != _|_ {A.state.effects}, {}][0]
 	_invokes: [
 		if A.state.machines != _|_
@@ -1605,29 +1606,41 @@ import (
 			}]
 		},
 	]
+	// The entities, by name, of the machines invoking each effect, keyed by
+	// the effect: one is the effect's own; none or several is refused below.
+	// Read off the machines alone, since the effects' `entity` is this map,
+	// and the rules read this map and never that field, which is incomplete
+	// in the programs they refuse.
+	_effectEntities: {for i in _invokes for en, e in A.state.entities if en == i.entity || e.table == i.entity {(i.src): (en): true}}
+	_effectEntityNames: {for n, s in _effectEntities {(n): [for en, _ in s {en}]}}
+	// By key: an effect refused below is bottom as a value, not undeclared.
+	_effectNames: [for n, _ in _effects {n}]
 	// An invoking state is left only by its outcome, so an outcome that cannot
 	// be delivered leaves the row there for good: the guard would refuse the
 	// move, and the airlock would retry the sink until its attempts ran out.
 	_invokeViolations: list.Concat([
-		[for i in _invokes if _effects[i.src] == _|_ {
+		[for i in _invokes if !list.Contains(_effectNames, i.src) {
 			"machine \(i.machine) state \(i.state) invokes undeclared effect: \(i.src)"
+		}],
+		[for i in _invokes if len([for en, e in A.state.entities if en == i.entity || e.table == i.entity {en}]) == 0 {
+			"machine \(i.machine) invokes \(i.src) over undeclared entity: \(i.entity)"
 		}],
 		[for i in _invokes if i.others {
 			"machine \(i.machine) state \(i.state) invokes \(i.src) and declares on or after: only the effect's outcome leaves it"
 		}],
-		[for i in _invokes if _effects[i.src] != _|_ if _entityTable[_effects[i.src].entity] != _|_ if _entityTable[_effects[i.src].entity] != _entityTable[i.entity] {
-			"machine \(i.machine) state \(i.state) invokes \(i.src), an effect of \(_effects[i.src].entity), not of the machine's \(i.entity)"
+		[for n, _ in _effects if len([for i in _invokes if i.src == n {i}]) == 0 {
+			"effect \(n) is invoked by no state: its entity is its invoking machine's, so it has none"
 		}],
-		[for n, _ in _effects let c = len([for i in _invokes if i.src == n {i}]) if c != 1 {
+		[for n, ens in _effectEntityNames if len(ens) > 1 {
+			"effect \(n) is invoked by machines of \(len(ens)) entities (\(strings.Join(ens, ", "))): its NEW reads and its key need one row"
+		}],
+		[for n, _ in _effects let c = len([for i in _invokes if i.src == n {i}]) if c > 1 {
 			"effect \(n) is invoked by \(c) states: exactly one invokes it, so its ledger key names one instance of one state"
 		}],
-		[for n, x in _effects if _entityTable[x.entity] == _|_ {
-			"effect \(n) names undeclared entity: \(x.entity)"
-		}],
-		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity if !e.server {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if !A.state.entities[en].server {
 			"effect \(n) is of \(en), whose rows do not live in the cluster: an effect fired from every tab would be performed by every tab"
 		}],
-		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity for k in x.key if !list.Contains([for f in e.fields {f.name}], k) {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k in _effects[n].key if !list.Contains([for f in A.state.entities[en].fields {f.name}], k) {
 			"effect \(n) keys on \(k), which is not a field of \(en)"
 		}],
 		[for i in _invokes if i.final {
@@ -1645,7 +1658,7 @@ import (
 		[for i in _invokes for ar in i.arrows for a in ar.actions if a.raise != _|_ {
 			"machine \(i.machine) state \(i.state): an outcome's actions raise, which would refuse the recorded outcome's delivery"
 		}],
-		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity for k, v in x.input if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in e.fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k, v in _effects[n].input if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in A.state.entities[en].fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
 			"effect \(n) input \(k) reads \(v), which is not a field of \(en)"
 		}],
 		// The credential is the airlock's alone: a handler handed it could put

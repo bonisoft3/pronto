@@ -35,7 +35,6 @@ _effecting: _code & {
 			}
 		}
 		effects: charge: {
-			entity:  "Payment"
 			input: {amount: "NEW.total"}
 			sink: {origin: "https://api.acquirer.example", idempotent: true}
 		}

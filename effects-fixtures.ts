@@ -51,7 +51,6 @@ app: pronto.#App & {
       }
     }
     effects: charge: {
-      entity: "Payment"
       input: {amount: "NEW.total", currency: "BRL"}
       sink: {origin: "https://api.acquirer.example", idempotent: true}
       ${effect}
