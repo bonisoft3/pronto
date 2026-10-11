@@ -115,6 +115,19 @@ article.ecard { display: grid; gap: 0; }
 .machine .canvas svg { max-width: 640px; }
 .fields td.x { max-width: 30ch; }
 
+.chip b { font-weight: 500; color: var(--muted); margin-right: 4px; font-family: var(--body); letter-spacing: 0.02em; }
+.chip.derived b { color: var(--accent); opacity: 0.8; }
+[data-tip] { position: relative; cursor: help; }
+[data-tip]:hover::after, [data-tip]:focus-visible::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 5; background: #fff6bf; color: #1b1f2a; border: 1px solid #e3cf5a; padding: 8px 10px; font: 13px/1.4 var(--body); width: max-content; max-width: 34ch; white-space: normal; text-transform: none; letter-spacing: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.names { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: baseline; padding: 4px 18px 12px; }
+.namelist { font-family: var(--mono); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.fname { margin-right: 10px; }
+.m { font-style: normal; font-size: 10px; color: var(--muted); margin-left: 2px; vertical-align: super; }
+.m.mach { color: var(--accent); }
+.names .more { grid-column: 2; }
+.legend { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.legend .g { margin-right: 2px; }
+
 .verdict { max-width: 68ch; display: grid; gap: 10px; }
 .verdict ul { margin: 0; padding-left: 20px; }
 a { color: var(--accent); }
@@ -386,31 +399,43 @@ a { color: var(--accent); }
 </section>
 
 <section class="object" id="htmlcard">
-  <h2>entities as cards, third round</h2>
-  <p class="blurb">At a glance: the band, the chips, the key rows (pk, refs, the machine's field), three referrers, one line of derived chips. Everything longer is behind a count: <code>+16 more fields</code>, <code>+8</code> referrers, <em>why</em>. The machine stays a picture.</p>
+  <h2>entities as cards, fourth round</h2>
+  <p class="blurb">Every chip now leads with the property it states and explains itself on hover or focus; the authored ones sit together in the header, the derived ones on their own line. The field names are all upfront on one line, marked only where a mark means navigation (<i class="m">pk</i>, <i class="m">→</i>, <i class="m mach">⚙</i>); their metadata is one click away, with a legend.</p>
   
 <article class="ecard dur-server" id="game">
   <span class="band"></span>
   <header class="ehead">
     <span class="ename">game</span>
-    <span class="chips"><span class="chip">server</span><span class="chip derived">level 3 replicated</span><span class="chip derived">exactly-once</span></span>
+    <span class="chips">
+      <span class="chip" data-tip="where the row lives, the one word the author chooses: tab · device · offline · live · server" tabindex="0"><b>durability</b> server</span>
+      <span class="chip" data-tip="who may read and write the row; becomes the roles and the row-level policies" tabindex="0"><b>access</b> public</span>
+      <span class="chip derived" data-tip="3 of 5 — a write to a row only the cluster holds, inside the transaction; delivered twice it converges, out of order it commutes" tabindex="0"><b>level</b> replicated</span>
+      <span class="chip derived" data-tip="what writes to this entity can claim when delivered twice — derived from the level and the op" tabindex="0"><b>delivery</b> exactly-once</span>
+    </span>
     <span class="counts">21 fields · 11 referrers</span>
   </header>
-  <div class="glance">
-    <table class="fields"><tr><td class="k">id</td><td class="t">uuid</td><td class="gl"><span class="g pk">pk</span></td><td class="x" title="= gen_random_uuid()">= gen_random_uuid()</td></tr><tr><td class="k">phase_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#phase">→ phase</a><span class="g" title="indexed">≡</span></td><td class="x" title=""></td></tr><tr><td class="k">home_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#team">→ team</a><span class="g" title="indexed">≡</span></td><td class="x" title=""></td></tr><tr><td class="k">away_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#team">→ team</a><span class="g" title="indexed">≡</span></td><td class="x" title=""></td></tr><tr><td class="k">stadium_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#stadium">→ stadium</a><span class="g" title="indexed">≡</span><span class="g" title="nullable">○</span></td><td class="x" title=""></td></tr><tr><td class="k">referee_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#referee">→ referee</a><span class="g" title="indexed">≡</span><span class="g" title="nullable">○</span></td><td class="x" title=""></td></tr></table>
-    <details class="more"><summary>+15 more fields</summary><table class="fields"><tr><td class="k">round</td><td class="t">int32</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title="this &gt;= 1">this &gt;= 1</td></tr><tr><td class="k">day</td><td class="t">date</td><td class="gl"><span class="g" title="indexed">≡</span></td><td class="x" title=""></td></tr><tr><td class="k">kickoff</td><td class="t">timestamp</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title=""></td></tr><tr><td class="k">home_field</td><td class="t">string</td><td class="gl"></td><td class="x" title="this in [&#x27;left&#x27;, &#x27;neutral&#x27;, &#x27;right&#x27;]">this in [&#x27;left&#x27;, &#x27;neutral&#x27;, &#x27;right&#x27;]</td></tr><tr><td class="k">played</td><td class="t">bool</td><td class="gl"></td><td class="x" title="= false">= false</td></tr><tr><td class="k">home_score</td><td class="t">int32</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">away_score</td><td class="t">int32</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">home_aet</td><td class="t">int32</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">away_aet</td><td class="t">int32</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">home_pen</td><td class="t">int32</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">away_pen</td><td class="t">int32</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">attendance</td><td class="t">int32</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt;= 250000">this &gt;= 0 &amp;&amp; this &lt;= 250000</td></tr><tr><td class="k">day_display</td><td class="t">string</td><td class="gl"></td><td class="x" title=""></td></tr><tr><td class="k">kickoff_local</td><td class="t">string</td><td class="gl"></td><td class="x" title=""></td></tr><tr><td class="k">slug</td><td class="t">string</td><td class="gl"><span class="g" title="unique">◇</span></td><td class="x" title="this.matches(&#x27;^[a-z0-9]+(-[a-z0-9]+)*$&#x27;)">this.matches(&#x27;^[a-z0-9]+(-[a-z0-9]+)*$&#x27;)</td></tr></table></details>
+  <div class="names">
+    <span class="lbl">fields</span>
+    <span class="namelist"><span class="fname">id<i class="m">pk</i></span><span class="fname">phase_id<i class="m">→</i></span><span class="fname">round</span><span class="fname">day</span><span class="fname">kickoff</span><span class="fname">home_id<i class="m">→</i></span><span class="fname">away_id<i class="m">→</i></span><span class="fname">home_field</span><span class="fname">played</span><span class="fname">home_score</span><span class="fname">away_score</span><span class="fname">home_aet</span><span class="fname">away_aet</span><span class="fname">home_pen</span><span class="fname">away_pen</span><span class="fname">stadium_id<i class="m">→</i></span><span class="fname">referee_id<i class="m">→</i></span><span class="fname">attendance</span><span class="fname">day_display</span><span class="fname">kickoff_local</span><span class="fname">slug</span></span>
+    <details class="more"><summary>all fields, with their metadata</summary>
+      <table class="fields"><tr><td class="k">id</td><td class="t">uuid</td><td class="gl"><span class="g pk" data-tip="primary key" tabindex="0">pk</span></td><td class="x" title="= gen_random_uuid()">= gen_random_uuid()</td></tr><tr><td class="k">phase_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#phase" data-tip="references another entity; click to go there" tabindex="0">→ phase</a><span class="g" data-tip="indexed" tabindex="0">≡</span></td><td class="x" title=""></td></tr><tr><td class="k">round</td><td class="t">int32</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title="this &gt;= 1">this &gt;= 1</td></tr><tr><td class="k">day</td><td class="t">date</td><td class="gl"><span class="g" data-tip="indexed" tabindex="0">≡</span></td><td class="x" title=""></td></tr><tr><td class="k">kickoff</td><td class="t">timestamp</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title=""></td></tr><tr><td class="k">home_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#team" data-tip="references another entity; click to go there" tabindex="0">→ team</a><span class="g" data-tip="indexed" tabindex="0">≡</span></td><td class="x" title=""></td></tr><tr><td class="k">away_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#team" data-tip="references another entity; click to go there" tabindex="0">→ team</a><span class="g" data-tip="indexed" tabindex="0">≡</span></td><td class="x" title=""></td></tr><tr><td class="k">home_field</td><td class="t">string</td><td class="gl"></td><td class="x" title="this in [&#x27;left&#x27;, &#x27;neutral&#x27;, &#x27;right&#x27;]">this in [&#x27;left&#x27;, &#x27;neutral&#x27;, &#x27;right&#x27;]</td></tr><tr><td class="k">played</td><td class="t">bool</td><td class="gl"></td><td class="x" title="= false">= false</td></tr><tr><td class="k">home_score</td><td class="t">int32</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">away_score</td><td class="t">int32</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">home_aet</td><td class="t">int32</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">away_aet</td><td class="t">int32</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">home_pen</td><td class="t">int32</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">away_pen</td><td class="t">int32</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt; 100">this &gt;= 0 &amp;&amp; this &lt; 100</td></tr><tr><td class="k">stadium_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#stadium" data-tip="references another entity; click to go there" tabindex="0">→ stadium</a><span class="g" data-tip="indexed" tabindex="0">≡</span><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title=""></td></tr><tr><td class="k">referee_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#referee" data-tip="references another entity; click to go there" tabindex="0">→ referee</a><span class="g" data-tip="indexed" tabindex="0">≡</span><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title=""></td></tr><tr><td class="k">attendance</td><td class="t">int32</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title="this &gt;= 0 &amp;&amp; this &lt;= 250000">this &gt;= 0 &amp;&amp; this &lt;= 250000</td></tr><tr><td class="k">day_display</td><td class="t">string</td><td class="gl"></td><td class="x" title=""></td></tr><tr><td class="k">kickoff_local</td><td class="t">string</td><td class="gl"></td><td class="x" title=""></td></tr><tr><td class="k">slug</td><td class="t">string</td><td class="gl"><span class="g" data-tip="unique" tabindex="0">◇</span></td><td class="x" title="this.matches(&#x27;^[a-z0-9]+(-[a-z0-9]+)*$&#x27;)">this.matches(&#x27;^[a-z0-9]+(-[a-z0-9]+)*$&#x27;)</td></tr></table>
+      <p class="legend"><span class="g pk">pk</span> primary key · <span class="g fk">→</span> references · <span class="g">◇</span> unique · <span class="g">≡</span> indexed · <span class="g">○</span> nullable · a rule or default in the last column</p>
+    </details>
   </div>
   <div class="strips">
     <div class="strip"><span class="lbl">referenced by</span><span class="rels"><a class="rel in" href="#match_probability">match_probability<span class="col">.id</span></a><a class="rel in" href="#match_probability">match_probability<span class="col">.game_id</span></a><a class="rel in" href="#goal">goal<span class="col">.game_id</span></a><details class="more inline"><summary>+8</summary><span class="rels"><a class="rel in" href="#player_game">player_game<span class="col">.game_id</span></a><a class="rel in" href="#game_importance">game_importance<span class="col">.id</span></a><a class="rel in" href="#game_card">game_card<span class="col">.id</span></a><a class="rel in" href="#home_game_card">home_game_card<span class="col">.id</span></a><a class="rel in" href="#matches_game_card">matches_game_card<span class="col">.id</span></a><a class="rel in" href="#team_game">team_game<span class="col">.game_id</span></a><a class="rel in" href="#comment">comment<span class="col">.game_id</span></a><a class="rel in" href="#team_campaign_point">team_campaign_point<span class="col">.game_id</span></a></span></details></span></div>
-    <div class="strip"><span class="lbl">access</span><span class="chip">public</span></div>
+    <div class="strip"><span class="lbl">refers to</span><span class="rels"><a class="rel out" href="#phase">phase<span class="col"> via phase_id</span></a><a class="rel out" href="#team">team<span class="col"> via home_id</span></a><a class="rel out" href="#team">team<span class="col"> via away_id</span></a><a class="rel out" href="#stadium">stadium<span class="col"> via stadium_id</span></a><details class="more inline"><summary>+1</summary><span class="rels"><a class="rel out" href="#referee">referee<span class="col"> via referee_id</span></a></span></details></span></div>
     <div class="strip"><span class="lbl">validations</span><span class="why">none</span></div>
   </div>
   <div class="dline">
     <span class="lbl derived">derived</span>
-    <span class="chips"><span class="chip derived">forms, computations · read lazy</span><span class="chip derived">owes an ir element</span><span class="chip derived">anon · app_user · service</span></span>
-    <details class="more"><summary>why, and the platform's columns</summary>
-      <dl><dt>level</dt><dd>3 replicated: the row lives on the server</dd><dt>delivery</dt><dd>exactly-once — a join inside the transaction</dd><dt>stamps</dt><dd><code>created_by</code>, <code>updated_by</code> → app_user, written by the platform</dd></dl>
-    </details>
+    <span class="chips">
+      <span class="chip derived" data-tip="who writes rows here (ports.written): forms, machines, pipelines, computations" tabindex="0"><b>writers</b> forms · computations</span>
+      <span class="chip derived" data-tip="how the terminal reads it (ports.read): eager syncs the whole table, lazy loads what a view asks" tabindex="0"><b>read</b> lazy</span>
+      <span class="chip derived" data-tip="the database roles that may touch the table, from durability and access" tabindex="0"><b>roles</b> anon · app_user · service</span>
+      <span class="chip derived" data-tip="whether ir.html must carry an element for it — review by consequence: a row that reaches another device or the server does" tabindex="0"><b>ir</b> required</span>
+    </span>
+    <details class="more"><summary>the platform’s columns</summary><p class="why"><code>created_by</code>, <code>updated_by</code> → app_user, stamped by the platform on every write; not the author’s.</p></details>
   </div>
   
 </article>
@@ -419,28 +444,40 @@ a { color: var(--accent); }
   <span class="band"></span>
   <header class="ehead">
     <span class="ename">payment</span>
-    <span class="chips"><span class="chip">server</span><span class="chip derived">level 3 replicated</span><span class="chip derived">exactly-once</span></span>
+    <span class="chips">
+      <span class="chip" data-tip="where the row lives, the one word the author chooses: tab · device · offline · live · server" tabindex="0"><b>durability</b> server</span>
+      <span class="chip" data-tip="who may read and write the row; becomes the roles and the row-level policies" tabindex="0"><b>access</b> private · owner user_id</span>
+      <span class="chip derived" data-tip="3 of 5 — a write to a row only the cluster holds, inside the transaction; delivered twice it converges, out of order it commutes" tabindex="0"><b>level</b> replicated</span>
+      <span class="chip derived" data-tip="what writes to this entity can claim when delivered twice — derived from the level and the op" tabindex="0"><b>delivery</b> exactly-once</span>
+    </span>
     <span class="counts">5 fields · 0 referrers · 1 machine · 1 effect</span>
   </header>
-  <div class="glance">
-    <table class="fields"><tr><td class="k">id</td><td class="t">uuid</td><td class="gl"><span class="g pk">pk</span></td><td class="x" title="= gen_random_uuid()">= gen_random_uuid()</td></tr><tr><td class="k">status</td><td class="t">string</td><td class="gl"><span class="g mach">machine</span></td><td class="x" title="= &#x27;pending&#x27;">= &#x27;pending&#x27;</td></tr><tr><td class="k">user_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#app_user">→ app_user</a><span class="g" title="indexed">≡</span></td><td class="x" title=""></td></tr></table>
-    <details class="more"><summary>+2 more fields</summary><table class="fields"><tr><td class="k">total</td><td class="t">decimal(12,2)</td><td class="gl"></td><td class="x" title="this &gt; 0">this &gt; 0</td></tr><tr><td class="k">failure</td><td class="t">string</td><td class="gl"><span class="g" title="nullable">○</span></td><td class="x" title=""></td></tr></table></details>
+  <div class="names">
+    <span class="lbl">fields</span>
+    <span class="namelist"><span class="fname">id<i class="m">pk</i></span><span class="fname">status<i class="m mach">⚙</i></span><span class="fname">total</span><span class="fname">failure</span><span class="fname">user_id<i class="m">→</i></span></span>
+    <details class="more"><summary>all fields, with their metadata</summary>
+      <table class="fields"><tr><td class="k">id</td><td class="t">uuid</td><td class="gl"><span class="g pk" data-tip="primary key" tabindex="0">pk</span></td><td class="x" title="= gen_random_uuid()">= gen_random_uuid()</td></tr><tr><td class="k">status</td><td class="t">string</td><td class="gl"><span class="g mach" data-tip="the machine’s field: only the chart moves it" tabindex="0">machine</span></td><td class="x" title="= &#x27;pending&#x27;">= &#x27;pending&#x27;</td></tr><tr><td class="k">total</td><td class="t">decimal(12,2)</td><td class="gl"></td><td class="x" title="this &gt; 0">this &gt; 0</td></tr><tr><td class="k">failure</td><td class="t">string</td><td class="gl"><span class="g" data-tip="nullable" tabindex="0">○</span></td><td class="x" title=""></td></tr><tr><td class="k">user_id</td><td class="t">uuid</td><td class="gl"><a class="g fk" href="#app_user" data-tip="references another entity; click to go there" tabindex="0">→ app_user</a><span class="g" data-tip="indexed" tabindex="0">≡</span></td><td class="x" title=""></td></tr></table>
+      <p class="legend"><span class="g pk">pk</span> primary key · <span class="g fk">→</span> references · <span class="g">◇</span> unique · <span class="g">≡</span> indexed · <span class="g">○</span> nullable · a rule or default in the last column</p>
+    </details>
   </div>
   <div class="strips">
     <div class="strip"><span class="lbl">referenced by</span><span class="rels"><span class="why">—</span></span></div>
-    <div class="strip"><span class="lbl">access</span><span class="chip">private</span> <span class="why">owner user_id</span></div>
-    <div class="strip"><span class="lbl">validations</span><ul class="vals"><li><code>positive-total</code> <span class="note">a charge is never for nothing</span><details class="more"><summary>the predicate</summary><pre><code>(state, event) =&gt; event.row.total &gt; 0</code></pre></details></li></ul></div>
+    <div class="strip"><span class="lbl">refers to</span><span class="rels"><a class="rel out" href="#app_user">app_user<span class="col"> via user_id</span></a></span></div>
+    <div class="strip"><span class="lbl">validations</span><ul class="vals"><li><code>positive-total</code> <span class="note">a charge is never for nothing</span> <details class="more inline"><summary>predicate</summary><pre><code>(state, event) =&gt; event.row.total &gt; 0</code></pre></details></li></ul></div>
   </div>
   <div class="dline">
     <span class="lbl derived">derived</span>
-    <span class="chips"><span class="chip derived">forms, PaymentMachine · read lazy</span><span class="chip derived">owes an ir element</span><span class="chip derived">anon · app_user · service · RLS</span></span>
-    <details class="more"><summary>why, and the platform's columns</summary>
-      <dl><dt>level</dt><dd>3 replicated: the row lives on the server</dd><dt>delivery</dt><dd>exactly-once — a join inside the transaction</dd><dt>stamps</dt><dd><code>created_by</code>, <code>updated_by</code> → app_user, written by the platform</dd></dl>
-    </details>
+    <span class="chips">
+      <span class="chip derived" data-tip="who writes rows here (ports.written): forms, machines, pipelines, computations" tabindex="0"><b>writers</b> forms · PaymentMachine</span>
+      <span class="chip derived" data-tip="how the terminal reads it (ports.read): eager syncs the whole table, lazy loads what a view asks" tabindex="0"><b>read</b> lazy</span>
+      <span class="chip derived" data-tip="the database roles that may touch the table, from durability and access" tabindex="0"><b>roles</b> anon · app_user · service · RLS</span>
+      <span class="chip derived" data-tip="whether ir.html must carry an element for it — review by consequence: a row that reaches another device or the server does" tabindex="0"><b>ir</b> required</span>
+    </span>
+    <details class="more"><summary>the platform’s columns</summary><p class="why"><code>created_by</code>, <code>updated_by</code> → app_user, stamped by the platform on every write; not the author’s.</p></details>
   </div>
   <section class="machine">
     <span class="lbl derived">machine</span>
-    <span class="mtitle">PaymentMachine · <code>status</code> <span class="chip derived">level 4 · invokes</span> <span class="chip derived">exactly-once</span></span>
+    <span class="mtitle">PaymentMachine · <code>status</code> <span class="chip derived" data-tip="4 of 5 — the state charging invokes an effect outside the cluster; the ledger claims before the call" tabindex="0"><b>level</b> external</span> <span class="chip derived" data-tip="the sink is not idempotent and answers a query by key, so a re-entry reconciles before calling again" tabindex="0"><b>delivery</b> exactly-once</span></span>
     <div class="canvas d2"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" data-d2-version="v0.9.0" preserveAspectRatio="xMinYMin meet" viewBox="0 0 974 256"><svg class="d2-659248904 d2-svg" width="974" height="256" viewBox="-13 -13 974 256"><rect x="-13" y="-13" width="974" height="256" rx="0" fill="#FFFFFF" class=" fill-N7" stroke-width="0" /><style type="text/css"><![CDATA[
 .d2-659248904 .text-bold {
 	font-family: "d2-659248904-font-bold";
@@ -482,7 +519,7 @@ a { color: var(--accent); }
 <rect x="513" y="198" width="36" height="21" fill="black"></rect>
 </mask></svg></svg>
 </div>
-    <details class="more"><summary>the effect</summary><p><code>charge</code> → https://api.acquirer.example · not idempotent · re-entry <code>reconcile</code> · the ledger claims before the call · initial <code>pending</code> is the column's default</p></details>
+    <details class="more"><summary>the effect</summary><p class="why"><code>charge</code> → https://api.acquirer.example · not idempotent · re-entry <code>reconcile</code> · the ledger claims before the call · initial <code>pending</code> is the column’s default</p></details>
   </section>
 </article>
 </section>
