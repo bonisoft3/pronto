@@ -367,7 +367,10 @@ that grammar. The terminal performs the memo: a question whose row
 stands is answered from the row without asking, and the unit's answer is
 upserted on the key before the chart hears the raised event, whose detail is
 the key — the chart reads the answer as a row of a table its region reads,
-which `check markup` requires. The entity's writers carry the unit as
+which `check markup` requires. An answer the store refuses is a
+`ProgramError` naming the unit and the table, bannered by the shell: no
+reduce authored the write, so it is not a `refused` event. The entity's
+writers carry the unit as
 `unit:<name> upsert`; its card says `memo of: <unit> by <key>`, and an entity
 a unit reads says `read by: <unit> (<isolation>)`.
 
