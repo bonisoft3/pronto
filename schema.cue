@@ -502,6 +502,21 @@ import (
 
 #Durability: "server" | "live" | "offline" | "tab" | "device"
 
+// What can be claimed of a write, from the durability of the row it lands on:
+// the saga's compensatable and retriable steps and its pivot (Garcia-Molina &
+// Salem 1987), with the local step and the pure function at either end. Never
+// authored; shown on the entity, the machine and in every lint sentence. The
+// terminal keeps the same table (omnishell/machine.cue) for its own lint, and a
+// test holds the two equal.
+#EffectLevel: "projection" | "ephemeral" | "compensable" | "replicated" | "external"
+#DurabilityEffectLevel: {
+	tab:     "ephemeral"
+	device:  "ephemeral"
+	offline: "compensable"
+	live:    "compensable"
+	server:  "replicated"
+}
+
 #Entity: E={
 	name:  string
 	ir:    *name | string
@@ -543,6 +558,7 @@ import (
 	// construction, with no policy to write, which is why `access` is not
 	// merely optional for them but meaningless: nothing else can reach it.
 	durability: #Durability
+	level:      #DurabilityEffectLevel[durability]
 	// Whether the rows live in the cluster: every durability but the two the browser keeps.
 	// The one spelling of that boundary; the emitter reads this, never the names.
 	server: durability != "tab" && durability != "device"
@@ -926,10 +942,13 @@ import (
 	exit?:  #MechaAction | [...#MechaAction]
 }
 
-#MechaMachine: {
+#MechaMachine: M={
 	name:    string
-	ir?:     string
+	ir:      *name | string
 	entity:  string
+	// Derived: a machine over a server row is replicated, and external where a
+	// state invokes an effect — the pivot its ledger claims before the call.
+	level: [if len([for _, s in [if M.states != _|_ {M.states}, {}][0] if s.invoke != _|_ {s}]) > 0 {"external"}, "replicated"][0] & #EffectLevel
 	timing?: "BEFORE" | "AFTER"
 	field?:   string
 	initial?: string

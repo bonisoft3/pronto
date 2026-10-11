@@ -61,7 +61,7 @@ say:
       machines:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts"
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts objects_test.ts"
       # What each Jessie role may be granted, held against both cages and the schema.
       endowments:
         priority: -1

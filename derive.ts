@@ -49,7 +49,7 @@ import { renderValidations, resolveEdges, type VEntity, validationLint, validati
 import { oneHome, parseHeld, seedKey, vetHeld } from "./seed.ts";
 import type { TypeEntity } from "./type-check.ts";
 import { claims, irAccepts, irPaths, LEDGER } from "./acceptance.ts";
-import { declarations, irIds, irRoutes, KINDS } from "./objects.ts";
+import { chartDeclarations, type ChartSite, declarations, handlersOwed, irIds, irRoutes, KINDS } from "./objects.ts";
 import { irDiagrams } from "./diagrams.ts";
 import {
   acceptanceFacts,
@@ -779,7 +779,26 @@ export async function derive(appDir: string): Promise<void> {
 
   let bijection: ReturnType<typeof bijectionFacts>;
   try {
-    bijection = bijectionFacts(KINDS, irIds(irHtml), irRoutes(irHtml), declarations(exp.program), exp.program);
+    // The charts the markup carries are machines too, claimed as `<entity
+    // ir>-<field>` and owed by reach; a handler only a tab-reaching chart names
+    // is machine-checked with it (objects.ts).
+    const chartSites: ChartSite[] = machines.map((m) => ({
+      screen: m.screen,
+      table: m.region.table,
+      field: (JSON.parse(m.region.machine) as { field: string }).field,
+      writes: m.region.writes.map((w) => w.table),
+      refs: m.region.refs,
+    }));
+    const programEntities = (exp.program as { state: { entities: Record<string, { table: string; ir: string; durability: string }> } }).state.entities;
+    const stemToIr = new Map(
+      Object.values((exp.program as { surface: { handlers: Record<string, { ir: string; src: string }> } }).surface.handlers)
+        .map((h) => [h.src.replace(/^.*\//, "").replace(/\.js$/, ""), h.ir]),
+    );
+    const decls = [
+      ...handlersOwed(declarations(exp.program), chartSites, programEntities, stemToIr),
+      ...chartDeclarations(chartSites, programEntities),
+    ];
+    bijection = bijectionFacts(KINDS, irIds(irHtml), irRoutes(irHtml), decls, exp.program, ["machine"]);
   } catch (e) {
     fail(`${exp.ir}: ${(e as Error).message}`);
   }

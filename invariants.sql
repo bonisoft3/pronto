@@ -142,6 +142,9 @@ SELECT p.severity,
 FROM pairing p
 JOIN claim b ON b.kind = p.kind_b AND b.rung = p.rung_b
 WHERE p.b_missing IS NOT NULL
+  -- Review by consequence: a program claim whose writes reach no further than
+  -- the tab is machine-checked only, and owes the ir nothing.
+  AND coalesce(b.owed, TRUE)
   AND NOT EXISTS (
         SELECT 1 FROM claim a
         WHERE a.kind = p.kind_a AND a.rung = p.rung_a AND a.id = b.id)

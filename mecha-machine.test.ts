@@ -446,6 +446,15 @@ Deno.test("a sink's credential is a header the airlock adds from a declared secr
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false, credential: {secret: "K"}}\n      reentry: "unknown"`)), "credential");
 });
 
+Deno.test("the level is derived and never authored: the entity's from its durability, the machine's from its invoke", async () => {
+  const program = paymentProgram();
+  const levels = await cue(["export", "-", "-e", "{entity: app.state.entities.Payment.level, machine: app.state.machines.PaymentMachine.level}", "--out", "json"], program);
+  assertEquals(levels.success, true, levels.stderr);
+  assertEquals(JSON.parse(levels.stdout), { entity: "replicated", machine: "external" });
+  // An authored level is refused: it is the durability's to say.
+  assertStringIncludes(await refusal(program.replace('durability: "server"', 'durability: "server"\n        level: "ephemeral"')), "level");
+});
+
 Deno.test("an effect's cluster keeps the wake's names, and the service role the ticker writes as", async () => {
   const program = paymentProgram();
   assertStringIncludes(await refusal(paymentProgram({ entity: `Wake: {table: "airlock_wake", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}` })), "entity Wake takes table airlock_wake, which the airlock's wake keeps");

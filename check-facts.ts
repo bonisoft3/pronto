@@ -78,7 +78,7 @@ const SCHEMA: Record<string, Record<string, string>> = {
   },
   enum_value: { entity: "VARCHAR", field: "VARCHAR", value: "VARCHAR" },
   ir_path_accept: { screen: "VARCHAR", name: "VARCHAR", accept: "VARCHAR" },
-  claim: { rung: "VARCHAR", kind: "VARCHAR", id: "VARCHAR", where: "VARCHAR" },
+  claim: { rung: "VARCHAR", kind: "VARCHAR", id: "VARCHAR", where: "VARCHAR", owed: "BOOLEAN" },
   unique_claim: { rung: "VARCHAR", kind: "VARCHAR" },
   pairing: {
     severity: "VARCHAR",
