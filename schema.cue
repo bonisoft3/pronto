@@ -964,12 +964,9 @@ import (
 	// Also the sink's Dapr binding name, so a DNS label.
 	name: =~"^[a-z][a-z0-9-]*$"
 	ir:   *name | string
-	// Derived (#App): the entity of the one machine whose state invokes it,
-	// which is the row its NEW reads and its key fields come from.
-	entity: string
-	// The ledger key is "<name>:" and these fields of the entity: one as its
-	// text, several JSON-encoded. It is also the sink's idempotency key, so it
-	// names the instance and never the input's content.
+	// The ledger key is "<name>:" and these fields of the invoking machine's
+	// entity: one as its text, several JSON-encoded. It is also the sink's
+	// idempotency key, so it names the instance and never the input's content.
 	key: *["id"] | [string, ...string]
 	// XState's input: what the handler is handed, frozen into the ledger at
 	// the claim. "NEW.<col>" reads the row, {raw: sql} is an expression,
@@ -1394,7 +1391,7 @@ import (
 		machines?: [Name=string]: #MechaMachine & {name: Name}
 		// Each also a Dapr output binding of the airlock's, and a handler the
 		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
-		effects?: [Name=string]: #ExternalEffect & {name: Name, entity: A._effectEntityNames[Name][0]}
+		effects?: [Name=string]: #ExternalEffect & {name: Name}
 		// What an effect's sink reaches through when it does not speak HTTP:
 		// a container on the airlock's outbound network speaking the other
 		// protocol to one declared server (mecha's #Bridge).
@@ -1611,10 +1608,9 @@ import (
 		},
 	]
 	// The entities, by name, of the machines invoking each effect, keyed by
-	// the effect: one is the effect's own; none or several is refused below.
-	// Read off the machines alone, since the effects' `entity` is this map,
-	// and the rules read this map and never that field, which is incomplete
-	// in the programs they refuse.
+	// the effect: one is the effect's own, the row its NEW reads and its key
+	// fields come from; none or several is refused below. An effect states no
+	// entity of its own.
 	_effectEntities: {for i in _invokes for en, e in A.state.entities if en == i.entity || e.table == i.entity {(i.src): (en): true}}
 	_effectEntityNames: {for n, s in _effectEntities {(n): [for en, _ in s {en}]}}
 	// By key: an effect refused below is bottom as a value, not undeclared.

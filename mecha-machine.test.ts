@@ -600,17 +600,12 @@ Deno.test("an invoking state with any exit but its outcome is refused", async ()
   assertStringIncludes(err, "machine PaymentMachine state charging invokes charge and declares on or after: only the effect's outcome leaves it");
 });
 
-// The effect's entity is the invoking machine's: a second copy could only
-// agree or disagree, and the disagreeing copy once passed as the machine's.
-Deno.test("an effect's entity is derived from the machine that invokes it, and an authored one is refused", async () => {
-  const derived = await cue(["export", "-", "-e", "app.state.effects.charge.entity", "--out", "json"], paymentProgram());
-  assertEquals(derived.success, true, derived.stderr);
-  assertEquals(JSON.parse(derived.stdout), "Payment");
-  const err = await refusal(paymentProgram({
-    effect: `entity: "Order"`,
-    entity: `Order: {table: "orders", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}`,
-  }));
-  assertStringIncludes(err, "entity");
+// The effect's entity is read off the invoking machine (#App's
+// _effectEntityNames), so a declaration has no second place to state it: the
+// closed #ExternalEffect refuses the field, agreeing or not.
+Deno.test("an effect's entity is the invoking machine's, and an authored one is a field the effect lacks", async () => {
+  const agreeing = await refusal(paymentProgram({ effect: `entity: "Payment"` }));
+  assertStringIncludes(agreeing, "app.state.effects.charge.entity: field not allowed");
 });
 
 // One effect reads NEW and keys on fields of one row; two machines over two
