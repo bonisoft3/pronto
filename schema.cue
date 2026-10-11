@@ -1514,7 +1514,8 @@ import (
 			// one event it raises reaches the chart naming the row. #App holds
 			// the isolation, the entity, the key, the unique and the columns
 			// (text, since an answer crosses the seat as strings) to this;
-			// #emit holds the column count to the seat's detail offer, since an
+			// #emit holds the columns to the seat's detail offer — their count,
+			// their names, and the size bound a column declares — since an
 			// answer carries every column in one event.
 			memo?: {entity: string, key: [string, ...string]}
 			src: string

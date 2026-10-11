@@ -1456,14 +1456,25 @@ _cdcBeforeField: "__before"
 						}
 						// The memo as the terminal performs it: the table, the key
 						// and every column an answer fills — in one event, whose
-						// detail the seat carries at most `keys` of.
+						// detail is the seat's offer: at most `keys` columns, each
+						// named by `key`, each value at most `value` characters,
+						// held here as far as the program states it (a column's
+						// declared size bound); the alphabet, and the length of a
+						// column the program leaves unbounded, are the seat's
+						// refusal at runtime.
 						if v.memo != _|_ {
 							memo: {
-								table: S.code.state.entities[v.memo.entity].table
+								let _me = S.code.state.entities[v.memo.entity]
+								table: _me.table
 								key:   v.memo.key
-								let _columns = [for f in S.code.state.entities[v.memo.entity].fields if !f.pk if !f.retired {f.name}]
-								let _carried = S.hatch[v.isolation].detail.keys
-								columns: [if len(_columns) <= _carried {_columns}, "unit \(n) memo on \(v.memo.entity) has \(len(_columns)) columns, and the \(v.isolation) seat carries an answer of at most \(_carried)"][0] & [...string]
+								let _columns = [for f in _me.fields if !f.pk if !f.retired {f.name}]
+								let _detail = S.hatch[v.isolation].detail
+								let _unfit = list.Concat([
+									[if len(_columns) > _detail.keys {"unit \(n) memo on \(v.memo.entity) has \(len(_columns)) columns, and the \(v.isolation) seat carries an answer of at most \(_detail.keys)"}],
+									[for c in _columns if c !~ _detail.key {"unit \(n) memo on \(v.memo.entity): column \(c) is not a name the \(v.isolation) seat's detail carries (\(_detail.key))"}],
+									[for c in _columns if _me.cel.bounds[c].sizeMax != _|_ if _me.cel.bounds[c].sizeMax > _detail.value {"unit \(n) memo on \(v.memo.entity): column \(c) admits \(_me.cel.bounds[c].sizeMax) characters, and the \(v.isolation) seat carries a value of at most \(_detail.value)"}],
+								])
+								columns: [if len(_unfit) == 0 {_columns}, _unfit[0]][0] & [...string]
 							}
 						}
 						src: v.src

@@ -4,13 +4,15 @@
 // pass as the refusal under test; the well-formed program pins what shell.yaml
 // carries to the terminal.
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { DETAIL, parseDetail } from "../omnishell/interpreter/hatch.js";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
-const answer = ({ fields = `{name: "uci", type: "string"}`, uniques = `[{name: "uq_answer_question", cols: ["fen", "nodes"]}]` } = {}) => `
+const answer = ({ fields = `{name: "uci", type: "string"}`, uniques = `[{name: "uq_answer_question", cols: ["fen", "nodes"]}]`, cel = "" } = {}) => `
       Answer: {
         table: "answer"
         durability: "device"
         uniques: ${uniques}
+        ${cel}
         fields: [
           {name: "id", type: "string", pk: true},
           {name: "fen", type: "string"},
@@ -92,4 +94,37 @@ Deno.test("a memo unit raising other than one event is refused: a question has o
 Deno.test("a memo wider than the seat's detail is refused by #emit: an answer carries every column in one event", async () => {
   const wide = Array.from({ length: 7 }, (_, i) => `{name: "c${i}", type: "string"}`).join(", ");
   await refused(program(engine(), answer({ fields: wide })), "unit engine memo on Answer has 9 columns, and the agent seat carries an answer of at most 8");
+});
+
+Deno.test("a memo column named outside the seat's detail grammar is refused by #emit", async () => {
+  await refused(
+    program(engine(), answer({ fields: `{name: "bestMove", type: "string"}` })),
+    "unit engine memo on Answer: column bestMove is not a name the agent seat's detail carries (^[a-z][a-z0-9_]{0,23}$)",
+  );
+});
+
+Deno.test("a memo column whose declared size bound exceeds the seat's value is refused by #emit", async () => {
+  await refused(
+    program(engine(), answer({ cel: `cel: bounds: {uci: {sizeMax: 129}}` })),
+    "unit engine memo on Answer: column uci admits 129 characters, and the agent seat carries a value of at most 128",
+  );
+});
+
+// The grammar is published once, as the terminal's offer; the seat's parser
+// is a second statement of it, and this is what holds the two equal.
+Deno.test("the agent seat's detail grammar is the terminal's published offer", async () => {
+  const res = await cue(["export", "-", "-e", "out", "--out", "json"], `
+package test
+
+import terminal "bonisoft.org/plugins/omnishell:terminal"
+
+out: terminal.#Terminal.capabilities.hatch.agent.detail
+`);
+  assert(res.success, res.stderr);
+  const offer = JSON.parse(res.stdout);
+  assertEquals({ keys: DETAIL.keys, key: DETAIL.key.source, value: DETAIL.value }, offer);
+  const detailOf = (n: number, length: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, "x".repeat(length)]));
+  assert(parseDetail(detailOf(offer.keys, offer.value)) !== undefined, "exactly the offer is admitted");
+  assertEquals(parseDetail(detailOf(offer.keys + 1, 1)), undefined, "one key more is refused");
+  assertEquals(parseDetail(detailOf(1, offer.value + 1)), undefined, "one character more is refused");
 });
