@@ -51,6 +51,10 @@ for (const [name, subdir, module] of [
 ]) {
   Deno.test(`derive input preserves the canonical projection in a ${name}`, async () => {
     await fixture(subdir, module, async (app) => {
+      const deployment = await new Deno.Command("cue", {
+        args: ["export", ".", "-e", "deployment", "--out", "json"], cwd: app, stdout: "piped", stderr: "piped",
+      }).output();
+      assert(!deployment.success, "unrelated deployment root unexpectedly became concrete");
       const input = await readDerivation(app, "sample", true) as Record<string, unknown>;
       assert(Object.keys(input).length === 18, "canonical input fields changed");
       assert(input.designCss === "authored design override" && input.shellCss === "authored shell override", "emitted stylesheet overrides lost");
