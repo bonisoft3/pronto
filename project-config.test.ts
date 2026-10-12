@@ -14,7 +14,13 @@ async function exported(): Promise<unknown> {
 }
 
 Deno.test("consumer configuration follows the emitted source seats and preserves real rule conflicts", async () => {
-  const seats = await exported() as {sources: Sources; build: string; terminal: string; installed: Record<string, unknown>};
+  const seats = await exported() as {sources: Sources; build: string; terminal: string; installed: Record<string, unknown>; buildDockerfile: string};
+  const run = seats.buildDockerfile.split("\n").find(line => line.startsWith("RUN ["));
+  assertEquals(run !== undefined, true);
+  assertEquals(JSON.parse(run!.slice(4)), [
+    "mise", "x", "--", "deno", "run", "--frozen", "--config", "../../plugins/pronto/deno.json",
+    "--allow-read", "--allow-write=.", "--allow-run", "--allow-env", "../../plugins/pronto/write.ts", ".",
+  ]);
   const app = await Deno.makeTempDir({dir: repo, prefix: ".project-config-"});
   try {
     await Deno.mkdir(`${app}/pronto`);

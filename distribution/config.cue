@@ -88,7 +88,10 @@ import (
 		tools: P.tools
 	}
 	_run: #Run & {runtime: "\(P.runtime)"}
-	write: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join write.ts) ."}).out
+	write: [
+		if P.runtime != "" {"deno run --frozen --config \(P.runtime)/deno.json --allow-read --allow-write=. --allow-run --allow-env \(P.runtime)/write.ts ."},
+		(_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join write.ts) ."}).out,
+	][0]
 	// The live tables a pages release fills from the settled container
 	// cluster, and the streams that cluster runs; none where the app runs no
 	// stream and no computation.
