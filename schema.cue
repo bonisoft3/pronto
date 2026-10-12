@@ -1171,6 +1171,7 @@ import (
 }
 
 #Screen: S={
+	hatches: *[] | [...string]
 	name:  string
 	ir:    *name | string
 	title: string
@@ -1533,11 +1534,15 @@ import (
 		// exemption reviewable rather than a line in a tool's config.
 		hatches: [Name=string]: H={
 			ir:   *Name | string
-			kind: "container" | "sql" | "proto"
+			kind: "container" | "sql" | "proto" | "host-dom"
 			note: string
-			// Only a file kind names files, and it must: a `sql` or `proto`
-			// hatch withholding nothing is an exemption that reads as one and
-			// protects no file.
+			if H.kind == "host-dom" {
+				note: !=""
+				src!: string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(m?js)$"
+				files: [string, ...string] & [...(string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$")]
+			}
+			// A file hatch names its artifacts; host-dom serves them without
+			// removing the terminal CSP or Trusted Types boundary.
 			if H.kind != "container" {
 				files!: [string, ...string]
 			}
@@ -1675,6 +1680,22 @@ import (
 		}
 	]
 	_hotRefusal: [if len(_hotViolations) == 0 {true}, "cold pipeline cannot feed an active screen mutation loop: \(_hotViolations[0].pipeline) feeds \(_hotViolations[0].sink) on screen \(_hotViolations[0].screen)"][0] & true
+
+	_hostDomViolations: list.Concat([
+		[for sn, screen in A.surface.screens for hn in screen.hatches if A.capabilities.hatches[hn] == _|_ {
+			"screen \(sn) names undeclared host-DOM hatch: \(hn)"
+		}],
+		[for sn, screen in A.surface.screens for hn in screen.hatches if A.capabilities.hatches[hn] != _|_ if A.capabilities.hatches[hn].kind != "host-dom" {
+			"screen \(sn) names hatch \(hn), which is not host-dom"
+		}],
+		[for hn, h in A.capabilities.hatches if h.kind == "host-dom" if !list.Contains(h.files, h.src) {
+			"host-DOM hatch \(hn) must serve its src in files"
+		}],
+		[for sn, screen in A.surface.screens if len([for hn, _ in {for h in screen.hatches {(h): true}} {hn}]) != len(screen.hatches) {
+			"screen \(sn) repeats a host-DOM hatch"
+		}],
+	])
+	_hostDomRefusal: [if len(_hostDomViolations) == 0 {true}, _hostDomViolations[0]][0] & true
 
 	_machineActions: [if A.state.machines != _|_ for mName, m in A.state.machines {machine: mName, actions: m._actions}]
 	_machineHatches: {if A.state.machines != _|_ for mn, m in A.state.machines {(mn): m.hatches}}

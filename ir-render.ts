@@ -61,7 +61,7 @@ export type MechaMachine = {
 export type Effect = { ir: string; sink: { origin?: string; bridge?: string; idempotent: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note: string };
 /** A vendored unit: its boundary, its ports and, for an agent, its memo. */
 export type Unit = { isolation: string; ports: { reads: string[]; raises: string[] }; memo?: { entity: string; key: string[] } };
-export type Screen = { ir: string; title: string; reads: { table: string; embeds?: string[] }[] };
+export type Screen = { ir: string; title: string; hatches?: string[]; reads: { table: string; embeds?: string[] }[] };
 export type Program = {
   state: {
     entities: Record<string, Entity>;
@@ -709,9 +709,15 @@ export async function renderIr(
     }
     const graph = screenNeighbourhood(program, screenName, screen, fields);
     graphs.set(screen.ir, graph);
-    if (graph.entities.length === 0) continue;
-    const svg = await drawNeighbourhood(neighbourhoodD2(program, graph, cardIrs));
-    screenHtml.set(screen.ir, `<figure class="pronto-neighbourhood" aria-label="${esc(screen.title)} entity neighbourhood"><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="${esc(screen.title)} entity diagram">${svg}</div><figcaption><b>entities:</b> ${entitySummary(program, graph, cardIrs)}</figcaption></figure>`);
+    const hatches = (screen.hatches ?? []).map(name => {
+      const hatch = program.capabilities.hatches?.[name];
+      if (hatch?.kind !== "host-dom") throw new Error(`screen ${screenName} names undeclared host-DOM hatch ${name}`);
+      return `<p class="why">Host-DOM hatch <a href="#${esc(hatch.ir)}">${esc(name)}</a> · ${chip("delivery", "unspecified", true)} · <span class="note">${esc(hatch.note)}</span></p>`;
+    }).join("\n");
+    if (graph.entities.length === 0 && !hatches) continue;
+    const svg = graph.entities.length ? await drawNeighbourhood(neighbourhoodD2(program, graph, cardIrs)) : "";
+    const entities = svg ? `<figure class="pronto-neighbourhood" aria-label="${esc(screen.title)} entity neighbourhood"><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="${esc(screen.title)} entity diagram">${svg}</div><figcaption><b>entities:</b> ${entitySummary(program, graph, cardIrs)}</figcaption></figure>` : "";
+    screenHtml.set(screen.ir, entities + hatches);
   }
   const appGraph = mergeNeighbourhoods(graphs.values());
   let appHtml: string | null = null;
@@ -720,7 +726,7 @@ export async function renderIr(
     appHtml = `<details class="pronto-neighbourhood app-neighbourhood"><summary>App entity neighbourhood · ${appGraph.entities.length} entities</summary><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="App entity diagram">${svg}</div><p><b>entities:</b> ${entitySummary(program, appGraph, cardIrs)}</p></details>`;
   }
   next = fillNeighbourhoodRegions(next, screenHtml, appHtml);
-  if ((cards.size > 0 || appGraph.entities.length > 0) && !next.includes(LINK)) next = next.replace(/<\/head>/, `${LINK}\n</head>`);
+  if ((cards.size > 0 || screenHtml.size > 0 || appGraph.entities.length > 0) && !next.includes(LINK)) next = next.replace(/<\/head>/, `${LINK}\n</head>`);
   await writeIrStylesheet(appDir);
   if (next === html) return false;
   await Deno.writeTextFile(`${appDir}/${irPath}`, next);

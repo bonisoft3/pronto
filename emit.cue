@@ -1524,6 +1524,7 @@ _cdcBeforeField: "__before"
 				if s.label != _|_ {key: s.label}
 				if !s.strip {strip: false}
 			}
+			if len(s.hatches) > 0 {hatches: s.hatches}
 			files:  s.files
 			states: s.states // storybook frame list; semantics stay in the ir storyboard
 			if s.keep != 1 {
@@ -1609,6 +1610,10 @@ _cdcBeforeField: "__before"
 		}
 		if len(S._seededLocal) > 0 {
 			seed: S._localSeeds
+		}
+
+		if len([for h in S.code.capabilities.hatches if h.kind == "host-dom" {h}]) > 0 {
+			hostDom: {for hn, h in S.code.capabilities.hatches if h.kind == "host-dom" {(hn): {src: h.src, note: h.note}}}
 		}
 
 		// The units a data-hatch may name, and what the terminal is allowed to
@@ -1985,6 +1990,7 @@ _cdcBeforeField: "__before"
 				for _, pl in D.code.state.pipelines if pl.fold != _|_ {pl.fold.src},
 			])
 			validations: list.SortStrings([for s, _ in D._validationSet {s}])
+			hostDom: list.SortStrings([for f, _ in {for _, h in D.code.capabilities.hatches if h.kind == "host-dom" for f in h.files {(f): true}} {f}])
 			// A unit's whole directory, not just its src: the wrapper's own
 			// imports are files the browser fetches by name.
 			units: list.SortStrings([for f, _ in D._unitSet {f}])
@@ -2717,7 +2723,11 @@ _cdcBeforeField: "__before"
 	cluster: capabilities: server: E._serverOn
 
 	files: [string]: #File
-	files: {if E.code._timerRefusal {}}
+	files: {
+		if E.code._timerRefusal {}
+		if E.code._hostDomRefusal {}
+		for _, h in E.code.capabilities.hatches if h.kind == "host-dom" {if E.terminal.capabilities.hostDom != true {_unsupportedHostDom: error("terminal does not offer host-dom")}}
+	}
 	// The compose files an installed app's closures include, one per
 	// MONOREPO_COMPOSE_MODE (builders/bayt.cue): `service` builds mecha's images
 	// from its fragments, where MONOREPO_MECHA_PATH puts mecha's tree; unset

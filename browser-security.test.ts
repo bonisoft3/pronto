@@ -38,3 +38,37 @@ Deno.test("the terminal fence excludes only a declared realm's served files", as
   assertStringIncludes(files["docker/Caddyfile"].text,
     "@terminal not path /shell/units/map/index.html /shell/units/map/map.js\n  header @terminal Content-Security-Policy");
 });
+
+const hostDom = `
+app: capabilities: hatches: dealer: {
+  kind: "host-dom", note: "trusted browser and DOM access",
+  src: "shell/hatches/dealer.js", files: ["shell/hatches/dealer.js"]
+}
+app: surface: screens: board: hatches: ["dealer"]
+`;
+
+Deno.test("host-DOM hatches are explicit screen capabilities served under the terminal fence", async () => {
+  const files = await emitFiles(paymentProgram() + hostDom) as unknown as Record<string, { text: string; data: any }>;
+  assertEquals(files["shell/shell.yaml"].data.hostDom, {
+    dealer: { src: "shell/hatches/dealer.js", note: "trusted browser and DOM access" },
+  });
+  assertEquals(files["shell/shell.yaml"].data.routes[0].hatches, ["dealer"]);
+  assertStringIncludes(files["docker/Caddyfile"].text, "script-src-attr 'none'");
+  assertEquals(files["docker/Caddyfile"].text.includes("@terminal not path /shell/hatches"), false);
+});
+
+Deno.test("projected emission refuses undeclared, unserved and malformed host-DOM hatches", async () => {
+  for (const change of [
+    hostDom.replace('hatches: ["dealer"]', 'hatches: ["missing"]'),
+    hostDom.replace('hatches: ["dealer"]', 'hatches: ["dealer", "dealer"]'),
+    hostDom.replace('kind: "host-dom"', 'kind: "sql"').replace('src: "shell/hatches/dealer.js", ', ''),
+    hostDom.replace('note: "trusted browser and DOM access",', ''),
+    hostDom.replace('note: "trusted browser and DOM access"', 'note: ""'),
+    hostDom.replace('files: ["shell/hatches/dealer.js"]', 'files: ["shell/hatches/other.js"]'),
+    hostDom.replaceAll('shell/hatches/dealer.js', 'https://example.org/dealer.js'),
+    hostDom.replaceAll('shell/hatches/dealer.js', 'shell/hatches/../dealer.js'),
+  ]) {
+    const result = await cue(["export", "-", "-e", "out", "--out", "json"], paymentProgram() + change);
+    assertEquals(result.success, false, change);
+  }
+});

@@ -441,7 +441,7 @@ the row and effect grammar.
 parser refuse scripts, inline event handlers, executable URLs, `srcdoc`, and
 embedded objects. Templates are checked recursively after HTML parsing, so
 character references cannot hide an executable URL. Jessie and declared units
-are the execution surfaces.
+and explicit host-DOM hatches are the execution surfaces.
 
 The door sends the terminal's Content Security Policy; the entry document
 carries the same policy in its hashed bytes and the release cache preserves
@@ -457,6 +457,26 @@ HTTPS origin, and `note` is non-empty. Reader-supplied images alone may use
 Script sources cannot be extended. Vendored realm and agent files keep their
 own execution boundary; the terminal's Trusted Types policies are not imposed
 on their documents or workers.
+
+**A host-DOM hatch is trusted browser code.** Declare
+`capabilities.hatches.<name>: {kind: "host-dom", src, files, note}` and name it
+in `surface.screens.<screen>.hatches`. `note` is non-empty and states the
+reason for its ambient authority. `src` is an ES module under `shell/hatches/`
+and must occur in `files`; those exact files are served and hashed with the
+app release. This hatch can reach the whole host DOM, browser APIs and app
+client. Its delivery is unspecified. Screen selection is a lifetime boundary,
+not a sandbox; CSP and Trusted Types still apply.
+
+The default export is synchronous `mount(screen, {signal, messages, params})`
+and returns a cleanup function. Register partial-mount cleanup on `signal`
+before allocating resources. The terminal aborts the signal then calls cleanup
+on pause, stop and before a template morph, and mounts again on resume or after
+a visible morph. Cleanup must be idempotent and release listeners, observers,
+timers and subscriptions; asynchronous continuations must check the signal.
+Server rendering validates the declaration without importing or mounting it.
+Only the manifest selects executable paths; no markup attribute loads code.
+A release-controlled browser imports the module through its pinned service
+worker; an absent release asset or controller is refused.
 
 **A vendored unit declares its ports.** `capabilities.vendored.<unit>.ports`
 is `reads`, the entities whose rows the unit is handed (the row of the region

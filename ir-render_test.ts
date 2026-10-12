@@ -329,3 +329,23 @@ Deno.test("one entity field cannot hide a divergent chart from another screen", 
     await Deno.remove(appDir, { recursive: true });
   }
 });
+
+Deno.test("a screen's host-DOM authority is visible even without entity reads", async () => {
+  const appDir = await Deno.makeTempDir();
+  try {
+    await Deno.writeTextFile(`${appDir}/ir.html`, '<html><head></head><body><section id="board" data-kind="screen"><h2>Board</h2></section><section id="dealer" data-kind="hatch"><h2>Dealer</h2></section></body></html>');
+    const p: Program = {
+      state: { entities: {} },
+      surface: { screens: { board: { ir: "board", title: "Board", reads: [], hatches: ["dealer"] } } },
+      capabilities: { hatches: { dealer: { ir: "dealer", kind: "host-dom", note: "full browser <authority>" } } },
+    };
+    const draw = () => { throw new Error("a hatch is not an entity graph"); };
+    await renderIr(appDir, "ir.html", p, {}, draw);
+    const html = await Deno.readTextFile(`${appDir}/ir.html`);
+    assertStringIncludes(html, 'Host-DOM hatch <a href="#dealer">dealer</a>');
+    assertStringIncludes(html, "unspecified");
+    assertStringIncludes(html, "full browser &lt;authority&gt;");
+    assertEquals(await renderIr(appDir, "ir.html", p, {}, draw), false);
+    await assertRejects(() => renderIr(appDir, "ir.html", { ...p, capabilities: {} }, {}, draw), Error, "undeclared host-DOM hatch");
+  } finally { await Deno.remove(appDir, { recursive: true }); }
+});
