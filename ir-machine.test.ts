@@ -35,6 +35,7 @@ Deno.test("IR resolves a machine's table alias for both its card and the screen'
   const { html, sources } = await render(paymentProgram().replace('entity: "Payment"', 'entity: "payment"'));
   assertStringIncludes(html, 'data-kind="machine" id="PaymentMachine" data-of="Payment"');
   assertStringIncludes(html, 'data-kind="effect" id="charge" data-of="PaymentMachine"');
+  assertStringIncludes(html, "<b>writers</b> machine:PaymentMachine update");
   assertEquals(sources.some((s) => s.includes('"status": "string" {constraint: machine}')), true);
 });
 
@@ -62,7 +63,7 @@ Deno.test("IR renders lifecycle reducers with their timing and actions without i
   }
 });
 
-Deno.test("IR covers every invoking state's effect and delivery alongside lifecycle actions", async () => {
+Deno.test("IR covers every invoking state's effect and a separate lifecycle machine's emitted actions", async () => {
   const code = paymentProgram({ machine: `
     pending: on: pay: "charging"
     charging: invoke: {src: "charge", onDone: "refunding", onError: "failed"}
@@ -71,7 +72,7 @@ Deno.test("IR covers every invoking state's effect and delivery alongside lifecy
     failed: type: "final"
   ` }) + `
 app: state: {
-  machines: PaymentMachine: on: insert: assign: failure: "fresh"
+  machines: PaymentLifecycle: {entity: "Payment", on: insert: effect: {notify: "payment_created", payload: "NEW.id"}}
   effects: refund: {
     input: {amount: "NEW.total"}
     sink: {origin: "https://api.acquirer.example", idempotent: false}
@@ -79,13 +80,17 @@ app: state: {
     note: "a refund must be issued at most once"
   }
 }`;
-  const { html, sources } = await render(code);
+  const { html, sources, sql } = await render(code);
   assertEquals(html.split("<b>delivery</b> exactly-once · at-most-once").length - 1, 2);
   for (const [id, delivery] of [["charge", "exactly-once"], ["refund", "at-most-once"]]) {
     const paragraph = html.match(new RegExp(`<p[^>]+id="${id}"[^>]*>[\\s\\S]*?</p>`))?.[0];
     assertStringIncludes(paragraph!, `<b>delivery</b> ${delivery}`);
   }
   assertStringIncludes(html, "a refund must be issued at most once");
+  assertStringIncludes(sql, "payment_created");
+  assertStringIncludes(sql, "trg_payment_PaymentLifecycle_reducer");
+  assertStringIncludes(html, 'data-kind="machine" id="PaymentLifecycle"');
   assertStringIncludes(html, "<th>AFTER insert</th>");
+  assertStringIncludes(html, "payment_created");
   assertEquals(sources.some((s) => s.includes("invoke charge") && s.includes("invoke refund")), true);
 });

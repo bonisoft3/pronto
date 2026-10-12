@@ -33,6 +33,9 @@ import (
 			for _, e in A.state.entities for f in e.fields if f.name == t if f.ref != _|_ {(f.ref): A._entityByTable[f.ref]}
 		}
 		for _, s in A.surface.screens for f in s.forms {(A.state.entities[f.entity].table): f.entity}
+		for _, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_ {
+			(A.state.entities[u.memo.entity].table): u.memo.entity
+		}
 		for _, p in A.state.pipelines if p.fold != _|_ {(p.fold.pair.table): A._entityByTable[p.fold.pair.table]}
 		for _, p in A.state.pipelines if p.fold != _|_ {(A.state.entities[p.from].table): p.from}
 		// Visibility walks through parents and grants even when markup names

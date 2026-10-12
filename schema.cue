@@ -1664,6 +1664,9 @@ import (
 	_machineEntityRefusal: [if len(_machineEntityViolations) == 0 {true}, _machineEntityViolations[0]][0] & true
 
 	_machineStateViolations: list.Concat([
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m.states != _|_ if m.on != _|_ {
+			"machine \(mn) combines states and lifecycle handlers: declare separate machines"
+		}],
 		if A.state.machines != _|_ for mn, m in A.state.machines if m.field != _|_ if m.initial != _|_ for en, e in A.state.entities if en == m.entity || e.table == m.entity {
 			list.Concat([
 				[if m.states[m.initial] == _|_ {"machine \(mn) initial \(m.initial) is not a state"}],
@@ -1708,6 +1711,11 @@ import (
 			let me = A.state.entities[u.memo.entity]
 			for k in u.memo.key if !list.Contains([for f in me.fields {f.name}], k) {
 			"unit \(un) memo keys on \(k), which is not a field of \(u.memo.entity)"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
+			let mk = A.state.entities[u.memo.entity]
+			for k in u.memo.key for f in mk.fields if f.name == k if f.pk || f.retired {
+			"unit \(un) memo keys on \(k), which is not an active non-primary field of \(u.memo.entity)"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
 			let mu = A.state.entities[u.memo.entity]

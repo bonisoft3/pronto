@@ -61,7 +61,7 @@ import "list"
 		// landing on this table.
 		[for mn, m in [if A.state.machines != _|_ {A.state.machines}, {}][0]
 			let machineOps = _distinct & {of: list.Concat([
-				[if m.entity == n if m.field != _|_ {"update"}],
+				[if m.entity == n || m.entity == e.table if m.field != _|_ {"update"}],
 				[for w in _machineEffects[mn] if w.table == e.table {w.op}],
 			])}
 			if len(machineOps.out) > 0 {by: mn, kind: "machine", ops: machineOps.out}],

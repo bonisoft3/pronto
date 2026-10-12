@@ -7,10 +7,10 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.
 import { DETAIL, parseDetail } from "../omnishell/interpreter/hatch.js";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
-const answer = ({ fields = `{name: "uci", type: "string"}`, uniques = `[{name: "uq_answer_question", cols: ["fen", "nodes"]}]`, cel = "" } = {}) => `
+const answer = ({ fields = `{name: "uci", type: "string"}`, uniques = `[{name: "uq_answer_question", cols: ["fen", "nodes"]}]`, cel = "", durability = "device" } = {}) => `
       Answer: {
         table: "answer"
-        durability: "device"
+        durability: "${durability}"
         uniques: ${uniques}
         ${cel}
         fields: [
@@ -51,6 +51,33 @@ Deno.test("an agent with a memo passes, and shell.yaml carries its ports as tabl
       src: "shell/units/engine/unit.js",
     },
   });
+});
+
+Deno.test("the host registers a memo even when no screen reads or writes its table", async () => {
+  for (const durability of ["tab", "device", "offline", "live", "server"]) {
+    const files = await emitFiles(program(engine(), answer({ durability }))) as unknown as Record<string, { data: {
+      tables: string[];
+      local?: Record<string, string>;
+      schema: Record<string, { durability: string; fields: { name: string }[] }>;
+      uniques: Record<string, string[][]>;
+    } }>;
+    const shell = files["shell/shell.yaml"].data;
+    assertEquals(shell.schema.answer.durability, durability);
+    assertEquals(shell.schema.answer.fields.map((f) => f.name), ["id", "fen", "nodes", "uci"]);
+    assertEquals(shell.uniques.answer, [["fen", "nodes"]]);
+    const local = durability === "tab" || durability === "device";
+    assertEquals(shell.local?.answer, local ? durability : undefined);
+    assertEquals(shell.tables.includes("answer"), !local);
+  }
+});
+
+Deno.test("memo keys cannot name primary or retired fields that the answer does not carry", async () => {
+  for (const key of [["id"], ["id", "fen"], ["gone"]]) {
+    await refused(program(
+      engine({ memo: `{entity: "Answer", key: ${JSON.stringify(key)}}` }),
+      answer({ fields: `{name: "gone", type: "string", retired: true}`, uniques: `[{name: "uq_answer_key", cols: ${JSON.stringify(key)}}]` }),
+    ), `unit engine memo keys on ${key[0]}, which is not an active non-primary field of Answer`);
+  }
 });
 
 Deno.test("a read naming no entity is refused", async () => {

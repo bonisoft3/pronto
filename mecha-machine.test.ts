@@ -1,6 +1,16 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
+Deno.test("a machine cannot combine a statechart with lifecycle actions the SQL would discard", async () => {
+  for (const event of ["insert", "update", "delete"]) {
+    const res = await cue(["export", "-", "-e", "out"], paymentProgram() + `
+app: state: machines: PaymentMachine: on: ${event}: effect: {notify: "payments", payload: "TG_OP"}
+`);
+    assertEquals(res.success, false);
+    assertStringIncludes(res.stderr, "machine PaymentMachine combines states and lifecycle handlers: declare separate machines");
+  }
+});
+
 // A Challenge statechart whose `accept` transition performs one relational
 // effect of the given op on audit_log.
 function challengeProgram(op: string): string {

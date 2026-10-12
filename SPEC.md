@@ -373,6 +373,10 @@ CHECK admitting exactly the machine's states; a parsed closed CEL enum must
 include every state. State values in inline and held seeds must name one of
 those states.
 
+A mecha machine declares either a statechart (`states`) or lifecycle handlers
+(`on.insert`, `on.update`, `on.delete`). Combining them is refused; separate
+machines over the same entity keep both triggers explicit in SQL and in the IR.
+
 **A terminal chart is closed over the entity's row.** `context` is refused:
 other columns start from the entity's field defaults. The emitted
 `shell.yaml` schema carries defaults as literal values: a SQL quoted string
@@ -409,7 +413,8 @@ listener, where anything else is a console line; the shell banners a
 the answer, addressed by the question's fields (Michie's memo table), which
 the mount binds as `data-prop-*` of the same names; a unit that acts on the
 world is a process hatch. CUE refuses an agent without a memo, a memo on any
-other isolation, a memo naming no entity, a key field the entity lacks, an
+other isolation, a memo naming no entity, a key field the entity lacks or that
+is primary or retired, an
 entity without a unique over exactly the key fields (the natural key an answer
 resolves against), a memo entity with a column that is not text (an answer
 crosses the seat as strings), and an agent raising other than one event (a
@@ -429,6 +434,9 @@ so it is not a `refused` event. The entity's
 writers carry the unit as
 `unit:<name> upsert`; its card says `memo of: <unit> by <key>`, and an entity
 a unit reads says `read by: <unit> (<isolation>)`.
+The host registers the memo's table and schema even when no screen reads or
+writes it. Its primary key is allocated by the store; the question's key uses
+active non-primary fields, all carried in the answer.
 
 A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
 parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as
