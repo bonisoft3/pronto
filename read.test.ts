@@ -6,7 +6,7 @@ const dir = new URL("./testdata/emit", import.meta.url);
 
 function goal(goal: string, field = "Goal"): { ok: boolean; out: string } {
   const expr = `(#readCase & {reads: [_view], goal: ${goal}}).app.state.entities.${field}.read`;
-  const out = new Deno.Command("cue", { args: ["export", ".", "-e", expr], cwd: dir, stdout: "piped", stderr: "piped" }).outputSync();
+  const out = new Deno.Command("cue", { args: ["export", "read.cue", "-e", expr], cwd: dir, stdout: "piped", stderr: "piped" }).outputSync();
   return { ok: out.success, out: new TextDecoder().decode(out.success ? out.stdout : out.stderr).trim() };
 }
 

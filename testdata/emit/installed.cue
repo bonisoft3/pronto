@@ -10,8 +10,6 @@ import (
 	omnishellTerminal "github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
-// An installed terminal names its files from omnishell's root (omnishell mode).
-_installedSurface: {runtime: "", interpreterRoot: "interpreter", componentsRoot: "components", markupReader: "read-markup.ts", documentRenderer: "render-documents.ts", documentConfig: "server/deno.json", machineSchema: "machine.cue"}
 _installedTerm: (pronto.#DefaultTerminal & {code: _code}).out & {surface: _installedSurface}
 _installedCluster: (pronto.#DefaultCluster & {code: _code, statics: _installedTerm.surface.statics, local: false}).out
 _installedBuild: (pronto.#DefaultBuild & {code: _code, loop: _external, cluster: _installedCluster, terminal: _installedTerm}).out

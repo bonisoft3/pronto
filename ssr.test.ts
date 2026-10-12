@@ -9,7 +9,7 @@
 const dir = new URL("./testdata/emit", import.meta.url).pathname;
 
 function exported(expr: string, text: boolean): { ok: boolean; out: string } {
-  const out = new Deno.Command("cue", { args: ["export", ".", "-e", expr, ...(text ? ["--out", "text"] : [])], cwd: dir, stdout: "piped", stderr: "piped" }).outputSync();
+  const out = new Deno.Command("cue", { args: ["export", "read.cue", "ssr.cue", "installed-surface.cue", "-e", expr, ...(text ? ["--out", "text"] : [])], cwd: dir, stdout: "piped", stderr: "piped" }).outputSync();
   return { ok: out.success, out: new TextDecoder().decode(out.success ? out.stdout : out.stderr) };
 }
 
