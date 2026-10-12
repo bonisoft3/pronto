@@ -193,6 +193,11 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       let written = "";
       for (let pass = 0; pass < 2; pass++) {
         await cue(app, ["cmd", "generate", "./pronto"]);
+        if (pass === 1) {
+          // A tightened grammar must judge the authored screen, not yesterday's output.
+          await Deno.writeTextFile(join(app, "program_document.cue"), '\ncode: surface: screens: about: markup: "<section class=\\"screen\\" data-screen=\\"about\\"><h1>About</h1></section>"\n', { append: true });
+          await Deno.writeTextFile(join(app, "shell/screens/about.html"), `<div data-live="row" data-filter="id=eq.the" data-machine='{"field":"phase","initial":"idle","context":{"old":true},"states":{"idle":{}}}'></div>`);
+        }
         await deno(join(scratch, "pronto/write.ts"), ["."]);
         const build = JSON.parse(await Deno.readTextFile(join(app, "bayt.json")));
         assert(build.name === "jsfb", "standalone build has an invalid project name");

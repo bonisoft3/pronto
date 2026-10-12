@@ -340,11 +340,12 @@ export async function derive(appDir: string): Promise<void> {
 
   // One export, not one per question: cue dominates this loop, so a second
   // invocation costs more than everything else derivation does.
-  const exported = await new Deno.Command("cue", {
+  const exporting = new Deno.Command("cue", {
     args: [
       "export",
       ...lift,
       ".",
+      "-",
       "-e",
       "{entities: code.state.entities, ir: code.meta.ir.source, " +
         "decisions: {for k, v in code.meta.decisions {(k): v.ir}}, " +
@@ -376,9 +377,16 @@ export async function derive(appDir: string): Promise<void> {
       "json",
     ],
     cwd: appDir,
+    stdin: "piped",
     stdout: "piped",
     stderr: "inherit",
-  }).output();
+  }).spawn();
+  // Only the derivation export bootstraps missing chart projections. This
+  // pass rebuilds them; normal exports require them on assembly screens.
+  const input = exporting.stdin.getWriter();
+  await input.write(new TextEncoder().encode(`package ${pkg}\ncode: surface: screens: [string]: charts: *[] | [..._]\n`));
+  await input.close();
+  const exported = await exporting.output();
   if (!exported.success) {
     fail(
       lift.length > 0 || previous === ""
@@ -419,13 +427,14 @@ export async function derive(appDir: string): Promise<void> {
   // read off it rather than added to the expression above.
   const { surface, state, meta: appMeta } = exp.program as unknown as {
     surface: {
-      screens: Record<string, { forms?: { id: string; entity: string }[]; files: { renderers?: string[] } }>;
+      screens: Record<string, { markup?: string; forms?: { id: string; entity: string }[]; files: { html: string; renderers?: string[] } }>;
       endowments?: Record<string, string[]>;
     };
     state: {
       pipelines?: Record<string, { fold?: { src: string; pair: { table: string } } }>;
       computations?: Record<string, { src: string; wasm: string[]; endowments: string[] }>;
       effects?: Record<string, { endowments?: string[] }>;
+      machines?: Record<string, unknown>;
       seed?: { src: string };
     };
     meta?: { i18n?: { default?: string; locales?: Record<string, { path: string }> } };
@@ -544,6 +553,16 @@ export async function derive(appDir: string): Promise<void> {
     if (f.isFile && f.name.endsWith(".js")) available.add(f.name.slice(0, -".js".length));
   }
 
+  // CUE-authored HTML must reach the markup reader before chart validation,
+  // which judges the current declaration rather than an earlier emission.
+  for (const screen of Object.values(surface.screens)) {
+    if (screen.markup !== undefined) {
+      const path = `${appDir}/${screen.files.html}`;
+      await Deno.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+      await Deno.writeTextFile(path, screen.markup);
+    }
+  }
+
   // What the screens say, as the terminal reads them. Spawned like the export
   // above and from the same directory, so the path the program's terminal
   // declares is the path that resolves; --no-config because every module the
@@ -647,7 +666,6 @@ export async function derive(appDir: string): Promise<void> {
         const parsed = JSON.parse(region.machine) as {
           field: string;
           initial: string;
-          context?: Record<string, unknown>;
         } | null;
         if (typeof parsed?.field !== "string" || typeof parsed.initial !== "string") {
           refuse(`${screen}.html: data-machine names no field and initial`);
@@ -672,14 +690,6 @@ export async function derive(appDir: string): Promise<void> {
                 JSON.stringify(row[parsed.field])
               } but the machine's initial is "${parsed.initial}" — one fact, two values`,
             );
-          }
-          for (const [k, v] of Object.entries(parsed.context ?? {})) {
-            if (k in row && row[k] !== v) {
-              refuse(
-                `${screen}.html: data-empty-row["${k}"] is ${JSON.stringify(row[k])} but the machine's ` +
-                  `context says ${JSON.stringify(v)} — one fact, two values`,
-              );
-            }
           }
         } else if (!(region.filterSpec ?? []).some((p) => p.col === "id" && p.op === "eq")) {
           refuse(`${screen}.html: a machine region with no data-empty-row must pin its id with an eq filter`);
@@ -721,7 +731,7 @@ export async function derive(appDir: string): Promise<void> {
   const seed_vetted: { src: string; key: string }[] = [];
   if (seedSrc !== undefined) {
     const bytes = await Deno.readFile(`${appDir}/${seedSrc}`).catch((e) => fail(`${seedSrc}: state.seed names it, and it does not open: ${e.message}`));
-    const key = await seedKey(bytes, entities, await Deno.readTextFile(`${appDir}/program_cel.cue`));
+    const key = await seedKey(bytes, entities, await Deno.readTextFile(`${appDir}/program_cel.cue`), state.machines);
     const previous = await ifMissing(Deno.readTextFile(`${appDir}/.pronto/facts.json`), null);
     const vetted = previous !== null &&
       ((JSON.parse(previous).seed_vetted ?? []) as { src: string; key: string }[]).some((r) => r.src === seedSrc && r.key === key);

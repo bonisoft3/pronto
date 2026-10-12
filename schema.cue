@@ -1192,16 +1192,12 @@ import (
 	// derived file holds what the emitted markup says.
 	reads!: [...#Read]
 	writes!: [...#Write]
+	charts!: [...#Chart]
 	if S.markup != _|_ {
 		reads:  *[] | [...#Read]
 		writes: *[] | [...#Write]
+		charts: *[] | [...#Chart]
 	}
-	// The charts the markup carries, projected beside the reads and writes.
-	// Absent, none: derive exports the program through the previous run's
-	// derived file, so a list the projection gained must be absent-tolerant for
-	// that one export, and a stale file costs a card's writers chip, not a
-	// read mode.
-	charts: *[] | [...#Chart]
 	// A component-bearing screen is authored HERE, in CUE: `markup` is the
 	// screen's whole HTML, composed by interpolating component definitions
 	// (their tags survive in it as inert wrappers), and files.html becomes an
@@ -1445,7 +1441,15 @@ import (
 	// rows under every constraint its own `seed` carries. Closed, so a row of
 	// an entity that is not a server one, or of none, is refused — a tab
 	// entity's rows are the program's own and render into shell.yaml.
-	#Seed: {for n, e in A.state.entities if e.server {(n)?: e.seed}}
+	#Seed: {for n, e in A.state.entities if e.server {
+		(n)?: e.seed & [...{
+			if A.state.machines != _|_
+			for _, m in A.state.machines if m.entity == n || m.entity == e.table
+			if m.field != _|_ if m.initial != _|_ {
+				(m.field)?: or([for state, _ in m.states {state}])
+			}
+		}]
+	}}
 
 	capabilities: {
 		// Passed through to shell.yaml verbatim: the terminal owns the login
@@ -1664,6 +1668,12 @@ import (
 			list.Concat([
 				[if m.states[m.initial] == _|_ {"machine \(mn) initial \(m.initial) is not a state"}],
 				[if !list.Contains([for f in e.fields {f.name}], m.field) {"machine \(mn) field \(m.field) is not a column of \(en)"}],
+				[for f in e.fields if f.name == m.field if f.generated != _|_ {
+					"machine \(mn) field \(en).\(m.field) is generated and cannot hold transitions"
+				}],
+				[for f in e.fields if f.name == m.field if f.retired {
+					"machine \(mn) field \(en).\(m.field) is retired and cannot hold transitions"
+				}],
 				[for f in e.fields if f.name == m.field if f.default != _|_ if strings.TrimSpace(f.default) != "'"+strings.Replace(m.initial, "'", "''", -1)+"'" {
 					"machine \(mn) initial \(m.initial) disagrees with \(en).\(m.field) default \(f.default)"
 				}],

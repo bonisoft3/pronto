@@ -943,3 +943,72 @@ Deno.test("a matching default and CEL check remain the column's one declared con
   assertEquals(line.match(/DEFAULT/g)?.length, 1);
   assertEquals(line.match(/CHECK/g)?.length, 1);
 });
+
+Deno.test("machine transitions cannot occupy generated or retired columns", async () => {
+  for (const [attributes, sentence] of [
+    [`generated: "'pending'"`, "is generated and cannot hold transitions"],
+    ["retired: true", "is retired and cannot hold transitions"],
+  ]) {
+    const source = challengeProgram("ensure").replace('{name: "status", type: "string"}', `{name: "status", type: "string", ${attributes}}`);
+    const result = await cue(["export", "-", "-e", "app", "--out", "json"], source);
+    assertEquals(result.success, false);
+    assertStringIncludes(result.stderr, "machine ChallengeMachine field Challenge.status");
+    assertStringIncludes(result.stderr, sentence);
+  }
+});
+
+Deno.test("shell schema sends typed literal defaults and leaves SQL expressions with the store", async () => {
+  const source = challengeProgram("ensure").replace('{name: "created_at", type: "timestamp"}', `
+    {name: "created_at", type: "timestamp", default: "now()"},
+    {name: "label", type: "string", default: "'can''t'"},
+    {name: "empty", type: "string", default: "''"},
+    {name: "count", type: "int32", default: "-12"},
+    {name: "ratio", type: "double", default: "+1.5e2"},
+    {name: "large", type: "int64", default: "9007199254740993"},
+    {name: "legacy_large", type: "bigint", default: "+9007199254740993"},
+    {name: "precise", type: "decimal", precision: 38, scale: 18, default: "12345678901234567890.123456789012345678"},
+    {name: "exponent", type: "decimal", precision: 38, scale: 20, default: "1.2300e-18"},
+    {name: "integer_exponent", type: "int64", default: "1.20e2"},
+    {name: "rounded_integer", type: "int64", default: "1.5"},
+    {name: "quoted_false", type: "bool", default: "'false'"},
+    {name: "quoted_json", type: "json", default: #"'{"n":1}'"#},
+    {name: "quoted_bytes", type: "bytes", default: "'abcd'"},
+    {name: "zero", type: "decimal", precision: 3, scale: 2, default: "-0.00"},
+    {name: "yes", type: "bool", default: "TRUE"},
+    {name: "no", type: "bool", default: "false"},
+    {name: "absent", type: "string", required: false, default: "NULL"},
+    {name: "expression", type: "uuid", default: "gen_random_uuid()"},
+    {name: "quoted_expr", type: "string", default: "'a' || 'b'"}`);
+  const result = await cue(["export", "-", "-e", 'out["shell/shell.yaml"].data.schema.challenge.fields', "--out", "json"], source);
+  assertEquals(result.success, true, result.stderr);
+  const fields = JSON.parse(result.stdout) as {name: string; default?: unknown; defaulted?: boolean}[];
+  assertEquals(Object.fromEntries(fields.filter(f => Object.hasOwn(f, "default")).map(f => [f.name, f.default])), {
+    status: "pending", label: "can't", empty: "", count: -12, ratio: 150, yes: true, no: false, absent: null,
+    large: "9007199254740993", legacy_large: "9007199254740993", precise: "12345678901234567890.123456789012345678",
+    exponent: "0.00000000000000000123", integer_exponent: "120", zero: "0",
+  });
+  assertEquals(fields.filter(f => f.name !== "id").every(f => f.defaulted === true), true);
+  assertEquals(Object.hasOwn(fields.find(f => f.name === "id")!, "defaulted"), false);
+});
+
+Deno.test("omitting SQL expression values preserves the markup gate for pending discriminants", async () => {
+  const { screenFindings } = await import("../omnishell/check-markup.ts");
+  const source = challengeProgram("ensure").replace('{name: "created_at", type: "timestamp"}',
+    '{name: "kind", type: "string", default: "choose_kind()", cel: "this in [\'note\', \'link\']"}') +
+    '\napp: state: entities: Challenge: cel: enums: kind: ["note", "link"]\n';
+  const result = await cue(["export", "-", "-e", 'out["shell/shell.yaml"].data.schema', "--out", "json"], source);
+  assertEquals(result.success, true, result.stderr);
+  const schema = JSON.parse(result.stdout) as Parameters<typeof screenFindings>[2];
+  const kind = schema.challenge.fields.find(f => f.name === "kind")!;
+  assertEquals(kind.defaulted, true);
+  assertEquals(Object.hasOwn(kind, "default"), false);
+  assertEquals(kind.enum, ["note", "link"]);
+  const html = '<ul data-live="challenge">' +
+    '<template data-item data-when="kind=eq.note"><li>Note</li></template>' +
+    '<template data-item data-when="kind=eq.link"><li>Link</li></template>';
+  const findings = screenFindings("shell/screens/board.html", html + '</ul>', schema, new Set(), []);
+  assertEquals(findings.length, 1);
+  assertStringIncludes(findings[0].message, '"kind" is DB-defaulted');
+  assertEquals(screenFindings("shell/screens/board.html",
+    html + '<template data-item><li>Pending</li></template></ul>', schema, new Set(), []), []);
+});

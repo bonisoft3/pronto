@@ -22,3 +22,13 @@ Deno.test("an authored read mode the rule contradicts fails to unify", () => {
 Deno.test("a browser tier has no read mode to state", () => {
   expect("a tab entity", goal('{table: "goal", durability: "tab", read: "eager"}'), false, /explicit error \(_\|_ literal\)/);
 });
+
+Deno.test("an assembly screen requires its chart projection; authored markup alone has a bootstrap default", () => {
+  const screen = '{name: "board", title: "Board", route: "/", reads: [], writes: [], forms: [], states: [], files: {handlers: [], adapters: []}}';
+  for (const [extra, success] of [["", false], [', charts: []', true], [', markup: "<main></main>"', true]] as const) {
+    const expr = `(#Screen & ${screen.slice(0, -1)}${extra}}).charts`;
+    const output = new Deno.Command("cue", { args: ["export", ".", "-e", expr], stdout: "piped", stderr: "piped" }).outputSync();
+    const message = new TextDecoder().decode(output.stderr);
+    if (output.success !== success || (!success && !message.includes("charts"))) throw new Error(message || "a missing projection was admitted");
+  }
+});

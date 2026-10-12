@@ -156,6 +156,53 @@ _sqlType: {
 	out: D._hours*3600 + D._mins*60 + D._secs
 }
 
+// SQL expressions and payload casts stay with the store; the terminal receives canonical literals.
+#literalDefault: D={
+	sql: string
+	type: #Type | #LegacyType
+	_type: [if #typeAlias[D.type] != _|_ {#typeAlias[D.type]}, D.type][0]
+	_expr: strings.TrimSpace(D.sql)
+	if D._expr =~ "^'(?:[^']|'')*'$" if !list.Contains(["bytes", "json", "geojson"], D._type) {
+		value: strings.Replace(strings.TrimSuffix(strings.TrimPrefix(D._expr, "'"), "'"), "''", "'", -1)
+	}
+	if D._expr =~ #"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"# {
+		if D._type == "int64" || D._type == "decimal" {
+			value: (#exactNumericLiteral & {sql: D._expr}).out
+		}
+		if D._type == "int32" {
+			let exact = (#exactNumericLiteral & {sql: D._expr}).out
+			if exact =~ #types.int64.pattern {value: strconv.Atoi(exact)}
+		}
+		if D._type != "int64" && D._type != "decimal" && D._type != "int32" {value: strconv.ParseFloat(D._expr, 64)}
+	}
+	if strings.ToLower(D._expr) == "true" {value: true}
+	if strings.ToLower(D._expr) == "false" {value: false}
+	if strings.ToLower(D._expr) == "null" {value: null}
+	if D.value != _|_ {admitted: D.value == null || (#TypeConstraint[D._type].valid & D.value) != _|_}
+}
+
+// String carriers must keep every digit and expand exponents without float64.
+#exactNumericLiteral: N={
+	sql: string
+	_parts: strings.Split(strings.ToLower(N.sql), "e")
+	_mantissa: strings.TrimPrefix(strings.TrimPrefix(N._parts[0], "-"), "+")
+	_decimal: strings.Split(N._mantissa, ".")
+	_digits: strings.Join(N._decimal, "")
+	_digitList: strings.Split(N._digits, "")
+	_exponent: [if len(N._parts) == 2 {strconv.Atoi(N._parts[1])}, 0][0]
+	_point: len(N._decimal[0]) + N._exponent
+	_expanded: [
+		if N._point <= 0 {"0." + strings.Repeat("0", -N._point) + N._digits},
+		if N._point >= len(N._digits) {N._digits + strings.Repeat("0", N._point-len(N._digits))},
+		if N._point > 0 && N._point < len(N._digits) {strings.Join(N._digitList[:N._point], "") + "." + strings.Join(N._digitList[N._point:], "")},
+	][0]
+	_fields: strings.Split(N._expanded, ".")
+	_integer: [if strings.TrimLeft(N._fields[0], "0") != "" {strings.TrimLeft(N._fields[0], "0")}, "0"][0]
+	_fraction: [if len(N._fields) == 2 {strings.TrimRight(N._fields[1], "0")}, ""][0]
+	_sign: [if strings.HasPrefix(N.sql, "-") if N._integer != "0" || N._fraction != "" {"-"}, ""][0]
+	out: N._sign + N._integer + [if N._fraction != "" {"." + N._fraction}, ""][0]
+}
+
 // The column contract owned by a cluster chart; reducers have no state field.
 #machineColumn: C={
 	machines: [...#MechaMachine]
@@ -1317,7 +1364,16 @@ _cdcBeforeField: "__before"
 				if f.pk {pk: true}
 				if f.ref != _|_ {ref: f.ref}
 				if f.unique != _|_ {unique: f.unique}
-				if f.default != _|_ {default: f.default}
+				let entity = e
+				let field = f
+				let column = #machineColumn & {e: entity, f: field, machines: [if S.code.state.machines != _|_ for _, m in S.code.state.machines {m}]}
+				if f.default != _|_ {
+					defaulted: true
+					let literal = #literalDefault & {sql: f.default, type: f.type}
+					if literal.admitted != _|_ if literal.admitted {default: literal.value}
+				}
+				if f.default == _|_ if column.initial != _|_ {defaulted: true, default: column.initial}
+				if f.cel == _|_ if column.states != _|_ {enum: column.states}
 				if e.cel.enums[f.name] != _|_ {enum: e.cel.enums[f.name]}
 				if e.cel.bounds[f.name] != _|_ {bounds: e.cel.bounds[f.name]}
 			}]
