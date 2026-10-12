@@ -345,9 +345,10 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
   const version = versionAt < 0 ? "" : module.slice(versionAt);
   const subdir = relative(root, app).split(sep).join("/");
   const importPath = `${modulePath}${subdir ? `/${subdir}` : ""}${version}:${pkg}`;
-  const observer = await Deno.makeTempDir({ dir: app, prefix: ".pronto-derive-" });
+  // Write permissions are scoped to the caller's spelling, including Windows short paths.
+  const observer = await Deno.makeTempDir({ dir: appDir, prefix: ".pronto-derive-" });
   try {
-    const bootstrap = await Deno.makeTempFile({ dir: app, prefix: "pronto_derive_", suffix: ".cue" });
+    const bootstrap = await Deno.makeTempFile({ dir: appDir, prefix: "pronto_derive_", suffix: ".cue" });
     try {
       // Tag injection applies only to the CLI package, so the imported app is lifted explicitly.
       await Deno.writeTextFile(bootstrap, `package ${pkg}\ncode: surface: screens: [string]: charts: *[] | [..._]\n${lifting ? "_deriving: true\n" : ""}`);

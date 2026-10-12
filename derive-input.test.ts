@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { readDerivation } from "./derive.ts";
 
 function assert(ok: unknown, message: string): asserts ok {
@@ -86,6 +86,33 @@ Deno.test("derive input refuses invalid selected values and cleans its temporary
       error = e;
     }
     assert(error instanceof Error && error.message.includes("shell"), `selected emission failure lost: ${error}`);
+    await assertClean(app);
+  });
+});
+
+Deno.test("derive input keeps writes within the authorized caller path", async () => {
+  await fixture("app", "example.com/scoped@v0", async (app) => {
+    const alias = join(dirname(app), "consumer alias");
+    await Deno.symlink(app, alias, { type: "junction" });
+    const script = join(dirname(app), "scoped.ts");
+    await Deno.writeTextFile(script, `
+import { join } from "node:path";
+import { readDerivation } from ${JSON.stringify(new URL("./derive.ts", import.meta.url).href)};
+let refused = false;
+try {
+  await Deno.writeTextFile(join(await Deno.realPath(Deno.args[0]), "unauthorized"), "");
+} catch (error) {
+  if (!(error instanceof Deno.errors.NotCapable)) throw error;
+  refused = true;
+}
+if (!refused) throw new Error("physical path unexpectedly authorized");
+await readDerivation(Deno.args[0], "sample", true);
+`);
+    const child = await new Deno.Command(Deno.execPath(), {
+      args: ["run", "--no-config", "--allow-read", `--allow-write=${alias}`, "--allow-run=cue", script, alias],
+      stdout: "piped", stderr: "piped",
+    }).output();
+    assert(child.success, new TextDecoder().decode(child.stderr));
     await assertClean(app);
   });
 });
