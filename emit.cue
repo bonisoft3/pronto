@@ -206,9 +206,10 @@ _sqlType: {
 // The column contract owned by a cluster chart; reducers have no state field.
 #machineColumn: C={
 	machines: [...#MechaMachine]
-	e: #Entity
-	f: #Field
-	for m in C.machines if m.entity == C.e.name || m.entity == C.e.table if m.field != _|_ if m.field == C.f.name if m.initial != _|_ {
+	entityName: string
+	entityTable: string
+	fieldName: string
+	for m in C.machines if m.entity == C.entityName || m.entity == C.entityTable if m.field != _|_ if m.field == C.fieldName if m.initial != _|_ {
 		initial: m.initial
 		states: [for n, _ in m.states {n}]
 	}
@@ -219,7 +220,7 @@ _sqlType: {
 	machines: *[] | [...#MechaMachine]
 	_lines: list.Concat([
 		[for fld in T.e.fields {
-			let column = #machineColumn & {machines: T.machines, e: T.e, f: fld}
+			let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
 			"  " + (#colSql & {
 				f: fld
 				if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
@@ -1364,9 +1365,7 @@ _cdcBeforeField: "__before"
 				if f.pk {pk: true}
 				if f.ref != _|_ {ref: f.ref}
 				if f.unique != _|_ {unique: f.unique}
-				let entity = e
-				let field = f
-				let column = #machineColumn & {e: entity, f: field, machines: [if S.code.state.machines != _|_ for _, m in S.code.state.machines {m}]}
+				let column = #machineColumn & {entityName: e.name, entityTable: e.table, fieldName: f.name, machines: [if S.code.state.machines != _|_ for _, m in S.code.state.machines {m}]}
 				if f.default != _|_ {
 					defaulted: true
 					let literal = #literalDefault & {sql: f.default, type: f.type}
