@@ -214,7 +214,8 @@ Deno.test("delivery follows the sink: the card's chip and the machine's panel sa
 });
 
 Deno.test("a chart's D2 draws every arrow by its event, an invoking state dashed, a final state as a ring", () => {
-  const d2 = chartD2(program.state.machines!.GameMachine);
+  const machine = program.state.machines!.GameMachine;
+  const d2 = chartD2({ initial: machine.initial!, states: machine.states! });
   assertStringIncludes(d2, '"charging": {label: "charging\\ninvoke charge"; style.stroke-dash: 3}');
   assertStringIncludes(d2, '"settled": {shape: circle; style.double-border: true}');
   assertStringIncludes(d2, '"pending" -> "charging": "pay"');

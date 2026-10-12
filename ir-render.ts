@@ -49,10 +49,12 @@ export type Entity = {
 export type MechaMachine = {
   ir: string;
   entity: string;
-  field: string;
-  initial: string;
+  field?: string;
+  initial?: string;
   level: string;
-  states: Record<string, { type?: string; on?: Record<string, unknown>; after?: Record<string, unknown>; invoke?: { src: string; onDone: unknown; onError: unknown } }>;
+  states?: Record<string, { type?: string; on?: Record<string, unknown>; after?: Record<string, unknown>; invoke?: { src: string; onDone: unknown; onError: unknown } }>;
+  timing?: "BEFORE" | "AFTER";
+  on?: Partial<Record<"insert" | "update" | "delete", Record<string, unknown> | Record<string, unknown>[]>>;
 };
 // `reentry` is declared exactly when the sink is not idempotent (#ExternalEffect).
 export type Effect = { ir: string; sink: { origin?: string; bridge?: string; idempotent: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note: string };
@@ -294,6 +296,13 @@ function reachOf(d: Iterable<string>): string {
   return REACH[far];
 }
 
+function machineEntity(entities: Record<string, Entity>, machine: MechaMachine): string {
+  if (entities[machine.entity] !== undefined) return machine.entity;
+  const name = Object.keys(entities).find((name) => entities[name].table === machine.entity);
+  if (name === undefined) throw new Error(`machine ${machine.ir} names undeclared entity ${machine.entity}`);
+  return name;
+}
+
 /** One entity's card. */
 export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<string> {
   const { entities } = ctx.program.state;
@@ -307,17 +316,24 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
       title: `${e.ir} · ${c.field}${c.suffix ? ` · ${c.screens.join(", ")} (${c.suffix.slice(1)})` : ""}`,
       level: e.level,
       chart: c,
-      invoke: null as null | string,
+      invokes: [] as string[],
+      lifecycle: undefined as MechaMachine["on"],
+      timing: undefined as MechaMachine["timing"],
     })),
-    ...Object.values(ctx.program.state.machines ?? {}).filter((m) => m.entity === name).map((m) => ({
+    ...Object.values(ctx.program.state.machines ?? {}).filter((m) => machineEntity(entities, m) === name).map((m) => ({
       id: m.ir,
-      title: `${m.ir} · ${m.field}`,
+      title: m.field === undefined ? m.ir : `${m.ir} · ${m.field}`,
       level: m.level,
-      chart: m,
-      invoke: Object.values(m.states).find((s) => s.invoke)?.invoke?.src ?? null,
+      chart: m.states === undefined ? null : (() => {
+        if (m.initial === undefined || m.field === undefined) throw new Error(`machine ${m.ir} has states without a field and initial state`);
+        return { field: m.field, initial: m.initial, states: m.states };
+      })(),
+      invokes: [...new Set(Object.values(m.states ?? {}).flatMap((s) => s.invoke === undefined ? [] : [s.invoke.src]))],
+      lifecycle: m.on,
+      timing: m.timing,
     })),
   ];
-  const machineField = new Set(machines.map((m) => m.chart.field));
+  const machineField = new Set(machines.flatMap((m) => m.chart === null ? [] : [m.chart.field]));
   const refs = fields.filter((f) => f.ref).map((f) => ({ col: f.name, ref: f.ref! }));
   const referrers: { table: string; col: string }[] = [];
   for (const other of Object.values(entities)) for (const f of other.fields) if (f.ref === e.table) referrers.push({ table: other.table, col: f.name });
@@ -350,14 +366,17 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
     return { reconcile: "exactly-once", unknown: "at-most-once", repeat: "at-least-once" }[reentryOf(effect)];
   };
   const panels = machines.map((m) => {
-    const effect = m.invoke === null ? null : ctx.program.state.effects?.[m.invoke] ?? (() => {
-      throw new Error(`machine ${m.id} invokes ${m.invoke}, which is no declared effect`);
-    })();
-    return { ...m, effect, delivery: deliveryOf(m.level, effect) };
+    const effects = m.invokes.map((src) => {
+      const effect = ctx.program.state.effects?.[src];
+      if (effect === undefined) throw new Error(`machine ${m.id} invokes ${src}, which is no declared effect`);
+      return { src, effect, delivery: deliveryOf(m.level, effect) };
+    });
+    const deliveries = effects.length === 0 ? [deliveryOf(m.level, null)] : effects.map((e) => e.delivery);
+    return { ...m, effects, deliveries: [...new Set(deliveries)] };
   });
   // The pivot's word is the entity's; the classes are not totally ordered, so
   // external machines that differ each show theirs.
-  const external = [...new Set(panels.filter((m) => m.level === "external").map((m) => m.delivery))];
+  const external = [...new Set(panels.filter((m) => m.level === "external").flatMap((m) => m.deliveries))];
   const delivery = external.length > 0 ? external.join(" · ") : deliveryOf(e.level, null);
   const glyphs = (f: Field) => [
     f.retired ? `<span class="g"${tip(TIP.retired)}>†</span>` : "",
@@ -377,18 +396,20 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
   const validations = Object.entries(e.validations ?? {});
   const peer = (x: Effect) => x.sink.idempotent ? "idempotent" : `not idempotent · re-entry ${esc(reentryOf(x))}`;
   const machinePanels = await Promise.all(panels.map(async (m) => {
-    const effect = m.effect;
-    const svg = await ctx.d2(chartD2(m.chart as { initial: string; states: Record<string, any> }));
+    const diagram = m.chart === null ? "" : `<div class="canvas">${await ctx.d2(chartD2(m.chart))}</div>`;
+    const lifecycle = Object.entries(m.lifecycle ?? {}).map(([event, actions]) =>
+      `<tr><th>${esc(m.timing ?? "AFTER")} ${esc(event)}</th><td><code>${esc(JSON.stringify(actions))}</code></td></tr>`
+    ).join("");
     return `<section class="machine" data-kind="machine" id="${esc(m.id)}" data-of="${esc(e.ir)}">
 <span class="lbl derived">machine</span>
-<span class="mtitle">${esc(m.title)} ${chip("level", m.level, true, LEVEL_TIP[m.level])}${chip("delivery", m.delivery, true)}</span>
-<div class="canvas">${svg}</div>${
-      effect === null ? "" : `
-<p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", m.invoke!, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? `bridge ${effect.sink.bridge}`)} · ${peer(effect)} · <span class="note">${esc(effect.note)}</span></p>`
+<span class="mtitle">${esc(m.title)} ${chip("level", m.level, true, LEVEL_TIP[m.level])}${chip("delivery", m.deliveries.join(" · "), true)}</span>
+${diagram}${lifecycle === "" ? "" : `<table class="fields"><thead><tr><th>event</th><th>actions</th></tr></thead><tbody>${lifecycle}</tbody></table>`}${
+      m.effects.map(({ src, effect, delivery }) => `
+<p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", src, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? `bridge ${effect.sink.bridge}`)} · ${peer(effect)}${m.effects.length > 1 ? ` ${chip("delivery", delivery, true)}` : ""} · <span class="note">${esc(effect.note)}</span></p>`).join("")
     }
 </section>`;
   }));
-  const owed = reachOf([e.durability, ...machines.flatMap((m) => (m.chart as { writes?: string[] }).writes ?? []).map((t) => byTable.get(t)?.durability ?? "tab")]) !== "tab";
+  const owed = reachOf([e.durability, ...machines.flatMap((m) => (m.chart as { writes?: string[] } | null)?.writes ?? []).map((t) => byTable.get(t)?.durability ?? "tab")]) !== "tab";
   return `<div class="card dur-${esc(e.durability)}">
 <header class="ehead">
 <span class="chips">${chip("durability", e.durability, false)}${chip("access", accessValue, false)}${e.id === undefined ? "" : chip("id", e.id, false)}${chip("level", e.level, true, LEVEL_TIP[e.level])}${chip("delivery", delivery, true)}</span>
@@ -661,10 +682,11 @@ export async function renderIr(
   }
   const mechaFields = new Map<string, Set<string>>();
   for (const machine of Object.values(program.state.machines ?? {})) {
-    if (entities[machine.entity] === undefined) throw new Error(`machine ${machine.ir} names undeclared entity ${machine.entity}`);
-    const fields = mechaFields.get(machine.entity) ?? new Set<string>();
+    const entity = machineEntity(entities, machine);
+    if (machine.field === undefined || machine.states === undefined) continue;
+    const fields = mechaFields.get(entity) ?? new Set<string>();
     fields.add(machine.field);
-    mechaFields.set(machine.entity, fields);
+    mechaFields.set(entity, fields);
   }
   const graphs = new Map<string, Neighbourhood>();
   const screenHtml = new Map<string, string>();
