@@ -156,11 +156,32 @@ _sqlType: {
 	out: D._hours*3600 + D._mins*60 + D._secs
 }
 
+// The column contract owned by a cluster chart; reducers have no state field.
+#machineColumn: C={
+	machines: [...#MechaMachine]
+	e: #Entity
+	f: #Field
+	for m in C.machines if m.entity == C.e.name || m.entity == C.e.table if m.field != _|_ if m.field == C.f.name if m.initial != _|_ {
+		initial: m.initial
+		states: [for n, _ in m.states {n}]
+	}
+}
+
 #tableSql: T={
 	e: #Entity
+	machines: *[] | [...#MechaMachine]
 	_lines: list.Concat([
 		[for fld in T.e.fields {
-			"  " + (#colSql & {f: fld, table: T.e.table, if T.e.cel.checks[fld.name] != _|_ {check: T.e.cel.checks[fld.name]}}).out
+			let column = #machineColumn & {machines: T.machines, e: T.e, f: fld}
+			"  " + (#colSql & {
+				f: fld
+				if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
+				table: T.e.table
+				if T.e.cel.checks[fld.name] != _|_ {check: T.e.cel.checks[fld.name]}
+				if fld.cel == _|_ if column.states != _|_ {
+					check: "\"\(fld.name)\" IN (" + strings.Join([for n in column.states {(#sqlLit & {v: n}).out}], ", ") + ")"
+				}
+			}).out
 		}],
 		// Platform column, never a #Field: the write's transaction id, returned
 		// via Prefer: return=representation so clients can awaitTxId against
@@ -2800,7 +2821,7 @@ _cdcBeforeField: "__before"
 				format: "sql"
 				_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 				text: strings.Join(list.Concat([
-					[for ent in E._serverEntities {(#tableSql & {e: ent}).out}],
+					[for ent in E._serverEntities {(#tableSql & {e: ent, machines: [if E.code.state.machines != _|_ for _, m in E.code.state.machines {m}]}).out}],
 					[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
 					[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
 				]), "\n\n") + "\n"

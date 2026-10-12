@@ -1659,6 +1659,25 @@ import (
 	]
 	_machineEntityRefusal: [if len(_machineEntityViolations) == 0 {true}, _machineEntityViolations[0]][0] & true
 
+	_machineStateViolations: list.Concat([
+		if A.state.machines != _|_ for mn, m in A.state.machines if m.field != _|_ if m.initial != _|_ for en, e in A.state.entities if en == m.entity || e.table == m.entity {
+			list.Concat([
+				[if m.states[m.initial] == _|_ {"machine \(mn) initial \(m.initial) is not a state"}],
+				[if !list.Contains([for f in e.fields {f.name}], m.field) {"machine \(mn) field \(m.field) is not a column of \(en)"}],
+				[for f in e.fields if f.name == m.field if f.default != _|_ if strings.TrimSpace(f.default) != "'"+strings.Replace(m.initial, "'", "''", -1)+"'" {
+					"machine \(mn) initial \(m.initial) disagrees with \(en).\(m.field) default \(f.default)"
+				}],
+				[if e.cel.enums[m.field] != _|_ for state, _ in m.states if !list.Contains(e.cel.enums[m.field], state) {
+					"machine \(mn) state \(state) is not admitted by \(en).\(m.field) cel enum"
+				}],
+				[for i, row in e.seed if row[m.field] != _|_ if !list.Contains([for state, _ in m.states {state}], row[m.field]) {
+					"machine \(mn) seed \(en)[\(i)].\(m.field) value \(row[m.field]) is not a state"
+				}],
+			])
+		},
+	])
+	_machineStateRefusal: [if len(_machineStateViolations) == 0 {true}, _machineStateViolations[0]][0] & true
+
 	_unitViolations: list.Concat([
 		[for un, u in A.capabilities.vendored for r in u.ports.reads if A.state.entities[r] == _|_ {
 			"unit \(un) reads \(r), which is no declared entity"

@@ -912,3 +912,34 @@ out: (pronto.#emit & {
 
 
 
+
+Deno.test("the machine supplies the column default and check so an omitted status starts legally", async () => {
+  const files = await emitFiles(challengeProgram("ensure"));
+  const sql = files["services/database/migrations/005_create_tables.sql"].text;
+  assertStringIncludes(sql, `"status" text DEFAULT 'pending' NOT NULL CHECK ("status" IN (`);
+  for (const state of ["pending", "accepted", "declined", "expired"]) assertStringIncludes(sql, `'${state}'`);
+});
+
+Deno.test("a machine refuses a conflicting default, a closed enum missing a state, and a seed outside its states", async () => {
+  const base = challengeProgram("ensure");
+  for (const [source, sentence] of [
+    [base.replace('{name: "status", type: "string"}', `{name: "status", type: "string", default: "'accepted'"}`), "disagrees with Challenge.status default"],
+    [base.replace('durability: "server"', 'durability: "server"\n cel: enums: status: ["pending"]'), "is not admitted by Challenge.status cel enum"],
+    [base.replace('durability: "server"', 'durability: "server"\n seed: [{status: "lost"}]'), "value lost is not a state"],
+  ]) {
+    const res = await cue(["export", "-", "-e", "app", "--out", "json"], source);
+    assertEquals(res.success, false);
+    assertStringIncludes(res.stderr, sentence);
+  }
+});
+
+Deno.test("a matching default and CEL check remain the column's one declared constraint", async () => {
+  const source = challengeProgram("ensure").replace('{name: "status", type: "string"}', `{name: "status", type: "string", default: "'pending'", cel: "this in ['pending', 'accepted', 'declined', 'expired']"}`)
+    .replace('durability: "server"', `durability: "server"
+      cel: {checks: status: "status IN ('pending', 'accepted', 'declined', 'expired')", enums: status: ["pending", "accepted", "declined", "expired"]}
+      seed: [{status: "pending"}]`);
+  const files = await emitFiles(source);
+  const line = files["services/database/migrations/005_create_tables.sql"].text.split("\n").find(l => l.includes('"status"'))!;
+  assertEquals(line.match(/DEFAULT/g)?.length, 1);
+  assertEquals(line.match(/CHECK/g)?.length, 1);
+});
