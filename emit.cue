@@ -1748,7 +1748,7 @@ _cdcBeforeField: "__before"
 					}
 				}
 			}
-			buildCmd: [if sources.pronto != "" {"deno run --allow-read --allow-write=. --allow-run --allow-env \(sources.pronto)/write.ts ."}, "./saytw build"][0]
+			buildCmd: [if sources.pronto != "" {_distribution.write}, "./saytw build"][0]
 			testCmd: "cue vet -c ./..."
 			pipelineFiles: [for n, _ in (#streams & {code: D.code}).out {"docker/\(D.code.meta.name)-\(n).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop

@@ -15,7 +15,7 @@
 import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive, terminalPath } from "./derive.ts";
 import { entries, exists, ifMissing } from "./missing.ts";
-import { projectSay } from "./project-config.ts";
+import { projectSay, type Sources } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
@@ -30,6 +30,7 @@ type Emission = {
   release: { enabled: boolean; runtime: string; assets: { path: string; src: string }[]; runtimeAssets: { path: string; src: string }[] };
   terminal: { surface: { runtime: string; documentRenderer: string; documentConfig: string } };
   build?: { meta?: { local?: boolean } };
+  loop: { surface: { sources: Sources } };
   cluster?: { meta?: { root?: string; statics?: { file: string }[] } };
 };
 
@@ -99,7 +100,7 @@ async function exportEmission(): Promise<Emission> {
   if (!exported.success) fail("cue export failed");
   const emission: Emission = JSON.parse(new TextDecoder().decode(exported.stdout));
   checkTypeSeeds(emission.files["schema/entities.proto"].data as Record<string, TypeEntity>);
-  emission.files[".say.yaml"].data = await projectSay(appDir, emission.files[".say.yaml"].data);
+  emission.files[".say.yaml"].data = await projectSay(appDir, emission.files[".say.yaml"].data, emission.loop.surface.sources);
   const keys = Object.keys(emission.files).sort();
   const manifest = [...emission.manifest].sort();
   if (JSON.stringify(keys) !== JSON.stringify(manifest)) {

@@ -14,19 +14,21 @@ import (
 	toolchain "github.com/bonisoft3/omnishell/toolchain"
 )
 
-#Project: {
+#Project: P={
 	...
+	omnishell: *"" | string
 	tools: toolchain.#Tools
 	say: say: {
 		...
 		generate: rulemap: {
 			...
-			omnishell: {priority: 0, cmds: [{do: #Generate}]}
+			omnishell: {priority: 0, cmds: [{do: [if P.omnishell == "" {#Generate}, #LocalGenerate][0]}]}
 		}
 	}
 }
 
 #Generate: "if ('program.cue' | path exists) { use tools.nu [run-mise]; run-mise exec -- omnishell mode . | save --force program_terminal.cue }"
+#LocalGenerate: "mise run omnishell -- mode . --local | save --force program_terminal.cue"
 
 // The image of omnishell's runtime tree an installed app's images copy from,
 // as pronto pins it: the consumer pins what it builds on, as with mecha's
@@ -59,9 +61,8 @@ published: runtime: "bonitao/omnishell:0.8.0@sha256:f51c51cb45151e671fde4268ba49
 		runtime: string
 		verbs: omnishell: {
 			verb: "generate"
-			cmds: [if runtime == "" {#Generate}, if runtime != "" {_localGenerate}]
+			cmds: [if runtime == "" {#Generate}, if runtime != "" {#LocalGenerate}]
 			note: "terminal assets and source layout"
 		}
-		_localGenerate: "mise run omnishell -- mode . --local | save --force program_terminal.cue"
 	}
 }
