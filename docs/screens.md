@@ -43,6 +43,13 @@ until the derived file holds what the emitted markup says.
 writes, charts and handlers are derived, so no check compares them: a rule comparing a
 restatement with the markup would be grading a copy.
 
+The same settled reads supply screen neighbourhoods in `ir.html`, including
+their embedded relations. The collection reach used by chart checks also
+includes write-only collections, so it cannot supply a screen's read
+neighbourhood. Keeping the graph bounded to those reads makes a screen's data
+dependencies visible without turning each screen into the whole schema. See
+[[../SPEC|the artifact spec]] for the generated diagrams and regions.
+
 ### The reads decide how a table is read
 
 Durability decides where data survives and how it stays current. The read
