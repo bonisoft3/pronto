@@ -122,6 +122,7 @@ type Entity = {
   invariant?: { cel: string };
 };
 
+import { dirname, join, relative, sep } from "node:path";
 import { quoteKey } from "./cue.ts";
 import { entries, ifMissing } from "./missing.ts";
 
@@ -320,6 +321,71 @@ export async function effectModules(
   return rows;
 }
 
+async function cueJson(cwd: string, args: string[]): Promise<unknown> {
+  const result = await new Deno.Command("cue", {
+    args, cwd, stdout: "piped", stderr: "piped",
+  }).output();
+  if (!result.success) throw new Error(new TextDecoder().decode(result.stderr).trim() || `cue exited ${result.code}`);
+  return JSON.parse(new TextDecoder().decode(result.stdout));
+}
+
+/** Importing the app leaves unreferenced deployment roots unevaluated. */
+export async function readDerivation(appDir: string, pkg: string, lifting: boolean): Promise<unknown> {
+  const app = await Deno.realPath(appDir);
+  let root = app;
+  while (await ifMissing(Deno.stat(join(root, "cue.mod/module.cue")), null) === null) {
+    const parent = dirname(root);
+    if (parent === root) throw new Error(`${app}: no enclosing CUE module`);
+    root = parent;
+  }
+  const module = await cueJson(root, ["export", join(root, "cue.mod/module.cue"), "-e", "module", "--out", "json"]);
+  if (typeof module !== "string" || module === "") throw new Error(`${root}/cue.mod/module.cue: module must be a string`);
+  const versionAt = module.lastIndexOf("@");
+  const modulePath = versionAt < 0 ? module : module.slice(0, versionAt);
+  const version = versionAt < 0 ? "" : module.slice(versionAt);
+  const subdir = relative(root, app).split(sep).join("/");
+  const importPath = `${modulePath}${subdir ? `/${subdir}` : ""}${version}:${pkg}`;
+  const observer = await Deno.makeTempDir({ dir: app, prefix: ".pronto-derive-" });
+  try {
+    const bootstrap = await Deno.makeTempFile({ dir: app, prefix: "pronto_derive_", suffix: ".cue" });
+    try {
+      // Tag injection applies only to the CLI package, so the imported app is lifted explicitly.
+      await Deno.writeTextFile(bootstrap, `package ${pkg}\ncode: surface: screens: [string]: charts: *[] | [..._]\n${lifting ? "_deriving: true\n" : ""}`);
+      const expression =
+        "{entities: app.code.state.entities, ir: app.code.meta.ir.source, " +
+        "decisions: {for k, v in app.code.meta.decisions {(k): v.ir}}, " +
+        "tests: {for k, t in app.code.meta.tests {(k): t.ir}}, " +
+        "paths: {for k, s in app.code.surface.screens {(k): {for n, p in s.paths {(n): p.accepts}}}}, " +
+        // Both sides of the literal rule's join, out of this one export, and the
+        // shared stylesheets the emission itself carries. Read off disk instead, a missing or stale file
+        // would yield an empty step set and a green lint. The checked-in copies are held equal to these by the
+        // artifact hashes, so nothing is lost by grading the emission.
+        "scale: app.out.scale, design: app.code.surface.design, " +
+        "designCss: app.out.files[\"shell/design.css\"].text, " +
+        "shellCss: app.out.files[\"shell/shell.css\"].text, " +
+        "entry: app.out.terminal.surface.entry, " +
+        // The terminal's own paths: what this pass spawns to read the markup,
+        // and the published schema it vets each chart against.
+        "terminalRuntime: app.out.terminal.surface.runtime, " +
+        "markupReader: app.out.terminal.surface.markupReader, " +
+        "machineSchema: app.out.terminal.surface.machineSchema, " +
+        "statics: [for s in app.out.cluster.meta.statics {file: s.file, target: s.target}], " +
+        "shared: {for k, s in app.code.surface.screens {(k): s.files.shared}}, " +
+        "pendingLiterals: app.code.meta.design.pendingLiterals, " +
+        // Which tables the terminal reads lazily and why, as the program
+        // decides it from the reads and writes the last derivation projected.
+        "read: app.code.#read, " +
+        "program: app.code}";
+      await Deno.writeTextFile(join(observer, "input.cue"), `package ${pkg === "pronto_derivation" ? "pronto_derivation_reader" : "pronto_derivation"}\nimport app ${JSON.stringify(importPath)}\nreading: ${expression}\n`);
+      return await cueJson(observer, ["export", ".", "-e", "reading", "--out", "json"]);
+    } finally {
+      await Deno.remove(bootstrap);
+    }
+  } finally {
+    await Deno.remove(observer, { recursive: true });
+  }
+}
+
 export async function derive(appDir: string): Promise<void> {
   const program = await Deno.readTextFile(`${appDir}/program.cue`);
   const pkg = /^package (\w+)$/m.exec(program)?.[1] ?? fail(`${appDir}/program.cue names no package`);
@@ -332,72 +398,11 @@ export async function derive(appDir: string): Promise<void> {
   await ifMissing(Deno.remove(`${appDir}/program_validations.cue`), undefined);
   // The previous run's citations are its own: a test or decision new to the
   // ir has no entry until this run derives one, so this read alone lifts them
-  // (`_deriving`, emitted below) and every other read stays strict. cue
-  // refuses a tag no file declares, so a file from before the tag is read
-  // as it is; its first rewrite declares it.
+  // (`_deriving`) and every other read stays strict. A file from before
+  // the tag is read as it is; its first rewrite declares it.
   const previous = await ifMissing(Deno.readTextFile(`${appDir}/program_derived.cue`), "");
-  const lift = previous.includes("@tag(derive,") ? ["-t", "derive=true"] : [];
+  const lifting = previous.includes("@tag(derive,");
 
-  // One export, not one per question: cue dominates this loop, so a second
-  // invocation costs more than everything else derivation does.
-  const exporting = new Deno.Command("cue", {
-    args: [
-      "export",
-      ...lift,
-      ".",
-      "-",
-      "-e",
-      "{entities: code.state.entities, ir: code.meta.ir.source, " +
-        "decisions: {for k, v in code.meta.decisions {(k): v.ir}}, " +
-        "tests: {for k, t in code.meta.tests {(k): t.ir}}, " +
-        "paths: {for k, s in code.surface.screens {(k): {for n, p in s.paths {(n): p.accepts}}}}, " +
-        // Both sides of the literal rule's join, out of this one export, and the
-        // shared stylesheets the emission itself carries. Read off disk instead, a missing or stale file
-        // would yield an empty step set and a green lint. The checked-in copies are held equal to these by the
-        // artifact hashes, so nothing is lost by grading the emission.
-        "scale: out.scale, design: code.surface.design, " +
-        "designCss: out.files[\"shell/design.css\"].text, " +
-        "shellCss: out.files[\"shell/shell.css\"].text, " +
-        "entry: out.terminal.surface.entry, " +
-        // The terminal's own paths: what this pass spawns to read the markup,
-        // and the published schema it vets each chart against.
-        "terminalRuntime: out.terminal.surface.runtime, " +
-        "markupReader: out.terminal.surface.markupReader, " +
-        "machineSchema: out.terminal.surface.machineSchema, " +
-        "statics: [for s in out.cluster.meta.statics {file: s.file, target: s.target}], " +
-        "shared: {for k, s in code.surface.screens {(k): s.files.shared}}, " +
-        "pendingLiterals: code.meta.design.pendingLiterals, " +
-        // Which tables the terminal reads lazily and why, as the program
-        // decides it from the reads and writes the last derivation projected.
-        "read: code.#read, " +
-        // `program` rather than `code`: a field named for the value it holds would
-        // shadow it inside the struct literal and export an incomplete `_`.
-        "program: code}",
-      "--out",
-      "json",
-    ],
-    cwd: appDir,
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "inherit",
-  }).spawn();
-  // Only the derivation export bootstraps missing chart projections. This
-  // pass rebuilds them; normal exports require them on assembly screens.
-  const input = exporting.stdin.getWriter();
-  await input.write(new TextEncoder().encode(`package ${pkg}\ncode: surface: screens: [string]: charts: *[] | [..._]\n`));
-  await input.close();
-  const exported = await exporting.output();
-  if (!exported.success) {
-    fail(
-      lift.length > 0 || previous === ""
-        ? "cue export of the entities, the ir source and the decision ids failed"
-        // A file from before the tag cites every test and decision strictly,
-        // so one the ir just gained is an undefined lookup here. One rewrite
-        // from the program as it stood declares the tag.
-        : "cue export failed, and program_derived.cue predates the derive tag: an undefined test or decision lookup above " +
-          "means a new one, so regenerate once without it, then add it",
-    );
-  }
   const exp: {
     // The export carries a whole #Entity; each module declares the slice it
     // reads, and this pass reads both the lint slice and the validation one.
@@ -421,7 +426,7 @@ export async function derive(appDir: string): Promise<void> {
     pendingLiterals: number;
     read: Record<string, { table: string; mode: string; reason: string }>;
     program: Record<string, unknown>;
-  } = JSON.parse(new TextDecoder().decode(exported.stdout));
+  } = await readDerivation(appDir, pkg, lifting) as typeof exp;
   const entities = exp.entities;
   // `program` is exported whole, so the slices the table registry needs are
   // read off it rather than added to the expression above.
