@@ -111,7 +111,7 @@ type MachineProjection = {
   filterSpec: Spec;
   writes: Write[];
 };
-type ScreenProjection = { handlers: string[]; adapters: string[]; reads: Read[]; writes: Write[]; machines: MachineProjection[] };
+export type ScreenProjection = { handlers: string[]; adapters: string[]; reads: Read[]; writes: Write[]; machines: MachineProjection[] };
 
 /** The slice of a program's entity this pass reads off its own export; every
  * module it hands the entities to declares the slice it reads for itself. */
