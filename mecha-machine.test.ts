@@ -184,9 +184,10 @@ Deno.test("mecha machine compiles statechart into PostgreSQL 010_machines.sql", 
   // Check final state immutability
   assertStringIncludes(sql, "cannot transition from final state % on %");
 
-  // Check timeout guard for 60000ms
+  // A timeout arms the ticker rather than depending on another client write.
   assertStringIncludes(sql, "interval '60000 milliseconds'");
-  assertStringIncludes(sql, "% in state % has expired (timeout after %ms)");
+  assertStringIncludes(sql, "CREATE TABLE IF NOT EXISTS public.machine_timer_tick");
+  assertStringIncludes(sql, "timer_delay = '60000'");
 
   // Check effect generation for ensure
   assertStringIncludes(sql, 'INSERT INTO "audit_log" ("event") VALUES (\'challenge_accepted\') ON CONFLICT ("id") DO NOTHING;');

@@ -17,6 +17,8 @@
 package pronto
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"list"
 	"regexp"
@@ -547,6 +549,7 @@ _sqlType: {
 	name:  string
 	state: #MechaState
 	states: [string]: #MechaState
+	timed: *false | bool
 	// The effect each invoking state of the machine claims on entry.
 	invokes: [string]: #ExternalEffect
 	pk: [...string]
@@ -572,10 +575,11 @@ _sqlType: {
 
 	_afterTransitions: [if ST.state["after"] != _|_ {[
 		for d, tr in ST.state.after
-		for t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
+		for idx, t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
 			if t["target"] != _|_ {target: t.target}
 			event:   "after"
 			delayMs: d
+			branch: idx
 			if t["guard"] != _|_ {guard: t.guard}
 			actions: [if t["actions"] != _|_ {[if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0]}, []][0]
 		},
@@ -591,25 +595,16 @@ _sqlType: {
 
 	_allTransitions: list.Concat([_onTransitions, _afterTransitions, _invokeTransitions])
 
-	_validTargets: [for t in _allTransitions if t["target"] != _|_ {t.target}]
-	_validTargetLits: [for t in _validTargets {"'\(t)'"}]
-
-	_timeoutChecks: [for t in _afterTransitions {
-		"""
-		      -- Timeout check: state \(ST.name) expires after \(t.delayMs)ms
-		      IF NEW."\(ST.field)" <> '\(t.target)' AND OLD.created_at < (now() - interval '\(t.delayMs) milliseconds') THEN
-		        RAISE EXCEPTION '% in state % has expired (timeout after %ms)', '\(ST.table)', '\(ST.name)', '\(t.delayMs)' USING ERRCODE = 'check_violation';
-		      END IF;
-		"""
-	}]
-
 	_transitionBranches: [for t in _allTransitions {
-		_guardLine: [if t["guard"] != _|_ {
+		_guardLine: [if t["guard"] != _|_ if t.delayMs == _|_ {
 			"""
-			        IF NOT (\(t.guard)) THEN
+			        IF (\(t.guard)) IS NOT TRUE THEN
 			          RAISE EXCEPTION 'guard failed on % transition from % to %', '\(ST.table)', '\(ST.name)', '\(t.target)' USING ERRCODE = 'check_violation';
 			        END IF;
 			"""
+		}, ""][0]
+		_timerGate: [if ST.timed {
+			[if t.delayMs != _|_ {" AND timer_delay = '\(t.delayMs)' AND timer_branch = \(t.branch)"}, " AND timer_delay IS NULL"][0]
 		}, ""][0]
 		_actionLines: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
 		_exitActions: [if ST.state.exit != _|_ for a in [if (ST.state.exit & [...]) != _|_ {ST.state.exit}, [ST.state.exit]][0] {
@@ -620,7 +615,7 @@ _sqlType: {
 		}]
 		_enterLines: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
 		"""
-		      IF NEW."\(ST.field)" = '\(t.target)' THEN
+		      IF NEW."\(ST.field)" = '\(t.target)'\(_timerGate) THEN
 		\(_guardLine)\(strings.Join(list.Concat([_exitActions, _actionLines, _entryActions, _enterLines]), "\n"))
 		        RETURN NEW;
 		      END IF;
@@ -641,13 +636,9 @@ _sqlType: {
 
 	_normalBlock: """
 		    IF OLD."\(ST.field)" = '\(ST.name)' THEN
-		\(strings.Join(_timeoutChecks, "\n"))\(_outcomeCheck)
-		      IF NEW."\(ST.field)" NOT IN (\(strings.Join(_validTargetLits, ", "))) THEN
-		        RAISE EXCEPTION 'invalid transition on % from % to %', '\(ST.table)', OLD."\(ST.field)", NEW."\(ST.field)" USING ERRCODE = 'check_violation';
-		      END IF;
-
+		\(_outcomeCheck)
 		\(strings.Join(_transitionBranches, "\n"))
-		      RETURN NEW;
+		      RAISE EXCEPTION 'invalid transition on % from % to %', '\(ST.table)', OLD."\(ST.field)", NEW."\(ST.field)" USING ERRCODE = 'check_violation';
 		    END IF;
 		"""
 
@@ -674,7 +665,10 @@ _sqlType: {
 
 		_invokes: {for sName, sBody in S.machine.states if sBody["invoke"] != _|_ {(sName): S.effects[sBody.invoke.src]}}
 		_hasInvoke: len([for _, _ in _invokes {true}]) > 0
-		_declare: [if _hasInvoke {"DECLARE\n  outcome jsonb;\n"}, ""][0]
+		_hasTimers: S.machine._timed
+		_declare: [if _hasInvoke || _hasTimers {"DECLARE\n" + strings.Join([if _hasInvoke {"  outcome jsonb;\n"}, if _hasTimers {"  timer_delay text;\n  timer_branch integer;\n"}], "")}, ""][0]
+		_timerContext: [if _hasTimers {"  IF TG_OP = 'UPDATE' THEN\n" + (#TimerContextSql & {machine: S.machine.name, field: _field, pk: _pk, rec: "OLD"}).out + "\n  END IF;\n"}, ""][0]
+		_sameStateGate: [if _hasTimers {" AND timer_delay IS NULL"}, ""][0]
 		_pk: [for e in S.entities if e.table == _table for f in e.fields if f.pk != _|_ if f.pk {f.name}]
 		_initialEnter: [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk}).out + "\n"}, ""][0]
 		_initialActions: [if S.machine.states[S.machine.initial].entry != _|_
@@ -708,7 +702,7 @@ _sqlType: {
 		// A ledger key is a field's text, which for a date or time is the
 		// session's to spell; pinned, so the claim's key and the outcome
 		// check's are one.
-		_locale: [if _hasInvoke {"\nSET TimeZone = 'UTC'\nSET DateStyle = 'ISO, YMD'"}, ""][0]
+		_locale: [if _hasInvoke || _hasTimers {"\nSET TimeZone = 'UTC'\nSET DateStyle = 'ISO, YMD'"}, ""][0]
 
 		_stateBlocks: [for sName, sBody in S.machine.states {
 			(#mechaStateSql & {
@@ -717,6 +711,7 @@ _sqlType: {
 				name:    sName
 				state:   sBody
 				states: S.machine.states
+				timed: _hasTimers
 				invokes: _invokes
 				pk:      _pk
 			}).out
@@ -728,7 +723,7 @@ _sqlType: {
 			SECURITY DEFINER
 			SET search_path = public, pg_catalog\(_locale) AS $$
 			\(_declare)BEGIN
-			\(_deleteBlock)\(strings.Join([for h in _held {h + "\n"}], ""))  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = NEW."\(_field)" THEN
+			\(_deleteBlock)\(_timerContext)\(strings.Join([for h in _held {h + "\n"}], ""))  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = NEW."\(_field)"\(_sameStateGate) THEN
 			    RETURN NEW;
 			  END IF;
 
@@ -753,7 +748,7 @@ _sqlType: {
 			  EXECUTE FUNCTION "\(_fnName)"();
 			"""
 
-		_checkConstraint + "\n\n" + _triggerBody
+		_checkConstraint + "\n\n" + _triggerBody + [if _hasTimers {"\n\n" + (#MachineTimerSql & {machine: S.machine, table: _table, pk: _pk}).out}, ""][0]
 	}, ""][0]
 
 	_lifecycleMachineSql: [if S.machine["on"] != _|_ {
@@ -809,7 +804,19 @@ _sqlType: {
 		_reducerBody
 	}, ""][0]
 
-	out: [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
+	_compiledSql: [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
+	_signature: hex.Encode(sha256.Sum256(_compiledSql))
+	_timerFunction: [if S.machine._timed {"trg_\(_table)_\(S.machine.field)_timer_arm"}, ""][0]
+	_timerCheck: [if S.machine._timed {
+		"""
+		DO $$ BEGIN
+		  IF obj_description(to_regprocedure('"\(_timerFunction)"()'), 'pg_proc') IS DISTINCT FROM '\(_signature)' THEN
+		    RAISE EXCEPTION 'machine \(S.machine.name) timer interpreter differs from the program: migrate 010_machines.sql and existing state-entry deadlines before starting';
+		  END IF;
+		END $$;
+		"""
+	}, ""][0]
+	out: _compiledSql + [if S.machine._timed {"\nCOMMENT ON FUNCTION \"\(_timerFunction)\"() IS '\(_signature)';"}, ""][0]
 }
 
 // A jsonb_build_object over a map of input values: "NEW.<col>"/"OLD.<col>"
@@ -2096,6 +2103,7 @@ _cdcBeforeField: "__before"
 				file: "docker/\(D.code.meta.name)-\(n).yaml"
 			}]
 			schedules: [for _, sc in D.code.state.schedules {sc.name}]
+			(#MachineTimerState & {code: D.code}).out
 			// The emitted manifest, endpoints and handlers sit where the
 			// cluster looks for them by default.
 			effects: [if D.code.state.effects != _|_ for n, x in D.code.state.effects {
@@ -2269,6 +2277,7 @@ _cdcBeforeField: "__before"
 	// clock is what makes the absence loud, and `meta.clocks` is where the app
 	// says so. The pages target skips schedules (_pagesBundle), so only an
 	// effect asks it for a clock.
+	_timedMachines: (#TimedMachines & {code: E.code}).out
 	_clockDeclared: {
 		for t in E.code.meta.targets {
 			if (t != "pages" && len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0) || (E.code.state.effects != _|_ && len(E.code.state.effects) > 0) {
@@ -2535,10 +2544,11 @@ _cdcBeforeField: "__before"
 	// The `service` role alone also stands where a schedule or an effect is
 	// declared: the ticker writes its ticks as it, through crud, which mecha's
 	// cluster has verify the token wherever something wakes (its _serviceToken).
-	_serviceOn: E._authOn || len(E.code.state.schedules) > 0 || [if E.code.state.effects != _|_ {len(E.code.state.effects) > 0}, false][0]
+	_serviceOn: len(E._timedMachines) > 0 || E._authOn || len(E.code.state.schedules) > 0 || [if E.code.state.effects != _|_ {len(E.code.state.effects) > 0}, false][0]
 
 	// The cluster handed in must be the program's: #DefaultCluster derives
 	// these from the code, and a cluster that disagrees conflicts here.
+	cluster: state: (#MachineTimerState & {code: E.code}).out
 	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
 	cluster: capabilities: blobs: E.code.capabilities.blobs
 	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
@@ -2707,6 +2717,7 @@ _cdcBeforeField: "__before"
 	cluster: capabilities: server: E._serverOn
 
 	files: [string]: #File
+	files: {if E.code._timerRefusal {}}
 	// The compose files an installed app's closures include, one per
 	// MONOREPO_COMPOSE_MODE (builders/bayt.cue): `service` builds mecha's images
 	// from its fragments, where MONOREPO_MECHA_PATH puts mecha's tree; unset
@@ -2961,7 +2972,7 @@ _cdcBeforeField: "__before"
 			if len(_machines) > 0 {
 				"services/database/migrations/010_machines.sql": {
 					format: "sql"
-					text: strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0]}).out}], "\n\n") + "\n"
+					text: [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0]}).out}], "\n\n") + "\n"
 				}
 			}
 

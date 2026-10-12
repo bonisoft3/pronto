@@ -33,6 +33,7 @@ import (
 #BridgePort: impl.#BridgePort
 
 #ConduitSlot: impl.#ConduitSlot
+#MachineTimersSql: impl.#MachineTimersSql
 
 // The mecha images an app takes by name, as pronto pins them: the consumer
 // pins what it builds on, so a pronto release names a mecha release's images

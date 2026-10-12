@@ -393,6 +393,35 @@ A mecha machine declares either a statechart (`states`) or lifecycle handlers
 (`on.insert`, `on.update`, `on.delete`). Combining them is refused; separate
 machines over the same entity keep both triggers explicit in SQL and in the IR.
 
+**A server machine's `after` is a durable timer.** Each nonnegative integer
+millisecond delay arms a one-shot schedule on state entry, in the row's
+transaction. The existing ticker inserts a private `machine_timer_tick`; its
+interpreter locks the owner, verifies that the same visit is still active,
+selects the first true guard, and performs exit, transition and entry actions.
+A timed self-transition creates another visit. An earlier `AFTER` trigger
+that rewrites or recreates the owner during the same row event is refused;
+it cannot silently replace the visit being armed. A false or null guard consumes
+that timeout; other delays remain armed. The clock's sweep cadence bounds
+precision: `after` is a minimum delay, not an exact execution time.
+
+Leaving a state, changing the primary key or deleting the row cancels its
+schedules. Every entry has distinct schedule names, so a late tick cannot
+advance a later visit to the same state. Duplicate tick IDs are absorbed.
+Primary keys cross the ticker as text, preserving large integers and composite
+keys. Client roles cannot read or write the schedule or tick tables. Timed
+machines require a server-held entity and a primary key; final states have no
+`after`. They require a declared cloud clock and cannot target Pages.
+
+`010_machines.sql` installs the timer tables and interpreters before seeds.
+Retained databases must apply the generated SQL through their migration path;
+the `timer-check` startup step refuses a different interpreter. First adoption
+also refuses existing timed rows without explicit schedules for their current
+state's delays: a migration must supply deadlines from known entry times or
+explicitly move those rows. Creation time is not state-entry time. Subsequent
+timer changes require the migration to reconcile any pending schedules with
+the new program. The compiler never guesses elapsed time or resets deadlines
+during startup.
+
 **A terminal chart is closed over the entity's row.** `context` is refused:
 other columns start from the entity's field defaults. The emitted
 `shell.yaml` schema carries defaults as literal values: a SQL quoted string

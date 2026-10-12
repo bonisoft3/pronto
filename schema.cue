@@ -963,7 +963,7 @@ import (
 #MechaState: {
 	type?:    "final" | "normal"
 	on?: [Event=string]: #MechaTransitionValue
-	after?: [DelayMs=string]: #MechaTransitionValue
+	after?: [=~"^(0|[1-9][0-9]{0,11})$"]: string | (#MechaTransition & {target!: string}) | [(#MechaTransition & {target!: string}), ...(#MechaTransition & {target!: string})]
 	// XState's invoke, whose actor is an external effect's handler: entering
 	// the state claims the effect, and only its outcome leaves.
 	invoke?: {
@@ -994,6 +994,17 @@ import (
 		for a in M._actions if a.hatch != _|_
 		for h in [if (a.hatch & [...]) != _|_ {a.hatch}, [a.hatch]][0] {(h.name): true}
 	} {hn}])
+	_timers: [if M.states != _|_ for sn, st in M.states if st.after != _|_
+		for ms, tr in st.after
+		for idx, t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
+			state: sn
+			"delay": ms
+			"branch": idx
+			target: t.target
+			if t.guard != _|_ {guard: t.guard}
+		}]
+	_timed: len(_timers) > 0
+
 	timing?: "BEFORE" | "AFTER"
 	field?:   string
 	initial?: string
@@ -1715,6 +1726,36 @@ import (
 		},
 	])
 	_machineStateRefusal: [if len(_machineStateViolations) == 0 {true}, _machineStateViolations[0]][0] & true
+
+	_timedMachines: [if A.state.machines != _|_ for _, m in A.state.machines if m._timed {m}]
+	_timerViolations: list.Concat([
+
+		[if len(A._timedMachines) > 0 for target in A.meta.targets if target == "pages" {
+			"server timers cannot target pages"
+		}],
+		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "pages" if !list.Contains(A.meta.clocks, target) {
+			"server timers require a declared clock for \(target)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if !e.server {
+			"timed machine \(mn) requires a server-held entity"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if len([for f in e.fields if f.pk {f}]) == 0 {
+			"timed machine \(mn) requires a primary key"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines for t in m._timers if m.states[t.target] == _|_ {
+			"timed machine \(mn) state \(t.state) targets missing state \(t.target)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m.states != _|_ for sn, st in m.states if st.type != _|_ if st.type == "final" if st.after != _|_ {
+			"machine \(mn) final state \(sn) cannot declare after"
+		}],
+		[if len(A._timedMachines) > 0 for en, e in A.state.entities if e.table == "schedule" || e.table == "machine_timer_tick" {
+			"timed machines reserve table \(e.table), declared by \(en)"
+		}],
+		[if len(A._timedMachines) > 0 for sn, sc in A.state.schedules if strings.HasPrefix(sc.name, "machine:") {
+			"timed machines reserve schedule prefix machine:, declared by \(sn)"
+		}],
+	])
+	_timerRefusal: [if len(_timerViolations) == 0 {true}, _timerViolations[0]][0] & true
 
 	_unitViolations: list.Concat([
 		[for un, u in A.capabilities.vendored for r in u.ports.reads if A.state.entities[r] == _|_ {
