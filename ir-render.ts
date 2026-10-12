@@ -1,7 +1,7 @@
 // The compiler draws, the author writes prose (decisions/2026-10-10-hatches.md,
 // "What ir.html shows"). Every `data-kind="entity"` element in ir.html that names
-// a declared entity gets a generated region right after its opening tag — the
-// entity's card — and the region is the only part of ir.html pronto writes:
+// a declared entity gets a generated card after its heading. Screen headings
+// likewise receive generated neighbourhoods, with their union before the first:
 //
 //   <section id="Game" data-kind="entity" …>
 //   <!-- pronto:card -->…<!-- /pronto:card -->
@@ -14,8 +14,7 @@
 // referrers and references as links; and, for an entity a machine moves, the
 // chart as the one picture — a D2 rendering carrying its own `data-kind`
 // (`machine`, and `effect` for what it invokes), which is how those claims are
-// answered without the author drawing them. write.ts runs this after derive
-// and before the derive that records the regions (facts `ir_region`).
+// answered without the author drawing them. write.ts runs this after derive.
 
 
 export type Field = { name: string; type: string; ordinal?: number; retired?: boolean; pk?: boolean; ref?: string; required?: boolean; unique?: boolean; default?: string; cel?: string };
@@ -47,12 +46,14 @@ export type MechaMachine = {
 export type Effect = { ir: string; sink: { origin?: string; bridge?: string; idempotent: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note: string };
 /** A vendored unit: its boundary, its ports and, for an agent, its memo. */
 export type Unit = { isolation: string; ports: { reads: string[]; raises: string[] }; memo?: { entity: string; key: string[] } };
+export type Screen = { ir: string; title: string; reads: { table: string; embeds?: string[] }[] };
 export type Program = {
   state: {
     entities: Record<string, Entity>;
     machines?: Record<string, MechaMachine>;
     effects?: Record<string, Effect>;
   };
+  surface: { screens: Record<string, Screen> };
   capabilities: { auth?: unknown; vendored?: Record<string, Unit> };
 };
 
@@ -87,9 +88,123 @@ const STAMPS = new Set(["created_by", "updated_by", "created_at", "updated_at"])
 const REACH = ["tab", "device", "offline", "live", "server"];
 
 const esc = (s: unknown) => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+const quoted = (s: string) => JSON.stringify(s);
 const tip = (text: string) => ` data-tip="${esc(text)}" tabindex="0"`;
 const chip = (name: string, value: string, derived: boolean, explain = TIP[name]) =>
   `<span class="chip${derived ? " derived" : ""}"${tip(explain)}><b>${name}</b> ${esc(value)}</span>`;
+
+export type Neighbourhood = { entities: string[]; edges: Set<string>; machineFields: Map<string, Set<string>> };
+const edgeKey = (from: string, field: string, to: string, target: string) => JSON.stringify([from, field, to, target]);
+
+function neighbourhood(program: Program, names: Iterable<string>, machineFields: Map<string, Set<string>>): Neighbourhood {
+  const entities = [...new Set(names)].sort();
+  const selected = new Set(entities);
+  const selectedMachineFields = new Map<string, Set<string>>();
+  for (const name of entities) {
+    const fields = machineFields.get(name);
+    if (fields !== undefined) selectedMachineFields.set(name, new Set(fields));
+  }
+  const byTable = new Map(Object.entries(program.state.entities).map(([name, entity]) => [entity.table, { name, entity }]));
+  const edges = new Set<string>();
+  for (const name of entities) {
+    const entity = program.state.entities[name];
+    if (entity === undefined) throw new Error(`neighbourhood names undeclared entity ${name}`);
+    for (const field of entity.fields) {
+      if (field.retired || STAMPS.has(field.name) || field.ref === undefined) continue;
+      const target = byTable.get(field.ref);
+      if (target === undefined || !selected.has(target.name)) continue;
+      const pk = target.entity.fields.find((f) => f.pk && !f.retired && !STAMPS.has(f.name));
+      if (pk === undefined) throw new Error(`${name}.${field.name} references ${target.name}, which has no active primary key`);
+      edges.add(edgeKey(name, field.name, target.name, pk.name));
+    }
+  }
+  return { entities, edges, machineFields: selectedMachineFields };
+}
+
+export function screenNeighbourhood(program: Program, screenName: string, screen: Screen, chartFields: Map<string, Set<string>>): Neighbourhood {
+  const byTable = new Map(Object.entries(program.state.entities).map(([name, entity]) => [entity.table, { name, entity }]));
+  const names = new Set<string>();
+  for (const read of screen.reads) {
+    const root = byTable.get(read.table);
+    if (root === undefined) throw new Error(`screen ${screenName} reads ${read.table}, the table of no declared entity`);
+    names.add(root.name);
+    const local = new Set([root.name]);
+    for (const embed of read.embeds ?? []) {
+      const direct = byTable.get(embed);
+      if (direct !== undefined) {
+        names.add(direct.name);
+        local.add(direct.name);
+        continue;
+      }
+      const targets = new Set<string>();
+      let platform = false;
+      for (const name of local) {
+        for (const field of program.state.entities[name].fields) {
+          if (field.name !== embed || field.ref === undefined) continue;
+          const target = byTable.get(field.ref);
+          if (target !== undefined) targets.add(target.name);
+          else if (field.ref === "app_user") platform = true;
+        }
+      }
+      if (targets.size > 1) throw new Error(`screen ${screenName} embed ${embed} names more than one declared entity: ${[...targets].sort().join(", ")}`);
+      if (targets.size === 0 && embed !== "app_user" && !platform) throw new Error(`screen ${screenName} read ${read.table} has unresolved embed ${embed}`);
+      for (const target of targets) {
+        names.add(target);
+        local.add(target);
+      }
+    }
+  }
+  return neighbourhood(program, names, chartFields);
+}
+
+/** A screen's related entities in D2's SQL-table grammar. */
+export function neighbourhoodD2(program: Program, graph: Neighbourhood, cardIrs: Set<string>): string {
+  const selected = new Set(graph.entities);
+  let source = "direction: right\n";
+  for (const name of graph.entities) {
+    const entity = program.state.entities[name];
+    if (entity === undefined) throw new Error(`neighbourhood names undeclared entity ${name}`);
+    const marks = graph.machineFields.get(name) ?? new Set<string>();
+    source += `${quoted(entity.ir)}: {\n  shape: sql_table\n`;
+    if (cardIrs.has(entity.ir)) source += `  link: ${quoted(`#${entity.ir}`)}\n`;
+    for (const field of entity.fields) {
+      if (field.retired || STAMPS.has(field.name) || (!field.pk && field.ref === undefined && !marks.has(field.name))) continue;
+      const constraints = [field.pk ? "primary_key" : "", field.ref === undefined ? "" : "foreign_key", marks.has(field.name) ? "machine" : ""].filter(Boolean);
+      const constraint = constraints.length === 1 ? constraints[0] : quoted(constraints.join(" · "));
+      source += `  ${quoted(field.name)}: ${quoted(field.type)}${constraints.length === 0 ? "" : ` {constraint: ${constraint}}`}\n`;
+    }
+    source += "}\n";
+  }
+  for (const key of [...graph.edges].sort()) {
+    const [from, field, to, target] = JSON.parse(key) as [string, string, string, string];
+    if (!selected.has(from) || !selected.has(to)) throw new Error(`neighbourhood edge escapes its entities: ${from}.${field} -> ${to}.${target}`);
+    source += `${quoted(program.state.entities[from].ir)}.${quoted(field)} -> ${quoted(program.state.entities[to].ir)}.${quoted(target)}\n`;
+  }
+  return source;
+}
+
+export function mergeNeighbourhoods(graphs: Iterable<Neighbourhood>): Neighbourhood {
+  const entities = new Set<string>();
+  const edges = new Set<string>();
+  const machineFields = new Map<string, Set<string>>();
+  for (const graph of graphs) {
+    for (const entity of graph.entities) entities.add(entity);
+    for (const edge of graph.edges) edges.add(edge);
+    for (const [entity, fields] of graph.machineFields) {
+      const merged = machineFields.get(entity) ?? new Set<string>();
+      for (const field of fields) merged.add(field);
+      machineFields.set(entity, merged);
+    }
+  }
+  return { entities: [...entities].sort(), edges, machineFields };
+}
+
+function entitySummary(program: Program, graph: Neighbourhood, cardIrs: Set<string>): string {
+  return graph.entities.map((name) => {
+    const ir = program.state.entities[name].ir;
+    return cardIrs.has(ir) ? `<a href="#${esc(ir)}">${esc(ir)}</a>` : `<span>${esc(ir)}</span>`;
+  }).join(", ");
+}
 
 /** The D2 source of a chart: a state a box, an invoking state dashed, a final
  * state a double ring, every arrow labelled by its event. */
@@ -279,7 +394,12 @@ ${machinePanels.join("\n")}
 
 const OPEN = "<!-- pronto:card -->";
 const CLOSE = "<!-- /pronto:card -->";
+const NEIGHBOURHOOD_OPEN = "<!-- pronto:neighbourhood -->";
+const NEIGHBOURHOOD_CLOSE = "<!-- /pronto:neighbourhood -->";
+const APP_OPEN = "<!-- pronto:app-neighbourhood -->";
+const APP_CLOSE = "<!-- /pronto:app-neighbourhood -->";
 const ENTITY_TAG = /<([a-z][a-z0-9]*)\s[^>]*data-kind="entity"[^>]*>/g;
+const SCREEN_TAG = /<([a-z][a-z0-9]*)\s[^>]*data-kind="screen"[^>]*>/g;
 const ID = /\sid="([^"]*)"/;
 
 /** The generated regions in an ir.html, by the entity id they sit under. */
@@ -328,12 +448,53 @@ export function fillRegions(html: string, cards: Map<string, string>): string {
   return out + html.slice(at);
 }
 
+function stripAppNeighbourhood(html: string): string {
+  const start = html.indexOf(APP_OPEN);
+  if (start === -1) return html;
+  if (html.indexOf(APP_OPEN, start + APP_OPEN.length) !== -1) throw new Error("ir.html: more than one app neighbourhood region");
+  const end = html.indexOf(APP_CLOSE, start + APP_OPEN.length);
+  if (end === -1) throw new Error("ir.html: the app neighbourhood opens and never closes");
+  const resume = end + APP_CLOSE.length + (html[end + APP_CLOSE.length] === "\n" ? 1 : 0);
+  return html.slice(0, start) + html.slice(resume);
+}
+
+/** Replaces each screen graph after its heading and the collapsed app graph
+ * before the first screen. Missing screen content removes a prior region. */
+export function fillNeighbourhoodRegions(html: string, screens: Map<string, string>, app: string | null): string {
+  let out = "";
+  let at = 0;
+  for (const tag of html.matchAll(SCREEN_TAG)) {
+    const id = ID.exec(tag[0])?.[1];
+    if (id === undefined) continue;
+    const site = cardSite(html, tag.index! + tag[0].length);
+    out += html.slice(at, site);
+    const marker = /^\s*<!-- pronto:neighbourhood -->/.exec(html.slice(site));
+    let resume = site;
+    if (marker !== null) {
+      const start = site + marker[0].length - NEIGHBOURHOOD_OPEN.length;
+      const end = html.indexOf(NEIGHBOURHOOD_CLOSE, start + NEIGHBOURHOOD_OPEN.length);
+      if (end === -1) throw new Error(`ir.html: the neighbourhood under "${id}" opens and never closes`);
+      resume = end + NEIGHBOURHOOD_CLOSE.length;
+    }
+    const graph = screens.get(id);
+    if (graph !== undefined) out += `\n${NEIGHBOURHOOD_OPEN}${graph}${NEIGHBOURHOOD_CLOSE}`;
+    at = resume;
+  }
+  const withoutApp = stripAppNeighbourhood(out + html.slice(at));
+  if (app === null) return withoutApp;
+  const first = SCREEN_TAG.exec(withoutApp);
+  SCREEN_TAG.lastIndex = 0;
+  if (first === null) throw new Error("ir.html: an app neighbourhood has no screen element to precede");
+  return withoutApp.slice(0, first.index) + `${APP_OPEN}${app}${APP_CLOSE}\n` + withoutApp.slice(first.index);
+}
+
 /** The card's stylesheet, as the ir's head links it (`ir/card.css`). Tokens
  * only, light and dark; the ir's own styles own everything else. */
 export const CARD_CSS = `/* generated by pronto from program.cue — do not edit */
-.card { --card-ink: #1b1f2a; --card-muted: #5f6782; --card-line: #d6dae4; --card-panel: #fff; --card-accent: #2443b8; --card-tip: #fff6bf; --card-tip-edge: #e3cf5a; --band: var(--card-accent);
+.card, .pronto-neighbourhood { --card-ink: #1b1f2a; --card-muted: #5f6782; --card-line: #d6dae4; --card-panel: #fff; --card-accent: #2443b8; --card-tip: #fff6bf; --card-tip-edge: #e3cf5a; --band: var(--card-accent); }
+.card {
   position: relative; background: var(--card-panel); border: 1px solid var(--card-line); color: var(--card-ink); font-size: 14px; line-height: 1.5; margin: 12px 0 20px; }
-@media (prefers-color-scheme: dark) { .card { --card-ink: #e8eaf0; --card-muted: #9aa3bd; --card-line: #2a3040; --card-panel: #1b1f2a; --card-accent: #8ea2ff; --card-tip: #3a3410; --card-tip-edge: #8a7a2a; } }
+@media (prefers-color-scheme: dark) { .card, .pronto-neighbourhood { --card-ink: #e8eaf0; --card-muted: #9aa3bd; --card-line: #2a3040; --card-panel: #1b1f2a; --card-accent: #8ea2ff; --card-tip: #3a3410; --card-tip-edge: #8a7a2a; } }
 .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--band); }
 .card.dur-server { --band: #2443b8; } .card.dur-live { --band: #1a8f5c; } .card.dur-offline { --band: #b8860b; } .card.dur-device { --band: #0e7c86; } .card.dur-tab { --band: #8a8f9c; }
 .card .ehead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; padding: 12px 18px 8px 24px; }
@@ -380,6 +541,13 @@ export const CARD_CSS = `/* generated by pronto from program.cue — do not edit
 .card .machine { display: grid; gap: 8px; padding: 10px 18px 14px 24px; border-top: 1px dashed var(--card-accent); }
 .card .mtitle { font-size: 15px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .card .canvas { overflow-x: auto; } .card .canvas svg { display: block; width: auto; height: auto; max-width: 640px; max-height: 260px; }
+.pronto-neighbourhood { max-width: 100%; margin: 12px 0 20px; color: var(--card-ink); }
+.pronto-neighbourhood > summary { cursor: pointer; font-weight: 600; }
+.pronto-neighbourhood .neighbourhood-canvas { max-width: 100%; max-height: min(70vh, 720px); overflow: auto; padding: 8px 0; }
+.pronto-neighbourhood .neighbourhood-canvas:focus-visible { outline: 2px solid var(--card-accent); outline-offset: 2px; }
+.pronto-neighbourhood .neighbourhood-canvas > svg { display: block; max-width: none; }
+.pronto-neighbourhood figcaption, .pronto-neighbourhood > p { margin-top: 6px; color: var(--card-muted); font-size: 13px; }
+.pronto-neighbourhood figcaption a, .pronto-neighbourhood > p a { color: inherit; }
 `;
 
 const LINK = '<link rel="stylesheet" href="ir/card.css">';
@@ -391,21 +559,66 @@ export async function renderIr(
   appDir: string,
   irPath: string,
   program: Program,
-  facts: { chart?: { table: string; field: string; machine: string }[]; read_mode?: { entity: string; mode: string }[] },
+  facts: {
+    chart?: { screen: string; table: string; field: string; machine: string }[];
+    read_mode?: { entity: string; mode: string }[];
+    reads?: { screen: string; entity: string }[];
+  },
   d2: (source: string) => Promise<string> = (source) => d2Svg(appDir, source),
 ): Promise<boolean> {
+  const entities = program.state.entities;
+  const byTable = new Map(Object.entries(entities).map(([name, entity]) => [entity.table, { name, entity }]));
+  const svgBySource = new Map<string, Promise<string>>();
+  const draw = (source: string) => {
+    const held = svgBySource.get(source);
+    if (held !== undefined) return held;
+    const rendered = d2(source);
+    svgBySource.set(source, rendered);
+    return rendered;
+  };
+  // D2's outer SVG has only a viewBox; give it intrinsic dimensions so the
+  // browser preserves readable labels instead of stretching it to the page.
+  const drawNeighbourhood = async (source: string) => (await draw(source)).replace(
+    /<svg\b([^>]*?)\bviewBox="([^"]+)"([^>]*?)>/,
+    (_tag, before: string, box: string, after: string) => {
+      const [, , width, height] = box.split(/\s+/).map(Number);
+      if (!(width > 0 && height > 0)) throw new Error(`D2 has invalid viewBox ${box}`);
+      return `<svg${before}viewBox="${box}"${after} width="${width}" height="${height}">`;
+    },
+  );
   const charts = new Map<string, { field: string; initial: string; states: Record<string, unknown>; on?: Record<string, unknown>; writes: string[] }[]>();
+  const chartFields = new Map<string, Map<string, Set<string>>>();
   for (const row of facts.chart ?? []) {
+    const entity = byTable.get(row.table);
+    if (entity === undefined) throw new Error(`chart fact names ${row.table}, the table of no declared entity`);
+    if (program.surface.screens[row.screen] === undefined) throw new Error(`chart fact names undeclared screen ${row.screen}`);
     const parsed = JSON.parse(row.machine) as { field: string; initial: string; states: Record<string, unknown>; on?: Record<string, unknown> };
+    if (parsed.field !== row.field) throw new Error(`chart fact ${row.screen}/${row.table} says field ${row.field} but its machine says ${parsed.field}`);
     const list = charts.get(row.table) ?? [];
-    if (list.some((c) => c.field === parsed.field)) continue;
-    list.push({ ...parsed, writes: [row.table] });
-    charts.set(row.table, list);
+    if (!list.some((c) => c.field === parsed.field)) {
+      list.push({ ...parsed, writes: [row.table] });
+      charts.set(row.table, list);
+    }
+    const byEntity = chartFields.get(row.screen) ?? new Map<string, Set<string>>();
+    const fields = byEntity.get(entity.name) ?? new Set<string>();
+    fields.add(row.field);
+    byEntity.set(entity.name, fields);
+    chartFields.set(row.screen, byEntity);
+  }
+  for (const row of facts.reads ?? []) {
+    if (program.surface.screens[row.screen] === undefined) throw new Error(`read fact names undeclared screen ${row.screen}`);
+    if (entities[row.entity] === undefined) throw new Error(`read fact names undeclared entity ${row.entity}`);
   }
   const readMode = new Map((facts.read_mode ?? []).map((r) => [r.entity, r.mode]));
-  const ctx: Context = { program, charts, readMode, d2 };
+  const ctx: Context = { program, charts, readMode, d2: draw };
   const html = await Deno.readTextFile(`${appDir}/${irPath}`);
-  const byIr = new Map(Object.entries(program.state.entities).map(([name, e]) => [e.ir, { name, e }]));
+  const byIr = new Map(Object.entries(entities).map(([name, e]) => [e.ir, { name, e }]));
+  if (byIr.size !== Object.keys(entities).length) throw new Error("two declared entities have the same ir id");
+  const cardIrs = new Set<string>();
+  for (const tag of html.matchAll(ENTITY_TAG)) {
+    const id = ID.exec(tag[0])?.[1];
+    if (id !== undefined && byIr.has(id)) cardIrs.add(id);
+  }
   const cards = new Map<string, string>();
   for (const tag of html.matchAll(ENTITY_TAG)) {
     const id = ID.exec(tag[0])?.[1];
@@ -414,10 +627,49 @@ export async function renderIr(
     cards.set(id!, await cardHtml(hit.name, hit.e, ctx));
   }
   let next = fillRegions(html, cards);
-  if (cards.size > 0 && !next.includes(LINK)) next = next.replace(/<\/head>/, `${LINK}\n</head>`);
+  const screenTags = new Set<string>();
+  for (const tag of next.matchAll(SCREEN_TAG)) {
+    const id = ID.exec(tag[0])?.[1];
+    if (id !== undefined) screenTags.add(id);
+  }
+  const mechaFields = new Map<string, Set<string>>();
+  for (const machine of Object.values(program.state.machines ?? {})) {
+    if (entities[machine.entity] === undefined) throw new Error(`machine ${machine.ir} names undeclared entity ${machine.entity}`);
+    const fields = mechaFields.get(machine.entity) ?? new Set<string>();
+    fields.add(machine.field);
+    mechaFields.set(machine.entity, fields);
+  }
+  const graphs = new Map<string, Neighbourhood>();
+  const screenHtml = new Map<string, string>();
+  for (const [screenName, screen] of Object.entries(program.surface.screens).sort(([a], [b]) => a.localeCompare(b))) {
+    if (!screenTags.has(screen.ir)) continue;
+    if (graphs.has(screen.ir)) throw new Error(`screens share ir id ${screen.ir}`);
+    const fields = new Map([...mechaFields].map(([entity, names]) => [entity, new Set(names)]));
+    for (const [entity, names] of chartFields.get(screenName) ?? []) {
+      const set = fields.get(entity) ?? new Set<string>();
+      for (const name of names) set.add(name);
+      fields.set(entity, set);
+    }
+    const graph = screenNeighbourhood(program, screenName, screen, fields);
+    graphs.set(screen.ir, graph);
+    if (graph.entities.length === 0) continue;
+    const svg = await drawNeighbourhood(neighbourhoodD2(program, graph, cardIrs));
+    screenHtml.set(screen.ir, `<figure class="pronto-neighbourhood" aria-label="${esc(screen.title)} entity neighbourhood"><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="${esc(screen.title)} entity diagram">${svg}</div><figcaption><b>entities:</b> ${entitySummary(program, graph, cardIrs)}</figcaption></figure>`);
+  }
+  const appGraph = mergeNeighbourhoods(graphs.values());
+  let appHtml: string | null = null;
+  if (appGraph.entities.length > 0) {
+    const svg = await drawNeighbourhood(neighbourhoodD2(program, appGraph, cardIrs));
+    appHtml = `<details class="pronto-neighbourhood app-neighbourhood"><summary>App entity neighbourhood · ${appGraph.entities.length} entities</summary><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="App entity diagram">${svg}</div><p><b>entities:</b> ${entitySummary(program, appGraph, cardIrs)}</p></details>`;
+  }
+  next = fillNeighbourhoodRegions(next, screenHtml, appHtml);
+  if ((cards.size > 0 || appGraph.entities.length > 0) && !next.includes(LINK)) next = next.replace(/<\/head>/, `${LINK}\n</head>`);
   await Deno.mkdir(`${appDir}/ir`, { recursive: true });
   const cssPath = `${appDir}/ir/card.css`;
-  const css = await Deno.readTextFile(cssPath).catch(() => null);
+  const css = await Deno.readTextFile(cssPath).catch((error) => {
+    if (error instanceof Deno.errors.NotFound) return null;
+    throw error;
+  });
   if (css !== CARD_CSS) await Deno.writeTextFile(cssPath, CARD_CSS);
   if (next === html) return false;
   await Deno.writeTextFile(`${appDir}/${irPath}`, next);
