@@ -19,7 +19,7 @@ every attribute it may carry is its [REFERENCE](../../omnishell/REFERENCE.md).
 ## Derived from the markup
 
 `derive.ts` reads each screen through the terminal's own markup reader and
-writes three lists into `program_derived.cue`, which unifies into the program:
+writes four projections into `program_derived.cue`, which unifies into the program:
 
 - `reads`, every read the markup makes as the terminal routes it (`#Read`): its
   table, whether it is a `data-live` region, a reduce's `data-reads` or a
@@ -29,16 +29,18 @@ writes three lists into `program_derived.cue`, which unifies into the program:
 - `writes`, every write it states (`#Write`), by table: a form, a chart's
   effect, and each region's reduces (`data-on-<event>`, a drag's
   `data-handler`) as op `reduce` on its table;
+- `charts`, every terminal chart, naming its entity, field, states and effect
+  writes;
 - `files.handlers`, every module `data-handler` and `data-on-*` bind.
 
-They are facts, never decisions. All three are required on `#Screen`, so a
+They are facts, never decisions. All four are required on `#Screen`, so a
 screen the derived file misses fails the export, and so does an html file for a
 screen the program no longer declares. A screen authored in CUE has no html
-before its first export, so it starts from empty lists and `write.ts` re-derives
+before its first export, so `markup` supplies empty projection defaults and `write.ts` re-derives
 until the derived file holds what the emitted markup says.
 
 **Two statements of one fact need a checker, or one of them derived.** Reads,
-writes and handlers are derived, so no check compares them: a rule comparing a
+writes, charts and handlers are derived, so no check compares them: a rule comparing a
 restatement with the markup would be grading a copy.
 
 ### The reads decide how a table is read

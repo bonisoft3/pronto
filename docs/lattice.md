@@ -46,7 +46,7 @@ query instead refetches on authorized dependency notifications, without
 retaining all dependency rows. `offline` keeps the existing eager collection
 behavior. Validations, access rules and folds can independently require local
 collections; those costs belong to those features rather than to a server read.
-See [[screens#The reads decide how a table syncs]] and
+See [[screens#The reads decide how a table is read]] and
 [[../../omnishell/docs/data#A region's rows]].
 
 ## Views, folds and the DOM
@@ -121,8 +121,8 @@ replay and a `put` be stated twice.
 | durability × schedule | `_scheduleShape`: `emits` is `server`, `done` is another, `live` entity | yes, `cue vet` |
 | durability × read | `#App.#read` (`read.cue`): `offline` is eager, a browser rung has no mode, an authored mode the rule contradicts fails to unify | yes, `cue vet` |
 | target × program | `_pagesBundle` ([release targets](release-targets.md)) | yes, `cue vet` |
-| effect level × `refused` arrow | `machineLint`, for an effect stating level 2; one naming no level escapes | partly, at lint ([machines](../../omnishell/docs/machines.md#effects)) |
-| durability × effect level | `#DurabilityEffectLevel`, in `schema.cue` and omnishell's `machine.cue` | no ([pending](../PENDING.md#the-lattice)) |
+| effect level × `refused` arrow | `machineLint` reads the effect target's durability from `shell.yaml`; every compensable effect owes the arrow | yes, at lint ([[../../omnishell/docs/machines#Effects\|machines]]) |
+| durability × effect level | `#Entity.level` derives from `#DurabilityEffectLevel`; a machine invoking an external effect has level 4; chart effects carry no authored level | yes, by derivation |
 | posing × effect | omnishell's posing (`test/storybook-battery.ts`, run over every app by `test/universal-storybook.test.ts`) mounts each chart state with handlers off over a store that refuses every write ([machine harnesses](../../omnishell/docs/machines.md#machine-harnesses)) | yes, in omnishell's own tests |
 | effect level × fuel | `FuelMeter.spendEffect` ([fuel](../../omnishell/docs/automated-tests-battery.md#fuel)) | where a harness calls it |
 | effect level × test layer | nothing picks where an arrow is proven from its level | no |

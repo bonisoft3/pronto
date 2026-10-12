@@ -301,9 +301,9 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
 - **Bijection.** Every object carries `ir`, defaulting to its name/key — the
   ir.html element id it realizes. A storyboard frame has no object of its own:
   its id is *built* as `<the screen's ir>-<state>` and compared whole. The
-  checker demands set equality both ways over eleven ir kinds — {entity,
-  pipeline, screen, state, flow, test, decision, handler, validation, hatch,
-  unit} — and both directions are errors. An id in the program with no ir element is code
+  checker compares thirteen ir kinds — {entity, pipeline, screen, state, flow,
+  test, decision, handler, validation, hatch, unit, machine, effect}. A program
+  id that owes review but has no ir element is code
   no reviewer signed; an id in the ir with no program object is a designed thing
   the running app silently lacks, and it is the more dangerous of the two.
   Neither is a work-in-progress state to be tolerated: one hop produced the
@@ -319,11 +319,13 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   an SES compartment, the largest escape from the declarative surface and
   precisely what a bijection exists to police.
 
-**The bijection is total.** No kind and no write is exempt by durability: a
-handler that updates only a `tab` entity owes its ir element as one writing the
-database does. Levying ir coverage by what a write reaches is
-[review by consequence](docs/decisions/2026-08-27-review-by-consequence.md),
-not built.
+**Review coverage follows reach.** A `tab` entity, its validations, its
+terminal charts and handlers only those charts name are machine-checked
+without owing an ir element. A terminal chart's reach includes its own row
+and the entities its effects write; `device` or above owes review. Other
+program objects owe their elements. Every declaration remains a claim, and
+an ir element with no declaration is always an error. The decision is
+[[docs/decisions/2026-08-27-review-by-consequence|review by consequence]].
 
 **An entity's writers are derived.** `#Entity.writers` (`writers.cue`) lists
 every declaration that writes its rows — a screen's forms and what its markup
@@ -338,6 +340,39 @@ Every op is a word of the terminal's `#Machine.#MutationOp` (omnishell
 re-exported by `terminals/omnishell.cue`: a form's `action`, a `#Write.op` and
 mecha's `#RelationalOp` each narrow it to the ops their performer runs, and
 none extends it.
+
+**An external effect belongs to its invoking machine.** `state.effects`
+declares `input`, its instance `key`, a sink and a non-empty `note`; its
+entity is derived from the machine whose state names it by `invoke.src`.
+No invoking state, multiple invoking states or invocations from different
+entities are refused. An idempotent sink carries no `reentry`; otherwise
+`reentry` is `reconcile | unknown | repeat`, with `reconcile` as the default.
+The peer's idempotency and the cost of a repeat are the claim the `note`
+explains. The card derives delivery: idempotent or `reconcile` is
+exactly-once, `unknown` at-most-once, and `repeat` at-least-once.
+
+**A machine owns its initial state.** A mecha machine's `initial` supplies the
+SQL default for its state field when the field declares none. A different
+field default is refused, as is a generated or retired state field. If the field
+has no CEL, the emitter supplies a
+CHECK admitting exactly the machine's states; a parsed closed CEL enum must
+include every state. State values in inline and held seeds must name one of
+those states.
+
+**A terminal chart is closed over the entity's row.** `context` is refused:
+other columns start from the entity's field defaults. The emitted
+`shell.yaml` schema carries defaults as literal values: a SQL quoted string
+is decoded, booleans retain their type, and `NULL` becomes null. Numeric
+defaults follow the field's carrier: `int64` and `decimal` retain exact
+canonical strings; other numeric types carry numbers.
+SQL expressions such as `now()` and `gen_random_uuid()`, and literals requiring
+a SQL payload cast, carry no terminal default. The field's `defaulted: true`
+still tells markup lint that a pending row may await a database default. A
+singleton machine region without `data-empty-row` requires a
+filter pinning `id`; it binds those defaults, then the filter's equalities,
+then its `field: initial`. An explicit `data-empty-row` remains the whole
+row. The terminal's [[../omnishell/docs/machines|machine contract]] states
+the row and effect grammar.
 
 **A vendored unit declares its ports.** `capabilities.vendored.<unit>.ports`
 is `reads`, the entities whose rows the unit is handed (the row of the region
@@ -370,10 +405,10 @@ than `keys`, a column named outside `key`, a column whose declared size bound
 exceeds `value` — since an answer carries every column in one event; the
 alphabet, and the length of a column left unbounded, are the agent seat's
 refusal at runtime, never a drop. The offer is stated once: the seat's parser
-is held equal to it by `vendored-unit.test.ts`. The terminal performs the memo: a question whose row
-stands is answered from the row without asking, and the unit's answer is
-upserted on the key before the chart hears the raised event, whose detail is
-the key — the chart reads the answer as a row of a table its region reads,
+is held equal to it by `vendored-unit.test.ts`. The terminal performs the
+memo: a keyed query asks for the question's row, and a row found answers
+without asking. The unit's answer is upserted on the key before the chart
+hears the raised event, whose detail is the key — the chart reads the answer as a row of a table its region reads,
 which `check markup` requires. An answer the store refuses is the same
 `ProgramError`, naming the unit and the table: no reduce authored the write,
 so it is not a `refused` event. The entity's
