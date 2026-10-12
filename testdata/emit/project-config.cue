@@ -6,6 +6,7 @@ import (
 )
 
 configSeats: {
+	mirroredImportRoot: mirroredCheckImportRoot
 	sources: (pronto.#emit & {code: _code, cluster: _cluster, terminal: _terminal, loop: _loop, build: _besideBuild}).loop.surface.sources
 	build: _loop.surface.buildCmd
 	terminal: (pronto.#DefaultTerminal & {code: _code, out: surface: runtime: "../../plugins/omnishell/runtime"}).out.surface.verbs.omnishell.cmds[0]
@@ -23,4 +24,21 @@ configSeats: {
 		}
 		depManifests: {}
 	}).docker.dockerfiles.build
+	checkDockerfile: (bayt.#render & {
+		project: {
+			name: "source-check"
+			dir: "apps/emit"
+			targets: check: {
+				deps: []
+				srcs: globs: ["tests/**"]
+				dockerfile: {
+					from: name: "alpine"
+					preamble: _besideTargets["check-plain"].dockerfile.preamble
+					copy: _besideTargets["check-plain"].dockerfile.copy
+				}
+				compose: build: additional_contexts: _besideTargets["check-plain"].compose.build.additional_contexts
+			}
+		}
+		depManifests: {}
+	}).docker.dockerfiles.check
 }

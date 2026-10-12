@@ -14,7 +14,10 @@ async function exported(): Promise<unknown> {
 }
 
 Deno.test("consumer configuration follows the emitted source seats and preserves real rule conflicts", async () => {
-  const seats = await exported() as {sources: Sources; build: string; terminal: string; installed: Record<string, unknown>; buildDockerfile: string};
+  const seats = await exported() as {sources: Sources; build: string; terminal: string; installed: Record<string, unknown>; buildDockerfile: string; checkDockerfile: string; mirroredImportRoot: boolean};
+  assertEquals(seats.mirroredImportRoot, true);
+  assertStringIncludes(seats.checkDockerfile, "COPY --from=root plugins/omnishell /omnishell");
+  assertStringIncludes(seats.checkDockerfile, "COPY --parents --from=root plugins/omnishell libraries/mecha /monorepo/");
   const run = seats.buildDockerfile.split("\n").find(line => line.startsWith("RUN ["));
   assertEquals(run !== undefined, true);
   assertEquals(JSON.parse(run!.slice(4)), [

@@ -164,6 +164,7 @@ import (
 	// switched by the same mode; mecha/ and omnishell/ hold the fragments.
 	_omnishell: omnishell.#RuntimeImage
 	_omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishell.published.runtime)}${MONOREPO_COMPOSE_MODE:+:\(_omnishell)}"
+	_omnishellCopy: [if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0]
 	// The terminal's statics served from omnishell's tree (target /omnishell/),
 	// which an installed app's caddy copies from that image; the cluster serves
 	// the app's own (#DefaultCluster). Named from omnishell's root.
@@ -269,7 +270,7 @@ import (
 						"ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
 						"ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
 						"ENV DENO_DIR=/deno-cache",
-						[if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0],
+						B._omnishellCopy,
 						"RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts",
 					]
 				}
@@ -379,8 +380,8 @@ import (
 					srcs: globs: list.Concat([["tests/**"], c.srcs])
 					dockerfile: {
 						from: ref: base
-						// An installed app's tests import omnishell from /omnishell
-						// (tests/deno.json maps `omnishell/` there).
+						// tests/deno.json maps omnishell/ to this root in both layouts.
+						if B.meta.local {preamble: [B._omnishellCopy]}
 						if !B.meta.local {
 							copy: [{from: name: B._omnishell, srcs: ["/"], dst: "/omnishell"}]
 						}
