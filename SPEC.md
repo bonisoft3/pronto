@@ -408,6 +408,27 @@ then its `field: initial`. An explicit `data-empty-row` remains the whole
 row. The terminal's [[../omnishell/docs/machines|machine contract]] states
 the row and effect grammar.
 
+**Screen markup carries no executable code.** The markup check and terminal
+parser refuse scripts, inline event handlers, executable URLs, `srcdoc`, and
+embedded objects. Templates are checked recursively after HTML parsing, so
+character references cannot hide an executable URL. Jessie and declared units
+are the execution surfaces.
+
+The door sends the terminal's Content Security Policy; the entry document
+carries the same policy in its hashed bytes and the release cache preserves
+its header. Trusted Types admits only the terminal's inert markup parser,
+same-origin script URLs, and SES evaluation while the cage is running. A
+rendered document boots through an external module after first paint.
+
+Browser resources default to the app's origin. An exception is
+`capabilities.resources.<name>: {kind, source, note}`: `kind` is a CSP fetch
+directive stem (`img`, `font`, `media`, `frame` or `connect`), `source` is one
+HTTPS origin, and `note` is non-empty. Reader-supplied images alone may use
+`source: "https:"`; that explicitly admits requests to their chosen hosts.
+Script sources cannot be extended. Vendored realm and agent files keep their
+own execution boundary; the terminal's Trusted Types policies are not imposed
+on their documents or workers.
+
 **A vendored unit declares its ports.** `capabilities.vendored.<unit>.ports`
 is `reads`, the entities whose rows the unit is handed (the row of the region
 its mount sits in, through `data-prop-*`), and `raises`, the events it may

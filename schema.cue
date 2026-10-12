@@ -1471,6 +1471,14 @@ import (
 	}}
 
 	capabilities: {
+		// Browser fetches outside the app are authored authority. Script sources
+		// remain the terminal's; only reader-supplied images may name a scheme.
+		resources?: [string]: {
+			kind: "img" | "font" | "media" | "frame" | "connect"
+			source: mecha.#Origin | "https:"
+			if kind != "img" {source: mecha.#Origin}
+			note: string & !=""
+		}
 		// Passed through to shell.yaml verbatim: the terminal owns the login
 		// chrome, keyed on `required`, and calls the auth service at `service`.
 		// Presence also switches the cluster's auth plane on (#emit).

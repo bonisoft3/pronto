@@ -2621,6 +2621,16 @@ _cdcBeforeField: "__before"
 			][0]
 		},
 	]
+	_resources: [if E.code.capabilities.resources != _|_ for _, r in E.code.capabilities.resources {kind: r.kind, source: r.source}]
+	_resourceSources: {for r in _resources {(r.kind): (r.source): true}}
+	_browserPolicy: [if E.terminal.surface.contentSecurityPolicy != _|_ {
+		[if len(_resources) == 0 {E.terminal.surface.contentSecurityPolicy},
+			if len(_resources) > 0 {strings.Join([for part in strings.Split(E.terminal.surface.contentSecurityPolicy, "; ") {
+				let kind = strings.TrimSuffix(strings.Split(part, " ")[0], "-src")
+				let sources = list.SortStrings([if _resourceSources[kind] != _|_ for src, _ in _resourceSources[kind] {src}])
+				strings.Join(list.Concat([[part], sources]), " ")
+			}], "; ")}][0]
+	}, ""][0]
 	_envelope: #envelopePlan & {
 		meta:         E.code.meta
 		surface:      E.code.surface
@@ -3455,7 +3465,18 @@ _cdcBeforeField: "__before"
 			// An asset the anchor is absent from indexes out of range here, rather
 			// than emitting a proxy that silently 404s every deep link.
 			_split: strings.SplitN(_caddyfileAsset, _anchor, 2)
-			text:   _split[0] + _served + _split[1]
+			// Units execute in their declared realm or agent; the terminal's
+			// Trusted Types policies belong only to its own runtime.
+			_unitPaths: list.SortStrings([for f, _ in {
+				for _, v in E.code.capabilities.vendored if v.isolation != "compartment"
+				for f in v.files {(f): true}
+			} {"/\(f)"}])
+			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
+				let matcher = [if len(_unitPaths) > 0 {"  @terminal not path \(strings.Join(_unitPaths, " "))\n  header @terminal"}, "  header"][0]
+
+				"\(matcher) Content-Security-Policy \(json.Marshal(E._browserPolicy))\n"
+			}, ""][0]
+			text: strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why
@@ -3590,12 +3611,18 @@ _cdcBeforeField: "__before"
 			let _parts = strings.Split(E.terminal.surface.assets.html, "<link rel=\"icon\" href=\"data:,\">")
 			_markerCheck: [if !E._envelope._hasEnvelopeInjections || len(_parts) == 2 { true }, "omnishell html asset must contain exactly one <link rel=\"icon\" href=\"data:,\"> marker, found \(len(_parts) - 1)"][0] & true
 			format: "text"
-			text: [
+			_html: [
 				if E._envelope._hasEnvelopeInjections if len(_parts) == 2 {
 					_parts[0] + E._envelope.headLinks + _parts[1]
 				},
 				E.terminal.surface.assets.html,
 			][0]
+			// The meta travels in the release's hashed bytes, including offline
+			// navigation, so changing resource authority changes its identity.
+			_escaped: strings.Replace(strings.Replace(E._browserPolicy, "&", "&amp;", -1), "\"", "&quot;", -1)
+			text: [if E._browserPolicy != "" {
+				strings.Replace(_html, "<head>", "<head>\n<meta http-equiv=\"Content-Security-Policy\" content=\"\(_escaped)\">", 1)
+			}, _html][0]
 		}
 		"\(E.terminal.surface.css)": {
 			format: "text"
