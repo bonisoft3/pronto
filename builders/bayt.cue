@@ -33,25 +33,31 @@ import (
 	tools: {"github:bonisoft3/bayt": "0.58.4", ...}
 	say: say: {
 		...
+
 		// The commands restated: a rule the config names replaces sayt's
 		// builtin of that name, so the priority alone would leave bayt unrun.
 		generate: rulemap: {"auto-bayt": {priority: 2, cmds: [{use: "./auto-bayt.nu", do: "auto-bayt"}]}, ...}
 	}
 }
 
+#CompilerSources: {
+	paths: ["cue.mod", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
+	exclude: ["**/docs/**", "**/testdata/**", "**/*_test.*", "**/*.test.*", "**/.bayt/**", "**/.task/**", "**/node_modules/**"]
+}
+
 // The canonical pronto build graph for one app, authored as the program's
 // `build:` seat.
 #Build: B={
 	meta: {
-		app:      string
-		local:    *true | bool
+		app:   string
+		local: *true | bool
 		// Where the app sits under the workspace root, and where pronto sits
 		// as the app sees it; program_pronto.cue states both where write.ts
 		// finds them.
-		dir:    *"apps/\(app)" | string
-		pronto: *"../../plugins/pronto" | string
-		buildCmd: string
-		testCmd:  string
+		dir:         *"apps/\(app)" | string
+		pronto:      *"../../plugins/pronto" | string
+		generateCmd: string
+		testCmd:     string
 	}
 	// The runtime, as the cluster states it: one bayt target per service,
 	// with bare names, lowered into this project by mecha's own #Runtime.
@@ -62,18 +68,28 @@ import (
 	// and derived sources are its own to add. The set sits in the
 	// framework-side slot, so a stage-level `globs` adds to it.
 	_program: {
-		deps: [B._base]
-		dockerfile: from: ref: B._base
+		deps: *[B._base] | [...string]
+		dockerfile: from: ref: *B._base | string
 		srcs: {
 			defaultGlobs: "pronto-tree": {glob: "**"}
 			// Generated, the checks' own, or local to a checkout.
 			defaultExclude: {
 				"pronto-bayt": *{glob: ".bayt/**"} | null
-				"pronto-tests": {glob: "tests/**"}
+				"pronto-tests": *{glob: "tests/**"} | null
 				"pronto-task": {glob: ".task/**"}
 				"pronto-node": {glob: "**/node_modules/**"}
 			}
 		}
+	}
+
+	_sayt: [if B.meta.local {strings.TrimSuffix(B.meta.pronto, "pronto") + "sayt"}, "(^mise where github:bonisoft3/sayt | str trim)"][0]
+	_actions: {for verb in ["generate", "build", "lint", "test", "launch", "integrate"] {
+		(verb): "^nu -I \(B._sayt) -c 'use task-leaf.nu; task-leaf \(verb)'"
+	}}
+
+	_ciTask: {
+		taskfile: incremental:   false
+		dockerfile: incremental: true
 	}
 
 	// Where pronto's scripts sit as a target's command sees them: the
@@ -84,7 +100,7 @@ import (
 	// From the app up to the workspace root, the root as compose sees it from
 	// .bayt/, and the runtime's directory under the root.
 	_up: [if B.meta.dir != "" {strings.Repeat("../", len(strings.Split(B.meta.dir, "/")))}, ""][0]
-	_root: strings.TrimSuffix("../\(_up)", "/")
+	_root:    strings.TrimSuffix("../\(_up)", "/")
 	_runtime: strings.TrimPrefix(strings.TrimSuffix(B.meta.pronto, "plugins/pronto"), _up)
 	// In the monorepo, workspace trees copied to where the app's relative paths
 	// find them: `_top` from the root, `_paths` from the runtime's directory.
@@ -154,15 +170,15 @@ import (
 	_runner: {if B.meta.local {B._fromRoot & {_paths: B._testTrees}}}
 	// The module the program evaluates in: what `program` copies from the root.
 	_programTrees: {
-		_top: ["cue.mod"]
-		_paths: ["plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
-		_exclude: ["**/docs/**", "**/testdata/**", "**/*_test.*", "**/*.test.*"]
+		_top: [#CompilerSources.paths[0]]
+		_paths:   list.Drop(#CompilerSources.paths, 1)
+		_exclude: #CompilerSources.exclude
 	}
 
 	// omnishell reaches an installed app's images the same way, as one image of
 	// its runtime tree (omnishell's runtime-image target), named here and
 	// switched by the same mode; mecha/ and omnishell/ hold the fragments.
-	_omnishell: omnishell.#RuntimeImage
+	_omnishell:        omnishell.#RuntimeImage
 	_omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishell.published.runtime)}${MONOREPO_COMPOSE_MODE:+:\(_omnishell)}"
 	_omnishellCopy: [if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0]
 	// The terminal's statics served from omnishell's tree (target /omnishell/),
@@ -174,9 +190,16 @@ import (
 	if !B.meta.local {terminalStatics: [_, ...]}
 	_runtimeStatics: [for s in B.terminalStatics if strings.HasPrefix(s.target, "/omnishell/") {s}]
 
-	project: core.#project & {
+	project: core.#project & sayt.gate & {
+		files: "say.yaml": say: {for verb in ["launch", "integrate"] {
+			(verb): rulemap: builtin: {
+				stop: true
+				cmds: [{use: "./bayt-task.nu", do: "bayt-task \(verb)-action --generate"}]
+			}
+		}}
 		dir: [if B.meta.local {B.meta.dir}, "."][0]
 		if !B.meta.local {name: B.meta.app}
+
 		// At a mirror's root, the monorepo's name, which its images and
 		// compose project keep.
 		if B.meta.local && B.meta.dir == "" {name: "apps_\(B.meta.app)"}
@@ -200,6 +223,7 @@ import (
 					compose: build: additional_contexts: (B._omnishell): B._omnishellContext
 				}
 			}
+
 			// A cluster target copying from omnishell's tree (the renderer)
 			// resolves it through the same switch.
 			targets: {for k, t in B._mechaRuntime.targets
@@ -227,24 +251,59 @@ import (
 			// to it leaves the install cached. A mirror's setup carries its own.
 			if B.meta.local {
 				"program": sayt.setup & (B._fromRoot & B._programTrees) & {
-					deps: [":setup"]
+					if B.meta.dir != "" {deps: [":setup", "workspaceroot:pronto-sources:srcs"]}
+					if B.meta.dir == "" {
+						deps: [":setup"]
+						srcs: {globs: list.Concat([B._programTrees._top, [for p in B._programTrees._paths {B._runtime + p}]]), exclude: #CompilerSources.exclude}
+					}
 					dockerfile: from: ref: ":setup"
 					// A build stage, never a container.
 					compose: scale: 0
 				}
 			}
+
 			// lint and test carry their check as the RUN, so a bake runs them and
 			// an unchanged one is a cache hit.
 			"lint": sayt.lint & mise.exec & B._program & {
-				cmd: builtin: do: "cue vet ./..."
+				deps: [":generate"]
+				dockerfile: from: ref: ":generate"
+				srcs: {
+					globs: [".bayt/checks.yaml", ".pronto/facts.json"]
+					defaultExclude: {"pronto-tests": null, "pronto-bayt": null}
+				}
+				// Protobuf compatibility also reads the Git baseline.
+				taskfile: incremental: false
+				cmd: builtin: {do: B._actions.lint, shell: "nu", dockerfile: do: "cue vet ./..."}
+			}
+			"generate": sayt.generate & mise.exec & B._program & {
+				state: globs: [".bayt/checks.yaml", ".bayt/say.yaml", ".bayt/Taskfile.yml", ".bayt/Taskfile.bayt.yml"]
+				dockerfile: {}
+				cmd: builtin: {do: B._actions.generate, shell: "nu", dockerfile: do: B.meta.generateCmd}
 			}
 			"build": sayt.build & mise.exec & B._program & {
-				cmd: builtin: do: B.meta.buildCmd
+				deps: [":generate"]
+				dockerfile: from: ref: ":generate"
+				srcs: {globs: [".bayt/checks.yaml"], defaultExclude: "pronto-bayt": null}
+				cmd: builtin: {do: B._actions.build, shell: "nu"}
 			}
 			"test": sayt.test & mise.exec & {
-				cmd: builtin: do:      B.meta.testCmd
+				// Local checkers are sibling trees outside this project's source view.
+				if B.meta.local {taskfile: incremental: false}
+				srcs: B._program.srcs & {
+					globs: [".bayt/checks.yaml", ".pronto/facts.json"]
+					defaultExclude: {"pronto-tests": null, "pronto-bayt": null}
+				}
+				cmd: builtin: {do: B._actions.test, shell: "nu", dockerfile: do: B.meta.testCmd}
 				dockerfile: from: ref: ":build"
 			}
+			for verb in ["launch", "integrate"] {
+				"\(verb)-action": {
+					deps: [":build"]
+					taskfile: {incremental: false, run: "always"}
+					cmd: builtin: {do: B._actions[verb], shell: "nu"}
+				}
+			}
+
 			// The cluster's aggregate; the sayt template gives it the entry
 			// flags and the profile `skaffold dev` fires on.
 			"launch": sayt.launch
@@ -302,7 +361,7 @@ import (
 				_runsChecker: list.Contains(compose.command, "/omnishell/check-visual.ts")
 				_runsChecker: true
 			}
-			"ci-visual": sayt.ci & B._runner & {
+			"ci-visual": sayt.ci & B._ciTask & B._runner & {
 				#closure: "integrate"
 				#check:   "visual"
 				deps: list.Concat([[":integrate:srcs", ":integrate:bayt"], B._stackSrcs])
@@ -316,7 +375,8 @@ import (
 				// The generated compose names the images and the database's
 				// settings, and the app's includes the root's.
 				"replay": sayt.integrate & B._program & B._fromRoot & {
-					_paths: [".bayt"]
+					deps: [B._base]
+					_paths: list.Concat([[".bayt"], [for path in B._testTrees {"\(path)/.bayt"}]])
 					srcs: defaultExclude: "pronto-bayt": null
 					cmd: "builtin": null
 					dockerfile: {
@@ -324,12 +384,12 @@ import (
 							"docker": {priority: -10, copy: {
 								from: {name: core.lock.images.docker}
 								srcs: ["/usr/local/bin/docker"]
-								dst:  "/usr/local/bin/docker"
+								dst: "/usr/local/bin/docker"
 							}}
 							"docker-compose": {priority: -9, copy: {
 								from: {name: core.lock.images.docker}
 								srcs: ["/usr/local/libexec/docker/cli-plugins/docker-compose"]
-								dst:  "/usr/local/libexec/docker/cli-plugins/docker-compose"
+								dst: "/usr/local/libexec/docker/cli-plugins/docker-compose"
 							}}
 							// Ahead of setup's lazybox, whose `docker` is a stub that
 							// fetches a CLI through mise on every run.
@@ -346,15 +406,16 @@ import (
 					}
 				}
 				// Its closure builds `program` and the replay from root trees.
-				"ci-replay": sayt.ci & B._fromRoot & {
-					_top:     B._programTrees._top
-					_paths:   list.Concat([B._programTrees._paths, [".bayt"]])
-					_exclude: B._programTrees._exclude
+				"ci-replay": sayt.ci & B._ciTask & B._fromRoot & {
+					_top: B._programTrees._top
+					_paths: list.Concat([B._programTrees._paths, [".bayt"]])
+					_exclude: [for path in B._programTrees._exclude if path != "**/.bayt/**" {path}]
 					#closure: "replay"
 					#check:   "replay"
 					deps: [":replay:srcs", ":replay:bayt"]
 				}
 			}
+
 			// Playwright's base with mise: its browsers need the libraries of the
 			// distribution they were built for, so the toolchain comes to them.
 			if B._browser {
@@ -371,17 +432,21 @@ import (
 			}
 			for name, c in B.checks {
 				let base = [if c.browser {":browser"}, ":setup"][0]
+
 				// The image is the base, which carries the toolchain, plus, in the
 				// monorepo, the trees the tests import.
 				"check-\(name)": sayt.integrate & {
 					if B.meta.local {B._fromRoot & {_paths: B._testTrees}}
+
 					// The plane is an image-only dep, as visual lint's is.
 					deps: [base, ":launch:outs"]
 					srcs: globs: list.Concat([["tests/**"], c.srcs])
 					dockerfile: {
 						from: ref: base
-						// tests/deno.json maps omnishell/ to this root in both layouts.
-						if B.meta.local {preamble: [B._omnishellCopy]}
+						if B.meta.local {epilogue: ["RUN ln -s /monorepo/\(B._runtime)plugins/omnishell /omnishell"]}
+
+						// An installed app's tests import omnishell from /omnishell
+						// (tests/deno.json maps `omnishell/` there).
 						if !B.meta.local {
 							copy: [{from: name: B._omnishell, srcs: ["/"], dst: "/omnishell"}]
 						}
@@ -404,7 +469,7 @@ import (
 					}
 				}
 				// The check's bkid runner (omnishell.#BkidCheck).
-				"ci-\(name)": sayt.ci & B._runner & {
+				"ci-\(name)": sayt.ci & B._ciTask & B._runner & {
 					#closure: "check-\(name)"
 					#check:   name
 					deps: list.Concat([[":check-\(name):srcs", ":check-\(name):bayt"], B._stackSrcs])

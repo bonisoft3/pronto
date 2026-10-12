@@ -21,6 +21,8 @@ import (
 	...
 	"github:cue-lang/cue":     "0.16.1"
 	"github:denoland/deno":    "v2.9.7"
+	"github:go-task/task":     "v3.49.1"
+	"github:nushell/nushell":  "0.115.1"
 	"github:bonisoft3/pronto": #Version
 	"github:bonisoft3/sayt":   #SaytVersion
 	// Compares every proto the app does not withhold against its own git
@@ -60,6 +62,11 @@ import (
 	out: "use tools.nu [run-mise]; let pronto = \(root); \(args)"
 }
 
+#Writer: {
+	root: string
+	out:  "deno run --config (\(root) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env (\(root) | path join write.ts) ."
+}
+
 #Project: P={
 	_valid:  saycfg.say & P.say.say
 	runtime: *"" | string
@@ -70,7 +77,7 @@ import (
 	mecha:     *"" | string
 	_omnishell: [if P.omnishell != "" {json.Marshal(P.omnishell)}, "(run-mise where \(#Runtimes.omnishell) | str trim)"][0]
 	_mecha: [if P.mecha != "" {json.Marshal(P.mecha)}, "(run-mise where \(#Runtimes.mecha) | str trim)"][0]
-	tools:   #Tools
+	tools: #Tools
 	mise: {
 		...
 		settings: {
@@ -88,10 +95,9 @@ import (
 		tools: P.tools
 	}
 	_run: #Run & {runtime: "\(P.runtime)"}
-	write: [
-		if P.runtime != "" {"deno run --frozen --config \(P.runtime)/deno.json --allow-read --allow-write=. --allow-run --allow-env \(P.runtime)/write.ts ."},
-		(_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join write.ts) ."}).out,
-	][0]
+	_compilerRoot: [if P.runtime != "" {json.Marshal(P.runtime)}, "(^mise where \(#Runtimes.pronto) | str trim)"][0]
+	compiler: "^\((#Writer & {root: P._compilerRoot}).out)"
+	write: (_run & {args: "run-mise exec -- \((#Writer & {root: "$pronto"}).out)"}).out
 	// The live tables a pages release fills from the settled container
 	// cluster, and the streams that cluster runs; none where the app runs no
 	// stream and no computation.
@@ -104,7 +110,18 @@ import (
 	// The browser tier's artifact: the app bundled into dist/browser/index.html,
 	// under the path prefix `sayt release@pages --base=/<prefix>` names.
 	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])"}).out
-	// The edge tier's artifact: the Cloudflare Worker + Durable Object cluster and assets in dist/cloudflare
+	// The edge tier's artifact, dist/cloudflare (bundle/edge.ts): the page, the
+	// Worker on mecha's edge cluster and the data directory its object loads.
+	// `--from`, given to `sayt release@cloudflare`, starts that directory from
+	// an archive built elsewhere instead of the migrations and derived rows;
+	// derive then has nothing to do.
+	_edgeData: "let data = if ($env.SAY_RELEASE_ARGS_FROM? | is-not-empty) { ['--from' $env.SAY_RELEASE_ARGS_FROM] } else { [\([if len(P.derived.tables) > 0 {"'--derived' '\(P._derivedOut)'"}, ""][0])] }"
+	edge:        (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])"}).out
+	edgeDerive:  "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
+	// `--reset` replaces the object's data with this release's.
+	publishEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle publish-edge.ts) dist/cloudflare --mecha \(P._mecha) ...(if ($env.SAY_RELEASE_ARGS_RESET? | is-empty) { [] } else { ['--reset'] })"}).out
+	// truco's edge release until the edge has a clock for its lobby sweep:
+	// native SQLite in the object, its tables from shell.json.
 	cloudflare: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle cloudflare.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
@@ -133,9 +150,12 @@ import (
 			"auto-cue": cmds: [{use: "./tools.nu", do: "tools run-cue cmd generate ./pronto"}]
 			"pronto": {
 				priority: 1
-				cmds: [{do: [if P.runtime == "" {"if ('program.cue' | path exists) { let pkg = (open program.cue --raw | parse -r '(?m)^package\\s+(\\w+)\\s*$' | first | get capture0); $'package ($pkg)\nloop: surface: sources: pronto: \"\"\n' | save --force program_pronto.cue; \(P.write) }"}, P.write][0]}]
+				if P.runtime == "" {
+					cmds: [{do: "if ('program.cue' | path exists) { let pkg = (open program.cue --raw | parse -r '(?m)^package\\s+(\\w+)\\s*$' | first | get capture0); $'package ($pkg)\nloop: surface: sources: pronto: \"\"\n' | save --force program_pronto.cue; \(P.write) }"}]
+				}
+				if P.runtime != "" {cmds: [{do: P.write}]}
 			}
 		}
-		build: do: P.write
+		build: do: "null"
 	}
 }

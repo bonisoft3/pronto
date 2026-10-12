@@ -60,7 +60,8 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
       },
     })
   }
-  createShell({ config: './shell.json', mount: document.getElementById('app') })
+  // The shim answers every file a preload would ask the network for.
+  createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false })
 })().catch((e) => {
   document.body.textContent = `boot failed: ${e instanceof Error ? e.message : String(e)}`
   throw e

@@ -164,6 +164,19 @@ async function main(appDir: string, branch: string) {
 
   const commonDir = await git(appDir, "rev-parse", "--path-format=absolute", "--git-common-dir");
   const prefix = await git(appDir, "rev-parse", "--show-prefix");
+  const subdir = prefix.replace(/\/$/, "");
+  if (subdir !== "") {
+    const exists = await new Deno.Command("git", {
+      args: ["cat-file", "-e", `${branch}:${subdir}`],
+      cwd: appDir,
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    if (!exists.success) {
+      console.log(JSON.stringify([], null, 2));
+      return;
+    }
+  }
   const against = gitInput(commonDir, prefix, branch);
 
   const excludes = [...skip.keys()].flatMap((f) => ["--exclude-path", f]);
@@ -179,7 +192,7 @@ async function main(appDir: string, branch: string) {
   // buf reports breakages on stdout and exits non-zero; a non-zero exit with
   // nothing on stdout is buf failing to run, which is not a clean verdict.
   if (!out.success && stdout === "") {
-    if (stderr.includes("no .proto files were targeted") && skip.size > 0) {
+    if ((stderr.includes("no .proto files were targeted") && skip.size > 0) || stderr.includes("had no .proto files")) {
       console.log(JSON.stringify([], null, 2));
       return;
     }

@@ -479,3 +479,41 @@ Deno.test('a bundled page carries no unresolvable node imports', async () => {
   }
 })
 
+
+// Regression: the shell's preloads went to the network past the page's shim,
+// and a host that answers an unknown path with the document sent the whole
+// page (5.6 MB for GolAberto) for each.
+Deno.test('a bundled page preloads nothing its shim serves', async () => {
+  const app = await Deno.makeTempDir({ prefix: 'preload-bundle-test-' })
+  try {
+    const write = async (p: string, text: string) => {
+      await Deno.mkdir(path.dirname(path.join(app, p)), { recursive: true })
+      await Deno.writeTextFile(path.join(app, p), text)
+    }
+    await write('shell/shell.json', JSON.stringify({ routes: [{ files: { css: 'shell/screens/home.css' } }], migrations: [], tables: [] }))
+    await write('shell/shell.css', '')
+    await write('shell/design.css', '')
+    await write('shell/screens/home.css', '')
+    await write('shell/index.html', [
+      '<!doctype html><html><head><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css">',
+      '<link rel="preload" href="./shell.json" as="fetch" crossorigin>',
+      '<link rel="preload" href="https://fonts.example/a.woff2" as="font" crossorigin>',
+      '</head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>',
+    ].join('\n'))
+    const bundled = await new Deno.Command(Deno.execPath(), {
+      args: [
+        'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
+        '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
+      ],
+      stdout: 'inherit',
+      stderr: 'inherit',
+    }).output()
+    assert.equal(bundled.success, true, 'bundle.ts failed')
+    const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
+    const preloads = [...html.matchAll(/<link rel="preload" href="([^"]+)"/g)].map((m) => m[1])
+    assert.deepEqual(preloads, ['https://fonts.example/a.woff2'])
+    assert.match(html, /preload: false/)
+  } finally {
+    await Deno.remove(app, { recursive: true })
+  }
+})

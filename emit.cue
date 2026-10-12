@@ -1771,13 +1771,23 @@ _cdcBeforeField: "__before"
 						note: "Pronto release@pages"
 					}
 				}
+				// The edge target: mecha's edge cluster in one Durable Object.
+				// truco alone keeps the native SQLite object, whose alarm sweeps
+				// its lobby, until the edge has a clock; then it moves and that
+				// generator goes.
 				if list.Contains(D.code.meta.targets, "cloudflare") {
 					cloudflare: {
 						verb:     "release"
 						platform: "cloudflare"
-						cmds: [_distribution.cloudflare]
-						publish: ["npx wrangler deploy --config dist/cloudflare/wrangler.jsonc"]
-						note: "Pronto release@cloudflare"
+						note:     "Pronto release@cloudflare"
+						if D.code.meta.name == "truco" {
+							cmds: [_distribution.cloudflare]
+							publish: ["npx wrangler deploy --config dist/cloudflare/wrangler.jsonc"]
+						}
+						if D.code.meta.name != "truco" {
+							cmds: [if len(_distribution.derived.tables) > 0 {_distribution.edgeDerive}, _distribution.edge]
+							publish: [_distribution.publishEdge]
+						}
 					}
 				}
 			}
@@ -1846,6 +1856,13 @@ _cdcBeforeField: "__before"
 					admitEffects: {verb: "lint", cmds: [_distribution.checks.admitEffects], note: "Pronto effect handlers admitted"}
 				}
 			}
+			sayYaml: say: {
+				build: _distribution.say.say.build
+				generate: rulemap: {
+					pronto: _distribution.say.say.generate.rulemap.pronto
+					"auto-bayt": {priority: 2, cmds: [{use: "./auto-bayt.nu", do: "auto-bayt"}]}
+				}
+			}
 			_mirrored: sources.pronto != "" && !strings.HasPrefix(sources.pronto, "../")
 			if sources.pronto == "" {
 				sayYaml: _distribution.say
@@ -1867,11 +1884,12 @@ _cdcBeforeField: "__before"
 		if D.terminal == _|_ if D.loop.surface.sources.pronto == "" {
 			terminalStatics: error("an installed app's build serves its terminal's statics: pass terminal to #DefaultBuild")
 		}
+		project: files: "checks.yaml": D.loop.surface.sayYaml
 		meta: {
 			app:      D.code.meta.name
 			local:    D.loop.surface.sources.pronto != ""
 			if local {pronto: D.loop.surface.sources.pronto}
-			buildCmd: D.loop.surface.buildCmd
+			generateCmd: (distribution.#Project & {runtime: "\(D.loop.surface.sources.pronto)"}).compiler
 			testCmd:  D.loop.surface.testCmd
 		}
 	}
@@ -3681,8 +3699,7 @@ _cdcBeforeField: "__before"
 		if list.Contains(E.code.meta.targets, "pages") {
 			".goreleaser.yaml": {
 				format: "yaml"
-				// Its own dist, since --clean wipes it and the bundle's is dist/browser.
-				data: {version: 2, project_name: E.code.meta.name, dist: "dist/goreleaser", builds: [{builder: "zig", skip: true}], release: {disable: true}}
+				data: {version: 2, project_name: E.code.meta.name, dist: "dist/goreleaser", builds: [{builder: "zig", skip: true}], release: {disable: true}, changelog: {disable: true}}
 			}
 			// An app at the mirror's root releases from there.
 			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]

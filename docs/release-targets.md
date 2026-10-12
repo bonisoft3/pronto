@@ -1,7 +1,7 @@
 ---
 type: concept
 title: Release targets
-description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages is built, and cloudflare, the clouds and k8s are designed."
+description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages and cloudflare (PGlite in one Durable Object) are built, and the clouds and k8s are designed."
 ---
 
 # Release targets
@@ -12,8 +12,8 @@ the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
 carries the whole app on one tier of mecha's ladder. `pages` and `cloudflare`
-are built. `gcp`, `aws`, `azure` and `k8s` are designed and
-[not built](../PENDING.md#release-targets). How an author releases an app is
+are built, `cloudflare` for guests and without derivations. `gcp`, `aws`,
+`azure` and `k8s` are designed and [not built](../PENDING.md#release-targets). How an author releases an app is
 [the guide's](../GUIDE.md#release).
 
 ## Targets, platforms and tiers
@@ -37,7 +37,7 @@ are built. `gcp`, `aws`, `azure` and `k8s` are designed and
 | target | tier | the artifact | the door |
 |---|---|---|---|
 | `pages` | browser | one HTML file | none: the page's fetch shim |
-| `cloudflare` | edge | a Worker and one Durable Object, the pages file its asset | the object |
+| `cloudflare` | edge | a Worker, one Durable Object running PGlite, and the data directory it loads | the Worker |
 | `gcp`, `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
 | `k8s` | k8s | skaffold's manifests | caddy in the named cluster |
 
@@ -190,36 +190,127 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 
 ## cloudflare
 
-`sayt release@cloudflare` runs [`cloudflare.ts`](../bundle/cloudflare.ts), which
-writes `dist/cloudflare/`: the client bundle built via `bundle.ts --no-cluster` into
-`dist/cloudflare/public/` (omitting the PGlite engine so the page delegates storage
-directly to the Worker origin), static assets copied from `shell/assets/`, `wrangler.jsonc`
-with native SQLite Durable Object configuration, and a Worker in `src/index.ts` binding
-to `ClusterDurableObject`. The Durable Object holds application tables in Cloudflare's
-native SQLite storage, handles PostgREST CRUD (`GET`, `POST`, `PATCH`, `DELETE`), serves
-Electric shape replication streams over HTTP (`/electric/v1/shape`), and issues guest
-JWT credentials under `/auth/guest`. `publish` runs `npx wrangler deploy`. What fixes its shape:
+`sayt release@cloudflare` runs [`edge.ts`](../bundle/edge.ts), which writes
+`dist/cloudflare/`: the page bundled with `--no-cluster` into `public/`, so it
+asks the Worker's origin for `/crud`, `/auth` and `/electric`; PGlite for
+workerd in `pglite/`, baked from mecha's pinned sources
+([pglite-workerd](../../../libraries/mecha/packages/pglite-workerd/README.md));
+the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
+[mecha's edge cluster](../../../libraries/mecha/packages/mecha-edge/README.md)
+as its one Durable Object, over the shell's tables. `publish` runs
+[`publish-edge.ts`](../bundle/publish-edge.ts): `wrangler deploy` at the
+version pglite-workerd's `mise.toml` pins, with `JWT_SECRET` (once) and a new
+`IMPORT_TOKEN` in the same version, then the data directory loaded into the
+object. The target keeps the compose stack's shape, one Cloudflare piece per
+service, and nothing runs while no one uses the app:
+
+| compose service | at the edge | sleeps | |
+|---|---|---|---|
+| caddy | the Worker: static files, `/crud`, `/auth`, `/electric`, settled reads from the Cache API | per request | built |
+| database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests only |
+| conduit, mesh-events | an outbox table and a Cloudflare Queue | — | designed |
+| transform, compute | a Container each, from the images bayt builds | after an idle timeout | designed |
+| ticker | the Cron Trigger | — | designed |
+| render | none: the page renders, as `pages` does | — | built |
+
+```
+browser ──/crud──▶ Worker ──▶ object (PGlite) ── commit: triggers write the outbox
+   ▲                 │ Cache API                    │
+   │                 ▼                 Queue ◀── outbox, after commit
+   │                                     │
+   │                            consumer Worker ──HTTP──▶ transform ──/invalidate──▶ compute (tables on R2)
+   │                                                          └──── batched writes back through /crud ────┘
+   └──── object ──held-open shape requests──▶ every open tab
+```
+
+What fixes its shape, as built:
 
 - **An isolate has no fork, threads or sockets, and 128 MB.** PGlite runs
-  there; Postgres needs all four. The 128 MB is the whole budget, so PGlite's
-  heap, shared buffers and data directory are each cut to fit, and since
-  `initdb` cannot run in the object, an initialised data directory ships and is
-  imported once.
-- **The object sleeps between requests.** One awake all day spends about
-  11,000 of the free plan's 13,000 daily GB-seconds. Live sync is therefore a
-  poke on one hibernating WebSocket per tab, after which the page's shim
-  refetches without `live`; presence is tags on those sockets; and the data
-  directory and each table's shape log live in the object's SQLite, so a woken
-  object answers a client under the handle it already holds. A pending JS
-  timer keeps an object awake, so Postgres's idle `setitimer` is a no-op there.
-- **Two clocks.** The Cron Trigger is the coarse one, outside the thing woken,
-  as [the ticker](../../../libraries/mecha/services/ticker/README.md#clocks)
-  requires; the alarm adds finer schedules and never runs alone, because a
-  sweep that dies before re-arming ends its chain silently.
-- **What is spent is not durability** — a commit is on the object's SQLite
-  when its write gate closes — but one connection, one location and the row
-  budget: one object per app, every user behind one writer. Partitioning per
-  room or per user is the first change when an app outgrows it.
+  there; Postgres needs all four. Its data directory lives page by page in the
+  object's SQLite, read when Postgres asks for it, so the database is bounded
+  by the object's storage, not its memory. Stock PGlite does not load in
+  workerd — it misdetects its environment, asks for 128 MiB at instantiation,
+  compiles WebAssembly at runtime for plpgsql and its callbacks, and re-arms an
+  idle timer every 10 s that keeps the object awake — so the target ships a
+  PGlite built without those, with ICU's root collation set.
+- **The data directory is built off the object**, since `initdb` cannot run
+  in it: [`pgdata.ts`](../bundle/pgdata.ts) applies `rls.sql`, the
+  migrations and, for a program with streams or computations, the rows
+  `derived.ts` wrote (as for `pages`) with npm's PGlite, the same Postgres the
+  object runs. `--from=<dir>` starts it from a directory built elsewhere
+  instead, an archive restored from its database with its pgroll ledger
+  ([`restore.ts`](../../../libraries/mecha/packages/pglite-workerd/restore.ts)),
+  applies the cluster's pgroll migrations the ledger lacks, as its migrate step
+  would ([`migrate.ts`](../../../libraries/mecha/packages/pglite-workerd/migrate.ts)),
+  and skips the derivation.
+- **Loading is once.** The object opens only a directory whose load verified
+  every chunk; a load resumes where it stopped and leaves a complete
+  directory alone, so a later release changes the Worker and the page and
+  never the data, unless `--reset` replaces it.
+- **One object, every user behind one writer.** PGlite is one connection.
+  [`createRestHandler`](../../../libraries/mecha/packages/postgrest-js/src/rest-handler.ts)
+  opens each request with a transaction-local role, `app.scopes` and
+  `request.jwt.claims`, so a shared connection never leaks a subject, and row
+  policy is Postgres's own here as on a single machine. Guests only:
+  `/auth/guest` mints the credentials; passkeys wait for mecha's auth service
+  to run in the Worker.
+- **Sync holds requests open.** A tab's live shape request waits on the
+  object, which keeps the object awake while a tab is open; that is the price
+  of the simplest path, and a poke on a hibernating WebSocket is the cheaper
+  later step. The shape log lives in the isolate, so a new object sends every
+  client back to a snapshot.
+- **Settled reads are the colo's.** A shape response that is not live is a
+  prefix of its log, so the Worker answers it again from the Cache API, keyed
+  by the object's epoch; a public table's chunks are every guest's.
+- **The derived rows ship as the release found them**: no stream, computation
+  or clock runs at the edge yet.
+
+As designed and [not built](../PENDING.md#release-targets):
+
+- **The change path is an outbox.** There is no WAL reader in the object, so
+  the statements fenced `-- tier: container` stay skipped and the triggers
+  that fill the outbox run instead; the object sends the outbox to the Queue
+  after each commit. A Queue delivers at least once, unordered, with retries,
+  backoff and a dead-letter queue of its own, so every stream must be an
+  idempotent keyed upsert. A long write holds every read behind it, so
+  derivations write back in batches of hundreds of rows, and the object
+  checkpoints after a burst, since every wake replays what the WAL holds.
+- **The containers are the stack's own images, scaled to zero.** transform and
+  compute run what `./saytw launch` runs, with the Worker in place of
+  `crud:3000` and `compute:9997` and the service token as today. A batch from
+  the Queue wakes transform; its `/invalidate` wakes compute. Their disks are
+  ephemeral, so compute keeps its tables as Parquet on R2 and a cold start
+  reads only what it needs. The container classes are generated from the
+  compose closure bayt emits, so a service added to the app is a container
+  added to the release.
+- **Two clocks**: the Cron Trigger outside the thing woken, as
+  [the ticker](../../../libraries/mecha/services/ticker/README.md#clocks)
+  requires, and alarms for finer schedules that never run alone.
+- **Cost follows use.** Workers Paid at $5 a month, Containers billed for the
+  memory and disk they hold while awake and the CPU they spend, R2 inside its
+  free tier: about $5–10 a month for an idle app.
+
+Measured with GolAberto's full archive deployed (2026-10-10, 11): 7.1 GB in
+the object's SQLite, loaded at 10.2 MiB/s and verified in the object in 70 s;
+a guest's first request reaching an evicted object in about 2 s, a warm one in
+0.25 s; object CPU per request 1–3 ms at the median, under 0.8 s at the
+largest; no memory or CPU kill.
+
+Derivation stays in containers until DuckStream runs. Work that is
+incremental by construction — a stream's mapping, a join or window kept up to
+date — needs memory proportional to a change, not to the data, so it fits an
+object with its state as indexed tables in the object's SQLite, on the free
+plan too. That is [DuckStream](decisions/2026-09-29-hybrid-machines.md): the
+SQL parsed at build time as `check-sql.ts` already parses it, lowered to a plan
+an object runs. It is built only together with the Feldera-backed engine that
+runs the same SQL locally, so an edge-only engine never becomes the reference.
+Batch work over the whole history — ratings refit over years — stays in a
+container on any tier.
+
+truco keeps the previous target until the edge has a clock: a Worker over a
+Durable Object holding its tables in native SQLite ([`cloudflare.ts`](../bundle/cloudflare.ts)),
+whose alarm sweeps its lobby, and which enforces no scope. The emitter routes
+it there by name ([pending](../PENDING.md#release-targets)).
 
 ## The clouds and k8s
 
@@ -257,9 +348,24 @@ is the mapping these start from.
 - **Neon as `gcp`'s database** — its regions are another cloud's, so every
   query would cross between clouds.
 - **Postgres at the edge** — it needs fork, threads and sockets, which an
-  isolate lacks, and would run only under an emulator.
-- **An object kept awake** by long polls and a heartbeat — it spends most of
-  the free plan on waiting.
+  isolate lacks; PGlite is Postgres without them, built for workerd.
+- **Docker in one container running `./saytw launch`** — Containers run
+  Docker without privilege or iptables, so compose's network is crippled, the
+  disk is ephemeral so every wake re-pulls the stack, and the stack's own
+  Postgres, Electric and Caddy would stand beside the object that already is
+  them.
+- **Containers kept awake** — about $30 a month for one that does nothing most
+  of the day; scaling to zero with state on R2 costs a cold start instead.
+- **DuckDB-wasm as compute in an object** — measured: it gives compute's
+  answers exactly, but needs about 65 MiB before its first query, a single
+  chances group peaks near 172 MiB, ratings over one year near 270 MiB, and
+  with no disk to spill to its memory limit only turns that into failures.
+- **Splitting the archive by age** across a live object and a read-only one —
+  the whole archive fits one object's storage, and reads that span seasons
+  would merge two sources.
+- **Row policy compiled into the object's SQLite** — enforcement in the
+  request path's own code turns a bug there into a breach, where Postgres's
+  policies make it an outage.
 - **Electric's sync service at the edge, or Electric Cloud** — the BEAM does
   not run in an isolate, and Electric Cloud has wound down; the object answers
   Electric's shape protocol itself, and nothing in omnishell changes.

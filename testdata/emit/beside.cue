@@ -25,20 +25,21 @@ _besideRules: (pronto.#emit & {
 
 besideRule: _besideRules.plain.cmds[0].do & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-plain"
 besideRunner: _besideTargets["ci-plain"] & {#closure: "check-plain", #check: "plain"}
-besidePriority:  _besideRules.plain.priority & 2
-besideWaits:     _besideTargets["check-plain"].compose.depends_on["apps_emit-launch"].condition & "service_healthy"
-besideDoor:      _besideTargets["check-plain"].compose.environment.APP_URL & "https://caddy:8443"
-besideEscaped:   _besideTargets["check-plain"].compose.command & ["mise", "x", "--", "sh", "-c", "deno run tests/plain.ts $$HOME"]
+besidePriority: _besideRules.plain.priority & 2
+besideWaits:    _besideTargets["check-plain"].compose.depends_on["apps_emit-launch"].condition & "service_healthy"
+besideDoor:     _besideTargets["check-plain"].compose.environment.APP_URL & "https://caddy:8443"
+besideEscaped: _besideTargets["check-plain"].compose.command & ["mise", "x", "--", "sh", "-c", "deno run tests/plain.ts $$HOME"]
 besidePlainBase: _besideTargets["check-plain"].dockerfile.from.ref & ":setup"
 besideBrowser:   _besideTargets["check-painted"].dockerfile.from.ref & ":browser"
-besideSources:   _besideTargets["check-painted"].srcs.globs & ["tests/**", "fixtures/**"]
+besideSources: _besideTargets["check-painted"].srcs.globs & ["tests/**", "fixtures/**"]
 besideNoBrowser: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.browser == _|_) & true
 // The tests import omnishell and mecha by relative path, which resolve in the
 // image only where the trees sit beside the app as they do in the monorepo.
 for check in ["check-plain", "check-painted"] {
 	besideTrees: (check): _besideTargets[check].dockerfile.copy[0] & {from: name: "root", srcs: ["plugins/omnishell", "libraries/mecha"], dst: "/monorepo/", parents: true}
-	besideImportRoot: (check): list.Contains(_besideTargets[check].dockerfile.preamble, "COPY --from=root plugins/omnishell /omnishell") & true
+	besideImportRoot: (check): list.Contains(_besideTargets[check].dockerfile.epilogue, "RUN ln -s /monorepo/plugins/omnishell /omnishell") & true
 }
+
 // A check reaches the database only when it asks to: the URL carries the
 // superuser's credentials.
 besideNoDatabase: (_besideTargets["check-plain"].compose.environment.DATABASE_URL == _|_) & true

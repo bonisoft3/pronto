@@ -13,6 +13,48 @@ program is a pure function and a set of checks. `cue export -e out` is the
 whole backend and `write.ts` its linker. What each artifact must contain is
 [SPEC](../SPEC.md); how an author drives the loop is [GUIDE](../GUIDE.md).
 
+## Incremental builds
+
+`generate` owns the compiler (`write.ts`) and Bayt graph emission. Its cached
+Task target depends on setup; lint depends on generation, and test, launch and
+integration depend on build. OmniShell interprets generated artifacts, so the
+native build target executes consumer build rules without another compiler pass.
+
+The initial bootstrap runs generation directly before a graph exists. Subsequent
+Sayt gates run cached generation first, then start a fresh Task invocation for
+the requested verb: Task loads its graph once per invocation. An unchanged
+generation skips application CUE evaluation.
+The same graph generates gates in `.bayt/say.yaml`. Pronto projects them into
+the application's `.say.yaml`, owning the glue Sayt reads at bootstrap. The complete
+compiler, terminal, cluster and consumer checks remain in `.bayt/checks.yaml`;
+the Task leaf executes that explicit configuration instead of reentering the
+public gate. Consumer additions still compose through CUE unification.
+Missing generated configuration is repaired from `bayt.json` before dispatch;
+a leaf refuses to substitute default checks when its configuration is absent.
+Generation also requires its generated configuration and Task roots to exist.
+If regeneration changes the generation rules, the leaf runs the refreshed
+rules before stamping success; rules that keep changing fail after three runs.
+
+Local generation depends on the workspace's `pronto-sources:srcs` view, whose
+compiler trees also define the Docker program copy. A rooted mirror declares
+those trees within its own source set. Framework edits invalidate generation
+in both layouts.
+
+Test fingerprints include `tests/**`, the generated check configuration and
+compiler facts. Installed-runtime tests use the cache; tests against local
+sibling runtimes run each time until those trees have declared dependency
+edges. Lint always runs because protobuf compatibility also reads Git history.
+Docker lint/test retain their existing compiler checks. Moving the full host
+rule set into those images requires a declared protobuf baseline instead of
+a live Git checkout.
+
+Launch and integration use separate native action targets so their commands do
+not become Docker build steps in the runtime service. Both run generation and the cached build
+first, then execute the original rules on every invocation. Arguments pass
+through the gate to the leaf. Integration runners invoke Task inside the
+Docker secret-injection envelope, preserving setup, teardown and failure
+verdicts; the runner action itself is uncached.
+
 ## The ladder
 
 The rungs, and which of them are deterministic, are
@@ -122,6 +164,9 @@ layout it finds: pronto as the app names it, the app's directory under the
 module's root, and the root and the runtime's directory as mecha names them.
 An [installed app's mirror](release-targets.md#pages) is the other case: the
 app alone at its root, finding the released runtime with `run-mise where`.
+Monorepo CI preserves installed layouts and carries their repository runtime
+bindings into the check runners. Their `.bayt/.env` selects images built from
+the checkout; mirror release gates validate the published pins.
 
 Each brings what the others cannot. sayt bootstraps the rest and carries the
 cross-platform concern, which is why it alone ships per-platform binaries;

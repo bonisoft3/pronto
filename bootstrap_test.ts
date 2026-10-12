@@ -216,9 +216,9 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
         const build = JSON.parse(await Deno.readTextFile(join(app, "bayt.json")));
         assert(build.name === "jsfb", "standalone build has an invalid project name");
         const dockerfile = await cue(app, ["export", ".", "-e", "(_render & {depManifests: {}}).docker.dockerfiles.build", "--out", "text"]);
-        assert(dockerfile.startsWith("FROM jsfb-setup AS build\n"), "standalone Dockerfile has an invalid setup context");
+        assert(dockerfile.startsWith("FROM jsfb-generate AS build\n"), "standalone Dockerfile has an invalid setup context");
         const generated = await Deno.readTextFile(join(app, ".say.yaml"));
-        assert(generated.includes("custom:"), "real writer lost the consumer rule");
+        assert(build.files["checks.yaml"].say.generate.rulemap.custom, "real writer lost the consumer rule");
         assert(!generated.includes("../../plugins"), "external writer emitted a monorepo command");
         assert((await Deno.readTextFile(join(app, "documents/about/index.html"))).includes("<h1>About</h1>"), "the installed omnishell rendered no document");
         if (pass === 1) assert(generated === written, "real writer did not settle");

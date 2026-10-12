@@ -221,12 +221,17 @@ html = html.replace(/<link rel="stylesheet" href="([^"]+)">/g, (_match, href) =>
   return `<style>${files[p]}</style>`
 })
 html = html.replace(/<link rel="modulepreload"[^>]*>\n/g, '').replace(/<script type="speculationrules">[\s\S]*?<\/script>\n/, '')
+// A preload of a file the shim serves goes to the network past it: on a host
+// that answers an unknown path with the document, it downloads the whole page.
+html = html.replace(/<link rel="preload" href="([^"]+)"[^>]*>\n/g, (tag, href) => {
+  if (isExternal(href)) return tag
+  const p = new URL(href, 'file:///shell/').pathname.slice(1)
+  return p in files ? '' : fail(`shell/index.html preloads ${p}, which shell.json does not serve`)
+})
 
-const isExternal = (url: string) =>
-  url.startsWith('data:') ||
-  url.startsWith('http://') ||
-  url.startsWith('https://') ||
-  url.startsWith('//')
+function isExternal(url: string) {
+  return url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')
+}
 
 // Mirrors #faviconPlan href emission in schema.cue (./ relative to shell/, / relative to root).
 const resolveShellAsset = (appPath: string, href: string): string | null => {

@@ -25,12 +25,12 @@ _installedFiles: (pronto.#emit & {
 }).files
 
 installedImageName: _installedCluster.meta.images.database & {name: "libraries_mecha-database-image"}
-installedFrom:      _installedProject.targets.database.dockerfile.from.name & "libraries_mecha-database-image"
-installedContext:   _installedProject.targets.database.compose.build.additional_contexts["libraries_mecha-database-image"] & "${MONOREPO_COMPOSE_MODE:-docker-image://\(mecha.published.database)}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image}"
+installedFrom:    _installedProject.targets.database.dockerfile.from.name & "libraries_mecha-database-image"
+installedContext: _installedProject.targets.database.compose.build.additional_contexts["libraries_mecha-database-image"] & "${MONOREPO_COMPOSE_MODE:-docker-image://\(mecha.published.database)}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image}"
 installedIncludes: _installedProject.compose.includes & ["mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml", "omnishell/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"]
-installedService: list.Contains(_installedFiles["mecha/service.yaml"].data.include, "../${MONOREPO_MECHA_PATH}/.bayt/compose.database-image.yaml") & true
+installedService:      list.Contains(_installedFiles["mecha/service.yaml"].data.include, "../${MONOREPO_MECHA_PATH}/.bayt/compose.database-image.yaml") & true
 installedServiceCount: len(_installedFiles["mecha/service.yaml"].data.include) & 7
-installedRoot:   _installedProject.targets.caddy.compose.build.additional_contexts.root & ".."
+installedRoot:         _installedProject.targets.caddy.compose.build.additional_contexts.root & ".."
 installedRootCompose: _installedFiles["compose.yaml"].data.include & [{path: "./.bayt/compose.yaml"}, {path: "mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"}, {path: "omnishell/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"}]
 
 // omnishell reaches the images as one image of its runtime tree, switched as
@@ -42,7 +42,7 @@ installedCaddyStatics: [for c in _installedProject.targets.caddy.dockerfile.copy
 	if [if c.parents != _|_ if c.parents {c.dst + f}, c.dst][0] =~ "^/omnishell/" {c}] & []
 installedCaddyShell: _installedProject.targets.caddy.dockerfile.defaultCopy["/omnishell/interpreter/shell.js"] & {from: name: "plugins_omnishell-runtime-image", srcs: ["interpreter/shell.js"]}
 installedCaddyContext: _installedProject.targets.caddy.compose.build.additional_contexts["plugins_omnishell-runtime-image"] & _omnishellContext
-installedVisual: list.Contains(_installedProject.targets.integrate.dockerfile.preamble, "COPY --from=plugins_omnishell-runtime-image / /omnishell") & true
+installedVisual:       list.Contains(_installedProject.targets.integrate.dockerfile.preamble, "COPY --from=plugins_omnishell-runtime-image / /omnishell") & true
 installedVisualContext: _installedProject.targets.integrate.compose.build.additional_contexts & {"plugins_omnishell-runtime-image": _omnishellContext}
 _installedChecked: (pronto.#DefaultBuild & {code: _code, loop: _external, cluster: _installedCluster, terminal: _installedTerm} & {out: checks: probe: {cmds: ["true"], note: "probe"}}).out.project
 installedCheckOmnishell: _installedChecked.targets["check-probe"].dockerfile.copy & [{from: name: "plugins_omnishell-runtime-image", srcs: ["/"], dst: "/omnishell"}]
@@ -63,12 +63,14 @@ installedNoReplayRule:   (_external.surface.checks.replay == _|_) & true
 // Commands reach sayt through the wrapper the app commits, at its pin.
 installedBuildCmd: _external.surface.buildCmd & "./saytw build"
 localReplayTarget: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.replay != _|_) & true
+localReplayCopiesRootGraph: len([for p in (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets["ci-replay"].dockerfile.copy[0].exclude if p == "**/.bayt/**" {p}]) & 0
+localReplayCopiesStackGraph: list.Contains((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.replay.dockerfile.copy[0].srcs, "libraries/mecha/.bayt") & true
 // The wrapper reaches the build image on the app's whole tree.
 installedBuildWrapper: _installedProject.targets.build.srcs.defaultGlobs["pronto-tree"].glob & "**"
 
 // An installed app type-checks pronto's own modules, not its tests, which
 // import their siblings.
-installedTypes:     _external.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts\\]"
+installedTypes: _external.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts\\]"
 // An installed terminal's checks reach omnishell through the app's mise, not
 // PATH: mise makes no shim for a `path:` version.
 _installedTerminal: (pronto.#DefaultTerminal & {code: _code}).out.surface & {runtime: ""}

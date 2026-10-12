@@ -18,19 +18,21 @@ _mirroredFiles: (pronto.#emit & {
 	build:    _mirroredBuild
 }).files
 
-mirroredSiblings:   _mirroredLoop.surface.sources.mecha & ".runtime/libraries/mecha"
-mirroredDirectory:  _mirroredBuild.project.dir & ""
+mirroredSiblings:  _mirroredLoop.surface.sources.mecha & ".runtime/libraries/mecha"
+mirroredDirectory: _mirroredBuild.project.dir & ""
+mirroredCompilerSources: _mirroredBuild.project.targets.program.srcs.globs & ["cue.mod", ".runtime/plugins/pronto", ".runtime/plugins/omnishell", ".runtime/plugins/bayt", ".runtime/plugins/sayt", ".runtime/libraries/mecha"]
+monorepoCompilerDependency: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.program.deps & [":setup", "workspaceroot:pronto-sources:srcs"]
 mirroredContext:    _mirroredBuild.project.targets.integrate.compose.build.additional_contexts.root & ".."
 mirroredVisualCopy: list.Contains(_mirroredBuild.project.targets.integrate.dockerfile.preamble, "COPY --from=root .runtime/plugins/omnishell /omnishell") & true
-mirroredProtos:     _mirroredFiles["buf.yaml"].data.modules[0].excludes & [".runtime"]
+mirroredProtos: _mirroredFiles["buf.yaml"].data.modules[0].excludes & [".runtime"]
 // The sync rewrites the imports the facts hash, so only the monorepo holds them.
 mirroredFacts: (_mirroredLoop.surface.checks.facts == _|_) & true
 monorepoContext: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.integrate.compose.build.additional_contexts.root & "../../.."
 _mirroredCluster: (pronto.#DefaultCluster & {code: _code, statics: [{file: ".runtime/plugins/omnishell/interpreter/shell.js", target: "/omnishell/interpreter/shell.js"}]}).out & {meta: {root: "", runtime: ".runtime/"}}
-_mirroredCaddy: _mirroredCluster.surface.targets.caddy
+_mirroredCaddy:       _mirroredCluster.surface.targets.caddy
 mirroredCaddyContext: _mirroredCaddy.compose.build.additional_contexts.root & ".."
 mirroredRuntimeStatic: list.Contains(_mirroredCaddy.dockerfile.copy, {from: name: "root", srcs: [".runtime/plugins/omnishell/interpreter/shell.js"], dst: "/omnishell/interpreter/shell.js"}) & true
 monorepoCaddyContext: _cluster.surface.targets.caddy.compose.build.additional_contexts.root & "../../.."
 _mirroredCheck: (_mirroredBuild & {checks: probe: {cmds: ["true"], note: "probe"}}).project.targets["check-probe"]
-mirroredCheckImportRoot: list.Contains(_mirroredCheck.dockerfile.preamble, "COPY --from=root .runtime/plugins/omnishell /omnishell") & true
-mirroredName:      _mirroredBuild.project.name & "apps_\(_code.meta.name)"
+mirroredCheckImportRoot: list.Contains(_mirroredCheck.dockerfile.epilogue, "RUN ln -s /monorepo/.runtime/plugins/omnishell /omnishell") & true
+mirroredName:            _mirroredBuild.project.name & "apps_\(_code.meta.name)"
