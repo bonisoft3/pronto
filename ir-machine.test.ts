@@ -106,3 +106,24 @@ app: state: {
   assertStringIncludes(html, "payment_created");
   assertEquals(sources.some((s) => s.includes("invoke charge") && s.includes("invoke refund")), true);
 });
+
+Deno.test("IR links lifecycle guards independently from their actions", async () => {
+  const { html } = await render(paymentProgram() + `
+app: state: machines: PaymentRules: {
+  entity: "Payment"
+  guards: positive: {
+    ir: "positive-payment"
+    src: "shell/validations/positive.js"
+    note: "payments must have a positive total"
+    edges: []
+    module: {statements: "", completion: "(state, event) => event.row.total > 0"}
+  }
+  on: insert: {
+    guard: "positive"
+    actions: raise: {notify: "payment_created", payload: "NEW.id"}
+  }
+}`);
+  assertStringIncludes(html, '<th>guards</th><th>actions</th>');
+  assertStringIncludes(html, 'href="#positive-payment"');
+  assertStringIncludes(html, 'payment_created');
+});

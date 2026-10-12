@@ -629,10 +629,9 @@ import (
 		uniques: [...{where?: _|_}]
 	}
 
-	// Rung five of validation: a Jessie predicate over the row and its
-	// references, run by the store before an optimistic write and by Postgres
-	// before commit. Named because the name is the refusal, as a unique's is.
-	validations: [Name=string]: #Validation & {name: Name}
+	// Derived from lifecycle-machine guards; the refusal names are shared by
+	// the server interpreter and the browser preflight.
+	validations: [Name=string]: #Validation & {name: Name, machine?: string, on?: [...string]}
 
 	// Bootstrap rows: the rows a store holds before anyone writes one. A
 	// cluster durability renders them into 900_seed.sql; a `tab` entity has no
@@ -668,6 +667,9 @@ import (
 }
 
 #Validation: {
+	machine?: string
+	on?: [...string]
+	order?: [string]: [int, int]
 	name: string & =~"^[a-z][a-z0-9-]*$"
 	ir:   *name | string
 	src:  #Jessie
@@ -975,15 +977,21 @@ import (
 	exit?:  #MechaAction | [...#MechaAction]
 }
 
+#LifecycleTransition: {
+	guard?: string | [string, ...string]
+	actions?: #MechaAction | [...#MechaAction]
+}
+
+#LifecycleTransitionValue: #LifecycleTransition | #MechaAction | [...#MechaAction]
+
 #MechaMachine: M={
 	name:    string
 	ir:      *name | string
 	entity:  string
-	// Derived: a machine over a server row is replicated, and external where a
-	// state invokes an effect — the pivot its ledger claims before the call.
-	level: [if len([for _, s in [if M.states != _|_ {M.states}, {}][0] if s.invoke != _|_ {s}]) > 0 {"external"}, "replicated"][0] & #EffectLevel
+	guards: [Name=string]: #Validation & {name: Name}
+	level: #EffectLevel
 	_actions: list.Concat([
-		[if M.on != _|_ for _, actList in M.on for act in [if (actList & [...]) != _|_ {actList}, [actList]][0] {act}],
+		[for _, tr in M._on for act in tr.actions {act}],
 		[if M.states != _|_ for _, st in M.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
 		[if M.states != _|_ for _, st in M.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
 		[if M.states != _|_ for _, st in M.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
@@ -994,6 +1002,16 @@ import (
 		for a in M._actions if a.hatch != _|_
 		for h in [if (a.hatch & [...]) != _|_ {a.hatch}, [a.hatch]][0] {(h.name): true}
 	} {hn}])
+	_on: {if M.on != _|_ for op, tr in M.on {
+		let transition = tr.guard != _|_ || tr.actions != _|_
+		(op): {
+			guard: [if transition if tr.guard != _|_ {[if (tr.guard & string) != _|_ {[tr.guard]}, tr.guard][0]}, []][0]
+			actions: [
+				if transition {[if tr.actions != _|_ {[if (tr.actions & [...]) != _|_ {tr.actions}, [tr.actions]][0]}, []][0]},
+				[if (tr & [...]) != _|_ {tr}, [tr]][0],
+			][0]
+		}
+	}}
 	_timers: [if M.states != _|_ for sn, st in M.states if st.after != _|_
 		for ms, tr in st.after
 		for idx, t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
@@ -1010,9 +1028,9 @@ import (
 	initial?: string
 	states?: [StateName=string]: #MechaState
 	on?: {
-		insert?: #MechaAction | [...#MechaAction]
-		update?: #MechaAction | [...#MechaAction]
-		delete?: #MechaAction | [...#MechaAction]
+		insert?: #LifecycleTransitionValue
+		update?: #LifecycleTransitionValue
+		delete?: #LifecycleTransitionValue
 	}
 }
 
@@ -1696,6 +1714,54 @@ import (
 		}],
 	])
 	_hostDomRefusal: [if len(_hostDomViolations) == 0 {true}, _hostDomViolations[0]][0] & true
+
+	state: entities: {for en, e in A.state.entities {
+		(en): validations: close({
+			if A.state.machines != _|_ for mn, m in A.state.machines if m.entity == en || m.entity == e.table
+			for gn, g in m.guards {
+				(gn): g & {
+					machine: mn
+					on: [for op, tr in m._on if list.Contains(tr.guard, gn) {op}]
+					let ordinal = [for i, name in list.SortStrings([for other, om in A.state.machines if om.entity == en || om.entity == e.table {"trg_\(e.table)_\(other)_reducer"}]) if name == "trg_\(e.table)_\(mn)_reducer" {i}][0]
+					order: {for op, tr in m._on for i, name in tr.guard if name == gn {(op): [ordinal, i]}}
+				}
+			}
+		})
+	}}
+	state: machines: [mn=string]: {
+		let m = A.state.machines[mn]
+		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
+			level: [if len([if m.states != _|_ for st in m.states if st.invoke != _|_ {st}]) > 0 {"external"}, if m.states == _|_ if len(m._actions) == 0 {e.level}, "replicated"][0]
+		}
+	}
+
+	_lifecycleViolations: list.Concat([
+		[if A.state.machines != _|_ for mn, m in A.state.machines for op, tr in m._on if len([for name, _ in {for g in tr.guard {(g): true}} {name}]) != len(tr.guard) {
+			"lifecycle machine \(mn).\(op) repeats a guard"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines for op, tr in m._on for gn in tr.guard if m.guards[gn] == _|_ {
+			"lifecycle machine \(mn).\(op) names undeclared guard \(gn)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines for gn, _ in m.guards if len([for op, tr in m._on if list.Contains(tr.guard, gn) {op}]) == 0 {
+			"lifecycle machine \(mn) declares unused guard \(gn)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 if m.states != _|_ {
+			"machine \(mn) puts lifecycle guards on a statechart"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m.on != _|_ for en, e in A.state.entities if m.entity == en || m.entity == e.table if len("trg_\(e.table)_\(m.name)_reducer") > 63 {
+			"lifecycle interpreter name exceeds Postgres's 63-byte limit: \(mn)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 for a in m._actions if a.assign != _|_ {
+			"guarded lifecycle machine \(mn) cannot assign NEW after the write; use a relational action"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 if m.timing != _|_ if m.timing != "AFTER" {
+			"lifecycle guards require AFTER timing: \(mn)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines for en, e in A.state.entities if m.entity == en || m.entity == e.table if !e.server if m.states != _|_ || len(m._actions) > 0 {
+			"machine \(mn) requires a server-held entity for actions or a statechart: \(en)"
+		}],
+	])
+	_lifecycleRefusal: [if len(_lifecycleViolations) == 0 {true}, _lifecycleViolations[0]][0] & true
 
 	_machineActions: [if A.state.machines != _|_ for mName, m in A.state.machines {machine: mName, actions: m._actions}]
 	_machineHatches: {if A.state.machines != _|_ for mn, m in A.state.machines {(mn): m.hatches}}

@@ -40,7 +40,7 @@ export type Entity = {
   level: string;
   fields: Field[];
   access?: Record<string, unknown>;
-  validations?: Record<string, { note: string }>;
+  validations?: Record<string, { note: string; ir?: string; machine?: string; on?: string[] }>;
   indexes?: { on: string }[];
   uniques?: unknown[];
   /** Derived at #App (writers.cue): every declaration that writes rows here. */
@@ -405,13 +405,22 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
   const peer = (x: Effect) => x.sink.idempotent ? "idempotent" : `not idempotent · re-entry ${esc(reentryOf(x))}`;
   const machinePanels = await Promise.all(panels.map(async (m) => {
     const diagram = m.chart === null ? "" : `<div class="canvas">${await ctx.d2(chartD2(m.chart))}</div>`;
-    const lifecycle = Object.entries(m.lifecycle ?? {}).map(([event, actions]) =>
-      `<tr><th>${esc(m.timing ?? "AFTER")} ${esc(event)}</th><td><code>${esc(JSON.stringify(actions))}</code></td></tr>`
-    ).join("");
+    const lifecycle = Object.entries(m.lifecycle ?? {}).map(([event, transition]) => {
+      const branch = !Array.isArray(transition) && ("guard" in transition || "actions" in transition);
+      const guard = branch ? transition.guard : undefined;
+      const guards = guard === undefined ? [] : Array.isArray(guard) ? guard : [guard];
+      const actions = branch ? transition.actions ?? [] : transition;
+      const names = guards.map(name => {
+        const predicate = e.validations?.[String(name)];
+        if (!predicate) throw new Error(`lifecycle machine ${m.id} names unknown guard ${name}`);
+        return `<a href="#${esc(predicate.ir ?? String(name))}">${esc(String(name))}</a>`;
+      }).join(", ") || "—";
+      return `<tr><th>${esc(m.timing ?? "AFTER")} ${esc(event)}</th><td>${names}</td><td><code>${esc(JSON.stringify(actions))}</code></td></tr>`;
+    }).join("");
     return `<section class="machine" data-kind="machine" id="${esc(m.id)}" data-of="${esc(e.ir)}">
 <span class="lbl derived">machine</span>
 <span class="mtitle">${esc(m.title)} ${chip("level", m.level, true, LEVEL_TIP[m.level])}${chip("delivery", m.deliveries.join(" · "), true)}</span>
-${diagram}${lifecycle === "" ? "" : `<table class="fields"><thead><tr><th>event</th><th>actions</th></tr></thead><tbody>${lifecycle}</tbody></table>`}${
+${diagram}${lifecycle === "" ? "" : `<table class="fields"><thead><tr><th>event</th><th>guards</th><th>actions</th></tr></thead><tbody>${lifecycle}</tbody></table>`}${
       m.effects.map(({ src, effect, delivery }) => `
 <p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", src, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? `bridge ${effect.sink.bridge}`)} · ${peer(effect)}${m.effects.length > 1 ? ` ${chip("delivery", delivery, true)}` : ""} · <span class="note">${esc(effect.note)}</span></p>`).join("")
     }${m.hatches.map((h) => `\n<p class="why">SQL hatch <a href="#${esc(h.ir)}">${esc(h.ir)}</a> · ${chip("delivery", "unspecified", true)} · <span class="note">${esc(h.note)}</span></p>`).join("")}

@@ -330,13 +330,9 @@ _sqlType: {
 	END $$;
 	"""
 
-// A validated table's plv8 predicates and the trigger that hands them their
-// world. The trigger is SECURITY DEFINER so the server seat judges against
-// the truth, and it refuses with check_violation because PostgREST maps a
-// bare plv8 exception to 500, which the client outbox would retry forever.
-// AFTER, so a row the caller's RLS refuses never reaches the definer's read:
-// the predicate cannot be used as an oracle for rows the caller cannot write.
-// It also puts stored generated columns and the restamped txid in `event.row`.
+// Predicate function identities survive the move into the lifecycle
+// interpreter. Its AFTER trigger receives generated columns and runs only
+// after RLS accepted the write, before making privileged related-row reads.
 #validationSql: V={
 	e: #Entity
 	_fn: {for n, _ in V.e.validations {(n): "\(V.e.table)_validation_\(strings.Replace(n, "-", "_", -1))"}}
@@ -360,43 +356,30 @@ _sqlType: {
 		REVOKE EXECUTE ON FUNCTION \(V._fn[n])(jsonb, jsonb) FROM PUBLIC;
 		"""
 	}]
-	_reads: {for n, v in V.e.validations {
-		(n): strings.Join([for ed in v.edges {
-			"'\(ed.table)', (SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM \(ed.table) r WHERE r.\"\(ed.key)\" = NEW.\"\(ed.from)\")"
+	out: strings.Join(list.Concat([V._functions, [
+		"DROP TRIGGER IF EXISTS \(V.e.table)_validate ON \(V.e.table);",
+		"DROP FUNCTION IF EXISTS \(V.e.table)_validate();",
+	]]), "\n\n")
+}
+
+#lifecycleGuardSql: G={
+	e: #Entity
+	guards: [...string]
+	row: "NEW" | "OLD"
+	out: strings.Join([for n in G.guards {
+		let v = G.e.validations[n]
+		let reads = strings.Join([for ed in v.edges {
+			"'\(ed.table)', (SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM \(ed.table) r WHERE r.\"\(ed.key)\" = \(G.row).\"\(ed.from)\")"
 		}], ", ")
-	}}
-	// IS DISTINCT FROM, so a null answer takes the program-error arm rather
-	// than passing: an unanswered predicate refuses.
-	_checks: [for n, _ in V.e.validations {
 		"""
-		  v := \(V._fn[n])(jsonb_build_object('items', items, 'rows', jsonb_build_object(\(V._reads[n]))), event);
+		  v := \(G.e.table)_validation_\(strings.Replace(n, "-", "_", -1))(jsonb_build_object('items', items, 'rows', jsonb_build_object(\(reads))), event);
 		  IF v = 'false' THEN
-		    RAISE EXCEPTION USING ERRCODE = 'check_violation', MESSAGE = 'validation \(V.e.table).\(n)';
+		    RAISE EXCEPTION USING ERRCODE = 'check_violation', MESSAGE = 'validation \(G.e.table).\(n)';
 		  ELSIF v IS DISTINCT FROM 'true' THEN
-		    RAISE EXCEPTION USING ERRCODE = 'raise_exception', MESSAGE = 'predicate \(V.e.table).\(n) ' || coalesce(v, 'answered nothing');
+		    RAISE EXCEPTION USING ERRCODE = 'raise_exception', MESSAGE = 'predicate \(G.e.table).\(n) ' || coalesce(v, 'answered nothing');
 		  END IF;
 		"""
-	}]
-	out: strings.Join(list.Concat([V._functions, [
-		"""
-		CREATE OR REPLACE FUNCTION \(V.e.table)_validate() RETURNS trigger
-		LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-		DECLARE
-		  items jsonb;
-		  event jsonb;
-		  v text;
-		BEGIN
-		  items := CASE WHEN TG_OP = 'UPDATE' THEN jsonb_build_array(to_jsonb(OLD)) ELSE '[]'::jsonb END;
-		  event := jsonb_build_object('type', lower(TG_OP), 'row', to_jsonb(NEW));
-		\(strings.Join(V._checks, "\n"))
-		  RETURN NULL;
-		END $$;
-
-		DROP TRIGGER IF EXISTS \(V.e.table)_validate ON \(V.e.table);
-		CREATE TRIGGER \(V.e.table)_validate AFTER INSERT OR UPDATE ON \(V.e.table)
-		  FOR EACH ROW EXECUTE FUNCTION \(V.e.table)_validate();
-		""",
-	]]), "\n\n")
+	}], "\n")
 }
 
 #mechaEffectSql: EF={
@@ -753,55 +736,38 @@ _sqlType: {
 
 	_lifecycleMachineSql: [if S.machine["on"] != _|_ {
 		_fnName: "trg_\(_table)_\(S.machine.name)_reducer"
-		_insertActions: [if S.machine.on["insert"] != _|_ {
-			[for a in [if (S.machine.on.insert & [...]) != _|_ {S.machine.on.insert}, [S.machine.on.insert]][0] {
-				(#mechaActionSql & {action: a, op: "INSERT"}).out
-			}]
-		}, []][0]
-		_updateActions: [if S.machine.on["update"] != _|_ {
-			[for a in [if (S.machine.on.update & [...]) != _|_ {S.machine.on.update}, [S.machine.on.update]][0] {
-				(#mechaActionSql & {action: a, op: "UPDATE"}).out
-			}]
-		}, []][0]
-		_deleteActions: [if S.machine.on["delete"] != _|_ {
-			[for a in [if (S.machine.on.delete & [...]) != _|_ {S.machine.on.delete}, [S.machine.on.delete]][0] {
-				(#mechaActionSql & {action: a, op: "DELETE"}).out
-			}]
-		}, []][0]
-
-		_timing: [if S.machine["timing"] != _|_ {S.machine.timing}, "AFTER"][0]
-
-		_reducerBody: """
-			CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
-			LANGUAGE plpgsql
-			SECURITY DEFINER
-			SET search_path = public, pg_catalog AS $$
-			BEGIN
-			  IF TG_OP = 'INSERT' THEN
-			\(strings.Join(_insertActions, "\n"))
-			    RETURN NEW;
-			  END IF;
-
-			  IF TG_OP = 'UPDATE' THEN
-			\(strings.Join(_updateActions, "\n"))
-			    RETURN NEW;
-			  END IF;
-
-			  IF TG_OP = 'DELETE' THEN
-			\(strings.Join(_deleteActions, "\n"))
-			    RETURN OLD;
-			  END IF;
-
-			  RETURN COALESCE(NEW, OLD);
-			END $$;
-
-			DROP TRIGGER IF EXISTS "\(_fnName)" ON "\(_table)";
-			CREATE TRIGGER "\(_fnName)"
-			  \(_timing) INSERT OR UPDATE OR DELETE ON "\(_table)"
-			  FOR EACH ROW
-			  EXECUTE FUNCTION "\(_fnName)"();
+		_entity: [for en, e in S.entities if en == S.machine.entity || e.table == S.machine.entity {e}][0]
+		_branches: [for op, tr in S.machine._on {
+			let row = [if op == "delete" {"OLD"}, "NEW"][0]
 			"""
-		_reducerBody
+			  IF TG_OP = '\(strings.ToUpper(op))' THEN
+			\((#lifecycleGuardSql & {e: _entity, guards: tr.guard, "row": row}).out)
+			\(strings.Join([for a in tr.actions {(#mechaActionSql & {action: a, "op": strings.ToUpper(op)}).out}], "\n"))
+			    RETURN \(row);
+			  END IF;
+			"""
+		}]
+		_timing: [if S.machine["timing"] != _|_ {S.machine.timing}, "AFTER"][0]
+		"""
+		CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
+		LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+		DECLARE
+		  items jsonb;
+		  event jsonb;
+		  v text;
+		BEGIN
+		  items := CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN jsonb_build_array(to_jsonb(OLD)) ELSE '[]'::jsonb END;
+		  event := jsonb_build_object('type', lower(TG_OP), 'row', CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END);
+		\(strings.Join(_branches, "\n"))
+		  RETURN COALESCE(NEW, OLD);
+		END $$;
+
+		REVOKE EXECUTE ON FUNCTION "\(_fnName)"() FROM PUBLIC;
+		DROP TRIGGER IF EXISTS "\(_fnName)" ON "\(_table)";
+		CREATE TRIGGER "\(_fnName)"
+		  \(_timing) INSERT OR UPDATE OR DELETE ON "\(_table)"
+		  FOR EACH ROW EXECUTE FUNCTION "\(_fnName)"();
+		"""
 	}, ""][0]
 
 	_compiledSql: [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
@@ -1604,7 +1570,7 @@ _cdcBeforeField: "__before"
 		if len(S._validatedTables) > 0 {
 			validations: {
 				for _, e in S.code.state.entities if S._tables[e.table] != _|_ for n, v in e.validations {
-					(e.table): {(n): {src: v.src, edges: v.edges}}
+					(e.table): {(n): {src: v.src, edges: v.edges, on: v.on, order: v.order, machine: v.machine}}
 				}
 			}
 		}
@@ -1715,7 +1681,7 @@ _cdcBeforeField: "__before"
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	_seedFile: len(M.seeded) > 0 || M.code.state.seed != _|_
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
-	machines: [if M.code.state.machines != _|_ {[for _, m in M.code.state.machines {m}]}, []][0]
+	machines: [if M.code.state.machines != _|_ {[for _, m in M.code.state.machines for en, e in M.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	// The cluster copies this list into its database image, so it follows the
 	// predicate that emits the database: a migration named without one would be
@@ -2726,6 +2692,7 @@ _cdcBeforeField: "__before"
 	files: {
 		if E.code._timerRefusal {}
 		if E.code._hostDomRefusal {}
+		if E.code._lifecycleRefusal {}
 		for _, h in E.code.capabilities.hatches if h.kind == "host-dom" {if E.terminal.capabilities.hostDom != true {_unsupportedHostDom: error("terminal does not offer host-dom")}}
 	}
 	// The compose files an installed app's closures include, one per
@@ -2978,7 +2945,7 @@ _cdcBeforeField: "__before"
 				}
 			}
 
-			_machines: [if E.code.state.machines != _|_ {[for _, m in E.code.state.machines {m}]}, []][0]
+			_machines: [if E.code.state.machines != _|_ {[for _, m in E.code.state.machines for en, e in E.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
 			if len(_machines) > 0 {
 				"services/database/migrations/010_machines.sql": {
 					format: "sql"

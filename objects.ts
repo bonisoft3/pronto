@@ -120,7 +120,7 @@ export function declarations(code: Record<string, any>): Declaration[] {
       );
     }
     for (const [key, value] of Object.entries(objects as Record<string, any>)) {
-      const owed = kind === "entity" ? owedAt((value as { durability: string }).durability) : true;
+      const owed = kind === "entity" ? owedAt(value.durability) : kind === "machine" ? value.level !== "ephemeral" : true;
       const claimedKind = collection === "pipelines" && value.raw === true ? "hatch" : kind;
       out.push({ kind: claimedKind, id: (value as { ir: string }).ir, where: `${collection}.${key}`, owed });
     }

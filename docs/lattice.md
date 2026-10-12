@@ -147,9 +147,9 @@ CEL has the `CHECK` rungs because it is expression-only and compiles to SQL;
 Jessie has closures and needs a runtime. Set membership is ahead of time, so
 it costs a race and write amplification; a validation checks at the write
 with nothing precomputed and pays with two engines. An app picks by whether
-the set is worth materializing. A validation is declared like a `cel:`, beside
-its entity, and named like a unique, because the name is the refusal that
-reaches the screen; its neighbourhood is the references the schema declares
+the set is worth materializing. A validation is a named guard on the entity's lifecycle machine, selected by
+its insert, update or delete transition. Its name is the refusal that reaches
+the screen; its neighbourhood is the references the schema declares
 (`via`). Its signature is the reduce's, `(state, event)`, so a reduce, a guard
 and a validation are one grammar in three positions.
 

@@ -469,7 +469,7 @@ export async function derive(appDir: string): Promise<void> {
   // denylist and the completion rule reach it through the same fact rows.
   const TAG = "$validation$";
   const modules: { path: string; references: string[]; completion: string; role: string }[] = [];
-  const validated: { entity: string; name: string; edges: ReturnType<typeof resolveEdges>; statements: string; completion: string }[] = [];
+  const validated: { entity: string; machine: string; name: string; edges: ReturnType<typeof resolveEdges>; statements: string; completion: string }[] = [];
   const surfaceEndowments = surface.endowments ?? {};
   for (const [ename, e] of Object.entries(entities)) {
     for (const [vname, v] of Object.entries(e.validations ?? {})) {
@@ -488,7 +488,8 @@ export async function derive(appDir: string): Promise<void> {
       for (const name of facts.references) {
         fail(`entity ${ename}: validations "${vname}": ${v.src} reaches ${name} (${DENIED.find((d) => d.name === name)!.reason})`);
       }
-      validated.push({ entity: ename, name: vname, edges: resolveEdges(entities, ename, v.via), ...split });
+      if (!v.machine) fail(`entity ${ename}: validation ${vname} has no lifecycle machine`);
+      validated.push({ entity: ename, machine: v.machine, name: vname, edges: resolveEdges(entities, ename, v.via), ...split });
     }
   }
 

@@ -393,6 +393,31 @@ A mecha machine declares either a statechart (`states`) or lifecycle handlers
 (`on.insert`, `on.update`, `on.delete`). Combining them is refused; separate
 machines over the same entity keep both triggers explicit in SQL and in the IR.
 
+**Lifecycle guards own predicate validation.** `state.machines.<name>.guards`
+contains named Jessie predicates (`src`, `via`, `note`). Each `on.insert`,
+`on.update` or `on.delete` transition names `guard` (one name or an ordered
+list) and optional `actions`; an action or list alone is the action-only
+shorthand. Every guard is used and every reference resolves in its own
+machine. Names are unique across an entity's machines because they are also
+the entity's refusal names. `entity.validations` is a closed derived projection
+with each guard's owner and events. Guard-only machines inherit the entity's
+effect level; server actions or statecharts on browser entities are refused.
+
+The server lifecycle interpreter checks its guards before its actions. It
+runs `AFTER` when guarded, after RLS and generated columns, reading related
+rows in the same transaction; guard refusal rolls back the write and actions.
+An `assign` cannot alter a row after its write and is refused there. Access
+stays declarative RLS. The browser preflight chooses the same event's guards
+before mutation; on delete, the event row and prior item are the deleted row.
+A false result is a named non-retriable refusal; every non-boolean is a program
+error. The predicate ABI and authoring contract are in [[GUIDE#validations|the guide]].
+
+For a retained database, apply the generated `009_validations.sql` and
+`010_machines.sql` together in an application migration while writes are
+stopped. The former keeps predicate function identities and removes the old
+validation-only trigger; the latter installs guarded lifecycle interpreters.
+Changing declarations alone does not upgrade an initialized volume.
+
 **A server machine's `after` is a durable timer.** Each nonnegative integer
 millisecond delay arms a one-shot schedule on state entry, in the row's
 transaction. The existing ticker inserts a private `machine_timer_tick`; its

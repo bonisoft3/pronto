@@ -106,3 +106,14 @@ Deno.test("distinct charts of one field keep separate IR claims and their own re
     { id: "Tick-beat-2", owed: true },
   ]);
 });
+
+Deno.test("a lifecycle machine confined to a tab is claimed but does not owe an IR element", () => {
+  const p = { ...program, state: { ...program.state, machines: {
+    LocalRules: { ir: "LocalRules", level: "ephemeral" },
+    SavedRules: { ir: "SavedRules", level: "local" },
+    SharedRules: { ir: "SharedRules", level: "replicated" },
+  } } };
+  assertEquals(declarations(p).filter(d => d.kind === "machine").map(d => [d.id, d.owed]), [
+    ["LocalRules", false], ["SavedRules", true], ["SharedRules", true],
+  ]);
+});

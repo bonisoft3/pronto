@@ -24,6 +24,7 @@ _readFields: [
 	goal?: {...}
 	more?: {...}
 	pipelines?: {...}
+	machines?: {...}
 	route: *"/jogo/:id" | string
 	app: pronto.#App & {
 		state: {
@@ -34,6 +35,7 @@ _readFields: [
 				Draft: {table: "draft", durability: "tab", fields: [{name: "id", type: "uuid", pk: true}]}
 				[if more != _|_ {more}, {}][0]
 			}
+			"machines": [if machines != _|_ {machines}, {}][0]
 			"pipelines": [if pipelines != _|_ {pipelines}, {}][0]
 		}
 		capabilities: {hatches: {}, vendored: {}}
@@ -102,7 +104,8 @@ readFold: (#readCase & {
 }).out & {mode: "eager", reason: "the fold tally projects the reader's own contribution from it"}
 readValidationEdge: (#readCase & {
 	reads: [_view]
-	more: Card: {table: "card", durability: "live", fields: _readFields, validations: fair: {src: "shell/handlers/fair.js", via: ["Goal.player_id"], note: ""}}
+	more: Card: {table: "card", durability: "live", fields: _readFields}
+	machines: CardRules: {entity: "Card", guards: fair: {src: "shell/handlers/fair.js", via: ["Goal.player_id"], note: ""}, on: insert: guard: "fair"}
 }).out & {mode: "eager", reason: "validation Card.fair walks to it"}
 readOffline: (#readCase & {reads: [_view], goal: {table: "goal", durability: "offline"}}).out & {
 	mode: "eager", reason: "offline keeps the whole table on the device"
