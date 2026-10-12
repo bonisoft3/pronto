@@ -1,8 +1,8 @@
-// A check the build seat runs beside the stack. Its rule names the closure of
-// the target that carries it, under the runtime's own project: under one of
-// its own, the closure would bring up a second runtime beside the first. Only a
-// browser check brings the browser base, and a `$` in a command reaches the
-// container's shell rather than compose's interpolation.
+// A check the build seat runs beside the stack. Its rule runs the check's bkid
+// runner, whose inner stack is the closure of the target that carries it under
+// a project of its own, so a check never touches the stack a person launched.
+// Only a browser check brings the browser base, and a `$` in a command reaches
+// the container's shell rather than compose's interpolation.
 package emit
 
 import pronto "github.com/bonisoft3/pronto"
@@ -20,7 +20,8 @@ _besideRules: (pronto.#emit & {
 	build:    _besideBuild
 }).files[".say.yaml"].data.say.integrate.rulemap
 
-besideRule: _besideRules.plain.cmds[0].do & "mise exec -- docker compose -p (^mise exec -- printenv COMPOSE_PROJECT_NAME | complete | get stdout | str trim | str replace -r '^$' 'emit') --profile '*' -f .bayt/compose.check-plain.closure.yaml up bayt --abort-on-container-failure --exit-code-from bayt --build --remove-orphans --attach-dependencies"
+besideRule: _besideRules.plain.cmds[0].do & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-plain"
+besideRunner: _besideTargets["ci-plain"] & {#closure: "check-plain", #check: "plain"}
 besidePriority:  _besideRules.plain.priority & 2
 besideWaits:     _besideTargets["check-plain"].compose.depends_on["apps_emit-launch"].condition & "service_healthy"
 besideDoor:      _besideTargets["check-plain"].compose.environment.APP_URL & "https://caddy:8443"

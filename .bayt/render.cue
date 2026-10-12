@@ -8,4 +8,5 @@ import bayt_ "github.com/bonisoft3/bayt/core:bayt"
 project: _
 depManifestsIn: {[string]: _}
 runtimeIn: *"" | string
-_render: (bayt_.#render & {"project": project, depManifests: depManifestsIn, runtime: runtimeIn})
+moduleIn: *"" | string
+_render: (bayt_.#render & {"project": project, depManifests: depManifestsIn, runtime: runtimeIn, module: moduleIn})

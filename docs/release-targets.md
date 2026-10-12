@@ -53,7 +53,7 @@ environment (`SAY_RELEASE_ARGS_SNAPSHOT`, `SAY_RELEASE_ARGS_BASE`), because a
 flag is only a flag to nushell when it is spelled in the call. Deploying is
 never a verb of its own: for `pages` the gesture is the tag push.
 
-Any target where an unsuspended schedule must fire names its clock in
+Any target other than `pages` where an unsuspended schedule must fire names its clock in
 `meta.clocks`, or the emitter refuses it (`_clockDeclared`): that clock lives
 in a deploy tree mecha does not write, and without the declaration a schedule
 nothing wakes fails silently. Compose runs the cluster's own clock.
@@ -132,10 +132,14 @@ request that made it, as a check of every pull request against the pins would.
 a broken release, for a program with:
 
 - a vendored unit, a worker the browser fetches past the document's shim;
-- an unsuspended schedule, since a closed tab ticks nothing;
 - a shared entity, since one user shares with nobody and the client opens a
   keyed shape per grant, which the page's cluster does not serve;
 - a validation, which runs in plv8, and PGlite has none.
+
+A schedule is skipped rather than refused. Its tick wakes only streams, and
+the page runs none, so the page holds the same derived rows with or without
+one; the target asks for no clock, and the schedule's seed, which writes the
+container database image's `schedule` table, is container-tier.
 
 **The derived rows ship as the release found them.** The page runs no stream
 and no computation, so for a program that declares either the rule first runs

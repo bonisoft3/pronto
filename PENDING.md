@@ -233,8 +233,7 @@ vet`.
 
 **No pipeline runs below the cluster**
 ([below the cluster](docs/pipelines-and-schedules.md#below-the-cluster)); either
-the transforms run in the page, or `pages` refuses a pipeline as it refuses an
-unsuspended schedule.
+the transforms run in the page, or `pages` refuses a pipeline.
 
 **Nothing holds a CDC pipeline's source to `server` or its sink off it.** The
 publication carries `server` tables only, so a pipeline `from` a `live` or
@@ -251,10 +250,21 @@ cadence finer than the resolution of the clock at a declared target keeps pace
 on a laptop and never where that clock runs, and nothing compares them, since
 `meta.clocks` names targets and no clock declares a resolution.
 
-**No app declares a schedule.** `testdata/emit/schedule.cue` pins the seed and
-where the table comes from, but `_scheduleShape` and `_clockDeclared` are hidden
-fields of `#emit` it never references, so `cue vet` does not evaluate them: its
-program still passes with the schedule emitting into a `live` entity.
+**The schedule refusals go untested.** `testdata/emit/schedule.cue` pins the
+seed and where the table comes from, but `_scheduleShape`, `_clockDeclared` and
+`_pagesBundle` are hidden fields of `#emit` it never references, so `cue vet`
+does not evaluate them: its program still passes with the schedule emitting
+into a `live` entity. GolAberto's two midnights are the one app's schedules,
+which its own `cue vet` holds to them.
+
+**A schedule reaches only a volume initdb built.** mecha's `800_schedule.sql`
+and the `801_schedule_seed.sql` rows are initdb steps, and migrate runs only
+the pgroll ledger, so a schedule declared, changed or suspended after a volume
+exists never reaches it; until then such a volume is recreated. Migrate refuses
+a cluster that declares a schedule over a volume without the table, so the
+absence is loud. The fix is migrate's: re-apply the steps the cluster placed
+that the volume lacks, every one of them idempotent, then upsert the seed on
+every boot, which is what the seed's `ON CONFLICT` already assumes.
 
 ## Localization
 

@@ -39,7 +39,7 @@ unification.
 
 | | state | capabilities | surface | identity |
 |---|---|---|---|---|
-| `#App` | `entities`, `pipelines`, `schedules`, `migrations`, `rawMigrations` | requested: `auth`, `native`, `blobs`, `hatches`, `vendored` | `screens`, `handlers`, `design`, `flows` | `meta`: `name`, `ir`, `targets`, `clocks`, `decisions`, `tests`, `i18n`, `favicon` |
+| `#App` | `entities`, `pipelines`, `drains`, `computations`, `schedules`, `migrations`, `rawMigrations` | requested: `auth`, `native`, `blobs`, `hatches`, `vendored` | `screens`, `handlers`, `design`, `flows` | `meta`: `name`, `ir`, `targets`, `clocks`, `decisions`, `tests`, `i18n`, `favicon` |
 | `#Terminal` | `navigation: true` | offered: `auth`, `text-formats`, `message-arms`, `renderer`, `sensors`, `background`, `hardware`, `os-bridge`, `network-peer`, `isolation`, `hatch`, `floors` | the entry page and its `assets`, the served file lists, `verbs`, `checks`, `statics` | `app`, `description`, `language`, `direction` |
 | `#Cluster` | `migrations`, `pipelines`, `schedules` (names only) | switches: `server`, `auth`, `blobs` | `targets`, `verbs`, `checks` | `meta`: `app`, `images`, the door, `statics` |
 | `#Loop` | — | — | `sources`, `buildCmd`, `testCmd`, `verbs`, `checks`, `sayYaml`, `tasksJson` | `meta.app` |
@@ -99,8 +99,11 @@ runtime's compose network, that waits on the launch aggregate healthy and
 reaches the app at `https://caddy:8443` (`APP_URL`, which omnishell's
 `baseUrl` honours). Caddy's own CA signs the certificate there, so a command
 ignores errors for `caddy`. `#emit` files the rule under `integrate`, under the
-check's `priority`; the rule brings the stack up if it is not, and its verdict
-is the container's exit code. The image is setup's — the trees and the app's
+check's `priority`, running the check's bkid runner `ci-<name>`: the check's
+closure, built and brought up inside a build as a stack of its own,
+`<COMPOSE_PROJECT_NAME>_<name>`, torn down before and after, so a check never
+touches the stack a person launched. The verdict is the container's exit code.
+Each check starts from a fresh database: it seeds what it reads. The image is setup's — the trees and the app's
 pinned toolchain, under `mise x` — or, with `browser: true`, the same toolchain
 on playwright's base. It carries `tests/**`, plus whatever `srcs` names.
 

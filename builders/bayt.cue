@@ -122,15 +122,12 @@ import (
 		database: *false | true
 		// What the commands read beyond tests/**, which every check carries.
 		srcs: *[] | [...string]
-		// The loop's rule: the check's closure up under the runtime's own
-		// compose project, so a stack already up is the one it reaches and one
-		// that is not comes up first. The closure holds the whole runtime, so
-		// --remove-orphans takes down only what the closure does not name.
+		// The loop's rule: the check's bkid runner (omnishell.#BkidCheck).
 		rule: {
 			verb: "integrate"
 			if C.priority != _|_ {priority: C.priority}
 			note: C.note
-			cmds: [(omnishell.#ClosureUp & {project: (omnishell.#ComposeProject & {app: B.meta.app}).out, target: "check-\(Name)"}).out]
+			cmds: [(omnishell.#BkidCheck & {runner: "ci-\(Name)"}).out]
 		}
 	}
 	_browser: len([for _, c in B.checks if c.browser {c}]) > 0
@@ -144,6 +141,23 @@ import (
 		"libraries_mecha-\(s)-image": "${MONOREPO_COMPOSE_MODE:-docker-image://\(pin)}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-\(s)-image}"
 	}}
 	_mechaRuntime: mecha.#Runtime & {"project": project.name, "cluster": B.cluster}
+	// A runner rebuilds the stack its closure brings up, from the sources the
+	// runtime's images are built from. Launch reaches them through `:outs`
+	// edges, which a `:srcs` view does not follow, so each is named.
+	_stackSrcs: [for k, _ in B._mechaRuntime.targets
+		let t = project.targets[k]
+		if t != null if t.dockerfile != _|_
+		if len(t.srcs.globs) > 0 || t.srcs.defaultGlobs != null {":\(k):srcs"}]
+	// What the stack copies from the workspace root (the terminal's statics,
+	// the trees the tests import) sits outside every srcs view, so in the
+	// monorepo a runner carries those trees too.
+	_runner: {if B.meta.local {B._fromRoot & {_paths: B._testTrees}}}
+	// The module the program evaluates in: what `program` copies from the root.
+	_programTrees: {
+		_top: ["cue.mod"]
+		_paths: ["plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
+		_exclude: ["**/docs/**", "**/testdata/**", "**/*_test.*", "**/*.test.*"]
+	}
 
 	// omnishell reaches an installed app's images the same way, as one image of
 	// its runtime tree (omnishell's runtime-image target), named here and
@@ -211,11 +225,7 @@ import (
 			// The module the program evaluates in, after the toolchain so an edit
 			// to it leaves the install cached. A mirror's setup carries its own.
 			if B.meta.local {
-				"program": sayt.setup & (B._fromRoot & {
-					_top: ["cue.mod"]
-					_paths: ["plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
-					_exclude: ["**/docs/**", "**/testdata/**", "**/*_test.*", "**/*.test.*"]
-				}) & {
+				"program": sayt.setup & (B._fromRoot & B._programTrees) & {
 					deps: [":setup"]
 					dockerfile: from: ref: ":setup"
 					// A build stage, never a container.
@@ -249,7 +259,7 @@ import (
 				// the build image would couple visual lint to a toolchain it does
 				// not use. The plane it drives is an image-only dep, so the entry
 				// closure carries every fragment the aggregate waits on and loads
-				// on its own — the dindbox tier runs it that way.
+				// on its own — the bkid tier runs it that way.
 				deps: [":launch:outs"]
 				srcs: globs: ["shell/shell.yaml", "shell/screens/**"]
 				dockerfile: {
@@ -291,6 +301,11 @@ import (
 				_runsChecker: list.Contains(compose.command, "/omnishell/check-visual.ts")
 				_runsChecker: true
 			}
+			"ci-visual": sayt.ci & B._runner & {
+				#closure: "integrate"
+				#check:   "visual"
+				deps: list.Concat([[":integrate:srcs", ":integrate:bayt"], B._stackSrcs])
+			}
 			// The migration replay starts throwaway databases from the images the
 			// runtime was built into, so it drives the host's daemon through its
 			// socket; a daemon of its own would hold none of those images. The
@@ -328,6 +343,15 @@ import (
 						// `$$` so compose leaves the substitution to the container's shell.
 						command: ["mise", "x", "--", "sh", "-c", "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."]
 					}
+				}
+				// Its closure builds `program` and the replay from root trees.
+				"ci-replay": sayt.ci & B._fromRoot & {
+					_top:     B._programTrees._top
+					_paths:   list.Concat([B._programTrees._paths, [".bayt"]])
+					_exclude: B._programTrees._exclude
+					#closure: "replay"
+					#check:   "replay"
+					deps: [":replay:srcs", ":replay:bayt"]
 				}
 			}
 			// Playwright's base with mise: its browsers need the libraries of the
@@ -377,6 +401,12 @@ import (
 						// `$$` so compose leaves a variable to the container's shell.
 						command: ["mise", "x", "--", "sh", "-c", strings.Join([for x in c.cmds {strings.Replace(x, "$", "$$", -1)}], " && ")]
 					}
+				}
+				// The check's bkid runner (omnishell.#BkidCheck).
+				"ci-\(name)": sayt.ci & B._runner & {
+					#closure: "check-\(name)"
+					#check:   name
+					deps: list.Concat([[":check-\(name):srcs", ":check-\(name):bayt"], B._stackSrcs])
 				}
 			}
 		}

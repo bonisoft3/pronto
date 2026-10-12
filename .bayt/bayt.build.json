@@ -120,7 +120,11 @@
           "*.ts",
           "scales/*.ts",
           "deno.json",
-          "deno.lock"
+          "deno.lock",
+          "[m]ise.toml",
+          "[.]mise.toml",
+          "[m]ise.lock",
+          "[.]tool-versions"
         ],
         "exclude": []
       },
@@ -140,7 +144,11 @@
               "*.ts",
               "scales/*.ts",
               "deno.json",
-              "deno.lock"
+              "deno.lock",
+              "[m]ise.toml",
+              "[.]mise.toml",
+              "[m]ise.lock",
+              "[.]tool-versions"
             ],
             "exclude": []
           }

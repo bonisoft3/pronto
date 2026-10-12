@@ -1161,6 +1161,69 @@ _cdcBeforeField: "__before"
 	}
 }
 
+// A drain's stream: a change to one of its tables and the stream's start
+// become the same call, and anything else is dropped, a message that is not
+// JSON included. Whatever arrives within a second of
+// the first is one batch and one call, so a burst of queue rows, and the
+// deletes the call itself makes of them, cost a call per batch rather than per
+// row. Those deletes are what wake it again while work remains, and the call
+// that finds none changes nothing, so an idle stack calls nothing.
+#rpkDrain: R={
+	d:      #Drain
+	app:    string
+	authOn: *false | bool // same service-token contract as #rpkPipeline
+	out: {
+		input: broker: inputs: [
+			{redis_streams: {
+				url: "${REDIS_URL}"
+				streams: ["cdc-events"]
+				body_key:       "data"
+				consumer_group: "\(R.app)-\(R.d.name)"
+			}},
+			// Rows queued before change capture began, or while the stream was
+			// down past the bus's retention, were never heard.
+			{generate: {count: 1, interval: "", mapping: "root = {\"wake\": \"start\"}"}},
+		]
+		pipeline: {
+			threads: 1
+			processors: [{mapping: """
+				let row = this.catch({})
+				let table = $row.data.or("").parse_json().catch({}).\(_cdcTableField).or("")
+				root = if $row.exists("wake") || \(json.Marshal(R.d.on)).contains($table) { \(json.Marshal(R.d.body)) } else { deleted() }
+				"""}]
+		}
+		output: http_client: {
+			// PostgREST direct, as every stream reaches it.
+			url:           "${CRUD_URL}/rpc/\(R.d.call)"
+			verb:          "POST"
+			timeout:       R.d.timeout
+			max_in_flight: 1
+			headers: {
+				"Content-Type": "application/json"
+				if R.authOn {
+					Authorization: "Bearer ${SERVICE_JWT}"
+				}
+			}
+			successful_on: [200, 204]
+			batching: {
+				period: "1s"
+				// The messages are equal, so the batch is one of them.
+				processors: [{archive: format: "json_array"}, {mapping: "root = this.index(0)"}]
+			}
+		}
+	}
+}
+
+// Every stream the transform runs, by name. A pipeline and a drain share the
+// file docker/<app>-<name>.yaml, so one name for both is a conflict here.
+#streams: S={
+	code: _
+	out: {
+		for n, _ in S.code.state.pipelines {(n): "pipeline"}
+		for n, _ in S.code.state.drains {(n): "drain"}
+	}
+}
+
 // The shell config is a file map, not a DSL: screen semantics live in the
 // generated HTML/CSS/Jessie themselves; this only wires routes, data files,
 // and pipeline topology to the filesystem. All paths are app-relative — the
@@ -1557,8 +1620,8 @@ _cdcBeforeField: "__before"
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
-		if len(M.code.state.schedules) > 0 {"services/database/migrations/021_schedule_seed.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
+		if len(M.code.state.schedules) > 0 {"services/database/migrations/801_schedule_seed.sql"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
 	]
 }
@@ -1602,16 +1665,16 @@ _cdcBeforeField: "__before"
 				}
 				// What only the cluster's streams and computations write lands in
 				// live tables, which the page ships as they stood at bundling.
-				if len(D.code.state.pipelines)+len(D.code.state.computations) > 0 {
+				if len(D.code.state.pipelines)+len(D.code.state.drains)+len(D.code.state.computations) > 0 {
 					derived: {
 						tables: list.SortStrings([for _, e in D.code.state.entities if e.durability == "live" {e.table}])
-						streams: list.SortStrings([for _, p in D.code.state.pipelines {"\(D.code.meta.name)-\(p.name)"}])
+						streams: list.SortStrings([for n, _ in (#streams & {code: D.code}).out {"\(D.code.meta.name)-\(n)"}])
 					}
 				}
 			}
 			buildCmd: [if sources.pronto != "" {"deno run --allow-read --allow-write=. --allow-run --allow-env \(sources.pronto)/write.ts ."}, "./saytw build"][0]
 			testCmd: "cue vet -c ./..."
-			pipelineFiles: [for _, p in D.code.state.pipelines {"docker/\(D.code.meta.name)-\(p.name).yaml"}]
+			pipelineFiles: [for n, _ in (#streams & {code: D.code}).out {"docker/\(D.code.meta.name)-\(n).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop
 			// routes each to the verb it names. A name collision across the two
 			// is a conflict here rather than a silent overwrite.
@@ -1680,7 +1743,7 @@ _cdcBeforeField: "__before"
 						replay: {
 							verb:     "integrate"
 							priority: 1
-							cmds: [(omnishell.#ClosureUp & {project: "\(D.code.meta.name)-replay", target: "replay"}).out]
+							cmds: [(omnishell.#BkidCheck & {runner: "ci-replay"}).out]
 							note: "Pronto compiler replay"
 						}
 					}
@@ -1743,8 +1806,10 @@ _cdcBeforeField: "__before"
 	boot?:       string
 	liveUpdates: *false | bool
 	// An adapter the terminal serves is the terminal's file and not the app's,
-	// so only an app's own module joins the set.
+	// so only an app's own module joins the set. A declared handler is served
+	// whether or not markup binds it: an app module may fetch one itself.
 	_handlerSet: {
+		for _, h in D.code.surface.handlers {(h.src): true}
 		for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}
 		for _, s in D.code.surface.screens for i in s.files.adapters if !strings.HasPrefix(i, "/") {(i): true}
 	}
@@ -1902,9 +1967,9 @@ _cdcBeforeField: "__before"
 		state: {
 			migrations: (#appMigrations & {"code": D.code}).list
 			if D.code.state.migrations != _|_ {pgroll: D.code.state.migrations}
-			pipelines: [for _, pl in D.code.state.pipelines {
-				name: "\(D.code.meta.name)-\(pl.name)"
-				file: "docker/\(D.code.meta.name)-\(pl.name).yaml"
+			pipelines: [for n, _ in (#streams & {code: D.code}).out {
+				name: "\(D.code.meta.name)-\(n)"
+				file: "docker/\(D.code.meta.name)-\(n).yaml"
 			}]
 			schedules: [for _, sc in D.code.state.schedules {sc.name}]
 			// The emitted manifest, endpoints and handlers sit where the
@@ -2078,25 +2143,29 @@ _cdcBeforeField: "__before"
 	// target the clock lives in a deploy tree this emitter does not write, and
 	// the failure is silent — the pipelines simply never run. Declaring the
 	// clock is what makes the absence loud, and `meta.clocks` is where the app
-	// says so.
+	// says so. The pages target skips schedules (_pagesBundle), so only an
+	// effect asks it for a clock.
 	_clockDeclared: {
 		for t in E.code.meta.targets {
-			if len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0 || (E.code.state.effects != _|_ && len(E.code.state.effects) > 0) {
+			if (t != "pages" && len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0) || (E.code.state.effects != _|_ && len(E.code.state.effects) > 0) {
 				(t): true & list.Contains(E.code.meta.clocks, t)
 			}
 		}
 	}
 
 	// A unit is a worker the browser fetches past the bundled document's shim,
-	// so a program with one cannot be bundled yet; a closed tab ticks no
-	// schedule; one user shares with nobody, while the client opens a keyed
-	// shape per grant that the page's cluster does not serve; and a validation
-	// runs in plv8, which PGlite has none of. The pages target is refused rather
-	// than released broken. A suspended schedule runs nowhere and refuses nothing.
+	// so a program with one cannot be bundled yet; one user shares with nobody,
+	// while the client opens a keyed shape per grant that the page's cluster
+	// does not serve; and a validation runs in plv8, which PGlite has none of.
+	// The pages target is refused rather than released broken.
+	//
+	// A schedule is skipped, not refused: its tick wakes only streams, and the
+	// page runs none, so a page holds what derived tables held at bundling with
+	// or without one. Its seed is container-tier, as the `schedule` table it
+	// writes is the container database image's.
 	_pagesBundle: {
 		if list.Contains(E.code.meta.targets, "pages") {
 			units: true & (len(E.code.capabilities.vendored) == 0)
-			schedules: true & (len([for _, s in E.code.state.schedules if !s.suspend {s}]) == 0)
 			shared: true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
 		}
@@ -2829,13 +2898,13 @@ _cdcBeforeField: "__before"
 
 			if len(E.code.state.schedules) > 0 {
 				// The table is mecha's: the cluster, handed the schedules' names,
-				// places it in the database as 020_schedule.sql, and this seeds it
-				// after, one row per declaration. An upsert on the name, so a
-				// redeploy restates the schedule without resetting the watermark it
-				// has earned.
-				"services/database/migrations/021_schedule_seed.sql": {
+				// places it in the database as 800_schedule.sql, and this seeds it
+				// after, one row per declaration. An upsert on the name, which keeps
+				// a watermark a schedule has earned; but initdb runs once per volume,
+				// so nothing restates a schedule on an existing one.
+				"services/database/migrations/801_schedule_seed.sql": {
 					format: "sql"
-					text: strings.Join([for _, sc in E.code.state.schedules {
+					text: "-- tier: container\n" + strings.Join([for _, sc in E.code.state.schedules {
 						"""
 						INSERT INTO schedule (name, cron, time_zone, suspended, max_lateness_seconds,
 						                      concurrency_policy, done_entity, done_filter,
@@ -2851,7 +2920,7 @@ _cdcBeforeField: "__before"
 						  done_entity = EXCLUDED.done_entity, done_filter = EXCLUDED.done_filter,
 						  emits_entity = EXCLUDED.emits_entity, emits_values = EXCLUDED.emits_values;
 						"""
-					}], "\n")
+					}], "\n") + "\n-- tier: any\n"
 				}
 			}
 			"services/database/migrations/007_txid.sql": {
@@ -3000,6 +3069,13 @@ _cdcBeforeField: "__before"
 						sinkTable: E.code.state.entities[pl.to].table
 						authOn:    E._authOn
 					}).out
+				}
+			}
+
+			for _, dr in E.code.state.drains {
+				"docker/\(E.code.meta.name)-\(dr.name).yaml": {
+					format: "yaml"
+					data: (#rpkDrain & {d: dr, app: E.code.meta.name, authOn: E._authOn}).out
 				}
 			}
 

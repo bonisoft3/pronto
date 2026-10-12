@@ -199,7 +199,7 @@ it. The door answers them at `/srv<address>/index.html` through Caddy's
 `templates`, so the origin is the deployment's `ORIGIN`, which the door holds
 as `{$ORIGIN}` and never reads off the request: it answers any Host
 ([mecha's proxy](../../../libraries/mecha/docs/proxy.md#the-origin)). In
-development that is `https://localhost:8443` whichever port the browser is on.
+development that is `https://localhost:<port>`, on the port the door binds.
 
 **`ssr`.** A route declaring `ssr: "ssr"` is answered by the terminal's server
 renderer ([the server terminal](../../omnishell/docs/terminal.md#the-server-terminal)),

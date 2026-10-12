@@ -35,6 +35,7 @@ const COLLECTIONS: Record<string, { bucket: string; field: string; kind: Kind; o
   entities: { bucket: "state", field: "entities", kind: "entity" },
   pipelines: { bucket: "state", field: "pipelines", kind: "pipeline" },
   duckstreams: { bucket: "state", field: "duckstreams", kind: "pipeline", optional: true },
+  drains: { bucket: "state", field: "drains", kind: "pipeline", optional: true },
   screens: { bucket: "surface", field: "screens", kind: "screen" },
   flows: { bucket: "surface", field: "flows", kind: "flow" },
   tests: { bucket: "meta", field: "tests", kind: "test" },

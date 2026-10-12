@@ -41,14 +41,14 @@ _scheduledFiles: (pronto.#emit & {
 }).files
 _migrations: "services/database/migrations"
 
-scheduleTableNotEmitted: (_scheduledFiles["\(_migrations)/020_schedule.sql"] == _|_) & true
-scheduleSeedOnly:        strings.Contains(_scheduledFiles["\(_migrations)/021_schedule_seed.sql"].text, "CREATE TABLE") & false
-scheduleSeeded:          strings.Contains(_scheduledFiles["\(_migrations)/021_schedule_seed.sql"].text, "INSERT INTO schedule") & true
+scheduleTableNotEmitted: (_scheduledFiles["\(_migrations)/800_schedule.sql"] == _|_) & true
+scheduleSeedOnly:        strings.Contains(_scheduledFiles["\(_migrations)/801_schedule_seed.sql"].text, "CREATE TABLE") & false
+scheduleSeeded:          strings.Contains(_scheduledFiles["\(_migrations)/801_schedule_seed.sql"].text, "INSERT INTO schedule") & true
 authUidNotEmitted:       strings.Contains(_scheduledFiles["\(_migrations)/000_extensions.sql"].text, "auth_uid") & false
 // The cluster the program feeds places the table's step in its database, and
 // the seed among the migrations after it.
-scheduleSeedMigrated: list.Contains(_scheduledCluster.state.migrations, "\(_migrations)/021_schedule_seed.sql") & true
-schedulePlaced: len([for c in _scheduledCluster.surface.targets.database.dockerfile.copy if c.dst == "/docker-entrypoint-initdb.d/020_schedule.sql" {c}]) & 1
+scheduleSeedMigrated: list.Contains(_scheduledCluster.state.migrations, "\(_migrations)/801_schedule_seed.sql") & true
+schedulePlaced: len([for c in _scheduledCluster.surface.targets.database.dockerfile.copy if c.dst == "/docker-entrypoint-initdb.d/800_schedule.sql" {c}]) & 1
 // A schedule brings the ticker and nothing of the airlock's.
 scheduleNoAirlock: (_scheduledCluster.surface.targets.airlock == _|_) & true
 scheduleNoNetworks: (_scheduledFiles["compose.networks.yaml"] == _|_) & true
@@ -58,3 +58,31 @@ scheduleServiceInputCaptured: strings.Contains(_scheduledCDC, "tick") & true
 scheduleOutcomeCaptured: strings.Contains(_scheduledCDC, "tick_done") & true
 scheduleCDCSourceTables: json.Marshal(list.SortStrings(strings.Split(
 	_scheduledFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["profile", "tick", "tick_done"])
+
+// Released to pages, a schedule is skipped rather than refused: the page runs
+// no stream a tick could wake. It asks the target for no clock, and its seed,
+// which writes the container image's `schedule` table, stays out of the page.
+_scheduledPaged: pronto.#App & {
+	for k, v in _scheduled if k != "meta" {(k): v}
+	meta: {
+		for k, v in _scheduled.meta if k != "targets" {(k): v}
+		targets: ["pages"]
+	}
+}
+_scheduledPagedCluster: (pronto.#DefaultCluster & {code: _scheduledPaged, statics: []}).out
+_scheduledPagedTerminal: (pronto.#DefaultTerminal & {code: _scheduledPaged}).out
+_scheduledPagedLoop: (pronto.#DefaultLoop & {code: _scheduledPaged, terminal: _scheduledPagedTerminal, cluster: _scheduledPagedCluster}).out
+_scheduledPagedFiles: (pronto.#emit & {
+	code:     _scheduledPaged
+	cluster:  _scheduledPagedCluster
+	terminal: _scheduledPagedTerminal
+	loop:     _scheduledPagedLoop
+	build: (pronto.#DefaultBuild & {code: _scheduledPaged, loop: _scheduledPagedLoop, cluster: _scheduledPagedCluster}).out
+}).files
+_pagedSeed: _scheduledPagedFiles["\(_migrations)/801_schedule_seed.sql"].text
+pagedSeedContainerOnly: (strings.HasPrefix(_pagedSeed, "-- tier: container\n") && strings.HasSuffix(_pagedSeed, "\n-- tier: any\n")) & true
+
+// The framework's steps hold 800-899, so an app step there is refused rather
+// than left to collide with whichever one a later declaration places.
+appStepInFrameworkRange: ((pronto.#App & {state: rawMigrations: [{name: "801_mine.sql", src: "x.sql"}]}).state == _|_) & true
+appStepBelowFrameworkRange: ((pronto.#App & {state: rawMigrations: [{name: "799_mine.sql", src: "x.sql"}]}).state.rawMigrations[0].name) & "799_mine.sql"

@@ -47,8 +47,7 @@ published: runtime: "bonitao/omnishell:0.8.0@sha256:f51c51cb45151e671fde4268ba49
 // served by this target, which the emitter adds where a route asks for one.
 #Render: impl.#Render
 
-#ComposeProject: impl.#ComposeProject
-#ClosureUp:      impl.#ClosureUp
+#BkidCheck: impl.#BkidCheck
 
 // Re-exported because pronto's every op is one of these: the one mutation
 // grammar is defined where the author-facing chart lives, and a form's

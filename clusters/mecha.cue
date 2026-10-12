@@ -19,9 +19,7 @@ import (
 
 #Project: {tools: toolchain.#Tools, ...}
 
-#Cluster: impl.#Cluster & {
-	meta: door: *"${CADDY_TLS_HOST_PORT:-0}:8443" | string
-}
+#Cluster: impl.#Cluster
 #Runtime: impl.#Runtime
 #Static:  impl.#Static
 // What a sink's origin may be: the airlock's daprd dials it.

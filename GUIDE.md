@@ -221,6 +221,34 @@ schedules: "session-keepalive": {
 What the emitter refuses — each entity's durability, a target's clock — is
 [pipelines and schedules](docs/pipelines-and-schedules.md#schedules).
 
+### Drains
+
+Work the database already does in SQL — a queue drained in batches, a
+projection recomputed whole — is declared as `drains` and called when its
+tables change, never on an interval:
+
+```cue
+drains: "team-profiles": {
+	on:   ["team_profile_dirty", "day_tick"] // tables whose change wakes it
+	call: "refresh_team_profiles"            // the RPC, as the service role
+	body: batch_size: 50
+}
+```
+
+An answer that moves with the date wakes on a schedule's tick table, as
+`day_tick` here, a `#Schedule` emitting at local midnight:
+
+```cue
+schedules: "local-day": {
+	cron:     "0 0 * * *"
+	timeZone: "America/Sao_Paulo"
+	emits: {entity: "DayTick", values: {}}
+}
+```
+
+What the function owes the drain, and whose job the publication is, is
+[pipelines and schedules](docs/pipelines-and-schedules.md#drains).
+
 ### Identity
 
 An entity is a durable identity — a Cap'n Proto type id, with ordinals for its

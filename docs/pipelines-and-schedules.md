@@ -1,7 +1,7 @@
 ---
 type: concept
 title: Pipelines and schedules
-description: How a derived entity is kept from another's changes — a pure transform over an absolute read, delivered at least once into an idempotent sink — the shapes a program declares, when a value earns one, and how periodic work becomes rows.
+description: How a derived entity is kept from another's changes — a pure transform over an absolute read, delivered at least once into an idempotent sink — the shapes a program declares, when a value earns one, how a database function is called when its tables change, and how periodic work becomes rows.
 ---
 
 # Pipelines and schedules
@@ -28,7 +28,7 @@ the other case, and its answer is a per-reader pair
 
 ## The shapes
 
-Four are `#Pipeline`s, one a `#DuckStreamPipeline`, and one a `#Schedule`, all in [`schema.cue`](../schema.cue):
+Four are `#Pipeline`s, one a `#DuckStreamPipeline`, one a `#Drain` and one a `#Schedule`, all in [`schema.cue`](../schema.cue):
 
 - **A DuckStream pipeline** (`#DuckStreamPipeline`): continuous streaming incremental view maintenance over local or replicated sources.
   - `tempo: *"hot" | "cold"`: `hot` runs sub-second DBSP differential circuits on the server and reactive DuckDB-WASM in the browser for active screens and running counters. `cold` flushes batched partitions into lake storage.
@@ -55,6 +55,9 @@ Four are `#Pipeline`s, one a `#DuckStreamPipeline`, and one a `#Schedule`, all i
   `window`) and `{nowts}` resolved at run time. It is level-triggered, for work whose job is
   to make a predicate false repeatedly — retention, expiry — and needs no
   identity, watermark or lateness.
+- **A drain** (`#Drain`, [below](#drains)): a database function called
+  when the tables it reads change, for work the database already does in
+  SQL — a queue drained in batches, or a projection recomputed whole.
 - **A schedule** (`#Schedule`, below): an occurrence with an identity, for
   work owed at an instant.
 
@@ -84,6 +87,38 @@ An assembly app can narrow both the publication and Conduit's table list through
 its existing migration and `cluster.meta.conduitTemplate` seams. GolAberto's
 [[../../../apps/golaberto/cdc.cue]] does this for its known dependency graph;
 request-time views and final projections are absent from its backend feed.
+
+## Drains
+
+A `#Drain` names the tables that wake it (`on`), the function it calls
+(`call`, a PostgREST RPC as the service role) and the JSON `body` of every
+call. The emitter writes it as a stream beside the pipelines', which wakes
+on two things alone: a bus row from one of its tables, and the stream's start
+(rows queued while nothing listened). Whatever arrives within a second of the
+first wake is one call. There is no interval, and an idle stack calls nothing.
+A function whose answer moves with the date names a [schedule](#schedules)'s
+tick entity in `on`, and each tick is a row that wakes it: GolAberto's
+midnights are two schedules emitting into one `DayTick`, which three drains
+read. The clock is the cluster's one clock, never the drain's.
+
+The function owns the batching. A queue drain deletes the rows it finished,
+and those deletes are change events on its own table, so the drain wakes again
+while work remains; the call that finds none changes nothing and the stream
+sleeps. That makes two obligations no type states: a call must make progress
+when there is work (one that returns with rows left and none touched is never
+woken for them), and a call with nothing to do must write nothing to its own
+`on` tables, or it never sleeps. A function that recomputes a projection
+whole names its sources in `on`, and must not name its sink.
+
+Every `on` table must be in the publication. The default publication carries
+every `server` entity; a queue table the app creates in its own SQL, or any
+table an app's narrowed publication leaves out, is the app's to add. Conduit
+keys each event by a single-column primary key and will not start over a
+table whose key is composite, so a queue keyed on a pair takes a generated
+key beside it.
+GolAberto's [[../../../apps/golaberto/cdc.cue]] adds its drains' tables to
+its feed and nowhere else: Electric's publication and the tables' policies
+are untouched.
 
 ## Below the cluster
 
@@ -117,12 +152,16 @@ What the emitter holds, at `cue vet`:
   [release targets'](release-targets.md#what-a-release-is).
 
 The `schedule` table is mecha's: the cluster is handed the schedules' names,
-and its database image creates the table as `020_schedule.sql`
+and its database image creates the table as `800_schedule.sql`
 ([mecha's schema](../../../libraries/mecha/docs/schema.md#how-a-schema-reaches-the-database)),
 with a ticker and a clock beside it. The emitter seeds it in
-`021_schedule_seed.sql`, by an upsert on the name, so a redeploy restates a
-schedule without resetting its watermark, and the table's `CHECK` refuses a
-`Forbid` without `done` in the row itself.
+`801_schedule_seed.sql`, by an upsert on the name, and the table's `CHECK`
+refuses a `Forbid` without `done` in the row itself. Both are initdb steps,
+so they run only on a volume initdb builds: a schedule declared, changed or
+dropped later reaches no existing volume, and the tick entity's table needs
+the app's own migration there. A cluster that declares a schedule over a
+volume without the `schedule` table fails at migrate rather than never
+ticking ([pending](../PENDING.md#pipelines-and-schedules)).
 
 ## Computations
 
@@ -200,6 +239,9 @@ service's own pins, the module in the same cage and the jobs on the same Wasm.
   nothing lints JavaScript inside a pipeline's YAML, where
   `redpanda-connect lint` catches a broken mapping. Convert a container
   transform only where two expressions of one aggregate could diverge.
+- **An interval timer for a drain** — it calls an idle stack forever, and
+  its period is the latency of every edit; the change feed already knows when
+  there is work.
 - **The tick and its outcome in one table** — the tick table is a change
   source, and a pipeline writing it back feeds itself.
 - **A scheduled pipeline for work owed at an instant, or a schedule for a

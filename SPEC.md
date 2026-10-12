@@ -252,7 +252,7 @@ The machine rung: a CUE instance of the `pronto` package (`schema.cue` +
 pinned CUE version. Nobody reviews it; it must merely be *checkable*.
 
 - **Shape.** The app package's top level is the five components: `code:
-  pronto.#App & {…}` (entities, pipelines, screens with storyboard states
+  pronto.#App & {…}` (entities, pipelines, drains, screens with storyboard states
   and paths, flows, tests, decisions), `cluster:`, `terminal:`, `loop:`,
   and `build:` (the harness seats — defaulted via
   `pronto.#DefaultCluster`/`#DefaultTerminal`/`#DefaultLoop`/

@@ -84,7 +84,7 @@ Deno.test("the door and the renderer spell the one origin the cluster states, an
   const render = ask("_view", "render.compose");
   for (const r of [ssg, render]) if (!r.ok) throw new Error(r.out);
   const { origin, doorEnv, document, robots, sitemap, caddyfile } = JSON.parse(ssg.out);
-  if (origin !== "${ORIGIN:-https://localhost:8443}") throw new Error(`the cluster states the origin ${origin}`);
+  if (origin !== "${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT}}") throw new Error(`the cluster states the origin ${origin}`);
   if (doorEnv.ORIGIN !== origin) throw new Error(`the door is handed ${doorEnv.ORIGIN}`);
   if (JSON.parse(render.out).environment?.ORIGIN !== origin) throw new Error(`the renderer is handed ${render.out}`);
   if (!caddyfile.includes("\n  vars origin {$ORIGIN}\n")) throw new Error(`the door holds no origin:\n${caddyfile}`);

@@ -869,6 +869,29 @@ import (
 	}
 }
 
+// A database function the cluster calls when tables it reads change: a queue
+// it drains, or the sources of a projection it recomputes whole
+// (docs/pipelines-and-schedules.md#drains). The call is the whole job, so it
+// must be idempotent and must make progress: a drain that leaves its queue
+// non-empty without changing it is never woken again, and one that rewrites
+// its own queue on every call never sleeps.
+#Drain: {
+	name: string
+	ir:   *name | string
+	// Tables whose change wakes the drain, each of which the publication must
+	// carry: the default one carries every `server` entity, and any other table
+	// is the app's to add, as an app narrowing its publication adds all of them.
+	// A function whose answer moves with the date names a #Schedule's tick
+	// entity here, and the tick wakes it.
+	on: [string, ...string]
+	call: string & =~"^[a-z_][a-z0-9_]{0,62}$"
+	// The JSON arguments of every call.
+	body: *{} | {[string]: bool | int | string}
+	// The HTTP deadline of one call; keep it above the function's own
+	// statement_timeout, so the database, not the client, ends a slow call.
+	timeout: *"30s" | =~"^[0-9]+(ms|s|m)$"
+}
+
 // A Mecha statechart executed inside PostgreSQL — transactions, trigger reducers,
 // finite timeouts, and deterministic relational effects. Level 3 effect limit.
 //
@@ -1373,8 +1396,9 @@ import (
 		// writer copies each src into services/database/migrations/<name>, and
 		// the name's numeric prefix orders it among the emitted migrations.
 		// Three digits no other startup file holds, then `_`: mecha's cluster
-		// refuses any other name.
-		rawMigrations?: [...{name: string, src: string}]
+		// refuses any other name. The app owns 000-799 and its seed at 900;
+		// 800-899 are the framework's steps (mecha's cluster.cue).
+		rawMigrations?: [...{name: string & !~"^8", src: string}]
 		// Changes to a schema that already exists, as pgroll migrations, keyed
 		// by the version they create; the cluster is given them
 		// (#DefaultCluster) and applies them in key order.
@@ -1394,6 +1418,7 @@ import (
 		// would not accept.
 		migrations?: [grammar.#Name]: grammar.#Migration
 		pipelines: [Name=string]: #Pipeline & {name: Name}
+		drains: [Name=string]: #Drain & {name: Name}
 		computations: [Name=string]: #Computation & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
 		machines?: [Name=string]: #MechaMachine & {name: Name}
@@ -1527,8 +1552,8 @@ import (
 	surface: {
 		screens: [Name=string]: #Screen & {name: Name}
 		// Jessie handlers, bijection surface (ir kind "handler"): `of` is the
-		// screen, `src` the assembly module — also listed in that screen's
-		// files.handlers, which is what the loader resolves.
+		// screen, `src` the assembly module, served by the terminal. The loader
+		// resolves the screen's files.handlers, which markup binding derives.
 		handlers: [Name=string]: {ir: *Name | string, of: string, src: #Jessie, note: string}
 		design: #Design
 		flows: [Name=string]: #Flow & {name: Name}
