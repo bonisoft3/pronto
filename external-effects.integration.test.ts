@@ -1,10 +1,10 @@
-// The interpreter emitted for an invoking state, run in postgres: the claim and the
+// The guard emitted for an invoking state, run in postgres: the claim and the
 // enqueue share the transition's commit, only the ledger's outcome leaves the
 // state, and a performed key is never claimed twice. Graphile's add_job is a
 // recording stand-in with its parameter names, so a renamed argument fails here;
 // the real queue is the airlock's to test.
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
-import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
+import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
 
@@ -19,7 +19,7 @@ async function run(cmd: string, args: string[], stdin?: string) {
   return { ok: res.success, out: new TextDecoder().decode(res.stdout).trim(), err: new TextDecoder().decode(res.stderr) };
 }
 
-Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits only the recorded outcome", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
+Deno.test({ name: "an invoking state's guard claims, enqueues and admits only the recorded outcome", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
   const files = await emitFiles(paymentProgram());
   const container = `pronto-effects-${crypto.randomUUID().slice(0, 8)}`;
   const started = await run("docker", ["run", "-d", "--rm", "--name", container, "-e", "POSTGRES_PASSWORD=pw", POSTGRES]);
@@ -58,7 +58,7 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
       // The airlock's step seeds the row ticked; a claim clears its watermark.
       assertEquals((await psql(`SELECT last_tick_at IS NOT NULL FROM schedule WHERE name = 'airlock';`)).out, "t");
       const r = await psql(`UPDATE payment SET status = 'charging' WHERE id = '${one}';
-        SELECT row::text || ' ' || input::text FROM airlock.external_effect_ledger WHERE key = 'charge:${one}';
+        SELECT row::text || ' ' || request::text FROM airlock.external_effect_ledger WHERE key = 'charge:${one}';
         SELECT identifier || ' ' || payload::text || ' ' || job_key || ' ' || max_attempts FROM graphile_worker.added;
         SELECT cron IS NULL AND due_at IS NOT NULL AND last_tick_at IS NULL FROM schedule WHERE name = 'airlock';`);
       assertEquals(r.out.split("\n"), [
@@ -101,43 +101,6 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
         SELECT status FROM payment WHERE id = '${two}';`);
       if (!r.ok) throw new Error(r.err);
       assertEquals(r.out, "settled");
-    });
-
-    await t.step("a retained request ledger upgrades with its interpreters atomically and preserves pending claims", async () => {
-      const exported = await cue(["export", "-", "-e", `_cluster.surface.targets["airlock-upgrade"]`, "--out", "json"], paymentProgram());
-      if (!exported.success) throw new Error(exported.stderr);
-      const target = JSON.parse(exported.stdout);
-      assertEquals(target.dockerfile.cmd.includes("--single-transaction"), true);
-      assertEquals(target.compose.depends_on.database.condition, "service_healthy");
-      const heredoc = target.dockerfile.epilogue[0] as string;
-      const upgrade = heredoc.slice(heredoc.indexOf("\n") + 1, heredoc.lastIndexOf("\n"));
-      const three = "00000000-0000-0000-0000-000000000003";
-      const four = "00000000-0000-0000-0000-000000000004";
-      const old = await psql(`BEGIN;
-        ALTER TABLE airlock.external_effect_ledger RENAME COLUMN input TO request;
-        ${files["services/database/migrations/010_machines.sql"].text.replaceAll('"input"', '"request"')}
-        INSERT INTO payment VALUES ('${three}', 'pending', 19.75, NULL);
-        UPDATE payment SET status = 'charging' WHERE id = '${three}';
-        COMMIT;`);
-      if (!old.ok) throw new Error(old.err);
-      const snapshot = (await psql(`SELECT jsonb_agg((to_jsonb(l) - 'request') || jsonb_build_object('input', request) ORDER BY key) FROM airlock.external_effect_ledger l;`)).out;
-      const failed = await psql(`BEGIN; ${upgrade} SELECT missing_upgrade_column; COMMIT;`);
-      assertEquals(failed.ok, false);
-      assertEquals((await psql(`SELECT request->>'amount' FROM airlock.external_effect_ledger WHERE key = 'charge:${three}';`)).out, "19.75");
-      for (let i = 0; i < 2; i++) {
-        const applied = await psql(`BEGIN; ${upgrade} COMMIT;`);
-        if (!applied.ok) throw new Error(applied.err);
-        assertEquals((await psql(`SELECT jsonb_agg(to_jsonb(l) ORDER BY key) FROM airlock.external_effect_ledger l;`)).out, snapshot);
-      }
-      const resumed = await psql(`
-        UPDATE airlock.external_effect_ledger SET outcome = '{"target":"settled","kind":"done"}' WHERE key = 'charge:${three}';
-        UPDATE payment SET status = 'settled' WHERE id = '${three}';
-        INSERT INTO payment VALUES ('${four}', 'pending', 23.50, NULL);
-        UPDATE payment SET status = 'charging' WHERE id = '${four}';
-        SELECT status FROM payment WHERE id = '${three}';
-        SELECT input->>'amount' FROM airlock.external_effect_ledger WHERE key = 'charge:${four}';`);
-      if (!resumed.ok) throw new Error(resumed.err);
-      assertEquals(resumed.out.split("\n"), ["settled", "23.50"]);
     });
 
     await t.step("the ledger is closed to the cluster's client roles", async () => {

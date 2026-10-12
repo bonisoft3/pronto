@@ -28,16 +28,9 @@ function fail(message: string): never {
 const CADDY = (await Deno.readTextFile(new URL("../../libraries/mecha/cluster.cue", import.meta.url)))
   .match(/"(caddy:[^"@]+@sha256:[0-9a-f]{64})"/)?.[1] ?? fail("cluster.cue pins no caddy image");
 
-// Evaluate each independent surface separately: merging the local and installed
-// cluster graphs in one CUE value needlessly retains both expanded runtimes.
-function fixture<T>(expression: string): T {
-  const result = new Deno.Command("cue", { args: ["export", ".", "-e", expression], cwd: dir, stdout: "piped", stderr: "piped" }).outputSync();
-  if (!result.success) fail(`cue ${expression}: exit ${result.code}, signal ${result.signal}: ${new TextDecoder().decode(result.stderr)}`);
-  return JSON.parse(new TextDecoder().decode(result.stdout));
-}
-const caddyfile = fixture<string>("#ssgCase.caddyfile");
-const door = fixture<string[]>("#ssgCase.door");
-const installedDoor = fixture<string[]>("#ssgCase.installedDoor");
+const exported = new Deno.Command("cue", { args: ["export", ".", "-e", "{caddyfile: #ssgCase.caddyfile, door: #ssgCase.door, installedDoor: #ssgCase.installedDoor}"], cwd: dir, stdout: "piped", stderr: "piped" }).outputSync();
+if (!exported.success) fail(new TextDecoder().decode(exported.stderr));
+const { caddyfile, door, installedDoor } = JSON.parse(new TextDecoder().decode(exported.stdout)) as { caddyfile: string; door: string[]; installedDoor: string[] };
 
 async function docker(args: string[]): Promise<string> {
   const result = await new Deno.Command("docker", { args, stdout: "piped", stderr: "piped" }).output();
@@ -49,8 +42,6 @@ async function docker(args: string[]): Promise<string> {
 const filler = "x".repeat(600);
 // Each path the door answers, the file behind it, and two contents of one length.
 const FILES: [string, string, (v: string) => string][] = [
-  ["/docs/ir.html", "srv/docs/ir.html", (v) => `<!doctype html><link rel="stylesheet" href="ir/card.css"><title>${v}</title><p>${filler}</p>\n`],
-  ["/docs/ir/card.css", "srv/docs/ir/card.css", (v) => `.${v} {}\n/* ${filler} */\n`],
   ["/llms.txt", "srv/llms.txt", (v) => `# ${v}\n${filler}\n`],
   ["/shell/screens/regras.css", "srv/shell/screens/regras.css", (v) => `.${v} {}\n/* ${filler} */\n`],
   ["/omnishell/interpreter/shell.js", "omnishell/interpreter/shell.js", (v) => `export const v = "${v}";\n// ${filler}\n`],
@@ -85,7 +76,6 @@ for (const [layout, composed] of [["local", door], ["installed", installedDoor]]
   };
   const get = async (url: string, etag?: string) => {
     const res = await fetch(url, { headers: etag === undefined ? {} : { "If-None-Match": etag } });
-    if (!res.headers.get("content-security-policy")?.includes("require-trusted-types-for 'script'")) fail(`the door omitted its terminal fence at ${url}`);
     return { status: res.status, etag: res.headers.get("etag") ?? "", body: await res.text() };
   };
   await write("aaaa");

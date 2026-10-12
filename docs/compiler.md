@@ -43,7 +43,12 @@ in both layouts.
 Test fingerprints include `tests/**`, the generated check configuration and
 compiler facts. Installed-runtime tests use the cache; tests against local
 sibling runtimes run each time until those trees have declared dependency
-edges. Lint always runs because protobuf compatibility also reads Git history.
+edges. Before lint checks its cache, an uncached `lint-inputs` target records
+the protobuf comparison ref in `.pronto/proto-baseline.json`. That file is part
+of lint's fingerprint and excluded from generation/build/test, so moving the
+ref invalidates lint without forcing every unchanged run to execute its checks.
+The protobuf checker compares against that sampled commit, even if the ref moves
+while the checks run.
 Docker lint/test retain their existing compiler checks. Moving the full host
 rule set into those images requires a declared protobuf baseline instead of
 a live Git checkout.
@@ -167,6 +172,14 @@ app alone at its root, finding the released runtime with `run-mise where`.
 Monorepo CI preserves installed layouts and carries their repository runtime
 bindings into the check runners. Their `.bayt/.env` selects images built from
 the checkout; mirror release gates validate the published pins.
+
+GolAberto's CI uses `sayt/depot` with registry cache imports and exports on
+both branches and main. Its CI overlay runs the native build, lint and test
+rules, then the integration suites sequentially: each suite owns a database
+and browser stack on the runner. The native stage carries a deterministic
+Git bundle of the main app tree for protobuf compatibility checks. These
+overlays and the bundle are CI inputs, not mirror artifacts. Local workflow
+replays use `sayt/ci` with registry access disabled.
 
 Each brings what the others cannot. sayt bootstraps the rest and carries the
 cross-platform concern, which is why it alone ships per-platform binaries;

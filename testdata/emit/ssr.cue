@@ -1,6 +1,6 @@
 // A route rendered on request (#Screen.ssr): served by the terminal's
 // renderer behind the door, and refused where its document could only be
-// somebody's. #readCase's program, whose Note is private.
+// somebody's. #syncCase's program, whose Note is private.
 package emit
 
 import pronto "github.com/bonisoft3/pronto"
@@ -9,7 +9,7 @@ import pronto "github.com/bonisoft3/pronto"
 	reads: [...pronto.#Read]
 	route: *"/jogo/:id" | string
 	// Signed out but known: the renderer mints its guest from the auth plane.
-	_app: (#readCase & {"reads": reads, "route": route}).app & {surface: screens: jogo: {ssr: "ssr", files: {handlers: [], adapters: []}}} & {capabilities: auth: {required: false, service: "/auth"}}
+	_app: (#syncCase & {"reads": reads, "route": route}).app & {surface: screens: jogo: {ssr: "ssr", files: {handlers: [], adapters: []}}} & {capabilities: auth: {required: false, service: "/auth"}}
 	_terminal: (pronto.#DefaultTerminal & {code: _app}).out
 	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _terminal.surface.statics}).out
 	_loop: (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out
@@ -24,12 +24,11 @@ import pronto "github.com/bonisoft3/pronto"
 // refused over rows the server holds.
 #ssgCase: {
 	reads: *[] | [...pronto.#Read]
-	_app: (#readCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}} & {surface: screens: regras: {
+	_app: (#syncCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}} & {surface: screens: regras: {
 		title:   "Regras"
 		route:   "/regras"
 		"reads": reads
 		writes: []
-		charts: []
 		forms: []
 		states: []
 		prerender: true

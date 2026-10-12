@@ -176,31 +176,8 @@ navigation from the brief) plus data attributes:
 - **Ids are opaque tokens; structure lives in data attributes, never parsed
   out of the id string.**
 - `data-kind` — `entity | pipeline | screen | state | flow | test | decision |
-  handler | validation | hatch | unit | machine | effect | paths | diagram |
-  auth | review` — on a `validation` or a `machine`, `data-of` names the
-  entity that owns it; a terminal chart's id is `<entity ir>-<field>`, a
-  mecha machine's and an effect's their declared `ir`. Presence is by reach
-  (review by consequence): a `tab` entity, its validations, its charts and the
-  handlers only they name are machine-checked and owe no element; `device` or
-  above does. **The compiler draws the entity's card**: right after an
-  `entity` element's opening tag, `write.ts` keeps a generated region
-  (`<!-- pronto:card -->…<!-- /pronto:card -->`, never hand-edited) holding
-  the card — its chips, field names, referrers, references, validations, the
-  derived line, and for an entity a machine moves, the chart as a D2 picture
-  carrying the `machine` (and `effect`) element — and links `ir/card.css` from
-  the head. The picture comes from the `d2` the app's `.mise.toml` pins beside
-  `buf` and `duckdb` (the scaffold carries it), run in the app directory with no
-  browser. The author's prose stays outside the region
-- **Screen neighbourhoods are compiled from reads.** Each screen element
-  carries a generated D2 graph of exactly the entities its settled `reads`
-  name, including embedded relations and disconnected entities. References are
-  drawn only when both
-  ends belong to that screen. Nodes show primary keys, references and machine
-  fields; retired and platform stamp columns are omitted. A generated app
-  overview is the union of the screen graphs, not every entity in the schema.
-  Both use the app's pinned D2 and link to entity cards where present. The
-  adjacent entity list remains readable without the picture. See
-  [[docs/screens|screens]] for how the markup supplies those reads.
+  handler | validation | hatch | unit | paths | diagram | auth | review` — on a
+  `validation`, `data-of` names the entity that owns it
 - `data-of` — owner (states belong to a screen, tests to an entity/pipeline/screen)
 - `data-durability` — durability on entities (`tab | device | server | live |
   offline`), the guarantee ladder of `#Entity.durability`
@@ -311,9 +288,9 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
 - **Bijection.** Every object carries `ir`, defaulting to its name/key — the
   ir.html element id it realizes. A storyboard frame has no object of its own:
   its id is *built* as `<the screen's ir>-<state>` and compared whole. The
-  checker compares thirteen ir kinds — {entity, pipeline, screen, state, flow,
-  test, decision, handler, validation, hatch, unit, machine, effect}. A program
-  id that owes review but has no ir element is code
+  checker demands set equality both ways over eleven ir kinds — {entity,
+  pipeline, screen, state, flow, test, decision, handler, validation, hatch,
+  unit} — and both directions are errors. An id in the program with no ir element is code
   no reviewer signed; an id in the ir with no program object is a designed thing
   the running app silently lacks, and it is the more dangerous of the two.
   Neither is a work-in-progress state to be tolerated: one hop produced the
@@ -329,233 +306,17 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   an SES compartment, the largest escape from the declarative surface and
   precisely what a bijection exists to police.
 
-**Review coverage follows reach.** A `tab` entity, its validations, its
-terminal charts and handlers only those charts name are machine-checked
-without owing an ir element. A terminal chart's reach includes its own row
-and the entities its effects write; `device` or above owes review. Other
-program objects owe their elements. Every declaration remains a claim, and
-an ir element with no declaration is always an error. The decision is
-[[docs/decisions/2026-08-27-review-by-consequence|review by consequence]].
-
-Entity cards draw every distinct terminal chart for a field. Identical charts
-share a diagram; differing charts receive separate IDs and labels naming their
-screens, including multiple charts mounted on one screen.
-
-**An entity's writers are derived.** `#Entity.writers` (`writers.cue`) lists
-every declaration that writes its rows — a screen's forms and what its markup
-writes past them, the terminal charts it carries (`#Screen.charts`, projected
-from the markup like its reads and writes), a pipeline's sink and a fold's
-pair, a computation's outputs, a mecha machine's row and relational effects —
-each with its ops, and the card prints each as `kind:name op·op`. Nothing is
-authored, and nothing refuses two kinds of writer on one entity; whether a
-sink should be its pipeline's alone is open ([pending](PENDING.md#the-lattice)).
-Every op is a word of the terminal's `#Machine.#MutationOp` (omnishell
-`machine.cue`, where each is classified by what happens if it happens twice),
-re-exported by `terminals/omnishell.cue`: a form's `action`, a `#Write.op` and
-mecha's `#RelationalOp` each narrow it to the ops their performer runs, and
-none extends it.
-
-**An external effect belongs to its invoking machine.** `state.effects`
-declares `input`, its instance `key`, a sink and a non-empty `note`; its
-entity is derived from the machine whose state names it by `invoke.src`.
-No invoking state, multiple invoking states or invocations from different
-entities are refused. An idempotent sink carries no `reentry`; otherwise
-`reentry` is `reconcile | unknown | repeat`, with `reconcile` as the default.
-The peer's idempotency and the cost of a repeat are the claim the `note`
-explains. The card derives delivery: idempotent or `reconcile` is
-exactly-once, `unknown` at-most-once, and `repeat` at-least-once.
-
-**Machine actions distinguish writes, signals and hatches.** `effect` contains
-only relational mutations. `raise: {notify, payload}` sends a PostgreSQL channel
-notification; `raise: {stream, signal?, key?}` signals a declared DuckStream
-(`refresh`, `checkpoint` or `flush`, default `refresh`). Both accept lists.
-`hatch: {name, call, args?}` calls a SQL function through a named
-`capabilities.hatches` declaration of kind `sql`; the machine's `hatches` are
-derived from its actions. Such a machine shows `delivery: unspecified` and
-links the hatch's rationale in its card. `reject` refuses the transaction.
-An effect outcome cannot contain a rejection, including its exit and entry
-actions. State entry runs on insert; transitions run exit, transition and entry
-actions in that order inside the transaction.
-
-A raw pipeline is a hatch: it requires a non-empty `note`, has unspecified
-delivery, and owes a `data-kind="hatch"` element. Its sink's writer is a hatch
-with no derived mutation op, since the compiler cannot inspect its stream.
-
-**A machine owns its initial state.** A mecha machine's `initial` supplies the
-SQL default for its state field when the field declares none. A different
-field default is refused, as is a generated or retired state field. If the field
-has no CEL, the emitter supplies a
-CHECK admitting exactly the machine's states; a parsed closed CEL enum must
-include every state. State values in inline and held seeds must name one of
-those states.
-
-A mecha machine declares either a statechart (`states`) or lifecycle handlers
-(`on.insert`, `on.update`, `on.delete`). Combining them is refused; separate
-machines over the same entity keep both triggers explicit in SQL and in the IR.
-
-**Lifecycle guards own predicate validation.** `state.machines.<name>.guards`
-contains named Jessie predicates (`src`, `via`, `note`). Each `on.insert`,
-`on.update` or `on.delete` transition names `guard` (one name or an ordered
-list) and optional `actions`; an action or list alone is the action-only
-shorthand. Every guard is used and every reference resolves in its own
-machine. Names are unique across an entity's machines because they are also
-the entity's refusal names. `entity.validations` is a closed derived projection
-with each guard's owner and events. Guard-only machines inherit the entity's
-effect level; server actions or statecharts on browser entities are refused.
-
-The server lifecycle interpreter checks its guards before its actions. It
-runs `AFTER` when guarded, after RLS and generated columns, reading related
-rows in the same transaction; guard refusal rolls back the write and actions.
-An `assign` cannot alter a row after its write and is refused there. Access
-stays declarative RLS. The browser preflight chooses the same event's guards
-before mutation; on delete, the event row and prior item are the deleted row.
-A false result is a named non-retriable refusal; every non-boolean is a program
-error. The predicate ABI and authoring contract are in [[GUIDE#validations|the guide]].
-
-For a retained database, apply the generated `009_validations.sql` and
-`010_machines.sql` together in an application migration while writes are
-stopped. The former keeps predicate function identities and removes the old
-validation-only trigger; the latter installs guarded lifecycle interpreters.
-Changing declarations alone does not upgrade an initialized volume.
-
-**A server machine's `after` is a durable timer.** Each nonnegative integer
-millisecond delay arms a one-shot schedule on state entry, in the row's
-transaction. The existing ticker inserts a private `machine_timer_tick`; its
-interpreter locks the owner, verifies that the same visit is still active,
-selects the first true guard, and performs exit, transition and entry actions.
-A timed self-transition creates another visit. An earlier `AFTER` trigger
-that rewrites or recreates the owner during the same row event is refused;
-it cannot silently replace the visit being armed. A false or null guard consumes
-that timeout; other delays remain armed. The clock's sweep cadence bounds
-precision: `after` is a minimum delay, not an exact execution time.
-
-Leaving a state, changing the primary key or deleting the row cancels its
-schedules. Every entry has distinct schedule names, so a late tick cannot
-advance a later visit to the same state. Duplicate tick IDs are absorbed.
-Primary keys cross the ticker as text, preserving large integers and composite
-keys. Client roles cannot read or write the schedule or tick tables. Timed
-machines require a server-held entity and a primary key; final states have no
-`after`. They require a declared cloud clock and cannot target Pages.
-
-`010_machines.sql` installs the timer tables and interpreters before seeds.
-Retained databases must apply the generated SQL through their migration path;
-the `timer-check` startup step refuses a different interpreter. First adoption
-also refuses existing timed rows without explicit schedules for their current
-state's delays: a migration must supply deadlines from known entry times or
-explicitly move those rows. Creation time is not state-entry time. Subsequent
-timer changes require the migration to reconcile any pending schedules with
-the new program. The compiler never guesses elapsed time or resets deadlines
-during startup.
-
-**A terminal chart is closed over the entity's row.** `context` is refused:
-other columns start from the entity's field defaults. The emitted
-`shell.yaml` schema carries defaults as literal values: a SQL quoted string
-is decoded, booleans retain their type, and `NULL` becomes null. Numeric
-defaults follow the field's carrier: `int64` and `decimal` retain exact
-canonical strings; other numeric types carry numbers.
-SQL expressions such as `now()` and `gen_random_uuid()`, and literals requiring
-a SQL payload cast, carry no terminal default. The field's `defaulted: true`
-still tells markup lint that a pending row may await a database default. A
-singleton machine region without `data-empty-row` requires a
-filter pinning `id`; it binds those defaults, then the filter's equalities,
-then its `field: initial`. An explicit `data-empty-row` remains the whole
-row. The terminal's [[../omnishell/docs/machines|machine contract]] states
-the row and effect grammar.
-
-**Screen markup carries no executable code.** The markup check and terminal
-parser refuse scripts, inline event handlers, executable URLs, `srcdoc`, and
-embedded objects. Templates are checked recursively after HTML parsing, so
-character references cannot hide an executable URL. Jessie and declared units
-and explicit host-DOM hatches are the execution surfaces.
-
-The door sends the terminal's Content Security Policy; the entry document
-carries the same policy in its hashed bytes and the release cache preserves
-its header. Trusted Types admits only the terminal's inert markup parser,
-same-origin script URLs, and SES evaluation while the cage is running. A
-rendered document boots through an external module after first paint.
-
-Browser resources default to the app's origin. An exception is
-`capabilities.resources.<name>: {kind, source, note}`: `kind` is a CSP fetch
-directive stem (`img`, `font`, `media`, `frame` or `connect`), `source` is one
-HTTPS origin, and `note` is non-empty. Reader-supplied images alone may use
-`source: "https:"`; that explicitly admits requests to their chosen hosts.
-Script sources cannot be extended. Vendored realm and agent files keep their
-own execution boundary; the terminal's Trusted Types policies are not imposed
-on their documents or workers.
-
-**A host-DOM hatch is trusted browser code.** Declare
-`capabilities.hatches.<name>: {kind: "host-dom", src, files, note}` and name it
-in `surface.screens.<screen>.hatches`. `note` is non-empty and states the
-reason for its ambient authority. `src` is an ES module under `shell/hatches/`
-and must occur in `files`; those exact files are served and hashed with the
-app release. This hatch can reach the whole host DOM, browser APIs and app
-client. Its delivery is unspecified. Screen selection is a lifetime boundary,
-not a sandbox; CSP and Trusted Types still apply.
-
-The default export is synchronous `mount(screen, {signal, messages, params})`
-and returns a cleanup function. Register partial-mount cleanup on `signal`
-before allocating resources. The terminal aborts the signal then calls cleanup
-on pause, stop and before a template morph, and mounts again on resume or after
-a visible morph. Cleanup must be idempotent and release listeners, observers,
-timers and subscriptions; asynchronous continuations must check the signal.
-Server rendering validates the declaration without importing or mounting it.
-Only the manifest selects executable paths; no markup attribute loads code.
-A release-controlled browser imports the module through its pinned service
-worker; an absent release asset or controller is refused.
-
-**A vendored unit declares its ports.** `capabilities.vendored.<unit>.ports`
-is `reads`, the entities whose rows the unit is handed (the row of the region
-its mount sits in, through `data-prop-*`), and `raises`, the events it may
-post (heard by the mount's `data-on-*`); ports and adapters, the terminal
-being the adapter on both. CUE refuses a read naming no entity; the terminal's
-`check markup`, which sees the emitted `units:` and the screens together,
-refuses a mount fed a region the unit does not read, a mount handling an event
-it does not raise, and a raise no mount on any screen handles; the mount
-refuses the first two at runtime and the seat an undeclared raise, while a
-raise nobody handles is the lint's alone, since no mount is where it would be
-seen. Every refusal of the mount and the seats is a `ProgramError`: the mount
-and a memo's question run inside the region's refresh, whose outage guard
-retries anything else as a dead gateway, and an answer inside the port's
-listener, where anything else is a console line; the shell banners a
-`ProgramError` from a rejection and from the window's `error` event alike.
-
-**An agent is a question whose answer lands in a memo.** A unit with
-`isolation: "agent"` declares `memo: {entity, key}` — the entity whose row is
-the answer, addressed by the question's fields (Michie's memo table), which
-the mount binds as `data-prop-*` of the same names; a unit that acts on the
-world is a process hatch. CUE refuses an agent without a memo, a memo on any
-other isolation, a memo naming no entity, a key field the entity lacks or that
-is primary or retired, an
-entity without a unique over exactly the key fields (the natural key an answer
-resolves against), a memo entity with a column that is not text (an answer
-crosses the seat as strings), and an agent raising other than one event (a
-question has one answer); `#emit` holds a memo's columns to the terminal's
-`hatch.<seat>.detail` offer as far as the program states them — more columns
-than `keys`, a column named outside `key`, a column whose declared size bound
-exceeds `value` — since an answer carries every column in one event; the
-alphabet, and the length of a column left unbounded, are the agent seat's
-refusal at runtime, never a drop. The offer is stated once: the seat's parser
-is held equal to it by `vendored-unit.test.ts`. The terminal performs the
-memo: a keyed query asks for the question's row, and a row found answers
-without asking. The unit's answer is upserted on the key before the chart
-hears the raised event, whose detail is the key — the chart reads the answer as a row of a table its region reads,
-which `check markup` requires. An answer the store refuses is the same
-`ProgramError`, naming the unit and the table: no reduce authored the write,
-so it is not a `refused` event. The entity's
-writers carry the unit as
-`unit:<name> upsert`; its card says `memo of: <unit> by <key>`, and an entity
-a unit reads says `read by: <unit> (<isolation>)`.
-The host registers the memo's table and schema even when no screen reads or
-writes it. Its primary key is allocated by the store; the question's key uses
-active non-primary fields, all carried in the answer.
+**The bijection is total.** No kind and no write is exempt by durability: a
+handler that updates only a `tab` entity owes its ir element as one writing the
+database does. Levying ir coverage by what a write reaches is
+[review by consequence](docs/decisions/2026-08-27-review-by-consequence.md),
+not built.
 
 A field's `cel:` is the one statement of its constraint. `plugins/pronto/cel.ts`
 parses it once at generate into `.pronto/cel.json` (cel.expr.ParsedExpr as
-protobuf-JSON); every rendering is a function of that file — in
-`program_cel.cue`, the CUE field constraints under `seed` and, under one
-`#Entity.cel`, the SQL CHECK bodies, the closed value sets the terminal's
-per-kind template lint is judged against, and the bounds a battery proposes
-values within. An
+protobuf-JSON); every rendering is a function of that file — the SQL CHECK
+bodies and the CUE field constraints in `program_cel.cue`, and the closed
+value set the terminal's per-kind template lint is judged against. An
 entity's `invariant:` binds `this` to the row instead of the value, so it
 derives a CHECK body and nothing for CUE: a predicate over several columns
 constrains no one field's value.

@@ -19,7 +19,7 @@ localCompiler:    strings.Contains(_loop.surface.checks.types.cmds[0], "../../pl
 externalCompiler: strings.Contains(_external.surface.checks.types.cmds[0], "../../plugins") & false
 externalBuild:    _external.surface.sayYaml.say.build.do & "null"
 _project:         dist.#Project
-sourceTerminalCommand: (dist.#Project & terminalProject.#Project & {omnishell: "../../plugins/omnishell"}).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#LocalGenerate
+sourceTerminalCommand: (dist.#Project & terminalProject.#Project & {runtime: "../../plugins/pronto"}).say.say.generate.rulemap.omnishell.cmds[0].do & "mise run omnishell -- mode . --local | save --force program_terminal.cue"
 installedTerminalCommand: (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
 sourcePin:                _project.mise.tools."github:bonisoft3/pronto" & dist.#Version
 bootstrapHasNoTerminal:   strings.Contains(_project.write, "omnishell") & false
@@ -33,7 +33,7 @@ externalVisualContext: (_externalBuild.targets.integrate.compose.build.additiona
 // program. The module, config, .say.yaml and held seed rows all ride in on it,
 // so what it excludes is pinned: an exclude that took one of them would refuse
 // the program the same way.
-externalTreeExcludes: [for _, e in _externalBuild.targets.generate.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", "**/node_modules/**"]
+externalTreeExcludes: [for _, e in _externalBuild.targets.generate.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", ".pronto/proto-baseline.json", "**/node_modules/**"]
 // Installed apps verify releases as the monorepo's do: off, globally and per
 // backend, since mise reads attestations from a rate-limited GitHub API.
 _settings: _project.mise.settings
@@ -47,7 +47,9 @@ externalLeafIsNotRecursive: strings.Contains(_externalBuild.targets.build.cmd.bu
 externalLintGate:                    strings.Contains(_externalBuild.files["say.yaml"].say.lint.rulemap.builtin.cmds[0].do, "bayt-task lint --generate") & true
 externalTestGate:                    strings.Contains(_externalBuild.files["say.yaml"].say.test.rulemap.builtin.cmds[0].do, "bayt-task test --generate") & true
 externalChecksKeepProto:             strings.Contains(_externalBuild.files["checks.yaml"].say.lint.rulemap.proto.cmds[0].do, "check-proto.ts") & true
-externalLintReadsHistory:            _externalBuild.targets.lint.taskfile.incremental & false
+externalLintCaches:                  _externalBuild.targets.lint.taskfile.incremental & true
+externalLintReadsHistory:            (_externalBuild.targets.lint.srcs.defaultExclude["pronto-history"] == null) & true
+externalLintRefreshesHistory:        _externalBuild.targets["lint-inputs"].taskfile.incremental & false
 externalTestIncludesFixtures:        (_externalBuild.targets.test.srcs.defaultExclude["pronto-tests"] == null) & true
 externalTestIncludesFacts:           list.Contains(_externalBuild.targets.test.srcs.globs, ".pronto/facts.json") & true
 externalTestLeafDoesNotReenterGate:  strings.Contains(_externalBuild.targets.test.cmd.builtin.do, "task-leaf test") & true
@@ -65,5 +67,5 @@ externalVisualKeepsInjection: len(_externalBuild.targets["ci-visual"].cmd.builti
 
 externalGenerateOwnsCompiler: strings.Contains(_externalBuild.targets.generate.cmd.builtin.do, "task-leaf generate") & true
 externalBuildDependsOnGenerate: _externalBuild.targets.build.deps & [":generate"]
-externalLintDependsOnGenerate: _externalBuild.targets.lint.deps & [":generate"]
+externalLintDependsOnGenerate: _externalBuild.targets.lint.deps & [":generate", ":lint-inputs"]
 externalBuildRunsConsumerRules: strings.Contains(_externalBuild.targets.build.cmd.builtin.do, "task-leaf build") & true

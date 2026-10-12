@@ -6,7 +6,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.11.1"
+#Version:     "0.10.0"
 #SaytVersion: "0.42.2"
 
 // The mise tools that carry the three trees a browser bundle reads, for a
@@ -32,9 +32,6 @@ import (
 	// binary per platform, windows included, so the lint runs wherever the
 	// toolchain does.
 	"github:sbdchd/squawk": "2.66.0"
-	// Draws an entity's machines into ir.html (ir-render.ts): one binary from
-	// its GitHub release, never aqua (whose registry meets rate limits).
-	"github:terrastruct/d2": "v0.9.0"
 	"http:duckdb": {
 		version: "1.5.5"
 		platforms: {

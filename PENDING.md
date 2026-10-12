@@ -171,13 +171,13 @@ reads the level ([omnishell's half](../omnishell/PENDING.md#machines)) — makes
 the lattice's first join a refusal, and lets one copy of the table import the
 other.
 
-**A lazy read takes only equality.** A view whose filter holds a boolean, a
-range or a pattern is read from the collection, so its table is read whole
-([screens](docs/screens.md#the-reads-decide-how-a-table-is-read)): golaberto's
+**Sync on demand takes only equality.** A view whose filter holds a boolean, a
+range or a pattern is read from the collection, so its table syncs whole
+([screens](docs/screens.md#the-reads-decide-how-a-table-syncs)): golaberto's
 `game_card`, `team_game`, `position_chance`, `standing` and its directories.
 The view engine's clause vocabulary lacks those ops, and a boolean clause is
 refused because an optimistic row lacks the schema's defaulted booleans, which
-belongs with the writers paragraph below. A named read (`data-read-*`) counts as a whole
+belongs with `writers` below. A named read (`data-read-*`) counts as a whole
 read until derive can prove an identical view on its screen serves it, and an
 `is.null` clause on a domain-typed column counts as a comparison Electric
 cannot make, though `IS NULL` needs no operator; it is the first reason ponto's
@@ -191,7 +191,7 @@ read a retyped column block `ALTER COLUMN TYPE`,
 [schema change](docs/schema-change-admission.md)).
 
 **A capped view ordered by free text keeps its table eager**
-([screens](docs/screens.md#the-reads-decide-how-a-table-is-read)): golaberto's
+([screens](docs/screens.md#the-reads-decide-how-a-table-syncs)): golaberto's
 `stage_group`, read `limit=1` by `position,name`. Postgres picks the rows inside
 the cap by ICU root and the view orders them by the reader's locale; it goes on
 demand once both sides order by one collation, which TanStack's
@@ -199,16 +199,15 @@ demand once both sides order by one collation, which TanStack's
 
 **A reduce keeps every server table eager**, whatever event it is bound to. Its
 updates and effects name their entities in code, so derive cannot read them off
-the markup; no app with a lazy table has one today. Closing it needs the
+the markup; no app with an on-demand table has one today. Closing it needs the
 entities a reduce writes stated somewhere derive reads and the store enforces.
 
-**Two kinds of writer on one entity is shown, not refused.** `#Entity.writers`
-(writers.cue) lists every declaration that writes the entity, so a sink a form
-also targets reads `pipeline:tally upsert, form:board create` on its card; no
-lint, store check or policy consults the list, and `app_user` holds whatever
-write arm the access mode grants. Refusing a form or effect aimed at a
-pipeline-written entity at lint, and emitting no `app_user` write arm for it,
-would make "a sink is written by its pipeline alone" a rule.
+**`writers` is read by nothing.** `#Entity.writers: "pipeline"` marks a derived
+entity, and no lint, store check or policy consults it: a form, a reduce or an
+effect may target one, and `app_user` holds whatever write arm the access mode
+grants. Refusing a form or effect aimed at a pipeline-written entity at lint,
+and emitting no `app_user` write arm for it, would make "a sink is written by
+its pipeline alone" a rule.
 
 **A `tab` or `device` write is judged by its validations alone**
 ([the lattice](docs/lattice.md#the-validation-ladder)); a judge beside

@@ -16,6 +16,7 @@ _scheduled: _code & {
 			Tick: {
 				table:      "tick"
 				durability: "server"
+				writers:    "pipeline"
 				fields: list.Concat([pronto.#tickFields, [{name: "status", type: "text"}]])
 			}
 			TickDone: {table: "tick_done", durability: "live", fields: [{name: "id", type: "uuid", pk: true}]}

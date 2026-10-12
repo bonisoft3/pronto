@@ -229,15 +229,15 @@ export async function checkDuckStreams(
 }
 
 async function main(appDir: string) {
-  const hatches = await exportJson<Record<string, Hatch>>(appDir, "code.capabilities.hatches");
-  const raw = await exportJson<RawMigration[]>(
-    appDir,
-    "[if code.state.rawMigrations != _|_ {code.state.rawMigrations}, []][0]",
-  );
-  const duckstreams = await exportJson<Record<string, DuckStream>>(
-    appDir,
-    "[if code.state.duckstreams != _|_ {code.state.duckstreams}, {}][0]",
-  );
+  const { hatches, raw, duckstreams } = await exportJson<{
+    hatches: Record<string, Hatch>;
+    raw: RawMigration[];
+    duckstreams: Record<string, DuckStream>;
+  }>(appDir, `{
+    hatches: code.capabilities.hatches
+    raw: [if code.state.rawMigrations != _|_ {code.state.rawMigrations}, []][0]
+    duckstreams: [if code.state.duckstreams != _|_ {code.state.duckstreams}, {}][0]
+  }`);
 
   const skip = withheld(hatches, raw);
   const all = await sqlFiles(appDir);

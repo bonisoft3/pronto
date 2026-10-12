@@ -484,7 +484,7 @@ export class ClusterDurableObject extends DurableObject {
         });
       }
 
-      // 1. Snapshot request for lazily read collections (subset__* params)
+      // 1. Snapshot request for on-demand collections (subset__* params)
       const isSubset = ["subset__where", "subset__params", "subset__limit", "subset__order_by"].some(k => u.searchParams.has(k));
       if (isSubset) {
         const where = u.searchParams.get("subset__where");

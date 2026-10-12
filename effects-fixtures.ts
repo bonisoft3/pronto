@@ -1,9 +1,9 @@
 // The program the external-effect tests compile, and the cue calls they share.
 
 // A program around one Payment machine whose `charging` state invokes `charge`;
-// `effect`, `entity` and `vendored` are spliced into the effect, the entities
-// and the vendored units, `machine` replaces the machine's states.
-export function paymentProgram({ effect = "", machine = "", entity = "", vendored = "" } = {}): string {
+// `effect` and `entity` are spliced into the effect and the entities,
+// `machine` replaces the machine's states.
+export function paymentProgram({ effect = "", machine = "", entity = "" } = {}): string {
   return `
 package test
 
@@ -51,13 +51,13 @@ app: pronto.#App & {
       }
     }
     effects: charge: {
-      input: {amount: "NEW.total", currency: "BRL"}
+      entity: "Payment"
+      request: {amount: "NEW.total", currency: "BRL"}
       sink: {origin: "https://api.acquirer.example", idempotent: true}
-      note: "the acquirer deduplicates on Idempotency-Key"
       ${effect}
     }
   }
-  capabilities: {hatches: {}, vendored: {${vendored}}}
+  capabilities: {hatches: {}, vendored: {}}
   surface: {
     screens: board: {
       title: "Board"

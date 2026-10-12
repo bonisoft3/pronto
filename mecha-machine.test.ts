@@ -1,81 +1,8 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
-Deno.test("SQL calls require a named SQL hatch and derive the machine's hatch references", async () => {
-  const base = paymentProgram() + `
-app: state: machines: PaymentMachine: states: pending: entry: hatch: {name: "billing", call: "bill", args: [{raw: "NEW.id"}]}
-`;
-  for (const [declaration, error] of [
-    ["", "calls undeclared SQL hatch: billing"],
-    ['app: capabilities: hatches: billing: {kind: "container", note: "billing"}', "calls hatch billing, which is not SQL"],
-  ]) {
-    const res = await cue(["export", "-", "-e", "app"], base + declaration);
-    assertEquals(res.success, false);
-    assertStringIncludes(res.stderr, error);
-  }
-  const res = await cue(["export", "-", "-e", '{machine: app.state.machines.PaymentMachine, sql: out["services/database/migrations/010_machines.sql"].text}'], base + `
-app: capabilities: hatches: billing: {kind: "sql", files: ["services/database/migrations/020_billing.sql"], note: "the billing function owns the write"}
-`);
-  assertEquals(res.success, true, res.stderr);
-  const { machine, sql } = JSON.parse(res.stdout);
-  assertEquals(machine.hatches, ["billing"]);
-  assertStringIncludes(sql, "PERFORM bill(NEW.id)");
-});
-
-Deno.test("state actions run on entry and in exit-transition-entry order", async () => {
-  const files = await emitFiles(paymentProgram().replace('pay: "charging"', 'pay: {target: "charging"}') + `
-app: state: machines: PaymentMachine: states: {
-  pending: {entry: raise: {notify: "trace", payload: "initial"}, exit: raise: {notify: "trace", payload: "exit"}}
-  pending: on: pay: {target: "charging", actions: raise: {notify: "trace", payload: "transition"}}
-  charging: entry: raise: {notify: "trace", payload: "entry"}
-}
-`);
-  const sql = files["services/database/migrations/010_machines.sql"].text;
-  const initial = sql.indexOf("pg_notify('trace', 'initial')");
-  const exit = sql.indexOf("pg_notify('trace', 'exit')");
-  const transition = sql.indexOf("pg_notify('trace', 'transition')");
-  const entry = sql.indexOf("pg_notify('trace', 'entry')");
-  assertEquals(initial > 0 && initial < exit && exit < transition && transition < entry, true);
-});
-
-Deno.test("signals are raises and SQL calls are hatches, never relational effects", async () => {
-  for (const effect of ['{notify: "payments", payload: "changed"}', '{stream: "payments"}', '{call: "bill"}']) {
-    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `\napp: state: machines: PaymentMachine: states: pending: entry: effect: ${effect}`);
-    assertEquals(res.success, false);
-    assertStringIncludes(res.stderr, "effect");
-  }
-  const files = await emitFiles(paymentProgram().replace('onDone: "settled"', 'onDone: {target: "settled", actions: {raise: [{notify: "payments", payload: "done"}, {notify: "audit", payload: "paid"}]}}'));
-  const sql = files["services/database/migrations/010_machines.sql"].text;
-  assertStringIncludes(sql, "pg_notify('payments', 'done')");
-  assertStringIncludes(sql, "pg_notify('audit', 'paid')");
-});
-
-Deno.test("a raw pipeline requires its own hatch rationale", async () => {
-  const base = paymentProgram() + '\napp: state: pipelines: authored: {raw: true, from: "Payment", to: "Payment", group: "authored"}';
-  for (const extra of ["", '\napp: state: pipelines: authored: note: ""']) {
-    const res = await cue(["export", "-", "-e", "app"], base + extra);
-    assertEquals(res.success, false);
-    assertStringIncludes(res.stderr, "note");
-  }
-  const res = await cue(["export", "-", "-e", "app.state.pipelines.authored"], base + '\napp: state: pipelines: authored: note: "the authored sink decides delivery"');
-  assertEquals(res.success, true, res.stderr);
-  assertEquals(JSON.parse(res.stdout).delivery, "unspecified");
-});
-
-Deno.test("a machine cannot combine a statechart with lifecycle actions the SQL would discard", async () => {
-  for (const event of ["insert", "update", "delete"]) {
-    const res = await cue(["export", "-", "-e", "out"], paymentProgram() + `
-app: state: machines: PaymentMachine: on: ${event}: raise: {notify: "payments", payload: "TG_OP"}
-`);
-    assertEquals(res.success, false);
-    assertStringIncludes(res.stderr, "machine PaymentMachine combines states and lifecycle handlers: declare separate machines");
-  }
-});
-
-// A Challenge statechart whose `accept` transition performs one relational
-// effect of the given op on audit_log.
-function challengeProgram(op: string): string {
-  return `
+Deno.test("mecha machine compiles statechart into PostgreSQL 010_machines.sql", async () => {
+  const cueCode = `
 package test
 
 import "bonisoft.org/plugins/pronto"
@@ -118,7 +45,7 @@ app: pronto.#App & {
                 target: "accepted"
                 actions: [{
                   effect: {
-                    op: "${op}"
+                    op: "ensure"
                     table: "audit_log"
                     values: {event: "challenge_accepted"}
                   }
@@ -163,10 +90,21 @@ out: (pronto.#emit & {
 }).files
 
 `;
-}
 
-Deno.test("mecha machine compiles statechart into PostgreSQL 010_machines.sql", async () => {
-  const files = await emitFiles(challengeProgram("ensure"));
+  const cmd = new Deno.Command("cue", {
+    args: ["export", "-", "-e", "out", "--out", "json"],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "inherit",
+  });
+  const child = cmd.spawn();
+  const writer = child.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(cueCode));
+  await writer.close();
+  const res = await child.output();
+  assertEquals(res.success, true);
+
+  const files = JSON.parse(new TextDecoder().decode(res.stdout));
   const sql = files["services/database/migrations/010_machines.sql"]?.text;
   assertEquals(typeof sql, "string");
 
@@ -184,28 +122,15 @@ Deno.test("mecha machine compiles statechart into PostgreSQL 010_machines.sql", 
   // Check final state immutability
   assertStringIncludes(sql, "cannot transition from final state % on %");
 
-  // A timeout arms the ticker rather than depending on another client write.
+  // Check timeout guard for 60000ms
   assertStringIncludes(sql, "interval '60000 milliseconds'");
-  assertStringIncludes(sql, "CREATE TABLE IF NOT EXISTS public.machine_timer_tick");
-  assertStringIncludes(sql, "timer_delay = '60000'");
+  assertStringIncludes(sql, "% in state % has expired (timeout after %ms)");
 
   // Check effect generation for ensure
   assertStringIncludes(sql, 'INSERT INTO "audit_log" ("event") VALUES (\'challenge_accepted\') ON CONFLICT ("id") DO NOTHING;');
 
   // Check trigger registration
   assertStringIncludes(sql, 'CREATE TRIGGER "trg_challenge_status_machine"');
-});
-
-Deno.test("a strict create emits a bare INSERT, and an op outside #RelationalOp is refused: the word is the terminal's, matched by spelling in emit.cue", async () => {
-  const files = await emitFiles(challengeProgram("create"));
-  const sql = files["services/database/migrations/010_machines.sql"].text;
-  assertStringIncludes(sql, `INSERT INTO "audit_log" ("event") VALUES ('challenge_accepted');`);
-  assertEquals(sql.includes("ON CONFLICT"), false);
-  const refused = await cue(["export", "-", "-e", "out", "--out", "json"], challengeProgram("insert"));
-  assertEquals(refused.success, false);
-  // The refusal is the op's: cue names the field and the word, so a fixture
-  // that fails elsewhere does not pass as a refused op.
-  assertStringIncludes(refused.stderr, 'effect.op: conflicting values "create" and "insert"');
 });
 
 Deno.test("mecha machine compiles mutation lifecycle reducer with relational effects", async () => {
@@ -430,7 +355,7 @@ async function refusal(code: string): Promise<string> {
 Deno.test("entering an invoking state claims the ledger and enqueues in the transition's commit", async () => {
   const files = await emitFiles(paymentProgram());
   const sql = files["services/database/migrations/010_machines.sql"].text;
-  assertStringIncludes(sql, `INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "input")`);
+  assertStringIncludes(sql, `INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "request")`);
   assertStringIncludes(sql, `VALUES ('charge:' || NEW."id"::text, 'charge', jsonb_build_object('id', NEW."id"), jsonb_build_object('amount', NEW."total", 'currency', 'BRL'))`);
   // A second claim of a performed key is refused, not skipped.
   assertStringIncludes(sql, `IF NOT FOUND THEN\n          RAISE EXCEPTION 'external effect % was already performed: entering charging again needs a new key', 'charge:' || NEW."id"::text USING ERRCODE = 'unique_violation';`);
@@ -521,15 +446,6 @@ Deno.test("a sink's credential is a header the airlock adds from a declared secr
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false, credential: {secret: "K"}}\n      reentry: "unknown"`)), "credential");
 });
 
-Deno.test("the level is derived and never authored: the entity's from its durability, the machine's from its invoke", async () => {
-  const program = paymentProgram();
-  const levels = await cue(["export", "-", "-e", "{entity: app.state.entities.Payment.level, machine: app.state.machines.PaymentMachine.level}", "--out", "json"], program);
-  assertEquals(levels.success, true, levels.stderr);
-  assertEquals(JSON.parse(levels.stdout), { entity: "replicated", machine: "external" });
-  // An authored level is refused: it is the durability's to say.
-  assertStringIncludes(await refusal(program.replace('durability: "server"', 'durability: "server"\n        level: "ephemeral"')), "level");
-});
-
 Deno.test("an effect's cluster keeps the wake's names, and the service role the ticker writes as", async () => {
   const program = paymentProgram();
   assertStringIncludes(await refusal(paymentProgram({ entity: `Wake: {table: "airlock_wake", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}` })), "entity Wake takes table airlock_wake, which the airlock's wake keeps");
@@ -556,8 +472,8 @@ Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpo
 Deno.test("a bridged effect states what a repeat costs: neither idempotent nor reconciled", async () => {
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: true}`)), "past a bridge nothing is the platform's to promise");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}`)), "a bridge answers no query");
-  const files = await emitFiles(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: "repeat"`));
-  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, "repeat");
+  const files = await emitFiles(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: {repeat: "a second mail is a nuisance, not a charge"}`));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, { repeat: "a second mail is a nuisance, not a charge" });
 });
 
 Deno.test("a bridge no effect reaches, or an effect reaching an undeclared bridge, is refused", async () => {
@@ -588,7 +504,7 @@ Deno.test("an effect is invoked by exactly one state", async () => {
         pending: on: pay: "settled"
         settled: type: "final"`,
   }));
-  assertStringIncludes(never, "effect charge is invoked by no state: its entity is its invoking machine's, so it has none");
+  assertStringIncludes(never, "effect charge is invoked by 0 states");
 });
 
 Deno.test("an effect's name is a DNS label, as its Dapr endpoint's must be", async () => {
@@ -630,20 +546,17 @@ Deno.test("an outcome that could never be delivered is refused", async () => {
     "share target failed and carry actions",
   );
   assertStringIncludes(
-    await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: {target: "failed", actions: [{reject: "no"}]}}`) })),
-    "an outcome's actions reject",
+    await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: {target: "failed", actions: [{raise: "no"}]}}`) })),
+    "an outcome's actions raise",
   );
-  for (const action of ['charging: exit: reject: "no"', 'settled: entry: reject: "no"']) {
-    assertStringIncludes(await refusal(paymentProgram() + `\napp: state: machines: PaymentMachine: states: ${action}`), "an outcome's entry or exit actions reject");
-  }
   // One target for both arrows, with no actions, is a plain join.
   const files = await emitFiles(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "failed", onError: "failed"}`) }));
   assertEquals(typeof files["services/database/migrations/010_machines.sql"].text, "string");
 });
 
-Deno.test("an input reads a field the entity has, quoted", async () => {
-  assertStringIncludes(await refusal(paymentProgram({ effect: `input: {amt: "NEW.totl"}` })), "input amt reads NEW.totl, which is not a field of Payment");
-  const files = await emitFiles(paymentProgram({ effect: `input: {"it's": "NEW.total"}` }));
+Deno.test("a request reads a field the entity has, quoted", async () => {
+  assertStringIncludes(await refusal(paymentProgram({ effect: `request: {amt: "NEW.totl"}` })), "request amt reads NEW.totl, which is not a field of Payment");
+  const files = await emitFiles(paymentProgram({ effect: `request: {"it's": "NEW.total"}` }));
   assertStringIncludes(files["services/database/migrations/010_machines.sql"].text, `'it''s', NEW."total"))`);
 });
 
@@ -678,46 +591,16 @@ Deno.test("an invoking state with any exit but its outcome is refused", async ()
   assertStringIncludes(err, "machine PaymentMachine state charging invokes charge and declares on or after: only the effect's outcome leaves it");
 });
 
-// The effect's entity is read off the invoking machine (#App's
-// _effectEntityNames), so a declaration has no second place to state it: the
-// closed #ExternalEffect refuses the field, agreeing or not.
-Deno.test("an effect's entity is the invoking machine's, and an authored one is a field the effect lacks", async () => {
-  const agreeing = await refusal(paymentProgram({ effect: `entity: "Payment"` }));
-  assertStringIncludes(agreeing, "app.state.effects.charge.entity: field not allowed");
-});
-
-// One effect reads NEW and keys on fields of one row; two machines over two
-// entities would hand it two shapes under one ledger prefix.
-Deno.test("an effect invoked by machines of two entities is refused", async () => {
-  const order = `machines: OrderMachine: {
-      name: "OrderMachine"
-      entity: "Order"
-      field: "status"
-      initial: "open"
-      states: {
-        open: on: pay: "paying"
-        paying: invoke: {src: "charge", onDone: "paid", onError: "open"}
-        paid: type: "final"
-      }
-    }
-    `;
+Deno.test("an effect of another entity than the machine's is refused", async () => {
   const err = await refusal(paymentProgram({
-    entity: `Order: {table: "orders", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "status", type: "string"}]}`,
-  }).replace("machines: PaymentMachine:", `${order}machines: PaymentMachine:`));
-  assertStringIncludes(err, "effect charge is invoked by machines of 2 entities (Order, Payment): its NEW reads and its key need one row");
+    entity: `Order: {table: "orders", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}`,
+  }).replace(`effects: charge: {\n      entity: "Payment"`, `effects: charge: {\n      entity: "Order"`));
+  assertStringIncludes(err, "machine PaymentMachine state charging invokes charge, an effect of Order, not of the machine's Payment");
 });
 
-// The entity is the machine's fault, not its invoke's: a machine that invokes
-// nothing names it too, and emit.cue would index an empty list for its table.
-Deno.test("a machine naming an undeclared entity is refused, whether or not it invokes", async () => {
-  const invoking = await refusal(paymentProgram().replace(`entity: "Payment"\n      field: "status"`, `entity: "Invoice"\n      field: "status"`));
-  assertStringIncludes(invoking, "machine PaymentMachine names undeclared entity: Invoice");
-  const plain = await refusal(
-    paymentProgram({ machine: `pending: on: pay: "settled"\n        settled: type: "final"` })
-      .replace(`entity: "Payment"\n      field: "status"`, `entity: "Invoice"\n      field: "status"`)
-      .replace(/    effects: charge: \{[\s\S]*?\n    \}\n/, ""),
-  );
-  assertStringIncludes(plain, "machine PaymentMachine names undeclared entity: Invoice");
+Deno.test("an effect naming an undeclared entity is refused", async () => {
+  const err = await refusal(paymentProgram().replace(`effects: charge: {\n      entity: "Payment"`, `effects: charge: {\n      entity: "Invoice"`));
+  assertStringIncludes(err, "effect charge names undeclared entity: Invoice");
 });
 
 Deno.test("an effect of an entity the cluster does not hold is refused", async () => {
@@ -730,29 +613,16 @@ Deno.test("an effect keyed on a field the entity lacks is refused", async () => 
   assertStringIncludes(err, "effect charge keys on intent, which is not a field of Payment");
 });
 
-Deno.test("reentry is declared only for a sink that is not idempotent, as a word", async () => {
+Deno.test("reentry is declared only for a sink that is not idempotent", async () => {
   const onIdempotent = await refusal(paymentProgram({ effect: `reentry: "unknown"` }));
   assertStringIncludes(onIdempotent, "reentry");
   assertStringIncludes(onIdempotent, "field not allowed");
-  // The reason a duplicate is acceptable is the effect's note, not a field of its own.
-  const repeatWithReason = await refusal(
-    paymentProgram({ effect: `reentry: {repeat: "a second mail is a nuisance"}` }).replace("idempotent: true", "idempotent: false"),
+  const repeatWithoutReason = await refusal(
+    paymentProgram({ effect: `reentry: {repeat: ""}` }).replace("idempotent: true", "idempotent: false"),
   );
-  assertStringIncludes(repeatWithReason, "reentry");
+  assertStringIncludes(repeatWithoutReason, "reentry");
   const files = await emitFiles(paymentProgram().replace("idempotent: true", "idempotent: false"));
   assertEquals(typeof files["services/database/migrations/010_machines.sql"].text, "string");
-});
-
-// Idempotency and the cost of a repeat are claims about a peer the compiler
-// cannot check, so every effect carries the judgment in prose.
-Deno.test("an effect without a note is refused", async () => {
-  const err = await refusal(paymentProgram().replace(`      note: "the acquirer deduplicates on Idempotency-Key"\n`, ""));
-  assertStringIncludes(err, "note");
-  // An empty note is the field present and the judgment absent: `repeat` with
-  // nothing said would admit a duplicate for no stated reason.
-  const empty = await refusal(paymentProgram().replace(`note: "the acquirer deduplicates on Idempotency-Key"`, `note: ""`));
-  assertStringIncludes(empty, `app.state.effects.charge.note: invalid value "" (out of bound !="")`);
-  assertEquals(typeof (await emitFiles(paymentProgram()))["services/airlock/effects.json"], "object");
 });
 
 // The airlock's daprd sits on the cluster's own network: an origin naming a
@@ -772,7 +642,7 @@ Deno.test("a machine signals a duckstream pipeline", async () => {
   const files = await emitFiles(paymentProgram({ machine: `
         pending: on: pay: {
           target: "charging"
-          actions: [{raise: {stream: "payment_analytics", signal: "refresh"}}]
+          actions: [{effect: {stream: "payment_analytics", signal: "refresh"}}]
         }
         charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
         settled: type: "final"
@@ -793,7 +663,7 @@ Deno.test("a machine referencing an undeclared duckstream is refused at compile 
   const err = await refusal(paymentProgram({ machine: `
         pending: on: pay: {
           target: "charging"
-          actions: [{raise: {stream: "undeclared_stream"}}]
+          actions: [{effect: {stream: "undeclared_stream"}}]
         }
         charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
         settled: type: "final"
@@ -826,7 +696,7 @@ app: pronto.#App & {
         on: {
           delete: [
             {
-              raise: {
+              effect: {
                 stream: "cleanup_order"
                 key: "NEW.id"
               }
@@ -907,8 +777,7 @@ app: pronto.#App & {
         on: {
           insert: [
             {
-              hatch: {
-                name: "locking"
+              effect: {
                 call: "pg_advisory_xact_lock"
                 args: [{raw: "hashtext('test_lock')::bigint"}]
               }
@@ -925,7 +794,7 @@ app: pronto.#App & {
               }
             },
             {
-              raise: {
+              effect: {
                 stream: "item_stream"
                 key: "NEW.month"
               }
@@ -943,7 +812,7 @@ app: pronto.#App & {
       }
     }
   }
-  capabilities: {hatches: {locking: {kind: "sql", files: ["services/database/migrations/020_locking.sql"], note: "serializes writers to the summary"}}, vendored: {}}
+  capabilities: {hatches: {}, vendored: {}}
   surface: {
     screens: {}
     handlers: {}
@@ -988,103 +857,3 @@ out: (pronto.#emit & {
 
 
 
-
-Deno.test("the machine supplies the column default and check so an omitted status starts legally", async () => {
-  const files = await emitFiles(challengeProgram("ensure"));
-  const sql = files["services/database/migrations/005_create_tables.sql"].text;
-  assertStringIncludes(sql, `"status" text DEFAULT 'pending' NOT NULL CHECK ("status" IN (`);
-  for (const state of ["pending", "accepted", "declined", "expired"]) assertStringIncludes(sql, `'${state}'`);
-});
-
-Deno.test("a machine refuses a conflicting default, a closed enum missing a state, and a seed outside its states", async () => {
-  const base = challengeProgram("ensure");
-  for (const [source, sentence] of [
-    [base.replace('{name: "status", type: "string"}', `{name: "status", type: "string", default: "'accepted'"}`), "disagrees with Challenge.status default"],
-    [base.replace('durability: "server"', 'durability: "server"\n cel: enums: status: ["pending"]'), "is not admitted by Challenge.status cel enum"],
-    [base.replace('durability: "server"', 'durability: "server"\n seed: [{status: "lost"}]'), "value lost is not a state"],
-  ]) {
-    const res = await cue(["export", "-", "-e", "app", "--out", "json"], source);
-    assertEquals(res.success, false);
-    assertStringIncludes(res.stderr, sentence);
-  }
-});
-
-Deno.test("a matching default and CEL check remain the column's one declared constraint", async () => {
-  const source = challengeProgram("ensure").replace('{name: "status", type: "string"}', `{name: "status", type: "string", default: "'pending'", cel: "this in ['pending', 'accepted', 'declined', 'expired']"}`)
-    .replace('durability: "server"', `durability: "server"
-      cel: {checks: status: "status IN ('pending', 'accepted', 'declined', 'expired')", enums: status: ["pending", "accepted", "declined", "expired"]}
-      seed: [{status: "pending"}]`);
-  const files = await emitFiles(source);
-  const line = files["services/database/migrations/005_create_tables.sql"].text.split("\n").find(l => l.includes('"status"'))!;
-  assertEquals(line.match(/DEFAULT/g)?.length, 1);
-  assertEquals(line.match(/CHECK/g)?.length, 1);
-});
-
-Deno.test("machine transitions cannot occupy generated or retired columns", async () => {
-  for (const [attributes, sentence] of [
-    [`generated: "'pending'"`, "is generated and cannot hold transitions"],
-    ["retired: true", "is retired and cannot hold transitions"],
-  ]) {
-    const source = challengeProgram("ensure").replace('{name: "status", type: "string"}', `{name: "status", type: "string", ${attributes}}`);
-    const result = await cue(["export", "-", "-e", "app", "--out", "json"], source);
-    assertEquals(result.success, false);
-    assertStringIncludes(result.stderr, "machine ChallengeMachine field Challenge.status");
-    assertStringIncludes(result.stderr, sentence);
-  }
-});
-
-Deno.test("shell schema sends typed literal defaults and leaves SQL expressions with the store", async () => {
-  const source = challengeProgram("ensure").replace('{name: "created_at", type: "timestamp"}', `
-    {name: "created_at", type: "timestamp", default: "now()"},
-    {name: "label", type: "string", default: "'can''t'"},
-    {name: "empty", type: "string", default: "''"},
-    {name: "count", type: "int32", default: "-12"},
-    {name: "ratio", type: "double", default: "+1.5e2"},
-    {name: "large", type: "int64", default: "9007199254740993"},
-    {name: "legacy_large", type: "bigint", default: "+9007199254740993"},
-    {name: "precise", type: "decimal", precision: 38, scale: 18, default: "12345678901234567890.123456789012345678"},
-    {name: "exponent", type: "decimal", precision: 38, scale: 20, default: "1.2300e-18"},
-    {name: "integer_exponent", type: "int64", default: "1.20e2"},
-    {name: "rounded_integer", type: "int64", default: "1.5"},
-    {name: "quoted_false", type: "bool", default: "'false'"},
-    {name: "quoted_json", type: "json", default: #"'{"n":1}'"#},
-    {name: "quoted_bytes", type: "bytes", default: "'abcd'"},
-    {name: "zero", type: "decimal", precision: 3, scale: 2, default: "-0.00"},
-    {name: "yes", type: "bool", default: "TRUE"},
-    {name: "no", type: "bool", default: "false"},
-    {name: "absent", type: "string", required: false, default: "NULL"},
-    {name: "expression", type: "uuid", default: "gen_random_uuid()"},
-    {name: "quoted_expr", type: "string", default: "'a' || 'b'"}`);
-  const result = await cue(["export", "-", "-e", 'out["shell/shell.yaml"].data.schema.challenge.fields', "--out", "json"], source);
-  assertEquals(result.success, true, result.stderr);
-  const fields = JSON.parse(result.stdout) as {name: string; default?: unknown; defaulted?: boolean}[];
-  assertEquals(Object.fromEntries(fields.filter(f => Object.hasOwn(f, "default")).map(f => [f.name, f.default])), {
-    status: "pending", label: "can't", empty: "", count: -12, ratio: 150, yes: true, no: false, absent: null,
-    large: "9007199254740993", legacy_large: "9007199254740993", precise: "12345678901234567890.123456789012345678",
-    exponent: "0.00000000000000000123", integer_exponent: "120", zero: "0",
-  });
-  assertEquals(fields.filter(f => f.name !== "id").every(f => f.defaulted === true), true);
-  assertEquals(Object.hasOwn(fields.find(f => f.name === "id")!, "defaulted"), false);
-});
-
-Deno.test("omitting SQL expression values preserves the markup gate for pending discriminants", async () => {
-  const { screenFindings } = await import("../omnishell/check-markup.ts");
-  const source = challengeProgram("ensure").replace('{name: "created_at", type: "timestamp"}',
-    '{name: "kind", type: "string", default: "choose_kind()", cel: "this in [\'note\', \'link\']"}') +
-    '\napp: state: entities: Challenge: cel: enums: kind: ["note", "link"]\n';
-  const result = await cue(["export", "-", "-e", 'out["shell/shell.yaml"].data.schema', "--out", "json"], source);
-  assertEquals(result.success, true, result.stderr);
-  const schema = JSON.parse(result.stdout) as Parameters<typeof screenFindings>[2];
-  const kind = schema.challenge.fields.find(f => f.name === "kind")!;
-  assertEquals(kind.defaulted, true);
-  assertEquals(Object.hasOwn(kind, "default"), false);
-  assertEquals(kind.enum, ["note", "link"]);
-  const html = '<ul data-live="challenge">' +
-    '<template data-item data-when="kind=eq.note"><li>Note</li></template>' +
-    '<template data-item data-when="kind=eq.link"><li>Link</li></template>';
-  const findings = screenFindings("shell/screens/board.html", html + '</ul>', schema, new Set(), []);
-  assertEquals(findings.length, 1);
-  assertStringIncludes(findings[0].message, '"kind" is DB-defaulted');
-  assertEquals(screenFindings("shell/screens/board.html",
-    html + '<template data-item><li>Pending</li></template></ul>', schema, new Set(), []), []);
-});

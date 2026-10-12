@@ -10,6 +10,8 @@ import (
 	omnishellTerminal "github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
+// An installed terminal names its files from omnishell's root (omnishell mode).
+_installedSurface: {runtime: "", interpreterRoot: "interpreter", componentsRoot: "components", markupReader: "read-markup.ts", documentRenderer: "render-documents.ts", documentConfig: "server/deno.json", machineSchema: "machine.cue"}
 _installedTerm: (pronto.#DefaultTerminal & {code: _code}).out & {surface: _installedSurface}
 _installedCluster: (pronto.#DefaultCluster & {code: _code, statics: _installedTerm.surface.statics, local: false}).out
 _installedBuild: (pronto.#DefaultBuild & {code: _code, loop: _external, cluster: _installedCluster, terminal: _installedTerm}).out
@@ -77,7 +79,7 @@ installedHandlers: _installedTerminal.checks.handlers.cmds[0] & "use tools.nu [r
 // An installed app's route rendered on request is served by omnishell's
 // renderer, copied from the runtime image whose root is omnishell's, as the
 // workspace's tree holds it; nothing of it is read from the app's directory.
-_ssrApp: (#readCase & {reads: [_view]}).app & {surface: screens: jogo: {ssr: "ssr", files: {handlers: [], adapters: []}}} & {capabilities: auth: {required: false, service: "/auth"}}
+_ssrApp: (#syncCase & {reads: [_view]}).app & {surface: screens: jogo: {ssr: "ssr", files: {handlers: [], adapters: []}}} & {capabilities: auth: {required: false, service: "/auth"}}
 _ssrTerm: (pronto.#DefaultTerminal & {code: _ssrApp}).out & {surface: _installedSurface}
 _ssrCluster: (pronto.#DefaultCluster & {code: _ssrApp, statics: _ssrTerm.surface.statics, local: false}).out
 _ssrLoop: (pronto.#DefaultLoop & {code: _ssrApp, terminal: _ssrTerm, cluster: _ssrCluster}).out & {surface: sources: pronto: ""}

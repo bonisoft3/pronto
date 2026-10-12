@@ -13,8 +13,8 @@ async function app(handlers: Record<string, string>): Promise<string> {
 
 Deno.test("a handler's reach is a fact row in the effect role, its declared endowments excepted", async () => {
   const dir = await app({
-    charge: `export const issue = async (input, sink) => ({ done: await Crypto.digest("SHA-256", new TextEncoder().encode(input.id)) });`,
-    leak: `export const issue = async (input) => fetch(input.url);`,
+    charge: `export const issue = async (request, sink) => ({ done: await Crypto.digest("SHA-256", new TextEncoder().encode(request.id)) });`,
+    leak: `export const issue = async (request) => fetch(request.url);`,
   });
   try {
     assertEquals(await effectModules(dir, { charge: { endowments: ["Crypto", "TextEncoder"] }, leak: {} }), [

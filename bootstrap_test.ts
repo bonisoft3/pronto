@@ -83,8 +83,6 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
     const tools = JSON.parse(await cue(app, ["export", ".mise.toml", "--out", "json"])).tools;
-    const d2 = tools["github:terrastruct/d2"];
-    assert(typeof d2 === "string" && /^v\d+\.\d+\.\d+$/.test(d2), "D2 must have an exact release pin");
     const pins = JSON.parse(await cue(repo, ["export", "plugins/pronto/.mirror/cue.mod/module.cue", "-e", "deps", "--out", "json"]));
     for (const [, name] of modules) {
       const version = name === "pronto" ? prontoVersion : pins[`github.com/bonisoft3/${name}@v0`].v;
@@ -190,28 +188,11 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       // mise.local.toml makes it: derive reads markup through its command.
       await Deno.writeTextFile(join(app, "mise.local.toml"), `[tools]\n"github:bonisoft3/omnishell" = "path:${join(scratch, "omnishell").replaceAll("\\", "/")}"\n`);
       await $`mise trust -q ${app}`;
-      const platformOs: Record<string, string> = { darwin: "macos", linux: "linux", windows: "windows" };
-      const platformArch: Record<string, string> = { aarch64: "arm64", x86_64: "x64" };
-      const currentPlatform = `${platformOs[Deno.build.os]}-${platformArch[Deno.build.arch]}`;
-      assert(!currentPlatform.includes("undefined"), `mise has no fixture platform for ${Deno.build.os}-${Deno.build.arch}`);
-      const runMise = async (args: string[], commandEnv: Record<string, string> = {}): Promise<void> => {
-        const result = await new Deno.Command("mise", { args, cwd: app, env: commandEnv, stdout: "piped", stderr: "piped" }).output();
-        assert(result.success, `${args.join(" ")}: ${decoder.decode(result.stderr)}`);
-      };
-      // The consumer is locked. Resolve and install only the released tool
-      // the renderer executes; local source stands in for the other tools.
-      await runMise(["lock", "--platform", currentPlatform, "github:terrastruct/d2"], { MISE_LOCKED: "0" });
-      await runMise(["install", `github:terrastruct/d2@${d2}`]);
       const terminal = join(scratch, "omnishell/runtime/cli.ts");
       await Deno.writeTextFile(join(app, "program_terminal.cue"), await deno(terminal, ["mode", "."]));
       let written = "";
       for (let pass = 0; pass < 2; pass++) {
         await cue(app, ["cmd", "generate", "./pronto"]);
-        if (pass === 1) {
-          // A tightened grammar must judge the authored screen, not yesterday's output.
-          await Deno.writeTextFile(join(app, "program_document.cue"), '\ncode: surface: screens: about: markup: "<section class=\\"screen\\" data-screen=\\"about\\"><h1>About</h1></section>"\n', { append: true });
-          await Deno.writeTextFile(join(app, "shell/screens/about.html"), `<div data-live="row" data-filter="id=eq.the" data-machine='{"field":"phase","initial":"idle","context":{"old":true},"states":{"idle":{}}}'></div>`);
-        }
         await deno(join(scratch, "pronto/write.ts"), ["."]);
         const build = JSON.parse(await Deno.readTextFile(join(app, "bayt.json")));
         assert(build.name === "jsfb", "standalone build has an invalid project name");

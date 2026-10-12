@@ -8,7 +8,7 @@ export type VEntity = {
   durability: string;
   fields: { name: string; ref?: string }[];
   uniques?: { name: string }[];
-  validations?: Record<string, { src: string; via: string[]; machine?: string }>;
+  validations?: Record<string, { src: string; via: string[] }>;
 };
 
 const LOCAL = new Set(["tab", "device"]);
@@ -84,16 +84,16 @@ export function validationLint(entities: Record<string, VEntity>, ename: string,
 }
 
 /** program_validations.cue: the resolved edges and the split module of every
- * guard, unified back into its lifecycle machine. */
+ * validation, unified back into the entities the emitter reads. */
 export function renderValidations(
   pkg: string,
-  list: { entity: string; machine: string; name: string; edges: Edge[]; statements: string; completion: string }[],
+  list: { entity: string; name: string; edges: Edge[]; statements: string; completion: string }[],
 ): string {
-  const byMachine = new Map<string, typeof list>();
-  for (const v of list) byMachine.set(v.machine, [...(byMachine.get(v.machine) ?? []), v]);
+  const byEntity = new Map<string, typeof list>();
+  for (const v of list) byEntity.set(v.entity, [...(byEntity.get(v.entity) ?? []), v]);
   const lines: string[] = [];
-  for (const [machine, vs] of byMachine) {
-    lines.push(`\t${quoteKey(machine)}: guards: {`);
+  for (const [entity, vs] of byEntity) {
+    lines.push(`\t${quoteKey(entity)}: validations: {`);
     for (const v of vs) {
       const edges = v.edges.map((e) => `{table: ${JSON.stringify(e.table)}, key: ${JSON.stringify(e.key)}, from: ${JSON.stringify(e.from)}}`);
       lines.push(`\t\t${quoteKey(v.name)}: {`);
@@ -110,7 +110,7 @@ export function renderValidations(
     "// `module` is the Jessie source split at its completion for the plv8 body.",
     `package ${pkg}`,
     "",
-    "code: state: machines: {",
+    "code: state: entities: {",
     ...lines,
     "}",
     "",
@@ -172,7 +172,7 @@ export function validationsSelfTest(): string[] {
     failures.push(`validations identifier length: got ${tooLong}`);
   }
   const rendered = renderValidations("realworld", [{
-    entity: "Favorite", machine: "FavoriteRules", name: "own-article", edges: [{ table: "article", key: "id", from: "article_id" }],
+    entity: "Favorite", name: "own-article", edges: [{ table: "article", key: "id", from: "article_id" }],
     statements: "", completion: "(state, event) => true",
   }]);
   if (!rendered.includes(`"own-article": {`) || !rendered.includes(`completion: "(state, event) => true"`)) {

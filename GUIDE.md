@@ -121,21 +121,14 @@ reachable by backend services alone. What each mode compiles to, and why, is
 ### Validations
 
 A rule a field or row CEL cannot state and a unique cannot encode is a
-lifecycle guard: a Jessie predicate over the row and the rows its declared
-references reach. The machine names which writes it guards.
+validation: a Jessie predicate over the row and the rows its declared
+references reach.
 
 ```cue
-state: machines: FavoriteRules: {
-	entity: "Favorite"
-	guards: "own-article": {
-		src: "shell/validations/own-article.js"
-		via: ["article_id"]
-		note: "a reader cannot favorite what they wrote"
-	}
-	on: {
-		insert: guard: "own-article"
-		update: guard: "own-article"
-	}
+Favorite: validations: "own-article": {
+	src:  "shell/validations/own-article.js"
+	via:  ["article_id"]
+	note: "a reader cannot favorite what they wrote"
 }
 ```
 
@@ -146,26 +139,12 @@ state: machines: FavoriteRules: {
 `via` lists the edges the predicate may follow: a field of this entity carrying
 `ref` walks forward to the one referenced row, and `"<Entity>.<field>"` whose
 field refs this entity walks backward to every row pointing here. `event` is
-`{type: "insert" | "update" | "delete", row}`. `row` is the resulting row
-on insert/update and the previous row on delete; `state.items` is `[]` on
-insert and `[previous]` on update/delete; `state.rows` holds one array per
+`{type: "insert" | "update", row}`, the row as it will stand; `state.items` is
+`[]` on insert and `[previous]` on update; `state.rows` holds one array per
 edge, keyed by the target table, and an edge may be empty. The answer is a
 boolean; a refusal carries the validation's name (`refused.validation` in a
 machine, `validation <table>.<name>` from the server). No clock, no draw, no
 reads beyond `via`.
-
-A lifecycle transition accepts `guard: "name"` or an ordered list of guard
-names, followed by optional `actions`. Every named guard must be declared in
-that machine and used by at least one transition. The entity's `validations`
-map is derived from these declarations and cannot carry independent predicates.
-
-Guarded server interpreters run `AFTER`: RLS has accepted the write, generated
-columns exist, and related rows are read in that transaction. A false answer
-rolls back the row and actions; a non-boolean is a program error. `BEFORE` and
-`assign` are refused for guarded lifecycle machines. Relational actions run on
-the server. A browser entity may have guard-only lifecycle machines; the store
-checks all guarded rows before starting a local mutation batch. Access remains
-RLS plus its browser visibility mirror, not a privileged Jessie guard.
 
 `derive.ts` refuses, when the writer runs, a `via` that is no reference, an
 edge from a server entity to a `tab` or `device` one, two edges to one table,

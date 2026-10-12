@@ -414,7 +414,7 @@ Deno.test("the page's store behind its cluster raises a refused subset as the pr
       const { ProgramError } = await import(${at(path.join(interpreter, 'fragment.js'))})
       const { FIXTURE_CARRIERS } = await import(${at(path.join(interpreter, 'fixture-types.js'))})
       const store = createStore('http://page', {
-        carriers: FIXTURE_CARRIERS, appBase: 'http://page/app/', tables: ['item'], read: { item: 'lazy' },
+        carriers: FIXTURE_CARRIERS, appBase: 'http://page/app/', tables: ['item'], sync: { item: 'on-demand' },
         // A field the program declares and the database lacks.
         schema: { item: { fields: [{ name: 'id', type: 'string' }, { name: 'game', type: 'int32' }, { name: 'ghost', type: 'string' }] } },
       })

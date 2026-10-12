@@ -30,7 +30,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.59.0", ...}
+	tools: {"github:bonisoft3/bayt": "0.58.4", ...}
 	say: say: {
 		...
 
@@ -77,14 +77,18 @@ import (
 				"pronto-bayt": *{glob: ".bayt/**"} | null
 				"pronto-tests": *{glob: "tests/**"} | null
 				"pronto-task": {glob: ".task/**"}
+				"pronto-history": *{glob: ".pronto/proto-baseline.json"} | null
 				"pronto-node": {glob: "**/node_modules/**"}
 			}
 		}
 	}
 
 	_sayt: [if B.meta.local {strings.TrimSuffix(B.meta.pronto, "pronto") + "sayt"}, "(^mise where github:bonisoft3/sayt | str trim)"][0]
+	_prontoNu: [if B.meta.local {"\"\(B.meta.pronto)\""}, "(run-mise where github:bonisoft3/pronto | str trim)"][0]
 	_actions: {for verb in ["generate", "build", "lint", "test", "launch", "integrate"] {
-		(verb): "^nu -I \(B._sayt) -c 'use task-leaf.nu; task-leaf \(verb)'"
+		(verb): [if verb == "lint" {
+			"^nu -I \(B._sayt) -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'"
+		}, "^nu -I \(B._sayt) -c 'use task-leaf.nu; task-leaf \(verb)'"][0]
 	}}
 
 	_ciTask: {
@@ -180,7 +184,6 @@ import (
 	// switched by the same mode; mecha/ and omnishell/ hold the fragments.
 	_omnishell:        omnishell.#RuntimeImage
 	_omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishell.published.runtime)}${MONOREPO_COMPOSE_MODE:+:\(_omnishell)}"
-	_omnishellCopy: [if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0]
 	// The terminal's statics served from omnishell's tree (target /omnishell/),
 	// which an installed app's caddy copies from that image; the cluster serves
 	// the app's own (#DefaultCluster). Named from omnishell's root.
@@ -262,17 +265,25 @@ import (
 				}
 			}
 
+			// Git refs are outside the app tree; sample them before lint's cache check.
+			"lint-inputs": mise.exec & {
+				deps: [":generate"]
+				taskfile: incremental: false
+				cmd: builtin: {
+					shell: "nu"
+					do:    "^nu -I \(B._sayt) -c 'use tools.nu [run-mise]; let pronto = \(B._prontoNu); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=.pronto --allow-run --allow-env ($pronto | path join check-proto.ts) --baseline .'"
+				}
+			}
 			// lint and test carry their check as the RUN, so a bake runs them and
 			// an unchanged one is a cache hit.
 			"lint": sayt.lint & mise.exec & B._program & {
-				deps: [":generate"]
+				deps: [":generate", ":lint-inputs"]
+				cache: full: false
 				dockerfile: from: ref: ":generate"
 				srcs: {
 					globs: [".bayt/checks.yaml", ".pronto/facts.json"]
-					defaultExclude: {"pronto-tests": null, "pronto-bayt": null}
+					defaultExclude: {"pronto-tests": null, "pronto-bayt": null, "pronto-history": null}
 				}
-				// Protobuf compatibility also reads the Git baseline.
-				taskfile: incremental: false
 				cmd: builtin: {do: B._actions.lint, shell: "nu", dockerfile: do: "cue vet ./..."}
 			}
 			"generate": sayt.generate & mise.exec & B._program & {
@@ -329,7 +340,7 @@ import (
 						"ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
 						"ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
 						"ENV DENO_DIR=/deno-cache",
-						B._omnishellCopy,
+						[if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0],
 						"RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts",
 					]
 				}

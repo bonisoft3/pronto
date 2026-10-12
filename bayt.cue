@@ -34,9 +34,16 @@ _pronto: bayt.#project & {
 		// them means.
 		"build": sayt.build & mise.exec & {
 			srcs: globs: ["*.ts", "scales/*.ts", "deno.json", "deno.lock"]
-			// Contract tests import the terminal parser, so its source closure must
-			// resolve at the same sibling path in the image as in the checkout.
-			deps: ["plugins_omnishell:build:srcs"]
+			// One file reaches across the plugin boundary into omnishell's
+			// interpreter — negotiation_test.ts holds the door's language rule
+			// against the terminal's. This context carries pronto alone, so the
+			// module does not resolve here and cannot be typechecked here; it
+			// is, at the repo tier, by `just lint`, where omnishell is a
+			// sibling.
+			//
+			// Named rather than globbed away: a second file reaching out lands
+			// in this list's absence and turns the image red, which is the
+			// decision arriving at whoever wrote the import.
 			cmd: "builtin": {
 				shell: "sh"
 				do:    "deno run --allow-read=. --allow-run check-build.ts"

@@ -1,7 +1,7 @@
 ---
 type: decision
 title: External effects
-description: How a machine reaches outside the cluster — a state invokes an external effect, the interpreter claims a ledger row and enqueues a Graphile job in the transition's commit, mecha's airlock runs the effect's Jessie handler against one declared sink through its Dapr binding, and the outcome returns through the interpreter as the machine's next event.
+description: How a machine reaches outside the cluster — a state invokes an external effect, the guard claims a ledger row and enqueues a Graphile job in the transition's commit, mecha's airlock runs the effect's Jessie handler against one declared sink through its Dapr binding, and the outcome returns through the guard as the machine's next event.
 status: partially-built
 ---
 
@@ -11,7 +11,7 @@ status: partially-built
 coordinator, alone. Until now the door it coordinates through was half built: a `#SagaEffect` inserted a `saga` row and sent a `pg_notify`,
 and nothing read either. This record closes the door. A machine *invokes* an **external
 effect**. Mecha's **airlock** performs it against a declared **sink**. The answer comes back as
-the machine's next event. A **ledger** that pronto owns records the input, every entry
+the machine's next event. A **ledger** that pronto owns records the request, every entry
 and the outcome.
 
 ## Two kinds
@@ -38,13 +38,13 @@ record builds.
 
 ```cue
 state: effects: charge: {
+	entity:  "Payment"
 	key:     ["id"]                             // identity: the ledger key is "charge:" || NEW.id
-	input:   {amount: "NEW.total", customer: "NEW.customer_id"}   // XState's input, frozen in the ledger at the claim
+	request: {amount: "NEW.total", customer: "NEW.customer_id"}   // frozen in the ledger at enqueue
 	sink: {
 		origin:     "https://api.acquirer.example"  // the only origin the handler's fetch may reach
 		idempotent: true                             // honours our key, so re-entry calls again
 	}
-	note: "the acquirer deduplicates on Idempotency-Key"  // the claim about the peer, in prose
 	attempts: 5                                 // tries on a thrown error before the outcome is unknown
 }
 
@@ -84,7 +84,7 @@ The previous run might have died before or after its call reached the sink:
 | `true` | (absent; refused if present) | call again with the same key; the sink makes it safe |
 | `false` | `"reconcile"` (default) | ask the sink by key through the handler's `reconcile`; call only if the sink has no record of it |
 | `false` | `"unknown"` | the outcome is `unknown`; a human decides |
-| `false` | `"repeat"` | call again; the effect's `note` says why a duplicate is acceptable |
+| `false` | `{repeat: "<why a duplicate is acceptable>"}` | call again; the hatch carries its reason |
 
 Pronto cannot verify `idempotent: true`, because it is a claim about a third party. What
 pronto checks is its own side: the handler's `fetch` sends `Idempotency-Key: <ledger
@@ -96,37 +96,34 @@ shows the declaration is honoured end to end.
 The program does not compile when:
 
 - an `invoke.src` names no declared effect;
-- an effect is invoked by no state, by more than one, or by machines of two
-  entities: its `entity` is the invoking machine's, and a ledger key names one
+- an effect is invoked by no state, or by more than one, so a ledger key names one
   instance of one state;
 - an effect's name is not a DNS label, which its Dapr binding's must be;
 - a state that invokes also declares `on` or `after`. Only an outcome leaves it, so a
   late answer about money that moved can never land on a machine that has moved on;
-- a machine names an undeclared entity, invoking or not;
-- the entity's rows do not live in the cluster (`tab`, `device`). The interpreter that claims
+- the effect's `entity` is not the machine's;
+- the entity's rows do not live in the cluster (`tab`, `device`). The guard that claims
   runs in the cluster, once per committed write; a browser-held row would fire the effect
   from every tab;
 - a `key` field is not a field of the entity;
-- an effect carries no `note`, or an empty one: the sink's idempotency and the cost of
-  a repeat are claims about a peer the compiler cannot check;
 - `reentry` is declared on an idempotent sink;
 - `sink.origin` is not an `https` origin (scheme and host, no path);
-- an effect reaches an undeclared bridge, or a declared bridge is reached by no
-  effect;
+- an effect names an undeclared entity, reaches an undeclared bridge, or a declared
+  bridge is reached by no effect;
 - a bridged sink is declared idempotent, or reconciles: past a bridge nothing is the
   platform's to promise, and a bridge answers no query by key, so the effect states
-  `unknown` or `repeat`;
+  `unknown` or `{repeat: why}`;
 - an outcome could never be delivered: the invoking state is `final`, an outcome
   targets a state the machine lacks or the invoking state itself, `onDone` and
-  `onError` share a target while carrying actions, or an outcome's transition, exit or entry actions `reject`;
-- an `input` value reads `NEW.<col>` where `<col>` is not a field of the entity;
+  `onError` share a target while carrying actions, or an outcome's actions `raise`;
+- a `request` value reads `NEW.<col>` where `<col>` is not a field of the entity;
 - a credential's header is one daprd would not forward (lowercase first) or one the host
   or HTTP sets, its secret is also among the handler's `secrets`, or a secret's name is a
   variable the cluster's own services read (`SERVICE_JWT`, `POSTGRES_PASSWORD`, …);
-- any entity takes table `schedule` or `airlock_wake` while an effect is declared, or a
-  schedule is named `airlock`: the wake's own names.
+- an effect is declared with an entity on table `schedule` or `airlock_wake`, or a
+  schedule named `airlock`: the wake's own names.
 
-Past compile time the interpreter refuses, while a row is in an invoking state, a change to
+Past compile time the guard refuses, while a row is in an invoking state, a change to
 its key fields or primary key and its deletion: the row is the ledger's instance until
 its outcome lands.
 
@@ -136,13 +133,13 @@ its outcome lands.
 [`airlock.sql`](../../../../libraries/mecha/services/airlock/airlock.sql), and the
 cluster places it as it places the ticker's `schedule`. A row holds the key
 (`<effect>:<key fields>`, also the sink's idempotency key), the instance's primary key,
-the input frozen at the claim, the count of runs begun, and the outcome, set once.
+the request frozen at the claim, the count of runs begun, and the outcome, set once.
 
 Graphile Worker cannot hold this record. A finished job's row is deleted, so the same
 `job_key` enqueued again runs again (G1 below). DBOS kept finished workflows; a queue
 does not. A ledger pronto owns has three uses an engine's private record would not:
 
-- **It is the only claim.** The interpreter inserts the row with `ON CONFLICT DO NOTHING` and
+- **It is the only claim.** The guard inserts the row with `ON CONFLICT DO NOTHING` and
   enqueues only `IF FOUND`. A key already in the ledger means the effect was performed,
   so entering the invoking state again raises instead of enqueuing. Re-entry with a
   different key needs a key field the transition changes.
@@ -166,14 +163,14 @@ outside, and like an airlock it never has both doors open: the claim commits bef
 call.
 
 ```
- CRUD write ─► interpreter (BEFORE UPDATE)                       airlock: LISTEN jobs:insert
+ CRUD write ─► guard (BEFORE UPDATE)                       airlock: LISTEN jobs:insert
                │ pending → charging                        │ unlock pools whose key is free
                │ INSERT ledger ON CONFLICT DO NOTHING      │ run(): task external_effect
                │ IF FOUND: graphile_worker.add_job(...)    │   outcome set? deliver it again
                └─ one commit ──────────────────────────────┤   entered := entered + 1 (commits)
                                                            │   entered = 1 → handler.issue
                                                            │   entered > 1 → the re-entry table
- interpreter: charging → settled, only if the ledger says so ◄───┤ ledger.outcome commits, then
+ guard: charging → settled, only if the ledger says so ◄───┤ ledger.outcome commits, then
                                                            └   UPDATE status = outcome.target
 ```
 
@@ -182,7 +179,7 @@ call.
   compute's own cage shares): SES, no clock, no entropy, nothing of the host, and the
   realm's deterministic `Crypto`. Its one capability is an argument, `sink`, whose `fetch` the host
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
-  key; the others are the frozen `input` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
+  key; the others are the frozen `request` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
   "no answer", not "failed". The airlock's
   [README](../../../../libraries/mecha/services/airlock/README.md) is the contract.
 - **A thrown error** is retried by Graphile with backoff, and each retry is a re-entry.
@@ -210,8 +207,8 @@ call.
   process hearing of it, when a call in flight can meet a re-entry; the process exits as
   soon as it hears, and a `reconcile` that runs before the earlier call lands is the cost.
 - **The process is Graphile's long-lived worker.** `run()` listens on `jobs:insert`,
-  which `add_job` notifies at the interpreter's commit, so an effect starts as its transition
-  commits (W1) ([the wake](#the-wake-the-tickers-re-armed-by-the-interpreter)).
+  which `add_job` notifies at the guard's commit, so an effect starts as its transition
+  commits (W1) ([the wake](#the-wake-the-tickers-re-armed-by-the-guard)).
 
 A saga is a cortex coordination with several invoking states, whose failure arrows lead
 to states that invoke compensations. Every compensation is itself an external effect, with
@@ -382,12 +379,12 @@ of its own for the run, a cluster with two effects, one through a bridge, has ba
 it, and boots its launch closure: bayt's Dockerfiles and fragments, and the
 `compose.includes` file carrying the networks, are what it runs.
 
-### The wake: the ticker's, re-armed by the interpreter
+### The wake: the ticker's, re-armed by the guard
 
 Inside a running cluster everything is reactive, and the airlock is no exception: its
-worker hears an enqueue at the interpreter's commit (W2), and a retry follows Graphile's backoff,
+worker hears an enqueue at the guard's commit (W2), and a retry follows Graphile's backoff,
 whose future-dated jobs Graphile's own worker fetches on its poll. Where a cluster scales to
-zero, the ticker is the platform's one wake. The interpreter that claims and enqueues also
+zero, the ticker is the platform's one wake. The guard that claims and enqueues also
 re-arms a one-shot schedule row named `airlock` in the same commit (`due_at` in place of
 `cron`, owed again when its watermark is cleared); the next sweep emits one tick into
 `airlock_wake`, however many claims since the last, and GETs each of `WAKE_URLS`, the
@@ -405,7 +402,7 @@ The row is seeded by the airlock's initdb step, which carries the schedule table
 its own text so that a caller's step at 013-019 writing an invoking row finds it. The
 re-arm is an `UPDATE` of the row only where its watermark is set, through `FOR UPDATE SKIP
 LOCKED`: claims never queue on the one row, a claim that finds it armed writes nothing, and
-one that finds the ticker ticking it at that instant is woken by that tick. The interpreter
+one that finds the ticker ticking it at that instant is woken by that tick. The guard
 pins `TimeZone` and `DateStyle`, so a key built from a date's text is the same in every
 session. `airlock_wake` is closed to the client roles as `schedule` is: a tick's instant
 says when some tenant's row entered an invoking state. The airlock prunes ticks older
@@ -417,13 +414,13 @@ than a day.
   wake was thought to be its own business; the ticker's one wake is what scales to zero.
 - **Waiting for whatever schedule comes next**: no row of the airlock's, the cluster woken
   only by an app's own cadence, or never where it declares none. One row, re-armed by the
-  interpreter, makes the wake owed to the enqueue.
-- **The interpreter poking over HTTP** (`pg_net`): I/O inside the transaction, a poke even on
+  guard, makes the wake owed to the enqueue.
+- **The guard poking over HTTP** (`pg_net`): I/O inside the transaction, a poke even on
   rollback, and egress from the database.
 
 ### Graphile's schema at initdb
 
-The interpreter calls `graphile_worker.add_job` inside the transition, and a held seed row in an
+The guard calls `graphile_worker.add_job` inside the transition, and a held seed row in an
 invoking state makes that transition at initdb, so the schema must exist before any process
 could run Graphile's migrator. The one-shot migrate step cannot carry it: it exists only
 where pgroll migrations are declared, its image has no Deno or Graphile, it runs after the
@@ -441,7 +438,7 @@ Graphile upgrade.
 - **The airlock migrating before the readers start**: the seed runs before any reader.
 
 `011_graphile_worker.sql` and `012_airlock.sql` take the first digits after the steps a
-caller opens with: pronto's 000-010, whose last is the machines, and whose plpgsql interpreters
+caller opens with: pronto's 000-010, whose last is the machines, and whose plpgsql guards
 resolve add_job and the ledger only when they run. Every caller step that can write a row,
 a raw step or a seed, is numbered above them, so a row written into an invoking state finds
 both. A raw step on 011 or 012 is refused where an effect is declared, as two steps sharing
@@ -449,7 +446,7 @@ digits always are; the apps that hold those digits today declare no effect, and 
 does renumbers.
 
 - **After every raw step, at 018 and 019**: a raw step at 011-017 writing an invoking row
-  would call a interpreter whose ledger does not exist yet, and initdb would die on it. Nothing
+  would call a guard whose ledger does not exist yet, and initdb would die on it. Nothing
   could refuse that without reading the step.
 - **Refusing raw steps between the machines and 018**: the same order, bought by
   renumbering every app's 011-015 rather than two digits.
@@ -472,7 +469,7 @@ take, would hand the ledger back. A grant over `public` names only `public`, and
 no USAGE on `airlock` reaches nothing in it whatever a table grants. `airlock.sql` also
 revokes what default privileges gave the schema or its tables at creation (G7). mecha's
 `rls_exempt` lives outside `public` for the same reason. Handlers hold no database handle,
-and the interpreter is `SECURITY DEFINER`, so no client writer needs a grant. Graphile's migrate
+and the guard is `SECURITY DEFINER`, so no client writer needs a grant. Graphile's migrate
 check needs DDL on its schema to survive an upgrade, which only the owner has.
 
 - **The ledger in `public`, every grantee revoked**: undone by the next schema-wide grant.
@@ -516,11 +513,11 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 | D1 | DBOS: one workflow id started twice | 1 | the id deduplicates |
 | D2 | DBOS: crash inside a step, after the call | **2** | steps are at-least-once; no engine can commit atomically with a foreign system |
 | D3 | DBOS: crash after a datasource transaction | 1 | exactly once inside DBOS's own postgres |
-| D4 | DBOS: `dbos.enqueue_workflow` from a interpreter trigger | 1 | rollback enqueues nothing; commit enqueues once |
+| D4 | DBOS: `dbos.enqueue_workflow` from a guard trigger | 1 | rollback enqueues nothing; commit enqueues once |
 | D5 | DBOS: a finished workflow id enqueued again | — | still one row, `SUCCESS`, not rerun |
 | G1 | Graphile: a `job_key` enqueued again after completion | **2** | a key deduplicates only while its job exists |
-| G2 | the interpreter claims the ledger and enqueues in the transition's commit | 0 | rollback leaves no row and no job |
-| G3 | the task settles through the interpreter | 1 | the outcome commits first, then the move through the interpreter; a crash between them re-delivers the move alone, and a row already moved is left |
+| G2 | the guard claims the ledger and enqueues in the transition's commit | 0 | rollback leaves no row and no job |
+| G3 | the task settles through the guard | 1 | the outcome commits first, then the move through the guard; a crash between them re-delivers the move alone, and a row already moved is left |
 | G4 | a client writes the outcome state itself | 0 | refused: the ledger holds no such outcome |
 | G5 | crash after the call, its pool recorded against a key no session holds | **1** | the sweep unlocks the job, the re-entry reconciles |
 | G6 | the job delivered again after completion | 1 | the task finds the outcome and only re-delivers it |
@@ -539,7 +536,7 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 | B8 | the plane booted with the daprd's `--config` removed | — | B2 fails in it, and nothing else does: the allowlist is what refuses |
 | B9 | over gRPC, `InvokeService` to `https://example.com`, `GetMetadata`, `Shutdown`; with an HTTP-only list, then with the gRPC rule | — | with HTTP only, the page's HTML and the metadata came back; with the rule, UNIMPLEMENTED for each, `InvokeBinding` still served |
 | B10 | from a container on the default network, the daprd's port and the bridge's | 0 | neither name resolves there |
-| B11 | an effect declaring `credential: {scheme: Bearer, secret: VAULT_KEY}`, the sink recording its headers | 1 | `Authorization: Bearer <value>` arrives; the ledger's input and outcome hold no trace of the value; an effect without one sends no such header |
+| B11 | an effect declaring `credential: {scheme: Bearer, secret: VAULT_KEY}`, the sink recording its headers | 1 | `Authorization: Bearer <value>` arrives; the ledger's request and outcome hold no trace of the value; an effect without one sends no such header |
 | R1 | the mail bridge against Mailpit | 1 | 200 with the key's `Message-ID` and the invite; 422 for a 5xx refusal and for a refused STARTTLS, nothing sent in the clear; 503 with no server; 403 for an inward server |
 | S1 | Graphile's `runMigrations` after `graphile.sql` | — | `pg_dump -s -n graphile_worker` unchanged: nothing to migrate |
 | S2 | `graphile.sql` against Graphile's own install | — | the same schema and the same `migrations` rows |
@@ -616,7 +613,7 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 
 - **Invoking the other tiers.** Cortex's coordination reaches frontend handlers and
   their effects, DuckStream pipelines and their compute nodes as well. `invoke` with
-  `onDone`/`onError` is the shape meant to carry all of them; the mecha interpreter is only its
+  `onDone`/`onError` is the shape meant to carry all of them; the mecha guard is only its
   first host. A pure actor's outcome can be recomputed, so it needs no ledger claim; only
   an external effect does. Where a coordination's own state lives when it spans tiers is
   not decided.
@@ -634,8 +631,8 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 - **The settle at cloud tier.** The airlock's settle is a direct write, which the bundled
   change-capture unit sees only at its next wake; a pipeline reading the settled row waits
   for the ticker's.
-- **Guards on outcome arrows.** XState allows `onError: [{interpreter, target}, …]`. The
-  first slice takes one target per arrow; a interpreter over `outcome` is the obvious extension.
+- **Guards on outcome arrows.** XState allows `onError: [{guard, target}, …]`. The
+  first slice takes one target per arrow; a guard over `outcome` is the obvious extension.
 - **`unknown` to a reader.** Still owed by the frontend, as rows, time and effects
   question 6 says.
 - **The wake is all or nothing.** An effect brings the ticker and the clock with it,
@@ -649,10 +646,10 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 One PR. These are its commits, in order, each green:
 
 1. **The compiler** (built). `#ExternalEffect`, `invoke` and the refusals in
-   `schema.cue`. The interpreter's claim, enqueue and outcome check in `emit.cue`.
+   `schema.cue`. The guard's claim, enqueue and outcome check in `emit.cue`.
    `#SagaEffect`, `#Saga` and `015_sagas.sql`
    removed, and level 4 renamed to `external`. `mecha-machine.test.ts` covers the emitted
-   SQL and every refusal. `external-effects.integration.test.ts` runs the interpreter in
+   SQL and every refusal. `external-effects.integration.test.ts` runs the guard in
    postgres: rollback claims nothing, a forged outcome is refused, a performed key is never
    claimed twice, and the ledger is closed to the client roles.
 2. **The airlock** (built). `libraries/mecha/services/airlock`, with the ledger moved into

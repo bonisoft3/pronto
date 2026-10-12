@@ -65,7 +65,7 @@ export function programFacts(
   const transition: Record<string, unknown>[] = [];
   for (const c of charts) {
     const m = JSON.parse(c.machine) as Chart;
-    chart.push({ screen: c.screen, "table": c.table, field: m.field, initial: m.initial, machine: c.machine });
+    chart.push({ screen: c.screen, "table": c.table, field: m.field, initial: m.initial });
     for (const [state, body] of Object.entries(m.states)) {
       chart_state.push({ screen: c.screen, "table": c.table, field: m.field, state });
       const own = body.on ?? {};
@@ -241,16 +241,14 @@ export function bijectionFacts(
   comparedKinds: readonly string[],
   irByKind: Map<string, string[]>,
   irRouteByScreen: Map<string, string | null>,
-  decls: { kind: string; id: string; where: string; owed?: boolean }[],
+  decls: { kind: string; id: string; where: string }[],
   code: Record<string, unknown>,
 ): Facts {
   const claim: Record<string, unknown>[] = [];
   for (const [kind, ids] of irByKind) {
-    for (const id of ids) claim.push({ rung: "ir", kind, id, where: null, owed: null });
+    for (const id of ids) claim.push({ rung: "ir", kind, id, where: null });
   }
-  // `owed`: a program claim the ir must answer; one reaching no further than a
-  // tab is machine-checked only (objects.ts owedAt).
-  for (const d of decls) claim.push({ rung: "program", kind: d.kind, id: d.id, where: d.where, owed: d.owed ?? true });
+  for (const d of decls) claim.push({ rung: "program", kind: d.kind, id: d.id, where: d.where });
   const screens = (code as { surface?: { screens?: Record<string, { ir: string; route?: string }> } })
     .surface?.screens ?? {};
   return {

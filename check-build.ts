@@ -1,5 +1,6 @@
-// The endowment contract also imports mecha, which is checked at the repo tier.
-const excluded = new Set(["endowments_test.ts"]);
+// Checked where their imports resolve: these reach omnishell's or mecha's tree,
+// which the build stage's context, plugins/pronto alone, does not hold.
+const excluded = new Set(["negotiation_test.ts", "endowments_test.ts"]);
 const files = [...Deno.readDirSync(".")]
   .filter((entry) => entry.isFile && entry.name.endsWith(".ts") && !excluded.has(entry.name))
   .map((entry) => entry.name)
