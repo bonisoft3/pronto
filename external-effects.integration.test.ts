@@ -1,4 +1,4 @@
-// The guard emitted for an invoking state, run in postgres: the claim and the
+// The interpreter emitted for an invoking state, run in postgres: the claim and the
 // enqueue share the transition's commit, only the ledger's outcome leaves the
 // state, and a performed key is never claimed twice. Graphile's add_job is a
 // recording stand-in with its parameter names, so a renamed argument fails here;
@@ -19,7 +19,7 @@ async function run(cmd: string, args: string[], stdin?: string) {
   return { ok: res.success, out: new TextDecoder().decode(res.stdout).trim(), err: new TextDecoder().decode(res.stderr) };
 }
 
-Deno.test({ name: "an invoking state's guard claims, enqueues and admits only the recorded outcome", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
+Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits only the recorded outcome", sanitizeOps: false, sanitizeResources: false, fn: async (t) => {
   const files = await emitFiles(paymentProgram());
   const container = `pronto-effects-${crypto.randomUUID().slice(0, 8)}`;
   const started = await run("docker", ["run", "-d", "--rm", "--name", container, "-e", "POSTGRES_PASSWORD=pw", POSTGRES]);
@@ -103,7 +103,7 @@ Deno.test({ name: "an invoking state's guard claims, enqueues and admits only th
       assertEquals(r.out, "settled");
     });
 
-    await t.step("a retained request ledger upgrades with its guards atomically and preserves pending claims", async () => {
+    await t.step("a retained request ledger upgrades with its interpreters atomically and preserves pending claims", async () => {
       const exported = await cue(["export", "-", "-e", `_cluster.surface.targets["airlock-upgrade"]`, "--out", "json"], paymentProgram());
       if (!exported.success) throw new Error(exported.stderr);
       const target = JSON.parse(exported.stdout);

@@ -1777,7 +1777,7 @@ import (
 	// By key: an effect refused below is bottom as a value, not undeclared.
 	_effectNames: [for n, _ in _effects {n}]
 	// An invoking state is left only by its outcome, so an outcome that cannot
-	// be delivered leaves the row there for good: the guard would refuse the
+	// be delivered leaves the row there for good: the interpreter would refuse the
 	// move, and the airlock would retry the sink until its attempts ran out.
 	_invokeViolations: list.Concat([
 		[for i in _invokes if !list.Contains(_effectNames, i.src) {
@@ -1811,7 +1811,7 @@ import (
 			"machine \(i.machine) state \(i.state) invokes \(i.src) with an outcome targeting itself: the row would never leave"
 		}],
 		[for i in _invokes if i.arrows[0].target == i.arrows[1].target if len(i.arrows[0].actions) + len(i.arrows[1].actions) > 0 {
-			"machine \(i.machine) state \(i.state): onDone and onError share target \(i.arrows[0].target) and carry actions, which the guard would run for the wrong outcome"
+			"machine \(i.machine) state \(i.state): onDone and onError share target \(i.arrows[0].target) and carry actions, which the interpreter would run for the wrong outcome"
 		}],
 		[for i in _invokes for ar in i.arrows for a in ar.actions if a.reject != _|_ {
 			"machine \(i.machine) state \(i.state): an outcome's actions reject, which would refuse the recorded outcome's delivery"
