@@ -14,6 +14,7 @@ app: capabilities: resources: {
   assertStringIncludes(caddy, "frame-src 'self' https://www.openstreetmap.org;");
   assertStringIncludes(caddy, "img-src 'self' data: blob: https:;");
   assertStringIncludes(caddy, "connect-src 'self';");
+  assertStringIncludes(caddy, "font-src 'self' data:;");
   assertStringIncludes(caddy, "script-src-attr 'none';");
 });
 
