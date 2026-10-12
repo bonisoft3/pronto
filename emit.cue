@@ -398,23 +398,18 @@ _sqlType: {
 }
 
 #mechaEffectSql: EF={
-	effect: #MechaEffect
+	effect: #RelationalEffect
 	op:     *"INSERT" | "UPDATE" | "DELETE"
 
-	_isRel:    (EF.effect & #RelationalEffect) != _|_
-	_isCall:   (EF.effect & #FunctionEffect) != _|_
-	_isNotify: (EF.effect & #NotifyEffect) != _|_
-	_isStream: (EF.effect & #StreamEffect) != _|_
-
 	_rel: EF.effect
-	_cols: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values {"\"\(c)\""}]}, []][0]
-	_rawKeys: [if _isRel {[if _rel["key"] != _|_ {_rel.key}, ["id"]][0]}, []][0]
-	_keys: [if _isRel {[for k in _rawKeys {"\"\(k)\""}]}, []][0]
-	_vals: [if _isRel if _rel["values"] != _|_ {[for _, val in _rel.values {(#sqlLit & {v: val}).out}]}, []][0]
-	_updates: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {"\"\(c)\" = EXCLUDED.\"\(c)\""}]}, []][0]
-	_setClauses: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values if (_rel["where"] != _|_ || !list.Contains(_rawKeys, c)) {"\"\(c)\" = \((#sqlLit & {v: _rel.values[c]}).out)"}]}, []][0]
-	_customUpdates: [if _isRel if _rel["updateValues"] != _|_ {[for c, val in _rel.updateValues {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
-	_accUpdates: [if _isRel if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {
+	_cols: [if _rel["values"] != _|_ {[for c, _ in _rel.values {"\"\(c)\""}]}, []][0]
+	_rawKeys: [{[if _rel["key"] != _|_ {_rel.key}, ["id"]][0]}, []][0]
+	_keys: [{[for k in _rawKeys {"\"\(k)\""}]}, []][0]
+	_vals: [if _rel["values"] != _|_ {[for _, val in _rel.values {(#sqlLit & {v: val}).out}]}, []][0]
+	_updates: [if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {"\"\(c)\" = EXCLUDED.\"\(c)\""}]}, []][0]
+	_setClauses: [if _rel["values"] != _|_ {[for c, _ in _rel.values if (_rel["where"] != _|_ || !list.Contains(_rawKeys, c)) {"\"\(c)\" = \((#sqlLit & {v: _rel.values[c]}).out)"}]}, []][0]
+	_customUpdates: [if _rel["updateValues"] != _|_ {[for c, val in _rel.updateValues {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
+	_accUpdates: [if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {
 		if _rel["accumulate"] != _|_ {
 			if list.Contains(_rel.accumulate, c) {
 				"\"\(c)\" = \"\(_rel.table)\".\"\(c)\" + EXCLUDED.\"\(c)\""
@@ -428,30 +423,30 @@ _sqlType: {
 		}
 	}]}, []][0]
 
-	_wherePreds: [if _isRel if _rel["where"] != _|_ {[for c, val in _rel.where {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
-	_rawWherePred: [if _isRel if _rel["rawWhere"] != _|_ {[_rel.rawWhere]}, []][0]
-	_keyPreds: [if _isRel if _rel["values"] != _|_ {[for k in _rawKeys if _rel.values[k] != _|_ {"\"\(k)\" = \((#sqlLit & {v: _rel.values[k]}).out)"}]}, []][0]
+	_wherePreds: [if _rel["where"] != _|_ {[for c, val in _rel.where {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
+	_rawWherePred: [if _rel["rawWhere"] != _|_ {[_rel.rawWhere]}, []][0]
+	_keyPreds: [if _rel["values"] != _|_ {[for k in _rawKeys if _rel.values[k] != _|_ {"\"\(k)\" = \((#sqlLit & {v: _rel.values[k]}).out)"}]}, []][0]
 	_explicitPreds: list.Concat([_wherePreds, _rawWherePred])
-	_preds: [if _isRel {[if len(_explicitPreds) > 0 {_explicitPreds}, _keyPreds][0]}, []][0]
+	_preds: [{[if len(_explicitPreds) > 0 {_explicitPreds}, _keyPreds][0]}, []][0]
 
 	_relBranches: [
-		if _isRel if _rel["op"] != _|_ if _rel.op == "create" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
-		if _isRel if _rel["op"] != _|_ if _rel.op == "ensure" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
-		if _isRel if _rel["op"] != _|_ if _rel.op == "upsert" {
+		if _rel["op"] != _|_ if _rel.op == "create" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
+		if _rel["op"] != _|_ if _rel.op == "ensure" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
+		if _rel["op"] != _|_ if _rel.op == "upsert" {
 			[if len(_customUpdates) > 0 {
 				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
 			}, {
 				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_updates, ", "));"
 			}][0]
 		},
-		if _isRel if _rel["op"] != _|_ if _rel.op == "accumulate" {
+		if _rel["op"] != _|_ if _rel.op == "accumulate" {
 			[if len(_customUpdates) > 0 {
 				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
 			}, {
 				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_accUpdates, ", "));"
 			}][0]
 		},
-		if _isRel if _rel["op"] != _|_ if _rel.op == "update" {
+		if _rel["op"] != _|_ if _rel.op == "update" {
 			if len(_preds) > 0 {
 				"        UPDATE \"\(_rel.table)\" SET \(strings.Join(_setClauses, ", ")) WHERE \(strings.Join(_preds, " AND "));"
 			}
@@ -459,32 +454,44 @@ _sqlType: {
 				"        UPDATE \"\(_rel.table)\" SET \(strings.Join(_setClauses, ", "));"
 			}
 		},
-		if _isRel if _rel["op"] != _|_ if _rel.op == "delete" {"        DELETE FROM \"\(_rel.table)\" WHERE \(strings.Join(_preds, " AND "));"},
+		if _rel["op"] != _|_ if _rel.op == "delete" {"        DELETE FROM \"\(_rel.table)\" WHERE \(strings.Join(_preds, " AND "));"},
 	]
 	// Every #RelationalOp has a branch; an op with none is a spelling the
 	// schema admits and this file does not.
-	_relSql: [if _isRel if _rel["op"] != _|_ {[if len(_relBranches) > 0 {_relBranches[0]}, error("effect on \(_rel.table): no SQL for op \(_rel.op)")][0]}, ""][0]
+	_relSql: [if _rel["op"] != _|_ {[if len(_relBranches) > 0 {_relBranches[0]}, error("effect on \(_rel.table): no SQL for op \(_rel.op)")][0]}, ""][0]
 
-	_callArgs: [if _isCall if EF.effect["args"] != _|_ {[for _, a in EF.effect.args {(#sqlLit & {v: a}).out}]}, []][0]
-	_callSql: [if _isCall if EF.effect["call"] != _|_ {"        PERFORM \(EF.effect.call)(\(strings.Join(_callArgs, ", ")));"}, ""][0]
+	out: _relSql
+}
 
-	_notifySql: [if _isNotify if EF.effect["notify"] != _|_ {"        PERFORM pg_notify('\(EF.effect.notify)', \((#sqlLit & {v: EF.effect.payload}).out));"}, ""][0]
+#mechaHatchSql: H={
+	hatch: #SqlHatchCall
+	_args: [if H.hatch.args != _|_ {[for _, a in H.hatch.args {(#sqlLit & {v: a}).out}]}, []][0]
+	out: "        PERFORM \(H.hatch.call)(\(strings.Join(_args, ", ")));"
+}
 
-	_defaultKey: [if EF.op == "DELETE" {"OLD.id::text"}, "NEW.id::text"][0]
+#mechaRaiseSql: R={
+	value:     #MechaRaise
+	op:        *"INSERT" | "UPDATE" | "DELETE"
+	_isNotify: (R.value & #NotifyRaise) != _|_
+	_isStream: (R.value & #StreamRaise) != _|_
 
-	_streamSignal: [if _isStream if EF.effect["signal"] != _|_ {EF.effect.signal}, "refresh"][0]
+	_notifySql: [if _isNotify if R.value["notify"] != _|_ {"        PERFORM pg_notify(\((#sqlLit & {v: R.value.notify}).out), \((#sqlLit & {v: R.value.payload}).out));"}, ""][0]
+
+	_defaultKey: [if R.op == "DELETE" {"OLD.id::text"}, "NEW.id::text"][0]
+
+	_streamSignal: [if _isStream if R.value["signal"] != _|_ {R.value.signal}, "refresh"][0]
 	_rawStreamKey: [
-		if _isStream if EF.effect["key"] != _|_ {
+		if _isStream if R.value["key"] != _|_ {
 			[
-				if (EF.effect.key & {raw: string}) != _|_ {
-					(EF.effect.key & {raw: string}).raw + "::text"
+				if (R.value.key & {raw: string}) != _|_ {
+					(R.value.key & {raw: string}).raw + "::text"
 				},
-				if (EF.effect.key & string) != _|_ {
+				if (R.value.key & string) != _|_ {
 					[
-						if strings.HasPrefix((EF.effect.key & string), "NEW.") || strings.HasPrefix((EF.effect.key & string), "OLD.") {
-							(EF.effect.key & string) + "::text"
+						if strings.HasPrefix((R.value.key & string), "NEW.") || strings.HasPrefix((R.value.key & string), "OLD.") {
+							(R.value.key & string) + "::text"
 						},
-						"'" + strings.Replace((EF.effect.key & string), "'", "''", -1) + "'",
+						"'" + strings.Replace((R.value.key & string), "'", "''", -1) + "'",
 					][0]
 				},
 				_defaultKey,
@@ -494,11 +501,11 @@ _sqlType: {
 	][0]
 	_streamSql: [if _isStream {
 		"""
-		        PERFORM pg_notify('duckstream_\(EF.effect.stream)', jsonb_build_object('signal', '\(_streamSignal)', 'table', TG_TABLE_NAME, 'id', \(_rawStreamKey))::text);
+		        PERFORM pg_notify('duckstream_\(R.value.stream)', jsonb_build_object('signal', '\(_streamSignal)', 'table', TG_TABLE_NAME, 'id', \(_rawStreamKey))::text);
 		"""
 	}, ""][0]
 
-	out: [if _isRel {_relSql}, if _isCall {_callSql}, if _isNotify {_notifySql}, if _isStream {_streamSql}, ""][0]
+	out: [if _isNotify {_notifySql}, _streamSql][0]
 }
 
 #mechaActionSql: AC={
@@ -521,11 +528,17 @@ _sqlType: {
 		},
 	]
 
-	_raise: [if AC.action["raise"] != _|_ {[
-		"        RAISE EXCEPTION '\(AC.action.raise)' USING ERRCODE = 'check_violation';",
-	]}, []][0]
+	_hatches: [if AC.action.hatch != _|_ for h in [if (AC.action.hatch & [...]) != _|_ {AC.action.hatch}, [AC.action.hatch]][0] {
+		(#mechaHatchSql & {hatch: h}).out
+	}]
+	_raises: [if AC.action.raise != _|_ for r in [if (AC.action.raise & [...]) != _|_ {AC.action.raise}, [AC.action.raise]][0] {
+		(#mechaRaiseSql & {value: r, op: AC.op}).out
+	}]
+	_reject: [if AC.action.reject != _|_ {
+		"        RAISE EXCEPTION USING MESSAGE = \((#sqlLit & {v: AC.action.reject}).out), ERRCODE = 'check_violation';"
+	}]
 
-	out: strings.Join(list.Concat([_assigns, _effects, _raise]), "\n")
+	out: strings.Join(list.Concat([_assigns, _effects, _hatches, _raises, _reject]), "\n")
 }
 
 #mechaStateSql: ST={
@@ -533,6 +546,7 @@ _sqlType: {
 	field: string
 	name:  string
 	state: #MechaState
+	states: [string]: #MechaState
 	// The effect each invoking state of the machine claims on entry.
 	invokes: [string]: #ExternalEffect
 	pk: [...string]
@@ -598,10 +612,16 @@ _sqlType: {
 			"""
 		}, ""][0]
 		_actionLines: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
+		_exitActions: [if ST.state.exit != _|_ for a in [if (ST.state.exit & [...]) != _|_ {ST.state.exit}, [ST.state.exit]][0] {
+			(#mechaActionSql & {action: a, op: "UPDATE"}).out
+		}]
+		_entryActions: [if ST.states[t.target].entry != _|_ for a in [if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0] {
+			(#mechaActionSql & {action: a, op: "UPDATE"}).out
+		}]
 		_enterLines: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
 		"""
 		      IF NEW."\(ST.field)" = '\(t.target)' THEN
-		\(_guardLine)\(strings.Join(list.Concat([_actionLines, _enterLines]), "\n"))
+		\(_guardLine)\(strings.Join(list.Concat([_exitActions, _actionLines, _entryActions, _enterLines]), "\n"))
 		        RETURN NEW;
 		      END IF;
 		"""
@@ -657,6 +677,10 @@ _sqlType: {
 		_declare: [if _hasInvoke {"DECLARE\n  outcome jsonb;\n"}, ""][0]
 		_pk: [for e in S.entities if e.table == _table for f in e.fields if f.pk != _|_ if f.pk {f.name}]
 		_initialEnter: [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk}).out + "\n"}, ""][0]
+		_initialActions: [if S.machine.states[S.machine.initial].entry != _|_
+			for a in [if (S.machine.states[S.machine.initial].entry & [...]) != _|_ {S.machine.states[S.machine.initial].entry}, [S.machine.states[S.machine.initial].entry]][0] {
+			(#mechaActionSql & {action: a, op: "INSERT"}).out + "\n"
+		}]
 		// A row in an invoking state is the ledger's instance until its outcome
 		// lands: its key fields and primary key stay as the ledger holds them,
 		// and it is not deleted, or the outcome could never be delivered.
@@ -692,6 +716,7 @@ _sqlType: {
 				field:   _field
 				name:    sName
 				state:   sBody
+				states: S.machine.states
 				invokes: _invokes
 				pk:      _pk
 			}).out
@@ -711,7 +736,7 @@ _sqlType: {
 			    IF NEW."\(_field)" <> '\(S.machine.initial)' THEN
 			      RAISE EXCEPTION 'new % must start in initial state % (got %)', '\(_table)', '\(S.machine.initial)', NEW."\(_field)" USING ERRCODE = 'check_violation';
 			    END IF;
-			\(_initialEnter)    RETURN NEW;
+			\(strings.Join(_initialActions, ""))\(_initialEnter)    RETURN NEW;
 			  END IF;
 
 			  IF TG_OP = 'UPDATE' THEN

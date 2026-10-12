@@ -712,9 +712,12 @@ import (
 	raw?: true
 	if raw != _|_ {
 		src: *"pipelines/\(name).yaml" | string
+		note!:      string & !=""
+		delivery:   "unspecified"
 		transform?: _|_
 		key?:       _|_
 	}
+
 	from?:   string // source entity name (CDC events); cdc pipelines set it
 	to:      string // sink entity name (upsert, or scheduled mutation target)
 	group?:  string // bus consumer group; cdc pipelines set it
@@ -788,6 +791,7 @@ import (
 		shim?: _|_
 		key:   string // a fold groups; the singleton case has no key to seed empty() with
 	}
+
 	// Scheduled pipelines: a generate input ticks every `interval` and the
 	// action mutates `to` rows matched by `filter` (PostgREST fragment;
 	// tokens {cutoff} and {nowts} resolve to bloblang metadata at runtime).
@@ -913,28 +917,31 @@ import (
 	updateValues?: {[string]: _}
 }
 
-#FunctionEffect: {
+#SqlHatchCall: {
+	name: string
 	call:  string
-	args?: [..._] | {[string]: _}
+	args?: [...] | {[string]: _}
 }
 
-#NotifyEffect: {
+#NotifyRaise: {
 	notify:  string
 	payload: string
 }
 
-#StreamEffect: {
+#StreamRaise: {
 	stream:  string
 	signal?: "refresh" | "checkpoint" | "flush"
 	key?:    string | {raw: string}
 }
 
-#MechaEffect: #RelationalEffect | #FunctionEffect | #NotifyEffect | #StreamEffect
+#MechaRaise: #NotifyRaise | #StreamRaise
 
 #MechaAction: {
 	assign?: {[string]: _}
-	effect?: #MechaEffect | [...#MechaEffect]
-	raise?:  string
+	effect?: #RelationalEffect | [...#RelationalEffect]
+	hatch?: #SqlHatchCall | [...#SqlHatchCall]
+	raise?: #MechaRaise | [...#MechaRaise]
+	reject?: string
 }
 
 #MechaTransition: {
@@ -975,6 +982,18 @@ import (
 	// Derived: a machine over a server row is replicated, and external where a
 	// state invokes an effect — the pivot its ledger claims before the call.
 	level: [if len([for _, s in [if M.states != _|_ {M.states}, {}][0] if s.invoke != _|_ {s}]) > 0 {"external"}, "replicated"][0] & #EffectLevel
+	_actions: list.Concat([
+		[if M.on != _|_ for _, actList in M.on for act in [if (actList & [...]) != _|_ {actList}, [actList]][0] {act}],
+		[if M.states != _|_ for _, st in M.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.after != _|_ for _, tr in st.after for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.invoke != _|_ for tr in [st.invoke.onDone, st.invoke.onError] for t in [if (tr & string) != _|_ {[]}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+	])
+	hatches: list.SortStrings([for hn, _ in {
+		for a in M._actions if a.hatch != _|_
+		for h in [if (a.hatch & [...]) != _|_ {a.hatch}, [a.hatch]][0] {(h.name): true}
+	} {hn}])
 	timing?: "BEFORE" | "AFTER"
 	field?:   string
 	initial?: string
@@ -1638,20 +1657,18 @@ import (
 	]
 	_hotRefusal: [if len(_hotViolations) == 0 {true}, "cold pipeline cannot feed an active screen mutation loop: \(_hotViolations[0].pipeline) feeds \(_hotViolations[0].sink) on screen \(_hotViolations[0].screen)"][0] & true
 
-	_machineActions: [
-		if A.state.machines != _|_
-		for mName, m in A.state.machines {
-			machine: mName
-			actions: list.Concat([
-				[if m.on != _|_ for _, actList in m.on for act in [if (actList & [...]) != _|_ {actList}, [actList]][0] {act}],
-				[if m.states != _|_ for _, st in m.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
-				[if m.states != _|_ for _, st in m.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
-				[if m.states != _|_ for _, st in m.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
-				[if m.states != _|_ for _, st in m.states if st.after != _|_ for _, tr in st.after for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
-				[if m.states != _|_ for _, st in m.states if st.invoke != _|_ for tr in [st.invoke.onDone, st.invoke.onError] for t in [if (tr & string) != _|_ {[]}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+	_machineActions: [if A.state.machines != _|_ for mName, m in A.state.machines {machine: mName, actions: m._actions}]
+	_machineHatches: {if A.state.machines != _|_ for mn, m in A.state.machines {(mn): m.hatches}}
+
+	_machineHatchViolations: list.Concat([
+		[for mn, hs in _machineHatches for hn in hs if A.capabilities.hatches[hn] == _|_ {
+			"machine \(mn) calls undeclared SQL hatch: \(hn)"
+		}],
+		[for mn, hs in _machineHatches for hn in hs if A.capabilities.hatches[hn] != _|_ if A.capabilities.hatches[hn].kind != "sql" {
+			"machine \(mn) calls hatch \(hn), which is not SQL"
+		}],
 			])
-		}
-	]
+	_machineHatchRefusal: [if len(_machineHatchViolations) == 0 {true}, _machineHatchViolations[0]][0] & true
 
 	// A machine names its entity by name or table, as emit.cue resolves it.
 	_machineEntityViolations: [
@@ -1796,8 +1813,15 @@ import (
 		[for i in _invokes if i.arrows[0].target == i.arrows[1].target if len(i.arrows[0].actions) + len(i.arrows[1].actions) > 0 {
 			"machine \(i.machine) state \(i.state): onDone and onError share target \(i.arrows[0].target) and carry actions, which the guard would run for the wrong outcome"
 		}],
-		[for i in _invokes for ar in i.arrows for a in ar.actions if a.raise != _|_ {
-			"machine \(i.machine) state \(i.state): an outcome's actions raise, which would refuse the recorded outcome's delivery"
+		[for i in _invokes for ar in i.arrows for a in ar.actions if a.reject != _|_ {
+			"machine \(i.machine) state \(i.state): an outcome's actions reject, which would refuse the recorded outcome's delivery"
+		}],
+		[for i in _invokes let m = A.state.machines[i.machine]
+		for actions in list.Concat([
+			[if m.states[i.state].exit != _|_ {m.states[i.state].exit}],
+			[for ar in i.arrows if m.states[ar.target] != _|_ if m.states[ar.target].entry != _|_ {m.states[ar.target].entry}],
+		]) for a in [if (actions & [...]) != _|_ {actions}, [actions]][0] if a.reject != _|_ {
+			"machine \(i.machine) state \(i.state): an outcome's entry or exit actions reject, which would refuse the recorded outcome's delivery"
 		}],
 		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k, v in _effects[n].input if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in A.state.entities[en].fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
 			"effect \(n) input \(k) reads \(v), which is not a field of \(en)"
@@ -1842,13 +1866,12 @@ import (
 	_undeclaredStreams: [
 		for ma in _machineActions
 		for act in ma.actions
-		for eff in [if act.effect != _|_ {[if (act.effect & [...]) != _|_ {act.effect}, [act.effect]][0]}, []][0]
-		if (eff & #StreamEffect) != _|_
-		if !list.Contains(_declaredStreams, eff.stream)
-		{
+		for eff in [if act.raise != _|_ {[if (act.raise & [...]) != _|_ {act.raise}, [act.raise]][0]}, []][0]
+		if (eff & #StreamRaise) != _|_
+		if !list.Contains(_declaredStreams, eff.stream) {
 			machine: ma.machine
 			stream:  eff.stream
-		}
+		},
 	]
 	_streamRefusal: [if len(_undeclaredStreams) == 0 {true}, "machine \(_undeclaredStreams[0].machine) references undeclared duckstream: \(_undeclaredStreams[0].stream)"][0] & true
 

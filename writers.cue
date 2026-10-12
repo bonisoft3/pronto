@@ -10,7 +10,7 @@ import "list"
 
 #Writer: {
 	by:   string
-	kind: "form" | "screen" | "chart" | "pipeline" | "computation" | "machine" | "unit"
+	kind: "form" | "screen" | "chart" | "pipeline" | "computation" | "machine" | "unit" | "hatch"
 	// A navigate writes nothing.
 	ops: [...#Write.op & !="navigate"]
 }
@@ -21,8 +21,8 @@ import "list"
 	_entityByTable: {for n, e in A.state.entities {(e.table): n}}
 	// The distinct values of a list, first occurrence first.
 	_distinct: {of: [...string], out: [for o, _ in {for x in of {(x): true}} {o}]}
-	// The relational effects among a machine's actions (schema.cue
-	// _machineActions): a call, a notify or a stream names no table.
+	// Relational effects name the tables their operations write; hatches and
+	// raises have no inferred write set.
 	_machineEffects: {for x in A._machineActions {(x.machine): [
 		for a in x.actions if a.effect != _|_
 		for e in [if (a.effect & [...]) != _|_ {a.effect}, [a.effect]][0] if e.op != _|_ {table: e.table, op: e.op},
@@ -54,7 +54,11 @@ import "list"
 			let chartOps = _distinct & {of: [for c in A._charts if c.name == cn for w in c.writes if w.table == e.table {w.op}]}
 			if len(chartOps.out) > 0 {by: cn, kind: "chart", ops: chartOps.out}],
 		// A sink is upserted on its key; a scheduled pipeline's action is its own.
-		[for pn, p in A.state.pipelines if p.to == n {by: pn, kind: "pipeline", ops: [[if p.action != _|_ {p.action}, "upsert"][0]]}],
+		[for pn, p in A.state.pipelines if p.to == n {
+			by: pn
+			if p.raw != _|_ {kind: "hatch", ops: []}
+			if p.raw == _|_ {kind: "pipeline", ops: [[if p.action != _|_ {p.action}, "upsert"][0]]}
+		}],
 		[for pn, p in A.state.pipelines if p.fold != _|_ if _entityByTable[p.fold.pair.table] == n if p.to != n {by: pn, kind: "pipeline", ops: ["upsert"]}],
 		[for cn, c in A.state.computations if list.Contains(c.to, n) {by: cn, kind: "computation", ops: ["upsert"]}],
 		// Its own row's field, moved in the write, and every relational effect

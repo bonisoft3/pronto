@@ -77,7 +77,7 @@ _freshInputs: _computed & {
 			RequestProjection: {table: "request_projection", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}
 			ServerPipeline: {table: "server_pipeline", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}
 		}
-		pipelines: server_pipeline: {raw: true, from: "Goal", to: "ServerPipeline", group: "server-pipeline"}
+		pipelines: server_pipeline: {raw: true, note: "the authored pipeline owns the sink writes", from: "Goal", to: "ServerPipeline", group: "server-pipeline"}
 	}
 }
 _freshCluster: (pronto.#DefaultCluster & {code: _freshInputs, statics: []}).out

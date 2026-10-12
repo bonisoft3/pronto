@@ -49,7 +49,8 @@ Four are `#Pipeline`s, one a `#DuckStreamPipeline`, one a `#Drain` and one a `#S
   ([access](access.md#a-count-the-reader-is-inside-of)). The container keeps
   its bloblang.
 - **A raw stream**: the whole rpk YAML under `pipelines/`, copied verbatim.
-  The emitter cannot see inside it, so loop prevention is the author's.
+  It is a hatch with a required non-empty `note` and unspecified delivery.
+  The emitter cannot inspect its writes, so loop prevention is the author's.
 - **A scheduled pipeline** (`trigger: "schedule"`): every `interval`, delete
   or patch the sink rows a filter matches, with `{cutoff}` (now minus
   `window`) and `{nowts}` resolved at run time. It is level-triggered, for work whose job is

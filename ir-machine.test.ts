@@ -39,6 +39,18 @@ Deno.test("IR resolves a machine's table alias for both its card and the screen'
   assertEquals(sources.some((s) => s.includes('"status": "string" {constraint: machine}')), true);
 });
 
+Deno.test("a SQL hatch is linked from its machine and prevents a derived delivery guarantee", async () => {
+  const { html, sql } = await render(paymentProgram() + `
+app: {
+  state: machines: PaymentMachine: states: pending: entry: hatch: {name: "billing", call: "bill", args: [{raw: "NEW.id"}]}
+  capabilities: hatches: billing: {ir: "billing-sql", kind: "sql", files: ["services/database/migrations/020_billing.sql"], note: "the billing function owns the write"}
+}`);
+  assertStringIncludes(sql, "PERFORM bill(NEW.id)");
+  assertStringIncludes(html, 'href="#billing-sql"');
+  assertStringIncludes(html, "the billing function owns the write");
+  assertEquals(html.split("<b>delivery</b> unspecified").length - 1, 3);
+});
+
 Deno.test("IR renders lifecycle reducers with their timing and actions without inventing a statechart", async () => {
   const normal = paymentProgram();
   const reducer = normal.slice(0, normal.indexOf("    machines:")) + `
@@ -46,7 +58,7 @@ Deno.test("IR renders lifecycle reducers with their timing and actions without i
       name: "PaymentMachine", entity: "Payment"
       on: {
         insert: assign: failure: "fresh"
-        update: [{assign: {failure: "changed"}}, {effect: {notify: "payments", payload: "NEW.id"}}]
+        update: [{assign: {failure: "changed"}}, {raise: {notify: "payments", payload: "NEW.id"}}]
         delete: effect: {op: "delete", table: "audit", where: {payment_id: "OLD.id"}}
       }
     }
@@ -72,7 +84,7 @@ Deno.test("IR covers every invoking state's effect and a separate lifecycle mach
     failed: type: "final"
   ` }) + `
 app: state: {
-  machines: PaymentLifecycle: {entity: "Payment", on: insert: effect: {notify: "payment_created", payload: "NEW.id"}}
+  machines: PaymentLifecycle: {entity: "Payment", on: insert: raise: {notify: "payment_created", payload: "NEW.id"}}
   effects: refund: {
     input: {amount: "NEW.total"}
     sink: {origin: "https://api.acquirer.example", idempotent: false}

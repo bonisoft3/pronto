@@ -365,6 +365,22 @@ The peer's idempotency and the cost of a repeat are the claim the `note`
 explains. The card derives delivery: idempotent or `reconcile` is
 exactly-once, `unknown` at-most-once, and `repeat` at-least-once.
 
+**Machine actions distinguish writes, signals and hatches.** `effect` contains
+only relational mutations. `raise: {notify, payload}` sends a PostgreSQL channel
+notification; `raise: {stream, signal?, key?}` signals a declared DuckStream
+(`refresh`, `checkpoint` or `flush`, default `refresh`). Both accept lists.
+`hatch: {name, call, args?}` calls a SQL function through a named
+`capabilities.hatches` declaration of kind `sql`; the machine's `hatches` are
+derived from its actions. Such a machine shows `delivery: unspecified` and
+links the hatch's rationale in its card. `reject` refuses the transaction.
+An effect outcome cannot contain a rejection, including its exit and entry
+actions. State entry runs on insert; transitions run exit, transition and entry
+actions in that order inside the transaction.
+
+A raw pipeline is a hatch: it requires a non-empty `note`, has unspecified
+delivery, and owes a `data-kind="hatch"` element. Its sink's writer is a hatch
+with no derived mutation op, since the compiler cannot inspect its stream.
+
 **A machine owns its initial state.** A mecha machine's `initial` supplies the
 SQL default for its state field when the field declares none. A different
 field default is refused, as is a generated or retired state field. If the field

@@ -37,6 +37,17 @@ Deno.test("a tab entity and its validations are claimed but not owed; device or 
   assertEquals(owed, { Tick: false, "no-skip": false, Game: true, Goal: true, "own-goal": true });
 });
 
+Deno.test("a raw pipeline owes a hatch element instead of a platform pipeline claim", () => {
+  const p = { ...program, state: { ...program.state, pipelines: {
+    raw: { ir: "authored", raw: true },
+    derived: { ir: "projection" },
+  } } };
+  assertEquals(declarations(p).filter((d) => d.where.startsWith("pipelines.")), [
+    { kind: "hatch", id: "authored", where: "pipelines.raw", owed: true },
+    { kind: "pipeline", id: "projection", where: "pipelines.derived", owed: true },
+  ]);
+});
+
 Deno.test("reach is the farthest durability a write lands on", () => {
   assertEquals(reachOf([]), "tab");
   assertEquals(reachOf(["tab", "device"]), "device");

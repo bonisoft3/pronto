@@ -52,6 +52,7 @@ export type MechaMachine = {
   field?: string;
   initial?: string;
   level: string;
+  hatches?: string[];
   states?: Record<string, { type?: string; on?: Record<string, unknown>; after?: Record<string, unknown>; invoke?: { src: string; onDone: unknown; onError: unknown } }>;
   timing?: "BEFORE" | "AFTER";
   on?: Partial<Record<"insert" | "update" | "delete", Record<string, unknown> | Record<string, unknown>[]>>;
@@ -68,7 +69,7 @@ export type Program = {
     effects?: Record<string, Effect>;
   };
   surface: { screens: Record<string, Screen> };
-  capabilities: { auth?: unknown; vendored?: Record<string, Unit> };
+  capabilities: { auth?: unknown; vendored?: Record<string, Unit>; hatches?: Record<string, { ir: string; kind: string; note: string }> };
 };
 
 /** What a chip explains of itself on hover; one sentence each. */
@@ -78,7 +79,7 @@ const TIP: Record<string, string> = {
   id: "the entity's type id, which a schema diff keys on across renames; each field keeps a gap-free ordinal, and a retired field stays as a tombstone",
   retired: "retired: the ordinal is kept so no later field takes it; nothing writes the column",
   level: "",
-  delivery: "what a write here can claim when delivered twice — the level's word, and at level 4 the sink's: idempotent or reconciled is exactly-once, unknown at-most-once, repeat at-least-once",
+  delivery: "what a write here can claim when delivered twice — the level's word, and at level 4 the sink's: idempotent or reconciled is exactly-once, unknown at-most-once, repeat at-least-once; a hatch is unspecified",
   writers: "who writes rows here, each as kind:name and its ops — a screen's forms and what its markup writes past them, the terminal's charts, pipelines, computations, machines, a unit's memo",
   "read by": "the vendored units handed this entity's row through their mount, read-only, with the boundary each runs behind",
   "memo of": "this entity is a question's memo: the unit's answer lands here, addressed by the key fields taken from the question, and the same question asked again is answered from the row",
@@ -319,6 +320,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
       invokes: [] as string[],
       lifecycle: undefined as MechaMachine["on"],
       timing: undefined as MechaMachine["timing"],
+      hatches: [] as string[],
     })),
     ...Object.values(ctx.program.state.machines ?? {}).filter((m) => machineEntity(entities, m) === name).map((m) => ({
       id: m.ir,
@@ -331,6 +333,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
       invokes: [...new Set(Object.values(m.states ?? {}).flatMap((s) => s.invoke === undefined ? [] : [s.invoke.src]))],
       lifecycle: m.on,
       timing: m.timing,
+      hatches: m.hatches ?? [],
     })),
   ];
   const machineField = new Set(machines.flatMap((m) => m.chart === null ? [] : [m.chart.field]));
@@ -371,12 +374,17 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
       if (effect === undefined) throw new Error(`machine ${m.id} invokes ${src}, which is no declared effect`);
       return { src, effect, delivery: deliveryOf(m.level, effect) };
     });
-    const deliveries = effects.length === 0 ? [deliveryOf(m.level, null)] : effects.map((e) => e.delivery);
-    return { ...m, effects, deliveries: [...new Set(deliveries)] };
+    const hatches = m.hatches.map((name) => {
+      const hatch = ctx.program.capabilities.hatches?.[name];
+      if (hatch === undefined || hatch.kind !== "sql") throw new Error(`machine ${m.id} calls undeclared SQL hatch ${name}`);
+      return hatch;
+    });
+    const deliveries = hatches.length > 0 ? ["unspecified"] : effects.length === 0 ? [deliveryOf(m.level, null)] : effects.map((e) => e.delivery);
+    return { ...m, effects, hatches, deliveries: [...new Set(deliveries)] };
   });
   // The pivot's word is the entity's; the classes are not totally ordered, so
   // external machines that differ each show theirs.
-  const external = [...new Set(panels.filter((m) => m.level === "external").flatMap((m) => m.deliveries))];
+  const external = [...new Set(panels.filter((m) => m.level === "external" || m.hatches.length > 0).flatMap((m) => m.deliveries))];
   const delivery = external.length > 0 ? external.join(" · ") : deliveryOf(e.level, null);
   const glyphs = (f: Field) => [
     f.retired ? `<span class="g"${tip(TIP.retired)}>†</span>` : "",
@@ -406,7 +414,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
 ${diagram}${lifecycle === "" ? "" : `<table class="fields"><thead><tr><th>event</th><th>actions</th></tr></thead><tbody>${lifecycle}</tbody></table>`}${
       m.effects.map(({ src, effect, delivery }) => `
 <p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", src, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? `bridge ${effect.sink.bridge}`)} · ${peer(effect)}${m.effects.length > 1 ? ` ${chip("delivery", delivery, true)}` : ""} · <span class="note">${esc(effect.note)}</span></p>`).join("")
-    }
+    }${m.hatches.map((h) => `\n<p class="why">SQL hatch <a href="#${esc(h.ir)}">${esc(h.ir)}</a> · ${chip("delivery", "unspecified", true)} · <span class="note">${esc(h.note)}</span></p>`).join("")}
 </section>`;
   }));
   const owed = reachOf([e.durability, ...machines.flatMap((m) => (m.chart as { writes?: string[] } | null)?.writes ?? []).map((t) => byTable.get(t)?.durability ?? "tab")]) !== "tab";

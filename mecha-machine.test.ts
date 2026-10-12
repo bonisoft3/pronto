@@ -1,10 +1,71 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
+Deno.test("SQL calls require a named SQL hatch and derive the machine's hatch references", async () => {
+  const base = paymentProgram() + `
+app: state: machines: PaymentMachine: states: pending: entry: hatch: {name: "billing", call: "bill", args: [{raw: "NEW.id"}]}
+`;
+  for (const [declaration, error] of [
+    ["", "calls undeclared SQL hatch: billing"],
+    ['app: capabilities: hatches: billing: {kind: "container", note: "billing"}', "calls hatch billing, which is not SQL"],
+  ]) {
+    const res = await cue(["export", "-", "-e", "app"], base + declaration);
+    assertEquals(res.success, false);
+    assertStringIncludes(res.stderr, error);
+  }
+  const res = await cue(["export", "-", "-e", '{machine: app.state.machines.PaymentMachine, sql: out["services/database/migrations/010_machines.sql"].text}'], base + `
+app: capabilities: hatches: billing: {kind: "sql", files: ["services/database/migrations/020_billing.sql"], note: "the billing function owns the write"}
+`);
+  assertEquals(res.success, true, res.stderr);
+  const { machine, sql } = JSON.parse(res.stdout);
+  assertEquals(machine.hatches, ["billing"]);
+  assertStringIncludes(sql, "PERFORM bill(NEW.id)");
+});
+
+Deno.test("state actions run on entry and in exit-transition-entry order", async () => {
+  const files = await emitFiles(paymentProgram().replace('pay: "charging"', 'pay: {target: "charging"}') + `
+app: state: machines: PaymentMachine: states: {
+  pending: {entry: raise: {notify: "trace", payload: "initial"}, exit: raise: {notify: "trace", payload: "exit"}}
+  pending: on: pay: {target: "charging", actions: raise: {notify: "trace", payload: "transition"}}
+  charging: entry: raise: {notify: "trace", payload: "entry"}
+}
+`);
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  const initial = sql.indexOf("pg_notify('trace', 'initial')");
+  const exit = sql.indexOf("pg_notify('trace', 'exit')");
+  const transition = sql.indexOf("pg_notify('trace', 'transition')");
+  const entry = sql.indexOf("pg_notify('trace', 'entry')");
+  assertEquals(initial > 0 && initial < exit && exit < transition && transition < entry, true);
+});
+
+Deno.test("signals are raises and SQL calls are hatches, never relational effects", async () => {
+  for (const effect of ['{notify: "payments", payload: "changed"}', '{stream: "payments"}', '{call: "bill"}']) {
+    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `\napp: state: machines: PaymentMachine: states: pending: entry: effect: ${effect}`);
+    assertEquals(res.success, false);
+    assertStringIncludes(res.stderr, "effect");
+  }
+  const files = await emitFiles(paymentProgram().replace('onDone: "settled"', 'onDone: {target: "settled", actions: {raise: [{notify: "payments", payload: "done"}, {notify: "audit", payload: "paid"}]}}'));
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(sql, "pg_notify('payments', 'done')");
+  assertStringIncludes(sql, "pg_notify('audit', 'paid')");
+});
+
+Deno.test("a raw pipeline requires its own hatch rationale", async () => {
+  const base = paymentProgram() + '\napp: state: pipelines: authored: {raw: true, from: "Payment", to: "Payment", group: "authored"}';
+  for (const extra of ["", '\napp: state: pipelines: authored: note: ""']) {
+    const res = await cue(["export", "-", "-e", "app"], base + extra);
+    assertEquals(res.success, false);
+    assertStringIncludes(res.stderr, "note");
+  }
+  const res = await cue(["export", "-", "-e", "app.state.pipelines.authored"], base + '\napp: state: pipelines: authored: note: "the authored sink decides delivery"');
+  assertEquals(res.success, true, res.stderr);
+  assertEquals(JSON.parse(res.stdout).delivery, "unspecified");
+});
+
 Deno.test("a machine cannot combine a statechart with lifecycle actions the SQL would discard", async () => {
   for (const event of ["insert", "update", "delete"]) {
     const res = await cue(["export", "-", "-e", "out"], paymentProgram() + `
-app: state: machines: PaymentMachine: on: ${event}: effect: {notify: "payments", payload: "TG_OP"}
+app: state: machines: PaymentMachine: on: ${event}: raise: {notify: "payments", payload: "TG_OP"}
 `);
     assertEquals(res.success, false);
     assertStringIncludes(res.stderr, "machine PaymentMachine combines states and lifecycle handlers: declare separate machines");
@@ -568,9 +629,12 @@ Deno.test("an outcome that could never be delivered is refused", async () => {
     "share target failed and carry actions",
   );
   assertStringIncludes(
-    await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: {target: "failed", actions: [{raise: "no"}]}}`) })),
-    "an outcome's actions raise",
+    await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: {target: "failed", actions: [{reject: "no"}]}}`) })),
+    "an outcome's actions reject",
   );
+  for (const action of ['charging: exit: reject: "no"', 'settled: entry: reject: "no"']) {
+    assertStringIncludes(await refusal(paymentProgram() + `\napp: state: machines: PaymentMachine: states: ${action}`), "an outcome's entry or exit actions reject");
+  }
   // One target for both arrows, with no actions, is a plain join.
   const files = await emitFiles(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "failed", onError: "failed"}`) }));
   assertEquals(typeof files["services/database/migrations/010_machines.sql"].text, "string");
@@ -707,7 +771,7 @@ Deno.test("a machine signals a duckstream pipeline", async () => {
   const files = await emitFiles(paymentProgram({ machine: `
         pending: on: pay: {
           target: "charging"
-          actions: [{effect: {stream: "payment_analytics", signal: "refresh"}}]
+          actions: [{raise: {stream: "payment_analytics", signal: "refresh"}}]
         }
         charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
         settled: type: "final"
@@ -728,7 +792,7 @@ Deno.test("a machine referencing an undeclared duckstream is refused at compile 
   const err = await refusal(paymentProgram({ machine: `
         pending: on: pay: {
           target: "charging"
-          actions: [{effect: {stream: "undeclared_stream"}}]
+          actions: [{raise: {stream: "undeclared_stream"}}]
         }
         charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
         settled: type: "final"
@@ -761,7 +825,7 @@ app: pronto.#App & {
         on: {
           delete: [
             {
-              effect: {
+              raise: {
                 stream: "cleanup_order"
                 key: "NEW.id"
               }
@@ -842,7 +906,8 @@ app: pronto.#App & {
         on: {
           insert: [
             {
-              effect: {
+              hatch: {
+                name: "locking"
                 call: "pg_advisory_xact_lock"
                 args: [{raw: "hashtext('test_lock')::bigint"}]
               }
@@ -859,7 +924,7 @@ app: pronto.#App & {
               }
             },
             {
-              effect: {
+              raise: {
                 stream: "item_stream"
                 key: "NEW.month"
               }
@@ -877,7 +942,7 @@ app: pronto.#App & {
       }
     }
   }
-  capabilities: {hatches: {}, vendored: {}}
+  capabilities: {hatches: {locking: {kind: "sql", files: ["services/database/migrations/020_locking.sql"], note: "serializes writers to the summary"}}, vendored: {}}
   surface: {
     screens: {}
     handlers: {}
