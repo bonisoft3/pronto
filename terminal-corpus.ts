@@ -1,4 +1,5 @@
 import { basename, join } from "node:path";
+import { entries } from "./missing.ts";
 import { parseCel } from "./cel.ts";
 import { celSites, type Entity, renderCel } from "./derive-cel.ts";
 import { renderDerived, type ScreenProjection, terminalPath } from "./derive.ts";
@@ -46,7 +47,7 @@ export async function prepareTerminalCorpus(fixture: string): Promise<void> {
     await Deno.writeTextFile(target, screen.markup);
   }
   const available = new Set<string>();
-  for await (const entry of Deno.readDir(join(fixture, "shell/handlers"))) {
+  for (const entry of await entries(join(fixture, "shell/handlers"))) {
     if (entry.isFile && entry.name.endsWith(".js")) available.add(entry.name.slice(0, -3));
   }
   const read = await run(Deno.execPath(), ["run", "--no-config", "--no-check", "--no-lock", "--allow-read=.", await terminalPath(authored, authored.markupReader, fixture), "."], fixture);

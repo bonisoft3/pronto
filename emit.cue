@@ -1998,7 +1998,7 @@ _cdcBeforeField: "__before"
 	// construction. Intended: reviewing a design doc is not using the app, and
 	// requiring a sign-in to read one would put the ladder behind the thing it
 	// exists to review.
-	_ladder: [for f in ["brief.html", "ir.html", "acceptance.md", "DESIGN.md"] {
+	_ladder: [for f in ["brief.html", "ir.html", "ir/card.css", "acceptance.md", "DESIGN.md"] {
 		file:   f
 		target: "/srv/docs/\(f)"
 		watch:  true
@@ -2061,6 +2061,11 @@ _cdcBeforeField: "__before"
 		state: {
 			migrations: (#appMigrations & {"code": D.code}).list
 			if D.code.state.migrations != _|_ {pgroll: D.code.state.migrations}
+			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
+				effectGuards: strings.Join([for _, m in D.code.state.machines if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
+					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects}).out
+				}], "\n\n")
+			}
 			pipelines: [for n, _ in (#streams & {code: D.code}).out {
 				name: "\(D.code.meta.name)-\(n)"
 				file: "docker/\(D.code.meta.name)-\(n).yaml"

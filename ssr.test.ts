@@ -139,3 +139,14 @@ Deno.test("a route prerendered over the browser's rows is left to the terminal's
   const { ok, out } = exported(`(#ssgCase & {reads: [#view & {table: "draft", clauses: [{col: "id", op: "eq"}]}]}).caddyfile`, true);
   if (!ok || !out.includes("@document path /regras /regras/")) throw new Error(out);
 });
+
+Deno.test("the deployed review page carries its relative IR stylesheet", () => {
+  const r = ask("_view", "statics");
+  if (!r.ok) throw new Error(r.out);
+  const statics = JSON.parse(r.out) as { file: string; target: string }[];
+  for (const file of ["ir.html", "ir/card.css"]) {
+    if (!statics.some((s) => s.file === file && s.target === `/srv/docs/${file}`)) {
+      throw new Error(`missing deployed review asset ${file}`);
+    }
+  }
+});

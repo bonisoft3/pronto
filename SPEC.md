@@ -337,6 +337,10 @@ program objects owe their elements. Every declaration remains a claim, and
 an ir element with no declaration is always an error. The decision is
 [[docs/decisions/2026-08-27-review-by-consequence|review by consequence]].
 
+Entity cards draw every distinct terminal chart for a field. Identical charts
+share a diagram; differing charts receive separate IDs and labels naming their
+screens, including multiple charts mounted on one screen.
+
 **An entity's writers are derived.** `#Entity.writers` (`writers.cue`) lists
 every declaration that writes its rows — a screen's forms and what its markup
 writes past them, the terminal charts it carries (`#Screen.charts`, projected

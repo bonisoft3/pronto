@@ -4,7 +4,7 @@
 // recording stand-in with its parameter names, so a renamed argument fails here;
 // the real queue is the airlock's to test.
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
-import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
+import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
 
@@ -101,6 +101,43 @@ Deno.test({ name: "an invoking state's guard claims, enqueues and admits only th
         SELECT status FROM payment WHERE id = '${two}';`);
       if (!r.ok) throw new Error(r.err);
       assertEquals(r.out, "settled");
+    });
+
+    await t.step("a retained request ledger upgrades with its guards atomically and preserves pending claims", async () => {
+      const exported = await cue(["export", "-", "-e", `_cluster.surface.targets["airlock-upgrade"]`, "--out", "json"], paymentProgram());
+      if (!exported.success) throw new Error(exported.stderr);
+      const target = JSON.parse(exported.stdout);
+      assertEquals(target.dockerfile.cmd.includes("--single-transaction"), true);
+      assertEquals(target.compose.depends_on.database.condition, "service_healthy");
+      const heredoc = target.dockerfile.epilogue[0] as string;
+      const upgrade = heredoc.slice(heredoc.indexOf("\n") + 1, heredoc.lastIndexOf("\n"));
+      const three = "00000000-0000-0000-0000-000000000003";
+      const four = "00000000-0000-0000-0000-000000000004";
+      const old = await psql(`BEGIN;
+        ALTER TABLE airlock.external_effect_ledger RENAME COLUMN input TO request;
+        ${files["services/database/migrations/010_machines.sql"].text.replaceAll('"input"', '"request"')}
+        INSERT INTO payment VALUES ('${three}', 'pending', 19.75, NULL);
+        UPDATE payment SET status = 'charging' WHERE id = '${three}';
+        COMMIT;`);
+      if (!old.ok) throw new Error(old.err);
+      const snapshot = (await psql(`SELECT jsonb_agg((to_jsonb(l) - 'request') || jsonb_build_object('input', request) ORDER BY key) FROM airlock.external_effect_ledger l;`)).out;
+      const failed = await psql(`BEGIN; ${upgrade} SELECT missing_upgrade_column; COMMIT;`);
+      assertEquals(failed.ok, false);
+      assertEquals((await psql(`SELECT request->>'amount' FROM airlock.external_effect_ledger WHERE key = 'charge:${three}';`)).out, "19.75");
+      for (let i = 0; i < 2; i++) {
+        const applied = await psql(`BEGIN; ${upgrade} COMMIT;`);
+        if (!applied.ok) throw new Error(applied.err);
+        assertEquals((await psql(`SELECT jsonb_agg(to_jsonb(l) ORDER BY key) FROM airlock.external_effect_ledger l;`)).out, snapshot);
+      }
+      const resumed = await psql(`
+        UPDATE airlock.external_effect_ledger SET outcome = '{"target":"settled","kind":"done"}' WHERE key = 'charge:${three}';
+        UPDATE payment SET status = 'settled' WHERE id = '${three}';
+        INSERT INTO payment VALUES ('${four}', 'pending', 23.50, NULL);
+        UPDATE payment SET status = 'charging' WHERE id = '${four}';
+        SELECT status FROM payment WHERE id = '${three}';
+        SELECT input->>'amount' FROM airlock.external_effect_ledger WHERE key = 'charge:${four}';`);
+      if (!resumed.ok) throw new Error(resumed.err);
+      assertEquals(resumed.out.split("\n"), ["settled", "23.50"]);
     });
 
     await t.step("the ledger is closed to the cluster's client roles", async () => {

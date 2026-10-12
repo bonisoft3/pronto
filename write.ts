@@ -21,7 +21,7 @@ import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
 import { parseHeld, seedSql, type SeedData } from "./seed.ts";
 import { releaseManifest, type ReleaseContent } from "./release.ts";
-import { type Program, renderIr } from "./ir-render.ts";
+import { type Program, renderIr, writeIrStylesheet } from "./ir-render.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Emission = {
@@ -381,6 +381,7 @@ async function writeLayout(): Promise<void> {
 // or the derived declarations moved; unchanged declarations and bytes cannot
 // change what the first pass read. Every generation still derives and exports once.
 await writeLayout();
+await writeIrStylesheet(appDir);
 const before = await derivedText();
 await derive(appDir);
 const settled = await derivedText();

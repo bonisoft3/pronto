@@ -50,14 +50,14 @@ Deno.test("a chart is a machine claimed as <entity ir>-<field>, once however man
     { screen: "shelf", table: "game", field: "mode", writes: ["game"], refs: [] },
     // A tab row whose chart writes a live one reaches live.
     { screen: "board", table: "tick", field: "sync", writes: ["goal"], refs: ["submit"] },
-  ];
+  ].map((chart) => ({ ...chart, machine: JSON.stringify({ field: chart.field, initial: "idle", states: { idle: {} } }) }));
   const decls = chartDeclarations(charts, program.state.entities);
   assertEquals(decls.map((d) => [d.id, d.owed, d.where]), [
     ["Tick-beat", false, "screens.board.tick.beat"],
     ["Game-mode", true, "screens.board.game.mode"],
     ["Tick-sync", true, "screens.board.tick.sync"],
   ]);
-  assertThrows(() => chartDeclarations([{ screen: "board", table: "ghost", field: "x", writes: [], refs: [] }], program.state.entities), Error, "ghost");
+  assertThrows(() => chartDeclarations([{ screen: "board", table: "ghost", field: "x", machine: "{}", writes: [], refs: [] }], program.state.entities), Error, "ghost");
 });
 
 Deno.test("a handler only a tab-reaching chart names is machine-checked with it; one named by an owed chart, or by no chart, keeps its element", () => {
@@ -80,4 +80,18 @@ Deno.test("pronto's durability-to-level table is the terminal's", async () => {
   const ours = await run(here, ["export", ".:pronto", "-e", "#DurabilityEffectLevel", "--out", "json"]);
   const theirs = await run(`${here}../omnishell`, ["export", ".:terminal", "-e", "#Machine.#DurabilityEffectLevel", "--out", "json"]);
   assertEquals(ours, theirs);
+});
+
+Deno.test("distinct charts of one field keep separate IR claims and their own reach", () => {
+  const base = { table: "tick", field: "beat", writes: ["tick"], refs: [] };
+  const idle = { field: "beat", initial: "idle", states: { idle: {} } };
+  const charts = [
+    { ...base, screen: "board", machine: JSON.stringify(idle) },
+    { ...base, screen: "shelf", machine: JSON.stringify({ states: idle.states, initial: idle.initial, field: idle.field }) },
+    { ...base, screen: "board", writes: ["goal"], machine: JSON.stringify({ ...idle, states: { idle: { on: { tick: "idle" } } } }) },
+  ];
+  assertEquals(chartDeclarations(charts, program.state.entities).map(({ id, owed }) => ({ id, owed })), [
+    { id: "Tick-beat-1", owed: false },
+    { id: "Tick-beat-2", owed: true },
+  ]);
 });

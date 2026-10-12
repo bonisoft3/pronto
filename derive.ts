@@ -800,13 +800,13 @@ export async function derive(appDir: string): Promise<void> {
 
   let bijection: ReturnType<typeof bijectionFacts>;
   try {
-    // The charts the markup carries are machines too, claimed as `<entity
-    // ir>-<field>` and owed by reach; a handler only a tab-reaching chart names
-    // is machine-checked with it (objects.ts).
+    // A handler only a tab-reaching chart names is machine-checked with it.
+    // Chart claims share their identities with the IR renderer (objects.ts).
     const chartSites: ChartSite[] = machines.map((m) => ({
       screen: m.screen,
       table: m.region.table,
       field: (JSON.parse(m.region.machine) as { field: string }).field,
+      machine: m.region.machine,
       writes: m.region.writes.map((w) => w.table),
       refs: m.region.refs,
     }));

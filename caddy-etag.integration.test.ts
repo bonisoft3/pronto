@@ -42,6 +42,8 @@ async function docker(args: string[]): Promise<string> {
 const filler = "x".repeat(600);
 // Each path the door answers, the file behind it, and two contents of one length.
 const FILES: [string, string, (v: string) => string][] = [
+  ["/docs/ir.html", "srv/docs/ir.html", (v) => `<!doctype html><link rel="stylesheet" href="ir/card.css"><title>${v}</title><p>${filler}</p>\n`],
+  ["/docs/ir/card.css", "srv/docs/ir/card.css", (v) => `.${v} {}\n/* ${filler} */\n`],
   ["/llms.txt", "srv/llms.txt", (v) => `# ${v}\n${filler}\n`],
   ["/shell/screens/regras.css", "srv/shell/screens/regras.css", (v) => `.${v} {}\n/* ${filler} */\n`],
   ["/omnishell/interpreter/shell.js", "omnishell/interpreter/shell.js", (v) => `export const v = "${v}";\n// ${filler}\n`],

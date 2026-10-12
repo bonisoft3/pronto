@@ -10,6 +10,8 @@
 // opaque tokens — a frame id is BUILT as `${screen.ir}-${state}` and carried
 // whole, never split back apart.
 
+import { isDeepStrictEqual } from "node:util";
+
 export const KINDS = [
   "entity",
   "pipeline",
@@ -138,23 +140,45 @@ export function declarations(code: Record<string, any>): Declaration[] {
 /** A chart the markup carries, as derive reads it off a screen: the row it
  * runs over, the field it moves, the tables its arrows write, the handler
  * modules it names. */
-export type ChartSite = { screen: string; table: string; field: string; writes: string[]; refs: string[] };
+export type ChartSite = { screen: string; table: string; field: string; machine: string; writes: string[]; refs: string[] };
 
-/** The `machine` claims a program's terminal charts make. A machine is an
- * entity's field: two screens carrying the same chart over the same row claim
- * one id, `<entity ir>-<field>`. It is owed by reach — the farthest durability
- * its row and its writes land on — like the entity it moves. */
+/** Distinct definitions of one field receive the same suffix in the IR and
+ * its claims; identical charts on several screens keep one identity. */
+export function chartVariantSuffixes(charts: { table: string; field: string; machine: string }[]): string[] {
+  const groups = new Map<string, { machine: unknown; sites: number[] }[]>();
+  for (const [index, chart] of charts.entries()) {
+    const key = JSON.stringify([chart.table, chart.field]);
+    const variants = groups.get(key) ?? [];
+    const machine = JSON.parse(chart.machine);
+    const prior = variants.find((v) => isDeepStrictEqual(v.machine, machine));
+    if (prior) prior.sites.push(index);
+    else variants.push({ machine, sites: [index] });
+    groups.set(key, variants);
+  }
+  const suffixes = charts.map(() => "");
+  for (const variants of groups.values()) {
+    if (variants.length < 2) continue;
+    for (const [ordinal, variant] of variants.entries()) {
+      for (const site of variant.sites) suffixes[site] = `-${ordinal + 1}`;
+    }
+  }
+  return suffixes;
+}
+
+/** The machine claims of terminal charts, owed by the farthest durability
+ * their row and writes reach. */
 export function chartDeclarations(
   charts: ChartSite[],
   entities: Record<string, { table: string; ir: string; durability: string }>,
 ): Declaration[] {
   const byTable = new Map(Object.values(entities).map((e) => [e.table, e]));
   const out = new Map<string, Declaration>();
-  for (const c of charts) {
+  const suffixes = chartVariantSuffixes(charts);
+  for (const [index, c] of charts.entries()) {
     const entity = byTable.get(c.table);
     if (entity === undefined) throw new Error(`${c.screen}: a chart runs over "${c.table}", the table of no declared entity`);
     const reach = reachOf([entity.durability, ...c.writes.map((t) => byTable.get(t)?.durability ?? "tab")]);
-    const id = `${entity.ir}-${c.field}`;
+    const id = `${entity.ir}-${c.field}${suffixes[index]}`;
     const prior = out.get(id);
     out.set(id, {
       kind: "machine",
@@ -172,7 +196,7 @@ export function chartDeclarations(
  * chart's module name to the handler's ir id. */
 export function handlersOwed(
   decls: Declaration[],
-  charts: ChartSite[],
+  charts: Omit<ChartSite, "machine">[],
   entities: Record<string, { table: string; ir: string; durability: string }>,
   stemToIr: Map<string, string>,
 ): Declaration[] {

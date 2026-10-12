@@ -17,6 +17,18 @@
 // answered without the author drawing them. write.ts runs this after derive.
 
 
+import { chartVariantSuffixes } from "./objects.ts";
+
+type TerminalChart = {
+  field: string;
+  initial: string;
+  states: Record<string, unknown>;
+  on?: Record<string, unknown>;
+  writes: string[];
+  screens: string[];
+  suffix: string;
+};
+
 export type Field = { name: string; type: string; ordinal?: number; retired?: boolean; pk?: boolean; ref?: string; required?: boolean; unique?: boolean; default?: string; cel?: string };
 export type Entity = {
   ir: string;
@@ -270,7 +282,7 @@ export async function d2Svg(appDir: string, source: string): Promise<string> {
 type Context = {
   program: Program;
   /** Terminal charts by the table they run over, parsed. */
-  charts: Map<string, { field: string; initial: string; states: Record<string, unknown>; on?: Record<string, unknown>; writes: string[] }[]>;
+  charts: Map<string, TerminalChart[]>;
   /** How the terminal reads each server entity (facts `read_mode`). */
   readMode: Map<string, string>;
   d2: (source: string) => Promise<string>;
@@ -290,7 +302,13 @@ export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<s
   const retired = e.fields.filter((f) => f.retired);
   const idx = new Set((e.indexes ?? []).map((i) => i.on));
   const machines = [
-    ...(ctx.charts.get(e.table) ?? []).map((c) => ({ id: `${e.ir}-${c.field}`, title: `${e.ir} · ${c.field}`, level: e.level, chart: c, invoke: null as null | string })),
+    ...(ctx.charts.get(e.table) ?? []).map((c) => ({
+      id: `${e.ir}-${c.field}${c.suffix}`,
+      title: `${e.ir} · ${c.field}${c.suffix ? ` · ${c.screens.join(", ")} (${c.suffix.slice(1)})` : ""}`,
+      level: e.level,
+      chart: c,
+      invoke: null as null | string,
+    })),
     ...Object.values(ctx.program.state.machines ?? {}).filter((m) => m.entity === name).map((m) => ({
       id: m.ir,
       title: `${m.ir} · ${m.field}`,
@@ -586,17 +604,26 @@ export async function renderIr(
       return `<svg${before}viewBox="${box}"${after} width="${width}" height="${height}">`;
     },
   );
-  const charts = new Map<string, { field: string; initial: string; states: Record<string, unknown>; on?: Record<string, unknown>; writes: string[] }[]>();
+  const charts = new Map<string, TerminalChart[]>();
+  const definitions = new Map<string, TerminalChart>();
+  const suffixes = chartVariantSuffixes(facts.chart ?? []);
   const chartFields = new Map<string, Map<string, Set<string>>>();
-  for (const row of facts.chart ?? []) {
+  for (const [index, row] of (facts.chart ?? []).entries()) {
     const entity = byTable.get(row.table);
     if (entity === undefined) throw new Error(`chart fact names ${row.table}, the table of no declared entity`);
     if (program.surface.screens[row.screen] === undefined) throw new Error(`chart fact names undeclared screen ${row.screen}`);
     const parsed = JSON.parse(row.machine) as { field: string; initial: string; states: Record<string, unknown>; on?: Record<string, unknown> };
     if (parsed.field !== row.field) throw new Error(`chart fact ${row.screen}/${row.table} says field ${row.field} but its machine says ${parsed.field}`);
-    const list = charts.get(row.table) ?? [];
-    if (!list.some((c) => c.field === parsed.field)) {
-      list.push({ ...parsed, writes: [row.table] });
+    const suffix = suffixes[index];
+    const identity = JSON.stringify([row.table, row.field, suffix]);
+    const prior = definitions.get(identity);
+    if (prior !== undefined) {
+      if (!prior.screens.includes(row.screen)) prior.screens.push(row.screen);
+    } else {
+      const chart = { ...parsed, writes: [row.table], screens: [row.screen], suffix };
+      definitions.set(identity, chart);
+      const list = charts.get(row.table) ?? [];
+      list.push(chart);
       charts.set(row.table, list);
     }
     const byEntity = chartFields.get(row.screen) ?? new Map<string, Set<string>>();
@@ -664,6 +691,13 @@ export async function renderIr(
   }
   next = fillNeighbourhoodRegions(next, screenHtml, appHtml);
   if ((cards.size > 0 || appGraph.entities.length > 0) && !next.includes(LINK)) next = next.replace(/<\/head>/, `${LINK}\n</head>`);
+  await writeIrStylesheet(appDir);
+  if (next === html) return false;
+  await Deno.writeTextFile(`${appDir}/${irPath}`, next);
+  return true;
+}
+
+export async function writeIrStylesheet(appDir: string): Promise<void> {
   await Deno.mkdir(`${appDir}/ir`, { recursive: true });
   const cssPath = `${appDir}/ir/card.css`;
   const css = await Deno.readTextFile(cssPath).catch((error) => {
@@ -671,7 +705,4 @@ export async function renderIr(
     throw error;
   });
   if (css !== CARD_CSS) await Deno.writeTextFile(cssPath, CARD_CSS);
-  if (next === html) return false;
-  await Deno.writeTextFile(`${appDir}/${irPath}`, next);
-  return true;
 }

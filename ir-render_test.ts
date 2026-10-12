@@ -127,7 +127,7 @@ Deno.test("the card says property: value on every chip, names every field upfron
   const drawn: string[] = [];
   const html = await cardHtml("Game", program.state.entities.Game, {
     program,
-    charts: new Map([["game", [{ field: "flipped", initial: "no", states: { no: { on: { click: "yes" } }, yes: { on: { click: "no" } } }, writes: ["game"] }]]]),
+    charts: new Map([["game", [{ field: "flipped", initial: "no", states: { no: { on: { click: "yes" } }, yes: { on: { click: "no" } } }, writes: ["game"], screens: ["board"], suffix: "" }]]]),
     readMode: new Map([["Game", "eager"]]),
     d2: (src) => {
       drawn.push(src);
@@ -288,6 +288,42 @@ Deno.test("renderIr uses screen ir aliases, ignores collection-only fact reach, 
     assertStringIncludes(empty, "entity prose");
     assertStringIncludes(empty, "board prose");
     assertStringIncludes(empty, "empty prose");
+  } finally {
+    await Deno.remove(appDir, { recursive: true });
+  }
+});
+
+Deno.test("one entity field cannot hide a divergent chart from another screen", async () => {
+  const appDir = await Deno.makeTempDir();
+  try {
+    await Deno.writeTextFile(`${appDir}/ir.html`, IR);
+    const p: Program = { ...program, surface: { screens: {
+      alpha: { ir: "alpha", title: "Alpha", reads: [] },
+      beta: { ir: "beta", title: "Beta", reads: [] },
+    } } };
+    const machine = { field: "phase", initial: "idle", states: { idle: { on: { go: "done" } }, done: {} } };
+    const row = { screen: "alpha", table: "game", field: "phase", machine: JSON.stringify(machine) };
+    let draws = 0;
+    const draw = () => { draws++; return Promise.resolve("<svg/>"); };
+    // JSON property order does not create a second machine identity.
+    await renderIr(appDir, "ir.html", p, { read_mode: [{ entity: "Game", mode: "eager" }], chart: [row, { ...row, screen: "beta", machine: JSON.stringify({ states: machine.states, initial: "idle", field: "phase" }) }] }, draw);
+    assertEquals(draws, 2); // The terminal chart and Game's mecha machine.
+    const divergent = { ...row, screen: "beta", machine: JSON.stringify({ ...machine, initial: "cold", states: { cold: { on: { heat: "hot" } }, hot: {} } }) };
+    for (const screen of ["alpha", "beta"]) {
+      const sources: string[] = [];
+      await renderIr(appDir, "ir.html", p, { read_mode: [{ entity: "Game", mode: "eager" }], chart: [row, { ...divergent, screen }] }, (source) => {
+        sources.push(source);
+        return Promise.resolve("<svg/>");
+      });
+      const html = await Deno.readTextFile(`${appDir}/ir.html`);
+      assertStringIncludes(html, 'id="Game-phase-1"');
+      assertStringIncludes(html, 'id="Game-phase-2"');
+      assertStringIncludes(html, "Game · phase · alpha (1)");
+      assertStringIncludes(html, `Game · phase · ${screen} (2)`);
+      assertEquals(sources.length, 3);
+      assertEquals(sources.some((source) => source.includes('"idle" -> "done": "go"')), true);
+      assertEquals(sources.some((source) => source.includes('"cold" -> "hot": "heat"')), true);
+    }
   } finally {
     await Deno.remove(appDir, { recursive: true });
   }
