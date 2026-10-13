@@ -22,6 +22,12 @@ _installedFiles: (pronto.#emit & {
 	build:    _installedBuild
 }).files
 
+checkerInputVersion: _installedFiles[".pronto/check-inputs.json"].data.version & 1
+checkerInputEntities: (_installedFiles[".pronto/check-inputs.json"].data.entities == _code.state.entities) & true
+checkerInputHatches: (_installedFiles[".pronto/check-inputs.json"].data.hatches == _code.capabilities.hatches) & true
+checkerInputRawMigrations: _installedFiles[".pronto/check-inputs.json"].data.rawMigrations & []
+checkerInputDuckstreams: _installedFiles[".pronto/check-inputs.json"].data.duckstreams & {}
+
 installedImageName: _installedCluster.meta.images.database & {name: "libraries_mecha-database-image"}
 installedFrom:    _installedProject.targets.database.dockerfile.from.name & "libraries_mecha-database-image"
 installedContext: _installedProject.targets.database.compose.build.additional_contexts["libraries_mecha-database-image"] & "${MONOREPO_COMPOSE_MODE:-docker-image://\(mecha.published.database)}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image}"

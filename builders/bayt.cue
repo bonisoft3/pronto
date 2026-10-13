@@ -287,10 +287,10 @@ import (
 					globs: [".bayt/checks.yaml", ".pronto/facts.json"]
 					defaultExclude: {"pronto-tests": null, "pronto-bayt": null, "pronto-history": null}
 				}
-				cmd: builtin: {do: B._actions.lint, shell: "nu", dockerfile: do: "cue vet ./..."}
+				cmd: builtin: {do: B._actions.lint, shell: "nu", dockerfile: do: "cue vet -c ./..."}
 			}
 			"generate": sayt.generate & mise.exec & B._program & {
-				state: globs: [".bayt/checks.yaml", ".bayt/say.yaml", ".bayt/Taskfile.yml", ".bayt/Taskfile.bayt.yml"]
+				state: globs: [".bayt/checks.yaml", ".bayt/say.yaml", ".bayt/Taskfile.yml", ".bayt/Taskfile.bayt.yml", ".pronto/check-inputs.json"]
 				dockerfile: {}
 				cmd: builtin: {do: B._actions.generate, shell: "nu", dockerfile: do: B.meta.generateCmd}
 			}

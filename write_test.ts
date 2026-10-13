@@ -93,6 +93,11 @@ Deno.test("a settled build preserves outputs and still follows new template read
     const warm = await gate();
     assertStringIncludes(warm, 'Task "bayt:generate:default" is up to date');
     assert(!warm.includes("pronto write:"), warm);
+    const checkerInputs = join(app, ".pronto/check-inputs.json");
+    const checkerSnapshot = await Deno.readTextFile(checkerInputs);
+    await Deno.remove(checkerInputs);
+    assertStringIncludes(await gate(), "pronto write:");
+    assertEquals(await Deno.readTextFile(checkerInputs), checkerSnapshot);
     const removed = join(app, "shell/screens/main.html");
     await Deno.remove(removed);
     assertStringIncludes(await gate(), "pronto write:");
@@ -417,6 +422,13 @@ pronto: say: say: {
       ),
       integrateArgs,
     );
+    const cachedArgs = ["--progress", "plain"];
+    await gate("integrate", true, cachedArgs);
+    assertStringIncludes(await gate("integrate", true, cachedArgs), "task-leaf integrate");
+    await Deno.writeTextFile(input, "integration edit");
+    assertStringIncludes(await gate("integrate", true, cachedArgs), "task-leaf integrate");
+    assertStringIncludes(await gate("integrate", true, integrateArgs), "task-leaf integrate");
+    assertStringIncludes(await gate("integrate", true, integrateArgs), "task-leaf integrate");
     assertStringIncludes(
       await gate("integrate", false, ["--fail"]),
       "action failure",

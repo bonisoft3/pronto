@@ -23,9 +23,9 @@ _besideRules: (pronto.#emit & {
 	build:    _besideBuild
 }).files[".say.yaml"].data.say.integrate.rulemap
 
-besideRule: _besideRules.plain.cmds[0].do & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-plain"
+besideRule: _besideRules["pronto-integrate-2"].cmds[0].do & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-plain"
 besideRunner: _besideTargets["ci-plain"] & {#closure: "check-plain", #check: "plain"}
-besidePriority: _besideRules.plain.priority & 2
+besidePriority: _besideRules["pronto-integrate-2"].priority & 2
 besideWaits:    _besideTargets["check-plain"].compose.depends_on["apps_emit-launch"].condition & "service_healthy"
 besideDoor:     _besideTargets["check-plain"].compose.environment.APP_URL & "https://caddy:8443"
 besideEscaped: _besideTargets["check-plain"].compose.command & ["mise", "x", "--", "sh", "-c", "deno run tests/plain.ts $$HOME"]

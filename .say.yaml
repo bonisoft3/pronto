@@ -57,7 +57,7 @@ say:
       schema-evolution:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-run --allow-env replay.test.ts withheld.test.ts"
+          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-run --allow-env replay.test.ts withheld.test.ts proto-baseline.test.ts check-inputs_test.ts"
       machines:
         priority: -1
         cmds:

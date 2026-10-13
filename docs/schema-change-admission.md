@@ -82,7 +82,8 @@ everywhere, because integer width is the type table's decision.
 `ban-create-domain-with-constraint` is forgiven in `004_types.sql` alone,
 because the `portable_*` domains carry their `CHECK` by design.
 
-**buf breaking** compares every proto under the app with the app's own git
+**buf breaking**, enabled when `CI` is set to a nonempty value other than
+`0` or `false`, compares every proto under the app with the app's own git
 history on `main` (a second argument names another branch), under `WIRE_JSON`
 rather than `WIRE`, because holders read the JSON. It is the only reader that
 refuses a rename made consistently in `program.cue` and `ir.html` together:

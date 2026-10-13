@@ -1,5 +1,24 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { gitInput, protoBaseline } from "./check-proto.ts";
+import { gitInput, historyChecksEnabled, protoBaseline } from "./check-proto.ts";
+import { fileURLToPath } from "node:url";
+
+Deno.test("history comparisons are CI-only and local lint needs no Git or generated inputs", async () => {
+  for (const value of [undefined, "", "0", "false", "FALSE"]) assertEquals(historyChecksEnabled(value), false);
+  for (const value of ["1", "true"]) assertEquals(historyChecksEnabled(value), true);
+  const root = await Deno.makeTempDir({ prefix: "pronto-local-lint-" });
+  try {
+    for (const args of [[root], ["--baseline", root]]) {
+      const result = await new Deno.Command(Deno.execPath(), {
+        args: ["run", "--no-config", "--allow-env=CI", `--allow-write=${root}`, fileURLToPath(new URL("./check-proto.ts", import.meta.url)), ...args],
+        env: { CI: "" }, stdout: "piped", stderr: "piped",
+      }).output();
+      assertEquals(result.success, true, new TextDecoder().decode(result.stderr));
+    }
+    assertEquals(await Deno.readTextFile(`${root}/.pronto/proto-baseline.json`), "null\n");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
 
 Deno.test("lint's history input follows the comparison ref, including packed refs", async () => {
   const root = await Deno.makeTempDir({ prefix: "pronto-baseline-" });

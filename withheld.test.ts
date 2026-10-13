@@ -61,6 +61,7 @@ Deno.test("the git input carries a subdir in a monorepo and none at a repo root"
 const run = (cwd: string) =>
   new Deno.Command("deno", {
     args: ["run", "-A", fileURLToPath(new URL("./check-proto.ts", import.meta.url)), cwd],
+    env: { CI: "true" },
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -162,6 +163,7 @@ Deno.test("a clone missing the target branch fetches it from origin", async () =
 
     await new Deno.Command("deno", {
       args: ["run", "-A", fileURLToPath(new URL("./check-proto.ts", import.meta.url)), local, "main"],
+      env: { CI: "true" },
       stdout: "piped",
       stderr: "piped",
     }).output();

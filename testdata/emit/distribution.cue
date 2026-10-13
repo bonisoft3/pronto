@@ -55,13 +55,15 @@ externalTestIncludesFacts:           list.Contains(_externalBuild.targets.test.s
 externalTestLeafDoesNotReenterGate:  strings.Contains(_externalBuild.targets.test.cmd.builtin.do, "task-leaf test") & true
 externalTestCachesPinnedRuntime:     _externalBuild.targets.test.taskfile.incremental & true
 externalChecksCopyGeneratedConfig:   (_externalBuild.targets.lint.srcs.defaultExclude["pronto-bayt"] == null) & true
-externalImageLintKeepsCompilerCheck: _externalBuild.targets.lint.cmd.builtin.dockerfile.do & "cue vet ./..."
-externalImageTestKeepsCompilerCheck: _externalBuild.targets.test.cmd.builtin.dockerfile.do & "cue vet -c ./..."
+externalImageLintKeepsCompilerCheck: _externalBuild.targets.lint.cmd.builtin.dockerfile.do & "cue vet -c ./..."
+externalImageTestUsesGeneratedInputs: _externalBuild.targets.test.cmd.builtin.dockerfile.do & "deno eval 0"
+externalLintChecksConcreteCue: _externalBuild.files["checks.yaml"].say.lint.rulemap.cue.cmds[0].do & "mise exec -- cue vet -c ./..."
+externalGenerateKeepsCheckerInputs: list.Contains(_externalBuild.targets.generate.state.globs, ".pronto/check-inputs.json") & true
 
 externalLaunchAction: _externalBuild.files["say.yaml"].say.launch.rulemap.builtin.cmds & [{use: "./bayt-task.nu", do: "bayt-task launch-action --generate"}]
 externalIntegrateAction: _externalBuild.files["say.yaml"].say.integrate.rulemap.builtin.cmds & [{use: "./bayt-task.nu", do: "bayt-task integrate-action --generate"}]
 externalLaunchAlwaysRuns:     _externalBuild.targets["launch-action"].taskfile.incremental & false
-externalIntegrateAlwaysRuns:  _externalBuild.targets["integrate-action"].taskfile.incremental & false
+externalIntegrateAlwaysRuns: _externalBuild.targets["integrate-action"].taskfile.incremental & false
 externalVisualRunsTask:       _externalBuild.targets["ci-visual"].dockerfile.incremental & true
 externalVisualKeepsInjection: len(_externalBuild.targets["ci-visual"].cmd.builtin.dockerfile.inject.secrets) > 0 & true
 

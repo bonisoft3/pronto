@@ -43,22 +43,30 @@ in both layouts.
 Test fingerprints include `tests/**`, the generated check configuration and
 compiler facts. Installed-runtime tests use the cache; tests against local
 sibling runtimes run each time until those trees have declared dependency
-edges. Before lint checks its cache, an uncached `lint-inputs` target records
-the protobuf comparison ref in `.pronto/proto-baseline.json`. That file is part
+edges. In CI, before lint checks its cache, an uncached `lint-inputs` target records
+the protobuf comparison ref in `.pronto/proto-baseline.json`. Local runs record
+`null` and skip historical compatibility checks without accessing Git. That file is part
 of lint's fingerprint and excluded from generation/build/test, so moving the
 ref invalidates lint without forcing every unchanged run to execute its checks.
 The protobuf checker compares against that sampled commit, even if the ref moves
 while the checks run.
-Docker lint/test retain their existing compiler checks. Moving the full host
-rule set into those images requires a declared protobuf baseline instead of
-a live Git checkout.
+Docker lint retains concrete CUE validation. Moving the full native check set
+into those images requires a declared protobuf baseline instead of a live
+Git checkout.
 
 Launch and integration use separate native action targets so their commands do
 not become Docker build steps in the runtime service. Both run generation and the cached build
-first, then execute the original rules on every invocation. Arguments pass
-through the gate to the leaf. Integration runners invoke Task inside the
-Docker secret-injection envelope, preserving setup, teardown and failure
-verdicts; the runner action itself is uncached.
+first. Launch always executes; integration retains a successful verdict against
+the app, tests, runner source closures, generated runner graphs and invocation
+arguments. An unchanged invocation returns before Docker; `--no-cache` forces it
+to execute. Arguments pass through the gate to the leaf. Integration runners
+invoke Task inside the Docker secret-injection envelope, preserving setup,
+teardown and failure verdicts; the runner action itself is uncached.
+
+Build checks at the same priority share one integration invocation. Bake runs
+at most two target envelopes per batch by default (`--jobs` changes the bound),
+and each retains its own named stack and database. A failed batch stops the
+remaining batches. Priority boundaries stay ordered.
 
 ## The ladder
 
@@ -105,6 +113,12 @@ two sets, over the kinds and by the rule [SPEC](../SPEC.md#programcue) states.
 
 ## Emission
 
+- Generation writes `.pronto/check-inputs.json` with the type table, evaluated entities,
+  hatches, raw migrations and DuckStreams used by identity, SQL and proto
+  checks. Those checks read this compiler output; they do not evaluate CUE.
+  The generation gate restores missing checker inputs, and lint retains
+  concrete CUE validation (`cue vet -c ./...`). Identity minting still evaluates
+  the source before and after stamping it.
 - **The manifest is part of the program.** The export yields `manifest`, every
   emitted path sorted, and `files`, path → `{format, text | data | src}`: raw
   formats render to strings in CUE, structured ones stay structs for the

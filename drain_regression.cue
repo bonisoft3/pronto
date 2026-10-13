@@ -30,3 +30,12 @@ _drainAuthed: (#rpkDrain & {
 }).out
 
 _drainAuthed: output: http_client: headers: Authorization: "Bearer ${SERVICE_JWT}"
+
+_drainIdle: pipeline: threads: 1
+_drainIdle: output: http_client: {
+	max_in_flight: 1
+	batching: {
+		period: "1s"
+		processors: [{archive: format: "json_array"}, {mapping: "root = this.index(0)"}]
+	}
+}

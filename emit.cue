@@ -1753,7 +1753,7 @@ _cdcBeforeField: "__before"
 				}
 			}
 			buildCmd: [if sources.pronto != "" {_distribution.write}, "./saytw build"][0]
-			testCmd: "cue vet -c ./..."
+			testCmd: "deno eval 0"
 			pipelineFiles: [for n, _ in (#streams & {code: D.code}).out {"docker/\(D.code.meta.name)-\(n).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop
 			// routes each to the verb it names. A name collision across the two
@@ -1870,6 +1870,7 @@ _cdcBeforeField: "__before"
 				}
 			}
 			sayYaml: say: {
+				lint: rulemap: cue: cmds: [{do: "mise exec -- cue vet -c ./..."}]
 				build: _distribution.say.say.build
 				generate: rulemap: {
 					pronto: _distribution.say.say.generate.rulemap.pronto
@@ -2311,8 +2312,23 @@ _cdcBeforeField: "__before"
 	// The build graph is the fifth (see #DefaultBuild); its resolved value
 	// is emitted as bayt.json for the bayt.cue stub to embed.
 	build!: _
-	// A check the build graph runs beside the stack is the loop's to schedule.
-	loop: surface: checks: {for name, c in E.build.checks {(name): c.rule}}
+	_integrationPriorities: {for _, c in E.build.checks {
+		let p = [if c.priority != _|_ {c.priority}, 0][0]
+		("\(p)"): p
+	}}
+	// Share orchestration within a priority; each runner still owns its stack.
+	loop: surface: checks: {for _, p in _integrationPriorities {
+		let names = list.SortStrings([for name, c in E.build.checks
+			if [if c.priority != _|_ {c.priority}, 0][0] == p {name}])
+		("pronto-integrate-\(p)"): {
+			verb: "integrate"
+			priority: p
+			cmds: [(omnishell.#BkidCheck & {
+				runner: strings.Join([for name in names {"ci-\(name)"}], ",")
+			}).out]
+			note: strings.Join([for name in names {E.build.checks[name].note}], "; ")
+		}
+	}}
 
 	_hatchSeam: [
 		if len(E.code.capabilities.hatches) > 0 {
@@ -2731,6 +2747,17 @@ _cdcBeforeField: "__before"
 		}
 	}
 	files: {
+		".pronto/check-inputs.json": {
+			format: "json"
+			data: {
+				version: 1
+				types: {types: #types, aliases: #typeAlias}
+				entities: E.code.state.entities
+				hatches: E.code.capabilities.hatches
+				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
+				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
+			}
+		}
 		"schema/entities.proto": {
 			format: "proto"
 			data:   E.code.state.entities

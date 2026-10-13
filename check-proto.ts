@@ -30,13 +30,15 @@
 // Findings print as {severity, path, message} JSON (SPEC.md lint format);
 // exit 1 when any error is reported.
 
-import { exportJson } from "./cue.ts";
+import { readCheckInputs } from "./check-inputs.ts";
 type Finding = { severity: "error" | "advisory"; path: string; message: string };
 
 type Hatch = { kind: string; files?: string[]; note: string };
 
 /** Where the comparison looks when nothing says otherwise. */
 const DEFAULT_BRANCH = "main";
+
+export const historyChecksEnabled = (ci: string | undefined) => ci !== undefined && ci !== "" && ci !== "0" && ci.toLowerCase() !== "false";
 
 async function git(appDir: string, ...args: string[]): Promise<string> {
   const out = await new Deno.Command("git", { args, cwd: appDir, stdout: "piped", stderr: "piped" }).output();
@@ -93,9 +95,8 @@ export function findings(stdout: string): Finding[] {
 export async function protoBaseline(appDir: string, branch = DEFAULT_BRANCH): Promise<string | null> {
   // Some absences are answers and some are failures. All are settled
   // before the hatches are read: whether git can answer at all does not depend
-  // on what the app declares, and asking first keeps the failure about the
-  // missing repository rather than about a CUE export that ran in a tree the
-  // comparison was never going to be able to grade.
+  // on what the app declares, so a missing repository fails before reading
+  // checker inputs for a comparison that cannot run.
   //
   // No repository at all is a missing precondition: the comparison is against
   // git history, so somewhere without git cannot produce a verdict. It has to
@@ -169,7 +170,7 @@ async function main(appDir: string, branch: string) {
     return;
   }
 
-  const hatches = await exportJson<Record<string, Hatch>>(appDir, "code.capabilities.hatches");
+  const { hatches } = await readCheckInputs<unknown, Hatch>(appDir);
   const skip = withheld(hatches);
 
   const commonDir = await git(appDir, "rev-parse", "--path-format=absolute", "--git-common-dir");
@@ -215,12 +216,15 @@ async function main(appDir: string, branch: string) {
 }
 
 if (import.meta.main) {
+  const enabled = historyChecksEnabled(Deno.env.get("CI"));
   if (Deno.args[0] === "--baseline") {
     const appDir = Deno.args[1] ?? ".";
-    const baseline = JSON.stringify(await protoBaseline(appDir)) + "\n";
+    const baseline = JSON.stringify(enabled ? await protoBaseline(appDir) : null) + "\n";
     await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
     await Deno.writeTextFile(`${appDir}/.pronto/proto-baseline.json`, baseline);
-  } else {
+  } else if (enabled) {
     await main(Deno.args[0] ?? ".", Deno.args[1] ?? DEFAULT_BRANCH);
+  } else {
+    console.log("[]");
   }
 }

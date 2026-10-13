@@ -10,8 +10,10 @@
 // docs/types-and-identity.md#identity, "Identity is append-only, and no model
 // mints it".
 
-import { boundTypes, boundCarriers } from "./type-table.ts";
+import { boundTypes } from "./type-table.ts";
+import { types, type Types } from "./portable-types.ts";
 import { exportJson } from "./cue.ts";
+import { readCheckInputs } from "./check-inputs.ts";
 import { ifMissing } from "./missing.ts";
 
 export type FieldId = { name: string; type: string; retired: boolean; precision?: number; scale?: number };
@@ -42,8 +44,7 @@ export function identitiesOf(entities: ProgramEntity[]): Identities {
 /** Everything the snapshot holds must still be in the program, under any label
  * and with the type it had: a rename is free, a disappearance and a retyping
  * are not. */
-export function lost(snapshot: Identities, program: Identities): Finding[] {
-  const types = boundTypes();
+export function lost(snapshot: Identities, program: Identities, typeProfile: Pick<Types, "canonicalType"> = boundTypes()): Finding[] {
   const findings: Finding[] = [];
   for (const [id, was] of Object.entries(snapshot)) {
     const now = program[id];
@@ -55,7 +56,7 @@ export function lost(snapshot: Identities, program: Identities): Finding[] {
       const kept = now.fields[ordinal];
       if (kept === undefined) {
         findings.push({ severity: "error", path: "program.cue", message: `${now.name} lost ordinal ${ordinal} (was "${field.name}"): mark it retired instead` });
-      } else if (types.canonicalType(kept.type) !== types.canonicalType(field.type)) {
+      } else if (typeProfile.canonicalType(kept.type) !== typeProfile.canonicalType(field.type)) {
         findings.push({ severity: "error", path: "program.cue", message: `${now.name}.${kept.name} (ordinal ${ordinal}) was ${field.type} and is ${kept.type}: a type change is a retirement beside an addition` });
       } else if (field.precision !== undefined && (kept.precision !== field.precision || kept.scale !== field.scale)) {
         findings.push({ severity: "error", path: "program.cue", message: `${now.name}.${kept.name}: decimal precision/scale changed` });
@@ -214,7 +215,8 @@ async function mint(appDir: string): Promise<void> {
 }
 
 async function check(appDir: string): Promise<void> {
-  const entities = await exportEntities(appDir);
+  const inputs = await readCheckInputs<ProgramEntity>(appDir);
+  const entities = Object.values(inputs.entities);
   const program = identitiesOf(entities);
   const snapshot = await readSnapshot(appDir);
   const findings: Finding[] = [...collisions(entities)];
@@ -231,7 +233,7 @@ async function check(appDir: string): Promise<void> {
       findings.push({ severity: "error", path: SNAPSHOT, message: "the program carries identities and no snapshot records them: only mint writes ids" });
     }
   } else {
-    findings.push(...lost(snapshot, program));
+    findings.push(...lost(snapshot, program, types(inputs.types)));
     for (const [id, e] of Object.entries(program)) {
       const known = snapshot[id];
       const fresh = known === undefined ? Object.keys(e.fields) : Object.keys(e.fields).filter((o) => known.fields[o] === undefined);
