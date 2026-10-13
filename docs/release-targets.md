@@ -1,7 +1,7 @@
 ---
 type: concept
 title: Release targets
-description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages and cloudflare (PGlite in one Durable Object) are built, and the clouds and k8s are designed."
+description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, and docker are built, and the clouds and k8s are designed."
 ---
 
 # Release targets
@@ -11,9 +11,10 @@ emitter projects each into a rule of sayt's `release` verb on the platform of
 the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
-carries the whole app on one tier of mecha's ladder. `pages` and `cloudflare`
-are built, `cloudflare` for guests and without derivations. `gcp`, `aws`,
-`azure` and `k8s` are designed and [not built](../PENDING.md#release-targets). How an author releases an app is
+carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare` and
+`docker` are built, `cloudflare` for guests and without derivations, `docker` as
+a single-container standalone appliance. `gcp`, `aws`, `azure` and `k8s` are
+designed and [not built](../PENDING.md#release-targets). How an author releases an app is
 [the guide's](../GUIDE.md#release).
 
 ## Targets, platforms and tiers
@@ -22,14 +23,14 @@ are built, `cloudflare` for guests and without derivations. `gcp`, `aws`,
   `@`. `release` and `verify` default to `preview`.
 - A pronto **target** is a place a program is released to and verified
   against: `#Target` in `schema.cue`, which admits `pages`, `cloudflare`,
-  `gcp` and `aws`, and not `azure` or `k8s`.
+  `docker`, `gcp` and `aws`, and not `azure` or `k8s`.
 - A mecha **tier** is what the cluster is made of there. The ladder is
   mecha's: browser, CLI, single machine, k8s, cloud and edge
   ([invariant 4](../../../libraries/mecha/README.md#4-vertical-scalability-down-and-up)).
-  pronto's `#Tier` names four of its rungs — `browser`, `edge`, `container`,
-  which is mecha's single machine, and `cloud` — and the browser and the
-  container are built. `container` is where every app develops and is no
-  target, and it is the one word the emitter reads: the SQL fence `-- tier:
+  pronto's `#Tier` names five of its rungs — `browser`, `edge`, `container`,
+  which is mecha's single machine, `k8s`, and `cloud` — and the browser, the
+  edge, and the container are built. `container` is where every app develops,
+  and for release it is the `docker` target: the SQL fence `-- tier:
   container` … `-- tier: any` around the publication and the replica identity,
   the statements that need a WAL reader
   ([the fence](../../../libraries/mecha/docs/browser.md#the-fence)).
@@ -38,6 +39,7 @@ are built, `cloudflare` for guests and without derivations. `gcp`, `aws`,
 |---|---|---|---|
 | `pages` | browser | one HTML file | none: the page's fetch shim |
 | `cloudflare` | edge | a Worker, one Durable Object running PGlite, and the data directory it loads | the Worker |
+| `docker` | container | single-container appliance image running postgres, crud, caddy, auth, and process-compose | caddy on port 8080 |
 | `gcp`, `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
 | `k8s` | k8s | skaffold's manifests | caddy in the named cluster |
 
@@ -311,6 +313,44 @@ truco keeps the previous target until the edge has a clock: a Worker over a
 Durable Object holding its tables in native SQLite ([`cloudflare.ts`](../bundle/cloudflare.ts)),
 whose alarm sweeps its lobby, and which enforces no scope. The emitter routes
 it there by name ([pending](../PENDING.md#release-targets)).
+
+## docker
+
+`sayt release@docker` packages the container tier into a single-container
+appliance image running under process-compose: PostgreSQL 18, PostgREST (`crud`),
+Caddy as reverse proxy and static asset server, and, when `capabilities.auth` is
+configured, Deno running the app's `auth` service.
+
+What fixes its shape:
+
+- **Single self-contained image.** The appliance inherits OpenSUSE Tumbleweed,
+  PostgreSQL 18 with ICU collations (`--locale-provider=icu --icu-locale=und`),
+  `setpriv`, PostgREST, Caddy and `process-compose`. When `capabilities.auth` is
+  enabled, the Deno binary and cached `/deno-dir` are copied into the image and
+  run alongside the other services.
+- **Loopback networking.** Internal services communicate over loopback.
+  `appliance-entrypoint.sh` appends `127.0.0.1 crud database auth` to
+  `/etc/hosts` before launching `process-compose`, so internal HTTP and database
+  references resolve without external DNS service discovery.
+- **Idempotent schema upgrades on existing volumes.** `docker-entrypoint.sh`
+  initializes fresh `PGDATA` databases or inspects existing volumes. A dedicated
+  ledger table, `_pronto_migrations`, records applied migration scripts. On a
+  volume mounted from an earlier release, pending migrations run in order while
+  seed scripts are skipped.
+- **Startup isolation.** `pg_ctl` runs with `listen_addresses=''` during initial
+  setup and migration runs, ensuring Postgres is only reachable over its Unix
+  domain socket until all migrations finish. External clients and readiness
+  probes see Postgres only once the final `postgres` daemon binds network
+  interfaces.
+- **Electric shape fallback.** For apps using Electric sync, Caddy intercepts
+  `/electric/*` requests and responds with a static up-to-date control shape
+  (`[{"headers":{"control":"up-to-date"}}]` with `electric-offset: 0_0` and
+  `electric-up-to-date: true`). Browser sync engines settle cleanly in
+  standalone mode without requiring a full live replication cluster.
+- **Image tagging and publication.** Distribution tasks derive the OCI image tag
+  by stripping any path prefix from the monorepo release tag (`$tag | path basename`),
+  defaulting publication to `ghcr.io/bonisoft3/<app>:<tag>` or the registry
+  configured via `${BAYT_DOCKER_REPOSITORY}` and `${BAYT_IMAGE_TAG}`.
 
 ## The clouds and k8s
 

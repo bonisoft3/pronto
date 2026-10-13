@@ -1680,6 +1680,15 @@ _cdcBeforeField: "__before"
 						}
 					}
 				}
+				if list.Contains(D.code.meta.targets, "docker") {
+					docker: {
+						verb:     "release"
+						platform: "docker"
+						note:     "Pronto release@docker"
+						cmds: [_distribution.docker]
+						publish: [_distribution.publishDocker]
+					}
+				}
 			}
 			checks: {
 				for name, c in D.cluster.surface.checks {(name): c}
@@ -1781,6 +1790,7 @@ _cdcBeforeField: "__before"
 			if local {pronto: D.loop.surface.sources.pronto}
 			generateCmd: (distribution.#Project & {runtime: "\(D.loop.surface.sources.pronto)"}).compiler
 			testCmd:  D.loop.surface.testCmd
+			targets:  D.code.meta.targets
 		}
 	}
 }

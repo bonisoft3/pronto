@@ -19,8 +19,8 @@ import (
 
 // A target is where a program is released; a tier, a rung of mecha's ladder
 // (docs/release-targets.md#targets-platforms-and-tiers).
-#Target: "pages" | "cloudflare" | "gcp" | "aws"
-#Tier:   "browser" | "edge" | "container" | "cloud"
+#Target: "pages" | "cloudflare" | "docker" | "k8s" | "gcp" | "aws"
+#Tier:   "browser" | "edge" | "container" | "k8s" | "cloud"
 
 // A path relative to the app directory, resolved by derive and by the
 // terminal's module loader. No scheme and no `..`: the source is read from the

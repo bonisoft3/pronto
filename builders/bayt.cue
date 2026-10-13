@@ -22,6 +22,7 @@ import (
 	mise "github.com/bonisoft3/bayt/stacks/mise"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
+	zypper "github.com/bonisoft3/bayt/distros/zypper"
 )
 
 // bayt's own project schema, re-exported so a compiler (or anyone) can
@@ -58,6 +59,7 @@ import (
 		pronto:      *"../../plugins/pronto" | string
 		generateCmd: string
 		testCmd:     string
+		targets:     *[] | [...string]
 	}
 	// The runtime, as the cluster states it: one bayt target per service,
 	// with bare names, lowered into this project by mecha's own #Runtime.
@@ -484,6 +486,89 @@ import (
 					#closure: "check-\(name)"
 					#check:   name
 					deps: list.Concat([[":check-\(name):srcs", ":check-\(name):bayt"], B._stackSrcs])
+				}
+			}
+			if list.Contains(B.meta.targets, "docker") && B.cluster.capabilities.server {
+				"release-docker": {
+					activate: ""
+					deps: list.Concat([
+						[":database", ":crud", ":caddy"],
+						if B.cluster.capabilities.auth {[":auth"]},
+					])
+					srcs: globs: [".bayt/process-compose.yaml"]
+					compose: {
+						manual: true
+						ports: ["8080:8080"]
+						image: "${BAYT_DOCKER_REPOSITORY:-ghcr.io/bonisoft3/\(B.meta.app)}:${BAYT_IMAGE_TAG:-latest}"
+					}
+					dockerfile: {
+						from: name: core.lock.images.leap
+						defaultPreamble: "zypper-postgres": (zypper.#install & {
+							pkgs: [
+								"postgresql18-server=18.6-160000.1.1",
+								"postgresql18-contrib=18.6-160000.1.1",
+								"libopenssl3=3.5.0-160000.10.1",
+								"findutils=4.10.0-160000.2.2",
+							]
+							then: [
+								"rm -rf /usr/lib/locale/*",
+								"mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql",
+							]
+						}).out
+						add: [{
+							platforms: {
+								amd64: {
+									url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_amd64.tar.gz"
+									checksum: "sha256:9b6dbc38324c0b0481f1cd1dd828ffdc78117129ec797678f4bf8c4023311281"
+								}
+								arm64: {
+									url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_arm64.tar.gz"
+									checksum: "sha256:52fa7d5a2d5e0db470faec5976204fc215ed7e3d13689e930cf522becfb63778"
+								}
+							}
+							dest:   "/usr/local/bin/process-compose"
+							unpack: true
+						}]
+						copy: list.Concat([
+							[
+								{from: {name: core.lock.images.microcheck}, srcs: ["/bin/httpcheck"], dst: "/usr/local/bin/httpcheck"},
+								{from: {name: core.lock.images.microcheck}, srcs: ["/bin/portcheck"], dst: "/usr/local/bin/portcheck"},
+								{from: {ref: ":database"}, srcs: ["/docker-entrypoint-initdb.d"], dst: "/docker-entrypoint-initdb.d"},
+								{from: {ref: ":crud"}, srcs: ["/usr/bin/postgrest"], dst: "/usr/local/bin/postgrest"},
+								{from: {ref: ":caddy"}, srcs: ["/usr/bin/caddy"], dst: "/usr/bin/caddy"},
+								{from: {ref: ":caddy"}, srcs: ["/etc/caddy/Caddyfile"], dst: "/etc/caddy/Caddyfile"},
+								{from: {ref: ":caddy"}, srcs: ["/srv"], dst: "/srv"},
+								{from: {ref: ":caddy"}, srcs: ["/omnishell"], dst: "/omnishell"},
+								{srcs: [".bayt/process-compose.yaml"], dst: "/.bayt/process-compose.yaml"},
+							],
+							if B.cluster.capabilities.auth {[
+								{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"},
+								{from: {ref: ":auth"}, srcs: ["/app"], dst: "/app"},
+								{from: {ref: ":auth"}, srcs: ["/deno-dir"], dst: "/deno-dir"},
+							]},
+						])
+						preamble: list.Concat([
+							[
+								"ENV PATH=/usr/lib/postgresql18/bin:/usr/local/bin:$PATH",
+								"ENV PGDATA=/var/lib/pgsql/data",
+								"ENV ORIGIN=http://localhost:8080",
+								"ENV CADDY_TLS_HOST_PORT=8080",
+							],
+							if B.cluster.capabilities.auth {[
+								"ENV DENO_DIR=/deno-dir",
+							]},
+						])
+						epilogue: [
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'export PGDATA="${PGDATA:-/var/lib/pgsql/data}"' 'export POSTGRES_DB="${POSTGRES_DB:-\#(B.meta.app)}"' 'export PATH="/usr/lib/postgresql18/bin:$PATH"' 'q=$(printf "\047")' 'if [ ! -s "$PGDATA/PG_VERSION" ]; then' '  mkdir -p "$PGDATA" /run/postgresql' '  chown -R postgres:postgres "$PGDATA" /run/postgresql' '  setpriv --reuid=postgres --regid=postgres --clear-groups initdb -D "$PGDATA" --no-sync --encoding=UTF8 --auth=trust --locale-provider=icu --icu-locale=und --locale=C' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\''" start' '  if [ "$POSTGRES_DB" != "postgres" ]; then setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\""; fi' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      echo "Applying $f..."' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '      base=$(basename "$f")' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q) ON CONFLICT DO NOTHING"' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'else' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\''" start' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      base=$(basename "$f")' '      case "$base" in *seed*) continue;; esac' '      applied=$(setpriv --reuid=postgres --regid=postgres --clear-groups psql -t -A -U postgres -d "$POSTGRES_DB" -c "SELECT count(*) FROM _pronto_migrations WHERE name = $q$base$q")' '      if [ "$applied" = "0" ]; then' '        echo "Applying pending migration $f..."' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q)"' '      fi' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'fi' 'if [ "$1" = "postgres" ]; then shift; fi' 'exec setpriv --reuid=postgres --regid=postgres --clear-groups postgres -D "$PGDATA" -c listen_addresses=127.0.0.1 "$@"' > /usr/local/bin/docker-entrypoint.sh && chmod 755 /usr/local/bin/docker-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'if [ "$1" = "microcheck" ]; then' '  shift' '  exec "$@"' 'fi' 'exec "$@"' > /usr/local/bin/bayt && chmod 755 /usr/local/bin/bayt"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if ! grep -q "crud" /etc/hosts 2>/dev/null; then' '  echo "127.0.0.1 crud database auth" >> /etc/hosts 2>/dev/null || true' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
+							"RUN if [ -f /srv/shell/index.html ] && [ ! -f /srv/index.html ]; then ln -sf /srv/shell/index.html /srv/index.html; fi",
+							"RUN sed -i '/handle @rendered {/,/^[[:space:]]*}[[:space:]]*$/d' /etc/caddy/Caddyfile",
+							#"RUN awk '/handle \/electric\/\* \{/{p=1; print "  handle /electric/* {\n    header Content-Type application/json\n    header electric-offset 0_0\n    header electric-up-to-date true\n    respond `[{\"headers\":{\"control\":\"up-to-date\"}}]` 200\n  }"; next} p && /^  \}/{p=0; next} !p{print}' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile"#,
+						]
+						entrypoint: ["/usr/local/bin/appliance-entrypoint.sh"]
+						cmd: ["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml", "-t=false", "--no-server"]
+					}
 				}
 			}
 		}
