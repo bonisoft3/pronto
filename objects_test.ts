@@ -1,6 +1,7 @@
 // The bijection's program side: what a program claims the ir carries, and which
 // claims are owed. Presence is by reach (decisions/2026-08-27-review-by-consequence.md):
 // a tab row is machine-checked only; device or above owes an element.
+import { fileURLToPath } from "node:url";
 import { assertEquals, assertThrows } from "jsr:@std/assert@1.0.11";
 import { chartDeclarations, declarations, handlersOwed, KINDS, reachOf } from "./objects.ts";
 
@@ -87,9 +88,9 @@ Deno.test("pronto's durability-to-level table is the terminal's", async () => {
     if (!out.success) throw new Error(new TextDecoder().decode(out.stderr));
     return JSON.parse(new TextDecoder().decode(out.stdout));
   };
-  const here = new URL(".", import.meta.url).pathname;
+  const here = fileURLToPath(new URL(".", import.meta.url));
   const ours = await run(here, ["export", ".:pronto", "-e", "#DurabilityEffectLevel", "--out", "json"]);
-  const theirs = await run(`${here}../omnishell`, ["export", ".:terminal", "-e", "#Machine.#DurabilityEffectLevel", "--out", "json"]);
+  const theirs = await run(fileURLToPath(new URL("../omnishell", import.meta.url)), ["export", ".:terminal", "-e", "#Machine.#DurabilityEffectLevel", "--out", "json"]);
   assertEquals(ours, theirs);
 });
 

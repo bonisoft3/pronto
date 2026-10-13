@@ -195,7 +195,7 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       const currentPlatform = `${platformOs[Deno.build.os]}-${platformArch[Deno.build.arch]}`;
       assert(!currentPlatform.includes("undefined"), `mise has no fixture platform for ${Deno.build.os}-${Deno.build.arch}`);
       const runMise = async (args: string[], commandEnv: Record<string, string> = {}): Promise<void> => {
-        const result = await new Deno.Command("mise", { args, cwd: app, env: commandEnv, stdout: "piped", stderr: "piped" }).output();
+        const result = await new Deno.Command("mise", { args, cwd: app, env: { MISE_LOCKED: "0", ...commandEnv }, stdout: "piped", stderr: "piped" }).output();
         assert(result.success, `${args.join(" ")}: ${decoder.decode(result.stderr)}`);
       };
       // The consumer is locked. Resolve and install only the released tool
