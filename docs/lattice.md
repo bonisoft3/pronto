@@ -46,7 +46,7 @@ query instead refetches on authorized dependency notifications, without
 retaining all dependency rows. `offline` keeps the existing eager collection
 behavior. Validations, access rules and folds can independently require local
 collections; those costs belong to those features rather than to a server read.
-See [[screens#The reads decide how a table syncs]] and
+See [[screens#The reads decide how a table is read]] and
 [[../../omnishell/docs/data#A region's rows]].
 
 ## Views, folds and the DOM
@@ -94,8 +94,9 @@ patching keyed nodes. Keyed and commutative per key is what lets the outbox
 replay and a `put` be stated twice.
 
 - **Read any relation; write only base facts.** Views are never written, and a
-  write goes to an address read or minted. The declared writer is `writers:`,
-  which nothing reads yet ([pending](../PENDING.md#the-lattice)).
+  write goes to an address read or minted. The writers are derived
+  (`writers.cue`) and shown on the entity's card; nothing enforces them
+  ([pending](../PENDING.md#the-lattice)).
 - **An address is not a capability.** Every write passes the store, which
   refuses a table it does not hold and runs the entity's validations, and at
   the cluster rungs the policies ([access](access.md)).
@@ -118,10 +119,10 @@ replay and a `put` be stated twice.
 | durability × seed, partial unique | `#Entity`: `device` refuses `seed`; a unique's `where` only below the cluster | yes, `cue vet` |
 | durability × validation edge | `validations.ts`: a cluster entity's edge to a `tab` or `device` one | yes, when `derive.ts` runs |
 | durability × schedule | `_scheduleShape`: `emits` is `server`, `done` is another, `live` entity | yes, `cue vet` |
-| durability × sync | `#App.#sync` (`sync.cue`): `offline` is eager, a browser rung has no mode, an authored mode the rule contradicts fails to unify | yes, `cue vet` |
+| durability × read | `#App.#read` (`read.cue`): `offline` is eager, a browser rung has no mode, an authored mode the rule contradicts fails to unify | yes, `cue vet` |
 | target × program | `_pagesBundle` ([release targets](release-targets.md)) | yes, `cue vet` |
-| effect level × `refused` arrow | `machineLint`, for an effect stating level 2; one naming no level escapes | partly, at lint ([machines](../../omnishell/docs/machines.md#effects)) |
-| durability × effect level | `#DurabilityEffectLevel`, in `schema.cue` and omnishell's `machine.cue` | no ([pending](../PENDING.md#the-lattice)) |
+| effect level × `refused` arrow | `machineLint` reads the effect target's durability from `shell.yaml`; every compensable effect owes the arrow | yes, at lint ([[../../omnishell/docs/machines#Effects\|machines]]) |
+| durability × effect level | `#Entity.level` derives from `#DurabilityEffectLevel`; a machine invoking an external effect has level 4; chart effects carry no authored level | yes, by derivation |
 | posing × effect | omnishell's posing (`test/storybook-battery.ts`, run over every app by `test/universal-storybook.test.ts`) mounts each chart state with handlers off over a store that refuses every write ([machine harnesses](../../omnishell/docs/machines.md#machine-harnesses)) | yes, in omnishell's own tests |
 | effect level × fuel | `FuelMeter.spendEffect` ([fuel](../../omnishell/docs/automated-tests-battery.md#fuel)) | where a harness calls it |
 | effect level × test layer | nothing picks where an arrow is proven from its level | no |
@@ -146,9 +147,9 @@ CEL has the `CHECK` rungs because it is expression-only and compiles to SQL;
 Jessie has closures and needs a runtime. Set membership is ahead of time, so
 it costs a race and write amplification; a validation checks at the write
 with nothing precomputed and pays with two engines. An app picks by whether
-the set is worth materializing. A validation is declared like a `cel:`, beside
-its entity, and named like a unique, because the name is the refusal that
-reaches the screen; its neighbourhood is the references the schema declares
+the set is worth materializing. A validation is a named guard on the entity's lifecycle machine, selected by
+its insert, update or delete transition. Its name is the refusal that reaches
+the screen; its neighbourhood is the references the schema declares
 (`via`). Its signature is the reduce's, `(state, event)`, so a reduce, a guard
 and a validation are one grammar in three positions.
 

@@ -2,9 +2,9 @@
 // the reader. The query is the thing under test: every case here is one a
 // migration can produce and a text pass cannot see.
 
-import { assertEquals } from "jsr:@std/assert@1";
+import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { fileURLToPath } from "node:url";
-import { targetService, forgivable, locate, pgrollMigrations, plain } from "./check-replay.ts";
+import { targetService, locate, pgrollMigrations, plain, fixtureDefinitions, replacementFindings, compareCatalogs, type Column } from "./check-replay.ts";
 
 type Row = { step: number; mig: string; rel: number; tbl: string; col: string; typ: string; ordinal: number };
 type Finding = { severity: string; path: string | null; message: string };
@@ -127,18 +127,6 @@ Deno.test("the migration that drops the last table is still named", async () => 
   assertEquals(found[0].path, "b_drops_everything.sql");
 });
 
-Deno.test("the second pass forgives a duplicate domain and cast, and nothing else", () => {
-  // Every one of these says "already exists", which is why matching that alone
-  // forgave the two that must not be: a CREATE FUNCTION without OR REPLACE and
-  // a CREATE TABLE are ordinary non-idempotent statements, and the exemption is
-  // for constructs with no IF NOT EXISTS spelling at all. Messages measured
-  // against the app's own database image.
-  assertEquals(forgivable('ERROR:  type "portable_email" already exists'), true);
-  assertEquals(forgivable("ERROR:  cast from type portable_email to type text already exists"), true);
-  assertEquals(forgivable('ERROR:  function "f" already exists with same argument types'), false);
-  assertEquals(forgivable('ERROR:  relation "article" already exists'), false);
-});
-
 Deno.test("the database service is picked by build context, not by name alone", () => {
   // The cluster an app instantiates declares a database of its own under a
   // name ending the same way; only one of the two is built out of this
@@ -213,4 +201,36 @@ Deno.test("a finding lands on the app's own file when it has one", async () => {
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+});
+
+const column = (table: string, rel = 1, kind = "r", col = "id", typ = "integer"): Column => ({ tbl: table, rel, kind, col, typ, ordinal: 1 });
+
+Deno.test("retained projections are explicit and retain their reader columns", () => {
+  const before = [column("feed")];
+  const declaration = { feed: { kind: "view" as const, note: "computed from retained source rows" } };
+  assertEquals(replacementFindings(before, [column("feed", 2, "v")], declaration, "fixture"), []);
+  assertEquals(replacementFindings(before, [], declaration, "fixture").length > 0, true);
+  assertEquals(replacementFindings(before, [column("feed", 2, "r")], declaration, "fixture").length > 0, true);
+  assertEquals(replacementFindings(before, [column("feed", 2, "v", "id", "text")], declaration, "fixture").length > 0, true);
+  assertEquals(replacementFindings([], [column("feed", 2, "v")], declaration, "fixture").length > 0, true);
+});
+
+Deno.test("a retained view disappearing is a reader loss; unrelated table replacement still fails", async () => {
+  const before = [column("feed", 1, "v"), column("account", 2)];
+  const missingView = await compareCatalogs(before, [column("account", 2)], "upgrade");
+  assertEquals(missingView.length, 1);
+  assertEquals(missingView[0].message.includes("feed"), true);
+  const recreated = await compareCatalogs(before, [column("feed", 1, "v"), column("account", 3)], "upgrade");
+  assertEquals(recreated.length, 1);
+  assertEquals(recreated[0].message.includes("dropped and recreated"), true);
+  assertEquals(await compareCatalogs([], [], "empty"), []);
+});
+
+Deno.test("retained fixture typos cannot silently remove upgrade coverage", () => {
+  const fixture = { name: "feed", omitInitdb: ["020_view.sql"], through: "010_previous", seed: "tests/replay/seed.sql", verify: "tests/replay/verify.sql", replacements: {} };
+  assertEquals(fixtureDefinitions([fixture]), [fixture]);
+  assertThrows(() => fixtureDefinitions([{ ...fixture, verification: "ignored.sql" }]));
+  assertThrows(() => fixtureDefinitions([fixture, fixture]));
+  assertThrows(() => fixtureDefinitions([{ ...fixture, seed: "tests/../../seed.sql" }]));
+  assertThrows(() => fixtureDefinitions([{ ...fixture, replacements: { feed: { kind: "view", note: "" } } }]));
 });

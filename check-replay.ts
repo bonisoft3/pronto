@@ -3,45 +3,16 @@
 //   deno run --allow-read --allow-write --allow-run --allow-env \
 //     ../../plugins/pronto/check-replay.ts <appDir>
 //
-// Applies the app's migrations one at a time into an empty database, asks the
-// catalog what the schema is after each, and hands the states to DuckDB, which
-// compares every step against the one before it (replay.sql).
+// Fresh initdb and the migration runner build a database once. A second run
+// of that runner must leave its schema, rows and ledger unchanged. Retained
+// fixtures exercise upgrades and compare their catalogs through replay.sql;
+// intermediate bootstrap tables have never been exposed to a reader.
 //
-// It exists because neither text pass can see this. squawk reads statements and
-// is blind inside a DO $$ ... $$ block — a rename, a dropped column and a
-// dropped table hidden in one produce no findings, where the same three bare
-// produce eight — and buf reads the emitted proto, which an escape-hatch
-// migration never touches. A catalog state does not care how it was reached, so
-// a rename spelled by dynamic EXECUTE lands here like a plain one.
-//
-// It also applies the set a second time, which is the other thing no reader of
-// the text finds: a step that cannot be applied twice never lets a correction
-// below it reach a database that already exists. The emitter restates its
-// objects (DROP POLICY IF EXISTS before CREATE POLICY, CREATE OR REPLACE,
-// DROP TRIGGER IF EXISTS).
-//
-// The database is the app's own image, resolved through the generated compose
-// rather than named here: it is the one carrying plv8, and its name is the
-// project's, which differs between this monorepo and the repo an app is
-// copybara'd into.
-//
-// This runs on `integrate`, the verb whose bayt target brings the stack up, so
-// the image it grades is the one this tree just produced. That is why nothing
-// here asks whether the image is current: an image older than the migrations
-// beside it makes every finding a statement about a schema nobody would deploy,
-// and the verb that builds it is what rules that out rather than a comparison
-// that would be re-deriving the build graph's job. Its absence is still a
-// precondition failure rather than a clean bill of health.
-//
-// What is the cluster's about that database — which target runs it, and where
-// its image applies scripts from; which target applies the pgroll migrations,
-// where its image holds them, and the name the baseline takes — is read from
-// `cluster.surface.schema`, which mecha publishes. This pass replays what a
-// cluster declares; it does not know how mecha lays an image out, and a second
-// copy of that layout here is exactly the thing that would rot without anyone
-// noticing. For the same reason the pgroll migrations are read out of the
-// migrate image and applied by the pgroll it carries: the set and the binary
-// graded are the ones the cluster runs, and no second pgroll is pinned here.
+// Compose selects the app's built images, settings and runner command;
+// cluster.surface.schema publishes their initdb and migration directories.
+// The integrate build graph ensures those images match the current source.
+// Docker runs through the host daemon, including when this checker is itself
+// in a container, so fixtures cannot depend on host bind mounts.
 //
 // Findings print as {severity, path, message} JSON (SPEC.md lint format);
 // exit 1 when any error is reported.
@@ -57,43 +28,7 @@ const here = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
 /** The scratch database the replay builds up; never the one the image seeded. */
 const REPLAY_DB = "pronto_replay";
 
-/**
- * The one step known not to survive a second application, and the reason it is
- * not a finding. Postgres has no CREATE DOMAIN IF NOT EXISTS, and the only
- * idempotent spelling hides the CREATE inside a DO block that swallows
- * duplicate_object — which also hides the domain's CHECK from squawk, where a
- * whole class of change would then pass unread. Visible and not re-appliable
- * was the trade taken (type-sql.ts); a migration ledger is what removes the
- * need to apply it twice at all.
- *
- * Every other step must survive, so this names one file rather than relaxing
- * the rule — and within that file, one condition, checked per statement. The
- * 14 domains and 42 casts here all fail the same way and are all forgiven; a
- * `CREATE FUNCTION` without `OR REPLACE` added beside them is not.
- */
-const FORGIVEN_SECOND_PASS = "services/database/migrations/004_types.sql";
-
-/**
- * The two spellings forgiven there, and nothing else that already exists.
- *
- * Postgres says "already exists" for every duplicate object, so matching that
- * alone would forgive `function "f" already exists with same argument types`
- * and `relation "t" already exists` — a CREATE FUNCTION without OR REPLACE and
- * a CREATE TABLE, neither of which has any business being unrepeatable in a
- * file exempted for lacking IF NOT EXISTS. Measured against the app's own
- * image, the domains say `type "d" already exists` and the casts `cast from
- * type a to type b already exists`; those two are the file's whole content
- * besides CREATE OR REPLACE functions, which re-apply cleanly.
- *
- * Matched on the message because psql reports the SQLSTATE only under a
- * verbosity that would put a code and a source location into every other
- * finding. Anything unmatched is reported, so the failure direction is a
- * finding too many, never one too few.
- */
-const FORGIVEN_DUPLICATE = [/^ERROR:\s+type ".+" already exists/i, /^ERROR:\s+cast from type .+ already exists/i];
-export const forgivable = (error: string) => FORGIVEN_DUPLICATE.some((p) => p.test(error));
-
-/** Named so a run interrupted before its cleanup can be swept by the next one. */
+/** Unique per run so concurrent worktrees never remove each other’s database. */
 const CONTAINER_PREFIX = "pronto-replay-";
 
 /** Where a finding about a pgroll migration sends its reader: the program. */
@@ -109,8 +44,8 @@ export function pgrollMigrations(listing: string): string[] {
 }
 
 /**
- * Columns of every ordinary table in the app's schema, as the catalog holds
- * them.
+ * Reader columns of tables and views. A view replacing a table still has a
+ * reader contract; omitting views makes that replacement look like absence.
  *
  * `rel` is the relation's oid, and it is what makes attnum readable: attnum is
  * unique and stable within one relation and says nothing across two, so a table
@@ -118,20 +53,116 @@ export function pgrollMigrations(listing: string): string[] {
  * Carrying the oid is what lets the comparison tell "this column moved" from
  * "this table is not the table that was here".
  */
-const CATALOG = `
+export const CATALOG = `
   SELECT c.oid::bigint AS rel,
          c.relname AS tbl,
+         c.relkind AS kind,
          a.attname AS col,
          format_type(a.atttypid, a.atttypmod) AS typ,
          a.attnum AS ordinal
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     JOIN pg_attribute a ON a.attrelid = c.oid
-   WHERE n.nspname = 'public' AND c.relkind IN ('r','p')
+   WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m')
      AND a.attnum > 0 AND NOT a.attisdropped
    ORDER BY c.relname, a.attnum`;
 
-type Row = { step: number; mig: string; rel: number; tbl: string; col: string; typ: string; ordinal: number };
+export type Column = { rel: number; tbl: string; kind: string; col: string; typ: string; ordinal: number };
+type Row = Column & { step: number; mig: string };
+
+type Replacement = { kind: "table" | "view" | "absent"; note: string };
+export type UpgradeFixture = {
+  name: string;
+  omitInitdb: string[];
+  through: string;
+  seed: string;
+  verify: string;
+  replacements: Record<string, Replacement>;
+};
+
+export function fixtureDefinitions(value: unknown): UpgradeFixture[] {
+  if (!Array.isArray(value)) throw new Error("tests/replay.json must be an array");
+  const names = new Set<string>();
+  for (const fixture of value) {
+    if (!fixture || typeof fixture !== "object" || Object.keys(fixture).some(k => !["name", "omitInitdb", "through", "seed", "verify", "replacements"].includes(k))) {
+      throw new Error("invalid retained fixture definition");
+    }
+    if (typeof fixture.name !== "string" || !/^[a-z0-9][a-z0-9_-]*$/.test(fixture.name) || names.has(fixture.name)) throw new Error("retained fixture needs a unique name");
+    names.add(fixture.name);
+    if (!Array.isArray(fixture.omitInitdb) || fixture.omitInitdb.some((n: unknown) => typeof n !== "string" || !/^\d{3}_[a-z0-9_]+\.sql$/.test(n))) throw new Error(`${fixture.name}: invalid omitted initdb steps`);
+    if (typeof fixture.through !== "string" || !/^[a-z0-9_]+$/.test(fixture.through)) throw new Error(`${fixture.name}: missing prior migration`);
+    for (const key of ["seed", "verify"]) {
+      if (typeof fixture[key] !== "string" || !/^tests\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.sql$/.test(fixture[key])) throw new Error(`${fixture.name}: ${key} must name a SQL fixture under tests/`);
+    }
+    if (!fixture.replacements || typeof fixture.replacements !== "object" || Array.isArray(fixture.replacements)) throw new Error(`${fixture.name}: replacements must be an object`);
+    for (const [table, declaration] of Object.entries(fixture.replacements)) {
+      const r = declaration as Replacement;
+      if (!/^[a-z][a-z0-9_]*$/.test(table) || !r || Object.keys(r).some(k => !["kind", "note"].includes(k)) || !["table", "view", "absent"].includes(r.kind) || typeof r.note !== "string" || !r.note.trim()) {
+        throw new Error(`${fixture.name}: projection replacement ${table} needs its resulting kind and rationale`);
+      }
+    }
+  }
+  return value;
+}
+
+async function loadFixtures(appDir: string): Promise<UpgradeFixture[]> {
+  const path = `${appDir}/tests/replay.json`;
+  if (!await exists(path)) return [];
+  return await Promise.all(fixtureDefinitions(JSON.parse(await Deno.readTextFile(path))).map(async f => ({
+    ...f,
+    seed: await Deno.readTextFile(`${appDir}/${f.seed}`),
+    verify: await Deno.readTextFile(`${appDir}/${f.verify}`),
+  })));
+}
+
+export function replacementFindings(before: Column[], after: Column[], replacements: Record<string, Replacement>, path: string): Finding[] {
+  const found: Finding[] = [];
+  for (const [table, replacement] of Object.entries(replacements)) {
+    const old = before.filter(c => c.tbl === table);
+    const next = after.filter(c => c.tbl === table);
+    const kinds = replacement.kind === "view" ? ["v"] : ["r", "p"];
+    const error = (message: string) => found.push({ severity: "error", path, message: `${table}: ${message}` });
+    if (!old.length) error("declared projection replacement was absent from the retained fixture");
+    if (replacement.kind === "absent") {
+      if (next.length) error("retired projection still exists");
+      continue;
+    }
+    if (!next.length || next.some(c => !kinds.includes(c.kind))) error(`replacement is not a ${replacement.kind}`);
+    for (const c of old) if (!next.some(n => n.col === c.col && n.typ === c.typ)) error(`replacement lost or retyped reader column ${c.col}`);
+  }
+  return found;
+}
+
+export async function compareCatalogs(before: Column[], after: Column[], path: string, cwd?: string): Promise<Finding[]> {
+  const scratch = await Deno.makeTempDir({ prefix: "pronto-replay-" });
+  try {
+    const rows: Row[] = [...before.map(c => ({ ...c, step: 0, mig: "retained" })), ...after.map(c => ({ ...c, step: 1, mig: path }))];
+    await Deno.writeTextFile(`${scratch}/states.json`, JSON.stringify(rows));
+    await Deno.writeTextFile(`${scratch}/steps.json`, JSON.stringify([{ step: 0, mig: "retained" }, { step: 1, mig: path }]));
+    const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
+    const query = `CREATE TABLE snapshot (step INTEGER, mig VARCHAR, rel BIGINT, tbl VARCHAR, kind VARCHAR, col VARCHAR, typ VARCHAR, ordinal INTEGER);
+      INSERT INTO snapshot SELECT * FROM read_json(${literal(`${scratch}/states.json`)}, columns={step:'INTEGER',mig:'VARCHAR',rel:'BIGINT',tbl:'VARCHAR',kind:'VARCHAR',col:'VARCHAR',typ:'VARCHAR',ordinal:'INTEGER'});
+      CREATE TABLE step AS SELECT * FROM read_json_auto(${literal(`${scratch}/steps.json`)});
+      ${await Deno.readTextFile(here("replay.sql"))}`;
+    const out = await run("mise", ["x", "--", "duckdb", "-json", "-c", query], { cwd });
+    if (!out.ok) throw new Error(`catalog comparison failed: ${out.stderr}`);
+    return out.stdout ? JSON.parse(out.stdout) : [];
+  } finally {
+    await Deno.remove(scratch, { recursive: true });
+  }
+}
+
+// Views may depend on now(); only stored rows must stay byte-identical when
+// the migration ledger says there is no work left to do.
+const DATA_SNAPSHOT = `
+  CREATE TEMP TABLE replay_rows (name text, rows bigint, digest text);
+  DO $$ DECLARE r record; BEGIN
+    FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relkind IN ('r','p','m') ORDER BY c.relname LOOP
+      EXECUTE format('INSERT INTO replay_rows SELECT %L, count(*), md5(coalesce(string_agg(md5(row_to_json(t)::text), '''' ORDER BY md5(row_to_json(t)::text)), '''')) FROM public.%I t', r.relname, r.relname);
+    END LOOP;
+  END $$;
+  SELECT coalesce(json_agg(r ORDER BY name), '[]') FROM replay_rows r;`;
 
 // pgroll draws a spinner and colours its output, so its stderr arrives wrapped
 // in escape sequences and carriage returns. A finding is read by a person, so
@@ -179,9 +210,11 @@ async function run(cmd: string, args: string[], opts: { cwd?: string; stdin?: st
 }
 
 /** What the cluster publishes about its database (mecha's cluster.cue). */
-type Published = { target: string; initdb: string; pgroll?: { target: string; dir: string; baseline: string } };
+export type Published = { target: string; initdb: string; pgroll?: { target: string; dir: string; baseline: string } };
 
 type Service = {
+  entrypoint?: string[];
+  command?: string[];
   image?: string;
   environment?: Record<string, string>;
   build?: { context?: string };
@@ -195,11 +228,11 @@ type Config = { services?: Record<string, Service> };
  * declares a database of its own under a name that ends the same way, and only
  * one of the two is built out of this directory.
  */
-export function targetService(config: Config, appDir: string, target: string) {
+export function targetService(config: Config, appDir: string, target: string): Runtime | undefined {
   for (const [name, svc] of Object.entries(config.services ?? {})) {
     if (!name.endsWith(`-${target}`) || !svc.image) continue;
     if (svc.build?.context !== appDir) continue;
-    return { name, image: svc.image, env: svc.environment ?? {} };
+    return { name, image: svc.image, env: svc.environment ?? {}, entrypoint: svc.entrypoint, command: svc.command };
   }
   return undefined;
 }
@@ -213,7 +246,7 @@ export function targetService(config: Config, appDir: string, target: string) {
  * own: mecha's cluster refuses a step name under which the two would differ.
  */
 async function steps(container: string, initdb: string): Promise<string[]> {
-  const listed = await run("docker", ["exec", container, "sh", "-c", `ls -1 ${initdb}/*.sql 2>/dev/null || true`]);
+  const listed = await run("docker", ["exec", container, "find", initdb, "-maxdepth", "1", "-name", "*.sql", "-print"]);
   if (!listed.ok) throw new Error(`could not list the image's initdb scripts: ${listed.stderr}`);
   return listed.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "").sort();
 }
@@ -232,7 +265,7 @@ export async function locate(appDir: string, scriptPath: string): Promise<string
   return (await exists(`${appDir}/${owned}`)) ? owned : `the database image's ${name}`;
 }
 
-async function main(appDir: string): Promise<number> {
+export async function main(appDir: string): Promise<number> {
   const config = await run("docker", ["compose", "-f", ".bayt/compose.yaml", "config", "--format", "json"], { cwd: appDir });
   if (!config.ok) throw new Error(`docker compose config failed: ${config.stderr}`);
   // compose answers with absolute build contexts, so the app's is compared as one.
@@ -261,21 +294,17 @@ async function main(appDir: string): Promise<number> {
     throw new Error(`${migrator.image} is not built — build the app before replaying its migrations`);
   }
 
-  // Anything THIS app's replay left behind before it started: the container is
-  // removed in a `finally`, which a SIGKILL — an interrupted run, a timeout —
-  // never reaches, and a machine that collects them runs out of memory without
-  // ever saying why.
-  //
-  // Scoped to the service, because the sweep is indiscriminate within its
-  // prefix: two apps replaying at once on one machine would otherwise tear down
-  // each other's database mid-run, and the victim would report a schema that
-  // simply stopped answering.
-  const mine = `${CONTAINER_PREFIX}${service.name}-`;
-  const left = await run("docker", ["ps", "-aq", "--filter", `name=${mine}`]);
-  if (!left.ok) throw new Error(`could not list leftover replay containers: ${left.stderr}`);
-  const ids = left.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-  if (ids.length > 0) await run("docker", ["rm", "-f", ...ids]);
+  const fixtures = await loadFixtures(appDir);
+  const found = await replayDatabase({ appDir, published, service, migrator, fixtures });
+  console.log(JSON.stringify(found, null, 2));
+  return found.some((f) => f.severity === "error") ? 1 : 0;
+}
 
+export type Runtime = { name: string; image: string; env: Record<string, string>; entrypoint?: string[]; command?: string[] };
+export async function replayDatabase({ appDir, published, service, migrator, fixtures = [] }: {
+  appDir: string; published: Published; service: Runtime; migrator?: Runtime; fixtures?: UpgradeFixture[];
+}): Promise<Finding[]> {
+  const mine = `${CONTAINER_PREFIX}${service.name}-`;
   const container = `${mine}${crypto.randomUUID().slice(0, 12)}`;
   // Taken from the compose the app ships and never guessed: a replay that
   // invents a user or a database name grades a schema built under settings the
@@ -313,192 +342,116 @@ async function main(appDir: string): Promise<number> {
 
     const scripts = await steps(container, published.initdb);
     if (scripts.length === 0) throw new Error("the database image carries no initdb scripts to replay");
-    const rows: Row[] = [];
-    const applied_steps: { step: number; mig: string }[] = [];
-    const failures: Finding[] = [];
-
-    /** The text of one step, as the image holds it. */
+    const findings: Finding[] = [];
     const read = async (script: string) => {
       const got = await run("docker", ["exec", container, "cat", script]);
       if (!got.ok) throw new Error(`could not read ${script}: ${got.stderr}`);
       return got.stdout;
     };
-
-    const applyAll = async (): Promise<Finding[]> => {
-      // Onto a copy, and with every statement attempted rather than the file
-      // stopping at its first error.
-      //
-      // A step is one transaction under ON_ERROR_STOP, so a single failure
-      // ends the file: 004_types.sql aborts at its first CREATE DOMAIN, around
-      // line 10 of 515, and the 42 CREATE CASTs and 57 functions below it are
-      // never tried. Forgiving that file then forgave everything under it,
-      // including anything a later emitter change puts there. ON_ERROR_ROLLBACK
-      // takes a savepoint per statement, so each failure is isolated and the
-      // rest still run — and the copy is what makes that safe, since the
-      // successful halves of a partly-failing file would otherwise commit into
-      // the schema the pgroll phase then reads.
-      const copy = `${REPLAY_DB}_again`;
-      const cloned = await psql("postgres", `DROP DATABASE IF EXISTS ${copy}; CREATE DATABASE ${copy} TEMPLATE ${REPLAY_DB};`);
-      if (!cloned.ok) throw new Error(`could not copy the replay database: ${cloned.stderr || cloned.stdout}`);
-
-      const again: Finding[] = [];
-      for (const script of scripts) {
-        const applied = await psql(copy, await read(script), ["-v", "ON_ERROR_STOP=0", "-v", "ON_ERROR_ROLLBACK=on"]);
-        const errors = applied.stderr.split("\n").filter((l) => l.startsWith("ERROR:")).map((l) => l.trim());
-        if (errors.length === 0) continue;
-        const where = await locate(appDir, script);
-        const unforgiven = where === FORGIVEN_SECOND_PASS ? errors.filter((e) => !forgivable(e)) : errors;
-        if (unforgiven.length === 0) continue;
-        again.push({
-          severity: "error",
-          path: where,
-          message: `cannot be applied a second time, so a correction below it never reaches a database that already exists: ${unforgiven[0]}${
-            unforgiven.length > 1 ? ` (and ${unforgiven.length - 1} more)` : ""
-          }`,
-        });
-      }
-      return again;
+    const must = async (result: ReturnType<typeof run>, what: string) => {
+      const out = await result;
+      if (!out.ok) throw new Error(`${what}: ${out.stderr || out.stdout}`);
+      return out.stdout;
     };
-
-    // Checked, because the next statement to fail would be the app's first
-    // migration and the finding would name it: a scratch database that could
-    // not be made reads as a migration that could not be applied.
-    const scratchDb = await psql("postgres", `DROP DATABASE IF EXISTS ${REPLAY_DB}; CREATE DATABASE ${REPLAY_DB};`);
-    if (!scratchDb.ok) throw new Error(`could not create the replay database: ${scratchDb.stderr || scratchDb.stdout}`);
-
-    // First pass: one step at a time, asking the catalog after each.
-    for (const [i, script] of scripts.entries()) {
-      const where = await locate(appDir, script);
-      const applied = await psql(REPLAY_DB, await read(script));
-      if (!applied.ok) {
-        failures.push({
-          severity: "error",
-          path: where,
-          message: `does not apply to the schema the steps before it built: ${
-            (applied.stderr.split("\n").find((l) => l.includes("ERROR")) ?? applied.stderr).trim()
-          }`,
-        });
-        break;
+    const sql = (db: string, query: string) => must(psql(db, `SET pgroll.no_inferred_migrations = 'true'; ${query}`, ["-X", "-t", "-A"]), `query ${db}`);
+    const catalog = async (db: string): Promise<Column[]> => JSON.parse(await sql(db, `SELECT coalesce(json_agg(t), '[]') FROM (${CATALOG}) t`));
+    const bootstrap = async (db: string, omitted: string[] = []) => {
+      for (const name of omitted) {
+        if (!scripts.some(s => s.endsWith(`/${name}`))) throw new Error(`retained fixture omits unknown initdb step ${name}`);
       }
-      const state = await psql(
-        REPLAY_DB,
-        `SELECT coalesce(json_agg(row_to_json(t)), '[]') FROM (${CATALOG}) t;`,
-        ["-t", "-A"],
-      );
-      if (!state.ok) throw new Error(`catalog read after ${script} failed: ${state.stderr}`);
-      applied_steps.push({ step: i + 1, mig: where });
-      for (const r of JSON.parse(state.stdout) as Omit<Row, "step" | "mig">[]) {
-        rows.push({ step: i + 1, mig: where, ...r });
-      }
-    }
-
-    // Second pass over the schema the first one built: what a correction
-    // arriving at a database that already exists would meet.
-    const notAgain = failures.length > 0 ? [] : await applyAll();
-
-    // Then the changes the app declares for a schema that already exists.
-    // Applied here and nowhere earlier because pgroll reads the live schema to
-    // judge an operation — `pgroll validate` needs a database too, so there is
-    // no cheaper place for this than the one that already has one.
-    //
-    // init and baseline first, as the cluster's migrate target runs them: the
-    // schema the steps above built is where these start from, and baseline is
-    // what records it as that starting point.
-    const unapplied: Finding[] = [];
-    if (published.pgroll !== undefined && migrator !== undefined) {
-      const { dir, baseline } = published.pgroll;
-      const listed = await run("docker", ["run", "--rm", "--entrypoint", "ls", migrator.image, dir]);
-      if (!listed.ok) throw new Error(`could not list ${dir} in ${migrator.image}: ${listed.stderr}`);
-      const declared = pgrollMigrations(listed.stdout);
-      // The migrate image's pgroll, inside the replay database's network
-      // namespace, so it reaches that database on loopback and the host needs
-      // neither a published port nor a pgroll of its own.
-      const pgroll = (args: string[]) =>
-        run("docker", [
-          "run", "--rm", "--network", `container:${container}`, "--entrypoint", "pgroll",
-          "-e", `PGROLL_PG_URL=postgres://${user}:${env.POSTGRES_PASSWORD}@127.0.0.1:5432/${REPLAY_DB}?sslmode=disable`,
-          migrator.image, ...args,
-        ]);
-      const init = await pgroll(["init"]);
-      if (!init.ok) throw new Error(`pgroll init failed: ${plain(init.stderr)}`);
-      // baseline writes a placeholder migration into the directory it is
-      // given; this one is the throwaway container's.
-      const based = await pgroll(["baseline", baseline, "/tmp", "--yes"]);
-      if (!based.ok) throw new Error(`pgroll baseline failed: ${plain(based.stderr)}`);
-      // One at a time, with the catalog read after each, so these steps are
-      // compared exactly as the initdb ones are. Applying them in a batch would
-      // leave a rename inside a pgroll migration unexamined by the very
-      // comparison this pass exists for.
-      let step = rows.reduce((highest, r) => Math.max(highest, r.step), 0);
-      let refused: { name: string; stderr: string } | undefined;
-      for (const name of declared) {
-        const applied = await pgroll(["start", `${dir}/${name}.json`, "--complete"]);
+      await sql("postgres", `CREATE DATABASE ${db}`);
+      for (const script of scripts) {
+        if (omitted.includes(script.split("/").at(-1)!)) continue;
+        const applied = await psql(db, await read(script));
         if (!applied.ok) {
-          refused = { name, stderr: applied.stderr };
-          break;
-        }
-        step += 1;
-        const state = await psql(
-          REPLAY_DB,
-          `SELECT coalesce(json_agg(row_to_json(t)), '[]') FROM (${CATALOG}) t;`,
-          ["-t", "-A"],
-        );
-        if (!state.ok) throw new Error(`catalog read after ${name} failed: ${state.stderr}`);
-        applied_steps.push({ step, mig: declaredAt(name) });
-        for (const r of JSON.parse(state.stdout) as Omit<Row, "step" | "mig">[]) {
-          rows.push({ step, mig: declaredAt(name), ...r });
+          findings.push({ severity: "error", path: await locate(appDir, script), message: `${db}: bootstrap failed: ${plain(applied.stderr)}` });
+          return false;
         }
       }
-      if (refused !== undefined) {
-        unapplied.push({
-          severity: "error",
-          path: declaredAt(refused.name),
-          message: `does not apply to the schema the steps before it built: ${plain(refused.stderr)}`,
-        });
-      } else {
-        // Declared but never run is the failure this would otherwise hide: a
-        // migration pgroll skipped is one nobody's database will get either.
-        const ran = await psql(REPLAY_DB, "SELECT name FROM pgroll.migrations WHERE schema = 'public' AND migration_type = 'pgroll';", ["-t", "-A"]);
-        // An unread ledger is not an empty one. Left unchecked this query's
-        // failure — a pgroll whose ledger shape moved under the pin — makes
-        // `seen` empty and reports every declared migration as skipped, which
-        // is a confident statement about the app built out of a broken read.
-        if (!ran.ok) throw new Error(`could not read pgroll's ledger: ${ran.stderr || ran.stdout}`);
-        const seen = new Set(ran.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== ""));
-        for (const name of declared) {
-          if (!seen.has(name)) {
-            unapplied.push({
-              severity: "error",
-              path: declaredAt(name),
-              message: "is declared but pgroll did not apply it",
-            });
-          }
-        }
-      }
+      return true;
+    };
+    if (!await bootstrap(REPLAY_DB)) return findings;
+    if (!published.pgroll || !migrator) {
+      if (fixtures.length) throw new Error("retained fixtures require a migration runner");
+      return findings;
     }
-
-    const scratch = await Deno.makeTempDir({ prefix: "pronto-replay-" });
-    const statesPath = `${scratch}/states.json`;
-    const stepsPath = `${scratch}/steps.json`;
-    await Deno.writeTextFile(statesPath, JSON.stringify(rows));
-    await Deno.writeTextFile(stepsPath, JSON.stringify(applied_steps));
-    const query = `CREATE TABLE snapshot AS SELECT * FROM read_json_auto('${statesPath}');\n` +
-      `CREATE TABLE step AS SELECT * FROM read_json_auto('${stepsPath}');\n` +
-      await Deno.readTextFile(here("replay.sql"));
-    const duck = await run("mise", ["x", "--", "duckdb", "-json", "-c", query], { cwd: appDir });
-    await Deno.remove(scratch, { recursive: true });
-    if (!duck.ok) throw new Error(`duckdb failed: ${duck.stderr}`);
-
-    const moved: Finding[] = duck.stdout === "" ? [] : JSON.parse(duck.stdout);
-    const found = [...failures, ...moved, ...notAgain, ...unapplied];
-    console.log(JSON.stringify(found, null, 2));
-    // Returned rather than exited: Deno.exit tears the isolate down without
-    // unwinding, so a `Deno.exit` here would skip the cleanup below and strand
-    // a postgres holding a published port — on the failing runs, which are the
-    // ones this pass exists to produce.
-    return found.some((f) => f.severity === "error") ? 1 : 0;
+    const { dir } = published.pgroll;
+    const declared = pgrollMigrations(await must(run("docker", ["run", "--rm", "--entrypoint", "ls", migrator.image, dir]), "list migrations"));
+    const imageConfig = JSON.parse(await must(run("docker", ["image", "inspect", migrator.image, "--format", "{{json .Config}}"]), "inspect migrator"));
+    const entrypoint = migrator.entrypoint ?? imageConfig.Entrypoint ?? [];
+    const command = migrator.command ?? imageConfig.Cmd ?? [];
+    if (!Array.isArray(entrypoint) || !Array.isArray(command) || !entrypoint.length) throw new Error("migration runner must have an executable entrypoint");
+    const migrate = (db: string, through?: string) => {
+      const url = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(env.POSTGRES_PASSWORD)}@127.0.0.1:5432/${db}?sslmode=disable`;
+      const args = ["run", "--rm", "--network", `container:${container}`,
+        ...Object.entries({ ...migrator.env, DATABASE_URL: url }).flatMap(([k, v]) => ["-e", `${k}=${v}`])];
+      if (through !== undefined) {
+        if (!declared.includes(through)) throw new Error(`retained fixture names unknown migration ${through}`);
+        if (!command.includes(dir)) throw new Error("migration runner command does not expose its migration directory");
+        const subset = "/tmp/pronto-replay-migrations";
+        // Copy inside the image: the daemon may be remote, so a local bind
+        // mount would select a directory on a different machine.
+        args.push("--entrypoint", "sh", migrator.image, "-c",
+          'set -eu; dest=$1; shift; mkdir "$dest"; while [ "$1" != -- ]; do cp "$1" "$dest/"; shift; done; shift; exec "$@"',
+          "replay-prefix", subset, ...declared.filter(n => n <= through).map(n => `${dir}/${n}.json`), "--",
+          ...entrypoint, ...command.map((arg: string) => arg === dir ? subset : arg));
+      } else {
+        args.push("--entrypoint", entrypoint[0], migrator.image, ...entrypoint.slice(1), ...command);
+      }
+      return run("docker", args);
+    };
+    const ledger = (db: string) => sql(db, "SELECT coalesce(json_agg(m ORDER BY name), '[]') FROM pgroll.migrations m WHERE schema = 'public'");
+    const snapshot = async (db: string) => {
+      const schema = await must(run("docker", ["exec", container, "pg_dump", "-U", user, "-d", db, "--schema-only", "--schema=public"]), "dump schema");
+      return JSON.stringify({
+        schema: schema.split("\n").filter(l => !/^\\(?:un)?restrict /.test(l)).join("\n"),
+        catalog: await catalog(db),
+        rows: await sql(db, DATA_SNAPSHOT),
+        ledger: await ledger(db),
+      });
+    };
+    const completed = async (db: string) => {
+      const seen = JSON.parse(await ledger(db)) as { name: string; migration_type: string; done: boolean }[];
+      for (const name of declared) if (!seen.some(m => m.name === name && m.migration_type === "pgroll" && m.done)) {
+        findings.push({ severity: "error", path: declaredAt(name), message: `${db}: migration runner did not complete this migration` });
+      }
+    };
+    const runAndRepeat = async (db: string, path: string) => {
+      const first = await migrate(db);
+      if (!first.ok) {
+        findings.push({ severity: "error", path, message: `migration runner failed: ${plain(first.stderr || first.stdout)}` });
+        return false;
+      }
+      await completed(db);
+      const before = await snapshot(db);
+      const second = await migrate(db);
+      if (!second.ok) findings.push({ severity: "error", path, message: `migration runner failed on restart: ${plain(second.stderr || second.stdout)}` });
+      else if (before !== await snapshot(db)) findings.push({ severity: "error", path, message: "migration runner changed the schema, stored rows or ledger on restart" });
+      return true;
+    };
+    if (!await runAndRepeat(REPLAY_DB, "code.state.migrations")) return findings;
+    if (!fixtures.length) findings.push({ severity: "advisory", path: "tests/replay.json", message: "fresh bootstrap and migration restart checked; no retained-data upgrade fixtures are declared" });
+    for (const [i, fixture] of fixtures.entries()) {
+      const db = `${REPLAY_DB}_${i}`;
+      const path = `tests/replay.json:${fixture.name}`;
+      if (!await bootstrap(db, fixture.omitInitdb)) continue;
+      await must(migrate(db, fixture.through), `${path}: prepare prior migration ledger`);
+      await sql(db, fixture.seed);
+      const before = await catalog(db);
+      if (!await runAndRepeat(db, path)) continue;
+      const after = await catalog(db);
+      const verified = await sql(db, fixture.verify);
+      if (verified !== "t") findings.push({ severity: "error", path, message: "retained-data verification must return one true boolean" });
+      findings.push(...replacementFindings(before, after, fixture.replacements, path));
+      // Only named, asserted projection replacements leave the strict
+      // identity comparison. Every other drop/recreate remains an error.
+      const replaced = new Set(Object.keys(fixture.replacements));
+      findings.push(...await compareCatalogs(before.filter(c => !replaced.has(c.tbl)), after.filter(c => !replaced.has(c.tbl)), path, appDir));
+    }
+    return findings;
   } finally {
-    await run("docker", ["rm", "-f", container]);
+    const removed = await run("docker", ["rm", "-f", "-v", container]);
+    if (!removed.ok) throw new Error(`could not remove replay database: ${removed.stderr}`);
   }
 }
 

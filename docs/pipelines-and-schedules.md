@@ -22,8 +22,8 @@ A derived value is a live query until it earns materialization by
 [`pipeline-designer`](../agents/pipeline-designer.md)'s rule, which also says
 what a materialized one is made of. A value over rows the reader cannot see is
 the other case, and its answer is a per-reader pair
-([access](access.md#a-count-the-reader-is-inside-of)). A sink is marked
-`writers: "pipeline"`, which nothing enforces
+([access](access.md#a-count-the-reader-is-inside-of)). A sink's derived
+`writers` names its pipeline, which nothing enforces
 ([pending](../PENDING.md#the-lattice)).
 
 ## The shapes
@@ -49,7 +49,8 @@ Four are `#Pipeline`s, one a `#DuckStreamPipeline`, one a `#Drain` and one a `#S
   ([access](access.md#a-count-the-reader-is-inside-of)). The container keeps
   its bloblang.
 - **A raw stream**: the whole rpk YAML under `pipelines/`, copied verbatim.
-  The emitter cannot see inside it, so loop prevention is the author's.
+  It is a hatch with a required non-empty `note` and unspecified delivery.
+  The emitter cannot inspect its writes, so loop prevention is the author's.
 - **A scheduled pipeline** (`trigger: "schedule"`): every `interval`, delete
   or patch the sink rows a filter matches, with `{cutoff}` (now minus
   `window`) and `{nowts}` resolved at run time. It is level-triggered, for work whose job is

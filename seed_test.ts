@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { oneHome, parseHeld, type SeedData, seedSql, vetHeld } from "./seed.ts";
+import { oneHome, parseHeld, type SeedData, seedKey, seedSql, vetHeld } from "./seed.ts";
 
 const team: SeedData["entities"][number] = {
   name: "Team",
@@ -83,6 +83,40 @@ Deno.test("held rows are judged by cue against #Seed, then by the beyond checks"
     await vet({ Team: [{ rank: 3, day: "2026-02-28" }] });
     await assert.rejects(vet({ Team: [{ rank: 12 }] }), /a row does not satisfy its entity/);
     await assert.rejects(vet({ Team: [{ day: "2026-02-30" }] }), /Team\.seed\[0\]\.day: .*calendar date/);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a held seed cannot bypass a machine's states, and changing those states invalidates its verdict", async () => {
+  const dir = await Deno.makeTempDir({ dir: "." });
+  const entities = { Payment: { fields: [{ name: "id", type: "uuid" as const }, { name: "status", type: "string" as const }] } };
+  const source = (states: string) => `package test
+import "bonisoft.org/plugins/pronto"
+code: pronto.#App & {
+  meta: {name: "held-machine", description: "test", ir: sha256: "", targets: [], clocks: [], decisions: {}, tests: {}}
+  state: {
+    entities: Payment: {table: "payment", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "status", type: "string"}]}
+    seed: src: "seed.json"
+    machines: lifecycle: {entity: "payment", field: "status", initial: "pending", states: {${states}}}
+  }
+  capabilities: {hatches: {}, vendored: {}}
+  surface: {screens: {}, handlers: {}, design: {}, flows: {}}
+}
+`;
+  try {
+    const bytes = new TextEncoder().encode('{"Payment":[{"id":"06000000-0000-4000-8000-000000000001","status":"settled"}]}');
+    const held = parseHeld("seed.json", new TextDecoder().decode(bytes));
+    await Deno.writeFile(`${dir}/seed.json`, bytes);
+    await Deno.writeTextFile(`${dir}/program.cue`, source('pending: {}, settled: {type: "final"}'));
+    await vetHeld(dir, "seed.json", held, entities);
+    assert.equal(seedSql({ src: "seed.json", entities: [{name: "Payment", table: "payment", columns: [{name: "id", type: "uuid"}, {name: "status", type: "string"}], rows: []}] }, held),
+      "INSERT INTO payment (id, status) VALUES ('06000000-0000-4000-8000-000000000001', 'settled') ON CONFLICT (id) DO NOTHING;\n");
+    const before = await seedKey(bytes, entities, "", { lifecycle: {entity: "payment", field: "status", states: {pending: {}, settled: {type: "final"}}} });
+    const after = await seedKey(bytes, entities, "", { lifecycle: {entity: "payment", field: "status", states: {pending: {}}} });
+    assert.notEqual(before, after);
+    await Deno.writeTextFile(`${dir}/program.cue`, source("pending: {}"));
+    await assert.rejects(vetHeld(dir, "seed.json", held, entities), /a row does not satisfy its entity/);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

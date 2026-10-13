@@ -66,7 +66,7 @@ const SCHEMA: Record<string, Record<string, string>> = {
   field: { entity: "VARCHAR", name: "VARCHAR", type: "VARCHAR", cel: "VARCHAR" },
   screen: { name: "VARCHAR" },
   reads: { screen: "VARCHAR", entity: "VARCHAR" },
-  chart: { screen: "VARCHAR", table: "VARCHAR", field: "VARCHAR", initial: "VARCHAR" },
+  chart: { screen: "VARCHAR", table: "VARCHAR", field: "VARCHAR", initial: "VARCHAR", machine: "VARCHAR" },
   chart_state: { screen: "VARCHAR", table: "VARCHAR", field: "VARCHAR", state: "VARCHAR" },
   transition: {
     screen: "VARCHAR",
@@ -78,7 +78,7 @@ const SCHEMA: Record<string, Record<string, string>> = {
   },
   enum_value: { entity: "VARCHAR", field: "VARCHAR", value: "VARCHAR" },
   ir_path_accept: { screen: "VARCHAR", name: "VARCHAR", accept: "VARCHAR" },
-  claim: { rung: "VARCHAR", kind: "VARCHAR", id: "VARCHAR", where: "VARCHAR" },
+  claim: { rung: "VARCHAR", kind: "VARCHAR", id: "VARCHAR", where: "VARCHAR", owed: "BOOLEAN" },
   unique_claim: { rung: "VARCHAR", kind: "VARCHAR" },
   pairing: {
     severity: "VARCHAR",
@@ -93,8 +93,8 @@ const SCHEMA: Record<string, Record<string, string>> = {
   artifact: { path: "VARCHAR", sha256: "VARCHAR", derived: "BOOLEAN" },
   // A held seed file judged against its entities under this key (seed.ts).
   seed_vetted: { src: "VARCHAR", key: "VARCHAR" },
-  // How a browser syncs each server entity's table, and why (sync.cue #App.#sync).
-  sync_mode: { entity: "VARCHAR", table: "VARCHAR", mode: "VARCHAR", reason: "VARCHAR" },
+  // How the terminal reads each server entity's table, and why (read.cue #App.#read).
+  read_mode: { entity: "VARCHAR", table: "VARCHAR", mode: "VARCHAR", reason: "VARCHAR" },
   cel_site: { entity: "VARCHAR", col: "VARCHAR", cel: "VARCHAR" },
   cel_ir: { cel: "VARCHAR" },
   owned_token: { token: "VARCHAR" },

@@ -19,7 +19,7 @@ every attribute it may carry is its [REFERENCE](../../omnishell/REFERENCE.md).
 ## Derived from the markup
 
 `derive.ts` reads each screen through the terminal's own markup reader and
-writes three lists into `program_derived.cue`, which unifies into the program:
+writes four projections into `program_derived.cue`, which unifies into the program:
 
 - `reads`, every read the markup makes as the terminal routes it (`#Read`): its
   table, whether it is a `data-live` region, a reduce's `data-reads` or a
@@ -29,31 +29,40 @@ writes three lists into `program_derived.cue`, which unifies into the program:
 - `writes`, every write it states (`#Write`), by table: a form, a chart's
   effect, and each region's reduces (`data-on-<event>`, a drag's
   `data-handler`) as op `reduce` on its table;
+- `charts`, every terminal chart, naming its entity, field, states and effect
+  writes;
 - `files.handlers`, every module `data-handler` and `data-on-*` bind.
 
-They are facts, never decisions. All three are required on `#Screen`, so a
+They are facts, never decisions. All four are required on `#Screen`, so a
 screen the derived file misses fails the export, and so does an html file for a
 screen the program no longer declares. A screen authored in CUE has no html
-before its first export, so it starts from empty lists and `write.ts` re-derives
+before its first export, so `markup` supplies empty projection defaults and `write.ts` re-derives
 until the derived file holds what the emitted markup says.
 
 **Two statements of one fact need a checker, or one of them derived.** Reads,
-writes and handlers are derived, so no check compares them: a rule comparing a
+writes, charts and handlers are derived, so no check compares them: a rule comparing a
 restatement with the markup would be grading a copy.
 
-### The reads decide how a table syncs
+The same settled reads supply screen neighbourhoods in `ir.html`, including
+their embedded relations. The collection reach used by chart checks also
+includes write-only collections, so it cannot supply a screen's read
+neighbourhood. Keeping the graph bounded to those reads makes a screen's data
+dependencies visible without turning each screen into the whole schema. See
+[[../SPEC|the artifact spec]] for the generated diagrams and regions.
 
-Durability decides where data survives and how it stays current. Demand decides
-when and how much to load, derived from the reads already present in the
-screens. Delaying an eager collection's first subscription is lazy activation;
-it still loads the whole shape. On-demand loading instead obtains the queried
-subset. No additional app-authored loading mode is needed.
+### The reads decide how a table is read
 
-What the program concludes from the reads is CUE's: `sync.cue` computes
-`#App.#sync`, every server entity's sync mode with its reason, and it lands on
-`#Entity.sync`. Read tables can load **on demand**: the shape opens from now,
-then each active query obtains the rows it needs. A broad query on another
-screen does not force this screen to download the table.
+Durability decides where data survives and how it stays current. The read
+mode decides when and how much to load, derived from the reads already present
+in the screens. Delaying an eager collection's first subscription still loads
+the whole shape; a lazy read instead obtains the queried subset. No additional
+app-authored loading mode is needed.
+
+What the program concludes from the reads is CUE's: `read.cue` computes
+`#App.#read`, every server entity's read mode with its reason, and it lands on
+`#Entity.read`. Read tables can be **lazy**: the shape opens from now, then
+each active query obtains the rows it needs. A broad query on another screen
+does not force this screen to download the table.
 
 The runtime chooses per query, using the existing filter, order, embeds and
 carrier metadata:
@@ -87,7 +96,7 @@ the complete table demand it when executed and retain that view for later
 writes. Tables with no screen reads remain eager.
 
 derive writes each mode and its first reason into the fact store as
-`sync_mode`, and `shell.yaml` names the on-demand tables under `sync`. An author
+`read_mode`, and `shell.yaml` names the lazy tables under `read`. An author
 cannot override the derived mode. The terminal refuses incidental partial
 collection reads by validation, visibility and fold code; query snapshot reads
 instead acquire explicit completeness ([data](../../omnishell/docs/data.md)).
@@ -256,12 +265,12 @@ kept document at once, however old.
 
 - **Comparing a restatement of reads or handlers with the markup** — derive
   them, and there is no second statement to drift.
-- **Deciding a table's sync mode in derive.ts** — derive projects the markup,
+- **Deciding a table's read mode in derive.ts** — derive projects the markup,
   and a rule over the projection, the entities and the type table is the kind
   of conclusion the rest of the program draws in CUE; in TypeScript it was a
   second front end for the program, with its own copy of the type table.
-- **Declaring a sync mode per entity** — the reads already say it, and a
-  declaration could claim on-demand for a table a validation requires whole.
+- **Declaring a read mode per entity** — the reads already say it, and a
+  declaration could claim lazy for a table a validation requires whole.
 - **A content hash in a public path** — it breaks every shared link at the next
   deploy, fragments a crawler's index, and needs a canonical back to the
   unhashed URL, conceding that URL was the identity. Hashes belong on internal

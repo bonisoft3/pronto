@@ -90,5 +90,16 @@ export function celFixtures(): Finding[] {
   };
   if (!imports("this.size() <= 8")) say("a rune bound must import strings");
   if (imports("this == 'strings.x'")) say("a literal spelling strings. must not import strings");
+  // The entity block's shape: the three maps sit under `cel`, beside `seed`,
+  // where emit.cue reads them (`e.cel.checks`, `.enums`, `.bounds`) and where
+  // the closed #Entity admits them; a map at the entity's top level is refused.
+  const rendered = renderCel("p", [
+    { entity: "E", durability: "server", col: "kind", cel: "this in ['a', 'b']" },
+    { entity: "E", durability: "server", col: "name", cel: "this.size() <= 8" },
+  ], new Map([["this in ['a', 'b']", IR["this in ['a', 'b']"]], ["this.size() <= 8", IR["this.size() <= 8"]]]));
+  const block = "\tE: {\n\t\tseed: [...{\n\t\t\tkind?: (\"a\" | \"b\")\n\t\t\tname?: strings.MaxRunes(8)\n\t\t}]\n" +
+    "\t\tcel: {\n\t\t\tchecks: {\n\t\t\t\tkind: \"kind IN ('a', 'b')\"\n\t\t\t\tname: \"char_length(name) <= 8\"\n\t\t\t}\n" +
+    "\t\t\tenums: {\n\t\t\t\tkind: [\"a\",\"b\"]\n\t\t\t}\n\t\t\tbounds: {\n\t\t\t\tname: {sizeMax: 8}\n\t\t\t}\n\t\t}\n\t}";
+  if (!rendered.includes(block)) say(`program_cel.cue's entity block is not {seed, cel: {checks, enums, bounds}}:\n${rendered}`);
   return out;
 }

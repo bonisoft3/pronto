@@ -1,16 +1,19 @@
 ---
 type: decision
 title: Review by consequence
-description: Levies ir coverage by what a write reaches — an update to a `tab` entity machine-checked only, one reaching `device` or above owing an ir element — with each handler declaring what it may write, where today every program object owes one.
-status: unbuilt
+description: Levies ir coverage by what a write reaches — an update to a `tab` entity machine-checked only, one reaching `device` or above owing an ir element — with handler reach derived from the terminal charts naming it; an authored write capability remains deferred.
+status: partially built
 ---
 
 # Review by consequence
 
-The ir↔program bijection is total: every program object of the eleven compared
-kinds owes an ir element a reviewer signs, and both directions are errors
-([SPEC](../../SPEC.md#programcue)). This record levies that
-coverage by consequence instead, and none of it is built.
+**Status: partially built.** The [[../../SPEC#program.cue|artifact spec]]
+records the live coverage rule: `tab` entities, their validations and
+terminal charts reaching only `tab` rows owe no element; a handler only
+those charts name shares their exemption. Unnamed handlers and other
+objects still owe review. [[../archive/2026-10-10-hatches|Hatches]] slice 2 built that
+reach projection. The explicit `data-writes` capability proposed below
+remains deferred.
 
 ## Checkable and reviewable are different budgets
 

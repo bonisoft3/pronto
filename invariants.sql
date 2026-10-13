@@ -142,6 +142,9 @@ SELECT p.severity,
 FROM pairing p
 JOIN claim b ON b.kind = p.kind_b AND b.rung = p.rung_b
 WHERE p.b_missing IS NOT NULL
+  -- Review by consequence: a program claim whose writes reach no further than
+  -- the tab is machine-checked only, and owes the ir nothing.
+  AND coalesce(b.owed, TRUE)
   AND NOT EXISTS (
         SELECT 1 FROM claim a
         WHERE a.kind = p.kind_a AND a.rung = p.rung_a AND a.id = b.id)
@@ -645,9 +648,11 @@ WHERE s.key IS NULL
 UNION ALL
 
 -- LOOSE, and about the ir alone. A design object belongs to the document and
--- not to another object, with three exceptions the ir's own layout makes: a
--- screen holds its storyboard states and its paths block, and a handler may
--- hold the tests that settle it. Anything else enclosed is a closing tag that
+-- not to another object, with the exceptions the ir's own layout makes: a
+-- screen holds its storyboard states and its paths block, a handler may hold
+-- the tests that settle it, and the card the compiler draws under an entity
+-- holds that entity's machines, each holding the effect it invokes
+-- (ir-render.ts). Anything else enclosed is a closing tag that
 -- went missing — nesting is valid HTML, so no validator says so, and every
 -- other reader of the ir scans attributes and cannot see an ancestor. The
 -- message names the first stray object per enclosure, which is where the tag is
@@ -658,7 +663,9 @@ SELECT 'error',
               inside, inside_kind, count(*), first(id), first(kind))
 FROM ir_nest
 WHERE NOT ((kind IN ('state', 'paths') AND inside_kind = 'screen')
-        OR (kind = 'test' AND inside_kind = 'handler'))
+        OR (kind = 'test' AND inside_kind = 'handler')
+        OR (kind = 'machine' AND inside_kind = 'entity')
+        OR (kind = 'effect' AND inside_kind = 'machine'))
 GROUP BY inside, inside_kind
 
 ORDER BY path, message

@@ -19,7 +19,7 @@ localCompiler:    strings.Contains(_loop.surface.checks.types.cmds[0], "../../pl
 externalCompiler: strings.Contains(_external.surface.checks.types.cmds[0], "../../plugins") & false
 externalBuild:    _external.surface.sayYaml.say.build.do & "null"
 _project:         dist.#Project
-sourceTerminalCommand: (dist.#Project & terminalProject.#Project & {runtime: "../../plugins/pronto"}).say.say.generate.rulemap.omnishell.cmds[0].do & "mise run omnishell -- mode . --local | save --force program_terminal.cue"
+sourceTerminalCommand: (dist.#Project & terminalProject.#Project & {omnishell: "../../plugins/omnishell"}).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#LocalGenerate
 installedTerminalCommand: (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
 sourcePin:                _project.mise.tools."github:bonisoft3/pronto" & dist.#Version
 bootstrapHasNoTerminal:   strings.Contains(_project.write, "omnishell") & false

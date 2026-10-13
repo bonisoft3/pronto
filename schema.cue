@@ -502,6 +502,13 @@ import (
 
 #Durability: "server" | "live" | "offline" | "tab" | "device"
 
+// What can be claimed of a write, from the durability of the row it lands on:
+// the saga's compensatable and retriable steps and its pivot (Garcia-Molina &
+// Salem 1987), with the local step and the pure function at either end. Never
+// authored; shown on the entity, the machine and in every lint sentence. The
+// terminal keeps the same table (omnishell/machine.cue) for its own lint, and a
+// test holds the two equal.
+#EffectLevel: "projection" | "ephemeral" | "compensable" | "replicated" | "external"
 #DurabilityEffectLevel: {
 	tab:     "ephemeral"
 	device:  "ephemeral"
@@ -551,6 +558,7 @@ import (
 	// construction, with no policy to write, which is why `access` is not
 	// merely optional for them but meaningless: nothing else can reach it.
 	durability: #Durability
+	level:      #DurabilityEffectLevel[durability]
 	// Whether the rows live in the cluster: every durability but the two the browser keeps.
 	// The one spelling of that boundary; the emitter reads this, never the names.
 	server: durability != "tab" && durability != "device"
@@ -560,19 +568,21 @@ import (
 	if durability != "tab" && durability != "device" {
 		access?: #Access
 	}
-	// How a browser syncs the table: "eager" takes the whole shape before a
-	// screen reads it; "on-demand" loads what each active query demands.
-	// #App.#sync decides it for every server entity (sync.cue), so an authored
+	// How the terminal reads the table: "eager" takes the whole shape before
+	// a screen reads it; "lazy" loads what each active query demands.
+	// #App.#read decides it for every server entity (read.cue), so an authored
 	// value it contradicts fails to unify.
 	if server {
-		sync: "eager" | "on-demand"
+		read: "eager" | "lazy"
 	}
 	if !server {
-		sync?: _|_
+		read?: _|_
 	}
-	// "pipeline" entities are never mutated by forms; role-level enforcement
-	// is an open question in SPEC.md.
-	writers: *"forms" | "pipeline"
+	// Who writes rows here, derived at #App (writers.cue) from every
+	// declaration that names the entity; the card prints each as
+	// `kind:by op·op`. Nothing refuses two kinds of writer on one entity
+	// (PENDING.md).
+	writers: [...#Writer]
 	fields: [...#Field]
 	// DDL: CREATE INDEX IF NOT EXISTS idx_<table>_<on> ON <table>
 	// USING <using> (<on>); emitted after the tables in 005.
@@ -581,31 +591,26 @@ import (
 	// like a field's, but only its CHECK: a predicate over several columns is
 	// not a constraint on any one field's value, so no CUE rendering exists.
 	invariant?: {cel: string, check?: string}
-	// Derived SQL CHECK bodies by column name (program_cel.cue), rendered from
-	// the parsed `cel` of each field. A browser tier declares none: no table
-	// is emitted for it, so its constraints reach only CUE. The empty default
-	// is what a first export holds before any derivation has run — the same
-	// first-generate rule as decisions' notes.
-	checks: *{} | {[string]: string}
-	// The values a column admits, by column name, derived from the same parsed
-	// `cel` (program_cel.cue) — only for the constraints that close the set. It
-	// is the emitted answer to "which kinds are declarable", which the
-	// terminal's markup rules judge a data-when against; a checker parsing the
-	// cel itself would be a second front end for the one constraint language.
-	enums: *{} | {[string]: [...string]}
-	// What the same parsed `cel` says about a column an enum does not close
-	// (program_cel.cue): the range an int admits, the length a string admits,
-	// the pattern it must match. Named in terms that belong to no constraint
-	// language, because the reader is a battery that has to PROPOSE a value the
-	// program would accept — an answer neither a CUE disjunction nor a SQL
-	// CHECK gives. Every key is optional and absent means unbounded.
-	bounds: *{} | {[string]: {
-		intMin?:  int
-		intMax?:  int
-		sizeMin?: int
-		sizeMax?: int
-		regex?:   string
-	}}
+	// What the parsed `cel` of each field says, in the languages its readers
+	// speak, all written by one derivation (program_cel.cue, derive-cel.ts)
+	// so no reader parses a cel itself: `checks` are the SQL CHECK bodies by
+	// column (none for a browser tier, which emits no table); `enums` the
+	// values a column admits, only where the constraint closes the set, for
+	// the terminal's markup rules and the emitted shell.yaml; `bounds` what an
+	// open constraint admits — a range, a length, a pattern — for a battery
+	// that has to PROPOSE a value, every key optional and absent unbounded.
+	// Empty is what a first export holds before any derivation has run.
+	cel: {
+		checks: *{} | {[string]: string}
+		enums:  *{} | {[string]: [...string]}
+		bounds: *{} | {[string]: {
+			intMin?:  int
+			intMax?:  int
+			sizeMin?: int
+			sizeMax?: int
+			regex?:   string
+		}}
+	}
 	// Composite uniques the per-field `unique` flag cannot express. Declared
 	// rather than written as assembly SQL because the shell needs them too: a
 	// row's natural key is what an upsert resolves against, and what an
@@ -624,10 +629,9 @@ import (
 		uniques: [...{where?: _|_}]
 	}
 
-	// Rung five of validation: a Jessie predicate over the row and its
-	// references, run by the store before an optimistic write and by Postgres
-	// before commit. Named because the name is the refusal, as a unique's is.
-	validations: [Name=string]: #Validation & {name: Name}
+	// Derived from lifecycle-machine guards; the refusal names are shared by
+	// the server interpreter and the browser preflight.
+	validations: [Name=string]: #Validation & {name: Name, machine?: string, on?: [...string]}
 
 	// Bootstrap rows: the rows a store holds before anyone writes one. A
 	// cluster durability renders them into 900_seed.sql; a `tab` entity has no
@@ -663,6 +667,9 @@ import (
 }
 
 #Validation: {
+	machine?: string
+	on?: [...string]
+	order?: [string]: [int, int]
 	name: string & =~"^[a-z][a-z0-9-]*$"
 	ir:   *name | string
 	src:  #Jessie
@@ -707,9 +714,12 @@ import (
 	raw?: true
 	if raw != _|_ {
 		src: *"pipelines/\(name).yaml" | string
+		note!:      string & !=""
+		delivery:   "unspecified"
 		transform?: _|_
 		key?:       _|_
 	}
+
 	from?:   string // source entity name (CDC events); cdc pipelines set it
 	to:      string // sink entity name (upsert, or scheduled mutation target)
 	group?:  string // bus consumer group; cdc pipelines set it
@@ -783,6 +793,7 @@ import (
 		shim?: _|_
 		key:   string // a fold groups; the singleton case has no key to seed empty() with
 	}
+
 	// Scheduled pipelines: a generate input ticks every `interval` and the
 	// action mutates `to` rows matched by `filter` (PostgREST fragment;
 	// tokens {cutoff} and {nowts} resolve to bloblang metadata at runtime).
@@ -889,7 +900,13 @@ import (
 
 // A Mecha statechart executed inside PostgreSQL — transactions, trigger reducers,
 // finite timeouts, and deterministic relational effects. Level 3 effect limit.
-#RelationalOp: "insert" | "ensure" | "upsert" | "accumulate" | "update" | "delete"
+//
+// The ops mecha's interpreter performs, narrowed from the terminal's
+// #MutationOp (one grammar, defined where the author-facing chart lives and
+// classified there by what happens twice). Inside the trigger's transaction
+// atomicity absorbs the duplicate, so a strict `create` is admitted here; on
+// the change feed only the joins are (CALM, Hellerstein & Alvaro 2020).
+#RelationalOp: omnishell.#MutationOp & ("create" | "ensure" | "upsert" | "accumulate" | "update" | "delete")
 
 #RelationalEffect: {
 	op:            #RelationalOp
@@ -902,28 +919,31 @@ import (
 	updateValues?: {[string]: _}
 }
 
-#FunctionEffect: {
+#SqlHatchCall: {
+	name: string
 	call:  string
-	args?: [..._] | {[string]: _}
+	args?: [...] | {[string]: _}
 }
 
-#NotifyEffect: {
+#NotifyRaise: {
 	notify:  string
 	payload: string
 }
 
-#StreamEffect: {
+#StreamRaise: {
 	stream:  string
 	signal?: "refresh" | "checkpoint" | "flush"
 	key?:    string | {raw: string}
 }
 
-#MechaEffect: #RelationalEffect | #FunctionEffect | #NotifyEffect | #StreamEffect
+#MechaRaise: #NotifyRaise | #StreamRaise
 
 #MechaAction: {
 	assign?: {[string]: _}
-	effect?: #MechaEffect | [...#MechaEffect]
-	raise?:  string
+	effect?: #RelationalEffect | [...#RelationalEffect]
+	hatch?: #SqlHatchCall | [...#SqlHatchCall]
+	raise?: #MechaRaise | [...#MechaRaise]
+	reject?: string
 }
 
 #MechaTransition: {
@@ -945,7 +965,7 @@ import (
 #MechaState: {
 	type?:    "final" | "normal"
 	on?: [Event=string]: #MechaTransitionValue
-	after?: [DelayMs=string]: #MechaTransitionValue
+	after?: [=~"^(0|[1-9][0-9]{0,11})$"]: string | (#MechaTransition & {target!: string}) | [(#MechaTransition & {target!: string}), ...(#MechaTransition & {target!: string})]
 	// XState's invoke, whose actor is an external effect's handler: entering
 	// the state claims the effect, and only its outcome leaves.
 	invoke?: {
@@ -957,18 +977,60 @@ import (
 	exit?:  #MechaAction | [...#MechaAction]
 }
 
-#MechaMachine: {
+#LifecycleTransition: {
+	guard?: string | [string, ...string]
+	actions?: #MechaAction | [...#MechaAction]
+}
+
+#LifecycleTransitionValue: #LifecycleTransition | #MechaAction | [...#MechaAction]
+
+#MechaMachine: M={
 	name:    string
-	ir?:     string
+	ir:      *name | string
 	entity:  string
+	guards: [Name=string]: #Validation & {name: Name}
+	level: #EffectLevel
+	_actions: list.Concat([
+		[for _, tr in M._on for act in tr.actions {act}],
+		[if M.states != _|_ for _, st in M.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.after != _|_ for _, tr in st.after for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.invoke != _|_ for tr in [st.invoke.onDone, st.invoke.onError] for t in [if (tr & string) != _|_ {[]}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+	])
+	hatches: list.SortStrings([for hn, _ in {
+		for a in M._actions if a.hatch != _|_
+		for h in [if (a.hatch & [...]) != _|_ {a.hatch}, [a.hatch]][0] {(h.name): true}
+	} {hn}])
+	_on: {if M.on != _|_ for op, tr in M.on {
+		let transition = tr.guard != _|_ || tr.actions != _|_
+		(op): {
+			guard: [if transition if tr.guard != _|_ {[if (tr.guard & string) != _|_ {[tr.guard]}, tr.guard][0]}, []][0]
+			actions: [
+				if transition {[if tr.actions != _|_ {[if (tr.actions & [...]) != _|_ {tr.actions}, [tr.actions]][0]}, []][0]},
+				[if (tr & [...]) != _|_ {tr}, [tr]][0],
+			][0]
+		}
+	}}
+	_timers: [if M.states != _|_ for sn, st in M.states if st.after != _|_
+		for ms, tr in st.after
+		for idx, t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
+			state: sn
+			"delay": ms
+			"branch": idx
+			target: t.target
+			if t.guard != _|_ {guard: t.guard}
+		}]
+	_timed: len(_timers) > 0
+
 	timing?: "BEFORE" | "AFTER"
 	field?:   string
 	initial?: string
 	states?: [StateName=string]: #MechaState
 	on?: {
-		insert?: #MechaAction | [...#MechaAction]
-		update?: #MechaAction | [...#MechaAction]
-		delete?: #MechaAction | [...#MechaAction]
+		insert?: #LifecycleTransitionValue
+		update?: #LifecycleTransitionValue
+		delete?: #LifecycleTransitionValue
 	}
 }
 
@@ -977,16 +1039,16 @@ import (
 // ledger (docs/decisions/2026-10-03-external-effects.md).
 #ExternalEffect: {
 	// Also the sink's Dapr binding name, so a DNS label.
-	name:   =~"^[a-z][a-z0-9-]*$"
-	ir:     *name | string
-	entity: string
-	// The ledger key is "<name>:" and these fields of the entity: one as its
-	// text, several JSON-encoded. It is also the sink's idempotency key, so it
-	// names the instance and never the request's content.
+	name: =~"^[a-z][a-z0-9-]*$"
+	ir:   *name | string
+	// The ledger key is "<name>:" and these fields of the invoking machine's
+	// entity: one as its text, several JSON-encoded. It is also the sink's
+	// idempotency key, so it names the instance and never the input's content.
 	key: *["id"] | [string, ...string]
-	// Frozen into the ledger at enqueue: "NEW.<col>" reads the row, {raw: sql}
-	// is an expression, anything else a literal.
-	request: {[string]: _} | *{}
+	// XState's input: what the handler is handed, frozen into the ledger at
+	// the claim. "NEW.<col>" reads the row, {raw: sql} is an expression,
+	// anything else a literal.
+	input: {[string]: _} | *{}
 	// An https origin naming a host by a DNS name of two labels or more, as
 	// mecha spells it (#Origin); a name that resolves inward is not refused,
 	// since the airlock's daprd dials what its binding names, and that is the
@@ -996,11 +1058,15 @@ import (
 	// does not speak HTTP.
 	sink: {origin: mecha.#Origin, credential?: #Credential} | {bridge: string}
 	// What a handler does when the ledger shows an earlier entry that may have
-	// reached the sink. An idempotent sink is simply called again.
+	// reached the sink. An idempotent sink is simply called again; a repeat
+	// is called again too, and `note` says why a duplicate is acceptable.
 	{sink: idempotent: true} | {
 		sink: idempotent: false
-		reentry: *"reconcile" | "unknown" | {repeat: string & !=""}
+		reentry: *"reconcile" | "unknown" | "repeat"
 	}
+	// The judgment the compiler cannot make: the sink's idempotency and what
+	// a repeat costs are claims about a peer.
+	note: string & !=""
 	// Thrown errors tolerated before the outcome is unknown.
 	attempts: *5 | int & >=1
 	// The environment variables whose values the handler is handed at each
@@ -1061,7 +1127,8 @@ import (
 #Form: {
 	id:     string
 	entity: string
-	action: "create" | "update" | "delete" | "upsert"
+	// The form's data-action (omnishell REFERENCE.md, "Mutations").
+	action: omnishell.#MutationOp & ("create" | "update" | "delete" | "upsert")
 	// Delete forms only: a PostgREST filter fragment ({param.x} interpolates)
 	// scoping a bulk delete of every matching row, instead of the row context.
 	filter?: string
@@ -1106,12 +1173,23 @@ import (
 // whose updates and effects may write any table by any op. Derived, never
 // authored.
 #Write: {
-	table: string
-	op:     "create" | "update" | "delete" | "upsert" | "reduce" | "navigate"
+	table:   string
+	op:      omnishell.#MutationOp
 	filter?: string
 }
 
+// One terminal chart a screen's markup carries, as the terminal projects it
+// (read-markup.ts `machines`): the row it runs over, the field it moves, and
+// its effects, each also among the screen's writes. Derived, never authored;
+// the chart's own bytes stay the terminal's (the `chart` fact row).
+#Chart: {
+	table:  string
+	field:  string
+	writes: [...#Write]
+}
+
 #Screen: S={
+	hatches: *[] | [...string]
 	name:  string
 	ir:    *name | string
 	title: string
@@ -1163,9 +1241,11 @@ import (
 	// derived file holds what the emitted markup says.
 	reads!: [...#Read]
 	writes!: [...#Write]
+	charts!: [...#Chart]
 	if S.markup != _|_ {
 		reads:  *[] | [...#Read]
 		writes: *[] | [...#Write]
+		charts: *[] | [...#Chart]
 	}
 	// A component-bearing screen is authored HERE, in CUE: `markup` is the
 	// screen's whole HTML, composed by interpolating component definitions
@@ -1229,9 +1309,10 @@ import (
 	ir:     *name | string
 	of:     string // screen
 	entity: string
-	// "navigate" flows end in a read, not a store call (a navigate form's hash
-	// change); entity names the entity the landing read targets.
-	action: "create" | "update" | "delete" | "upsert" | "navigate"
+	// The form's data-action (omnishell REFERENCE.md, "Mutations"). "navigate"
+	// flows end in a read, not a store call (a navigate form's hash change);
+	// entity names the entity the landing read targets.
+	action: omnishell.#MutationOp & ("create" | "update" | "delete" | "upsert" | "navigate")
 }
 
 #Test: {
@@ -1369,8 +1450,7 @@ import (
 		//
 		// Separate from the migrations above because they answer a different
 		// question. Those build the schema on a fresh volume, where initdb
-		// replays every one of them and records nothing — which is why they
-		// have to be written to survive being applied twice. These are applied
+		// applies every one of them once. These are applied
 		// against a database that already holds a schema, through pgroll, which
 		// keeps a ledger of what it has run: a migration here runs once, and
 		// running it again is a no-op rather than an error. So they are written
@@ -1409,9 +1489,25 @@ import (
 	// rows under every constraint its own `seed` carries. Closed, so a row of
 	// an entity that is not a server one, or of none, is refused — a tab
 	// entity's rows are the program's own and render into shell.yaml.
-	#Seed: {for n, e in A.state.entities if e.server {(n)?: e.seed}}
+	#Seed: {for n, e in A.state.entities if e.server {
+		(n)?: e.seed & [...{
+			if A.state.machines != _|_
+			for _, m in A.state.machines if m.entity == n || m.entity == e.table
+			if m.field != _|_ if m.initial != _|_ {
+				(m.field)?: or([for state, _ in m.states {state}])
+			}
+		}]
+	}}
 
 	capabilities: {
+		// Browser fetches outside the app are authored authority. Script sources
+		// remain the terminal's; only reader-supplied images may name a scheme.
+		resources?: [string]: {
+			kind: "img" | "font" | "media" | "frame" | "connect"
+			source: mecha.#Origin | "https:"
+			if kind != "img" {source: mecha.#Origin}
+			note: string & !=""
+		}
 		// Passed through to shell.yaml verbatim: the terminal owns the login
 		// chrome, keyed on `required`, and calls the auth service at `service`.
 		// Presence also switches the cluster's auth plane on (#emit).
@@ -1455,19 +1551,23 @@ import (
 		// exemption reviewable rather than a line in a tool's config.
 		hatches: [Name=string]: H={
 			ir:   *Name | string
-			kind: "container" | "sql" | "proto"
+			kind: "container" | "sql" | "proto" | "host-dom"
 			note: string
-			// Only a file kind names files, and it must: a `sql` or `proto`
-			// hatch withholding nothing is an exemption that reads as one and
-			// protects no file.
+			if H.kind == "host-dom" {
+				note: !=""
+				src!: string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(m?js)$"
+				files: [string, ...string] & [...(string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$")]
+			}
+			// A file hatch names its artifacts; host-dom serves them without
+			// removing the terminal CSP or Trusted Types boundary.
 			if H.kind != "container" {
 				files!: [string, ...string]
 			}
 		}
 		// Terminal-tier hatch: a vendored unit running inside the terminal, under
-		// one of `isolation`'s boundaries, requesting a subset of the terminal's
-		// capability vocabulary (`"group.name"` strings). Checked against
-		// #Terminal.capabilities' offer in #emit, not here.
+		// one of `isolation`'s boundaries, touching the app only through its
+		// `ports`. The boundary is checked against #Terminal.capabilities' offer
+		// in #emit; a port naming an undeclared entity is refused here.
 		//
 		// `files` is everything the unit needs served, `src` among them: the
 		// wrapper an engineer audited, and whatever that wrapper loads beside
@@ -1475,8 +1575,38 @@ import (
 		// reaches no further over the network than the app already does.
 		vendored: [Name=string]: {
 			ir: *Name | string
-			isolation: "compartment" | "iframe" | "worker"
-			capabilities: [...string]
+			// How far the unit reaches without the platform, as protection
+			// domains (Saltzer & Schroeder 1975) named by the web platform's own
+			// rungs: a `compartment` has no ambient authority; a `realm` is an
+			// iframe with its own globals and DOM (ECMA-262 realm) and may
+			// present; an `agent` is a worker with its own thread (ECMA-262
+			// agent) and reaches the network, so it may only ask.
+			isolation: "compartment" | "realm" | "agent"
+			// Everything the unit touches, as entities and events (ports and
+			// adapters, Cockburn 2005): `reads` the entities whose rows it is
+			// handed, read-only, and `raises` the events it may post. The
+			// terminal is the adapter on each — the mount's data-prop-* feed off
+			// a read's row, the mount's data-on-* listener on a raise — and it
+			// refuses a row or an event outside them; its markup lint holds every
+			// mount to the same lists and asks that every raise be handled.
+			ports: {
+				reads:  [...string]
+				raises: [...string]
+			}
+			// An agent is a question whose answer lands in a memo (Michie's memo
+			// table, 1968: answers addressed by what was asked); a unit that
+			// acts on the world is a process hatch. `entity` is where the answer
+			// lands and `key` the question's fields — a unique of the entity,
+			// taken from the mount's data-prop-* of the same names. The terminal
+			// performs it: a question whose row exists is answered from the row
+			// and never posted; the unit's answer is upserted on the key and the
+			// one event it raises reaches the chart naming the row. #App holds
+			// the isolation, the entity, the key, the unique and the columns
+			// (text, since an answer crosses the seat as strings) to this;
+			// #emit holds the columns to the seat's detail offer — their count,
+			// their names, and the size bound a column declares — since an
+			// answer carries every column in one event.
+			memo?: {entity: string, key: [string, ...string]}
 			src: string
 			files: [...string]
 			note: string
@@ -1568,22 +1698,190 @@ import (
 	]
 	_hotRefusal: [if len(_hotViolations) == 0 {true}, "cold pipeline cannot feed an active screen mutation loop: \(_hotViolations[0].pipeline) feeds \(_hotViolations[0].sink) on screen \(_hotViolations[0].screen)"][0] & true
 
-	_machineActions: [
-		if A.state.machines != _|_
-		for mName, m in A.state.machines {
-			machine: mName
-			actions: list.Concat([
-				[if m.on != _|_ for _, actList in m.on for act in [if (actList & [...]) != _|_ {actList}, [actList]][0] {act}],
-				[if m.states != _|_ for _, st in m.states if st.entry != _|_ for a in [if (st.entry & [...]) != _|_ {st.entry}, [st.entry]][0] {a}],
-				[if m.states != _|_ for _, st in m.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
-				[if m.states != _|_ for _, st in m.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
-				[if m.states != _|_ for _, st in m.states if st.after != _|_ for _, tr in st.after for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
-				[if m.states != _|_ for _, st in m.states if st.invoke != _|_ for tr in [st.invoke.onDone, st.invoke.onError] for t in [if (tr & string) != _|_ {[]}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
-			])
-		}
-	]
+	_hostDomViolations: list.Concat([
+		[for sn, screen in A.surface.screens for hn in screen.hatches if A.capabilities.hatches[hn] == _|_ {
+			"screen \(sn) names undeclared host-DOM hatch: \(hn)"
+		}],
+		[for sn, screen in A.surface.screens for hn in screen.hatches if A.capabilities.hatches[hn] != _|_ if A.capabilities.hatches[hn].kind != "host-dom" {
+			"screen \(sn) names hatch \(hn), which is not host-dom"
+		}],
+		[for hn, h in A.capabilities.hatches if h.kind == "host-dom" if !list.Contains(h.files, h.src) {
+			"host-DOM hatch \(hn) must serve its src in files"
+		}],
+		[for sn, screen in A.surface.screens if len([for hn, _ in {for h in screen.hatches {(h): true}} {hn}]) != len(screen.hatches) {
+			"screen \(sn) repeats a host-DOM hatch"
+		}],
+	])
+	_hostDomRefusal: [if len(_hostDomViolations) == 0 {true}, _hostDomViolations[0]][0] & true
 
-	_entityTable: {for n, e in A.state.entities {(n): e.table, (e.table): e.table}}
+	state: entities: {for en, e in A.state.entities {
+		(en): validations: close({
+			if A.state.machines != _|_ for mn, m in A.state.machines if m.entity == en || m.entity == e.table
+			for gn, g in m.guards {
+				(gn): g & {
+					machine: mn
+					on: [for op, tr in m._on if list.Contains(tr.guard, gn) {op}]
+					let ordinal = [for i, name in list.SortStrings([for other, om in A.state.machines if om.entity == en || om.entity == e.table {"trg_\(e.table)_\(other)_reducer"}]) if name == "trg_\(e.table)_\(mn)_reducer" {i}][0]
+					order: {for op, tr in m._on for i, name in tr.guard if name == gn {(op): [ordinal, i]}}
+				}
+			}
+		})
+	}}
+	state: machines: [mn=string]: {
+		let m = A.state.machines[mn]
+		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
+			level: [if len([if m.states != _|_ for st in m.states if st.invoke != _|_ {st}]) > 0 {"external"}, if m.states == _|_ if len(m._actions) == 0 {e.level}, "replicated"][0]
+		}
+	}
+
+	_lifecycleViolations: list.Concat([
+		[if A.state.machines != _|_ for mn, m in A.state.machines for op, tr in m._on if len([for name, _ in {for g in tr.guard {(g): true}} {name}]) != len(tr.guard) {
+			"lifecycle machine \(mn).\(op) repeats a guard"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines for op, tr in m._on for gn in tr.guard if m.guards[gn] == _|_ {
+			"lifecycle machine \(mn).\(op) names undeclared guard \(gn)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines for gn, _ in m.guards if len([for op, tr in m._on if list.Contains(tr.guard, gn) {op}]) == 0 {
+			"lifecycle machine \(mn) declares unused guard \(gn)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 if m.states != _|_ {
+			"machine \(mn) puts lifecycle guards on a statechart"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m.on != _|_ for en, e in A.state.entities if m.entity == en || m.entity == e.table if len("trg_\(e.table)_\(m.name)_reducer") > 63 {
+			"lifecycle interpreter name exceeds Postgres's 63-byte limit: \(mn)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 for a in m._actions if a.assign != _|_ {
+			"guarded lifecycle machine \(mn) cannot assign NEW after the write; use a relational action"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 if m.timing != _|_ if m.timing != "AFTER" {
+			"lifecycle guards require AFTER timing: \(mn)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines for en, e in A.state.entities if m.entity == en || m.entity == e.table if !e.server if m.states != _|_ || len(m._actions) > 0 {
+			"machine \(mn) requires a server-held entity for actions or a statechart: \(en)"
+		}],
+	])
+	_lifecycleRefusal: [if len(_lifecycleViolations) == 0 {true}, _lifecycleViolations[0]][0] & true
+
+	_machineActions: [if A.state.machines != _|_ for mName, m in A.state.machines {machine: mName, actions: m._actions}]
+	_machineHatches: {if A.state.machines != _|_ for mn, m in A.state.machines {(mn): m.hatches}}
+
+	_machineHatchViolations: list.Concat([
+		[for mn, hs in _machineHatches for hn in hs if A.capabilities.hatches[hn] == _|_ {
+			"machine \(mn) calls undeclared SQL hatch: \(hn)"
+		}],
+		[for mn, hs in _machineHatches for hn in hs if A.capabilities.hatches[hn] != _|_ if A.capabilities.hatches[hn].kind != "sql" {
+			"machine \(mn) calls hatch \(hn), which is not SQL"
+		}],
+			])
+	_machineHatchRefusal: [if len(_machineHatchViolations) == 0 {true}, _machineHatchViolations[0]][0] & true
+
+	// A machine names its entity by name or table, as emit.cue resolves it.
+	_machineEntityViolations: [
+		if A.state.machines != _|_
+		for mName, m in A.state.machines
+		if len([for en, e in A.state.entities if en == m.entity || e.table == m.entity {en}]) == 0 {
+			"machine \(mName) names undeclared entity: \(m.entity)"
+		},
+	]
+	_machineEntityRefusal: [if len(_machineEntityViolations) == 0 {true}, _machineEntityViolations[0]][0] & true
+
+	_machineStateViolations: list.Concat([
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m.states != _|_ if m.on != _|_ {
+			"machine \(mn) combines states and lifecycle handlers: declare separate machines"
+		}],
+		if A.state.machines != _|_ for mn, m in A.state.machines if m.field != _|_ if m.initial != _|_ for en, e in A.state.entities if en == m.entity || e.table == m.entity {
+			list.Concat([
+				[if m.states[m.initial] == _|_ {"machine \(mn) initial \(m.initial) is not a state"}],
+				[if !list.Contains([for f in e.fields {f.name}], m.field) {"machine \(mn) field \(m.field) is not a column of \(en)"}],
+				[for f in e.fields if f.name == m.field if f.generated != _|_ {
+					"machine \(mn) field \(en).\(m.field) is generated and cannot hold transitions"
+				}],
+				[for f in e.fields if f.name == m.field if f.retired {
+					"machine \(mn) field \(en).\(m.field) is retired and cannot hold transitions"
+				}],
+				[for f in e.fields if f.name == m.field if f.default != _|_ if strings.TrimSpace(f.default) != "'"+strings.Replace(m.initial, "'", "''", -1)+"'" {
+					"machine \(mn) initial \(m.initial) disagrees with \(en).\(m.field) default \(f.default)"
+				}],
+				[if e.cel.enums[m.field] != _|_ for state, _ in m.states if !list.Contains(e.cel.enums[m.field], state) {
+					"machine \(mn) state \(state) is not admitted by \(en).\(m.field) cel enum"
+				}],
+				[for i, row in e.seed if row[m.field] != _|_ if !list.Contains([for state, _ in m.states {state}], row[m.field]) {
+					"machine \(mn) seed \(en)[\(i)].\(m.field) value \(row[m.field]) is not a state"
+				}],
+			])
+		},
+	])
+	_machineStateRefusal: [if len(_machineStateViolations) == 0 {true}, _machineStateViolations[0]][0] & true
+
+	_timedMachines: [if A.state.machines != _|_ for _, m in A.state.machines if m._timed {m}]
+	_timerViolations: list.Concat([
+
+		[if len(A._timedMachines) > 0 for target in A.meta.targets if target == "pages" {
+			"server timers cannot target pages"
+		}],
+		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "pages" if !list.Contains(A.meta.clocks, target) {
+			"server timers require a declared clock for \(target)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if !e.server {
+			"timed machine \(mn) requires a server-held entity"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if len([for f in e.fields if f.pk {f}]) == 0 {
+			"timed machine \(mn) requires a primary key"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines for t in m._timers if m.states[t.target] == _|_ {
+			"timed machine \(mn) state \(t.state) targets missing state \(t.target)"
+		}],
+		[if A.state.machines != _|_ for mn, m in A.state.machines if m.states != _|_ for sn, st in m.states if st.type != _|_ if st.type == "final" if st.after != _|_ {
+			"machine \(mn) final state \(sn) cannot declare after"
+		}],
+		[if len(A._timedMachines) > 0 for en, e in A.state.entities if e.table == "schedule" || e.table == "machine_timer_tick" {
+			"timed machines reserve table \(e.table), declared by \(en)"
+		}],
+		[if len(A._timedMachines) > 0 for sn, sc in A.state.schedules if strings.HasPrefix(sc.name, "machine:") {
+			"timed machines reserve schedule prefix machine:, declared by \(sn)"
+		}],
+	])
+	_timerRefusal: [if len(_timerViolations) == 0 {true}, _timerViolations[0]][0] & true
+
+	_unitViolations: list.Concat([
+		[for un, u in A.capabilities.vendored for r in u.ports.reads if A.state.entities[r] == _|_ {
+			"unit \(un) reads \(r), which is no declared entity"
+		}],
+		[for un, u in A.capabilities.vendored if u.isolation == "agent" if u.memo == _|_ {
+			"unit \(un) is an agent with no memo: an agent is a question whose answer lands in a memo; a unit that acts on the world is a process hatch"
+		}],
+		[for un, u in A.capabilities.vendored if u.isolation != "agent" if u.memo != _|_ {
+			"unit \(un) is a \(u.isolation) with a memo: only an agent asks a question"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] == _|_ {
+			"unit \(un) memo names \(u.memo.entity), which is no declared entity"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if len(u.ports.raises) != 1 {
+			"unit \(un) has a memo and raises \(len(u.ports.raises)) events: a question has one answer"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
+			let me = A.state.entities[u.memo.entity]
+			for k in u.memo.key if !list.Contains([for f in me.fields {f.name}], k) {
+			"unit \(un) memo keys on \(k), which is not a field of \(u.memo.entity)"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
+			let mk = A.state.entities[u.memo.entity]
+			for k in u.memo.key for f in mk.fields if f.name == k if f.pk || f.retired {
+			"unit \(un) memo keys on \(k), which is not an active non-primary field of \(u.memo.entity)"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
+			let mu = A.state.entities[u.memo.entity]
+			if len([for q in mu.uniques if q.where == _|_ if list.SortStrings(q.cols) == list.SortStrings(u.memo.key) {q}]) != 1 {
+			"unit \(un) memo on \(u.memo.entity) has no unique over exactly (\(strings.Join(u.memo.key, ", "))): the natural key an answer resolves against"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
+			let mc = A.state.entities[u.memo.entity]
+			for f in mc.fields if !f.pk if !f.retired if f.type != "string" {
+			"unit \(un) memo on \(u.memo.entity): column \(f.name) is \(f.type), and an answer crosses the seat as strings"
+		}],
+	])
+	_unitRefusal: [if len(_unitViolations) == 0 {true}, _unitViolations[0]][0] & true
+
 	_effects: [if A.state.effects != _|_ {A.state.effects}, {}][0]
 	_invokes: [
 		if A.state.machines != _|_
@@ -1605,29 +1903,37 @@ import (
 			}]
 		},
 	]
+	// The entities, by name, of the machines invoking each effect, keyed by
+	// the effect: one is the effect's own, the row its NEW reads and its key
+	// fields come from; none or several is refused below. An effect states no
+	// entity of its own.
+	_effectEntities: {for i in _invokes for en, e in A.state.entities if en == i.entity || e.table == i.entity {(i.src): (en): true}}
+	_effectEntityNames: {for n, s in _effectEntities {(n): [for en, _ in s {en}]}}
+	// By key: an effect refused below is bottom as a value, not undeclared.
+	_effectNames: [for n, _ in _effects {n}]
 	// An invoking state is left only by its outcome, so an outcome that cannot
-	// be delivered leaves the row there for good: the guard would refuse the
+	// be delivered leaves the row there for good: the interpreter would refuse the
 	// move, and the airlock would retry the sink until its attempts ran out.
 	_invokeViolations: list.Concat([
-		[for i in _invokes if _effects[i.src] == _|_ {
+		[for i in _invokes if !list.Contains(_effectNames, i.src) {
 			"machine \(i.machine) state \(i.state) invokes undeclared effect: \(i.src)"
 		}],
 		[for i in _invokes if i.others {
 			"machine \(i.machine) state \(i.state) invokes \(i.src) and declares on or after: only the effect's outcome leaves it"
 		}],
-		[for i in _invokes if _effects[i.src] != _|_ if _entityTable[_effects[i.src].entity] != _|_ if _entityTable[_effects[i.src].entity] != _entityTable[i.entity] {
-			"machine \(i.machine) state \(i.state) invokes \(i.src), an effect of \(_effects[i.src].entity), not of the machine's \(i.entity)"
+		[for n, _ in _effects if len([for i in _invokes if i.src == n {i}]) == 0 {
+			"effect \(n) is invoked by no state: its entity is its invoking machine's, so it has none"
 		}],
-		[for n, _ in _effects let c = len([for i in _invokes if i.src == n {i}]) if c != 1 {
+		[for n, ens in _effectEntityNames if len(ens) > 1 {
+			"effect \(n) is invoked by machines of \(len(ens)) entities (\(strings.Join(ens, ", "))): its NEW reads and its key need one row"
+		}],
+		[for n, _ in _effects let c = len([for i in _invokes if i.src == n {i}]) if c > 1 {
 			"effect \(n) is invoked by \(c) states: exactly one invokes it, so its ledger key names one instance of one state"
 		}],
-		[for n, x in _effects if _entityTable[x.entity] == _|_ {
-			"effect \(n) names undeclared entity: \(x.entity)"
-		}],
-		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity if !e.server {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens if !A.state.entities[en].server {
 			"effect \(n) is of \(en), whose rows do not live in the cluster: an effect fired from every tab would be performed by every tab"
 		}],
-		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity for k in x.key if !list.Contains([for f in e.fields {f.name}], k) {
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k in _effects[n].key if !list.Contains([for f in A.state.entities[en].fields {f.name}], k) {
 			"effect \(n) keys on \(k), which is not a field of \(en)"
 		}],
 		[for i in _invokes if i.final {
@@ -1640,13 +1946,20 @@ import (
 			"machine \(i.machine) state \(i.state) invokes \(i.src) with an outcome targeting itself: the row would never leave"
 		}],
 		[for i in _invokes if i.arrows[0].target == i.arrows[1].target if len(i.arrows[0].actions) + len(i.arrows[1].actions) > 0 {
-			"machine \(i.machine) state \(i.state): onDone and onError share target \(i.arrows[0].target) and carry actions, which the guard would run for the wrong outcome"
+			"machine \(i.machine) state \(i.state): onDone and onError share target \(i.arrows[0].target) and carry actions, which the interpreter would run for the wrong outcome"
 		}],
-		[for i in _invokes for ar in i.arrows for a in ar.actions if a.raise != _|_ {
-			"machine \(i.machine) state \(i.state): an outcome's actions raise, which would refuse the recorded outcome's delivery"
+		[for i in _invokes for ar in i.arrows for a in ar.actions if a.reject != _|_ {
+			"machine \(i.machine) state \(i.state): an outcome's actions reject, which would refuse the recorded outcome's delivery"
 		}],
-		[for n, x in _effects for en, e in A.state.entities if en == x.entity || e.table == x.entity for k, v in x.request if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in e.fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
-			"effect \(n) request \(k) reads \(v), which is not a field of \(en)"
+		[for i in _invokes let m = A.state.machines[i.machine]
+		for actions in list.Concat([
+			[if m.states[i.state].exit != _|_ {m.states[i.state].exit}],
+			[for ar in i.arrows if m.states[ar.target] != _|_ if m.states[ar.target].entry != _|_ {m.states[ar.target].entry}],
+		]) for a in [if (actions & [...]) != _|_ {actions}, [actions]][0] if a.reject != _|_ {
+			"machine \(i.machine) state \(i.state): an outcome's entry or exit actions reject, which would refuse the recorded outcome's delivery"
+		}],
+		[for n, ens in _effectEntityNames if _effects[n] != _|_ for en in ens for k, v in _effects[n].input if (v & string) != _|_ if strings.HasPrefix(v, "NEW.") || strings.HasPrefix(v, "OLD.") if !list.Contains([for f in A.state.entities[en].fields {f.name}], strings.SplitN(v, ".", 2)[1]) {
+			"effect \(n) input \(k) reads \(v), which is not a field of \(en)"
 		}],
 		// The credential is the airlock's alone: a handler handed it could put
 		// it in a body the ledger keeps.
@@ -1679,7 +1992,7 @@ import (
 			"effect \(n) reaches bridge \(x.sink.bridge) as an idempotent sink: past a bridge nothing is the platform's to promise"
 		}],
 		[for n, x in _effects if x.sink.bridge != _|_ if !x.sink.idempotent if x.reentry == "reconcile" {
-			"effect \(n) reaches bridge \(x.sink.bridge) and reconciles: a bridge answers no query, so state reentry unknown or {repeat: why}"
+			"effect \(n) reaches bridge \(x.sink.bridge) and reconciles: a bridge answers no query, so state reentry unknown or repeat"
 		}],
 	])
 	_bridgeRefusal: [if len(_bridgeViolations) == 0 {true}, _bridgeViolations[0]][0] & true
@@ -1688,13 +2001,12 @@ import (
 	_undeclaredStreams: [
 		for ma in _machineActions
 		for act in ma.actions
-		for eff in [if act.effect != _|_ {[if (act.effect & [...]) != _|_ {act.effect}, [act.effect]][0]}, []][0]
-		if (eff & #StreamEffect) != _|_
-		if !list.Contains(_declaredStreams, eff.stream)
-		{
+		for eff in [if act.raise != _|_ {[if (act.raise & [...]) != _|_ {act.raise}, [act.raise]][0]}, []][0]
+		if (eff & #StreamRaise) != _|_
+		if !list.Contains(_declaredStreams, eff.stream) {
 			machine: ma.machine
 			stream:  eff.stream
-		}
+		},
 	]
 	_streamRefusal: [if len(_undeclaredStreams) == 0 {true}, "machine \(_undeclaredStreams[0].machine) references undeclared duckstream: \(_undeclaredStreams[0].stream)"][0] & true
 

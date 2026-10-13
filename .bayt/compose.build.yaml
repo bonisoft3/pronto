@@ -3,6 +3,8 @@ services:
   plugins_pronto-build:
     build:
       additional_contexts:
+        plugins_omnishell-build_srcs: service:plugins_omnishell-build_srcs
+        plugins_omnishell-setup_srcs: service:plugins_omnishell-setup_srcs
         plugins_pronto-setup: service:plugins_pronto-setup
       context: ..
       dockerfile: .bayt/Dockerfile.build
@@ -19,6 +21,8 @@ services:
     build:
       additional_contexts:
         plugins_pronto-setup_bayt: service:plugins_pronto-setup_bayt
+        plugins_omnishell-build_bayt: service:plugins_omnishell-build_bayt
+        plugins_omnishell-setup_bayt: service:plugins_omnishell-setup_bayt
       context: ..
       dockerfile: .bayt/Dockerfile.build
       target: build_bayt

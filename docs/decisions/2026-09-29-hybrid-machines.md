@@ -75,12 +75,15 @@ three tiers are mathematically pure, closed over rows, and replayable.
     (`020_schedule.sql`; the same table opens `012_airlock.sql` where an effect is
     declared, so the airlock's wake is a one-shot row of it).
 - **Outbound Effects**:
-  - Closed relational operations:
-    - `insert`: Strict append (`INSERT INTO ...`). Fails loudly on unique collision.
+  - Closed relational operations (`#RelationalOp`, the terminal's `#Machine.#MutationOp`
+    narrowed to what the trigger performs):
+    - `create`: Strict append (`INSERT INTO ...`). Fails loudly on unique collision.
     - `ensure`: Idempotent insert (`INSERT ... ON CONFLICT DO NOTHING`). Inserts if absent,
       no-op if existing.
     - `upsert`: State replacement (`INSERT ... ON CONFLICT (key) DO UPDATE SET ... = EXCLUDED...`).
     - `accumulate`: Delta accumulation (`INSERT ... ON CONFLICT (key) DO UPDATE SET col = col + EXCLUDED.col`).
+    - `update`: Absolute update (`UPDATE ... SET ... WHERE ...`), the rows `where`/`rawWhere`
+      name, else the row the values' key names, else every row.
     - `delete`: Row deletion (`DELETE FROM ... WHERE ...`).
   - Domain functions:
     - `call`: Parameterized execution of declared, schema-vetted PL/pgSQL functions.
@@ -143,9 +146,9 @@ attached to them, and the external effects only it may perform. A state invokes 
 tier's actor and answers to its outcome. A saga is such a coordination, with states that
 invoke effects and states that invoke their compensations.
 
-External effects are the first part built: a mecha state *invokes* one, the guard claims
+External effects are the first part built: a mecha state *invokes* one, the interpreter claims
 a ledger row in the transition's commit, mecha's airlock performs it against one declared
-sink through that sink's Dapr binding, and the outcome returns through the guard.
+sink through that sink's Dapr binding, and the outcome returns through the interpreter.
 [External effects](2026-10-03-external-effects.md) holds the grammar, the ledger and
 the measurements that rejected DBOS as the runtime.
 
@@ -176,15 +179,15 @@ Hybrid state machines in Pronto compile transitions that seamlessly trigger acro
    ```cue
    charging: invoke: {src: "charge", onDone: "settled", onError: "failed"}
    ```
-   The guard claims a ledger row and enqueues a Graphile job in the transition's own
+   The interpreter claims a ledger row and enqueues a Graphile job in the transition's own
    commit; [external effects](2026-10-03-external-effects.md) has the rest.
 
-2. **Driving DuckStream from a Machine Transition (`#StreamEffect`)**:
+2. **Driving DuckStream from a Machine Transition (`#StreamRaise`)**:
    When a machine executes state changes that feed analytical pipelines or require an explicit
    derivation sweep:
    ```cue
    actions: [{
-       effect: {
+       raise: {
            stream: "recount_ledger"
            signal: "refresh"
        }
@@ -204,7 +207,7 @@ queries and writes forms. What differs per tier is only how far from pure it may
 | Executor | Closed over | Level | Runs as | Status |
 |---|---|---|---|---|
 | Omnishell machine | a `tab`/`device` row in the client | 2 | the terminal: SES-caged Jessie, XState JSON | built |
-| Mecha machine | a `server` row in Postgres | 3 | the plpgsql guard inside the write | built |
+| Mecha machine | a `server` row in Postgres | 3 | the plpgsql interpreter inside the write | built |
 | Compute, whole-table | a snapshot of the tables it `reads` | 3 | Jessie planning WASI jobs over a DuckDB lake; woken by CDC invalidations through the change feed, batched and retried | built |
 | Compute, per key | one changed row and its declared edges | 3 | the same cage, warm; Conduit → compute's own daprd over gRPC, no bus; a direct write | not built |
 | Airlock | one ledger row per effect instance | 4 | Graphile Worker listening on `jobs:insert`, woken from zero by the ticker's one-shot row; one declared Dapr binding per effect; bridges for what is not HTTP | built ([external effects](2026-10-03-external-effects.md)) |
@@ -216,9 +219,9 @@ and a compute output all replay from rows. Level 4 is the airlock, and the airlo
 hatch: one of the places where perfect time travel stops, beside the compiler's `sql`,
 `proto` and `container` hatches, each with its own declaration and its own record. The
 airlock's record is the ledger, so a replay answers the invoke from it instead of
-re-running the world; `reentry: {repeat: why}` is a hatch inside the hatch. Saga-style
+re-running the world; `reentry: "repeat"` is a hatch inside the hatch, its `note` the why. Saga-style
 resilience comes from the statechart and the ledger, not from a durable function: a
-state invokes one effect, the guard claims and enqueues in the transition's commit, the
+state invokes one effect, the interpreter claims and enqueues in the transition's commit, the
 sink declares idempotency or its re-entry, the outcome returns as the next event, and a
 compensation is another invoking state. Only an effect handler holds a sink; every other
 module has the language plus declared endowments, lint-checked per role across omnishell

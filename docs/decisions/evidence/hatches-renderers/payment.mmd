@@ -1,0 +1,8 @@
+stateDiagram-v2
+  [*] --> pending
+  pending --> charging : pay
+  state "charging · invoke charge" as charging
+  charging --> settled : onDone
+  charging --> failed : onError
+  settled --> [*]
+  failed --> pending : retry

@@ -55,8 +55,9 @@ schedule exists. The loop and the build graph own no data.
 terminal publishes what it offers as data, the app asks against that
 vocabulary, and `#emit` refuses the mismatch at `cue vet`: an auth mode the
 terminal does not list, a vendored unit whose `isolation` it does not offer,
-a `"group.name"` capability it does not declare, or a unit whose `src` is not
-among its files. The cluster's capabilities are switches, each turning on a
+or a unit whose `src` is not among its files; a unit's `ports` are judged
+against the app's own entities in `#App` and against the screens by the
+terminal's markup check. The cluster's capabilities are switches, each turning on a
 **plane**, mecha's word for the services behind one switch: the data plane
 (`server`), the auth plane and the blob plane. `#DefaultCluster` derives every
 switch from the app, so none is wired by hand.
@@ -266,7 +267,7 @@ The kinetic host decouples simulation ticks from variable display refresh rates,
   capability: they are the `isolation` axis, which boundary a unit runs behind,
   a different question from which resource it may reach.
 - **`transport` for the unit boundary** — a compartment passes no messages;
-  what varies across compartment, iframe and worker is the boundary, so the
+  what varies across compartment, realm and agent is the boundary, so the
   field is `isolation`.
 - **`pages` for screens** — "screen" is the design-layer word both Apple's and
   Android's guidelines use, while their API class names have changed twice.

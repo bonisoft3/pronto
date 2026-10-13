@@ -21,11 +21,11 @@ say:
         priority: -1
         cmds:
           - do: "cue vet -c ./testdata/emit"
-          - do: "deno test --no-config --allow-read --allow-run=cue sync.test.ts ssr.test.ts builder-inputs.test.ts"
+          - do: "deno test --no-config --allow-read --allow-run=cue read.test.ts ssr.test.ts builder-inputs.test.ts"
       distribution:
         priority: -1
         cmds:
-          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env bootstrap_test.ts layout_test.ts write_test.ts"
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env bootstrap_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
       types:
         priority: -1
         cmds:
@@ -61,7 +61,9 @@ say:
       machines:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts"
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts browser-security.test.ts objects_test.ts"
+          - do: 'mise exec -- deno test --config deno.json --allow-read --allow-run=cue --filter "server timers refuse" machine-timers.integration.test.ts'
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
       # What each Jessie role may be granted, held against both cages and the schema.
       endowments:
         priority: -1

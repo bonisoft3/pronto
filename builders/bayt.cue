@@ -31,7 +31,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.58.4", ...}
+	tools: {"github:bonisoft3/bayt": "0.59.0", ...}
 	say: say: {
 		...
 
@@ -186,6 +186,7 @@ import (
 	// switched by the same mode; mecha/ and omnishell/ hold the fragments.
 	_omnishell:        omnishell.#RuntimeImage
 	_omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishell.published.runtime)}${MONOREPO_COMPOSE_MODE:+:\(_omnishell)}"
+	_omnishellCopy: [if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0]
 	// The terminal's statics served from omnishell's tree (target /omnishell/),
 	// which an installed app's caddy copies from that image; the cluster serves
 	// the app's own (#DefaultCluster). Named from omnishell's root.
@@ -342,7 +343,7 @@ import (
 						"ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
 						"ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
 						"ENV DENO_DIR=/deno-cache",
-						[if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0],
+						B._omnishellCopy,
 						"RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts",
 					]
 				}
@@ -391,6 +392,7 @@ import (
 					deps: [B._base]
 					_paths: list.Concat([[".bayt"], [for path in B._testTrees {"\(path)/.bayt"}]])
 					srcs: defaultExclude: "pronto-bayt": null
+					srcs: defaultExclude: "pronto-tests": null
 					cmd: "builtin": null
 					dockerfile: {
 						defaultPreamble: {

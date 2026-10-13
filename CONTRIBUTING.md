@@ -34,6 +34,7 @@ just build   # deno check over every *.ts
 just lint    # the same check, as sayt's lint rulemap
 just test    # the .say.yaml rulemap: bounds.ts, check-loop.ts --self-test,
              # cue vet -c ./testdata/emit, and the *_test.ts / *.test.ts suites
+deno task test:replay        # bootstrap, retained upgrades and migrator restart; needs Docker
 deno task test:integration   # types through Postgres, PostgREST and Electric, the door over an Electric 5xx, and the external-effect guard; needs Docker
 ```
 

@@ -33,9 +33,8 @@ WITH last AS (SELECT max(step) AS n FROM step),
 rels AS (SELECT DISTINCT step, rel, tbl FROM snapshot),
 
 -- A relation the next state no longer has. Whether its name was taken up by a
--- new relation decides only which sentence is printed: the rows are gone either
--- way, and the recreate is the more dangerous of the two because the schema
--- that follows it can look untouched.
+-- new relation decides which sentence is printed. A replacement can look
+-- unchanged while destroying stored rows or changing a view’s reader contract.
 lost_rel AS (
   SELECT p.step + 1 AS step,
          p.tbl      AS tbl,
@@ -67,10 +66,9 @@ SELECT severity, path, message FROM (
          step, tbl, 0 AS ordinal,
          CASE
            WHEN reused_name THEN
-             tbl || ' was dropped and recreated: the table standing here now is a different one, ' ||
-             'so every row the old one held is gone — a table is altered, never replaced'
+             tbl || ' was dropped and recreated: its relation identity changed; retained rows and readers need an explicit upgrade contract'
            ELSE
-             tbl || ' is gone: every row it held is gone with it, and every holder still reading it breaks'
+             tbl || ' is gone: every holder still reading it breaks'
          END AS message
     FROM lost_rel
 

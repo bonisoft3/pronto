@@ -36,7 +36,7 @@ let _clock = "([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}"
 	// A domain is opaque to it ("Could not select an operator overload", and
 	// no cast out of one parses), and a json value has no equality operator in
 	// Postgres and no path operator in Electric. A table whose views filter on
-	// a column that is not syncs whole (#App.#sync). Measured against Electric
+	// a column that is not is read whole (#App.#read). Measured against Electric
 	// 1.8.0, and held there by type-sql.integration.test.ts.
 	subset: bool
 	// The domain that holds it in PostgreSQL; type-sql.ts writes them and
@@ -68,7 +68,7 @@ let _clock = "([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}"
 	// their value order. A "text" type with a pattern is spelled in characters
 	// every collation orders alike; one without is free text, which Postgres
 	// orders by its collation and the view engine by the reader's locale
-	// (#App.#sync). "none" is refused where a column asks for order, never
+	// (#App.#read). "none" is refused where a column asks for order, never
 	// guessed.
 	order: "text" | "number" | "boolean" | "integer" | "decimal" | "duration" | "none"
 	// What the pattern cannot say, by name.

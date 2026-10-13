@@ -33,4 +33,6 @@ _mirroredCaddy:       _mirroredCluster.surface.targets.caddy
 mirroredCaddyContext: _mirroredCaddy.compose.build.additional_contexts.root & ".."
 mirroredRuntimeStatic: list.Contains(_mirroredCaddy.dockerfile.copy, {from: name: "root", srcs: [".runtime/plugins/omnishell/interpreter/shell.js"], dst: "/omnishell/interpreter/shell.js"}) & true
 monorepoCaddyContext: _cluster.surface.targets.caddy.compose.build.additional_contexts.root & "../../.."
-mirroredName:         _mirroredBuild.project.name & "apps_\(_code.meta.name)"
+_mirroredCheck: (_mirroredBuild & {checks: probe: {cmds: ["true"], note: "probe"}}).project.targets["check-probe"]
+mirroredCheckImportRoot: list.Contains(_mirroredCheck.dockerfile.epilogue, "RUN ln -s /monorepo/.runtime/plugins/omnishell /omnishell") & true
+mirroredName:            _mirroredBuild.project.name & "apps_\(_code.meta.name)"

@@ -29,6 +29,6 @@ Deno.test("a mecha module may be granted what mecha's cages endow and the schema
   const mecha = sorted(MECHA);
   for (const role of ["computation", "effect"]) assertEquals(sorted(ENDOWABLE[role]), mecha, role);
   assertEquals(await admitted("([n] & #Computation.endowments) != _|_"), mecha);
-  const effect = `{name: "x", entity: "E", sink: {origin: "https://api.example.com", idempotent: true}, endowments: [n]}`;
+  const effect = `{name: "x", sink: {origin: "https://api.example.com", idempotent: true}, note: "x", endowments: [n]}`;
   assertEquals(await admitted(`(#ExternalEffect & ${effect}) != _|_`), mecha);
 });

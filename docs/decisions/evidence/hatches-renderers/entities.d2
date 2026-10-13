@@ -1,0 +1,131 @@
+direction: right
+game: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "phase_id": uuid {constraint: foreign_key}
+  "home_id": uuid {constraint: foreign_key}
+  "away_id": uuid {constraint: foreign_key}
+  "stadium_id": uuid {constraint: foreign_key}
+  "referee_id": uuid {constraint: foreign_key}
+  "created_by": uuid {constraint: foreign_key}
+  "updated_by": uuid {constraint: foreign_key}
+  "round": int32
+  "day": date
+  "kickoff": timestamp
+  "home_field": string
+  "played": bool
+}
+team: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "stadium_id": uuid {constraint: foreign_key}
+  "created_by": uuid {constraint: foreign_key}
+  "updated_by": uuid {constraint: foreign_key}
+  "name": string
+  "full_name": string
+  "city": string
+  "country": string
+  "foundation": date
+}
+phase: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "championship_id": uuid {constraint: foreign_key}
+  "created_by": uuid {constraint: foreign_key}
+  "updated_by": uuid {constraint: foreign_key}
+  "name": string
+  "position": int32
+  "sort": string
+  "bonus_points": int32
+  "bonus_points_threshold": int32
+}
+stadium: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "created_by": uuid {constraint: foreign_key}
+  "updated_by": uuid {constraint: foreign_key}
+  "name": string
+  "full_name": string
+  "city": string
+  "country": string
+  "search_name": string
+}
+referee: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "created_by": uuid {constraint: foreign_key}
+  "updated_by": uuid {constraint: foreign_key}
+  "name": string
+  "location": string
+  "search_name": string
+  "search_key": string
+  "slug": string
+}
+goal: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "game_id": uuid {constraint: foreign_key}
+  "player_id": uuid {constraint: foreign_key}
+  "created_by": uuid {constraint: foreign_key}
+  "updated_by": uuid {constraint: foreign_key}
+  "side": string
+  "minute": int32
+  "penalty": bool
+  "own_goal": bool
+  "aet": bool
+}
+comment: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "game_id": uuid {constraint: foreign_key}
+  "app_user_id": uuid {constraint: foreign_key}
+  "body": string
+  "created_at": timestamp
+}
+match_probability: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "game_id": uuid {constraint: foreign_key}
+  "home_name": string
+  "away_name": string
+  "rating_status": string
+  "timeline_status": string
+  "payload_json": string
+}
+player_game: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "game_id": uuid {constraint: foreign_key}
+  "player_id": uuid {constraint: foreign_key}
+  "created_by": uuid {constraint: foreign_key}
+  "updated_by": uuid {constraint: foreign_key}
+  "side": string
+  "on_minute": int32
+  "off_minute": int32
+  "yellow": bool
+  "red": bool
+}
+player: {
+  shape: sql_table
+  "id": uuid {constraint: primary_key}
+  "created_by": uuid {constraint: foreign_key}
+  "updated_by": uuid {constraint: foreign_key}
+  "name": string
+  "full_name": string
+  "birth": date
+  "country": string
+  "height": int32
+}
+game."phase_id" -> phase."id"
+game."home_id" -> team."id"
+game."away_id" -> team."id"
+game."stadium_id" -> stadium."id"
+game."referee_id" -> referee."id"
+team."stadium_id" -> stadium."id"
+goal."game_id" -> game."id"
+goal."player_id" -> player."id"
+comment."game_id" -> game."id"
+match_probability."id" -> game."id"
+match_probability."game_id" -> game."id"
+player_game."game_id" -> game."id"
+player_game."player_id" -> player."id"

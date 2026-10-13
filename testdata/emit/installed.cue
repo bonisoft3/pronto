@@ -10,8 +10,6 @@ import (
 	omnishellTerminal "github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
-// An installed terminal names its files from omnishell's root (omnishell mode).
-_installedSurface: {runtime: "", interpreterRoot: "interpreter", componentsRoot: "components", markupReader: "read-markup.ts", documentRenderer: "render-documents.ts", documentConfig: "server/deno.json", machineSchema: "machine.cue"}
 _installedTerm: (pronto.#DefaultTerminal & {code: _code}).out & {surface: _installedSurface}
 _installedCluster: (pronto.#DefaultCluster & {code: _code, statics: _installedTerm.surface.statics, local: false}).out
 _installedBuild: (pronto.#DefaultBuild & {code: _code, loop: _external, cluster: _installedCluster, terminal: _installedTerm}).out
@@ -29,7 +27,8 @@ installedFrom:    _installedProject.targets.database.dockerfile.from.name & "lib
 installedContext: _installedProject.targets.database.compose.build.additional_contexts["libraries_mecha-database-image"] & "${MONOREPO_COMPOSE_MODE:-docker-image://\(mecha.published.database)}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image}"
 installedIncludes: _installedProject.compose.includes & ["mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml", "omnishell/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"]
 installedService:      list.Contains(_installedFiles["mecha/service.yaml"].data.include, "../${MONOREPO_MECHA_PATH}/.bayt/compose.database-image.yaml") & true
-installedServiceCount: len(_installedFiles["mecha/service.yaml"].data.include) & 7
+installedAirlock:      list.Contains(_installedFiles["mecha/service.yaml"].data.include, "../${MONOREPO_MECHA_PATH}/.bayt/compose.airlock-image.yaml") & true
+installedServiceCount: len(_installedFiles["mecha/service.yaml"].data.include) & 8
 installedRoot:         _installedProject.targets.caddy.compose.build.additional_contexts.root & ".."
 installedRootCompose: _installedFiles["compose.yaml"].data.include & [{path: "./.bayt/compose.yaml"}, {path: "mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"}, {path: "omnishell/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"}]
 
@@ -63,6 +62,7 @@ installedNoReplayRule:   (_external.surface.checks.replay == _|_) & true
 // Commands reach sayt through the wrapper the app commits, at its pin.
 installedBuildCmd: _external.surface.buildCmd & "./saytw build"
 localReplayTarget: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.replay != _|_) & true
+localReplayIncludesFixtures: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.replay.srcs.defaultExclude["pronto-tests"] == null) & true
 localReplayCopiesRootGraph: len([for p in (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets["ci-replay"].dockerfile.copy[0].exclude if p == "**/.bayt/**" {p}]) & 0
 localReplayCopiesStackGraph: list.Contains((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.replay.dockerfile.copy[0].srcs, "libraries/mecha/.bayt") & true
 // The wrapper reaches the build image on the app's whole tree.
@@ -79,7 +79,7 @@ installedHandlers: _installedTerminal.checks.handlers.cmds[0] & "use tools.nu [r
 // An installed app's route rendered on request is served by omnishell's
 // renderer, copied from the runtime image whose root is omnishell's, as the
 // workspace's tree holds it; nothing of it is read from the app's directory.
-_ssrApp: (#syncCase & {reads: [_view]}).app & {surface: screens: jogo: {ssr: "ssr", files: {handlers: [], adapters: []}}} & {capabilities: auth: {required: false, service: "/auth"}}
+_ssrApp: (#readCase & {reads: [_view]}).app & {surface: screens: jogo: {ssr: "ssr", files: {handlers: [], adapters: []}}} & {capabilities: auth: {required: false, service: "/auth"}}
 _ssrTerm: (pronto.#DefaultTerminal & {code: _ssrApp}).out & {surface: _installedSurface}
 _ssrCluster: (pronto.#DefaultCluster & {code: _ssrApp, statics: _ssrTerm.surface.statics, local: false}).out
 _ssrLoop: (pronto.#DefaultLoop & {code: _ssrApp, terminal: _ssrTerm, cluster: _ssrCluster}).out & {surface: sources: pronto: ""}

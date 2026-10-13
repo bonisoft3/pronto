@@ -74,7 +74,9 @@
       },
       "upClosure": [
         "plugins/pronto/.bayt/compose.build.yaml",
-        "plugins/pronto/.bayt/compose.setup.yaml"
+        "plugins/pronto/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.build.yaml",
+        "plugins/omnishell/.bayt/compose.setup.yaml"
       ]
     },
     "outs": {
@@ -103,7 +105,9 @@
       },
       "upClosure": [
         "plugins/pronto/.bayt/compose.build.yaml",
-        "plugins/pronto/.bayt/compose.setup.yaml"
+        "plugins/pronto/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.build.yaml",
+        "plugins/omnishell/.bayt/compose.setup.yaml"
       ]
     },
     "srcs": {
@@ -136,6 +140,49 @@
       ],
       "transitiveCrossDeps": [
         {
+          "name": "build_srcs",
+          "project": "plugins_omnishell",
+          "dir": "plugins/omnishell",
+          "outs": {
+            "globs": [
+              "src/**/*",
+              "test/**/*",
+              "interpreter/**/*",
+              "check-*.ts",
+              "arbitrary.ts",
+              "components/**/*",
+              "base-url.ts",
+              "terminal.cue",
+              "instrument.ts",
+              "read-markup.ts",
+              "render-documents.ts",
+              "server/**/*",
+              "runtime/**/*",
+              "package.json",
+              "tsconfig.json",
+              "[m]ise.toml",
+              "[.]mise.toml",
+              "[m]ise.lock",
+              "[.]tool-versions"
+            ],
+            "exclude": []
+          }
+        },
+        {
+          "project": "plugins_omnishell",
+          "name": "setup_srcs",
+          "dir": "plugins/omnishell",
+          "outs": {
+            "globs": [
+              "[m]ise.toml",
+              "[.]mise.toml",
+              "[m]ise.lock",
+              "[.]tool-versions"
+            ],
+            "exclude": []
+          }
+        },
+        {
           "project": "plugins_pronto",
           "name": "setup_srcs",
           "dir": "plugins/pronto",
@@ -162,7 +209,9 @@
       },
       "upClosure": [
         "plugins/pronto/.bayt/compose.build.yaml",
-        "plugins/pronto/.bayt/compose.setup.yaml"
+        "plugins/pronto/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.build.yaml",
+        "plugins/omnishell/.bayt/compose.setup.yaml"
       ]
     }
   },
@@ -174,7 +223,8 @@
   "visibility": "internal",
   "emitsSrcs": true,
   "deps": [
-    "setup"
+    "setup",
+    "build_srcs"
   ],
   "sameProjectDeps": [
     "setup"
@@ -182,10 +232,56 @@
   "transitiveDeps": [
     "setup"
   ],
-  "transitiveCrossDeps": [],
+  "transitiveCrossDeps": [
+    {
+      "name": "build_srcs",
+      "project": "plugins_omnishell",
+      "dir": "plugins/omnishell",
+      "outs": {
+        "globs": [
+          "src/**/*",
+          "test/**/*",
+          "interpreter/**/*",
+          "check-*.ts",
+          "arbitrary.ts",
+          "components/**/*",
+          "base-url.ts",
+          "terminal.cue",
+          "instrument.ts",
+          "read-markup.ts",
+          "render-documents.ts",
+          "server/**/*",
+          "runtime/**/*",
+          "package.json",
+          "tsconfig.json",
+          "[m]ise.toml",
+          "[.]mise.toml",
+          "[m]ise.lock",
+          "[.]tool-versions"
+        ],
+        "exclude": []
+      }
+    },
+    {
+      "project": "plugins_omnishell",
+      "name": "setup_srcs",
+      "dir": "plugins/omnishell",
+      "outs": {
+        "globs": [
+          "[m]ise.toml",
+          "[.]mise.toml",
+          "[m]ise.lock",
+          "[.]tool-versions"
+        ],
+        "exclude": []
+      }
+    }
+  ],
   "upClosure": [
     "plugins/pronto/.bayt/compose.build.yaml",
-    "plugins/pronto/.bayt/compose.setup.yaml"
+    "plugins/pronto/.bayt/compose.setup.yaml",
+    "plugins/omnishell/.bayt/compose.build.yaml",
+    "plugins/omnishell/.bayt/compose.setup.yaml"
   ],
   "chainedDeps": [
     {
@@ -194,6 +290,35 @@
       "dir": "plugins/pronto",
       "outs": {
         "globs": [],
+        "exclude": []
+      }
+    },
+    {
+      "name": "build_srcs",
+      "project": "plugins_omnishell",
+      "dir": "plugins/omnishell",
+      "outs": {
+        "globs": [
+          "src/**/*",
+          "test/**/*",
+          "interpreter/**/*",
+          "check-*.ts",
+          "arbitrary.ts",
+          "components/**/*",
+          "base-url.ts",
+          "terminal.cue",
+          "instrument.ts",
+          "read-markup.ts",
+          "render-documents.ts",
+          "server/**/*",
+          "runtime/**/*",
+          "package.json",
+          "tsconfig.json",
+          "[m]ise.toml",
+          "[.]mise.toml",
+          "[m]ise.lock",
+          "[.]tool-versions"
+        ],
         "exclude": []
       }
     }

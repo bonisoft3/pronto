@@ -95,32 +95,55 @@ such branch is an error, since a gate comparing nothing would read green.
 came back from retirement, whatever the SQL or the proto says
 ([identity](types-and-identity.md)).
 
-**The catalog replay** runs the app's own database image, applies the
-migrations one at a time into an empty database, and reads the catalog after
-each. DuckDB (`replay.sql`) joins consecutive states on the relation's oid and
-the column's `attnum`, which PostgreSQL keeps across a rename and never reissues
-after a drop, and reports a relation that ended (a drop-and-recreate named as
-such), a column gone, renamed or retyped. Additions are not findings. The oid is
-carried because `attnum` means something only within one relation: `DROP TABLE
-t; CREATE TABLE t` restarts it at 1, so on name and number alone an identical
-recreate reads as no change. A catalog state does not care how it was reached,
-which is why it sees what the text readers cannot.
+**The catalog replay** runs the app's own database and migrate images. It
+applies initdb once to an empty database, then invokes the migrate image's
+entrypoint and command with the same environment as the runtime. Every
+declared pgroll migration must be completed in the ledger. Running that
+migrator again must leave the public schema, stored rows and ledger unchanged.
+Initdb is not replayed against a populated database: retained volumes advance
+through the migration ledger, not through their bootstrap scripts.
 
-The replay is a service of the app's build graph, `replay`, whose exit code is
-the verdict. It drives the host's daemon through its socket, since only that
-daemon holds the images the runtime was built into, and runs under a compose
-project of its own, `<app>-replay`, so its `--remove-orphans` cannot take the
-running cluster down.
+A fresh bootstrap can create temporary tables before replacing them with
+views. Those intermediate objects have no deployed readers. Compatibility is
+checked across retained upgrade fixtures, rather than between bootstrap steps.
+`tests/replay.json` lists those fixtures:
 
-The replay then applies the whole set a second time, onto a copy, with each
-statement isolated. A step that cannot be applied twice is a finding, since a
-correction below it never reaches a database that already exists; the only
-failures forgiven are `004_types.sql`'s domains and casts, which have no `IF NOT
-EXISTS` spelling that squawk could still read.
+```json
+[
+  {
+    "name": "feed-view",
+    "omitInitdb": ["020_feed_view.sql"],
+    "through": "010_previous",
+    "seed": "tests/replay/feed-before.sql",
+    "verify": "tests/replay/feed-after.sql",
+    "replacements": {
+      "feed": {"kind": "view", "note": "Computed from retained source rows."}
+    }
+  }
+]
+```
 
-It runs on `integrate` because it grades a built image, and at `priority: 1`
-because rules sort by priority and then by name, which would otherwise put
-`replay` before the `visual` rule whose `up --build` makes the image.
+Each fixture builds the prior schema by omitting exactly the named initdb
+steps, runs the actual migrator through an existing migration, then loads
+representative retained data from `seed`. The full migrator must upgrade it
+and restart without changes. `verify` must return exactly one PostgreSQL
+boolean `true`; SQL errors fail the check. Assertions should cover source-row
+preservation, reader behavior and permissions. This is a reproducible prior
+schema fixture, not a claim to cover every deployed database version.
+
+The catalog includes tables and views. `replay.sql` compares relation OIDs and
+column ordinals across the upgrade, rejecting lost/recreated relations and
+removed, renamed or retyped columns. Additions are allowed. A fixture may name
+an intentional projection replacement with its resulting `kind` (`table`,
+`view` or `absent`) and a rationale. It must exist before the upgrade; surviving
+replacements must retain the old reader columns and types. Its data and access
+semantics belong in `verify`. Every unnamed relation keeps the strict identity
+check: replacing a cache does not exempt its source tables.
+
+The replay runs on `integrate`, after the app images are built, under its own
+compose project. It drives the host daemon through its socket, so it inspects
+the same images as the app. A fresh bootstrap/restart check without retained
+fixtures does not establish upgrade compatibility.
 
 ## Inspection and hatches
 
@@ -161,14 +184,11 @@ The two paths must not claim the same column:
    migration is deleted. A live database takes the deletion in its stride: the
    migrate step applies only what its ledger lacks.
 
-The replay checks this. After its two passes it reads the migrations out of the
-app's migrate image, runs that image's `pgroll init`, baselines the initdb
-schema under the name the cluster publishes, and starts each migration in name
-order, reading the catalog after each exactly as for the initdb steps. A
-migration that does not apply, such as one adding a column the entity already
-declares, is an error at `code.state.migrations.<name>`, and so is one pgroll's
-ledger shows it skipped. Step 2 is a manual discipline
-([pending](../PENDING.md#schema-changes)).
+The replay runs the shipped migrator on the fresh schema and checks its
+completed ledger, so a migration that conflicts with a folded-in column fails.
+Retained fixtures exercise the same runner over earlier schemas and data.
+Folding a change into initdb remains a deployment discipline
+([[../PENDING#schema-changes|pending work]]).
 
 ### Retyping a column from a domain to its base type
 
@@ -180,7 +200,7 @@ the next: `PGDATA` sits on the database container's writable layer
 ([mecha's schema](../../../libraries/mecha/docs/schema.md)), and a rebuilt image
 recreates the container empty. So no migration is emitted, and the database is
 rebuilt with its migrations: a container started again from an image built
-before the split keeps its domains, and the first subset an on-demand
+before the split keeps its domains, and the first subset a lazily read
 collection asks of one is Electric's 400, a ProgramError naming the table.
 Comparing the data directory with the initdb steps inside one container cannot
 see that, since the container carries the steps that built it. When a pronto

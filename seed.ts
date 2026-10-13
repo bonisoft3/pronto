@@ -97,13 +97,13 @@ export function seedSql(data: SeedData, held: Held): string {
 }
 
 /** The inputs a held seed's verdict depends on: its bytes, the entities that
- * judge it (fields, types, cel), the constraints derived from their cel, and
- * the type table and entity schema pronto judges every row with. */
-export async function seedKey(bytes: Uint8Array, entities: unknown, programCel: string): Promise<string> {
+ * judge it (fields, types, cel), their machine states, the parsed CEL
+ * constraints, and the type table and entity schema that judge every row. */
+export async function seedKey(bytes: Uint8Array, entities: unknown, programCel: string, machines: unknown): Promise<string> {
   const pronto = await Promise.all(
     ["types.cue", "schema.cue"].map((f) => Deno.readFile(new URL(`./${f}`, import.meta.url)).then(sha256Hex)),
   );
-  const text = JSON.stringify({ seed: await sha256Hex(bytes), entities, programCel, pronto });
+  const text = JSON.stringify({ seed: await sha256Hex(bytes), entities, machines, programCel, pronto });
   return sha256Hex(new TextEncoder().encode(text));
 }
 

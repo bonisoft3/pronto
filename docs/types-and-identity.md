@@ -114,7 +114,7 @@ fails "Could not select an operator overload", and no cast out of a domain
 parses. Measured against Electric 1.8.0, every base column but a json or
 geojson one compares, so `subset` is true for those seven and for no domain, and the
 integration test holds each entry to Electric. A table whose views filter on a
-column `subset` refuses syncs whole ([screens](screens.md#the-reads-decide-how-a-table-syncs)).
+column `subset` refuses syncs whole ([screens](screens.md#the-reads-decide-how-a-table-is-read)).
 DuckDB reads a base column as its own type rather than as text.
 
 ## Where each boundary makes a value canonical

@@ -121,7 +121,7 @@ Deno.test("a settled build preserves outputs and still follows new template read
     assertEquals(await outputs(), before);
     assertEquals((await Deno.stat(screen)).mtime, mtime);
 
-    // The compiler sees the old emitted template until emission replaces it.
+    // Authored markup reaches derivation before the emission settles.
     const source = join(app, "screens.cue");
     const markup = await Deno.readTextFile(source);
     await Deno.writeTextFile(
@@ -131,7 +131,7 @@ Deno.test("a settled build preserves outputs and still follows new template read
         '<section class="screen" data-screen="main"><aside data-live="row" data-filter="id=eq.preview"><template data-item><span data-text="{id}"></span></template></aside>',
       ),
     );
-    assertStringIncludes(await gate(), "(3 derivations)");
+    assertStringIncludes(await gate(), "(2 derivations)");
     assertStringIncludes(await Deno.readTextFile(screen), "id=eq.preview");
     const derived = await Deno.readTextFile(join(app, "program_derived.cue"));
     const old = before["program_derived.cue"];
@@ -197,11 +197,22 @@ Deno.test("Pronto check gates retain consumer rules and track test fixtures", as
     prefix: "check-test-",
   });
   const decoder = new TextDecoder();
+  // A nested frontend must not inherit the outer Bayt leaf's dispatch identity.
+  const commandEnv = Object.fromEntries(
+    Object.entries(Deno.env.toObject()).filter(([name]) =>
+      !name.startsWith("SAYT_") && !name.startsWith("BAYT_")
+    ),
+  );
   async function run(args: string[], success = true): Promise<string> {
     const result = await new Deno.Command("mise", {
       args: ["tool-stub", join(repo, "plugins/sayt/nu.toml"), ...args],
       cwd: app,
-      env: { MISE_TRUSTED_CONFIG_PATHS: repo, MISE_LOCKED: "0" },
+      clearEnv: true,
+      env: {
+        ...commandEnv,
+        MISE_TRUSTED_CONFIG_PATHS: repo,
+        MISE_LOCKED: "0",
+      },
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -343,7 +354,9 @@ pronto: say: say: {
     await Deno.writeTextFile(join(app, "tests/copy-b.txt"), "same");
     const gate = (verb: string, success = true, args: string[] = []) =>
       run([join(repo, "plugins/sayt/sayt.nu"), verb, ...args], success);
-    await gate("lint");
+    const firstLint = await gate("lint");
+    assertStringIncludes(firstLint, "bayt:generate");
+    assertStringIncludes(firstLint, "bayt:lint");
     assertEquals(
       await Deno.readTextFile(join(app, ".task/lint-one")),
       "lint-one",
@@ -359,7 +372,9 @@ pronto: say: say: {
       "lint-one",
     );
     await Deno.writeTextFile(join(app, "tests/copy-b.txt"), "different");
-    assertStringIncludes(await gate("lint", false), "differs from");
+    const drift = await gate("lint", false);
+    assertStringIncludes(drift, "bayt:lint");
+    assertStringIncludes(drift, "differs from");
     await Deno.writeTextFile(join(app, "tests/copy-b.txt"), "same");
     await gate("lint");
     assertEquals(

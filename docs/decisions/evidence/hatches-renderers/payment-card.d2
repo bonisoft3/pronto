@@ -1,0 +1,59 @@
+direction: down
+classes: {
+  authored: {style.stroke: "#1b1f2a"; style.font-color: "#1b1f2a"; style.fill: "#ffffff"}
+  derived: {style.stroke: "#2443b8"; style.stroke-dash: 3; style.font-color: "#2443b8"; style.fill: "#f3f5fd"}
+  chip: {shape: oval; style.font-size: 13}
+}
+Payment: {
+  label: "Payment · server · replicated"
+  style.stroke: "#1b1f2a"
+  style.fill: "#ffffff"
+  style.font-size: 20
+  grid-columns: 2
+  grid-gap: 24
+  fields: {
+    class: authored
+    shape: sql_table
+    label: "fields (authored)"
+    "id": uuid {constraint: primary_key}
+    "status": string {constraint: "machine"}
+    "total": decimal(12,2)
+    "failure": string
+    "user_id": uuid {constraint: foreign_key}
+  }
+  access: {
+    class: authored
+    label: "access (authored)"
+    private: {class: chip; label: "private · owner user_id"}
+  }
+  validations: {
+    class: authored
+    label: "validations (authored)"
+    positive-total: {label: "positive-total\n(state, event) ⇒ total > 0"; tooltip: "a charge is never for nothing"}
+  }
+  derived: {
+    class: derived
+    label: "derived"
+    grid-columns: 2
+    level: {class: chip; label: "level 3 · replicated"}
+    delivery: {class: chip; label: "exactly-once"}
+    ports: {class: chip; label: "written: forms, machine · read: lazy"}
+    presence: {class: chip; label: "owes an ir element (server)"}
+    roles: {class: chip; label: "anon, app_user, service · RLS"}
+  }
+  machine: {
+    label: "PaymentMachine · status (derived level 4)"
+    style.stroke: "#2443b8"
+    style.stroke-dash: 3
+    style.fill: "#f3f5fd"
+    direction: right
+    start: {shape: circle; style.fill: "#1b1f2a"; label: ""}
+    start -> pending
+    pending -> charging: pay
+    charging: {label: "charging\ninvoke charge"; style.stroke-dash: 3}
+    charging -> settled: onDone
+    charging -> failed: onError
+    settled: {shape: circle; style.double-border: true}
+    failed -> pending: retry
+  }
+}

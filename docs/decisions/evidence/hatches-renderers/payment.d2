@@ -1,0 +1,9 @@
+direction: right
+start: {shape: circle; style.fill: black; label: ""}
+start -> pending
+pending -> charging: pay
+charging: {label: "charging\ninvoke charge"; style.stroke-dash: 3}
+charging -> settled: onDone
+charging -> failed: onError
+settled: {shape: circle; style.double-border: true}
+failed -> pending: retry

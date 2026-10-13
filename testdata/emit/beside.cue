@@ -5,7 +5,10 @@
 // the container's shell rather than compose's interpolation.
 package emit
 
-import pronto "github.com/bonisoft3/pronto"
+import (
+	pronto "github.com/bonisoft3/pronto"
+	"list"
+)
 
 _besideBuild: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out & {
 	checks: plain: {priority: 2, cmds: ["deno run tests/plain.ts $HOME"], note: "plain"}
@@ -34,10 +37,9 @@ besideNoBrowser: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _c
 // image only where the trees sit beside the app as they do in the monorepo.
 for check in ["check-plain", "check-painted"] {
 	besideTrees: (check): _besideTargets[check].dockerfile.copy[0] & {from: name: "root", srcs: ["plugins/omnishell", "libraries/mecha"], dst: "/monorepo/", parents: true}
+	besideImportRoot: (check): list.Contains(_besideTargets[check].dockerfile.epilogue, "RUN ln -s /monorepo/plugins/omnishell /omnishell") & true
 }
 
 // A check reaches the database only when it asks to: the URL carries the
 // superuser's credentials.
 besideNoDatabase: (_besideTargets["check-plain"].compose.environment.DATABASE_URL == _|_) & true
-
-sourceCheckRuntimeAlias: _besideBuild.project.targets["check-plain"].dockerfile.epilogue & ["RUN ln -s /monorepo/plugins/omnishell /omnishell"]
