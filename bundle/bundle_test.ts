@@ -1,12 +1,40 @@
 // The derived rows a pages release ships: derived.ts's SQL, and bundle.ts
 // carrying it into a page whose PGlite runs it after the migrations.
+import './edge-addresses_test.ts'
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotSql } from './derived.ts'
+import { writeEdgeAssets } from './edge-assets.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../../..')
+
+Deno.test('edge assets preserve lazy module and route delivery without bundling the browser cluster', async () => {
+  const scratch = await Deno.makeTempDir({ prefix: 'edge-assets-' })
+  try {
+    const app = path.join(scratch, 'app'), terminal = path.join(scratch, 'terminal'), out = path.join(scratch, 'public')
+    for (const dir of [path.join(app, 'shell/screens'), path.join(terminal, 'interpreter')]) await Deno.mkdir(dir, { recursive: true })
+    const html = '<!doctype html><base href="/shell/"><script type="module" src="./boot.js"></script>'
+    await Deno.writeTextFile(path.join(app, 'shell/index.html'), html)
+    await Deno.writeTextFile(path.join(app, 'shell/boot.js'), 'import "/omnishell/interpreter/shell.js";')
+    await Deno.writeTextFile(path.join(app, 'shell/screens/second.html'), '<h1>Another route</h1>')
+    await Deno.writeTextFile(path.join(terminal, 'interpreter/shell.js'), 'export const runtime = true;')
+    await writeEdgeAssets(app, terminal, out, [
+      { file: 'shell/index.html', target: '/srv/shell/index.html' },
+      { file: 'shell/boot.js', target: '/srv/shell/boot.js' },
+      { file: 'shell/screens/second.html', target: '/srv/shell/screens/second.html' },
+      { file: 'a different installed runtime/interpreter/shell.js', target: '/omnishell/interpreter/shell.js' },
+      { file: 'private.sql', target: '/database/private.sql' },
+    ])
+    assert.equal(await Deno.readTextFile(path.join(out, 'index.html')), html)
+    assert.equal(await Deno.readTextFile(path.join(out, 'shell/index.html')), html)
+    assert.equal(await Deno.readTextFile(path.join(out, 'shell/screens/second.html')), '<h1>Another route</h1>')
+    assert.equal(await Deno.readTextFile(path.join(out, 'omnishell/interpreter/shell.js')), 'export const runtime = true;')
+    await assert.rejects(() => writeEdgeAssets(app, terminal, out, [{ file: 'shell/index.html', target: '/srv/../escape.html' }]), /invalid static asset target/)
+  } finally { await Deno.remove(scratch, { recursive: true }) }
+})
 
 Deno.test('a table follows the tables it references, and a cycle is refused', () => {
   assert.deepEqual(dependencyOrder(['b', 'a', 'c'], [['a', 'b'], ['c', 'a'], ['c', 'game'], ['a', 'a']]), ['b', 'a', 'c'])

@@ -4,9 +4,9 @@
 // the data directory the object loads once (publish-edge.ts).
 //
 //   deno run -A --config bundle/deno.json bundle/edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>]
-//     [--derived <file> | --from <dir>]
+//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>]
 //
-// <out>/public   the page, bundled without its cluster: it asks the Worker
+// <out>/public   the terminal and app assets; data requests reach the Worker
 // <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
 // <out>/pgdata   rls.sql, the migrations and --derived's rows, applied on disk;
 //                or, with --from, a copy of a directory built elsewhere (an
@@ -15,6 +15,8 @@
 // <out>/src/index.ts, <out>/wrangler.jsonc
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
+import { addressEdgeAssets, separateAssetDirectories } from './edge-addresses.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -23,7 +25,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>]'
+const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>]'
 const app = path.resolve(args.shift() ?? fail(usage))
 const flags: Record<string, string> = {}
 while (args.length) {
@@ -31,12 +33,14 @@ while (args.length) {
   flags[flag] = args.shift() ?? fail(`${flag} takes a value`)
 }
 for (const flag of Object.keys(flags)) {
-  if (!['--omnishell', '--mecha', '--out', '--domain', '--derived', '--from'].includes(flag)) fail(`unknown flag ${flag}`)
+  if (!['--omnishell', '--mecha', '--out', '--domain', '--derived', '--from', '--assets-from'].includes(flag)) fail(`unknown flag ${flag}`)
 }
 const omnishell = path.resolve(flags['--omnishell'] ?? fail('--omnishell names the interpreter root'))
 const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha root'))
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
 const domain = flags['--domain'] ?? ''
+const previousAssets = flags['--assets-from'] ? path.resolve(flags['--assets-from']) : undefined
+if (previousAssets) separateAssetDirectories(out, previousAssets)
 
 async function run(cmd: string, args: string[], cwd?: string) {
   const r = await new Deno.Command(cmd, { args, cwd, stdout: 'inherit', stderr: 'inherit' }).output()
@@ -48,21 +52,27 @@ const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.jso
   tables: string[]
   schema?: Record<string, { durability?: string }>
   migrations: string[]
+  units?: Record<string, unknown>
 }
 if (shell.migrations.length === 0) fail('the app has no migration, so no cluster: release it to pages')
+// A unit also needs the terminal door's per-unit security headers.
+if (Object.keys(shell.units ?? {}).length) fail(`units are not packaged yet: ${Object.keys(shell.units!).join(', ')}`)
 const name = shell.app ?? path.basename(app)
 
 await Deno.remove(out, { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
 await Deno.mkdir(path.join(out, 'src'), { recursive: true })
 
-// The page, asking the Worker's origin for /crud, /auth and /electric.
+// Use the same public files as the container door; the cluster stays remote.
 const publicDir = path.join(out, 'public')
-await run(Deno.execPath(), ['run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app, '--omnishell', omnishell, '--mecha', mecha, '--out', publicDir, '--no-cluster'])
-const assets = path.join(app, 'shell/assets')
-if ((await Deno.stat(assets).catch(() => null))?.isDirectory) {
-  await Deno.mkdir(path.join(publicDir, 'shell/assets'), { recursive: true })
-  for await (const e of Deno.readDir(assets)) if (e.isFile) await Deno.copyFile(path.join(assets, e.name), path.join(publicDir, 'shell/assets', e.name))
-}
+const statics = await new Deno.Command('cue', {
+  args: ['export', '.', '-e', '{statics: terminal.surface.statics, clusterStatics: cluster.meta.statics}', '--out', 'json'],
+  cwd: app, stdout: 'piped', stderr: 'inherit',
+}).output()
+if (!statics.success) fail('cue export of public assets failed')
+const { statics: terminalStatics, clusterStatics } = JSON.parse(new TextDecoder().decode(statics.stdout)) as { statics: StaticAsset[]; clusterStatics: StaticAsset[] }
+await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
+const hints = await addressEdgeAssets(publicDir, previousAssets)
+await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints))
 
 // PGlite for workerd. Bake reads the project's compose from its .bayt/, and a
 // local export adds to its destination, which is fresh here.
@@ -94,6 +104,9 @@ const fromSrc = (p: string) => path.relative(path.join(out, 'src'), p)
 await Deno.writeTextFile(path.join(out, 'src/index.ts'), `// Written by pronto's edge.ts for ${name}.
 import { edgeObject } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/object.ts'))}'
 import { edgeWorker } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/worker.ts'))}'
+import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
+import { routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
+import hints from './hints.json'
 import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
@@ -104,7 +117,17 @@ export const Cluster = edgeObject({
   tables: ${JSON.stringify(shell.tables)},
   schema: ${JSON.stringify(Object.fromEntries(Object.entries(shell.schema ?? {}).map(([t, s]) => [t, { durability: s.durability }])))},
 })
-export default edgeWorker
+export default {
+  async fetch(req, env, ctx) {
+    const response = await edgeWorker.fetch(req, env, ctx)
+    if (req.method !== 'GET' || response.status !== 200 ||
+        !(response.headers.get('content-type') ?? '').includes('text/html') ||
+        !(req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') ?? '').includes('text/html'))) return response
+    const result = new Response(response.body, response)
+    result.headers.set('Link', edgeHints(req, hints, routeAt))
+    return result
+  },
+}
 `)
 await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   name,
@@ -112,7 +135,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   compatibility_date: '2026-09-01',
   // No asset matches a route of the page or the cluster's: those reach the
   // Worker, which answers a navigation with the document (mecha-edge's worker.ts).
-  assets: { directory: './public', binding: 'ASSETS' },
+  assets: { directory: './public', binding: 'ASSETS', run_worker_first: ['/'] },
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],

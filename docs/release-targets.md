@@ -195,9 +195,37 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 ## cloudflare
 
 `sayt release@cloudflare` runs [`edge.ts`](../bundle/edge.ts), which writes
-`dist/cloudflare/`: the page bundled with `--no-cluster` into `public/`, so it
-asks the Worker's origin for `/crud`, `/auth` and `/electric`; PGlite for
-workerd in `pglite/`, baked from mecha's pinned sources
+`dist/cloudflare/`. The terminal modules and declared public files live in
+`public/`, so each route loads only its own screen and required catalogues.
+The terminal asks the Worker's origin for `/crud`, `/auth` and `/electric`.
+
+Each public asset also has a SHA-256 URL with one year of immutable caching.
+The document's CSP-authorized import map pins native modules and fetched
+screen files to those URLs; canonical names still identify handlers and
+endowments. Stylesheet references are resolved before hashing the served
+bytes. Canonical files remain revalidatable for service-worker installation.
+An edge release refuses live-update manifests: their verified release protocol
+and the edge document's import map cannot independently replace the same files.
+
+The build computes the native modules' transitive static import closure and
+places its modulepreloads after the import map. Response `Link` headers preload
+styles, configuration, the requested screen's files, and the resolved locale's
+catalogue. Modulepreloads in headers could resolve imports before the map;
+ordinary `as=script` preloads promote the whole module graph ahead of first
+paint. In-app navigation uses the same map for its screen preloads and fetches.
+Cloudflare can turn eligible `Link` headers into HTTP 103 when the zone's
+[Early Hints setting](https://developers.cloudflare.com/workers/examples/103-early-hints/)
+is enabled. Emitting those headers does not establish that 103 is enabled on
+the deployed hostname; verify the interim response on the wire.
+
+For a subsequent deployment, preserve the previous `public/` outside the new
+output tree and pass `edge.ts --assets-from <previous-public-dir>`. The build
+verifies and retains its immutable files, including earlier retained releases,
+so an open tab can still enter a screen it has not downloaded. It does not copy
+the old entry, canonical files, or cache rules. A fresh build without that
+input contains only the current release's URLs.
+
+The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
 ([pglite-workerd](../../../libraries/mecha/packages/pglite-workerd/README.md));
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
 [mecha's edge cluster](../../../libraries/mecha/packages/mecha-edge/README.md)
