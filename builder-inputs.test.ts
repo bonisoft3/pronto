@@ -9,7 +9,12 @@ const dir = new URL("./testdata/emit", import.meta.url);
 
 function statics(seats: string): { ok: boolean; out: string } {
   const expr = `(#installedBuild & {seats: {${seats}}}).out.terminalStatics`;
-  const out = new Deno.Command("cue", { args: ["export", ".", "-e", expr], cwd: dir, stdout: "piped", stderr: "piped" }).outputSync();
+  const out = new Deno.Command("cue", {
+    args: ["export", "builder.cue", "installed-surface.cue", "optional.cue", "installed.cue", "distribution.cue", "read.cue", "-e", expr],
+    cwd: dir,
+    stdout: "piped",
+    stderr: "piped",
+  }).outputSync();
   return { ok: out.success, out: new TextDecoder().decode(out.success ? out.stdout : out.stderr).trim() };
 }
 

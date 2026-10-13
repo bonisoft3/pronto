@@ -92,7 +92,7 @@ Deno.test("derive input refuses invalid selected values and cleans its temporary
 
 Deno.test("derive input keeps writes within the authorized caller path", async () => {
   await fixture("app", "example.com/scoped@v0", async (app) => {
-    const alias = join(dirname(app), "consumer alias");
+    const alias = join(dirname(app), "consumer-alias");
     await Deno.symlink(app, alias, { type: "junction" });
     const script = join(dirname(app), "scoped.ts");
     await Deno.writeTextFile(script, `
