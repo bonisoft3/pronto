@@ -10,6 +10,7 @@
 //   deno run -A --config bundle/deno.json bundle/publish-edge.ts <out> --mecha <dir> [--reset]
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { gzipSync } from 'node:zlib'
 
 function fail(msg: string): never {
   console.error(`publish-edge: ${msg}`)
@@ -42,16 +43,28 @@ const secretPath = path.join(path.dirname(out), '.jwt-secret')
 let jwtSecret: string
 try {
   jwtSecret = (await Deno.readTextFile(secretPath)).trim()
-} catch {
+} catch (error) {
+  if (!(error instanceof Deno.errors.NotFound)) throw error
   jwtSecret = random()
-  await Deno.writeTextFile(secretPath, jwtSecret)
+  await Deno.writeTextFile(secretPath, jwtSecret, { mode: 0o600 })
 }
+if (!jwtSecret) fail('JWT secret file is empty')
 const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSecret }
 const secretsDir = await Deno.makeTempDir({ prefix: 'publish-edge-' })
 const secretsFile = path.join(secretsDir, 'secrets.json')
 let deployed: string
 try {
   await Deno.writeTextFile(secretsFile, JSON.stringify(secrets), { mode: 0o600 })
+  let ssr = false
+  try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
+  catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+  if (ssr) {
+    console.log(await run(wrangler, ['deploy', '--config', path.join(out, 'renderer.jsonc'), '--durable-objects-code-update-mode', 'immediate']))
+    const settings = JSON.parse(await Deno.readTextFile(config))
+    if (settings.durable_objects.bindings.some((binding: { name: string; script_name?: string }) => binding.name === 'CLUSTER' && binding.script_name)) {
+      console.log(await run(wrangler, ['deploy', '--config', path.join(out, 'database.jsonc'), '--secrets-file', secretsFile, '--durable-objects-code-update-mode', 'immediate']))
+    }
+  }
   // The object restarts on the new code rather than at its next idle.
   deployed = await run(wrangler, ['deploy', '--config', config, '--secrets-file', secretsFile, '--durable-objects-code-update-mode', 'immediate'])
 } finally {
@@ -60,7 +73,16 @@ try {
 console.log(deployed)
 const settings = JSON.parse(await Deno.readTextFile(config)) as { routes?: { pattern: string }[] }
 const origin = settings.routes?.length ? `https://${settings.routes[0].pattern}` : /https:\/\/\S+\.workers\.dev/.exec(deployed)?.[0] ?? fail('wrangler deploy named no workers.dev URL')
-const send = (route: string, init?: RequestInit) => fetch(`${origin}/import/${route}`, { ...init, headers: { authorization: `Bearer ${token}` } })
+const send = (route: string, init?: RequestInit) => {
+  const headers = new Headers(init?.headers)
+  headers.set('authorization', `Bearer ${token}`)
+  let body = init?.body
+  if (route.startsWith('chunk?') && body instanceof Uint8Array) {
+    body = new Uint8Array(gzipSync(body, { level: 1 }))
+    headers.set('content-encoding', 'gzip')
+  }
+  return fetch(`${origin}/import/${route}`, { ...init, body, headers })
+}
 
 // The version just deployed is everywhere once the Worker takes this token.
 for (let streak = 0, t0 = Date.now(); ; ) {

@@ -1645,6 +1645,7 @@ import (
 		sitemap?:     #Sitemap
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		domain?: string
+		ssrOrigin?: string
 		targets: [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
 		// compose clock is emitted by cluster.cue and needs no declaration; a

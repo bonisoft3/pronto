@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import { parseHTML } from 'npm:linkedom@0.18.4'
 import { addressEdgeAssets, separateAssetDirectories } from './edge-addresses.ts'
 import { edgeHints } from './edge-hints.ts'
-import { routeAt } from '../../omnishell/interpreter/fragment.js'
+import { acceptedLanguages, routeAt } from '../../omnishell/interpreter/fragment.js'
 
 async function fixture(changed = false, previous?: string) {
   const out = await Deno.makeTempDir({ prefix: 'edge-addresses-' })
@@ -112,12 +112,12 @@ Deno.test('route hints follow the shell’s locale and parameter resolution with
   const f = await fixture()
   try {
     for (const url of ['/en/team/42', '/equipe/42?lang=en-GB']) {
-      const links = edgeHints(new Request('https://app.test' + url), f.hints, routeAt)
+      const links = edgeHints(new Request('https://app.test' + url), f.hints, routeAt, [])
       for (const name of ['/shell/screens/team.html', '/shell/handlers/save.js', '/messages/en-GB.json', '/messages/pt-BR.json']) assert.ok(links.includes(f.imports[name]))
       assert.ok(!links.includes(f.imports['/shell/screens/other.html']))
       assert.ok(links.includes('crossorigin=anonymous'))
     }
-    const portuguese = edgeHints(new Request('https://app.test/equipe/42', { headers: { 'accept-language': 'en-GB;q=0, pt-BR;q=1' } }), f.hints, routeAt)
+    const portuguese = edgeHints(new Request('https://app.test/equipe/42'), f.hints, routeAt, acceptedLanguages('en-GB;q=0, pt-BR;q=1'))
     assert.ok(!portuguese.includes(f.imports['/messages/en-GB.json']))
   } finally { await Deno.remove(f.out, { recursive: true }) }
 })

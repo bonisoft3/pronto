@@ -19,6 +19,8 @@ localCompiler:    strings.Contains(_loop.surface.checks.types.cmds[0], "../../pl
 externalCompiler: strings.Contains(_external.surface.checks.types.cmds[0], "../../plugins") & false
 externalBuild:    _external.surface.sayYaml.say.build.do & "null"
 _project:         dist.#Project
+clientOnlyEdge: strings.Contains(_project.edge, "--ssr-origin") & false
+nativeSsrEdge: strings.Contains((dist.#Project & {ssrOrigin: "https://example.com"}).edge, "--ssr-origin \"https://example.com\"") & true
 sourceTerminalCommand: (dist.#Project & terminalProject.#Project & {omnishell: "../../plugins/omnishell"}).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#LocalGenerate
 installedTerminalCommand: (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
 sourcePin:                _project.mise.tools."github:bonisoft3/pronto" & dist.#Version

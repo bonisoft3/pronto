@@ -225,6 +225,38 @@ so an open tab can still enter a screen it has not downloaded. It does not copy
 the old entry, canonical files, or cache rules. A fresh build without that
 input contains only the current release's URLs.
 
+For native M-SSR, declare `code.meta.ssrOrigin: "https://<public-host>"` so the
+generated release recipe passes `edge.ts --ssr-origin https://<public-host>`.
+By default,
+the entry keeps its existing `Cluster` namespace and persisted filesystem format,
+so enabling SSR does not replace live data. The builder also writes
+`renderer.jsonc`; `publish-edge.ts` deploys that renderer before updating the
+entry and its database class. Publishing leaves a complete directory intact.
+Keep the existing `.jwt-secret` beside the release directory to preserve sessions.
+
+A new deployment can opt into `--ssr-database separate`: it writes
+`database.jsonc` for `<app>-database` with compressed 128 KiB filesystem blocks,
+and deploys renderer, database, then entry. That namespace starts empty; this
+option is not an in-place migration of an existing app. The resumable import
+verifies checksums and uses gzip transport. Do not switch database modes on a
+live deployment without migrating its current data and controlling the cutover.
+
+Both modes keep the renderer in a separate isolate. Renderer Worker names include
+a digest of the origin, sources and assets, so an old entry continues to use its
+matching renderer during an upgrade. Retain previous immutable assets with
+`--assets-from`; old renderer Workers can be removed after their entry versions
+are no longer serving or needed for rollback.
+
+Every navigation renders under public RLS from a fresh database transaction,
+without guest login. No HTML cache can bypass that transaction. Language
+negotiation matches the browser, and the response varies on `Accept-Language`.
+See [[../../omnishell/docs/native-worker-ssr]] for the freshness and isolation
+contract. Authentication and derivation support remain the edge target's.
+
+The integrated deployment has been exercised on Paid; Free enforcement,
+including the documented per-object storage limit discrepancy, requires
+verification on a Free account before claiming a free deployment.
+
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
 ([pglite-workerd](../../../libraries/mecha/packages/pglite-workerd/README.md));
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting

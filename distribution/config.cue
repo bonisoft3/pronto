@@ -68,9 +68,10 @@ import (
 }
 
 #Project: P={
-	_valid:  saycfg.say & P.say.say
-	runtime: *"" | string
-	domain:  *"" | string
+	_valid:    saycfg.say & P.say.say
+	runtime:   *"" | string
+	domain:    *"" | string
+	ssrOrigin: *"" | string
 	// The interpreter's root and mecha's, which the bundler reads from: a
 	// sibling path in the monorepo, the installed distribution elsewhere.
 	omnishell: *"" | string
@@ -116,8 +117,8 @@ import (
 	// an archive built elsewhere instead of the migrations and derived rows;
 	// derive then has nothing to do.
 	_edgeData: "let data = if ($env.SAY_RELEASE_ARGS_FROM? | is-not-empty) { ['--from' $env.SAY_RELEASE_ARGS_FROM] } else { [\([if len(P.derived.tables) > 0 {"'--derived' '\(P._derivedOut)'"}, ""][0])] }"
-	edge:        (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])"}).out
-	edgeDerive:  "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
+	edge: (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
+	edgeDerive: "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
 	// `--reset` replaces the object's data with this release's.
 	publishEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle publish-edge.ts) dist/cloudflare --mecha \(P._mecha) ...(if ($env.SAY_RELEASE_ARGS_RESET? | is-empty) { [] } else { ['--reset'] })"}).out
 	// truco's edge release until the edge has a clock for its lobby sweep:

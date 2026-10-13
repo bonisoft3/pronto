@@ -4,7 +4,7 @@
 // the data directory the object loads once (publish-edge.ts).
 //
 //   deno run -A --config bundle/deno.json bundle/edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>]
-//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>]
+//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate]
 //
 // <out>/public   the terminal and app assets; data requests reach the Worker
 // <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
@@ -17,6 +17,7 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
 import { addressEdgeAssets, separateAssetDirectories } from './edge-addresses.ts'
+import { writeEdgeSsr } from './edge-ssr.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -25,7 +26,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>]'
+const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate]'
 const app = path.resolve(args.shift() ?? fail(usage))
 const flags: Record<string, string> = {}
 while (args.length) {
@@ -33,8 +34,11 @@ while (args.length) {
   flags[flag] = args.shift() ?? fail(`${flag} takes a value`)
 }
 for (const flag of Object.keys(flags)) {
-  if (!['--omnishell', '--mecha', '--out', '--domain', '--derived', '--from', '--assets-from'].includes(flag)) fail(`unknown flag ${flag}`)
+  if (!['--omnishell', '--mecha', '--out', '--domain', '--derived', '--from', '--assets-from', '--ssr-origin', '--ssr-database'].includes(flag)) fail(`unknown flag ${flag}`)
 }
+const databaseMode = flags['--ssr-database'] ?? 'existing'
+if (databaseMode !== 'existing' && databaseMode !== 'separate') fail('--ssr-database must be existing or separate')
+if (flags['--ssr-database'] && !flags['--ssr-origin']) fail('--ssr-database requires --ssr-origin')
 const omnishell = path.resolve(flags['--omnishell'] ?? fail('--omnishell names the interpreter root'))
 const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha root'))
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
@@ -105,7 +109,7 @@ await Deno.writeTextFile(path.join(out, 'src/index.ts'), `// Written by pronto's
 import { edgeObject } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/object.ts'))}'
 import { edgeWorker } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/worker.ts'))}'
 import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
-import { routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
+import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
 import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
@@ -115,7 +119,7 @@ import icu from '../pglite/icu-root.tgz'
 export const Cluster = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(shell.tables)},
-  schema: ${JSON.stringify(Object.fromEntries(Object.entries(shell.schema ?? {}).map(([t, s]) => [t, { durability: s.durability }])))},
+  schema: ${JSON.stringify(shell.schema ?? {})},
 })
 export default {
   async fetch(req, env, ctx) {
@@ -124,7 +128,7 @@ export default {
         !(response.headers.get('content-type') ?? '').includes('text/html') ||
         !(req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') ?? '').includes('text/html'))) return response
     const result = new Response(response.body, response)
-    result.headers.set('Link', edgeHints(req, hints, routeAt))
+    result.headers.set('Link', edgeHints(req, hints, routeAt, acceptedLanguages(req.headers.get('accept-language') ?? '')))
     return result
   },
 }
@@ -152,4 +156,10 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
     '@mecha/postgrest-js': rel(path.join(mecha, 'packages/postgrest-js/src/index.ts')),
   },
 }, null, 2) + '\n')
+if (flags['--ssr-origin']) {
+  const origin = new URL(flags['--ssr-origin'])
+  if (origin.origin !== flags['--ssr-origin'] || origin.protocol !== 'https:') fail('--ssr-origin must be an HTTPS origin without a trailing slash')
+  await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], path.join(omnishell, 'server/worker'))
+  await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, databaseMode)
+}
 console.error(`edge: ${out}`)

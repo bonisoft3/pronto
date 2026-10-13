@@ -1743,6 +1743,9 @@ _cdcBeforeField: "__before"
 				if D.code.meta.domain != _|_ {
 					domain: "\(D.code.meta.domain)"
 				}
+				if D.code.meta.ssrOrigin != _|_ {
+					ssrOrigin: D.code.meta.ssrOrigin
+				}
 				// What only the cluster's streams and computations write lands in
 				// live tables, which the page ships as they stood at bundling.
 				if len(D.code.state.pipelines)+len(D.code.state.drains)+len(D.code.state.computations) > 0 {

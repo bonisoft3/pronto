@@ -79,7 +79,7 @@ say:
       bundle:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts"
+          - do: "mise exec -- deno test --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-addresses_test.ts bundle/edge-ssr_test.ts"
       # The door's language rule against the terminal's, over an emitted
       # Caddyfile: two runtimes that cannot share code and must not disagree.
       negotiation:
