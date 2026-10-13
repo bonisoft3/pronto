@@ -445,7 +445,7 @@ Deno.test("the page's store behind its cluster raises a refused subset as the pr
   }
 })
 
-Deno.test('a bundled page carries no unresolvable node imports', async () => {
+Deno.test('a bundled page resolves its imports and authorizes only its exact inline scripts', async () => {
   const app = await Deno.makeTempDir({ prefix: 'no-cluster-bundle-test-' })
   try {
     const write = async (p: string, text: string) => {
@@ -460,7 +460,8 @@ Deno.test('a bundled page carries no unresolvable node imports', async () => {
     await write('shell/shell.css', '')
     await write('shell/design.css', '')
     await write('shell/screens/home.css', '')
-    await write('shell/index.html', '<!doctype html><html><head><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>')
+    const policy = (await Deno.readTextFile(path.join(repo, 'plugins/omnishell/content-security-policy.txt'))).trim()
+    await write('shell/index.html', `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>`)
     await write('m/001.sql', 'CREATE TABLE item (id text PRIMARY KEY);')
 
     const bundled = await new Deno.Command(Deno.execPath(), {
@@ -474,6 +475,16 @@ Deno.test('a bundled page carries no unresolvable node imports', async () => {
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
+    const scripts = [...html.matchAll(/<script(?: type="module")?>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+    assert.equal(scripts.length, 1, 'SES must initialize through the interpreter inside the application module')
+    assert.ok(!scripts[0].includes('\0'), 'HTML replaces literal NULs before checking script hashes')
+    const hashes = await Promise.all(scripts.map(async (source) => {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
+      return `'sha256-${Buffer.from(digest).toString('base64')}'`
+    }))
+    const bundledPolicy = /http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)![1]
+    assert.equal(bundledPolicy, policy.replace(/script-src ([^;]+)/, `$& ${hashes.join(' ')}`))
+    assert.ok(!/<script src="data:/.test(html), 'data: would authorize scripts beyond this release')
   } finally {
     await Deno.remove(app, { recursive: true })
   }

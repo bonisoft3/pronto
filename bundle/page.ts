@@ -7,6 +7,9 @@ import { createCluster, type Cluster } from 'mecha-browser/cluster.ts'
 import { createPageDatabase, type DatabaseAssets } from './database.ts'
 // @ts-ignore untyped interpreter module
 import { createShell } from 'omnishell/shell.js'
+// @ts-ignore untyped interpreter module
+import { ensureSes } from 'omnishell/jessie.js'
+import { installSes } from 'pronto-bundle-ses'
 
 interface Payload {
   files: Record<string, string>
@@ -61,6 +64,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     })
   }
   // The shim answers every file a preload would ask the network for.
+  await ensureSes(installSes)
   createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false })
 })().catch((e) => {
   document.body.textContent = `boot failed: ${e instanceof Error ? e.message : String(e)}`

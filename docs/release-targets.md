@@ -75,7 +75,8 @@ that a cold page boot exceeds. The projection is
 `sayt release@pages` runs [`bundle.ts`](../bundle/bundle.ts), which writes
 `dist/browser/index.html`: the interpreter and mecha's browser cluster as one
 `deno bundle` module written inline, the files `shell.json` serves in a base64
-table, SES from a `data:` URL, and, for an app with migrations, `rls.sql`, the
+table, SES installed through the interpreter's Trusted Types policy, and, for
+an app with migrations, `rls.sql`, the
 migrations and PGlite's wasm and data as base64 of gzip, inflated at boot.
 Every PGlite bundle also embeds the full ICU data archive and loads it before
 applying migrations, so declared collations retain case and accent semantics
@@ -98,7 +99,8 @@ What the bundler holds to:
   fails the bundle.
 - **Inline script data cannot carry `<!--` or `</script`**, and SES and screens
   contain both, so the data rides as base64 and the module has both sequences
-  escaped. The module is inline so that `import.meta.url` is the page's own
+  escaped. The document's CSP authorizes the exact module bytes with a SHA-256
+  hash. The module is inline so that `import.meta.url` is the page's own
   URL, which PGlite's relative asset URLs resolve against.
 - **A publication or replica identity outside a container fence fails the
   bundle**, read by mecha's own fence grammar.

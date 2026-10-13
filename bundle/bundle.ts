@@ -5,8 +5,7 @@
 // the page resolves through the same map and lock `deno run` would, and it is
 // written inline so `import.meta.url` is the page's own, which PGlite's
 // relative asset URLs resolve against. Inline script data cannot carry `<!--`
-// or `</script`, and both occur in SES and in screens: the data rides as
-// base64, and the module has the two sequences escaped.
+// or `</script`: the data rides as base64, and executable scripts escape both.
 //
 //   deno run -A --config bundle/deno.json bundle/bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>]
 //
@@ -155,8 +154,12 @@ const map: { imports: Record<string, string> } = {
 const work = await Deno.makeTempDir({ prefix: 'bundle-' })
 const mapFile = path.join(work, 'imports.json')
 const jsFile = path.join(work, 'page.js')
+const sesFile = path.join(work, 'ses.js')
 let js: string
 try {
+  const ses = await Deno.readTextFile(path.join(omnishell, 'interpreter/vendor/ses.umd.min.js'))
+  await Deno.writeTextFile(sesFile, `export function installSes() {\n${ses}\n}\n`)
+  map.imports['pronto-bundle-ses'] = String(pathToFileURL(sesFile))
   await Deno.writeTextFile(mapFile, JSON.stringify(map))
   const bundled = new Deno.Command(Deno.execPath(), {
     args: [
@@ -202,10 +205,10 @@ const payload = {
 }
 
 const b64 = (s: string) => encodeBase64(new TextEncoder().encode(s))
-const ses = await Deno.readTextFile(path.join(omnishell, 'interpreter/vendor/ses.umd.min.js'))
 // A module carries the two sequences only in a string, a regex or a comment,
 // where `\/` and `\!` read as the character.
-const module = js.replaceAll('</script', '<\\/script').replaceAll('<!--', '<\\!--')
+const scriptText = (text: string) => text.replace(/\r\n?/g, '\n').replaceAll('\0', '\\x00').replaceAll('</script', '<\\/script').replaceAll('<!--', '<\\!--')
+const module = scriptText(js)
 // A function, so a `$` in a stylesheet is written as it is and not read as
 // a replacement pattern.
 const replace = (html: string, from: string | RegExp, to: string) => {
@@ -313,11 +316,28 @@ for (const match of html.matchAll(/<link\s+[^>]*rel=["']manifest["'][^>]*>/gi)) 
   const inlinedTag = tag.replace(hrefMatch[0], () => `href="${manifestDataUri}"`)
   html = html.replace(tag, () => inlinedTag)
 }
+// Bundling changes external scripts into inline scripts; authorize only their
+// exact bytes under every policy, including a script-src-elem override.
+const hash = `'sha256-${encodeBase64(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(module))))}'`
+html = html.replace(/<meta\b[^>]*>/gi, (tag) => {
+  if (!/\bhttp-equiv\s*=\s*["']Content-Security-Policy["']/i.test(tag)) return tag
+  return tag.replace(/\bcontent\s*=\s*"([^"]*)"/i, (_attribute, policy: string) => {
+    const directives = policy.split(';').map((d) => d.trim()).filter(Boolean)
+    const find = (name: string) => directives.findIndex((d) => d.split(/\s/)[0] === name)
+    const element = find('script-src-elem')
+    const script = element < 0 ? find('script-src') : element
+    if (script >= 0) directives[script] = `${directives[script].replace(/\s+'none'(?=\s|$)/g, '')} ${hash}`
+    else {
+      const fallback = directives[find('default-src')]?.split(/\s+/).slice(1).filter((s) => s !== "'none'") ?? []
+      directives.push(['script-src', ...fallback, hash].join(' '))
+    }
+    return `content="${directives.join('; ')}"`
+  })
+})
 html = replace(
   html,
   '<script type="module" src="./boot.js"></script>',
   `<script type="application/octet-stream" id="pronto-payload">${b64(JSON.stringify(payload))}</script>\n` +
-    `<script src="data:text/javascript;base64,${b64(ses)}"></script>\n` +
     `<script type="module">${module}</script>`,
 )
 
