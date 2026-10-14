@@ -152,6 +152,42 @@ sink through that sink's Dapr binding, and the outcome returns through the inter
 [External effects](2026-10-03-external-effects.md) holds the grammar, the ledger and
 the measurements that rejected DBOS as the runtime.
 
+### Future composition: use XState invocation semantics
+
+XState already expresses the hierarchy Cortex needs. Extend the compiler's
+supported subset using `invoke.src`, explicit `invoke.input`, child `output`,
+`onDone` and `onError`. Invoked children start on state entry and stop on exit.
+The missing work is implementing and checking those semantics across our tier
+boundaries, rather than designing another orchestration language. See the
+upstream [invocation](https://stately.ai/docs/invoke) and
+[output](https://stately.ai/docs/output) contracts.
+
+A future Truco root could compose boot/session restoration, local play, online
+lobby, online table and recovery as child machines. The parent owns navigation
+and child lifetimes; existing Mecha actors retain domain authority and
+transactions. `state.cortex` currently registers bounded client compositions;
+it does not yet express this executable parent. Wrapping the old local arena
+in an opaque invoked callback would not establish correctness of its internals.
+
+Stopping a browser child stops observation, polling and local presentation.
+Cooperative I/O can receive an `AbortSignal`, and stopped actors discard late
+results, as described by [promise actor cancellation](https://stately.ai/docs/promise-actors#stopping-promise-actors).
+Neither operation rolls back a committed remote transition. Leaving a Truco
+table must therefore detach its browser interaction while the authoritative
+match continues. Resignation is an explicit domain command. Unknown command
+outcomes retain their original identity and durable recovery information.
+
+Before admitting general invocation, the compiler must check child input/output
+compatibility, tier authority and outcome handling. The runtime must distinguish
+a locally owned child's lifetime from attachment to an existing durable actor,
+and define recovery after parent restart. Cortex composes existing Mecha ports,
+transactional actions and Airlock effects; it does not introduce another lock,
+transaction, saga or delivery implementation. The built subset's contract lives
+in [[../cortex|Cortex client compositions]].
+
+This extension is deferred until Truco's existing multiplayer path is delivered.
+It is not a prerequisite for that delivery.
+
 ---
 
 ## 5. How Hybrid Machines Drive Cortex and DuckStream
@@ -207,12 +243,12 @@ queries and writes forms. What differs per tier is only how far from pure it may
 | Executor | Closed over | Level | Runs as | Status |
 |---|---|---|---|---|
 | Omnishell machine | a `tab`/`device` row in the client | 2 | the terminal: SES-caged Jessie, XState JSON | built |
-| Mecha machine | a `server` row in Postgres | 3 | the plpgsql interpreter inside the write | built |
+| Mecha machine | a `server` row in Postgres | 3 | plpgsql interpreter or bounded SES reducer in PLV8, inside the transaction | built |
 | Compute, whole-table | a snapshot of the tables it `reads` | 3 | Jessie planning WASI jobs over a DuckDB lake; woken by CDC invalidations through the change feed, batched and retried | built |
 | Compute, per key | one changed row and its declared edges | 3 | the same cage, warm; Conduit → compute's own daprd over gRPC, no bus; a direct write | not built |
 | Airlock | one ledger row per effect instance | 4 | Graphile Worker listening on `jobs:insert`, woken from zero by the ticker's one-shot row; one declared Dapr binding per effect; bridges for what is not HTTP | built ([external effects](2026-10-03-external-effects.md)) |
 | DuckStream | a pipeline or lake row, with history | 3 | Feldera on the feed, DuckDB-WASM in the page | grammar and static checks only; no executor |
-| Cortex | a coordination whose states are owned by tiers | 4 | the machine itself: a saga is several invoking states | a concept |
+| Cortex | a composition of tier-owned actors and browser interaction state | up to 4 | generated client protocols over Mecha ports; external effects through Airlock | bounded session/command compositions built; general hierarchical invocation unbuilt |
 
 **Effects and hatches.** Levels 1–3 stay inside time travel: an assign, a relational effect
 and a compute output all replay from rows. Level 4 is the airlock, and the airlock is a
@@ -235,22 +271,56 @@ of its input: whole-table (built, above), per key for user-facing latency (tens 
 milliseconds; not built), and analytical over the stream with history, where durability
 is the point because history is the input (DuckStream). Feldera's place is the third
 kind, not a trigger for the first two. A client-side differential engine (`d2ts`) is
-named in the seams below and is not in the tree.
+named in the seams below and is not in the tree. Truco's current online path
+uses authenticated command RPCs and polls private projections; it does not
+require Electric subscriptions or DuckStream.
 
 **What forces the unbuilt parts.** golaberto needs the analytical kind: odds are recomputed
 in micro-batches of simulation draws (odds-rust replaces 50,000-draw batches
 incrementally), which a per-row path delivers without batching semantics and a
-whole-table recompute delivers too slowly. truco needs cortex: online play is one machine
-whose states live partly in the browser (hand, optimistic plays) and partly in Postgres
-(seats, room, authority), and without one chart with per-state tier ownership a model
-writes two machines that disagree.
+whole-table recompute delivers too slowly. Truco validates a different boundary:
+browser drafts and pending intents must agree with authoritative Mecha matches,
+presence and challenges. Hands are private server projections; browser optimism
+must not become a second writer of canonical game state. The bounded Cortex
+compositions exercise this boundary before general hierarchy or DuckStream.
 
-**Open, in order.** The per-key compute path, after a spike on whether Conduit can call a
-Dapr invoke synchronously. The DuckStream executor, Feldera or DuckDB on the feed, with
-golaberto as the oracle. The cortex grammar, one XState chart with states owned by
-tiers, with truco as the oracle. Hatches as one taxonomy: what a replay owes each kind.
-The external-effects record's own open list: a client certificate for a sink, bridges
-beyond mail, a wake placed by tier.
+### Truco delivery priority
+
+The implemented slice includes authoritative 1×1, 2×2 and 2×2×2 matches with the supported regional variants,
+presence leases, challenges, generated Mecha admission and coordination, and
+`state.cortex` compositions for both lobby and table. Their browser protocols
+own drafts, admission, polling, persisted command identity, retries,
+reconciliation and shutdown. Hatches retain rendering and host I/O. No
+handwritten procedural online SQL adapters remain; read-only SQL projections
+and relational preconditions remain in Mecha declarations.
+
+The stable contracts live in [[../cortex|Cortex client compositions]] and
+[[../../../../libraries/mecha/docs/machines|Mecha machines]]. The
+[[../../../../apps/truco/docs/hybrid-machine-proof|execution proof]] also checks
+shared local/PostgreSQL reductions and private projections. The pinned PLV8
+build's native timeout verification gap remains advisory; adoption assumes the
+timeout contract and retains deterministic fuel.
+
+Verification includes real PostgreSQL races and rollback, complete matches for
+two-, four- and six-seat tables, bounded session delivery schedules, and two mounted DOM clients
+completing a match over HTTP after lost visibility/play replies and reload.
+Live HTTPS checks cover guest authentication, discovery, challenge acceptance,
+private deals and direct invitations. This is not full-shell browser acceptance
+or a proof that the application is bug-free. Current behavior and limitations
+belong in the [[../../../../apps/truco/docs/online-hybrid|online reference]].
+
+The immediate priority is delivering that multiplayer slice with the primitives
+already built: validate the real two-browser journey, fix concrete usability
+and recovery defects, complete the replay/rematch experience, and make rollout
+and stale-client handling explicit. Add framework capability only when a
+reproducible delivery blocker requires it. A top-level Cortex root, general
+hierarchical invocation, offline-arena migration, more variants/seats,
+DuckStream, Rust emission and a new solver are not prerequisites.
+
+Other framework work remains independent: per-key compute and analytical
+DuckStream with golaberto as an oracle, replay contracts for hatches, and the
+external-effects record's open work on sink certificates, non-HTTP bridges and
+wake placement. That work does not precede Truco multiplayer delivery.
 
 ---
 
@@ -420,7 +490,7 @@ Every existing application in `./apps` with a PostgreSQL backend (migrations, pu
 
 | Application | Existing Mechanism | Hybrid Machine Adoption & Guarantees |
 |---|---|---|
-| **[`apps/truco`](../../../../apps/truco)** | Hand-written `challenge_expire_check()` trigger and RLS status checks in `012_lobby.sql`. | **Adopted (`010_machines.sql`)**: Challenge lifecycle (`pending` $\rightarrow$ `accepted` \| `declined` \| `expired`) is compiled from `#MechaMachine` with finite timeout `after: {"60000": "expired"}`. Enforces initial state, valid transitions, immutability of final states, and timeout guards without custom trigger boilerplate. |
+| **[[../../../../apps/truco/docs/index|apps/truco]]** | `state.hybrids` owns online games in all supported variant/seating combinations, lobby presence and challenges; the local arena retains its existing engine. | **Partial adoption**: generated transactional commands, private views and browser reconciliation. [[../../../../apps/truco/docs/online-hybrid|The online reference]] records evidence and limits; general Cortex hierarchy and migration of the local arena remain unbuilt. |
 | **[`apps/chess`](../../../../apps/chess)** | In-browser referee state machine and local time controls. | **Authoritative Turn Clocks**: Match state (`playing` $\rightarrow$ `over`) with strict termination reasons (`checkmate`, `resignation`, `flag`) backed by database-level clock expiration checks, preventing client clock manipulation. |
 
 ---

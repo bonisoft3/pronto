@@ -14,6 +14,8 @@
 
 # Subsystems
 
+* [[cortex|Cortex client compositions]] — generated browser protocols composing Mecha session and command ports.
+
 * [The compiler and its review ladder](compiler.md) - concept: How a brief becomes an app — two model hops above deterministic rungs, what `cue export` emits and where it lands, what the bijection holds a person to sign, and how pronto reaches the parts it configures.
 * [Component contracts](component-contracts.md) - concept: What each part of a pronto program — the app, the terminal, the cluster, the loop and the build graph — declares as its state, its capabilities and its surface, how data flows between them as one graph, and the dual-plane kinetic contract for universal time travel.
 * [Types and identity](types-and-identity.md) - concept: What a field's value is and what an entity is: fifteen portable types, each equal exactly when its canonical strings are, and a minted type id with ordinals, so a name is a label nothing is keyed on.
@@ -32,7 +34,9 @@
 * [Owner stamping](decisions/2026-08-31-owner-stamping.md) - decision, unbuilt: Moves a row's owner stamp from the apps' `default: "auth_uid()"` column defaults to an emitted per-table BEFORE INSERT trigger beside the policies, and narrows `#Field.default` to what a bare Postgres has, so the data-holding steps need nothing from the rules.
 * [The next vocabulary](decisions/2026-09-08-the-next-vocabulary.md) - decision, accepted: Chooses the platform's next token layer — DTCG as the format, Tailwind's namespaces as the grammar, shadcn's names as the roles — for the names a model will write, of which only the contrast grading is built.
 * [Pronto written in pronto](decisions/2026-09-27-pronto-written-in-pronto.md) - decision, unbuilt: The whole development loop in a browser tab — authoring, compilation, running and version control, with sayt's verbs run by an in-tab executor, inside an IDE that is itself a pronto app — none of which exists yet.
-* [Hybrid machines](decisions/2026-09-29-hybrid-machines.md) - decision, unbuilt: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-external tiers.
+* [Hybrid machines](decisions/2026-09-29-hybrid-machines.md) - decision, partially built: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-external tiers.
+* [[../../../apps/truco/docs/online-hybrid|Truco online hybrid table]] — 1v1 games, lobby presence and challenges, generated commands and recovery; timeout verification is advisory.
+* [[../../../apps/truco/docs/hybrid-machine-proof|Hybrid execution proof]] — isolated framework protocol and shared-reducer checks.
 * [External effects](decisions/2026-10-03-external-effects.md) - decision, partially built: How a machine reaches outside the cluster — a state invokes an external effect, the interpreter claims a ledger row and enqueues a Graphile job in the transition's commit, mecha's airlock runs the effect's Jessie handler against one declared sink through its Dapr binding, and the outcome returns through the interpreter as the machine's next event.
 
 # Archive

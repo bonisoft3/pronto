@@ -10,7 +10,7 @@ COPY --chmod=0755 <<'STATIC_CURL' /root/.local/share/lazybox/libexec/static-curl
 OPENSSL_CONF="${OPENSSL_CONF:-/dev/null}" exec "$(dirname "$0")/static-curl.bin" "$@"
 STATIC_CURL
 RUN --mount=type=cache,target=/zypper-store,id=/zypper-store,sharing=shared --mount=type=cache,target=/var/cache/zypp,id=plugins_pronto-setup:/var/cache/zypp,sharing=locked s=/zypper-store; d=/var/cache/zypp/packages; mkdir -p "$s" "$d"; cp -r "$s"/. "$d"/ 2>/dev/null || true; zypper -n modifyservice --no-refresh --all && sed -i 's|http://|https://|g' /etc/zypp/repos.d/*.repo || exit; zypper -n modifyrepo --keep-packages --all && zypper -n install findutils=4.10.0-160000.2.2 which=2.23-160000.2.2 git-core=2.51.0-160000.1.2 libatomic1=15.3.0+git11272-160000.1.1 || exit; cd "$d" && for f in */*.rpm */*/*.rpm; do [ -f "$f" ] || continue; o="$s/$f"; [ -e "$o" ] && continue; mkdir -p "$(dirname "$o")"; t="$(mktemp "$(dirname "$o")/.pXXXXXX")" && cp "$f" "$t" && mv -f "$t" "$o"; done; zypper -n modifyrepo --no-keep-packages --all || true
-COPY --parents *.ts scales/*.ts deno.json deno.lock ./
+COPY --parents *.ts hybrid*.js scales/*.ts deno.json deno.lock ./
 ENV MISE_ALWAYS_KEEP_DOWNLOAD=1
 COPY --parents [m]ise.toml [.]mise.toml [m]ise.lock [.]tool-versions ./
 RUN --mount=type=cache,target=/root/.local/share/mise/downloads,id=plugins_pronto:/root/.local/share/mise/downloads,sharing=locked --mount=type=cache,target=/mise-tarball-store,id=/mise-tarball-store,sharing=shared d=/root/.local/share/mise/downloads; s=/mise-tarball-store; mkdir -p "$d" "$s"; cp -r "$s"/. "$d"/ 2>/dev/null || true; mise install || exit; cd "$d" && for f in */*/*; do [ -f "$f" ] || continue; o="$s/$f"; [ -e "$o" ] && continue; mkdir -p "$(dirname "$o")"; t="$(mktemp "$(dirname "$o")/.pXXXXXX")" && cp "$f" "$t" && mv -f "$t" "$o"; done; :
@@ -18,7 +18,7 @@ COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.setup.yaml .bayt/
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS setup_ctxs
 WORKDIR /monorepo/plugins/pronto
-COPY --parents *.ts scales/*.ts deno.json deno.lock [m]ise.toml [.]mise.toml [m]ise.lock [.]tool-versions ./
+COPY --parents *.ts hybrid*.js scales/*.ts deno.json deno.lock [m]ise.toml [.]mise.toml [m]ise.lock [.]tool-versions ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
 RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/plugins/pronto -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/plugins; fi

@@ -35,7 +35,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
+	format: "sql" | "cortex-client" | "hybrid-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -387,6 +387,7 @@ _sqlType: {
 	op:     *"INSERT" | "UPDATE" | "DELETE"
 
 	_rel: EF.effect
+	_table: [if _rel.schema != _|_ {"\"\(_rel.schema)\".\"\(_rel.table)\""}, "\"\(_rel.table)\""][0]
 	_cols: [if _rel["values"] != _|_ {[for c, _ in _rel.values {"\"\(c)\""}]}, []][0]
 	_rawKeys: [{[if _rel["key"] != _|_ {_rel.key}, ["id"]][0]}, []][0]
 	_keys: [{[for k in _rawKeys {"\"\(k)\""}]}, []][0]
@@ -415,31 +416,31 @@ _sqlType: {
 	_preds: [{[if len(_explicitPreds) > 0 {_explicitPreds}, _keyPreds][0]}, []][0]
 
 	_relBranches: [
-		if _rel["op"] != _|_ if _rel.op == "create" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
-		if _rel["op"] != _|_ if _rel.op == "ensure" {"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
+		if _rel["op"] != _|_ if _rel.op == "create" {"        INSERT INTO \(_table) (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
+		if _rel["op"] != _|_ if _rel.op == "ensure" {"        INSERT INTO \(_table) (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO NOTHING;"},
 		if _rel["op"] != _|_ if _rel.op == "upsert" {
 			[if len(_customUpdates) > 0 {
-				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
+				"        INSERT INTO \(_table) (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
 			}, {
-				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_updates, ", "));"
+				"        INSERT INTO \(_table) (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_updates, ", "));"
 			}][0]
 		},
 		if _rel["op"] != _|_ if _rel.op == "accumulate" {
 			[if len(_customUpdates) > 0 {
-				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
+				"        INSERT INTO \(_table) (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_customUpdates, ", "));"
 			}, {
-				"        INSERT INTO \"\(_rel.table)\" (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_accUpdates, ", "));"
+				"        INSERT INTO \(_table) (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", "))) ON CONFLICT (\(strings.Join(_keys, ", "))) DO UPDATE SET \(strings.Join(_accUpdates, ", "));"
 			}][0]
 		},
 		if _rel["op"] != _|_ if _rel.op == "update" {
 			if len(_preds) > 0 {
-				"        UPDATE \"\(_rel.table)\" SET \(strings.Join(_setClauses, ", ")) WHERE \(strings.Join(_preds, " AND "));"
+				"        UPDATE \(_table) SET \(strings.Join(_setClauses, ", ")) WHERE \(strings.Join(_preds, " AND "));"
 			}
 			if len(_preds) == 0 {
-				"        UPDATE \"\(_rel.table)\" SET \(strings.Join(_setClauses, ", "));"
+				"        UPDATE \(_table) SET \(strings.Join(_setClauses, ", "));"
 			}
 		},
-		if _rel["op"] != _|_ if _rel.op == "delete" {"        DELETE FROM \"\(_rel.table)\" WHERE \(strings.Join(_preds, " AND "));"},
+		if _rel["op"] != _|_ if _rel.op == "delete" {"        DELETE FROM \(_table) WHERE \(strings.Join(_preds, " AND "));"},
 	]
 	// Every #RelationalOp has a branch; an op with none is a spelling the
 	// schema admits and this file does not.
@@ -493,10 +494,26 @@ _sqlType: {
 	out: [if _isNotify {_notifySql}, _streamSql][0]
 }
 
+#mechaLockSql: L={
+	lock: #MechaReadLock
+	_table: [if L.lock.schema != _|_ {"\"\(L.lock.schema)\".\"\(L.lock.table)\""}, "\"\(L.lock.table)\""][0]
+	_statement: "PERFORM 1 FROM \(_table) WHERE \"\(L.lock.key)\" IN (\(strings.Join([for value in L.lock.values {(#sqlLit & {v: value}).out}], ", "))) ORDER BY \"\(L.lock.key)\" FOR UPDATE;"
+	out: [if L.lock.when != _|_ {"IF (\(L.lock.when)) THEN\n\(_statement)\nEND IF;"}, _statement][0]
+}
+
 #mechaActionSql: AC={
 	action: #MechaAction
 	op:     *"INSERT" | "UPDATE" | "DELETE"
 
+	_spawns: [if AC.action.spawn != _|_ {
+        let call = AC.action.spawn
+        "PERFORM hybrid_\(call.machine).spawn(\((#sqlLit & {v: call.id}).out), \((#MechaJsonSql & {fields: call.input}).out), \((#MechaJsonSql & {fields: call.members}).out));"
+    }]
+    _sends: [if AC.action.send != _|_ {
+        let call = AC.action.send
+        "PERFORM hybrid_\(call.machine).deliver(\((#sqlLit & {v: call.id}).out), jsonb_build_object('kind', \((#sqlLit & {v: call.event}).out), 'payload', \((#MechaJsonSql & {fields: call.payload}).out)));"
+    }]
+	_locks: [if AC.action.lock != _|_ {(#mechaLockSql & {lock: AC.action.lock}).out}]
 	_effList: [if AC.action["effect"] != _|_ {
 		[if (AC.action.effect & [...]) != _|_ {AC.action.effect}, [AC.action.effect]][0]
 	}, []][0]
@@ -523,7 +540,7 @@ _sqlType: {
 		"        RAISE EXCEPTION USING MESSAGE = \((#sqlLit & {v: AC.action.reject}).out), ERRCODE = 'check_violation';"
 	}]
 
-	out: strings.Join(list.Concat([_assigns, _effects, _hatches, _raises, _reject]), "\n")
+	out: strings.Join(list.Concat([_locks, _assigns, _effects, _spawns, _sends, _hatches, _raises, _reject]), "\n")
 }
 
 #mechaStateSql: ST={
@@ -1700,6 +1717,7 @@ _cdcBeforeField: "__before"
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
+		if M.code.state.hybrids != _|_ {"services/database/migrations/016_mecha_actors.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/801_schedule_seed.sql"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
@@ -1925,7 +1943,10 @@ _cdcBeforeField: "__before"
 		for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}
 		for _, s in D.code.surface.screens for i in s.files.adapters if !strings.HasPrefix(i, "/") {(i): true}
 	}
-	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
+	_sharedSet: {
+        for _, s in D.code.surface.screens for i in s.files.shared {(i): true}
+        if D.code.state.cortex != _|_ for name, _ in D.code.state.cortex {("shell/shared/cortex-\(name).js"): true}
+    }
 	_rendererSet: {for _, s in D.code.surface.screens if s.files.renderers != _|_ for i in s.files.renderers {(i): true}}
 	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
 	_validationSet: {for _, e in D.code.state.entities for _, v in e.validations {(v.src): true}}
@@ -2987,6 +3008,12 @@ _cdcBeforeField: "__before"
 			}
 
 			_machines: [if E.code.state.machines != _|_ {[for _, m in E.code.state.machines for en, e in E.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
+			if E.code.state.cortex != _|_ for name, sessionSpec in E.code.state.cortex {
+                "shell/shared/cortex-\(name).js": {format: "cortex-client", data: {composition: sessionSpec, machines: E.code.state.hybrids}}
+            }
+			if E.code.state.hybrids != _|_ {
+				"services/database/migrations/016_mecha_actors.sql": {format: "hybrid-sql", data: E.code.state.hybrids}
+			}
 			if len(_machines) > 0 {
 				"services/database/migrations/010_machines.sql": {
 					format: "sql"

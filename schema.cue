@@ -909,6 +909,7 @@ import (
 #RelationalOp: omnishell.#MutationOp & ("create" | "ensure" | "upsert" | "accumulate" | "update" | "delete")
 
 #RelationalEffect: {
+	schema?: string & =~"^[a-z_][a-z0-9_]*$"
 	op:            #RelationalOp
 	table:         string
 	values?:       {[string]: _}
@@ -938,7 +939,21 @@ import (
 
 #MechaRaise: #NotifyRaise | #StreamRaise
 
+#MechaReadLock: {
+	when?:   string
+	schema?: string & =~"^[a-z_][a-z0-9_]*$"
+	table:   string & =~"^[a-z_][a-z0-9_]*$"
+	key:     string & =~"^[a-z_][a-z0-9_]*$"
+	values: [_, ...]
+}
+
+#MechaSpawn: {machine: string & =~"^[a-z][a-z0-9_]*$", id: _, input: {[string]: _}, members: {[string]: _}}
+#MechaSend: {machine: string & =~"^[a-z][a-z0-9_]*$", id: _, event: string, payload: {[string]: _}}
+
 #MechaAction: {
+	spawn?: #MechaSpawn
+	send?: #MechaSend
+	lock?: #MechaReadLock
 	assign?: {[string]: _}
 	effect?: #RelationalEffect | [...#RelationalEffect]
 	hatch?: #SqlHatchCall | [...#SqlHatchCall]
@@ -1444,6 +1459,8 @@ import (
 		// refuses any other name. The app owns 000-799 and its seed at 900;
 		// 800-899 are the framework's steps (mecha's cluster.cue).
 		rawMigrations?: [...{name: string & !~"^8", src: string}]
+		cortex?: [string]: #CortexComposition
+		hybrids?: [Name=string]: {machine: #MechaReducerMachine & {name: Name}, rules: string}
 		// Changes to a schema that already exists, as pgroll migrations, keyed
 		// by the version they create; the cluster is given them
 		// (#DefaultCluster) and applies them in key order.
@@ -1763,8 +1780,26 @@ import (
 	])
 	_lifecycleRefusal: [if len(_lifecycleViolations) == 0 {true}, _lifecycleViolations[0]][0] & true
 
-	_machineActions: [if A.state.machines != _|_ for mName, m in A.state.machines {machine: mName, actions: m._actions}]
-	_machineHatches: {if A.state.machines != _|_ for mn, m in A.state.machines {(mn): m.hatches}}
+	_machineActions: list.Concat([
+        [if A.state.machines != _|_ for mName, m in A.state.machines {machine: mName, actions: m._actions}],
+        [if A.state.hybrids != _|_ for mName, m in A.state.hybrids {machine: mName, actions: [for _, phase in m.machine.states for _, transition in phase.on if transition.actions != _|_ for actionSpec in transition.actions {actionSpec}]}],
+    ])
+    _machineCalls: [for caller in _machineActions for actionSpec in caller.actions for call in [
+        if actionSpec.spawn != _|_ {{kind: "spawn", target: actionSpec.spawn.machine}},
+        if actionSpec.send != _|_ {{kind: "send", target: actionSpec.send.machine, event: actionSpec.send.event}},
+    ] {call}]
+    _callTargets: [if A.state.hybrids != _|_ {A.state.hybrids}, {}][0]
+    _machineCallViolations: list.Concat([
+        [for call in _machineCalls if _callTargets[call.target] == _|_ {"undeclared Mecha operation target: \(call.target)"}],
+        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "spawn" if _callTargets[call.target].machine.initialize == _|_ {"Mecha spawn requires an initializer: \(call.target)"}],
+        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].machine.events[call.event] == _|_ {"undeclared Mecha delivery event: \(call.target).\(call.event)"}],
+        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].machine.events[call.event] != _|_ if _callTargets[call.target].machine.events[call.event].tier != "mecha" {"delivery requires a Mecha event: \(call.target).\(call.event)"}],
+    ])
+    _machineCallRefusal: [if len(_machineCallViolations) == 0 {true}, _machineCallViolations[0]][0] & true
+	_machineHatches: {
+		if A.state.machines != _|_ for mn, m in A.state.machines {(mn): m.hatches}
+		if A.state.hybrids != _|_ for mn, m in A.state.hybrids {("reducer:\(mn)"): m.machine.hatches}
+	}
 
 	_machineHatchViolations: list.Concat([
 		[for mn, hs in _machineHatches for hn in hs if A.capabilities.hatches[hn] == _|_ {

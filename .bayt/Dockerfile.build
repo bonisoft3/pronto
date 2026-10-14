@@ -3,13 +3,13 @@ FROM plugins_pronto-setup AS build
 WORKDIR /monorepo/plugins/pronto
 COPY --from=plugins_omnishell-build_srcs --parents /monorepo/plugins/omnishell/src/**/* /monorepo/plugins/omnishell/test/**/* /monorepo/plugins/omnishell/interpreter/**/* /monorepo/plugins/omnishell/check-*.ts /monorepo/plugins/omnishell/arbitrary.ts /monorepo/plugins/omnishell/battery-inputs.ts /monorepo/plugins/omnishell/components/**/* /monorepo/plugins/omnishell/base-url.ts /monorepo/plugins/omnishell/terminal.cue /monorepo/plugins/omnishell/instrument.ts /monorepo/plugins/omnishell/read-markup.ts /monorepo/plugins/omnishell/render-documents.ts /monorepo/plugins/omnishell/server/**/* /monorepo/plugins/omnishell/runtime/**/* /monorepo/plugins/omnishell/package.json /monorepo/plugins/omnishell/tsconfig.json /monorepo/plugins/omnishell/[m]ise.toml /monorepo/plugins/omnishell/[.]mise.toml /monorepo/plugins/omnishell/[m]ise.lock /monorepo/plugins/omnishell/[.]tool-versions /
 COPY --from=plugins_omnishell-setup_srcs --parents /monorepo/plugins/omnishell/[m]ise.toml /monorepo/plugins/omnishell/[.]mise.toml /monorepo/plugins/omnishell/[m]ise.lock /monorepo/plugins/omnishell/[.]tool-versions /
-COPY --parents *.ts scales/*.ts deno.json deno.lock ./
+COPY --parents *.ts hybrid*.js scales/*.ts deno.json deno.lock ./
 RUN mise x -- deno run --allow-read=. --allow-run check-build.ts
 COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.build.yaml .bayt/bayt.build.json ./.bayt/
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS build_ctxs
 WORKDIR /monorepo/plugins/pronto
-COPY --parents *.ts scales/*.ts deno.json deno.lock ./
+COPY --parents *.ts hybrid*.js scales/*.ts deno.json deno.lock ./
 COPY --from=plugins_pronto-setup_srcs /monorepo /monorepo
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1

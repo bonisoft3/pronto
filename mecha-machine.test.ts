@@ -1088,3 +1088,73 @@ Deno.test("omitting SQL expression values preserves the markup gate for pending 
   assertEquals(screenFindings("shell/screens/board.html",
     html + '<template data-item><li>Pending</li></template></ul>', schema, new Set(), []), []);
 });
+
+Deno.test("Mecha actions qualify private tables and order locks before writes", async () => {
+  const files = await emitFiles(paymentProgram() + `
+app: state: machines: PaymentMachine: states: pending: entry: {
+  lock: {schema: "private", table: "account", key: "id", values: [{raw: "NEW.id"}]}
+  effect: {op: "update", schema: "private", table: "account", values: {active: true}, rawWhere: "id = NEW.id"}
+}
+`);
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  const lock = 'FROM "private"."account" WHERE "id" IN (NEW.id) ORDER BY "id" FOR UPDATE;';
+  const write = 'UPDATE "private"."account" SET "active" = true WHERE id = NEW.id;';
+  assertStringIncludes(sql, lock);
+  assertStringIncludes(sql, write);
+  assertEquals(sql.indexOf(lock) < sql.indexOf(write), true);
+});
+
+Deno.test("bounded Mecha machines share SQL hatch admission and refuse trigger-only actions", async () => {
+  const machine = `
+app: state: hybrids: bounded: {rules: "bounded.js", machine: {
+  name: "bounded", version: 1, initial: "ready"
+  state: {type: "object", fields: phase: {type: "string", maxLength: 8}}
+  view: {type: "object", fields: {}}
+  events: run: {tier: "mecha", payload: {type: "object", fields: {}}}
+  states: ready: on: run: {reduce: "same", actions: [{hatch: {name: "billing", call: "bill"}}]}
+}}
+`;
+  const result = await cue(["export", "-", "-e", "app"], paymentProgram() + machine);
+  assertEquals(result.success, false);
+  assertStringIncludes(result.stderr, "calls undeclared SQL hatch: billing");
+  const declared = paymentProgram() + machine + `
+app: capabilities: hatches: billing: {kind: "sql", files: ["billing.sql"], note: "billing operation"}
+`;
+  const valid = await cue(["export", "-", "-e", "app"], declared);
+  assertEquals(valid.success, true, valid.stderr);
+  for (const action of ['assign: {phase: "ready"}', 'lock: {table: "account", key: "id", values: [1]}', 'raise: {stream: "scores"}']) {
+    const invalid = await cue(["export", "-", "-e", "app"], declared.replace('hatch: {name: "billing", call: "bill"}', action));
+    assertEquals(invalid.success, false, action);
+  }
+});
+
+Deno.test("native Mecha spawn and send resolve declared bounded targets and authority", async () => {
+  const target = `
+app: state: hybrids: child: {rules: "child.js", machine: {
+  name: "child", version: 1, initial: "ready"
+  initialize: {reduce: "initial", input: {type: "object", fields: {}}}
+  state: {type: "object", fields: phase: {type: "string", maxLength: 8}}
+  view: {type: "object", fields: {}}
+  events: tick: {tier: "mecha", payload: {type: "object", fields: {}}}
+  states: ready: on: tick: {reduce: "same"}
+}}
+app: state: machines: PaymentMachine: states: pending: entry: [
+  {spawn: {machine: "child", id: {raw: "NEW.id"}, input: {}, members: owner: {raw: "NEW.id"}}},
+  {send: {machine: "child", id: {raw: "NEW.id"}, event: "tick", payload: {}}},
+]
+`;
+  const files = await emitFiles(paymentProgram() + target);
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(sql, "PERFORM hybrid_child.spawn(NEW.id,");
+  assertStringIncludes(sql, "PERFORM hybrid_child.deliver(NEW.id,");
+  for (const [changed, reason] of [
+    [target.replaceAll('machine: "child"', 'machine: "missing"'), "undeclared Mecha operation target"],
+    [target.replace('initialize: {reduce: "initial", input: {type: "object", fields: {}}}', ''), "Mecha spawn requires an initializer"],
+    [target.replace('event: "tick"', 'event: "missing"'), "undeclared Mecha delivery event"],
+    [target.replace('tier: "mecha"', 'tier: "omnishell"'), "delivery requires a Mecha event"],
+  ]) {
+    const result = await cue(["export", "-", "-e", "app"], paymentProgram() + changed);
+    assertEquals(result.success, false);
+    assertStringIncludes(result.stderr, reason);
+  }
+});

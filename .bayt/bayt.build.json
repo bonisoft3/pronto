@@ -26,6 +26,7 @@
   "srcs": {
     "globs": [
       "*.ts",
+      "hybrid*.js",
       "scales/*.ts",
       "deno.json",
       "deno.lock"
@@ -122,6 +123,7 @@
       "outs": {
         "globs": [
           "*.ts",
+          "hybrid*.js",
           "scales/*.ts",
           "deno.json",
           "deno.lock",
@@ -190,6 +192,7 @@
           "outs": {
             "globs": [
               "*.ts",
+              "hybrid*.js",
               "scales/*.ts",
               "deno.json",
               "deno.lock",
@@ -331,6 +334,7 @@
       "srcs": {
         "globs": [
           "*.ts",
+          "hybrid*.js",
           "scales/*.ts",
           "deno.json",
           "deno.lock"
