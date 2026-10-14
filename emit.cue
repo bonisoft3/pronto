@@ -1084,16 +1084,17 @@ _sqlType: {
 	]), "\n")
 }
 
-// A publication over a table list. Created when absent, and brought up to the
-// list when present: this file replays on a fresh volume only, and a database
-// that outlives one would otherwise publish every table but the newest.
+// A publication over a table list, brought up to the list and its options
+// whoever made it: a database outliving its volume would publish every table
+// but the newest, and a WAL reader that arrives first makes it without the
+// generated columns. The options sit outside the DO block, where squawk sees them.
 #publication: P={
 	name: string
 	tables: [...string]
 	out: """
 		DO $$ DECLARE t text; BEGIN
 		  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '\(P.name)') THEN
-		    CREATE PUBLICATION \(P.name) FOR TABLE \(strings.Join(P.tables, ",")) WITH (publish_generated_columns = stored);
+		    CREATE PUBLICATION \(P.name) FOR TABLE \(strings.Join(P.tables, ","));
 		  END IF;
 		  FOREACH t IN ARRAY ARRAY[\(strings.Join([for t in P.tables {"'\(t)'"}], ","))] LOOP
 		    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables
@@ -1102,6 +1103,7 @@ _sqlType: {
 		    END IF;
 		  END LOOP;
 		END $$;
+		ALTER PUBLICATION \(P.name) SET (publish_generated_columns = stored);
 		"""
 }
 
