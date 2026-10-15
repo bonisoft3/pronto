@@ -2,17 +2,22 @@
 
 # Entry points
 
-Writing an app needs the first three entries and nothing below them until a gate names a doc.
+Writing an app needs these entries; the rest of this index is for when a gate or a lint names a document.
 
 * [Agents](../AGENTS.md) - howto: Start here — time travel, the five languages, the lineage, the stack, the component split, machines, and the loop, in one screen.
 * [Idioms](../idioms/README.md) - howto: One small compiled screen per concept — reduce, forms, fold, machine and time — to copy before reading a full app.
 * [Bootstrap](../skills/pronto-turn/references/bootstrap.md) - howto: the pinned seed phase that makes a repository a pronto consumer module with its sayt wrappers and toolchain.
+* [pronto-turn](../skills/pronto-turn/SKILL.md) - howto: the outer loop an agent drives over a pronto app — scope, sayt verbs, review by consequence, one simplify pass, evidence.
+* [One turn](../commands/turn.md) - howto: the Claude Code command that drives one turn of the outer loop over a problem statement.
+
+# Reference
+
+Open one when a gate or a lint names it; the idioms already show what each describes.
+
 * [Pronto](../README.md) - concept: A programming language whose source is markdown and whose compiler is an LLM, targeting an architecture in which whole classes of bugs cannot exist.
 * [Writing a pronto app](../GUIDE.md) - howto: The app author's tour — starting an app and running a turn, the layout, the build loop, data modelling, screens, i18n, the capability bar, testing and release.
 * [Pronto artifact spec](../SPEC.md) - reference: What a conforming brief.md, ir.html and program.cue contain, and the lints that enforce it.
 * [The pronto prelude](../prelude.md) - reference: The component knowledge implicit in every brief-to-ir compilation — entities, durability, pipelines, screens, capability, identity, hatches, the team, the loop, tiers and tests.
-* [pronto-turn](../skills/pronto-turn/SKILL.md) - howto: the outer loop an agent drives over a pronto app — scope, sayt verbs, review by consequence, one simplify pass, evidence.
-* [One turn](../commands/turn.md) - howto: the Claude Code command that drives one turn of the outer loop over a problem statement.
 
 # For contributors
 

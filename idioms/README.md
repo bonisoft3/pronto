@@ -26,6 +26,9 @@ them, and loop until each exits 0:
 ./saytw generate && ./saytw lint && ./saytw test && ./saytw integrate
 ```
 
-The app is done when `integrate` exits 0, and not before: a page written by
-hand or a test written around the handlers is not the app.
+Then launch it and use it as a person would, play the game or walk the flow,
+and capture what you saw. The app is done when `integrate` exits 0 and using it
+shows what the brief promised: a page written by hand or a test written around
+the handlers is not the app. Rewrite the app's journal with the turn's before and
+after, as the pronto-turn skill says.
 

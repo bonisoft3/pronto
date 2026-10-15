@@ -3,18 +3,18 @@
 Pronto is a CUE module and a source distribution, not a CLI. The agent plugin
 carries installation knowledge; it is not the compiler installation.
 
-Use Pronto **0.13.2** and Sayt **0.43.1**. Verify both releases exist before
+Use Pronto **0.13.3** and Sayt **0.44.0**. Verify both releases exist before
 installation; do not substitute `main` or `latest` for a missing release.
 
-A checkout of pronto on disk is reading matter, not an installation: the app
-still builds against the release step 2 pins. Copy from the checkout's idioms;
-bootstrap from the release.
+Bootstrap is the agent's to run, first, in the app's directory: everything it
+installs lands there and in mise's cache. A checkout of pronto on disk does not
+replace it; copy from the checkout's idioms and bootstrap from the release.
 
 1. Download both project wrappers from the same pinned Sayt tag:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.43.1/saytw -o saytw
-   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.43.1/saytw.ps1 -o saytw.ps1
+   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.44.0/saytw -o saytw
+   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.44.0/saytw.ps1 -o saytw.ps1
    chmod +x saytw
    ```
 
@@ -26,7 +26,7 @@ bootstrap from the release.
 
    ```sh
    ./saytw --script tools.nu cue mod init example.com/my-app@v0
-   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v0.13.2
+   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v0.13.3
    ./saytw --script tools.nu cue cmd bootstrap github.com/bonisoft3/pronto/bootstrap@v0
    ```
 

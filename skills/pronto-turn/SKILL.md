@@ -7,7 +7,8 @@ description: "Drive a Pronto coding turn: establish a design oracle when needed,
 
 Use this skill when the user asks to implement, deliver, review, or take a
 Pronto app through its outer loop. The working tree is the durable state. Do
-not create a state file, a phase directory, or a second task tracker.
+not create a state file, a phase directory, or a second task tracker; the app's
+journal (step 5) is a log for people, never read to resume a turn.
 
 Pronto distinguishes two budgets. A command settles a checkable fact; an agent
 reviews a decision whose consequences a command cannot judge. Never use an
@@ -103,13 +104,27 @@ contracts; revisit an affected seat if a reviewable decision changed. If a
 simplification breaks a gate, undo only that pass's changes, preserving other
 work. This is one pass, not another revision loop.
 
-## 5. Evidence and handoff
+## 5. Evidence, journal and handoff
 
 Run the smallest final gate that proves the changed layer, plus `sayt
 integrate` whenever the change affects an acceptance flow or rendered output.
-Do not claim coverage that was skipped. Report: scope, oracle decision or why
-none was needed, commands and exit status, selected seats and findings, and
-actual model/design-tool routes, and any remaining human decision.
+Do not claim coverage that was skipped.
+
+Then use what the turn built as a person would: launch it and play the game,
+file the form, walk the flow the brief describes. A gate can pass an app nobody
+can use; a person looking at it cannot. Capture screenshots of what you saw and
+look at them: two states that look alike, such as an opened square drawn like a
+closed one, are a bug. Send what you find back to step 2.
+
+Write the journal last, from what you captured: it cites only screenshots that
+exist and gates whose exit you saw. Rewrite it as one page for people showing what each turn changed,
+before and after, with that evidence and a sentence of what the app is now.
+Append this turn, and revise earlier ones when this turn changes what they
+claimed. Its shape is yours to choose.
+
+Report: scope, oracle decision or why none was needed, commands and exit
+status, what using it showed, selected seats and findings, actual
+model/design-tool routes, and any remaining human decision.
 
 ## Host adapter
 

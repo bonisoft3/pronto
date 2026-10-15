@@ -1,4 +1,4 @@
-Writing an app? Read only this file and the [idioms](idioms/README.md), copy from them, and open another doc when a gate's error names it.
+Writing an app? Read only this file and the [idioms](idioms/README.md), copy from them, and open another doc when a gate's error names it. SPEC, GUIDE and the prelude are references for that moment, not reading before you write.
 
 # Working in this repository
 
@@ -24,8 +24,12 @@ Split: pronto compiles brief → ir → program.cue; omnishell is the terminal (
 
 Machines: a statechart over one row's field. In omnishell (`data-machine`) it owns a `tab` or `device` row; in mecha it runs in a Postgres trigger and rolls back an illegal transition. Cortex composes mecha machines into browser sessions and commands.
 
-Done: `./saytw generate`, `lint`, `test` and `integrate` exit 0 after [bootstrap](skills/pronto-turn/references/bootstrap.md). Nothing else is the app: not a hand-written page, not a test you wrote around it. A `cue vet` error names the schema.cue line to read.
+Bootstrap: yours to run, first, in the app's directory, as [bootstrap](skills/pronto-turn/references/bootstrap.md) says; it installs into that directory and mise's cache, nothing global. Until it has run, no gate has.
 
-Loop: the exit code is the verdict. You write brief.md, ir.html, acceptance.md, DESIGN.md, program.cue, shell/screens, shell/handlers; a do-not-edit header means emitted. Leave `id` and `ordinal` out of a new entity: `generate` mints both, and lint refuses one it did not record.
+TDD loop: sayt's. Pick the verb for the layer you changed (`generate` and `lint` for CUE and markup, `test` for handlers, `integrate` for the running app), repeat until it exits 0, then move up a layer. The exit code is the verdict, so run each verb in the foreground and wait for it: a gate you backgrounded has not passed. A hand-written page or a test written around a handler is not the app.
+
+Done: any task that changes an app ends with the four verbs green, then using what you built as a person would, screenshots as evidence, and the app's journal rewritten: a page for people showing each turn's before and after. A task that stops before that has not built the app; there is no later step that does it for you. The journal is a log, never state a turn resumes from. A meaty feature runs this through the `pronto-turn` skill (plugins for Claude Code, Codex and Antigravity; see the README).
+
+Files: you write brief.md, ir.html, acceptance.md, DESIGN.md, program.cue, shell/screens and shell/handlers; a do-not-edit header means emitted. Import pronto as `github.com/bonisoft3/pronto` (the monorepo's apps spell it `bonisoft.org/plugins/pronto`). Leave `id` and `ordinal` out of a new entity: `generate` mints both. A `cue vet` error names the schema.cue line to read.
 
 Idioms: [idioms](idioms/README.md) is a small app, compiled at this release, with one screen per concept. Copy from it before reading a full app or the compiler.

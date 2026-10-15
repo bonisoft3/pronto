@@ -27,8 +27,10 @@ Three rules hold for the whole turn:
    outcome. The next step reads the outcome.
 3. **Write no state.** The turn is resumable by re-running it: the artifacts are on
    disk (`brief.md`, `ir.html`, `program.cue`, the branch) and the verbs are
-   idempotent. There is no journal, no phase directory and no `STATE.md`, because a
-   second source of truth for where you are is a second thing that can be wrong.
+   idempotent. There is no phase directory and no `STATE.md`, because a second
+   source of truth for where you are is a second thing that can be wrong. The
+   app's journal (step 7) is a log for people that no turn reads to decide what
+   to do.
 
 ## The steps
 
@@ -146,9 +148,11 @@ rather than repairing it.
 
 ### 7. Evidence — abort gate
 
-`sayt integrate`, plus the battery and whatever oracle the app carries. Exit code
-plus the driving agent's judgment on rendered evidence. This is the last checkable
-gate and it is not negotiable.
+`sayt integrate`, plus the battery and whatever oracle the app carries. This is the
+last checkable gate and it is not negotiable.
+
+Then use what the turn built, capture what you saw, and rewrite the app's journal,
+as `${CLAUDE_PLUGIN_ROOT}/skills/pronto-turn/SKILL.md` step 5 says.
 
 ### 8. Hand back
 
@@ -170,7 +174,7 @@ generic answer to a question this repo answers specifically:
 
 | Not here | Because |
 |---|---|
-| A state file | The tree is the state; re-run the turn |
+| A state file | The tree is the state; re-run the turn; the journal is a log for people |
 | Phase directories | The ir is the plan |
 | A roadmap or milestone layer | The branch is the milestone |
 | App-kind detection | The app's own CUE says what it is |
