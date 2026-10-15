@@ -7,7 +7,7 @@ status: partially-built
 
 # Hybrid machines: omnishell, mecha, duckstream and cortex
 
-The unbreakable machine of [machines.md](https://github.com/bonisoft3/omnishell/blob/v0.10.0/docs/machines.md) was designed
+The unbreakable machine of [machines.md](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/machines.md) was designed
 for the browser: a chart closed over one row whose transitions emit typed effects the
 terminal executes and answers. The backend architecture of
 the monorepo's `docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md`
@@ -50,7 +50,7 @@ three tiers are mathematically pure, closed over rows, and replayable.
 
 ## 1. Omnishell Machines (Client UI)
 
-*Specification: [`machine.cue`](https://github.com/bonisoft3/omnishell/blob/v0.10.0/machine.cue).*
+*Specification: [`machine.cue`](https://github.com/bonisoft3/omnishell/blob/v0.11.0/machine.cue).*
 
 - **Role**: Drives interactive DOM regions, form submissions, optimistic screen state,
   and keyboard/focus navigation.
@@ -295,7 +295,7 @@ handwritten procedural online SQL adapters remain; read-only SQL projections
 and relational preconditions remain in Mecha declarations.
 
 The stable contracts live in [[../cortex|Cortex client compositions]] and
-[Mecha machines](https://github.com/bonisoft3/mecha/blob/v0.10.0/docs/machines.md). The
+[Mecha machines](https://github.com/bonisoft3/mecha/blob/v0.11.0/docs/machines.md). The
 execution proof in `apps/truco/docs/hybrid-machine-proof.md` also checks
 shared local/PostgreSQL reductions and private projections. The pinned PLV8
 build's native timeout verification gap remains advisory; adoption assumes the
