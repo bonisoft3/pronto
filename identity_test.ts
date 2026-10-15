@@ -88,3 +88,11 @@ Deno.test("the ir is stamped where it has a section and agrees afterwards", () =
   assert.deepEqual(irDisagreements(stamped.replace("<td>label</td>", "<td>title</td>"), [row]).length, 1);
   assert.deepEqual(stampIr(stamped, row), stamped);
 });
+
+// An app started by copying another's ir.html carries that app's type ids;
+// before any snapshot exists the program's ids are the only ones recorded.
+Deno.test("a fresh app's ir takes the program's type id over a copied one", () => {
+  const copied = '<section id="Row" data-kind="entity" data-durability="tab" data-type-id="0x8000000000000001">\n<tr><td>id</td></tr>\n</section>';
+  assert.deepEqual(irDisagreements(stampIr(copied, row), [row]).length, 1);
+  assert.deepEqual(irDisagreements(stampIr(copied, row, true), [row]), []);
+});

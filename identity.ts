@@ -160,12 +160,16 @@ export function stampCue(source: string, e: ProgramEntity, id: string | undefine
   return lines.join("\n");
 }
 
-export function stampIr(ir: string, e: Required<Pick<ProgramEntity, "id">> & ProgramEntity): string {
+/** `fresh` is an app no snapshot has recorded: an id its ir.html already
+ * carries was copied from another app, so the program's replaces it. */
+export function stampIr(ir: string, e: Required<Pick<ProgramEntity, "id">> & ProgramEntity, fresh = false): string {
   const section = sectionOf(ir, e.name);
   if (section === undefined) return ir;
   let body = section.body;
   if (!section.open.includes("data-type-id=")) {
     body = body.replace(section.open, section.open.replace(/>$/, ` data-type-id="${e.id}">`));
+  } else if (fresh) {
+    body = body.replace(section.open, section.open.replace(/data-type-id="[^"]*"/, `data-type-id="${e.id}"`));
   }
   for (const f of e.fields) {
     body = body.replace(`<tr><td>${f.name}</td>`, `<tr data-ordinal="${f.ordinal}"><td>${f.name}</td>`);
@@ -183,8 +187,13 @@ async function cueFiles(appDir: string): Promise<string[]> {
   return files.sort();
 }
 
-async function mint(appDir: string): Promise<void> {
+/** Stamps an id on every entity and an ordinal on every field that has none,
+ * and records them in the snapshot. write.ts calls it first, so an author
+ * never writes one; it writes nothing when everything is already minted. */
+export async function mint(appDir: string): Promise<void> {
   const before = await exportEntities(appDir);
+  if (before.length === 0) return;
+  if (before.every((e) => e.id !== undefined && e.fields.every((f) => f.ordinal !== undefined)) && (await readSnapshot(appDir)) !== undefined) return;
   // Every stamp is computed before any is written: a refusal halfway would
   // otherwise leave a program that is part minted and a snapshot that is not.
   const sources = new Map<string, string>();
@@ -201,9 +210,10 @@ async function mint(appDir: string): Promise<void> {
   const unminted = after.filter((e) => e.id === undefined).map((e) => e.name);
   if (unminted.length > 0) throw new Error(`still unminted after stamping: ${unminted.join(", ")}`);
 
+  const fresh = (await readSnapshot(appDir)) === undefined;
   const irPath = `${appDir}/ir.html`;
   let ir = await Deno.readTextFile(irPath);
-  for (const e of after) ir = stampIr(ir, e as Required<Pick<ProgramEntity, "id">> & ProgramEntity);
+  for (const e of after) ir = stampIr(ir, e as Required<Pick<ProgramEntity, "id">> & ProgramEntity, fresh);
   await Deno.writeTextFile(irPath, ir);
 
   const program = identitiesOf(after);

@@ -14,6 +14,7 @@
 
 import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive, GENERATED_HTML_HEADER, terminalPath } from "./derive.ts";
+import { mint } from "./identity.ts";
 import { entries, exists, ifMissing } from "./missing.ts";
 import { projectSay, projectGates, type Sources } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
@@ -406,6 +407,8 @@ await writeLayout();
 await writeIrStylesheet(appDir);
 const before = await derivedText();
 await derive(appDir);
+// An entity's writers come from the screens, so ids are minted once a derivation exists.
+await mint(appDir);
 const settled = await derivedText();
 let emission = await writeEmission(await exportEmission());
 let derivations = 1;
