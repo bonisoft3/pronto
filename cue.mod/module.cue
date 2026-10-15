@@ -38,7 +38,7 @@ deps: {
 		default: true
 	}
 	"github.com/bonisoft3/sayt@v0": {
-		v:       "v0.44.0"
+		v:       "v0.44.1"
 		default: true
 	}
 }

@@ -46,7 +46,7 @@ designed and [not built](../PENDING.md#release-targets). How an author releases 
 ## What a release is
 
 A release rule is three steps the loop contract
-([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.44.0/loop.cue)) projects from one `release` verb: the
+([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.44.1/loop.cue)) projects from one `release` verb: the
 target's `cmds` build the artifact; `release.nu` runs the ceremony — the
 git-cliff bump under the app's tag prefix, the `VERSION` gate, the tag, and
 goreleaser as a shim with builds and the GitHub release off; `publish` makes

@@ -22,7 +22,7 @@ as one graph.
 | `code` | `#App` ([`schema.cue`](../schema.cue)) | — | the app's `program.cue` |
 | `cluster` | `#Cluster` ([`cluster.cue`](https://github.com/bonisoft3/mecha/blob/v0.11.0/cluster.cue)) | [`clusters/mecha.cue`](../clusters/mecha.cue) | `#DefaultCluster` |
 | `terminal` | `#Terminal` ([`terminal.cue`](https://github.com/bonisoft3/omnishell/blob/v0.11.0/terminal.cue)) | [`terminals/omnishell.cue`](../terminals/omnishell.cue) | `#DefaultTerminal` |
-| `loop` | `#Loop` ([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.44.0/loop.cue)) | [`loops/sayt.cue`](../loops/sayt.cue) | `#DefaultLoop` |
+| `loop` | `#Loop` ([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.44.1/loop.cue)) | [`loops/sayt.cue`](../loops/sayt.cue) | `#DefaultLoop` |
 | `build` | `#Build` ([`builders/bayt.cue`](../builders/bayt.cue)), over bayt's `#project` | — | `#DefaultBuild` |
 
 The brief's frontmatter and [SPEC](../SPEC.md#frontmatter-the-per-app-harness)
