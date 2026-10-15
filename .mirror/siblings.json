@@ -1,0 +1,6 @@
+{
+  "../omnishell": "omnishell",
+  "../../libraries/mecha": "mecha",
+  "../sayt": "sayt",
+  "../bayt": "bayt"
+}

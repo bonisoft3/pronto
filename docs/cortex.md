@@ -46,7 +46,7 @@ allowed browser event set; Mecha-only events cannot be submitted through this
 client. The driver owns entry, create/join retries, command persistence,
 polling, failure and shutdown. Admission and in-flight status live in its
 machine state. Its receipt/view actions use Omnishell's existing
-[[../../omnishell/interpreter/hybrid-client.js|hybrid interaction reducer]].
+[hybrid interaction reducer](https://github.com/bonisoft3/omnishell/blob/v0.10.0/interpreter/hybrid-client.js).
 
 Mecha joins can declare a fixed `seat` or a state-array field `seats` with
 `membersPayload`. The latter generates an optional `requested_seat` input.
@@ -74,7 +74,7 @@ inputs; they do not decide whether an uncertain operation should be repeated.
 Storage failure must prevent transmission. Protocol failure enters a visible
 failed state; transport loss retries the same identity.
 
-[[../../../apps/truco/machines/lobby.cue]] composes the lobby and online table.
+Truco's `apps/truco/machines/lobby.cue` composes the lobby and online table.
 The local arena remains outside this composition. `test:hybrid` includes
 compiler refusal tests, bounded session delivery schedules and driver tests for
 lost admission/command replies, reload and late responses. `test:truco-online`

@@ -86,6 +86,10 @@ say:
         priority: -1
         cmds:
           - do: "deno test --config deno.json --allow-read negotiation_test.ts"
+      links:
+        priority: -1
+        cmds:
+          - do: "deno test --no-config --allow-read links_test.ts"
       favicon:
         priority: -1
         cmds:

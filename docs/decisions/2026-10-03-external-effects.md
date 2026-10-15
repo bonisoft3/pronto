@@ -133,7 +133,7 @@ its outcome lands.
 ## The ledger
 
 `airlock.external_effect_ledger` is mecha's, in the airlock's
-[`airlock.sql`](../../../../libraries/mecha/services/airlock/airlock.sql), and the
+[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.10.0/services/airlock/airlock.sql), and the
 cluster places it as it places the ticker's `schedule`. A row holds the key
 (`<effect>:<key fields>`, also the sink's idempotency key), the instance's primary key,
 the input frozen at the claim, the count of runs begun, and the outcome, set once.
@@ -151,8 +151,8 @@ does not. A ledger pronto owns has three uses an engine's private record would n
   can forge an outcome (G4); the ledger is closed to every role but its owner,
   which is the airlock's connection (G7).
 - **It is time travel's record of the outside world.** Replay answers an `invoke` from
-  `outcome` instead of performing it. That is the replay handler of the [handler
-  triad](../../../../docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md#the-handler-triad-generalises-exactly):
+  `outcome` instead of performing it. That is the replay handler of the handler
+  triad of the monorepo's `docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md`:
   live, replay from the ledger, fixture.
 
 ## The airlock
@@ -184,7 +184,7 @@ call.
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
   key; the others are the frozen `input` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
   "no answer", not "failed". The airlock's
-  [README](../../../../libraries/mecha/services/airlock/README.md) is the contract.
+  [README](https://github.com/bonisoft3/mecha/blob/v0.10.0/services/airlock/README.md) is the contract.
 - **A thrown error** is retried by Graphile with backoff, and each retry is a re-entry.
   After `attempts` runs counted by the ledger the outcome is `unknown`: no answer ever
   came, and the sink may have acted. The ledger counts, not Graphile, which counts a run
@@ -354,7 +354,7 @@ ticker only where one declares a schedule: `state.effects` in mecha's `cluster.c
 effect's name and its origin or bridge, brings two services (`airlock` and its daprd
 `airlock-mesh`), a `bridge-<name>` per declared bridge, the ticker and its clock, two initdb
 steps, and four networks. The
-airlock's [README](../../../../libraries/mecha/services/airlock/README.md#in-a-cluster) is
+airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.10.0/services/airlock/README.md#in-a-cluster) is
 the contract; what follows is why it has that shape.
 
 ### The networks
@@ -497,7 +497,7 @@ airlock's side there.
 
 The wall travels with the daprd: its allowlist and its bindings are its configuration on
 every tier, so compose, k8s and Cloud Run hold the same one.
-[Tiers and clouds](../../../../libraries/mecha/docs/deployment.md#the-airlocks-wake-and-wall)
+[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.10.0/docs/deployment.md#the-airlocks-wake-and-wall)
 holds the table. Crash recovery reads each process's own advisory key, so an overlap of two
 revisions, or any number of instances, unlocks nothing a live process holds.
 
@@ -559,10 +559,9 @@ S1-S2 and W2 are steps of the first, W1 of the second.
   pays off when authors write DBOS code, and pronto's authors write statecharts. D2 shows
   it does not close the call-to-checkpoint window either. **Revisit if** machines cannot
   express a saga's shape, such as fan-out with a join, or loops that carry data from step
-  to step ([rows, time and
-  effects](../../../../docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md),
-  open decision 4). Then workflow-as-code is the right escape hatch for cortex, as a library
-  beside the machines.
+  to step (open decision 4 of the monorepo's
+  `docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md`). Then
+  workflow-as-code is the right escape hatch for cortex, as a library beside the machines.
 - **Restate, Temporal, Inngest, Hatchet, Trigger.dev, Dapr Workflow.** The same pure
   half, plus a server or a sidecar. Restate's `ctx.run` is the cleanest
   recorded-side-effect primitive among them, and the one to study if the escape hatch
@@ -678,7 +677,7 @@ One PR. These are its commits, in order, each green:
    `mail_docker_test.ts` holds the bridge's answers against Mailpit, `crypto_test.ts`
    Crypto's against FIPS 180-2 and RFC 4231 and each refusal, and `tests/airlock_test.ts`
    sends a signed confirmation through the bridge and fails without the allowlist.
-5. **The oracle app** (started). [`apps/calcom`](../../../../apps/calcom/brief.md), a
+5. **The oracle app** (started). `apps/calcom`, a
    clone of Cal.com, the open-source Calendly, at brief stage. It is the first app graded
    against a live original: `apps/plausible` is graded by a second computation over its
    fixture, while this clone's every email, invite, webhook, reminder and offered slot is
@@ -688,4 +687,4 @@ One PR. These are its commits, in order, each green:
    reminders; no teams, no round-robin, no calendar sync. The harnesses, the fidelity
    decisions they force (the invite's unstable `UID`, `METHOD:REQUEST` on cancel) and the
    slot oracle's disagreement classes are in its
-   [oracle README](../../../../apps/calcom/oracle/README.md).
+   `apps/calcom/oracle/README.md`.

@@ -26,14 +26,14 @@ designed and [not built](../PENDING.md#release-targets). How an author releases 
   `docker`, `gcp` and `aws`, and not `azure` or `k8s`.
 - A mecha **tier** is what the cluster is made of there. The ladder is
   mecha's: browser, CLI, single machine, k8s, cloud and edge
-  ([invariant 4](../../../libraries/mecha/README.md#4-vertical-scalability-down-and-up)).
+  ([invariant 4](https://github.com/bonisoft3/mecha/blob/v0.10.0/README.md#4-vertical-scalability-down-and-up)).
   pronto's `#Tier` names five of its rungs — `browser`, `edge`, `container`,
   which is mecha's single machine, `k8s`, and `cloud` — and the browser, the
   edge, and the container are built. `container` is where every app develops,
   and for release it is the `docker` target: the SQL fence `-- tier:
   container` … `-- tier: any` around the publication and the replica identity,
   the statements that need a WAL reader
-  ([the fence](../../../libraries/mecha/docs/browser.md#the-fence)).
+  ([the fence](https://github.com/bonisoft3/mecha/blob/v0.10.0/docs/browser.md#the-fence)).
 
 | target | tier | the artifact | the door |
 |---|---|---|---|
@@ -46,7 +46,7 @@ designed and [not built](../PENDING.md#release-targets). How an author releases 
 ## What a release is
 
 A release rule is three steps the loop contract
-([`loop.cue`](../../sayt/loop.cue)) projects from one `release` verb: the
+([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.43.0/loop.cue)) projects from one `release` verb: the
 target's `cmds` build the artifact; `release.nu` runs the ceremony — the
 git-cliff bump under the app's tag prefix, the `VERSION` gate, the tag, and
 goreleaser as a shim with builds and the GitHub release off; `publish` makes
@@ -61,7 +61,7 @@ in a deploy tree mecha does not write, and without the declaration a schedule
 nothing wakes fails silently. Compose runs the cluster's own clock.
 
 **`verify@<target>` adds no checks.** The integrate drivers that measure a
-running app read `APP_URL` ([`base-url.ts`](../../omnishell/base-url.ts)), so
+running app read `APP_URL` ([`base-url.ts`](https://github.com/bonisoft3/omnishell/blob/v0.10.0/base-url.ts)), so
 each becomes a `verify` rule per target with `APP_URL` bound to that target's
 door and no compose prepend. Two things come first. The base: a driver that
 navigates to `${origin}/ar` (`apps/truco/tests/acceptance.ts`) cannot reach a
@@ -83,7 +83,7 @@ applying migrations, so declared collations retain case and accent semantics
 offline. ICU and PGlite versions are pinned together in the browser runtime;
 this is part of the database contract and requires no application setting. The
 page's fetch shim serves the table by path and hands `/crud`, `/auth` and
-`/electric` to [the one-user cluster](../../../libraries/mecha/docs/browser.md#the-one-user-cluster),
+`/electric` to [the one-user cluster](https://github.com/bonisoft3/mecha/blob/v0.10.0/docs/browser.md#the-one-user-cluster),
 which mints its user at boot, so the tenancy floor runs against a real subject
 and there is no door. A program begins as one HTML file, `ir.html`, and ships
 as one.
@@ -122,9 +122,11 @@ tags `vX.Y.Z`, and the same workflow deploys it without a mirror.
 `.env` and `.bayt/.env`, the files that point the monorepo's copy at the
 runtime's sibling trees, so the mirror runs the pronto, omnishell, mecha, bayt
 and sayt releases its `.mise.toml` pins
-([design](../../../docs/superpowers/specs/2026-10-03-regenerable-mirror-design.md)).
+(design: the monorepo's
+`docs/superpowers/specs/2026-10-03-regenerable-mirror-design.md`).
 It is published only once, with those pins, `setup`, `build`, `lint` and
-`integrate` pass on the synced tree: [`mirror_gate.sh`](../../../.github/mirror_gate.sh),
+`integrate` pass on the synced tree: the monorepo's
+`.github/mirror_gate.sh`,
 run by `sync.yml` and by `cd.yml` before copybara pushes. Nothing holds the
 mirror to what the monorepo would regenerate. An app need not be in sync with
 the framework, which is what anyone bumping one runtime piece outside the
@@ -250,7 +252,7 @@ are no longer serving or needed for rollback.
 Every navigation renders under public RLS from a fresh database transaction,
 without guest login. No HTML cache can bypass that transaction. Language
 negotiation matches the browser, and the response varies on `Accept-Language`.
-See [[../../omnishell/docs/native-worker-ssr]] for the freshness and isolation
+See [omnishell/docs/native-worker-ssr](https://github.com/bonisoft3/omnishell/blob/v0.10.0/docs/native-worker-ssr.md) for the freshness and isolation
 contract. Authentication and derivation support remain the edge target's.
 
 The integrated deployment has been exercised on Paid; Free enforcement,
@@ -258,9 +260,9 @@ including the documented per-object storage limit discrepancy, requires
 verification on a Free account before claiming a free deployment.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
-([pglite-workerd](../../../libraries/mecha/packages/pglite-workerd/README.md));
+([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.10.0/packages/pglite-workerd/README.md));
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
-[mecha's edge cluster](../../../libraries/mecha/packages/mecha-edge/README.md)
+[mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.10.0/packages/mecha-edge/README.md)
 as its one Durable Object, over the shell's tables. `publish` runs
 [`publish-edge.ts`](../bundle/publish-edge.ts): `wrangler deploy` at the
 version pglite-workerd's `mise.toml` pins, with `JWT_SECRET` (once) and a new
@@ -303,16 +305,16 @@ What fixes its shape, as built:
   `derived.ts` wrote (as for `pages`) with npm's PGlite, the same Postgres the
   object runs. `--from=<dir>` starts it from a directory built elsewhere
   instead, an archive restored from its database with its pgroll ledger
-  ([`restore.ts`](../../../libraries/mecha/packages/pglite-workerd/restore.ts)),
+  ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.10.0/packages/pglite-workerd/restore.ts)),
   applies the cluster's pgroll migrations the ledger lacks, as its migrate step
-  would ([`migrate.ts`](../../../libraries/mecha/packages/pglite-workerd/migrate.ts)),
+  would ([`migrate.ts`](https://github.com/bonisoft3/mecha/blob/v0.10.0/packages/pglite-workerd/migrate.ts)),
   and skips the derivation.
 - **Loading is once.** The object opens only a directory whose load verified
   every chunk; a load resumes where it stopped and leaves a complete
   directory alone, so a later release changes the Worker and the page and
   never the data, unless `--reset` replaces it.
 - **One object, every user behind one writer.** PGlite is one connection.
-  [`createRestHandler`](../../../libraries/mecha/packages/postgrest-js/src/rest-handler.ts)
+  [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.10.0/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and
   `request.jwt.claims`, so a shared connection never leaks a subject, and row
   policy is Postgres's own here as on a single machine. Guests only:
@@ -348,7 +350,7 @@ As designed and [not built](../PENDING.md#release-targets):
   compose closure bayt emits, so a service added to the app is a container
   added to the release.
 - **Two clocks**: the Cron Trigger outside the thing woken, as
-  [the ticker](../../../libraries/mecha/services/ticker/README.md#clocks)
+  [the ticker](https://github.com/bonisoft3/mecha/blob/v0.10.0/services/ticker/README.md#clocks)
   requires, and alarms for finer schedules that never run alone.
 - **Cost follows use.** Workers Paid at $5 a month, Containers billed for the
   memory and disk they hold while awake and the CPU they spend, R2 inside its
@@ -434,7 +436,7 @@ highest, since Aurora does not pause while logical replication is on. Project,
 account, region and domain are declarations on the cluster; credentials are
 each cloud's own and never in the session. Region is the first of the axes a
 system shards along, before time and user. mecha's
-[clouds as built](../../../libraries/mecha/docs/deployment.md#clouds-as-built)
+[clouds as built](https://github.com/bonisoft3/mecha/blob/v0.10.0/docs/deployment.md#clouds-as-built)
 is the mapping these start from.
 
 ## Rejected

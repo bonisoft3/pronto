@@ -7,10 +7,10 @@ status: partially-built
 
 # Hybrid machines: omnishell, mecha, duckstream and cortex
 
-The unbreakable machine of [machines.md](../../../omnishell/docs/machines.md) was designed
+The unbreakable machine of [machines.md](https://github.com/bonisoft3/omnishell/blob/v0.10.0/docs/machines.md) was designed
 for the browser: a chart closed over one row whose transitions emit typed effects the
 terminal executes and answers. The backend architecture of
-[rows-time-and-effects-design.md](../../../../docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md)
+the monorepo's `docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md`
 arrived at the same four laws from the cluster side: state is a row, operators are pure
 functions of rows, impure things are sources, and every decision carries a version frontier.
 
@@ -50,7 +50,7 @@ three tiers are mathematically pure, closed over rows, and replayable.
 
 ## 1. Omnishell Machines (Client UI)
 
-*Specification: [`machine.cue`](../../../omnishell/machine.cue).*
+*Specification: [`machine.cue`](https://github.com/bonisoft3/omnishell/blob/v0.10.0/machine.cue).*
 
 - **Role**: Drives interactive DOM regions, form submissions, optimistic screen state,
   and keyboard/focus navigation.
@@ -295,8 +295,8 @@ handwritten procedural online SQL adapters remain; read-only SQL projections
 and relational preconditions remain in Mecha declarations.
 
 The stable contracts live in [[../cortex|Cortex client compositions]] and
-[[../../../../libraries/mecha/docs/machines|Mecha machines]]. The
-[[../../../../apps/truco/docs/hybrid-machine-proof|execution proof]] also checks
+[Mecha machines](https://github.com/bonisoft3/mecha/blob/v0.10.0/docs/machines.md). The
+execution proof in `apps/truco/docs/hybrid-machine-proof.md` also checks
 shared local/PostgreSQL reductions and private projections. The pinned PLV8
 build's native timeout verification gap remains advisory; adoption assumes the
 timeout contract and retains deterministic fuel.
@@ -307,7 +307,7 @@ completing a match over HTTP after lost visibility/play replies and reload.
 Live HTTPS checks cover guest authentication, discovery, challenge acceptance,
 private deals and direct invitations. This is not full-shell browser acceptance
 or a proof that the application is bug-free. Current behavior and limitations
-belong in the [[../../../../apps/truco/docs/online-hybrid|online reference]].
+belong in Truco's online reference, `apps/truco/docs/online-hybrid.md`.
 
 The immediate priority is delivering that multiplayer slice with the primitives
 already built: validate the real two-browser journey, fix concrete usability
@@ -490,8 +490,8 @@ Every existing application in `./apps` with a PostgreSQL backend (migrations, pu
 
 | Application | Existing Mechanism | Hybrid Machine Adoption & Guarantees |
 |---|---|---|
-| **[[../../../../apps/truco/docs/index|apps/truco]]** | `state.hybrids` owns online games in all supported variant/seating combinations, lobby presence and challenges; the local arena retains its existing engine. | **Partial adoption**: generated transactional commands, private views and browser reconciliation. [[../../../../apps/truco/docs/online-hybrid|The online reference]] records evidence and limits; general Cortex hierarchy and migration of the local arena remain unbuilt. |
-| **[`apps/chess`](../../../../apps/chess)** | In-browser referee state machine and local time controls. | **Authoritative Turn Clocks**: Match state (`playing` $\rightarrow$ `over`) with strict termination reasons (`checkmate`, `resignation`, `flag`) backed by database-level clock expiration checks, preventing client clock manipulation. |
+| **`apps/truco`** | `state.hybrids` owns online games in all supported variant/seating combinations, lobby presence and challenges; the local arena retains its existing engine. | **Partial adoption**: generated transactional commands, private views and browser reconciliation. Its online reference, `apps/truco/docs/online-hybrid.md`, records evidence and limits; general Cortex hierarchy and migration of the local arena remain unbuilt. |
+| **`apps/chess`** | In-browser referee state machine and local time controls. | **Authoritative Turn Clocks**: Match state (`playing` $\rightarrow$ `over`) with strict termination reasons (`checkmate`, `resignation`, `flag`) backed by database-level clock expiration checks, preventing client clock manipulation. |
 
 ---
 
