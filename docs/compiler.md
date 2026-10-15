@@ -172,10 +172,10 @@ fills and which commands exist; **published commands**, so what crosses to
 pronto is what to ask, never how to run it; **relocatability**; and
 **self-bootstrapping**. One trick delivers them: a launcher that resolves its
 own directory and `exec`s a mise tool-stub on its program
-(`plugins/bayt/runtime/bayt`, `plugins/omnishell/runtime/omnishell`),
+(bayt's `runtime/bayt`, omnishell's `runtime/omnishell`),
 depth-relative prefixes in generated invocations, and a mode chosen **at
-generation**. In the monorepo an app's `loop.surface.sources` default to the
-sibling checkouts; a bootstrapped consumer's `generate` writes
+generation**. In a source checkout an app's `loop.surface.sources` default to
+the siblings' sources; a bootstrapped consumer's `generate` writes
 `program_pronto.cue` setting `sources: pronto: ""`, and every command then
 finds the installed distribution with `run-mise where` as it runs. Where pronto
 sits inside the app's CUE module, `write.ts` writes that file instead, from the
@@ -183,17 +183,9 @@ layout it finds: pronto as the app names it, the app's directory under the
 module's root, and the root and the runtime's directory as mecha names them.
 An [installed app's mirror](release-targets.md#pages) is the other case: the
 app alone at its root, finding the released runtime with `run-mise where`.
-Monorepo CI preserves installed layouts and carries their repository runtime
-bindings into the check runners. Their `.bayt/.env` selects images built from
-the checkout; mirror release gates validate the published pins.
-
-GolAberto's CI uses `sayt/depot` with registry cache imports and exports on
-both branches and main. Its CI overlay runs the native build, lint and test
-rules, then the integration suites sequentially: each suite owns a database
-and browser stack on the runner. The native stage carries a deterministic
-Git bundle of the main app tree for protobuf compatibility checks. These
-overlays and the bundle are CI inputs, not mirror artifacts. Local workflow
-replays use `sayt/ci` with registry access disabled.
+An installed app checked out beside the sources keeps its installed layout:
+its `.bayt/.env` selects images built from the checkout, and its mirror's
+release gate validates the published pins.
 
 Each brings what the others cannot. sayt bootstraps the rest and carries the
 cross-platform concern, which is why it alone ships per-platform binaries;
@@ -203,8 +195,8 @@ checkable at authoring time and by automation, paid for in imperative
 expressiveness. The install order follows: sayt → bayt → {omnishell, mecha} →
 pronto, each installable by the one below it.
 
-The monorepo is where a terminal change is tested against every app in the
-commit that makes it; the trick lets that coexist with a published
+A source checkout is where a terminal change is tested against every app in
+the commit that makes it; the trick lets that coexist with a published
 distribution running the same program.
 
 ## Rejected
@@ -225,10 +217,9 @@ distribution running the same program.
   no installed branch is a fixed depth relocatable to nothing; a published
   `deno run` carrying lockfile policy, permissions and paths makes pronto know
   how a part runs rather than what to ask it.
-- **Choosing monorepo or distribution mode by a runtime probe** — committed
-  emissions would depend on the machine that wrote them, and
-  `verify-generated` (`.github/workflows/cd.yml`), which regenerates them on
-  every release tag and aborts on a diff, could never pass.
+- **Choosing checkout or distribution mode by a runtime probe** — committed
+  emissions would depend on the machine that wrote them, and a release gate
+  that regenerates them and aborts on a diff could never pass.
 - **A source filesystem that makes one tree both a checkout and a
   distribution** — a FUSE layer such as Google's srcfs is infrastructure this
   repository does not have; the emitted artifact differs between the two

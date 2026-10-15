@@ -110,29 +110,24 @@ What the bundler holds to:
   `404.html`, which is how a deep link boots. `file://` is not a host, since
   the router is `pushState` on the path.
 
-**The deploy.** The rule's `publish` pushes the tag. The monorepo's `cd.yml`
-propagates it to the app's public mirror, fed by copybara, whose own emitted
-`cd.yml` runs `sayt release@pages --snapshot --base=/<repo>` and deploys the
-file to a project site. A private repository on a free plan has no Pages, so
+**The deploy.** The rule's `publish` pushes the tag. It reaches the app's
+public mirror, whose emitted `cd.yml` runs
+`sayt release@pages --snapshot --base=/<repo>` and deploys the file to a
+project site. A private repository on a free plan has no Pages, so
 the site lives on the mirror. An app at the root of its own public repository
 tags `vX.Y.Z`, and the same workflow deploys it without a mirror.
 
-**An installed app's mirror** is the app as its own repository: copybara's
-`installed_app` moves it to the root and leaves behind `mise.local.toml`,
-`.env` and `.bayt/.env`, the files that point the monorepo's copy at the
-runtime's sibling trees, so the mirror runs the pronto, omnishell, mecha, bayt
-and sayt releases its `.mise.toml` pins
-(design: the monorepo's
-`docs/superpowers/specs/2026-10-03-regenerable-mirror-design.md`).
-It is published only once, with those pins, `setup`, `build`, `lint` and
-`integrate` pass on the synced tree: the monorepo's
-`.github/mirror_gate.sh`,
-run by `sync.yml` and by `cd.yml` before copybara pushes. Nothing holds the
-mirror to what the monorepo would regenerate. An app need not be in sync with
-the framework, which is what anyone bumping one runtime piece outside the
-monorepo meets; a change that needs an unreleased framework change holds the
-mirror back until that release is pinned, rather than failing the pull
-request that made it, as a check of every pull request against the pins would.
+**An installed app's mirror** is the app as its own repository, at its root
+and without `mise.local.toml`, `.env` and `.bayt/.env`, the files that point a
+checkout's copy at the runtime's sibling trees, so the mirror runs the pronto,
+omnishell, mecha, bayt and sayt releases its `.mise.toml` pins. It is
+published only once, with those pins, `setup`, `build`, `lint` and
+`integrate` pass on the synced tree. Nothing holds the mirror to what a
+checkout would regenerate. An app need not be in sync with the framework,
+which is what anyone bumping one runtime piece on its own meets; a change
+that needs an unreleased framework change holds the mirror back until that
+release is pinned, rather than failing the pull request that made it, as a
+check of every pull request against the pins would.
 
 **The refusals.** `emit.cue` refuses the target, a `cue vet` error rather than
 a broken release, for a program with:
@@ -412,7 +407,7 @@ What fixes its shape:
   `electric-up-to-date: true`). Browser sync engines settle cleanly in
   standalone mode without requiring a full live replication cluster.
 - **Image tagging and publication.** Distribution tasks derive the OCI image tag
-  by stripping any path prefix from the monorepo release tag (`$tag | path basename`),
+  by stripping any path prefix from a prefixed release tag (`$tag | path basename`),
   defaulting publication to `ghcr.io/bonisoft3/<app>:<tag>` or the registry
   configured via `${BAYT_DOCKER_REPOSITORY}` and `${BAYT_IMAGE_TAG}`.
 

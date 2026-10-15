@@ -261,7 +261,7 @@ for the clock), `output`, `error` (`error.kind`, `error.field`).
 ## program.cue
 
 The machine rung: a CUE instance of the `pronto` package (`schema.cue` +
-`emit.cue` in this directory, module `bonisoft.org`), evaluated with the
+`emit.cue` in this directory), evaluated with the
 pinned CUE version. Nobody reviews it; it must merely be *checkable*.
 
 - **Shape.** The app package's top level is the five components: `code:
@@ -292,13 +292,14 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
 
   `"local": terminal.surface.runtime != ""` on the cluster seat and
   `"terminal": terminal` on the build seat are the installed layout,
-  derived from the terminal rather than stated: outside the monorepo the
+  derived from the terminal rather than stated: installed, the
   terminal's runtime is empty, so the cluster serves the app's own files
   (fingerprinted from the build context) and the build takes the
-  terminal's statics from its image. Inside the monorepo the runtime is
-  a workspace path, so both stay the workspace's own tree. One shape
-  holds in both layouts because no layout is stated. An installed app
-  whose seats disagree — an installed loop with a monorepo cluster
+  terminal's statics from its image. In a source checkout, where pronto
+  sits beside its siblings' sources, the runtime is a workspace path, so
+  both stay the workspace's own tree. One shape holds in both layouts
+  because no layout is stated. An installed app
+  whose seats disagree — an installed loop with a checkout's cluster
   layout — serves docker copies that resolve nowhere; `write.ts`
   refuses it with the seats named.
 

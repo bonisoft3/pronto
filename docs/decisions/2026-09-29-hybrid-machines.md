@@ -9,9 +9,8 @@ status: partially-built
 
 The unbreakable machine of [machines.md](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/machines.md) was designed
 for the browser: a chart closed over one row whose transitions emit typed effects the
-terminal executes and answers. The backend architecture of
-the monorepo's `docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md`
-arrived at the same four laws from the cluster side: state is a row, operators are pure
+terminal executes and answers. A backend architecture designed from the cluster
+side arrived at the same four laws: state is a row, operators are pure
 functions of rows, impure things are sources, and every decision carries a version frontier.
 
 This decision unifies them into one XState-JSON machine model partitioned into four tiers:

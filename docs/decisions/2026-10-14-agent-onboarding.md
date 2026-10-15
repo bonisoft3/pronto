@@ -42,9 +42,10 @@ v0.12.0. The first `generate` error was a `note` field v0.12.0 requires on
 every handler and truco never shows. The `text` and `int` field types it
 copied are older spellings too.
 
-**Built:** the monorepo's `apps/idioms`, carried into the pronto mirror as
-`idioms/`. It sits beside the apps rather than inside pronto because `write.ts`
-derives an app's layout from a pronto it sits beside. Four screens, each named
+**Built:** [`idioms`](../../idioms/README.md), an app that ships
+with pronto at the release that compiled it. It is an app beside pronto rather
+than a directory inside it because `write.ts` derives an app's layout from the
+pronto beside it. Four screens, each named
 for a use case and labelled with its concepts, cover the idioms the transcript
 paid for:
 
@@ -79,12 +80,15 @@ read `derive.ts` 23 times and then wrote its own script to render
 `program_derived.cue` "exactly as the writer would".
 
 **Built:** the stub defaults `reads`, `writes`, `charts` and `files.handlers`,
-held by `derive-input.test.ts`; `apps/idioms` was written from nothing on it.
+held by `derive-input.test.ts`; the idioms were written from nothing on it.
 The proposal as made: the stub defaults every field the derivation owns, as it
 already does for `charts`. Bootstrap also emits the smallest app that passes
 `generate`, `lint` and `test`: one screen, one `tab` entity, one handler, a
 `DESIGN.md`, an `ir.html` and an `acceptance.md` that cite each other. The
 author then edits a green program rather than assembling one from a sample.
+That starter was not built: an author copies the idioms' authored files
+instead ([Start an app](../../idioms/README.md#start-an-app)), and
+`generate` mints the entity ids a copied program leaves out.
 
 *Alternative.* Documenting the first-run seed would make each author
 reimplement the writer, which is what the agent did.
@@ -163,15 +167,38 @@ the shared one. **Proposal:** an app with no auth capability gets no auth
 service, and a screen with no stylesheet gets none. Each of these
 requirements cost the agent a launch and a reading of `schema.cue`.
 
-## Order
+## Beyond the six
 
-1. Section 2's derivation stub and section 4's link rewrite: small, and each
-   unblocks every new app.
-2. `idioms/` seeded from jsfb, with the bootstrap's minimal app taken from it.
-3. `AGENTS.md`.
-4. The battery's error-state refusal, then its path walk.
-5. Section 6.
+The runs after sections 1–4 shipped found three more stalls, each built:
 
-The measure of success is the same prompt under `cerebras/qwen-3.8-27b` with
-a 128k context: a playable board, `integrate` green, and no read of a `.ts`
-or `.cue` file under the installed pronto tree.
+- **Agents stopped at their own checks.** `AGENTS.md` makes bootstrap the
+  agent's first step and ends any task that changes an app with the four
+  verbs green, the app used as a person would, screenshots, and the app's
+  journal rewritten last from that evidence. The journal is a log for
+  people, never state a turn resumes from
+  ([pronto-turn](../../skills/pronto-turn/SKILL.md), step 5).
+- **The references were read before a line was written.** The
+  [index](../index.md) files README, GUIDE, SPEC and the prelude under
+  Reference, opened when a gate names one, and `AGENTS.md` says so first.
+- **A gate's output filled the context.** sayt's `normal` level, the default
+  on a pipe, shows each command and a verdict and keeps the output in a
+  log; a failure prints the whole log.
+
+## Where it stands
+
+The same prompt, asking for three turns, from an empty directory under
+opencode with Muse Spark 1.3:
+
+| Run | pronto | Context at first write | Reference reads | Turns | Outcome |
+|---|---|---|---|---|---|
+| baseline | 0.12.0 | 110k | many | 4 prompts | playable only after a person reported each break |
+| v14 | 0.13.2 | 62k | 1 | 3 in one session | gates green, 12 screenshots cited, a consistent won board; the Windows look off |
+| v15 | 0.13.3 | 90k | 0 | 3 in one session | gates green, 16 screenshots, three levels with bevels, LCD counters and faces |
+
+Peak context still passes 300k per run under compaction. Shrinking it
+further is not pursued: the measure of success is the prompt above completing
+its three turns unattended, which v14 and v15 meet. Qwen 3.8 27B at 128k
+completed one turn per attempt before rate limits ended its sessions.
+
+Sections 5 and 6 remain unbuilt, in that order: the battery's error-state
+refusal, then its path walk, then the all-local defaults.

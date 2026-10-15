@@ -152,8 +152,7 @@ does not. A ledger pronto owns has three uses an engine's private record would n
   which is the airlock's connection (G7).
 - **It is time travel's record of the outside world.** Replay answers an `invoke` from
   `outcome` instead of performing it. That is the replay handler of the handler
-  triad of the monorepo's `docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md`:
-  live, replay from the ledger, fixture.
+  triad: live, replay from the ledger, fixture.
 
 ## The airlock
 
@@ -559,8 +558,7 @@ S1-S2 and W2 are steps of the first, W1 of the second.
   pays off when authors write DBOS code, and pronto's authors write statecharts. D2 shows
   it does not close the call-to-checkpoint window either. **Revisit if** machines cannot
   express a saga's shape, such as fan-out with a join, or loops that carry data from step
-  to step (open decision 4 of the monorepo's
-  `docs/superpowers/specs/2026-09-05-rows-time-and-effects-design.md`). Then
+  to step. Then
   workflow-as-code is the right escape hatch for cortex, as a library beside the machines.
 - **Restate, Temporal, Inngest, Hatchet, Trigger.dev, Dapr Workflow.** The same pure
   half, plus a server or a sidecar. Restate's `ctx.run` is the cleanest

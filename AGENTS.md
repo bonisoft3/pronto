@@ -30,6 +30,6 @@ TDD loop: sayt's. Pick the verb for the layer you changed (`generate` and `lint`
 
 Done: any task that changes an app ends with the four verbs green, then using what you built as a person would, screenshots as evidence, and the app's journal rewritten: a page for people showing each turn's before and after. A task that stops before that has not built the app; there is no later step that does it for you. The journal is a log, never state a turn resumes from. A meaty feature runs this through the `pronto-turn` skill (plugins for Claude Code, Codex and Antigravity; see the README).
 
-Files: you write brief.md, ir.html, acceptance.md, DESIGN.md, program.cue, shell/screens and shell/handlers; a do-not-edit header means emitted. Import pronto as `github.com/bonisoft3/pronto` (the monorepo's apps spell it `bonisoft.org/plugins/pronto`). Leave `id` and `ordinal` out of a new entity: `generate` mints both. A `cue vet` error names the schema.cue line to read.
+Files: you write brief.md, ir.html, acceptance.md, DESIGN.md, program.cue, shell/screens and shell/handlers; a do-not-edit header means emitted. Import pronto as `github.com/bonisoft3/pronto`. Leave `id` and `ordinal` out of a new entity: `generate` mints both. A `cue vet` error names the schema.cue line to read.
 
 Idioms: [idioms](idioms/README.md) is a small app, compiled at this release, with one screen per concept. Copy from it before reading a full app or the compiler.
