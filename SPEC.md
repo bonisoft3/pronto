@@ -198,8 +198,11 @@ navigation from the brief) plus data attributes:
   ends belong to that screen. Nodes show primary keys, references and machine
   fields; retired and platform stamp columns are omitted. A generated app
   overview is the union of the screen graphs, not every entity in the schema.
-  Both use the app's pinned D2 and link to entity cards where present. The
-  adjacent entity list remains readable without the picture. See
+  Both use the app's pinned D2 and are written beside the document as
+  `ir/neighbourhood-<screen>.svg` and `ir/neighbourhood-app.svg`, shown by
+  `<img>`, so ir.html stays the prose, cards and frames a reader loads. The
+  adjacent entity list carries the links to entity cards and remains readable
+  without the picture. See
   [[docs/screens|screens]] for how the markup supplies those reads.
 - `data-of` — owner (states belong to a screen, tests to an entity/pipeline/screen)
 - `data-durability` — durability on entities (`tab | device | server | live |

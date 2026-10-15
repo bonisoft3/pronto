@@ -264,7 +264,11 @@ Deno.test("renderIr uses screen ir aliases, ignores collection-only fact reach, 
     assertEquals(await renderIr(appDir, "ir.html", renderedProgram, facts, d2), true);
     const once = await Deno.readTextFile(`${appDir}/ir.html`);
     assertEquals(drawn.length, 1);
-    assertStringIncludes(once, '<svg viewBox="0 0 400 900" width="400" height="900"><svg width="400" height="900">');
+    // The picture lives beside ir.html, so a reader of the document pays for the prose and not the drawing.
+    assertStringIncludes(await Deno.readTextFile(`${appDir}/ir/neighbourhood-board.svg`), '<svg viewBox="0 0 400 900" width="400" height="900"><svg width="400" height="900">');
+    assertStringIncludes(once, '<img src="ir/neighbourhood-board.svg" width="400" height="900" alt="Board entity diagram">');
+    assertStringIncludes(once, '<img src="ir/neighbourhood-app.svg" width="400" height="900" alt="App entity diagram">');
+    assertEquals(once.includes("<svg"), false);
     assertStringIncludes(drawn[0], '"Game": {');
     assertStringIncludes(drawn[0], 'link: "#Game"');
     assertStringIncludes(drawn[0], '"Tick": {');
@@ -286,6 +290,7 @@ Deno.test("renderIr uses screen ir aliases, ignores collection-only fact reach, 
     const empty = await Deno.readTextFile(`${appDir}/ir.html`);
     assertEquals(empty.includes("pronto:neighbourhood"), false);
     assertEquals(empty.includes("pronto:app-neighbourhood"), false);
+    assertEquals((await Array.fromAsync(Deno.readDir(`${appDir}/ir`))).map((e) => e.name).filter((n) => n.endsWith(".svg")), []);
     assertStringIncludes(empty, "entity prose");
     assertStringIncludes(empty, "board prose");
     assertStringIncludes(empty, "empty prose");
