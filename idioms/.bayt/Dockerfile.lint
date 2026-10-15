@@ -1,0 +1,32 @@
+# generated from bayt.cue — do not edit
+FROM apps_idioms-generate AS lint
+WORKDIR /monorepo/apps/idioms
+COPY --parents --exclude=**/node_modules/** --exclude=.task/** ** .bayt/checks.yaml .pronto/facts.json ./
+RUN ["nu", "-c", "mise x -- cue vet -c ./..."]
+COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.lint.yaml .bayt/bayt.lint.json ./.bayt/
+
+FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS lint_ctxs
+WORKDIR /monorepo/apps/idioms
+COPY --parents --exclude=**/node_modules/** --exclude=.task/** ** .bayt/checks.yaml .pronto/facts.json ./
+COPY --from=apps_idioms-generate_srcs /monorepo /monorepo
+COPY --from=apps_idioms-program_srcs /monorepo /monorepo
+COPY --from=apps_idioms-setup_srcs /monorepo /monorepo
+ARG SOURCE_DATE_EPOCH
+ARG BAYT_CLAMP=1
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+FROM scratch AS lint_srcs
+COPY --from=lint_ctxs /monorepo /monorepo
+
+FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS lint_bayt_ctxs
+WORKDIR /monorepo/apps/idioms
+COPY --parents .bayt/compose.lint.yaml .bayt/Dockerfile.lint .bayt/bayt.lint.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.lint.yaml .bayt/process-compose.yaml ./
+COPY --from=apps_idioms-generate_bayt /monorepo /monorepo
+COPY --from=apps_idioms-program_bayt /monorepo /monorepo
+COPY --from=apps_idioms-setup_bayt /monorepo /monorepo
+COPY --from=workspaceroot-pronto-sources_bayt /monorepo /monorepo
+COPY --from=workspaceroot-setup_bayt /monorepo /monorepo
+ARG SOURCE_DATE_EPOCH
+ARG BAYT_CLAMP=1
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+FROM scratch AS lint_bayt
+COPY --from=lint_bayt_ctxs /monorepo /monorepo

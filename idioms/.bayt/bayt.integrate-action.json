@@ -1,0 +1,145 @@
+{
+  "_generated_from": "bayt.cue (do not edit)",
+  "name": "integrate-action",
+  "project": "apps_idioms",
+  "dir": "apps/idioms",
+  "activate": "mise x --",
+  "srcs": {
+    "globs": [],
+    "exclude": []
+  },
+  "outs": {
+    "globs": [],
+    "exclude": []
+  },
+  "state": {
+    "globs": []
+  },
+  "env": {},
+  "taskfile": {
+    "incremental": false,
+    "run": "always",
+    "preconditions": []
+  },
+  "visibility": "internal",
+  "emitsSrcs": false,
+  "deps": [
+    "build"
+  ],
+  "sameProjectDeps": [
+    "build"
+  ],
+  "transitiveDeps": [
+    "build",
+    "generate",
+    "program",
+    "setup"
+  ],
+  "transitiveCrossDeps": [
+    {
+      "name": "pronto-sources_srcs",
+      "project": "workspaceroot",
+      "dir": "",
+      "outs": {
+        "globs": [
+          "cue.mod",
+          "plugins/pronto",
+          "plugins/omnishell",
+          "plugins/bayt",
+          "plugins/sayt",
+          "libraries/mecha"
+        ],
+        "exclude": [
+          "**/docs/**",
+          "**/testdata/**",
+          "**/*_test.*",
+          "**/*.test.*",
+          "**/.bayt/**",
+          "**/.task/**",
+          "**/node_modules/**"
+        ]
+      }
+    },
+    {
+      "name": "setup",
+      "project": "workspaceroot",
+      "dir": "",
+      "outs": {
+        "globs": [
+          "[m]ise.toml",
+          "[.]mise.toml",
+          "[m]ise.lock",
+          "[.]tool-versions",
+          "gradle/libs.versions.toml",
+          "plugins/devserver/docker-bridge.sh",
+          ".task/bayt/setup.hash"
+        ],
+        "exclude": []
+      }
+    }
+  ],
+  "upClosure": [
+    "apps/idioms/.bayt/compose.build.yaml",
+    "apps/idioms/.bayt/compose.generate.yaml",
+    "apps/idioms/.bayt/compose.program.yaml",
+    "apps/idioms/.bayt/compose.setup.yaml",
+    ".bayt/compose.setup.yaml",
+    ".bayt/compose.pronto-sources.yaml"
+  ],
+  "chainedDeps": [
+    {
+      "name": "build",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    },
+    {
+      "name": "generate",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    },
+    {
+      "name": "program",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    },
+    {
+      "name": "setup",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    }
+  ],
+  "cmds": [
+    {
+      "srcs": {
+        "globs": [],
+        "exclude": [],
+        "defaultGlobs": null,
+        "defaultExclude": null
+      },
+      "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf integrate'",
+      "shell": "nu",
+      "name": "builtin",
+      "stop": false
+    }
+  ],
+  "cache": {
+    "full": false,
+    "similar": false
+  }
+}

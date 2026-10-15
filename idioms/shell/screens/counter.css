@@ -1,0 +1,2 @@
+.counter { display: flex; gap: var(--sp-md); align-items: center; justify-content: center; }
+.counter output { font-size: var(--text-xl); min-inline-size: 3ch; text-align: center; }

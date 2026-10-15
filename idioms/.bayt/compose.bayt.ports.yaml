@@ -1,0 +1,5 @@
+# generated from bayt.cue — do not edit
+services:
+  apps_idioms-caddy:
+    ports:
+    - ${CADDY_TLS_HOST_PORT:-30146}:8443

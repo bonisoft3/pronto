@@ -1,0 +1,26 @@
+<!-- Concepts: forms. See README.md. -->
+<section class="screen" data-screen="todo">
+  <!-- A create form mints the key: randomness exists at this boundary and
+       nowhere else. Time enters the same way, as {now} in a hidden data-value,
+       and every column the list binds is stated here. -->
+  <form data-entity="todo" data-action="create">
+    <input name="title" required maxlength="80" placeholder="{msg.todo_placeholder}" aria-label="{msg.todo_placeholder}">
+    <input type="hidden" name="done" value="no">
+    <input type="hidden" name="created" data-value="{now}">
+    <button type="submit" data-text="{msg.add}">Add</button>
+  </form>
+  <ul class="todos" data-live="todo" data-order="created.desc" data-empty="{msg.todo_empty}">
+    <template data-item>
+      <!-- The row's state is an attribute; the stylesheet draws it. -->
+      <li data-done="{done}">
+        <!-- A form inside an item updates that item, and nothing else. -->
+        <form data-entity="todo" data-action="update">
+          <input type="hidden" name="done" value="yes">
+          <button type="submit" aria-label="{msg.done}">✓</button>
+        </form>
+        <span data-text="{title}"></span>
+        <button type="button" data-on-click="remove" aria-label="{msg.remove}">✕</button>
+      </li>
+    </template>
+  </ul>
+</section>

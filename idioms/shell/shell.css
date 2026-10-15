@@ -1,0 +1,9 @@
+/* The terminal ships no style. Its chrome and login markup carry stable
+   classes (nav, .shell-me, .shell-who, .shell-signout, .shell-screen,
+   .shell-login) and the interpreter stamps lifecycle attributes
+   (data-enter, data-exit, data-entering) at moments no screen can
+   observe — that vocabulary is the whole contract. The design layer
+   (shell/design.css, emitted from the program) owns every rule,
+   including the motion tokens; the interpreter waits on whatever
+   animations actually run and degrades to instant removal where none
+   are defined, so an app that styles nothing still works. */

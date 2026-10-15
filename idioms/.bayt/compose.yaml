@@ -1,0 +1,72 @@
+# generated from bayt.cue — do not edit
+include:
+- path:
+  - ./compose.bayt.yaml
+  - ./compose.bayt.ports.yaml
+  required: false
+services:
+  program:
+    extends:
+      file: ./compose.program.yaml
+      service: apps_idioms-program
+    profiles:
+    - program
+    scale: 1
+  setup:
+    extends:
+      file: ./compose.setup.yaml
+      service: apps_idioms-setup
+    profiles:
+    - setup
+  lint:
+    extends:
+      file: ./compose.lint.yaml
+      service: apps_idioms-lint
+    profiles:
+    - lint
+  generate:
+    extends:
+      file: ./compose.generate.yaml
+      service: apps_idioms-generate
+    profiles:
+    - generate
+  build:
+    extends:
+      file: ./compose.build.yaml
+      service: apps_idioms-build
+    profiles:
+    - build
+  test:
+    extends:
+      file: ./compose.test.yaml
+      service: apps_idioms-test
+    profiles:
+    - test
+  launch:
+    extends:
+      file: ./compose.launch.yaml
+      service: apps_idioms-launch
+    profiles:
+    - launch
+    scale: 1
+  integrate:
+    extends:
+      file: ./compose.integrate.yaml
+      service: apps_idioms-integrate
+    profiles:
+    - integrate
+    scale: 1
+  ci-visual:
+    extends:
+      file: ./compose.ci-visual.yaml
+      service: apps_idioms-ci-visual
+    profiles:
+    - ci-visual
+    scale: 1
+  caddy:
+    extends:
+      file: ./compose.caddy.yaml
+      service: apps_idioms-caddy
+    profiles:
+    - caddy
+    scale: 1

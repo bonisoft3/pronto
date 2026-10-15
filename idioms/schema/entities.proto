@@ -1,0 +1,36 @@
+syntax = "proto3";
+package pronto.entities;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+
+message Board {
+  optional string id = 1 [json_name = "id"];
+  optional int32 moves = 2 [json_name = "moves"];
+  optional int32 lit = 3 [json_name = "lit"];
+}
+
+message Clock {
+  optional string id = 1 [json_name = "id"];
+  optional int32 n = 2 [json_name = "n"];
+  optional string run = 3 [json_name = "run"];
+  optional int32 face = 4 [json_name = "face"];
+}
+
+message Counter {
+  optional string id = 1 [json_name = "id"];
+  optional int32 n = 2 [json_name = "n"];
+}
+
+message Light {
+  optional string id = 1 [json_name = "id"];
+  optional string on = 2 [json_name = "on"];
+}
+
+message Todo {
+  optional string id = 1 [json_name = "id"];
+  optional string title = 2 [json_name = "title"];
+  optional string done = 3 [json_name = "done"];
+  google.protobuf.Timestamp created = 4 [json_name = "created"];
+}

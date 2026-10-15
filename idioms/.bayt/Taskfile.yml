@@ -1,0 +1,7 @@
+# generated from bayt.cue — do not edit
+version: "3"
+includes:
+  bayt:
+    taskfile: ./Taskfile.bayt.yml
+    dir: ../
+    optional: true

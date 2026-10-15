@@ -1,0 +1,36 @@
+# generated from bayt.cue — do not edit
+version: "0.5"
+ordered_shutdown: true
+environment:
+- MISE_LOCKED=0
+processes:
+  "bayt:httpcheck":
+    entrypoint:
+    - mise
+    - tool-stub
+    - ../../plugins/bayt/runtime/nu.toml
+    - ../../plugins/bayt/runtime/bayt.nu
+    - microcheck
+    - httpcheck
+    - --help
+  caddy:
+    depends_on:
+      "bayt:httpcheck":
+        condition: process_completed_successfully
+    entrypoint:
+    - sh
+    - -c
+    - "case \"$${ORIGIN#http://}\" in \"$$ORIGIN\") h=$${ORIGIN#https://};; *) h=$${ORIGIN#http://};; esac; case \"$$h\" in \"$$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; set -e -o pipefail; roots=$$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$$roots\" ]; then find $$roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$$1; shift; for f do h=$$(sha256sum < \"$$f\"); printf \"$$q%s$$q\" \"$${h%% *}\" > \"$$f.etag\"; done' sh '\"' {} +; fi; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; fi; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
+    availability:
+      exit_on_skipped: true
+    environment:
+    - ELECTRIC_SECRET=${ELECTRIC_SECRET:-dev-electric-secret}
+    - ORIGIN=${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT}}
+    readiness_probe:
+      exec:
+        command: >-
+          mise tool-stub ../../plugins/bayt/runtime/nu.toml
+          ../../plugins/bayt/runtime/bayt.nu microcheck httpcheck http://127.0.0.1:8080/health
+      period_seconds: 5
+      timeout_seconds: 5
+      failure_threshold: 32

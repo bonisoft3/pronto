@@ -1,0 +1,18 @@
+{
+  "nav_counter": "Contador",
+  "nav_todo": "Tarefas",
+  "nav_grid": "Apague as luzes",
+  "nav_timer": "Cronômetro",
+  "less": "Menos",
+  "more": "Mais",
+  "todo_placeholder": "Algo a fazer",
+  "todo_empty": "Nada a fazer.",
+  "add": "Adicionar",
+  "done": "Feito",
+  "remove": "Remover",
+  "moves": "Jogadas",
+  "lit": "Acesas",
+  "paused": "Iniciar",
+  "running": "Pausar",
+  "roll": "Rolar"
+}

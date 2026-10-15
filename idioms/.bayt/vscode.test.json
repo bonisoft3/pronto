@@ -1,0 +1,22 @@
+{
+  "_generated_from": "bayt.cue (do not edit)",
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "command": "mise x -- nu",
+      "args": [
+        "-c",
+        "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf test'"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "label": "test",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/idioms"
+      }
+    }
+  ]
+}

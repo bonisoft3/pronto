@@ -1,0 +1,17 @@
+<!-- Concepts: fold. See README.md. -->
+<section class="screen" data-screen="grid">
+  <p class="score" data-live="board" data-filter="id=eq.board">
+    <span data-text="{msg.moves}">Moves</span> <b data-text="{moves}">0</b> ·
+    <span data-text="{msg.lit}">Lit</span> <b data-text="{lit}">0</b>
+  </p>
+  <!-- One list, one element per item, drawn as a grid by the stylesheet.
+       `press` hears clicks; `tally` hears every change to this region's own
+       table. A table named only in data-reads is read, never heard, so a fold
+       rides the region of each table that must wake it. -->
+  <div class="lights" data-live="light" data-order="id.asc"
+       data-reads="light,board" data-on-mutation="tally">
+    <template data-item>
+      <button type="button" class="light" data-on-click="press" data-on="{on}" aria-pressed="{on}" aria-label="{id}"></button>
+    </template>
+  </div>
+</section>

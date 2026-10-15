@@ -1,0 +1,32 @@
+# generated from bayt.cue — do not edit
+FROM apps_idioms-generate AS build
+WORKDIR /monorepo/apps/idioms
+COPY --parents --exclude=.pronto/proto-baseline.json --exclude=**/node_modules/** --exclude=.task/** --exclude=tests/** ** .bayt/checks.yaml ./
+RUN ["nu", "-c", "mise x -- ^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf build'"]
+COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.build.yaml .bayt/bayt.build.json ./.bayt/
+
+FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS build_ctxs
+WORKDIR /monorepo/apps/idioms
+COPY --parents --exclude=.pronto/proto-baseline.json --exclude=**/node_modules/** --exclude=.task/** --exclude=tests/** ** .bayt/checks.yaml ./
+COPY --from=apps_idioms-generate_srcs /monorepo /monorepo
+COPY --from=apps_idioms-program_srcs /monorepo /monorepo
+COPY --from=apps_idioms-setup_srcs /monorepo /monorepo
+ARG SOURCE_DATE_EPOCH
+ARG BAYT_CLAMP=1
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+FROM scratch AS build_srcs
+COPY --from=build_ctxs /monorepo /monorepo
+
+FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS build_bayt_ctxs
+WORKDIR /monorepo/apps/idioms
+COPY --parents .bayt/compose.build.yaml .bayt/Dockerfile.build .bayt/bayt.build.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.build.yaml .bayt/process-compose.yaml ./
+COPY --from=apps_idioms-generate_bayt /monorepo /monorepo
+COPY --from=apps_idioms-program_bayt /monorepo /monorepo
+COPY --from=apps_idioms-setup_bayt /monorepo /monorepo
+COPY --from=workspaceroot-pronto-sources_bayt /monorepo /monorepo
+COPY --from=workspaceroot-setup_bayt /monorepo /monorepo
+ARG SOURCE_DATE_EPOCH
+ARG BAYT_CLAMP=1
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+FROM scratch AS build_bayt
+COPY --from=build_bayt_ctxs /monorepo /monorepo

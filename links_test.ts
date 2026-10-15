@@ -14,6 +14,12 @@ const SIBLINGS: Record<string, string> = JSON.parse(
   readFileSync(join(ROOT, ".mirror/siblings.json"), "utf8"),
 );
 
+// Monorepo paths the mirror carries inside itself, which copy.bara.sky moves
+// there and relinks from this same file, at any depth and in either form.
+const CARRIED: Record<string, string> = JSON.parse(
+  readFileSync(join(ROOT, ".mirror/carried.json"), "utf8"),
+);
+
 type Link = { target: string; wikilink: boolean };
 
 /** Relative link targets outside code, the way copybara's rewrite reads them:
@@ -37,9 +43,11 @@ function links(markdown: string): Link[] {
 
 /** Where a link from `file` lands, relative to ROOT, and the sibling whose
  * mirror the rewrite sends it to, if it leaves pronto for one. */
-function land(file: string, target: string): { path: string; sibling?: string } {
+function land(file: string, target: string): { path: string; sibling?: string; carried?: string } {
   const path = normalize(join(dirname(file), target));
   if (path !== ".." && !path.startsWith("../")) return { path };
+  const carried = Object.keys(CARRIED).find((at) => path === at || path.startsWith(`${at}/`));
+  if (carried) return { path, carried: CARRIED[carried] + path.slice(carried.length) };
   const sibling = Object.keys(SIBLINGS).find((at) => path === at || path.startsWith(`${at}/`));
   return { path, sibling };
 }
@@ -72,6 +80,10 @@ Deno.test("the parser reads both link forms the docs use, and skips code", () =>
   assert.equal(land("docs/a/b.md", "../../../../libraries/mecha/README.md").sibling, "../../libraries/mecha");
   assert.equal(land("docs/index.md", "../../../apps/truco/docs/online-hybrid.md").sibling, undefined);
   assert.deepEqual(land("docs/index.md", "../GUIDE.md"), { path: "GUIDE.md" });
+  // The idioms are an app in the monorepo and a directory of the mirror; their
+  // links must neither be refused nor sent to a sibling.
+  assert.equal(land("docs/index.md", "../../../apps/idioms/README.md").carried, "idioms/README.md");
+  assert.equal(land("AGENTS.md", "../../apps/idioms/README.md").sibling, undefined);
 });
 
 Deno.test("every relative link stays in pronto or reaches a mirrored sibling, and resolves", () => {
@@ -80,9 +92,9 @@ Deno.test("every relative link stays in pronto or reaches a mirrored sibling, an
   const broken: string[] = [];
   for (const file of files) {
     for (const { target } of links(readFileSync(join(ROOT, file), "utf8"))) {
-      const { path, sibling } = land(file, target);
+      const { path, sibling, carried } = land(file, target);
       const leaves = path === ".." || path.startsWith("../");
-      if (leaves && !sibling) {
+      if (leaves && !sibling && !carried) {
         broken.push(`${file}: ${target} leaves pronto for a path no mirror publishes`);
       } else if (!existsSync(join(ROOT, path))) {
         broken.push(`${file}: ${target} resolves to nothing`);

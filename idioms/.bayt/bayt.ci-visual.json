@@ -1,0 +1,484 @@
+{
+  "_generated_from": "bayt.cue (do not edit)",
+  "compose": {
+    "up": false,
+    "manual": false,
+    "build": {
+      "additional_contexts": {
+        "root": "../../.."
+      },
+      "secrets": [],
+      "args": {}
+    },
+    "environment": {},
+    "ports": [],
+    "volumes": [],
+    "depends_on": {}
+  },
+  "dockerfile": {
+    "preamble": [
+      "COPY --from=bonitao/lazybox:0.8.3@sha256:c896a6836673d8fd217f6021a2522351fd82d580ed985159feb2f10373018e73 /lazybox/ /root/.local/share/lazybox/",
+      "COPY --from=mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/bin/socat1 /usr/local/bin/socat",
+      "COPY --from=mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/lib/libreadline.so.8 /usr/lib/libncursesw.so.6 /usr/lib/",
+      "ENV PATH=$PATH:/root/.local/bin:/root/.local/share/lazybox/bin",
+      "COPY <<'BKID_MISE' /opt/bkid/mise.toml\n[settings]\nexperimental = true\ngithub_attestations = false\nlocked = true\nlockfile = true\nslsa = false\n\n[settings.github]\ngithub_attestations = false\nslsa = false\n\n[tools]\n'github:depot/cli' = '2.101.78'\n'github:go-task/task' = 'v3.49.1'\nBKID_MISE\nCOPY <<'BKID_LOCK' /opt/bkid/mise.lock\n[tools]\n[[tools.'github:depot/cli']]\nbackend = 'github:depot/cli'\nversion = '2.101.78'\n\n[tools.'github:depot/cli'.platforms]\n[tools.'github:depot/cli'.platforms.linux-arm64]\nchecksum = 'sha256:985308b4e9b124c9d8ca712b30b84ea613e7de2f9bb3bb193a710e45e254ea87'\nurl = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_arm64.tar.gz'\nurl_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083092'\n\n[tools.'github:depot/cli'.platforms.linux-arm64-musl]\nchecksum = 'sha256:985308b4e9b124c9d8ca712b30b84ea613e7de2f9bb3bb193a710e45e254ea87'\nurl = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_arm64.tar.gz'\nurl_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083092'\n\n[tools.'github:depot/cli'.platforms.linux-x64]\nchecksum = 'sha256:15d066413b99c4fdd399d5fc79a64e50b2e266b509642995935bb96c01d28f1b'\nurl = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_amd64.tar.gz'\nurl_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083086'\n\n[tools.'github:depot/cli'.platforms.linux-x64-musl]\nchecksum = 'sha256:15d066413b99c4fdd399d5fc79a64e50b2e266b509642995935bb96c01d28f1b'\nurl = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_amd64.tar.gz'\nurl_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083086'\n\n[[tools.'github:go-task/task']]\nbackend = 'github:go-task/task'\nversion = 'v3.49.1'\n\n[tools.'github:go-task/task'.platforms]\n[tools.'github:go-task/task'.platforms.linux-arm64]\nchecksum = 'sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb'\nurl = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz'\nurl_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609773'\n\n[tools.'github:go-task/task'.platforms.linux-arm64-musl]\nchecksum = 'sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb'\nurl = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz'\nurl_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609773'\n\n[tools.'github:go-task/task'.platforms.linux-x64]\nchecksum = 'sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576'\nurl = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz'\nurl_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609772'\n\n[tools.'github:go-task/task'.platforms.linux-x64-musl]\nchecksum = 'sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576'\nurl = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz'\nurl_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609772'\nBKID_LOCK",
+      "COPY --from=bayt . /monorepo/plugins/bayt/runtime",
+      "RUN cd /opt/bkid && mise trust -y && mise install && mise exec -- sh -c 'cp \"$(mise which task)\" /usr/local/bin/task && cp \"$(mise which depot)\" /usr/local/bin/depot'",
+      "ENV PATH=/monorepo/plugins/bayt/runtime:${PATH}"
+    ],
+    "preambleCopyContexts": [
+      {
+        "name": "bayt",
+        "image": "plugins/bayt/runtime"
+      },
+      {
+        "name": "mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8"
+      },
+      {
+        "name": "mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8"
+      }
+    ],
+    "from": {
+      "name": "docker:29.7.1-cli@sha256:27a51d5ab1cd38d9eeaba7b415b8c07bc10c31e1cf1ec8d78f6413fcfab3f44f"
+    },
+    "add": [],
+    "mounts": [],
+    "secrets": {
+      "docker_host": {
+        "environment": "DOCKER_HOST_TCP"
+      },
+      "buildx_builder": {
+        "environment": "BUILDX_BUILDER"
+      },
+      "buildx_instance": {
+        "environment": "BUILDX_INSTANCE"
+      },
+      "docker_config": {
+        "environment": "DOCKER_AUTH_CONFIG"
+      },
+      "testcontainers_host": {
+        "environment": "TESTCONTAINERS_HOST_OVERRIDE"
+      },
+      "cache_scope": {
+        "environment": "CACHE_SCOPE"
+      },
+      "cache_scope_fallback": {
+        "environment": "CACHE_SCOPE_FALLBACK"
+      },
+      "sayt_buildkit_syntax": {
+        "environment": "BUILDKIT_SYNTAX"
+      },
+      "sayt_no_cache": {
+        "environment": "SAYT_NO_CACHE"
+      },
+      "bayt_image_tag": {
+        "environment": "BAYT_IMAGE_TAG"
+      },
+      "bayt_pull_policy": {
+        "environment": "BAYT_PULL_POLICY"
+      },
+      "sayt_no_cache_from": {
+        "environment": "SAYT_NO_CACHE_FROM"
+      },
+      "sayt_no_cache_to": {
+        "environment": "SAYT_NO_CACHE_TO"
+      },
+      "depot_token": {
+        "environment": "DEPOT_TOKEN"
+      },
+      "depot_project_id": {
+        "environment": "DEPOT_PROJECT_ID"
+      },
+      "depot_org_id": {
+        "environment": "DEPOT_ORG_ID"
+      },
+      "depot_disable_otel": {
+        "environment": "DEPOT_DISABLE_OTEL"
+      },
+      "actions_results_url": {
+        "environment": "ACTIONS_RESULTS_URL"
+      },
+      "actions_runtime_token": {
+        "environment": "ACTIONS_RUNTIME_TOKEN"
+      },
+      "bkid_project": {
+        "environment": "BKID_PROJECT"
+      }
+    },
+    "extra_hosts": [],
+    "epilogue": [],
+    "copy": [
+      {
+        "from": {
+          "name": "root"
+        },
+        "srcs": [
+          "plugins/omnishell",
+          "libraries/mecha"
+        ],
+        "dst": "/monorepo/",
+        "link": true,
+        "parents": true,
+        "exclude": []
+      }
+    ],
+    "healthcheck": null,
+    "expose": [],
+    "entrypoint": null,
+    "incremental": true,
+    "cmd": null
+  },
+  "name": "ci-visual",
+  "project": "apps_idioms",
+  "dir": "apps/idioms",
+  "activate": "",
+  "srcs": {
+    "globs": [],
+    "exclude": []
+  },
+  "outs": {
+    "globs": [],
+    "exclude": []
+  },
+  "state": {
+    "globs": []
+  },
+  "env": {
+    "BUILDX_BAKE_ENTITLEMENTS_FS": "0",
+    "COMPOSE_BAKE": "true"
+  },
+  "synthetics": {
+    "bayt": {
+      "name": "ci-visual_bayt",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "activate": "",
+      "srcs": {
+        "globs": [],
+        "exclude": []
+      },
+      "outs": {
+        "globs": [
+          ".bayt/compose.ci-visual.yaml",
+          ".bayt/Dockerfile.ci-visual",
+          ".bayt/bayt.ci-visual.json",
+          ".bayt/Taskfile.yml",
+          ".bayt/Taskfile.bayt.yml",
+          ".bayt/Taskfile.ci-visual.yaml",
+          ".bayt/process-compose.yaml"
+        ],
+        "exclude": []
+      },
+      "env": {},
+      "visibility": "internal",
+      "deps": [],
+      "transitiveDeps": [],
+      "transitiveCrossDeps": [],
+      "chainedDeps": [],
+      "cmds": [],
+      "cache": {
+        "full": false,
+        "similar": false
+      },
+      "upClosure": [
+        "apps/idioms/.bayt/compose.ci-visual.yaml",
+        "apps/idioms/.bayt/compose.integrate.yaml",
+        "apps/idioms/.bayt/compose.launch.yaml",
+        "apps/idioms/.bayt/compose.caddy.yaml"
+      ]
+    },
+    "outs": {
+      "name": "ci-visual_outs",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "activate": "",
+      "srcs": {
+        "globs": [],
+        "exclude": []
+      },
+      "outs": {
+        "globs": [],
+        "exclude": []
+      },
+      "env": {},
+      "visibility": "internal",
+      "deps": [],
+      "transitiveDeps": [],
+      "transitiveCrossDeps": [],
+      "chainedDeps": [],
+      "cmds": [],
+      "cache": {
+        "full": false,
+        "similar": false
+      },
+      "upClosure": [
+        "apps/idioms/.bayt/compose.ci-visual.yaml",
+        "apps/idioms/.bayt/compose.integrate.yaml",
+        "apps/idioms/.bayt/compose.launch.yaml",
+        "apps/idioms/.bayt/compose.caddy.yaml"
+      ]
+    }
+  },
+  "taskfile": {
+    "run": "once",
+    "incremental": false,
+    "preconditions": []
+  },
+  "visibility": "internal",
+  "emitsSrcs": false,
+  "deps": [
+    "integrate_srcs",
+    "integrate_bayt",
+    "caddy_srcs"
+  ],
+  "sameProjectDeps": [
+    "integrate_srcs",
+    "integrate_bayt",
+    "caddy_srcs"
+  ],
+  "transitiveDeps": [
+    "integrate_srcs",
+    "integrate_bayt",
+    "caddy_srcs",
+    "launch_outs_srcs"
+  ],
+  "transitiveCrossDeps": [],
+  "upClosure": [
+    "apps/idioms/.bayt/compose.ci-visual.yaml",
+    "apps/idioms/.bayt/compose.integrate.yaml",
+    "apps/idioms/.bayt/compose.launch.yaml",
+    "apps/idioms/.bayt/compose.caddy.yaml"
+  ],
+  "chainedDeps": [
+    {
+      "name": "integrate_srcs",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [
+          "shell/shell.yaml",
+          "shell/screens/**"
+        ],
+        "exclude": []
+      }
+    },
+    {
+      "name": "integrate_bayt",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [
+          ".bayt/compose.integrate.yaml",
+          ".bayt/Dockerfile.integrate",
+          ".bayt/bayt.integrate.json",
+          ".bayt/Taskfile.yml",
+          ".bayt/Taskfile.bayt.yml",
+          ".bayt/Taskfile.integrate.yaml",
+          ".bayt/compose.integrate.closure.yaml",
+          ".bayt/process-compose.yaml"
+        ],
+        "exclude": []
+      }
+    },
+    {
+      "name": "caddy_srcs",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [
+          "docker/Caddyfile",
+          "shell/index.html",
+          "shell/shell.css",
+          "shell/boot.js",
+          "offline-first-sw.js",
+          "shell/shell.yaml",
+          "shell/shell.json",
+          "shell/design.css",
+          "shell/screens/counter.html",
+          "shell/screens/counter.css",
+          "shell/screens/todo.html",
+          "shell/screens/todo.css",
+          "shell/screens/grid.html",
+          "shell/screens/grid.css",
+          "shell/screens/timer.html",
+          "shell/screens/timer.css",
+          "shell/handlers/count.js",
+          "shell/handlers/press.js",
+          "shell/handlers/remove.js",
+          "shell/handlers/roll.js",
+          "shell/handlers/tally.js",
+          "shell/handlers/tick.js",
+          "messages/en.json",
+          "messages/pt-BR.json",
+          "brief.html",
+          "ir.html",
+          "ir/card.css",
+          "acceptance.md",
+          "DESIGN.md",
+          "robots.txt",
+          "sitemap.xml"
+        ],
+        "exclude": []
+      }
+    }
+  ],
+  "cmds": [
+    {
+      "srcs": {
+        "globs": [],
+        "exclude": [],
+        "defaultGlobs": null,
+        "defaultExclude": null
+      },
+      "shell": "sh",
+      "do": "if [ -n \"$BUILDKIT_SYNTAX\" ]; then\n  # depot frontend-pin workaround (full rationale in stacks/sayt/sayt.cue)\n  find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i \"1i # syntax=$BUILDKIT_SYNTAX\" {} \\;\nfi\n[ -n \"$BKID_PROJECT\" ] || { echo \"bkid: BKID_PROJECT is unset; sayt integrate names the inner stack\" >&2; exit 1; }\np=\"${BKID_PROJECT}_visual\"\nf=.bayt/compose.integrate.closure.yaml\n[ -n \"$DEPOT_TOKEN\" ] && bake=\"depot bake --project $DEPOT_PROJECT_ID\" || bake=\"docker buildx bake\"\ndocker compose -p \"$p\" --profile '*' -f \"$f\" config | docker buildx bake --allow=fs.read=/monorepo -f - --print bayt | $bake -f - ${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} ${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} ${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} bayt\ndocker compose -p \"$p\" --profile '*' -f \"$f\" down -v --timeout 0 --remove-orphans\ns=0\ndocker compose -p \"$p\" --profile '*' -f \"$f\" up bayt --build --abort-on-container-failure --exit-code-from bayt --remove-orphans --attach-dependencies || s=$?\ndocker compose -p \"$p\" --profile '*' -f \"$f\" down -v --timeout 0 --remove-orphans\nexit \"$s\"",
+      "dockerfile": {
+        "inject": {
+          "secrets": [
+            {
+              "id": "docker_host",
+              "var": {
+                "contents": "DOCKER_HOST"
+              }
+            },
+            {
+              "id": "buildx_builder",
+              "var": {
+                "contents": "BUILDX_BUILDER"
+              }
+            },
+            {
+              "id": "testcontainers_host",
+              "var": {
+                "contents": "TESTCONTAINERS_HOST_OVERRIDE"
+              }
+            },
+            {
+              "id": "cache_scope",
+              "var": {
+                "contents": "CACHE_SCOPE"
+              }
+            },
+            {
+              "id": "cache_scope_fallback",
+              "var": {
+                "contents": "CACHE_SCOPE_FALLBACK"
+              }
+            },
+            {
+              "id": "sayt_buildkit_syntax",
+              "var": {
+                "contents": "BUILDKIT_SYNTAX"
+              }
+            },
+            {
+              "id": "sayt_no_cache",
+              "var": {
+                "contents": "SAYT_NO_CACHE"
+              }
+            },
+            {
+              "id": "bayt_image_tag",
+              "var": {
+                "contents": "BAYT_IMAGE_TAG"
+              }
+            },
+            {
+              "id": "bayt_pull_policy",
+              "var": {
+                "contents": "BAYT_PULL_POLICY"
+              }
+            },
+            {
+              "id": "sayt_no_cache_from",
+              "var": {
+                "contents": "SAYT_NO_CACHE_FROM"
+              }
+            },
+            {
+              "id": "sayt_no_cache_to",
+              "var": {
+                "contents": "SAYT_NO_CACHE_TO"
+              }
+            },
+            {
+              "id": "depot_token",
+              "var": {
+                "contents": "DEPOT_TOKEN"
+              }
+            },
+            {
+              "id": "depot_project_id",
+              "var": {
+                "contents": "DEPOT_PROJECT_ID"
+              }
+            },
+            {
+              "id": "depot_org_id",
+              "var": {
+                "contents": "DEPOT_ORG_ID"
+              }
+            },
+            {
+              "id": "depot_disable_otel",
+              "var": {
+                "contents": "DEPOT_DISABLE_OTEL"
+              }
+            },
+            {
+              "id": "actions_results_url",
+              "var": {
+                "contents": "ACTIONS_RESULTS_URL"
+              }
+            },
+            {
+              "id": "actions_runtime_token",
+              "var": {
+                "contents": "ACTIONS_RUNTIME_TOKEN"
+              }
+            },
+            {
+              "id": "bkid_project",
+              "var": {
+                "contents": "BKID_PROJECT"
+              }
+            },
+            {
+              "id": "buildx_instance",
+              "var": {
+                "contents": "BUILDX_INSTANCE"
+              }
+            },
+            {
+              "id": "docker_config",
+              "var": {
+                "contents": "DOCKER_AUTH_CONFIG",
+                "path": "/root/.docker/config.json"
+              },
+              "mode": "0600"
+            }
+          ],
+          "defaultSteps": {
+            "buildx-instance": {
+              "name": "buildx-instance",
+              "priority": 11,
+              "pre": "if [ -n \"$BUILDX_BUILDER\" ] && [ -n \"$BUILDX_INSTANCE\" ]; then\n  install -d -m 0700 /root/.docker/buildx/instances\n  printf '%s' \"$BUILDX_INSTANCE\" > \"/root/.docker/buildx/instances/$BUILDX_BUILDER\"\n  chmod 0600 \"/root/.docker/buildx/instances/$BUILDX_BUILDER\"\nfi"
+            },
+            "unix-socket-forward": {
+              "name": "unix-socket-forward",
+              "priority": 10,
+              "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
+            }
+          },
+          "steps": []
+        }
+      },
+      "name": "builtin",
+      "stop": false
+    }
+  ],
+  "cache": {
+    "full": false,
+    "similar": false
+  }
+}

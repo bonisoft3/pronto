@@ -1,0 +1,3 @@
+.todos li { display: flex; gap: var(--sp-sm); align-items: center; }
+.todos li[data-done="yes"] span { text-decoration: line-through; color: var(--secondary); }
+.todos li[data-done="yes"] form { visibility: hidden; }

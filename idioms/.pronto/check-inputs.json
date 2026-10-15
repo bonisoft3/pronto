@@ -1,0 +1,689 @@
+{
+  "version": 1,
+  "types": {
+    "types": {
+      "string": {
+        "pg": "text",
+        "column": "plain",
+        "subset": true,
+        "base": [
+          "text",
+          "varchar",
+          "bpchar",
+          "tsvector"
+        ],
+        "json": "string",
+        "refuse": "\\x00",
+        "order": "text",
+        "beyond": [
+          "scalar-values"
+        ]
+      },
+      "bool": {
+        "pg": "boolean",
+        "column": "plain",
+        "subset": true,
+        "base": [
+          "bool",
+          "boolean"
+        ],
+        "json": "boolean",
+        "order": "boolean",
+        "beyond": []
+      },
+      "int32": {
+        "pg": "integer",
+        "column": "plain",
+        "subset": true,
+        "base": [
+          "int2",
+          "int4",
+          "integer",
+          "smallint"
+        ],
+        "json": "number",
+        "min": -2147483648,
+        "max": 2147483647,
+        "order": "number",
+        "beyond": []
+      },
+      "int64": {
+        "pg": "bigint",
+        "column": "domain",
+        "subset": false,
+        "sql": "portable_int64",
+        "base": [
+          "int8",
+          "bigint"
+        ],
+        "json": "string",
+        "pattern": "^(0|-?[1-9][0-9]*)$",
+        "order": "integer",
+        "beyond": [
+          "int64-range"
+        ]
+      },
+      "double": {
+        "pg": "double precision",
+        "column": "checked",
+        "subset": true,
+        "base": [
+          "float4",
+          "float8",
+          "double precision",
+          "real"
+        ],
+        "json": "number",
+        "order": "number",
+        "beyond": []
+      },
+      "bytes": {
+        "pg": "bytea",
+        "column": "domain",
+        "subset": false,
+        "sql": "portable_bytes",
+        "base": [
+          "bytea"
+        ],
+        "json": "string",
+        "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+        "order": "none",
+        "beyond": []
+      },
+      "uuid": {
+        "pg": "uuid",
+        "column": "plain",
+        "subset": true,
+        "base": [
+          "uuid"
+        ],
+        "json": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "order": "text",
+        "beyond": []
+      },
+      "timestamp": {
+        "pg": "timestamptz",
+        "column": "domain",
+        "subset": false,
+        "sql": "portable_timestamp",
+        "base": [
+          "timestamptz",
+          "timestamp with time zone"
+        ],
+        "json": "string",
+        "pattern": "^(000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$",
+        "order": "text",
+        "beyond": [
+          "calendar"
+        ]
+      },
+      "duration": {
+        "pg": "interval",
+        "column": "domain",
+        "subset": false,
+        "sql": "portable_duration",
+        "base": [
+          "interval"
+        ],
+        "json": "string",
+        "pattern": "^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$",
+        "order": "duration",
+        "beyond": [
+          "duration-range"
+        ]
+      },
+      "decimal": {
+        "pg": "numeric",
+        "column": "domain",
+        "subset": false,
+        "base": [
+          "numeric",
+          "decimal"
+        ],
+        "json": "string",
+        "pattern": "^(0|-?[1-9][0-9]*|-?(0|[1-9][0-9]*)\\.[0-9]*[1-9])$",
+        "order": "decimal",
+        "beyond": [
+          "decimal-profile"
+        ]
+      },
+      "date": {
+        "pg": "date",
+        "column": "checked",
+        "subset": true,
+        "base": [
+          "date"
+        ],
+        "json": "string",
+        "pattern": "^(000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
+        "order": "text",
+        "beyond": [
+          "calendar"
+        ]
+      },
+      "time": {
+        "pg": "time(6)",
+        "column": "domain",
+        "subset": false,
+        "sql": "portable_time",
+        "base": [
+          "time",
+          "time without time zone"
+        ],
+        "json": "string",
+        "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}$",
+        "order": "text",
+        "beyond": []
+      },
+      "timezone": {
+        "pg": "text",
+        "column": "checked",
+        "subset": true,
+        "base": [
+          "text"
+        ],
+        "json": "string",
+        "pattern": "^[A-Za-z0-9+_/-]+$",
+        "order": "none",
+        "beyond": [
+          "tzdb"
+        ]
+      },
+      "json": {
+        "pg": "json",
+        "column": "checked",
+        "subset": false,
+        "base": [
+          "json",
+          "jsonb"
+        ],
+        "json": "value",
+        "order": "none",
+        "beyond": [
+          "scalar-values",
+          "finite-numbers"
+        ]
+      },
+      "geojson": {
+        "pg": "json",
+        "column": "checked",
+        "subset": false,
+        "base": [
+          "json",
+          "jsonb",
+          "geometry",
+          "geography"
+        ],
+        "json": "value",
+        "order": "none",
+        "beyond": [
+          "scalar-values",
+          "finite-numbers",
+          "ring-closure"
+        ]
+      }
+    },
+    "aliases": {
+      "text": "string",
+      "int": "int32",
+      "bigint": "int64",
+      "timestamptz": "timestamp",
+      "tsvector": "string"
+    }
+  },
+  "entities": {
+    "Counter": {
+      "name": "Counter",
+      "ir": "Counter",
+      "table": "counter",
+      "id": "0xcaba350e763103ab",
+      "fields": [
+        {
+          "name": "id",
+          "ordinal": 1,
+          "retired": false,
+          "type": "string",
+          "pk": true,
+          "required": true,
+          "cel": "this == 'counter'"
+        },
+        {
+          "name": "n",
+          "ordinal": 2,
+          "retired": false,
+          "type": "int32",
+          "pk": false,
+          "required": true,
+          "cel": "this >= -99 && this <= 99"
+        }
+      ],
+      "seed": [
+        {
+          "id": "counter",
+          "n": 0
+        }
+      ],
+      "durability": "tab",
+      "level": "ephemeral",
+      "server": false,
+      "writers": [
+        {
+          "by": "counter",
+          "kind": "screen",
+          "ops": [
+            "reduce"
+          ]
+        }
+      ],
+      "cel": {
+        "checks": {},
+        "enums": {
+          "id": [
+            "counter"
+          ]
+        },
+        "bounds": {
+          "n": {
+            "intMin": -99,
+            "intMax": 99
+          }
+        }
+      },
+      "uniques": [],
+      "validations": {}
+    },
+    "Todo": {
+      "name": "Todo",
+      "ir": "Todo",
+      "table": "todo",
+      "id": "0xe2cd3e83dbf7849b",
+      "fields": [
+        {
+          "name": "id",
+          "ordinal": 1,
+          "retired": false,
+          "type": "uuid",
+          "pk": true,
+          "required": true
+        },
+        {
+          "name": "title",
+          "ordinal": 2,
+          "retired": false,
+          "type": "string",
+          "pk": false,
+          "required": true,
+          "cel": "this.size() >= 1 && this.size() <= 80"
+        },
+        {
+          "name": "done",
+          "ordinal": 3,
+          "retired": false,
+          "type": "string",
+          "pk": false,
+          "required": true,
+          "cel": "this in ['no', 'yes']"
+        },
+        {
+          "name": "created",
+          "ordinal": 4,
+          "retired": false,
+          "type": "timestamp",
+          "pk": false,
+          "required": true
+        }
+      ],
+      "seed": [],
+      "durability": "device",
+      "level": "ephemeral",
+      "server": false,
+      "writers": [
+        {
+          "by": "todo",
+          "kind": "screen",
+          "ops": [
+            "create",
+            "update",
+            "reduce"
+          ]
+        }
+      ],
+      "cel": {
+        "checks": {},
+        "enums": {
+          "done": [
+            "no",
+            "yes"
+          ]
+        },
+        "bounds": {
+          "title": {
+            "sizeMin": 1,
+            "sizeMax": 80
+          }
+        }
+      },
+      "uniques": [],
+      "validations": {}
+    },
+    "Light": {
+      "name": "Light",
+      "ir": "Light",
+      "table": "light",
+      "id": "0xba1a0e0de5f050ad",
+      "fields": [
+        {
+          "name": "id",
+          "ordinal": 1,
+          "retired": false,
+          "type": "string",
+          "pk": true,
+          "required": true,
+          "cel": "this.matches('^r[0-4]c[0-4]$')"
+        },
+        {
+          "name": "on",
+          "ordinal": 2,
+          "retired": false,
+          "type": "string",
+          "pk": false,
+          "required": true,
+          "cel": "this in ['no', 'yes']"
+        }
+      ],
+      "seed": [
+        {
+          "id": "r0c0",
+          "on": "no"
+        },
+        {
+          "id": "r0c1",
+          "on": "no"
+        },
+        {
+          "id": "r0c2",
+          "on": "yes"
+        },
+        {
+          "id": "r0c3",
+          "on": "no"
+        },
+        {
+          "id": "r0c4",
+          "on": "no"
+        },
+        {
+          "id": "r1c0",
+          "on": "no"
+        },
+        {
+          "id": "r1c1",
+          "on": "no"
+        },
+        {
+          "id": "r1c2",
+          "on": "yes"
+        },
+        {
+          "id": "r1c3",
+          "on": "no"
+        },
+        {
+          "id": "r1c4",
+          "on": "no"
+        },
+        {
+          "id": "r2c0",
+          "on": "yes"
+        },
+        {
+          "id": "r2c1",
+          "on": "yes"
+        },
+        {
+          "id": "r2c2",
+          "on": "yes"
+        },
+        {
+          "id": "r2c3",
+          "on": "yes"
+        },
+        {
+          "id": "r2c4",
+          "on": "yes"
+        },
+        {
+          "id": "r3c0",
+          "on": "no"
+        },
+        {
+          "id": "r3c1",
+          "on": "no"
+        },
+        {
+          "id": "r3c2",
+          "on": "yes"
+        },
+        {
+          "id": "r3c3",
+          "on": "no"
+        },
+        {
+          "id": "r3c4",
+          "on": "no"
+        },
+        {
+          "id": "r4c0",
+          "on": "no"
+        },
+        {
+          "id": "r4c1",
+          "on": "no"
+        },
+        {
+          "id": "r4c2",
+          "on": "yes"
+        },
+        {
+          "id": "r4c3",
+          "on": "no"
+        },
+        {
+          "id": "r4c4",
+          "on": "no"
+        }
+      ],
+      "durability": "tab",
+      "level": "ephemeral",
+      "server": false,
+      "writers": [
+        {
+          "by": "grid",
+          "kind": "screen",
+          "ops": [
+            "reduce"
+          ]
+        }
+      ],
+      "cel": {
+        "checks": {},
+        "enums": {
+          "on": [
+            "no",
+            "yes"
+          ]
+        },
+        "bounds": {
+          "id": {
+            "regex": "^r[0-4]c[0-4]$"
+          }
+        }
+      },
+      "uniques": [],
+      "validations": {}
+    },
+    "Board": {
+      "name": "Board",
+      "ir": "Board",
+      "table": "board",
+      "id": "0xfbbda7d72c8e787f",
+      "fields": [
+        {
+          "name": "id",
+          "ordinal": 1,
+          "retired": false,
+          "type": "string",
+          "pk": true,
+          "required": true,
+          "cel": "this == 'board'"
+        },
+        {
+          "name": "moves",
+          "ordinal": 2,
+          "retired": false,
+          "type": "int32",
+          "pk": false,
+          "required": true,
+          "cel": "this >= 0"
+        },
+        {
+          "name": "lit",
+          "ordinal": 3,
+          "retired": false,
+          "type": "int32",
+          "pk": false,
+          "required": true,
+          "cel": "this >= 0 && this <= 25"
+        }
+      ],
+      "seed": [
+        {
+          "id": "board",
+          "moves": 0,
+          "lit": 9
+        }
+      ],
+      "durability": "tab",
+      "level": "ephemeral",
+      "server": false,
+      "writers": [],
+      "cel": {
+        "checks": {},
+        "enums": {
+          "id": [
+            "board"
+          ]
+        },
+        "bounds": {
+          "moves": {
+            "intMin": 0
+          },
+          "lit": {
+            "intMin": 0,
+            "intMax": 25
+          }
+        }
+      },
+      "uniques": [],
+      "validations": {}
+    },
+    "Clock": {
+      "name": "Clock",
+      "ir": "Clock",
+      "table": "clock",
+      "id": "0xc1fbce4f0e610a76",
+      "fields": [
+        {
+          "name": "id",
+          "ordinal": 1,
+          "retired": false,
+          "type": "string",
+          "pk": true,
+          "required": true,
+          "cel": "this == 'clock'"
+        },
+        {
+          "name": "n",
+          "ordinal": 2,
+          "retired": false,
+          "type": "int32",
+          "pk": false,
+          "required": true,
+          "cel": "this >= 0"
+        },
+        {
+          "name": "run",
+          "ordinal": 3,
+          "retired": false,
+          "type": "string",
+          "pk": false,
+          "required": true,
+          "cel": "this in ['paused', 'running']"
+        },
+        {
+          "name": "face",
+          "ordinal": 4,
+          "retired": false,
+          "type": "int32",
+          "pk": false,
+          "required": true,
+          "cel": "this >= 1 && this <= 6"
+        }
+      ],
+      "seed": [
+        {
+          "id": "clock",
+          "n": 0,
+          "run": "paused",
+          "face": 1
+        }
+      ],
+      "durability": "tab",
+      "level": "ephemeral",
+      "server": false,
+      "writers": [
+        {
+          "by": "timer",
+          "kind": "screen",
+          "ops": [
+            "reduce"
+          ]
+        },
+        {
+          "by": "Clock-run",
+          "kind": "chart",
+          "ops": [
+            "update"
+          ]
+        }
+      ],
+      "cel": {
+        "checks": {},
+        "enums": {
+          "id": [
+            "clock"
+          ],
+          "run": [
+            "paused",
+            "running"
+          ]
+        },
+        "bounds": {
+          "n": {
+            "intMin": 0
+          },
+          "face": {
+            "intMin": 1,
+            "intMax": 6
+          }
+        }
+      },
+      "uniques": [],
+      "validations": {}
+    }
+  },
+  "hatches": {},
+  "rawMigrations": [],
+  "duckstreams": {}
+}

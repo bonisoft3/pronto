@@ -1,0 +1,3 @@
+.lights { --cols: 5; display: grid; grid-template-columns: repeat(var(--cols), 3rem); gap: var(--sp-sm); justify-content: center; }
+.light { aspect-ratio: var(--ratio-square); border-radius: var(--r-sm); background: var(--surface-muted); }
+.light[data-on="yes"] { background: var(--accent); }

@@ -1,0 +1,26 @@
+{
+  "written": [
+    ".config/mise/conf.d/omnishell.toml",
+    ".github/workflows/cd.yml",
+    ".goreleaser.yaml",
+    ".pronto/check-inputs.json",
+    ".say.yaml",
+    ".vscode/tasks.json",
+    "bayt.cue",
+    "bayt.json",
+    "buf.yaml",
+    "compose.yaml",
+    "docker/Caddyfile",
+    "offline-first-sw.js",
+    "robots.txt",
+    "schema/entities.proto",
+    "shell/boot.js",
+    "shell/design.css",
+    "shell/index.html",
+    "shell/shell.css",
+    "shell/shell.json",
+    "shell/shell.yaml",
+    "sitemap.xml",
+    "tests/pairs.yaml"
+  ]
+}

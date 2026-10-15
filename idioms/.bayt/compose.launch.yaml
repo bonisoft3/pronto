@@ -1,0 +1,44 @@
+# generated from bayt.cue — do not edit
+services:
+  apps_idioms-launch:
+    build:
+      additional_contexts:
+        apps_idioms-caddy: service:apps_idioms-caddy
+      context: ..
+      dockerfile: .bayt/Dockerfile.launch
+      target: launch
+      tags:
+      - bayt-apps_idioms-launch:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-apps_idioms-launch:latest
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    depends_on:
+      apps_idioms-caddy:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test:
+      - CMD
+      - echo
+      - idioms is healthy
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    image: bayt-apps_idioms-launch:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+    networks:
+      default:
+        aliases:
+        - launch
+  apps_idioms-launch_bayt:
+    build:
+      additional_contexts:
+        apps_idioms-caddy_bayt: service:apps_idioms-caddy_bayt
+      context: ..
+      dockerfile: .bayt/Dockerfile.launch
+      target: launch_bayt
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-launch_bayt:latest
+    scale: 0

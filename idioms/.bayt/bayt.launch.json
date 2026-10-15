@@ -1,0 +1,209 @@
+{
+  "_generated_from": "bayt.cue (do not edit)",
+  "compose": {
+    "up": true,
+    "manual": false,
+    "environment": {},
+    "ports": [],
+    "volumes": [],
+    "depends_on": {
+      "apps_idioms-caddy": {
+        "condition": "service_healthy"
+      }
+    },
+    "networks": {
+      "default": {
+        "aliases": [
+          "launch"
+        ]
+      }
+    },
+    "healthcheck": {
+      "test": [
+        "CMD",
+        "echo",
+        "idioms is healthy"
+      ],
+      "interval": "5s",
+      "timeout": "2s",
+      "retries": 3
+    }
+  },
+  "dockerfile": {
+    "preamble": [],
+    "preambleCopyContexts": [],
+    "from": {
+      "name": "busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223"
+    },
+    "add": [],
+    "mounts": [],
+    "secrets": {},
+    "extra_hosts": [],
+    "epilogue": [],
+    "copy": [],
+    "healthcheck": null,
+    "expose": [],
+    "entrypoint": null,
+    "incremental": false,
+    "cmd": [
+      "tail",
+      "-f",
+      "/dev/null"
+    ]
+  },
+  "name": "launch",
+  "project": "apps_idioms",
+  "dir": "apps/idioms",
+  "activate": "",
+  "skaffold": {
+    "profiles": {
+      "bayt-dev": {
+        "name": "bayt-dev",
+        "activation": [
+          {
+            "command": "dev"
+          }
+        ],
+        "build": {
+          "artifact": {
+            "context": ".",
+            "sync": {
+              "manual": [],
+              "auto": false
+            },
+            "docker": {
+              "dockerfile": ".bayt/Dockerfile.launch"
+            }
+          },
+          "local": {
+            "useBuildkit": true,
+            "concurrency": 64,
+            "push": false
+          },
+          "platforms": [],
+          "tagPolicy": {
+            "gitCommit": {
+              "variant": "AbbrevCommitSha"
+            }
+          }
+        },
+        "manifests": {},
+        "test": [],
+        "verify": [],
+        "portForward": []
+      }
+    }
+  },
+  "srcs": {
+    "globs": [],
+    "exclude": []
+  },
+  "outs": {
+    "globs": [],
+    "exclude": []
+  },
+  "state": {
+    "globs": []
+  },
+  "env": {},
+  "synthetics": {
+    "bayt": {
+      "name": "launch_bayt",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "activate": "",
+      "srcs": {
+        "globs": [],
+        "exclude": []
+      },
+      "outs": {
+        "globs": [
+          ".bayt/compose.launch.yaml",
+          ".bayt/Dockerfile.launch",
+          ".bayt/bayt.launch.json",
+          ".bayt/Taskfile.yml",
+          ".bayt/Taskfile.bayt.yml",
+          ".bayt/compose.launch.closure.yaml",
+          ".bayt/process-compose.yaml"
+        ],
+        "exclude": []
+      },
+      "env": {},
+      "visibility": "internal",
+      "deps": [],
+      "transitiveDeps": [],
+      "transitiveCrossDeps": [],
+      "chainedDeps": [],
+      "cmds": [],
+      "cache": {
+        "full": false,
+        "similar": false
+      },
+      "upClosure": [
+        "apps/idioms/.bayt/compose.launch.yaml",
+        "apps/idioms/.bayt/compose.caddy.yaml"
+      ]
+    },
+    "outs": {
+      "name": "launch_outs",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "activate": "",
+      "srcs": {
+        "globs": [],
+        "exclude": []
+      },
+      "outs": {
+        "globs": [],
+        "exclude": []
+      },
+      "env": {},
+      "visibility": "internal",
+      "deps": [],
+      "transitiveDeps": [],
+      "transitiveCrossDeps": [],
+      "chainedDeps": [],
+      "cmds": [],
+      "cache": {
+        "full": false,
+        "similar": false
+      },
+      "upClosure": [
+        "apps/idioms/.bayt/compose.launch.yaml",
+        "apps/idioms/.bayt/compose.caddy.yaml"
+      ]
+    }
+  },
+  "visibility": "internal",
+  "emitsSrcs": false,
+  "deps": [
+    "caddy_outs"
+  ],
+  "sameProjectDeps": [
+    "caddy_outs"
+  ],
+  "transitiveDeps": [
+    "caddy_outs"
+  ],
+  "transitiveCrossDeps": [],
+  "upClosure": [
+    "apps/idioms/.bayt/compose.launch.yaml",
+    "apps/idioms/.bayt/compose.caddy.yaml"
+  ],
+  "chainedDeps": [
+    {
+      "name": "caddy_outs",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    }
+  ],
+  "cmds": [],
+  "cache": {
+    "full": false,
+    "similar": false
+  }
+}

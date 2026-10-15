@@ -1,0 +1,24 @@
+# generated from bayt.cue — do not edit
+include:
+- path: ./compose.program.yaml
+  required: false
+- path: ./compose.setup.yaml
+  required: false
+- path: ./compose.lint.yaml
+  required: false
+- path: ./compose.generate.yaml
+  required: false
+- path: ./compose.build.yaml
+  required: false
+- path: ./compose.test.yaml
+  required: false
+- path: ./compose.launch.yaml
+  required: false
+- path: ./compose.integrate.yaml
+  required: false
+- path: ./compose.ci-visual.yaml
+  required: false
+- path: ./compose.caddy.yaml
+  required: false
+- path: ../../../.bayt/compose.bayt.yaml
+  required: false

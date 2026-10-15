@@ -1,0 +1,102 @@
+{
+  "0xcaba350e763103ab": {
+    "name": "counter",
+    "fields": {
+      "1": {
+        "name": "id",
+        "type": "string",
+        "retired": false
+      },
+      "2": {
+        "name": "n",
+        "type": "int32",
+        "retired": false
+      }
+    }
+  },
+  "0xe2cd3e83dbf7849b": {
+    "name": "todo",
+    "fields": {
+      "1": {
+        "name": "id",
+        "type": "uuid",
+        "retired": false
+      },
+      "2": {
+        "name": "title",
+        "type": "string",
+        "retired": false
+      },
+      "3": {
+        "name": "done",
+        "type": "string",
+        "retired": false
+      },
+      "4": {
+        "name": "created",
+        "type": "timestamp",
+        "retired": false
+      }
+    }
+  },
+  "0xba1a0e0de5f050ad": {
+    "name": "light",
+    "fields": {
+      "1": {
+        "name": "id",
+        "type": "string",
+        "retired": false
+      },
+      "2": {
+        "name": "on",
+        "type": "string",
+        "retired": false
+      }
+    }
+  },
+  "0xfbbda7d72c8e787f": {
+    "name": "board",
+    "fields": {
+      "1": {
+        "name": "id",
+        "type": "string",
+        "retired": false
+      },
+      "2": {
+        "name": "moves",
+        "type": "int32",
+        "retired": false
+      },
+      "3": {
+        "name": "lit",
+        "type": "int32",
+        "retired": false
+      }
+    }
+  },
+  "0xc1fbce4f0e610a76": {
+    "name": "clock",
+    "fields": {
+      "1": {
+        "name": "id",
+        "type": "string",
+        "retired": false
+      },
+      "2": {
+        "name": "n",
+        "type": "int32",
+        "retired": false
+      },
+      "3": {
+        "name": "run",
+        "type": "string",
+        "retired": false
+      },
+      "4": {
+        "name": "face",
+        "type": "int32",
+        "retired": false
+      }
+    }
+  }
+}

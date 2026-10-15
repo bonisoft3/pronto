@@ -1,0 +1,18 @@
+{
+  "nav_counter": "Counter",
+  "nav_todo": "Todo",
+  "nav_grid": "Lights out",
+  "nav_timer": "Timer",
+  "less": "Less",
+  "more": "More",
+  "todo_placeholder": "Something to do",
+  "todo_empty": "Nothing to do.",
+  "add": "Add",
+  "done": "Done",
+  "remove": "Remove",
+  "moves": "Moves",
+  "lit": "Lit",
+  "paused": "Start",
+  "running": "Pause",
+  "roll": "Roll"
+}

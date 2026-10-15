@@ -1,0 +1,2 @@
+.clock, .die { display: flex; gap: var(--sp-md); align-items: center; justify-content: center; }
+.clock output, .die output { font-size: var(--text-xl); min-inline-size: 3ch; text-align: center; }

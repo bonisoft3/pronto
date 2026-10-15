@@ -1,0 +1,116 @@
+# generated from bayt.cue — do not edit
+secrets:
+  docker_host:
+    environment: DOCKER_HOST_TCP
+  buildx_builder:
+    environment: BUILDX_BUILDER
+  buildx_instance:
+    environment: BUILDX_INSTANCE
+  docker_config:
+    environment: DOCKER_AUTH_CONFIG
+  testcontainers_host:
+    environment: TESTCONTAINERS_HOST_OVERRIDE
+  cache_scope:
+    environment: CACHE_SCOPE
+  cache_scope_fallback:
+    environment: CACHE_SCOPE_FALLBACK
+  sayt_buildkit_syntax:
+    environment: BUILDKIT_SYNTAX
+  sayt_no_cache:
+    environment: SAYT_NO_CACHE
+  bayt_image_tag:
+    environment: BAYT_IMAGE_TAG
+  bayt_pull_policy:
+    environment: BAYT_PULL_POLICY
+  sayt_no_cache_from:
+    environment: SAYT_NO_CACHE_FROM
+  sayt_no_cache_to:
+    environment: SAYT_NO_CACHE_TO
+  depot_token:
+    environment: DEPOT_TOKEN
+  depot_project_id:
+    environment: DEPOT_PROJECT_ID
+  depot_org_id:
+    environment: DEPOT_ORG_ID
+  depot_disable_otel:
+    environment: DEPOT_DISABLE_OTEL
+  actions_results_url:
+    environment: ACTIONS_RESULTS_URL
+  actions_runtime_token:
+    environment: ACTIONS_RUNTIME_TOKEN
+  bkid_project:
+    environment: BKID_PROJECT
+services:
+  apps_idioms-ci-visual:
+    build:
+      additional_contexts:
+        apps_idioms-integrate_srcs: service:apps_idioms-integrate_srcs
+        apps_idioms-integrate_bayt: service:apps_idioms-integrate_bayt
+        apps_idioms-caddy_srcs: service:apps_idioms-caddy_srcs
+        bayt: ../../../plugins/bayt/runtime
+        root: ../../..
+      context: ..
+      dockerfile: .bayt/Dockerfile.ci-visual
+      secrets:
+      - docker_host
+      - buildx_builder
+      - buildx_instance
+      - docker_config
+      - testcontainers_host
+      - cache_scope
+      - cache_scope_fallback
+      - sayt_buildkit_syntax
+      - sayt_no_cache
+      - bayt_image_tag
+      - bayt_pull_policy
+      - sayt_no_cache_from
+      - sayt_no_cache_to
+      - depot_token
+      - depot_project_id
+      - depot_org_id
+      - depot_disable_otel
+      - actions_results_url
+      - actions_runtime_token
+      - bkid_project
+      target: ci-visual
+      tags:
+      - bayt-apps_idioms-ci-visual:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-apps_idioms-ci-visual:latest
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-ci-visual:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+    secrets:
+    - docker_host
+    - buildx_builder
+    - buildx_instance
+    - docker_config
+    - testcontainers_host
+    - cache_scope
+    - cache_scope_fallback
+    - sayt_buildkit_syntax
+    - sayt_no_cache
+    - bayt_image_tag
+    - bayt_pull_policy
+    - sayt_no_cache_from
+    - sayt_no_cache_to
+    - depot_token
+    - depot_project_id
+    - depot_org_id
+    - depot_disable_otel
+    - actions_results_url
+    - actions_runtime_token
+    - bkid_project
+  apps_idioms-ci-visual_bayt:
+    build:
+      additional_contexts:
+        apps_idioms-integrate_bayt: service:apps_idioms-integrate_bayt
+        apps_idioms-caddy_bayt: service:apps_idioms-caddy_bayt
+      context: ..
+      dockerfile: .bayt/Dockerfile.ci-visual
+      target: ci-visual_bayt
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-ci-visual_bayt:latest
+    scale: 0

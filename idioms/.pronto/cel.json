@@ -1,0 +1,13 @@
+{
+  "this == 'board'": {"expr":{"callExpr":{"function":"_==_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"stringValue":"board"}}]}}},
+  "this == 'clock'": {"expr":{"callExpr":{"function":"_==_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"stringValue":"clock"}}]}}},
+  "this == 'counter'": {"expr":{"callExpr":{"function":"_==_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"stringValue":"counter"}}]}}},
+  "this >= -99 && this <= 99": {"expr":{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_>=_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"int64Value":"-99"}}]}},{"callExpr":{"function":"_<=_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"int64Value":"99"}}]}}]}}},
+  "this >= 0": {"expr":{"callExpr":{"function":"_>=_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"int64Value":"0"}}]}}},
+  "this >= 0 && this <= 25": {"expr":{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_>=_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"int64Value":"0"}}]}},{"callExpr":{"function":"_<=_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"int64Value":"25"}}]}}]}}},
+  "this >= 1 && this <= 6": {"expr":{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_>=_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"int64Value":"1"}}]}},{"callExpr":{"function":"_<=_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"int64Value":"6"}}]}}]}}},
+  "this in ['no', 'yes']": {"expr":{"callExpr":{"function":"@in","args":[{"identExpr":{"name":"this"}},{"listExpr":{"elements":[{"constExpr":{"stringValue":"no"}},{"constExpr":{"stringValue":"yes"}}]}}]}}},
+  "this in ['paused', 'running']": {"expr":{"callExpr":{"function":"@in","args":[{"identExpr":{"name":"this"}},{"listExpr":{"elements":[{"constExpr":{"stringValue":"paused"}},{"constExpr":{"stringValue":"running"}}]}}]}}},
+  "this.matches('^r[0-4]c[0-4]$')": {"expr":{"callExpr":{"target":{"identExpr":{"name":"this"}},"function":"matches","args":[{"constExpr":{"stringValue":"^r[0-4]c[0-4]$"}}]}}},
+  "this.size() >= 1 && this.size() <= 80": {"expr":{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_>=_","args":[{"callExpr":{"target":{"identExpr":{"name":"this"}},"function":"size"}},{"constExpr":{"int64Value":"1"}}]}},{"callExpr":{"function":"_<=_","args":[{"callExpr":{"target":{"identExpr":{"name":"this"}},"function":"size"}},{"constExpr":{"int64Value":"80"}}]}}]}}}
+}

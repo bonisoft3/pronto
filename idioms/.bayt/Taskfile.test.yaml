@@ -1,0 +1,9 @@
+# generated from bayt.cue — do not edit
+tasks:
+  default:
+    deps:
+    - "::bayt:build"
+    run: once
+    cmds:
+    - nu -c "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf test'"
+version: "3"

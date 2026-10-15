@@ -1,0 +1,17 @@
+<!-- Concepts: machine and time. See README.md. -->
+<section class="screen" data-screen="timer">
+  <!-- A machine: one field (`run`) on one row, its transitions data. While
+       running, `after` re-arms every second on the terminal's clock, which
+       ?clock=manual holds and a test steps. The timer region shows the row. -->
+  <div class="clock" data-live="clock" data-filter="id=eq.clock"
+       data-machine='{"field":"run","initial":"paused","states":{"paused":{"on":{"click@toggle":[{"target":"running"}]}},"running":{"after":{"1000":{"assign":{"n":"tick"},"target":"running"}},"on":{"click@toggle":[{"target":"paused"}]}}}}'>
+    <output data-text="{n}">0</output>
+    <button type="button" id="toggle" data-run="{run}" data-text="{msg[run]}">paused</button>
+  </div>
+  <!-- A reduce has no randomness: it asks for a draw and is called again with
+       it. ?seed= makes the same rolls come back. -->
+  <div class="die" data-live="clock" data-filter="id=eq.clock">
+    <output data-text="{face}">1</output>
+    <button type="button" id="roll" data-on-click="roll" data-text="{msg.roll}">Roll</button>
+  </div>
+</section>

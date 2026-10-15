@@ -1,0 +1,14 @@
+# generated from bayt.cue — do not edit
+include:
+- path: ../../../apps/idioms/.bayt/compose.integrate.yaml
+  required: false
+- path: ../../../apps/idioms/.bayt/compose.launch.yaml
+  required: false
+- path: ../../../apps/idioms/.bayt/compose.caddy.yaml
+  required: false
+services:
+  bayt:
+    extends:
+      file: ./compose.integrate.yaml
+      service: apps_idioms-integrate
+    scale: 1

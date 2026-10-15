@@ -1,0 +1,15 @@
+# generated from bayt.cue — do not edit
+tasks:
+  default:
+    deps:
+    - "::bayt:generate"
+    - "::bayt:lint-inputs"
+    run: always
+    status:
+    - "{{if eq OS \"windows\"}}mise tool-stub ../../plugins/bayt/runtime/nu.toml ../../plugins/bayt/runtime/bayt.nu{{else}}../../plugins/bayt/runtime/bayt{{end}} fingerprint --manifest '{{.TASKFILE_DIR}}/bayt.lint.json' --stamp-file .task/bayt/lint.hash"
+    vars:
+      BAYTW: "{{if eq OS \"windows\"}}mise tool-stub ../../plugins/bayt/runtime/nu.toml ../../plugins/bayt/runtime/bayt.nu{{else}}../../plugins/bayt/runtime/bayt{{end}} cache run --manifest '{{.TASKFILE_DIR}}/bayt.lint.json' -- mise x --"
+    cmds:
+    - "{{.BAYTW}} nu -c \"^nu -I ../../plugins/sayt -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'\""
+    - defer: "{{if not .EXIT_CODE}}{{if eq OS \"windows\"}}mise tool-stub ../../plugins/bayt/runtime/nu.toml ../../plugins/bayt/runtime/bayt.nu{{else}}../../plugins/bayt/runtime/bayt{{end}} fingerprint --manifest '{{.TASKFILE_DIR}}/bayt.lint.json' --stamp-file .task/bayt/lint.hash --update-stamp{{end}}"
+version: "3"

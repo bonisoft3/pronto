@@ -1,0 +1,134 @@
+{
+  "_generated_from": "bayt.cue (do not edit)",
+  "name": "lint-inputs",
+  "project": "apps_idioms",
+  "dir": "apps/idioms",
+  "activate": "mise x --",
+  "srcs": {
+    "globs": [],
+    "exclude": []
+  },
+  "outs": {
+    "globs": [],
+    "exclude": []
+  },
+  "state": {
+    "globs": []
+  },
+  "env": {},
+  "taskfile": {
+    "run": "once",
+    "incremental": false,
+    "preconditions": []
+  },
+  "visibility": "internal",
+  "emitsSrcs": false,
+  "deps": [
+    "generate"
+  ],
+  "sameProjectDeps": [
+    "generate"
+  ],
+  "transitiveDeps": [
+    "generate",
+    "program",
+    "setup"
+  ],
+  "transitiveCrossDeps": [
+    {
+      "name": "pronto-sources_srcs",
+      "project": "workspaceroot",
+      "dir": "",
+      "outs": {
+        "globs": [
+          "cue.mod",
+          "plugins/pronto",
+          "plugins/omnishell",
+          "plugins/bayt",
+          "plugins/sayt",
+          "libraries/mecha"
+        ],
+        "exclude": [
+          "**/docs/**",
+          "**/testdata/**",
+          "**/*_test.*",
+          "**/*.test.*",
+          "**/.bayt/**",
+          "**/.task/**",
+          "**/node_modules/**"
+        ]
+      }
+    },
+    {
+      "name": "setup",
+      "project": "workspaceroot",
+      "dir": "",
+      "outs": {
+        "globs": [
+          "[m]ise.toml",
+          "[.]mise.toml",
+          "[m]ise.lock",
+          "[.]tool-versions",
+          "gradle/libs.versions.toml",
+          "plugins/devserver/docker-bridge.sh",
+          ".task/bayt/setup.hash"
+        ],
+        "exclude": []
+      }
+    }
+  ],
+  "upClosure": [
+    "apps/idioms/.bayt/compose.generate.yaml",
+    "apps/idioms/.bayt/compose.program.yaml",
+    "apps/idioms/.bayt/compose.setup.yaml",
+    ".bayt/compose.setup.yaml",
+    ".bayt/compose.pronto-sources.yaml"
+  ],
+  "chainedDeps": [
+    {
+      "name": "generate",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    },
+    {
+      "name": "program",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    },
+    {
+      "name": "setup",
+      "project": "apps_idioms",
+      "dir": "apps/idioms",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    }
+  ],
+  "cmds": [
+    {
+      "srcs": {
+        "globs": [],
+        "exclude": [],
+        "defaultGlobs": null,
+        "defaultExclude": null
+      },
+      "shell": "nu",
+      "do": "^nu -I ../../plugins/sayt -c 'use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=.pronto --allow-run --allow-env ($pronto | path join check-proto.ts) --baseline .'",
+      "name": "builtin",
+      "stop": false
+    }
+  ],
+  "cache": {
+    "full": false,
+    "similar": false
+  }
+}

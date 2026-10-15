@@ -1,0 +1,11 @@
+<!-- Concepts: reduce. See README.md. -->
+<section class="screen" data-screen="counter">
+  <h2 data-text="{msg.nav_counter}">Counter</h2>
+  <!-- A region is a standing query; a click inside it wakes `count` with the
+       region's rows. Outside any region a click has no rows to hand over. -->
+  <div class="counter" data-live="counter" data-filter="id=eq.counter">
+    <button type="button" id="dec" data-on-click="count" aria-label="{msg.less}">−</button>
+    <output data-text="{n}">0</output>
+    <button type="button" id="inc" data-on-click="count" aria-label="{msg.more}">+</button>
+  </div>
+</section>

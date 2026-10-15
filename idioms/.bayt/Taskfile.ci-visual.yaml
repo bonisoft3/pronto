@@ -1,0 +1,24 @@
+# generated from bayt.cue — do not edit
+tasks:
+  default:
+    env:
+      BUILDX_BAKE_ENTITLEMENTS_FS: "0"
+      COMPOSE_BAKE: "true"
+    run: once
+    cmds:
+    - |-
+      sh -c "if [ -n \"\$BUILDKIT_SYNTAX\" ]; then
+        # depot frontend-pin workaround (full rationale in stacks/sayt/sayt.cue)
+        find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i \"1i # syntax=\$BUILDKIT_SYNTAX\" {} \\;
+      fi
+      [ -n \"\$BKID_PROJECT\" ] || { echo \"bkid: BKID_PROJECT is unset; sayt integrate names the inner stack\" >&2; exit 1; }
+      p=\"\${BKID_PROJECT}_visual\"
+      f=.bayt/compose.integrate.closure.yaml
+      [ -n \"\$DEPOT_TOKEN\" ] && bake=\"depot bake --project \$DEPOT_PROJECT_ID\" || bake=\"docker buildx bake\"
+      docker compose -p \"\$p\" --profile '*' -f \"\$f\" config | docker buildx bake --allow=fs.read=/monorepo -f - --print bayt | \$bake -f - \${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} \${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} \${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} bayt
+      docker compose -p \"\$p\" --profile '*' -f \"\$f\" down -v --timeout 0 --remove-orphans
+      s=0
+      docker compose -p \"\$p\" --profile '*' -f \"\$f\" up bayt --build --abort-on-container-failure --exit-code-from bayt --remove-orphans --attach-dependencies || s=\$?
+      docker compose -p \"\$p\" --profile '*' -f \"\$f\" down -v --timeout 0 --remove-orphans
+      exit \"\$s\""
+version: "3"

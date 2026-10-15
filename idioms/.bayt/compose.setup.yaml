@@ -1,0 +1,41 @@
+# generated from bayt.cue — do not edit
+services:
+  apps_idioms-setup:
+    build:
+      additional_contexts:
+        workspaceroot-setup: service:workspaceroot-setup
+      context: ..
+      dockerfile: .bayt/Dockerfile.setup
+      target: setup
+      tags:
+      - bayt-apps_idioms-setup:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-apps_idioms-setup:latest
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-setup:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+    scale: 0
+  apps_idioms-setup_bayt:
+    build:
+      additional_contexts:
+        workspaceroot-setup_bayt: service:workspaceroot-setup_bayt
+      context: ..
+      dockerfile: .bayt/Dockerfile.setup
+      target: setup_bayt
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-setup_bayt:latest
+    scale: 0
+  apps_idioms-setup_srcs:
+    build:
+      additional_contexts:
+        workspaceroot-setup_srcs: service:workspaceroot-setup_srcs
+      context: ..
+      dockerfile: .bayt/Dockerfile.setup
+      target: setup_srcs
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-setup_srcs:latest
+    scale: 0

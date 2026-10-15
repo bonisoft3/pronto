@@ -6,6 +6,10 @@ carries installation knowledge; it is not the compiler installation.
 Use Pronto **0.12.0** and Sayt **0.43.0**. Verify both releases exist before
 installation; do not substitute `main` or `latest` for a missing release.
 
+A checkout of pronto on disk is reading matter, not an installation: the app
+still builds against the release step 2 pins. Copy from the checkout's idioms;
+bootstrap from the release.
+
 1. Download both project wrappers from the same pinned Sayt tag:
 
    ```sh

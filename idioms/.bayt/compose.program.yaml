@@ -1,0 +1,45 @@
+# generated from bayt.cue — do not edit
+services:
+  apps_idioms-program:
+    build:
+      additional_contexts:
+        workspaceroot-pronto-sources_srcs: service:workspaceroot-pronto-sources_srcs
+        apps_idioms-setup: service:apps_idioms-setup
+        root: ../../..
+      context: ..
+      dockerfile: .bayt/Dockerfile.program
+      target: program
+      tags:
+      - bayt-apps_idioms-program:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-apps_idioms-program:latest
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-program:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+    scale: 0
+  apps_idioms-program_bayt:
+    build:
+      additional_contexts:
+        apps_idioms-setup_bayt: service:apps_idioms-setup_bayt
+        workspaceroot-pronto-sources_bayt: service:workspaceroot-pronto-sources_bayt
+        workspaceroot-setup_bayt: service:workspaceroot-setup_bayt
+      context: ..
+      dockerfile: .bayt/Dockerfile.program
+      target: program_bayt
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-program_bayt:latest
+    scale: 0
+  apps_idioms-program_srcs:
+    build:
+      additional_contexts:
+        apps_idioms-setup_srcs: service:apps_idioms-setup_srcs
+      context: ..
+      dockerfile: .bayt/Dockerfile.program
+      target: program_srcs
+      args:
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+    image: bayt-apps_idioms-program_srcs:latest
+    scale: 0

@@ -1,0 +1,58 @@
+# generated from bayt.cue — do not edit
+includes:
+  program:
+    taskfile: ./Taskfile.program.yaml
+    dir: ../
+    optional: true
+  setup:
+    taskfile: ./Taskfile.setup.yaml
+    dir: ../
+    optional: true
+  lint-inputs:
+    taskfile: ./Taskfile.lint-inputs.yaml
+    dir: ../
+    optional: true
+  lint:
+    taskfile: ./Taskfile.lint.yaml
+    dir: ../
+    optional: true
+  generate:
+    taskfile: ./Taskfile.generate.yaml
+    dir: ../
+    optional: true
+  build:
+    taskfile: ./Taskfile.build.yaml
+    dir: ../
+    optional: true
+  test:
+    taskfile: ./Taskfile.test.yaml
+    dir: ../
+    optional: true
+  integrate:
+    taskfile: ./Taskfile.integrate.yaml
+    dir: ../
+    optional: true
+  ci-visual:
+    taskfile: ./Taskfile.ci-visual.yaml
+    dir: ../
+    optional: true
+  launch-action:
+    taskfile: ./Taskfile.launch-action.yaml
+    dir: ../
+    optional: true
+  integrate-action:
+    taskfile: ./Taskfile.integrate-action.yaml
+    dir: ../
+    optional: true
+  workspaceroot:
+    taskfile: ../../../Taskfile.yml
+    dir: ../../../
+    optional: true
+tasks:
+  cross_workspaceroot_setup:
+    internal: true
+    run: once
+    if: test -f ../../Taskfile.yml
+    deps:
+    - workspaceroot:bayt:setup
+version: "3"

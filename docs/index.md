@@ -2,17 +2,26 @@
 
 # Entry points
 
+Writing an app needs the first three entries and nothing below them until a gate names a doc.
+
+* [Agents](../AGENTS.md) - howto: Start here — time travel, the five languages, the lineage, the stack, the component split, machines, and the loop, in one screen.
+* [Idioms](../idioms/README.md) - howto: One small compiled screen per concept — reduce, forms, fold, machine and time — to copy before reading a full app.
+* [Bootstrap](../skills/pronto-turn/references/bootstrap.md) - howto: the pinned seed phase that makes a repository a pronto consumer module with its sayt wrappers and toolchain.
 * [Pronto](../README.md) - concept: A programming language whose source is markdown and whose compiler is an LLM, targeting an architecture in which whole classes of bugs cannot exist.
 * [Writing a pronto app](../GUIDE.md) - howto: The app author's tour — starting an app and running a turn, the layout, the build loop, data modelling, screens, i18n, the capability bar, testing and release.
 * [Pronto artifact spec](../SPEC.md) - reference: What a conforming brief.md, ir.html and program.cue contain, and the lints that enforce it.
 * [The pronto prelude](../prelude.md) - reference: The component knowledge implicit in every brief-to-ir compilation — entities, durability, pipelines, screens, capability, identity, hatches, the team, the loop, tiers and tests.
-* [Contributing to pronto](../CONTRIBUTING.md) - howto: Changing pronto itself — the two invariants, the commands, where a compiler check is declared, and where each subsystem is argued.
-* [Pending](../PENDING.md) - metric: What pronto argues for and has not built, and what a measurement found that nothing has fixed, each checked against this tree on the date given.
 * [pronto-turn](../skills/pronto-turn/SKILL.md) - howto: the outer loop an agent drives over a pronto app — scope, sayt verbs, review by consequence, one simplify pass, evidence.
-* [Bootstrap](../skills/pronto-turn/references/bootstrap.md) - howto: the pinned seed phase that makes a repository a pronto consumer module with its sayt wrappers and toolchain.
 * [One turn](../commands/turn.md) - howto: the Claude Code command that drives one turn of the outer loop over a problem statement.
 
-# Subsystems
+# For contributors
+
+How pronto works inside, what it decided and what it superseded.
+
+* [Contributing to pronto](../CONTRIBUTING.md) - howto: Changing pronto itself — the two invariants, the commands, where a compiler check is declared, and where each subsystem is argued.
+* [Pending](../PENDING.md) - metric: What pronto argues for and has not built, and what a measurement found that nothing has fixed, each checked against this tree on the date given.
+
+## Subsystems
 
 * [[cortex|Cortex client compositions]] — generated browser protocols composing Mecha session and command ports.
 
@@ -28,7 +37,7 @@
 * [Screens](screens.md) - concept: How pronto compiles a screen — what it derives from the markup, what it checks the markup against, and how each route's first document is rendered and cached.
 * [Release targets](release-targets.md) - concept: Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, and docker are built, and the clouds and k8s are designed.
 
-# Decisions
+## Decisions
 
 * [Review by consequence](decisions/2026-08-27-review-by-consequence.md) - decision, partially built: Levies ir coverage by what a write reaches — an update to a `tab` entity machine-checked only, one reaching `device` or above owing an ir element — with handler reach derived from the charts naming it, and an explicit write capability deferred.
 * [Owner stamping](decisions/2026-08-31-owner-stamping.md) - decision, unbuilt: Moves a row's owner stamp from the apps' `default: "auth_uid()"` column defaults to an emitted per-table BEFORE INSERT trigger beside the policies, and narrows `#Field.default` to what a bare Postgres has, so the data-holding steps need nothing from the rules.
@@ -36,8 +45,9 @@
 * [Pronto written in pronto](decisions/2026-09-27-pronto-written-in-pronto.md) - decision, unbuilt: The whole development loop in a browser tab — authoring, compilation, running and version control, with sayt's verbs run by an in-tab executor, inside an IDE that is itself a pronto app — none of which exists yet.
 * [Hybrid machines](decisions/2026-09-29-hybrid-machines.md) - decision, partially built: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-external tiers.
 * [External effects](decisions/2026-10-03-external-effects.md) - decision, partially built: How a machine reaches outside the cluster — a state invokes an external effect, the interpreter claims a ledger row and enqueues a Graphile job in the transition's commit, mecha's airlock runs the effect's Jessie handler against one declared sink through its Dapr binding, and the outcome returns through the interpreter as the machine's next event.
+* [Agent onboarding](decisions/2026-10-14-agent-onboarding.md) - decision, partially built: What a cold agent needs to write its first pronto app inside a 128k context — an idioms package shipped and gated with the module, a first generate that compiles a hand-authored program, an author's card under 8k tokens, links that resolve in the mirror, and gates that refuse an app nobody can play.
 
-# Archive
+## Archive
 
 * [Design: Pronto — AI App Builder With Constraint-Cascade Architecture](archive/2026-06-12-design-constraint-cascade.md) - decision, superseded: The startup-mode design — constraint-cascade generation and a scale-to-zero runtime against the prompt-to-app category — whose business analysis still stands.
 * [A numeric stage](archive/2026-09-30-numeric-stage.md) - decision, built: A pronto rung for computation bloblang and Jessie cannot carry — a compute service fed by the lake, writing back through CRUD; proposed on JAX, revised to Jessie planning Wasm jobs on Deno.

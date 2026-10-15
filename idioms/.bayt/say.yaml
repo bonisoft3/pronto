@@ -1,0 +1,48 @@
+# generated from bayt.cue — do not edit
+say:
+  launch:
+    rulemap:
+      builtin:
+        stop: true
+        cmds:
+        - use: ./bayt-task.nu
+          do: bayt-task launch-action --generate
+  integrate:
+    rulemap:
+      builtin:
+        stop: true
+        cmds:
+        - use: ./bayt-task.nu
+          do: bayt-task integrate-action --generate
+  lint:
+    rulemap:
+      auto-cue: null
+      builtin:
+        stop: true
+        cmds:
+        - use: ./bayt-task.nu
+          do: bayt-task lint --generate
+  generate:
+    rulemap:
+      auto-bayt: null
+      auto-cue: null
+      auto-gomplate: null
+      builtin:
+        stop: true
+        cmds:
+        - use: ./bayt-task.nu
+          do: bayt-task generate
+  build:
+    rulemap:
+      builtin:
+        stop: true
+        cmds:
+        - use: ./bayt-task.nu
+          do: bayt-task build --generate
+  test:
+    rulemap:
+      builtin:
+        stop: true
+        cmds:
+        - use: ./bayt-task.nu
+          do: bayt-task test --generate

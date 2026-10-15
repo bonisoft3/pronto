@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="pronto-ir-version" content="0.1.0">
+  <meta name="pronto-source" content="brief.md">
+  <meta name="pronto-brief-sha256" content="cee2d02965a109e31e54b1b42de428bce0049051827945693404ec0f322e289d">
+  <meta name="pronto-generated" content="2026-10-14T00:00:00Z">
+  <meta name="pronto-compiler" content="claude-opus-5-5">
+  <title>Idioms — IR</title>
+<link rel="stylesheet" href="ir/card.css">
+</head>
+<body>
+  <h1>Idioms — IR</h1>
+  <p>Five <code>tab</code> entities and one <code>device</code> entity, read and written by four screens in one browser tab.
+  A <code>tab</code> entity and the handlers only it reaches are machine-checked and owe this document nothing; the <code>device</code> one does.</p>
+
+  <h2>Entities</h2>
+  <section id="Todo" data-kind="entity" data-durability="device" data-type-id="0xe2cd3e83dbf7849b">
+    <h3>Todo</h3>
+<!-- pronto:card --><div class="card dur-device">
+<header class="ehead">
+<span class="chips"><span class="chip" data-tip="where the row lives, the one word the author chooses: tab · device · offline · live · server" tabindex="0"><b>durability</b> device</span><span class="chip" data-tip="who may read and write the row; becomes the roles and the row-level policies" tabindex="0"><b>access</b> —</span><span class="chip" data-tip="the entity's type id, which a schema diff keys on across renames; each field keeps a gap-free ordinal, and a retired field stays as a tombstone" tabindex="0"><b>id</b> 0xe2cd3e83dbf7849b</span><span class="chip derived" data-tip="1 of 5 — a register this tab or device alone writes" tabindex="0"><b>level</b> ephemeral</span><span class="chip derived" data-tip="what a write here can claim when delivered twice — the level's word, and at level 4 the sink's: idempotent or reconciled is exactly-once, unknown at-most-once, repeat at-least-once; a hatch is unspecified" tabindex="0"><b>delivery</b> exactly-once</span></span>
+<span class="counts">4 fields · 0 referrers</span>
+</header>
+<div class="names"><span class="lbl">fields</span><span class="namelist"><span class="fname">id<i class="m">pk</i></span><span class="fname">title</span><span class="fname">done</span><span class="fname">created</span></span>
+<details class="more"><summary>all fields, with their metadata</summary>
+<table class="fields"><tr><td class="o">1</td><td class="k">id</td><td class="t">uuid</td><td class="gl"><span class="g pk" data-tip="primary key" tabindex="0">pk</span></td><td class="x" title=""></td></tr><tr><td class="o">2</td><td class="k">title</td><td class="t">string</td><td class="gl"></td><td class="x" title="this.size() &gt;= 1 &amp;&amp; this.size() &lt;= 80">this.size() &gt;= 1 &amp;&amp; this.size() &lt;= 80</td></tr><tr><td class="o">3</td><td class="k">done</td><td class="t">string</td><td class="gl"></td><td class="x" title="this in ['no', 'yes']">this in ['no', 'yes']</td></tr><tr><td class="o">4</td><td class="k">created</td><td class="t">timestamp</td><td class="gl"></td><td class="x" title=""></td></tr></table>
+<p class="legend">the first column is the field's ordinal, which a diff keys on · <span class="g pk">pk</span> primary key · <span class="g fk">→</span> references · <span class="g">◇</span> unique · <span class="g">≡</span> indexed · <span class="g">○</span> nullable · a rule or default in the last column</p>
+</details></div>
+<div class="strips">
+<div class="strip"><span class="lbl">referenced by</span><span class="rels"><span class="why">—</span></span></div>
+<div class="strip"><span class="lbl">refers to</span><span class="rels"><span class="why">—</span></span></div>
+<div class="strip"><span class="lbl">validations</span><span class="why">none</span></div>
+</div>
+<div class="dline"><span class="lbl derived">derived</span><span class="chips"><span class="chip derived" data-tip="who writes rows here, each as kind:name and its ops — a screen's forms and what its markup writes past them, the terminal's charts, pipelines, computations, machines, a unit's memo" tabindex="0"><b>writers</b> screen:todo create·update·reduce</span><span class="chip derived" data-tip="how the terminal reads a server entity's table: eager syncs it whole, lazy loads what a view asks; a browser tier has no mode" tabindex="0"><b>read</b> —</span><span class="chip derived" data-tip="the database roles that may touch the table, from durability and access" tabindex="0"><b>roles</b> anon</span><span class="chip derived" data-tip="whether ir.html carries an element for it — review by consequence: a row that reaches another device or the server does" tabindex="0"><b>ir</b> required</span></span>
+<details class="more"><summary>the platform’s columns</summary><p class="why"><code>created_by</code>, <code>updated_by</code> → app_user, stamped by the platform on every write; not the author’s.</p></details></div>
+
+</div><!-- /pronto:card -->
+    <p>A task, kept in this browser across reloads. The key is minted by the create form; nothing else invents one.</p>
+    <table data-extract="fields">
+      <thead><tr><th>Field</th><th>Type</th><th>Constraint</th></tr></thead>
+      <tbody>
+        <tr data-ordinal="1"><td>id</td><td>uuid</td><td></td></tr>
+        <tr data-ordinal="2"><td>title</td><td>string</td><td><code class="cel">this.size() &gt;= 1 &amp;&amp; this.size() &lt;= 80</code></td></tr>
+        <tr data-ordinal="3"><td>done</td><td>string</td><td><code class="cel">this in ['no', 'yes']</code></td></tr>
+        <tr data-ordinal="4"><td>created</td><td>timestamp</td><td></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <h2>Screens</h2>
+    <!-- pronto:app-neighbourhood --><details class="pronto-neighbourhood app-neighbourhood"><summary>App entity neighbourhood · 5 entities</summary><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="App entity diagram"><img src="ir/neighbourhood-app.svg" width="251" height="510" alt="App entity diagram"></div><p><b>entities:</b> <span>Board</span>, <span>Clock</span>, <span>Counter</span>, <span>Light</span>, <a href="#Todo">Todo</a></p></details><!-- /pronto:app-neighbourhood -->
+<section id="counter" data-kind="screen" data-route="/">
+      <h3>Counter (/)</h3>
+<!-- pronto:neighbourhood --><figure class="pronto-neighbourhood" aria-label="Counter entity neighbourhood"><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="Counter entity diagram"><img src="ir/neighbourhood-counter.svg" width="189" height="106" alt="Counter entity diagram"></div><figcaption><b>entities:</b> <span>Counter</span></figcaption></figure><!-- /pronto:neighbourhood -->
+      <p>One seeded <code>tab</code> row; a click wakes <code>count</code>, which tells the buttons apart by element id.</p>
+      <figure id="counter-populated" data-kind="state" data-of="counter" data-state="populated">
+        <svg viewBox="0 0 120 60" width="120" height="60" role="img" aria-label="− 0 +"><rect x="1" y="1" width="118" height="58" fill="none" stroke="currentColor"/><text x="60" y="34" text-anchor="middle" font-size="9">− 0 +</text></svg>
+        <figcaption>− 0 +</figcaption>
+      </figure>
+      <script type="application/json" data-kind="paths" data-of="counter">{"count": {"states": ["populated", "populated"], "accepts": ["accept-count"]}}</script>
+    </section>
+    <section id="todo" data-kind="screen" data-route="/todo">
+      <h3>Todo (/todo)</h3>
+<!-- pronto:neighbourhood --><figure class="pronto-neighbourhood" aria-label="Todo entity neighbourhood"><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="Todo entity diagram"><img src="ir/neighbourhood-todo.svg" width="194" height="123" alt="Todo entity diagram"></div><figcaption><b>entities:</b> <a href="#Todo">Todo</a></figcaption></figure><!-- /pronto:neighbourhood -->
+      <p>A create form mints the key and stamps <code>{now}</code>; a form inside an item updates that item; a click deletes by the row's key.</p>
+      <figure id="todo-empty" data-kind="state" data-of="todo" data-state="empty">
+        <svg viewBox="0 0 120 60" width="120" height="60" role="img" aria-label="Nothing to do."><rect x="1" y="1" width="118" height="58" fill="none" stroke="currentColor"/><text x="60" y="34" text-anchor="middle" font-size="9">Nothing to do.</text></svg>
+        <figcaption>Nothing to do.</figcaption>
+      </figure>
+      <figure id="todo-populated" data-kind="state" data-of="todo" data-state="populated">
+        <svg viewBox="0 0 120 60" width="120" height="60" role="img" aria-label="☐ task ✕"><rect x="1" y="1" width="118" height="58" fill="none" stroke="currentColor"/><text x="60" y="34" text-anchor="middle" font-size="9">☐ task ✕</text></svg>
+        <figcaption>☐ task ✕</figcaption>
+      </figure>
+      <script type="application/json" data-kind="paths" data-of="todo">{"add": {"states": ["empty", "populated"], "accepts": ["accept-todo"]}}</script>
+    </section>
+    <section id="grid" data-kind="screen" data-route="/grid">
+      <h3>Lights out (/grid)</h3>
+<!-- pronto:neighbourhood --><figure class="pronto-neighbourhood" aria-label="Lights out entity neighbourhood"><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="Lights out entity diagram"><img src="ir/neighbourhood-grid.svg" width="189" height="198" alt="Lights out entity diagram"></div><figcaption><b>entities:</b> <span>Board</span>, <span>Light</span></figcaption></figure><!-- /pronto:neighbourhood -->
+      <p><code>press</code> writes five lights and the move count; <code>tally</code> folds the lit count and writes it only when it changed.</p>
+      <figure id="grid-populated" data-kind="state" data-of="grid" data-state="populated">
+        <svg viewBox="0 0 120 60" width="120" height="60" role="img" aria-label="5×5 lights"><rect x="1" y="1" width="118" height="58" fill="none" stroke="currentColor"/><text x="60" y="34" text-anchor="middle" font-size="9">5×5 lights</text></svg>
+        <figcaption>5×5 lights</figcaption>
+      </figure>
+      <script type="application/json" data-kind="paths" data-of="grid">{"press": {"states": ["populated", "populated"], "accepts": ["accept-grid"]}}</script>
+    </section>
+    <section id="timer" data-kind="screen" data-route="/timer">
+      <h3>Timer (/timer)</h3>
+<!-- pronto:neighbourhood --><figure class="pronto-neighbourhood" aria-label="Timer entity neighbourhood"><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="Timer entity diagram"><img src="ir/neighbourhood-timer.svg" width="251" height="142" alt="Timer entity diagram"></div><figcaption><b>entities:</b> <span>Clock</span></figcaption></figure><!-- /pronto:neighbourhood -->
+      <p>A machine owns <code>run</code> and re-arms <code>after</code> each second; <code>roll</code> asks the terminal for a draw.</p>
+      <figure id="timer-populated" data-kind="state" data-of="timer" data-state="populated">
+        <svg viewBox="0 0 120 60" width="120" height="60" role="img" aria-label="0 ▶ · 1 roll"><rect x="1" y="1" width="118" height="58" fill="none" stroke="currentColor"/><text x="60" y="34" text-anchor="middle" font-size="9">0 ▶ · 1 roll</text></svg>
+        <figcaption>0 ▶ · 1 roll</figcaption>
+      </figure>
+      <script type="application/json" data-kind="paths" data-of="timer">{"run": {"states": ["populated", "populated"], "accepts": ["accept-timer"]}}</script>
+    </section>
+
+  <h2>Decisions</h2>
+  <p id="decision-escape-hatches" data-kind="decision"><strong>Escape hatches: none.</strong> No container, WASM unit, vendored component or external endpoint; every line of app code is a handler the terminal runs in a compartment.</p>
+</body>
+</html>
