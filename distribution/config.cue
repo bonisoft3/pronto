@@ -127,6 +127,8 @@ import (
 	// The container tier's artifact: the self-contained appliance image.
 	docker:        "docker compose build release-docker"
 	publishDocker: "use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag; let image_tag = ($tag | path basename); with-env { BAYT_IMAGE_TAG: $image_tag } { docker compose build release-docker; docker compose push release-docker }"
+	// The kubernetes tier: cloud or kind cluster release using verified operators and Gateway API.
+	k8s: (_run & {args: "nu ($pronto | path join k8s release.nu)"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// An installed pronto has no siblings, which its own tests import.

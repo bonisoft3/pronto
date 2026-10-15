@@ -14,7 +14,7 @@ _drainIdle: input: broker: inputs: [
 _drainIdle: pipeline: processors: [{mapping: """
 	let row = this.catch({})
 	let table = $row.data.or("").parse_json().catch({}).__table.or("")
-	root = if $row.exists("wake") || ["team_profile_dirty"].contains($table) { {"batch_size":50} } else { deleted() }
+	root = if $row.exists("wake") || ["team_profile_dirty"].contains($table) { {"body": {"batch_size":50}, "trace": @traceparent.or("")} } else { deleted() }
 	"""}]
 _drainIdle: output: http_client: {
 	url: "${CRUD_URL}/rpc/refresh_team_profiles"
@@ -36,6 +36,6 @@ _drainIdle: output: http_client: {
 	max_in_flight: 1
 	batching: {
 		period: "1s"
-		processors: [{archive: format: "json_array"}, {mapping: "root = this.index(0)"}]
+		processors: [{archive: format: "json_array"}, {resource: "cdc_trace_batch"}, {mapping: "root = this.index(0).body"}]
 	}
 }

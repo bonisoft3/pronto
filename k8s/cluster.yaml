@@ -1,0 +1,26 @@
+apiVersion: ctlptl.dev/v1alpha1
+kind: Registry
+name: kind-registry
+port: 5001
+---
+apiVersion: ctlptl.dev/v1alpha1
+kind: Cluster
+product: kind
+name: kind-local-cluster
+registry: kind-registry
+kindV1Alpha4Cluster:
+  nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+    - |
+      kind: InitConfiguration
+      nodeRegistration:
+        kubeletExtraArgs:
+          node-labels: "ingress-ready=true"
+    extraPortMappings:
+    - containerPort: 80
+      hostPort: 80
+      protocol: TCP
+    - containerPort: 443
+      hostPort: 443
+      protocol: TCP

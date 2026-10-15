@@ -39,7 +39,21 @@
   }
 }
 
+# Tracing where a collector runs (a k8s release sets PRONTO_TRACING=on): caddy
+# ignores OTEL_TRACES_EXPORTER and OTEL_SDK_DISABLED, so without a collector
+# every export batch would spend its deadline dialing one.
+(tracing-on) {
+  tracing
+}
+(tracing-off) {
+}
+
 (app) {
+  # Every request is a span, the child of the traceparent it arrived with (the
+  # gateway's), and every upstream is sent the span's own; the access log names
+  # its traceID. The exporter reads the standard OTEL_* environment.
+  import tracing-{$PRONTO_TRACING:off}
+  log
   # The origin every absolute address the app answers is spelled against,
   # read by a template as `http.vars.origin`. The deployment's, never the
   # request's: this door answers any Host (mecha's docs/proxy.md, "The origin").
@@ -86,11 +100,17 @@
   handle /manifest.json {
     redir /manifest.webmanifest 308
   }
+  # Every upstream is dialed at $PRONTO_MESH when set and named by
+  # dapr-app-id: a k8s release sets it to the caddy pod's Dapr sidecar, which
+  # routes by that header (service invocation) and keeps the path; compose and
+  # docker leave it unset and dial the service directly.
   handle /crud/* {
     uri strip_prefix /crud
     @post method POST
     request_header @post Prefer "return=representation,resolution=ignore-duplicates"
-    reverse_proxy crud:3000
+    reverse_proxy {$PRONTO_MESH:crud:3000} {
+      header_up dapr-app-id crud
+    }
   }
   handle /electric/* {
     uri strip_prefix /electric
@@ -109,14 +129,16 @@
     # refuses the parameter the proxy itself just set. Inside, these run as
     # written.
     route {
-      forward_auth auth:9999 {
+      forward_auth {$PRONTO_MESH:auth:9999} {
         uri /auth/shape/verify
+        header_up dapr-app-id auth
       }
       # Electric takes its secret as a query parameter, added by an authorizing
       # proxy and never sent by a client. It is set after the gate, so a client
       # that supplies its own is refused there rather than silently overwritten.
       uri query secret {$ELECTRIC_SECRET}
-      reverse_proxy electric:3000 {
+      reverse_proxy {$PRONTO_MESH:electric:3000} {
+        header_up dapr-app-id electric
         flush_interval -1
         transport http {
           read_timeout 300s
@@ -137,24 +159,32 @@
   # prefix. Ships unconditionally — in a cluster without an auth service
   # the upstream never resolves and this unused route just 502s.
   handle /auth/* {
-    reverse_proxy auth:9999
+    reverse_proxy {$PRONTO_MESH:auth:9999} {
+      header_up dapr-app-id auth
+    }
   }
   # The wake. Ships unconditionally like /auth, and mounted WITH its prefix
   # for the same reason: the ticker answers POST /poke and 404s everything
   # else, so stripping would 404 every poke.
   handle /poke {
-    reverse_proxy ticker:9998
+    reverse_proxy {$PRONTO_MESH:ticker:9998} {
+      header_up dapr-app-id ticker
+    }
   }
   # The blob plane. Ships unconditionally, like /auth — in a cluster
   # without the blobs services the upstreams never resolve and these
   # unused routes just 502.
   handle /blobs/* {
     uri strip_prefix /blobs
-    reverse_proxy rclone-s3:3900
+    reverse_proxy {$PRONTO_MESH:rclone-s3:3900} {
+      header_up dapr-app-id rclone-s3
+    }
   }
   handle /img/* {
     uri strip_prefix /img
-    reverse_proxy imgproxy:8081
+    reverse_proxy {$PRONTO_MESH:imgproxy:8081} {
+      header_up dapr-app-id imgproxy
+    }
   }
   handle /health {
     respond "ok" 200

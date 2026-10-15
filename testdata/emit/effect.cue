@@ -70,7 +70,7 @@ effectBinding: _effectingTargets["airlock-mesh"].dockerfile.copy[1] & {srcs: ["s
 effectBindingEmitted: _effectingFiles["services/airlock/dapr/charge.yaml"].data.spec.metadata[0] & {name: "url", value: "https://api.acquirer.example"}
 effectAllowlist: _effectingTargets["airlock-mesh"].dockerfile.copy[0] & {srcs: ["/app/airlock/dapr.yaml"], dst: "/dapr/config.yaml"}
 effectImage: _effectingTargets.airlock.dockerfile.from.ref & "libraries_mecha:airlock-image"
-effectSteps: [for c in _effectingTargets.database.dockerfile.copy if c.from.name != _|_ {c.dst}] & ["/docker-entrypoint-initdb.d/011_graphile_worker.sql", "/docker-entrypoint-initdb.d/012_airlock.sql"]
+effectSteps: [for c in _effectingTargets.database.dockerfile.copy if c.from.name != _|_ {c.dst}] & ["/docker-entrypoint-initdb.d/899_electric_password.sh", "/docker-entrypoint-initdb.d/011_graphile_worker.sql", "/docker-entrypoint-initdb.d/012_airlock.sql"]
 // Neither the airlock nor its daprd stands on the default network, where
 // every other service is; the daprd goes out on a network of its own.
 effectAirlockWalled: (_effectingTargets.airlock.compose.networks.default == _|_) & true

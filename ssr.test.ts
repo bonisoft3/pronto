@@ -21,9 +21,26 @@ Deno.test("a public route's addresses reach the renderer, ahead of the entry", (
   const { ok, out } = ask("_view", "caddyfile");
   if (!ok) throw new Error(out);
   const rendered = out.indexOf("@rendered {\n      path /jogo/* /jogo/*/\n");
-  if (out.indexOf("handle @rendered {\n      reverse_proxy render:8090", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
+  if (out.indexOf("handle @rendered {\n      reverse_proxy {$PRONTO_MESH:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered > out.indexOf("rewrite @route")) throw new Error("the entry's rewrite answers before the renderer does");
+});
+
+// A k8s release dials every upstream at the caddy pod's Dapr sidecar, which
+// routes by dapr-app-id. Regression guard: an upstream spelled as a bare
+// host:port, or missing the header, bypasses the mesh there, and one naming
+// another app id reaches the wrong service.
+Deno.test("every upstream the door dials is the mesh's when set, naming its service", () => {
+  const { ok, out } = ask("_view", "caddyfile");
+  if (!ok) throw new Error(out);
+  const proxies = [...out.matchAll(/^\s*(reverse_proxy|forward_auth)\b(.*)$/gm)];
+  if (!proxies.some((m) => m[2].includes("render:"))) throw new Error(`no renderer upstream:\n${out}`);
+  for (const m of proxies) {
+    const spelled = m[2].match(/^ \{\$PRONTO_MESH:([a-z0-9-]+):\d+\} \{$/);
+    if (!spelled) throw new Error(`${m[0].trim()} dials past the mesh`);
+    const next = out.slice(m.index! + m[0].length).split("\n").slice(1, 4).map((l) => l.trim());
+    if (!next.includes(`header_up dapr-app-id ${spelled[1]}`)) throw new Error(`${m[0].trim()} names no dapr-app-id ${spelled[1]}`);
+  }
 });
 
 Deno.test("the renderer reads through the door, as a guest would", () => {

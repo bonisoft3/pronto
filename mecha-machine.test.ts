@@ -547,6 +547,15 @@ Deno.test("an effect's cluster keeps the wake's names, and the service role the 
   assertStringIncludes((await emitFiles(program))["services/database/migrations/002_grants.sql"].text, "ON ALL TABLES IN SCHEMA public TO anon, service;");
 });
 
+// The schema states electric's attributes and never its password: on
+// Kubernetes the operator sets the password from a secret, and a roles
+// migration that set one would overwrite it whenever it ran.
+Deno.test("the roles migration leaves electric's password to the deployment", async () => {
+  const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
+  assertStringIncludes(roles, "ALTER ROLE electric BYPASSRLS REPLICATION LOGIN;");
+  assertEquals(/PASSWORD/i.test(roles), false);
+});
+
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {
   const files = await emitFiles(bridged(MAIL_BRIDGE));
   assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", value: "http://bridge-mail:8080" });

@@ -1107,11 +1107,52 @@ _sqlType: {
 		"""
 }
 
+// The feed's transaction markers (mecha.txn_trace, mecha's rls.sql): the
+// table joins the feed's publication and not Electric's, which would sync it
+// to no reader, and every published table marks the transaction writing it.
+// Not in conduit's `tables`, which does not filter logrepl and resolves each
+// entry's key as one quoted identifier, so a schema-qualified name fails it.
+// Conduit names a collection without its schema, so the marker reaches the
+// bus as `__table: txn_trace`, which an app table must not also be.
+#txnMarker: M={
+	pub: string
+	tables: [...string]
+	_unshadowed: true & !list.Contains(M.tables, "txn_trace")
+	out: strings.Join(list.Concat([[
+		"""
+		DO $$ BEGIN
+		  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables
+		                 WHERE pubname = '\(M.pub)' AND schemaname = 'mecha' AND tablename = 'txn_trace') THEN
+		    ALTER PUBLICATION \(M.pub) ADD TABLE mecha.txn_trace;
+		  END IF;
+		END $$;
+		""",
+	], [for t in M.tables {
+		"""
+		CREATE OR REPLACE TRIGGER mark_txn BEFORE INSERT OR UPDATE OR DELETE ON \(t)
+		  FOR EACH STATEMENT EXECUTE FUNCTION mecha.mark_txn();
+		"""
+	}]]), "\n")
+}
+
 // Column conduit stamps onto every bus row naming the table it came from. Not
 // a database column: it exists only on the wire, so it must not collide with
 // one, hence the reserved prefix.
 _cdcTableField: "__table"
 _cdcBeforeField: "__before"
+
+// A cdc-events stream's input processors: mecha's cdc_trace_join (the
+// transform's -r cdc-trace.yaml) consumes the transaction markers and stamps
+// each row's @traceparent, keyed by a name unique to the stream.
+#cdcTraceJoin: J={
+	consumer: string
+	out: [{mutation: "meta cdc_consumer = \(json.Marshal(J.consumer))"}, {resource: "cdc_trace_join"}]
+}
+
+// Sent with each call a stream makes for a row, so the call joins the row's
+// transaction's trace and, through mecha.mark_txn, the write it makes is
+// marked with that trace too. Unset metadata sends no header.
+_traceHeader: include_patterns: ["^traceparent$"]
 
 #rpkPipeline: R={
 	p:           #Pipeline
@@ -1134,8 +1175,9 @@ _cdcBeforeField: "__before"
 	// reachable for delete-to-zero emissions.
 	_fetch: branch: {
 		processors: [{http: {
-			url:  "${CRUD_URL}/\(R.sourceTable)?\(R.p.transform.aggregate)"
-			verb: "GET"
+			url:      "${CRUD_URL}/\(R.sourceTable)?\(R.p.transform.aggregate)"
+			verb:     "GET"
+			metadata: _traceHeader
 			if R.authOn {
 				headers: Authorization: "Bearer ${SERVICE_JWT}"
 			}
@@ -1149,6 +1191,7 @@ _cdcBeforeField: "__before"
 			body_key:       "data"
 			consumer_group: R.p.group
 		}
+		input: processors: (#cdcTraceJoin & {consumer: R.p.group}).out
 		pipeline: processors: [
 			// Ahead of the fetch on purpose: cdc-events carries every table and
 			// each stream reads all of it, so a message the mapping will discard
@@ -1187,8 +1230,9 @@ _cdcBeforeField: "__before"
 				// CRUD_URL is PostgREST direct, never the gateway: Caddy's
 				// client-facing Prefer injection would clobber the
 				// merge-duplicates upsert below.
-				url:  "${CRUD_URL}/\(R.sinkTable)?on_conflict=\(R._onConflict)"
-				verb: "POST"
+				url:      "${CRUD_URL}/\(R.sinkTable)?on_conflict=\(R._onConflict)"
+				verb:     "POST"
+				metadata: _traceHeader
 				headers: {
 					"Content-Type": "application/json"
 					Prefer:         "resolution=merge-duplicates"
@@ -1271,12 +1315,13 @@ _cdcBeforeField: "__before"
 			// down past the bus's retention, were never heard.
 			{generate: {count: 1, interval: "", mapping: "root = {\"wake\": \"start\"}"}},
 		]
+		input: processors: (#cdcTraceJoin & {consumer: "\(R.app)-\(R.d.name)"}).out
 		pipeline: {
 			threads: 1
 			processors: [{mapping: """
 				let row = this.catch({})
 				let table = $row.data.or("").parse_json().catch({}).\(_cdcTableField).or("")
-				root = if $row.exists("wake") || \(json.Marshal(R.d.on)).contains($table) { \(json.Marshal(R.d.body)) } else { deleted() }
+				root = if $row.exists("wake") || \(json.Marshal(R.d.on)).contains($table) { {"body": \(json.Marshal(R.d.body)), "trace": @traceparent.or("")} } else { deleted() }
 				"""}]
 		}
 		output: http_client: {
@@ -1291,11 +1336,12 @@ _cdcBeforeField: "__before"
 					Authorization: "Bearer ${SERVICE_JWT}"
 				}
 			}
+			metadata:      _traceHeader
 			successful_on: [200, 204]
 			batching: {
 				period: "1s"
-				// The messages are equal, so the batch is one of them.
-				processors: [{archive: format: "json_array"}, {mapping: "root = this.index(0)"}]
+				// The bodies are equal, so the batch's is one of them.
+				processors: [{archive: format: "json_array"}, {resource: "cdc_trace_batch"}, {mapping: "root = this.index(0).body"}]
 			}
 		}
 	}
@@ -1891,6 +1937,12 @@ _cdcBeforeField: "__before"
 				if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 					admitEffects: {verb: "lint", cmds: [_distribution.checks.admitEffects], note: "Pronto effect handlers admitted"}
 				}
+			}
+			// A deploy, not a published version: its rule is the release
+			// engine alone, so it carries none of release.nu's versioning
+			// and its flags (--dry-run, --snapshot) reach that engine.
+			if list.Contains(D.code.meta.targets, "k8s") {
+				sayYaml: say: release: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.k8s}]}
 			}
 			sayYaml: say: {
 				lint: rulemap: cue: cmds: [{do: "mise exec -- cue vet -c ./..."}]
@@ -2865,9 +2917,10 @@ _cdcBeforeField: "__before"
 				// error.
 				_bypass: [
 					if E._serviceOn {"\nALTER ROLE service BYPASSRLS;\n"},
-					// A dev credential; cluster.cue, at the URL naming this role, says
-					// what a deployment does with both.
-					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN PASSWORD 'electric';\n" +
+					// No password: the deployment's secret sets it (mecha's
+					// #ElectricPasswordStep), and a schema that set one would
+					// overwrite it whenever it ran.
+					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN;\n" +
 						"GRANT USAGE ON SCHEMA public TO electric;\n" +
 						"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
 						"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n" +
@@ -2943,10 +2996,13 @@ _cdcBeforeField: "__before"
 				// The publications and the replica identity need a WAL reader, so
 				// they go inside the fence (libraries/mecha/docs/browser.md#the-fence).
 				_wal: #Tier & "container"
+				// Marked only where the feed runs: with nothing reading the WAL,
+				// a marker is a write per statement for nobody.
+				_marker: [if E.cluster.capabilities.capture {"\n" + (#txnMarker & {pub: E._pub, tables: strings.Split(E._cdcTables, ",")}).out}, ""][0]
 				text: [
 					if len(E._syncTables) > 0 {
 						"""
-				\([if len(E._cdcTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: strings.Split(E._cdcTables, ",")}).out + "\n-- tier: any"}, "-- No authoritative source entity: nothing for the bus to read."][0])
+				\([if len(E._cdcTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: strings.Split(E._cdcTables, ",")}).out + _marker + "\n-- tier: any"}, "-- No authoritative source entity: nothing for the bus to read."][0])
 
 				-- Electric's own publication, declared rather than left to it.
 				-- ELECTRIC_MANUAL_TABLE_PUBLISHING makes it validate this instead of
@@ -3481,7 +3537,9 @@ _cdcBeforeField: "__before"
 				      }
 				    }
 				    handle @rendered {
-				      reverse_proxy render:\(omnishell.#Render.port)
+				      reverse_proxy {$PRONTO_MESH:render:\(omnishell.#Render.port)} {
+				        header_up dapr-app-id render
+				      }
 				    }
 
 				""",
