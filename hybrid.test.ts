@@ -1,8 +1,9 @@
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
 import { hybridInteraction } from "./hybrid-client.js";
 import { compileHybrid } from "./hybrid.ts";
-import { executeHybrid } from "./hybrid-local.ts";
-import { fixture, initial, request } from "./hybrid-fixtures.ts";
+import { instrument } from "../omnishell/instrument.ts";
+import { executeHybrid } from "./testdata/hybrid-local.ts";
+import { fixture, initial, request } from "./testdata/hybrid-fixtures.ts";
 
 Deno.test("hybrid chart dispatches internal events, validates ownership, and projects private hands", async () => {
   const { spec, compiled } = await fixture();
@@ -22,30 +23,30 @@ Deno.test("hybrid chart dispatches internal events, validates ownership, and pro
 
 Deno.test("hybrid compiler refuses incomplete protocols and ambient authority", async () => {
   const { spec, rules } = await fixture();
-  await assertRejects(() => compileHybrid({ ...spec, initial: "missing" }, rules), Error, "initial state");
+  await assertRejects(() => compileHybrid({ ...spec, initial: "missing" }, rules, instrument), Error, "initial state");
   const missing = structuredClone(spec);
   missing.states.playing.on.play.target = "missing";
-  await assertRejects(() => compileHybrid(missing, rules), Error, "missing target");
-  await assertRejects(() => compileHybrid(spec, "return {play: () => plv8.execute('SELECT 1')};"), Error, "reach plv8");
-  await assertRejects(() => compileHybrid(spec, "return {play: () => Date['now']()};"), Error, "reach Date");
-  const compiled = await compileHybrid(spec, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => Math['random']()"));
+  await assertRejects(() => compileHybrid(missing, rules, instrument), Error, "missing target");
+  await assertRejects(() => compileHybrid(spec, "return {play: () => plv8.execute('SELECT 1')};", instrument), Error, "reach plv8");
+  await assertRejects(() => compileHybrid(spec, "return {play: () => Date['now']()};", instrument), Error, "reach Date");
+  const compiled = await compileHybrid(spec, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => Math['random']()"), instrument);
   await assertRejects(() => executeHybrid(compiled.source, spec.fuel, { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] }), Error);
 });
 
 Deno.test("a command cannot carry hidden module state or replenish exhausted fuel", async () => {
   const { spec, rules } = await fixture();
-  const stateful = await compileHybrid(spec, `let count = 0;\n${rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: (state, event, context) => putCard(state, event.payload.card, ++count)")}`);
+  const stateful = await compileHybrid(spec, `let count = 0;\n${rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: (state, event, context) => putCard(state, event.payload.card, ++count)")}`, instrument);
   const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
   assertEquals(await executeHybrid(stateful.source, spec.fuel, input), await executeHybrid(stateful.source, spec.fuel, input));
-  const catches = await compileHybrid(spec, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: (state) => { try { while (true) {} } catch {} return {...state}; }"));
+  const catches = await compileHybrid(spec, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: (state) => { try { while (true) {} } catch {} return {...state}; }"), instrument);
   await assertRejects(() => executeHybrid(catches.source, spec.fuel, input), Error, "fuel limit exceeded");
-  await assertRejects(() => compileHybrid(spec, "const __fuel = () => {}; " + rules), Error, "meter");
+  await assertRejects(() => compileHybrid(spec, "const __fuel = () => {}; " + rules, instrument), Error, "meter");
 });
 
 Deno.test("hybrid input is immutable and reducers cannot bypass chart targets", async () => {
   const { spec, rules } = await fixture();
   for (const body of ["{ state.a.pop(); return state; }", "({ ...state, phase: 'finished' })"]) {
-    const compiled = await compileHybrid(spec, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", `play: (state) => ${body}`));
+    const compiled = await compileHybrid(spec, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", `play: (state) => ${body}`), instrument);
     await assertRejects(() => executeHybrid(compiled.source, spec.fuel, { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] }), Error);
   }
 });
@@ -91,11 +92,11 @@ Deno.test("automatic chart transitions settle inside the command and cannot cycl
   spec.states.resolving = {final: false, on: {}, always: [{target: "playing", reduce: "same"}]};
   const source = rules.replace("return {", "return { same: state => ({...state}),");
   const input = {state: initial(), event: request(0).event, context: {actor: "a", tier: "omnishell", now: 0}, viewers: ["a"]};
-  let compiled = await compileHybrid(spec, source);
+  let compiled = await compileHybrid(spec, source, instrument);
   const answer = await executeHybrid(compiled.source, spec.fuel, input) as {state: ReturnType<typeof initial>};
   assertEquals(answer.state.phase, "playing");
   assertEquals(answer.state.plays.length, 1);
   spec.states.resolving.always![0].target = "resolving";
-  compiled = await compileHybrid(spec, source);
+  compiled = await compileHybrid(spec, source, instrument);
   await assertRejects(() => executeHybrid(compiled.source, spec.fuel, input), Error, "did not settle");
 });

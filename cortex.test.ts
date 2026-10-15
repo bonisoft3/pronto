@@ -1,7 +1,7 @@
 import { assertEquals, assertThrows, assert } from "jsr:@std/assert@1.0.11";
 import { compileCortexSession, type CortexSession } from "./cortex.ts";
 import type { MechaReducerMachine } from "./mecha-reducer.ts";
-import { run } from "./hybrid-fixtures.ts";
+import { run } from "./testdata/hybrid-fixtures.ts";
 import { sessionInitial, sessionTransition } from "../omnishell/interpreter/cortex-session.js";
 import emitted from "../../apps/truco/shell/shared/cortex-lobby.js";
 

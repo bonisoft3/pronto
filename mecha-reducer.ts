@@ -1,6 +1,5 @@
 import type { MechaPorts, MechaPortSql } from "./mecha-ports.ts";
 import { jessieFacts } from "./jessie.ts";
-import { instrument } from "../omnishell/instrument.ts";
 
 export type Shape =
   | { type: "string"; maxLength: number; values?: string[] }
@@ -25,7 +24,14 @@ export type MechaReducerMachine = {
 
 const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
-export async function compileMechaReducer(spec: MechaReducerMachine, source: string): Promise<{ source: string; sql: string }> {
+/** `instrument` is the terminal's fuel instrumentation (omnishell's
+ * instrument.ts), passed in because an installed pronto has no sibling to
+ * import it from. */
+export async function compileMechaReducer(
+  spec: MechaReducerMachine,
+  source: string,
+  instrument: (source: string) => string,
+): Promise<{ source: string; sql: string }> {
   if (!/^[a-z][a-z0-9_]{0,30}$/.test(spec.name)) throw new Error("invalid hybrid name");
   if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid hybrid version");
   if (!Number.isSafeInteger(spec.fuel) || spec.fuel < 1 || spec.fuel > 1000000) throw new Error("invalid hybrid fuel");

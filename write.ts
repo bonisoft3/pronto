@@ -12,6 +12,8 @@
 // stale emissions; a file authored in place is never recorded, so the sweep
 // cannot reach it.
 
+import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive, GENERATED_HTML_HEADER, terminalPath } from "./derive.ts";
 import { mint } from "./identity.ts";
@@ -184,6 +186,14 @@ async function recorded(manifestPath: string): Promise<string[]> {
 /** Everything the run will write, rendered, so nothing on disk moves for an
  * emission the writer refuses. Documents are the one exception, rendered by
  * renderDocuments once the files they are rendered from are on disk. */
+/** The terminal's instrument.ts: beside its runtime in a checkout, at its
+ * installed root otherwise. */
+async function terminalInstrument(emission: Emission): Promise<string> {
+  const runtime = emission.terminal.surface.runtime;
+  if (runtime === "") return resolve(await terminalPath({ terminalRuntime: "" }, "instrument.ts", appDir));
+  return resolve(appDir, dirname(runtime), "instrument.ts");
+}
+
 async function rendered(emission: Emission): Promise<Map<string, string>> {
   const contents = new Map<string, string>();
   for (const rel of [...emission.manifest].sort()) {
@@ -198,12 +208,13 @@ async function rendered(emission: Emission): Promise<Map<string, string>> {
     }
     if (f.format === "hybrid-sql") {
       const hybrids = f.data as Record<string, { machine: MechaReducerMachine; rules: string }>;
+      const { instrument } = await import(pathToFileURL(await terminalInstrument(emission)).href);
       const statements: string[] = [];
       for (const name of Object.keys(hybrids).sort()) {
         const hybrid = hybrids[name];
         if (unsafe(hybrid.rules)) fail(`${rel}: unsafe hybrid rules path`);
         const rules = await Deno.readTextFile(`${appDir}/${hybrid.rules}`);
-        statements.push((await compileMechaReducer(hybrid.machine, rules)).sql);
+        statements.push((await compileMechaReducer(hybrid.machine, rules, instrument)).sql);
       }
       statements.push(compileMechaPorts(Object.fromEntries(Object.entries(hybrids).map(([name, hybrid]) => [name, hybrid.machine]))));
       contents.set(rel, sqlFile(rel, statements.join("\n")));
