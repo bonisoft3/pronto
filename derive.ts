@@ -353,7 +353,11 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
     const bootstrap = await Deno.makeTempFile({ dir: appDir, prefix: "pronto_derive_", suffix: ".cue" });
     try {
       // Tag injection applies only to the CLI package, so the imported app is lifted explicitly.
-      await Deno.writeTextFile(bootstrap, `package ${pkg}\ncode: surface: screens: [string]: charts: *[] | [..._]\n${lifting ? "_deriving: true\n" : ""}`);
+      // Every field program_derived.cue holds is defaulted, so a first generate can read a program it has not derived.
+      await Deno.writeTextFile(
+        bootstrap,
+        `package ${pkg}\ncode: surface: screens: [string]: {reads: *[] | [..._], writes: *[] | [..._], charts: *[] | [..._], files: handlers: *[] | [..._]}\n${lifting ? "_deriving: true\n" : ""}`,
+      );
       const expression =
         "{entities: app.code.state.entities, ir: app.code.meta.ir.source, " +
         "decisions: {for k, v in app.code.meta.decisions {(k): v.ir}}, " +

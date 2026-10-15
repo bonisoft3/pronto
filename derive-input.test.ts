@@ -7,7 +7,7 @@ function assert(ok: unknown, message: string): asserts ok {
 
 const source = `package sample
 _deriving: *false | bool @tag(derive,type=bool)
-#Screen: {charts!: [..._], paths: {save: accepts: ["saved"]}, files: shared: ["theme.css"]}
+#Screen: {reads!: [..._], writes!: [..._], charts!: [..._], paths: {save: accepts: ["saved"]}, files: {handlers!: [...string], shared: ["theme.css"]}}
 code: {
   state: entities: Item: {table: "item", durability: "persistent", fields: []}
   surface: {screens: home: #Screen, design: colors: ink: "#123456"}
@@ -59,9 +59,14 @@ for (const [name, subdir, module] of [
       assert(Object.keys(input).length === 18, "canonical input fields changed");
       assert(input.designCss === "authored design override" && input.shellCss === "authored shell override", "emitted stylesheet overrides lost");
       assert(JSON.stringify(input.statics) === '[{"file":"asset.svg","target":"/authored-asset.svg"}]', "emitted static overrides lost");
-      const program = input.program as { surface: { screens: { home: { charts: unknown[] } } }; extra: { preserved: boolean } };
+      const program = input.program as {
+        surface: { screens: { home: { reads: unknown[]; writes: unknown[]; charts: unknown[]; files: { handlers: unknown[] } } } };
+        extra: { preserved: boolean };
+      };
       assert(program.extra.preserved, "whole program was narrowed");
-      assert(program.surface.screens.home.charts.length === 0, "missing chart projection was not bootstrapped");
+      // A first generate has no program_derived.cue, and every field it would hold is required of an assembly screen.
+      const home = program.surface.screens.home;
+      assert([home.reads, home.writes, home.charts, home.files.handlers].every((l) => l.length === 0), "missing derived projection was not bootstrapped");
       assert(JSON.stringify(input.read) === '{"Item":{"table":"item","mode":"lazy","reason":"screen"}}', "hidden read projection lost");
       await assertClean(app);
     });
