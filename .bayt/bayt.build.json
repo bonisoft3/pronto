@@ -28,6 +28,7 @@
       "*.ts",
       "hybrid*.js",
       "scales/*.ts",
+      "testdata/*.ts",
       "deno.json",
       "deno.lock"
     ],
@@ -125,6 +126,7 @@
           "*.ts",
           "hybrid*.js",
           "scales/*.ts",
+          "testdata/*.ts",
           "deno.json",
           "deno.lock",
           "[m]ise.toml",
@@ -336,6 +338,7 @@
           "*.ts",
           "hybrid*.js",
           "scales/*.ts",
+          "testdata/*.ts",
           "deno.json",
           "deno.lock"
         ],

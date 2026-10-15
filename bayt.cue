@@ -33,7 +33,7 @@ _pronto: bayt.#project & {
 		// .ts files directly under deno, so the typecheck is what building
 		// them means.
 		"build": sayt.build & mise.exec & {
-			srcs: globs: ["*.ts", "hybrid*.js", "scales/*.ts", "deno.json", "deno.lock"]
+			srcs: globs: ["*.ts", "hybrid*.js", "scales/*.ts", "testdata/*.ts", "deno.json", "deno.lock"]
 			// Contract tests import the terminal parser, so its source closure must
 			// resolve at the same sibling path in the image as in the checkout.
 			deps: ["plugins_omnishell:build:srcs"]
