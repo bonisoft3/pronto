@@ -1234,13 +1234,17 @@ import (
 	priority?:   number & >=0.0 & <=1.0
 	changefreq?: "always" | "hourly" | "daily" | "weekly" | "monthly" | "yearly" | "never"
 
+	// Who the route's entry document may be shown to without a session,
+	// in the browser-applicable subset of #Access.scope: #App defaults it to
+	// "private" when capabilities.auth.required is true or when every top-level
+	// live region on the screen is restricted, and "public" otherwise.
+	access: "public" | "private"
 	// Rendering strategy:
 	//   ssg: a document per locale written at generate (prerender: true)
-	//   ssr: a document rendered with its rows on request, by the terminal's
-	//        renderer, held until a read that drew it changes; only over
-	//        public top-level reads (#emit refuses the rest)
+	//   ssr: a document rendered with its public rows on request, by the
+	//        terminal's renderer, held until a read that drew it changes
 	//   spa: client-side single page app shell
-	ssr: *"spa" | "ssg" | "ssr"
+	ssr: "spa" | "ssg" | "ssr"
 	if S.prerender {ssr: "ssg"}
 	if S.ssr == "ssg" {prerender: true}
 	// A slugged route's authored pattern is what the default locale's
@@ -1631,7 +1635,41 @@ import (
 	}
 
 	surface: {
-		screens: [Name=string]: #Screen & {name: Name}
+		screens: [Name=string]: S=#Screen & {
+			name: Name
+			let authRequired = [if A.capabilities.auth != _|_ if A.capabilities.auth.required {true}, false][0]
+			let authOn = A.capabilities.auth != _|_
+			_topLive: [
+				for read in S.reads if read.kind == "live" && !read.nested {
+					read.table
+				},
+			]
+			_topRestricted: [
+				for read in S.reads if read.kind == "live" && !read.nested
+				let en = A._entityByTable[read.table]
+				let e = A.state.entities[en] if e.server if e.access != _|_ if e.access.scope != "public" {
+					"\(en) (\(e.access.scope))"
+				},
+			]
+			_publicServerReads: [
+				for read in S.reads if read.kind == "live"
+				let en = A._entityByTable[read.table]
+				let e = A.state.entities[en] if e.server if e.access != _|_ if e.access.scope == "public" {
+					en
+				},
+			]
+			let defaultAccess = [
+				if authRequired || (len(S._topLive) > 0 && len(S._topRestricted) == len(S._topLive)) {"private"},
+				"public",
+			][0]
+			access: *defaultAccess | "public" | "private"
+			let defaultSsr = [
+				if S.prerender {"ssg"},
+				if S.access == "public" && authOn && len(S._publicServerReads) > 0 {"ssr"},
+				"spa",
+			][0]
+			ssr: *defaultSsr | "spa" | "ssg" | "ssr"
+		}
 		// Jessie handlers, bijection surface (ir kind "handler"): `of` is the
 		// screen, `src` the assembly module, served by the terminal. The loader
 		// resolves the screen's files.handlers, which markup binding derives.
@@ -1731,6 +1769,16 @@ import (
 		}],
 	])
 	_hostDomRefusal: [if len(_hostDomViolations) == 0 {true}, _hostDomViolations[0]][0] & true
+
+	_screenAccessViolations: list.Concat([
+		[if A.capabilities.auth != _|_ if A.capabilities.auth.required for sn, screen in A.surface.screens if screen.access == "public" {
+			"screen \(sn) declares access: \"public\" in an app behind a sign-in"
+		}],
+		[for sn, screen in A.surface.screens if len(screen._topLive) > 0 && len(screen._topRestricted) == len(screen._topLive) if screen.access == "public" {
+			"screen \(sn) declares access: \"public\" over \(strings.Join(screen._topRestricted, ", ")); every top-level region is restricted"
+		}],
+	])
+	_screenAccessRefusal: [if len(_screenAccessViolations) == 0 {true}, error(_screenAccessViolations[0])][0]
 
 	state: entities: {for en, e in A.state.entities {
 		(en): validations: close({

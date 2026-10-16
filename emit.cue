@@ -1544,6 +1544,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if s.prerender {
 				prerender: true
 			}
+			if [if S.code.capabilities.auth != _|_ if S.code.capabilities.auth.required {false}, true][0] if s.access == "private" {
+				access: "private"
+			}
 			if s.ssr != _|_ {
 				ssr: s.ssr
 			}
@@ -2016,6 +2019,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		let rows = list.SortStrings([for e, _ in {for r in s.reads let en = D.code._entityByTable[r.table] if D.code.state.entities[en].server {(en): true}} {e}]) {
 			[
 				if len(rows) > 0 {error("screen \(n) is prerendered over rows the server holds (\(strings.Join(rows, ", "))): its document is drawn before they land and moves when they do; declare ssr: \"ssr\" (plugins/pronto/docs/screens.md#how-a-routes-first-document-is-rendered)")},
+				if s.access == "private" {error("screen \(n) is private and declares prerender; a document written at generate is served to everyone")},
 				s,
 			][0]
 		},
@@ -2684,26 +2688,20 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	][0]
 	// The routes rendered on request (#Screen.ssr), each refused where a
 	// document rendered for no one in particular could not show what the
-	// route shows. Its scope is the most restrictive of its top-level reads'
-	// (a nested read is under whatever row encloses it, and a tab or device
-	// entity is the browser's): anything but public would be a document per
-	// session, and a session reaches the door as a token in one tab's storage,
-	// never with a document request. The same for an app behind a sign-in,
-	// where every address is somebody's.
+	// route shows: an app behind a sign-in, a private route, or a route whose
+	// top-level regions are all restricted. A mixed route with public access
+	// renders its public regions and leaves restricted regions to their empty
+	// slot until a session arrives.
 	_onRequest: [
 		for r in E._shell.routes if r.ssr == "ssr"
 		let n = r.screen
 		let s = E.code.surface.screens[n]
-		let restricted = [
-			for read in s.reads if !read.nested
-			let en = E.code._entityByTable[read.table]
-			let e = E.code.state.entities[en] if e.server if e.access != _|_ if e.access.scope != "public" {
-				"\(en) (\(e.access.scope))"
-			},
-		] {
+		let restricted = s._topRestricted
+		let purelyRestricted = len(s._topLive) > 0 && len(restricted) == len(s._topLive) {
 			[
 				if !E._public {error("screen \(n) declares ssr: \"ssr\" in an app behind a sign-in; a document rendered per session is not built (plugins/pronto/PENDING.md#screens)")},
-				if len(restricted) > 0 {error("screen \(n) declares ssr: \"ssr\" over \(strings.Join(restricted, ", ")); a document rendered on request is rendered for no one in particular, and one rendered per session is not built (plugins/pronto/PENDING.md#screens)")},
+				if purelyRestricted {error("screen \(n) declares ssr: \"ssr\" over \(strings.Join(restricted, ", ")); a document rendered on request is rendered for no one in particular, and one rendered per session is not built (plugins/pronto/PENDING.md#screens)")},
+				if s.access == "private" {error("screen \(n) is private and declares ssr: \"ssr\"; a document rendered on request is rendered for no one in particular")},
 				n,
 			][0]
 		},
@@ -2772,6 +2770,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// them one by one too.
 	_crawlable: [
 		if E._public && _envelope.sitemap.enabled for r in E._shell.routes
+		if E.code.surface.screens[r.screen].access == "public"
 		if !_isScreenExcluded[r.screen]
 		if len([for a in E._spellings[r.screen] if strings.Contains(a, ":") {a}]) == 0 {r},
 	]
@@ -2798,6 +2797,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if E.code._timerRefusal {}
 		if E.code._hostDomRefusal {}
 		if E.code._lifecycleRefusal {}
+		if E.code._screenAccessRefusal {}
 		for _, h in E.code.capabilities.hatches if h.kind == "host-dom" {if E.terminal.capabilities.hostDom != true {_unsupportedHostDom: error("terminal does not offer host-dom")}}
 	}
 	// The compose files an installed app's closures include, one per

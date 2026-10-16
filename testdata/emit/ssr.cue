@@ -51,3 +51,32 @@ import pronto "github.com/bonisoft3/pronto"
 	doorEnv:   _cluster.surface.targets.caddy.compose.environment
 	origin:    _cluster.surface.origin
 }
+
+// Screen-level access ("public" | "private") and its derived rendering
+// strategy (#Screen.ssr) and sitemap visibility (#emit._crawlable).
+#accessCase: {
+	reads: [...pronto.#Read]
+	extra?: {...}
+	_base: (#readCase & {
+		"reads": reads
+		route:   "/jogos"
+		goal: {table: "goal", durability: "live", access: {scope: "public"}}
+	}).app & {
+		capabilities: auth: {required: false, service: "/auth"}
+		surface: screens: jogo: {files: {handlers: [], adapters: []}, [if extra != _|_ {extra}, {}][0]}
+	}
+	_terminal: (pronto.#DefaultTerminal & {code: _base}).out
+	_cluster: (pronto.#DefaultCluster & {code: _base, statics: _terminal.surface.statics}).out
+	_loop: (pronto.#DefaultLoop & {code: _base, terminal: _terminal, cluster: _cluster}).out
+	_build: (pronto.#DefaultBuild & {code: _base, loop: _loop, cluster: _cluster}).out
+	_files: (pronto.#emit & {code: _base, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files
+	out: {
+		screen: {
+			access: _base.surface.screens.jogo.access
+			ssr:    _base.surface.screens.jogo.ssr
+		}
+		shellRoute: (pronto.#shellConfig & {code: _base}).out.routes[0]
+		caddyfile:  _files["docker/Caddyfile"].text
+		sitemap:    _files["sitemap.xml"].text
+	}
+}

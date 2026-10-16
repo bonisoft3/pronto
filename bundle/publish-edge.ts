@@ -99,4 +99,12 @@ for (let streak = 0, t0 = Date.now(); ; ) {
 
 const { load } = await import(String(pathToFileURL(path.join(workerd, 'load.ts'))))
 const loaded = await load(path.join(out, 'pgdata'), send, { reset })
+let ssr = false
+try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
+catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+if (ssr) {
+  const warm = await fetch(`${origin}/`, { headers: { accept: 'text/html' } })
+  await warm.body?.cancel()
+  if (!warm.ok) fail(`warming ${origin}/ answered ${warm.status}`)
+}
 console.log(JSON.stringify({ origin, loaded }))

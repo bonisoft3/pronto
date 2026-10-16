@@ -167,3 +167,50 @@ Deno.test("the deployed review page carries its relative IR stylesheet", () => {
     }
   }
 });
+
+Deno.test("a screen's access and ssr derive from its top-level regions and govern rendering and crawlability", () => {
+  // Open + public server read -> access: "public", ssr: "ssr", in sitemap and @rendered.
+  const open = exported("(#accessCase & {reads: [_view]}).out", false);
+  if (!open.ok) throw new Error(open.out);
+  const openData = JSON.parse(open.out);
+  if (openData.screen.access !== "public" || openData.screen.ssr !== "ssr") throw new Error(open.out);
+  if (openData.shellRoute.access !== undefined || openData.shellRoute.ssr !== "ssr") throw new Error(open.out);
+  if (!openData.caddyfile.includes("@rendered {\n      path /jogos /jogos/")) throw new Error(openData.caddyfile);
+  if (!openData.sitemap.includes("/jogos</loc>")) throw new Error(openData.sitemap);
+
+  // Mixed top-level reads (public + private) -> access: "public", ssr: "ssr" (renders public regions, leaves private to data-empty).
+  const mixed = exported(`(#accessCase & {reads: [_view, ${note()}]}).out`, false);
+  if (!mixed.ok) throw new Error(mixed.out);
+  const mixedData = JSON.parse(mixed.out);
+  if (mixedData.screen.access !== "public" || mixedData.screen.ssr !== "ssr") throw new Error(mixed.out);
+  if (!mixedData.caddyfile.includes("@rendered {\n      path /jogos /jogos/")) throw new Error(mixedData.caddyfile);
+  if (!mixedData.sitemap.includes("/jogos</loc>")) throw new Error(mixedData.sitemap);
+
+  // Purely restricted top-level reads -> access: "private", ssr: "spa", omitted from @rendered and sitemap.xml.
+  const priv = exported(`(#accessCase & {reads: [${note()}]}).out`, false);
+  if (!priv.ok) throw new Error(priv.out);
+  const privData = JSON.parse(priv.out);
+  if (privData.screen.access !== "private" || privData.screen.ssr !== "spa") throw new Error(priv.out);
+  if (privData.shellRoute.access !== "private" || privData.shellRoute.ssr !== "spa") throw new Error(priv.out);
+  if (privData.caddyfile.includes("@rendered")) throw new Error(privData.caddyfile);
+  if (privData.sitemap.includes("/jogos</loc>")) throw new Error(privData.sitemap);
+
+  // Explicit access: "private" override on an open or mixed screen -> derives ssr: "spa" and omits from sitemap.xml.
+  const overridden = exported('(#accessCase & {reads: [_view], extra: {access: "private"}}).out', false);
+  if (!overridden.ok) throw new Error(overridden.out);
+  const overData = JSON.parse(overridden.out);
+  if (overData.screen.access !== "private" || overData.screen.ssr !== "spa") throw new Error(overridden.out);
+  if (overData.shellRoute.access !== "private" || overData.shellRoute.ssr !== "spa") throw new Error(overridden.out);
+  if (overData.caddyfile.includes("@rendered")) throw new Error(overData.caddyfile);
+  if (overData.sitemap.includes("/jogos</loc>")) throw new Error(overData.sitemap);
+
+  // Inconsistent overrides are refused.
+  const pubOverPriv = exported(`(#accessCase & {reads: [${note()}], extra: {access: "public"}}).out.caddyfile`, true);
+  if (pubOverPriv.ok || !/screen jogo declares access: "public" over Note \(private\)/.test(pubOverPriv.out)) {
+    throw new Error(pubOverPriv.out);
+  }
+  const ssrOverPriv = exported('(#accessCase & {reads: [_view], extra: {access: "private", ssr: "ssr"}}).out.caddyfile', true);
+  if (ssrOverPriv.ok || !/screen jogo is private and declares ssr: "ssr"/.test(ssrOverPriv.out)) {
+    throw new Error(ssrOverPriv.out);
+  }
+});

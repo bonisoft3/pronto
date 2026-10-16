@@ -154,43 +154,49 @@ pronto owns the policy: which routes are rendered where, and what the door and
 a crawler are told. omnishell owns the mechanism: rendering a document anywhere
 a DOM exists, and the shell taking it over where it stands once it boots
 ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/screen-updates.md#a-pre-rendered-page)).
-The policy is a route's `ssr` crossed with the access scope of what it reads:
+The policy is a screen's `access` (`"public" | "private"`) and `ssr` (`"spa" | "ssg" | "ssr"`), both derived from the program unless explicitly narrowed:
 
-| `ssr` | read scope | rendering | caching | crawler | in this tree |
-|---|---|---|---|---|---|
-| `ssg`, `prerender: true` | none the server holds, each region naming the row it shows first | one document per locale at generate: the screen before its first read | file through a template, a hash of the file as its ETag | indexed; title, canonical, hreflang and OpenGraph | built |
-| `ssr` | `public` | on first request, held until a read that drew it changes | `public, no-cache`, ETag | indexed; title, canonical, hreflang and OpenGraph from rows | built |
-| `ssr` | `private`, `folder` | per session under row-level security | `private, no-store` | `noindex` | refused at emit ([pending](../PENDING.md#screens)) |
-| `spa`, the default | any | the entry shell; the store takes over | shell only | disallowed | built |
+- `access` defaults to `"private"` when `auth.required` is true, when the screen declares forms (`len(forms) > 0`) or writes to server entities, or when every top-level live region reads a restricted server entity (`access.scope != "public"`). Otherwise `access` defaults to `"public"`. A screen with no server writes or restricted-only top-level reads that still requires sign-in (such as an entry shell redirecting to a signed-in editor) sets `access: "private"`. Declaring `access: "public"` on a screen under `auth.required: true` or with restricted-only top-level reads is refused.
+- `ssr` defaults to `"ssg"` when `prerender` is true, `"ssr"` when `access == "public"` and the screen has at least one top-level live read of a public server entity, and `"spa"` otherwise.
+
+| `ssr` | `access` | top-level read scope | rendering | caching | crawler | in this tree |
+|---|---|---|---|---|---|---|
+| `ssg`, `prerender: true` | `public` | none the server holds, each region naming the row it shows first | one document per locale at generate: the screen before its first read | file through a template, a hash of the file as its ETag | indexed; title, canonical, hreflang and OpenGraph | built |
+| `ssr` | `public` | at least one `public` (mixed or purely public) | on first request, public regions drawn from guest reads and restricted regions left empty until the client store boots | `public, no-cache`, ETag | indexed; title, canonical, hreflang and OpenGraph from rows | built |
+| `ssr` | `private`, or all top-level reads `private`/`folder` | `private`, `folder` | per session under row-level security | `private, no-store` | `noindex` | refused at emit ([pending](../PENDING.md#screens)) |
+| `spa` | `public` or `private` | any | the entry shell; the store takes over | shell only | indexed if `access == "public"` and static; excluded from `sitemap.xml` if `access == "private"` | built |
 
 A public row is cacheable for everyone and a private one for nobody, so
 cacheability follows the visibility axis and is derived from `access.scope`,
-never declared a second time ([access](access.md)). A route's scope is the most
-restrictive among its top-level reads: a read nested in a region (`nested` in
-the derived reads) is under whatever row encloses it, and a `tab` or `device`
-entity has no scope, since the browser holds it. Rendering early moves content
-earlier, not interactivity: the client bundle still loads, after the document
-has painted.
+never declared a second time ([access](access.md)). A read nested in a region
+(`nested` in the derived reads) is under whatever row encloses it, and a `tab`
+or `device` entity has no scope, since the browser holds it. A screen with both
+public and restricted top-level regions (`access: "public"`) renders its public
+regions on request and leaves restricted regions for the client to fill once
+authenticated; a screen whose top-level server reads are all restricted derives
+`access: "private"` and `ssr: "spa"`. Rendering early moves content earlier, not
+interactivity: the client bundle still loads, after the document has painted.
 
 A route whose first view reads rows is rendered with them or not early at all.
 Drawn before its reads land, its lists fill once the shell takes it over and
 push down whatever follows them: golaberto's `/campeonatos` measured a layout
 shift of 0.12 prerendered, and its home 0.74, against 0 for each rendered on
-request. So `#DefaultTerminal` refuses `prerender` on a screen reading any
-entity the server holds, naming them. A `tab` or `device` read is the
-browser's, and the terminal draws a prerendered document from an empty store,
-so a tab entity's seed arrives with the shell as the server's rows do, and a
-device entity's rows are each reader's own: the terminal's renderer refuses a
-prerendered route with a region that draws nothing until its read lands, and
-draws one that names the row it shows until then (`data-empty-row`) from that
-row, which the reader's own replaces in place. truco's rules are the case: they
-name the variant in force, from a fallback match. Drawing a tab entity's seed
-into the document was the alternative; it buys nothing `ssr` does not already
-draw, and a device read would still need its fallback row.
+request. So `#DefaultTerminal` refuses `prerender` on a `private` screen or a
+screen reading any entity the server holds, naming them. A `tab` or `device`
+read is the browser's, and the terminal draws a prerendered document from an
+empty store, so a tab entity's seed arrives with the shell as the server's rows
+do, and a device entity's rows are each reader's own: the terminal's renderer
+refuses a prerendered route with a region that draws nothing until its read
+lands, and draws one that names the row it shows until then (`data-empty-row`)
+from that row, which the reader's own replaces in place. truco's rules are the
+case: they name the variant in force, from a fallback match. Drawing a tab
+entity's seed into the document was the alternative; it buys nothing `ssr` does
+not already draw, and a device read would still need its fallback row.
 
 **`ssg`.** `prerender` and `ssg` imply each other, and `prerender` refuses a
 route with a `:param`, because the rows an `/article/:slug` needs do not exist
-when the build runs, and a route reading rows the server holds, as above. The emitter lists `documents<address>/index.html` for
+when the build runs, a `private` screen, and a route reading rows the server
+holds, as above. The emitter lists `documents<address>/index.html` for
 every address of every prerendered route, in an app no sign-in walls, and
 `write.ts` has the terminal render them (`terminal.surface.documentRenderer`,
 `omnishell render documents`, under the config and lock
@@ -210,7 +216,7 @@ as `{$ORIGIN}` and never reads off the request: it answers any Host
 ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.11.0/docs/proxy.md#the-origin)). In
 development that is `https://localhost:<port>`, on the port the door binds.
 
-**`ssr`.** A route declaring `ssr: "ssr"` is answered by the terminal's server
+**`ssr`.** A route whose `ssr` is `"ssr"` is answered by the terminal's server
 renderer ([the server terminal](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/terminal.md#the-server-terminal)),
 which the emitter adds to the cluster (`terminal.cue`'s `#Render`) beside a
 Caddy route sending the route's addresses there, none of which is a file the
@@ -219,8 +225,8 @@ that depth. Its image is built from every file it reads beside its entry
 (`shell/`, `messages/`), and an edit to the entry restarts it as an edit to
 any of the others restarts the door it restarts with. The renderer reads as a fresh
 guest through the door, so its documents hold nothing a stranger could not
-read; that is why `#emit` refuses `ssr` over a top-level read whose scope is not
-public, and in an app behind a sign-in. A `tab` or `device` read is the
+read; that is why `#emit` refuses `ssr` on a `private` screen, on a screen whose
+top-level server reads are all non-public, and in an app behind a sign-in. A `tab` or `device` read is the
 browser's, so the renderer holds of it only what every reader starts from, the
 entity's seed (`shell.json`'s `seed`, written from the program's): golaberto's
 catalogue is drawn under its search's seeded row. A tab's rows last one page
@@ -236,7 +242,10 @@ for the rows it reads.
 **The door and the crawler files.** Caddy answers a prerendered address with
 its document, a route rendered on request from the renderer, `{path}` or
 `{path}/index.html` when the image carries one, else the entry document for a
-path that matches a route, else 404, all `Cache-Control: no-cache`. What the
+path that matches a route, else 404, all `Cache-Control: no-cache`. On the
+Cloudflare Edge worker (`edge-ssr.ts`), only routes with `ssr: "ssr"` invoke the
+`RENDERER` and `CLUSTER` Durable Objects; `spa` and `ssg` routes serve directly
+from `ASSETS` with `Link` preload hints. What the
 door answers through `templates` (a prerendered document, `robots.txt`,
 `sitemap.xml`) is answered with a hash of its bytes as its ETag, as every file
 the door serves is (mecha's [proxy](https://github.com/bonisoft3/mecha/blob/v0.11.0/docs/proxy.md)),
@@ -250,9 +259,10 @@ for another language is answered with that language's document rather than
 redirected to it, `Vary: Accept-Language`, and the shell restates the address
 with `replaceState`. `robots.txt` allows everything and names the sitemap when
 the app requires no sign-in, and disallows everything otherwise: an app behind
-a login wall is not a site. `sitemap.xml` lists every route with no `:param` in
-any locale's spelling, with its locale alternates where the app declares
-locales, since an address invented for a row id is a 404 or somebody's row.
+a login wall is not a site. `sitemap.xml` lists every `access: "public"` route
+with no `:param` in any locale's spelling, with its locale alternates where the
+app declares locales, since an address invented for a row id is a 404 or
+somebody's row and a `private` route is not for crawlers.
 
 The shell takes the served screen over in place, its rows brought to the
 store's by key. Every document names the template it was rendered from

@@ -21,7 +21,7 @@ async function fixture(changed = false, previous?: string) {
     'shell/a.js': 'import "./boot.js"; export const value = ' + (changed ? '2;' : '1;'),
     'shell/unused.js': 'export const unused = true;',
     'shell/shell.json': JSON.stringify(cfg),
-    'shell/screens/team.html': '<h1>Team</h1>',
+    'shell/screens/team.html': '<h1>Team</h1><template data-item><a data-route="other">Other</a></template>',
     'shell/screens/team.css': '@import url("shared/base.css");',
     'shell/shared/base.css': '/* url(missing.svg) */ body { background: url("./ball.svg#ball"); mask: url("./a space.svg"); background-image: url("blob:https://release.invalid/456"); cursor: url("urn:isbn:0451450523"); }',
     'shell/shared/ball.svg': '<svg/>',
@@ -82,6 +82,8 @@ Deno.test('edge identity hashes the served bytes, preserves module bases, and au
     const headers = await Deno.readTextFile(path.join(f.out, '_headers'))
     assert.ok(headers.includes('/shell/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable'))
     assert.ok(!headers.includes('/shell/*\n'))
+    assert.deepEqual(JSON.parse(f.map).screens, { team: ['other'], other: [] })
+    assert.deepEqual(f.hints.routes[0].screens, ['other'])
   } finally { await Deno.remove(f.out, { recursive: true }) }
 })
 

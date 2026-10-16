@@ -113,3 +113,150 @@ Deno.test('enabling SSR on an existing app retains its Cluster namespace and per
     await assert.rejects(cluster.render(new Request('https://app.example/'), null), error => error === failure)
   } finally { await Deno.remove(out, { recursive: true }) }
 })
+
+Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and strips pronto-reads on stale hits while revalidating', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  const savedCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches')
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
+    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', 'separate')
+    await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify({
+      common: ['</shell/boot.js>; rel=preload; as=script'],
+      catalogues: {},
+      routes: [
+        { path: '/', ssr: 'ssr', links: ['</shell/screens/home.html>; rel=preload; as=fetch; crossorigin=anonymous'] },
+        { path: '/gerenciar', access: 'private', ssr: 'spa', links: ['</shell/screens/gerenciar.html>; rel=preload; as=fetch; crossorigin=anonymous'] },
+      ],
+    }))
+    const source = await Deno.readTextFile(path.join(out, 'src/index.ts'))
+    const stubbed = source.replace(
+      /^import \{ edgeWorker \} from '[^']+'$/m,
+      'const edgeWorker = { fetch(req) { return new URL(req.url).pathname === "/gerenciar" ? new Response("<!doctype html><title>SPA</title>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) : new Response("api") } }',
+    )
+    const entryPath = path.join(out, 'src/index-test.ts')
+    await Deno.writeTextFile(entryPath, stubbed)
+    const worker = (await import(pathToFileURL(entryPath).href)).default
+
+    const store = new Map<string, Response>()
+    Object.defineProperty(globalThis, 'caches', {
+      configurable: true,
+      value: {
+        default: {
+          async match(req: Request) { return store.get(req.url)?.clone() ?? null },
+          async put(req: Request, res: Response) { store.set(req.url, res.clone()) },
+        },
+      },
+    })
+
+    let renders = 0
+    let releaseRender: (() => void) | null = null
+    const env = {
+      CF_VERSION_METADATA: { id: 'v1' },
+      ASSETS: {
+        async fetch(req: Request) {
+          return new URL(req.url).pathname === '/'
+            ? new Response('<!doctype html><title>SPA</title>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
+            : new Response('Not found', { status: 404 })
+        },
+      },
+      RENDERER: { idFromName: (n: string) => n, get: () => ({}) },
+      CLUSTER: {
+        idFromName: (n: string) => n,
+        get: () => ({
+          async render() {
+            renders += 1
+            if (releaseRender) await new Promise<void>(r => { releaseRender = r })
+            return new Response(
+              `<html><body><h1>Render ${renders}</h1><script type="application/json" id="pronto-reads">{"/crud/game":"[${renders}]"}</script></body></html>`,
+              {
+                status: 200,
+                headers: {
+                  'content-type': 'text/html; charset=utf-8',
+                  'cache-control': 'public, no-cache, must-revalidate',
+                  etag: `"etag-${renders}"`,
+                },
+              },
+            )
+          },
+        }),
+      },
+    }
+    const background: Promise<unknown>[] = []
+    const ctx = { waitUntil(p: Promise<unknown>) { background.push(p) } }
+
+    // Concurrent cold misses share one in-flight render.
+    releaseRender = () => {}
+    const p1 = worker.fetch(new Request('https://app.example/'), env, ctx)
+    const p2 = worker.fetch(new Request('https://app.example/'), env, ctx)
+    await new Promise(r => setTimeout(r, 10))
+    const unblock = releaseRender as () => void
+    releaseRender = null
+    unblock()
+    const [first, concurrent] = await Promise.all([p1, p2])
+    assert.equal(first.headers.get('x-edge-cache'), 'miss')
+    assert.equal(first.headers.get('cache-control'), 'public, no-cache, must-revalidate')
+    assert.equal(first.headers.get('etag'), '"etag-1"')
+    assert.match(await first.text(), /id="pronto-reads"/)
+    assert.match(await concurrent.text(), /id="pronto-reads"/)
+    assert.equal(renders, 1)
+
+    const second = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    assert.equal(second.headers.get('x-edge-cache'), 'hit')
+    assert.equal(second.headers.get('cache-control'), 'public, no-cache, must-revalidate')
+    assert.equal(second.headers.get('etag'), '"etag-1"')
+    assert.match(await second.text(), /id="pronto-reads"/)
+    assert.equal(renders, 1)
+
+    // Age the cached response past the 60s fresh window.
+    for (const [key, res] of store) {
+      const headers = new Headers(res.headers)
+      headers.set('x-rendered-at', String(Date.now() - 61_000))
+      store.set(key, new Response(await res.arrayBuffer(), { status: res.status, headers }))
+    }
+
+    const stale1 = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    const stale2 = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    assert.equal(stale1.headers.get('x-edge-cache'), 'stale')
+    assert.equal(stale1.headers.get('cache-control'), 'public, no-cache, must-revalidate')
+    assert.equal(stale1.headers.get('etag'), null)
+    const staleHtml = await stale1.text()
+    await stale2.text()
+    assert.match(staleHtml, /Render 1/)
+    assert.doesNotMatch(staleHtml, /id="pronto-reads"/)
+    await Promise.all(background.splice(0))
+    assert.equal(renders, 2)
+
+    const refreshed = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    assert.equal(refreshed.headers.get('x-edge-cache'), 'hit')
+    assert.equal(refreshed.headers.get('etag'), '"etag-2"')
+    const refreshedHtml = await refreshed.text()
+    assert.match(refreshedHtml, /Render 2/)
+    assert.match(refreshedHtml, /id="pronto-reads"/)
+
+    // A public write marker in caches.default invalidates the cached SSR HTML.
+    store.set('https://edge-cache.invalid/v1/0/writes/public', new Response('1700000000000'))
+    const afterWrite = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    assert.equal(afterWrite.headers.get('x-edge-cache'), 'miss')
+    assert.equal(renders, 3)
+
+    // A private / SPA route skips RENDERER + CLUSTER.render and serves the SPA entry with Link hints on GET and HEAD.
+    const spa = await worker.fetch(new Request('https://app.example/gerenciar', { headers: { accept: 'text/html' } }), env, ctx)
+    assert.equal(spa.status, 200)
+    assert.equal(await spa.text(), '<!doctype html><title>SPA</title>')
+    assert.match(spa.headers.get('link') ?? '', /gerenciar\.html/)
+    const spaHead = await worker.fetch(new Request('https://app.example/gerenciar', { method: 'HEAD' }), env, ctx)
+    assert.equal(spaHead.status, 200)
+    assert.equal(await spaHead.text(), '')
+    assert.match(spaHead.headers.get('link') ?? '', /gerenciar\.html/)
+    assert.equal(renders, 3)
+  } finally {
+    if (savedCaches) Object.defineProperty(globalThis, 'caches', savedCaches)
+    else Reflect.deleteProperty(globalThis, 'caches')
+    await Deno.remove(out, { recursive: true })
+  }
+})

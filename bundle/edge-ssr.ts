@@ -76,16 +76,79 @@ export default { fetch() { return new Response(null, { status: 404 }) } }
 import { edgeWorker } from '${fromSrc(path.join(edge, 'worker.ts'))}'
 import { edgeHints } from '${fromSrc(fileURLToPath(new URL('edge-hints.ts', import.meta.url)))}'
 import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
-import hints from './hints.json'
+import hints from './hints.json' with { type: 'json' }
 ${separate ? '' : "export { Cluster } from './database.ts'"}
+const RENDER_FRESH_MS = 60_000
+const RENDER_SWR_S = 86_400
+const RENDER_CACHE_CONTROL = 'public, no-cache, must-revalidate'
+const stripServedReads = (html) => html.replace(/<script type="application\\/json" id="pronto-reads">[\\s\\S]*?<\\/script>/, '')
+const keyOf = (...parts) => new Request(\`https://edge-cache.invalid/\${parts.map(encodeURIComponent).join('/')}\`)
+const inFlight = new Map()
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
-    if ((request.method === 'GET' || request.method === 'HEAD') && routeAt(hints, url.pathname, url.search, [])) {
-      const renderer = env.RENDERER.get(env.RENDERER.idFromName('public'))
-      const response = await env.CLUSTER.get(env.CLUSTER.idFromName('cluster')).render(request, renderer)
-      const result = new Response(response.body, response)
-      result.headers.set('Link', edgeHints(request, hints, routeAt, acceptedLanguages(request.headers.get('accept-language') ?? '')))
+    const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
+    const found = (request.method === 'GET' || request.method === 'HEAD') ? routeAt(hints, url.pathname, url.search, preferred) : null
+    if (found && found.route.ssr === 'ssr') {
+      const linkHeader = edgeHints(request, hints, routeAt, preferred)
+      const cache = globalThis.caches?.default
+      const version = env.CF_VERSION_METADATA?.id ?? ''
+      const reset = cache ? ((await (await cache.match(keyOf(version, 'reset')))?.text()) ?? '0') : '0'
+      const lastWrite = cache ? ((await (await cache.match(keyOf(version, reset, 'writes', 'public')))?.text()) ?? '0') : '0'
+      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${found.locale ?? ''}\${url.pathname}\${url.search}\`)
+      const renderFresh = async () => {
+        const getReq = request.method === 'HEAD' ? new Request(request.url, { headers: request.headers }) : request
+        const renderer = env.RENDERER.get(env.RENDERER.idFromName('public'))
+        const response = await env.CLUSTER.get(env.CLUSTER.idFromName('cluster')).render(getReq, renderer)
+        const body = response.body ? await response.arrayBuffer() : null
+        const headers = new Headers(response.headers)
+        headers.set('Link', linkHeader)
+        if (cache && response.status === 200 && body && !request.headers.has('if-none-match')) {
+          const storedHeaders = new Headers(headers)
+          storedHeaders.set('cache-control', \`public, max-age=\${RENDER_SWR_S}\`)
+          storedHeaders.set('x-rendered-at', String(Date.now()))
+          await cache.put(cacheKey, new Response(body.slice(0), { status: 200, headers: storedHeaders }))
+        }
+        headers.set('x-edge-cache', 'miss')
+        return { status: response.status, headers, body }
+      }
+      const renderShared = () => {
+        let pending = inFlight.get(cacheKey.url)
+        if (!pending) {
+          pending = renderFresh().finally(() => inFlight.delete(cacheKey.url))
+          inFlight.set(cacheKey.url, pending)
+        }
+        return pending
+      }
+      if (cache && !request.headers.has('if-none-match')) {
+        const cached = await cache.match(cacheKey)
+        if (cached) {
+          const age = Date.now() - Number(cached.headers.get('x-rendered-at') ?? 0)
+          const headers = new Headers(cached.headers)
+          headers.delete('x-rendered-at')
+          headers.set('cache-control', RENDER_CACHE_CONTROL)
+          headers.set('Link', linkHeader)
+          if (age <= RENDER_FRESH_MS) {
+            headers.set('x-edge-cache', 'hit')
+            return new Response(request.method === 'HEAD' ? null : cached.body, { status: cached.status, headers })
+          }
+          headers.delete('etag')
+          headers.set('x-edge-cache', 'stale')
+          ctx?.waitUntil?.(renderShared())
+          // Drop carried reads on a stale hit so the browser paints cached HTML
+          // immediately and revalidates live rows from /crud after first paint.
+          const staleBody = request.method === 'HEAD' ? null : stripServedReads(await cached.text())
+          return new Response(staleBody, { status: cached.status, headers })
+        }
+      }
+      const fresh = await (request.headers.has('if-none-match') ? renderFresh() : renderShared())
+      return new Response(request.method === 'HEAD' ? null : fresh.body, { status: fresh.status, headers: new Headers(fresh.headers) })
+    }
+    if (found) {
+      let asset = await env.ASSETS.fetch(request)
+      if (asset.status === 404) asset = await env.ASSETS.fetch(new Request(new URL('/', request.url), request))
+      const result = new Response(request.method === 'HEAD' ? null : asset.body, asset)
+      if (result.status === 200) result.headers.set('Link', edgeHints(request, hints, routeAt, preferred))
       return result
     }
     if (!['auth', 'crud', 'electric', 'import'].includes(url.pathname.split('/')[1]) &&

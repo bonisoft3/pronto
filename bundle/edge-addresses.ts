@@ -6,6 +6,8 @@ import { simple } from 'npm:acorn-walk@8.3.4'
 // @ts-types="npm:@types/css-tree@2.3.10"
 import * as cssTree from 'npm:css-tree@3.1.0'
 
+import { skeletonRoutes } from '../../omnishell/interpreter/preloads.js'
+
 const origin = 'https://release.invalid'
 const encoder = new TextEncoder()
 const digest = async (bytes: Uint8Array) => new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))
@@ -22,7 +24,7 @@ const local = (value: string, base: string) => {
 export interface EdgeHints {
   common: string[]
   catalogues: Record<string, string>
-  routes: { path: string; paths?: Record<string, string>; links: string[] }[]
+  routes: { path: string; paths?: Record<string, string>; access?: 'public' | 'private'; ssr?: 'spa' | 'ssg' | 'ssr'; links: string[]; screens: string[] }[]
   i18n?: unknown
   prefix?: string
 }
@@ -120,6 +122,19 @@ export async function addressEdgeAssets(out: string, previous?: string): Promise
     dependencies.set(name, deps)
   }
 
+  const cfg = JSON.parse(decoder.decode(files.get('/shell/shell.json')!))
+  const strip = cfg.routes
+    .filter((r: { path: string; nav?: { strip?: boolean } }) => !r.path.includes(':') && r.nav?.strip !== false)
+    .map((r: { screen?: string; files: { html: string } }) => r.screen ?? path.posix.basename(r.files.html, '.html'))
+  const stripTargets = strip.length > 1 || Boolean(cfg.auth?.required) || (cfg.tables?.length ?? 0) > 0 ? strip : []
+  const screens: Record<string, string[]> = {}
+  for (const route of cfg.routes as { screen?: string; files: { html: string } }[]) {
+    const name = route.screen ?? path.posix.basename(route.files.html, '.html')
+    const htmlBytes = files.get(local(route.files.html, '/')!)
+    const targets = htmlBytes ? skeletonRoutes(decoder.decode(htmlBytes)) : []
+    screens[name] = [...new Set([...targets, ...stripTargets])].filter(target => target !== name)
+  }
+
   const entry = (await Deno.readTextFile(path.join(out, 'shell/index.html'))).replace(/\r\n?/g, '\n').replace(/\0/g, '\ufffd')
   const { document } = parseHTML(entry)
   const base = local(document.querySelector('base[href]')?.getAttribute('href') ?? '/shell/', '/')!
@@ -159,7 +174,7 @@ export async function addressEdgeAssets(out: string, previous?: string): Promise
   const map = document.createElement('script')
   map.setAttribute('type', 'importmap')
   map.setAttribute('id', 'pronto-assets')
-  const json = JSON.stringify({ imports }).replace(/</g, '\\u003c')
+  const json = JSON.stringify({ imports, screens }).replace(/</g, '\\u003c')
   map.textContent = json
   document.head.prepend(map)
   const charset = document.querySelector('meta[charset]')
@@ -198,13 +213,20 @@ export async function addressEdgeAssets(out: string, previous?: string): Promise
   if (directories.size > 100) throw new Error('edge asset cache rules exceed Cloudflare’s 100-rule limit')
   await Deno.writeTextFile(path.join(out, '_headers'), [...directories].sort().map(dir => `${dir === '/' ? '' : dir}/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable\n`).join('\n'))
 
-  const cfg = JSON.parse(decoder.decode(files.get('/shell/shell.json')!))
-  const routes = cfg.routes.map((route: { path: string; paths?: Record<string, string>; files: Record<string, string | string[]> }) => {
+  const routes = cfg.routes.map((route: { path: string; screen?: string; paths?: Record<string, string>; access?: 'public' | 'private'; ssr?: 'spa' | 'ssg' | 'ssr'; files: Record<string, string | string[]> }) => {
+    const name = route.screen ?? path.posix.basename(String(route.files.html), '.html')
     const links = new Set<string>()
     for (const [kind, value] of Object.entries(route.files)) {
-      for (const name of typeof value === 'string' ? [value] : value) links.add(link(local(name, '/')!, kind === 'shared' ? 'style' : 'fetch'))
+      for (const file of typeof value === 'string' ? [value] : value) links.add(link(local(file, '/')!, kind === 'shared' ? 'style' : 'fetch'))
     }
-    return { path: route.path, ...(route.paths ? { paths: route.paths } : {}), links: [...links] }
+    return {
+      path: route.path,
+      ...(route.paths ? { paths: route.paths } : {}),
+      ...(route.access ? { access: route.access } : {}),
+      ...(route.ssr ? { ssr: route.ssr } : {}),
+      links: [...links],
+      screens: screens[name] ?? [],
+    }
   })
   const catalogues = Object.fromEntries(Object.keys(cfg.i18n?.locales ?? {}).map(tag => [tag, link(`/messages/${tag}.json`, 'fetch')]))
   return { common: [...common], routes, catalogues, i18n: cfg.i18n, prefix: cfg.prefix }
