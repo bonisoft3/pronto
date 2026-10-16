@@ -1,7 +1,7 @@
 // The entity card the compiler draws into ir.html: where it goes, that a redraw
 // replaces it and only it, what it says, and the chart it draws.
 import { assertEquals, assertRejects, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.11";
-import { cardHtml, chartD2, type Effect, fillNeighbourhoodRegions, fillRegions, irRegions, mergeNeighbourhoods, neighbourhoodD2, type Program, renderIr, screenNeighbourhood } from "./ir-render.ts";
+import { authoredNotes, cardHtml, chartD2, type Effect, fillNeighbourhoodRegions, fillRegions, irRegions, mergeNeighbourhoods, neighbourhoodD2, type Program, renderIr, screenNeighbourhood } from "./ir-render.ts";
 
 const IR = `<!doctype html><html><head><title>x</title></head><body>
 <section id="Game" data-kind="entity" data-durability="device">
@@ -155,6 +155,26 @@ Deno.test("the card says property: value on every chip, names every field upfron
   assertStringIncludes(html, 'data-kind="effect" id="charge" data-of="GameMachine"');
   assertStringIncludes(html, 'not idempotent · re-entry reconcile · <span class="note">the acquirer answers a charge by key</span>');
   assertEquals(drawn.length, 2);
+});
+
+Deno.test("the card carries the authored table's notes, so the table, hop 2's input, stays in ir.html collapsed under it", async () => {
+  const section = `<h3>Game</h3><p>prose</p><table data-extract="fields">
+<tr><th>field</th><th>type</th><th>constraint</th><th>notes</th></tr>
+<tr><td>id</td><td>text</td><td></td><td>primary <code>key</code></td></tr>
+<tr><td>status</td><td>text</td><td></td><td></td></tr>
+</table>`;
+  const notes = authoredNotes(section);
+  assertEquals([...notes], [["id", "primary <code>key</code>"]]);
+  assertEquals(authoredNotes("<p>no table</p>").size, 0);
+  const ctx = { program, charts: new Map(), readMode: new Map([["Game", "eager"]]), d2: () => Promise.resolve("<svg></svg>") };
+  const html = await cardHtml("Game", program.state.entities.Game, ctx, notes);
+  assertStringIncludes(html, '<td class="n">primary <code>key</code></td>');
+  assertStringIncludes(html, '<details class="more authored"><summary>the authored table</summary></details>');
+  // The raw entity is one collapsible tree, scalars as JSON literals.
+  assertStringIncludes(html, '<div class="jl"><span class="jk">durability</span>: <span class="jv">&quot;live&quot;</span></div>');
+  assertStringIncludes(html, '<details class="jn"><summary><span class="jk">fields</span> <span class="jv">[');
+  // Without notes the table keeps its five columns.
+  assertEquals((await cardHtml("Game", program.state.entities.Game, ctx)).includes('class="n"'), false);
 });
 
 Deno.test("the derived line names the units handed an entity's row, and the unit whose memo an entity is", async () => {

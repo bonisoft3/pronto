@@ -164,9 +164,6 @@ hides the second one.
 Include actual model and design-tool routes, including host substitutions or
 inherited choices; a requested model is not evidence that it ran.
 
-Then suggest `/code-review ultra` at the branch boundary. This command cannot launch
-it — it is user-triggered and billed — so it is a suggestion, and the user types it.
-
 ## What a turn does not do
 
 Naming these because every general-purpose loop grows them, and each one is a

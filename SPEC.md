@@ -190,7 +190,11 @@ navigation from the brief) plus data attributes:
   carrying the `machine` (and `effect`) element — and links `ir/card.css` from
   the head. The picture comes from the `d2` the app's `.mise.toml` pins beside
   `buf` and `duckdb` (the scaffold carries it), run in the app directory with no
-  browser. The author's prose stays outside the region
+  browser. The card's field table carries the notes column of the authored
+  `data-extract="fields"` table, which `card.css` then hides under the card: it
+  stays in ir.html as hop 2's input, shown again from the card's "authored
+  table" toggle, beside the entity as collapsible JSON. The author's prose
+  stays outside the region
 - **Screen neighbourhoods are compiled from reads.** Each screen element
   carries a generated D2 graph of exactly the entities its settled `reads`
   name, including embedded relations and disconnected entities. References are
@@ -465,7 +469,7 @@ still tells markup lint that a pending row may await a database default. A
 singleton machine region without `data-empty-row` requires a
 filter pinning `id`; it binds those defaults, then the filter's equalities,
 then its `field: initial`. An explicit `data-empty-row` remains the whole
-row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/machines.md) states
+row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.12.1/docs/machines.md) states
 the row and effect grammar.
 
 **Screen markup carries no executable code.** The markup check and terminal

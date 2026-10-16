@@ -46,7 +46,7 @@ allowed browser event set; Mecha-only events cannot be submitted through this
 client. The driver owns entry, create/join retries, command persistence,
 polling, failure and shutdown. Admission and in-flight status live in its
 machine state. Its receipt/view actions use Omnishell's existing
-[hybrid interaction reducer](https://github.com/bonisoft3/omnishell/blob/v0.11.0/interpreter/hybrid-client.js).
+[hybrid interaction reducer](https://github.com/bonisoft3/omnishell/blob/v0.12.1/interpreter/hybrid-client.js).
 
 Mecha joins can declare a fixed `seat` or a state-array field `seats` with
 `membersPayload`. The latter generates an optional `requested_seat` input.

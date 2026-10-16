@@ -304,8 +304,35 @@ function machineEntity(entities: Record<string, Entity>, machine: MechaMachine):
   return name;
 }
 
+/** The notes column of the authored `data-extract="fields"` table in an
+ * entity element, by field. The card shows them beside what program.cue says,
+ * so the authored table, hop 2's input, can stay collapsed under it. */
+export function authoredNotes(element: string): Map<string, string> {
+  const table = /<table\b[^>]*data-extract="fields"[^>]*>([\s\S]*?)<\/table>/.exec(element);
+  if (table === null) return new Map();
+  const rows = [...table[1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)].map((r) =>
+    [...r[1].matchAll(/<t([hd])\b[^>]*>([\s\S]*?)<\/t[hd]>/g)].map((c) => ({ head: c[1] === "h", html: c[2].trim() }))
+  );
+  const head = rows.find((r) => r.length > 0 && r.every((c) => c.head));
+  if (head === undefined) return new Map();
+  const at = (word: string) => head.findIndex((c) => c.html.toLowerCase() === word);
+  const field = at("field"), notes = at("notes");
+  if (field === -1 || notes === -1) return new Map();
+  return new Map(rows.filter((r) => r !== head && r[notes]?.html).map((r) => [r[field].html, r[notes].html]));
+}
+
+/** A JSON value as nested <details>, each object and array collapsible. */
+function jsonTree(key: string, value: unknown): string {
+  const k = `<span class="jk">${esc(key)}</span>`;
+  if (value === null || typeof value !== "object") return `<div class="jl">${k}: <span class="jv">${esc(JSON.stringify(value))}</span></div>`;
+  const entries = Object.entries(value);
+  const named = (value as { name?: unknown }).name;
+  const shape = Array.isArray(value) ? `[${entries.length}]` : typeof named === "string" ? esc(named) : `{${entries.length}}`;
+  return `<details class="jn"><summary>${k} <span class="jv">${shape}</span></summary>${entries.map(([ck, cv]) => jsonTree(ck, cv)).join("")}</details>`;
+}
+
 /** One entity's card. */
-export async function cardHtml(name: string, e: Entity, ctx: Context): Promise<string> {
+export async function cardHtml(name: string, e: Entity, ctx: Context, notes: ReadonlyMap<string, string> = new Map()): Promise<string> {
   const { entities } = ctx.program.state;
   const byTable = new Map(Object.entries(entities).map(([n, x]) => [x.table, { name: n, ...x }]));
   const fields = e.fields.filter((f) => !STAMPS.has(f.name) && !f.retired);
@@ -434,9 +461,11 @@ ${diagram}${lifecycle === "" ? "" : `<table class="fields"><thead><tr><th>event<
 </header>
 <div class="names"><span class="lbl">fields</span><span class="namelist">${fields.map(nameToken).join("")}</span>
 <details class="more"><summary>all fields, with their metadata</summary>
-<table class="fields">${[...fields, ...retired].map((f) => `<tr${f.retired ? ' class="retired"' : ""}><td class="o">${f.ordinal ?? ""}</td><td class="k">${esc(f.name)}</td><td class="t">${esc(f.type)}</td><td class="gl">${glyphs(f)}</td><td class="x" title="${esc(rule(f))}">${esc(rule(f))}</td></tr>`).join("")}</table>
-<p class="legend">${e.id === undefined ? "" : "the first column is the field's ordinal, which a diff keys on · "}<span class="g pk">pk</span> primary key · <span class="g fk">→</span> references · <span class="g">◇</span> unique · <span class="g">≡</span> indexed · <span class="g">○</span> nullable${retired.length > 0 ? ' · <span class="g">†</span> retired' : ""} · a rule or default in the last column</p>
-</details></div>
+<table class="fields">${[...fields, ...retired].map((f) => `<tr${f.retired ? ' class="retired"' : ""}><td class="o">${f.ordinal ?? ""}</td><td class="k">${esc(f.name)}</td><td class="t">${esc(f.type)}</td><td class="gl">${glyphs(f)}</td><td class="x" title="${esc(rule(f))}">${esc(rule(f))}</td>${notes.size === 0 ? "" : `<td class="n">${notes.get(f.name) ?? ""}</td>`}</tr>`).join("")}</table>
+<p class="legend">${e.id === undefined ? "" : "the first column is the field's ordinal, which a diff keys on · "}<span class="g pk">pk</span> primary key · <span class="g fk">→</span> references · <span class="g">◇</span> unique · <span class="g">≡</span> indexed · <span class="g">○</span> nullable${retired.length > 0 ? ' · <span class="g">†</span> retired' : ""} · a rule or default${notes.size === 0 ? " in the last column" : ", then the author's note"}</p>
+</details>
+<details class="more authored"><summary>the authored table</summary></details>
+<details class="more json"><summary>the entity, as JSON</summary><div class="jt">${Object.entries(e).map(([k, v]) => jsonTree(k, v)).join("")}</div></details></div>
 <div class="strips">
 <div class="strip"><span class="lbl">referenced by</span><span class="rels">${pills(referrers, 3, (r) => `<a class="rel in" href="#${esc(byTable.get(r.table)?.ir ?? r.table)}">${esc(r.table)}<span class="col">.${esc(r.col)}</span></a>`) || '<span class="why">—</span>'}</span></div>
 <div class="strip"><span class="lbl">refers to</span><span class="rels">${pills(refs, 4, (r) => `<a class="rel out" href="#${esc(byTable.get(r.ref)?.ir ?? r.ref)}">${esc(r.ref)}<span class="col"> via ${esc(r.col)}</span></a>`) || '<span class="why">—</span>'}</span></div>
@@ -455,6 +484,7 @@ const NEIGHBOURHOOD_CLOSE = "<!-- /pronto:neighbourhood -->";
 const APP_OPEN = "<!-- pronto:app-neighbourhood -->";
 const APP_CLOSE = "<!-- /pronto:app-neighbourhood -->";
 const ENTITY_TAG = /<([a-z][a-z0-9]*)\s[^>]*data-kind="entity"[^>]*>/g;
+const ENTITY_START = /<[a-z][a-z0-9]*\s[^>]*data-kind="entity"/;
 const SCREEN_TAG = /<([a-z][a-z0-9]*)\s[^>]*data-kind="screen"[^>]*>/g;
 const ID = /\sid="([^"]*)"/;
 
@@ -585,6 +615,12 @@ export const CARD_CSS = `/* generated by pronto from program.cue — do not edit
 .card .g { font-family: ui-monospace, Menlo, monospace; font-size: 11px; margin-right: 6px; color: var(--card-muted); }
 .card .g.pk { font-weight: 600; color: var(--card-ink); } .card .g.fk { color: var(--card-accent); text-decoration: none; }
 .card .g.mach { color: var(--card-accent); border: 1px dashed var(--card-accent); padding: 0 4px; }
+.card .fields .n { color: var(--card-muted); font-size: 12px; }
+[data-kind="entity"]:has(> .card) > table[data-extract="fields"] { display: none; }
+[data-kind="entity"]:has(> .card .authored[open]) > table[data-extract="fields"] { display: table; }
+.card .jt { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin-top: 6px; }
+.card .jn > summary { cursor: pointer; } .card .jl { padding-left: 1.2em; } .card .jn > :not(summary) { margin-left: 14px; }
+.card .jk { color: var(--card-accent); } .card .jv { color: var(--card-muted); }
 .card .legend { color: var(--card-muted); font-size: 12px; margin: 8px 0 0; }
 .card .strips { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px 24px; padding: 10px 18px 10px 24px; border-top: 1px solid var(--card-line); align-items: baseline; }
 .card .strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
@@ -703,7 +739,9 @@ export async function renderIr(
     const id = ID.exec(tag[0])?.[1];
     const hit = id === undefined ? undefined : byIr.get(id);
     if (hit === undefined || cards.has(id!)) continue;
-    cards.set(id!, await cardHtml(hit.name, hit.e, ctx));
+    const rest = html.slice(tag.index! + tag[0].length);
+    const next = rest.search(ENTITY_START);
+    cards.set(id!, await cardHtml(hit.name, hit.e, ctx, authoredNotes(next === -1 ? rest : rest.slice(0, next))));
   }
   let next = fillRegions(html, cards);
   const screenTags = new Set<string>();

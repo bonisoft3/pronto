@@ -20,8 +20,8 @@ as one graph.
 | part | type | re-exported by | default instance |
 |---|---|---|---|
 | `code` | `#App` ([`schema.cue`](../schema.cue)) | — | the app's `program.cue` |
-| `cluster` | `#Cluster` ([`cluster.cue`](https://github.com/bonisoft3/mecha/blob/v0.11.0/cluster.cue)) | [`clusters/mecha.cue`](../clusters/mecha.cue) | `#DefaultCluster` |
-| `terminal` | `#Terminal` ([`terminal.cue`](https://github.com/bonisoft3/omnishell/blob/v0.11.0/terminal.cue)) | [`terminals/omnishell.cue`](../terminals/omnishell.cue) | `#DefaultTerminal` |
+| `cluster` | `#Cluster` ([`cluster.cue`](https://github.com/bonisoft3/mecha/blob/v0.12.1/cluster.cue)) | [`clusters/mecha.cue`](../clusters/mecha.cue) | `#DefaultCluster` |
+| `terminal` | `#Terminal` ([`terminal.cue`](https://github.com/bonisoft3/omnishell/blob/v0.12.1/terminal.cue)) | [`terminals/omnishell.cue`](../terminals/omnishell.cue) | `#DefaultTerminal` |
 | `loop` | `#Loop` ([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.44.1/loop.cue)) | [`loops/sayt.cue`](../loops/sayt.cue) | `#DefaultLoop` |
 | `build` | `#Build` ([`builders/bayt.cue`](../builders/bayt.cue)), over bayt's `#project` | — | `#DefaultBuild` |
 
@@ -72,7 +72,7 @@ its directory, and `write.ts` refuses a `src` outside the app.
 
 **Returned requests are a protocol, not a field.** A reduce's `{updates, then}`
 and a machine's effects are how a unit acts on state
-([the terminal's surfaces](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/terminal.md#what-the-terminal-owns)).
+([the terminal's surfaces](https://github.com/bonisoft3/omnishell/blob/v0.12.1/docs/terminal.md#what-the-terminal-owns)).
 They are the verb, not a third noun beside state and capabilities, so no part
 declares them. `#App.surface.flows` is the one place a program names one,
 filed under the screen it starts from.
@@ -157,7 +157,7 @@ Declared via `meta.social: #Social`:
 
 - **Tags emitted**: OpenGraph (`og:title`, `og:description`, `og:type`, `og:image`, `og:image:alt`) and Twitter Card (`twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`, `twitter:site`, `twitter:creator`).
 - **Defaults**: `title` and `description` inherit from `#App.meta`. `card` defaults to `"summary_large_image"` if `image` is set, else `"summary"`. `type` defaults to `"website"`.
-- **The origin is the deployment's**: a card names no address of its own. The app's absolute addresses are spelled against one origin, the deployment's `ORIGIN`, stated beside the auth service's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.11.0/docs/proxy.md#the-origin)); the image never holds it. `#Social` has no `url`, so declaring one is a compile error rather than a second statement of the origin that the build would fix into an image every deployment runs.
+- **The origin is the deployment's**: a card names no address of its own. The app's absolute addresses are spelled against one origin, the deployment's `ORIGIN`, stated beside the auth service's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.12.1/docs/proxy.md#the-origin)); the image never holds it. `#Social` has no `url`, so declaring one is a compile error rather than a second statement of the origin that the build would fix into an image every deployment runs.
 - **Local images**: Social card scrapers require absolute image URLs. A local `image` is mounted as a cluster static under `/srv/` and named from the root (`/preview.png`) in the entry; a rendered document spells it absolute against the origin. A remote `https://` or `http://` image is named as written. Protocol-relative URLs (`//`), data URIs and path traversal (`..`) are refused at compile time.
 - **Per address**: the card above is the entry's, spelled for the app, and the entry is the shell every client-routed address is answered with, so it names no `og:url`, as it names no canonical: either would claim the root for every address. A [rendered document](screens.md#how-a-routes-first-document-is-rendered) (`ssg` or `ssr`) states its own canonical, absolute against the deployment's origin, and its card follows it: `og:url` is the canonical (dropped where the address has none), `og:title` and `twitter:title` are the page's title, a local image is absolute; the rest of the card stands. An address meant to be shared with a scraper-readable image is one that is rendered.
 
@@ -213,7 +213,7 @@ collections ──► live query ──► region ──► DOM          bus ◄
 - **Postgres is upstream of reads and downstream of writes.**
 - **The region is the sink**, and the terminal owns it. Rows are keyed by
   primary key, so the sink applies a delta rather than diffing two trees
-  ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/screen-updates.md#when-data-changes)).
+  ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.12.1/docs/screen-updates.md#when-data-changes)).
   A sink whose input empties takes its output with it: a vanished row is a
   removal, never a template left standing over the last value.
 - **A pipeline is the same shape one tier down.** The bus carries the
@@ -228,7 +228,7 @@ collections ──► live query ──► region ──► DOM          bus ◄
   second data language.
 
 A region's read is a query the store maintains
-([omnishell's data](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/data.md#a-regions-rows)).
+([omnishell's data](https://github.com/bonisoft3/omnishell/blob/v0.12.1/docs/data.md#a-regions-rows)).
 Server-computed reads (full-text search, embed-path filters, hinted or nested
 embeds, a filter the store cannot translate) stay PostgREST queries, re-run
 when a table they depend on changes. The collections are the change signal,
@@ -240,7 +240,7 @@ Pronto separates application state into two planes:
 1. **The relational plane**: Durable entities (`tab`, `device`, `server`, `live`) queryable via PostgREST and synchronized via ElectricSQL shapes. Mutations occur on-demand via forms and pure Jessie handlers.
 2. **The kinetic plane**: Ephemeral high-frequency states living below `tab` (e.g. 35Hz, 60Hz, 120Hz physics loops, 3D simulations, and canvas interactions).
 
-Rather than abandoning determinism at the kinetic boundary, Omnishell's runtime provides `createKineticHost` governed by the pure engine contract (see [Kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.11.0/docs/kinetic.md)):
+Rather than abandoning determinism at the kinetic boundary, Omnishell's runtime provides `createKineticHost` governed by the pure engine contract (see [Kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.12.1/docs/kinetic.md)):
 - **`initState(seed)`**: Returns immutable initial state.
 - **`advanceFrame(state, cmd)`**: Pure fixed-step transition step.
 - **`saveState(state)`** and **`loadState(snapshot)`**: Formally verify the algebraic isomorphism $\text{loadState} \circ \text{saveState} = \text{id}$.

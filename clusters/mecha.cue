@@ -41,12 +41,12 @@ import (
 // and an app pinning pronto gets them through it. One per service of
 // impl.#Images, from the pin lines a mecha release prints.
 published: impl.#Published & {
-	airlock:  "bonitao/mecha-airlock:0.11.0@sha256:0283c10b46a2cd4fa5b57e6cdd8315402b056c78d992c5baed6fc41b68c4a718"
-	auth:     "bonitao/mecha-auth:0.11.0@sha256:301d656e3f61f87c537b431bf2459114c6b3bec706accfd15b7b17b5d9782416"
-	clock:    "bonitao/mecha-clock:0.11.0@sha256:7420c2c8dd00c82a6e06bd2cb81e050ba4f7517a9e0824534c5d96f40f8d8d8e"
-	compute:  "bonitao/mecha-compute:0.11.0@sha256:24df3362b85c3654b16429c6cffffd5101e732f19a7277fa64394235b64d7199"
-	conduit:  "bonitao/mecha-conduit:0.11.0@sha256:15f6d65f0dad3841339acdb20a33da5c77fd9affb16c2d67b6ab665cb7e239d7"
-	database: "bonitao/mecha-database:0.11.0@sha256:5f79ccb12f43ad4e9881fcfb0d376d57ae81c62394d66e24a636e80e00ef3b4c"
-	mesh:     "bonitao/mecha-mesh:0.11.0@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
-	ticker:   "bonitao/mecha-ticker:0.11.0@sha256:238ebac9d89ab96ef6e85d51aedabbcb91073637c6b9c246665744f781f51e98"
+	airlock:  "bonitao/mecha-airlock:0.12.1@sha256:e8d4f8853ec49672e2515fda2f6429322680da6443b36dce9e41f375af58122f"
+	auth:     "bonitao/mecha-auth:0.12.1@sha256:4d7fc684af603f3c79459ec76fe578ed1c87c7bfa9b2abb8106d6af4d7ba2fd6"
+	clock:    "bonitao/mecha-clock:0.12.1@sha256:7420c2c8dd00c82a6e06bd2cb81e050ba4f7517a9e0824534c5d96f40f8d8d8e"
+	compute:  "bonitao/mecha-compute:0.12.1@sha256:7c7d4e34a91f19ea87c429ec00401c19c1d11067a619d5c5001b7716294953c4"
+	conduit:  "bonitao/mecha-conduit:0.12.1@sha256:15f6d65f0dad3841339acdb20a33da5c77fd9affb16c2d67b6ab665cb7e239d7"
+	database: "bonitao/mecha-database:0.12.1@sha256:8478d56bb4aa2545cad656db0ff059f4c5d8f4ba227ef4cb7fd9edfae861bc09"
+	mesh:     "bonitao/mecha-mesh:0.12.1@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
+	ticker:   "bonitao/mecha-ticker:0.12.1@sha256:f1136ad98ab5a86b9723d75c4a6fbda0236a486f9cb22cde8c479fc8578e8bc1"
 }

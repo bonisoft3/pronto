@@ -117,8 +117,10 @@ look at them: two states that look alike, such as an opened square drawn like a
 closed one, are a bug. Send what you find back to step 2.
 
 Write the journal last, from what you captured: it cites only screenshots that
-exist and gates whose exit you saw. Rewrite it as one page for people showing what each turn changed,
-before and after, with that evidence and a sentence of what the app is now.
+exist and gates whose exit you saw. Rewrite it as one rich HTML page for
+people, not markdown, showing what each turn changed, before and after, with
+that evidence embedded: screenshots, and recordings, diagrams or gate output
+where they show progress better, plus a sentence of what the app is now.
 Append this turn, and revise earlier ones when this turn changes what they
 claimed. Its shape is yours to choose.
 
