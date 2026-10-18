@@ -124,7 +124,7 @@ code: pronto.#App & {
 	}
 }
 
-cluster:  (pronto.#DefaultCluster & {"code": code, "local": terminal.surface.runtime != "", statics: terminal.surface.statics}).out
+cluster:  (pronto.#DefaultCluster & {"code": code, statics: terminal.surface.statics}).out
 terminal: (pronto.#DefaultTerminal & {"code": code}).out
 loop:     (pronto.#DefaultLoop & {"code": code, "cluster": cluster, "terminal": terminal}).out
 

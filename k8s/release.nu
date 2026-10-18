@@ -276,8 +276,16 @@ export def render-manifests [
 	--data: string # JSON unified into the release package's root, e.g. the images it pushed
 ]: nothing -> any {
 	let expr = $"($env_name)Manifests"
-	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
+	# The roles the app's schema grants PostgREST's login, as generate wrote them.
+	let facts_path = ($cue_path | path dirname | path join .pronto cluster.json)
+	if not ($facts_path | path exists) { error make { msg: $"($facts_path) is missing: generate the app before releasing it" } }
+	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
+	let facts = (open $facts_path)
+	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
+	{App: {database: {tokenRoles: $facts.tokenRoles}}} | to json | save -f $roles_file
+	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
+	rm $roles_file
 	if $res.exit_code != 0 {
 		error make { msg: $"Failed to render CUE manifests: ($res.stderr)" }
 	}
@@ -392,7 +400,7 @@ export def main [
 		}
 	}
 	# The image each target loaded, as bake names it: the tag carries bayt's
-	# project name, which is not always the app's (truco's is apps_truco).
+	# project name.
 	let bake_targets = (do { cd $app_source_dir; docker compose --profile "*" config | docker buildx bake -f - --print ...$build_svcs } | from json | get target)
 	let pushed = ($build_svcs | each {|svc|
 		let local = ($bake_targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
@@ -453,6 +461,19 @@ export def main [
 
 	for job in (["initdb"] | append (if $has_migrate { ["migrate"] } else { [] })) {
 		run-job ($jobs_yaml | where {|d| $d =~ $"\(?m\)^  name: ($app_info.name)-($job)\\s*$" } | first) $"($app_info.name)-($job)" $target_ns
+	}
+
+	# authenticator's memberships name roles initdb creates, so the operator
+	# reconciles it, password included, only after the Jobs; crud logs in as it.
+	let cluster = $"cluster.postgresql.cnpg.io/($app_info.name)-db"
+	print $"Waiting for ($cluster) to reconcile its managed roles..."
+	let deadline = (date now) + 300sec
+	loop {
+		let roles = (kubectl get $cluster -n $target_ns -o json | from json | get status.managedRolesStatus? | default {})
+		let pending = ($roles.cannotReconcile? | default {} | columns | append ($roles.byStatus?.pending-reconciliation? | default []))
+		if ("authenticator" in ($roles.byStatus?.reconciled? | default [])) and ($pending | is-empty) { break }
+		if (date now) > $deadline { error make { msg: $"($cluster) has not reconciled its managed roles: ($roles | to nuon)" } }
+		sleep 3sec
 	}
 
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.

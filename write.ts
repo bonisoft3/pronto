@@ -18,7 +18,7 @@ import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive, GENERATED_HTML_HEADER, terminalPath } from "./derive.ts";
 import { mint } from "./identity.ts";
 import { entries, exists, ifMissing } from "./missing.ts";
-import { projectSay, projectGates, type Sources } from "./project-config.ts";
+import { projectSay, projectGates } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
@@ -33,10 +33,10 @@ type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Emission = {
   manifest: string[];
   files: Record<string, EmitFile>;
+  checkout: Record<string, EmitFile>;
   release: { enabled: boolean; runtime: string; assets: { path: string; src: string }[]; runtimeAssets: { path: string; src: string }[] };
   terminal: { surface: { runtime: string; documentRenderer: string; documentConfig: string } };
-  build?: { meta?: { local?: boolean } };
-  loop: { surface: { sources: Sources } };
+  build?: { meta?: { dir?: string } };
   cluster?: { meta?: { root?: string; statics?: { file: string }[] } };
 };
 
@@ -106,7 +106,7 @@ async function exportEmission(): Promise<Emission> {
   if (!exported.success) fail("cue export failed");
   const emission: Emission = JSON.parse(new TextDecoder().decode(exported.stdout));
   checkTypeSeeds(emission.files["schema/entities.proto"].data as Record<string, TypeEntity>);
-  const checks = await projectSay(appDir, emission.files[".say.yaml"].data, emission.loop.surface.sources) as { say: Record<string, unknown> };
+  const checks = await projectSay(appDir, emission.files[".say.yaml"].data) as { say: Record<string, unknown> };
   const graph = emission.files["bayt.json"].data as { files: Record<string, { say: Record<string, unknown> }> };
   graph.files["checks.yaml"] = checks;
   const gates = graph.files["say.yaml"].say;
@@ -119,40 +119,18 @@ async function exportEmission(): Promise<Emission> {
   if (JSON.stringify(keys) !== JSON.stringify(manifest)) {
     fail(`manifest and files disagree:\n  manifest: ${manifest}\n  files: ${keys}`);
   }
-  // The scan that would catch a mismatch runs over the build graph with no app
-  // in hand to name, which is why this is checked here instead.
-  const dir = (emission.files["bayt.json"]?.data as { dir?: string } | undefined)?.dir;
-  if (dir !== undefined) {
-    // Compared in the spelling a bayt.json holds, which is always
-    // forward-slashed where realPathSync answers in the platform's own.
-    const here = Deno.realPathSync(appDir).replaceAll("\\", "/");
-    // "." is an installed pronto's app and "" the workspace root's own.
-    if (dir !== "." && dir !== "" && here !== dir && !here.endsWith(`/${dir}`)) {
-      fail(
-        `bayt.json names dir "${dir}" but this app is at "${here}": the dir a ` +
-          `project names must be the directory the app is in`,
-      );
-    }
-  }
-  // An installed loop with a monorepo cluster layout serves docker copies
-  // that resolve nowhere: the cluster's statics stay workspace-relative
-  // instead of the app's own files plus the terminal's image. The seats
-  // below name the disagreement; SPEC's canonical program.cue shape derives
-  // the layout from the terminal so the two cannot drift apart.
-  if (emission.build?.meta?.local === false && emission.cluster?.meta?.root !== undefined && emission.cluster.meta.root !== "") {
-    fail(
-      `this app is installed (its loop names no pronto sources) but its cluster seat kept the monorepo layout (meta.root is ${JSON.stringify(emission.cluster.meta.root)}): ` +
-        `make the seats agree — SPEC's canonical program.cue shape derives "local" from the terminal and hands "terminal" to the build seat`,
-    );
+  // The images take the app's place in the checkout under the switch
+  // (builders/bayt.cue), so the place the build names must be this one.
+  const place = await checkout();
+  const dir = emission.build?.meta?.dir;
+  if (place !== undefined && dir !== place.app) {
+    fail(`the build names the app's directory "${dir}" but it is at "${place.app}": an app outside apps/<name> states build: meta: dir`);
   }
   // Every static the cluster serves from the build context is either an
   // emission output (written by this run: screens, manifests, documents)
   // or the app's own file: one naming a path nothing holds fails here, at
   // generate, rather than minutes later in a docker build.
-  // Runtime-prefixed files (a `../` path the root context serves in the
-  // monorepo) are the terminal's, not the app's, and are skipped.
   for (const s of emission.cluster?.meta?.statics ?? []) {
-    if (s.file.startsWith("../")) continue;
     if (emission.files[s.file] !== undefined) continue;
     if ((await ifMissing(Deno.stat(`${appDir}/${s.file}`), null)) === null) {
       fail(`${s.file}: no such file — the cluster serves it from the build context, so it must exist in the app (most often the review ladder's brief.html, authored per SPEC's brief.html section)`);
@@ -186,14 +164,6 @@ async function recorded(manifestPath: string): Promise<string[]> {
 /** Everything the run will write, rendered, so nothing on disk moves for an
  * emission the writer refuses. Documents are the one exception, rendered by
  * renderDocuments once the files they are rendered from are on disk. */
-/** The terminal's instrument.ts: beside its runtime in a checkout, at its
- * installed root otherwise. */
-async function terminalInstrument(emission: Emission): Promise<string> {
-  const runtime = emission.terminal.surface.runtime;
-  if (runtime === "") return resolve(await terminalPath({ terminalRuntime: "" }, "instrument.ts", appDir));
-  return resolve(appDir, dirname(runtime), "instrument.ts");
-}
-
 async function rendered(emission: Emission): Promise<Map<string, string>> {
   const contents = new Map<string, string>();
   for (const rel of [...emission.manifest].sort()) {
@@ -208,7 +178,7 @@ async function rendered(emission: Emission): Promise<Map<string, string>> {
     }
     if (f.format === "hybrid-sql") {
       const hybrids = f.data as Record<string, { machine: MechaReducerMachine; rules: string }>;
-      const { instrument } = await import(pathToFileURL(await terminalInstrument(emission)).href);
+      const { instrument } = await import(pathToFileURL(resolve(await terminalPath("instrument.ts", appDir))).href);
       const statements: string[] = [];
       for (const name of Object.keys(hybrids).sort()) {
         const hybrid = hybrids[name];
@@ -256,11 +226,9 @@ async function renderDocuments(emission: Emission): Promise<Map<string, string>>
   // returns.
   const out = await Deno.makeTempDir({ dir: `${appDir}/.pronto`, prefix: "documents-" });
   try {
-    // An installed terminal names both from its own root, where mise put it.
     const surface = emission.terminal.surface;
-    const named = { terminalRuntime: surface.runtime };
-    const renderer = await terminalPath(named, surface.documentRenderer, appDir);
-    const config = await terminalPath(named, surface.documentConfig, appDir);
+    const renderer = await terminalPath(surface.documentRenderer, appDir);
+    const config = await terminalPath(surface.documentConfig, appDir);
     // One door serves them all, so one origin stands for it in every document.
     const spelled = wanted.map((rel) => emission.files[rel].data as { origin: string; declare: string });
     const { origin, declare } = spelled[0];
@@ -312,7 +280,7 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
       assets.set(asset.path, contents.get(asset.src) ?? await Deno.readFile(`${appDir}/${asset.src}`));
     }
     const surface = emission.terminal.surface;
-    const runtimeRoot = surface.runtime === "" ? await terminalPath({ terminalRuntime: "" }, "", appDir) : `${appDir}/`;
+    const runtimeRoot = await terminalPath("", appDir);
     for (const asset of emission.release.runtimeAssets) {
       assets.set(asset.path, await Deno.readFile(`${runtimeRoot}${asset.src}`));
     }
@@ -353,6 +321,18 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
   };
   for (const [rel, text] of contents) await put(rel, text);
   for (const [rel, text] of await renderDocuments(emission)) await put(rel, text);
+  // The checkout's own files, as mise.local.toml is: written only in one,
+  // and in no manifest a mirror copies, so after the sweep of what the last
+  // manifest recorded.
+  if ((await checkout()) !== undefined) {
+    for (const [rel, f] of Object.entries(emission.checkout)) {
+      const text = render(rel, f);
+      const path = `${appDir}/${rel}`;
+      if ((await ifMissing(Deno.readTextFile(path), "")) === text) continue;
+      await Deno.mkdir(dirname(path), { recursive: true });
+      await Deno.writeTextFile(path, text);
+    }
+  }
   return { written, changed };
 }
 
@@ -371,14 +351,10 @@ function pathFrom(base: string, target: string): string {
   return [...here.slice(shared).map(() => ".."), ...there.slice(shared)].join("/");
 }
 
-/** The layout this app is built in, stated for its program as omnishell's mode
- * states the terminal's: this pronto as the app names it, the app's directory
- * under its CUE module's root, and that root and the runtime's directory as the
- * cluster names them. A pronto outside that module is an installed one, whose
- * program_pronto.cue setup writes; an app declaring an installed pronto keeps
- * that layout whichever pronto writes it, as an app built in its own
- * repository does inside the monorepo. */
-async function writeLayout(): Promise<void> {
+/** The app's place in the checkout pronto runs from, or undefined where that
+ * pronto is installed: a pronto inside the app's CUE module is the monorepo's,
+ * and the app sits under the module's root. */
+async function checkout(): Promise<{ root: string; app: string } | undefined> {
   const real = (p: string | URL) => Deno.realPathSync(p).replaceAll("\\", "/").replace(/\/+$/, "");
   const app = real(appDir);
   const pronto = real(new URL(".", import.meta.url));
@@ -387,34 +363,67 @@ async function writeLayout(): Promise<void> {
     if (!root.includes("/", 1)) fail(`${appDir} is in no CUE module`);
     root = root.slice(0, root.lastIndexOf("/"));
   }
-  if (!pronto.startsWith(`${root}/`)) return;
-  const path = `${appDir}/program_pronto.cue`;
-  const declared = await ifMissing(Deno.readTextFile(path), "");
-  if (/^loop:\s*surface:\s*sources:\s*pronto:\s*""\s*$/m.test(declared)) return;
-  const program = await Deno.readTextFile(`${appDir}/program.cue`);
-  const named = pathFrom(app, pronto);
-  if (!named.endsWith("plugins/pronto")) fail(`pronto at ${pronto} is not a runtime's plugins/pronto`);
-  const pkg = program.match(/^package\s+(\w+)\s*$/m)?.[1] ?? fail(`${appDir}/program.cue declares no package`);
-  // Only the loop's source pointer and the build dir: the cluster's root
-  // and runtime derive from the cluster seat (`local`) and mecha's
-  // defaults, so stating them here would fight the seat on every app whose
-  // seat disagrees — which is every installed app.
+  if (!pronto.startsWith(`${root}/`)) {
+    // An installed pronto run over an app whose checkout keeps the runtime: the
+    // checkout's own pronto writes the file that would have chosen it.
+    if (await exists(`${root}/plugins/pronto/write.ts`) && !(await exists(`${app}/mise.local.toml`))) {
+      fail(`${appDir} sits in a checkout that keeps the runtime but has no mise.local.toml, so mise ran the pinned pronto: run ${root}/plugins/pronto/write.ts over it once`);
+    }
+    return undefined;
+  }
+  if (pathFrom(root, pronto) !== "plugins/pronto") fail(`pronto at ${pronto} is not a runtime's plugins/pronto`);
+  if (app === root) fail(`${appDir} is the checkout's root: an app sits in a directory of its own`);
+  return { root, app: pathFrom(root, app) };
+}
+
+/** The monorepo's own mise.local.toml, which a mirror never has: the runtime's
+ * tools from their trees at HEAD over the releases .mise.toml pins, and the
+ * switch that builds the runtime's images from those trees and lays the app's
+ * out as the checkout does (builders/bayt.cue). */
+async function writeMiseLocal(): Promise<void> {
+  const place = await checkout();
+  if (place === undefined) return;
+  const up = place.app.split("/").map(() => "..").join("/");
+  const tools = [
+    ["pronto", "plugins/pronto"],
+    ["omnishell", "plugins/omnishell"],
+    ["mecha", "libraries/mecha"],
+    ["bayt", "plugins/bayt"],
+    ["sayt", "plugins/sayt"],
+  ];
+  const stub = (unset: string) => `${unset}mise tool-stub ${up}/plugins/sayt/nu.toml ${up}/plugins/sayt/compose.nu compose-project`;
+  const project = "{% if get_env(name='MISE_SHELL', default='') != '' %}" +
+    `{% if os() == 'windows' %}{{ exec(command='${stub("(set MISE_SHELL=) && ")}') }}` +
+    `{% else %}{{ exec(command='${stub("MISE_SHELL= ")}') }}{% endif %}` +
+    "{% else %}{{ get_env(name='COMPOSE_PROJECT_NAME', default='') }}{% endif %}";
   const text = [
-    "// generated by pronto from the layout this app is built in — do not edit",
+    "# generated by pronto from the checkout this app is built in — do not edit",
+    "#",
+    "# The monorepo's own, which copybara leaves out: the runtime's tools from",
+    "# their trees at HEAD over the releases .mise.toml pins, and the switch that",
+    "# builds the runtime's images from those trees (builders/bayt.cue).",
+    "[tools]",
+    ...tools.map(([name, path]) => `"github:bonisoft3/${name}" = "path:${up}/${path}"`),
     "",
-    `package ${pkg}`,
-    "",
-    `loop: surface: sources: pronto: ${JSON.stringify(named)}`,
-    `build: meta: dir: ${JSON.stringify(app === root ? "" : app.slice(root.length + 1))}`,
+    "[env]",
+    'MONOREPO_COMPOSE_MODE = "service"',
+    "# bayt's runtime, from .bayt/, where the composes naming it sit.",
+    `BAYT_RUNTIME = "../${up}/plugins/bayt/runtime"`,
+    "# The compose project per checkout, as every monorepo project publishes it",
+    "# (.say.yaml's compose-project rule says why). The exec's child runs without",
+    "# MISE_SHELL: a tool stub with a cold cache resolves this `[env]` itself, and",
+    "# with the variable set would exec again.",
+    `COMPOSE_PROJECT_NAME = '''${project}'''`,
     "",
   ].join("\n");
-  if (declared !== text) await Deno.writeTextFile(path, text);
+  const path = `${appDir}/mise.local.toml`;
+  if ((await ifMissing(Deno.readTextFile(path), "")) !== text) await Deno.writeTextFile(path, text);
 }
 
 // Emitted markup feeds derivation. A second pass is needed only when emission
 // or the derived declarations moved; unchanged declarations and bytes cannot
 // change what the first pass read. Every generation still derives and exports once.
-await writeLayout();
+await writeMiseLocal();
 await writeIrStylesheet(appDir);
 const before = await derivedText();
 await derive(appDir);

@@ -137,7 +137,10 @@ export default {
           ctx?.waitUntil?.(renderShared())
           // Drop carried reads on a stale hit so the browser paints cached HTML
           // immediately and revalidates live rows from /crud after first paint.
-          const staleBody = request.method === 'HEAD' ? null : stripServedReads(await cached.text())
+          // A prefetch keeps them: the tab holds what it seeds as stale and
+          // refreshes it behind (omnishell's link-prefetch.js).
+          const prefetch = request.headers.get('purpose') === 'prefetch'
+          const staleBody = request.method === 'HEAD' ? null : prefetch ? await cached.text() : stripServedReads(await cached.text())
           return new Response(staleBody, { status: cached.status, headers })
         }
       }

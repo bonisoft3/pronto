@@ -208,6 +208,11 @@
    emission — program-owned, preset-derived, app-overridable — is the
    only stylesheet they have. Aesthetic values stay behind --shell-*
    variables so an app can retheme without repeating structure. */
+/* The scrollbar's room is kept whether or not the page overflows: a
+   screen swapping in is as short as its loading state until its data
+   lands, and with a classic scrollbar the whole page would jump
+   sideways and back on every navigation. */
+html { scrollbar-gutter: stable; }
 body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
   background: var(--shell-bg); color: var(--shell-fg); }
 /* Sticky, because the navigation stack restores a screen's scroll

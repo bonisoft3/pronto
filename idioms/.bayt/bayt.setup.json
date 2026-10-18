@@ -1,17 +1,41 @@
 {
   "_generated_from": "bayt.cue (do not edit)",
+  "compose": {
+    "up": false,
+    "manual": false,
+    "build": {
+      "additional_contexts": {
+        "workspaceroot-pronto-sources_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}"
+      },
+      "secrets": [],
+      "args": {}
+    },
+    "environment": {},
+    "ports": [],
+    "volumes": [],
+    "depends_on": {}
+  },
   "dockerfile": {
-    "preamble": [],
+    "preamble": [
+      "COPY --from=bonitao/lazybox:0.8.3@sha256:c896a6836673d8fd217f6021a2522351fd82d580ed985159feb2f10373018e73 /lazybox/ /root/.local/share/lazybox/",
+      "ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH",
+      "ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo",
+      "RUN mv /root/.local/share/lazybox/libexec/static-curl /root/.local/share/lazybox/libexec/static-curl.bin\nCOPY --chmod=0755 <<'STATIC_CURL' /root/.local/share/lazybox/libexec/static-curl\n#!/bin/sh\nOPENSSL_CONF=\"${OPENSSL_CONF:-/dev/null}\" exec \"$(dirname \"$0\")/static-curl.bin\" \"$@\"\nSTATIC_CURL",
+      "RUN --mount=type=cache,target=/zypper-store,id=/zypper-store,sharing=shared --mount=type=cache,target=/var/cache/zypp,id=idioms-setup:/var/cache/zypp,sharing=locked s=/zypper-store; d=/var/cache/zypp/packages; mkdir -p \"$s\" \"$d\"; cp -r \"$s\"/. \"$d\"/ 2>/dev/null || true; zypper -n modifyservice --no-refresh --all && sed -i 's|http://|https://|g' /etc/zypp/repos.d/*.repo || exit; zypper -n modifyrepo --keep-packages --all && zypper -n install findutils=4.10.0-160000.2.2 which=2.23-160000.2.2 git-core=2.51.0-160000.1.2 libatomic1=15.3.0+git11272-160000.1.1 || exit; cd \"$d\" && for f in */*.rpm */*/*.rpm; do [ -f \"$f\" ] || continue; o=\"$s/$f\"; [ -e \"$o\" ] && continue; mkdir -p \"$(dirname \"$o\")\"; t=\"$(mktemp \"$(dirname \"$o\")/.pXXXXXX\")\" && cp \"$f\" \"$t\" && mv -f \"$t\" \"$o\"; done; zypper -n modifyrepo --no-keep-packages --all || true"
+    ],
     "preambleCopyContexts": [],
     "from": {
-      "ref": "workspaceroot:setup",
-      "name": "workspaceroot-setup"
+      "name": "opensuse/leap:16.0@sha256:7f3aeccb6a613c0fc1690d3d3e5eb493fd477ee4587de20640017fc36d72f9b0"
     },
     "add": [],
     "mounts": [],
     "secrets": {},
     "extra_hosts": [],
-    "epilogue": [],
+    "epilogue": [
+      "COPY --from=workspaceroot-pronto-sources_srcs /monorep[o] /monorepo/",
+      "COPY [m]ise.local.toml ./",
+      "RUN mise install"
+    ],
     "copy": [],
     "healthcheck": null,
     "expose": [],
@@ -20,8 +44,8 @@
     "cmd": null
   },
   "name": "setup",
-  "project": "apps_idioms",
-  "dir": "apps/idioms",
+  "project": "idioms",
+  "dir": ".",
   "activate": "",
   "srcs": {
     "globs": [],
@@ -40,8 +64,8 @@
   "synthetics": {
     "bayt": {
       "name": "setup_bayt",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -71,14 +95,13 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.setup.yaml",
-        ".bayt/compose.setup.yaml"
+        "./.bayt/compose.setup.yaml"
       ]
     },
     "outs": {
       "name": "setup_outs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -100,14 +123,13 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.setup.yaml",
-        ".bayt/compose.setup.yaml"
+        "./.bayt/compose.setup.yaml"
       ]
     },
     "srcs": {
       "name": "setup_srcs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -126,24 +148,7 @@
       "visibility": "internal",
       "deps": [],
       "transitiveDeps": [],
-      "transitiveCrossDeps": [
-        {
-          "name": "setup_srcs",
-          "project": "workspaceroot",
-          "dir": "",
-          "outs": {
-            "globs": [
-              "[m]ise.toml",
-              "[.]mise.toml",
-              "[m]ise.lock",
-              "[.]tool-versions",
-              "gradle/libs.versions.toml",
-              "plugins/devserver/docker-bridge.sh"
-            ],
-            "exclude": []
-          }
-        }
-      ],
+      "transitiveCrossDeps": [],
       "chainedDeps": [],
       "cmds": [],
       "cache": {
@@ -151,8 +156,7 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.setup.yaml",
-        ".bayt/compose.setup.yaml"
+        "./.bayt/compose.setup.yaml"
       ]
     }
   },
@@ -166,48 +170,11 @@
   "deps": [],
   "sameProjectDeps": [],
   "transitiveDeps": [],
-  "transitiveCrossDeps": [
-    {
-      "name": "setup",
-      "project": "workspaceroot",
-      "dir": "",
-      "outs": {
-        "globs": [
-          "[m]ise.toml",
-          "[.]mise.toml",
-          "[m]ise.lock",
-          "[.]tool-versions",
-          "gradle/libs.versions.toml",
-          "plugins/devserver/docker-bridge.sh",
-          ".task/bayt/setup.hash"
-        ],
-        "exclude": []
-      }
-    }
-  ],
+  "transitiveCrossDeps": [],
   "upClosure": [
-    "apps/idioms/.bayt/compose.setup.yaml",
-    ".bayt/compose.setup.yaml"
+    "./.bayt/compose.setup.yaml"
   ],
-  "chainedDeps": [
-    {
-      "name": "setup",
-      "project": "workspaceroot",
-      "dir": "",
-      "outs": {
-        "globs": [
-          "[m]ise.toml",
-          "[.]mise.toml",
-          "[m]ise.lock",
-          "[.]tool-versions",
-          "gradle/libs.versions.toml",
-          "plugins/devserver/docker-bridge.sh",
-          ".task/bayt/setup.hash"
-        ],
-        "exclude": []
-      }
-    }
-  ],
+  "chainedDeps": [],
   "cmds": [
     {
       "srcs": {

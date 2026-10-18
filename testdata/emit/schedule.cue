@@ -37,7 +37,7 @@ _scheduledFiles: (pronto.#emit & {
 	cluster:  _scheduledCluster
 	terminal: _scheduledTerminal
 	loop:     _scheduledLoop
-	build: (pronto.#DefaultBuild & {code: _scheduled, loop: _scheduledLoop, cluster: _scheduledCluster}).out
+	build: (pronto.#DefaultBuild & {code: _scheduled, loop: _scheduledLoop, cluster: _scheduledCluster, terminal: _scheduledTerminal}).out
 }).files
 _migrations: "services/database/migrations"
 
@@ -77,7 +77,7 @@ _scheduledPagedFiles: (pronto.#emit & {
 	cluster:  _scheduledPagedCluster
 	terminal: _scheduledPagedTerminal
 	loop:     _scheduledPagedLoop
-	build: (pronto.#DefaultBuild & {code: _scheduledPaged, loop: _scheduledPagedLoop, cluster: _scheduledPagedCluster}).out
+	build: (pronto.#DefaultBuild & {code: _scheduledPaged, loop: _scheduledPagedLoop, cluster: _scheduledPagedCluster, terminal: _scheduledPagedTerminal}).out
 }).files
 _pagedSeed: _scheduledPagedFiles["\(_migrations)/801_schedule_seed.sql"].text
 pagedSeedContainerOnly: (strings.HasPrefix(_pagedSeed, "-- tier: container\n") && strings.HasSuffix(_pagedSeed, "\n-- tier: any\n")) & true

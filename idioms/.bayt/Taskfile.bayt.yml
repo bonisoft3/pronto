@@ -1,9 +1,5 @@
 # generated from bayt.cue — do not edit
 includes:
-  program:
-    taskfile: ./Taskfile.program.yaml
-    dir: ../
-    optional: true
   setup:
     taskfile: ./Taskfile.setup.yaml
     dir: ../
@@ -36,6 +32,10 @@ includes:
     taskfile: ./Taskfile.ci-visual.yaml
     dir: ../
     optional: true
+  ci:
+    taskfile: ./Taskfile.ci.yaml
+    dir: ../
+    optional: true
   launch-action:
     taskfile: ./Taskfile.launch-action.yaml
     dir: ../
@@ -44,15 +44,4 @@ includes:
     taskfile: ./Taskfile.integrate-action.yaml
     dir: ../
     optional: true
-  workspaceroot:
-    taskfile: ../../../Taskfile.yml
-    dir: ../../../
-    optional: true
-tasks:
-  cross_workspaceroot_setup:
-    internal: true
-    run: once
-    if: test -f ../../Taskfile.yml
-    deps:
-    - workspaceroot:bayt:setup
 version: "3"

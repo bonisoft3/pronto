@@ -30,6 +30,7 @@ import (
 	"github.com/bonisoft3/pronto/clusters:mecha"
 	prontoloop "github.com/bonisoft3/pronto/loops:sayt"
 	"github.com/bonisoft3/pronto/scales"
+	"github.com/bonisoft3/pronto/resilience"
 	"github.com/bonisoft3/pronto/distribution"
 	"github.com/bonisoft3/pronto/terminals:omnishell"
 )
@@ -1789,26 +1790,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
 		surface: {
-			sources: {
-				pronto: *"../../plugins/pronto" | string
-				// The siblings follow pronto: an app that installs pronto as a
-				// distribution has no monorepo beside it.
-				omnishell: string
-				mecha:     string
-				if pronto == "" {
-					omnishell: *"" | string
-					mecha:     *"" | string
-				}
-				if pronto != "" {
-					let root = strings.TrimSuffix(pronto, "plugins/pronto")
-					omnishell: *"\(root)plugins/omnishell" | string
-					mecha:     *"\(root)libraries/mecha" | string
-				}
-			}
 			_distribution: distribution.#Project & {
-				runtime:   "\(sources.pronto)"
-				omnishell: "\(sources.omnishell)"
-				mecha:     "\(sources.mecha)"
 				if D.code.meta.domain != _|_ {
 					domain: "\(D.code.meta.domain)"
 				}
@@ -1824,7 +1806,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					}
 				}
 			}
-			buildCmd: [if sources.pronto != "" {_distribution.write}, "./saytw build"][0]
+			buildCmd: "./saytw build"
 			testCmd: "deno eval 0"
 			pipelineFiles: [for n, _ in (#streams & {code: D.code}).out {"docker/\(D.code.meta.name)-\(n).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop
@@ -1882,11 +1864,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				for name in ["derive", "types", "proto"] {
 					(name): {verb: "lint", cmds: [_distribution.checks[name]], note: "Pronto compiler \(name)"}
 				}
-				// A runtime inside the app is a mirror's, whose sync rewrote the
-				// imports the facts hash; the monorepo holds them.
-				if !_mirrored {
-					facts: {verb: "lint", priority: 1, cmds: [_distribution.checks.facts], note: "Pronto compiler facts"}
-				}
+				facts: {verb: "lint", priority: 1, cmds: [_distribution.checks.facts], note: "Pronto compiler facts"}
 				// Only where there is SQL to read: an app whose every entity is
 				// a browser durability emits no migration and authors none, so the
 				// pass would grade an empty set.
@@ -1905,18 +1883,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					// In the build graph's replay service, whose verdict is its exit
 					// code. A project of its own: --remove-orphans under the runtime's
 					// would take the runtime down, as nothing of it is in this closure.
-					//
-					// Not yet for an installed app: in the monorepo its image would
-					// lack the module the program evaluates in and the runtime at
-					// HEAD, which images take from neither mise.local.toml nor the
-					// root.
-					if sources.pronto != "" {
-						replay: {
-							verb:     "integrate"
-							priority: 1
-							cmds: [(omnishell.#BkidCheck & {runner: "ci-replay"}).out]
-							note: "Pronto compiler replay"
-						}
+					replay: {
+						verb:     "integrate"
+						priority: 1
+						cmds: [(omnishell.#BkidCheck & {runner: "ci-replay"}).out]
+						note: "Pronto compiler replay"
 					}
 				}
 
@@ -1955,10 +1926,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					"auto-bayt": {priority: 2, cmds: [{use: "./auto-bayt.nu", do: "auto-bayt"}]}
 				}
 			}
-			_mirrored: sources.pronto != "" && !strings.HasPrefix(sources.pronto, "../")
-			if sources.pronto == "" {
-				sayYaml: _distribution.say
-			}
+			sayYaml: _distribution.say
 		}
 	}
 }
@@ -1967,23 +1935,17 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	code!:    _
 	loop!:    _
 	cluster!: _
-	// The terminal, whose own statics an installed app's build serves from
-	// omnishell's image; required there, unread in the monorepo's layout.
-	terminal?: _
+	// The terminal, whose own statics the build serves from omnishell's image.
+	terminal!: _
 	out: prontobuild.#Build & {
-		"cluster": D.cluster
-		if D.terminal != _|_ {terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]}
-		if D.terminal == _|_ if D.loop.surface.sources.pronto == "" {
-			terminalStatics: error("an installed app's build serves its terminal's statics: pass terminal to #DefaultBuild")
-		}
+		"cluster":       D.cluster
+		terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]
 		project: files: "checks.yaml": D.loop.surface.sayYaml
 		meta: {
-			app:      D.code.meta.name
-			local:    D.loop.surface.sources.pronto != ""
-			if local {pronto: D.loop.surface.sources.pronto}
-			generateCmd: (distribution.#Project & {runtime: "\(D.loop.surface.sources.pronto)"}).compiler
-			testCmd:  D.loop.surface.testCmd
-			targets:  D.code.meta.targets
+			app:         D.code.meta.name
+			generateCmd: distribution.#Project.compiler
+			testCmd:     D.loop.surface.testCmd
+			targets:     D.code.meta.targets
 		}
 	}
 }
@@ -2079,11 +2041,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 #DefaultCluster: D={
 	code!: _
 	statics: [...mecha.#Static]
-	// Whether the app is built in the runtime's workspace, as #DefaultBuild's
-	// meta.local: an installed app takes mecha's images by name, which its
-	// build resolves to the pinned release or, in the monorepo, to mecha's
-	// sources (builders/bayt.cue).
-	local: *true | bool
 
 	// The review ladder's artifacts, served beside the app by caddy's catch-all
 	// /srv root. One directory is load-bearing, not tidiness: brief.html links
@@ -2125,25 +2082,23 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: mecha.#Cluster & {
 		meta: {
 			app: D.code.meta.name
-			// An installed app is its workspace's root, and its runtime sits where
-			// mise put it, outside the app: every static the cluster serves is
-			// then the app's own file, fingerprinted and copied from the build
-			// context. Stated here, never in program_pronto.cue: the layout
-			// file only records what the writer derived (loop sources, build
-			// dir), and the seat already knows the rest.
-			if !D.local {
-				root:    ""
-				runtime: "../"
-			}
-			// An installed app's caddy takes omnishell's own statics from its
-			// image, which the build adds (builders/bayt.cue); the cluster
-			// serves the app's.
-			statics: list.Concat([[for s in D.statics if D.local || !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
-			// mecha's images, reached through the monorepo's bayt federation,
-			// or by name where the app is installed.
+			// The app is its build's root, and its runtime sits where mise put
+			// it, outside the app: every static the cluster serves is then the
+			// app's own file, fingerprinted and copied from the build context.
+			root:    ""
+			runtime: "../"
+			// The caddy takes omnishell's own statics from its image, which the
+			// build adds (builders/bayt.cue); the cluster serves the app's.
+			statics: list.Concat([[for s in D.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
+			// mecha's images by name, which the build resolves to the pinned
+			// release or, in the monorepo, to mecha's sources.
 			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute", "airlock"] {
-				(s): [if D.local {{ref: "libraries_mecha:\(s)-image"}}, {name: "libraries_mecha-\(s)-image"}][0]
+				(s): {name: "libraries_mecha-\(s)-image"}
 			}}
+			bounds: {
+				authStatementMs: resilience.resilience.timeouts.statement.client * 1000
+				tickerCallMs:    resilience.resilience.timeouts.tickerCall * 1000
+			}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth
 		// block; the blob plane follows the program's flag; the data plane
@@ -2219,18 +2174,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					dockerfile: {
 						from: name: omnishell.#Render.image
 						workdir: omnishell.#Render.workdir
-						// The renderer's tree: from the runtime's workspace, or for an
-						// installed app from omnishell's runtime image, whose root is
-						// omnishell's.
+						// The renderer's tree, from omnishell's runtime image, whose
+						// root is omnishell's.
 						copy: list.Concat([
 							[for d in omnishell.#Render.dirs {
-								[if D.local {{
-									from: {name: "root"}
-									srcs: [strings.TrimPrefix(meta.runtime+d, meta.root)]
-								}}, {
-									from: {name: omnishell.#RuntimeImage}
-									srcs: ["/\(strings.TrimPrefix(d, omnishell.#Render.home+"/"))"]
-								}][0]
+								from: {name: omnishell.#RuntimeImage}
+								srcs: ["/\(strings.TrimPrefix(d, omnishell.#Render.home+"/"))"]
 								dst: "\(omnishell.#Render.workdir)/\(d)"
 							}],
 							[{srcs: [omnishell.#Render.entry.source], dst: omnishell.#Render.entry.target}],
@@ -2239,7 +2188,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						cmd: omnishell.#Render.command
 					}
 					compose: {
-						if D.local {build: additional_contexts: root: strings.TrimSuffix("../\(meta.root)", "/")}
 						// The door, and what answers behind it: a guest is minted
 						// and every table synced before the renderer is ready.
 						depends_on: {
@@ -2249,10 +2197,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							auth:     {condition: "service_started"}
 						}
 						environment: {
-							DOOR:   "http://caddy:8080"
-							ENTRY:  omnishell.#Render.entry.target
-							ORIGIN: D.out.surface.origin
-							PORT:   "\(omnishell.#Render.port)"
+							DOOR:            "http://caddy:8080"
+							DOOR_TIMEOUT_MS: "\(resilience.resilience.timeouts.renderDoor*1000)"
+							ENTRY:           omnishell.#Render.entry.target
+							ORIGIN:          D.out.surface.origin
+							PORT:            "\(omnishell.#Render.port)"
 						}
 						restart: "on-failure"
 						// An edit to the entry reaches the door, which the renderer
@@ -2502,6 +2451,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		   emission — program-owned, preset-derived, app-overridable — is the
 		   only stylesheet they have. Aesthetic values stay behind --shell-*
 		   variables so an app can retheme without repeating structure. */
+		/* The scrollbar's room is kept whether or not the page overflows: a
+		   screen swapping in is as short as its loading state until its data
+		   lands, and with a classic scrollbar the whole page would jump
+		   sideways and back on every navigation. */
+		html { scrollbar-gutter: stable; }
 		body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
 		  background: var(--shell-bg); color: var(--shell-fg); }
 		/* Sticky, because the navigation stack restores a screen's scroll
@@ -2793,6 +2747,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	cluster: capabilities: server: E._serverOn
 
 	files: [string]: #File
+	checkout: [string]: #File
 	files: {
 		if E.code._timerRefusal {}
 		if E.code._hostDomRefusal {}
@@ -2800,31 +2755,40 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if E.code._screenAccessRefusal {}
 		for _, h in E.code.capabilities.hatches if h.kind == "host-dom" {if E.terminal.capabilities.hostDom != true {_unsupportedHostDom: error("terminal does not offer host-dom")}}
 	}
-	// The compose files an installed app's closures include, one per
-	// MONOREPO_COMPOSE_MODE (builders/bayt.cue): `service` builds mecha's images
-	// from its fragments, where MONOREPO_MECHA_PATH puts mecha's tree; unset
-	// pulls the pinned ones and needs no service.
-	if !E.build.meta.local {
-		files: {
-			"mecha/service.yaml": {
-				format: "yaml"
-				data: include: [for s, _ in mecha.published {"../${MONOREPO_MECHA_PATH}/.bayt/compose.\(s)-image.yaml"}]
-			}
-			"mecha/docker-image.yaml": {
-				format: "yaml"
-				data: {}
-			}
-			"omnishell/service.yaml": {
-				format: "yaml"
-				data: include: ["../${MONOREPO_OMNISHELL_PATH}/.bayt/compose.runtime-image.yaml"]
-			}
-			"omnishell/docker-image.yaml": {
-				format: "yaml"
-				data: {}
-			}
-		}
+	// The compose file every closure includes, one per MONOREPO_COMPOSE_MODE
+	// (builders/bayt.cue): `service` declares the monorepo's targets the
+	// switch names, at the paths the checkout and its images keep them;
+	// unset, the pinned images need none. `service` is the checkout's own,
+	// as mise.local.toml is: the writer writes it only there, and records
+	// it nowhere a mirror reads.
+	let up = strings.Repeat("../", len(strings.Split(E.build.meta.dir, "/"))+1)
+	checkout: "monorepo/service.yaml": {
+		format: "yaml"
+		data: include: list.Concat([
+			[for s, _ in mecha.published {"\(up)libraries/mecha/.bayt/compose.\(s)-image.yaml"}],
+			["\(up)plugins/omnishell/.bayt/compose.runtime-image.yaml", "\(up).bayt/compose.pronto-sources.yaml"],
+		])
+	}
+	files: "monorepo/docker-image.yaml": {
+		format: "yaml"
+		data: {}
 	}
 	files: {
+		// What tools outside CUE read of the cluster, evaluated here once:
+		// evaluating a program takes gigabytes, too much to repeat in the
+		// replay's container beside the stack it grades, or in a release. The
+		// token roles are those 001_roles.sql grants authenticator, which a
+		// Kubernetes release's operator would otherwise revoke.
+		".pronto/cluster.json": {
+			format: "json"
+			data: {
+				server: E.cluster.capabilities.server
+				if E.cluster.capabilities.server {
+					schema:     E.cluster.surface.schema
+					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+				}
+			}
+		}
 		".pronto/check-inputs.json": {
 			format: "json"
 			data: {
@@ -2859,14 +2823,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			format: "yaml"
 			data: {
 				version: "v2"
-				// A mirror's runtime sits inside the app, with protos of its own.
-				let pronto = E.loop.surface.sources.pronto
-				modules: [
-					if pronto != "" && !strings.HasPrefix(pronto, "../") {
-						{path: ".", excludes: [strings.TrimSuffix(pronto, "/plugins/pronto")]}
-					},
-					{path: "."},
-				][0:1]
+				modules: [{path: "."}]
 				breaking: use: ["WIRE_JSON"]
 			}
 		}
@@ -2904,7 +2861,20 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					    CREATE ROLE \(r) NOLOGIN;
 					  END IF;
 					"""
-				}], "\n") + "\nEND $$;\n" + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
+				}], "\n") + "\n" + _authenticator + "END $$;\n" + _login + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
+
+				// PostgREST's login, which switches to the role a request's token
+				// names; it applies that role's settings (the bounds below) only
+				// when the role is granted to it. No password, as electric's: the
+				// deployment's secret sets it (mecha's #RolePasswordsStep).
+				_tokenRoles: [for r in _roles if r != "electric" {r}]
+				_authenticator: """
+					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
+					    CREATE ROLE authenticator NOINHERIT;
+					  END IF;
+
+					"""
+				_login: "\nALTER ROLE authenticator LOGIN;\nGRANT \(strings.Join(_tokenRoles, ", ")) TO authenticator;\n"
 
 				// The tenancy floor binds PUBLIC, which includes service. A pipeline
 				// and the auth service read every tenant's rows by definition, so
@@ -2918,7 +2888,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				_bypass: [
 					if E._serviceOn {"\nALTER ROLE service BYPASSRLS;\n"},
 					// No password: the deployment's secret sets it (mecha's
-					// #ElectricPasswordStep), and a schema that set one would
+					// #RolePasswordsStep), and a schema that set one would
 					// overwrite it whenever it ran.
 					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN;\n" +
 						"GRANT USAGE ON SCHEMA public TO electric;\n" +
@@ -2928,22 +2898,15 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					},
 				]
 
-				_timeouts: [
-					"\n-- Finite machine bounds: statement, lock, and idle timeouts.\n" +
-					"ALTER ROLE anon SET statement_timeout = '5s';\n" +
-					"ALTER ROLE anon SET lock_timeout = '2s';\n" +
-					"ALTER ROLE anon SET idle_in_transaction_session_timeout = '10s';\n",
-					if E._authOn {
-						"ALTER ROLE app_user SET statement_timeout = '5s';\n" +
-						"ALTER ROLE app_user SET lock_timeout = '2s';\n" +
-						"ALTER ROLE app_user SET idle_in_transaction_session_timeout = '10s';\n"
+				// The innermost timeouts of a request (plugins/pronto/resilience), per token role.
+				_timeouts: list.Concat([["\n-- Finite machine bounds: statement, lock, and idle timeouts.\n"], [
+					for r in _tokenRoles
+					let tier = [if r == "service" {"service"}, "client"][0] {
+						"ALTER ROLE \(r) SET statement_timeout = '\(resilience.resilience.timeouts.statement[tier])s';\n" +
+						"ALTER ROLE \(r) SET lock_timeout = '\(resilience.resilience.timeouts.lock[tier])s';\n" +
+						"ALTER ROLE \(r) SET idle_in_transaction_session_timeout = '\(resilience.resilience.timeouts.idleInTransaction[tier])s';\n"
 					},
-					if E._serviceOn {
-						"ALTER ROLE service SET statement_timeout = '30s';\n" +
-						"ALTER ROLE service SET lock_timeout = '5s';\n" +
-						"ALTER ROLE service SET idle_in_transaction_session_timeout = '60s';\n"
-					},
-				]
+				]])
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
@@ -3236,6 +3199,23 @@ _traceHeader: include_patterns: ["^traceparent$"]
 								}
 							}]
 							processors: [{
+								// A delete from a table of default replica identity carries
+								// no before-image, only its key: the key becomes the image,
+								// or restore-deleted-row would put `%!s(<nil>)` on the bus.
+								id:        "key-as-before"
+								plugin:    "builtin:field.set"
+								condition: "{{ if or .Payload.After .Payload.Before }}false{{ else }}true{{ end }}"
+								settings: {
+									field: ".Payload.Before"
+									value: "{{ toJson .Key }}"
+								}
+							}, {
+								// field.set writes a string; only the key it wrote is one.
+								id:        "decode-key-before"
+								plugin:    "builtin:json.decode"
+								condition: "{{ if eq (printf \"%T\" .Payload.Before) \"opencdc.RawData\" }}true{{ else }}false{{ end }}"
+								settings: field: ".Payload.Before"
+							}, {
 								// Which table changed, carried in the row itself. The bus
 								// is one topic for every table and each pipeline reads all
 								// of it, so a consumer has to tell its own source's events
@@ -3539,6 +3519,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				    handle @rendered {
 				      reverse_proxy {$PRONTO_MESH:render:\(omnishell.#Render.port)} {
 				        header_up dapr-app-id render
+				        import bounded-render
 				      }
 				    }
 
@@ -3592,7 +3573,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 				"\(matcher) Content-Security-Policy \(json.Marshal(E._browserPolicy))\n"
 			}, ""][0]
-			text: strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
+			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why
@@ -3877,10 +3858,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// An app at the mirror's root releases from there.
 			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]
 			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
-			// An installed app's tools, the runtime among them, are its pinned
-			// releases, which setup installs; a mirror carrying the runtime in
-			// its tree has nothing to install first.
-			let pagesSetup = [if !E.build.meta.local {"\n      - run: sayt setup"}, ""][0]
+			// The app's tools, the runtime among them, are its pinned releases,
+			// which setup installs.
+			let pagesSetup = "\n      - run: sayt setup"
 			".github/workflows/cd.yml": {
 				format: "yaml"
 				text:   """

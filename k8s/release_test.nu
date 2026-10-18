@@ -27,6 +27,7 @@ def main [] {
 	test_render_manifests_eks
 	test_render_manifests_aks
 	test_dapr_annotations
+	test_timeout_budget_nests
 	test_external_secrets_manifests
 	test_observability_manifests
 	test_fetch_verified_checksum_mismatch
@@ -93,9 +94,18 @@ def test_schema_jobs [] {
 	assert not ((render-manifests (resolve-app "truco").cue_path "kind") | str contains "truco-migrate")
 	assert not ($yaml | str contains "postInitApplicationSQLRefs")
 	# One credential for postgres: CloudNativePG's superuser and owner secret is
-	# the one crud, auth and the Jobs read.
+	# the one auth and the Jobs read.
 	assert ($yaml | str contains "superuserSecret:\n    name: golaberto-db-postgres")
 	assert not ($yaml | str contains "golaberto-db-app")
+	# PostgREST logs in as authenticator, never postgres: it applies a token
+	# role's statement_timeout only when that role is granted to its login.
+	assert ($yaml | str contains "value: postgres://authenticator:$(AUTHENTICATOR_PASSWORD)@database:5432/golaberto")
+	let authenticator = ($yaml | from yaml | where kind == "Cluster" | first | get spec.managed.roles | where name == "authenticator" | first)
+	# The schema's own token roles, which the operator would otherwise revoke;
+	# a fixed list named roles an app without auth never creates.
+	assert equal $authenticator.inRoles (open ((resolve-app "golaberto").cue_path | path dirname | path join .pronto cluster.json) | get tokenRoles)
+	assert equal $authenticator.inRoles ["anon" "app_user" "service"]
+	assert equal $authenticator.inherit false
 	# Enforcing CNIs: OTLP/HTTP to Jaeger, and the instance manager's API server.
 	assert ($yaml | str contains "port: 4318")
 	assert ($yaml | str contains "port: 6443")
@@ -248,6 +258,46 @@ def test_dapr_annotations [] {
 	assert ($yaml | str contains "kubernetes.io/metadata.name: dapr-system")
 }
 
+const pronto_dir = path self ..
+
+def test_timeout_budget_nests [] {
+	print "test the timeouts nest, and every hop takes its bound from resilience..."
+	let budget_dir = ($pronto_dir | path join "resilience")
+	let resilience = (do { cd $budget_dir; cue export . -e resilience --out json } | from json)
+	let budget = $resilience.timeouts
+	let objects = (render-manifests (resolve-app "golaberto").cue_path "kind" | from yaml)
+	let route = ($objects | where kind == "HTTPRoute" | first | get spec.rules | each {|r| [($r.matches | first | get path.value) $r.timeouts.request] } | into record)
+	assert equal $route {"/": $"($budget.gateway.default)s", "/electric/": $"($budget.gateway.electric)s"}
+	let resiliency = ($objects | where kind == "Resiliency" | first | get spec)
+	assert equal $resiliency.policies.timeouts ($budget.mesh | items {|id, s| [$id $"($s)s"] } | into record)
+	# Timeouts alone. Dapr 1.14 counts every answer outside 200-399 as a
+	# failure, so a breaker opened on clients' 401s and shapes' 409s; and no
+	# retry policy, so a write is never replayed.
+	assert equal ($resiliency.targets.apps | values | where {|t| $t.circuitBreaker? != null } | length) 0
+	assert ($resiliency.policies.circuitBreakers? == null)
+	assert ($resiliency.policies.retries? == null)
+	assert equal ($objects | where kind == "BackendTrafficPolicy" | first | get spec.circuitBreaker) $resilience.gateway
+	assert equal ($objects | where kind == "BackendTrafficPolicy" | first | get spec.targetRefs.0.name) "golaberto-route"
+	# Caddy names hops; the numbers are the budget's alone.
+	let caddyfile = (open ($pronto_dir | path join "assets" "Caddyfile"))
+	assert not ($caddyfile | str contains "_timeout ")
+	assert equal ($caddyfile | parse --regex '(?m)^\s*import bounded-(?<hop>[a-z]+)$' | get hop | uniq | sort) ($budget.door | columns | where $it != "render" | sort)
+	# A budget that does not nest is refused, not deployed: a sidecar bound past
+	# caddy's in front of it, and a gateway bound under Electric's gate plus
+	# Electric, which run one after the other on the same request.
+	for broken in [
+		{bound: ($budget | update mesh.crud ($budget.door.crud + 1)), names: "door.crud"}
+		{bound: ($budget | update gateway.electric ($budget.door.electric + 1)), names: "gateway.electric"}
+	] {
+		let tmp = (mktemp --suffix .json)
+		{timeouts: $broken.bound, gateway: $resilience.gateway} | to json | save -f $tmp
+		let refused = (do { cd $budget_dir; cue vet -d "#Resilience" . $tmp } | complete)
+		rm $tmp
+		assert ($refused.exit_code != 0)
+		assert ($refused.stderr | str contains $broken.names)
+	}
+}
+
 def test_external_secrets_manifests [] {
 	print "test external secrets manifest emitted when externalSecrets.enabled is true..."
 	let cue_code = '
@@ -385,7 +435,7 @@ def test_cloud_release_refused [] {
 def test_sayt_sh_release_k8s_cli [] {
 	print "test sayt.sh release@k8s --dry-run via app .say.yaml rulemap..."
 	let root = (do { git rev-parse --show-toplevel } | complete | get stdout | str trim)
-	let res = (do { ^($root | path join "plugins/sayt/sayt.sh") -d apps/golaberto release@k8s --dry-run } | complete)
+	let res = (do { ^($root | path join "plugins/sayt/sayt.sh") -v -d apps/golaberto release@k8s --dry-run } | complete)
 
 	assert equal $res.exit_code 0
 	assert ($res.stdout | str contains "localhost:5001/golaberto-caddy:latest")

@@ -1,12 +1,9 @@
 import { exists } from "./missing.ts";
 
 // Keep consumer contributions and program-derived rules under CUE unification.
-export type Sources = { pronto: string; omnishell: string; mecha: string };
-
 export async function projectSay(
   appDir: string,
   programSay: unknown,
-  sources?: Sources,
 ): Promise<unknown> {
   if (!(await exists(`${appDir}/pronto/config.cue`))) return programSay;
   const child = new Deno.Command("cue", {
@@ -30,11 +27,6 @@ export async function projectSay(
     new TextEncoder().encode(JSON.stringify({
       pronto: {
         say: programSay,
-        ...(sources === undefined ? {} : {
-          runtime: sources.pronto,
-          omnishell: sources.omnishell,
-          mecha: sources.mecha,
-        }),
       },
     })),
   );

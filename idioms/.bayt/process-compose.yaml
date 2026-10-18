@@ -6,10 +6,7 @@ environment:
 processes:
   "bayt:httpcheck":
     entrypoint:
-    - mise
-    - tool-stub
-    - ../../plugins/bayt/runtime/nu.toml
-    - ../../plugins/bayt/runtime/bayt.nu
+    - bayt
     - microcheck
     - httpcheck
     - --help
@@ -28,9 +25,7 @@ processes:
     - ORIGIN=${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT}}
     readiness_probe:
       exec:
-        command: >-
-          mise tool-stub ../../plugins/bayt/runtime/nu.toml
-          ../../plugins/bayt/runtime/bayt.nu microcheck httpcheck http://127.0.0.1:8080/health
+        command: bayt microcheck httpcheck http://127.0.0.1:8080/health
       period_seconds: 5
       timeout_seconds: 5
       failure_threshold: 32

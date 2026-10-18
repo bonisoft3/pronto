@@ -160,7 +160,7 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       }
       const fixture = join(repo, "apps/jsfb");
       for await (const entry of Deno.readDir(fixture)) {
-        if (entry.name.startsWith(".") || ["mise.lock", "bayt.cue", "bayt.json", "program_terminal.cue", "program_pronto.cue"].includes(entry.name)) continue;
+        if (entry.name.startsWith(".") || ["mise.lock", "mise.local.toml", "bayt.cue", "bayt.json", "program_terminal.cue"].includes(entry.name)) continue;
         const source = join(fixture, entry.name), target = join(app, entry.name);
         if (entry.isDirectory) await copy(source, target);
         else if (entry.isFile) {
@@ -171,7 +171,6 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
           await Deno.writeTextFile(target, content);
         }
       }
-      await Deno.writeTextFile(join(app, "program_pronto.cue"), 'package jsfb\nloop: surface: sources: pronto: ""\n');
       // A prerendered route, whose document the writer renders through the
       // installed omnishell, as it reads markup through it.
       await Deno.writeTextFile(join(app, "program_document.cue"), 'package jsfb\ncode: surface: screens: about: {title: "About", route: "/about", prerender: true, reads: [], writes: [], forms: [], states: ["populated"], files: {handlers: [], adapters: []}}\n');
@@ -186,9 +185,11 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
         assert(result.success === success, text);
         return success ? decoder.decode(result.stdout) : text;
       }
-      // The installed omnishell is this tree's, as the monorepo's
-      // mise.local.toml makes it: derive reads markup through its command.
-      await Deno.writeTextFile(join(app, "mise.local.toml"), `[tools]\n"github:bonisoft3/omnishell" = "path:${join(scratch, "omnishell").replaceAll("\\", "/")}"\n`);
+      // The installed source runtimes are this tree's, as the monorepo's
+      // mise.local.toml makes them: the writer and derive run them through
+      // mise, and derive reads markup through omnishell's command.
+      const local = ["omnishell", "pronto", "mecha"].map((name) => `"github:bonisoft3/${name}" = "path:${join(scratch, name).replaceAll("\\", "/")}"\n`);
+      await Deno.writeTextFile(join(app, "mise.local.toml"), `[tools]\n${local.join("")}`);
       await $`mise trust -q ${app}`;
       const platformOs: Record<string, string> = { darwin: "macos", linux: "linux", windows: "windows" };
       const platformArch: Record<string, string> = { aarch64: "arm64", x86_64: "x64" };
@@ -198,10 +199,11 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
         const result = await new Deno.Command("mise", { args, cwd: app, env: { MISE_LOCKED: "0", ...commandEnv }, stdout: "piped", stderr: "piped" }).output();
         assert(result.success, `${args.join(" ")}: ${decoder.decode(result.stderr)}`);
       };
-      // The consumer is locked. Resolve and install only the released tool
-      // the renderer executes; local source stands in for the other tools.
-      await runMise(["lock", "--platform", currentPlatform, "github:terrastruct/d2"], { MISE_LOCKED: "0" });
-      await runMise(["install", `github:terrastruct/d2@${d2}`]);
+      // The consumer is locked. Resolve and install the released binaries it
+      // executes; local source stands in for the other tools.
+      const released = ["github:terrastruct/d2", "github:bonisoft3/bayt", "github:bonisoft3/sayt"];
+      await runMise(["lock", "--platform", currentPlatform, ...released], { MISE_LOCKED: "0" });
+      await runMise(["install", ...released.map((tool) => `${tool}@${tools[tool]}`)]);
       const terminal = join(scratch, "omnishell/runtime/cli.ts");
       await Deno.writeTextFile(join(app, "program_terminal.cue"), await deno(terminal, ["mode", "."]));
       let written = "";
@@ -232,14 +234,6 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       const missing = await deno(join(scratch, "pronto/write.ts"), ["."], false);
       assert(missing.includes("brief.html: no such file"), "the writer did not refuse the missing static");
       await Deno.writeTextFile(briefPath, brief);
-      // An installed loop with a monorepo cluster layout fails the same
-      // way: the seats below name the disagreement.
-      const programPath = join(app, "program.cue");
-      const program = await Deno.readTextFile(programPath);
-      await Deno.writeTextFile(programPath, program.replace('"local": terminal.surface.runtime != ""', '"local": true'));
-      const layout = await deno(join(scratch, "pronto/write.ts"), ["."], false);
-      assert(layout.includes("kept the monorepo layout"), "the writer did not refuse the monorepo cluster layout");
-      await Deno.writeTextFile(programPath, program);
     } finally {
       if (previousRegistry === undefined) Deno.env.delete("CUE_REGISTRY"); else Deno.env.set("CUE_REGISTRY", previousRegistry);
       if (previousCache === undefined) Deno.env.delete("CUE_CACHE_DIR"); else Deno.env.set("CUE_CACHE_DIR", previousCache);

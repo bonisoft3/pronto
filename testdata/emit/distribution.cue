@@ -11,37 +11,36 @@ import (
 _terminal: (pronto.#DefaultTerminal & {code: _code}).out
 _cluster: (pronto.#DefaultCluster & {code: _code, statics: []}).out
 _loop: (pronto.#DefaultLoop & {code: _code, terminal: _terminal, cluster: _cluster}).out
-_external: _loop & {surface: sources: pronto: ""}
 
 compilerChecks: [for name in ["derive", "types", "facts"] {_loop.surface.checks[name].verb & "lint"}]
-factsPriority:    _external.surface.sayYaml.say.lint.rulemap.facts.priority & 1
-localCompiler:    strings.Contains(_loop.surface.checks.types.cmds[0], "../../plugins/pronto") & true
-externalCompiler: strings.Contains(_external.surface.checks.types.cmds[0], "../../plugins") & false
-externalBuild:    _external.surface.sayYaml.say.build.do & "null"
+factsPriority:    _loop.surface.sayYaml.say.lint.rulemap.facts.priority & 1
+// Every command finds pronto where mise puts it, never by a path into the
+// monorepo, which a mirror receiving the same files has no copy of.
+compilerFromMise: strings.Contains(_loop.surface.checks.types.cmds[0], "../../plugins") & false
+externalBuild:    _loop.surface.sayYaml.say.build.do & "null"
 _project:         dist.#Project
 clientOnlyEdge: strings.Contains(_project.edge, "--ssr-origin") & false
 nativeSsrEdge: strings.Contains((dist.#Project & {ssrOrigin: "https://example.com"}).edge, "--ssr-origin \"https://example.com\"") & true
-sourceTerminalCommand: (dist.#Project & terminalProject.#Project & {omnishell: "../../plugins/omnishell"}).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#LocalGenerate
-installedTerminalCommand: (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
+terminalCommand:          (dist.#Project & terminalProject.#Project).say.say.generate.rulemap.omnishell.cmds[0].do & terminalProject.#Generate
 sourcePin:                _project.mise.tools."github:bonisoft3/pronto" & dist.#Version
 bootstrapHasNoTerminal:   strings.Contains(_project.write, "omnishell") & false
-_externalBuild: (pronto.#DefaultBuild & {code: _code, loop: _external, cluster: _cluster, terminal: _terminal}).out.project
+_externalBuild: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project
 externalDirectory:   _externalBuild.dir & "."
 externalProjectName: (_externalBuild.name == _code.meta.name) & true
-localProjectName: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.name == "apps_\(_code.meta.name)") & true
 externalVisualContext: (_externalBuild.targets.integrate.compose.build.additional_contexts.root == _|_) & true
 // The app's whole tree is the build's input: a list of named files missed the
 // subpackages, embeds and derived sources apps add, and the image refused the
 // program. The module, config, .say.yaml and held seed rows all ride in on it,
 // so what it excludes is pinned: an exclude that took one of them would refuse
 // the program the same way.
-externalTreeExcludes: [for _, e in _externalBuild.targets.generate.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", ".pronto/proto-baseline.json", "**/node_modules/**"]
+// mise.local.lock records the checkout's absolute paths, which a container
+// does not have.
+externalTreeExcludes: [for _, e in _externalBuild.targets.generate.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", ".pronto/proto-baseline.json", "**/node_modules/**", "mise.local.lock"]
 // Installed apps verify releases as the monorepo's do: off, globally and per
 // backend, since mise reads attestations from a rate-limited GitHub API.
 _settings: _project.mise.settings
 attestationsOff: [_settings.github_attestations, _settings.slsa, _settings.github.slsa, _settings.github.github_attestations, _settings.aqua.github_attestations, _settings.aqua.cosign, _settings.aqua.slsa, _settings.aqua.minisign] & [false, false, false, false, false, false, false, false]
 
-localBuild:                 _loop.surface.sayYaml.say.build.do & externalBuild
 externalLeafShell:          _externalBuild.targets.build.cmd.builtin.shell & "nu"
 externalLeafIsWriter:       strings.Contains(_externalBuild.targets.generate.cmd.builtin.dockerfile.do, "write.ts") & true
 externalLeafIsNotRecursive: strings.Contains(_externalBuild.targets.build.cmd.builtin.do, "saytw") & false
@@ -55,7 +54,9 @@ externalLintRefreshesHistory:        _externalBuild.targets["lint-inputs"].taskf
 externalTestIncludesFixtures:        (_externalBuild.targets.test.srcs.defaultExclude["pronto-tests"] == null) & true
 externalTestIncludesFacts:           list.Contains(_externalBuild.targets.test.srcs.globs, ".pronto/facts.json") & true
 externalTestLeafDoesNotReenterGate:  strings.Contains(_externalBuild.targets.test.cmd.builtin.do, "task-leaf test") & true
-externalTestCachesPinnedRuntime:     _externalBuild.targets.test.taskfile.incremental & true
+// Its checkers are the runtime's, outside the app's source view in the
+// monorepo, so a go-task stamp over the app alone would call it fresh.
+externalTestRunsEveryTime:           (_externalBuild.targets.test.taskfile.incremental == false) & true
 externalChecksCopyGeneratedConfig:   (_externalBuild.targets.lint.srcs.defaultExclude["pronto-bayt"] == null) & true
 externalImageLintKeepsCompilerCheck: _externalBuild.targets.lint.cmd.builtin.dockerfile.do & "cue vet -c ./..."
 externalImageTestUsesGeneratedInputs: _externalBuild.targets.test.cmd.builtin.dockerfile.do & "deno eval 0"

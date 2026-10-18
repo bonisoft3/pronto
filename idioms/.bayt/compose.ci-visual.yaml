@@ -41,14 +41,52 @@ secrets:
   bkid_project:
     environment: BKID_PROJECT
 services:
-  apps_idioms-ci-visual:
+  idioms-ci-visual:
     build:
       additional_contexts:
-        apps_idioms-integrate_srcs: service:apps_idioms-integrate_srcs
-        apps_idioms-integrate_bayt: service:apps_idioms-integrate_bayt
-        apps_idioms-caddy_srcs: service:apps_idioms-caddy_srcs
-        bayt: ../../../plugins/bayt/runtime
-        root: ../../..
+        idioms-integrate_srcs: service:idioms-integrate_srcs
+        idioms-integrate_bayt: service:idioms-integrate_bayt
+        idioms-caddy_srcs: service:idioms-caddy_srcs
+        bayt: >-
+          ${BAYT_RUNTIME:-docker-image://bonitao/bayt-runtime:1.2.1@sha256:c5776093b5c464b77365e3bb5310b2c5d9c8d99f5cc07a131c30a4ea03d42f5c}
+        workspaceroot-pronto-sources_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}
+        libraries_mecha-airlock-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_bayt}
+        libraries_mecha-auth-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-auth-image_bayt}
+        libraries_mecha-clock-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-clock-image_bayt}
+        libraries_mecha-compute-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-compute-image_bayt}
+        libraries_mecha-conduit-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-conduit-image_bayt}
+        libraries_mecha-database-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_bayt}
+        libraries_mecha-mesh-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_bayt}
+        libraries_mecha-ticker-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_bayt}
+        libraries_mecha-database-image_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_srcs}
+        libraries_mecha-mesh-image_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_srcs}
+        libraries_mecha-auth-image_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-auth-image_srcs}
+        libraries_mecha-ticker-image_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_srcs}
+        libraries_mecha-clock-image_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-clock-image_srcs}
+        libraries_mecha-compute-image_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-compute-image_srcs}
+        libraries_mecha-airlock-image_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_srcs}
+        plugins_omnishell-runtime-image_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image_srcs}
+        plugins_omnishell-runtime-image_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image_bayt}
+        workspaceroot-pronto-sources_bayt: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_bayt}
       context: ..
       dockerfile: .bayt/Dockerfile.ci-visual
       secrets:
@@ -74,12 +112,15 @@ services:
       - bkid_project
       target: ci-visual
       tags:
-      - bayt-apps_idioms-ci-visual:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
-      - bayt-apps_idioms-ci-visual:latest
+      - bayt-idioms-ci-visual:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-idioms-ci-visual:latest
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-ci-visual:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+        MONOREPO_COMPOSE_MODE: ${MONOREPO_COMPOSE_MODE:-}
+        BAYT_RUNTIME: ${BAYT_RUNTIME:-}
+    image: bayt-idioms-ci-visual:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
     secrets:
     - docker_host
     - buildx_builder
@@ -101,16 +142,17 @@ services:
     - actions_results_url
     - actions_runtime_token
     - bkid_project
-  apps_idioms-ci-visual_bayt:
+  idioms-ci-visual_bayt:
     build:
       additional_contexts:
-        apps_idioms-integrate_bayt: service:apps_idioms-integrate_bayt
-        apps_idioms-caddy_bayt: service:apps_idioms-caddy_bayt
+        idioms-integrate_bayt: service:idioms-integrate_bayt
+        idioms-caddy_bayt: service:idioms-caddy_bayt
       context: ..
       dockerfile: .bayt/Dockerfile.ci-visual
       target: ci-visual_bayt
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-ci-visual_bayt:latest
+    image: bayt-idioms-ci-visual_bayt:latest
     scale: 0

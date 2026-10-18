@@ -1,6 +1,6 @@
 // The emitted #rpkPipeline in the pinned Connect image, in streams mode with
 // the transform's -r cdc-trace.yaml, reading a real Redis stream in the shape
-// conduit v0.14.0 publishes: each transaction's marker (`__table: txn_trace`)
+// conduit publishes: each transaction's marker (`__table: txn_trace`)
 // right before its first change. Crud is a mock that records each request's
 // traceparent, the header PostgREST hands mecha.mark_txn to mark the derived
 // write's own transaction with.

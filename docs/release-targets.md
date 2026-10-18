@@ -118,16 +118,15 @@ the site lives on the mirror. An app at the root of its own public repository
 tags `vX.Y.Z`, and the same workflow deploys it without a mirror.
 
 **An installed app's mirror** is the app as its own repository, at its root
-and without `mise.local.toml`, `.env` and `.bayt/.env`, the files that point a
-checkout's copy at the runtime's sibling trees, so the mirror runs the pronto,
-omnishell, mecha, bayt and sayt releases its `.mise.toml` pins. It is
-published only once, with those pins, `setup`, `build`, `lint` and
-`integrate` pass on the synced tree. Nothing holds the mirror to what a
-checkout would regenerate. An app need not be in sync with the framework,
-which is what anyone bumping one runtime piece on its own meets; a change
-that needs an unreleased framework change holds the mirror back until that
-release is pinned, rather than failing the pull request that made it, as a
-check of every pull request against the pins would.
+and without `mise.local.toml`, the file that points a checkout's copy at the
+runtime's sibling trees, so the mirror runs the pronto, omnishell, mecha, bayt
+and sayt releases its `.mise.toml` pins. It is published only once, with those
+pins, `setup`, `build`, `lint` and `integrate` pass on the synced tree.
+Nothing holds the mirror to what a checkout would regenerate. An app need not
+be in sync with the framework, which is what anyone bumping one runtime piece
+on its own meets; a change that needs an unreleased framework change holds the
+mirror back until that release is pinned, rather than failing the pull request
+that made it, as a check of every pull request against the pins would.
 
 **The refusals.** `emit.cue` refuses the target, a `cue vet` error rather than
 a broken release, for a program with:

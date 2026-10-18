@@ -48,6 +48,8 @@
 (tracing-off) {
 }
 
+# Each upstream's bound is `import bounded-<hop>`, a snippet emitted ahead of
+# this file from plugins/pronto/resilience.
 (app) {
   # Every request is a span, the child of the traceparent it arrived with (the
   # gateway's), and every upstream is sent the span's own; the access log names
@@ -110,6 +112,7 @@
     request_header @post Prefer "return=representation,resolution=ignore-duplicates"
     reverse_proxy {$PRONTO_MESH:crud:3000} {
       header_up dapr-app-id crud
+      import bounded-crud
     }
   }
   handle /electric/* {
@@ -132,6 +135,7 @@
       forward_auth {$PRONTO_MESH:auth:9999} {
         uri /auth/shape/verify
         header_up dapr-app-id auth
+        import bounded-auth
       }
       # Electric takes its secret as a query parameter, added by an authorizing
       # proxy and never sent by a client. It is set after the gate, so a client
@@ -140,9 +144,7 @@
       reverse_proxy {$PRONTO_MESH:electric:3000} {
         header_up dapr-app-id electric
         flush_interval -1
-        transport http {
-          read_timeout 300s
-        }
+        import bounded-electric
         # Electric's 5xx reaches the client without its text: mecha's services/proxy/Caddyfile says why.
         @fault status 5xx
         handle_response @fault {
@@ -161,6 +163,7 @@
   handle /auth/* {
     reverse_proxy {$PRONTO_MESH:auth:9999} {
       header_up dapr-app-id auth
+      import bounded-auth
     }
   }
   # The wake. Ships unconditionally like /auth, and mounted WITH its prefix
@@ -169,6 +172,7 @@
   handle /poke {
     reverse_proxy {$PRONTO_MESH:ticker:9998} {
       header_up dapr-app-id ticker
+      import bounded-ticker
     }
   }
   # The blob plane. Ships unconditionally, like /auth — in a cluster
@@ -178,12 +182,14 @@
     uri strip_prefix /blobs
     reverse_proxy {$PRONTO_MESH:rclone-s3:3900} {
       header_up dapr-app-id rclone-s3
+      import bounded-blobs
     }
   }
   handle /img/* {
     uri strip_prefix /img
     reverse_proxy {$PRONTO_MESH:imgproxy:8081} {
       header_up dapr-app-id imgproxy
+      import bounded-blobs
     }
   }
   handle /health {

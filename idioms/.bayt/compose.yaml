@@ -5,68 +5,69 @@ include:
   - ./compose.bayt.ports.yaml
   required: false
 services:
-  program:
+  caddy:
     extends:
-      file: ./compose.program.yaml
-      service: apps_idioms-program
+      file: ./compose.caddy.yaml
+      service: idioms-caddy
     profiles:
-    - program
+    - caddy
     scale: 1
   setup:
     extends:
       file: ./compose.setup.yaml
-      service: apps_idioms-setup
+      service: idioms-setup
     profiles:
     - setup
+    scale: 1
   lint:
     extends:
       file: ./compose.lint.yaml
-      service: apps_idioms-lint
+      service: idioms-lint
     profiles:
     - lint
   generate:
     extends:
       file: ./compose.generate.yaml
-      service: apps_idioms-generate
+      service: idioms-generate
     profiles:
     - generate
   build:
     extends:
       file: ./compose.build.yaml
-      service: apps_idioms-build
+      service: idioms-build
     profiles:
     - build
   test:
     extends:
       file: ./compose.test.yaml
-      service: apps_idioms-test
+      service: idioms-test
     profiles:
     - test
   launch:
     extends:
       file: ./compose.launch.yaml
-      service: apps_idioms-launch
+      service: idioms-launch
     profiles:
     - launch
     scale: 1
   integrate:
     extends:
       file: ./compose.integrate.yaml
-      service: apps_idioms-integrate
+      service: idioms-integrate
     profiles:
     - integrate
     scale: 1
   ci-visual:
     extends:
       file: ./compose.ci-visual.yaml
-      service: apps_idioms-ci-visual
+      service: idioms-ci-visual
     profiles:
     - ci-visual
     scale: 1
-  caddy:
+  ci:
     extends:
-      file: ./compose.caddy.yaml
-      service: apps_idioms-caddy
+      file: ./compose.ci.yaml
+      service: idioms-ci
     profiles:
-    - caddy
+    - ci
     scale: 1

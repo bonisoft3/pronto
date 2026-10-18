@@ -1,16 +1,19 @@
 # generated from bayt.cue — do not edit
 services:
-  apps_idioms-caddy:
+  idioms-caddy:
     build:
       additional_contexts:
-        root: ../../..
+        root: ..
+        plugins_omnishell-runtime-image: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.12.1@sha256:df434871aa11a1863a77ef125f7847a2978fd3ecde76b47f50d51e1a8749e10e}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}
       context: ..
       dockerfile: .bayt/Dockerfile.caddy
       target: caddy
       tags:
-      - bayt-apps_idioms-caddy:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
-      - bayt-apps_idioms-caddy:latest
+      - bayt-idioms-caddy:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-idioms-caddy:latest
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
     develop:
@@ -91,96 +94,6 @@ services:
         path: ../messages/pt-BR.json
         target: /srv/messages/pt-BR.json
       - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/shell.js
-        target: /omnishell/interpreter/shell.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/chrome.js
-        target: /omnishell/interpreter/chrome.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/screen.js
-        target: /omnishell/interpreter/screen.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/fragment.js
-        target: /omnishell/interpreter/fragment.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/data-sync.js
-        target: /omnishell/interpreter/data-sync.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/hybrid-client.js
-        target: /omnishell/interpreter/hybrid-client.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/cortex-session.js
-        target: /omnishell/interpreter/cortex-session.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/cortex-command.js
-        target: /omnishell/interpreter/cortex-command.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/validate.js
-        target: /omnishell/interpreter/validate.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/render.js
-        target: /omnishell/interpreter/render.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/release-plan.js
-        target: /omnishell/interpreter/release-plan.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/release-assets.js
-        target: /omnishell/interpreter/release-assets.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/preloads.js
-        target: /omnishell/interpreter/preloads.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/markup.js
-        target: /omnishell/interpreter/markup.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/script-url.js
-        target: /omnishell/interpreter/script-url.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/deferred-boot.js
-        target: /omnishell/interpreter/deferred-boot.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/host-dom.js
-        target: /omnishell/interpreter/host-dom.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/hatch.js
-        target: /omnishell/interpreter/hatch.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/hatch-worker.js
-        target: /omnishell/interpreter/hatch-worker.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/storybook.js
-        target: /omnishell/interpreter/storybook.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/jessie.js
-        target: /omnishell/interpreter/jessie.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/kinetic.js
-        target: /omnishell/interpreter/kinetic.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/prng.js
-        target: /omnishell/interpreter/prng.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/vendor/mecha-client.js
-        target: /omnishell/interpreter/vendor/mecha-client.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/vendor/js-yaml.js
-        target: /omnishell/interpreter/vendor/js-yaml.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/vendor/ses.umd.min.js
-        target: /omnishell/interpreter/vendor/ses.umd.min.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/vendor/morphlex.js
-        target: /omnishell/interpreter/vendor/morphlex.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/vendor/messages.js
-        target: /omnishell/interpreter/vendor/messages.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/interpreter/vendor/game-inputs.js
-        target: /omnishell/interpreter/vendor/game-inputs.js
-      - action: sync+restart
-        path: ../../../plugins/omnishell/components/wallclock.js
-        target: /omnishell/components/wallclock.js
-      - action: sync+restart
         path: ../brief.html
         target: /srv/docs/brief.html
       - action: sync+restart
@@ -203,7 +116,7 @@ services:
         target: /srv/sitemap.xml
     environment:
       ELECTRIC_SECRET: ${ELECTRIC_SECRET:-dev-electric-secret}
-      ORIGIN: ${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT:-30146}}
+      ORIGIN: ${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT:-28068}}
     healthcheck:
       test:
       - CMD
@@ -214,28 +127,30 @@ services:
       retries: 30
       start_period: 10s
       start_interval: 500ms
-    image: bayt-apps_idioms-caddy:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+    image: bayt-idioms-caddy:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
     networks:
       default:
         aliases:
         - caddy
-  apps_idioms-caddy_bayt:
+  idioms-caddy_bayt:
     build:
       context: ..
       dockerfile: .bayt/Dockerfile.caddy
       target: caddy_bayt
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-caddy_bayt:latest
+    image: bayt-idioms-caddy_bayt:latest
     scale: 0
-  apps_idioms-caddy_srcs:
+  idioms-caddy_srcs:
     build:
       context: ..
       dockerfile: .bayt/Dockerfile.caddy
       target: caddy_srcs
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-caddy_srcs:latest
+    image: bayt-idioms-caddy_srcs:latest
     scale: 0

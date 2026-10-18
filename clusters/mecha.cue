@@ -40,6 +40,10 @@ import (
 // pins what it builds on, so a pronto release names a mecha release's images
 // and an app pinning pronto gets them through it. One per service of
 // impl.#Images, from the pin lines a mecha release prints.
+// Those whose targets copy mecha's sources, which a build from a checkout
+// carries as each one's srcs view.
+#Sourced: impl.#Sourced
+
 published: impl.#Published & {
 	airlock:  "bonitao/mecha-airlock:0.12.1@sha256:e8d4f8853ec49672e2515fda2f6429322680da6443b36dce9e41f375af58122f"
 	auth:     "bonitao/mecha-auth:0.12.1@sha256:4d7fc684af603f3c79459ec76fe578ed1c87c7bfa9b2abb8106d6af4d7ba2fd6"

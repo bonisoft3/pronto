@@ -54,12 +54,12 @@ import (
 	}
 }
 
-// Commands resolve an installation at execution time, never into generated files.
+// Commands resolve an installation at execution time, never into generated
+// files: where mise puts it, the pinned release or, under a checkout's
+// mise.local.toml, its tree.
 #Run: {
-	runtime: string
-	args:    string
-	root: [if runtime != "" {json.Marshal(runtime)}, "(run-mise where \(#Runtimes.pronto) | str trim)"][0]
-	out: "use tools.nu [run-mise]; let pronto = \(root); \(args)"
+	args: string
+	out:  "use tools.nu [run-mise]; let pronto = (run-mise where \(#Runtimes.pronto) | str trim); \(args)"
 }
 
 #Writer: {
@@ -69,15 +69,11 @@ import (
 
 #Project: P={
 	_valid:    saycfg.say & P.say.say
-	runtime:   *"" | string
 	domain:    *"" | string
 	ssrOrigin: *"" | string
-	// The interpreter's root and mecha's, which the bundler reads from: a
-	// sibling path in the monorepo, the installed distribution elsewhere.
-	omnishell: *"" | string
-	mecha:     *"" | string
-	_omnishell: [if P.omnishell != "" {json.Marshal(P.omnishell)}, "(run-mise where \(#Runtimes.omnishell) | str trim)"][0]
-	_mecha: [if P.mecha != "" {json.Marshal(P.mecha)}, "(run-mise where \(#Runtimes.mecha) | str trim)"][0]
+	// The interpreter's root and mecha's, which the bundler reads from.
+	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
+	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
 	tools: #Tools
 	mise: {
 		...
@@ -95,9 +91,8 @@ import (
 		}
 		tools: P.tools
 	}
-	_run: #Run & {runtime: "\(P.runtime)"}
-	_compilerRoot: [if P.runtime != "" {json.Marshal(P.runtime)}, "(^mise where \(#Runtimes.pronto) | str trim)"][0]
-	compiler: "^\((#Writer & {root: P._compilerRoot}).out)"
+	_run: #Run
+	compiler: "^\((#Writer & {root: "(^mise where \(#Runtimes.pronto) | str trim)"}).out)"
 	write: (_run & {args: "run-mise exec -- \((#Writer & {root: "$pronto"}).out)"}).out
 	// The live tables a pages release fills from the settled container
 	// cluster, and the streams that cluster runs; none where the app runs no
@@ -131,8 +126,8 @@ import (
 	k8s: (_run & {args: "nu ($pronto | path join k8s release.nu)"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
-		// An installed pronto has no siblings, which its own tests import.
-		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir \([if P.runtime == "" {"--exclude [*_test.ts *.test.ts] "}, ""][0])'*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
+		// Its own tests import siblings a release of it does not carry.
+		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
 		identity: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check ."}).out
 		facts: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
 		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
@@ -153,13 +148,15 @@ import (
 		doctor: do:    "use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno --version; run-mise where github:bonisoft3/pronto"
 		generate: rulemap: {
 			...
-			"auto-cue": cmds: [{use: "./tools.nu", do: "tools run-cue cmd generate ./pronto"}]
+			// An app that bootstraps its repository's root from pronto keeps that
+			// project in pronto/, with the command that writes it; a pronto/
+			// holding only an app's own rules has nothing to write.
+			"auto-cue": cmds: [{use: "./tools.nu", do: "if ('pronto/generate_tool.cue' | path exists) { tools run-cue cmd generate ./pronto }"}]
 			"pronto": {
 				priority: 1
-				if P.runtime == "" {
-					cmds: [{do: "if ('program.cue' | path exists) { let pkg = (open program.cue --raw | parse -r '(?m)^package\\s+(\\w+)\\s*$' | first | get capture0); $'package ($pkg)\nloop: surface: sources: pronto: \"\"\n' | save --force program_pronto.cue; \(P.write) }"}]
-				}
-				if P.runtime != "" {cmds: [{do: P.write}]}
+				// Joined, not interpolated: cue v0.16.1 panics interpolating P.write
+				// into a program that fails, where it should say why it fails.
+				cmds: [{do: strings.Join(["if ('program.cue' | path exists) { ", P.write, " }"], "")}]
 			}
 		}
 		build: do: "null"

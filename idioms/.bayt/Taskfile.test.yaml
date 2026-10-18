@@ -5,5 +5,7 @@ tasks:
     - "::bayt:build"
     run: once
     cmds:
-    - nu -c "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf test'"
+    - >-
+      nu -c "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use
+      task-leaf.nu; task-leaf test'"
 version: "3"

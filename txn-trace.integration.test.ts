@@ -55,7 +55,7 @@ out: (pronto.#emit & {
   cluster:  _cluster
   terminal: _terminal
   loop:     _loop
-  build:    (pronto.#DefaultBuild & {code: app, loop: _loop, cluster: _cluster}).out
+  build:    (pronto.#DefaultBuild & {code: app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
 }).files
 `;
 

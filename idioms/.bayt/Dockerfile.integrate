@@ -1,30 +1,33 @@
 # generated from bayt.cue — do not edit
 FROM mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48 AS integrate
-WORKDIR /monorepo/apps/idioms
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
 COPY --from=denoland/deno:bin-2.5.5@sha256:a8dd9a073b2b4d1beb77a8174830c5af54e32517808dcc28249ed6c04fdac979 /deno /usr/local/bin/deno
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV DENO_DIR=/deno-cache
-COPY --from=root plugins/omnishell /omnishell
+COPY --from=plugins_omnishell-runtime-image / /omnishell
 RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts
 COPY --parents shell/shell.yaml shell/screens/** ./
 COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.integrate.yaml .bayt/bayt.integrate.json ./.bayt/
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS integrate_ctxs
-WORKDIR /monorepo/apps/idioms
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
 COPY --parents shell/shell.yaml shell/screens/** ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS integrate_srcs
 COPY --from=integrate_ctxs /monorepo /monorepo
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS integrate_bayt_ctxs
-WORKDIR /monorepo/apps/idioms
-COPY --parents .bayt/compose.integrate.yaml .bayt/Dockerfile.integrate .bayt/bayt.integrate.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.integrate.yaml .bayt/compose.integrate.closure.yaml .bayt/process-compose.yaml ./
-COPY --from=apps_idioms-launch_bayt /monorepo /monorepo
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY --parents .bayt/compose.integrate.yaml .bayt/Dockerfile.integrate .bayt/bayt.integrate.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.integrate.yaml .bayt/compose.integrate.closure.yaml .bayt/process-compose.yaml .bayt/compose.*.yaml .bayt/Dockerfile.* .bayt/bayt.*.json .bayt/Taskfile.*.yaml monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml ./
+COPY --from=idioms-launch_bayt /monorepo /monorepo
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS integrate_bayt
 COPY --from=integrate_bayt_ctxs /monorepo /monorepo

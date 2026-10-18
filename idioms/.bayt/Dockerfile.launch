@@ -1,15 +1,17 @@
 # generated from bayt.cue — do not edit
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS launch
-WORKDIR /monorepo/apps/idioms
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
 COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/bayt.launch.json ./.bayt/
 CMD ["tail", "-f", "/dev/null"]
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS launch_bayt_ctxs
-WORKDIR /monorepo/apps/idioms
-COPY --parents .bayt/compose.launch.yaml .bayt/Dockerfile.launch .bayt/bayt.launch.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/compose.launch.closure.yaml .bayt/process-compose.yaml ./
-COPY --from=apps_idioms-caddy_bayt /monorepo /monorepo
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY --parents .bayt/compose.launch.yaml .bayt/Dockerfile.launch .bayt/bayt.launch.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/compose.launch.closure.yaml .bayt/process-compose.yaml .bayt/compose.*.yaml .bayt/Dockerfile.* .bayt/bayt.*.json .bayt/Taskfile.*.yaml monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml ./
+COPY --from=idioms-caddy_bayt /monorepo /monorepo
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS launch_bayt
 COPY --from=launch_bayt_ctxs /monorepo /monorepo

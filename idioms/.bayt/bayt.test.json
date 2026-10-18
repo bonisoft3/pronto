@@ -5,7 +5,7 @@
     "preambleCopyContexts": [],
     "from": {
       "ref": ":build",
-      "name": "apps_idioms-build"
+      "name": "idioms-build"
     },
     "add": [],
     "mounts": [],
@@ -20,8 +20,8 @@
     "cmd": null
   },
   "name": "test",
-  "project": "apps_idioms",
-  "dir": "apps/idioms",
+  "project": "idioms",
+  "dir": ".",
   "activate": "mise x --",
   "srcs": {
     "globs": [
@@ -31,6 +31,7 @@
     ],
     "exclude": [
       ".pronto/proto-baseline.json",
+      "mise.local.lock",
       "**/node_modules/**",
       ".task/**"
     ]
@@ -46,8 +47,8 @@
   "synthetics": {
     "bayt": {
       "name": "test_bayt",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -77,19 +78,16 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.test.yaml",
-        "apps/idioms/.bayt/compose.build.yaml",
-        "apps/idioms/.bayt/compose.generate.yaml",
-        "apps/idioms/.bayt/compose.program.yaml",
-        "apps/idioms/.bayt/compose.setup.yaml",
-        ".bayt/compose.setup.yaml",
-        ".bayt/compose.pronto-sources.yaml"
+        "./.bayt/compose.test.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml"
       ]
     },
     "outs": {
       "name": "test_outs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -111,19 +109,16 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.test.yaml",
-        "apps/idioms/.bayt/compose.build.yaml",
-        "apps/idioms/.bayt/compose.generate.yaml",
-        "apps/idioms/.bayt/compose.program.yaml",
-        "apps/idioms/.bayt/compose.setup.yaml",
-        ".bayt/compose.setup.yaml",
-        ".bayt/compose.pronto-sources.yaml"
+        "./.bayt/compose.test.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml"
       ]
     },
     "srcs": {
       "name": "test_srcs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -141,6 +136,7 @@
         ],
         "exclude": [
           ".pronto/proto-baseline.json",
+          "mise.local.lock",
           "**/node_modules/**",
           ".task/**"
         ]
@@ -151,54 +147,13 @@
       "transitiveDeps": [
         "build_srcs",
         "generate_srcs",
-        "program_srcs",
         "setup_srcs"
       ],
       "transitiveCrossDeps": [
         {
-          "name": "pronto-sources_srcs",
-          "project": "workspaceroot",
-          "dir": "",
-          "outs": {
-            "globs": [
-              "cue.mod",
-              "plugins/pronto",
-              "plugins/omnishell",
-              "plugins/bayt",
-              "plugins/sayt",
-              "libraries/mecha"
-            ],
-            "exclude": [
-              "**/docs/**",
-              "**/testdata/**",
-              "**/*_test.*",
-              "**/*.test.*",
-              "**/.bayt/**",
-              "**/.task/**",
-              "**/node_modules/**"
-            ]
-          }
-        },
-        {
-          "name": "setup_srcs",
-          "project": "workspaceroot",
-          "dir": "",
-          "outs": {
-            "globs": [
-              "[m]ise.toml",
-              "[.]mise.toml",
-              "[m]ise.lock",
-              "[.]tool-versions",
-              "gradle/libs.versions.toml",
-              "plugins/devserver/docker-bridge.sh"
-            ],
-            "exclude": []
-          }
-        },
-        {
-          "project": "apps_idioms",
+          "project": "idioms",
           "name": "build_srcs",
-          "dir": "apps/idioms",
+          "dir": ".",
           "outs": {
             "globs": [
               "**",
@@ -206,6 +161,7 @@
             ],
             "exclude": [
               ".pronto/proto-baseline.json",
+              "mise.local.lock",
               "**/node_modules/**",
               ".task/**",
               "tests/**"
@@ -213,9 +169,9 @@
           }
         },
         {
-          "project": "apps_idioms",
+          "project": "idioms",
           "name": "generate_srcs",
-          "dir": "apps/idioms",
+          "dir": ".",
           "outs": {
             "globs": [
               "**"
@@ -223,6 +179,7 @@
             "exclude": [
               ".bayt/**",
               ".pronto/proto-baseline.json",
+              "mise.local.lock",
               "**/node_modules/**",
               ".task/**",
               "tests/**"
@@ -230,9 +187,9 @@
           }
         },
         {
-          "project": "apps_idioms",
+          "project": "idioms",
           "name": "setup_srcs",
-          "dir": "apps/idioms",
+          "dir": ".",
           "outs": {
             "globs": [
               "[m]ise.toml",
@@ -251,13 +208,10 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.test.yaml",
-        "apps/idioms/.bayt/compose.build.yaml",
-        "apps/idioms/.bayt/compose.generate.yaml",
-        "apps/idioms/.bayt/compose.program.yaml",
-        "apps/idioms/.bayt/compose.setup.yaml",
-        ".bayt/compose.setup.yaml",
-        ".bayt/compose.pronto-sources.yaml"
+        "./.bayt/compose.test.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml"
       ]
     }
   },
@@ -277,66 +231,20 @@
   "transitiveDeps": [
     "build",
     "generate",
-    "program",
     "setup"
   ],
-  "transitiveCrossDeps": [
-    {
-      "name": "pronto-sources_srcs",
-      "project": "workspaceroot",
-      "dir": "",
-      "outs": {
-        "globs": [
-          "cue.mod",
-          "plugins/pronto",
-          "plugins/omnishell",
-          "plugins/bayt",
-          "plugins/sayt",
-          "libraries/mecha"
-        ],
-        "exclude": [
-          "**/docs/**",
-          "**/testdata/**",
-          "**/*_test.*",
-          "**/*.test.*",
-          "**/.bayt/**",
-          "**/.task/**",
-          "**/node_modules/**"
-        ]
-      }
-    },
-    {
-      "name": "setup",
-      "project": "workspaceroot",
-      "dir": "",
-      "outs": {
-        "globs": [
-          "[m]ise.toml",
-          "[.]mise.toml",
-          "[m]ise.lock",
-          "[.]tool-versions",
-          "gradle/libs.versions.toml",
-          "plugins/devserver/docker-bridge.sh",
-          ".task/bayt/setup.hash"
-        ],
-        "exclude": []
-      }
-    }
-  ],
+  "transitiveCrossDeps": [],
   "upClosure": [
-    "apps/idioms/.bayt/compose.test.yaml",
-    "apps/idioms/.bayt/compose.build.yaml",
-    "apps/idioms/.bayt/compose.generate.yaml",
-    "apps/idioms/.bayt/compose.program.yaml",
-    "apps/idioms/.bayt/compose.setup.yaml",
-    ".bayt/compose.setup.yaml",
-    ".bayt/compose.pronto-sources.yaml"
+    "./.bayt/compose.test.yaml",
+    "./.bayt/compose.build.yaml",
+    "./.bayt/compose.generate.yaml",
+    "./.bayt/compose.setup.yaml"
   ],
   "chainedDeps": [
     {
       "name": "build",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "outs": {
         "globs": [],
         "exclude": []
@@ -344,17 +252,8 @@
     },
     {
       "name": "generate",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
-      "outs": {
-        "globs": [],
-        "exclude": []
-      }
-    },
-    {
-      "name": "program",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "outs": {
         "globs": [],
         "exclude": []
@@ -362,8 +261,8 @@
     },
     {
       "name": "setup",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "outs": {
         "globs": [],
         "exclude": []
@@ -380,13 +279,14 @@
         ],
         "exclude": [
           ".pronto/proto-baseline.json",
+          "mise.local.lock",
           "**/node_modules/**",
           ".task/**"
         ],
         "defaultGlobs": null,
         "defaultExclude": null
       },
-      "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf test'",
+      "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf test'",
       "shell": "nu",
       "dockerfile": {
         "do": "deno eval 0"

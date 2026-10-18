@@ -4,6 +4,8 @@ import (
 	"encoding/yaml"
 	"list"
 	"strings"
+
+	"github.com/bonisoft3/pronto/resilience"
 )
 
 // #BuildManifests maps a ReleaseSpec and Environment into standard Kubernetes manifests.
@@ -113,7 +115,7 @@ import (
 				postgresUID: 999
 				postgresGID: 999
 				// One credential for postgres, the role that owns the schema
-				// and the one crud, auth and the schema Jobs connect as.
+				// and the one auth and the schema Jobs connect as.
 				enableSuperuserAccess: true
 				superuserSecret: name: "\(release.name)-db-postgres"
 				managed: roles: [{
@@ -123,6 +125,16 @@ import (
 					replication: true
 					bypassrls:   true
 					passwordSecret: name: "\(release.name)-electric-db"
+				}, {
+					// PostgREST's login. The operator revokes any membership this
+					// list leaves out, so it names every role a token can: the
+					// schema's, which exist only once initdb has run.
+					name:    "authenticator"
+					ensure:  "present"
+					login:   true
+					inherit: false
+					inRoles: release.database.tokenRoles
+					passwordSecret: name: "\(release.name)-authenticator-db"
 				}]
 				bootstrap: initdb: {
 					database:       release.name
@@ -195,9 +207,11 @@ import (
 			(schemaJob & {
 				component: "initdb"
 				svc:       "database"
-				env: list.Concat([schemaEnv, [{
-					name: "ELECTRIC_PASSWORD"
-					valueFrom: secretKeyRef: {name: "\(release.name)-electric-db", key: "password"}
+				// The roles' passwords the image's initdb step sets, from the
+				// secrets the operator sets them from too.
+				env: list.Concat([schemaEnv, [for role in ["electric", "authenticator"] {
+					name: "\(strings.ToUpper(role))_PASSWORD"
+					valueFrom: secretKeyRef: {name: "\(release.name)-\(role)-db", key: "password"}
 				}]])
 				command: ["bash", "-c", """
 					set -euo pipefail
@@ -255,6 +269,7 @@ import (
 		{key: "PGRST_JWT_SECRET", length: 48, target: "\(release.name)-auth-secrets"},
 		{key: "ELECTRIC_SECRET", length: 32, target: "\(release.name)-auth-secrets"},
 		{key: "ELECTRIC_PASSWORD", length: 32, target: "\(release.name)-electric-db", role: "electric"},
+		{key: "AUTHENTICATOR_PASSWORD", length: 32, target: "\(release.name)-authenticator-db", role: "authenticator"},
 		{key: "POSTGRES_PASSWORD", length: 32, target: "\(release.name)-db-postgres", role: "postgres"},
 	]
 
@@ -327,8 +342,8 @@ import (
 			}
 		},
 		// A database role's credential, as CloudNativePG reads it: electric's
-		// (managed.roles) and postgres's (superuser and owner), so the schema
-		// declares the roles and never their passwords.
+		// and authenticator's (managed.roles) and postgres's (superuser and
+		// owner), so the schema declares the roles and never their passwords.
 		for sec in appSecrets if sec.role != _|_ if release.type == "pronto" {
 			apiVersion: "external-secrets.io/v1beta1"
 			kind:       "ExternalSecret"
@@ -356,6 +371,33 @@ import (
 			}
 		},
 	]
+
+	let bounds = resilience.resilience.timeouts
+
+	// Every call between sidecars to the cluster's own apps is bounded. No
+	// circuit breaker: Dapr 1.14 counts any answer outside 200-399 as a
+	// failure, so a client's 401s, a shape's 409s or a missing row's 404s would
+	// open a target's circuit for everyone. No retry policy either: a write is
+	// not replayed.
+	let daprResiliencyObj = [if release.type == "pronto" {
+		apiVersion: "dapr.io/v1alpha1"
+		kind:       "Resiliency"
+		metadata: {
+			name:      "\(release.name)-resiliency"
+			namespace: release.namespace
+			labels:    appLabels
+		}
+		spec: {
+			policies: {
+				timeouts: {for id, s in bounds.mesh {(id): "\(s)s"}}
+			}
+			targets: apps: {
+				for id, _ in bounds.mesh {
+					(id): timeout: id
+				}
+			}
+		}
+	}]
 
 	let daprConfigObj = [{
 		apiVersion: "dapr.io/v1alpha1"
@@ -409,15 +451,15 @@ import (
 						]
 						env: [
 							{
-								name: "PG_PASSWORD"
+								name: "AUTHENTICATOR_PASSWORD"
 								valueFrom: secretKeyRef: {
-									name: "\(release.name)-db-postgres"
+									name: "\(release.name)-authenticator-db"
 									key:  "password"
 								}
 							},
 							{
 								name:  "PGRST_DB_URI"
-								value: "postgres://postgres:$(PG_PASSWORD)@database:5432/\(release.name)"
+								value: "postgres://authenticator:$(AUTHENTICATOR_PASSWORD)@database:5432/\(release.name)"
 							},
 							{name: "PGRST_DB_SCHEMA", value: "public"},
 							{name: "PGRST_DB_ANON_ROLE", value: "anon"},
@@ -616,6 +658,7 @@ import (
 								name:  "DATABASE_URL"
 								value: "postgres://postgres:$(PG_PASSWORD)@database:5432/\(release.name)"
 							},
+							{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"},
 							{
 								name: "PGRST_JWT_SECRET"
 								valueFrom: secretKeyRef: {
@@ -791,6 +834,7 @@ import (
 						ports: [{name: "http", containerPort: release.render.port}]
 						env: [
 							{name: "DOOR", value: "http://localhost:3500/v1.0/invoke/caddy/method"},
+							{name: "DOOR_TIMEOUT_MS", value: "\(bounds.renderDoor*1000)"},
 							{name: "ENTRY", value: "/render/entry.html"},
 							{name: "ORIGIN", value: originValue},
 							{name: "PORT", value: "\(release.render.port)"},
@@ -896,18 +940,30 @@ import (
 					name: "\(release.name)-gateway"
 				}]
 				hostnames: [gatewayHostname]
-				rules: [{
-					matches: [{
-						path: {
-							type:  "PathPrefix"
-							value: "/"
-						}
-					}]
-					backendRefs: [{
-						name: "caddy"
-						port: 8080
-					}]
+				// Envoy's own default is 15s, under Electric's 20s live hold.
+				rules: [for prefix, s in {"/": bounds.gateway.default, "/electric/": bounds.gateway.electric} {
+					matches: [{path: {type: "PathPrefix", value: prefix}}]
+					timeouts: request: "\(s)s"
+					backendRefs: [{name: "caddy", port: 8080}]
 				}]
+			}
+		},
+	]
+
+	// The gateway's breaker is Envoy's concurrency limits on caddy's pool.
+	let backendTrafficPolicyObj = [
+		if release.gateway.enabled {
+			apiVersion: "gateway.envoyproxy.io/v1alpha1"
+			kind:       "BackendTrafficPolicy"
+			metadata: {
+				name:      "\(release.name)-backend"
+				namespace: release.namespace
+				labels:    appLabels
+			}
+			spec: {
+				targetRefs: [{group: "gateway.networking.k8s.io", kind: "HTTPRoute", name: "\(release.name)-route"}]
+				timeout: tcp: connectTimeout: "\(bounds.dial)s"
+				circuitBreaker: resilience.resilience.gateway
 			}
 		},
 	]
@@ -1221,6 +1277,7 @@ import (
 			prontoSecretGeneratorObj,
 			prontoExternalSecretObj,
 			daprConfigObj,
+			daprResiliencyObj,
 			prontoClusterObj,
 			schemaJobObj,
 			prontoDatabaseServiceObj,
@@ -1236,6 +1293,7 @@ import (
 			prontoRenderServiceObj,
 			gatewayObj,
 			httpRouteObj,
+			backendTrafficPolicyObj,
 			caddyNetworkPolicyObj,
 			backendsNetworkPolicyObj,
 			databaseNetworkPolicyObj,

@@ -15,7 +15,7 @@ _quietFiles: (pronto.#emit & {
 	cluster:  _cluster
 	terminal: _terminal
 	loop:     _loop
-	build: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out
+	build: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster, terminal: _terminal}).out
 }).files
 _pipeline: "docker/conduit-pipeline.yaml"
 

@@ -173,19 +173,16 @@ pronto is what to ask, never how to run it; **relocatability**; and
 **self-bootstrapping**. One trick delivers them: a launcher that resolves its
 own directory and `exec`s a mise tool-stub on its program
 (bayt's `runtime/bayt`, omnishell's `runtime/omnishell`),
-depth-relative prefixes in generated invocations, and a mode chosen **at
-generation**. In a source checkout an app's `loop.surface.sources` default to
-the siblings' sources; a bootstrapped consumer's `generate` writes
-`program_pronto.cue` setting `sources: pronto: ""`, and every command then
-finds the installed distribution with `run-mise where` as it runs. Where pronto
-sits inside the app's CUE module, `write.ts` writes that file instead, from the
-layout it finds: pronto as the app names it, the app's directory under the
-module's root, and the root and the runtime's directory as mecha names them.
-An [installed app's mirror](release-targets.md#pages) is the other case: the
-app alone at its root, finding the released runtime with `run-mise where`.
-An installed app checked out beside the sources keeps its installed layout:
-its `.bayt/.env` selects images built from the checkout, and its mirror's
-release gate validates the published pins.
+depth-relative prefixes in generated invocations, and every command finding
+its runtime with `run-mise where` as it runs. Generated files are the same in
+a source checkout and in an [app's mirror](release-targets.md#pages), which
+receives them as they are; one switch decides what is the checkout's. Where
+pronto sits inside the app's CUE module, `write.ts` writes `mise.local.toml`:
+mise's tools from the runtime's trees, and `MONOREPO_COMPOSE_MODE`, under which
+each image builds mecha's and omnishell's from those trees instead of pulling
+the pins, and takes the checkout's layout (bayt's `imageDir`) so the views of
+the trees it copies land where `mise.local.toml` names them. A mirror has no
+such file and runs the releases it pins; its release gate validates them.
 
 Each brings what the others cannot. sayt bootstraps the rest and carries the
 cross-platform concern, which is why it alone ships per-platform binaries;

@@ -1,45 +1,44 @@
 # generated from bayt.cue — do not edit
 services:
-  apps_idioms-generate:
+  idioms-generate:
     build:
       additional_contexts:
-        apps_idioms-program: service:apps_idioms-program
+        idioms-setup: service:idioms-setup
       context: ..
       dockerfile: .bayt/Dockerfile.generate
       target: generate
       tags:
-      - bayt-apps_idioms-generate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
-      - bayt-apps_idioms-generate:latest
+      - bayt-idioms-generate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-idioms-generate:latest
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-generate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+    image: bayt-idioms-generate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
     scale: 0
-  apps_idioms-generate_bayt:
+  idioms-generate_bayt:
     build:
       additional_contexts:
-        apps_idioms-program_bayt: service:apps_idioms-program_bayt
-        apps_idioms-setup_bayt: service:apps_idioms-setup_bayt
-        workspaceroot-pronto-sources_bayt: service:workspaceroot-pronto-sources_bayt
-        workspaceroot-setup_bayt: service:workspaceroot-setup_bayt
+        idioms-setup_bayt: service:idioms-setup_bayt
       context: ..
       dockerfile: .bayt/Dockerfile.generate
       target: generate_bayt
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-generate_bayt:latest
+    image: bayt-idioms-generate_bayt:latest
     scale: 0
-  apps_idioms-generate_srcs:
+  idioms-generate_srcs:
     build:
       additional_contexts:
-        apps_idioms-program_srcs: service:apps_idioms-program_srcs
-        apps_idioms-setup_srcs: service:apps_idioms-setup_srcs
+        idioms-setup_srcs: service:idioms-setup_srcs
       context: ..
       dockerfile: .bayt/Dockerfile.generate
       target: generate_srcs
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-generate_srcs:latest
+    image: bayt-idioms-generate_srcs:latest
     scale: 0

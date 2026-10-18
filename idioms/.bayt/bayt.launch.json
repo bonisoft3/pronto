@@ -7,7 +7,7 @@
     "ports": [],
     "volumes": [],
     "depends_on": {
-      "apps_idioms-caddy": {
+      "idioms-caddy": {
         "condition": "service_healthy"
       }
     },
@@ -52,8 +52,8 @@
     ]
   },
   "name": "launch",
-  "project": "apps_idioms",
-  "dir": "apps/idioms",
+  "project": "idioms",
+  "dir": ".",
   "activate": "",
   "skaffold": {
     "profiles": {
@@ -109,8 +109,8 @@
   "synthetics": {
     "bayt": {
       "name": "launch_bayt",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -124,7 +124,12 @@
           ".bayt/Taskfile.yml",
           ".bayt/Taskfile.bayt.yml",
           ".bayt/compose.launch.closure.yaml",
-          ".bayt/process-compose.yaml"
+          ".bayt/process-compose.yaml",
+          ".bayt/compose.*.yaml",
+          ".bayt/Dockerfile.*",
+          ".bayt/bayt.*.json",
+          ".bayt/Taskfile.*.yaml",
+          "monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"
         ],
         "exclude": []
       },
@@ -140,14 +145,14 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.launch.yaml",
-        "apps/idioms/.bayt/compose.caddy.yaml"
+        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.caddy.yaml"
       ]
     },
     "outs": {
       "name": "launch_outs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -169,8 +174,8 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.launch.yaml",
-        "apps/idioms/.bayt/compose.caddy.yaml"
+        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.caddy.yaml"
       ]
     }
   },
@@ -187,14 +192,14 @@
   ],
   "transitiveCrossDeps": [],
   "upClosure": [
-    "apps/idioms/.bayt/compose.launch.yaml",
-    "apps/idioms/.bayt/compose.caddy.yaml"
+    "./.bayt/compose.launch.yaml",
+    "./.bayt/compose.caddy.yaml"
   ],
   "chainedDeps": [
     {
       "name": "caddy_outs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "outs": {
         "globs": [],
         "exclude": []

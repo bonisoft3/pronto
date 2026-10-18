@@ -1,23 +1,5 @@
 # generated from bayt.cue — do not edit
 say:
-  generate:
-    rulemap:
-      omnishell:
-        priority: 0
-        cmds:
-        - do: mise run omnishell -- mode . --local | save --force program_terminal.cue
-      pronto:
-        cmds:
-        - do: >-
-            use tools.nu [run-mise]; let pronto = "../../plugins/pronto"; run-mise exec --
-            deno run --config ($pronto | path join deno.json) --allow-read --allow-write=.
-            --allow-run --allow-env ($pronto | path join write.ts) .
-        priority: 1
-      auto-bayt:
-        priority: 2
-        cmds:
-        - use: ./auto-bayt.nu
-          do: auto-bayt
   integrate:
     rulemap:
       builtin:
@@ -44,57 +26,94 @@ say:
         priority: 1
         cmds:
         - do: >-
-            use tools.nu [run-mise]; let pronto = "../../plugins/pronto"; run-mise exec --
-            deno run --config ($pronto | path join deno.json) --allow-read --allow-run
-            --allow-env ($pronto | path join check-facts.ts) .
+            use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
+            str trim); run-mise exec -- deno run --config ($pronto | path join deno.json)
+            --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) .
       identity:
         cmds:
         - do: >-
-            use tools.nu [run-mise]; let pronto = "../../plugins/pronto"; run-mise exec --
-            deno run --config ($pronto | path join deno.json) --allow-read --allow-run
-            --allow-env ($pronto | path join identity.ts) check .
+            use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
+            str trim); run-mise exec -- deno run --config ($pronto | path join deno.json)
+            --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check .
       caddy:
         cmds:
         - do: "with-env {ELECTRIC_SECRET: lint, ORIGIN: lint} { mise exec -- caddy adapt --config docker/Caddyfile --adapter caddyfile out> (if $nu.os-info.name == \"windows\" { \"NUL\" } else { \"/dev/null\" }) }"
       handlers:
         cmds:
-        - do: mise run omnishell -- check handlers .
+        - do: use tools.nu [run-mise]; run-mise exec -- omnishell check handlers .
       markup:
         cmds:
-        - do: mise run omnishell -- check markup .
+        - do: use tools.nu [run-mise]; run-mise exec -- omnishell check markup .
       derive:
         cmds:
         - do: >-
-            use tools.nu [run-mise]; let pronto = "../../plugins/pronto"; run-mise exec --
-            deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path
-            join derive.ts) --self-test
+            use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
+            str trim); run-mise exec -- deno run --config ($pronto | path join deno.json)
+            --allow-read=. ($pronto | path join derive.ts) --self-test
       types:
         cmds:
         - do: >-
-            use tools.nu [run-mise]; let pronto = "../../plugins/pronto"; let files = do {
-            cd $pronto; [ ...(glob --no-dir '*.ts') ...(glob --no-dir 'scales/*.ts') ] };
-            run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files
+            use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
+            str trim); let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts
+            *.test.ts] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno
+            check --config ($pronto | path join deno.json) ...$files
       proto:
         cmds:
         - do: >-
-            use tools.nu [run-mise]; let pronto = "../../plugins/pronto"; run-mise exec --
-            deno run --config ($pronto | path join deno.json) --allow-read --allow-run
-            --allow-env ($pronto | path join check-proto.ts) .
+            use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
+            str trim); run-mise exec -- deno run --config ($pronto | path join deno.json)
+            --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) .
   release:
     rulemap:
       pages:
         cmds:
         - do: >-
-            use tools.nu [run-mise]; let pronto = "../../plugins/pronto"; run-mise exec --
-            deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join
-            bundle bundle.ts) . --omnishell "../../plugins/omnishell" --mecha
-            "../../libraries/mecha" --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default "")
+            use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
+            str trim); run-mise exec -- deno run -A --config ($pronto | path join bundle
+            deno.json) ($pronto | path join bundle bundle.ts) . --omnishell (run-mise where
+            github:bonisoft3/omnishell | str trim) --mecha (run-mise where github:bonisoft3/mecha
+            | str trim) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default "")
         - do: >-
             if ($env.SAY_RELEASE_ARGS_SNAPSHOT? | is-empty) { release --skip=validate
             --clean } else { release --snapshot --skip=validate --clean }
           use: ./release.nu
         - do: "if ($env.SAY_RELEASE_ARGS_SNAPSHOT? | is-empty) { use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag }"
         platform: pages
+  self:
+    version: v0.44.1
+  doctor:
+    do: >-
+      use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno
+      --version; run-mise where github:bonisoft3/pronto
+  build:
+    do: "null"
+  generate:
+    rulemap:
+      omnishell:
+        priority: 0
+        cmds:
+        - do: >-
+            if ('program.cue' | path exists) { use tools.nu [run-mise]; run-mise exec --
+            omnishell mode . | save --force program_terminal.cue }
+      auto-cue:
+        cmds:
+        - use: ./tools.nu
+          do: >-
+            if ('pronto/generate_tool.cue' | path exists) { tools run-cue cmd generate
+            ./pronto }
+      pronto:
+        priority: 1
+        cmds:
+        - do: >-
+            if ('program.cue' | path exists) { use tools.nu [run-mise]; let pronto =
+            (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run --config
+            ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run
+            --allow-env ($pronto | path join write.ts) . }
+      auto-bayt:
+        priority: 2
+        cmds:
+        - use: ./auto-bayt.nu
+          do: auto-bayt
   setup:
     rulemap:
       builtin:
@@ -118,12 +137,10 @@ say:
         - do: deno test --allow-read tests/handlers.test.ts
       machines:
         cmds:
-        - do: mise run omnishell -- check machines .
+        - do: use tools.nu [run-mise]; run-mise exec -- omnishell check machines .
       i18n:
         cmds:
-        - do: mise run omnishell -- check i18n .
+        - do: use tools.nu [run-mise]; run-mise exec -- omnishell check i18n .
       battery:
         cmds:
-        - do: mise run omnishell -- check battery .
-  build:
-    do: "null"
+        - do: use tools.nu [run-mise]; run-mise exec -- omnishell check battery .

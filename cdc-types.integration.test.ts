@@ -1,8 +1,10 @@
 // cdc-types.blobl, run by the transform image the cluster pins, over the bus
-// spellings conduit v0.14.0 was measured to produce: Postgres text for a
-// domain column (2026-09-22, ponto, realworld and thenote stacks), and native
-// JSON for a base-typed one (2026-10-03, a logrepl pipeline over int4, bool,
-// float8, uuid, date and text columns). Conduit decodes a column whose type it
+// spellings conduit was measured to produce: Postgres text for a domain column
+// (v0.14.0, 2026-09-22, ponto, realworld and thenote stacks), and native JSON
+// for a base-typed one (v0.14.0, 2026-10-03, a logrepl pipeline over int4,
+// bool, float8, uuid, date and text columns). v0.20.4 spells both the same
+// (2026-10-16, a text and an int domain beside the base columns), and a NULL
+// uuid as null where v0.14.0 gave "". Conduit decodes a column whose type it
 // knows and passes a domain, whose OID it does not, through as text.
 
 import { typeTable } from "./type-table.ts";

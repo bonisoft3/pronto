@@ -254,6 +254,19 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     assert.equal(await spaHead.text(), '')
     assert.match(spaHead.headers.get('link') ?? '', /gerenciar\.html/)
     assert.equal(renders, 3)
+
+    // A link the shell prefetched seeds its tab from the reads; stripped on a
+    // stale hit, a prefetch of any page past its first minute seeded nothing.
+    await Promise.all(background.splice(0))
+    for (const [key, res] of store) {
+      const headers = new Headers(res.headers)
+      if (!headers.has('x-rendered-at')) continue
+      headers.set('x-rendered-at', String(Date.now() - 61_000))
+      store.set(key, new Response(await res.arrayBuffer(), { status: res.status, headers }))
+    }
+    const prefetched = await worker.fetch(new Request('https://app.example/', { headers: { purpose: 'prefetch' } }), env, ctx)
+    assert.equal(prefetched.headers.get('x-edge-cache'), 'stale')
+    assert.match(await prefetched.text(), /id="pronto-reads"/)
   } finally {
     if (savedCaches) Object.defineProperty(globalThis, 'caches', savedCaches)
     else Reflect.deleteProperty(globalThis, 'caches')

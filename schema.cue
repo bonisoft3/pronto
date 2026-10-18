@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"encoding/yaml"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/bonisoft3/pronto/clusters:mecha"
+	"github.com/bonisoft3/pronto/resilience"
 	"github.com/bonisoft3/pronto/scales"
 	"github.com/bonisoft3/pronto/terminals:omnishell"
 	grammar "github.com/bonisoft3/mecha/pgroll"
@@ -893,9 +895,15 @@ import (
 	call: string & =~"^[a-z_][a-z0-9_]{0,62}$"
 	// The JSON arguments of every call.
 	body: *{} | {[string]: bool | int | string}
-	// The HTTP deadline of one call; keep it above the function's own
-	// statement_timeout, so the database, not the client, ends a slow call.
-	timeout: *"30s" | =~"^[0-9]+(ms|s|m)$"
+	// The HTTP deadline of one call, in seconds above the service role's
+	// statement_timeout so the database, not the client, ends a slow call
+	// (resilience's drain bound).
+	timeout: *"\(resilience.resilience.timeouts.drain)s" | =~"^[0-9]+(ms|s|m)$"
+	_timeoutMs: [
+		if strings.HasSuffix(timeout, "ms") {strconv.Atoi(strings.TrimSuffix(timeout, "ms"))},
+		if !strings.HasSuffix(timeout, "ms") && strings.HasSuffix(timeout, "s") {strconv.Atoi(strings.TrimSuffix(timeout, "s")) * 1000},
+		if strings.HasSuffix(timeout, "m") {strconv.Atoi(strings.TrimSuffix(timeout, "m")) * 60000},
+	][0] & >(resilience.resilience.timeouts.statement.service * 1000)
 }
 
 // A Mecha statechart executed inside PostgreSQL — transactions, trigger reducers,

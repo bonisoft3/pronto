@@ -1,40 +1,42 @@
 # generated from bayt.cue — do not edit
 FROM caddy:2.9-alpine@sha256:b4e3952384eb9524a887633ce65c752dd7c71314d2c2acf98cd5c715aaa534f0 AS caddy
-WORKDIR /monorepo/apps/idioms
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY --from=plugins_omnishell-runtime-image components/wallclock.js /omnishell/components/wallclock.js
+COPY --from=plugins_omnishell-runtime-image interpreter/chrome.js /omnishell/interpreter/chrome.js
+COPY --from=plugins_omnishell-runtime-image interpreter/cortex-command.js /omnishell/interpreter/cortex-command.js
+COPY --from=plugins_omnishell-runtime-image interpreter/cortex-session.js /omnishell/interpreter/cortex-session.js
+COPY --from=plugins_omnishell-runtime-image interpreter/data-sync.js /omnishell/interpreter/data-sync.js
+COPY --from=plugins_omnishell-runtime-image interpreter/deferred-boot.js /omnishell/interpreter/deferred-boot.js
+COPY --from=plugins_omnishell-runtime-image interpreter/fragment.js /omnishell/interpreter/fragment.js
+COPY --from=plugins_omnishell-runtime-image interpreter/hatch-worker.js /omnishell/interpreter/hatch-worker.js
+COPY --from=plugins_omnishell-runtime-image interpreter/hatch.js /omnishell/interpreter/hatch.js
+COPY --from=plugins_omnishell-runtime-image interpreter/host-dom.js /omnishell/interpreter/host-dom.js
+COPY --from=plugins_omnishell-runtime-image interpreter/hybrid-client.js /omnishell/interpreter/hybrid-client.js
+COPY --from=plugins_omnishell-runtime-image interpreter/jessie.js /omnishell/interpreter/jessie.js
+COPY --from=plugins_omnishell-runtime-image interpreter/kinetic.js /omnishell/interpreter/kinetic.js
+COPY --from=plugins_omnishell-runtime-image interpreter/link-prefetch.js /omnishell/interpreter/link-prefetch.js
+COPY --from=plugins_omnishell-runtime-image interpreter/markup.js /omnishell/interpreter/markup.js
+COPY --from=plugins_omnishell-runtime-image interpreter/preloads.js /omnishell/interpreter/preloads.js
+COPY --from=plugins_omnishell-runtime-image interpreter/prng.js /omnishell/interpreter/prng.js
+COPY --from=plugins_omnishell-runtime-image interpreter/release-assets.js /omnishell/interpreter/release-assets.js
+COPY --from=plugins_omnishell-runtime-image interpreter/release-plan.js /omnishell/interpreter/release-plan.js
+COPY --from=plugins_omnishell-runtime-image interpreter/render.js /omnishell/interpreter/render.js
+COPY --from=plugins_omnishell-runtime-image interpreter/screen.js /omnishell/interpreter/screen.js
+COPY --from=plugins_omnishell-runtime-image interpreter/script-url.js /omnishell/interpreter/script-url.js
+COPY --from=plugins_omnishell-runtime-image interpreter/shell.js /omnishell/interpreter/shell.js
+COPY --from=plugins_omnishell-runtime-image interpreter/storybook.js /omnishell/interpreter/storybook.js
+COPY --from=plugins_omnishell-runtime-image interpreter/validate.js /omnishell/interpreter/validate.js
+COPY --from=plugins_omnishell-runtime-image interpreter/vendor/game-inputs.js /omnishell/interpreter/vendor/game-inputs.js
+COPY --from=plugins_omnishell-runtime-image interpreter/vendor/js-yaml.js /omnishell/interpreter/vendor/js-yaml.js
+COPY --from=plugins_omnishell-runtime-image interpreter/vendor/mecha-client.js /omnishell/interpreter/vendor/mecha-client.js
+COPY --from=plugins_omnishell-runtime-image interpreter/vendor/messages.js /omnishell/interpreter/vendor/messages.js
+COPY --from=plugins_omnishell-runtime-image interpreter/vendor/morphlex.js /omnishell/interpreter/vendor/morphlex.js
+COPY --from=plugins_omnishell-runtime-image interpreter/vendor/ses.umd.min.js /omnishell/interpreter/vendor/ses.umd.min.js
 COPY --chmod=755 --from=tarampampam/microcheck:1@sha256:79c187c05bfa67518078bf4db117771942fa8fe107dc79a905861c75ddf28dfa /bin/httpcheck /usr/local/bin/httpcheck
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 COPY .cert[s] /certs/
 COPY --parents shell/index.html shell/shell.css shell/boot.js offline-first-sw.js shell/shell.yaml shell/shell.json shell/design.css shell/screens/counter.html shell/screens/counter.css shell/screens/todo.html shell/screens/todo.css shell/screens/grid.html shell/screens/grid.css shell/screens/timer.html shell/screens/timer.css shell/handlers/count.js shell/handlers/press.js shell/handlers/remove.js shell/handlers/roll.js shell/handlers/tally.js shell/handlers/tick.js messages/en.json messages/pt-BR.json /srv/
-COPY --from=root plugins/omnishell/interpreter/shell.js /omnishell/interpreter/shell.js
-COPY --from=root plugins/omnishell/interpreter/chrome.js /omnishell/interpreter/chrome.js
-COPY --from=root plugins/omnishell/interpreter/screen.js /omnishell/interpreter/screen.js
-COPY --from=root plugins/omnishell/interpreter/fragment.js /omnishell/interpreter/fragment.js
-COPY --from=root plugins/omnishell/interpreter/data-sync.js /omnishell/interpreter/data-sync.js
-COPY --from=root plugins/omnishell/interpreter/hybrid-client.js /omnishell/interpreter/hybrid-client.js
-COPY --from=root plugins/omnishell/interpreter/cortex-session.js /omnishell/interpreter/cortex-session.js
-COPY --from=root plugins/omnishell/interpreter/cortex-command.js /omnishell/interpreter/cortex-command.js
-COPY --from=root plugins/omnishell/interpreter/validate.js /omnishell/interpreter/validate.js
-COPY --from=root plugins/omnishell/interpreter/render.js /omnishell/interpreter/render.js
-COPY --from=root plugins/omnishell/interpreter/release-plan.js /omnishell/interpreter/release-plan.js
-COPY --from=root plugins/omnishell/interpreter/release-assets.js /omnishell/interpreter/release-assets.js
-COPY --from=root plugins/omnishell/interpreter/preloads.js /omnishell/interpreter/preloads.js
-COPY --from=root plugins/omnishell/interpreter/markup.js /omnishell/interpreter/markup.js
-COPY --from=root plugins/omnishell/interpreter/script-url.js /omnishell/interpreter/script-url.js
-COPY --from=root plugins/omnishell/interpreter/deferred-boot.js /omnishell/interpreter/deferred-boot.js
-COPY --from=root plugins/omnishell/interpreter/host-dom.js /omnishell/interpreter/host-dom.js
-COPY --from=root plugins/omnishell/interpreter/hatch.js /omnishell/interpreter/hatch.js
-COPY --from=root plugins/omnishell/interpreter/hatch-worker.js /omnishell/interpreter/hatch-worker.js
-COPY --from=root plugins/omnishell/interpreter/storybook.js /omnishell/interpreter/storybook.js
-COPY --from=root plugins/omnishell/interpreter/jessie.js /omnishell/interpreter/jessie.js
-COPY --from=root plugins/omnishell/interpreter/kinetic.js /omnishell/interpreter/kinetic.js
-COPY --from=root plugins/omnishell/interpreter/prng.js /omnishell/interpreter/prng.js
-COPY --from=root plugins/omnishell/interpreter/vendor/mecha-client.js /omnishell/interpreter/vendor/mecha-client.js
-COPY --from=root plugins/omnishell/interpreter/vendor/js-yaml.js /omnishell/interpreter/vendor/js-yaml.js
-COPY --from=root plugins/omnishell/interpreter/vendor/ses.umd.min.js /omnishell/interpreter/vendor/ses.umd.min.js
-COPY --from=root plugins/omnishell/interpreter/vendor/morphlex.js /omnishell/interpreter/vendor/morphlex.js
-COPY --from=root plugins/omnishell/interpreter/vendor/messages.js /omnishell/interpreter/vendor/messages.js
-COPY --from=root plugins/omnishell/interpreter/vendor/game-inputs.js /omnishell/interpreter/vendor/game-inputs.js
-COPY --from=root plugins/omnishell/components/wallclock.js /omnishell/components/wallclock.js
 COPY --parents brief.html ir.html ir/card.css acceptance.md DESIGN.md /srv/docs/
 COPY --parents robots.txt sitemap.xml /srv/
 COPY --parents docker/Caddyfile shell/index.html shell/shell.css shell/boot.js offline-first-sw.js shell/shell.yaml shell/shell.json shell/design.css shell/screens/counter.html shell/screens/counter.css shell/screens/todo.html shell/screens/todo.css shell/screens/grid.html shell/screens/grid.css shell/screens/timer.html shell/screens/timer.css shell/handlers/count.js shell/handlers/press.js shell/handlers/remove.js shell/handlers/roll.js shell/handlers/tally.js shell/handlers/tick.js messages/en.json messages/pt-BR.json brief.html ir.html ir/card.css acceptance.md DESIGN.md robots.txt sitemap.xml ./
@@ -44,19 +46,21 @@ ENTRYPOINT ["sh","-c","case \"${ORIGIN#http://}\" in \"$ORIGIN\") h=${ORIGIN#htt
 HEALTHCHECK --interval=5s --timeout=5s --retries=30 --start-period=10s CMD ["httpcheck","http://127.0.0.1:8080/health"]
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS caddy_ctxs
-WORKDIR /monorepo/apps/idioms
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
 COPY --parents docker/Caddyfile shell/index.html shell/shell.css shell/boot.js offline-first-sw.js shell/shell.yaml shell/shell.json shell/design.css shell/screens/counter.html shell/screens/counter.css shell/screens/todo.html shell/screens/todo.css shell/screens/grid.html shell/screens/grid.css shell/screens/timer.html shell/screens/timer.css shell/handlers/count.js shell/handlers/press.js shell/handlers/remove.js shell/handlers/roll.js shell/handlers/tally.js shell/handlers/tick.js messages/en.json messages/pt-BR.json brief.html ir.html ir/card.css acceptance.md DESIGN.md robots.txt sitemap.xml ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS caddy_srcs
 COPY --from=caddy_ctxs /monorepo /monorepo
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS caddy_bayt_ctxs
-WORKDIR /monorepo/apps/idioms
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
 COPY --parents .bayt/compose.caddy.yaml .bayt/Dockerfile.caddy .bayt/bayt.caddy.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/process-compose.yaml ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
-RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/apps/idioms -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && touch -hd @${SOURCE_DATE_EPOCH:-0} /monorepo /monorepo/apps; fi
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
 FROM scratch AS caddy_bayt
 COPY --from=caddy_bayt_ctxs /monorepo /monorepo

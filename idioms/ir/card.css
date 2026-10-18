@@ -37,6 +37,12 @@
 .card .g { font-family: ui-monospace, Menlo, monospace; font-size: 11px; margin-right: 6px; color: var(--card-muted); }
 .card .g.pk { font-weight: 600; color: var(--card-ink); } .card .g.fk { color: var(--card-accent); text-decoration: none; }
 .card .g.mach { color: var(--card-accent); border: 1px dashed var(--card-accent); padding: 0 4px; }
+.card .fields .n { color: var(--card-muted); font-size: 12px; }
+[data-kind="entity"]:has(> .card) > table[data-extract="fields"] { display: none; }
+[data-kind="entity"]:has(> .card .authored[open]) > table[data-extract="fields"] { display: table; }
+.card .jt { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin-top: 6px; }
+.card .jn > summary { cursor: pointer; } .card .jl { padding-left: 1.2em; } .card .jn > :not(summary) { margin-left: 14px; }
+.card .jk { color: var(--card-accent); } .card .jv { color: var(--card-muted); }
 .card .legend { color: var(--card-muted); font-size: 12px; margin: 8px 0 0; }
 .card .strips { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px 24px; padding: 10px 18px 10px 24px; border-top: 1px solid var(--card-line); align-items: baseline; }
 .card .strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }

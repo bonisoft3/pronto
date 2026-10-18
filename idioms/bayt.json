@@ -1,42 +1,15 @@
 {
   "activate": "mise x --",
   "compose": {
-    "includes": []
+    "includes": [
+      "monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"
+    ]
   },
   "depot": false,
-  "dir": "apps/idioms",
+  "dir": ".",
   "files": {
     "checks.yaml": {
       "say": {
-        "generate": {
-          "rulemap": {
-            "omnishell": {
-              "priority": 0,
-              "cmds": [
-                {
-                  "do": "mise run omnishell -- mode . --local | save --force program_terminal.cue"
-                }
-              ]
-            },
-            "pronto": {
-              "cmds": [
-                {
-                  "do": "use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join write.ts) ."
-                }
-              ],
-              "priority": 1
-            },
-            "auto-bayt": {
-              "priority": 2,
-              "cmds": [
-                {
-                  "use": "./auto-bayt.nu",
-                  "do": "auto-bayt"
-                }
-              ]
-            }
-          }
-        },
         "integrate": {
           "rulemap": {
             "builtin": {
@@ -79,14 +52,14 @@
               "priority": 1,
               "cmds": [
                 {
-                  "do": "use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."
+                  "do": "use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."
                 }
               ]
             },
             "identity": {
               "cmds": [
                 {
-                  "do": "use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check ."
+                  "do": "use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check ."
                 }
               ]
             },
@@ -100,35 +73,35 @@
             "handlers": {
               "cmds": [
                 {
-                  "do": "mise run omnishell -- check handlers ."
+                  "do": "use tools.nu [run-mise]; run-mise exec -- omnishell check handlers ."
                 }
               ]
             },
             "markup": {
               "cmds": [
                 {
-                  "do": "mise run omnishell -- check markup ."
+                  "do": "use tools.nu [run-mise]; run-mise exec -- omnishell check markup ."
                 }
               ]
             },
             "derive": {
               "cmds": [
                 {
-                  "do": "use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"
+                  "do": "use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"
                 }
               ]
             },
             "types": {
               "cmds": [
                 {
-                  "do": "use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; let files = do { cd $pronto; [ ...(glob --no-dir '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"
+                  "do": "use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"
                 }
               ]
             },
             "proto": {
               "cmds": [
                 {
-                  "do": "use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."
+                  "do": "use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."
                 }
               ]
             }
@@ -139,7 +112,7 @@
             "pages": {
               "cmds": [
                 {
-                  "do": "use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \"../../plugins/omnishell\" --mecha \"../../libraries/mecha\" --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")"
+                  "do": "use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell (run-mise where github:bonisoft3/omnishell | str trim) --mecha (run-mise where github:bonisoft3/mecha | str trim) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")"
                 },
                 {
                   "do": "if ($env.SAY_RELEASE_ARGS_SNAPSHOT? | is-empty) { release --skip=validate --clean } else { release --snapshot --skip=validate --clean }",
@@ -150,6 +123,52 @@
                 }
               ],
               "platform": "pages"
+            }
+          }
+        },
+        "self": {
+          "version": "v0.44.1"
+        },
+        "doctor": {
+          "do": "use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno --version; run-mise where github:bonisoft3/pronto"
+        },
+        "build": {
+          "do": "null"
+        },
+        "generate": {
+          "rulemap": {
+            "omnishell": {
+              "priority": 0,
+              "cmds": [
+                {
+                  "do": "if ('program.cue' | path exists) { use tools.nu [run-mise]; run-mise exec -- omnishell mode . | save --force program_terminal.cue }"
+                }
+              ]
+            },
+            "auto-cue": {
+              "cmds": [
+                {
+                  "use": "./tools.nu",
+                  "do": "if ('pronto/generate_tool.cue' | path exists) { tools run-cue cmd generate ./pronto }"
+                }
+              ]
+            },
+            "pronto": {
+              "priority": 1,
+              "cmds": [
+                {
+                  "do": "if ('program.cue' | path exists) { use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join write.ts) . }"
+                }
+              ]
+            },
+            "auto-bayt": {
+              "priority": 2,
+              "cmds": [
+                {
+                  "use": "./auto-bayt.nu",
+                  "do": "auto-bayt"
+                }
+              ]
             }
           }
         },
@@ -195,28 +214,25 @@
             "machines": {
               "cmds": [
                 {
-                  "do": "mise run omnishell -- check machines ."
+                  "do": "use tools.nu [run-mise]; run-mise exec -- omnishell check machines ."
                 }
               ]
             },
             "i18n": {
               "cmds": [
                 {
-                  "do": "mise run omnishell -- check i18n ."
+                  "do": "use tools.nu [run-mise]; run-mise exec -- omnishell check i18n ."
                 }
               ]
             },
             "battery": {
               "cmds": [
                 {
-                  "do": "mise run omnishell -- check battery ."
+                  "do": "use tools.nu [run-mise]; run-mise exec -- omnishell check battery ."
                 }
               ]
             }
           }
-        },
-        "build": {
-          "do": "null"
         }
       }
     },
@@ -307,14 +323,47 @@
       }
     }
   },
-  "name": "apps_idioms",
+  "imageDir": "${MONOREPO_COMPOSE_MODE:+apps/idioms}",
+  "name": "idioms",
   "targets": {
-    "program": {
-      "name": "program",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+    "caddy": {
+      "name": "caddy",
+      "project": "idioms",
+      "dir": ".",
       "srcs": {
-        "globs": [],
+        "globs": [
+          "docker/Caddyfile",
+          "shell/index.html",
+          "shell/shell.css",
+          "shell/boot.js",
+          "offline-first-sw.js",
+          "shell/shell.yaml",
+          "shell/shell.json",
+          "shell/design.css",
+          "shell/screens/counter.html",
+          "shell/screens/counter.css",
+          "shell/screens/todo.html",
+          "shell/screens/todo.css",
+          "shell/screens/grid.html",
+          "shell/screens/grid.css",
+          "shell/screens/timer.html",
+          "shell/screens/timer.css",
+          "shell/handlers/count.js",
+          "shell/handlers/press.js",
+          "shell/handlers/remove.js",
+          "shell/handlers/roll.js",
+          "shell/handlers/tally.js",
+          "shell/handlers/tick.js",
+          "messages/en.json",
+          "messages/pt-BR.json",
+          "brief.html",
+          "ir.html",
+          "ir/card.css",
+          "acceptance.md",
+          "DESIGN.md",
+          "robots.txt",
+          "sitemap.xml"
+        ],
         "defaultGlobs": null,
         "exclude": [],
         "defaultExclude": null
@@ -327,32 +376,15 @@
         "globs": []
       },
       "visibility": "internal",
-      "cmd": {},
-      "env": {},
-      "deps": [
-        ":setup",
-        "workspaceroot:pronto-sources:srcs"
-      ],
-      "compose": {
-        "up": false,
-        "manual": false,
-        "build": {
-          "additional_contexts": {
-            "root": "../../.."
-          },
-          "secrets": [],
-          "args": {}
-        },
-        "environment": {},
-        "ports": [],
-        "volumes": [],
-        "depends_on": {},
-        "scale": 0
+      "activate": "",
+      "cmd": {
+        "builtin": null
       },
+      "env": {},
+      "deps": [],
       "dockerfile": {
         "from": {
-          "ref": ":setup",
-          "name": "apps_idioms-setup"
+          "name": "caddy:2.9-alpine@sha256:b4e3952384eb9524a887633ce65c752dd7c71314d2c2acf98cd5c715aaa534f0"
         },
         "preamble": [],
         "defaultPreamble": null,
@@ -363,42 +395,757 @@
         "epilogue": [],
         "copy": [
           {
-            "from": {
-              "name": "root"
-            },
+            "from": null,
             "srcs": [
-              "cue.mod",
-              "plugins/pronto",
-              "plugins/omnishell",
-              "plugins/bayt",
-              "plugins/sayt",
-              "libraries/mecha"
+              "docker/Caddyfile"
             ],
-            "dst": "/monorepo/",
+            "dst": "/etc/caddy/Caddyfile",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          {
+            "from": null,
+            "srcs": [
+              ".cert[s]"
+            ],
+            "dst": "/certs/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          {
+            "from": null,
+            "srcs": [
+              "shell/index.html",
+              "shell/shell.css",
+              "shell/boot.js",
+              "offline-first-sw.js",
+              "shell/shell.yaml",
+              "shell/shell.json",
+              "shell/design.css",
+              "shell/screens/counter.html",
+              "shell/screens/counter.css",
+              "shell/screens/todo.html",
+              "shell/screens/todo.css",
+              "shell/screens/grid.html",
+              "shell/screens/grid.css",
+              "shell/screens/timer.html",
+              "shell/screens/timer.css",
+              "shell/handlers/count.js",
+              "shell/handlers/press.js",
+              "shell/handlers/remove.js",
+              "shell/handlers/roll.js",
+              "shell/handlers/tally.js",
+              "shell/handlers/tick.js",
+              "messages/en.json",
+              "messages/pt-BR.json"
+            ],
+            "dst": "/srv/",
             "link": true,
             "parents": true,
-            "exclude": [
-              "**/docs/**",
-              "**/testdata/**",
-              "**/*_test.*",
-              "**/*.test.*",
-              "**/.bayt/**",
-              "**/.task/**",
-              "**/node_modules/**"
-            ]
+            "exclude": []
+          },
+          {
+            "from": null,
+            "srcs": [
+              "brief.html",
+              "ir.html",
+              "ir/card.css",
+              "acceptance.md",
+              "DESIGN.md"
+            ],
+            "dst": "/srv/docs/",
+            "link": true,
+            "parents": true,
+            "exclude": []
+          },
+          {
+            "from": null,
+            "srcs": [
+              "robots.txt",
+              "sitemap.xml"
+            ],
+            "dst": "/srv/",
+            "link": true,
+            "parents": true,
+            "exclude": []
           }
         ],
-        "defaultCopy": null,
-        "healthcheck": null,
+        "defaultCopy": {
+          "httpcheck": {
+            "from": {
+              "name": "tarampampam/microcheck:1@sha256:79c187c05bfa67518078bf4db117771942fa8fe107dc79a905861c75ddf28dfa"
+            },
+            "name": "httpcheck",
+            "srcs": [
+              "/bin/httpcheck"
+            ],
+            "dst": "/usr/local/bin/httpcheck",
+            "chmod": "755",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/shell.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/shell.js",
+            "srcs": [
+              "interpreter/shell.js"
+            ],
+            "dst": "/omnishell/interpreter/shell.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/chrome.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/chrome.js",
+            "srcs": [
+              "interpreter/chrome.js"
+            ],
+            "dst": "/omnishell/interpreter/chrome.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/screen.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/screen.js",
+            "srcs": [
+              "interpreter/screen.js"
+            ],
+            "dst": "/omnishell/interpreter/screen.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/fragment.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/fragment.js",
+            "srcs": [
+              "interpreter/fragment.js"
+            ],
+            "dst": "/omnishell/interpreter/fragment.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/data-sync.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/data-sync.js",
+            "srcs": [
+              "interpreter/data-sync.js"
+            ],
+            "dst": "/omnishell/interpreter/data-sync.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/hybrid-client.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/hybrid-client.js",
+            "srcs": [
+              "interpreter/hybrid-client.js"
+            ],
+            "dst": "/omnishell/interpreter/hybrid-client.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/cortex-session.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/cortex-session.js",
+            "srcs": [
+              "interpreter/cortex-session.js"
+            ],
+            "dst": "/omnishell/interpreter/cortex-session.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/cortex-command.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/cortex-command.js",
+            "srcs": [
+              "interpreter/cortex-command.js"
+            ],
+            "dst": "/omnishell/interpreter/cortex-command.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/validate.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/validate.js",
+            "srcs": [
+              "interpreter/validate.js"
+            ],
+            "dst": "/omnishell/interpreter/validate.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/render.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/render.js",
+            "srcs": [
+              "interpreter/render.js"
+            ],
+            "dst": "/omnishell/interpreter/render.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/release-plan.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/release-plan.js",
+            "srcs": [
+              "interpreter/release-plan.js"
+            ],
+            "dst": "/omnishell/interpreter/release-plan.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/release-assets.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/release-assets.js",
+            "srcs": [
+              "interpreter/release-assets.js"
+            ],
+            "dst": "/omnishell/interpreter/release-assets.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/preloads.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/preloads.js",
+            "srcs": [
+              "interpreter/preloads.js"
+            ],
+            "dst": "/omnishell/interpreter/preloads.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/link-prefetch.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/link-prefetch.js",
+            "srcs": [
+              "interpreter/link-prefetch.js"
+            ],
+            "dst": "/omnishell/interpreter/link-prefetch.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/markup.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/markup.js",
+            "srcs": [
+              "interpreter/markup.js"
+            ],
+            "dst": "/omnishell/interpreter/markup.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/script-url.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/script-url.js",
+            "srcs": [
+              "interpreter/script-url.js"
+            ],
+            "dst": "/omnishell/interpreter/script-url.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/deferred-boot.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/deferred-boot.js",
+            "srcs": [
+              "interpreter/deferred-boot.js"
+            ],
+            "dst": "/omnishell/interpreter/deferred-boot.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/host-dom.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/host-dom.js",
+            "srcs": [
+              "interpreter/host-dom.js"
+            ],
+            "dst": "/omnishell/interpreter/host-dom.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/hatch.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/hatch.js",
+            "srcs": [
+              "interpreter/hatch.js"
+            ],
+            "dst": "/omnishell/interpreter/hatch.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/hatch-worker.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/hatch-worker.js",
+            "srcs": [
+              "interpreter/hatch-worker.js"
+            ],
+            "dst": "/omnishell/interpreter/hatch-worker.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/storybook.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/storybook.js",
+            "srcs": [
+              "interpreter/storybook.js"
+            ],
+            "dst": "/omnishell/interpreter/storybook.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/jessie.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/jessie.js",
+            "srcs": [
+              "interpreter/jessie.js"
+            ],
+            "dst": "/omnishell/interpreter/jessie.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/kinetic.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/kinetic.js",
+            "srcs": [
+              "interpreter/kinetic.js"
+            ],
+            "dst": "/omnishell/interpreter/kinetic.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/prng.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/prng.js",
+            "srcs": [
+              "interpreter/prng.js"
+            ],
+            "dst": "/omnishell/interpreter/prng.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/vendor/mecha-client.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/vendor/mecha-client.js",
+            "srcs": [
+              "interpreter/vendor/mecha-client.js"
+            ],
+            "dst": "/omnishell/interpreter/vendor/mecha-client.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/vendor/js-yaml.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/vendor/js-yaml.js",
+            "srcs": [
+              "interpreter/vendor/js-yaml.js"
+            ],
+            "dst": "/omnishell/interpreter/vendor/js-yaml.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/vendor/ses.umd.min.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/vendor/ses.umd.min.js",
+            "srcs": [
+              "interpreter/vendor/ses.umd.min.js"
+            ],
+            "dst": "/omnishell/interpreter/vendor/ses.umd.min.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/vendor/morphlex.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/vendor/morphlex.js",
+            "srcs": [
+              "interpreter/vendor/morphlex.js"
+            ],
+            "dst": "/omnishell/interpreter/vendor/morphlex.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/vendor/messages.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/vendor/messages.js",
+            "srcs": [
+              "interpreter/vendor/messages.js"
+            ],
+            "dst": "/omnishell/interpreter/vendor/messages.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/interpreter/vendor/game-inputs.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/interpreter/vendor/game-inputs.js",
+            "srcs": [
+              "interpreter/vendor/game-inputs.js"
+            ],
+            "dst": "/omnishell/interpreter/vendor/game-inputs.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "/omnishell/components/wallclock.js": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image"
+            },
+            "name": "/omnishell/components/wallclock.js",
+            "srcs": [
+              "components/wallclock.js"
+            ],
+            "dst": "/omnishell/components/wallclock.js",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          }
+        },
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "httpcheck",
+            "http://127.0.0.1:8080/health"
+          ],
+          "interval": "5s",
+          "timeout": "5s",
+          "retries": 30,
+          "start_period": "10s"
+        },
         "expose": [],
         "entrypoint": null,
         "incremental": false,
         "cmd": null
       },
-      "taskfile": {
-        "run": "when_changed",
-        "incremental": true,
-        "preconditions": []
+      "compose": {
+        "up": false,
+        "manual": false,
+        "build": {
+          "additional_contexts": {
+            "root": "..",
+            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.12.1@sha256:df434871aa11a1863a77ef125f7847a2978fd3ecde76b47f50d51e1a8749e10e}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
+          },
+          "secrets": [],
+          "args": {}
+        },
+        "environment": {
+          "ELECTRIC_SECRET": "${ELECTRIC_SECRET:-dev-electric-secret}",
+          "ORIGIN": "${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT}}"
+        },
+        "ports": [],
+        "volumes": [],
+        "depends_on": {},
+        "networks": {
+          "default": {
+            "aliases": [
+              "caddy"
+            ]
+          }
+        },
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "httpcheck",
+            "http://127.0.0.1:8080/health"
+          ],
+          "interval": "5s",
+          "timeout": "5s",
+          "retries": 30,
+          "start_period": "10s",
+          "start_interval": "500ms"
+        },
+        "develop": {
+          "watch": [
+            {
+              "action": "sync+restart",
+              "path": "../docker/Caddyfile",
+              "target": "/etc/caddy/Caddyfile"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../.certs",
+              "target": "/certs"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/index.html",
+              "target": "/srv/shell/index.html"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/shell.css",
+              "target": "/srv/shell/shell.css"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/boot.js",
+              "target": "/srv/shell/boot.js"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../offline-first-sw.js",
+              "target": "/srv/offline-first-sw.js"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/shell.yaml",
+              "target": "/srv/shell/shell.yaml"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/shell.json",
+              "target": "/srv/shell/shell.json"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/design.css",
+              "target": "/srv/shell/design.css"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/screens/counter.html",
+              "target": "/srv/shell/screens/counter.html"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/screens/counter.css",
+              "target": "/srv/shell/screens/counter.css"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/screens/todo.html",
+              "target": "/srv/shell/screens/todo.html"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/screens/todo.css",
+              "target": "/srv/shell/screens/todo.css"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/screens/grid.html",
+              "target": "/srv/shell/screens/grid.html"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/screens/grid.css",
+              "target": "/srv/shell/screens/grid.css"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/screens/timer.html",
+              "target": "/srv/shell/screens/timer.html"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/screens/timer.css",
+              "target": "/srv/shell/screens/timer.css"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/handlers/count.js",
+              "target": "/srv/shell/handlers/count.js"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/handlers/press.js",
+              "target": "/srv/shell/handlers/press.js"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/handlers/remove.js",
+              "target": "/srv/shell/handlers/remove.js"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/handlers/roll.js",
+              "target": "/srv/shell/handlers/roll.js"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/handlers/tally.js",
+              "target": "/srv/shell/handlers/tally.js"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../shell/handlers/tick.js",
+              "target": "/srv/shell/handlers/tick.js"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../messages/en.json",
+              "target": "/srv/messages/en.json"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../messages/pt-BR.json",
+              "target": "/srv/messages/pt-BR.json"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../brief.html",
+              "target": "/srv/docs/brief.html"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../ir.html",
+              "target": "/srv/docs/ir.html"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../ir/card.css",
+              "target": "/srv/docs/ir/card.css"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../acceptance.md",
+              "target": "/srv/docs/acceptance.md"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../DESIGN.md",
+              "target": "/srv/docs/DESIGN.md"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../robots.txt",
+              "target": "/srv/robots.txt"
+            },
+            {
+              "action": "sync+restart",
+              "path": "../sitemap.xml",
+              "target": "/srv/sitemap.xml"
+            }
+          ]
+        }
+      },
+      "healthcheck": {
+        "template": "http",
+        "url": "http://127.0.0.1:8080/health",
+        "authorization": null,
+        "headers": [],
+        "interval": "5s",
+        "start_interval": "500ms",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "10s"
+      },
+      "entrypoint": {
+        "name": "entrypoint",
+        "do": "case \"${ORIGIN#http://}\" in \"$ORIGIN\") h=${ORIGIN#https://};; *) h=${ORIGIN#http://};; esac; case \"$h\" in \"$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; set -e -o pipefail; roots=$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$roots\" ]; then find $roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$1; shift; for f do h=$(sha256sum < \"$f\"); printf \"$q%s$q\" \"${h%% *}\" > \"$f.etag\"; done' sh '\"' {} +; fi; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; fi; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
+        "priority": 0,
+        "shell": "sh",
+        "stop": false,
+        "srcs": {
+          "globs": [],
+          "defaultGlobs": null,
+          "exclude": [],
+          "defaultExclude": null
+        },
+        "env": {
+          "ELECTRIC_SECRET": "${ELECTRIC_SECRET:-dev-electric-secret}",
+          "ORIGIN": "${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT}}"
+        },
+        "after": {},
+        "host": true
+      },
+      "expose": {
+        "door": {
+          "port": 8443,
+          "publish": {
+            "environment": "CADDY_TLS_HOST_PORT"
+          }
+        }
       },
       "cmds": [],
       "cache": {
@@ -408,8 +1155,8 @@
     },
     "setup": {
       "name": "setup",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "srcs": {
         "globs": [],
         "defaultGlobs": null,
@@ -467,18 +1214,77 @@
         "MISE_ALWAYS_KEEP_DOWNLOAD": "1"
       },
       "deps": [],
+      "compose": {
+        "up": false,
+        "manual": false,
+        "build": {
+          "additional_contexts": {
+            "workspaceroot-pronto-sources_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}"
+          },
+          "secrets": [],
+          "args": {}
+        },
+        "environment": {},
+        "ports": [],
+        "volumes": [],
+        "depends_on": {}
+      },
       "dockerfile": {
         "from": {
-          "ref": "workspaceroot:setup",
-          "name": "workspaceroot-setup"
+          "name": "opensuse/leap:16.0@sha256:7f3aeccb6a613c0fc1690d3d3e5eb493fd477ee4587de20640017fc36d72f9b0"
         },
         "preamble": [],
-        "defaultPreamble": null,
+        "defaultPreamble": {
+          "lazybox-copy": {
+            "name": "lazybox-copy",
+            "priority": -10,
+            "line": "COPY --from=bonitao/lazybox:0.8.3@sha256:c896a6836673d8fd217f6021a2522351fd82d580ed985159feb2f10373018e73 /lazybox/ /root/.local/share/lazybox/"
+          },
+          "path-env": {
+            "name": "path-env",
+            "priority": -9,
+            "line": "ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH"
+          },
+          "static-curl-config": {
+            "name": "static-curl-config",
+            "priority": -8,
+            "line": "RUN mv /root/.local/share/lazybox/libexec/static-curl /root/.local/share/lazybox/libexec/static-curl.bin\nCOPY --chmod=0755 <<'STATIC_CURL' /root/.local/share/lazybox/libexec/static-curl\n#!/bin/sh\nOPENSSL_CONF=\"${OPENSSL_CONF:-/dev/null}\" exec \"$(dirname \"$0\")/static-curl.bin\" \"$@\"\nSTATIC_CURL"
+          },
+          "mise-trusted": {
+            "name": "mise-trusted",
+            "priority": -8,
+            "line": "ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo"
+          },
+          "gnu-shell-utils": {
+            "name": "gnu-shell-utils",
+            "priority": -7,
+            "do": "s=/zypper-store; d=/var/cache/zypp/packages; mkdir -p \"$s\" \"$d\"; cp -r \"$s\"/. \"$d\"/ 2>/dev/null || true; zypper -n modifyservice --no-refresh --all && sed -i 's|http://|https://|g' /etc/zypp/repos.d/*.repo || exit; zypper -n modifyrepo --keep-packages --all && zypper -n install findutils=4.10.0-160000.2.2 which=2.23-160000.2.2 git-core=2.51.0-160000.1.2 libatomic1=15.3.0+git11272-160000.1.1 || exit; cd \"$d\" && for f in */*.rpm */*/*.rpm; do [ -f \"$f\" ] || continue; o=\"$s/$f\"; [ -e \"$o\" ] && continue; mkdir -p \"$(dirname \"$o\")\"; t=\"$(mktemp \"$(dirname \"$o\")/.pXXXXXX\")\" && cp \"$f\" \"$t\" && mv -f \"$t\" \"$o\"; done; zypper -n modifyrepo --no-keep-packages --all || true",
+            "shell": "sh",
+            "mounts": [
+              {
+                "type": "cache",
+                "target": "/zypper-store",
+                "scope": "global",
+                "required": false
+              },
+              {
+                "type": "cache",
+                "target": "/var/cache/zypp",
+                "scope": "target",
+                "required": false
+              }
+            ]
+          }
+        },
         "add": [],
         "mounts": [],
         "secrets": {},
         "extra_hosts": [],
-        "epilogue": [],
+        "epilogue": [
+          "COPY --from=workspaceroot-pronto-sources_srcs /monorep[o] /monorepo/",
+          "COPY [m]ise.local.toml ./",
+          "RUN mise install"
+        ],
         "copy": [],
         "defaultCopy": null,
         "healthcheck": null,
@@ -536,8 +1342,8 @@
     },
     "lint-inputs": {
       "name": "lint-inputs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "srcs": {
         "globs": [],
         "defaultGlobs": null,
@@ -558,7 +1364,7 @@
           "name": "builtin",
           "priority": 0,
           "shell": "nu",
-          "do": "^nu -I ../../plugins/sayt -c 'use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=.pronto --allow-run --allow-env ($pronto | path join check-proto.ts) --baseline .'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=.pronto --allow-run --allow-env ($pronto | path join check-proto.ts) --baseline .'",
           "stop": false,
           "srcs": {
             "globs": [],
@@ -580,7 +1386,7 @@
       "cmds": [
         {
           "shell": "nu",
-          "do": "^nu -I ../../plugins/sayt -c 'use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=.pronto --allow-run --allow-env ($pronto | path join check-proto.ts) --baseline .'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=.pronto --allow-run --allow-env ($pronto | path join check-proto.ts) --baseline .'",
           "name": "builtin",
           "stop": false,
           "srcs": {
@@ -598,8 +1404,8 @@
     },
     "lint": {
       "name": "lint",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "mise x --",
       "cache": {
         "full": false,
@@ -609,7 +1415,7 @@
         "builtin": {
           "name": "builtin",
           "priority": 0,
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'",
           "shell": "nu",
           "stop": false,
           "srcs": {
@@ -625,7 +1431,7 @@
       },
       "cmds": [
         {
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'",
           "shell": "nu",
           "dockerfile": {
             "do": "cue vet -c ./..."
@@ -647,7 +1453,7 @@
       "dockerfile": {
         "from": {
           "ref": ":generate",
-          "name": "apps_idioms-generate"
+          "name": "idioms-generate"
         },
         "preamble": [],
         "defaultPreamble": null,
@@ -692,6 +1498,10 @@
           "pronto-node": {
             "glob": "**/node_modules/**",
             "name": "pronto-node"
+          },
+          "pronto-local-lock": {
+            "glob": "mise.local.lock",
+            "name": "pronto-local-lock"
           }
         }
       },
@@ -707,14 +1517,14 @@
     },
     "generate": {
       "name": "generate",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "mise x --",
       "cmd": {
         "builtin": {
           "name": "builtin",
           "priority": 0,
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf generate'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf generate'",
           "shell": "nu",
           "stop": false,
           "srcs": {
@@ -724,15 +1534,15 @@
             "defaultExclude": null
           },
           "dockerfile": {
-            "do": "^deno run --config (\"../../plugins/pronto\" | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env (\"../../plugins/pronto\" | path join write.ts) ."
+            "do": "^deno run --config ((^mise where github:bonisoft3/pronto | str trim) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ((^mise where github:bonisoft3/pronto | str trim) | path join write.ts) ."
           }
         }
       },
       "deps": [],
       "dockerfile": {
         "from": {
-          "ref": ":program",
-          "name": "apps_idioms-program"
+          "ref": ":setup",
+          "name": "idioms-setup"
         },
         "preamble": [],
         "defaultPreamble": null,
@@ -783,6 +1593,10 @@
           "pronto-node": {
             "glob": "**/node_modules/**",
             "name": "pronto-node"
+          },
+          "pronto-local-lock": {
+            "glob": "mise.local.lock",
+            "name": "pronto-local-lock"
           }
         }
       },
@@ -803,10 +1617,10 @@
       },
       "cmds": [
         {
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf generate'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf generate'",
           "shell": "nu",
           "dockerfile": {
-            "do": "^deno run --config (\"../../plugins/pronto\" | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env (\"../../plugins/pronto\" | path join write.ts) ."
+            "do": "^deno run --config ((^mise where github:bonisoft3/pronto | str trim) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ((^mise where github:bonisoft3/pronto | str trim) | path join write.ts) ."
           },
           "name": "builtin",
           "stop": false,
@@ -825,14 +1639,14 @@
     },
     "build": {
       "name": "build",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "mise x --",
       "cmd": {
         "builtin": {
           "name": "builtin",
           "priority": 0,
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf build'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf build'",
           "shell": "nu",
           "stop": false,
           "srcs": {
@@ -849,7 +1663,7 @@
       "dockerfile": {
         "from": {
           "ref": ":generate",
-          "name": "apps_idioms-generate"
+          "name": "idioms-generate"
         },
         "preamble": [],
         "defaultPreamble": null,
@@ -899,6 +1713,10 @@
           "pronto-node": {
             "glob": "**/node_modules/**",
             "name": "pronto-node"
+          },
+          "pronto-local-lock": {
+            "glob": "mise.local.lock",
+            "name": "pronto-local-lock"
           }
         }
       },
@@ -919,7 +1737,7 @@
       },
       "cmds": [
         {
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf build'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf build'",
           "shell": "nu",
           "name": "builtin",
           "stop": false,
@@ -938,8 +1756,55 @@
     },
     "test": {
       "name": "test",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
+      "activate": "mise x --",
+      "cmd": {
+        "builtin": {
+          "name": "builtin",
+          "priority": 0,
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf test'",
+          "shell": "nu",
+          "stop": false,
+          "srcs": {
+            "globs": [],
+            "defaultGlobs": null,
+            "exclude": [],
+            "defaultExclude": null
+          },
+          "dockerfile": {
+            "do": "deno eval 0"
+          }
+        }
+      },
+      "deps": [
+        ":build"
+      ],
+      "dockerfile": {
+        "from": {
+          "ref": ":build",
+          "name": "idioms-build"
+        },
+        "preamble": [],
+        "defaultPreamble": null,
+        "add": [],
+        "mounts": [],
+        "secrets": {},
+        "extra_hosts": [],
+        "epilogue": [],
+        "copy": [],
+        "defaultCopy": null,
+        "healthcheck": null,
+        "expose": [],
+        "entrypoint": null,
+        "incremental": false,
+        "cmd": null
+      },
+      "env": {},
+      "outs": {
+        "globs": [],
+        "exclude": []
+      },
       "srcs": {
         "globs": [
           ".bayt/checks.yaml",
@@ -966,65 +1831,22 @@
           "pronto-node": {
             "glob": "**/node_modules/**",
             "name": "pronto-node"
+          },
+          "pronto-local-lock": {
+            "glob": "mise.local.lock",
+            "name": "pronto-local-lock"
           }
         }
-      },
-      "outs": {
-        "globs": [],
-        "exclude": []
       },
       "state": {
         "globs": []
       },
-      "visibility": "internal",
-      "activate": "mise x --",
-      "cmd": {
-        "builtin": {
-          "name": "builtin",
-          "priority": 0,
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf test'",
-          "shell": "nu",
-          "stop": false,
-          "srcs": {
-            "globs": [],
-            "defaultGlobs": null,
-            "exclude": [],
-            "defaultExclude": null
-          },
-          "dockerfile": {
-            "do": "deno eval 0"
-          }
-        }
-      },
-      "deps": [
-        ":build"
-      ],
-      "dockerfile": {
-        "from": {
-          "ref": ":build",
-          "name": "apps_idioms-build"
-        },
-        "preamble": [],
-        "defaultPreamble": null,
-        "add": [],
-        "mounts": [],
-        "secrets": {},
-        "extra_hosts": [],
-        "epilogue": [],
-        "copy": [],
-        "defaultCopy": null,
-        "healthcheck": null,
-        "expose": [],
-        "entrypoint": null,
-        "incremental": false,
-        "cmd": null
-      },
-      "env": {},
       "taskfile": {
         "run": "once",
         "incremental": false,
         "preconditions": []
       },
+      "visibility": "internal",
       "vscode": {
         "group": {
           "kind": "test",
@@ -1033,7 +1855,7 @@
       },
       "cmds": [
         {
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf test'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf test'",
           "shell": "nu",
           "dockerfile": {
             "do": "deno eval 0"
@@ -1055,8 +1877,8 @@
     },
     "launch": {
       "name": "launch",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "srcs": {
         "globs": [],
         "defaultGlobs": null,
@@ -1086,7 +1908,7 @@
         "ports": [],
         "volumes": [],
         "depends_on": {
-          "apps_idioms-caddy": {
+          "idioms-caddy": {
             "condition": "service_healthy"
           }
         },
@@ -1178,8 +2000,8 @@
     },
     "integrate": {
       "name": "integrate",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "cmd": {
         "builtin": null
       },
@@ -1195,7 +2017,7 @@
           "ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
           "ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
           "ENV DENO_DIR=/deno-cache",
-          "COPY --from=root plugins/omnishell /omnishell",
+          "COPY --from=plugins_omnishell-runtime-image / /omnishell",
           "RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts"
         ],
         "defaultPreamble": null,
@@ -1235,7 +2057,7 @@
         "manual": true,
         "build": {
           "additional_contexts": {
-            "root": "../../.."
+            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.12.1@sha256:df434871aa11a1863a77ef125f7847a2978fd3ecde76b47f50d51e1a8749e10e}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
           },
           "secrets": [],
           "args": {}
@@ -1255,7 +2077,7 @@
           "."
         ],
         "depends_on": {
-          "apps_idioms-launch": {
+          "idioms-launch": {
             "condition": "service_healthy"
           }
         },
@@ -1278,8 +2100,8 @@
     },
     "ci-visual": {
       "name": "ci-visual",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "srcs": {
         "globs": [],
         "defaultGlobs": null,
@@ -1456,10 +2278,31 @@
         "manual": false,
         "build": {
           "additional_contexts": {
-            "root": "../../.."
+            "workspaceroot-pronto-sources_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}",
+            "libraries_mecha-airlock-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_bayt}",
+            "libraries_mecha-auth-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-auth-image_bayt}",
+            "libraries_mecha-clock-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-clock-image_bayt}",
+            "libraries_mecha-compute-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-compute-image_bayt}",
+            "libraries_mecha-conduit-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-conduit-image_bayt}",
+            "libraries_mecha-database-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_bayt}",
+            "libraries_mecha-mesh-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_bayt}",
+            "libraries_mecha-ticker-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_bayt}",
+            "libraries_mecha-database-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_srcs}",
+            "libraries_mecha-mesh-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_srcs}",
+            "libraries_mecha-auth-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-auth-image_srcs}",
+            "libraries_mecha-ticker-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_srcs}",
+            "libraries_mecha-clock-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-clock-image_srcs}",
+            "libraries_mecha-compute-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-compute-image_srcs}",
+            "libraries_mecha-airlock-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_srcs}",
+            "plugins_omnishell-runtime-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image_srcs}",
+            "plugins_omnishell-runtime-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image_bayt}",
+            "workspaceroot-pronto-sources_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_bayt}"
           },
           "secrets": [],
-          "args": {}
+          "args": {
+            "MONOREPO_COMPOSE_MODE": "${MONOREPO_COMPOSE_MODE:-}",
+            "BAYT_RUNTIME": "${BAYT_RUNTIME:-}"
+          }
         },
         "environment": {},
         "ports": [],
@@ -1475,7 +2318,12 @@
         "from": {
           "name": "docker:29.7.1-cli@sha256:27a51d5ab1cd38d9eeaba7b415b8c07bc10c31e1cf1ec8d78f6413fcfab3f44f"
         },
-        "preamble": [],
+        "preamble": [
+          "ARG MONOREPO_COMPOSE_MODE",
+          "ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
+          "ARG BAYT_RUNTIME",
+          "ENV BAYT_RUNTIME=$BAYT_RUNTIME"
+        ],
         "defaultPreamble": {
           "bayt-runtime": {
             "name": "bayt-runtime",
@@ -1621,20 +2469,265 @@
         "epilogue": [],
         "copy": [
           {
-            "from": {
-              "name": "root"
-            },
+            "from": null,
             "srcs": [
-              "plugins/omnishell",
-              "libraries/mecha"
+              "monorepo/*.yaml"
             ],
-            "dst": "/monorepo/",
+            "dst": "./",
             "link": true,
             "parents": true,
             "exclude": []
           }
         ],
-        "defaultCopy": null,
+        "defaultCopy": {
+          "workspaceroot-pronto-sources_srcs": {
+            "from": {
+              "name": "workspaceroot-pronto-sources_srcs"
+            },
+            "name": "workspaceroot-pronto-sources_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-airlock-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-airlock-image_bayt"
+            },
+            "name": "libraries_mecha-airlock-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-auth-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-auth-image_bayt"
+            },
+            "name": "libraries_mecha-auth-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-clock-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-clock-image_bayt"
+            },
+            "name": "libraries_mecha-clock-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-compute-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-compute-image_bayt"
+            },
+            "name": "libraries_mecha-compute-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-conduit-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-conduit-image_bayt"
+            },
+            "name": "libraries_mecha-conduit-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-database-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-database-image_bayt"
+            },
+            "name": "libraries_mecha-database-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-mesh-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-mesh-image_bayt"
+            },
+            "name": "libraries_mecha-mesh-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-ticker-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-ticker-image_bayt"
+            },
+            "name": "libraries_mecha-ticker-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-database-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-database-image_srcs"
+            },
+            "name": "libraries_mecha-database-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-mesh-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-mesh-image_srcs"
+            },
+            "name": "libraries_mecha-mesh-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-auth-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-auth-image_srcs"
+            },
+            "name": "libraries_mecha-auth-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-ticker-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-ticker-image_srcs"
+            },
+            "name": "libraries_mecha-ticker-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-clock-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-clock-image_srcs"
+            },
+            "name": "libraries_mecha-clock-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-compute-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-compute-image_srcs"
+            },
+            "name": "libraries_mecha-compute-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-airlock-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-airlock-image_srcs"
+            },
+            "name": "libraries_mecha-airlock-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "plugins_omnishell-runtime-image_srcs": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image_srcs"
+            },
+            "name": "plugins_omnishell-runtime-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "plugins_omnishell-runtime-image_bayt": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image_bayt"
+            },
+            "name": "plugins_omnishell-runtime-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "workspaceroot-pronto-sources_bayt": {
+            "from": {
+              "name": "workspaceroot-pronto-sources_bayt"
+            },
+            "name": "workspaceroot-pronto-sources_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          }
+        },
         "healthcheck": null,
         "expose": [],
         "entrypoint": null,
@@ -1810,10 +2903,819 @@
         "similar": false
       }
     },
+    "ci": {
+      "name": "ci",
+      "project": "idioms",
+      "dir": ".",
+      "activate": "",
+      "cmd": {
+        "builtin": {
+          "name": "builtin",
+          "priority": 0,
+          "shell": "sh",
+          "do": "set -eu\nexport DOCKER_HOST_TCP=\"$DOCKER_HOST\"\nexport DEPOT_DISABLE_OTEL=1\n[ -n \"$DEPOT_TOKEN\" ] && bake=\"depot bake --project $DEPOT_PROJECT_ID\" || bake=\"docker buildx bake\"\npin() { [ -z \"$BUILDKIT_SYNTAX\" ] || find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i \"$1\" {} \\; ; }\ndocker compose --profile '*' config -o /tmp/ci-compose.yaml\ndocker buildx bake --allow=fs.read=/ -f /tmp/ci-compose.yaml --print ci-visual > /tmp/ci-bake.json\n:\nfor target in ci-visual; do\n case \"  \" in\n *\" $target \"*) executor=\"$bake\" ;;\n *) executor=\"docker buildx bake\"; : ;;\n esac\n $executor -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' ${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} ${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} ${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} \"$target\"\ndone",
+          "stop": false,
+          "srcs": {
+            "globs": [],
+            "defaultGlobs": null,
+            "exclude": [],
+            "defaultExclude": null
+          },
+          "dockerfile": {
+            "inject": {
+              "secrets": [
+                {
+                  "id": "docker_host",
+                  "var": {
+                    "contents": "DOCKER_HOST"
+                  }
+                },
+                {
+                  "id": "buildx_builder",
+                  "var": {
+                    "contents": "BUILDX_BUILDER"
+                  }
+                },
+                {
+                  "id": "testcontainers_host",
+                  "var": {
+                    "contents": "TESTCONTAINERS_HOST_OVERRIDE"
+                  }
+                },
+                {
+                  "id": "cache_scope",
+                  "var": {
+                    "contents": "CACHE_SCOPE"
+                  }
+                },
+                {
+                  "id": "cache_scope_fallback",
+                  "var": {
+                    "contents": "CACHE_SCOPE_FALLBACK"
+                  }
+                },
+                {
+                  "id": "sayt_buildkit_syntax",
+                  "var": {
+                    "contents": "BUILDKIT_SYNTAX"
+                  }
+                },
+                {
+                  "id": "sayt_no_cache",
+                  "var": {
+                    "contents": "SAYT_NO_CACHE"
+                  }
+                },
+                {
+                  "id": "bayt_image_tag",
+                  "var": {
+                    "contents": "BAYT_IMAGE_TAG"
+                  }
+                },
+                {
+                  "id": "bayt_pull_policy",
+                  "var": {
+                    "contents": "BAYT_PULL_POLICY"
+                  }
+                },
+                {
+                  "id": "sayt_no_cache_from",
+                  "var": {
+                    "contents": "SAYT_NO_CACHE_FROM"
+                  }
+                },
+                {
+                  "id": "sayt_no_cache_to",
+                  "var": {
+                    "contents": "SAYT_NO_CACHE_TO"
+                  }
+                },
+                {
+                  "id": "depot_token",
+                  "var": {
+                    "contents": "DEPOT_TOKEN"
+                  }
+                },
+                {
+                  "id": "depot_project_id",
+                  "var": {
+                    "contents": "DEPOT_PROJECT_ID"
+                  }
+                },
+                {
+                  "id": "depot_org_id",
+                  "var": {
+                    "contents": "DEPOT_ORG_ID"
+                  }
+                },
+                {
+                  "id": "depot_disable_otel",
+                  "var": {
+                    "contents": "DEPOT_DISABLE_OTEL"
+                  }
+                },
+                {
+                  "id": "actions_results_url",
+                  "var": {
+                    "contents": "ACTIONS_RESULTS_URL"
+                  }
+                },
+                {
+                  "id": "actions_runtime_token",
+                  "var": {
+                    "contents": "ACTIONS_RUNTIME_TOKEN"
+                  }
+                },
+                {
+                  "id": "bkid_project",
+                  "var": {
+                    "contents": "BKID_PROJECT"
+                  }
+                },
+                {
+                  "id": "buildx_instance",
+                  "var": {
+                    "contents": "BUILDX_INSTANCE"
+                  }
+                },
+                {
+                  "id": "docker_config",
+                  "var": {
+                    "contents": "DOCKER_AUTH_CONFIG",
+                    "path": "/root/.docker/config.json"
+                  },
+                  "mode": "0600"
+                }
+              ],
+              "defaultSteps": {
+                "buildx-instance": {
+                  "name": "buildx-instance",
+                  "priority": 11,
+                  "pre": "if [ -n \"$BUILDX_BUILDER\" ] && [ -n \"$BUILDX_INSTANCE\" ]; then\n  install -d -m 0700 /root/.docker/buildx/instances\n  printf '%s' \"$BUILDX_INSTANCE\" > \"/root/.docker/buildx/instances/$BUILDX_BUILDER\"\n  chmod 0600 \"/root/.docker/buildx/instances/$BUILDX_BUILDER\"\nfi"
+                },
+                "unix-socket-forward": {
+                  "name": "unix-socket-forward",
+                  "priority": 10,
+                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
+                }
+              },
+              "steps": []
+            }
+          }
+        }
+      },
+      "compose": {
+        "up": false,
+        "manual": false,
+        "build": {
+          "additional_contexts": {
+            "workspaceroot-pronto-sources_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}",
+            "libraries_mecha-airlock-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_bayt}",
+            "libraries_mecha-auth-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-auth-image_bayt}",
+            "libraries_mecha-clock-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-clock-image_bayt}",
+            "libraries_mecha-compute-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-compute-image_bayt}",
+            "libraries_mecha-conduit-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-conduit-image_bayt}",
+            "libraries_mecha-database-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_bayt}",
+            "libraries_mecha-mesh-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_bayt}",
+            "libraries_mecha-ticker-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_bayt}",
+            "libraries_mecha-database-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_srcs}",
+            "libraries_mecha-mesh-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_srcs}",
+            "libraries_mecha-auth-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-auth-image_srcs}",
+            "libraries_mecha-ticker-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_srcs}",
+            "libraries_mecha-clock-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-clock-image_srcs}",
+            "libraries_mecha-compute-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-compute-image_srcs}",
+            "libraries_mecha-airlock-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_srcs}",
+            "plugins_omnishell-runtime-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image_srcs}",
+            "plugins_omnishell-runtime-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image_bayt}",
+            "workspaceroot-pronto-sources_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_bayt}"
+          },
+          "secrets": [],
+          "args": {
+            "MONOREPO_COMPOSE_MODE": "${MONOREPO_COMPOSE_MODE:-}",
+            "BAYT_RUNTIME": "${BAYT_RUNTIME:-}"
+          }
+        },
+        "environment": {},
+        "ports": [],
+        "volumes": [],
+        "depends_on": {}
+      },
+      "deps": [
+        ":ci-visual:srcs",
+        ":ci-visual:bayt"
+      ],
+      "dockerfile": {
+        "from": {
+          "name": "docker:29.7.1-cli@sha256:27a51d5ab1cd38d9eeaba7b415b8c07bc10c31e1cf1ec8d78f6413fcfab3f44f"
+        },
+        "preamble": [
+          "ARG MONOREPO_COMPOSE_MODE",
+          "ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
+          "ARG BAYT_RUNTIME",
+          "ENV BAYT_RUNTIME=$BAYT_RUNTIME"
+        ],
+        "defaultPreamble": {
+          "bayt-runtime": {
+            "name": "bayt-runtime",
+            "priority": -6,
+            "copy": {
+              "from": {
+                "name": "bayt",
+                "image": "bonitao/bayt-runtime:1.2.1@sha256:c5776093b5c464b77365e3bb5310b2c5d9c8d99f5cc07a131c30a4ea03d42f5c"
+              },
+              "srcs": [
+                "."
+              ],
+              "dst": "/monorepo/plugins/bayt/runtime",
+              "link": true,
+              "parents": false,
+              "exclude": []
+            }
+          },
+          "bayt-path": {
+            "name": "bayt-path",
+            "priority": -5,
+            "line": "ENV PATH=/monorepo/plugins/bayt/runtime:${PATH}"
+          },
+          "socat": {
+            "name": "socat",
+            "priority": -10,
+            "copy": {
+              "from": {
+                "name": "mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8"
+              },
+              "srcs": [
+                "/usr/bin/socat1"
+              ],
+              "dst": "/usr/local/bin/socat",
+              "link": true,
+              "parents": false,
+              "exclude": []
+            }
+          },
+          "socat-libs": {
+            "name": "socat-libs",
+            "priority": -9,
+            "copy": {
+              "from": {
+                "name": "mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8"
+              },
+              "srcs": [
+                "/usr/lib/libreadline.so.8",
+                "/usr/lib/libncursesw.so.6"
+              ],
+              "dst": "/usr/lib/",
+              "link": true,
+              "parents": false,
+              "exclude": []
+            }
+          },
+          "lazybox-copy": {
+            "name": "lazybox-copy",
+            "priority": -11,
+            "line": "COPY --from=bonitao/lazybox:0.8.3@sha256:c896a6836673d8fd217f6021a2522351fd82d580ed985159feb2f10373018e73 /lazybox/ /root/.local/share/lazybox/"
+          },
+          "path-env": {
+            "name": "path-env",
+            "priority": -8,
+            "line": "ENV PATH=$PATH:/root/.local/bin:/root/.local/share/lazybox/bin"
+          },
+          "toolchain-config": {
+            "name": "toolchain-config",
+            "priority": -7,
+            "line": "COPY <<'BKID_MISE' /opt/bkid/mise.toml\n[settings]\nexperimental = true\ngithub_attestations = false\nlocked = true\nlockfile = true\nslsa = false\n\n[settings.github]\ngithub_attestations = false\nslsa = false\n\n[tools]\n'github:depot/cli' = '2.101.78'\n'github:go-task/task' = 'v3.49.1'\nBKID_MISE\nCOPY <<'BKID_LOCK' /opt/bkid/mise.lock\n[tools]\n[[tools.'github:depot/cli']]\nbackend = 'github:depot/cli'\nversion = '2.101.78'\n\n[tools.'github:depot/cli'.platforms]\n[tools.'github:depot/cli'.platforms.linux-arm64]\nchecksum = 'sha256:985308b4e9b124c9d8ca712b30b84ea613e7de2f9bb3bb193a710e45e254ea87'\nurl = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_arm64.tar.gz'\nurl_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083092'\n\n[tools.'github:depot/cli'.platforms.linux-arm64-musl]\nchecksum = 'sha256:985308b4e9b124c9d8ca712b30b84ea613e7de2f9bb3bb193a710e45e254ea87'\nurl = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_arm64.tar.gz'\nurl_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083092'\n\n[tools.'github:depot/cli'.platforms.linux-x64]\nchecksum = 'sha256:15d066413b99c4fdd399d5fc79a64e50b2e266b509642995935bb96c01d28f1b'\nurl = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_amd64.tar.gz'\nurl_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083086'\n\n[tools.'github:depot/cli'.platforms.linux-x64-musl]\nchecksum = 'sha256:15d066413b99c4fdd399d5fc79a64e50b2e266b509642995935bb96c01d28f1b'\nurl = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_amd64.tar.gz'\nurl_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083086'\n\n[[tools.'github:go-task/task']]\nbackend = 'github:go-task/task'\nversion = 'v3.49.1'\n\n[tools.'github:go-task/task'.platforms]\n[tools.'github:go-task/task'.platforms.linux-arm64]\nchecksum = 'sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb'\nurl = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz'\nurl_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609773'\n\n[tools.'github:go-task/task'.platforms.linux-arm64-musl]\nchecksum = 'sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb'\nurl = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz'\nurl_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609773'\n\n[tools.'github:go-task/task'.platforms.linux-x64]\nchecksum = 'sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576'\nurl = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz'\nurl_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609772'\n\n[tools.'github:go-task/task'.platforms.linux-x64-musl]\nchecksum = 'sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576'\nurl = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz'\nurl_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609772'\nBKID_LOCK"
+          },
+          "toolchain-install": {
+            "name": "toolchain-install",
+            "priority": -6,
+            "line": "RUN cd /opt/bkid && mise trust -y && mise install && mise exec -- sh -c 'cp \"$(mise which task)\" /usr/local/bin/task && cp \"$(mise which depot)\" /usr/local/bin/depot'"
+          }
+        },
+        "add": [],
+        "mounts": [],
+        "secrets": {
+          "docker_host": {
+            "environment": "DOCKER_HOST_TCP"
+          },
+          "buildx_builder": {
+            "environment": "BUILDX_BUILDER"
+          },
+          "buildx_instance": {
+            "environment": "BUILDX_INSTANCE"
+          },
+          "docker_config": {
+            "environment": "DOCKER_AUTH_CONFIG"
+          },
+          "testcontainers_host": {
+            "environment": "TESTCONTAINERS_HOST_OVERRIDE"
+          },
+          "cache_scope": {
+            "environment": "CACHE_SCOPE"
+          },
+          "cache_scope_fallback": {
+            "environment": "CACHE_SCOPE_FALLBACK"
+          },
+          "sayt_buildkit_syntax": {
+            "environment": "BUILDKIT_SYNTAX"
+          },
+          "sayt_no_cache": {
+            "environment": "SAYT_NO_CACHE"
+          },
+          "bayt_image_tag": {
+            "environment": "BAYT_IMAGE_TAG"
+          },
+          "bayt_pull_policy": {
+            "environment": "BAYT_PULL_POLICY"
+          },
+          "sayt_no_cache_from": {
+            "environment": "SAYT_NO_CACHE_FROM"
+          },
+          "sayt_no_cache_to": {
+            "environment": "SAYT_NO_CACHE_TO"
+          },
+          "depot_token": {
+            "environment": "DEPOT_TOKEN"
+          },
+          "depot_project_id": {
+            "environment": "DEPOT_PROJECT_ID"
+          },
+          "depot_org_id": {
+            "environment": "DEPOT_ORG_ID"
+          },
+          "depot_disable_otel": {
+            "environment": "DEPOT_DISABLE_OTEL"
+          },
+          "actions_results_url": {
+            "environment": "ACTIONS_RESULTS_URL"
+          },
+          "actions_runtime_token": {
+            "environment": "ACTIONS_RUNTIME_TOKEN"
+          },
+          "bkid_project": {
+            "environment": "BKID_PROJECT"
+          }
+        },
+        "extra_hosts": [],
+        "epilogue": [],
+        "copy": [
+          {
+            "from": null,
+            "srcs": [
+              "monorepo/*.yaml"
+            ],
+            "dst": "./",
+            "link": true,
+            "parents": true,
+            "exclude": []
+          }
+        ],
+        "defaultCopy": {
+          "workspaceroot-pronto-sources_srcs": {
+            "from": {
+              "name": "workspaceroot-pronto-sources_srcs"
+            },
+            "name": "workspaceroot-pronto-sources_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-airlock-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-airlock-image_bayt"
+            },
+            "name": "libraries_mecha-airlock-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-auth-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-auth-image_bayt"
+            },
+            "name": "libraries_mecha-auth-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-clock-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-clock-image_bayt"
+            },
+            "name": "libraries_mecha-clock-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-compute-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-compute-image_bayt"
+            },
+            "name": "libraries_mecha-compute-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-conduit-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-conduit-image_bayt"
+            },
+            "name": "libraries_mecha-conduit-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-database-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-database-image_bayt"
+            },
+            "name": "libraries_mecha-database-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-mesh-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-mesh-image_bayt"
+            },
+            "name": "libraries_mecha-mesh-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-ticker-image_bayt": {
+            "from": {
+              "name": "libraries_mecha-ticker-image_bayt"
+            },
+            "name": "libraries_mecha-ticker-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-database-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-database-image_srcs"
+            },
+            "name": "libraries_mecha-database-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-mesh-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-mesh-image_srcs"
+            },
+            "name": "libraries_mecha-mesh-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-auth-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-auth-image_srcs"
+            },
+            "name": "libraries_mecha-auth-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-ticker-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-ticker-image_srcs"
+            },
+            "name": "libraries_mecha-ticker-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-clock-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-clock-image_srcs"
+            },
+            "name": "libraries_mecha-clock-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-compute-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-compute-image_srcs"
+            },
+            "name": "libraries_mecha-compute-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "libraries_mecha-airlock-image_srcs": {
+            "from": {
+              "name": "libraries_mecha-airlock-image_srcs"
+            },
+            "name": "libraries_mecha-airlock-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "plugins_omnishell-runtime-image_srcs": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image_srcs"
+            },
+            "name": "plugins_omnishell-runtime-image_srcs",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "plugins_omnishell-runtime-image_bayt": {
+            "from": {
+              "name": "plugins_omnishell-runtime-image_bayt"
+            },
+            "name": "plugins_omnishell-runtime-image_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          },
+          "workspaceroot-pronto-sources_bayt": {
+            "from": {
+              "name": "workspaceroot-pronto-sources_bayt"
+            },
+            "name": "workspaceroot-pronto-sources_bayt",
+            "srcs": [
+              "/monorep[o]"
+            ],
+            "dst": "/monorepo/",
+            "link": true,
+            "parents": false,
+            "exclude": []
+          }
+        },
+        "healthcheck": null,
+        "expose": [],
+        "entrypoint": null,
+        "incremental": true,
+        "cmd": null
+      },
+      "env": {
+        "BUILDX_BAKE_ENTITLEMENTS_FS": "0",
+        "COMPOSE_BAKE": "true"
+      },
+      "outs": {
+        "globs": [],
+        "exclude": []
+      },
+      "srcs": {
+        "globs": [],
+        "defaultGlobs": {
+          "graph": {
+            "glob": ".bayt/**",
+            "name": "graph"
+          }
+        },
+        "exclude": [],
+        "defaultExclude": null
+      },
+      "state": {
+        "globs": []
+      },
+      "taskfile": {
+        "run": "once",
+        "incremental": false,
+        "preconditions": []
+      },
+      "visibility": "internal",
+      "cmds": [
+        {
+          "do": "set -eu\nexport DOCKER_HOST_TCP=\"$DOCKER_HOST\"\nexport DEPOT_DISABLE_OTEL=1\n[ -n \"$DEPOT_TOKEN\" ] && bake=\"depot bake --project $DEPOT_PROJECT_ID\" || bake=\"docker buildx bake\"\npin() { [ -z \"$BUILDKIT_SYNTAX\" ] || find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i \"$1\" {} \\; ; }\ndocker compose --profile '*' config -o /tmp/ci-compose.yaml\ndocker buildx bake --allow=fs.read=/ -f /tmp/ci-compose.yaml --print ci-visual > /tmp/ci-bake.json\n:\nfor target in ci-visual; do\n case \"  \" in\n *\" $target \"*) executor=\"$bake\" ;;\n *) executor=\"docker buildx bake\"; : ;;\n esac\n $executor -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' ${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} ${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} ${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} \"$target\"\ndone",
+          "shell": "sh",
+          "dockerfile": {
+            "inject": {
+              "secrets": [
+                {
+                  "id": "docker_host",
+                  "var": {
+                    "contents": "DOCKER_HOST"
+                  }
+                },
+                {
+                  "id": "buildx_builder",
+                  "var": {
+                    "contents": "BUILDX_BUILDER"
+                  }
+                },
+                {
+                  "id": "testcontainers_host",
+                  "var": {
+                    "contents": "TESTCONTAINERS_HOST_OVERRIDE"
+                  }
+                },
+                {
+                  "id": "cache_scope",
+                  "var": {
+                    "contents": "CACHE_SCOPE"
+                  }
+                },
+                {
+                  "id": "cache_scope_fallback",
+                  "var": {
+                    "contents": "CACHE_SCOPE_FALLBACK"
+                  }
+                },
+                {
+                  "id": "sayt_buildkit_syntax",
+                  "var": {
+                    "contents": "BUILDKIT_SYNTAX"
+                  }
+                },
+                {
+                  "id": "sayt_no_cache",
+                  "var": {
+                    "contents": "SAYT_NO_CACHE"
+                  }
+                },
+                {
+                  "id": "bayt_image_tag",
+                  "var": {
+                    "contents": "BAYT_IMAGE_TAG"
+                  }
+                },
+                {
+                  "id": "bayt_pull_policy",
+                  "var": {
+                    "contents": "BAYT_PULL_POLICY"
+                  }
+                },
+                {
+                  "id": "sayt_no_cache_from",
+                  "var": {
+                    "contents": "SAYT_NO_CACHE_FROM"
+                  }
+                },
+                {
+                  "id": "sayt_no_cache_to",
+                  "var": {
+                    "contents": "SAYT_NO_CACHE_TO"
+                  }
+                },
+                {
+                  "id": "depot_token",
+                  "var": {
+                    "contents": "DEPOT_TOKEN"
+                  }
+                },
+                {
+                  "id": "depot_project_id",
+                  "var": {
+                    "contents": "DEPOT_PROJECT_ID"
+                  }
+                },
+                {
+                  "id": "depot_org_id",
+                  "var": {
+                    "contents": "DEPOT_ORG_ID"
+                  }
+                },
+                {
+                  "id": "depot_disable_otel",
+                  "var": {
+                    "contents": "DEPOT_DISABLE_OTEL"
+                  }
+                },
+                {
+                  "id": "actions_results_url",
+                  "var": {
+                    "contents": "ACTIONS_RESULTS_URL"
+                  }
+                },
+                {
+                  "id": "actions_runtime_token",
+                  "var": {
+                    "contents": "ACTIONS_RUNTIME_TOKEN"
+                  }
+                },
+                {
+                  "id": "bkid_project",
+                  "var": {
+                    "contents": "BKID_PROJECT"
+                  }
+                },
+                {
+                  "id": "buildx_instance",
+                  "var": {
+                    "contents": "BUILDX_INSTANCE"
+                  }
+                },
+                {
+                  "id": "docker_config",
+                  "var": {
+                    "contents": "DOCKER_AUTH_CONFIG",
+                    "path": "/root/.docker/config.json"
+                  },
+                  "mode": "0600"
+                }
+              ],
+              "defaultSteps": {
+                "buildx-instance": {
+                  "name": "buildx-instance",
+                  "priority": 11,
+                  "pre": "if [ -n \"$BUILDX_BUILDER\" ] && [ -n \"$BUILDX_INSTANCE\" ]; then\n  install -d -m 0700 /root/.docker/buildx/instances\n  printf '%s' \"$BUILDX_INSTANCE\" > \"/root/.docker/buildx/instances/$BUILDX_BUILDER\"\n  chmod 0600 \"/root/.docker/buildx/instances/$BUILDX_BUILDER\"\nfi"
+                },
+                "unix-socket-forward": {
+                  "name": "unix-socket-forward",
+                  "priority": 10,
+                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
+                }
+              },
+              "steps": []
+            }
+          },
+          "name": "builtin",
+          "stop": false,
+          "srcs": {
+            "globs": [],
+            "defaultGlobs": null,
+            "exclude": [],
+            "defaultExclude": null
+          }
+        }
+      ],
+      "cache": {
+        "full": false,
+        "similar": false
+      }
+    },
     "launch-action": {
       "name": "launch-action",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "srcs": {
         "globs": [],
         "defaultGlobs": null,
@@ -1832,7 +3734,7 @@
         "builtin": {
           "name": "builtin",
           "priority": 0,
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf launch'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf launch'",
           "shell": "nu",
           "stop": false,
           "srcs": {
@@ -1854,7 +3756,7 @@
       },
       "cmds": [
         {
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf launch'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf launch'",
           "shell": "nu",
           "name": "builtin",
           "stop": false,
@@ -1873,8 +3775,8 @@
     },
     "integrate-action": {
       "name": "integrate-action",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "srcs": {
         "globs": [],
         "defaultGlobs": null,
@@ -1893,7 +3795,7 @@
         "builtin": {
           "name": "builtin",
           "priority": 0,
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf integrate'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf integrate'",
           "shell": "nu",
           "stop": false,
           "srcs": {
@@ -1915,7 +3817,7 @@
       },
       "cmds": [
         {
-          "do": "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf integrate'",
+          "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf integrate'",
           "shell": "nu",
           "name": "builtin",
           "stop": false,
@@ -1927,937 +3829,6 @@
           }
         }
       ],
-      "cache": {
-        "full": false,
-        "similar": false
-      }
-    },
-    "caddy": {
-      "name": "caddy",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
-      "srcs": {
-        "globs": [
-          "docker/Caddyfile",
-          "shell/index.html",
-          "shell/shell.css",
-          "shell/boot.js",
-          "offline-first-sw.js",
-          "shell/shell.yaml",
-          "shell/shell.json",
-          "shell/design.css",
-          "shell/screens/counter.html",
-          "shell/screens/counter.css",
-          "shell/screens/todo.html",
-          "shell/screens/todo.css",
-          "shell/screens/grid.html",
-          "shell/screens/grid.css",
-          "shell/screens/timer.html",
-          "shell/screens/timer.css",
-          "shell/handlers/count.js",
-          "shell/handlers/press.js",
-          "shell/handlers/remove.js",
-          "shell/handlers/roll.js",
-          "shell/handlers/tally.js",
-          "shell/handlers/tick.js",
-          "messages/en.json",
-          "messages/pt-BR.json",
-          "brief.html",
-          "ir.html",
-          "ir/card.css",
-          "acceptance.md",
-          "DESIGN.md",
-          "robots.txt",
-          "sitemap.xml"
-        ],
-        "defaultGlobs": null,
-        "exclude": [],
-        "defaultExclude": null
-      },
-      "outs": {
-        "globs": [],
-        "exclude": []
-      },
-      "state": {
-        "globs": []
-      },
-      "visibility": "internal",
-      "activate": "",
-      "cmd": {
-        "builtin": null
-      },
-      "env": {},
-      "deps": [],
-      "dockerfile": {
-        "from": {
-          "name": "caddy:2.9-alpine@sha256:b4e3952384eb9524a887633ce65c752dd7c71314d2c2acf98cd5c715aaa534f0"
-        },
-        "preamble": [],
-        "defaultPreamble": null,
-        "add": [],
-        "mounts": [],
-        "secrets": {},
-        "extra_hosts": [],
-        "epilogue": [],
-        "copy": [
-          {
-            "from": null,
-            "srcs": [
-              "docker/Caddyfile"
-            ],
-            "dst": "/etc/caddy/Caddyfile",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": null,
-            "srcs": [
-              ".cert[s]"
-            ],
-            "dst": "/certs/",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": null,
-            "srcs": [
-              "shell/index.html",
-              "shell/shell.css",
-              "shell/boot.js",
-              "offline-first-sw.js",
-              "shell/shell.yaml",
-              "shell/shell.json",
-              "shell/design.css",
-              "shell/screens/counter.html",
-              "shell/screens/counter.css",
-              "shell/screens/todo.html",
-              "shell/screens/todo.css",
-              "shell/screens/grid.html",
-              "shell/screens/grid.css",
-              "shell/screens/timer.html",
-              "shell/screens/timer.css",
-              "shell/handlers/count.js",
-              "shell/handlers/press.js",
-              "shell/handlers/remove.js",
-              "shell/handlers/roll.js",
-              "shell/handlers/tally.js",
-              "shell/handlers/tick.js",
-              "messages/en.json",
-              "messages/pt-BR.json"
-            ],
-            "dst": "/srv/",
-            "link": true,
-            "parents": true,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/shell.js"
-            ],
-            "dst": "/omnishell/interpreter/shell.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/chrome.js"
-            ],
-            "dst": "/omnishell/interpreter/chrome.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/screen.js"
-            ],
-            "dst": "/omnishell/interpreter/screen.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/fragment.js"
-            ],
-            "dst": "/omnishell/interpreter/fragment.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/data-sync.js"
-            ],
-            "dst": "/omnishell/interpreter/data-sync.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/hybrid-client.js"
-            ],
-            "dst": "/omnishell/interpreter/hybrid-client.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/cortex-session.js"
-            ],
-            "dst": "/omnishell/interpreter/cortex-session.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/cortex-command.js"
-            ],
-            "dst": "/omnishell/interpreter/cortex-command.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/validate.js"
-            ],
-            "dst": "/omnishell/interpreter/validate.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/render.js"
-            ],
-            "dst": "/omnishell/interpreter/render.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/release-plan.js"
-            ],
-            "dst": "/omnishell/interpreter/release-plan.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/release-assets.js"
-            ],
-            "dst": "/omnishell/interpreter/release-assets.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/preloads.js"
-            ],
-            "dst": "/omnishell/interpreter/preloads.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/markup.js"
-            ],
-            "dst": "/omnishell/interpreter/markup.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/script-url.js"
-            ],
-            "dst": "/omnishell/interpreter/script-url.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/deferred-boot.js"
-            ],
-            "dst": "/omnishell/interpreter/deferred-boot.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/host-dom.js"
-            ],
-            "dst": "/omnishell/interpreter/host-dom.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/hatch.js"
-            ],
-            "dst": "/omnishell/interpreter/hatch.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/hatch-worker.js"
-            ],
-            "dst": "/omnishell/interpreter/hatch-worker.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/storybook.js"
-            ],
-            "dst": "/omnishell/interpreter/storybook.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/jessie.js"
-            ],
-            "dst": "/omnishell/interpreter/jessie.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/kinetic.js"
-            ],
-            "dst": "/omnishell/interpreter/kinetic.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/prng.js"
-            ],
-            "dst": "/omnishell/interpreter/prng.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/vendor/mecha-client.js"
-            ],
-            "dst": "/omnishell/interpreter/vendor/mecha-client.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/vendor/js-yaml.js"
-            ],
-            "dst": "/omnishell/interpreter/vendor/js-yaml.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/vendor/ses.umd.min.js"
-            ],
-            "dst": "/omnishell/interpreter/vendor/ses.umd.min.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/vendor/morphlex.js"
-            ],
-            "dst": "/omnishell/interpreter/vendor/morphlex.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/vendor/messages.js"
-            ],
-            "dst": "/omnishell/interpreter/vendor/messages.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/interpreter/vendor/game-inputs.js"
-            ],
-            "dst": "/omnishell/interpreter/vendor/game-inputs.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": {
-              "name": "root"
-            },
-            "srcs": [
-              "plugins/omnishell/components/wallclock.js"
-            ],
-            "dst": "/omnishell/components/wallclock.js",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          },
-          {
-            "from": null,
-            "srcs": [
-              "brief.html",
-              "ir.html",
-              "ir/card.css",
-              "acceptance.md",
-              "DESIGN.md"
-            ],
-            "dst": "/srv/docs/",
-            "link": true,
-            "parents": true,
-            "exclude": []
-          },
-          {
-            "from": null,
-            "srcs": [
-              "robots.txt",
-              "sitemap.xml"
-            ],
-            "dst": "/srv/",
-            "link": true,
-            "parents": true,
-            "exclude": []
-          }
-        ],
-        "defaultCopy": {
-          "httpcheck": {
-            "from": {
-              "name": "tarampampam/microcheck:1@sha256:79c187c05bfa67518078bf4db117771942fa8fe107dc79a905861c75ddf28dfa"
-            },
-            "name": "httpcheck",
-            "srcs": [
-              "/bin/httpcheck"
-            ],
-            "dst": "/usr/local/bin/httpcheck",
-            "chmod": "755",
-            "link": true,
-            "parents": false,
-            "exclude": []
-          }
-        },
-        "healthcheck": {
-          "test": [
-            "CMD",
-            "httpcheck",
-            "http://127.0.0.1:8080/health"
-          ],
-          "interval": "5s",
-          "timeout": "5s",
-          "retries": 30,
-          "start_period": "10s"
-        },
-        "expose": [],
-        "entrypoint": null,
-        "incremental": false,
-        "cmd": null
-      },
-      "compose": {
-        "up": false,
-        "manual": false,
-        "build": {
-          "additional_contexts": {
-            "root": "../../.."
-          },
-          "secrets": [],
-          "args": {}
-        },
-        "environment": {
-          "ELECTRIC_SECRET": "${ELECTRIC_SECRET:-dev-electric-secret}",
-          "ORIGIN": "${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT}}"
-        },
-        "ports": [],
-        "volumes": [],
-        "depends_on": {},
-        "networks": {
-          "default": {
-            "aliases": [
-              "caddy"
-            ]
-          }
-        },
-        "healthcheck": {
-          "test": [
-            "CMD",
-            "httpcheck",
-            "http://127.0.0.1:8080/health"
-          ],
-          "interval": "5s",
-          "timeout": "5s",
-          "retries": 30,
-          "start_period": "10s",
-          "start_interval": "500ms"
-        },
-        "develop": {
-          "watch": [
-            {
-              "action": "sync+restart",
-              "path": "../docker/Caddyfile",
-              "target": "/etc/caddy/Caddyfile"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../.certs",
-              "target": "/certs"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/index.html",
-              "target": "/srv/shell/index.html"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/shell.css",
-              "target": "/srv/shell/shell.css"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/boot.js",
-              "target": "/srv/shell/boot.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../offline-first-sw.js",
-              "target": "/srv/offline-first-sw.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/shell.yaml",
-              "target": "/srv/shell/shell.yaml"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/shell.json",
-              "target": "/srv/shell/shell.json"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/design.css",
-              "target": "/srv/shell/design.css"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/screens/counter.html",
-              "target": "/srv/shell/screens/counter.html"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/screens/counter.css",
-              "target": "/srv/shell/screens/counter.css"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/screens/todo.html",
-              "target": "/srv/shell/screens/todo.html"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/screens/todo.css",
-              "target": "/srv/shell/screens/todo.css"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/screens/grid.html",
-              "target": "/srv/shell/screens/grid.html"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/screens/grid.css",
-              "target": "/srv/shell/screens/grid.css"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/screens/timer.html",
-              "target": "/srv/shell/screens/timer.html"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/screens/timer.css",
-              "target": "/srv/shell/screens/timer.css"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/handlers/count.js",
-              "target": "/srv/shell/handlers/count.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/handlers/press.js",
-              "target": "/srv/shell/handlers/press.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/handlers/remove.js",
-              "target": "/srv/shell/handlers/remove.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/handlers/roll.js",
-              "target": "/srv/shell/handlers/roll.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/handlers/tally.js",
-              "target": "/srv/shell/handlers/tally.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../shell/handlers/tick.js",
-              "target": "/srv/shell/handlers/tick.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../messages/en.json",
-              "target": "/srv/messages/en.json"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../messages/pt-BR.json",
-              "target": "/srv/messages/pt-BR.json"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/shell.js",
-              "target": "/omnishell/interpreter/shell.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/chrome.js",
-              "target": "/omnishell/interpreter/chrome.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/screen.js",
-              "target": "/omnishell/interpreter/screen.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/fragment.js",
-              "target": "/omnishell/interpreter/fragment.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/data-sync.js",
-              "target": "/omnishell/interpreter/data-sync.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/hybrid-client.js",
-              "target": "/omnishell/interpreter/hybrid-client.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/cortex-session.js",
-              "target": "/omnishell/interpreter/cortex-session.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/cortex-command.js",
-              "target": "/omnishell/interpreter/cortex-command.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/validate.js",
-              "target": "/omnishell/interpreter/validate.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/render.js",
-              "target": "/omnishell/interpreter/render.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/release-plan.js",
-              "target": "/omnishell/interpreter/release-plan.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/release-assets.js",
-              "target": "/omnishell/interpreter/release-assets.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/preloads.js",
-              "target": "/omnishell/interpreter/preloads.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/markup.js",
-              "target": "/omnishell/interpreter/markup.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/script-url.js",
-              "target": "/omnishell/interpreter/script-url.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/deferred-boot.js",
-              "target": "/omnishell/interpreter/deferred-boot.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/host-dom.js",
-              "target": "/omnishell/interpreter/host-dom.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/hatch.js",
-              "target": "/omnishell/interpreter/hatch.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/hatch-worker.js",
-              "target": "/omnishell/interpreter/hatch-worker.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/storybook.js",
-              "target": "/omnishell/interpreter/storybook.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/jessie.js",
-              "target": "/omnishell/interpreter/jessie.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/kinetic.js",
-              "target": "/omnishell/interpreter/kinetic.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/prng.js",
-              "target": "/omnishell/interpreter/prng.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/vendor/mecha-client.js",
-              "target": "/omnishell/interpreter/vendor/mecha-client.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/vendor/js-yaml.js",
-              "target": "/omnishell/interpreter/vendor/js-yaml.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/vendor/ses.umd.min.js",
-              "target": "/omnishell/interpreter/vendor/ses.umd.min.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/vendor/morphlex.js",
-              "target": "/omnishell/interpreter/vendor/morphlex.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/vendor/messages.js",
-              "target": "/omnishell/interpreter/vendor/messages.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/interpreter/vendor/game-inputs.js",
-              "target": "/omnishell/interpreter/vendor/game-inputs.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../../../plugins/omnishell/components/wallclock.js",
-              "target": "/omnishell/components/wallclock.js"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../brief.html",
-              "target": "/srv/docs/brief.html"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../ir.html",
-              "target": "/srv/docs/ir.html"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../ir/card.css",
-              "target": "/srv/docs/ir/card.css"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../acceptance.md",
-              "target": "/srv/docs/acceptance.md"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../DESIGN.md",
-              "target": "/srv/docs/DESIGN.md"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../robots.txt",
-              "target": "/srv/robots.txt"
-            },
-            {
-              "action": "sync+restart",
-              "path": "../sitemap.xml",
-              "target": "/srv/sitemap.xml"
-            }
-          ]
-        }
-      },
-      "healthcheck": {
-        "template": "http",
-        "url": "http://127.0.0.1:8080/health",
-        "interval": "5s",
-        "start_interval": "500ms",
-        "timeout": "5s",
-        "retries": 30,
-        "start_period": "10s"
-      },
-      "entrypoint": {
-        "name": "entrypoint",
-        "do": "case \"${ORIGIN#http://}\" in \"$ORIGIN\") h=${ORIGIN#https://};; *) h=${ORIGIN#http://};; esac; case \"$h\" in \"$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; set -e -o pipefail; roots=$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$roots\" ]; then find $roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$1; shift; for f do h=$(sha256sum < \"$f\"); printf \"$q%s$q\" \"${h%% *}\" > \"$f.etag\"; done' sh '\"' {} +; fi; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; fi; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
-        "priority": 0,
-        "shell": "sh",
-        "stop": false,
-        "srcs": {
-          "globs": [],
-          "defaultGlobs": null,
-          "exclude": [],
-          "defaultExclude": null
-        },
-        "env": {
-          "ELECTRIC_SECRET": "${ELECTRIC_SECRET:-dev-electric-secret}",
-          "ORIGIN": "${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT}}"
-        },
-        "after": {},
-        "host": true
-      },
-      "expose": {
-        "door": {
-          "port": 8443,
-          "publish": {
-            "environment": "CADDY_TLS_HOST_PORT"
-          }
-        }
-      },
-      "cmds": [],
       "cache": {
         "full": false,
         "similar": false

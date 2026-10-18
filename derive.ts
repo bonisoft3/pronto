@@ -279,10 +279,8 @@ export function notesFor(
   });
 }
 
-// A path the terminal names: from the app for a checkout, from the installed
-// omnishell's root (where the app's mise put it) for an install.
-export async function terminalPath(exp: { terminalRuntime: string }, path: string, appDir: string): Promise<string> {
-  if (exp.terminalRuntime !== "") return path;
+// A path the terminal names, from omnishell's root, where the app's mise put it.
+export async function terminalPath(path: string, appDir: string): Promise<string> {
   const where = await new Deno.Command("mise", {
     args: ["where", "github:bonisoft3/omnishell"],
     cwd: appDir,
@@ -373,7 +371,6 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
         "entry: app.out.terminal.surface.entry, " +
         // The terminal's own paths: what this pass spawns to read the markup,
         // and the published schema it vets each chart against.
-        "terminalRuntime: app.out.terminal.surface.runtime, " +
         "markupReader: app.out.terminal.surface.markupReader, " +
         "machineSchema: app.out.terminal.surface.machineSchema, " +
         "statics: [for s in app.out.cluster.meta.statics {file: s.file, target: s.target}], " +
@@ -423,9 +420,6 @@ export async function derive(appDir: string): Promise<void> {
     designCss: string;
     shellCss: string;
     entry: string;
-    // "" for an installed terminal, whose paths are then named from its own
-    // root, where mise put it.
-    terminalRuntime: string;
     markupReader: string;
     machineSchema: string;
     statics: { file: string; target: string }[];
@@ -581,10 +575,8 @@ export async function derive(appDir: string): Promise<void> {
   // above and from the same directory, so the path the program's terminal
   // declares is the path that resolves; --no-config because every module the
   // reader loads is a static import of its own.
-  // The terminal's reader, a path from the app for a checkout and from the
-  // installed omnishell's root for an install.
   const read = await new Deno.Command("deno", {
-    args: ["run", "--no-lock", "--no-check", "--no-config", "--allow-read=.", await terminalPath(exp, exp.markupReader, appDir), "."],
+    args: ["run", "--no-lock", "--no-check", "--no-config", "--allow-read=.", await terminalPath(exp.markupReader, appDir), "."],
     cwd: appDir,
     stdout: "piped",
     stderr: "inherit",
@@ -714,7 +706,7 @@ export async function derive(appDir: string): Promise<void> {
         // rather than by a path into a plugin directory: a consumer keeping the
         // terminal elsewhere says where by unifying machineSchema, and vets
         // against the file it ships.
-        args: ["vet", "-d", "#Machine", await terminalPath(exp, exp.machineSchema, appDir), ...files],
+        args: ["vet", "-d", "#Machine", await terminalPath(exp.machineSchema, appDir), ...files],
         cwd: appDir,
         stderr: "inherit",
       }).output();

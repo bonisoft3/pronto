@@ -15,7 +15,7 @@ import (
 		cluster:  _cluster
 		terminal: R.terminal
 		loop:     _loop
-		build: (pronto.#DefaultBuild & {code: _releaseCode, loop: _loop, cluster: _cluster}).out
+		build: (pronto.#DefaultBuild & {code: _releaseCode, loop: _loop, cluster: _cluster, terminal: R.terminal}).out
 	}).release
 }
 
