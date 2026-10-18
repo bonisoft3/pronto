@@ -1584,6 +1584,17 @@ import (
 			if H.kind != "container" {
 				files!: [string, ...string]
 			}
+			// A container hatch reached through the door: the emitted Caddyfile
+			// proxies `path` and everything under it, prefix kept as /auth/*'s
+			// is, to the service of the hatch's name on `port`. One segment, and
+			// none of the door's own, so a hatch can neither shadow a route the
+			// cluster depends on nor sit under one.
+			if H.kind == "container" {
+				route?: {
+					path: string & =~"^/[a-z0-9][a-z0-9-]*$" & !="/crud" & !="/electric" & !="/auth" & !="/img" & !="/blobs" & !="/poke" & !="/health" & !="/shell" & !="/favicon.ico" & !="/manifest.json" & !="/robots.txt" & !="/sitemap.xml"
+					port: int & >0 & <65536
+				}
+			}
 		}
 		// Terminal-tier hatch: a vendored unit running inside the terminal, under
 		// one of `isolation`'s boundaries, touching the app only through its

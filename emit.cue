@@ -3592,7 +3592,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 				"\(matcher) Content-Security-Policy \(json.Marshal(E._browserPolicy))\n"
 			}, ""][0]
-			text: strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
+			// A routed container hatch, proxied as /auth/* is: prefix kept, dialed
+			// at $PRONTO_MESH when set and named by dapr-app-id.
+			_hatchRoutes: strings.Join([for n in list.SortStrings([for n, h in E.code.capabilities.hatches if h.kind == "container" && h.route != _|_ {n}]) {
+				let r = E.code.capabilities.hatches[n].route
+				"  handle \(r.path)/* {\n    reverse_proxy {$PRONTO_MESH:\(n):\(r.port)} {\n      header_up dapr-app-id \(n)\n    }\n  }\n"
+			}], "")
+			text: strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security + _hatchRoutes, 1)
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why

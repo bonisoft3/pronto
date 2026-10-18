@@ -134,7 +134,9 @@ two sets, over the kinds and by the rule [SPEC](../SPEC.md#programcue) states.
 - **Inspection is default-on; a hatch is the exemption.** Every SQL file and
   proto under the app is linted unless a `sql` or `proto` hatch names it, and a
   `container` hatch withholds a service whose definition is the program's
-  cluster unification. Every hatch carries `ir`, so an exemption is an ir
+  cluster unification; one that declares a `route` (`{path, port}`, one
+  segment, none of the door's own) is proxied from that prefix, kept, to the
+  service of the hatch's name, as `/auth/*` is. Every hatch carries `ir`, so an exemption is an ir
   element a reviewer signs, not a line in a tool's config.
 - **The loop runs on builtins.** The emitter writes the files sayt's builtin
   verbs read — `.say.yaml`, `.vscode/tasks.json`, a `compose.yaml` including
