@@ -1512,7 +1512,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			native: true
 		}
 		if S.code.capabilities.auth != _|_ {
-			auth: S.code.capabilities.auth
+			auth: {for k, v in S.code.capabilities.auth if k != "image" && k != "envFiles" {(k): v}}
 		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the
@@ -1977,6 +1977,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			terminalStatics: error("an installed app's build serves its terminal's statics: pass terminal to #DefaultBuild")
 		}
 		project: files: "checks.yaml": D.loop.surface.sayYaml
+		// The compose files sit in .bayt/, one level under the app.
+		if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.envFiles != _|_ {
+			project: targets: auth: compose: env_file: [for f in D.code.capabilities.auth.envFiles {path: "../\(f)", required: false}]
+		}
 		meta: {
 			app:      D.code.meta.name
 			local:    D.loop.surface.sources.pronto != ""
@@ -2140,9 +2144,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// serves the app's.
 			statics: list.Concat([[for s in D.statics if D.local || !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
 			// mecha's images, reached through the monorepo's bayt federation,
-			// or by name where the app is installed.
+			// or by name where the app is installed; the auth service's is the
+			// program's when it names one (#App capabilities.auth.image).
 			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute", "airlock"] {
-				(s): [if D.local {{ref: "libraries_mecha:\(s)-image"}}, {name: "libraries_mecha-\(s)-image"}][0]
+				(s): [
+					if s == "auth" if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.image != _|_ {D.code.capabilities.auth.image},
+					if D.local {{ref: "libraries_mecha:\(s)-image"}},
+					{name: "libraries_mecha-\(s)-image"},
+				][0]
 			}}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth

@@ -1548,6 +1548,17 @@ import (
 			// one gesture that signs in, or keeps the guest's identity under a
 			// new passkey.
 			promote: *false | bool
+			// The image the cluster's auth service runs in place of mecha's: a
+			// target of the program's cluster unification (`{ref: ":<target>"}`)
+			// built FROM mecha's, or a pinned name. The service keeps mecha's
+			// entrypoint, environment and route, so the image answers mecha's
+			// token contract; the cluster's, not the terminal's, so shell.yaml
+			// never carries it.
+			image?: {ref: string & =~"^:[a-z][a-z0-9-]*$"} | {name: string & !=""}
+			// Env files, app-relative, compose reads beside mecha's environment
+			// for the auth service, each optional: an image's settings, and a
+			// secret kept in a file git ignores rather than in any emitted one.
+			envFiles?: [...(string & =~"^[A-Za-z0-9_][A-Za-z0-9._/-]*\\.env$" & !~"\\.\\.")]
 		}
 		// The app ships a native host beside the web one, so every route owes
 		// its web affordances a native peer: check-parity reads this key to

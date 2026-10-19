@@ -136,6 +136,14 @@ two sets, over the kinds and by the rule [SPEC](../SPEC.md#programcue) states.
   `container` hatch withholds a service whose definition is the program's
   cluster unification. Every hatch carries `ir`, so an exemption is an ir
   element a reviewer signs, not a line in a tool's config.
+- **The auth service may run the program's image.** `capabilities.auth.image`
+  names one, a target of the cluster unification built FROM mecha's or a pinned
+  name, in place of mecha's: entrypoint, environment and route stay mecha's, so
+  the image answers its token contract, and the docker appliance copies its
+  `/app` like any other. `envFiles` (app-relative, optional) are the env files
+  compose reads for the service beside mecha's closed environment, which is
+  where a secret a git-ignored file holds reaches it. shell.yaml carries
+  neither.
 - **The loop runs on builtins.** The emitter writes the files sayt's builtin
   verbs read — `.say.yaml`, `.vscode/tasks.json`, a `compose.yaml` including
   what bayt emits — and files every check under the verb whose layer it needs
