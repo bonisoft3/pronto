@@ -1514,8 +1514,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			native: true
 		}
 		if S.code.capabilities.auth != _|_ {
-			// A provider's settings are the cluster's (#signIn).
-			auth: {for k, v in S.code.capabilities.auth if k != "provider" {(k): v}}
+			// A provider's settings, the auth image and its env files are the cluster's (#signIn).
+			auth: {for k, v in S.code.capabilities.auth if k != "provider" && k != "image" && k != "envFiles" {(k): v}}
 		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the
@@ -1945,6 +1945,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"cluster":       D.cluster
 		terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]
 		project: files: "checks.yaml": D.loop.surface.sayYaml
+		// The compose files sit in .bayt/, one level under the app.
+		if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.envFiles != _|_ {
+			project: targets: auth: compose: env_file: [for f in D.code.capabilities.auth.envFiles {path: "../\(f)", required: false}]
+		}
 		meta: {
 			app:         D.code.meta.name
 			generateCmd: distribution.#Project.compiler
@@ -2090,9 +2094,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// build adds (builders/bayt.cue); the cluster serves the app's.
 			statics: list.Concat([[for s in D.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
 			// mecha's images by name, which the build resolves to the pinned
-			// release or, in the monorepo, to mecha's sources.
+			// release or, in the monorepo, to mecha's sources; the auth service's
+			// is the program's when it names one (#App capabilities.auth.image).
 			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute", "airlock"] {
-				(s): {name: "libraries_mecha-\(s)-image"}
+				(s): [
+					if s == "auth" if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.image != _|_ {D.code.capabilities.auth.image},
+					{name: "libraries_mecha-\(s)-image"},
+				][0]
 			}}
 			bounds: {
 				authStatementMs: resilience.resilience.timeouts.statement.client * 1000
