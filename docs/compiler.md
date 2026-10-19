@@ -104,6 +104,7 @@ two sets, over the kinds and by the rule [SPEC](../SPEC.md#programcue) states.
 | `objects.ts`, `facts.ts`, `check-facts.ts`, `invariants.sql`, `acceptance.ts` | the bijection, the fact store, and the invariants two rungs owe each other |
 | `cel.ts`, `derive-cel.ts`, `cel-emit.ts`, `bounds.ts` | one parse of every `cel:` into `.pronto/cel.json`, and every reading of it |
 | `jessie.ts`, `validations.ts` | what a Jessie module references; what a validation compiles to |
+| `mecha-*.ts`, `hybrid-runtime.js`, `check-hybrids.ts` | Mecha machines: their SQL, runtime and surface, and the lint over their [contracts](decisions/2026-10-15-machine-contracts.md) |
 | `identity.ts`, `type-*.ts`, `types.cue` | [types and identity](types-and-identity.md) |
 | `check-sql.ts`, `check-proto.ts`, `check-replay.ts`, `pgroll.cue` | [schema changes](schema-change-admission.md) |
 | `scales.ts`, `scales/`, `styles.ts` | [the design scale](design-scale.md) |

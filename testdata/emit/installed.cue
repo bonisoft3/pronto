@@ -77,14 +77,15 @@ installedRunnerModes: [for c in _visualRunner.dockerfile.copy if c.srcs == ["mon
 installedRunnerViews: [for v in ["workspaceroot-pronto-sources_srcs", "libraries_mecha-database-image_srcs", "libraries_mecha-database-image_bayt", "plugins_omnishell-runtime-image_bayt"] {_visualRunner.dockerfile.defaultCopy[v] != _|_}] & [true, true, true, true]
 
 // omnishell reaches the images as one image of its runtime tree, switched as
-// mecha's are: caddy serves the terminal's statics from it, the visual check
-// and every check's tests read it at /omnishell; nothing is copied into the app.
+// mecha's are: the door's release is built from it, the visual check and every
+// check's tests read it at /omnishell; nothing is copied into the app.
 _omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishellTerminal.published.runtime)}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
 // A grouped copy lands each source under its `dst`, so the target is per source.
+// The door serves the terminal from its release, and from nothing else.
 installedCaddyStatics: [for c in _installedProject.targets.caddy.dockerfile.copy for f in c.srcs
-	if [if c.parents != _|_ if c.parents {c.dst + f}, c.dst][0] =~ "^/omnishell/" {c}] & []
-installedCaddyShell: _installedProject.targets.caddy.dockerfile.defaultCopy["/omnishell/interpreter/shell.js"] & {from: name: "plugins_omnishell-runtime-image", srcs: ["interpreter/shell.js"]}
-installedCaddyContext: _installedProject.targets.caddy.compose.build.additional_contexts["plugins_omnishell-runtime-image"] & _omnishellContext
+	if [if c.parents != _|_ if c.parents {c.dst + f}, c.dst][0] =~ "^/omnishell/" {c.from.ref}] & [":served"]
+installedServedRuntime: [for c in _installedProject.targets.served.dockerfile.copy if c.from != null if c.from.name != _|_ if c.from.name == "plugins_omnishell-runtime-image" {[c.srcs, c.dst]}] & [[["/"], "/omnishell"]]
+installedServedContext: _installedProject.targets.served.compose.build.additional_contexts["plugins_omnishell-runtime-image"] & _omnishellContext
 installedVisual:       list.Contains(_installedProject.targets.integrate.dockerfile.preamble, "COPY --from=plugins_omnishell-runtime-image / /omnishell") & true
 installedVisualContext: _installedProject.targets.integrate.compose.build.additional_contexts & {"plugins_omnishell-runtime-image": _omnishellContext}
 _installedChecked: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _installedCluster, terminal: _installedTerm} & {out: checks: probe: {cmds: ["true"], note: "probe"}}).out.project

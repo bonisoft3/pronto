@@ -434,7 +434,8 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "outs": {
@@ -465,7 +466,8 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     }
   },
@@ -479,25 +481,30 @@
   "deps": [
     "integrate_srcs",
     "integrate_bayt",
-    "caddy_srcs"
+    "caddy_srcs",
+    "served_srcs"
   ],
   "sameProjectDeps": [
     "integrate_srcs",
     "integrate_bayt",
-    "caddy_srcs"
+    "caddy_srcs",
+    "served_srcs"
   ],
   "transitiveDeps": [
     "integrate_srcs",
     "integrate_bayt",
     "caddy_srcs",
-    "launch_outs_srcs"
+    "served_srcs",
+    "launch_outs_srcs",
+    "served_outs_srcs"
   ],
   "transitiveCrossDeps": [],
   "upClosure": [
     "./.bayt/compose.ci-visual.yaml",
     "./.bayt/compose.integrate.yaml",
     "./.bayt/compose.launch.yaml",
-    "./.bayt/compose.caddy.yaml"
+    "./.bayt/compose.caddy.yaml",
+    "./.bayt/compose.served.yaml"
   ],
   "chainedDeps": [
     {
@@ -541,7 +548,17 @@
       "dir": ".",
       "outs": {
         "globs": [
-          "docker/Caddyfile",
+          "docker/Caddyfile"
+        ],
+        "exclude": []
+      }
+    },
+    {
+      "name": "served_srcs",
+      "project": "idioms",
+      "dir": ".",
+      "outs": {
+        "globs": [
           "shell/index.html",
           "shell/shell.css",
           "shell/boot.js",

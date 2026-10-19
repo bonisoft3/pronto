@@ -151,41 +151,124 @@ sink through that sink's Dapr binding, and the outcome returns through the inter
 [External effects](2026-10-03-external-effects.md) holds the grammar, the ledger and
 the measurements that rejected DBOS as the runtime.
 
-### Future composition: use XState invocation semantics
+### Composition: one machine per domain, Cortex across them
 
-XState already expresses the hierarchy Cortex needs. Extend the compiler's
-supported subset using `invoke.src`, explicit `invoke.input`, child `output`,
-`onDone` and `onError`. Invoked children start on state entry and stop on exit.
-The missing work is implementing and checking those semantics across our tier
-boundaries, rather than designing another orchestration language. See the
-upstream [invocation](https://stately.ai/docs/invoke) and
-[output](https://stately.ai/docs/output) contracts.
+Each runtime's machine is expressed in its own vocabulary, in its own package,
+and expresses everything that runtime does: `omnishell.#Machine` (the terminal's,
+in `plugins/omnishell`), `mecha.#Machine` (in `libraries/mecha`, re-exported by
+Pronto as `clusters:mecha` already re-exports the cluster), and
+`#CortexMachine`, Pronto's, the only one that spans tiers. A tier-specific
+vocabulary never learns about the other tier; a chart that crosses is Cortex's,
+and the compiler projects it into each tier's machine and the protocol between
+them. Dependencies point from Pronto to Omnishell and Mecha, never back: Cortex's
+browser runtime is Pronto's, emitted into the app, and a tier knows nothing of
+Cortex.
 
-A future Truco root could compose boot/session restoration, local play, online
-lobby, online table and recovery as child machines. The parent owns navigation
-and child lifetimes; existing Mecha actors retain domain authority and
-transactions. `state.cortex` currently registers bounded client compositions;
-it does not yet express this executable parent. Wrapping the old local arena
-in an opaque invoked callback would not establish correctness of its internals.
+Cortex uses XState's invocation semantics rather than another orchestration
+language: `invoke.src`, explicit `input`, child output, `onDone` and `onError`;
+children start on state entry and stop on exit (upstream
+[invocation](https://stately.ai/docs/invoke) and
+[output](https://stately.ai/docs/output)). Stopping a browser child stops
+observation, polling and local presentation and discards late results, as
+[promise actor cancellation](https://stately.ai/docs/promise-actors#stopping-promise-actors)
+does. Neither rolls back a committed remote transition: leaving a Truco table
+detaches while the authoritative match continues, and resignation is a domain
+command. Cortex composes existing Mecha ports, transactional actions and
+Airlock effects; it introduces no other lock, transaction, saga or delivery
+implementation.
 
-Stopping a browser child stops observation, polling and local presentation.
-Cooperative I/O can receive an `AbortSignal`, and stopped actors discard late
-results, as described by [promise actor cancellation](https://stately.ai/docs/promise-actors#stopping-promise-actors).
-Neither operation rolls back a committed remote transition. Leaving a Truco
-table must therefore detach its browser interaction while the authoritative
-match continues. Resignation is an explicit domain command. Unknown command
-outcomes retain their original identity and durable recovery information.
+Today's reducer machine (`#MechaReducerMachine`, alias `#HybridMachine`) glues
+both sides. Its tier-tagged events, typed state and per-viewer views, its
+initializer and the choice of running it in PostgreSQL or the browser are
+Cortex's; its locks, ports, `requires.sql`, relational actions and fuel are
+Mecha's. Mecha also has the row machine (`#MechaMachine`: a column's value,
+trigger dispatch, timers, Airlock invokes), a second dispatch model. And
+Omnishell's `#Machine` cannot yet express Cortex's browser side: the session
+and sync drivers are handwritten protocol code, `invoke` is refused, and
+it has no typed document state or per-viewer projection for local placement.
 
-Before admitting general invocation, the compiler must check child input/output
-compatibility, tier authority and outcome handling. The runtime must distinguish
-a locally owned child's lifetime from attachment to an existing durable actor,
-and define recovery after parent restart. Cortex composes existing Mecha ports,
-transactional actions and Airlock effects; it does not introduce another lock,
-transaction, saga or delivery implementation. The built subset's contract lives
-in [[../cortex|Cortex client compositions]].
+Alternatives not taken:
 
-This extension is deferred until Truco's existing multiplayer path is delivered.
-It is not a prerequisite for that delivery.
+- **Separate composition kinds** (a session, a command and a local form beside
+  the parent). Each was an invoke in disguise, with its own lifetime rule; one
+  `invoke` with `via` keeps the hierarchy in one chart and derives the lifetime.
+- **`#MechaMachine` as a union of row and reducer forms.** One name over two
+  dispatch models hides the difference the Truco adoption record calls
+  decisive: dispatch by event, not by the destination value.
+- **Naming the reducer a Mecha actor and keeping both.** Keeps the cross-tier
+  half of the reducer in Mecha's vocabulary, which is the coupling this rule
+  removes.
+
+### A Mecha machine's surface is rows
+
+A Cortex child that reaches Mecha talks to it through the store, never through
+a driver. Every input the browser gives a Mecha machine is a row the terminal
+writes, and everything it reads back is a row the terminal reads, so the
+terminal's replay covers the online game as it covers the local one. The
+session and command drivers, their polling, their `sessionStorage` and their
+`crypto.randomUUID()` were the protocol the store already implements: keyed,
+idempotent writes with an outbox; a 4xx as a `refused` event; live reads.
+
+For a machine `m`, the compiler derives its surface as entities:
+
+| Entity | Durability, access | Written by | Replaces |
+| --- | --- | --- | --- |
+| `m_seat` | `live`, private to `actor` | dispatch, after every accepted step | the `view` table and the `_view`/`_sync` RPCs |
+| `m_command` | `live`, private to `actor`, insert-only | the browser; an `AFTER INSERT` trigger dispatches it and stamps the receipt on the row | the `_command` RPC and the receipt table |
+| `m_open` | `live`, private to `actor`, insert-only | the browser; its trigger runs the admission or join | the admission and join RPCs |
+| `m_public` | `live`, public | dispatch, from the rules' public projection | the session port's composed `select` |
+
+A command's id is derived from what it says (`instance/revision/kind`), as the
+arena's intents are, so the same gesture twice is one row and a gesture on a
+stale view is a stale-revision receipt, not a second effect. A domain refusal
+is a receipt on the row; a protocol violation is a 4xx and arrives as
+`refused`. Deadlines leave the client: a step that sets a machine's deadline
+arms the ticker's `machine_timer_tick` row, so a timeout and a lapsed presence
+lease fire on the server whether anyone polls or not.
+
+A Cortex state is hosted by a screen: navigating to it mounts the child's
+regions and leaving unmounts them, which is Cortex's lifetime rule, so the
+parent's state is the terminal's navigation, which it already records and
+replays. The child is a fold Pronto composes over the machine's declaration
+([[../cortex|Cortex machines]]). A session's lease is renewed by a fold on the
+terminal's clock, on a seat of its own, and lapses on the ticker when the
+screen is gone.
+
+Alternatives not taken:
+
+- **Driver charts the terminal interprets, over the RPC ports.** Would keep a
+  second protocol beside the store's, with its own retry, outbox and refusal
+  path, and keep the browser polling.
+- **Client-armed timeouts** (a fold writing a `wake` command at the deadline).
+  A table nobody watches would never time out; the ticker already owns time
+  for Mecha machines.
+- **The parent as an `omnishell.#Machine` on a `tab` row**, its children under
+  `data-when` on its phase. A terminal machine answers DOM events and reads
+  fixed fields of them; a child's outcome and a gesture carrying a room are
+  neither, and the screen a state lives on already says when it is entered.
+
+Sequence, one transformation per change:
+
+1. **Built.** `#CortexMachine` is the only Cortex form: a state invokes a Mecha
+   machine `via` its session or sync ports or locally. Contract:
+   [[../cortex|Cortex machines]].
+2. **Built.** Local placement: Pronto emits a local child as a terminal
+   handler, the app's Jessie module over the machine's own reducer, so its
+   state is rows, its pauses the terminal's clock and its entropy a recorded
+   draw. Truco's arena runs on it.
+3. **Built.** A Mecha machine's surface is rows (above), on today's reducer:
+   the surface entities, deadlines on the ticker, and Truco's bar and online
+   table as markup over them. The drivers, the RPC ports and the `online` and
+   `lobby` hatches are gone.
+4. **One `mecha.#Machine` in Mecha's package, dispatching by event.** The
+   schema moves to `libraries/mecha`, re-exported by `clusters:mecha`; the
+   compilers stay in Pronto, as `#MachineTimersSql`'s consumers do. The row
+   machine's lifecycle changes, timers and effect outcomes become events of
+   one dispatch model; realworld's guard machine and the fixtures migrate.
+5. **The domain chart moves into `#CortexMachine`** with tier-owned states; the
+   compiler projects the Mecha part into `mecha.#Machine` and the same chart,
+   projected for the terminal, is the arena's handler. `#MechaReducerMachine`
+   and `#HybridMachine` go.
 
 ---
 
@@ -247,7 +330,7 @@ queries and writes forms. What differs per tier is only how far from pure it may
 | Compute, per key | one changed row and its declared edges | 3 | the same cage, warm; Conduit → compute's own daprd over gRPC, no bus; a direct write | not built |
 | Airlock | one ledger row per effect instance | 4 | Graphile Worker listening on `jobs:insert`, woken from zero by the ticker's one-shot row; one declared Dapr binding per effect; bridges for what is not HTTP | built ([external effects](2026-10-03-external-effects.md)) |
 | DuckStream | a pipeline or lake row, with history | 3 | Feldera on the feed, DuckDB-WASM in the page | grammar and static checks only; no executor |
-| Cortex | a composition of tier-owned actors and browser interaction state | up to 4 | generated client protocols over Mecha ports; external effects through Airlock | bounded session/command compositions built; general hierarchical invocation unbuilt |
+| Cortex | a composition of tier-owned actors and browser interaction state | up to 4 | screens whose folds reach Mecha machines through their surface rows; external effects through Airlock | screen-hosted session, sync and local children built; tier-owned states, nested hierarchy and parallel regions unbuilt |
 
 **Effects and hatches.** Levels 1–3 stay inside time travel: an assign, a relational effect
 and a compute output all replay from rows. Level 4 is the airlock, and the airlock is a
@@ -270,9 +353,9 @@ of its input: whole-table (built, above), per key for user-facing latency (tens 
 milliseconds; not built), and analytical over the stream with history, where durability
 is the point because history is the input (DuckStream). Feldera's place is the third
 kind, not a trigger for the first two. A client-side differential engine (`d2ts`) is
-named in the seams below and is not in the tree. Truco's current online path
-uses authenticated command RPCs and polls private projections; it does not
-require Electric subscriptions or DuckStream.
+named in the seams below and is not in the tree. Truco's online path writes
+command and admission rows and reads its private seats live; it does not
+require DuckStream.
 
 **What forces the unbuilt parts.** golaberto needs the analytical kind: odds are recomputed
 in micro-batches of simulation draws (odds-rust replaces 50,000-draw batches
@@ -281,19 +364,19 @@ whole-table recompute delivers too slowly. Truco validates a different boundary:
 browser drafts and pending intents must agree with authoritative Mecha matches,
 presence and challenges. Hands are private server projections; browser optimism
 must not become a second writer of canonical game state. The bounded Cortex
-compositions exercise this boundary before general hierarchy or DuckStream.
+machine exercises this boundary before general hierarchy or DuckStream.
 
 ### Truco delivery priority
 
 The implemented slice includes authoritative 1×1, 2×2 and 2×2×2 matches with the supported regional variants,
 presence leases, challenges, generated Mecha admission and coordination, and
-`state.cortex` compositions for both lobby and table. Their browser protocols
-own drafts, admission, polling, persisted command identity, retries,
-reconciliation and shutdown. Hatches retain rendering and host I/O. No
-handwritten procedural online SQL adapters remain; read-only SQL projections
-and relational preconditions remain in Mecha declarations.
+a Cortex machine whose screens are the arena, the bar and the online table.
+Every request is a row keyed by what it says and every answer a row the machine
+writes, so the store's outbox owns retries and the terminal's replay covers the
+online game. No hatch remains on the online path; read-only SQL projections and
+relational preconditions remain in Mecha declarations.
 
-The stable contracts live in [[../cortex|Cortex client compositions]] and
+The stable contracts live in [[../cortex|Cortex machines]] and
 [Mecha machines](https://github.com/bonisoft3/mecha/blob/v0.12.1/docs/machines.md). The
 execution proof in `apps/truco/docs/hybrid-machine-proof.md` also checks
 shared local/PostgreSQL reductions and private projections. The pinned PLV8
@@ -301,10 +384,9 @@ build's native timeout verification gap remains advisory; adoption assumes the
 timeout contract and retains deterministic fuel.
 
 Verification includes real PostgreSQL races and rollback, complete matches for
-two-, four- and six-seat tables, bounded session delivery schedules, and two mounted DOM clients
-completing a match over HTTP after lost visibility/play replies and reload.
-Live HTTPS checks cover guest authentication, discovery, challenge acceptance,
-private deals and direct invitations. This is not full-shell browser acceptance
+two-, four- and six-seat tables, the ticker's timeouts and lease lapses, and two
+readers completing a match through PostgREST with every row resent once. This
+is not full-shell browser acceptance
 or a proof that the application is bug-free. Current behavior and limitations
 belong in Truco's online reference, `apps/truco/docs/online-hybrid.md`.
 
@@ -489,7 +571,7 @@ Every existing application in `./apps` with a PostgreSQL backend (migrations, pu
 
 | Application | Existing Mechanism | Hybrid Machine Adoption & Guarantees |
 |---|---|---|
-| **`apps/truco`** | `state.hybrids` owns online games in all supported variant/seating combinations, lobby presence and challenges; the local arena retains its existing engine. | **Partial adoption**: generated transactional commands, private views and browser reconciliation. Its online reference, `apps/truco/docs/online-hybrid.md`, records evidence and limits; general Cortex hierarchy and migration of the local arena remain unbuilt. |
+| **`apps/truco`** | `state.hybrids` owns online games in all supported variant/seating combinations, lobby presence and challenges; the local arena plays the same `truco_match` in the terminal. | **Adopted**: surface rows with generated transactional commands, private views and receipts, under a Cortex root that hosts the arena, the bar and the online table. Its online reference, `apps/truco/docs/online-hybrid.md`, records evidence and limits; general Cortex hierarchy remains unbuilt. |
 | **`apps/chess`** | In-browser referee state machine and local time controls. | **Authoritative Turn Clocks**: Match state (`playing` $\rightarrow$ `over`) with strict termination reasons (`checkmate`, `resignation`, `flag`) backed by database-level clock expiration checks, preventing client clock manipulation. |
 
 ---

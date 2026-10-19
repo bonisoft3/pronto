@@ -1,5 +1,5 @@
-import { evaluateCaged } from "../../omnishell/interpreter/jessie.js";
-import { fuelMeter } from "../../omnishell/instrument.ts";
+import { evaluateCaged } from "../omnishell/interpreter/jessie.js";
+import { fuelMeter } from "../omnishell/instrument.ts";
 
 // Each command starts with a fresh compartment and budget, just like PLV8.
 // Retaining the rule functions would retain arbitrary module closure state.

@@ -1,7 +1,5 @@
 # generated from bayt.cue — do not edit
 include:
-- path: .././.bayt/compose.caddy.yaml
-  required: false
 - path: .././.bayt/compose.setup.yaml
   required: false
 - path: .././.bayt/compose.lint.yaml
@@ -13,6 +11,10 @@ include:
 - path: .././.bayt/compose.test.yaml
   required: false
 - path: .././.bayt/compose.launch.yaml
+  required: false
+- path: .././.bayt/compose.caddy.yaml
+  required: false
+- path: .././.bayt/compose.served.yaml
   required: false
 - path: .././.bayt/compose.integrate.yaml
   required: false

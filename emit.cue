@@ -36,7 +36,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "cortex-client" | "hybrid-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
+	format: "sql" | "local-handler" | "hybrid-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -57,7 +57,7 @@ _busCarrier: _busType
 // cdc-types.integration.test.ts. A server column of any other type would
 // wedge its whole table at runtime, every change to it dropped by every
 // pipeline and visible only in a log, so it is refused where the app is built.
-_busTypes: ["string", "bool", "int32", "int64", "double", "uuid", "timestamp", "date", "time", "timezone", "duration", "decimal"]
+_busTypes: ["string", "bool", "int32", "int64", "double", "uuid", "timestamp", "date", "time", "timezone", "duration", "decimal", "json", "geojson"]
 _busCarriers:    _busTypes
 _busConvertible: or(_busTypes)
 
@@ -505,14 +505,17 @@ _sqlType: {
 #mechaActionSql: AC={
 	action: #MechaAction
 	op:     *"INSERT" | "UPDATE" | "DELETE"
+	// The time a machine's step runs at, which the machines it spawns or
+	// sends to run at too; outside a step, each reads its own clock().
+	at: *"NULL" | string
 
 	_spawns: [if AC.action.spawn != _|_ {
         let call = AC.action.spawn
-        "PERFORM hybrid_\(call.machine).spawn(\((#sqlLit & {v: call.id}).out), \((#MechaJsonSql & {fields: call.input}).out), \((#MechaJsonSql & {fields: call.members}).out));"
+        "PERFORM hybrid_\(call.machine).spawn(\((#sqlLit & {v: call.id}).out), \((#MechaJsonSql & {fields: call.input}).out), \((#MechaJsonSql & {fields: call.members}).out), \(AC.at));"
     }]
     _sends: [if AC.action.send != _|_ {
         let call = AC.action.send
-        "PERFORM hybrid_\(call.machine).deliver(\((#sqlLit & {v: call.id}).out), jsonb_build_object('kind', \((#sqlLit & {v: call.event}).out), 'payload', \((#MechaJsonSql & {fields: call.payload}).out)));"
+        "PERFORM hybrid_\(call.machine).deliver(\((#sqlLit & {v: call.id}).out), jsonb_build_object('kind', \((#sqlLit & {v: call.event}).out), 'payload', \((#MechaJsonSql & {fields: call.payload}).out)), \(AC.at));"
     }]
 	_locks: [if AC.action.lock != _|_ {(#mechaLockSql & {lock: AC.action.lock}).out}]
 	_effList: [if AC.action["effect"] != _|_ {
@@ -1363,8 +1366,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // and pipeline topology to the filesystem. All paths are app-relative — the
 // same path language as the manifest.
 #shellConfig: S={
-	code!:       _
-	liveUpdates: bool
+	code!: _
 	migrations: [...string]
 	// The terminal's measured floors, carried into the file visual lint
 	// reads. #scale publishes the same struct as --min-*, so the rung an author
@@ -1506,7 +1508,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 	out: {
 		app:    S.code.meta.name
-		if S.liveUpdates {liveUpdates: true}
 		floors: S.floors
 		server: S.server
 		if S.native {
@@ -1897,6 +1898,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					identity: {verb: "lint", cmds: [_distribution.checks.identity], note: "Pronto compiler identity"}
 				}
 
+				// What a Mecha machine can do, over its declarations.
+				if D.code.state.hybrids != _|_ {
+					hybrids: {verb: "lint", cmds: [_distribution.checks.hybrids], note: "Pronto Mecha machines"}
+				}
+
 				// A computation's tests run it as mecha's compute service does.
 				if len(D.code.state.computations) > 0 {
 					computations: {verb: "test", cmds: [_distribution.checks.computations], note: "Pronto computations"}
@@ -1953,7 +1959,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 #DefaultTerminal: D={
 	code!:       _
 	boot?:       string
-	liveUpdates: *false | bool
 	// An adapter the terminal serves is the terminal's file and not the app's,
 	// so only an app's own module joins the set. A declared handler is served
 	// whether or not markup binds it: an app module may fetch one itself.
@@ -1962,10 +1967,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}
 		for _, s in D.code.surface.screens for i in s.files.adapters if !strings.HasPrefix(i, "/") {(i): true}
 	}
-	_sharedSet: {
-        for _, s in D.code.surface.screens for i in s.files.shared {(i): true}
-        if D.code.state.cortex != _|_ for name, _ in D.code.state.cortex {("shell/shared/cortex-\(name).js"): true}
-    }
+	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
 	_rendererSet: {for _, s in D.code.surface.screens if s.files.renderers != _|_ for i in s.files.renderers {(i): true}}
 	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
 	_validationSet: {for _, e in D.code.state.entities for _, v in e.validations {(v.src): true}}
@@ -1988,7 +1990,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	]
 	out: omnishell.#Terminal & {
 		app:         D.code.meta.name
-		liveUpdates: D.liveUpdates
 		description: D.code.meta.description
 		if D.code.meta.i18n != _|_ {
 			language: D.code.meta.i18n.default
@@ -2148,6 +2149,39 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
 			}]
 		}
+		// The door's tree as a release (omnishell.#Address): omnishell's tree
+		// from its runtime image, which the monorepo's switch builds from the
+		// checkout, every static placed at its URL's path, then addressed in
+		// place. The door and the renderer copy what it wrote.
+		if D._terminal {
+			surface: targets: served: {
+				cmd: "builtin": null
+				activate: ""
+				let own = [for s in meta.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}]
+				let runtime = [for s in D.statics if strings.HasPrefix(s.target, "/omnishell/") {s}]
+				srcs: globs: [for s in own {s.file}]
+				dockerfile: {
+					from: name: omnishell.#Address.image
+					// Where bayt copies the srcs, each at its path in the app.
+					workdir: "/app"
+					copy: [{from: {name: omnishell.#RuntimeImage}, srcs: ["/"], dst: omnishell.#Address.home}]
+					let place = [for s in list.Concat([runtime, own]) {
+						let source = [
+							if strings.HasPrefix(s.target, "/omnishell/") {"\(omnishell.#Address.home)/\(strings.TrimPrefix(s.target, "/omnishell/"))"},
+							"/app/\(s.file)",
+						][0]
+						let url = [
+							if strings.HasPrefix(s.target, "/srv/") {strings.TrimPrefix(s.target, "/srv")},
+							s.target,
+						][0]
+						"install -D -m 644 '\(source)' '\(omnishell.#Address.tree)\(url)'"
+					}]
+					epilogue: ["RUN set -e; \(strings.Join(place, "; ")); \(omnishell.#Address.cache) && \(omnishell.#Address.run)"]
+				}
+				compose: {}
+			}
+			meta: served: {ref: ":served", tree: omnishell.#Address.tree, scripts: omnishell.#Address.scripts}
+		}
 		// The terminal's server half, where a route asks to be rendered on
 		// request (#Screen.ssr; #emit decides which routes may). It reads the
 		// app through the door, so it waits on the door, and the aggregate
@@ -2157,6 +2191,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				render: bayt.healthcheck.http & {
 					cmd: "builtin": null
 					activate: ""
+					// The release it takes its entry from (a `from.ref` copy).
+					deps: [":served:outs"]
 					healthcheck: {
 						url: omnishell.#Render.health
 						// Healthy once every table has synced.
@@ -2182,7 +2218,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 								srcs: ["/\(strings.TrimPrefix(d, omnishell.#Render.home+"/"))"]
 								dst: "\(omnishell.#Render.workdir)/\(d)"
 							}],
-							[{srcs: [omnishell.#Render.entry.source], dst: omnishell.#Render.entry.target}],
+							// The entry as the release wrote it, carrying its map.
+							[{from: ref: ":served", srcs: ["\(omnishell.#Address.tree)/\(omnishell.#Render.entry.source)"], dst: omnishell.#Render.entry.target}],
 						])
 						epilogue: ["RUN \(omnishell.#Render.cache)"]
 						cmd: omnishell.#Render.command
@@ -2214,6 +2251,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 	}
 	_rendersOnRequest: list.Contains([for _, s in D.code.surface.screens {s.ssr}], "ssr")
+	_terminal:         list.Contains([for s in D.statics {s.target}], "/srv/shell/index.html")
 }
 
 // The components of an app package — code, cluster, terminal, loop, build —
@@ -2590,7 +2628,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
 	// door and the router cannot disagree about what a route is.
-	_shell: (#shellConfig & {"code": E.code, liveUpdates: E.terminal.liveUpdates, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, server: E._serverOn, native: E.code.capabilities.native}).out
+	_shell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, server: E._serverOn, native: E.code.capabilities.native}).out
 	// The locales in one order, so every artifact that lists them lists them the
 	// same way and a regenerated file has no spurious diff.
 	_locales: list.SortStrings([if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}])
@@ -2746,6 +2784,19 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_gated: bool & (E._serverOn == false || E._authOn) & true
 	cluster: capabilities: server: E._serverOn
 
+	// The handlers Pronto composes rather than copies: a Cortex state's child,
+	// the app's module over the Mecha machine it reaches — run by the terminal
+	// for a local child — and the declarations of every machine it may write to.
+	_composedHandlers: {
+		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex for name, actor in cortexMachine.setup.actors {
+			"shell/handlers/\(name).js": {
+				machine:  {machine: E.code.state.hybrids[actor.machine].reducer, rules: E.code.state.hybrids[actor.machine].rules}
+				local:    actor.via == "local"
+				machines: {for n, h in E.code.state.hybrids {(n): h.reducer}}
+				src:      actor.handler
+			}
+		}
+	}
 	files: [string]: #File
 	checkout: [string]: #File
 	files: {
@@ -2795,6 +2846,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				version: 1
 				types: {types: #types, aliases: #typeAlias}
 				entities: E.code.state.entities
+				hybrids: {if E.code.state.hybrids != _|_ for n, h in E.code.state.hybrids {(n): h.reducer}}
 				hatches: E.code.capabilities.hatches
 				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
 				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
@@ -3029,11 +3081,19 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			}
 
 			_machines: [if E.code.state.machines != _|_ {[for _, m in E.code.state.machines for en, e in E.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
-			if E.code.state.cortex != _|_ for name, sessionSpec in E.code.state.cortex {
-                "shell/shared/cortex-\(name).js": {format: "cortex-client", data: {composition: sessionSpec, machines: E.code.state.hybrids}}
-            }
+			// A Mecha machine a Cortex state runs locally is the terminal's: a
+			// handler composing the app's module over the machine's own rules.
+			for path, local in E._composedHandlers {
+				"\(path)": {format: "local-handler", data: local}
+			}
 			if E.code.state.hybrids != _|_ {
-				"services/database/migrations/016_mecha_actors.sql": {format: "hybrid-sql", data: E.code.state.hybrids}
+				// Each machine's surface is entities the app declares; the writer
+				// checks them against the machine before compiling.
+				"services/database/migrations/016_mecha_actors.sql": {format: "hybrid-sql", data: {
+					hybrids: {for n, h in E.code.state.hybrids {(n): {machine: h.reducer, rules: h.rules}}}
+					entities: E.code.state.entities
+					timers: [if len([for _, h in E.code.state.hybrids if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
+				}}
 			}
 			if len(_machines) > 0 {
 				"services/database/migrations/010_machines.sql": {
@@ -3571,7 +3631,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 				let matcher = [if len(_unitPaths) > 0 {"  @terminal not path \(strings.Join(_unitPaths, " "))\n  header @terminal"}, "  header"][0]
 
-				"\(matcher) Content-Security-Policy \(json.Marshal(E._browserPolicy))\n"
+				// A door built as a release names the inline scripts its documents
+				// run; an addressed file never changes, so it is never revalidated.
+				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
+				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(immutable)"
 			}, ""][0]
 			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}
@@ -3750,7 +3814,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				"\(s.files.html)": {format: "html", src: s.files.html}
 			}
 			"\(s.files.css)": {format: "css", src: s.files.css}
-			for i in s.files.handlers {"\(i)": {format: "jessie", src: i}}
+			for i in s.files.handlers if E._composedHandlers[i] == _|_ {"\(i)": {format: "jessie", src: i}}
 			for i in s.files.adapters if !strings.HasPrefix(i, "/") {"\(i)": {format: "jessie", src: i}}
 			if s.files.renderers != _|_ {
 				for i in s.files.renderers {"\(i)": {format: "jessie", src: i}}
@@ -3930,20 +3994,4 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 
 	manifest: list.SortStrings([for p, _ in files {p}])
-	release: {
-		enabled: E.terminal.liveUpdates
-		runtime: omnishell.published.runtime
-		_declarations: [for s in list.Concat([E.terminal.surface.statics, E.cluster.meta.statics])
-			if strings.HasPrefix(s.target, "/srv/shell/") || strings.HasPrefix(s.target, "/srv/messages/") || strings.HasPrefix(s.target, "/srv/omnishell/") || s.target == "/srv/offline-first-sw.js"
-			let servedPath = strings.TrimPrefix(s.target, "/srv/")
-			if servedPath != "shell/release.json" {{path: servedPath, src: s.file}}]
-		// Docker copies cluster statics in order; the last destination wins.
-		_served: {for i, s in _declarations
-			if !list.Contains([for later in _declarations[i+1:] {later.path}], s.path) {(s.path): s}}
-		assets: [for p in list.SortStrings([for p, _ in _served {p}]) {_served[p]}]
-		runtimeAssets: [for s in E.terminal.surface.statics if strings.HasPrefix(s.target, "/omnishell/") {
-			path: strings.TrimPrefix(s.target, "/")
-			src:  s.file
-		}]
-	}
 }

@@ -36,6 +36,11 @@ import (
 #ConduitSlot:      impl.#ConduitSlot
 #MachineTimersSql: impl.#MachineTimersSql
 
+// A machine Mecha runs: XState's configuration and the setup beside it.
+#Machine: impl.#Machine
+#XState:  impl.#XState
+#Shape:   impl.#Shape
+
 // The mecha images an app takes by name, as pronto pins them: the consumer
 // pins what it builds on, so a pronto release names a mecha release's images
 // and an app pinning pronto gets them through it. One per service of

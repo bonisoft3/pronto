@@ -213,6 +213,10 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       let written = "";
       for (let pass = 0; pass < 2; pass++) {
         await cue(app, ["cmd", "generate", "./pronto"]);
+        // Beside a program the writer alone owns .say.yaml. A bootstrap copy
+        // standing until the writer ran is what a failed write left behind, and
+        // in the monorepo its rules declared the installed pronto for good.
+        if (pass === 1) assert(await Deno.readTextFile(join(app, ".say.yaml")) === written, "generate rewrote the writer's .say.yaml");
         if (pass === 1) {
           // A tightened grammar must judge the authored screen, not yesterday's output.
           await Deno.writeTextFile(join(app, "program_document.cue"), '\ncode: surface: screens: about: markup: "<section class=\\"screen\\" data-screen=\\"about\\"><h1>About</h1></section>"\n', { append: true });

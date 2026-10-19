@@ -251,7 +251,8 @@ import (
 			"monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml",
 			if B.cluster.surface.networks != _|_ {"compose.networks.yaml"},
 		]
-		if len(B._runtimeStatics) > 0 {
+		// A door built as a release takes them from the release.
+		if len(B._runtimeStatics) > 0 if B.cluster.meta.served == _|_ {
 			targets: caddy: {
 				dockerfile: defaultCopy: {for s in B._runtimeStatics {
 					(s.target): {from: name: B._omnishell, srcs: [s.file], dst: s.target}

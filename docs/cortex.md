@@ -1,84 +1,125 @@
-# Cortex client compositions
+# Cortex machines
 
-`state.cortex` composes existing Mecha actor ports with browser protocol machines.
-[[../cortex.cue]] admits two bounded forms: `#CortexSession` for a leased session
-and `#CortexCommand` for admission and commands on one actor. [[../cortex.ts]]
-checks the bindings and emits `shell/shared/cortex-<name>.js`; the terminal
-packages those files and the shared protocol drivers automatically.
+`state.cortex` declares `#CortexMachine`s ([[../cortex.cue]]): the app's
+screens over the Mecha machines in `state.hybrids`. Each state names the screen
+that hosts it and the machine its child reaches, and every child is a fold the
+terminal runs. Nothing runs in the browser that the terminal does not record:
+a child's state is rows, its pauses are the terminal's clock, its entropy is
+the terminal's draw, and everything it asks of a Mecha machine is a row it
+writes.
 
-This is a constrained composition vocabulary, not the full arbitrary cross-tier
-statechart proposed in [[decisions/2026-09-29-hybrid-machines]]. The generated
-browser graph owns only interaction state. Mecha retains the referenced domain
-charts, authorization, locking, writes, private views and durable receipts.
-Composition introduces no transaction coordinator, worker, pipeline or ledger.
-External effects still use Mecha's existing Airlock machinery.
+Where this vocabulary is heading — Cortex spanning the tiers, each tier's own
+`#Machine` — is §4 of [[decisions/2026-09-29-hybrid-machines]]. Mecha retains
+the invoked domain charts, authorization, locking, writes, private views,
+receipts and deadlines. Cortex introduces no transaction coordinator, worker,
+pipeline or ledger.
 
-## Session
+## The parent
 
-A session names a Mecha machine with a `ports.session`, a polling interval, a
-private-view field for an editable draft, and the confirmed value that locks
-editing. Optional `rebaseUnsent` names a command route to that same machine and
-private-view fields that must be unchanged before a queued intent can use the
-latest revision. This policy is an authored semantic assertion: the compiler
-checks field existence and ownership, not that those fields capture every
-meaningful domain change.
+A `#CortexMachine` is XState's own `{config, setup}`. A state of `config`
+names the screen that hosts it in `meta.screen` and invokes its children by
+`invoke.src`; `setup.actors` implements each, as XState's `setup()` does.
 
-The emitted graph covers connecting, ready, sending, reconnecting, failed and
-closed. Its runtime stores draft, pending command, confirmed snapshot and
-in-flight request in one state. Draft edits cannot mutate snapshots. Reads do
-not disable controls. A click during a read persists an intent and sends it
-after the read. An uncertain transmitted command keeps its exact ID and body;
-reload treats every restored pending command as already transmitted. Only a
-correlated accepted/rejected receipt clears it. Closing cancels scheduling and
-ignores late responses; undeliverable lease cleanup is resolved by Mecha expiry.
+A Cortex state is hosted by a screen. Navigating to the screen enters the
+state and mounts the child's regions; leaving unmounts them, and a child's late
+write lands as a row like any other. The parent's state is the terminal's
+navigation, which it already holds and replays, so there is no second chart to
+persist. `#App` refuses a state whose screen or machine is undeclared, a
+session over a machine without a lease, a sync child over a machine without a
+join, and a sync child whose screen's route does not carry its `instance`.
 
-Bindings must reference declared machines, receipt-producing admissions and
-private-view fields. No authored SQL is sent to the browser. Read-only SQL
-projection semantics remain a Mecha declaration boundary validated by the app's
-integration tests.
+## Invoking a Mecha machine
 
-## Actor commands
+An invoke's `src` names an actor of `setup.actors`, `{machine, via, handler}`:
+the Mecha machine it reaches, how, and the fold that does. A sync child's
+`input.instance` names the route parameter that carries the instance.
 
-A command composition names a Mecha machine with public view-returning
-admission keyed by `instance_id`, join and sync ports. The compiler derives admission
-input names, command version and the
-allowed browser event set; Mecha-only events cannot be submitted through this
-client. The driver owns entry, create/join retries, command persistence,
-polling, failure and shutdown. Admission and in-flight status live in its
-machine state. Its receipt/view actions use Omnishell's existing
-[hybrid interaction reducer](https://github.com/bonisoft3/omnishell/blob/v0.12.1/interpreter/hybrid-client.js).
+| `via` | Child | Lifetime |
+| --- | --- | --- |
+| `session` | holds a lease row on the terminal's clock | while the screen is open; a lapsed lease is the ticker's to drop |
+| `sync` | opens the instance its route names and commands it | attached: leaving detaches, and the instance plays on |
+| `local` | plays the machine's own reducer in the terminal | owned; its state is the app's rows |
 
-Mecha joins can declare a fixed `seat` or a state-array field `seats` with
-`membersPayload`. The latter generates an optional `requested_seat` input.
-Under the instance lock, Mecha resumes existing membership or claims one vacant
-seat, then delivers the member-seat list through the declared internal event.
-That transition decides whether enough participants have arrived to start.
-Membership, state and private views commit together. Cortex derives the join
-input from that port and persists it through retries; it does not allocate seats.
-Admission parameters can declare SQL defaults, while the generated create client
-requires explicit input values so a pending request retains its meaning.
+`handler` is the fold: `write.ts` emits `shell/handlers/<actor>.js` from the
+app's Jessie module at that path — a function `(state, event, machine, machines)`.
+`machine` is the invoked machine's declaration, `{spec}`, and for a local child
+also `execute`, the hybrid runtime and rules PostgreSQL runs, evaluated in the
+handler's cage. `machines` holds every hybrid's declaration, so a fold that
+opens another machine (a lobby opening a challenge) states its protocol version
+from the declaration rather than a copy.
 
-Admission input is persisted before sending. Unknown creation retries reuse
-that input. A definitive admission refusal clears the opening record, allowing
-another invitation; uncertain delivery retains it. Commands are persisted before transmission and remain pending until
-the correlated receipt and a sufficiently recent authorized view reconcile.
-A view arriving first does not acknowledge a command. One request runs at a
-time; an input queued during a read is sent next. Unlike a session visibility
-intent, a game command never rebases its expected revision.
+### Through rows
 
-## Host boundary and evidence
+A Mecha machine's surface is the live entities the app declares beside it,
+checked against it by [[../mecha-surface.ts]] as the migration is written:
 
-Hosts provide authenticated RPC, actor-scoped storage, lifecycle cancellation,
-and rendering/navigation callbacks. They translate DOM gestures to protocol
-inputs; they do not decide whether an uncertain operation should be repeated.
-Storage failure must prevent transmission. Protocol failure enters a visible
-failed state; transport loss retries the same identity.
+| Entity | Written by | Says |
+| --- | --- | --- |
+| `<m>_seat` | the machine, at every accepted step | a reader's view, private to them |
+| `<m>_command` | the reader | an event; the insert dispatches it and stamps the receipt on the row |
+| `<m>_open` | the reader | a creation or a join; the insert runs the admission and stamps it |
+| `<m>_public` | the machine | what anyone may read, where the machine publishes |
+| `<m>_lease` | the reader | a tab's lease; writing admits and renews, deleting leaves |
 
-Truco's `apps/truco/machines/lobby.cue` composes the lobby and online table.
-The local arena remains outside this composition. `test:hybrid` includes
-compiler refusal tests, bounded session delivery schedules and driver tests for
-lost admission/command replies, reload and late responses. `test:truco-online`
-checks the generated clients against real PostgreSQL and HTTP, including two
-mounted DOM clients completing a match. DOM mounting does not establish browser
-layout, service-worker behavior or full-shell acceptance. These are executable
-safety checks, not an unbounded proof of liveness or domain correctness.
+A row's key is what it says. A command is keyed by its instance, the revision
+it was made at, the seat and the gesture, so the same gesture twice is one row
+and the store's outbox replays it under the same key; a gesture on a stale view
+is a stale-revision receipt. A creation is keyed by its instance's id, drawn by
+the terminal. A domain refusal is a receipt on the row; a protocol violation is
+a 4xx and arrives at the fold as `refused`. Deadlines are armed on the ticker
+as a timed phase is entered, so a timeout and a lapsed lease fire whether
+anyone is reading.
+
+A seat's columns past the protocol's are its view's fields of the same name,
+and a public row's its projection's: the bar lists rooms by the seat's
+`variant`. A view, a request and an input travel as JSON in a text column,
+since a server table's columns ride the change feed, which has no `json`.
+
+### Session
+
+The fold draws a lease key once per tab and holds it; renewing is a `then` on
+the terminal's clock. A fold's seat is held through its waits, so the renewal
+sits on a seat of its own and the screen's other folds never wait a beat for
+it. A tab that closes stops renewing, and the machine's deadline drops it.
+
+### Sync
+
+The screen's route carries the instance. The fold reads the room's seat,
+commands and admissions through named reads filtered by the route, and a slot
+keyed by the route names the instance before any row of it exists. With no
+seat, it asks to join under a drawn key; with one, it draws the seat's view
+into the screen's rows and turns a gesture into a command row.
+
+### Local
+
+The invoke names a machine with an object initializer. The terminal plays the
+machine's own reducer; a Mecha-tier event is executed with `tier: "mecha"`,
+standing in for Mecha's ports and ticker. Because it is a handler, everything
+the game is lives in rows and every step is the terminal's, so a local game
+replays like any other screen:
+
+- its state is a row the module writes, at the durability the app declares;
+- a pause is a `then` delay on the terminal's clock;
+- entropy is the terminal's draw (`then: {seed: true}`), recorded on a row and
+  expanded purely — never ambient randomness or the wall clock, which the cage
+  refuses anyway;
+- a gesture writes an intent row, and the fold the app seats with
+  `data-on-mutation` applies it, so no two steps race over the game. A seat
+  wakes on writes to its region's own table, so the gesture also touches that
+  table's row.
+
+The module decides when a game starts and what a save from another machine
+version means; Truco deals a new game rather than resume one.
+
+## Evidence
+
+Truco's root machine is its own `machines/root.cue`. `test:hybrid` covers the
+reducer's commands, races, receipts, timers and Airlock claim on the surface
+rows, and the surface check's refusals. `test:truco-online` runs Truco's
+machines through their surface in PostgreSQL under the generated policies —
+leases, challenges, admissions, seat races, team matches, the ticker's
+timeouts — and two readers completing a match through PostgREST as the store
+writes it. Truco's mounted lobby and table screens check the folds' keys,
+draws and renewal on the harness's store and clock. Mounting does not establish
+browser layout, Electric delivery or full-shell acceptance; these are
+executable safety checks, not an unbounded proof of liveness.

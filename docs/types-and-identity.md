@@ -43,8 +43,37 @@ The rules that make a form canonical:
   platform's `txid` is the case that matters: `columnOrder` in omnishell's
   `data-sync.js` types it as `int64` on every table.
 - **`json` keeps the text it was given** (RFC 8259), so two spellings of one
-  value both stand and a `json` column has no order. What is inside it is
-  outside the entity model: no ordinals, no per-field CEL.
+  value both stand and a `json` column has no order. What is inside it has no
+  ordinals; its shape, where the column has one, is the column's own `cel`.
+
+### A json column with a shape
+
+A machine's seat view, its command's request and its open's input hold
+values of the machine's own shape (`mecha.#Shape`: closed records, bounded
+lists, strings with a length or a set, integers with a range, booleans). The
+column is `json`, and its `cel` is the shape as one CEL statement, rendered
+in CUE from the machine's declaration (`cel-shape.cue`: `#ShapeCel`,
+`#RequestCel`) so the app writes no constraint by hand and `cue vet` holds
+the seat's cel equal to the machine's view (`_surfaceViolations`). The
+spelling is fixed, one per constructor: `type(x) == map && size(x) == N &&
+has(x.f) && …` for a record, `type(x) == list && size(x) <= n && x.all(e1,
+…)` for a list, `type(x) == string` with `x.size() <= n` or `x in [...]`,
+`x == int(x)` with its range, `type(x) == bool`. The integer spelling is one a
+CEL evaluator agrees with over a JSON number, which it holds as a double.
+
+The derivation reads that one text back as a tree (`cel-emit.ts` `shapeTree`,
+refusing any other spelling rather than reading it narrower) and every reader
+gets its own rendering of the tree: the Postgres `CHECK` calls
+`portable_shape_valid(column, tree)`, a walk written once in `004_types.sql`
+because a `CHECK` holds no subquery; the CUE constraint closes the record
+(`close({...})`, `list.MaxItems`) for the seed vet; `bounds` carries the tree
+(`kind`, `fields`, `items`, `maxItems`) into shell.yaml, where the battery
+draws values inside it. The step-time check (`hybrid-runtime.js`) walks the
+same shape over the machine's own values, so a settle never writes what the
+column refuses. Electric hands the terminal the value, so a handler reads
+`row.view` as the record it is. A request's payload and an open's input are
+open records: their shape depends on the event's or the open's kind, a union
+the grammar does not state.
 
 Money is not a type but what an integer counts: `money: {currency,
 minorUnits}` on an integer field. Some fields carry physical labels (`text`,
@@ -128,10 +157,13 @@ DuckDB reads a base column as its own type rather than as text.
 | the lake | `libraries/mecha/packages/lake/src/lake-types.ts` | projects typed columns inside DuckDB, before Arrow builds JavaScript values |
 | the emitted `.proto` | `type-proto.ts` | `timestamp` and `duration` as well-known types, `json` and `geojson` as `Value`, the rest as scalars or strings |
 
-The bus transform has a measured spelling for twelve types. A `server` entity,
-whose rows the change feed carries, cannot declare `bytes`, `json` or `geojson`:
-`_busTypes` in `emit.cue` refuses it at `cue vet`, because at runtime the
-column would wedge its table, every change dropped with only a log line.
+The bus transform has a measured spelling for fourteen types. Conduit reads a
+`json` or `geojson` column as bytes, which its JSON encoding of the row spells
+as base64 of the text (measured 2026-10-19, v0.20.4, a json and a jsonb column
+over logrepl), and the transform decodes it into the value. A `server` entity,
+whose rows the change feed carries, cannot declare `bytes`: `_busTypes` in
+`emit.cue` refuses it at `cue vet`, because at runtime the column would wedge
+its table, every change dropped with only a log line.
 
 ## Identity
 
@@ -235,6 +267,22 @@ shape fingerprint among them, is [pending](../PENDING.md#types-and-identity).
   syntax (`1h30m`), not the RFC's.
 - **RFC 8785 for `json`.** Nothing canonicalizes key order: the client keeps the
   order it was handed and the `json` column keeps its text.
+- **Nested types as named records with field numbers**, protobuf's way, for a
+  shaped json column. Field numbers buy evolution across readers of different
+  versions; the runtime's records are closed and a machine versions whole, so
+  the seat's values never meet a reader of another version, and CUE's
+  definitions already name the records.
+- **A `shape` slot on `#Field` beside `cel`.** A second way to state what a
+  column admits, for the three emitters to read twice. `cel` is the one
+  statement, and the shape is read back out of it.
+- **CUE evaluated at runtime, or a CUE-to-CEL translator.** The check a nested
+  value needs at a step is a walk the runtime already makes in twenty-five
+  lines; the translator needed is a CUE function over the Shape grammar, which
+  runs at generation and is `#ShapeCel`.
+- **The `CHECK` rendered node by node** (`jsonb_typeof`, `?`, `NOT EXISTS`
+  over `jsonb_array_elements`). A `CHECK` holds no subquery, and the per-node
+  text ran to a kilobyte for a small record; the tree handed to one function
+  says the same in a line.
 - **A domain for every type.** It made input strict at PostgREST, at the price
   of a column no Electric subset can compare and DuckDB reads as text. Where
   the default output is already canonical, the domain bought only the input

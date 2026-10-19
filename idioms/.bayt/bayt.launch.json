@@ -146,7 +146,8 @@
       },
       "upClosure": [
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "outs": {
@@ -175,7 +176,8 @@
       },
       "upClosure": [
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     }
   },
@@ -193,7 +195,8 @@
   "transitiveCrossDeps": [],
   "upClosure": [
     "./.bayt/compose.launch.yaml",
-    "./.bayt/compose.caddy.yaml"
+    "./.bayt/compose.caddy.yaml",
+    "./.bayt/compose.served.yaml"
   ],
   "chainedDeps": [
     {

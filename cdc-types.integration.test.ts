@@ -26,6 +26,7 @@ const types = {
     day: "date", u: "uuid", tm: "time", f: "double", s: "string",
   },
   g: { blob: "bytes" },
+  j: { v: "json", geo: "geojson" },
 };
 const carriers = types;
 
@@ -57,6 +58,15 @@ const cases: { name: string; row: Row; want: Row | string }[] = [
       day: "0001-01-01", u: null, tm: "00:00:00.000000", f: 1e+300, s: "", txid: 979,
     },
   },
+  // Conduit v0.20.4 reads a json or jsonb column as bytes, spelled as base64 of
+  // the text: the column's own for json, Postgres's spaced one for jsonb
+  // (2026-10-19, a logrepl pipeline over a json and a jsonb column).
+  {
+    name: "a json column as base64 of its text",
+    row: { __table: "j", v: "eyJhIjoxLCJiIjpbMSwyLjUsInMiXSwiYyI6eyJkIjoieCJ9LCJiaWciOjkwMDcxOTkyNTQ3NDA5OTN9", geo: "eyJ0eXBlIjogIlBvaW50IiwgImNvb3JkaW5hdGVzIjogWzEsIDJdfQ==" },
+    want: { __table: "j", v: { a: 1, b: [1, 2.5, "s"], c: { d: "x" }, big: 9007199254740993 }, geo: { type: "Point", coordinates: [1, 2] } },
+  },
+  { name: "a json column as a JSON value", row: { __table: "j", v: { a: 1 } }, want: "json is not base64 text" },
   { name: "a table the map does not name", row: { __table: "other", at: "2026-09-22 14:18:23+00" }, want: { __table: "other", at: "2026-09-22 14:18:23+00" } },
   { name: "a duration with a day part", row: { __table: "t", d: "1 day 02:00:00" }, want: "duration is not clock text" },
   // An int64 is a domain, spelled as text. A JSON number is a spelling nobody

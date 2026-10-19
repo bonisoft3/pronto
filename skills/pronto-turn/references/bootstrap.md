@@ -76,6 +76,10 @@ project locking prevails. An already-installed tool is skipped without
 filling its entry; repeat the install with `--force <tool>` (for example,
 `^mise install --force http:duckdb`) and recheck the lock.
 
+Once the app has a `program.cue`, that command rewrites only `.mise.toml`; the
+seat's Sayt rules reach `.say.yaml` on the next `./saytw generate`, whose writer
+unifies them with the program's.
+
 Host plugins and project configuration are separate installations. Use the
 host's supported plugin installer, then restart or reload when required by
 that host. Generated project files do not install a plugin into a running

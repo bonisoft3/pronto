@@ -11,8 +11,8 @@
 // the domain wider than the constraint, never narrower, so a generator built on
 // it proposes values the program refuses and never the reverse.
 
-import type { Expr, ParsedExpr } from "./cel-emit.ts";
-import { enumValues } from "./cel-emit.ts";
+import type { Expr, ParsedExpr, ShapeTree } from "./cel-emit.ts";
+import { CelUnsupported, enumValues, shapeTree } from "./cel-emit.ts";
 import { parseCel } from "./cel.ts";
 
 /** A column's value domain. Every key is optional and absent means unbounded;
@@ -23,6 +23,13 @@ export type FieldBounds = {
   enumValues?: string[];
   intMin?: number;
   intMax?: number;
+  // A json column's value, as the shape its constraint states: the kind at
+  // each level, a record's fields, a list's items and cap. A record with no
+  // fields is open.
+  kind?: ShapeTree["kind"];
+  fields?: Record<string, FieldBounds>;
+  items?: FieldBounds;
+  maxItems?: number;
   sizeMin?: number;
   sizeMax?: number;
   regex?: string;
@@ -31,7 +38,7 @@ export type FieldBounds = {
 /** The keys of a FieldBounds in the order a rendering states them, so two runs
  * over the same constraint write the same line whatever order the source
  * stated its conjuncts in. */
-export const BOUND_KEYS = ["intMin", "intMax", "sizeMin", "sizeMax", "regex"] as const;
+export const BOUND_KEYS = ["kind", "intMin", "intMax", "sizeMin", "sizeMax", "regex", "maxItems", "items", "fields"] as const;
 
 function conjuncts(e: Expr): Expr[] {
   const c = e.callExpr;
@@ -46,59 +53,104 @@ function intOf(e: Expr): number | null {
   return v === undefined ? null : Number(v);
 }
 
-export function extractBounds(ir: ParsedExpr): FieldBounds {
+export function extractBounds(ir: ParsedExpr, json = false): FieldBounds {
+  if (json) {
+    try {
+      return boundsOfTree(shapeTree(ir));
+    } catch (e) {
+      if (e instanceof CelUnsupported) return {};
+      throw e;
+    }
+  }
+  return read(ir).bounds;
+}
+
+function boundsOfTree(t: ShapeTree): FieldBounds {
+  switch (t.kind) {
+    case "boolean":
+      return { kind: "boolean" };
+    case "string":
+      return t.enumValues !== undefined ? { kind: "string", enumValues: t.enumValues } : { kind: "string", sizeMax: t.sizeMax };
+    case "integer":
+      return { kind: "integer", ...(t.intMin === undefined ? {} : { intMin: t.intMin }), ...(t.intMax === undefined ? {} : { intMax: t.intMax }) };
+    case "array":
+      return { kind: "array", maxItems: t.maxItems, items: boundsOfTree(t.items) };
+    case "object":
+      return t.fields === undefined ? { kind: "object" } : { kind: "object", fields: Object.fromEntries(Object.entries(t.fields).map(([k, v]) => [k, boundsOfTree(v)])) };
+  }
+}
+
+/** The bounds a constraint states, or null where any conjunct says more than
+ * they can: a proof that a value fits the column reads only what it fully
+ * understands, where a generator may read the domain wider. */
+export function exactBounds(ir: ParsedExpr): FieldBounds | null {
+  const { bounds, exact } = read(ir);
+  return exact ? bounds : null;
+}
+
+function read(ir: ParsedExpr): { bounds: FieldBounds; exact: boolean } {
   const bounds: FieldBounds = {};
   const enums = enumValues(ir);
   if (enums !== null) {
     bounds.enumValues = enums;
-    return bounds;
+    return { bounds, exact: true };
   }
 
+  let exact = true;
   for (const c of conjuncts(ir.expr)) {
-    const call = c.callExpr;
-    if (call === undefined) continue;
-    const args = call.args ?? [];
+    if (!conjunct(c, bounds)) exact = false;
+  }
+  return { bounds, exact };
+}
 
-    if (call.function === "matches" && call.target?.identExpr?.name === "this" && args.length === 1) {
-      const pattern = args[0].constExpr?.stringValue;
-      if (pattern !== undefined) bounds.regex = pattern;
-      continue;
-    }
+/** Narrows `bounds` by one conjunct; whether it was read exactly. */
+function conjunct(c: Expr, bounds: FieldBounds): boolean {
+  const call = c.callExpr;
+  if (call === undefined) return false;
+  const args = call.args ?? [];
 
-    if (args.length === 2) {
-      const [lhs, rhs] = args;
-      const n = intOf(rhs);
-      if (n === null) continue;
-
-      if (lhs.identExpr?.name === "this") {
-        if (call.function === "_>=_") bounds.intMin = Math.max(bounds.intMin ?? -Infinity, n);
-        else if (call.function === "_>_") bounds.intMin = Math.max(bounds.intMin ?? -Infinity, n + 1);
-        else if (call.function === "_<=_") bounds.intMax = Math.min(bounds.intMax ?? Infinity, n);
-        else if (call.function === "_<_") bounds.intMax = Math.min(bounds.intMax ?? Infinity, n - 1);
-        else if (call.function === "_==_") {
-          bounds.intMin = n;
-          bounds.intMax = n;
-        }
-      }
-
-      if (lhs.callExpr?.function === "size" && lhs.callExpr.target?.identExpr?.name === "this") {
-        if (call.function === "_>=_") bounds.sizeMin = Math.max(bounds.sizeMin ?? 0, n);
-        else if (call.function === "_>_") bounds.sizeMin = Math.max(bounds.sizeMin ?? 0, n + 1);
-        else if (call.function === "_<=_") bounds.sizeMax = Math.min(bounds.sizeMax ?? Infinity, n);
-        else if (call.function === "_<_") bounds.sizeMax = Math.min(bounds.sizeMax ?? Infinity, n - 1);
-        else if (call.function === "_==_") {
-          bounds.sizeMin = n;
-          bounds.sizeMax = n;
-        }
-      }
-
-      if (lhs.callExpr?.function === "size" && lhs.callExpr.target?.callExpr?.function === "trim") {
-        bounds.sizeMin = Math.max(bounds.sizeMin ?? 0, 1);
-      }
-    }
+  if (call.function === "matches" && call.target?.identExpr?.name === "this" && args.length === 1) {
+    const pattern = args[0].constExpr?.stringValue;
+    if (pattern === undefined) return false;
+    bounds.regex = pattern;
+    return true;
   }
 
-  return bounds;
+  if (args.length !== 2) return false;
+  const [lhs, rhs] = args;
+  const n = intOf(rhs);
+  if (n === null) return false;
+
+  if (lhs.identExpr?.name === "this") {
+    if (call.function === "_>=_") bounds.intMin = Math.max(bounds.intMin ?? -Infinity, n);
+    else if (call.function === "_>_") bounds.intMin = Math.max(bounds.intMin ?? -Infinity, n + 1);
+    else if (call.function === "_<=_") bounds.intMax = Math.min(bounds.intMax ?? Infinity, n);
+    else if (call.function === "_<_") bounds.intMax = Math.min(bounds.intMax ?? Infinity, n - 1);
+    else if (call.function === "_==_") {
+      bounds.intMin = n;
+      bounds.intMax = n;
+    } else return false;
+    return true;
+  }
+
+  if (lhs.callExpr?.function === "size" && lhs.callExpr.target?.identExpr?.name === "this") {
+    if (call.function === "_>=_") bounds.sizeMin = Math.max(bounds.sizeMin ?? 0, n);
+    else if (call.function === "_>_") bounds.sizeMin = Math.max(bounds.sizeMin ?? 0, n + 1);
+    else if (call.function === "_<=_") bounds.sizeMax = Math.min(bounds.sizeMax ?? Infinity, n);
+    else if (call.function === "_<_") bounds.sizeMax = Math.min(bounds.sizeMax ?? Infinity, n - 1);
+    else if (call.function === "_==_") {
+      bounds.sizeMin = n;
+      bounds.sizeMax = n;
+    } else return false;
+    return true;
+  }
+
+  // A non-blank value: its untrimmed length is at least one, which is less
+  // than it says.
+  if (lhs.callExpr?.function === "size" && lhs.callExpr.target?.callExpr?.function === "trim") {
+    bounds.sizeMin = Math.max(bounds.sizeMin ?? 0, 1);
+  }
+  return false;
 }
 
 export function boundsSelfTest(): string[] {

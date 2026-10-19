@@ -1,7 +1,5 @@
 # generated from bayt.cue — do not edit
 include:
-- path: ./compose.caddy.yaml
-  required: false
 - path: ./compose.setup.yaml
   required: false
 - path: ./compose.lint.yaml
@@ -19,6 +17,10 @@ include:
 - path: ./compose.ci-visual.yaml
   required: false
 - path: ./compose.ci.yaml
+  required: false
+- path: ./compose.served.yaml
+  required: false
+- path: ./compose.caddy.yaml
   required: false
 - path: ../monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml
   required: false

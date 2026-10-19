@@ -151,7 +151,7 @@ BEGIN
   EXCEPTION WHEN numeric_value_out_of_range OR invalid_text_representation THEN
     RETURN false;
   END;
-  RETURN portable_double_valid(binary64) AND source = binary64::text::numeric;
+  RETURN public.portable_double_valid(binary64) AND source = binary64::text::numeric;
 END;
 $$;
 
@@ -162,15 +162,15 @@ AS $$
 DECLARE item json;
 BEGIN
   CASE json_typeof(value)
-    WHEN 'number' THEN RETURN portable_json_number_valid(value);
+    WHEN 'number' THEN RETURN public.portable_json_number_valid(value);
     WHEN 'array' THEN
       FOR item IN SELECT json_array_elements(value) LOOP
-        IF portable_json_valid(item) IS NOT TRUE THEN RETURN false; END IF;
+        IF public.portable_json_valid(item) IS NOT TRUE THEN RETURN false; END IF;
       END LOOP;
     WHEN 'object' THEN
       IF EXISTS (SELECT entry.key FROM json_each($1) AS entry GROUP BY entry.key HAVING count(*) > 1) THEN RETURN false; END IF;
       FOR item IN SELECT entry.value FROM json_each($1) AS entry LOOP
-        IF portable_json_valid(item) IS NOT TRUE THEN RETURN false; END IF;
+        IF public.portable_json_valid(item) IS NOT TRUE THEN RETURN false; END IF;
       END LOOP;
     WHEN 'string' THEN
       BEGIN
@@ -186,6 +186,56 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.portable_shape_valid(value json, shape jsonb)
+RETURNS boolean
+LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE
+AS $$
+-- A value against the shape its column's constraint states, as derive-cel
+-- read it (cel-emit.ts shapeTree): the kind at each level, a record's fields
+-- (none stated: open), a list's items and cap, a string's length or set, an
+-- integer's range. The same walk hybrid-runtime.js makes over a step's values.
+DECLARE
+  kind text := shape->>'kind';
+  item json;
+  key text;
+  n numeric;
+BEGIN
+  CASE kind
+    WHEN 'boolean' THEN RETURN json_typeof(value) = 'boolean';
+    WHEN 'string' THEN
+      IF json_typeof(value) <> 'string' THEN RETURN false; END IF;
+      IF shape ? 'enumValues' THEN RETURN (shape->'enumValues') ? (value #>> '{}'); END IF;
+      RETURN char_length(value #>> '{}') <= (shape->>'sizeMax')::int;
+    WHEN 'integer' THEN
+      IF json_typeof(value) <> 'number' THEN RETURN false; END IF;
+      n := (value #>> '{}')::numeric;
+      IF n <> trunc(n) THEN RETURN false; END IF;
+      IF shape ? 'intMin' AND n < (shape->>'intMin')::numeric THEN RETURN false; END IF;
+      IF shape ? 'intMax' AND n > (shape->>'intMax')::numeric THEN RETURN false; END IF;
+      RETURN true;
+    WHEN 'array' THEN
+      IF json_typeof(value) <> 'array' THEN RETURN false; END IF;
+      IF json_array_length(value) > (shape->>'maxItems')::int THEN RETURN false; END IF;
+      FOR item IN SELECT json_array_elements(value) LOOP
+        IF public.portable_shape_valid(item, shape->'items') IS NOT TRUE THEN RETURN false; END IF;
+      END LOOP;
+      RETURN true;
+    WHEN 'object' THEN
+      IF json_typeof(value) <> 'object' THEN RETURN false; END IF;
+      IF NOT (shape ? 'fields') THEN RETURN true; END IF;
+      FOR key IN SELECT json_object_keys(value) LOOP
+        IF NOT ((shape->'fields') ? key) THEN RETURN false; END IF;
+      END LOOP;
+      FOR key IN SELECT jsonb_object_keys(shape->'fields') LOOP
+        IF value->key IS NULL THEN RETURN false; END IF;
+        IF public.portable_shape_valid(value->key, shape->'fields'->key) IS NOT TRUE THEN RETURN false; END IF;
+      END LOOP;
+      RETURN true;
+    ELSE RETURN false;
+  END CASE;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.portable_geojson_position_valid(value json)
 RETURNS boolean
 LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE
@@ -194,8 +244,8 @@ DECLARE longitude double precision;
 DECLARE latitude double precision;
 BEGIN
   IF json_typeof(value) IS DISTINCT FROM 'array' OR json_array_length(value) NOT IN (2, 3) THEN RETURN false; END IF;
-  IF portable_json_number_valid(value -> 0) IS NOT TRUE OR portable_json_number_valid(value -> 1) IS NOT TRUE THEN RETURN false; END IF;
-  IF json_array_length(value) = 3 AND portable_json_number_valid(value -> 2) IS NOT TRUE THEN RETURN false; END IF;
+  IF public.portable_json_number_valid(value -> 0) IS NOT TRUE OR public.portable_json_number_valid(value -> 1) IS NOT TRUE THEN RETURN false; END IF;
+  IF json_array_length(value) = 3 AND public.portable_json_number_valid(value -> 2) IS NOT TRUE THEN RETURN false; END IF;
   longitude := (value ->> 0)::double precision;
   latitude := (value ->> 1)::double precision;
   RETURN longitude BETWEEN -180 AND 180 AND latitude BETWEEN -90 AND 90;
@@ -210,7 +260,7 @@ DECLARE item json;
 BEGIN
   IF json_typeof(value) IS DISTINCT FROM 'array' OR json_array_length(value) < minimum THEN RETURN false; END IF;
   FOR item IN SELECT json_array_elements(value) LOOP
-    IF portable_geojson_position_valid(item) IS NOT TRUE THEN RETURN false; END IF;
+    IF public.portable_geojson_position_valid(item) IS NOT TRUE THEN RETURN false; END IF;
   END LOOP;
   RETURN true;
 END;
@@ -219,7 +269,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.portable_geojson_ring_valid(value json)
 RETURNS boolean
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
-RETURN COALESCE(portable_geojson_positions_valid(value, 4)
+RETURN COALESCE(public.portable_geojson_positions_valid(value, 4)
   AND ((value -> 0 ->> 0)::numeric = (value -> (json_array_length(value) - 1) ->> 0)::numeric)
   AND ((value -> 0 ->> 1)::numeric = (value -> (json_array_length(value) - 1) ->> 1)::numeric), false);
 
@@ -234,21 +284,21 @@ BEGIN
   IF json_typeof(value) IS DISTINCT FROM 'object' OR json_object_field(value, 'crs') IS NOT NULL THEN RETURN false; END IF;
   kind := value ->> 'type';
   CASE kind
-    WHEN 'Point' THEN RETURN portable_geojson_position_valid(value -> 'coordinates');
-    WHEN 'MultiPoint' THEN RETURN portable_geojson_positions_valid(value -> 'coordinates', 0);
-    WHEN 'LineString' THEN RETURN portable_geojson_positions_valid(value -> 'coordinates', 2);
+    WHEN 'Point' THEN RETURN public.portable_geojson_position_valid(value -> 'coordinates');
+    WHEN 'MultiPoint' THEN RETURN public.portable_geojson_positions_valid(value -> 'coordinates', 0);
+    WHEN 'LineString' THEN RETURN public.portable_geojson_positions_valid(value -> 'coordinates', 2);
     WHEN 'MultiLineString' THEN
       coordinates := value -> 'coordinates';
       IF json_typeof(coordinates) IS DISTINCT FROM 'array' THEN RETURN false; END IF;
       FOR item IN SELECT json_array_elements(coordinates) LOOP
-        IF portable_geojson_positions_valid(item, 2) IS NOT TRUE THEN RETURN false; END IF;
+        IF public.portable_geojson_positions_valid(item, 2) IS NOT TRUE THEN RETURN false; END IF;
       END LOOP;
       RETURN true;
     WHEN 'Polygon' THEN
       coordinates := value -> 'coordinates';
       IF json_typeof(coordinates) IS DISTINCT FROM 'array' OR json_array_length(coordinates) = 0 THEN RETURN false; END IF;
       FOR item IN SELECT json_array_elements(coordinates) LOOP
-        IF portable_geojson_ring_valid(item) IS NOT TRUE THEN RETURN false; END IF;
+        IF public.portable_geojson_ring_valid(item) IS NOT TRUE THEN RETURN false; END IF;
       END LOOP;
       RETURN true;
     WHEN 'MultiPolygon' THEN
@@ -256,14 +306,14 @@ BEGIN
       IF json_typeof(coordinates) IS DISTINCT FROM 'array' THEN RETURN false; END IF;
       FOR item IN SELECT json_array_elements(coordinates) LOOP
         IF json_typeof(item) IS DISTINCT FROM 'array' OR json_array_length(item) = 0 THEN RETURN false; END IF;
-        IF EXISTS (SELECT 1 FROM json_array_elements(item) AS ring WHERE portable_geojson_ring_valid(ring) IS NOT TRUE) THEN RETURN false; END IF;
+        IF EXISTS (SELECT 1 FROM json_array_elements(item) AS ring WHERE public.portable_geojson_ring_valid(ring) IS NOT TRUE) THEN RETURN false; END IF;
       END LOOP;
       RETURN true;
     WHEN 'GeometryCollection' THEN
       coordinates := value -> 'geometries';
       IF json_typeof(coordinates) IS DISTINCT FROM 'array' THEN RETURN false; END IF;
       FOR item IN SELECT json_array_elements(coordinates) LOOP
-        IF portable_geojson_geometry_valid(item) IS NOT TRUE THEN RETURN false; END IF;
+        IF public.portable_geojson_geometry_valid(item) IS NOT TRUE THEN RETURN false; END IF;
       END LOOP;
       RETURN true;
     ELSE RETURN false;
@@ -285,14 +335,14 @@ BEGIN
       RETURN json_object_field(value, 'geometry') IS NOT NULL
         AND json_object_field(value, 'properties') IS NOT NULL
         AND json_typeof(properties) IN ('object', 'null')
-        AND (json_typeof(value -> 'geometry') = 'null' OR portable_geojson_geometry_valid(value -> 'geometry') IS TRUE);
+        AND (json_typeof(value -> 'geometry') = 'null' OR public.portable_geojson_geometry_valid(value -> 'geometry') IS TRUE);
     WHEN 'FeatureCollection' THEN
       IF json_object_field(value, 'features') IS NULL OR json_typeof(value -> 'features') IS DISTINCT FROM 'array' THEN RETURN false; END IF;
       FOR item IN SELECT json_array_elements(value -> 'features') LOOP
-        IF portable_geojson_object_valid(item) IS NOT TRUE OR item ->> 'type' IS DISTINCT FROM 'Feature' THEN RETURN false; END IF;
+        IF public.portable_geojson_object_valid(item) IS NOT TRUE OR item ->> 'type' IS DISTINCT FROM 'Feature' THEN RETURN false; END IF;
       END LOOP;
       RETURN true;
-    ELSE RETURN portable_geojson_geometry_valid(value);
+    ELSE RETURN public.portable_geojson_geometry_valid(value);
   END CASE;
 END;
 $$;
@@ -300,19 +350,19 @@ $$;
 CREATE OR REPLACE FUNCTION public.portable_geojson_valid(value json)
 RETURNS boolean
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
-RETURN portable_json_valid(value) AND portable_geojson_object_valid(value);
+RETURN public.portable_json_valid(value) AND public.portable_geojson_object_valid(value);
 
 ${domain("portable_int64", "bigint", "true")}
 ${domain("portable_bytes", "bytea", "true")}
 ${domain("portable_timestamp", "timestamptz", "VALUE >= timestamptz '0001-01-01 00:00:00+00' AND VALUE < timestamptz '10000-01-01 00:00:00+00'")}
 ${domain("portable_time", "time(6)", "VALUE < time '24:00:00'")}
-${domain("portable_duration", "interval", "portable_duration_valid(VALUE)")}
+${domain("portable_duration", "interval", "public.portable_duration_valid(VALUE)")}
 
-${representation("portable_int64", "CASE WHEN portable_canonical_integer(portable_json_scalar_text(value, 'string'), -9223372036854775808, 9223372036854775807) THEN portable_json_scalar_text(value, 'string')::bigint ELSE portable_reject('portable_int64 must be a canonical JSON string')::bigint END::public.portable_int64", "CASE WHEN portable_canonical_integer(value, -9223372036854775808, 9223372036854775807) THEN value::bigint ELSE portable_reject('portable_int64 must be canonical')::bigint END::public.portable_int64", "to_json(value::text)")}
-${representation("portable_bytes", "CASE WHEN portable_base64(portable_json_scalar_text(value, 'string')) THEN decode(portable_json_scalar_text(value, 'string'), 'base64') ELSE portable_reject('portable_bytes must be strict base64')::bytea END::public.portable_bytes", "CASE WHEN portable_base64(value) THEN decode(value, 'base64') ELSE portable_reject('portable_bytes must be strict base64')::bytea END::public.portable_bytes", "to_json(replace(encode(value::bytea, 'base64'), E'\\n', ''))")}
-${representation("portable_timestamp", "CASE WHEN portable_json_scalar_text(value, 'string') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$' THEN portable_json_scalar_text(value, 'string')::timestamptz ELSE portable_reject('portable_timestamp must be UTC with exactly six fractional digits')::timestamptz END::public.portable_timestamp", "CASE WHEN value ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$' THEN value::timestamptz ELSE portable_reject('portable_timestamp must be UTC with exactly six fractional digits')::timestamptz END::public.portable_timestamp", `to_json(to_char(value::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`)}
-${representation("portable_time", "CASE WHEN portable_json_scalar_text(value, 'string') ~ '^[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}$' AND portable_json_scalar_text(value, 'string') < '24:00:00.000000' THEN portable_json_scalar_text(value, 'string')::time ELSE portable_reject('portable_time must be HH:mm:ss.ffffff before 24:00')::time END::public.portable_time", "CASE WHEN value ~ '^[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}$' AND value < '24:00:00.000000' THEN value::time ELSE portable_reject('portable_time must be HH:mm:ss.ffffff before 24:00')::time END::public.portable_time", "to_json(to_char(value::time, 'HH24:MI:SS.US'))")}
-${representation("portable_duration", "CASE WHEN portable_json_scalar_text(value, 'string') ~ '^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$' THEN (substring(portable_json_scalar_text(value, 'string') FROM 3 FOR char_length(portable_json_scalar_text(value, 'string')) - 3) || ' seconds')::interval ELSE portable_reject('portable_duration must be canonical total seconds at microsecond precision')::interval END::public.portable_duration", "CASE WHEN value ~ '^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$' THEN (substring(value FROM 3 FOR char_length(value) - 3) || ' seconds')::interval ELSE portable_reject('portable_duration must be canonical total seconds at microsecond precision')::interval END::public.portable_duration", "to_json('PT' || trim_scale(extract(epoch FROM value::interval))::text || 'S')")}
+${representation("portable_int64", "CASE WHEN public.portable_canonical_integer(public.portable_json_scalar_text(value, 'string'), -9223372036854775808, 9223372036854775807) THEN public.portable_json_scalar_text(value, 'string')::bigint ELSE public.portable_reject('portable_int64 must be a canonical JSON string')::bigint END::public.portable_int64", "CASE WHEN public.portable_canonical_integer(value, -9223372036854775808, 9223372036854775807) THEN value::bigint ELSE public.portable_reject('portable_int64 must be canonical')::bigint END::public.portable_int64", "to_json(value::text)")}
+${representation("portable_bytes", "CASE WHEN public.portable_base64(public.portable_json_scalar_text(value, 'string')) THEN decode(public.portable_json_scalar_text(value, 'string'), 'base64') ELSE public.portable_reject('portable_bytes must be strict base64')::bytea END::public.portable_bytes", "CASE WHEN public.portable_base64(value) THEN decode(value, 'base64') ELSE public.portable_reject('portable_bytes must be strict base64')::bytea END::public.portable_bytes", "to_json(replace(encode(value::bytea, 'base64'), E'\\n', ''))")}
+${representation("portable_timestamp", "CASE WHEN public.portable_json_scalar_text(value, 'string') ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$' THEN public.portable_json_scalar_text(value, 'string')::timestamptz ELSE public.portable_reject('portable_timestamp must be UTC with exactly six fractional digits')::timestamptz END::public.portable_timestamp", "CASE WHEN value ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$' THEN value::timestamptz ELSE public.portable_reject('portable_timestamp must be UTC with exactly six fractional digits')::timestamptz END::public.portable_timestamp", `to_json(to_char(value::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))`)}
+${representation("portable_time", "CASE WHEN public.portable_json_scalar_text(value, 'string') ~ '^[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}$' AND public.portable_json_scalar_text(value, 'string') < '24:00:00.000000' THEN public.portable_json_scalar_text(value, 'string')::time ELSE public.portable_reject('portable_time must be HH:mm:ss.ffffff before 24:00')::time END::public.portable_time", "CASE WHEN value ~ '^[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}$' AND value < '24:00:00.000000' THEN value::time ELSE public.portable_reject('portable_time must be HH:mm:ss.ffffff before 24:00')::time END::public.portable_time", "to_json(to_char(value::time, 'HH24:MI:SS.US'))")}
+${representation("portable_duration", "CASE WHEN public.portable_json_scalar_text(value, 'string') ~ '^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$' THEN (substring(public.portable_json_scalar_text(value, 'string') FROM 3 FOR char_length(public.portable_json_scalar_text(value, 'string')) - 3) || ' seconds')::interval ELSE public.portable_reject('portable_duration must be canonical total seconds at microsecond precision')::interval END::public.portable_duration", "CASE WHEN value ~ '^PT(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?S$' THEN (substring(value FROM 3 FOR char_length(value) - 3) || ' seconds')::interval ELSE public.portable_reject('portable_duration must be canonical total seconds at microsecond precision')::interval END::public.portable_duration", "to_json('PT' || trim_scale(extract(epoch FROM value::interval))::text || 'S')")}
 `;
 
 function decimalRepresentation(profile: DecimalProfile): string {
@@ -321,11 +371,11 @@ function decimalRepresentation(profile: DecimalProfile): string {
   const pattern = scale === 0
     ? "^(0|-?[1-9][0-9]*)$"
     : `^(0|-?[1-9][0-9]*|-?(0|[1-9][0-9]*)\\.[0-9]{0,${scale - 1}}[1-9])$`;
-  const parse = `CASE WHEN value ~ '${pattern}' THEN value::numeric ELSE portable_reject('portable decimal must be canonical')::numeric END`;
+  const parse = `CASE WHEN value ~ '${pattern}' THEN value::numeric ELSE public.portable_reject('portable decimal must be canonical')::numeric END`;
   return `
-${domain(name, "numeric", `portable_decimal_valid(VALUE, ${precision}, ${scale})`)}
+${domain(name, "numeric", `public.portable_decimal_valid(VALUE, ${precision}, ${scale})`)}
 ${representation(name,
-  `${parse.replaceAll("value", "portable_json_scalar_text(value, 'string')")}::public.${name}`,
+  `${parse.replaceAll("value", "public.portable_json_scalar_text(value, 'string')")}::public.${name}`,
   `${parse}::public.${name}`,
   `to_json(trim_scale(value::numeric)::text)`)}
 `;

@@ -86,7 +86,7 @@ export async function prepareTerminalCorpus(fixture: string): Promise<void> {
   // Imported code stays separate from its deployment roots. The storybook
   // never applies migrations, so this uses the canonical terminal config
   // without constructing the cluster's SQL or its package builder.
-  const config = await reading(fixture, pkg, `(pronto.#shellConfig & {code: app.code, liveUpdates: app.terminal.liveUpdates, migrations: [], floors: app.terminal.capabilities.floors, hatch: app.terminal.capabilities.hatch, server: (pronto.#serverOn & {servers: [for _, entity in app.code.state.entities {entity.server}], auth: app.code.capabilities.auth != _|_}).out, native: app.code.capabilities.native}).out`);
+  const config = await reading(fixture, pkg, `(pronto.#shellConfig & {code: app.code, migrations: [], floors: app.terminal.capabilities.floors, hatch: app.terminal.capabilities.hatch, server: (pronto.#serverOn & {servers: [for _, entity in app.code.state.entities {entity.server}], auth: app.code.capabilities.auth != _|_}).out, native: app.code.capabilities.native}).out`);
   const bytes = JSON.stringify(config);
   await Deno.writeTextFile(join(fixture, "shell/shell.yaml"), bytes);
   await Deno.writeTextFile(join(fixture, "shell/shell.json"), bytes);

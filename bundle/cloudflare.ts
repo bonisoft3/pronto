@@ -72,9 +72,18 @@ const shell = JSON.parse(shellText) as {
   app?: string
   tables?: string[]
   schema?: Record<string, { fields?: Array<{ name: string; type: string; pk?: boolean; required?: boolean }> }>
+  hostDom?: Record<string, { src: string }>
 }
 const appName = shell.app ?? path.basename(app)
 const tables = shell.tables ?? []
+
+// A hatch is a module the page imports by its URL, which the entry's fetch
+// shim cannot answer: each one the shell names is served as the file it is.
+for (const hatch of Object.values(shell.hostDom ?? {})) {
+  const target = path.join(publicDir, hatch.src)
+  await Deno.mkdir(path.dirname(target), { recursive: true })
+  await Deno.copyFile(path.join(app, hatch.src), target)
+}
 
 function sqliteType(type: string): string {
   if (type === 'int' || type === 'integer') return 'INTEGER'

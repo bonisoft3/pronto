@@ -5,13 +5,6 @@ include:
   - ./compose.bayt.ports.yaml
   required: false
 services:
-  caddy:
-    extends:
-      file: ./compose.caddy.yaml
-      service: idioms-caddy
-    profiles:
-    - caddy
-    scale: 1
   setup:
     extends:
       file: ./compose.setup.yaml
@@ -70,4 +63,18 @@ services:
       service: idioms-ci
     profiles:
     - ci
+    scale: 1
+  served:
+    extends:
+      file: ./compose.served.yaml
+      service: idioms-served
+    profiles:
+    - served
+    scale: 1
+  caddy:
+    extends:
+      file: ./compose.caddy.yaml
+      service: idioms-caddy
+    profiles:
+    - caddy
     scale: 1

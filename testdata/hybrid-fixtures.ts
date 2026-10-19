@@ -8,6 +8,16 @@ export const quote = (value: unknown) => `'${JSON.stringify(value).replaceAll("'
 export const initial = () => ({ phase: "playing", turn: "a", a: [0, 1, 2], b: [3, 4, 5], plays: [], deadline: 9007199254740000 });
 export const request = (revision: number | string, kind = "play", payload: unknown = { card: 0 }) => ({ version: 1, expected_revision: String(revision), event: { kind, payload } });
 
+/** The surface tables an app declares for a machine (mecha-surface.ts), bare:
+ * no policy, so a test reads a seat by its actor. */
+export const surface = (name: string) => `
+CREATE TABLE public.${name}_seat (id text PRIMARY KEY, instance_id uuid NOT NULL, actor uuid NOT NULL, seat text NOT NULL,
+  revision bigint NOT NULL, phase text NOT NULL, view text NOT NULL);
+CREATE TABLE public.${name}_command (id text PRIMARY KEY, instance_id uuid NOT NULL, actor uuid NOT NULL DEFAULT public.auth_uid(),
+  request text NOT NULL, outcome text, reason text, revision bigint);
+GRANT SELECT ON public.${name}_seat TO app_user;
+GRANT SELECT, INSERT ON public.${name}_command TO app_user;`;
+
 export async function run(command: string, args: string[], input?: string) {
   const process = new Deno.Command(command, {
     args, cwd: ROOT, stdin: input === undefined ? "null" : "piped", stdout: "piped", stderr: "piped",
@@ -22,7 +32,7 @@ export async function run(command: string, args: string[], input?: string) {
 }
 
 export async function fixture() {
-  const result = await run("cue", ["export", "./apps/truco/tests/fixtures/hybrid", "-e", "machine"]);
+  const result = await run("cue", ["export", "./apps/truco/tests/fixtures/hybrid", "-e", "reducer"]);
   if (!result.ok) throw new Error(result.err);
   const spec: HybridMachine = JSON.parse(result.out);
   const rules = await Deno.readTextFile(new URL("apps/truco/tests/fixtures/hybrid/turn.js", ROOT));

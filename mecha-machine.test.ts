@@ -1116,11 +1116,16 @@ app: state: machines: PaymentMachine: states: pending: entry: {
 Deno.test("bounded Mecha machines share SQL hatch admission and refuse trigger-only actions", async () => {
   const machine = `
 app: state: hybrids: bounded: {rules: "bounded.js", machine: {
-  name: "bounded", version: 1, initial: "ready"
-  state: {type: "object", fields: phase: {type: "string", maxLength: 8}}
-  view: {type: "object", fields: {}}
-  events: run: {tier: "mecha", payload: {type: "object", fields: {}}}
-  states: ready: on: run: {reduce: "same", actions: [{hatch: {name: "billing", call: "bill"}}]}
+  config: {id: "bounded", initial: "ready", states: ready: on: run: {actions: "bill"}}
+  setup: {
+    version: 1
+    types: {
+      context: {type: "object", fields: {}}
+      view: {type: "object", fields: {}}
+      events: run: {tier: "mecha", payload: {type: "object", fields: {}}}
+    }
+    actions: bill: [{hatch: {name: "billing", call: "bill"}}]
+  }
 }}
 `;
   const result = await cue(["export", "-", "-e", "app"], paymentProgram() + machine);
@@ -1137,15 +1142,61 @@ app: capabilities: hatches: billing: {kind: "sql", files: ["billing.sql"], note:
   }
 });
 
+Deno.test("a Mecha machine refuses the XState it cannot run instead of misreading it", async () => {
+  // An event's transition list compiled to an unguarded no-op, and an invoke
+  // was dropped: both read as valid machines doing something else.
+  const machine = (state: string, root = "") => `
+app: state: hybrids: bounded: {rules: "bounded.js", machine: {
+  config: {id: "bounded", initial: "ready", ${root} states: {ready: ${state}, done: type: "final"}}
+  setup: {
+    version: 1
+    types: {
+      context: {type: "object", fields: {}}
+      view: {type: "object", fields: {}}
+      events: run: {tier: "omnishell", payload: {type: "object", fields: {}}}
+    }
+  }
+}}
+`;
+  for (const [state, reason] of [
+    ['{on: run: [{target: "done", guard: "mayRun"}, {target: "ready"}]}', "an event names one transition"],
+    ["{on: run: []}", "an event names one transition"],
+    ['{invoke: {src: "child"}, on: run: "done"}', "a Mecha machine invokes nothing"],
+  ]) {
+    const result = await cue(["export", "-", "-e", "app"], paymentProgram() + machine(state));
+    assertEquals(result.success, false, state);
+    assertStringIncludes(result.stderr, reason);
+  }
+  const single = await cue(["export", "-", "-e", "app"], paymentProgram() + machine('{on: run: [{target: "done"}]}'));
+  assertEquals(single.success, true, single.stderr);
+  // XState takes the machine's transition when the state's own guard refuses;
+  // a state that takes the machine's event would refuse it here instead.
+  const shadowed = await cue(["export", "-", "-e", "app"], paymentProgram() + machine('{on: run: {guard: "mayRun", target: "done"}}', 'on: run: "done",'));
+  assertEquals(shadowed.success, false);
+  assertStringIncludes(shadowed.stderr, "the machine takes run in every state");
+  const rooted = await cue(["export", "-", "-e", "app"], paymentProgram() + machine("{}", 'on: run: "done",'));
+  assertEquals(rooted.success, true, rooted.stderr);
+  // The machine's own transitions are held to the rule a state's are: a list
+  // of two normalized to a transition that did nothing.
+  const listed = await cue(["export", "-", "-e", "app"], paymentProgram() + machine("{}", 'on: run: [{target: "done", guard: "mayRun"}, {target: "ready"}],'));
+  assertEquals(listed.success, false);
+  assertStringIncludes(listed.stderr, "bounded.on.run: an event names one transition");
+});
+
 Deno.test("native Mecha spawn and send resolve declared bounded targets and authority", async () => {
   const target = `
 app: state: hybrids: child: {rules: "child.js", machine: {
-  name: "child", version: 1, initial: "ready"
-  initialize: {reduce: "initial", input: {type: "object", fields: {}}}
-  state: {type: "object", fields: phase: {type: "string", maxLength: 8}}
-  view: {type: "object", fields: {}}
-  events: tick: {tier: "mecha", payload: {type: "object", fields: {}}}
-  states: ready: on: tick: {reduce: "same"}
+  config: {id: "child", initial: "ready", states: ready: on: tick: {}}
+  setup: {
+    version: 1
+    initialize: "initial"
+    types: {
+      context: {type: "object", fields: {}}
+      input: {type: "object", fields: {}}
+      view: {type: "object", fields: {}}
+      events: tick: {tier: "mecha", payload: {type: "object", fields: {}}}
+    }
+  }
 }}
 app: state: machines: PaymentMachine: states: pending: entry: [
   {spawn: {machine: "child", id: {raw: "NEW.id"}, input: {}, members: owner: {raw: "NEW.id"}}},
@@ -1158,7 +1209,7 @@ app: state: machines: PaymentMachine: states: pending: entry: [
   assertStringIncludes(sql, "PERFORM hybrid_child.deliver(NEW.id,");
   for (const [changed, reason] of [
     [target.replaceAll('machine: "child"', 'machine: "missing"'), "undeclared Mecha operation target"],
-    [target.replace('initialize: {reduce: "initial", input: {type: "object", fields: {}}}', ''), "Mecha spawn requires an initializer"],
+    [target.replace('initialize: "initial"', ''), "Mecha spawn requires an initializer"],
     [target.replace('event: "tick"', 'event: "missing"'), "undeclared Mecha delivery event"],
     [target.replace('tier: "mecha"', 'tier: "omnishell"'), "delivery requires a Mecha event"],
   ]) {

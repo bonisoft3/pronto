@@ -4,14 +4,14 @@ import { readCheckInputs } from "./check-inputs.ts";
 import { identitiesOf } from "./identity.ts";
 import { typeTable } from "./type-table.ts";
 
-const inputs = { version: 1 as const, types: typeTable(), entities: {}, hatches: {}, rawMigrations: [], duckstreams: {} };
+const inputs = { version: 1 as const, types: typeTable(), entities: {}, hybrids: {}, hatches: {}, rawMigrations: [], duckstreams: {} };
 
 Deno.test("checker inputs require generation and reject unsupported or malformed output", async () => {
   const app = await Deno.makeTempDir();
   try {
     await assert.rejects(() => readCheckInputs(app), Deno.errors.NotFound);
     await Deno.mkdir(`${app}/.pronto`);
-    for (const value of [null, {}, { ...inputs, version: 2 }, { ...inputs, types: null }, { ...inputs, types: {} }, { ...inputs, entities: [] }, { ...inputs, hatches: null }, { ...inputs, rawMigrations: {} }, { ...inputs, duckstreams: [] }]) {
+    for (const value of [null, {}, { ...inputs, version: 2 }, { ...inputs, types: null }, { ...inputs, types: {} }, { ...inputs, entities: [] }, { ...inputs, hatches: null }, { ...inputs, hybrids: [] }, { ...inputs, rawMigrations: {} }, { ...inputs, duckstreams: [] }]) {
       await Deno.writeTextFile(`${app}/.pronto/check-inputs.json`, JSON.stringify(value));
       await assert.rejects(() => readCheckInputs(app), { message: /regenerate the application/ });
     }

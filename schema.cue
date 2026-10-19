@@ -605,13 +605,7 @@ import (
 	cel: {
 		checks: *{} | {[string]: string}
 		enums:  *{} | {[string]: [...string]}
-		bounds: *{} | {[string]: {
-			intMin?:  int
-			intMax?:  int
-			sizeMin?: int
-			sizeMax?: int
-			regex?:   string
-		}}
+		bounds: *{} | {[string]: #Bounds}
 	}
 	// Composite uniques the per-field `unique` flag cannot express. Declared
 	// rather than written as assembly SQL because the shell needs them too: a
@@ -1471,8 +1465,14 @@ import (
 		// refuses any other name. The app owns 000-799 and its seed at 900;
 		// 800-899 are the framework's steps (mecha's cluster.cue).
 		rawMigrations?: [...{name: string & !~"^8", src: string}]
-		cortex?: [string]: #CortexComposition
-		hybrids?: [Name=string]: {machine: #MechaReducerMachine & {name: Name}, rules: string}
+		cortex?: [string]: #CortexMachine
+		// A Mecha machine as XState writes it, its Jessie rules, and the
+		// internal form the compilers read, derived.
+		hybrids?: [Name=string]: H={
+			machine: mecha.#Machine & {config: id: Name}
+			rules:   string
+			reducer: (#Reducer & {machine: H.machine}).out
+		}
 		// Changes to a schema that already exists, as pgroll migrations, keyed
 		// by the version they create; the cluster is given them
 		// (#DefaultCluster) and applies them in key order.
@@ -1838,7 +1838,7 @@ import (
 
 	_machineActions: list.Concat([
         [if A.state.machines != _|_ for mName, m in A.state.machines {machine: mName, actions: m._actions}],
-        [if A.state.hybrids != _|_ for mName, m in A.state.hybrids {machine: mName, actions: [for _, phase in m.machine.states for _, transition in phase.on if transition.actions != _|_ for actionSpec in transition.actions {actionSpec}]}],
+        [if A.state.hybrids != _|_ for mName, m in A.state.hybrids {machine: mName, actions: [for _, phase in m.reducer.states for _, transition in phase.on if transition.actions != _|_ for actionSpec in transition.actions {actionSpec}]}],
     ])
     _machineCalls: [for caller in _machineActions for actionSpec in caller.actions for call in [
         if actionSpec.spawn != _|_ {{kind: "spawn", target: actionSpec.spawn.machine}},
@@ -1847,14 +1847,83 @@ import (
     _callTargets: [if A.state.hybrids != _|_ {A.state.hybrids}, {}][0]
     _machineCallViolations: list.Concat([
         [for call in _machineCalls if _callTargets[call.target] == _|_ {"undeclared Mecha operation target: \(call.target)"}],
-        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "spawn" if _callTargets[call.target].machine.initialize == _|_ {"Mecha spawn requires an initializer: \(call.target)"}],
-        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].machine.events[call.event] == _|_ {"undeclared Mecha delivery event: \(call.target).\(call.event)"}],
-        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].machine.events[call.event] != _|_ if _callTargets[call.target].machine.events[call.event].tier != "mecha" {"delivery requires a Mecha event: \(call.target).\(call.event)"}],
+        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "spawn" if _callTargets[call.target].reducer.initialize == _|_ {"Mecha spawn requires an initializer: \(call.target)"}],
+        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].reducer.events[call.event] == _|_ {"undeclared Mecha delivery event: \(call.target).\(call.event)"}],
+        [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "send" if _callTargets[call.target].reducer.events[call.event] != _|_ if _callTargets[call.target].reducer.events[call.event].tier != "mecha" {"delivery requires a Mecha event: \(call.target).\(call.event)"}],
     ])
     _machineCallRefusal: [if len(_machineCallViolations) == 0 {true}, _machineCallViolations[0]][0] & true
+	// A Cortex state names the screen that hosts it and the actor its child
+	// is; what an actor's `via` needs of its Mecha machine is what that
+	// machine's ports carry.
+	_cortexViolations: [if A.state.cortex != _|_ for cName, c in A.state.cortex for sName, st in c.config.states for v in list.Concat([
+		[if st.meta == _|_ || st.meta.screen == _|_ {"\(cName).\(sName): no meta.screen hosts it"}],
+		[if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] == _|_ {"\(cName).\(sName): no screen \(st.meta.screen)"}],
+		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] {
+			[if c.setup.actors[inv.src] == _|_ {"\(cName).\(sName): the setup implements no actor \(inv.src)"}]
+		},
+		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ {
+			let actor = c.setup.actors[inv.src]
+			list.Concat([
+				[if _callTargets[actor.machine] == _|_ {"\(cName).\(sName): no Mecha machine \(actor.machine)"}],
+				if _callTargets[actor.machine] != _|_ {
+					let m = _callTargets[actor.machine].reducer
+					let instance = [if inv.input != _|_ if inv.input.instance != _|_ {inv.input.instance}, ""][0]
+					list.Concat([
+						[if m.initialize == _|_ {"\(cName).\(sName): \(m.name) has no initializer"}],
+						[if actor.via == "session" if m.ports == _|_ || m.ports.lease == _|_ {"\(cName).\(sName): a session needs \(m.name)'s lease"}],
+						[if actor.via == "sync" if m.ports == _|_ || m.ports.join == _|_ {"\(cName).\(sName): a sync child joins \(m.name), which declares no join"}],
+						[if actor.via == "sync" if !strings.HasPrefix(instance, "{param.") {"\(cName).\(sName): a sync child's input.instance names its route's parameter"}],
+						[if actor.via == "sync" if strings.HasPrefix(instance, "{param.") if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] != _|_
+							if !list.Contains(strings.Split(A.surface.screens[st.meta.screen].route, "/"), ":" + strings.TrimSuffix(strings.TrimPrefix(instance, "{param."), "}")) {"\(cName).\(sName): \(st.meta.screen)'s route has no \(instance)"}],
+					])
+				},
+			])
+		},
+	]) {v}]
+	_cortexRefusal: [if len(_cortexViolations) == 0 {true}, _cortexViolations[0]][0] & true
+	// The XState a Mecha machine cannot run is refused rather than read as
+	// something else: its step is its reducer's, so it invokes nothing, and an
+	// event names one transition.
+	_hybridViolations: list.Concat([[if A.state.hybrids != _|_ for hName, h in A.state.hybrids for sName, st in h.machine.config.states for v in list.Concat([
+		[if st.invoke != _|_ {"hybrid \(hName).\(sName): a Mecha machine invokes nothing"}],
+		[if st.on != _|_ for ev, tv in st.on if (tv & [...]) != _|_ if len(tv) != 1 {"hybrid \(hName).\(sName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"}],
+		// XState takes the machine's transition when the state's own guard
+		// refuses; one event names one transition here, so it is the state's
+		// or the machine's.
+		[if h.machine.config.on != _|_ if st.on != _|_ for ev, _ in st.on if h.machine.config.on[ev] != _|_ {"hybrid \(hName).\(sName).on.\(ev): the machine takes \(ev) in every state; a state does not take it as well"}],
+	]) {v}], [if A.state.hybrids != _|_ for hName, h in A.state.hybrids if h.machine.config.on != _|_ for ev, tv in h.machine.config.on if (tv & [...]) != _|_ if len(tv) != 1 {
+		"hybrid \(hName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"
+	}]])
+	_hybridRefusal: [if len(_hybridViolations) == 0 {true}, _hybridViolations[0]][0] & true
+	// A machine's surface columns hold its own values: a seat's view, a
+	// command's request and an open's input are json columns whose cel is the
+	// one cel-shape.cue renders from the machine, so the value a settle writes
+	// and the value the terminal proposes are judged by one text.
+	_surfaceEntities: {if A.state.entities != _|_ for n, e in A.state.entities {(e.table): e}}
+	_surfaceViolations: list.Concat([if A.state.hybrids != _|_ for hName, h in A.state.hybrids {
+		let seat = _surfaceEntities["\(hName)_seat"]
+		let command = _surfaceEntities["\(hName)_command"]
+		let open = _surfaceEntities["\(hName)_open"]
+		list.Concat([
+			[if seat != _|_ for f in seat.fields if f.name == "view" {
+				let want = (#ShapeCel & {shape: h.reducer.view}).out
+				if f.type != "json" {"hybrid \(hName): \(seat.table).view holds the view, so it is json"}
+				if f.type == "json" if f.cel == _|_ {"hybrid \(hName): \(seat.table).view states no cel; #ShapeCel renders the view's"}
+				if f.type == "json" if f.cel != _|_ if f.cel != want {"hybrid \(hName): \(seat.table).view's cel is not the view's as #ShapeCel renders it"}
+			}],
+			[if command != _|_ for f in command.fields if f.name == "request" {
+				let want = (#RequestCel & {events: [for ev, e in h.reducer.events if e.tier == "omnishell" {ev}]}).out
+				if f.type != "json" {"hybrid \(hName): \(command.table).request holds the request, so it is json"}
+				if f.type == "json" if f.cel == _|_ {"hybrid \(hName): \(command.table).request states no cel; #RequestCel renders the envelope's"}
+				if f.type == "json" if f.cel != _|_ if f.cel != want {"hybrid \(hName): \(command.table).request's cel is not the envelope's as #RequestCel renders it"}
+			}],
+			[if open != _|_ for f in open.fields if f.name == "input" if f.type != "json" {"hybrid \(hName): \(open.table).input holds the input, so it is json"}],
+		])
+	}])
+	_surfaceRefusal: [if len(_surfaceViolations) == 0 {true}, _surfaceViolations[0]][0] & true
 	_machineHatches: {
 		if A.state.machines != _|_ for mn, m in A.state.machines {(mn): m.hatches}
-		if A.state.hybrids != _|_ for mn, m in A.state.hybrids {("reducer:\(mn)"): m.machine.hatches}
+		if A.state.hybrids != _|_ for mn, m in A.state.hybrids {("reducer:\(mn)"): m.reducer.hatches}
 	}
 
 	_machineHatchViolations: list.Concat([
@@ -3120,4 +3189,21 @@ import (
 		}
 	}
 	statics: [for _, s in _staticMap { s }]
+}
+
+// What an open constraint admits, for a reader that has to propose a value:
+// a range, a length, a pattern. A json column states the shape of its value
+// instead: the kind at each level, a record's fields (none stated: open), a
+// list's items and cap, a string's set where the constraint closes it.
+#Bounds: {
+	kind?:       "boolean" | "string" | "integer" | "array" | "object"
+	intMin?:     int
+	intMax?:     int
+	sizeMin?:    int
+	sizeMax?:    int
+	regex?:      string
+	enumValues?: [...string]
+	maxItems?:   int
+	items?:      #Bounds
+	fields?: [string]: #Bounds
 }

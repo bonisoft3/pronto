@@ -47,6 +47,7 @@ services:
         idioms-integrate_srcs: service:idioms-integrate_srcs
         idioms-integrate_bayt: service:idioms-integrate_bayt
         idioms-caddy_srcs: service:idioms-caddy_srcs
+        idioms-served_srcs: service:idioms-served_srcs
         bayt: >-
           ${BAYT_RUNTIME:-docker-image://bonitao/bayt-runtime:1.2.1@sha256:c5776093b5c464b77365e3bb5310b2c5d9c8d99f5cc07a131c30a4ea03d42f5c}
         workspaceroot-pronto-sources_srcs: >-
@@ -147,6 +148,7 @@ services:
       additional_contexts:
         idioms-integrate_bayt: service:idioms-integrate_bayt
         idioms-caddy_bayt: service:idioms-caddy_bayt
+        idioms-served_bayt: service:idioms-served_bayt
       context: ..
       dockerfile: .bayt/Dockerfile.ci-visual
       target: ci-visual_bayt

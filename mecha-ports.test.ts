@@ -2,7 +2,7 @@ import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1.0.1
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
 import { instrument } from "../omnishell/instrument.ts";
-import { executeHybrid } from "./testdata/hybrid-local.ts";
+import { executeHybrid } from "./hybrid-local.ts";
 import { fixture, initial } from "./testdata/hybrid-fixtures.ts";
 
 Deno.test("initializers use the bounded input, initial-phase, invariant and projection checks", async () => {
@@ -23,11 +23,18 @@ Deno.test("initializers use the bounded input, initial-phase, invariant and proj
 Deno.test("Mecha ports refuse unresolved composition and invalid authority before emission", async () => {
   const {spec} = await fixture();
   const compile = (machine: MechaReducerMachine) => compileMechaPorts({[machine.name]: machine});
-  assertThrows(() => compile({...spec, ports: {join: {name: "join", seat: "b", phases: ["playing"], event: "play"}}}), Error, "initialization");
+  assertThrows(() => compile({...spec, ports: {join: {seat: "b", phases: ["playing"], event: "play"}}}), Error, "initialization");
   assertThrows(() => compile({...spec, ports: {wake: {phases: ["missing"], deadline: "deadline", event: "timeout"}}}), Error, "undeclared");
   assertThrows(() => compile({...spec, ports: {wake: {phases: ["playing"], deadline: "phase", event: "timeout"}}}), Error, "deadline");
   assertThrows(() => compile({...spec, ports: {wake: {phases: ["playing"], deadline: "deadline", event: "play"}}}), Error, "Mecha event");
-  assertThrows(() => compile({...spec, ports: {sync: {name: "truco_turn_command"}, wake: {phases: ["playing"], deadline: "deadline", event: "timeout"}}}), Error, "duplicate");
+  const admitted: MechaReducerMachine = {...spec, initialize: {reduce: "initial", input: {type: "object", fields: {}}},
+    mecha: {...spec.mecha!, ports: {admission: {input: "'{}'::jsonb", members: "jsonb_build_object('a', current_actor)", locks: ""}}}};
+  const admission = {name: "admit", params: [], id: "current_actor", checks: []};
+  // A lease admits its reader as the instance, so it opens no instance by argument.
+  assertThrows(() => compile({...admitted, ports: {admission: {...admission, params: [{name: "room", type: "uuid"}], id: "room"}, lease: {touch: "timeout", leave: "timeout", held: "phase"}}}), Error, "takes no arguments");
+  assertThrows(() => compile({...admitted, ports: {admission: {...admission, id: "gen_random_uuid()"}, lease: {touch: "timeout", leave: "timeout", held: "phase"}}}), Error, "current_actor");
+  assertThrows(() => compile({...admitted, ports: {admission, lease: {touch: "play", leave: "timeout", held: "phase"}}}), Error, "Mecha event");
+  assertThrows(() => compile({...admitted, ports: {admission, lease: {touch: "timeout", leave: "timeout", held: "phase"}}}), Error, "lists the live sessions by id");
 });
 
 Deno.test("equivalent CUE field orders emit identical reducer programs without reordering transition priority", async () => {

@@ -70,6 +70,27 @@ router refuses. And the budgets, whose 20 s are tuned to a warm local stack
 that a cold page boot exceeds. The projection is
 [not emitted](../PENDING.md#release-targets).
 
+## A release is its entry
+
+Every target serves the files a page runs or fetches at their content
+addresses, `_immutable-<sha256>-<name>` beside each file, and every document
+that boots the terminal — the entry, a prerendered document, one rendered on
+request — carries the map from logical path to address as its import map,
+`#pronto-assets` (omnishell's [`release-addresses.ts`](https://github.com/bonisoft3/omnishell/blob/v0.12.1/server/release-addresses.ts)).
+A page therefore runs one release, and an open one takes the next at the
+level its changes allow ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.12.1/docs/screen-updates.md#when-a-deployment-lands)).
+An address never changes and is served `immutable`; the map is an inline
+script, so the door's policy names its hash.
+
+The container door builds its tree as a release in a stage of its own, the
+`served` target (`#DefaultCluster`): omnishell's tree, from the workspace or
+an installed app's runtime image, and every static the door serves, each at its
+URL's path, addressed in place (`omnishell.#Address`). The door copies that
+tree and the scripts its documents run, which its `script-src` names as
+`$PRONTO_RELEASE_SCRIPTS`; the renderer takes the entry from it. An edit under
+`launch --watch` rebuilds the door, so the development loop takes a deployment
+as a reader's tab does.
+
 ## pages
 
 `sayt release@pages` runs [`bundle.ts`](../bundle/bundle.ts), which writes
@@ -195,13 +216,10 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 `public/`, so each route loads only its own screen and required catalogues.
 The terminal asks the Worker's origin for `/crud`, `/auth` and `/electric`.
 
-Each public asset also has a SHA-256 URL with one year of immutable caching.
-The document's CSP-authorized import map pins native modules and fetched
-screen files to those URLs; canonical names still identify handlers and
-endowments. Stylesheet references are resolved before hashing the served
-bytes. Canonical files remain revalidatable for service-worker installation.
-An edge release refuses live-update manifests: their verified release protocol
-and the edge document's import map cannot independently replace the same files.
+The public tree is addressed as every target's is ([a release is its
+entry](#a-release-is-its-entry)); Cloudflare's assets take its immutable rules
+from `_headers`, answer `/` from a copy of the entry, and are given addressed
+templates as `.txt`, since they answer `.html` by rules of their own.
 
 The build computes the native modules' transitive static import closure and
 places its modulepreloads after the import map. Response `Link` headers preload

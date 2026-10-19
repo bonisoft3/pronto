@@ -122,7 +122,8 @@
       "upClosure": [
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "outs": {
@@ -152,7 +153,8 @@
       "upClosure": [
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "srcs": {
@@ -187,7 +189,8 @@
       "upClosure": [
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     }
   },
@@ -211,7 +214,8 @@
   "upClosure": [
     "./.bayt/compose.integrate.yaml",
     "./.bayt/compose.launch.yaml",
-    "./.bayt/compose.caddy.yaml"
+    "./.bayt/compose.caddy.yaml",
+    "./.bayt/compose.served.yaml"
   ],
   "chainedDeps": [
     {

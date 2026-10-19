@@ -437,7 +437,8 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "outs": {
@@ -469,7 +470,8 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "srcs": {
@@ -496,7 +498,9 @@
         "integrate_srcs_srcs_srcs",
         "integrate_bayt_srcs_srcs",
         "caddy_srcs_srcs_srcs",
-        "launch_outs_srcs_srcs_srcs"
+        "served_srcs_srcs_srcs",
+        "launch_outs_srcs_srcs_srcs",
+        "served_outs_srcs_srcs_srcs"
       ],
       "transitiveCrossDeps": [],
       "chainedDeps": [],
@@ -510,7 +514,8 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
-        "./.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     }
   },
@@ -535,7 +540,9 @@
     "integrate_srcs_srcs",
     "integrate_bayt_srcs",
     "caddy_srcs_srcs",
-    "launch_outs_srcs_srcs"
+    "served_srcs_srcs",
+    "launch_outs_srcs_srcs",
+    "served_outs_srcs_srcs"
   ],
   "transitiveCrossDeps": [],
   "upClosure": [
@@ -543,7 +550,8 @@
     "./.bayt/compose.ci-visual.yaml",
     "./.bayt/compose.integrate.yaml",
     "./.bayt/compose.launch.yaml",
-    "./.bayt/compose.caddy.yaml"
+    "./.bayt/compose.caddy.yaml",
+    "./.bayt/compose.served.yaml"
   ],
   "chainedDeps": [
     {

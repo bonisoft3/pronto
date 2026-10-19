@@ -264,11 +264,12 @@ export function chartD2(c: { initial: string; states: Record<string, any>; on?: 
 
 /** Renders a D2 source to SVG through the binary the app's .mise.toml pins —
  * one GitHub release, never aqua (whose registry meets rate limits), locked
- * per platform — the way check-facts runs duckdb; no browser. */
+ * per platform — the way check-facts runs duckdb; no browser. Only d2: a
+ * locked consumer need not have installed the app's other tools to draw. */
 export async function d2Svg(appDir: string, source: string): Promise<string> {
   const mise = Deno.build.os === "windows" ? `${Deno.env.get("LOCALAPPDATA")}\\mise\\bin\\mise.exe` : "mise";
   const child = new Deno.Command(mise, {
-    args: ["x", "--", "d2", "--layout", "elk", "--theme", "0", "--pad", "16", "-", "-"],
+    args: ["x", "github:terrastruct/d2", "--", "d2", "--layout", "elk", "--theme", "0", "--pad", "16", "-", "-"],
     cwd: appDir,
     stdin: "piped",
     stdout: "piped",

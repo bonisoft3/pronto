@@ -46,6 +46,7 @@ published: runtime: "bonitao/omnishell:0.12.1@sha256:df434871aa11a1863a77ef125f7
 // Re-exported because the cluster runs it: a route rendered on request is
 // served by this target, which the emitter adds where a route asks for one.
 #Render: impl.#Render
+#Address: impl.#Address
 
 #BkidCheck: impl.#BkidCheck
 
