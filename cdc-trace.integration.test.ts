@@ -5,6 +5,7 @@
 // traceparent, the header PostgREST hands mecha.mark_txn to mark the derived
 // write's own transaction with.
 import { deepStrictEqual as equal } from "node:assert/strict";
+import { created } from "./docker-copy.ts";
 
 const decoder = new TextDecoder();
 const REDIS = "redis:7.4.1-alpine@sha256:59b6e694653476de2c992937ebe1c64182af4728e54bb49e9b7a6c26614d8933";
@@ -78,10 +79,12 @@ Deno.test("a pipeline's calls carry their row's transaction trace, and markers a
       // writer's txid: only the marker read before it names its transaction.
       bus({ ...note, txid: 10, n: 4 }));
 
-    containers.push(await run("docker", "run", "-d", "--rm", "--network", net,
-      "--add-host=host.docker.internal:host-gateway", "-v", `${scratch}:/w:ro`,
+    const connect = await created(["--rm", "--network", net,
+      "--add-host=host.docker.internal:host-gateway",
       "-e", "REDIS_URL=redis://redis:6379", "-e", `CRUD_URL=http://host.docker.internal:${crud.addr.port}`,
-      "--entrypoint", "/redpanda-connect", image, "streams", "-r", "/w/cdc-trace.yaml", "/w/stream.yaml"));
+      "--entrypoint", "/redpanda-connect", image, "streams", "-r", "/w/cdc-trace.yaml", "/w/stream.yaml"], [[scratch, "/w"]]);
+    containers.push(connect);
+    await run("docker", "start", connect);
     await until(async () => {
       const groups = JSON.parse(await cli("XINFO", "GROUPS", "cdc-events")) as { lag: number; pending: number }[];
       return groups.length === 1 && groups[0].lag === 0 && groups[0].pending === 0 && posts.size >= 4;

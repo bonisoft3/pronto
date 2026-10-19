@@ -18,7 +18,7 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
       if (entry.name === 'node_modules') continue
       const file = path.join(dir, entry.name)
       if (entry.isDirectory) await collect(file)
-      else if (/\.(js|ts|json)$/.test(entry.name)) sources.push([path.relative(omnishell, file), await Deno.readTextFile(file)])
+      else if (/\.(js|ts|json)$/.test(entry.name)) sources.push([path.relative(omnishell, file).replaceAll('\\', '/'), await Deno.readTextFile(file)])
     }
   }
   await collect(server)
@@ -27,8 +27,13 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   const identity = JSON.stringify([origin, sources, await Deno.readTextFile(path.join(generated, 'assets.json'))])
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity)))
   const renderer = name + '-renderer-' + [...digest.slice(0, 6)].map(b => b.toString(16).padStart(2, '0')).join('')
-  const fromSrc = (file: string) => path.relative(path.join(out, 'src'), file)
-  const rel = (file: string) => './' + path.relative(out, file)
+  // Import specifiers, which a Windows path's separators would escape.
+  const specifier = (from: string, file: string) => {
+    const r = path.relative(from, file).replaceAll('\\', '/')
+    return r.startsWith('.') ? r : `./${r}`
+  }
+  const fromSrc = (file: string) => specifier(path.join(out, 'src'), file)
+  const rel = (file: string) => specifier(out, file)
   const edge = path.join(mecha, 'packages/mecha-edge/src')
   await Deno.writeTextFile(path.join(out, 'src/render.ts'), `
 import '${fromSrc(path.join(server, 'worker-roles.ts'))}'

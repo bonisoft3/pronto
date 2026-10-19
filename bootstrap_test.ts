@@ -83,6 +83,14 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
     const tools = JSON.parse(await cue(app, ["export", ".mise.toml", "--out", "json"])).tools;
+    // The lock bootstrap ships is the roster's: a pin it does not cover would
+    // send the first install to GitHub's API to resolve it.
+    const lock = JSON.parse(await cue(app, ["export", "toml:", "mise.lock", "--out", "json"])).tools as Record<string, { version: string }[]>;
+    const bare = (v: string) => v.replace(/^v/, "");
+    for (const [tool, pin] of Object.entries(tools as Record<string, string | { version: string }>)) {
+      const version = bare(typeof pin === "string" ? pin : pin.version);
+      assert(lock[tool]?.some((entry) => bare(entry.version) === version), `${tool}@${version}: plugins/pronto/bootstrap/mise.lock has no entry; run plugins/pronto/bootstrap/relock.ts`);
+    }
     const d2 = tools["github:terrastruct/d2"];
     assert(typeof d2 === "string" && /^v\d+\.\d+\.\d+$/.test(d2), "D2 must have an exact release pin");
     const pins = JSON.parse(await cue(repo, ["export", "plugins/pronto/.mirror/cue.mod/module.cue", "-e", "deps", "--out", "json"]));
@@ -191,18 +199,14 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       const local = ["omnishell", "pronto", "mecha"].map((name) => `"github:bonisoft3/${name}" = "path:${join(scratch, name).replaceAll("\\", "/")}"\n`);
       await Deno.writeTextFile(join(app, "mise.local.toml"), `[tools]\n${local.join("")}`);
       await $`mise trust -q ${app}`;
-      const platformOs: Record<string, string> = { darwin: "macos", linux: "linux", windows: "windows" };
-      const platformArch: Record<string, string> = { aarch64: "arm64", x86_64: "x64" };
-      const currentPlatform = `${platformOs[Deno.build.os]}-${platformArch[Deno.build.arch]}`;
-      assert(!currentPlatform.includes("undefined"), `mise has no fixture platform for ${Deno.build.os}-${Deno.build.arch}`);
-      const runMise = async (args: string[], commandEnv: Record<string, string> = {}): Promise<void> => {
-        const result = await new Deno.Command("mise", { args, cwd: app, env: { MISE_LOCKED: "0", ...commandEnv }, stdout: "piped", stderr: "piped" }).output();
+      const runMise = async (args: string[]): Promise<void> => {
+        const result = await new Deno.Command("mise", { args, cwd: app, stdout: "piped", stderr: "piped" }).output();
         assert(result.success, `${args.join(" ")}: ${decoder.decode(result.stderr)}`);
       };
-      // The consumer is locked. Resolve and install the released binaries it
-      // executes; local source stands in for the other tools.
+      // The released binaries it executes install from the lock bootstrap
+      // wrote, as a consumer's first install does; local source stands in for
+      // the other tools.
       const released = ["github:terrastruct/d2", "github:bonisoft3/bayt", "github:bonisoft3/sayt"];
-      await runMise(["lock", "--platform", currentPlatform, ...released], { MISE_LOCKED: "0" });
       await runMise(["install", ...released.map((tool) => `${tool}@${tools[tool]}`)]);
       const terminal = join(scratch, "omnishell/runtime/cli.ts");
       await Deno.writeTextFile(join(app, "program_terminal.cue"), await deno(terminal, ["mode", "."]));

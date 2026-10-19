@@ -6,6 +6,8 @@
 // Read from what ships: pronto's Caddyfile, which every app's docker/Caddyfile
 // is emitted from, behind resilience's snippets as emit puts them.
 
+import { created } from "./docker-copy.ts";
+
 const CADDYFILE = new URL("./assets/Caddyfile", import.meta.url);
 
 function fail(message: string): never {
@@ -52,7 +54,7 @@ Deno.test({ name: "the door's span is the child of the incoming traceparent and 
       // exporter would spend each batch's deadline dialing one.
       [`door-${suffix}`, "door", ["-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", "-e", "PRONTO_TRACING=on", "-p", "127.0.0.1::8080"]],
     ] as const) {
-      await docker(["run", "-d", "--rm", "--name", name, "--network", network, ...extra, "-v", `${scratch}/${conf}:/etc/caddy/Caddyfile:ro`, CADDY]);
+      await docker(["start", await created(["--rm", "--name", name, "--network", network, ...extra, CADDY], [[`${scratch}/${conf}`, "/etc/caddy/Caddyfile"]])]);
       started.push(name);
     }
     const port = (await docker(["port", `door-${suffix}`, "8080"])).trim().split("\n")[0].split(":").pop();

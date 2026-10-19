@@ -30,7 +30,8 @@
       }
     },
     "environment": {
-      "APP_URL": "https://caddy:8443"
+      "APP_URL": "https://caddy:8443",
+      "SETTLE_TIMEOUT_MS": "50000"
     },
     "ports": [],
     "volumes": []

@@ -7,6 +7,8 @@
 // Read from the artifacts that ship: pronto's Caddyfile, which every app's
 // docker/Caddyfile is emitted from, and mecha's own proxy.
 
+import { created } from "./docker-copy.ts";
+
 const SHIPPED = [
   new URL("./assets/Caddyfile", import.meta.url),
   new URL("../../libraries/mecha/services/proxy/Caddyfile", import.meta.url),
@@ -61,7 +63,7 @@ for (const file of SHIPPED) {
     await docker(["network", "create", network]);
     try {
       for (const [name, conf, extra] of [[`electric-${suffix}`, "electric", ["--network-alias", "electric"]], [`door-${suffix}`, "door", ["-p", "127.0.0.1::8080"]]] as const) {
-        await docker(["run", "-d", "--rm", "--name", name, "--network", network, ...extra, "-v", `${scratch}/${conf}:/etc/caddy/Caddyfile:ro`, CADDY]);
+        await docker(["start", await created(["--rm", "--name", name, "--network", network, ...extra, CADDY], [[`${scratch}/${conf}`, "/etc/caddy/Caddyfile"]])]);
         started.push(name);
       }
       const port = (await docker(["port", `door-${suffix}`, "8080"])).trim().split("\n")[0].split(":").pop();

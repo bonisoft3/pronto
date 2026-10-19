@@ -8,6 +8,7 @@
 // knows and passes a domain, whose OID it does not, through as text.
 
 import { typeTable } from "./type-table.ts";
+import { created } from "./docker-copy.ts";
 
 const CLUSTER = new URL("../../libraries/mecha/cluster.cue", import.meta.url);
 const ASSET = new URL("./assets/cdc-types.blobl", import.meta.url);
@@ -130,7 +131,7 @@ Deno.test({ name: "cdc-types.blobl converts conduit's spellings into canonical f
     await Deno.writeTextFile(`${scratch}/config.json`, JSON.stringify(config));
     const input = cases.map((c, i) => JSON.stringify({ case: i, event: JSON.parse(bus(c.row)) })).join("\n") + "\n";
     const child = new Deno.Command("docker", {
-      args: ["run", "--rm", "-i", "-v", `${scratch}:/w:ro`, "--entrypoint", "/redpanda-connect", IMAGE, "run", "/w/config.json"],
+      args: ["start", "-a", "-i", await created(["--rm", "-i", "--entrypoint", "/redpanda-connect", IMAGE, "run", "/w/config.json"], [[scratch, "/w"]])],
       stdin: "piped", stdout: "piped", stderr: "piped",
     }).spawn();
     const writer = child.stdin.getWriter();

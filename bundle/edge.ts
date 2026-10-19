@@ -101,10 +101,14 @@ await run(Deno.execPath(), [
 ])
 
 const rel = (p: string) => {
-  const r = path.relative(out, p)
+  const r = path.relative(out, p).replaceAll('\\', '/')
   return r.startsWith('.') ? r : `./${r}`
 }
-const fromSrc = (p: string) => path.relative(path.join(out, 'src'), p)
+// An import specifier, which a Windows path's separators would escape.
+const fromSrc = (p: string) => {
+  const rel = path.relative(path.join(out, 'src'), p).replaceAll('\\', '/')
+  return rel.startsWith('.') ? rel : `./${rel}`
+}
 await Deno.writeTextFile(path.join(out, 'src/index.ts'), `// Written by pronto's edge.ts for ${name}.
 import { edgeObject } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/object.ts'))}'
 import { edgeWorker } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/worker.ts'))}'

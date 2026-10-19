@@ -22,6 +22,7 @@ import (
 	mise "github.com/bonisoft3/bayt/stacks/mise"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
+	"github.com/bonisoft3/pronto/resilience"
 	zypper "github.com/bonisoft3/bayt/distros/zypper"
 )
 
@@ -367,7 +368,13 @@ import (
 					build: additional_contexts: (B._omnishell): B._omnishellContext
 					// The TLS door, so the browser speaks h2 as a reader's does (see
 					// the Caddyfile's door), whose certificate Caddy's own CA signs.
-					environment: APP_URL: "https://caddy:8443"
+					environment: {
+						APP_URL: "https://caddy:8443"
+						// A screen settles once its guest and its reads have
+						// answered, each inside its door's bound.
+						let door = resilience.resilience.timeouts.door
+						SETTLE_TIMEOUT_MS: "\((door.auth + door.crud) * 1000)"
+					}
 					// The aggregate the whole runtime hangs off, healthy: loaded on its
 					// own the closure brings the plane up, and under the verb, which
 					// brought it up first, this is a health check — see the visual
@@ -478,6 +485,11 @@ import (
 							APP_URL: "https://caddy:8443"
 							// What the app's absolute addresses are spelled against.
 							ORIGIN: B.cluster.surface.origin
+							// A browser check waits on screens as visual lint does.
+							if c.browser {
+								let door = resilience.resilience.timeouts.door
+								SETTLE_TIMEOUT_MS: "\((door.auth + door.crud) * 1000)"
+							}
 							if c.database {
 								DATABASE_URL:     B.cluster.surface.databaseUrl
 								PGRST_JWT_SECRET: B.cluster.surface.jwtSecret

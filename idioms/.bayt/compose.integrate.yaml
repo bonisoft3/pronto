@@ -35,6 +35,7 @@ services:
         restart: true
     environment:
       APP_URL: https://caddy:8443
+      SETTLE_TIMEOUT_MS: "50000"
     image: bayt-idioms-integrate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
     scale: 0
   idioms-integrate_bayt:
