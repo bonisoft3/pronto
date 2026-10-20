@@ -1955,6 +1955,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if list.Contains(D.code.meta.targets, "k8s") {
 				sayYaml: say: release: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.k8s}]}
 			}
+			// The same for the cloud tier on GCP: a deploy, not a version.
+			if list.Contains(D.code.meta.targets, "gcp") {
+				sayYaml: say: release: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.gcp}]}
+			}
 			sayYaml: say: {
 				lint: rulemap: cue: cmds: [{do: "mise exec -- cue vet -c ./..."}]
 				build: _distribution.say.say.build
@@ -3555,7 +3559,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				      }
 				    }
 				    handle @rendered {
-				      reverse_proxy {$PRONTO_MESH:render:\(omnishell.#Render.port)} {
+				      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:\(omnishell.#Render.port)} {
 				        header_up dapr-app-id render
 				      }
 				    }

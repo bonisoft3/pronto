@@ -1,7 +1,7 @@
 ---
 type: concept
 title: Release targets
-description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, and docker are built, and the clouds and k8s are designed."
+description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, docker and gcp are built, and the other clouds and k8s are designed."
 ---
 
 # Release targets
@@ -11,10 +11,11 @@ emitter projects each into a rule of sayt's `release` verb on the platform of
 the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
-carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare` and
-`docker` are built, `cloudflare` for guests and without derivations, `docker` as
-a single-container standalone appliance. `gcp`, `aws`, `azure` and `k8s` are
-designed and [not built](../PENDING.md#release-targets). How an author releases an app is
+carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare`,
+`docker` and `gcp` are built, `cloudflare` for guests and without derivations,
+`docker` as a single-container standalone appliance, `gcp` for a cluster of the
+database, crud, auth and electric alone. `aws`, `azure` and `k8s` are designed
+and [not built](../PENDING.md#release-targets). How an author releases an app is
 [the guide's](../GUIDE.md#release).
 
 ## Targets, platforms and tiers
@@ -40,7 +41,8 @@ designed and [not built](../PENDING.md#release-targets). How an author releases 
 | `pages` | browser | one HTML file | none: the page's fetch shim |
 | `cloudflare` | edge | a Worker, one Durable Object running PGlite, and the data directory it loads | the Worker |
 | `docker` | container | single-container appliance image running postgres, crud, caddy, auth, and process-compose | caddy on port 8080 |
-| `gcp`, `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
+| `gcp` | cloud | images by digest in Artifact Registry, one Cloud Run service and the Job that builds its schema | caddy, the service's ingress container |
+| `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
 | `k8s` | k8s | skaffold's manifests | caddy in the named cluster |
 
 ## What a release is
@@ -411,17 +413,55 @@ What fixes its shape:
   defaulting publication to `ghcr.io/bonisoft3/<app>:<tag>` or the registry
   configured via `${BAYT_DOCKER_REPOSITORY}` and `${BAYT_IMAGE_TAG}`.
 
+## gcp
+
+`sayt release@gcp` runs [`gcp/release.nu`](../gcp/release.nu) with gcloud
+alone, against the app's `release.cue`, which declares `GCP:
+schema.#Release & {name, project, region, domain, ...}` and `gcpRelease:
+schema.#Build & {release: GCP}` from [`gcp/schema`](../gcp/schema/gcp.cue).
+Every resource is described before it is made, so a second release with
+nothing changed pushes the same digests and rolls nothing.
+
+| compose | on GCP |
+|---|---|
+| database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts |
+| caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
+| electric's storage | a GCS bucket mounted as a volume |
+| the stack's secrets | Secret Manager, generated once; the database URLs are composed from the passwords there, since Cloud Run expands no `$(VAR)` |
+
+This is mecha's [bundled unit](https://github.com/bonisoft3/mecha/blob/v0.12.1/docs/deployment.md#the-bundled-unit)
+applied to the door: the containers wake together, reach each other on
+localhost, and need no invoker between them. The door dials each upstream at
+its own `PRONTO_UPSTREAM_<SERVICE>`, which a gcp release sets to the
+service's port there and a k8s release to its Dapr sidecar. Electric takes
+3002, since crud holds compose's 3000.
+
+What bit on a real instance:
+
+- **Cloud SQL's `postgres` is no superuser.** It creates `anon`, `app_user`
+  and `service` with admin over them but no `SET`, so PostgREST could not
+  switch into `anon`; initdb grants them to it on every release.
+- It does grant `BYPASSRLS` and `REPLICATION` to a role it made, so electric's
+  role is compose's.
+
+The release refuses an app whose compose project runs anything else: a
+migrate service, the change-feed unit, a ticker or clock, the airlock,
+compute, blobs, images or render. A provider's settings come from compose as
+the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
+secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
+release maps it onto the service and prints the DNS records it needs.
+
 ## The clouds and k8s
 
 A cloud target carries users, so its floor is dollars a month rather than
 requests a day, and it is tuned for low cost and for scaling with no hand on
 it. Each service of the compose stack becomes the cloud's managed equivalent
-running the images bayt builds, declared as Kubernetes resources that the
-cloud's own controller reconciles:
+running the images bayt builds, declared as resources the cloud's own tool
+applies:
 
 | target | controller | compute | database |
 |---|---|---|---|
-| `gcp` | Config Connector | Cloud Run | Cloud SQL |
+| `gcp` | gcloud ([built](#gcp)) | Cloud Run | Cloud SQL |
 | `aws` | ACK | ECS Express Mode on Fargate | Aurora Serverless v2, from 0.5 ACU |
 | `azure` | Azure Service Operator v2 | Container Apps | Flexible Server, B1ms |
 | `k8s` | skaffold, against a named kube context | mecha's images, scaled from zero by KEDA | CloudNativePG |
@@ -459,6 +499,10 @@ that way is a plain value in the manifest, not a Kubernetes secret.
 - **A multicloud target on Crossplane** — deferred until partitioning and
   disaster recovery are solved: with one writer in one region, a second cloud
   is a second bill and not a second chance.
+- **Config Connector for `gcp`** — it reconciles from inside a Kubernetes
+  cluster, GKE or Config Controller, whose bill is a floor beside the
+  database's for an app that otherwise scales to zero; gcloud applies the same
+  declarative documents (`gcloud run services replace`) with none.
 - **Neon as `gcp`'s database** — its regions are another cloud's, so every
   query would cross between clouds.
 - **Postgres at the edge** — it needs fork, threads and sockets, which an
