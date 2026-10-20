@@ -495,6 +495,62 @@ way in answering 404. `GCP.auth.oidc` gives the provider its production
 settings: a broker the operator runs, or the provider's own issuer with a
 client registered for the domain.
 
+### Previews
+
+`sayt release@gcp --preview=pr-32` releases a pull request's own copy of the
+app beside the released one, and `sayt release@gcp --preview=pr-32 --delete`
+removes it when the pull request closes. A preview is the release's whole
+stack, not a stand-in for it: its own Cloud Run service (`<service>-pr-32`),
+Cloud SQL instance (`<name>-pr-32-db`), initdb and migrate jobs, and secrets,
+so it builds its schema and carries its migrations exactly as the release
+does. Each thing two copies could not share is its own: the `postgres` and
+`electric` passwords are the instance's, and electric's replication slot is
+named alike in every database. It answers at its run.app address alone, with
+no domain or alias mapped, so a passkey made there belongs to the preview.
+Its images are tagged for it in the release's repository; the service names
+them by digest, as the release's does.
+
+What fixes its shape:
+
+- **An instance each.** A first release of a preview waits several minutes
+  for Cloud SQL; later pushes reuse it. The smallest tier costs cents a day,
+  and `--delete` removes it.
+- **No say over the project.** A preview runs from a pull request, so its
+  release enables no API, makes no service account and grants no role.
+  Previews share one account, `<name>-preview`, which the project's owner
+  makes once; the release refuses to run without it.
+- **`--delete` names a preview.** Without `--preview` it refuses: a release is
+  never deleted here.
+
+What the project's owner does once, for an app `<name>` in project `<project>`,
+released from a GitHub repository `<owner>/<repo>`:
+
+```sh
+gcloud iam service-accounts create <name>-preview --project <project>
+for role in roles/cloudsql.client roles/secretmanager.secretAccessor; do
+  gcloud projects add-iam-policy-binding <project> --role $role \
+    --member serviceAccount:<name>-preview@<project>.iam.gserviceaccount.com
+done
+gcloud iam workload-identity-pools create github --project <project> --location global
+gcloud iam workload-identity-pools providers create-oidc github --project <project> \
+  --location global --workload-identity-pool github \
+  --issuer-uri https://token.actions.githubusercontent.com \
+  --attribute-mapping google.subject=assertion.sub,attribute.repository=assertion.repository \
+  --attribute-condition "assertion.repository == '<owner>/<repo>'"
+gcloud iam service-accounts create preview-deployer --project <project>
+gcloud iam service-accounts add-iam-policy-binding preview-deployer@<project>.iam.gserviceaccount.com \
+  --role roles/iam.workloadIdentityUser \
+  --member principalSet://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/github/attribute.repository/<owner>/<repo>
+```
+
+The deployer, which the workflow signs in as, needs `roles/run.admin`,
+`roles/cloudsql.admin`, `roles/secretmanager.admin`, `roles/browser`,
+`roles/artifactregistry.writer` and `roles/iam.serviceAccountUser` on
+`<name>-preview`. In a project the released app shares, each of the first
+three is bound with a condition on the preview's names
+(`resource.name.startsWith(...)` on `<service>-pr-`, `<name>-pr-`), so a pull
+request reaches nothing the release made.
+
 ## The clouds and k8s
 
 A cloud target carries users, so its floor is dollars a month rather than
