@@ -6,8 +6,11 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.15.0"
+#Version:     "0.15.1"
 #SaytVersion: "0.44.2"
+
+// The hybrid oracle harnesses exercise the checkout's terminal.
+#TestModules: ["hybrid-local.ts", "hybrid-battery.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.
@@ -124,7 +127,7 @@ import (
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// Its own tests import siblings a release of it does not carry.
-		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
+		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts \(strings.Join(#TestModules, " "))] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
 		identity: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check ."}).out
 		facts: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
 		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
