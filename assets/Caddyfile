@@ -58,6 +58,11 @@
   # read by a template as `http.vars.origin`. The deployment's, never the
   # request's: this door answers any Host (mecha's docs/proxy.md, "The origin").
   vars origin {$ORIGIN}
+  # Another name the deployment answers to (a gcp release's aliases, such as
+  # www) sends the reader on to the origin: a passkey's relying party is the
+  # origin alone. Unset, it names a host nobody asks for.
+  @alias host {$PRONTO_ALIASES:alias.invalid}
+  redir @alias {$ORIGIN}{uri} 308
   # The interpreter ships as plain ES modules plus a vendored data-plane
   # driver measured in hundreds of KiB; compression at the door is what keeps
   # a cold cache from paying for that in seconds on a slow link.

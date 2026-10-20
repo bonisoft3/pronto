@@ -200,7 +200,7 @@ export def main [
 	gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
 
 	let address = $"https://($plan.service)-($number).($r).run.app"
-	if ($plan.domain? | is-not-empty) { map-domain $plan.domain $plan.service $p $r }
+	for d in ([$plan.domain?] | compact | append $plan.aliases) { map-domain $d $plan.service $p $r }
 	# Live means the address answers, not that gcloud returned.
 	let health = (^curl --silent --output /dev/null --write-out "%{http_code}" --retry 8 --retry-all-errors $"($address)/health")
 	if $health != "200" { error make {msg: $"($address)/health answered ($health)"} }
