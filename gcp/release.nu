@@ -15,11 +15,12 @@ const unbuilt = ["migrate" "mesh-events" "conduit" "transform" "ticker" "clock" 
 
 def --wrapped gc [...args] {
 	let input = $in
-	let r = ($input | ^gcloud ...$args | complete)
+	# Never a prompt: a release runs where nobody answers one.
+	let r = ($input | ^gcloud --quiet ...$args | complete)
 	if $r.exit_code != 0 { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
 	$r.stdout
 }
-def --wrapped exists [...args]: nothing -> bool { (^gcloud ...$args | complete).exit_code == 0 }
+def --wrapped exists [...args]: nothing -> bool { (^gcloud --quiet ...$args | complete).exit_code == 0 }
 
 def render [cue_path: string, data?: string]: nothing -> record {
 	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
@@ -51,7 +52,7 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 def ensure-infrastructure [plan: record] {
 	let p = $plan.project
 	let n = $plan.names
-	gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com storage.googleapis.com iam.googleapis.com --project $p | ignore
+	gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com --project $p | ignore
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $p) {
 		gc artifacts repositories create $plan.repository --repository-format docker --location $plan.region --project $p --description "pronto images" | ignore
 	}
@@ -88,10 +89,6 @@ def ensure-infrastructure [plan: record] {
 	if not (exists sql databases describe $n.database --instance $n.instance --project $p) {
 		gc sql databases create $n.database --instance $n.instance --project $p | ignore
 	}
-	if not (exists storage buckets describe $"gs://($n.bucket)" --project $p) {
-		gc storage buckets create $"gs://($n.bucket)" --project $p --location $plan.region --uniform-bucket-level-access | ignore
-	}
-	gc storage buckets add-iam-policy-binding $"gs://($n.bucket)" --member $"serviceAccount:($n.serviceAccount)" --role roles/storage.objectAdmin | ignore
 }
 
 # The runtime images, built as the app's compose project builds them and pushed
@@ -117,6 +114,41 @@ def push-images [app_dir: string, plan: record, name: string]: nothing -> record
 		let digest = (^docker image inspect --format '{{json .RepoDigests}}' $"($repo):release" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
 		{svc: $svc, ref: {tag: "release", digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
+}
+
+# The domain onto the service, through Cloud Run's domain-mapping API: gcloud
+# reaches it only from its beta component, which a release cannot assume. The
+# records it prints go to the domain's DNS; Google wants the domain verified
+# first (Search Console), which no release can do for its owner.
+def map-domain [domain: string, service: string, project: string, region: string] {
+	let api = $"https://($region)-run.googleapis.com/apis/domains.cloudrun.com/v1/namespaces/($project)/domainmappings"
+	let auth = [Authorization $"Bearer (gc auth print-access-token | str trim)"]
+	let got = (http get --full --allow-errors --headers $auth $"($api)/($domain)")
+	let mapping = if $got.status == 404 {
+		let made = (http post --full --allow-errors --headers $auth --content-type application/json $api {
+			apiVersion: "domains.cloudrun.com/v1", kind: "DomainMapping"
+			metadata: {name: $domain, namespace: $project}
+			spec: {routeName: $service}
+		})
+		if $made.status >= 300 {
+			print $"gcp: ($domain) is not mapped: ($made.body.error?.message? | default ($made.body | to json))"
+			print $"gcp: verify it first: gcloud domains verify ($domain)"
+			return
+		}
+		$made.body
+	} else if $got.status >= 300 {
+		error make {msg: $"($api)/($domain) answered ($got.status): ($got.body | to json)"}
+	} else { $got.body }
+	let ready = ($mapping.status?.conditions? | default [] | where type == "Ready" | get 0?)
+	if ($ready.status? | default "") != "True" {
+		print $"gcp: ($domain) is mapped but not ready: ($ready.message? | default 'Google is still provisioning it')"
+		print $"gcp: an unverified domain is verified once by its owner: gcloud domains verify ($domain)"
+	}
+	let records = ($mapping.status?.resourceRecords? | default [])
+	if ($records | is-not-empty) {
+		print $"gcp: ($domain)'s DNS records:"
+		print ($records | select -o type name rrdata | table)
+	}
 }
 
 export def main [
@@ -160,7 +192,7 @@ export def main [
 	}
 	gc run jobs replace dist/gcp/job.yaml --region $r --project $p | ignore
 	print $"gcp: building the schema \(($plan.names.job)\)"
-	let run = (^gcloud run jobs execute $plan.names.job --region $r --project $p --wait | complete)
+	let run = (^gcloud --quiet run jobs execute $plan.names.job --region $r --project $p --wait | complete)
 	if $run.exit_code != 0 {
 		error make {msg: $"($plan.names.job) failed: ($run.stderr | str trim)\nlogs: gcloud logging read 'resource.labels.job_name=($plan.names.job)' --project ($p) --limit 40"}
 	}
@@ -168,13 +200,7 @@ export def main [
 	gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
 
 	let address = $"https://($plan.service)-($number).($r).run.app"
-	if ($plan.domain? | is-not-empty) {
-		if not (exists beta run domain-mappings describe --domain $plan.domain --region $r --project $p) {
-			let made = (^gcloud beta run domain-mappings create --service $plan.service --domain $plan.domain --region $r --project $p | complete)
-			if $made.exit_code != 0 { print $"gcp: ($plan.domain) is not mapped yet: ($made.stderr | str trim)" }
-		}
-		print (gc beta run domain-mappings describe --domain $plan.domain --region $r --project $p --format "table(status.resourceRecords[].type,status.resourceRecords[].name,status.resourceRecords[].rrdata)")
-	}
+	if ($plan.domain? | is-not-empty) { map-domain $plan.domain $plan.service $p $r }
 	# Live means the address answers, not that gcloud returned.
 	let health = (^curl --silent --output /dev/null --write-out "%{http_code}" --retry 8 --retry-all-errors $"($address)/health")
 	if $health != "200" { error make {msg: $"($address)/health answered ($health)"} }

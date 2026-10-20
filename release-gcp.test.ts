@@ -122,3 +122,26 @@ Deno.test("the pools fit the database's connections", async () => {
   const plan = await built(release(), "plan");
   assertEquals(plan.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=50");
 });
+
+// A page load asks for every hatch file at once while electric's live requests
+// hold theirs open, and the one instance is all there is: at Cloud Run's
+// default of 80 a reload met "Rate exceeded" (found on a real revision).
+Deno.test("the one instance takes Cloud Run's most requests at once", async () => {
+  const r = await built(release(), "service");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.spec.template.spec.containerConcurrency, 1000);
+});
+
+// Electric keeps its shape metadata in SQLite, which a GCS bucket mounted over
+// FUSE cannot lock: a restarted instance failed its ShapeDb migration (found on
+// a real revision). Its storage is the instance's; a new one rebuilds shapes
+// from Postgres, and clients refetch.
+Deno.test("electric's storage is the instance's, no bucket", async () => {
+  const r = await built(release(), "service");
+  assertEquals(r.success, true, r.stderr);
+  const spec = r.value.spec.template.spec;
+  assertEquals(spec.volumes, undefined);
+  const electric = spec.containers[3];
+  assertEquals(electric.volumeMounts, undefined);
+  assertEquals(electric.env.find((e: { name: string }) => e.name === "ELECTRIC_STORAGE_DIR").value, "/tmp/electric");
+});
