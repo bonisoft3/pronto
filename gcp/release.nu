@@ -75,7 +75,13 @@ def ensure-infrastructure [plan: record] {
 
 	if not (exists sql instances describe $n.instance --project $p) {
 		print $"gcp: creating Cloud SQL ($n.instance) \(several minutes\)"
-		gc sql instances create $n.instance --project $p --region $plan.region --database-version POSTGRES_18 --edition enterprise --tier $plan.sqlTier --storage-size 10 --storage-type HDD --database-flags cloudsql.logical_decoding=on --root-password $pg | ignore
+		gc sql instances create $n.instance --project $p --region $plan.region --database-version POSTGRES_18 --edition enterprise --tier $plan.sqlTier --storage-size 10 --storage-type HDD --database-flags $plan.sqlFlags --root-password $pg | ignore
+	}
+	# Flags an earlier release set differently are patched, which restarts it.
+	let flags = (gc sql instances describe $n.instance --project $p --format json | from json | get settings.databaseFlags? | default [] | each {|f| $"($f.name)=($f.value)" } | sort | str join ",")
+	if $flags != ($plan.sqlFlags | split row "," | sort | str join ",") {
+		print $"gcp: setting ($plan.sqlFlags) on ($n.instance) \(it restarts\)"
+		gc sql instances patch $n.instance --project $p --database-flags $plan.sqlFlags --quiet | ignore
 	}
 	# The password the URLs carry is the user's, whichever came first.
 	gc sql users set-password postgres --instance $n.instance --project $p --password $pg | ignore

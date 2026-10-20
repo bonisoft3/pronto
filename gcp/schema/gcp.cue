@@ -77,6 +77,11 @@ import (
 // is crud's.
 #Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, database: 5432, proxyHealth: 9090}
 
+// The smallest tier admits about 25 connections, fewer than the pools'
+// defaults together; the instance is raised to 50 and the pools capped.
+#Pools: {crud: 5, electric: 5}
+#SqlFlags: "cloudsql.logical_decoding=on,max_connections=50"
+
 // The Cloud SQL Auth Proxy, pinned.
 #Proxy: "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2@sha256:fc224915ef435afeb5b2a9421260a0d31986d5c8b7c7f5783c7f5d5885700cd2"
 
@@ -145,7 +150,9 @@ import (
 						{name: "PGRST_DB_SCHEMA", value: "public"},
 						{name: "PGRST_DB_ANON_ROLE", value: "anon"},
 						{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
-						{name: "PGRST_SERVER_HOST", value: "127.0.0.1"},
+						// Cloud Run probes the instance's address, not loopback.
+						{name: "PGRST_SERVER_HOST", value: "*"},
+						{name: "PGRST_DB_POOL", value: "\(#Pools.crud)"},
 						{name: "PGRST_SERVER_PORT", value: "\(P.crud)"},
 						{name: "PGRST_ADMIN_SERVER_PORT", value: "\(P.crudAdmin)"},
 					]
@@ -168,6 +175,7 @@ import (
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
 						{name: "ELECTRIC_PORT", value: "\(P.electric)"},
 						{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
+						{name: "ELECTRIC_DB_POOL_SIZE", value: "\(#Pools.electric)"},
 						// Its shape logs outlive an instance on the bucket, as on
 						// mecha's GCP deployment.
 						{name: "ELECTRIC_STORAGE_DIR", value: "/electric"},
@@ -247,6 +255,7 @@ import (
 		service:        R.service
 		names:          R.names
 		sqlTier:        R.sqlTier
+		sqlFlags:       #SqlFlags
 		if R.domain != _|_ {domain: R.domain}
 		hasRpId:        R._rpId != ""
 		serviceYaml:    yaml.Marshal(B.service)

@@ -26,6 +26,9 @@ Deno.test("the door dials each upstream at its own port in the shared instance",
   assertEquals(env.PRONTO_UPSTREAM_ELECTRIC, "127.0.0.1:3002");
   assertEquals(electric.env.find((e: { name: string }) => e.name === "ELECTRIC_PORT").value, "3002");
   assertEquals(crud.env.find((e: { name: string }) => e.name === "PGRST_SERVER_PORT").value, "3000");
+  // Cloud Run probes a container at the instance's address, not loopback: a
+  // crud bound to 127.0.0.1 never answered /ready (found on a real revision).
+  assertEquals(crud.env.find((e: { name: string }) => e.name === "PGRST_SERVER_HOST").value, "*");
   assertEquals(env.ORIGIN, "https://bonkchess.com");
 });
 
@@ -100,7 +103,22 @@ Deno.test("an app targeting gcp gets release@gcp, a deploy as k8s's is", async (
   assertEquals(res.success, true, res.stderr);
   const rule = JSON.parse(res.stdout).gcp;
   assertEquals(rule.platform, "gcp");
-  assertStringIncludes(rule.cmds[0].do, "path join gcp release.nu");
+  // Under mise's environment: nu, gcloud and cue are its tools, on no PATH
+  // of their own where sayt runs a rule.
+  assertStringIncludes(rule.cmds[0].do, "run-mise exec -- nu ($pronto | path join gcp release.nu)");
   const none = await cue(["export", "-", "-e", "_loop.surface.sayYaml.say.release.rulemap.gcp", "--out", "json"], paymentProgram());
   assertEquals(none.success, false);
+});
+
+// The smallest Cloud SQL tier admits about 25 connections, fewer than the
+// pools' defaults together: electric met "remaining connection slots are
+// reserved" on a real revision.
+Deno.test("the pools fit the database's connections", async () => {
+  const r = await built(release(), "service");
+  assertEquals(r.success, true, r.stderr);
+  const [, crud, , electric] = r.value.spec.template.spec.containers;
+  assertEquals(crud.env.find((e: { name: string }) => e.name === "PGRST_DB_POOL").value, "5");
+  assertEquals(electric.env.find((e: { name: string }) => e.name === "ELECTRIC_DB_POOL_SIZE").value, "5");
+  const plan = await built(release(), "plan");
+  assertEquals(plan.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=50");
 });
