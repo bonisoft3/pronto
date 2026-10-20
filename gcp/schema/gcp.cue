@@ -49,6 +49,9 @@ import (
 		// What the program must not hold (a provider's client secret), by the
 		// Secret Manager secret that holds it.
 		oidcSecrets: *{} | {[=~"^OIDC_[A-Z0-9_]+$"]: string}
+		// The providers the program offers, whose ways in the terminal draws
+		// (compose's OIDC_PROVIDERS), filled by the release.
+		programProviders: *"" | string
 	}
 
 	_registry: "\(R.region)-docker.pkg.dev/\(R.project)/\(R.repository)"
@@ -285,6 +288,16 @@ import (
 		}
 	}
 
+	// A provider the program configures for development, against a broker on the developer's
+	// machine, sends every reader to their own machine; one the program offers and production
+	// does not serve leaves the terminal's way in answering 404. Either refuses the release.
+	let served = [for p in strings.Split([if R.auth.oidc.OIDC_PROVIDERS != _|_ {R.auth.oidc.OIDC_PROVIDERS}, ""][0], ",") if p != "" {p}]
+	let atDeveloper = [for p in served for k in ["ISSUER", "INTERNAL"]
+		let key = "OIDC_\(strings.ToUpper(p))_\(k)"
+		if R.auth.oidc[key] != _|_
+		if R.auth.oidc[key] =~ "//(localhost|127\\.0\\.0\\.1|\\[::1\\]|host\\.docker\\.internal)([:/]|$)" {"\(key) is \(R.auth.oidc[key])"}]
+	let unserved = [for p in strings.Split(R.auth.programProviders, ",") if p != "" if !list.Contains(served, p) {p}]
+
 	// What the release needs besides the two documents, as JSON.
 	plan: {
 		project:        R.project
@@ -297,6 +310,8 @@ import (
 		sqlFlags:       #SqlFlags
 		if R.domain != _|_ {domain: R.domain}
 		aliases:        R.aliases
+		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}
+		if len(unserved) > 0 {providers: error("the terminal offers \(strings.Join(unserved, ", ")), which production does not serve, so its way in would answer 404: give GCP.auth.oidc the provider's production settings")}
 		// An alias sends readers on to the domain, so it needs one.
 		if len(R.aliases) > 0 {aliasTarget: R.domain}
 		hasRpId:        R._rpId != ""
