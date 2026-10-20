@@ -209,3 +209,45 @@ Deno.test("a release refuses a provider at a developer's address, or one the pro
   const none = await built(release());
   assertEquals(none.success, true, none.stderr);
 });
+
+// A pull request's preview beside the released app: everything of its own
+// that two releases could not share, at its run.app address.
+Deno.test("a preview is its own service, instance, jobs and secrets, with no domain", async () => {
+  const preview = await built(release(`, preview: "pr-32", runHost: "bonk-chess-pr-32-504479523278.us-central1.run.app"`), "plan");
+  assertEquals(preview.success, true, preview.stderr);
+  const p = preview.value;
+  assertEquals(p.service, "bonk-chess-pr-32");
+  assertEquals(p.preview, "pr-32");
+  assertEquals(p.names.instance, "battlechess-pr-32-db");
+  assertEquals([p.names.job, p.names.migrateJob], ["battlechess-pr-32-initdb", "battlechess-pr-32-migrate"]);
+  for (const s of Object.values(p.names.secrets) as string[]) assert(s.startsWith("battlechess-pr-32-"), s);
+  // Its own instance, so the database keeps the app's name.
+  assertEquals(p.names.database, "battlechess");
+  assertEquals(p.names.serviceAccount, "battlechess-preview@brawl-chess.iam.gserviceaccount.com");
+  assertEquals(p.domain, undefined);
+  assertEquals(p.aliases, []);
+  const service = await built(release(`, aliases: ["www.bonkchess.com"], preview: "pr-32", runHost: "bonk-chess-pr-32-504479523278.us-central1.run.app"`), "service");
+  assertEquals(service.success, true, service.stderr);
+  assertEquals(service.value.metadata.name, "bonk-chess-pr-32");
+  const [caddy, , auth] = service.value.spec.template.spec.containers;
+  const env = (c: { env: { name: string; value?: string }[] }) => Object.fromEntries(c.env.filter((e) => e.value).map((e) => [e.name, e.value]));
+  assertEquals(env(caddy).ORIGIN, "https://bonk-chess-pr-32-504479523278.us-central1.run.app");
+  assertEquals(env(caddy).PRONTO_ALIASES, undefined);
+  // A passkey made on a preview belongs to the preview's address alone.
+  assertEquals(env(auth).WEBAUTHN_RP_ID, "bonk-chess-pr-32-504479523278.us-central1.run.app");
+});
+
+Deno.test("the released app's names are unchanged by previews", async () => {
+  const r = await built(release(), "plan");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals([r.value.service, r.value.names.instance, r.value.domain], ["bonk-chess", "battlechess-db", "bonkchess.com"]);
+  assertEquals(r.value.names.serviceAccount, "battlechess-run@brawl-chess.iam.gserviceaccount.com");
+  assertEquals(r.value.preview, undefined);
+});
+
+Deno.test("a preview name Cloud Run, Cloud SQL or a secret would refuse is refused here", async () => {
+  for (const bad of ["PR-32", "pr_32", "-pr", "pr-", "a-preview-name-too-long"]) {
+    const r = await built(release(`, preview: "${bad}"`), "plan");
+    assertEquals(r.success, false, bad);
+  }
+});

@@ -30,6 +30,12 @@ import (
 	// door (www, say): a passkey's relying party is the domain alone.
 	aliases: *[] | [...=~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"]
 	sqlTier:  *"db-f1-micro" | string
+	// A pull request's own copy of the app, beside the released one: its own
+	// service, Cloud SQL instance, jobs and secrets, each named for the app and
+	// the preview, at the service's run.app address with no domain or alias
+	// mapped. The release sets it (`sayt release@gcp --preview=pr-32`), and
+	// `--delete` removes all of it when the pull request closes.
+	preview?: =~"^[a-z0-9]([-a-z0-9]{0,14}[a-z0-9])?$"
 
 	// Filled by the release from what it pushed: a revision resolves a tag once,
 	// so every image is named by digest (mecha's docs/deployment.md, what bites).
@@ -55,32 +61,40 @@ import (
 	}
 
 	_registry: "\(R.region)-docker.pkg.dev/\(R.project)/\(R.repository)"
+	// What a preview's resources are named for: the app, and the preview.
+	_id:      [if R.preview != _|_ {"\(R.name)-\(R.preview)"}, R.name][0]
+	_service: [if R.preview != _|_ {"\(R.service)-\(R.preview)"}, R.service][0]
+	_domain:  [if R.domain != _|_ && R.preview == _|_ {R.domain}, ""][0]
+	_aliases: [if R.preview != _|_ {[]}, R.aliases][0]
 	// Where readers are, which the door and a passkey's relying party are told
 	// (ORIGIN and WEBAUTHN_* in compose).
-	_host: [if R.domain != _|_ {R.domain}, R.runHost][0]
+	_host: [if _domain != "" {_domain}, R.runHost][0]
 	_origin: [if _host != "" {"https://\(_host)"}, ""][0]
 	_rpId:   _host
 
 	names: {
-		instance:       "\(R.name)-db"
+		instance:       "\(R._id)-db"
 		connection:     "\(R.project):\(R.region):\(instance)"
 		database:       R.name
-		serviceAccount: "\(R.name)-run@\(R.project).iam.gserviceaccount.com"
-		job:            "\(R.name)-initdb"
-		migrateJob:     "\(R.name)-migrate"
+		// Previews share one, made once by the project's owner with only what
+		// a revision needs (docs/release-targets.md#previews), so the release
+		// that makes a preview needs no say over the project's IAM.
+		serviceAccount: [if R.preview != _|_ {"\(R.name)-preview"}, "\(R.name)-run"][0] + "@\(R.project).iam.gserviceaccount.com"
+		job:            "\(R._id)-initdb"
+		migrateJob:     "\(R._id)-migrate"
 		// Generated once by the release, never a literal in what it renders;
 		// the URLs are composed from the passwords, since Cloud Run expands no
 		// $(VAR) inside a value.
 		secrets: {
-			POSTGRES_PASSWORD: "\(R.name)-postgres-password"
-			ELECTRIC_PASSWORD: "\(R.name)-electric-password"
-			PGRST_JWT_SECRET:  "\(R.name)-pgrst-jwt-secret"
-			ELECTRIC_SECRET:   "\(R.name)-electric-secret"
-			CRUD_DB_URI:       "\(R.name)-crud-db-uri"
-			AUTH_DATABASE_URL: "\(R.name)-auth-database-url"
-			ELECTRIC_DB_URL:   "\(R.name)-electric-database-url"
+			POSTGRES_PASSWORD: "\(R._id)-postgres-password"
+			ELECTRIC_PASSWORD: "\(R._id)-electric-password"
+			PGRST_JWT_SECRET:  "\(R._id)-pgrst-jwt-secret"
+			ELECTRIC_SECRET:   "\(R._id)-electric-secret"
+			CRUD_DB_URI:       "\(R._id)-crud-db-uri"
+			AUTH_DATABASE_URL: "\(R._id)-auth-database-url"
+			ELECTRIC_DB_URL:   "\(R._id)-electric-database-url"
 			// pgroll's runner, over the socket Cloud Run mounts for a job.
-			MIGRATE_DATABASE_URL: "\(R.name)-migrate-database-url"
+			MIGRATE_DATABASE_URL: "\(R._id)-migrate-database-url"
 		}
 	}
 }
@@ -119,7 +133,7 @@ import (
 		apiVersion: "serving.knative.dev/v1"
 		kind:       "Service"
 		metadata: {
-			name: R.service
+			name: R._service
 			labels: "cloud.googleapis.com/location": R.region
 			annotations: "run.googleapis.com/ingress": "all"
 		}
@@ -150,7 +164,7 @@ import (
 					ports: [{name: "http1", containerPort: P.caddy}]
 					env: list.Concat([[
 						if R._origin != "" {{name: "ORIGIN", value: R._origin}},
-						if len(R.aliases) > 0 {{name: "PRONTO_ALIASES", value: strings.Join(R.aliases, " ")}},
+						if len(R._aliases) > 0 {{name: "PRONTO_ALIASES", value: strings.Join(R._aliases, " ")}},
 						{name: "PRONTO_UPSTREAM_CRUD", value: "127.0.0.1:\(P.crud)"},
 						{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
 						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
@@ -304,16 +318,17 @@ import (
 		region:         R.region
 		repository:     R.repository
 		registry:       R._registry
-		service:        R.service
+		service:        R._service
+		if R.preview != _|_ {preview: R.preview}
 		names:          R.names
 		sqlTier:        R.sqlTier
 		sqlFlags:       #SqlFlags
-		if R.domain != _|_ {domain: R.domain}
-		aliases:        R.aliases
+		if R._domain != "" {domain: R._domain}
+		aliases:        R._aliases
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}
 		if len(unserved) > 0 {providers: error("the terminal offers \(strings.Join(unserved, ", ")), which production does not serve, so its way in would answer 404: give GCP.auth.oidc the provider's production settings")}
 		// An alias sends readers on to the domain, so it needs one.
-		if len(R.aliases) > 0 {aliasTarget: R.domain}
+		if len(R._aliases) > 0 {aliasTarget: R.domain}
 		hasRpId:        R._rpId != ""
 		serviceYaml:    yaml.Marshal(B.service)
 		jobYaml:        yaml.Marshal(B.job)

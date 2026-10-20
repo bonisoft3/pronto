@@ -52,16 +52,27 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 def ensure-infrastructure [plan: record] {
 	let p = $plan.project
 	let n = $plan.names
-	gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com --project $p | ignore
+	# A preview's release may not enable APIs: the project's first release did.
+	if ($plan.preview? | is-empty) {
+		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com --project $p | ignore
+	}
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $p) {
 		gc artifacts repositories create $plan.repository --repository-format docker --location $plan.region --project $p --description "pronto images" | ignore
 	}
 	let sa = ($n.serviceAccount | split row "@" | first)
-	if not (exists iam service-accounts describe $n.serviceAccount --project $p) {
-		gc iam service-accounts create $sa --project $p --display-name $"($plan.service) on Cloud Run" | ignore
-	}
-	for role in ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] {
-		gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role $role --condition None --quiet | ignore
+	if ($plan.preview? | is-not-empty) {
+		# A preview's release runs from a pull request: it may not grant roles in
+		# the project, so the previews' account is the owner's to make, once.
+		if not (exists iam service-accounts describe $n.serviceAccount --project $p) {
+			error make {msg: $"($n.serviceAccount) is missing: the project's owner makes it once \(pronto's docs/release-targets.md#previews\)"}
+		}
+	} else {
+		if not (exists iam service-accounts describe $n.serviceAccount --project $p) {
+			gc iam service-accounts create $sa --project $p --display-name $"($plan.service) on Cloud Run" | ignore
+		}
+		for role in ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] {
+			gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role $role --condition None --quiet | ignore
+		}
 	}
 
 	let pg = (ensure-secret $n.secrets.POSTGRES_PASSWORD $p)
@@ -111,10 +122,12 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 	$services | each {|svc|
 		let local = ($targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
 		let repo = $"($plan.registry)/($name)-($svc)"
-		^docker tag $local $"($repo):release"
-		^docker push --quiet $"($repo):release" | ignore
-		let digest = (^docker image inspect --format '{{json .RepoDigests}}' $"($repo):release" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
-		{svc: $svc, ref: {tag: "release", digest: $digest}}
+		# A preview's images are tagged for it, never as the release's.
+		let tag = ($plan.preview? | default "release")
+		^docker tag $local $"($repo):($tag)"
+		^docker push --quiet $"($repo):($tag)" | ignore
+		let digest = (^docker image inspect --format '{{json .RepoDigests}}' $"($repo):($tag)" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
+		{svc: $svc, ref: {tag: $tag, digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
 
@@ -163,13 +176,44 @@ def run-job [file: string, name: string, what: string, project: string, region: 
 	}
 }
 
+# A preview removed: its service, jobs, instance and secrets. Its images stay
+# for the repository's cleanup policy; nothing the release made is touched.
+def delete-preview [plan: record] {
+	let p = $plan.project
+	let r = $plan.region
+	let n = $plan.names
+	if (exists run services describe $plan.service --region $r --project $p) { gc run services delete $plan.service --region $r --project $p | ignore }
+	for job in [$n.job $n.migrateJob] {
+		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
+	}
+	if (exists sql instances describe $n.instance --project $p) { gc sql instances delete $n.instance --project $p | ignore }
+	for secret in ($n.secrets | values) {
+		if (exists secrets describe $secret --project $p) { gc secrets delete $secret --project $p | ignore }
+	}
+	print $"gcp: preview ($plan.preview) removed"
+}
+
 export def main [
 	--snapshot      # Build and render only, change nothing in the project
 	--dry-run       # Print what would be applied and exit
 	--app: string   # Application name or path
+	--preview: string # A pull request's own copy beside the release, such as pr-32
+	--delete        # Remove the preview, when its pull request closes
 ] {
 	let app_info = (resolve-app $app)
-	let plan0 = (render $app_info.cue_path)
+	# sayt hands a release's own flags over as SAY_RELEASE_ARGS_<FLAG>.
+	let preview = ($preview | default ($env.SAY_RELEASE_ARGS_PREVIEW? | default ""))
+	let delete = ($delete or (($env.SAY_RELEASE_ARGS_DELETE? | default "") | is-not-empty))
+	let base = if ($preview | is-empty) { {} } else { {GCP: {preview: $preview}} }
+	let base_file = (mktemp -t gcp.XXXXXX.json | str trim)
+	$base | to json | save -f $base_file
+	let plan0 = (render $app_info.cue_path $base_file)
+	rm $base_file
+	if $delete {
+		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }
+		delete-preview $plan0
+		return
+	}
 	let services = (do { cd $app_info.dir; ^docker compose --profile "*" config --services } | lines)
 	let refused = ($services | where {|s| $s in $unbuilt })
 	if ($refused | is-not-empty) {
@@ -191,7 +235,7 @@ export def main [
 	let number = (gc projects describe $plan0.project --format "value(projectNumber)" | str trim)
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate)} | to json | save -f $data_file
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	mkdir dist/gcp
