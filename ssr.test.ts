@@ -23,25 +23,28 @@ Deno.test("a public route's addresses reach the renderer, ahead of the entry", (
   const { ok, out } = ask("_view", "caddyfile");
   if (!ok) throw new Error(out);
   const rendered = out.indexOf("@rendered {\n      path /jogo/* /jogo/*/\n");
-  if (out.indexOf("handle @rendered {\n      reverse_proxy {$PRONTO_MESH:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
+  if (out.indexOf("handle @rendered {\n      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered > out.indexOf("rewrite @route")) throw new Error("the entry's rewrite answers before the renderer does");
 });
 
-// A k8s release dials every upstream at the caddy pod's Dapr sidecar, which
-// routes by dapr-app-id. Regression guard: an upstream spelled as a bare
-// host:port, or missing the header, bypasses the mesh there, and one naming
-// another app id reaches the wrong service.
-Deno.test("every upstream the door dials is the mesh's when set, naming its service", () => {
+// Each upstream is dialed at its own PRONTO_UPSTREAM_<SERVICE> when set: a k8s
+// release sets every one to the caddy pod's Dapr sidecar, which routes by
+// dapr-app-id, and a gcp release to the service's own localhost port in the
+// shared Cloud Run instance. Regression guard: an upstream spelled as a bare
+// host:port, or missing the header, bypasses the mesh on k8s and the sidecar on
+// gcp; one naming another service reaches the wrong one.
+Deno.test("every upstream the door dials is its own variable's when set, naming its service", () => {
   const { ok, out } = ask("_view", "caddyfile");
   if (!ok) throw new Error(out);
   const proxies = [...out.matchAll(/^\s*(reverse_proxy|forward_auth)\b(.*)$/gm)];
   if (!proxies.some((m) => m[2].includes("render:"))) throw new Error(`no renderer upstream:\n${out}`);
   for (const m of proxies) {
-    const spelled = m[2].match(/^ \{\$PRONTO_MESH:([a-z0-9-]+):\d+\} \{$/);
-    if (!spelled) throw new Error(`${m[0].trim()} dials past the mesh`);
+    const spelled = m[2].match(/^ \{\$PRONTO_UPSTREAM_([A-Z0-9_]+):([a-z0-9-]+):\d+\} \{$/);
+    if (!spelled) throw new Error(`${m[0].trim()} dials past its variable`);
+    if (spelled[1] !== spelled[2].toUpperCase().replaceAll("-", "_")) throw new Error(`${m[0].trim()} names another service's variable`);
     const next = out.slice(m.index! + m[0].length).split("\n").slice(1, 4).map((l) => l.trim());
-    if (!next.includes(`header_up dapr-app-id ${spelled[1]}`)) throw new Error(`${m[0].trim()} names no dapr-app-id ${spelled[1]}`);
+    if (!next.includes(`header_up dapr-app-id ${spelled[2]}`)) throw new Error(`${m[0].trim()} names no dapr-app-id ${spelled[2]}`);
   }
 });
 
