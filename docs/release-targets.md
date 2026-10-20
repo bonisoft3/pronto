@@ -464,6 +464,15 @@ release maps it onto the service and prints the DNS records it needs; each of
 (`PRONTO_ALIASES`), since a passkey's relying party is the domain alone. A
 domain is verified once by its owner (Search Console) before Google routes it.
 
+A provider is refused at release in two cases that a program's development
+settings produce. One whose issuer or internal address is a developer's machine
+(`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), as the program's
+defaults for a broker on that machine are, would send every reader to their own.
+One the program offers that production does not serve leaves the terminal's
+way in answering 404. `GCP.auth.oidc` gives the provider its production
+settings: a broker the operator runs, or the provider's own issuer with a
+client registered for the domain.
+
 ## The clouds and k8s
 
 A cloud target carries users, so its floor is dollars a month rather than

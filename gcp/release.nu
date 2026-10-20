@@ -191,7 +191,7 @@ export def main [
 	let number = (gc projects describe $plan0.project --format "value(projectNumber)" | str trim)
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate)} | to json | save -f $data_file
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate)} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	mkdir dist/gcp
