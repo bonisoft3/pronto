@@ -155,18 +155,18 @@ The entire lifecycle—cluster reconciliation, verified operator bootstrapping, 
 
 ```bash
 # 1. Full release to Kind (targeted via -d or from inside the app directory)
-sayt -d apps/golaberto release@k8s
+sayt -d /path/to/app release@k8s
 
 # 2. Dry-run (render evaluated CUE manifests for inspection without side effects)
-sayt -d apps/golaberto release@k8s --dry-run
+sayt -d /path/to/app release@k8s --dry-run
 
 # 3. Render for cloud environments (AWS EKS, Azure AKS); deploying there is not
 #    implemented yet: only Kind provisions operators, observability and TLS.
-sayt -d apps/golaberto release@k8s --cluster-env eks --dry-run
-sayt -d apps/golaberto release@k8s --cluster-env aks --dry-run
+sayt -d /path/to/app release@k8s --cluster-env eks --dry-run
+sayt -d /path/to/app release@k8s --cluster-env aks --dry-run
 
 # 4. Skip operator reconciliation on repeated dev iterations
-sayt -d apps/golaberto release@k8s --skip-operators
+sayt -d /path/to/app release@k8s --skip-operators
 ```
 
 ### Direct Script Usage
@@ -174,7 +174,7 @@ sayt -d apps/golaberto release@k8s --skip-operators
 If invoking the Nushell release engine directly:
 
 ```bash
-nu plugins/pronto/k8s/release.nu --app golaberto
+nu k8s/release.nu --app /path/to/app
 ```
 
 ### HTTPS Verification
@@ -182,7 +182,7 @@ nu plugins/pronto/k8s/release.nu --app golaberto
 Each app's Gateway listens on its own hostname, with a certificate from the app's pinned mkcert:
 
 ```bash
-curl -sI https://golaberto.localhost/
+curl -sI https://my-app.localhost/
 # Traces and metrics:
 open http://telemetry.localhost/jaeger/
 ```

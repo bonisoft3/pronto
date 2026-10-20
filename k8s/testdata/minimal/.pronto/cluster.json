@@ -1,0 +1,6 @@
+{
+  "server": true,
+  "tokenRoles": [
+    "reader"
+  ]
+}

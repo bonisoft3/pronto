@@ -639,6 +639,9 @@ import (
 					metadata: {
 						labels: appLabels & {"app.kubernetes.io/component": "auth"}
 						annotations: (#daprSidecar & {id: "auth", port: "9999"}).out
+						if release.auth.oidcSecretDigest != "" {
+							annotations: "pronto.dev/oidc-secret-digest": release.auth.oidcSecretDigest
+						}
 					}
 					spec: containers: [{
 						name:            "auth"
@@ -668,6 +671,14 @@ import (
 							},
 							{name: "WEBAUTHN_RP_ID", value: authRpId},
 							{name: "WEBAUTHN_ORIGIN", value: authOrigin},
+							for k, v in release.auth.oidc {{name: k, value: v}},
+								for k in release.auth.oidcSecrets {{
+									name: k
+									valueFrom: secretKeyRef: {
+										name: "\(release.name)-oidc"
+										key: k
+									}
+								}},
 						]
 						resources: release.resources
 						livenessProbe: {

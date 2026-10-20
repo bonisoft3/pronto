@@ -129,9 +129,13 @@ module's `auth` block): one-tap passkey ceremonies with a server-generated
 display handle — users never type identifiers, passwords, or emails. The
 terminal always offers guest sign-in beside the passkey: one click, no
 ceremony, origin-independent, minting the same generated identity; the
-passkey remains the durable identity. Briefs speak of people and names; they
-never design login screens. An app whose program demands an auth mode the
-terminal does not offer fails to compile.
+passkey remains the durable identity. An app may also offer the providers the
+terminal lists (`auth.providers`, Google first): a way in at the gate and in a
+guest's strip, run by the cluster's auth service by redirect, so no provider
+script runs in the app's pages. A person signed in through a provider and one
+holding a passkey are two people. Briefs speak of people and names; they never
+design login screens. An app whose program demands an auth mode or a provider
+the terminal does not offer fails to compile. Sign-in is never a hatch's.
 
 ## Escape hatches
 

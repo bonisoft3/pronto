@@ -51,6 +51,12 @@ package schema
 	auth: {
 		rpId?:   string
 		origin?: string
+		// The providers the auth service signs in through, and each one's
+		// client, as the app's compose project gives them: filled by the
+		// release, which fails there when a provider's client is unset.
+		oidc: *{} | {[=~"^OIDC_[A-Z0-9_]+$" & !~"_CLIENT_SECRET$"]: string}
+		oidcSecrets: *[] | [...=~"^OIDC_[A-Z0-9_]+_CLIENT_SECRET$"]
+		oidcSecretDigest: *"" | =~"^[0-9a-f]{64}$"
 	}
 
 	render: {

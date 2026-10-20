@@ -1,0 +1,8 @@
+{
+  "server": true,
+  "tokenRoles": [
+    "anon",
+    "app_user",
+    "service"
+  ]
+}

@@ -40,6 +40,11 @@ say:
         priority: -1
         cmds:
           - do: "deno test --config deno.json --allow-read --allow-run=cue identity_test.ts"
+          - do: "deno test --no-config --allow-read --allow-run=cue auth-providers.test.ts"
+      k8s:
+        priority: -1
+        cmds:
+          - do: "nu k8s/release_test.nu"
       type-system:
         priority: -1
         cmds:
