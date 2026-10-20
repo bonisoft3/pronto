@@ -389,8 +389,11 @@ An app's machines step in the object: the migration declares each step over
 an engine the tier supplies, and the object's is PGlite for workerd's host
 import, handed the machines `edge.ts` renders from the app's rules
 ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.13.1/packages/mecha-edge/README.md#machines)).
-A deadline a machine arms is the object's alarm; a cron schedule is refused,
+A deadline a machine arms is the object's alarm; an active cron schedule is refused,
 since the edge runs no ticker ([pending](../PENDING.md#release-targets)).
+For a frozen archive, `code.meta.edgeClock: "disabled"` emits `--clock disabled`:
+the object preserves schedule rows and clears alarms at boot and delivery.
+The default, `"deadlines"`, runs machine deadlines and accepts suspended cron history.
 
 ## docker
 

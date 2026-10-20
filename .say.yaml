@@ -40,7 +40,7 @@ say:
         priority: -1
         cmds:
           - do: "deno test --config deno.json --allow-read --allow-run=cue identity_test.ts"
-          - do: "deno test --no-config --allow-read --allow-run=cue auth-providers.test.ts"
+          - do: "deno test --no-config --allow-read --allow-run=cue auth-providers.test.ts login-design.test.ts"
       k8s:
         priority: -1
         cmds:

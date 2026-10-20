@@ -74,3 +74,6 @@ externalGenerateOwnsCompiler: strings.Contains(_externalBuild.targets.generate.c
 externalBuildDependsOnGenerate: _externalBuild.targets.build.deps & [":generate"]
 externalLintDependsOnGenerate: _externalBuild.targets.lint.deps & [":generate", ":lint-inputs"]
 externalBuildRunsConsumerRules: strings.Contains(_externalBuild.targets.build.cmd.builtin.do, "task-leaf build") & true
+
+frozenArchiveClock: strings.Contains((dist.#Project & {edgeClock: "disabled"}).edge, "--clock disabled") & true
+defaultEdgeClock: strings.Contains(_project.edge, "--clock disabled") & false

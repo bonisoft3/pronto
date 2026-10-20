@@ -1,7 +1,7 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, databaseMode: 'existing' | 'separate' = 'existing') {
+export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, databaseMode: 'existing' | 'separate' = 'existing', clock: 'deadlines' | 'disabled' = 'deadlines') {
   out = await Deno.realPath(out)
   const headers = await Deno.readTextFile(path.join(out, 'public/_headers'))
   const policy = headers.match(/^  Content-Security-Policy: (.+)$/m)?.[1]
@@ -59,6 +59,7 @@ class SnapshotReader extends RpcTarget {
   read(path) { return this.snapshot.read(path) }
 }
 const Base = edgeObject({
+  clock: ${JSON.stringify(clock)},
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(cfg.tables)},
   schema: ${JSON.stringify(cfg.schema ?? {})},
@@ -224,8 +225,9 @@ export default {
 }
 
 if (import.meta.main) {
-  const [out, omnishell, mecha, name, origin, mode = 'existing'] = Deno.args
-  if (!origin) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin>')
+  const [out, omnishell, mecha, name, origin, mode = 'existing', clock = 'deadlines'] = Deno.args
+  if (!origin) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin> [existing|separate] [deadlines|disabled]')
   if (mode !== 'existing' && mode !== 'separate') throw new Error('database mode must be existing or separate')
-  await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, mode)
+  if (clock !== 'deadlines' && clock !== 'disabled') throw new Error('clock must be deadlines or disabled')
+  await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, mode, clock)
 }

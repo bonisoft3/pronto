@@ -20,7 +20,7 @@
     {"path":"shell/screens/grid.css","sha256":"41ee2191c8c328326532755a132cbc1119573856e83da12451fb5d7182f42cd3","derived":false},
     {"path":"shell/screens/timer.css","sha256":"0fc6514c91150cc37fbc10b159f8b362e5fc6db79649dbf2b77f48acfa6e9028","derived":false},
     {"path":"shell/screens/todo.css","sha256":"da3ec217690d5bd3c100d0513fff0f3896274b2aded381ad56b5f687987d053b","derived":false},
-    {"path":"shell/design.css","sha256":"16b540393c9ffb5090e8ffcf4e42da12cdf2b5af784638d2484d5c734dfc85d2","derived":true}
+    {"path":"shell/design.css","sha256":"c1e2548d4f78952324ef151d180e7472654d506ec9900a84b833d82c2997ecd3","derived":true}
   ],
   "cel_ir": [
     {"cel":"this == 'board'"},

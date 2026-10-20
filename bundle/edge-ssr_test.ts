@@ -11,6 +11,28 @@ async function securityHeaders(out: string) {
 
 type Config = { durable_objects: { bindings: { name: string; script_name?: string }[] } }
 
+Deno.test('SSR database generation preserves the clock policy in both database modes', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    for (const mode of ['existing', 'separate'] as const) {
+      for (const clock of ['deadlines', 'disabled'] as const) {
+        await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
+        await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', mode, clock)
+        const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
+        const options = source.slice(source.indexOf('const Base = edgeObject('), source.indexOf('export class Cluster'))
+        const captured = new Function('edgeObject', 'pgliteWasm', 'initdbWasm', 'pgliteData', 'icu', options + '\nreturn Base')(Object, null, null, null, null)
+        assert.equal(captured.clock, clock)
+      }
+    }
+  } finally { await Deno.remove(out, { recursive: true }) }
+})
+
 Deno.test('installed edge helpers load the supplied runtime without a monorepo sibling', async () => {
   const tmp = await Deno.makeTempDir({ prefix: 'edge installed ' })
   try {
