@@ -55,7 +55,6 @@ import (
 		instance:       "\(R.name)-db"
 		connection:     "\(R.project):\(R.region):\(instance)"
 		database:       R.name
-		bucket:         "\(R.project)-\(R.name)-electric"
 		serviceAccount: "\(R.name)-run@\(R.project).iam.gserviceaccount.com"
 		job:            "\(R.name)-initdb"
 		// Generated once by the release, never a literal in what it renders;
@@ -129,6 +128,9 @@ import (
 				serviceAccountName: R.names.serviceAccount
 				// electric's live requests hold for its long-poll.
 				timeoutSeconds: 300
+				// A page load asks for every hatch file at once while electric's
+				// live requests hold theirs, and this one instance is all there is.
+				containerConcurrency: 1000
 				containers: [{
 					name:  "caddy"
 					image: (imageOf & {svc: "caddy"}).out
@@ -176,21 +178,17 @@ import (
 						{name: "ELECTRIC_PORT", value: "\(P.electric)"},
 						{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
 						{name: "ELECTRIC_DB_POOL_SIZE", value: "\(#Pools.electric)"},
-						// Its shape logs outlive an instance on the bucket, as on
-						// mecha's GCP deployment.
-						{name: "ELECTRIC_STORAGE_DIR", value: "/electric"},
+						// The instance's own: electric's shape metadata is SQLite,
+						// which a bucket mounted over FUSE cannot lock. A new
+						// instance rebuilds its shapes from Postgres.
+						{name: "ELECTRIC_STORAGE_DIR", value: "/tmp/electric"},
 					]
-					volumeMounts: [{name: "electric", mountPath: "/electric"}]
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
 				}, {
 					name:  "cloud-sql-proxy"
 					image: #Proxy
 					args: ["--port=\(P.database)", "--health-check", "--http-port=\(P.proxyHealth)", "--http-address=0.0.0.0", R.names.connection]
 					startupProbe: {httpGet: {path: "/startup", port: P.proxyHealth}, periodSeconds: 2, failureThreshold: 60}
-				}]
-				volumes: [{
-					name: "electric"
-					csi: {driver: "gcsfuse.run.googleapis.com", volumeAttributes: bucketName: R.names.bucket}
 				}]
 			}
 		}

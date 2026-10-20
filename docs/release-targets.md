@@ -426,7 +426,7 @@ nothing changed pushes the same digests and rolls nothing.
 |---|---|
 | database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts |
 | caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
-| electric's storage | a GCS bucket mounted as a volume |
+| electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
 | the stack's secrets | Secret Manager, generated once; the database URLs are composed from the passwords there, since Cloud Run expands no `$(VAR)` |
 
 This is mecha's [bundled unit](https://github.com/bonisoft3/mecha/blob/v0.12.1/docs/deployment.md#the-bundled-unit)
@@ -443,6 +443,15 @@ What bit on a real instance:
   switch into `anon`; initdb grants them to it on every release.
 - It does grant `BYPASSRLS` and `REPLICATION` to a role it made, so electric's
   role is compose's.
+- **Electric's storage cannot be a bucket.** Its shape metadata is SQLite,
+  which a GCS bucket mounted over FUSE cannot lock, so a restarted instance
+  failed to migrate it; mecha's GCP deployment predates that store.
+- **One instance takes 1000 requests at once**, Cloud Run's most: at its
+  default of 80, a page load's hatch files beside electric's held live
+  requests met "Rate exceeded".
+- **The smallest tier admits about 25 connections**, so the instance is raised
+  to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
+  container at the instance's address, so crud binds `*`.
 
 The release refuses an app whose compose project runs anything else: a
 migrate service, the change-feed unit, a ticker or clock, the airlock,
