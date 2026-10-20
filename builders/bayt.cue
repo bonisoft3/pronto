@@ -32,7 +32,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.63.1", ...}
+	tools: {"github:bonisoft3/bayt": "0.65.0", ...}
 	say: say: {
 		...
 

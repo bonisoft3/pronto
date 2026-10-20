@@ -34,7 +34,8 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       ["plugins/omnishell", "omnishell"],
       ["plugins/pronto", "pronto"],
     ].map(([local, name]) => [local, name, name === "sayt" ? Deno.env.get("PRONTO_SAYT_SOURCE") ?? join(repo, local) : join(repo, local)]);
-    let prontoVersion = "";
+    // Fixture module identity stays independent of the published tool self-pin.
+    const prontoVersion = "v0.0.0";
     const versions = new Map<string, Set<string>>();
     // Transitive pins may intentionally lag the direct ones. Publish this
     // fixture's sources at every declared version into the isolated registry.
@@ -68,7 +69,6 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       await cue(mirror, ["mod", "edit", "--source=self"]);
       await cue(mirror, ["mod", "tidy"]);
       if (name === "pronto") {
-        prontoVersion = `v${(await cue(mirror, ["export", "./distribution", "-e", "#Version", "--out", "text"])).trim()}`;
         versions.set("github.com/bonisoft3/pronto@v0", new Set([prontoVersion]));
       }
       const required = versions.get(`github.com/bonisoft3/${name}@v0`);
@@ -93,10 +93,21 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     }
     const d2 = tools["github:terrastruct/d2"];
     assert(typeof d2 === "string" && /^v\d+\.\d+\.\d+$/.test(d2), "D2 must have an exact release pin");
-    const pins = JSON.parse(await cue(repo, ["export", "plugins/pronto/.mirror/cue.mod/module.cue", "-e", "deps", "--out", "json"]));
-    for (const [, name] of modules) {
-      const version = name === "pronto" ? prontoVersion : pins[`github.com/bonisoft3/${name}@v0`].v;
-      assert(tools[`github:bonisoft3/${name}`] === version.slice(1), `${name}: bootstrap tool version differs from the direct CUE dependency`);
+    // A finish tag may update the CUE module while retaining an already
+    // published tool self-pin; the source declarations own the runtime roster.
+    const declaredPins = await Promise.all([
+      ["mecha", "libraries/mecha/toolchain", '#Tools["github:bonisoft3/mecha"]'],
+      ["omnishell", "plugins/omnishell/toolchain", '#Tools["github:bonisoft3/omnishell"]'],
+      ["pronto", "plugins/pronto/distribution", "#Version"],
+      ["sayt", "plugins/pronto/distribution", "#SaytVersion"],
+      ["bayt", "plugins/pronto/builders:bayt", '#Toolchain.tools["github:bonisoft3/bayt"]'],
+    ].map(async ([name, source, expression]) => {
+      const version = (await cue(repo, ["export", `./${source}`, "-e", expression, "--out", "text"])).trim();
+      return { name, source, expression, version };
+    }));
+    for (const { name, source, expression, version } of declaredPins) {
+      assert(/^\d+\.\d+\.\d+$/.test(version), `${source} ${expression}: tool self-pin must be an exact release version`);
+      assert(tools[`github:bonisoft3/${name}`] === version, `${name}: bootstrap tool version differs from ${source} ${expression}`);
     }
     const duckdb = tools["http:duckdb"];
     const assets: Record<string, string> = {
