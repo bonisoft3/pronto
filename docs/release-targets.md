@@ -313,8 +313,8 @@ What fixes its shape, as built:
   opens each request with a transaction-local role, `app.scopes` and
   `request.jwt.claims`, so a shared connection never leaks a subject, and row
   policy is Postgres's own here as on a single machine. Guests only:
-  `/auth/guest` mints the credentials; passkeys wait for mecha's auth service
-  to run in the Worker.
+  `/auth/guest` mints the credentials; passkeys and providers wait for mecha's
+  auth service to run in the Worker.
 - **Sync holds requests open.** A tab's live shape request waits on the
   object, which keeps the object awake while a tab is open; that is the price
   of the simplest path, and a poke on a hibernating WebSocket is the cheaper
@@ -433,6 +433,21 @@ each cloud's own and never in the session. Region is the first of the axes a
 system shards along, before time and user. mecha's
 [clouds as built](https://github.com/bonisoft3/mecha/blob/v0.12.1/docs/deployment.md#clouds-as-built)
 is the mapping these start from.
+
+A sign-in provider (`auth.providers`) is registered with the provider, told
+the callback `<origin>/auth/oidc/<name>/callback`, which hands back a client
+id. The program may give it, with the issuer and the rest, as
+`auth.provider.<name>`: the auth service's defaults, which every target's
+compose renders without an environment, a visual check's nested one included.
+The deployment overrides each as `OIDC_<NAME>_<SETTING>`, and gives what the
+program must not hold, Google's client secret as `OIDC_GOOGLE_CLIENT_SECRET`.
+Another OpenID issuer may stand in the provider's place, such as a broker an
+operator runs, by its issuer and the client `origin`
+(mecha's [provider sign-in](https://github.com/bonisoft3/mecha/blob/main/services/auth/README.md#provider-sign-in)).
+Compose refuses to render the stack when neither gives a client id, and the
+k8s release copies every `OIDC_*` setting from there onto the auth service, so
+no target boots a provider it cannot sign in through. A client secret copied
+that way is a plain value in the manifest, not a Kubernetes secret.
 
 ## Rejected
 

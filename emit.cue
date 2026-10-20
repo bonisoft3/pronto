@@ -1512,7 +1512,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			native: true
 		}
 		if S.code.capabilities.auth != _|_ {
-			auth: S.code.capabilities.auth
+			// A provider's settings are the cluster's (#signIn).
+			auth: {for k, v in S.code.capabilities.auth if k != "provider" {(k): v}}
 		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the
@@ -1732,6 +1733,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			}
 		}]
 	}
+}
+
+// The providers the cluster's auth service signs in through, each with the
+// settings the app gives it as the deployment's defaults.
+#signIn: S={
+	auth: _
+	out: {for p in S.auth.providers {(p): *S.auth.provider[p] | {}}}
 }
 
 // Whether an app's cluster keeps server-side state: an entity of a cluster durability,
@@ -2153,6 +2161,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// them as constraints.
 		capabilities: {
 			auth:  D.code.capabilities.auth != _|_
+			if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.providers != _|_ {
+				signIn: (#signIn & {auth: D.code.capabilities.auth}).out
+			}
 			blobs: D.code.capabilities.blobs
 			server: (#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out
 		}
@@ -2304,9 +2315,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 
 	// The target terminal's published doctrine is a compile-time constraint:
-	// an app cannot demand an auth mode its terminal does not offer.
+	// an app cannot demand an auth mode or a provider its terminal does not
+	// offer.
 	if E.code.capabilities.auth != _|_ {
 		_authModeOffered: true & list.Contains(E.terminal.capabilities.auth.modes, E.code.capabilities.auth.mode)
+		if E.code.capabilities.auth.providers != _|_ for p in E.code.capabilities.auth.providers {
+			_authProviderOffered: (p): true & list.Contains(E.terminal.capabilities.auth.providers, p)
+		}
 	}
 
 	for _, v in E.code.capabilities.vendored {
@@ -2631,6 +2646,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// these from the code, and a cluster that disagrees conflicts here.
 	cluster: state: (#MachineTimerState & {code: E.code}).out
 	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
+	if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ {
+		cluster: capabilities: signIn: (#signIn & {auth: E.code.capabilities.auth}).out
+	}
 	cluster: capabilities: blobs: E.code.capabilities.blobs
 	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
 	// The served route table, resolved once: shell.yaml IS this, and the

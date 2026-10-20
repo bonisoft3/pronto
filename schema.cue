@@ -1548,6 +1548,26 @@ import (
 			// one gesture that signs in, or keeps the guest's identity under a
 			// new passkey.
 			promote: *false | bool
+			// The providers a person may sign in through besides a passkey,
+			// each one the terminal offers (#emit): a way in at the gate and in
+			// a guest's strip, run by the cluster's auth service. A provider's
+			// person and a passkey's are two.
+			providers?: [string, ...string] & list.UniqueItems()
+			// A named provider's settings, the cluster's defaults for what the
+			// deployment's OIDC_<NAME>_<SETTING> overrides: another issuer in
+			// the provider's place, where the cluster reaches it, the client
+			// registered there (`origin` for a public client named by the
+			// app's origin), the scope and further authorization parameters.
+			// Without a client here the deployment must give one. Never a
+			// secret, and never the terminal's.
+			provider?: [Name=string]: {
+				_named: true & list.Contains(providers, Name)
+				issuer?:   string
+				internal?: string
+				client?:   string
+				scope?:    string
+				params?:   string
+			}
 		}
 		// The app ships a native host beside the web one, so every route owes
 		// its web affordances a native peer: check-parity reads this key to

@@ -625,6 +625,7 @@ import (
 							},
 							{name: "WEBAUTHN_RP_ID", value: authRpId},
 							{name: "WEBAUTHN_ORIGIN", value: authOrigin},
+							for k, v in release.auth.oidc {{name: k, value: v}},
 						]
 						resources: release.resources
 						livenessProbe: {
