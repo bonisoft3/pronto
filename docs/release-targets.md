@@ -480,7 +480,10 @@ migrate service, the change-feed unit, a ticker or clock, the airlock,
 compute, blobs, images or render. A provider's settings come from compose as
 the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
 secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
-release maps it onto the service and prints the DNS records it needs.
+release maps it onto the service and prints the DNS records it needs; each of
+`aliases` (www, say) is mapped too, and the door sends it on to the domain
+(`PRONTO_ALIASES`), since a passkey's relying party is the domain alone. A
+domain is verified once by its owner (Search Console) before Google routes it.
 
 ## The clouds and k8s
 

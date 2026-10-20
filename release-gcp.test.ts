@@ -145,3 +145,24 @@ Deno.test("electric's storage is the instance's, no bucket", async () => {
   assertEquals(electric.volumeMounts, undefined);
   assertEquals(electric.env.find((e: { name: string }) => e.name === "ELECTRIC_STORAGE_DIR").value, "/tmp/electric");
 });
+
+// An alias (www) reaches the same service and is sent on to the origin: a
+// passkey's relying party is the origin alone, so a reader signed in at www
+// would be refused.
+Deno.test("an alias is mapped and redirected to the origin", async () => {
+  const r = await built(release(`, aliases: ["www.bonkchess.com"]`), "service");
+  assertEquals(r.success, true, r.stderr);
+  const caddy = r.value.spec.template.spec.containers[0];
+  assertEquals(caddy.env.find((e: { name: string }) => e.name === "PRONTO_ALIASES").value, "www.bonkchess.com");
+  const plan = await built(release(`, aliases: ["www.bonkchess.com"]`), "plan");
+  assertEquals(plan.value.aliases, ["www.bonkchess.com"]);
+  const none = await built(release(), "service");
+  assertEquals(none.value.spec.template.spec.containers[0].env.some((e: { name: string }) => e.name === "PRONTO_ALIASES"), false);
+  assertEquals((await built(`{name: "battlechess", project: "brawl-chess", aliases: ["www.bonkchess.com"]}`)).success, false, "an alias needs a domain to send readers to");
+});
+
+Deno.test("the door sends an alias host on to the origin", async () => {
+  const caddyfile = await Deno.readTextFile(new URL("./assets/Caddyfile", import.meta.url));
+  assertStringIncludes(caddyfile, "@alias host {$PRONTO_ALIASES:alias.invalid}");
+  assertStringIncludes(caddyfile, "redir @alias {$ORIGIN}{uri} 308");
+});

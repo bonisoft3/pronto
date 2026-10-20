@@ -26,6 +26,9 @@ import (
 	// one, which the release fills from the project's number.
 	domain?: =~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
 	runHost: *"" | =~"^[a-z0-9-]+\\.[a-z0-9-]+\\.run\\.app$"
+	// Other names mapped onto the service, each sent on to the domain by the
+	// door (www, say): a passkey's relying party is the domain alone.
+	aliases: *[] | [...=~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"]
 	sqlTier:  *"db-f1-micro" | string
 
 	// Filled by the release from what it pushed: a revision resolves a tag once,
@@ -137,6 +140,7 @@ import (
 					ports: [{name: "http1", containerPort: P.caddy}]
 					env: list.Concat([[
 						if R._origin != "" {{name: "ORIGIN", value: R._origin}},
+						if len(R.aliases) > 0 {{name: "PRONTO_ALIASES", value: strings.Join(R.aliases, " ")}},
 						{name: "PRONTO_UPSTREAM_CRUD", value: "127.0.0.1:\(P.crud)"},
 						{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
 						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
@@ -255,6 +259,9 @@ import (
 		sqlTier:        R.sqlTier
 		sqlFlags:       #SqlFlags
 		if R.domain != _|_ {domain: R.domain}
+		aliases:        R.aliases
+		// An alias sends readers on to the domain, so it needs one.
+		if len(R.aliases) > 0 {aliasTarget: R.domain}
 		hasRpId:        R._rpId != ""
 		serviceYaml:    yaml.Marshal(B.service)
 		jobYaml:        yaml.Marshal(B.job)
