@@ -1,7 +1,12 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@std/assert@1.0.11": "1.0.11",
     "jsr:@std/encoding@1.0.7": "1.0.7",
+    "jsr:@std/internal@^1.0.5": "1.0.14",
+    "npm:@bufbuild/cel-spec@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
+    "npm:@bufbuild/cel@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
+    "npm:@bufbuild/protobuf@2.14.1": "2.14.1",
     "npm:@types/css-tree@2.3.10": "2.3.10",
     "npm:@types/node@*": "22.15.15",
     "npm:acorn-walk@8.3.4": "8.3.4",
@@ -10,11 +15,36 @@
     "npm:linkedom@0.18.4": "0.18.4"
   },
   "jsr": {
+    "@std/assert@1.0.11": {
+      "integrity": "2461ef3c368fe88bc60e186e7744a93112f16fd110022e113a0849e94d1c83c1",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
     "@std/encoding@1.0.7": {
       "integrity": "f631247c1698fef289f2de9e2a33d571e46133b38d042905e3eac3715030a82d"
+    },
+    "@std/internal@1.0.14": {
+      "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
     }
   },
   "npm": {
+    "@bufbuild/cel-spec@0.5.0_@bufbuild+protobuf@2.14.1": {
+      "integrity": "sha512-nYqgVUsw+5XmhwxKyWJz/uA1hEBCGd0Bg6o0vFA9C7taFTYMRfCl94ZDxObR6Qen6QMzj0b9Bhnqr9viKkFonw==",
+      "dependencies": [
+        "@bufbuild/protobuf"
+      ]
+    },
+    "@bufbuild/cel@0.5.0_@bufbuild+protobuf@2.14.1": {
+      "integrity": "sha512-LpSZGvGRMrC0FPKXmVIzNltoT/Q9SOuJ1cCWPcpol72AM1O24hv40COigZfwtaL+QEuOLHszqIohhXNxE/HZKg==",
+      "dependencies": [
+        "@bufbuild/cel-spec",
+        "@bufbuild/protobuf"
+      ]
+    },
+    "@bufbuild/protobuf@2.14.1": {
+      "integrity": "sha512-agRJn3+EJDUe8AvxTx/LnHA/GErvLE62pSaSk7+MwFOtOv8eWBu/qCq2qoZjBjVZ3C2aiFJCveuSs17KMkYGOw=="
+    },
     "@types/css-tree@2.3.10": {
       "integrity": "sha512-WcaBazJ84RxABvRttQjjFWgTcHvZR9jGr0Y3hccPkHjFyk/a3N8EuxjKr+QfrwjoM5b1yI1Uj1i7EzOAAwBwag=="
     },

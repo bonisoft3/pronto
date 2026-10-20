@@ -116,9 +116,6 @@ import (
 	edgeDerive: "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
 	// `--reset` replaces the object's data with this release's.
 	publishEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle publish-edge.ts) dist/cloudflare --mecha \(P._mecha) ...(if ($env.SAY_RELEASE_ARGS_RESET? | is-empty) { [] } else { ['--reset'] })"}).out
-	// truco's edge release until the edge has a clock for its lobby sweep:
-	// native SQLite in the object, its tables from shell.json.
-	cloudflare: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle cloudflare.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])"}).out
 	// The container tier's artifact: the self-contained appliance image.
 	docker:        "docker compose build release-docker"
 	publishDocker: "use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag; let image_tag = ($tag | path basename); with-env { BAYT_IMAGE_TAG: $image_tag } { docker compose build release-docker; docker compose push release-docker }"

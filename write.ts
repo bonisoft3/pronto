@@ -24,6 +24,7 @@ import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
 import { parseHeld, seedSql, type SeedData } from "./seed.ts";
 import { type Program, renderIr, writeIrStylesheet } from "./ir-render.ts";
+import { declaredMachine } from "./hybrid-spec.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
 import { surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
@@ -178,10 +179,8 @@ async function rendered(emission: Emission): Promise<Map<string, string>> {
       // every child is handed the declarations of the machines it may write to.
       const data = f.data as {machine: {machine: MechaReducerMachine; rules: string}; local: boolean; machines: Record<string, MechaReducerMachine>; src: string};
       for (const path of [data.src, data.machine.rules]) if (unsafe(path)) fail(`${rel}: unsafe path ${path}`);
-      const declared = ({name, version, fuel, entropy, initial, initialize, state, view, public: shown, contracts, events, states}: MechaReducerMachine) =>
-        ({name, version, fuel, entropy, initial, initialize, state, view, public: shown, contracts, events, states});
-      const spec = JSON.stringify(declared(data.machine.machine));
-      const machines = JSON.stringify(Object.fromEntries(Object.entries(data.machines).sort(([a], [b]) => a < b ? -1 : 1).map(([n, m]) => [n, {spec: declared(m)}])));
+      const spec = JSON.stringify(declaredMachine(data.machine.machine));
+      const machines = JSON.stringify(Object.fromEntries(Object.entries(data.machines).sort(([a], [b]) => a < b ? -1 : 1).map(([n, m]) => [n, {spec: declaredMachine(m)}])));
       const app = (await Deno.readTextFile(`${appDir}/${data.src}`)).trim();
       let machine = "{spec}";
       if (data.local) {

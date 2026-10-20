@@ -436,17 +436,12 @@ build reads or writes the Depot bake cache. Checked 2026-10-02.
 `pages` and `cloudflare` are emitted. The remaining designs are
 [release targets](docs/release-targets.md)'s, built on a branch of their own.
 
-**truco releases to the native SQLite object**
-([cloudflare](docs/release-targets.md#cloudflare)): its lobby sweep needs a
-clock the edge cluster does not have. The emitter routes `truco` by name to
-`cloudflare.ts`, whose `publish` runs `npx wrangler deploy`; once the edge
-ticks, truco moves and both go.
-
-**The edge derives nothing and ticks nothing**
+**The edge derives nothing and runs no cron**
 ([cloudflare](docs/release-targets.md#cloudflare)): the outbox and Queue, the
 scale-to-zero containers for transform and compute with compute's tables on
 R2, their generation from the compose closure, and the Cron Trigger are
-designed and not built.
+designed and not built. The object's alarm serves a machine's deadlines
+alone; a cron schedule is refused there.
 
 **`gcp` has no rule**, no `clusters/gcp.cue` and no skaffold profile in
 `builders/bayt.cue` ([the design](docs/release-targets.md#the-clouds-and-k8s)).

@@ -1,3 +1,4 @@
+import { HYBRID_NAME } from "./hybrid-spec.ts";
 import type { MechaPorts, MechaPortSql } from "./mecha-ports.ts";
 import { jessieFacts } from "./jessie.ts";
 import { partsOf } from "./mecha-surface.ts";
@@ -41,7 +42,7 @@ export async function compileMechaReducer(
   instrument: (source: string) => string,
   surface: Surface = { seat: [], public: [] },
 ): Promise<{ source: string; sql: string }> {
-  if (!/^[a-z][a-z0-9_]{0,30}$/.test(spec.name)) throw new Error("invalid hybrid name");
+  if (!HYBRID_NAME.test(spec.name)) throw new Error("invalid hybrid name");
   if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid hybrid version");
   if (!Number.isSafeInteger(spec.fuel) || spec.fuel < 1 || spec.fuel > 1000000) throw new Error("invalid hybrid fuel");
   const entropy = spec.entropy ?? 0;
@@ -115,8 +116,9 @@ return JSON.parse(run(JSON.stringify(input)));
   // table the machine has no part in would fail the migration.
   const parts = partsOf(spec);
   const sql = `
+-- tier: container
 CREATE EXTENSION IF NOT EXISTS plv8;
-${entropy ? "CREATE EXTENSION IF NOT EXISTS pgcrypto;" : ""}
+-- tier: any
 CREATE SCHEMA ${schema};
 REVOKE ALL ON SCHEMA ${schema} FROM PUBLIC;
 -- A machine's steps run serializable: every interleaving of its transactions
@@ -146,7 +148,8 @@ SELECT floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint;
 $clock$;
 REVOKE ALL ON FUNCTION ${schema}.clock() FROM PUBLIC;
 ${entropy ? `CREATE FUNCTION ${schema}.draw() RETURNS text LANGUAGE sql AS $draw$
-SELECT encode(public.gen_random_bytes(${entropy}), 'hex');
+SELECT left(string_agg(substr(hex, 1, 12) || substr(hex, 14, 3) || substr(hex, 18), ''), ${entropy * 2})
+FROM (SELECT replace(gen_random_uuid()::text, '-', '') AS hex FROM generate_series(1, ${Math.ceil(entropy * 2 / 30)})) random;
 $draw$;
 REVOKE ALL ON FUNCTION ${schema}.draw() FROM PUBLIC;
 ` : ""}CREATE TABLE ${schema}.instance (
@@ -172,7 +175,18 @@ CREATE TABLE ${schema}.receipt (
   entropy text,
   PRIMARY KEY(instance_id, actor, command_id)
 );
-CREATE FUNCTION ${schema}.step(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};
+-- The step's engine is the tier's. PostgreSQL runs the rules in plv8, inside
+-- the fence; the edge object creates ${schema}.engine over its host import
+-- when it boots (mecha-edge's machines.ts); the browser tier has no engine and
+-- steps nothing. plpgsql resolves the engine when a step runs, so the step is
+-- declared once, on every tier, before any engine exists.
+-- tier: container
+CREATE FUNCTION ${schema}.engine(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};
+REVOKE ALL ON FUNCTION ${schema}.engine(jsonb) FROM PUBLIC;
+-- tier: any
+CREATE FUNCTION ${schema}.step(input jsonb) RETURNS jsonb LANGUAGE plpgsql AS $step$
+BEGIN RETURN ${schema}.engine(input); END;
+$step$;
 REVOKE ALL ON FUNCTION ${schema}.step(jsonb) FROM PUBLIC;
 
 -- What every member and, where declared, everyone reads of the instance: its

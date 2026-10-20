@@ -3,6 +3,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, databaseMode: 'existing' | 'separate' = 'existing') {
   out = await Deno.realPath(out)
+  const headers = await Deno.readTextFile(path.join(out, 'public/_headers'))
+  const policy = headers.match(/^  Content-Security-Policy: (.+)$/m)?.[1]
+  if (!policy) throw new Error('the edge assets carry no Content-Security-Policy header')
   const separate = databaseMode === 'separate'
   const database = separate ? name + '-database' : name
   const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
@@ -83,6 +86,7 @@ import { edgeHints } from '${fromSrc(fileURLToPath(new URL('edge-hints.ts', impo
 import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json' with { type: 'json' }
 ${separate ? '' : "export { Cluster } from './database.ts'"}
+const DOCUMENT_POLICY = ${JSON.stringify(policy)}
 const RENDER_FRESH_MS = 60_000
 const RENDER_SWR_S = 86_400
 const RENDER_CACHE_CONTROL = 'public, no-cache, must-revalidate'
@@ -108,6 +112,7 @@ export default {
         const body = response.body ? await response.arrayBuffer() : null
         const headers = new Headers(response.headers)
         headers.set('Link', linkHeader)
+        headers.set('Content-Security-Policy', DOCUMENT_POLICY)
         if (cache && response.status === 200 && body && !request.headers.has('if-none-match')) {
           const storedHeaders = new Headers(headers)
           storedHeaders.set('cache-control', \`public, max-age=\${RENDER_SWR_S}\`)
@@ -133,6 +138,7 @@ export default {
           headers.delete('x-rendered-at')
           headers.set('cache-control', RENDER_CACHE_CONTROL)
           headers.set('Link', linkHeader)
+          headers.set('Content-Security-Policy', DOCUMENT_POLICY)
           if (age <= RENDER_FRESH_MS) {
             headers.set('x-edge-cache', 'hit')
             return new Response(request.method === 'HEAD' ? null : cached.body, { status: cached.status, headers })

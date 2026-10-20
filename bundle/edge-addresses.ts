@@ -24,7 +24,15 @@ export async function addressEdgeAssets(out: string, previous?: string): Promise
   const directories = new Set(Object.values(imports).map(url => path.posix.dirname(url)))
   if (previous) for (const dir of await retainReleases(out, previous)) directories.add(dir)
   if (directories.size > 100) throw new Error('edge asset cache rules exceed Cloudflare’s 100-rule limit')
-  await Deno.writeTextFile(path.join(out, '_headers'), [...directories].sort().map(dir => `${dir === '/' ? '' : dir}/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable\n`).join('\n'))
+  // The document's policy as a header too, as the container door sends it:
+  // the Worker answers every navigation with `/`, so the rule covers them all.
+  const { document } = parseHTML(await Deno.readTextFile(path.join(out, 'shell/index.html')))
+  const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')
+  if (!policy) throw new Error('the document carries no Content-Security-Policy')
+  await Deno.writeTextFile(path.join(out, '_headers'), [
+    `/\n  Content-Security-Policy: ${policy}\n`,
+    ...[...directories].sort().map(dir => `${dir === '/' ? '' : dir}/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable\n`),
+  ].join('\n'))
 
   const link = (name: string, as: string) => {
     const url = imports[name]
@@ -33,7 +41,6 @@ export async function addressEdgeAssets(out: string, previous?: string): Promise
   }
   // Header modulepreloads can resolve dependencies before the map exists, so
   // the entry's stylesheets and fetch preloads are the hints all routes share.
-  const { document } = parseHTML(await Deno.readTextFile(path.join(out, 'shell/index.html')))
   const common = new Set<string>()
   for (const node of document.querySelectorAll('link[rel="stylesheet"][href], link[rel="preload"][href]')) {
     const href = node.getAttribute('href')!

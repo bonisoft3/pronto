@@ -8,6 +8,8 @@
 //
 // <out>/public   the terminal and app assets; data requests reach the Worker
 // <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
+// <out>/src/machines.js   the app's machines, each the step its migration
+//                declares (mecha-reducer.ts), for the object's host import
 // <out>/pgdata   rls.sql, the migrations and --derived's rows, applied on disk;
 //                or, with --from, a copy of a directory built elsewhere (an
 //                archive) with the pgroll migrations its ledger lacks applied
@@ -18,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
 import { addressEdgeAssets, separateAssetDirectories } from './edge-addresses.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
+import { type Hybrids, renderMachines } from './edge-machines.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -100,6 +103,17 @@ await run(Deno.execPath(), [
   ...(flags['--from'] ? ['--from', path.resolve(flags['--from']), '--pgroll', pgroll] : []),
 ])
 
+// The app's machines: the migration declared each step over an engine this
+// tier supplies (mecha-edge's machines.ts), so the object is handed the same
+// rules PostgreSQL would run in plv8 (edge-machines.ts).
+const hybridsOut = await new Deno.Command('cue', {
+  args: ['export', '.', '-e', '{hybrids: *code.state.hybrids | {}}', '--out', 'json'],
+  cwd: app, stdout: 'piped', stderr: 'inherit',
+}).output()
+if (!hybridsOut.success) fail('cue export of the machines failed')
+const { hybrids } = JSON.parse(new TextDecoder().decode(hybridsOut.stdout)) as { hybrids: Hybrids }
+if (Object.keys(hybrids).length) await Deno.writeTextFile(path.join(out, 'src/machines.js'), await renderMachines(name, app, omnishell, hybrids))
+
 const rel = (p: string) => {
   const r = path.relative(out, p).replaceAll('\\', '/')
   return r.startsWith('.') ? r : `./${r}`
@@ -115,7 +129,7 @@ import { edgeWorker } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/
 import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
 import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
-import pgliteWasm from '../pglite/pglite.wasm'
+${Object.keys(hybrids).length ? "import machines from './machines.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
@@ -123,7 +137,7 @@ import icu from '../pglite/icu-root.tgz'
 export const Cluster = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(shell.tables)},
-  schema: ${JSON.stringify(shell.schema ?? {})},
+  schema: ${JSON.stringify(shell.schema ?? {})},${Object.keys(hybrids).length ? '\n  machines,' : ''}
 })
 export default {
   async fetch(req, env, ctx) {

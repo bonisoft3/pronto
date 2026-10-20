@@ -385,10 +385,12 @@ runs the same SQL locally, so an edge-only engine never becomes the reference.
 Batch work over the whole history — ratings refit over years — stays in a
 container on any tier.
 
-truco keeps the previous target until the edge has a clock: a Worker over a
-Durable Object holding its tables in native SQLite ([`cloudflare.ts`](../bundle/cloudflare.ts)),
-whose alarm sweeps its lobby, and which enforces no scope. The emitter routes
-it there by name ([pending](../PENDING.md#release-targets)).
+An app's machines step in the object: the migration declares each step over
+an engine the tier supplies, and the object's is PGlite for workerd's host
+import, handed the machines `edge.ts` renders from the app's rules
+([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.12.1/packages/mecha-edge/README.md#machines)).
+A deadline a machine arms is the object's alarm; a cron schedule is refused,
+since the edge runs no ticker ([pending](../PENDING.md#release-targets)).
 
 ## docker
 

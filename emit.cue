@@ -1830,23 +1830,15 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						note: "Pronto release@pages"
 					}
 				}
-				// The edge target: mecha's edge cluster in one Durable Object.
-				// truco alone keeps the native SQLite object, whose alarm sweeps
-				// its lobby, until the edge has a clock; then it moves and that
-				// generator goes.
+				// The edge target: mecha's edge cluster in one Durable Object,
+				// where the app's machines step and their deadlines are its alarm.
 				if list.Contains(D.code.meta.targets, "cloudflare") {
 					cloudflare: {
 						verb:     "release"
 						platform: "cloudflare"
 						note:     "Pronto release@cloudflare"
-						if D.code.meta.name == "truco" {
-							cmds: [_distribution.cloudflare]
-							publish: ["npx wrangler deploy --config dist/cloudflare/wrangler.jsonc"]
-						}
-						if D.code.meta.name != "truco" {
-							cmds: [if len(_distribution.derived.tables) > 0 {_distribution.edgeDerive}, _distribution.edge]
-							publish: [_distribution.publishEdge]
-						}
+						cmds: [if len(_distribution.derived.tables) > 0 {_distribution.edgeDerive}, _distribution.edge]
+						publish: [_distribution.publishEdge]
 					}
 				}
 				if list.Contains(D.code.meta.targets, "docker") {
