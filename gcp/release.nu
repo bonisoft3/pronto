@@ -11,7 +11,7 @@ use ../k8s/release.nu [resolve-app]
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
-const unbuilt = ["migrate" "mesh-events" "conduit" "transform" "ticker" "clock" "airlock" "compute" "rclone-s3" "imgproxy" "render"]
+const unbuilt = ["mesh-events" "conduit" "transform" "ticker" "clock" "airlock" "compute" "rclone-s3" "imgproxy" "render"]
 
 def --wrapped gc [...args] {
 	let input = $in
@@ -73,6 +73,8 @@ def ensure-infrastructure [plan: record] {
 	ensure-secret $n.secrets.CRUD_DB_URI $p $"postgres://postgres:($pg)($at)?sslmode=disable" | ignore
 	ensure-secret $n.secrets.AUTH_DATABASE_URL $p $"postgres://postgres:($pg)($at)?sslmode=disable" | ignore
 	ensure-secret $n.secrets.ELECTRIC_DB_URL $p $"postgresql://electric:($electric)($at)?sslmode=disable" | ignore
+	# A job has no proxy beside it: pgroll's runner reaches the database over the socket.
+	ensure-secret $n.secrets.MIGRATE_DATABASE_URL $p $"postgres://postgres:($pg)@/($n.database)?host=/cloudsql/($n.connection)&sslmode=disable" | ignore
 
 	if not (exists sql instances describe $n.instance --project $p) {
 		print $"gcp: creating Cloud SQL ($n.instance) \(several minutes\)"
@@ -93,7 +95,7 @@ def ensure-infrastructure [plan: record] {
 
 # The runtime images, built as the app's compose project builds them and pushed
 # by digest: what integrate tested is what releases.
-def push-images [app_dir: string, plan: record, name: string]: nothing -> record {
+def push-images [app_dir: string, plan: record, name: string, services: list<string>]: nothing -> record {
 	let host = ($plan.registry | split row "/" | first)
 	# A short-lived token, not a credential helper written into Docker's config.
 	gc auth print-access-token | ^docker login --username oauth2accesstoken --password-stdin $"https://($host)"
@@ -102,11 +104,11 @@ def push-images [app_dir: string, plan: record, name: string]: nothing -> record
 		cd $app_dir
 		# Reproducible, so an unchanged source pushes the digest it pushed before.
 		with-env {SOURCE_DATE_EPOCH: "0"} {
-			^docker compose --profile "*" config | ^docker buildx bake -f - --load --provenance=false $"--allow=fs.read=($root)" --set "*.platform=linux/amd64" ...$runtime
+			^docker compose --profile "*" config | ^docker buildx bake -f - --load --provenance=false $"--allow=fs.read=($root)" --set "*.platform=linux/amd64" ...$services
 		}
 	}
-	let targets = (do { cd $app_dir; ^docker compose --profile "*" config | ^docker buildx bake -f - --print ...$runtime } | from json | get target)
-	$runtime | each {|svc|
+	let targets = (do { cd $app_dir; ^docker compose --profile "*" config | ^docker buildx bake -f - --print ...$services } | from json | get target)
+	$services | each {|svc|
 		let local = ($targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
 		let repo = $"($plan.registry)/($name)-($svc)"
 		^docker tag $local $"($repo):release"
@@ -151,6 +153,16 @@ def map-domain [domain: string, service: string, project: string, region: string
 	}
 }
 
+# A job applied and run to its end; its logs are where a failure says why.
+def run-job [file: string, name: string, what: string, project: string, region: string] {
+	gc run jobs replace $file --region $region --project $project | ignore
+	print $"gcp: ($what) \(($name)\)"
+	let run = (^gcloud --quiet run jobs execute $name --region $region --project $project --wait | complete)
+	if $run.exit_code != 0 {
+		error make {msg: $"($name) failed: ($run.stderr | str trim)\nlogs: gcloud logging read 'resource.labels.job_name=($name)' --project ($project) --limit 40"}
+	}
+}
+
 export def main [
 	--snapshot      # Build and render only, change nothing in the project
 	--dry-run       # Print what would be applied and exit
@@ -166,21 +178,26 @@ export def main [
 	if $dry_run { print $plan0.jobYaml; print "---"; print $plan0.serviceYaml; return }
 
 	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
-	let pushed = if $snapshot { {} } else { ensure-infrastructure $plan0; push-images $app_info.dir $plan0 $name }
+	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
+	let has_migrate = ("migrate" in $services)
+	let pushed = if $snapshot { {} } else { ensure-infrastructure $plan0; push-images $app_info.dir $plan0 $name ($runtime | append (if $has_migrate { ["migrate"] } else { [] })) }
 
 	# The providers compose gives the auth service, under what release.cue sets.
-	let auth_env = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json | get services.auth.environment)
+	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
+	let auth_env = $compose.services.auth.environment
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
 	let oidc = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }
 		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
 	let number = (gc projects describe $plan0.project --format "value(projectNumber)" | str trim)
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
-	{GCP: {image: {pushed: $pushed}, auth: {oidc: $oidc}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"}} | to json | save -f $data_file
+	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate)} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	mkdir dist/gcp
 	$plan.jobYaml | save -f dist/gcp/job.yaml
 	$plan.serviceYaml | save -f dist/gcp/service.yaml
+	if $has_migrate { $plan.migrateJobYaml | save -f dist/gcp/migrate.yaml }
 	if $snapshot { print "gcp: rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return }
 
 	let p = $plan.project
@@ -190,12 +207,8 @@ export def main [
 			error make {msg: $"secret ($key) is missing: create it with `gcloud secrets create ($key) --project ($p) --data-file=-`"}
 		}
 	}
-	gc run jobs replace dist/gcp/job.yaml --region $r --project $p | ignore
-	print $"gcp: building the schema \(($plan.names.job)\)"
-	let run = (^gcloud --quiet run jobs execute $plan.names.job --region $r --project $p --wait | complete)
-	if $run.exit_code != 0 {
-		error make {msg: $"($plan.names.job) failed: ($run.stderr | str trim)\nlogs: gcloud logging read 'resource.labels.job_name=($plan.names.job)' --project ($p) --limit 40"}
-	}
+	run-job dist/gcp/job.yaml $plan.names.job "building the schema" $p $r
+	if $has_migrate { run-job dist/gcp/migrate.yaml $plan.names.migrateJob "carrying the schema forward" $p $r }
 	gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
 	gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
 

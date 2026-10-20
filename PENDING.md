@@ -444,8 +444,7 @@ designed and not built. The object's alarm serves a machine's deadlines
 alone; a cron schedule is refused there.
 
 **`gcp` runs the database, crud, auth and electric alone**
-([gcp](docs/release-targets.md#gcp)): it refuses a migrate service, the
-change-feed unit, a ticker or clock, the airlock, compute, blobs, images and
+([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, a ticker or clock, the airlock, compute, blobs, images and
 render, each of which needs its own Cloud Run shape and wake.
 
 **`aws` has no rule** ([the design](docs/release-targets.md#the-clouds-and-k8s)).
