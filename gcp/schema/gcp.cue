@@ -38,6 +38,10 @@ import (
 		pushed: [string]: {tag: string, digest: =~"^sha256:[0-9a-f]{64}$"}
 	}
 
+	// Present where the app's compose project runs the cluster's migrate step: the
+	// environment compose gives it beside its DATABASE_URL, filled by the release.
+	migrate?: env: [string]: string
+
 	auth: {
 		// The providers compose gives the auth service, filled by the release;
 		// overrides here win, as a deployment's environment does in compose.
@@ -60,6 +64,7 @@ import (
 		database:       R.name
 		serviceAccount: "\(R.name)-run@\(R.project).iam.gserviceaccount.com"
 		job:            "\(R.name)-initdb"
+		migrateJob:     "\(R.name)-migrate"
 		// Generated once by the release, never a literal in what it renders;
 		// the URLs are composed from the passwords, since Cloud Run expands no
 		// $(VAR) inside a value.
@@ -71,6 +76,8 @@ import (
 			CRUD_DB_URI:       "\(R.name)-crud-db-uri"
 			AUTH_DATABASE_URL: "\(R.name)-auth-database-url"
 			ELECTRIC_DB_URL:   "\(R.name)-electric-database-url"
+			// pgroll's runner, over the socket Cloud Run mounts for a job.
+			MIGRATE_DATABASE_URL: "\(R.name)-migrate-database-url"
 		}
 	}
 }
@@ -248,6 +255,36 @@ import (
 		}
 	}
 
+	// A database built before a change is carried forward by the cluster's pgroll runner, the
+	// image compose's migrate step runs (mecha's docs/schema.md, carrying a live database
+	// forward), after initdb and before the service rolls: the k8s release's migrate Job.
+	if R.migrate != _|_ {
+		migrateJob: {
+			apiVersion: "run.googleapis.com/v1"
+			kind:       "Job"
+			metadata: {
+				name: R.names.migrateJob
+				labels: "cloud.googleapis.com/location": R.region
+			}
+			spec: template: {
+				metadata: annotations: "run.googleapis.com/cloudsql-instances": R.names.connection
+				spec: {
+					taskCount: 1
+					template: spec: {
+						serviceAccountName: R.names.serviceAccount
+						maxRetries:         0
+						timeoutSeconds:     600
+						containers: [{
+							name:  "migrate"
+							image: (imageOf & {svc: "migrate"}).out
+							env: list.Concat([[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out], [for k, v in R.migrate.env {name: k, value: v}]])
+						}]
+					}
+				}
+			}
+		}
+	}
+
 	// What the release needs besides the two documents, as JSON.
 	plan: {
 		project:        R.project
@@ -265,6 +302,7 @@ import (
 		hasRpId:        R._rpId != ""
 		serviceYaml:    yaml.Marshal(B.service)
 		jobYaml:        yaml.Marshal(B.job)
+		migrateJobYaml: [if B.migrateJob != _|_ {yaml.Marshal(B.migrateJob)}, ""][0]
 		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
 	}
 	_noLiteralSecret: true & !strings.Contains(json.Marshal(B.service), "postgres://")

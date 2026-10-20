@@ -425,6 +425,7 @@ nothing changed pushes the same digests and rolls nothing.
 | compose | on GCP |
 |---|---|
 | database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts |
+| migrate | where the app declares pgroll migrations, the cluster's runner as the Job `<app>-migrate`, after initdb and before the service rolls, as compose runs it on every boot |
 | caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
 | electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
 | the stack's secrets | Secret Manager, generated once; the database URLs are composed from the passwords there, since Cloud Run expands no `$(VAR)` |
@@ -453,8 +454,8 @@ What bit on a real instance:
   to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
   container at the instance's address, so crud binds `*`.
 
-The release refuses an app whose compose project runs anything else: a
-migrate service, the change-feed unit, a ticker or clock, the airlock,
+The release refuses an app whose compose project runs anything else: the
+change-feed unit, a ticker or clock, the airlock,
 compute, blobs, images or render. A provider's settings come from compose as
 the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
 secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the

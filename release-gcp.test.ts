@@ -12,7 +12,7 @@ async function built(release: string, field = "plan") {
   return { ...res, value: res.success ? JSON.parse(res.stdout) : undefined };
 }
 
-const pushed = `{${["caddy", "crud", "auth", "electric", "database"].map((s, i) => `${s}: {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+const pushed = `{${["caddy", "crud", "auth", "electric", "database", "migrate"].map((s, i) => `${s}: {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
 const release = (extra = "") => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${pushed}${extra}}`;
 
 Deno.test("the door dials each upstream at its own port in the shared instance", async () => {
@@ -165,4 +165,21 @@ Deno.test("the door sends an alias host on to the origin", async () => {
   const caddyfile = await Deno.readTextFile(new URL("./assets/Caddyfile", import.meta.url));
   assertStringIncludes(caddyfile, "@alias host {$PRONTO_ALIASES:alias.invalid}");
   assertStringIncludes(caddyfile, "redir @alias {$ORIGIN}{uri} 308");
+});
+
+// A database built before a change is carried forward by the cluster's pgroll runner, as
+// compose's migrate step and the k8s release's Job do, after initdb and before any reader starts.
+Deno.test("an app with migrations gets a migrate job over the Cloud SQL socket", async () => {
+  const r = await built(release(`, migrate: env: {REQUIRED_TABLES: "schedule"}`), "plan");
+  assertEquals(r.success, true, r.stderr);
+  const job = (await built(release(`, migrate: env: {REQUIRED_TABLES: "schedule"}`), "migrateJob")).value;
+  assertEquals(job.metadata.name, "battlechess-migrate");
+  assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/cloudsql-instances"], "brawl-chess:us-central1:battlechess-db");
+  const c = job.spec.template.spec.template.spec.containers[0];
+  assert(/battlechess-migrate@sha256:/.test(c.image), c.image);
+  assertEquals(c.env.find((e: { name: string }) => e.name === "DATABASE_URL").valueFrom.secretKeyRef.name, "battlechess-migrate-database-url");
+  assertEquals(c.env.find((e: { name: string }) => e.name === "REQUIRED_TABLES").value, "schedule");
+  assert(!r.value.migrateJobYaml.includes("postgres://"));
+  const none = await built(release(), "plan");
+  assertEquals(none.value.migrateJobYaml, "");
 });
