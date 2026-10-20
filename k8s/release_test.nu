@@ -22,6 +22,7 @@ def main [] {
 	test_resolve_app_by_name
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
+	test_auth_providers
 	test_read_environment
 	test_render_manifests_kind
 	test_render_manifests_eks
@@ -72,6 +73,20 @@ def test_resolve_app_nonexistent_fails [] {
 	} catch { |err|
 		assert ($err.msg | str contains "No release.cue for does-not-exist-at-all")
 	}
+}
+
+def test_auth_providers [] {
+	print "test the auth service is given the providers and clients compose gives it..."
+	let app = (resolve-app "golaberto")
+	let data = (mktemp -t oidc.XXXXXX.json | str trim)
+	{App: {auth: {oidc: {OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "client.apps.googleusercontent.com"}}}} | to json | save -f $data
+	let auth = (render-manifests $app.cue_path "kind" --data $data | from yaml | where kind == "Deployment" and metadata.name == "golaberto-auth" | first)
+	rm $data
+	let vars = ($auth.spec.template.spec.containers.0.env | reduce -f {} {|e, acc| $acc | insert $e.name ($e.value? | default "") })
+	assert equal $vars.OIDC_PROVIDERS "google"
+	assert equal $vars.OIDC_GOOGLE_CLIENT_ID "client.apps.googleusercontent.com"
+	# Given none, the auth service is deployed as before.
+	assert not ((render-manifests $app.cue_path "kind") | str contains "OIDC_")
 }
 
 def test_schema_jobs [] {
@@ -238,7 +253,9 @@ def test_dapr_annotations [] {
 		assert ($yaml | str contains $"dapr.io/app-id: ($id)\n")
 	}
 	assert ($yaml | str contains "dapr.io/config: golaberto-dapr-config")
-	assert ($yaml | str contains "name: PRONTO_MESH\n              value: localhost:3500")
+	for up in ["CRUD" "AUTH" "ELECTRIC" "TICKER" "RCLONE_S3" "IMGPROXY" "RENDER"] {
+		assert ($yaml | str contains $"name: PRONTO_UPSTREAM_($up)\n              value: localhost:3500")
+	}
 	assert ($yaml | str contains "value: http://localhost:3500/v1.0/invoke/caddy/method")
 	assert ($yaml | str contains "name: OTEL_DENO")
 	assert ($yaml | str contains "kind: Configuration")

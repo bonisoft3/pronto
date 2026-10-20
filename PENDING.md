@@ -448,8 +448,9 @@ scale-to-zero containers for transform and compute with compute's tables on
 R2, their generation from the compose closure, and the Cron Trigger are
 designed and not built.
 
-**`gcp` has no rule**, no `clusters/gcp.cue` and no skaffold profile in
-`builders/bayt.cue` ([the design](docs/release-targets.md#the-clouds-and-k8s)).
+**`gcp` runs the database, crud, auth and electric alone**
+([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, a ticker or clock, the airlock, compute, blobs, images and
+render, each of which needs its own Cloud Run shape and wake.
 
 **`aws` has no rule** ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 

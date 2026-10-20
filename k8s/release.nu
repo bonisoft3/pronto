@@ -414,8 +414,12 @@ export def main [
 	let migrate = if $has_migrate {
 		{migrate: {env: (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.migrate.environment | reject DATABASE_URL)}}
 	} else { {} }
+	# The providers compose gives the auth service, and each one's client:
+	# compose refuses to render a provider whose client is unset.
+	let oidc = (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment
+		| transpose key value | where {|e| $e.key starts-with "OIDC_" } | reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}} | merge $migrate)} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: {oidc: $oidc}} | merge $migrate)} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file)
 	rm $pushed_file
 
