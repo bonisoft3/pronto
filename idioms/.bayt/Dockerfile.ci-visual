@@ -2,7 +2,7 @@
 FROM docker:29.7.1-cli@sha256:27a51d5ab1cd38d9eeaba7b415b8c07bc10c31e1cf1ec8d78f6413fcfab3f44f AS ci-visual
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --from=bonitao/lazybox:0.8.3@sha256:c896a6836673d8fd217f6021a2522351fd82d580ed985159feb2f10373018e73 /lazybox/ /root/.local/share/lazybox/
+COPY --from=bonitao/lazybox:0.8.4@sha256:4afc3200d59fe5744cc7871858c4b04b404449c90578b9fe57136fea0b7dd566 /lazybox/ /root/.local/share/lazybox/
 COPY --from=mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/bin/socat1 /usr/local/bin/socat
 COPY --from=mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/lib/libreadline.so.8 /usr/lib/libncursesw.so.6 /usr/lib/
 ENV PATH=$PATH:/root/.local/bin:/root/.local/share/lazybox/bin
@@ -135,7 +135,7 @@ if [ -n "$DOCKER_HOST" ] && [ ! -e /var/run/docker.sock ]; then
   ulimit -n 1048576 2>/dev/null || true
   addr=${DOCKER_HOST#tcp://}
   [ -n "$addr" ] || { echo "bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address" >&2; exit 1; }
-  socat -d0 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr "TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4" &
+  socat -d0 -t 86400 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr "TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4" &
   SOCAT_PID=$!
   trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM
   socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \

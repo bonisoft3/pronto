@@ -411,7 +411,7 @@
           "lazybox-copy": {
             "name": "lazybox-copy",
             "priority": -10,
-            "line": "COPY --from=bonitao/lazybox:0.8.3@sha256:c896a6836673d8fd217f6021a2522351fd82d580ed985159feb2f10373018e73 /lazybox/ /root/.local/share/lazybox/"
+            "line": "COPY --from=bonitao/lazybox:0.8.4@sha256:4afc3200d59fe5744cc7871858c4b04b404449c90578b9fe57136fea0b7dd566 /lazybox/ /root/.local/share/lazybox/"
           },
           "path-env": {
             "name": "path-env",
@@ -1439,7 +1439,7 @@
                 "unix-socket-forward": {
                   "name": "unix-socket-forward",
                   "priority": 10,
-                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
+                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 -t 86400 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
                 }
               },
               "steps": []
@@ -1558,7 +1558,7 @@
           "lazybox-copy": {
             "name": "lazybox-copy",
             "priority": -11,
-            "line": "COPY --from=bonitao/lazybox:0.8.3@sha256:c896a6836673d8fd217f6021a2522351fd82d580ed985159feb2f10373018e73 /lazybox/ /root/.local/share/lazybox/"
+            "line": "COPY --from=bonitao/lazybox:0.8.4@sha256:4afc3200d59fe5744cc7871858c4b04b404449c90578b9fe57136fea0b7dd566 /lazybox/ /root/.local/share/lazybox/"
           },
           "path-env": {
             "name": "path-env",
@@ -2057,7 +2057,7 @@
                 "unix-socket-forward": {
                   "name": "unix-socket-forward",
                   "priority": 10,
-                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
+                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 -t 86400 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
                 }
               },
               "steps": []
@@ -2231,7 +2231,7 @@
                 "unix-socket-forward": {
                   "name": "unix-socket-forward",
                   "priority": 10,
-                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
+                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 -t 86400 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
                 }
               },
               "steps": []
@@ -2348,7 +2348,7 @@
           "lazybox-copy": {
             "name": "lazybox-copy",
             "priority": -11,
-            "line": "COPY --from=bonitao/lazybox:0.8.3@sha256:c896a6836673d8fd217f6021a2522351fd82d580ed985159feb2f10373018e73 /lazybox/ /root/.local/share/lazybox/"
+            "line": "COPY --from=bonitao/lazybox:0.8.4@sha256:4afc3200d59fe5744cc7871858c4b04b404449c90578b9fe57136fea0b7dd566 /lazybox/ /root/.local/share/lazybox/"
           },
           "path-env": {
             "name": "path-env",
@@ -2866,7 +2866,7 @@
                 "unix-socket-forward": {
                   "name": "unix-socket-forward",
                   "priority": 10,
-                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
+                  "pre": "if [ -n \"$DOCKER_HOST\" ] && [ ! -e /var/run/docker.sock ]; then\n  ulimit -n 1048576 2>/dev/null || true\n  addr=${DOCKER_HOST#tcp://}\n  [ -n \"$addr\" ] || { echo \"bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address\" >&2; exit 1; }\n  socat -d0 -t 86400 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr \"TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4\" &\n  SOCAT_PID=$!\n  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM\n  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \\\n    || { echo \"bkid: socat bridge to /var/run/docker.sock not ready\" >&2; exit 1; }\nfi"
                 }
               },
               "steps": []

@@ -439,6 +439,16 @@ import (
 							BAYT_IMAGE_TAG:        "${BAYT_IMAGE_TAG:-latest}"
 							MONOREPO_COMPOSE_MODE: "${MONOREPO_COMPOSE_MODE:-}"
 						}
+						// The images it replays from, which `up --build` builds and
+						// loads only for the services it starts: compose has no edge
+						// that builds an image without starting its service.
+						let schema = B.cluster.surface.schema
+						depends_on: {
+							"\(project.name)-\(schema.target)": condition: "service_started"
+							if schema.pgroll != _|_ {
+								"\(project.name)-\(schema.pgroll.target)": condition: "service_started"
+							}
+						}
 						// `$$` so compose leaves the substitution to the container's shell.
 						command: ["mise", "x", "--", "sh", "-c", "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."]
 					}
