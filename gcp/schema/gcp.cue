@@ -36,6 +36,11 @@ import (
 	// mapped. The release sets it (`sayt release@gcp --preview=pr-32`), and
 	// `--delete` removes all of it when the pull request closes.
 	preview?: =~"^[a-z0-9]([-a-z0-9]{0,14}[a-z0-9])?$"
+	// The project previews run in, apart from the release's: everything a
+	// preview makes, its images and its account are there, so whoever deploys
+	// previews holds no role in the released app's project. Absent, previews
+	// run beside the release.
+	previewProject?: =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
 
 	// Filled by the release from what it pushed: a revision resolves a tag once,
 	// so every image is named by digest (mecha's docs/deployment.md, what bites).
@@ -60,7 +65,9 @@ import (
 		programProviders: *"" | string
 	}
 
-	_registry: "\(R.region)-docker.pkg.dev/\(R.project)/\(R.repository)"
+	// Where this release's resources are: a preview's project when it has one.
+	_project:  [if R.preview != _|_ && R.previewProject != _|_ {R.previewProject}, R.project][0]
+	_registry: "\(R.region)-docker.pkg.dev/\(R._project)/\(R.repository)"
 	// What a preview's resources are named for: the app, and the preview.
 	_id:      [if R.preview != _|_ {"\(R.name)-\(R.preview)"}, R.name][0]
 	_service: [if R.preview != _|_ {"\(R.service)-\(R.preview)"}, R.service][0]
@@ -74,12 +81,12 @@ import (
 
 	names: {
 		instance:       "\(R._id)-db"
-		connection:     "\(R.project):\(R.region):\(instance)"
+		connection:     "\(R._project):\(R.region):\(instance)"
 		database:       R.name
 		// Previews share one, made once by the project's owner with only what
 		// a revision needs (docs/release-targets.md#previews), so the release
 		// that makes a preview needs no say over the project's IAM.
-		serviceAccount: [if R.preview != _|_ {"\(R.name)-preview"}, "\(R.name)-run"][0] + "@\(R.project).iam.gserviceaccount.com"
+		serviceAccount: [if R.preview != _|_ {"\(R.name)-preview"}, "\(R.name)-run"][0] + "@\(R._project).iam.gserviceaccount.com"
 		job:            "\(R._id)-initdb"
 		migrateJob:     "\(R._id)-migrate"
 		// Generated once by the release, never a literal in what it renders;
@@ -314,7 +321,7 @@ import (
 
 	// What the release needs besides the two documents, as JSON.
 	plan: {
-		project:        R.project
+		project:        R._project
 		region:         R.region
 		repository:     R.repository
 		registry:       R._registry
