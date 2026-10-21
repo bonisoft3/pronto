@@ -245,6 +245,21 @@ Deno.test("the released app's names are unchanged by previews", async () => {
   assertEquals(r.value.preview, undefined);
 });
 
+// Whoever deploys previews then holds no role where the release runs.
+Deno.test("a preview in a project of previews names nothing in the release's", async () => {
+  const preview = await built(release(`, previewProject: "brawl-chess-previews", preview: "pr-32"`), "plan");
+  assertEquals(preview.success, true, preview.stderr);
+  const p = preview.value;
+  assertEquals(p.project, "brawl-chess-previews");
+  assertEquals(p.registry, "us-central1-docker.pkg.dev/brawl-chess-previews/pronto");
+  assertEquals(p.names.connection, "brawl-chess-previews:us-central1:battlechess-pr-32-db");
+  assertEquals(p.names.serviceAccount, "battlechess-preview@brawl-chess-previews.iam.gserviceaccount.com");
+  assert(!JSON.stringify(p).replaceAll("brawl-chess-previews", "").includes("brawl-chess"), "the release's project is named");
+  const released = await built(release(`, previewProject: "brawl-chess-previews"`), "plan");
+  assertEquals(released.success, true, released.stderr);
+  assertEquals([released.value.project, released.value.names.serviceAccount], ["brawl-chess", "battlechess-run@brawl-chess.iam.gserviceaccount.com"]);
+});
+
 Deno.test("a preview name Cloud Run, Cloud SQL or a secret would refuse is refused here", async () => {
   for (const bad of ["PR-32", "pr_32", "-pr", "pr-", "a-preview-name-too-long"]) {
     const r = await built(release(`, preview: "${bad}"`), "plan");

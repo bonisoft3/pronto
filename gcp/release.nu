@@ -57,6 +57,10 @@ def ensure-infrastructure [plan: record] {
 		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com --project $p | ignore
 	}
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $p) {
+		# Nor make the repository its images go to, in a project of previews.
+		if ($plan.preview? | is-not-empty) {
+			error make {msg: $"the Artifact Registry repository ($plan.repository) in ($p) is missing: the project's owner makes it once \(pronto's docs/release-targets.md#previews\)"}
+		}
 		gc artifacts repositories create $plan.repository --repository-format docker --location $plan.region --project $p --description "pronto images" | ignore
 	}
 	let sa = ($n.serviceAccount | split row "@" | first)
