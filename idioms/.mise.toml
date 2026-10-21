@@ -14,23 +14,23 @@ aqua.slsa = false
 aqua.minisign = false
 
 [tools]
-"github:go-task/task" = "v3.49.1"
-"github:nushell/nushell" = "0.115.1"
+"github:go-task/task" = "v3.54.0"
+"github:nushell/nushell" = "0.116.1"
 # The repo-wide CUE pin; exports must be byte-identical everywhere.
 "github:cue-lang/cue" = "0.16.1"
 
 # Compares every proto the app does not withhold against its own git history
 # (plugins/pronto/check-proto.ts). Ships windows-x64 and windows-arm64.
-"github:bufbuild/buf" = "1.73.0"
+"github:bufbuild/buf" = "1.74.0"
 # Draws an entity's machines into ir.html (plugins/pronto/ir-render.ts): one binary from
 # its GitHub release, ELK layout, no browser.
 "github:terrastruct/d2" = "v0.9.0"
 # Runs write.ts and the pronto/omnishell checkers.
 "github:denoland/deno" = "v2.9.7"
 # Lint + config validator for the emitted pipeline files.
-"github:redpanda-data/connect" = "4.112.0"
+"github:redpanda-data/connect" = "4.114.0"
 # The cluster's own lint check validates docker/Caddyfile.
-"github:caddyserver/caddy" = "2.10.0"
+"github:caddyserver/caddy" = "2.11.7"
 # Issues the locally-trusted cert the https door serves (cluster setup check).
 "github:FiloSottile/mkcert" = "v1.4.4"
 
@@ -40,7 +40,7 @@ aqua.minisign = false
 # backend picks the library on linux and windows while picking the CLI on macos,
 # so the rule would pass on a laptop and report 'duckdb: command not found' in CI.
 [tools."http:duckdb"]
-version = "1.5.5"
+version = "1.5.6"
 url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-{{ os(macos="osx") }}-{{ arch(x64="amd64") }}.zip'
 
 # Spelled out per platform because the template cannot say musl: duckdb ships a

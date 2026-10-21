@@ -24,13 +24,13 @@ import (
 	...
 	"github:cue-lang/cue":     "0.16.1"
 	"github:denoland/deno":    "v2.9.7"
-	"github:go-task/task":     "v3.49.1"
-	"github:nushell/nushell":  "0.115.1"
+	"github:go-task/task":     "v3.54.0"
+	"github:nushell/nushell":  "0.116.1"
 	"github:bonisoft3/pronto": #Version
 	"github:bonisoft3/sayt":   #SaytVersion
 	// Compares every proto the app does not withhold against its own git
 	// history (check-proto.ts).
-	"github:bufbuild/buf": "1.73.0"
+	"github:bufbuild/buf": "1.74.0"
 	// Reads every SQL file the app does not withhold (check-sql.ts). A single
 	// binary per platform, windows included, so the lint runs wherever the
 	// toolchain does.
@@ -39,7 +39,7 @@ import (
 	// its GitHub release, never aqua (whose registry meets rate limits).
 	"github:terrastruct/d2": "v0.9.0"
 	"http:duckdb": {
-		version: "1.5.5"
+		version: "1.5.6"
 		platforms: {
 			for platform, asset in {
 				"linux-x64":        "linux-amd64"
