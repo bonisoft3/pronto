@@ -4,10 +4,11 @@
 // ready and every one-shot has finished, the lint runs, and the stack goes
 // down whatever the lint answered; its exit code is the verdict.
 //
-//   deno run -A integrate-local.ts <app dir> --stub <process-compose tool stub> --omnishell <omnishell dir>
+//   deno run -A integrate-local.ts <app dir> --omnishell <omnishell dir>
 //
-// The cluster's host preparation (its surface's hostPrepare) has run before
-// this, in the launch@local rule's toolchain. The browser is Playwright's
+// Run inside the app's toolchain, which has process-compose and every tool
+// the cluster's processes name on PATH; the cluster's host preparation (its
+// surface's hostPrepare) has run before this. The browser is Playwright's
 // Chromium at the version the lint imports, installed once per host, with its
 // system libraries where the host is Linux (a CI runner).
 
@@ -23,8 +24,8 @@ const fail = (msg: string): never => {
   Deno.exit(1)
 }
 const [app] = rest
-if (!app || !args.stub || !args.omnishell) {
-  fail("usage: integrate-local.ts <app dir> --stub <process-compose tool stub> --omnishell <omnishell dir>")
+if (!app || !args.omnishell) {
+  fail("usage: integrate-local.ts <app dir> --omnishell <omnishell dir>")
 }
 const appDir = await Deno.realPath(app)
 const lint = `${args.omnishell}/check-visual.ts`
@@ -50,8 +51,11 @@ const door = Deno.env.get(doorVar) ?? doorDefault
 // process-compose with its API on a socket of its own, which `list` reads.
 const dir = await Deno.makeTempDir({ prefix: "integrate-local." })
 const socket = `${dir}/pc.sock`
-const pc = (more: string[]) => ["tool-stub", args.stub, "-U", "-u", socket, ...more]
-const stack = new Deno.Command("mise", {
+// Its own account of the processes, which their output does not carry (one
+// it could not start says so only here).
+const log = `${dir}/process-compose.log`
+const pc = (more: string[]) => ["-U", "-u", socket, "-L", log, ...more]
+const stack = new Deno.Command("process-compose", {
   args: pc(["-f", ".bayt/process-compose.yaml", "up", "--tui=false"]),
   cwd: appDir,
   env: { MISE_LOCKED: "0" },
@@ -63,7 +67,7 @@ stack.status.then(() => exited = true)
 
 type Proc = { name: string; status: string; is_ready: string; exit_code: number; has_ready_probe: boolean }
 const list = async (): Promise<Proc[] | undefined> => {
-  const out = await new Deno.Command("mise", { args: pc(["list", "-o", "json"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "piped", stderr: "null" }).output()
+  const out = await new Deno.Command("process-compose", { args: pc(["list", "-o", "json"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "piped", stderr: "null" }).output()
   if (!out.success) return undefined
   try {
     return JSON.parse(new TextDecoder().decode(out.stdout))
@@ -71,15 +75,25 @@ const list = async (): Promise<Proc[] | undefined> => {
     return undefined
   }
 }
-const down = async () => {
-  await new Deno.Command("mise", { args: pc(["down"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "null", stderr: "null" }).output()
-  await stack.status
+const settled = (ms: number) => Promise.race([stack.status.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(exited), ms))])
+const down = async (failed: boolean) => {
+  if (failed) {
+    const text = await Deno.readTextFile(log).catch(() => "")
+    console.error(`integrate@local: process-compose's log, last lines:\n${text.split("\n").slice(-60).join("\n")}`)
+  }
+  await new Deno.Command("process-compose", { args: pc(["down"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "null", stderr: "null" }).output()
+  // A stack that does not stop when asked is stopped, never waited on.
+  if (!await settled(60_000)) {
+    console.error("integrate@local: process-compose did not stop in a minute; terminating it")
+    stack.kill("SIGTERM")
+    if (!await settled(30_000)) stack.kill("SIGKILL")
+  }
   await Deno.remove(dir, { recursive: true }).catch(() => {})
 }
 
 // Stopped from outside, the stack goes down with it.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  Deno.addSignalListener(signal, () => down().then(() => Deno.exit(130)))
+  Deno.addSignalListener(signal, () => down(false).then(() => Deno.exit(130)))
 }
 
 // Ready: every one-shot completed, every process with a probe passing it. A
@@ -119,5 +133,5 @@ if (verdict === undefined) {
     "--unsafely-ignore-certificate-errors=localhost", lint, appDir,
   ], { cwd: dir, env: { APP_URL: url } })
 }
-await down()
+await down(verdict !== 0)
 Deno.exit(verdict)
