@@ -108,6 +108,22 @@ def ensure-infrastructure [plan: record] {
 	}
 }
 
+# An image pushed, or the release stopped with docker's own words: a push that
+# failed unseen surfaced later as a digest of nothing. The registry drops a
+# connection now and then (a TLS handshake timeout, found from a runner), so a
+# push is tried three times; an unchanged layer is not sent again.
+def push-image [ref: string] {
+	mut last = ""
+	for attempt in 1..3 {
+		let r = (^docker push --quiet $ref | complete)
+		if $r.exit_code == 0 { return }
+		$last = ($r.stderr | str trim)
+		print $"gcp: pushing ($ref) failed \(attempt ($attempt)/3\): ($last)"
+		sleep 5sec
+	}
+	error make {msg: $"docker push ($ref): ($last)"}
+}
+
 # The runtime images, built as the app's compose project builds them and pushed
 # by digest: what integrate tested is what releases.
 def push-images [app_dir: string, plan: record, name: string, services: list<string>]: nothing -> record {
@@ -129,7 +145,7 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 		# A preview's images are tagged for it, never as the release's.
 		let tag = ($plan.preview? | default "release")
 		^docker tag $local $"($repo):($tag)"
-		^docker push --quiet $"($repo):($tag)" | ignore
+		push-image $"($repo):($tag)"
 		let digest = (^docker image inspect --format '{{json .RepoDigests}}' $"($repo):($tag)" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
 		{svc: $svc, ref: {tag: $tag, digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
