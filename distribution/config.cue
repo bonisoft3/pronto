@@ -6,7 +6,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.15.1"
+#Version:     "0.16.0"
 #SaytVersion: "0.44.2"
 
 // The hybrid oracle harnesses exercise the checkout's terminal.
