@@ -131,6 +131,14 @@ import (
 	k8s: (_run & {args: "run-mise exec -- nu ($pronto | path join k8s release.nu)"}).out
 	// The cloud tier on GCP: Cloud Run beside Cloud SQL, with gcloud alone.
 	gcp: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp release.nu)"}).out
+	// The cluster as host processes under process-compose, which sayt pins as
+	// a tool stub, inside the app's toolchain: every process and probe finds
+	// the cluster's tools and bayt's on its PATH. What the cluster prepares
+	// first (its surface's hostPrepare) runs in the same toolchain.
+	launchLocal: {
+		prepare: [...string]
+		out: "use tools.nu [run-mise]; \(strings.Join([for c in prepare {"run-mise exec -- env MISE_LOCKED=0 sh -c \(json.Marshal(c)); "}], ""))let stub = (run-mise where github:bonisoft3/sayt | str trim | path join process-compose.toml); run-mise exec -- env MISE_LOCKED=0 mise tool-stub $stub --no-server -f .bayt/process-compose.yaml up --tui=false"
+	}
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// An installed pronto has no siblings, which its own tests import.
