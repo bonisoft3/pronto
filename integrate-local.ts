@@ -55,10 +55,14 @@ const socket = `${dir}/pc.sock`
 // it could not start says so only here).
 const log = `${dir}/process-compose.log`
 const pc = (more: string[]) => ["-U", "-u", socket, "-L", log, ...more]
+// Every process of this run carries this, whatever group process-compose
+// gives it, so one it starts while it stops, which outlives it and would hold
+// the run's output open, is found and stopped (survivors(), on Linux).
+const tag = `INTEGRATE_LOCAL_RUN=${crypto.randomUUID()}`
 const stack = new Deno.Command("process-compose", {
   args: pc(["-f", ".bayt/process-compose.yaml", "up", "--tui=false"]),
   cwd: appDir,
-  env: { MISE_LOCKED: "0" },
+  env: { MISE_LOCKED: "0", [tag.split("=")[0]]: tag.split("=")[1] },
   stdout: "inherit",
   stderr: "inherit",
 }).spawn()
@@ -75,6 +79,20 @@ const list = async (): Promise<Proc[] | undefined> => {
     return undefined
   }
 }
+// The processes still carrying this run's tag, read from /proc where there is
+// one; elsewhere none are found, and process-compose's own stop is trusted.
+const survivors = async (): Promise<number[]> => {
+  const found: number[] = []
+  try {
+    for await (const e of Deno.readDir("/proc")) {
+      const pid = Number(e.name)
+      if (!Number.isInteger(pid) || pid === Deno.pid) continue
+      const env = await Deno.readFile(`/proc/${pid}/environ`).catch(() => undefined)
+      if (env && new TextDecoder().decode(env).split("\0").includes(tag)) found.push(pid)
+    }
+  } catch { /* no /proc */ }
+  return found
+}
 const settled = (ms: number) => Promise.race([stack.status.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(exited), ms))])
 const down = async (failed: boolean) => {
   if (failed) {
@@ -87,6 +105,17 @@ const down = async (failed: boolean) => {
     console.error("integrate@local: process-compose did not stop in a minute; terminating it")
     stack.kill("SIGTERM")
     if (!await settled(30_000)) stack.kill("SIGKILL")
+  }
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    const left = await survivors()
+    if (left.length === 0) break
+    console.error(`integrate@local: ${left.length} of its processes outlived process-compose; sending ${signal}`)
+    for (const pid of left) {
+      try {
+        Deno.kill(pid, signal)
+      } catch { /* gone already */ }
+    }
+    await new Promise((r) => setTimeout(r, 5000))
   }
   await Deno.remove(dir, { recursive: true }).catch(() => {})
 }
