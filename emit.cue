@@ -1936,6 +1936,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if list.Contains(D.code.meta.targets, "gcp") {
 				sayYaml: say: release: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.gcp}]}
 			}
+			// The cluster on this machine, each service a process
+			// (.bayt/process-compose.yaml), where `launch` alone runs it in
+			// containers.
+			sayYaml: say: launch: rulemap: local: {platform: "local", priority: -1, stop: true, cmds: [{do: (_distribution.launchLocal & {prepare: D.cluster.surface.hostPrepare}).out}]}
 			sayYaml: say: {
 				lint: rulemap: cue: cmds: [{do: "mise exec -- cue vet -c ./..."}]
 				build: _distribution.say.say.build
@@ -2105,8 +2109,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			root:    ""
 			runtime: "../"
 			// The caddy takes omnishell's own statics from its image, which the
-			// build adds (builders/bayt.cue); the cluster serves the app's.
+			// build adds (builders/bayt.cue), and a host launch from the
+			// omnishell mise installs; the cluster serves the app's.
 			statics: list.Concat([[for s in D.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
+			toolStatics: [for s in D.statics if strings.HasPrefix(s.target, "/omnishell/") {file: s.file, target: s.target, tool: distribution.#Runtimes.omnishell}]
 			// mecha's images by name, which the build resolves to the pinned
 			// release or, in the monorepo, to mecha's sources; the auth
 			// service's is the program's when it names one (#App
