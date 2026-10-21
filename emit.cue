@@ -2232,17 +2232,17 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					"process-compose": activate: "mise x --"
 					expose: http: {port: omnishell.#Render.port, env: "PORT"}
 					entrypoint: {
-						do:    "entry=\"$PWD/\(omnishell.#Render.entry.source)\"; cd \"$(mise where \(distribution.#Runtimes.omnishell))\" && ENTRY=\"$entry\" exec deno run --frozen --config server/deno.json --allow-net --allow-env --allow-read server/render.ts"
+						do:    "entry=\"$PWD/\(omnishell.#Render.entry.source)\"; cd \"$(mise where \(distribution.#Runtimes.omnishell))\" && ENTRY=\"$entry\" ORIGIN=\"$HOST_ORIGIN\" exec deno run --frozen --config server/deno.json --allow-net --allow-env --allow-read server/render.ts"
 						shell: "sh"
 						dockerfile: {
 							do:    strings.Join(omnishell.#Render.command, " ")
 							shell: "exec"
 						}
 						// The origin as the door's own host entry spells it, which the host
-						// maps to the door's port there.
+						// maps to the door's port there; the command hands it on as ORIGIN.
 						env: {
-							for k, v in compose.environment if k != "PORT" && k != "ENTRY" && k != "ORIGIN" {(k): v}
-							ORIGIN: "${ORIGIN:-\(D.out.meta.door.scheme)://localhost:\(D.out.meta.door.port)}"
+							for k, v in compose.environment if k != "PORT" && k != "ENTRY" {(k): v}
+							HOST_ORIGIN: "${ORIGIN:-\(D.out.meta.door.scheme)://localhost:\(D.out.meta.door.port)}"
 						}
 						after: {caddy: "healthy", crud: "healthy", electric: "healthy"}
 					}
