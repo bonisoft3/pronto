@@ -2220,10 +2220,27 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// app through the door, so it waits on the door, and the aggregate
 		// waits on it: a launch is up when its documents can be answered.
 		if D._rendersOnRequest {
+			// A host launch runs it beside the cluster's own processes, and the
+			// door proxies to it at its host address.
+			meta: hostPeers: ["render=\(omnishell.#Render.port)"]
 			surface: targets: {
 				render: bayt.healthcheck.http & {
 					cmd: "builtin": null
 					activate: ""
+					// As the cluster's own processes run under process-compose: the
+					// renderer from the omnishell mise installs, the entry the app's own.
+					"process-compose": activate: "mise x --"
+					expose: http: {port: omnishell.#Render.port, env: "PORT"}
+					entrypoint: {
+						do:    "entry=\"$PWD/\(omnishell.#Render.entry.source)\"; cd \"$(mise where \(distribution.#Runtimes.omnishell))\" && ENTRY=\"$entry\" exec deno run --frozen --config server/deno.json --allow-net --allow-env --allow-read server/render.ts"
+						shell: "sh"
+						dockerfile: {
+							do:    strings.Join(omnishell.#Render.command, " ")
+							shell: "exec"
+						}
+						env: {for k, v in compose.environment if k != "PORT" && k != "ENTRY" {(k): v}}
+						after: {caddy: "healthy", crud: "healthy", electric: "healthy"}
+					}
 					// The release it takes its entry from (a `from.ref` copy).
 					deps: [":served:outs"]
 					healthcheck: {
@@ -2255,7 +2272,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							[{from: ref: ":served", srcs: ["\(omnishell.#Address.tree)/\(omnishell.#Render.entry.source)"], dst: omnishell.#Render.entry.target}],
 						])
 						epilogue: ["RUN \(omnishell.#Render.cache)"]
-						cmd: omnishell.#Render.command
 					}
 					compose: {
 						// The door, and what answers behind it: a guest is minted
