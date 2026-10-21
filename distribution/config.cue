@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	saycfg "github.com/bonisoft3/sayt:say"
+	"github.com/bonisoft3/pronto/resilience"
 )
 
 #Version:     "0.16.0"
@@ -85,7 +86,9 @@ import (
 // omnishell tree is the installed one unless given.
 #IntegrateLocal: I={
 	prepare: [...string]
-	settleMs:  int & >0
+	// A screen settles inside its door's bounds, as the visual check's.
+	let _door = resilience.resilience.timeouts.door
+	settleMs:  *((_door.auth + _door.crud) * 1000) | (int & >0)
 	omnishell: *"(run-mise where \(#Runtimes.omnishell) | str trim)" | string
 	let _l = #LaunchLocal & {prepare: I.prepare}
 	out: (#Run & {args: "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell) --settle \(I.settleMs)"}).out
