@@ -101,12 +101,14 @@ def ensure-infrastructure [plan: record] {
 
 	let pg = (ensure-secret $n.secrets.POSTGRES_PASSWORD $p)
 	let electric = (ensure-secret $n.secrets.ELECTRIC_PASSWORD $p)
+	let authenticator = (ensure-secret $n.secrets.AUTHENTICATOR_PASSWORD $p)
 	let jwt_secret = (ensure-secret $n.secrets.PGRST_JWT_SECRET $p)
 	ensure-secret $n.secrets.SERVICE_JWT $p (service-jwt $jwt_secret) | ignore
 	ensure-secret $n.secrets.ELECTRIC_SECRET $p | ignore
 	# Through the Auth Proxy on localhost, which carries TLS itself.
 	let at = $"@127.0.0.1:5432/($n.database)"
-	ensure-secret $n.secrets.CRUD_DB_URI $p $"postgres://postgres:($pg)($at)?sslmode=disable" | ignore
+	# PostgREST logs in as the authenticator role, as compose's crud does.
+	ensure-secret $n.secrets.CRUD_DB_URI $p $"postgres://authenticator:($authenticator)($at)?sslmode=disable" | ignore
 	ensure-secret $n.secrets.AUTH_DATABASE_URL $p $"postgres://postgres:($pg)($at)?sslmode=disable" | ignore
 	ensure-secret $n.secrets.ELECTRIC_DB_URL $p $"postgresql://electric:($electric)($at)?sslmode=disable" | ignore
 	# A job has no proxy beside it: pgroll's runner reaches the database over the socket.

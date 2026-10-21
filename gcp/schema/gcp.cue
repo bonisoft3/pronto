@@ -108,6 +108,9 @@ import (
 		secrets: {
 			POSTGRES_PASSWORD: "\(R._id)-postgres-password"
 			ELECTRIC_PASSWORD: "\(R._id)-electric-password"
+			// mecha's authenticator role, which PostgREST logs in as and switches
+			// from into anon, app_user or service; initdb sets its password.
+			AUTHENTICATOR_PASSWORD: "\(R._id)-authenticator-password"
 			PGRST_JWT_SECRET:  "\(R._id)-pgrst-jwt-secret"
 			ELECTRIC_SECRET:   "\(R._id)-electric-secret"
 			CRUD_DB_URI:       "\(R._id)-crud-db-uri"
@@ -299,6 +302,7 @@ import (
 							{name: "POSTGRES_DB", value: R.names.database},
 							(secretOf & {env: "PGPASSWORD", secret: sq.POSTGRES_PASSWORD}).out,
 							(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
+							(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
 						]
 					}]
 				}

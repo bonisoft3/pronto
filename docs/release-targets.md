@@ -480,7 +480,9 @@ What bit on a real instance:
 
 - **Cloud SQL's `postgres` is no superuser.** It creates `anon`, `app_user`
   and `service` with admin over them but no `SET`, so PostgREST could not
-  switch into `anon`; initdb grants them to it on every release.
+  switch into `anon`; initdb grants them to it on every release. PostgREST
+  logs in as mecha's `authenticator` role, whose password initdb sets from
+  `<app>-authenticator-password`, as compose's does.
 - It does grant `BYPASSRLS` and `REPLICATION` to a role it made, so electric's
   role is compose's.
 - **Electric's storage cannot be a bucket.** Its shape metadata is SQLite,
