@@ -11,7 +11,8 @@ use ../k8s/release.nu [resolve-app auth-provider-environment bake-images]
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
-const unbuilt = ["mesh-events" "conduit" "transform" "ticker" "clock" "airlock" "compute" "rclone-s3" "imgproxy" "render"]
+# compose's clock is not one of them: Cloud Scheduler is the ticker's clock here.
+const unbuilt = ["mesh-events" "conduit" "transform" "airlock" "compute" "rclone-s3" "imgproxy" "render"]
 
 def --wrapped gc [...args] {
 	let input = $in
@@ -38,6 +39,19 @@ def render [cue_path: string, data?: string]: nothing -> record {
 	$res.stdout | from json
 }
 
+# The service role's token, HS256 under the gateway's secret, as mecha's
+# cluster signs its own (role service, the nil subject) but with no expiry:
+# the release restates it from the secret, so it changes only with it.
+def service-jwt [secret: string]: nothing -> string {
+	$secret | ^python3 -I -c 'import sys,hmac,hashlib,base64,json
+b=lambda d: base64.urlsafe_b64encode(d).rstrip(b"=").decode()
+h=b(json.dumps({"alg":"HS256","typ":"JWT"},separators=(",",":")).encode())
+p=b(json.dumps({"role":"service","sub":"00000000-0000-0000-0000-000000000000"},separators=(",",":")).encode())
+k=sys.stdin.buffer.read()
+print(h+"."+p+"."+b(hmac.new(k,(h+"."+p).encode(),hashlib.sha256).digest()),end="")'
+}
+
+
 def random-secret []: nothing -> string { random chars --length 48 }
 
 # A secret's latest value, made from `value` (or a random one) when it has none,
@@ -61,7 +75,7 @@ def ensure-infrastructure [plan: record] {
 	let n = $plan.names
 	# A preview's release may not enable APIs: the project's first release did.
 	if ($plan.preview? | is-empty) {
-		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com --project $p | ignore
+		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com cloudscheduler.googleapis.com --project $p | ignore
 	}
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $p) {
 		# Nor make the repository its images go to, in a project of previews.
@@ -89,7 +103,8 @@ def ensure-infrastructure [plan: record] {
 	let pg = (ensure-secret $n.secrets.POSTGRES_PASSWORD $p)
 	let electric = (ensure-secret $n.secrets.ELECTRIC_PASSWORD $p)
 	ensure-secret $n.secrets.AUTHENTICATOR_PASSWORD $p | ignore
-	ensure-secret $n.secrets.PGRST_JWT_SECRET $p | ignore
+	let jwt_secret = (ensure-secret $n.secrets.PGRST_JWT_SECRET $p)
+	ensure-secret $n.secrets.SERVICE_JWT $p (service-jwt $jwt_secret) | ignore
 	ensure-secret $n.secrets.ELECTRIC_SECRET $p | ignore
 	# Through the Auth Proxy on localhost, which carries TLS itself.
 	let at = $"@127.0.0.1:5432/($n.database)"
@@ -196,6 +211,22 @@ def run-job [file: string, name: string, what: string, project: string, region: 
 	}
 }
 
+# The ticker's clock: one Cloud Scheduler job POSTing to the door's /poke each
+# minute, made or brought to the plan's. It carries the service token, as the
+# compose clock does: the service answers anyone, so Cloud Run has no OIDC
+# token to check (mecha's services/ticker, the cloud clock), and the ticker
+# compares the bearer itself. No retry: the next minute recomputes the same.
+def ensure-clock [clock: record, token: string, project: string, region: string] {
+	let common = [--location $region --project $project --schedule $clock.schedule --time-zone Etc/UTC --uri $clock.uri --http-method POST --max-retry-attempts 0 --attempt-deadline 60s]
+	let header = $"Authorization=Bearer ($token)"
+	if (exists scheduler jobs describe $clock.name --location $region --project $project) {
+		gc scheduler jobs update http $clock.name ...$common --update-headers $header | ignore
+	} else {
+		gc scheduler jobs create http $clock.name ...$common --headers $header | ignore
+	}
+	print $"gcp: the ticker's clock \(($clock.name)\) pokes ($clock.uri) each minute"
+}
+
 # A preview removed: its service, jobs, instance and secrets. Its images stay
 # for the repository's cleanup policy; nothing the release made is touched.
 def delete-preview [plan: record] {
@@ -206,6 +237,7 @@ def delete-preview [plan: record] {
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
 	}
+	if (exists scheduler jobs describe $n.clock --location $r --project $p) { gc scheduler jobs delete $n.clock --location $r --project $p | ignore }
 	if (exists sql instances describe $n.instance --project $p) { gc sql instances delete $n.instance --project $p | ignore }
 	for secret in ($n.secrets | values) {
 		if (exists secrets describe $secret --project $p) { gc secrets delete $secret --project $p | ignore }
@@ -256,7 +288,10 @@ export def main [
 	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
 	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
 	let has_migrate = ("migrate" in $services)
-	let pushed = if $snapshot { {} } else { ensure-infrastructure $plan0; push-images $app_info.dir $compose_text $plan0 $name ($runtime | append (if $has_migrate { ["migrate"] } else { [] })) }
+	# The ticker, where the app declares a schedule or a machine's timer.
+	let has_ticker = ("ticker" in $services)
+	let images = ($runtime | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }))
+	let pushed = if $snapshot { {} } else { ensure-infrastructure $plan0; push-images $app_info.dir $compose_text $plan0 $name $images }
 
 	# The providers compose gives the auth service, under what release.cue sets.
 	let auth_env = $compose.services.auth.environment
@@ -265,7 +300,8 @@ export def main [
 	let number = (gc projects describe $plan0.project --format "value(projectNumber)" | str trim)
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	let ticker = if $has_ticker { {ticker: {env: ($compose.services.ticker.environment? | default {} | reject -o CRUD_URL SERVICE_JWT PORT)}} } else { {} }
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate | merge $ticker | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	# The app's own dist, wherever the release was started from.
@@ -287,6 +323,7 @@ export def main [
 	if $has_migrate { run-job ($dist | path join migrate.yaml) $plan.names.migrateJob "carrying the schema forward" $p $r }
 	gc run services replace ($dist | path join service.yaml) --region $r --project $p | ignore
 	gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+	if ($plan.clock? | is-not-empty) { ensure-clock $plan.clock (gc secrets versions access latest --secret $plan.names.secrets.SERVICE_JWT --project $p) $p $r }
 
 	let address = $"https://($plan.service)-($number).($r).run.app"
 	for d in ([$plan.domain?] | compact | append $plan.aliases) { map-domain $d $plan.service $p $r }

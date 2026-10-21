@@ -32,6 +32,11 @@ import (
 	// door (www, say): a passkey's relying party is the domain alone.
 	aliases: *[] | [...=~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"]
 	sqlTier:  *"db-f1-micro" | string
+	// Which Cloud SQL instance holds the database: raising it starts the app on
+	// a new, empty one, the way an initdb set no pgroll migration carries forward
+	// reaches production. The earlier instance is left as it was, a backup and
+	// the way back, until its owner deletes it.
+	sqlGeneration: *1 | int & >=1
 	// A pull request's own copy of the app, beside the released one: its own
 	// service, Cloud SQL instance, jobs and secrets, each named for the app and
 	// the preview, at the service's run.app address with no domain or alias
@@ -61,6 +66,12 @@ import (
 	// Filled by the release.
 	database: tokenRoles: [...string]
 
+	// Present where the app's compose project runs mecha's ticker: the
+	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
+	// by the release. The ticker runs as one more container of the service, and
+	// Cloud Scheduler is its clock (mecha's services/ticker, the cloud clock).
+	ticker?: env: [string]: string
+
 	auth: {
 		// The providers compose gives the auth service, filled by the release;
 		// overrides here win, as a deployment's environment does in compose.
@@ -88,7 +99,7 @@ import (
 	_rpId:   _host
 
 	names: {
-		instance:       "\(R._id)-db"
+		instance:       "\(R._id)-db" + [if R.sqlGeneration > 1 {"-\(R.sqlGeneration)"}, ""][0]
 		connection:     "\(R._project):\(R.region):\(instance)"
 		database:       R.name
 		// Previews share one, made once by the project's owner with only what
@@ -97,6 +108,8 @@ import (
 		serviceAccount: [if R.preview != _|_ {"\(R.name)-preview"}, "\(R.name)-run"][0] + "@\(R._project).iam.gserviceaccount.com"
 		job:            "\(R._id)-initdb"
 		migrateJob:     "\(R._id)-migrate"
+		// The Cloud Scheduler job that pokes the ticker.
+		clock: "\(R._id)-clock"
 		// Generated once by the release, never a literal in what it renders;
 		// the URLs are composed from the passwords, since Cloud Run expands no
 		// $(VAR) inside a value.
@@ -112,13 +125,16 @@ import (
 			ELECTRIC_DB_URL:   "\(R._id)-electric-database-url"
 			// pgroll's runner, over the socket Cloud Run mounts for a job.
 			MIGRATE_DATABASE_URL: "\(R._id)-migrate-database-url"
+			// The service role's token, signed with PGRST_JWT_SECRET: the ticker
+			// writes with it, and its clock's poke carries it.
+			SERVICE_JWT: "\(R._id)-service-jwt"
 		}
 	}
 }
 
 // Ports inside the shared instance: compose's own, but for electric, whose 3000
 // is crud's.
-#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, database: 5432, proxyHealth: 9090}
+#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, ticker: 9998, database: 5432, proxyHealth: 9090}
 
 // The smallest tier admits about 25 connections, fewer than the pools'
 // defaults together; the instance is raised to 50 and the pools capped.
@@ -163,7 +179,8 @@ import (
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
 				"run.googleapis.com/container-dependencies": json.Marshal({
-					caddy: ["crud", "auth", "electric"]
+					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}]])
+					if R.ticker != _|_ {ticker: ["crud"]}
 					crud: ["cloud-sql-proxy"]
 					auth: ["cloud-sql-proxy"]
 					electric: ["cloud-sql-proxy"]
@@ -186,6 +203,7 @@ import (
 						{name: "PRONTO_UPSTREAM_CRUD", value: "127.0.0.1:\(P.crud)"},
 						{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
 						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
+						if R.ticker != _|_ {{name: "PRONTO_UPSTREAM_TICKER", value: "127.0.0.1:\(P.ticker)"}},
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
 					]])
 					startupProbe: {httpGet: {path: "/health", port: P.caddy}, periodSeconds: 2, failureThreshold: 60}
@@ -232,6 +250,15 @@ import (
 						{name: "ELECTRIC_STORAGE_DIR", value: "/tmp/electric"},
 					]
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
+				}, if R.ticker != _|_ {
+					name:  "ticker"
+					image: (imageOf & {svc: "ticker"}).out
+					env: list.Concat([[
+						{name: "CRUD_URL", value: "http://127.0.0.1:\(P.crud)"},
+						{name: "PORT", value: "\(P.ticker)"},
+						(secretOf & {env: "SERVICE_JWT", secret: sq.SERVICE_JWT}).out,
+					], [for k, v in R.ticker.env {name: k, value: v}]])
+					startupProbe: {tcpSocket: port: P.ticker, periodSeconds: 2, failureThreshold: 60}
 				}, {
 					name:  "cloud-sql-proxy"
 					image: #Proxy
@@ -360,6 +387,14 @@ import (
 		serviceYaml:    yaml.Marshal(B.service)
 		jobYaml:        yaml.Marshal(B.job)
 		migrateJobYaml: [if B.migrateJob != _|_ {yaml.Marshal(B.migrateJob)}, ""][0]
+		// The ticker's clock, once a minute, the floor (mecha's services/ticker,
+		// the cloud clock): the service's own run.app address, which a domain
+		// mapping still provisioning cannot stall.
+		if R.ticker != _|_ && R.runHost != "" {clock: {
+			name:     R.names.clock
+			schedule: "* * * * *"
+			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
+		}}
 		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
 	}
 	_noLiteralSecret: true & !strings.Contains(json.Marshal(B.service), "postgres://")
