@@ -4,7 +4,7 @@
 // ready and every one-shot has finished, the lint runs, and the stack goes
 // down whatever the lint answered; its exit code is the verdict.
 //
-//   deno run -A integrate-local.ts <app dir> --omnishell <omnishell dir>
+//   deno run -A integrate-local.ts <app dir> --omnishell <omnishell dir> --settle <ms>
 //
 // Run inside the app's toolchain, which has process-compose and every tool
 // the cluster's processes name on PATH; the cluster's host preparation (its
@@ -24,8 +24,8 @@ const fail = (msg: string): never => {
   Deno.exit(1)
 }
 const [app] = rest
-if (!app || !args.omnishell) {
-  fail("usage: integrate-local.ts <app dir> --omnishell <omnishell dir>")
+if (!app || !args.omnishell || !(Number(args.settle) > 0)) {
+  fail("usage: integrate-local.ts <app dir> --omnishell <omnishell dir> --settle <ms>")
 }
 const appDir = await Deno.realPath(app)
 const lint = `${args.omnishell}/check-visual.ts`
@@ -160,7 +160,7 @@ if (verdict === undefined) {
   verdict = await run(Deno.execPath(), [
     "run", "--node-modules-dir=auto", "--allow-read", "--allow-write", "--allow-net", "--allow-env", "--allow-run", "--allow-sys",
     "--unsafely-ignore-certificate-errors=localhost", lint, appDir,
-  ], { cwd: dir, env: { APP_URL: url } })
+  ], { cwd: dir, env: { APP_URL: url, SETTLE_TIMEOUT_MS: args.settle } })
 }
 await down(verdict !== 0)
 Deno.exit(verdict)

@@ -85,9 +85,10 @@ import (
 // omnishell tree is the installed one unless given.
 #IntegrateLocal: I={
 	prepare: [...string]
+	settleMs:  int & >0
 	omnishell: *"(run-mise where \(#Runtimes.omnishell) | str trim)" | string
 	let _l = #LaunchLocal & {prepare: I.prepare}
-	out: (#Run & {args: "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell)"}).out
+	out: (#Run & {args: "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell) --settle \(I.settleMs)"}).out
 }
 
 #Writer: {

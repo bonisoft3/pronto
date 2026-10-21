@@ -244,7 +244,9 @@ import (
 				platform: "local"
 				priority: -1
 				stop:     true
-				cmds: [{do: (distribution.#IntegrateLocal & {prepare: B.cluster.surface.hostPrepare}).out}]
+				// A screen settles inside its door's bounds, as the visual check's.
+				let door = resilience.resilience.timeouts.door
+				cmds: [{do: (distribution.#IntegrateLocal & {prepare: B.cluster.surface.hostPrepare, settleMs: (door.auth + door.crud) * 1000}).out}]
 			}
 		}
 		// The app is its repository's root, in its mirror and in the monorepo
