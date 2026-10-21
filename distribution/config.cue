@@ -82,13 +82,12 @@ import (
 
 // The same stack, the terminal's visual lint against its door, and the stack
 // down again (integrate-local.ts): `integrate` without containers. The
-// pronto and omnishell trees are the installed ones unless given.
+// omnishell tree is the installed one unless given.
 #IntegrateLocal: I={
 	prepare: [...string]
-	runtime:   *"" | string
 	omnishell: *"(run-mise where \(#Runtimes.omnishell) | str trim)" | string
 	let _l = #LaunchLocal & {prepare: I.prepare}
-	out: (#Run & {runtime: I.runtime, args: "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell)"}).out
+	out: (#Run & {args: "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell)"}).out
 }
 
 #Writer: {
