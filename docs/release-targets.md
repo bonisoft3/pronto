@@ -485,49 +485,66 @@ does. Each thing two copies could not share is its own: the `postgres` and
 `electric` passwords are the instance's, and electric's replication slot is
 named alike in every database. It answers at its run.app address alone, with
 no domain or alias mapped, so a passkey made there belongs to the preview.
-Its images are tagged for it in the release's repository; the service names
-them by digest, as the release's does.
+Its images are tagged for it in the repository it releases to; the service
+names them by digest, as the release's does.
 
 What fixes its shape:
 
 - **An instance each.** A first release of a preview waits several minutes
   for Cloud SQL; later pushes reuse it. The smallest tier costs cents a day,
   and `--delete` removes it.
-- **No say over the project.** A preview runs from a pull request, so its
-  release enables no API, makes no service account and grants no role.
-  Previews share one account, `<name>-preview`, which the project's owner
-  makes once; the release refuses to run without it.
+- **A project of its own.** A preview runs a pull request's code, deployed by
+  whatever the pull request's workflow signs in as. With `previewProject` set
+  on the release, every preview lives there: its service, instance, jobs,
+  secrets, images and account. The deployer holds roles there alone and none
+  in the released app's project, so a pull request cannot reach the release.
+  Conditions on resource names cannot give the same: Cloud Run does not
+  recognize `resource.name` in IAM Conditions, so a role on its services would
+  reach the release's service too. Absent, previews run beside the release.
+- **No say over the project.** A preview's release enables no API, makes no
+  repository or service account and grants no role. Previews share one
+  account, `<name>-preview`, which the project's owner makes once; the release
+  refuses to run without it, or without the repository.
 - **`--delete` names a preview.** Without `--preview` it refuses: a release is
   never deleted here.
 
-What the project's owner does once, for an app `<name>` in project `<project>`,
-released from a GitHub repository `<owner>/<repo>`:
+What the owner does once, for an app `<name>` whose previews run in project
+`<previews>` (number `<number>`, given the release as `previewProject`), released
+from a GitHub repository `<owner>/<repo>`:
 
 ```sh
-gcloud iam service-accounts create <name>-preview --project <project>
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com \
+  secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project <previews>
+gcloud artifacts repositories create pronto --repository-format docker --location <region> --project <previews>
+gcloud iam service-accounts create <name>-preview --project <previews>
 for role in roles/cloudsql.client roles/secretmanager.secretAccessor; do
-  gcloud projects add-iam-policy-binding <project> --role $role \
-    --member serviceAccount:<name>-preview@<project>.iam.gserviceaccount.com
+  gcloud projects add-iam-policy-binding <previews> --role $role --condition None \
+    --member serviceAccount:<name>-preview@<previews>.iam.gserviceaccount.com
 done
-gcloud iam workload-identity-pools create github --project <project> --location global
-gcloud iam workload-identity-pools providers create-oidc github --project <project> \
+gcloud iam workload-identity-pools create github --project <previews> --location global
+gcloud iam workload-identity-pools providers create-oidc github --project <previews> \
   --location global --workload-identity-pool github \
   --issuer-uri https://token.actions.githubusercontent.com \
   --attribute-mapping google.subject=assertion.sub,attribute.repository=assertion.repository \
   --attribute-condition "assertion.repository == '<owner>/<repo>'"
-gcloud iam service-accounts create preview-deployer --project <project>
-gcloud iam service-accounts add-iam-policy-binding preview-deployer@<project>.iam.gserviceaccount.com \
+gcloud iam service-accounts create preview-deployer --project <previews>
+gcloud iam service-accounts add-iam-policy-binding preview-deployer@<previews>.iam.gserviceaccount.com \
   --role roles/iam.workloadIdentityUser \
   --member principalSet://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/github/attribute.repository/<owner>/<repo>
+for role in roles/run.admin roles/cloudsql.admin roles/secretmanager.admin roles/browser; do
+  gcloud projects add-iam-policy-binding <previews> --role $role --condition None \
+    --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
+done
+gcloud artifacts repositories add-iam-policy-binding pronto --location <region> --project <previews> \
+  --role roles/artifactregistry.writer --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
+gcloud iam service-accounts add-iam-policy-binding <name>-preview@<previews>.iam.gserviceaccount.com \
+  --role roles/iam.serviceAccountUser --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
 ```
 
-The deployer, which the workflow signs in as, needs `roles/run.admin`,
-`roles/cloudsql.admin`, `roles/secretmanager.admin`, `roles/browser`,
-`roles/artifactregistry.writer` and `roles/iam.serviceAccountUser` on
-`<name>-preview`. In a project the released app shares, each of the first
-three is bound with a condition on the preview's names
-(`resource.name.startsWith(...)` on `<service>-pr-`, `<name>-pr-`), so a pull
-request reaches nothing the release made.
+The repository's workflow signs in through the provider as the deployer: its
+variables `GCP_WORKLOAD_IDENTITY_PROVIDER`
+(`projects/<number>/locations/global/workloadIdentityPools/github/providers/github`)
+and `GCP_PREVIEW_DEPLOYER` (`preview-deployer@<previews>.iam.gserviceaccount.com`).
 
 ## The clouds and k8s
 
