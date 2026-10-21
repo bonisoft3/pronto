@@ -422,6 +422,16 @@ schema.#Build & {release: GCP}` from [`gcp/schema`](../gcp/schema/gcp.cue).
 Every resource is described before it is made, so a second release with
 nothing changed pushes the same digests and rolls nothing.
 
+The images are built in Cloud Build, not on the machine releasing, which needs
+no Docker daemon: the release uploads the app's files as git sees them (never
+`.certs/`, the certificate pair `sayt setup` issues for one machine), and a
+build step runs the app's compose project through `docker buildx bake --push`,
+as integrate builds it, for linux/amd64 and reproducibly. Every context of the
+app's images is its own directory or an image by digest, so nothing else is
+sent. The build runs as the project's default Cloud Build account, which the
+release lets push to the repository and write its log; the release reads each
+digest back from the registry and names it in the service and jobs.
+
 | compose | on GCP |
 |---|---|
 | database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts |
@@ -502,7 +512,7 @@ What fixes its shape:
   recognize `resource.name` in IAM Conditions, so a role on its services would
   reach the release's service too. Absent, previews run beside the release.
 - **No say over the project.** A preview's release enables no API, makes no
-  repository or service account and grants no role. Previews share one
+  repository or service account and grants no role, Cloud Build's included. Previews share one
   account, `<name>-preview`, which the project's owner makes once; the release
   refuses to run without it, or without the repository.
 - **`--delete` names a preview.** Without `--preview` it refuses: a release is
@@ -514,8 +524,15 @@ from a GitHub repository `<owner>/<repo>`:
 
 ```sh
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com \
-  secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project <previews>
+  secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \
+  cloudbuild.googleapis.com --project <previews>
 gcloud artifacts repositories create pronto --repository-format docker --location <region> --project <previews>
+# The account Cloud Build builds the images as pushes them and writes the build's log.
+builds=$(gcloud builds get-default-service-account --project <previews> --format 'value(serviceAccountEmail)' | awk -F/ '{print $NF}')
+gcloud artifacts repositories add-iam-policy-binding pronto --location <region> --project <previews> \
+  --role roles/artifactregistry.writer --member serviceAccount:$builds
+gcloud projects add-iam-policy-binding <previews> --role roles/logging.logWriter --condition None \
+  --member serviceAccount:$builds
 gcloud iam service-accounts create <name>-preview --project <previews>
 for role in roles/cloudsql.client roles/secretmanager.secretAccessor; do
   gcloud projects add-iam-policy-binding <previews> --role $role --condition None \
@@ -531,7 +548,8 @@ gcloud iam service-accounts create preview-deployer --project <previews>
 gcloud iam service-accounts add-iam-policy-binding preview-deployer@<previews>.iam.gserviceaccount.com \
   --role roles/iam.workloadIdentityUser \
   --member principalSet://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/github/attribute.repository/<owner>/<repo>
-for role in roles/run.admin roles/cloudsql.admin roles/secretmanager.admin roles/browser; do
+for role in roles/run.admin roles/cloudsql.admin roles/secretmanager.admin roles/browser \
+  roles/cloudbuild.builds.editor roles/storage.admin roles/logging.viewer; do
   gcloud projects add-iam-policy-binding <previews> --role $role --condition None \
     --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
 done

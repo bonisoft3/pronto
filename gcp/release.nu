@@ -54,7 +54,7 @@ def ensure-infrastructure [plan: record] {
 	let n = $plan.names
 	# A preview's release may not enable APIs: the project's first release did.
 	if ($plan.preview? | is-empty) {
-		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com --project $p | ignore
+		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com cloudbuild.googleapis.com --project $p | ignore
 	}
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $p) {
 		# Nor make the repository its images go to, in a project of previews.
@@ -62,6 +62,13 @@ def ensure-infrastructure [plan: record] {
 			error make {msg: $"the Artifact Registry repository ($plan.repository) in ($p) is missing: the project's owner makes it once \(pronto's docs/release-targets.md#previews\)"}
 		}
 		gc artifacts repositories create $plan.repository --repository-format docker --location $plan.region --project $p --description "pronto images" | ignore
+	}
+	# Cloud Build's account pushes the images and writes the build's log; a
+	# preview's project grants it that once, by its owner, as the repository.
+	if ($plan.preview? | is-empty) {
+		let builds = (build-account $p)
+		gc artifacts repositories add-iam-policy-binding $plan.repository --location $plan.region --project $p --member $"serviceAccount:($builds)" --role roles/artifactregistry.writer | ignore
+		gc projects add-iam-policy-binding $p --member $"serviceAccount:($builds)" --role roles/logging.logWriter --condition None --quiet | ignore
 	}
 	let sa = ($n.serviceAccount | split row "@" | first)
 	if ($plan.preview? | is-not-empty) {
@@ -108,46 +115,58 @@ def ensure-infrastructure [plan: record] {
 	}
 }
 
-# An image pushed, or the release stopped with docker's own words: a push that
-# failed unseen surfaced later as a digest of nothing. The registry drops a
-# connection now and then (a TLS handshake timeout, found from a runner), so a
-# push is tried three times; an unchanged layer is not sent again.
-def push-image [ref: string] {
-	mut last = ""
-	for attempt in 1..3 {
-		let r = (^docker push --quiet $ref | complete)
-		if $r.exit_code == 0 { return }
-		$last = ($r.stderr | str trim)
-		print $"gcp: pushing ($ref) failed \(attempt ($attempt)/3\): ($last)"
-		sleep 5sec
-	}
-	error make {msg: $"docker push ($ref): ($last)"}
+# What builds the runtime images: Docker's own CLI image, with its buildx and
+# compose plugins, run by Cloud Build against the Docker of the build's worker.
+const builder = "docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d"
+
+# The account Cloud Build runs a build as in the project: the project's
+# default, which pushes the images and writes the build's log.
+def build-account [project: string]: nothing -> string {
+	gc builds get-default-service-account --project $project --format "value(serviceAccountEmail)" | str trim | split row "/" | last
 }
 
-# The runtime images, built as the app's compose project builds them and pushed
-# by digest: what integrate tested is what releases.
+# The runtime images, built in Cloud Build as the app's compose project builds
+# them, so the machine releasing needs no Docker daemon, and pushed by digest:
+# what integrate tested is what releases. The build reads the app's own files
+# alone, as git sees them: every context of its images is the app's
+# directory or an image by digest.
 def push-images [app_dir: string, plan: record, name: string, services: list<string>]: nothing -> record {
+	let p = $plan.project
 	let host = ($plan.registry | split row "/" | first)
-	# A short-lived token, not a credential helper written into Docker's config.
-	gc auth print-access-token | ^docker login --username oauth2accesstoken --password-stdin $"https://($host)"
-	let root = (do { cd $app_dir; ^git rev-parse --show-toplevel } | str trim)
-	do {
-		cd $app_dir
-		# Reproducible, so an unchanged source pushes the digest it pushed before.
-		with-env {SOURCE_DATE_EPOCH: "0"} {
-			^docker compose --profile "*" config | ^docker buildx bake -f - --load --provenance=false $"--allow=fs.read=($root)" --set "*.platform=linux/amd64" ...$services
-		}
+	# A preview's images are tagged for it, never as the release's.
+	let tag = ($plan.preview? | default "release")
+	let refs = ($services | each {|svc| {svc: $svc, ref: $"($plan.registry)/($name)-($svc):($tag)"} })
+	let work = (mktemp -d -t gcp-build.XXXXXX | str trim)
+	# Never a certificate pair `sayt setup` issued for this machine: an image
+	# carries none.
+	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
+	with-env {COPYFILE_DISABLE: "1"} { ^tar -czf $"($work)/source.tgz" -C $app_dir -T $"($work)/files" }
+	let sets = ($refs | each {|r| $"--set ($r.svc).tags=($r.ref)" } | str join " ")
+	# The worker's metadata server lends the build's account a token, which
+	# logs Docker into the registry; reproducible, so an unchanged source
+	# pushes the digest it pushed before.
+	let script = ([
+		"set -eu"
+		"token=$(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\"access_token\":\"\\([^\"]*\\)\".*/\\1/p')"
+		$"echo \"$token\" | docker login --username oauth2accesstoken --password-stdin https://($host) >/dev/null"
+		"docker buildx create --use --driver docker-container >/dev/null"
+		$"docker compose --profile '*' config | docker buildx bake -f - --push --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' ($sets) ($services | str join ' ')"
+	] | str join "\n")
+	{
+		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
+		steps: [{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: ["SOURCE_DATE_EPOCH=0"]}]
+		options: {machineType: "E2_HIGHCPU_8", logging: "CLOUD_LOGGING_ONLY"}
+		timeout: "1800s"
+	} | to yaml | save -f $"($work)/cloudbuild.yaml"
+	print $"gcp: building ($services | str join ', ') in Cloud Build"
+	let r = (^gcloud --quiet builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p | complete)
+	rm -rf $work
+	if $r.exit_code != 0 {
+		error make {msg: $"Cloud Build failed:\n(($r.stdout + $r.stderr) | lines | last 40 | str join (char nl))"}
 	}
-	let targets = (do { cd $app_dir; ^docker compose --profile "*" config | ^docker buildx bake -f - --print ...$services } | from json | get target)
-	$services | each {|svc|
-		let local = ($targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
-		let repo = $"($plan.registry)/($name)-($svc)"
-		# A preview's images are tagged for it, never as the release's.
-		let tag = ($plan.preview? | default "release")
-		^docker tag $local $"($repo):($tag)"
-		push-image $"($repo):($tag)"
-		let digest = (^docker image inspect --format '{{json .RepoDigests}}' $"($repo):($tag)" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
-		{svc: $svc, ref: {tag: $tag, digest: $digest}}
+	$refs | each {|r|
+		let digest = (gc artifacts docker images describe $r.ref --format "value(image_summary.digest)" | str trim)
+		{svc: $r.svc, ref: {tag: $tag, digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
 
