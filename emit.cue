@@ -2103,6 +2103,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: mecha.#Cluster & {
 		meta: {
 			app: D.code.meta.name
+			// The database runs PLV8 where a server entity's validation or a
+			// hybrid machine's rules need it (000_extensions.sql, 016's).
+			plv8: len([for _, e in D.code.state.entities if e.server if len([for n, _ in e.validations {n}]) > 0 {e}]) > 0 || len([if D.code.state.hybrids != _|_ for n, _ in D.code.state.hybrids {n}]) > 0
 			// The app is its build's root, and its runtime sits where mise put
 			// it, outside the app: every static the cluster serves is then the
 			// app's own file, fingerprinted and copied from the build context.
