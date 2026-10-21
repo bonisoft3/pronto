@@ -2238,7 +2238,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							do:    strings.Join(omnishell.#Render.command, " ")
 							shell: "exec"
 						}
-						env: {for k, v in compose.environment if k != "PORT" && k != "ENTRY" {(k): v}}
+						// The origin as the door's own host entry spells it, which the host
+						// maps to the door's port there.
+						env: {
+							for k, v in compose.environment if k != "PORT" && k != "ENTRY" && k != "ORIGIN" {(k): v}
+							ORIGIN: "${ORIGIN:-\(D.out.meta.door.scheme)://localhost:\(D.out.meta.door.port)}"
+						}
 						after: {caddy: "healthy", crud: "healthy", electric: "healthy"}
 					}
 					// The release it takes its entry from (a `from.ref` copy).
