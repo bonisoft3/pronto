@@ -25,7 +25,7 @@ say:
       distribution:
         priority: -1
         cmds:
-          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env bootstrap_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
       types:
         priority: -1
         cmds:
@@ -40,6 +40,11 @@ say:
         priority: -1
         cmds:
           - do: "deno test --config deno.json --allow-read --allow-run=cue identity_test.ts"
+          - do: "deno test --no-config --allow-read --allow-run=cue auth-providers.test.ts login-design.test.ts"
+      k8s:
+        priority: -1
+        cmds:
+          - do: "nu k8s/release_test.nu"
       type-system:
         priority: -1
         cmds:
@@ -79,7 +84,7 @@ say:
       bundle:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-addresses_test.ts bundle/edge-ssr_test.ts"
+          - do: "mise exec -- deno test --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-addresses_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts mecha-reducer.test.ts"
       # The door's language rule against the terminal's, over an emitted
       # Caddyfile: two runtimes that cannot share code and must not disagree.
       negotiation:
@@ -101,10 +106,10 @@ say:
   # lint is not a #verb: it carries its own rulemap with no builtin wiring, so a
   # `do:` here type-checks, exports, and never reaches lint.rules.
   lint:
-    # The bootstrap reference states the releases distribution pins, each
+    # The bootstrap reference states the tool releases distribution pins, each
     # where it names one.
     shared:
-      - pattern: '(?:#Version: +"|Pronto \*\*|bonisoft3/pronto@v)(?<v>\d+\.\d+\.\d+)'
+      - pattern: '(?:#Version: +"|Pronto \*\*)(?<v>\d+\.\d+\.\d+)'
         files: [distribution/config.cue, skills/pronto-turn/references/bootstrap.md]
       - pattern: '(?:#SaytVersion: +"|Sayt \*\*|bonisoft3/sayt/v)(?<v>\d+\.\d+\.\d+)'
         files: [distribution/config.cue, skills/pronto-turn/references/bootstrap.md]

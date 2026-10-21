@@ -76,7 +76,7 @@ app: pronto.#App & {
 _terminal: (pronto.#DefaultTerminal & {code: app}).out
 _cluster: (pronto.#DefaultCluster & {code: app, statics: []}).out
 _loop: (pronto.#DefaultLoop & {code: app, terminal: _terminal, cluster: _cluster}).out
-_build: (pronto.#DefaultBuild & {code: app, loop: _loop, cluster: _cluster}).out
+_build: (pronto.#DefaultBuild & {code: app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
 out: (pronto.#emit & {
   code:     app
   cluster:  _cluster

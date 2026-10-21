@@ -5,7 +5,7 @@
     "manual": true,
     "build": {
       "additional_contexts": {
-        "root": "../../.."
+        "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.13.0@sha256:0b0bd18f85c8dc71553c8ad106cb0ee3286f8f34997d16c7b34d984b9ac445c2}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
       },
       "secrets": [],
       "args": {}
@@ -25,12 +25,13 @@
       "."
     ],
     "depends_on": {
-      "apps_idioms-launch": {
+      "idioms-launch": {
         "condition": "service_healthy"
       }
     },
     "environment": {
-      "APP_URL": "https://caddy:8443"
+      "APP_URL": "https://caddy:8443",
+      "SETTLE_TIMEOUT_MS": "50000"
     },
     "ports": [],
     "volumes": []
@@ -41,7 +42,7 @@
       "ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
       "ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1",
       "ENV DENO_DIR=/deno-cache",
-      "COPY --from=root plugins/omnishell /omnishell",
+      "COPY --from=plugins_omnishell-runtime-image / /omnishell",
       "RUN deno install --node-modules-dir=auto --entrypoint /omnishell/check-visual.ts"
     ],
     "preambleCopyContexts": [],
@@ -61,8 +62,8 @@
     "cmd": null
   },
   "name": "integrate",
-  "project": "apps_idioms",
-  "dir": "apps/idioms",
+  "project": "idioms",
+  "dir": ".",
   "activate": "mise x --",
   "srcs": {
     "globs": [
@@ -82,8 +83,8 @@
   "synthetics": {
     "bayt": {
       "name": "integrate_bayt",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -98,7 +99,12 @@
           ".bayt/Taskfile.bayt.yml",
           ".bayt/Taskfile.integrate.yaml",
           ".bayt/compose.integrate.closure.yaml",
-          ".bayt/process-compose.yaml"
+          ".bayt/process-compose.yaml",
+          ".bayt/compose.*.yaml",
+          ".bayt/Dockerfile.*",
+          ".bayt/bayt.*.json",
+          ".bayt/Taskfile.*.yaml",
+          "monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"
         ],
         "exclude": []
       },
@@ -114,15 +120,16 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.integrate.yaml",
-        "apps/idioms/.bayt/compose.launch.yaml",
-        "apps/idioms/.bayt/compose.caddy.yaml"
+        "./.bayt/compose.integrate.yaml",
+        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "outs": {
       "name": "integrate_outs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -144,15 +151,16 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.integrate.yaml",
-        "apps/idioms/.bayt/compose.launch.yaml",
-        "apps/idioms/.bayt/compose.caddy.yaml"
+        "./.bayt/compose.integrate.yaml",
+        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "srcs": {
       "name": "integrate_srcs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -179,9 +187,10 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.integrate.yaml",
-        "apps/idioms/.bayt/compose.launch.yaml",
-        "apps/idioms/.bayt/compose.caddy.yaml"
+        "./.bayt/compose.integrate.yaml",
+        "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     }
   },
@@ -203,15 +212,16 @@
   ],
   "transitiveCrossDeps": [],
   "upClosure": [
-    "apps/idioms/.bayt/compose.integrate.yaml",
-    "apps/idioms/.bayt/compose.launch.yaml",
-    "apps/idioms/.bayt/compose.caddy.yaml"
+    "./.bayt/compose.integrate.yaml",
+    "./.bayt/compose.launch.yaml",
+    "./.bayt/compose.caddy.yaml",
+    "./.bayt/compose.served.yaml"
   ],
   "chainedDeps": [
     {
       "name": "launch_outs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "outs": {
         "globs": [],
         "exclude": []

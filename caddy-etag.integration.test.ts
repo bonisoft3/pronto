@@ -19,7 +19,10 @@
 // script spelled from sha256sum's lines and piped into sh, so a static named
 // with a quote stopped the door, and one naming `$(…)` ran it.
 
-const dir = new URL("./testdata/emit", import.meta.url).pathname;
+import { fileURLToPath } from "node:url";
+import { created } from "./docker-copy.ts";
+
+const dir = fileURLToPath(new URL("./testdata/emit", import.meta.url));
 
 function fail(message: string): never {
   throw new Error(message);
@@ -94,8 +97,9 @@ for (const [layout, composed] of [["local", door], ["installed", installedDoor]]
     await Deno.writeTextFile(`${scratch}/${file}`, file);
   }
   await Deno.writeTextFile(`${scratch}/Caddyfile`, caddyfile);
+  const tree: [string, string][] = [[`${scratch}/srv`, "/srv"], [`${scratch}/omnishell`, "/omnishell"]];
   try {
-    await docker(["run", "-d", "--name", name, "-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", "-p", "127.0.0.1::8080", "-v", `${scratch}/Caddyfile:/etc/caddy/Caddyfile:ro`, "-v", `${scratch}/srv:/srv`, "-v", `${scratch}/omnishell:/omnishell`, CADDY, ...command]);
+    await docker(["start", await created(["--name", name, "-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", "-p", "127.0.0.1::8080", CADDY, ...command], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], ...tree])]);
     let url = await base();
     const before: Record<string, string> = {};
     for (const [path, , body] of FILES) {
@@ -109,11 +113,8 @@ for (const [layout, composed] of [["local", door], ["installed", installedDoor]]
     for (const file of HOSTILE) {
       const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(file)));
       const want = `"${Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("")}"`;
-      const got = await Deno.readTextFile(`${scratch}/${file}.etag`).catch((err) => fail(`${JSON.stringify(file)} has no validator: ${err}`));
+      const got = await docker(["exec", name, "cat", `/${file}.etag`]).catch((err) => fail(`${JSON.stringify(file)} has no validator: ${err}`));
       if (got !== want) fail(`${JSON.stringify(file)} carries ${got}, not ${want}`);
-    }
-    for (const dir of [scratch, `${scratch}/srv`, `${scratch}/srv/shell`]) {
-      for await (const e of Deno.readDir(dir)) if (e.name === "pwned") fail(`a file's name ran as a command in ${dir}`);
     }
     if ((await docker(["exec", name, "find", "/", "-xdev", "-name", "pwned"])).trim() !== "") fail("a file's name ran as a command");
     for (const sidecar of ["/llms.txt.etag", "/robots.txt.etag", "/regras/index.html.etag", "/omnishell/interpreter/shell.js.etag"]) {
@@ -121,6 +122,7 @@ for (const [layout, composed] of [["local", door], ["installed", installedDoor]]
       if (res.status !== 404) fail(`${sidecar} is served: ${res.status}`);
     }
     await write("bbbb");
+    for (const [source, target] of tree) await docker(["cp", `${source}/.`, `${name}:${target}`]);
     await docker(["restart", name]);
     url = await base();
     for (const [path, , body] of FILES) {

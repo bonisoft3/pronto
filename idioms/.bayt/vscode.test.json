@@ -6,7 +6,7 @@
       "command": "mise x -- nu",
       "args": [
         "-c",
-        "^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf test'"
+        "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf test'"
       ],
       "group": {
         "kind": "test",
@@ -15,7 +15,7 @@
       "label": "test",
       "type": "shell",
       "options": {
-        "cwd": "${workspaceFolder}/apps/idioms"
+        "cwd": "${workspaceFolder}/."
       }
     }
   ]

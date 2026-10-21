@@ -28,7 +28,7 @@ How pronto works inside, what it decided and what it superseded.
 
 ## Subsystems
 
-* [[cortex|Cortex client compositions]] — generated browser protocols composing Mecha session and command ports.
+* [[cortex|Cortex machines]] — the app's screens over its Mecha machines, each a fold that reaches its machine through surface rows or plays it in place.
 
 * [The compiler and its review ladder](compiler.md) - concept: How a brief becomes an app — two model hops above deterministic rungs, what `cue export` emits and where it lands, what the bijection holds a person to sign, and how pronto reaches the parts it configures.
 * [Component contracts](component-contracts.md) - concept: What each part of a pronto program — the app, the terminal, the cluster, the loop and the build graph — declares as its state, its capabilities and its surface, how data flows between them as one graph, and the dual-plane kinetic contract for universal time travel.
@@ -51,6 +51,8 @@ How pronto works inside, what it decided and what it superseded.
 * [Hybrid machines](decisions/2026-09-29-hybrid-machines.md) - decision, partially built: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-external tiers.
 * [External effects](decisions/2026-10-03-external-effects.md) - decision, partially built: How a machine reaches outside the cluster — a state invokes an external effect, the interpreter claims a ledger row and enqueues a Graphile job in the transition's commit, mecha's airlock runs the effect's Jessie handler against one declared sink through its Dapr binding, and the outcome returns through the interpreter as the machine's next event.
 * [Agent onboarding](decisions/2026-10-14-agent-onboarding.md) - decision, partially built: What a cold agent needs to write its first pronto app inside a 128k context — an idioms package shipped and gated with the module, a first generate that compiles a hand-authored program, an author's card under 8k tokens, links that resolve in the mirror, and gates that refuse an app nobody can play.
+* [Machine contracts](decisions/2026-10-15-machine-contracts.md) - decision, partially built: Rules out the races and stalls Truco's review found by construction — serializable steps, recorded time and randomness, rules declaring the inputs they read and the fields they write, and an app-independent lint that every event carries what its rules read, no reachable state is stuck, and every projected value fits its column — instead of simulating backends; Z3 deferred until a property needs it.
+* [Releases by content](decisions/2026-10-16-releases-by-content.md) - decision, proposed: Replaces per-file revalidation, verified live-update releases and the edge's content addresses with the third for every target, so a page cannot run files from two deployments, a first visit never restarts, and a tab left open takes each deployment at the least disruptive level its changes allow.
 
 ## Archive
 
@@ -60,5 +62,5 @@ How pronto works inside, what it decided and what it superseded.
 * [Held seeds](archive/2026-10-02-held-seeds.md) - decision, built: Moves an archive of seed rows out of the program's CUE package into a JSON file judged by `cue vet` against the entities only when it or they change, after golaberto's 18,782-line seed made every evaluation of the program over ten times slower. Contract moved to [the guide](../GUIDE.md#seed-rows).
 * [Web platform envelope](archive/2026-10-03-web-platform-envelope.md) - decision, built: Coordinates the shell metadata, HTTP door routing, and single-file bundling for browser chrome, crawlers, and LLMs — favicons, manifest, social cards, llms.txt, well-knowns, and preconnects. Contract moved to [component contracts](component-contracts.md#web-platform-envelope).
 
-* [[archive/2026-10-10-hatches|Hatches]] — built decision: derive effect levels and delivery, declare escape hatches, and review entities and machines by consequence. Contracts live in [[../SPEC|the artifact spec]], [[../GUIDE|the guide]] and [the terminal](https://github.com/bonisoft3/omnishell/blob/v0.12.1/docs/terminal.md).
+* [[archive/2026-10-10-hatches|Hatches]] — built decision: derive effect levels and delivery, declare escape hatches, and review entities and machines by consequence. Contracts live in [[../SPEC|the artifact spec]], [[../GUIDE|the guide]] and [the terminal](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/terminal.md).
 * [[archive/2026-10-12-lifecycle-guards|Predicates belong to lifecycle transitions]] — built decision: guarded writes share the machine interpreter; access remains RLS.

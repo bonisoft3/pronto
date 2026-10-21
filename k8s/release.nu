@@ -276,8 +276,16 @@ export def render-manifests [
 	--data: string # JSON unified into the release package's root, e.g. the images it pushed
 ]: nothing -> any {
 	let expr = $"($env_name)Manifests"
-	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
+	# The roles the app's schema grants PostgREST's login, as generate wrote them.
+	let facts_path = ($cue_path | path dirname | path join .pronto cluster.json)
+	if not ($facts_path | path exists) { error make { msg: $"($facts_path) is missing: generate the app before releasing it" } }
+	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
+	let facts = (open $facts_path)
+	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
+	{App: {database: {tokenRoles: $facts.tokenRoles}}} | to json | save -f $roles_file
+	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
+	rm $roles_file
 	if $res.exit_code != 0 {
 		error make { msg: $"Failed to render CUE manifests: ($res.stderr)" }
 	}
@@ -292,6 +300,28 @@ export def read-environment [cluster_env: string]: nothing -> record {
 		error make { msg: $"Failed to read ($cluster_env) environment: ($res.stderr)" }
 	}
 	$res.stdout | from json
+}
+
+export def auth-provider-environment [environment: record]: nothing -> record {
+	let entries = ($environment | transpose key value | where {|e| $e.key starts-with "OIDC_" })
+	let secrets = ($entries | where {|e| $e.key ends-with "_CLIENT_SECRET" and $e.value != "" }
+		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
+	let settings = ($entries | where {|e| not ($e.key ends-with "_CLIENT_SECRET") }
+		| reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
+	{
+		oidc: $settings, oidcSecrets: ($secrets | columns), secretValues: $secrets
+		oidcSecretDigest: (if ($secrets | is-empty) { "" } else { $secrets | sort | to json --raw | hash sha256 })
+	}
+}
+
+export def auth-provider-secret [name: string, namespace: string, values: record]: nothing -> record {
+	{
+		apiVersion: "v1", kind: "Secret"
+		metadata: {name: $"($name)-oidc", namespace: $namespace}
+		type: "Opaque"
+		# stringData is write-only: server-side apply must own the stored data.
+		data: ($values | items {|key, value| [$key ($value | encode base64)] } | into record)
+	}
 }
 
 # Main entrypoint for release@k8s
@@ -392,7 +422,7 @@ export def main [
 		}
 	}
 	# The image each target loaded, as bake names it: the tag carries bayt's
-	# project name, which is not always the app's (truco's is apps_truco).
+	# project name.
 	let bake_targets = (do { cd $app_source_dir; docker compose --profile "*" config | docker buildx bake -f - --print ...$build_svcs } | from json | get target)
 	let pushed = ($build_svcs | each {|svc|
 		let local = ($bake_targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
@@ -416,10 +446,9 @@ export def main [
 	} else { {} }
 	# The providers compose gives the auth service, and each one's client:
 	# compose refuses to render a provider whose client is unset.
-	let oidc = (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment
-		| transpose key value | where {|e| $e.key starts-with "OIDC_" } | reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
+	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment))
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}, auth: {oidc: $oidc}} | merge $migrate)} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate)} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file)
 	rm $pushed_file
 
@@ -430,6 +459,10 @@ export def main [
 
 	# Decrypt and apply SOPS secrets if present
 	apply-sops-secrets $app_source_dir $target_ns
+	if ($oidc.secretValues | is-not-empty) {
+		auth-provider-secret $workload_name $target_ns $oidc.secretValues
+			| to json | kubectl apply --server-side --field-manager=pronto-oidc -f -
+	}
 
 	# In the order a fresh cluster needs: the database and everything around it,
 	# then its schema, then the services that read it, so none starts on a
@@ -457,6 +490,19 @@ export def main [
 
 	for job in (["initdb"] | append (if $has_migrate { ["migrate"] } else { [] })) {
 		run-job ($jobs_yaml | where {|d| $d =~ $"\(?m\)^  name: ($app_info.name)-($job)\\s*$" } | first) $"($app_info.name)-($job)" $target_ns
+	}
+
+	# authenticator's memberships name roles initdb creates, so the operator
+	# reconciles it, password included, only after the Jobs; crud logs in as it.
+	let cluster = $"cluster.postgresql.cnpg.io/($app_info.name)-db"
+	print $"Waiting for ($cluster) to reconcile its managed roles..."
+	let deadline = (date now) + 300sec
+	loop {
+		let roles = (kubectl get $cluster -n $target_ns -o json | from json | get status.managedRolesStatus? | default {})
+		let pending = ($roles.cannotReconcile? | default {} | columns | append ($roles.byStatus?.pending-reconciliation? | default []))
+		if ("authenticator" in ($roles.byStatus?.reconciled? | default [])) and ($pending | is-empty) { break }
+		if (date now) > $deadline { error make { msg: $"($cluster) has not reconciled its managed roles: ($roles | to nuon)" } }
+		sleep 3sec
 	}
 
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.

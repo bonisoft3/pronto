@@ -32,10 +32,10 @@ export async function prepareTerminalCorpus(fixture: string): Promise<void> {
   }
   const bootstrap = join(fixture, "storybook_bootstrap.cue");
   await Deno.writeTextFile(bootstrap, `package ${pkg}\ncode: surface: screens: [string]: charts: *[] | [..._]\n${previous.includes("@tag(derive,") ? "_deriving: true\n" : ""}`);
-  const authored = await reading(fixture, pkg, "{terminalRuntime: app.terminal.surface.runtime, markupReader: app.terminal.surface.markupReader, machineSchema: app.terminal.surface.machineSchema, entities: app.code.state.entities, screens: {for name, screen in app.code.surface.screens {(name): {files: screen.files, if screen.markup != _|_ {markup: screen.markup}}}}}") as {
+  const authored = await reading(fixture, pkg, "{markupReader: app.terminal.surface.markupReader, machineSchema: app.terminal.surface.machineSchema, entities: app.code.state.entities, screens: {for name, screen in app.code.surface.screens {(name): {files: screen.files, if screen.markup != _|_ {markup: screen.markup}}}}}") as {
     entities: Record<string, Entity>;
     screens: Record<string, { markup?: string; files: { html: string } }>;
-    terminalRuntime: string; markupReader: string; machineSchema: string;
+    markupReader: string; machineSchema: string;
   };
   const sites = celSites(authored.entities);
   const parsed = new Map(sites.map((site) => [site.cel, parseCel(site.cel)]));
@@ -50,7 +50,7 @@ export async function prepareTerminalCorpus(fixture: string): Promise<void> {
   for (const entry of await entries(join(fixture, "shell/handlers"))) {
     if (entry.isFile && entry.name.endsWith(".js")) available.add(entry.name.slice(0, -3));
   }
-  const read = await run(Deno.execPath(), ["run", "--no-config", "--no-check", "--no-lock", "--allow-read=.", await terminalPath(authored, authored.markupReader, fixture), "."], fixture);
+  const read = await run(Deno.execPath(), ["run", "--no-config", "--no-check", "--no-lock", "--allow-read=.", await terminalPath(authored.markupReader, fixture), "."], fixture);
   const projected = JSON.parse(read) as { screens: Record<string, ScreenProjection> };
   const charts: string[] = [];
   const screens = Object.entries(projected.screens).map(([name, screen]) => {
@@ -75,7 +75,7 @@ export async function prepareTerminalCorpus(fixture: string): Promise<void> {
     await Deno.mkdir(join(fixture, ".pronto"), { recursive: true });
     const files = charts.map((_, index) => join(fixture, ".pronto", `storybook-chart-${index}.json`));
     for (const [index, chart] of charts.entries()) await Deno.writeTextFile(files[index], chart);
-    await run("cue", ["vet", "-d", "#Machine", await terminalPath(authored, authored.machineSchema, fixture), ...files], fixture);
+    await run("cue", ["vet", "-d", "#Machine", await terminalPath(authored.machineSchema, fixture), ...files], fixture);
     for (const file of files) await Deno.remove(file);
   }
   const derived = renderDerived(pkg, screens, available, [], []);
@@ -86,7 +86,7 @@ export async function prepareTerminalCorpus(fixture: string): Promise<void> {
   // Imported code stays separate from its deployment roots. The storybook
   // never applies migrations, so this uses the canonical terminal config
   // without constructing the cluster's SQL or its package builder.
-  const config = await reading(fixture, pkg, `(pronto.#shellConfig & {code: app.code, liveUpdates: app.terminal.liveUpdates, migrations: [], floors: app.terminal.capabilities.floors, hatch: app.terminal.capabilities.hatch, server: (pronto.#serverOn & {servers: [for _, entity in app.code.state.entities {entity.server}], auth: app.code.capabilities.auth != _|_}).out, native: app.code.capabilities.native}).out`);
+  const config = await reading(fixture, pkg, `(pronto.#shellConfig & {code: app.code, migrations: [], floors: app.terminal.capabilities.floors, hatch: app.terminal.capabilities.hatch, server: (pronto.#serverOn & {servers: [for _, entity in app.code.state.entities {entity.server}], auth: app.code.capabilities.auth != _|_}).out, native: app.code.capabilities.native}).out`);
   const bytes = JSON.stringify(config);
   await Deno.writeTextFile(join(fixture, "shell/shell.yaml"), bytes);
   await Deno.writeTextFile(join(fixture, "shell/shell.json"), bytes);

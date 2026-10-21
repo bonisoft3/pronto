@@ -1,11 +1,14 @@
 // cdc-types.blobl, run by the transform image the cluster pins, over the bus
-// spellings conduit v0.14.0 was measured to produce: Postgres text for a
-// domain column (2026-09-22, ponto, realworld and thenote stacks), and native
-// JSON for a base-typed one (2026-10-03, a logrepl pipeline over int4, bool,
-// float8, uuid, date and text columns). Conduit decodes a column whose type it
+// spellings conduit was measured to produce: Postgres text for a domain column
+// (v0.14.0, 2026-09-22, ponto, realworld and thenote stacks), and native JSON
+// for a base-typed one (v0.14.0, 2026-10-03, a logrepl pipeline over int4,
+// bool, float8, uuid, date and text columns). v0.20.4 spells both the same
+// (2026-10-16, a text and an int domain beside the base columns), and a NULL
+// uuid as null where v0.14.0 gave "". Conduit decodes a column whose type it
 // knows and passes a domain, whose OID it does not, through as text.
 
 import { typeTable } from "./type-table.ts";
+import { created } from "./docker-copy.ts";
 
 const CLUSTER = new URL("../../libraries/mecha/cluster.cue", import.meta.url);
 const ASSET = new URL("./assets/cdc-types.blobl", import.meta.url);
@@ -23,6 +26,7 @@ const types = {
     day: "date", u: "uuid", tm: "time", f: "double", s: "string",
   },
   g: { blob: "bytes" },
+  j: { v: "json", geo: "geojson" },
 };
 const carriers = types;
 
@@ -54,6 +58,15 @@ const cases: { name: string; row: Row; want: Row | string }[] = [
       day: "0001-01-01", u: null, tm: "00:00:00.000000", f: 1e+300, s: "", txid: 979,
     },
   },
+  // Conduit v0.20.4 reads a json or jsonb column as bytes, spelled as base64 of
+  // the text: the column's own for json, Postgres's spaced one for jsonb
+  // (2026-10-19, a logrepl pipeline over a json and a jsonb column).
+  {
+    name: "a json column as base64 of its text",
+    row: { __table: "j", v: "eyJhIjoxLCJiIjpbMSwyLjUsInMiXSwiYyI6eyJkIjoieCJ9LCJiaWciOjkwMDcxOTkyNTQ3NDA5OTN9", geo: "eyJ0eXBlIjogIlBvaW50IiwgImNvb3JkaW5hdGVzIjogWzEsIDJdfQ==" },
+    want: { __table: "j", v: { a: 1, b: [1, 2.5, "s"], c: { d: "x" }, big: 9007199254740993 }, geo: { type: "Point", coordinates: [1, 2] } },
+  },
+  { name: "a json column as a JSON value", row: { __table: "j", v: { a: 1 } }, want: "json is not base64 text" },
   { name: "a table the map does not name", row: { __table: "other", at: "2026-09-22 14:18:23+00" }, want: { __table: "other", at: "2026-09-22 14:18:23+00" } },
   { name: "a duration with a day part", row: { __table: "t", d: "1 day 02:00:00" }, want: "duration is not clock text" },
   // An int64 is a domain, spelled as text. A JSON number is a spelling nobody
@@ -128,7 +141,7 @@ Deno.test({ name: "cdc-types.blobl converts conduit's spellings into canonical f
     await Deno.writeTextFile(`${scratch}/config.json`, JSON.stringify(config));
     const input = cases.map((c, i) => JSON.stringify({ case: i, event: JSON.parse(bus(c.row)) })).join("\n") + "\n";
     const child = new Deno.Command("docker", {
-      args: ["run", "--rm", "-i", "-v", `${scratch}:/w:ro`, "--entrypoint", "/redpanda-connect", IMAGE, "run", "/w/config.json"],
+      args: ["start", "-a", "-i", await created(["--rm", "-i", "--entrypoint", "/redpanda-connect", IMAGE, "run", "/w/config.json"], [[scratch, "/w"]])],
       stdin: "piped", stdout: "piped", stderr: "piped",
     }).spawn();
     const writer = child.stdin.getWriter();

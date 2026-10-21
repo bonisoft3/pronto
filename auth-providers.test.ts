@@ -63,3 +63,27 @@ Deno.test("a provider's settings reach the auth service as defaults and not the 
   assertEquals(stray.success, false);
   assertStringIncludes(stray.stderr, "github");
 });
+
+Deno.test("invalid provider settings are refused rather than replaced by defaults", async () => {
+  for (const settings of [
+    `client: "bad$client", issuer: "https://login.example"`,
+    `client: "valid", issuer: "https://login.example/}"`,
+    `client: "", issuer: "https://login.example"`,
+  ]) {
+    const res = await exported(withAuth(`{required: false, service: "/auth", providers: ["google"], provider: google: {${settings}}}`), "out");
+    assertEquals(res.success, false, settings);
+    assertStringIncludes(res.stderr, "signIn.google", settings);
+  }
+});
+
+Deno.test("provider settings require a provider list while an empty settings map needs none", async () => {
+  const stray = await exported(withAuth(`{required: false, service: "/auth", provider: google: {client: "valid"}}`), "out");
+  assertEquals(stray.success, false);
+  assertStringIncludes(stray.stderr, "_providersPresent");
+  const empty = await exported(withAuth(`{required: false, service: "/auth", provider: {}}`), "out");
+  assertEquals(empty.success, true, empty.stderr);
+  assertEquals("providers" in empty.value["shell/shell.json"].data.auth, false);
+  const unauthenticated = await exported(paymentProgram(), "out");
+  assertEquals(unauthenticated.success, true, unauthenticated.stderr);
+  assertEquals("auth" in unauthenticated.value["shell/shell.json"].data, false);
+});

@@ -1,5 +1,8 @@
+import { HYBRID_NAME } from "./hybrid-spec.ts";
 import type { MechaPorts, MechaPortSql } from "./mecha-ports.ts";
 import { jessieFacts } from "./jessie.ts";
+import { partsOf } from "./mecha-surface.ts";
+import { contracted } from "./mecha-contracts.ts";
 
 export type Shape =
   | { type: "string"; maxLength: number; values?: string[] }
@@ -17,12 +20,18 @@ export type MechaReducerMachine = {
   ports?: MechaPorts;
   state: Shape;
   view: Shape;
+  public?: Shape;
+  contracts?: Record<string, { reads: string[]; writes?: string[] }>;
   events: Record<string, { tier: "omnishell" | "mecha"; payload: Shape }>;
   mecha?: {ports?: MechaPortSql; locks: string; transitions: {phase: string; event: string; requires?: {sql: string; reason: string}; sql: string}[]};
-  states: Record<string, { final: boolean; always?: { target: string; guard?: string; reduce: string }[]; on: Record<string, { target?: string; guard?: string; reduce: string }> }>;
+  states: Record<string, { final: boolean; always?: { target: string; guard?: string; reduce?: string }[]; on: Record<string, { target?: string; guard?: string; reduce?: string; requires?: { sql: string; reason: string } }> }>;
 };
 
 const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
+
+/** The columns a machine's surface entities declare past the protocol's own,
+ * each filled from the projection's field of the same name. */
+export type Surface = { seat: string[]; public?: string[] };
 
 /** `instrument` is the terminal's fuel instrumentation (omnishell's
  * instrument.ts), passed in because an installed pronto has no sibling to
@@ -31,8 +40,9 @@ export async function compileMechaReducer(
   spec: MechaReducerMachine,
   source: string,
   instrument: (source: string) => string,
+  surface: Surface = { seat: [], public: [] },
 ): Promise<{ source: string; sql: string }> {
-  if (!/^[a-z][a-z0-9_]{0,30}$/.test(spec.name)) throw new Error("invalid hybrid name");
+  if (!HYBRID_NAME.test(spec.name)) throw new Error("invalid hybrid name");
   if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid hybrid version");
   if (!Number.isSafeInteger(spec.fuel) || spec.fuel < 1 || spec.fuel > 1000000) throw new Error("invalid hybrid fuel");
   const entropy = spec.entropy ?? 0;
@@ -53,6 +63,7 @@ export async function compileMechaReducer(
   for (const event of Object.values(spec.events)) {
     if (!["omnishell", "mecha"].includes(event.tier) || event.payload.type !== "object") throw new Error("invalid hybrid event declaration");
   }
+  contracted(spec);
   const facts = jessieFacts(source, "handler");
   if (facts.references.length) throw new Error(`hybrid rules reach ${facts.references.join(", ")}`);
   const runtime = await Deno.readTextFile(new URL("./hybrid-runtime.js", import.meta.url));
@@ -60,7 +71,7 @@ export async function compileMechaReducer(
   const script = `(() => {
     const spec = harden(${JSON.stringify(spec, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)});
     const rules = harden(${instrument(`(() => { ${source}\n })()`)});
-    for (const name of ['project', 'invariant', ...(spec.initialize ? [spec.initialize.reduce] : []), ...Object.values(spec.states).flatMap(s => [...Object.values(s.on), ...(s.always ?? [])].flatMap(t => [t.reduce, ...(t.guard ? [t.guard] : [])]))]) {
+    for (const name of ['project', 'invariant', ...(spec.public ? ['publish'] : []), ...(spec.initialize ? [spec.initialize.reduce] : []), ...Object.values(spec.states).flatMap(s => [...Object.values(s.on), ...(s.always ?? [])].flatMap(t => [...(t.reduce ? [t.reduce] : []), ...(t.guard ? [t.guard] : [])]))]) {
       if (!Object.prototype.hasOwnProperty.call(rules, name) || typeof rules[name] !== 'function') throw new Error('hybrid missing function ' + name);
     }
     const execute = (${runtime.trim()})(spec, rules);
@@ -98,12 +109,50 @@ return JSON.parse(run(JSON.stringify(input)));
       END IF;` : t.sql}
     END IF;`;
   }).join("\n");
+  const seatColumns = ["id", "instance_id", "actor", "seat", "revision", "phase", "view", ...surface.seat];
+  const publicColumns = ["id", ...(surface.public ?? [])];
+  const upsert = (columns: string[]) => columns.filter(c => c !== "id").map(c => `"${c}" = EXCLUDED."${c}"`).join(", ");
+  // The surface's parts, as the surface check reads them: a trigger on a
+  // table the machine has no part in would fail the migration.
+  const parts = partsOf(spec);
   const sql = `
+-- tier: container
 CREATE EXTENSION IF NOT EXISTS plv8;
-${entropy ? "CREATE EXTENSION IF NOT EXISTS pgcrypto;" : ""}
+-- tier: any
 CREATE SCHEMA ${schema};
 REVOKE ALL ON SCHEMA ${schema} FROM PUBLIC;
-CREATE TABLE ${schema}.instance (
+-- A machine's steps run serializable: every interleaving of its transactions
+-- is then some serial order, and the writer retries the transaction a conflict
+-- aborts. The roles that drive a step default to it — app_user through the
+-- gateway, service for the ticker and the pipelines — and the gateway starts
+-- each request's transaction at its role's. Every other session keeps the
+-- database's default, which its writers were written against and owe no
+-- retry to; a step reaching one is refused, not trusted.
+DO $isolation$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN ALTER ROLE app_user SET default_transaction_isolation = 'serializable'; END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service') THEN ALTER ROLE service SET default_transaction_isolation = 'serializable'; END IF;
+END $isolation$;
+CREATE FUNCTION ${schema}.serial() RETURNS void LANGUAGE plpgsql AS $serial$
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'a ${spec.name} step runs serializable, not %', current_setting('transaction_isolation') USING ERRCODE = '25000';
+  END IF;
+END;
+$serial$;
+-- A step's time: the transaction's, the same on every read in it, so every
+-- check in one step agrees on it, and no session can set it. A step a timer
+-- delivers is given the tick's time instead (dispatch's at), so a deadline
+-- is decided on the ticker's clock alone.
+CREATE FUNCTION ${schema}.clock() RETURNS bigint LANGUAGE sql STABLE AS $clock$
+SELECT floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint;
+$clock$;
+REVOKE ALL ON FUNCTION ${schema}.clock() FROM PUBLIC;
+${entropy ? `CREATE FUNCTION ${schema}.draw() RETURNS text LANGUAGE sql AS $draw$
+SELECT left(string_agg(substr(hex, 1, 12) || substr(hex, 14, 3) || substr(hex, 18), ''), ${entropy * 2})
+FROM (SELECT replace(gen_random_uuid()::text, '-', '') AS hex FROM generate_series(1, ${Math.ceil(entropy * 2 / 30)})) random;
+$draw$;
+REVOKE ALL ON FUNCTION ${schema}.draw() FROM PUBLIC;
+` : ""}CREATE TABLE ${schema}.instance (
   id uuid PRIMARY KEY,
   version integer NOT NULL CHECK (version = ${spec.version}),
   revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
@@ -118,22 +167,55 @@ CREATE TABLE ${schema}.member (
 CREATE TABLE ${schema}.receipt (
   instance_id uuid NOT NULL REFERENCES ${schema}.instance,
   actor uuid NOT NULL,
-  command_id uuid NOT NULL,
+  command_id text NOT NULL,
   request jsonb NOT NULL,
   result jsonb NOT NULL,
+  -- What the step was given beside its request, so it replays.
+  now bigint NOT NULL,
+  entropy text,
   PRIMARY KEY(instance_id, actor, command_id)
 );
-CREATE TABLE ${schema}.view (
-  instance_id uuid NOT NULL REFERENCES ${schema}.instance,
-  actor uuid NOT NULL,
-  revision bigint NOT NULL,
-  value jsonb NOT NULL,
-  PRIMARY KEY(instance_id, actor)
-);
-CREATE FUNCTION ${schema}.step(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};
+-- The step's engine is the tier's. PostgreSQL runs the rules in plv8, inside
+-- the fence; the edge object creates ${schema}.engine over its host import
+-- when it boots (mecha-edge's machines.ts); the browser tier has no engine and
+-- steps nothing. plpgsql resolves the engine when a step runs, so the step is
+-- declared once, on every tier, before any engine exists.
+-- tier: container
+CREATE FUNCTION ${schema}.engine(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};
+REVOKE ALL ON FUNCTION ${schema}.engine(jsonb) FROM PUBLIC;
+-- tier: any
+CREATE FUNCTION ${schema}.step(input jsonb) RETURNS jsonb LANGUAGE plpgsql AS $step$
+BEGIN RETURN ${schema}.engine(input); END;
+$step$;
 REVOKE ALL ON FUNCTION ${schema}.step(jsonb) FROM PUBLIC;
 
-CREATE FUNCTION ${schema}.dispatch(instance_id uuid, actor uuid, command_id uuid, request jsonb, tier text)
+-- What every member and, where declared, everyone reads of the instance: its
+-- seats' rows, each column of the surface filled from the view's field of
+-- the same name.
+CREATE FUNCTION ${schema}.settle(game ${schema}.instance, projected jsonb) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, ${schema} AS $settle$
+BEGIN
+  INSERT INTO public.${spec.name}_seat AS v (${seatColumns.map(c => `"${c}"`).join(", ")})
+    SELECT ${seatColumns.map(c => `r."${c}"`).join(", ")} FROM jsonb_array_elements(projected->'views') p
+    JOIN ${schema}.member m ON m.instance_id = game.id AND m.seat = p->>'viewer'
+    CROSS JOIN LATERAL jsonb_populate_record(NULL::public.${spec.name}_seat, (p->'value') || jsonb_build_object(
+      'id', game.id::text || '/' || m.seat, 'instance_id', game.id, 'actor', m.actor, 'seat', m.seat,
+      'revision', game.revision::text, 'phase', game.state->>'phase', 'view', p->'value')) r
+    ON CONFLICT (id) DO UPDATE SET ${upsert(seatColumns)};
+${spec.public ? `  IF projected->'public' = 'null'::jsonb THEN
+    DELETE FROM public.${spec.name}_public WHERE id = game.id::text;
+  ELSE
+    INSERT INTO public.${spec.name}_public AS v (${publicColumns.map(c => `"${c}"`).join(", ")})
+      SELECT ${publicColumns.map(c => `r."${c}"`).join(", ")}
+      FROM jsonb_populate_record(NULL::public.${spec.name}_public, (projected->'public') || jsonb_build_object('id', game.id::text)) r
+      ON CONFLICT (id) DO UPDATE SET ${upsert(publicColumns) || `"id" = EXCLUDED."id"`};
+  END IF;
+` : ""}${spec.ports?.wake ? `  PERFORM ${schema}.arm(game);
+` : ""}END;
+$settle$;
+REVOKE ALL ON FUNCTION ${schema}.settle(${schema}.instance, jsonb) FROM PUBLIC;
+
+CREATE FUNCTION ${schema}.dispatch(instance_id uuid, actor uuid, command_id text, request jsonb, tier text, at bigint DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, ${schema}
 SET statement_timeout = '5s'
@@ -147,8 +229,10 @@ DECLARE
   reduced jsonb;
   recipients jsonb;
   now_ms bigint;
+  drawn text;
   prepared_revision bigint;
 BEGIN
+  PERFORM ${schema}.serial();
   ${mecha.locks ? `SELECT * INTO STRICT game FROM ${schema}.instance i WHERE i.id = instance_id;
   IF tier = 'omnishell' AND NOT EXISTS (SELECT FROM ${schema}.member m WHERE m.instance_id = game.id AND m.actor = dispatch.actor) THEN
     RAISE EXCEPTION 'not a member' USING ERRCODE = '42501';
@@ -162,6 +246,7 @@ BEGIN
   ELSIF tier <> 'mecha' THEN
     RAISE EXCEPTION 'invalid tier';
   END IF;
+  now_ms := coalesce(at, ${schema}.clock());
   SELECT * INTO prior FROM ${schema}.receipt r WHERE r.instance_id = game.id AND r.actor = dispatch.actor AND r.command_id = dispatch.command_id;
   IF FOUND THEN
     IF prior.request <> request THEN RAISE EXCEPTION 'command id reused with different input' USING ERRCODE = '22023'; END IF;
@@ -175,25 +260,21 @@ BEGIN
     ${mecha.locks ? `IF prepared_revision <> game.revision THEN
       RAISE EXCEPTION 'Mecha lock inputs changed; retry the command' USING ERRCODE = '40001';
     END IF;` : ""}
-    now_ms := floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint;
-    SELECT coalesce(jsonb_agg(m.seat ORDER BY m.seat), '[]'::jsonb) INTO recipients FROM ${schema}.member m WHERE m.instance_id = game.id;
+    ${entropy ? `drawn := ${schema}.draw();
+    ` : ""}SELECT coalesce(jsonb_agg(m.seat ORDER BY m.seat), '[]'::jsonb) INTO recipients FROM ${schema}.member m WHERE m.instance_id = game.id;
     reduced := ${schema}.step(jsonb_build_object(
       'state', game.state,
       'event', request->'event',
-      'context', jsonb_build_object('actor', seat, 'tier', tier, 'now', now_ms${entropy ? `, 'entropy', encode(public.gen_random_bytes(${entropy}), 'hex')` : ""}),
+      'context', jsonb_build_object('actor', seat, 'tier', tier, 'now', now_ms${entropy ? `, 'entropy', drawn` : ""}),
       'viewers', recipients
     ));
     IF reduced->>'kind' = 'accepted' THEN
       ${branches}
     END IF;
     IF reduced->>'kind' = 'accepted' THEN
-      game.revision := game.revision + 1;
-      UPDATE ${schema}.instance i SET state = reduced->'state', revision = game.revision WHERE i.id = game.id;
-      INSERT INTO ${schema}.view AS v (instance_id, actor, revision, value)
-        SELECT game.id, m.actor, game.revision, p->'value'
-        FROM jsonb_array_elements(reduced->'views') p
-        JOIN ${schema}.member m ON m.instance_id = game.id AND m.seat = p->>'viewer'
-        ON CONFLICT ON CONSTRAINT view_pkey DO UPDATE SET revision = EXCLUDED.revision, value = EXCLUDED.value;
+      UPDATE ${schema}.instance i SET state = reduced->'state', revision = i.revision + 1 WHERE i.id = game.id
+        RETURNING i.* INTO STRICT game;
+      PERFORM ${schema}.settle(game, reduced);
       answer := jsonb_build_object('kind', 'accepted');
     ELSIF reduced->>'kind' = 'rejected' THEN
       answer := reduced;
@@ -202,45 +283,58 @@ BEGIN
     END IF;
   END IF;
   answer := answer || jsonb_build_object('command_id', command_id, 'revision', game.revision::text);
-  INSERT INTO ${schema}.receipt VALUES (game.id, actor, command_id, request, answer);
+  INSERT INTO ${schema}.receipt (instance_id, actor, command_id, request, result, now, entropy)
+    VALUES (game.id, actor, command_id, request, answer, now_ms, drawn);
   RETURN answer;
 END;
 $dispatch$;
-REVOKE ALL ON FUNCTION ${schema}.dispatch(uuid, uuid, uuid, jsonb, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ${schema}.dispatch(uuid, uuid, text, jsonb, text, bigint) FROM PUBLIC;
 
-CREATE FUNCTION ${schema}.deliver(instance_id uuid, event jsonb) RETURNS void
+CREATE FUNCTION ${schema}.deliver(instance_id uuid, event jsonb, at bigint DEFAULT NULL) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, ${schema} AS $deliver$
 DECLARE revision bigint; answer jsonb;
 BEGIN
-  SELECT i.revision INTO STRICT revision FROM ${schema}.instance i WHERE i.id = instance_id;
-  answer := ${schema}.dispatch(instance_id, '00000000-0000-0000-0000-000000000000', gen_random_uuid(),
-    jsonb_build_object('version', ${spec.version}, 'expected_revision', revision::text, 'event', event), 'mecha');
+  -- Locked as dispatch will lock it, so the revision read is the one it checks.
+  SELECT i.revision INTO STRICT revision FROM ${schema}.instance i WHERE i.id = instance_id FOR UPDATE;
+  -- One delivery is accepted per revision, so the revision names it.
+  answer := ${schema}.dispatch(instance_id, '00000000-0000-0000-0000-000000000000', 'mecha/' || revision::text,
+    jsonb_build_object('version', ${spec.version}, 'expected_revision', revision::text, 'event', event), 'mecha', at);
   IF answer->>'kind' IS DISTINCT FROM 'accepted' THEN
     RAISE EXCEPTION 'Mecha delivery refused: %', answer USING ERRCODE = 'check_violation';
   END IF;
 END;
 $deliver$;
-REVOKE ALL ON FUNCTION ${schema}.deliver(uuid, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ${schema}.deliver(uuid, jsonb, bigint) FROM PUBLIC;
 
-CREATE FUNCTION public.${spec.name}_command(instance_id uuid, command_id uuid, request jsonb)
-RETURNS jsonb LANGUAGE sql SECURITY DEFINER
-SET search_path = pg_catalog, ${schema}
-AS $command$
-  SELECT ${schema}.dispatch(instance_id, public.auth_uid(), command_id, request, 'omnishell');
+${parts.includes("command") ? `-- A command row is the browser's whole request: inserting it dispatches it,
+-- and the receipt is stamped on the row in the same transaction.
+CREATE FUNCTION ${schema}.command() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, ${schema} AS $command$
+DECLARE answer jsonb;
+BEGIN
+  answer := ${schema}.dispatch(NEW.instance_id, NEW.actor, NEW.id, NEW.request::jsonb, 'omnishell');
+  UPDATE public.${spec.name}_command c SET outcome = answer->>'kind', reason = coalesce(answer->>'reason', ''),
+    revision = (answer->>'revision')::bigint WHERE c.id = NEW.id;
+  RETURN NULL;
+END;
 $command$;
-REVOKE ALL ON FUNCTION public.${spec.name}_command(uuid, uuid, jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.${spec.name}_command(uuid, uuid, jsonb) TO app_user;
-
-CREATE FUNCTION public.${spec.name}_view(instance_id uuid)
-RETURNS jsonb LANGUAGE sql SECURITY DEFINER
-SET search_path = pg_catalog, ${schema}
-AS $view$
-  SELECT jsonb_build_object('revision', v.revision::text, 'value', v.value)
-  FROM ${schema}.view v JOIN ${schema}.member m USING(instance_id, actor)
-  WHERE v.instance_id = ${spec.name}_view.instance_id AND v.actor = public.auth_uid();
-$view$;
-REVOKE ALL ON FUNCTION public.${spec.name}_view(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.${spec.name}_view(uuid) TO app_user;
+REVOKE ALL ON FUNCTION ${schema}.command() FROM PUBLIC;
+CREATE TRIGGER ${spec.name}_command_dispatch AFTER INSERT ON public.${spec.name}_command
+  FOR EACH ROW EXECUTE FUNCTION ${schema}.command();` : ""}
+-- Readers write only commands; everything else on the surface is the
+-- machine's, written from inside its SECURITY DEFINER functions.
+CREATE FUNCTION ${schema}.sealed() RETURNS trigger LANGUAGE plpgsql AS $sealed$
+BEGIN
+  IF current_user::text IN ('app_user', 'anon') THEN RAISE EXCEPTION '% rows are the machine''s', TG_TABLE_NAME USING ERRCODE = '42501'; END IF;
+  RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
+END;
+$sealed$;
+${parts.includes("command") ? `CREATE TRIGGER ${spec.name}_command_sealed BEFORE UPDATE OR DELETE ON public.${spec.name}_command
+  FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
+${parts.includes("seat") ? `CREATE TRIGGER ${spec.name}_seat_sealed BEFORE INSERT OR UPDATE OR DELETE ON public.${spec.name}_seat
+  FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
+${spec.public ? `CREATE TRIGGER ${spec.name}_public_sealed BEFORE INSERT OR UPDATE OR DELETE ON public.${spec.name}_public
+  FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
 COMMENT ON SCHEMA ${schema} IS ${literal(`Hybrid ${spec.name} protocol ${spec.version}; no public canonical-state access`)};
 `;
   return { source: script, sql };

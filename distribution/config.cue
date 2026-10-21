@@ -6,8 +6,11 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.14.0"
-#SaytVersion: "0.44.1"
+#Version:     "0.16.0"
+#SaytVersion: "0.44.2"
+
+// The hybrid oracle harnesses exercise the checkout's terminal.
+#TestModules: ["hybrid-local.ts", "hybrid-battery.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.
@@ -54,12 +57,12 @@ import (
 	}
 }
 
-// Commands resolve an installation at execution time, never into generated files.
+// Commands resolve an installation at execution time, never into generated
+// files: where mise puts it, the pinned release or, under a checkout's
+// mise.local.toml, its tree.
 #Run: {
-	runtime: string
-	args:    string
-	root: [if runtime != "" {json.Marshal(runtime)}, "(run-mise where \(#Runtimes.pronto) | str trim)"][0]
-	out: "use tools.nu [run-mise]; let pronto = \(root); \(args)"
+	args: string
+	out:  "use tools.nu [run-mise]; let pronto = (run-mise where \(#Runtimes.pronto) | str trim); \(args)"
 }
 
 #Writer: {
@@ -69,15 +72,12 @@ import (
 
 #Project: P={
 	_valid:    saycfg.say & P.say.say
-	runtime:   *"" | string
 	domain:    *"" | string
 	ssrOrigin: *"" | string
-	// The interpreter's root and mecha's, which the bundler reads from: a
-	// sibling path in the monorepo, the installed distribution elsewhere.
-	omnishell: *"" | string
-	mecha:     *"" | string
-	_omnishell: [if P.omnishell != "" {json.Marshal(P.omnishell)}, "(run-mise where \(#Runtimes.omnishell) | str trim)"][0]
-	_mecha: [if P.mecha != "" {json.Marshal(P.mecha)}, "(run-mise where \(#Runtimes.mecha) | str trim)"][0]
+	edgeClock: *"deadlines" | "disabled"
+	// The interpreter's root and mecha's, which the bundler reads from.
+	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
+	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
 	tools: #Tools
 	mise: {
 		...
@@ -95,9 +95,8 @@ import (
 		}
 		tools: P.tools
 	}
-	_run: #Run & {runtime: "\(P.runtime)"}
-	_compilerRoot: [if P.runtime != "" {json.Marshal(P.runtime)}, "(^mise where \(#Runtimes.pronto) | str trim)"][0]
-	compiler: "^\((#Writer & {root: P._compilerRoot}).out)"
+	_run: #Run
+	compiler: "^\((#Writer & {root: "(^mise where \(#Runtimes.pronto) | str trim)"}).out)"
 	write: (_run & {args: "run-mise exec -- \((#Writer & {root: "$pronto"}).out)"}).out
 	// The live tables a pages release fills from the settled container
 	// cluster, and the streams that cluster runs; none where the app runs no
@@ -117,13 +116,10 @@ import (
 	// an archive built elsewhere instead of the migrations and derived rows;
 	// derive then has nothing to do.
 	_edgeData: "let data = if ($env.SAY_RELEASE_ARGS_FROM? | is-not-empty) { ['--from' $env.SAY_RELEASE_ARGS_FROM] } else { [\([if len(P.derived.tables) > 0 {"'--derived' '\(P._derivedOut)'"}, ""][0])] }"
-	edge: (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
+	edge: (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
 	edgeDerive: "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
 	// `--reset` replaces the object's data with this release's.
 	publishEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle publish-edge.ts) dist/cloudflare --mecha \(P._mecha) ...(if ($env.SAY_RELEASE_ARGS_RESET? | is-empty) { [] } else { ['--reset'] })"}).out
-	// truco's edge release until the edge has a clock for its lobby sweep:
-	// native SQLite in the object, its tables from shell.json.
-	cloudflare: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle cloudflare.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])"}).out
 	// The container tier's artifact: the self-contained appliance image.
 	docker:        "docker compose build release-docker"
 	publishDocker: "use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag; let image_tag = ($tag | path basename); with-env { BAYT_IMAGE_TAG: $image_tag } { docker compose build release-docker; docker compose push release-docker }"
@@ -133,12 +129,13 @@ import (
 	gcp: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp release.nu)"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
-		// An installed pronto has no siblings, which its own tests import.
-		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir \([if P.runtime == "" {"--exclude [*_test.ts *.test.ts] "}, ""][0])'*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
+		// Its own tests import siblings a release of it does not carry.
+		types: (_run & {args: "let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts \(strings.Join(#TestModules, " "))] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"}).out
 		identity: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join identity.ts) check ."}).out
 		facts: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
 		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
 		proto: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."}).out
+		hybrids: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-hybrids.ts) ."}).out
 		// Under the compute service's own pins, as it runs them: queries over
 		// DuckDB, the cage's workers, the wasm.
 		computations: (_run & {args: "run-mise exec -- deno test --config (\(P._mecha) | path join services compute deno.json) --frozen --permit-no-files --unstable-worker-options --allow-read --allow-ffi --allow-env computations"}).out
@@ -155,13 +152,15 @@ import (
 		doctor: do:    "use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno --version; run-mise where github:bonisoft3/pronto"
 		generate: rulemap: {
 			...
-			"auto-cue": cmds: [{use: "./tools.nu", do: "tools run-cue cmd generate ./pronto"}]
+			// An app that bootstraps its repository's root from pronto keeps that
+			// project in pronto/, with the command that writes it; a pronto/
+			// holding only an app's own rules has nothing to write.
+			"auto-cue": cmds: [{use: "./tools.nu", do: "if ('pronto/generate_tool.cue' | path exists) { tools run-cue cmd generate ./pronto }"}]
 			"pronto": {
 				priority: 1
-				if P.runtime == "" {
-					cmds: [{do: "if ('program.cue' | path exists) { let pkg = (open program.cue --raw | parse -r '(?m)^package\\s+(\\w+)\\s*$' | first | get capture0); $'package ($pkg)\nloop: surface: sources: pronto: \"\"\n' | save --force program_pronto.cue; \(P.write) }"}]
-				}
-				if P.runtime != "" {cmds: [{do: P.write}]}
+				// Joined, not interpolated: cue v0.16.1 panics interpolating P.write
+				// into a program that fails, where it should say why it fails.
+				cmds: [{do: strings.Join(["if ('program.cue' | path exists) { ", P.write, " }"], "")}]
 			}
 		}
 		build: do: "null"

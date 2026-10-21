@@ -30,6 +30,16 @@ export type Expr = {
   selectExpr?: { operand: Expr; field: string; testOnly?: boolean };
   callExpr?: { target?: Expr; function: string; args?: Expr[] };
   listExpr?: { elements?: Expr[] };
+  // What the `all` macro parses to: a fold over `iterRange` binding `iterVar`.
+  comprehensionExpr?: {
+    iterVar: string;
+    iterRange: Expr;
+    accuVar: string;
+    accuInit: Expr;
+    loopCondition: Expr;
+    loopStep: Expr;
+    result: Expr;
+  };
 };
 
 /** cel.expr.ParsedExpr in protobuf-JSON: what parse() hands over and what
@@ -52,6 +62,31 @@ const unsupported = (what: string): never => {
 
 const call = (e: Expr) => e.callExpr;
 const isThis = (e: Expr) => e.identExpr?.name === "this";
+
+// ---------------------------------------------------------------- json
+
+/** A value named inside a json column: `this`, an `all` element, or a field
+ * selected off either, as the path's identifiers. Null where the expression
+ * names no such value. */
+function pathOf(e: Expr, elements: Set<string>): string[] | null {
+  if (e.identExpr !== undefined) {
+    return isThis(e) || elements.has(e.identExpr.name) ? [e.identExpr.name] : null;
+  }
+  const sel = e.selectExpr;
+  if (sel === undefined || sel.testOnly === true) return null;
+  const head = pathOf(sel.operand, elements);
+  return head === null ? null : [...head, sel.field];
+}
+
+/** The predicate an `all` comprehension holds over each element, or null
+ * where the comprehension is not `all`. */
+function allOf(c: NonNullable<Expr["comprehensionExpr"]>): Expr | null {
+  const step = call(c.loopStep);
+  if (c.accuInit.constExpr?.boolValue !== true || step?.function !== "_&&_" || step.args?.length !== 2) return null;
+  if (step.args[0].identExpr?.name !== c.accuVar || c.result.identExpr?.name !== c.accuVar) return null;
+  return step.args[1];
+}
+
 
 /** The integer a const node states, or null when it states something else. */
 function intOf(e: Expr): number | null {
@@ -154,8 +189,15 @@ function sql(e: Expr, col: string | null): { text: string; prec: number } {
 }
 
 /** The SQL CHECK body for a constraint. `col` names the column `this` stands
- * for at field level, or is null for an entity invariant. */
-export function sqlCheck(ir: ParsedExpr, col: string | null): string {
+ * for at field level, or is null for an entity invariant; `json` says the
+ * column holds a json value, whose constraint is read as a shape. */
+export function sqlCheck(ir: ParsedExpr, col: string | null, json = false): string {
+  if (json) {
+    if (col === null) return unsupported("a json constraint under the row convention");
+    // A CHECK holds no subquery, so a nested value is walked by a function
+    // written once (type-sql.ts), handed the shape the constraint states.
+    return `public.portable_shape_valid(${col}, ${sqlString(JSON.stringify(shapeTree(ir)))}::jsonb)`;
+  }
   return sql(ir.expr, col).text;
 }
 
@@ -231,17 +273,160 @@ function cue(e: Expr, used: { strings: boolean }): string {
   return unsupported(`function ${c.function} in a CUE constraint`);
 }
 
+// ---------------------------------------------------------------- shape
+
+/** What a json column's constraint states, read back as the tree #ShapeCel
+ * renders it from: the one nested grammar the readers that have to propose
+ * a value (bounds) or vet a stated one (CUE) understand. A record with no
+ * fields stated is open. */
+export type ShapeTree =
+  | { kind: "boolean" }
+  | { kind: "string"; sizeMax?: number; enumValues?: string[] }
+  | { kind: "integer"; intMin?: number; intMax?: number }
+  | { kind: "array"; maxItems: number; items: ShapeTree }
+  | { kind: "object"; fields?: Record<string, ShapeTree> };
+
+const pathText = (p: string[]) => p.join(".");
+
+/** Reads the conjuncts about `at` off the cursor, in #ShapeCel's order, and
+ * refuses any other spelling: the subset is exactly the one the renderer
+ * emits, so a constraint written another way is refused rather than read
+ * narrower than it says. */
+function readShape(cs: Expr[], cursor: { i: number }, at: string[], elements: Set<string>): ShapeTree {
+  const next = () => cs[cursor.i++] ?? unsupported(`a json constraint ending before ${pathText(at)} is stated`);
+  const typeOf = (e: Expr): string | null => {
+    const c = call(e);
+    if (c?.function !== "_==_" || c.args?.length !== 2 || call(c.args[0])?.function !== "type") return null;
+    const p = pathOf(call(c.args[0])!.args?.[0] ?? {}, elements);
+    if (p === null || pathText(p) !== pathText(at)) return null;
+    return c.args[1].identExpr?.name ?? null;
+  };
+  const bound = (e: Expr, fn: string): { op: string; n: number } | null => {
+    const c = call(e);
+    if (c === undefined || !(c.function in SQL_CMP) || c.args?.length !== 2) return null;
+    const n = intOf(c.args[1]);
+    const lhs = c.args[0];
+    if (n === null) return null;
+    if (fn === "size") {
+      const lc = call(lhs);
+      if (lc?.function !== "size") return null;
+      const p = lc.target !== undefined ? pathOf(lc.target, elements) : pathOf(lc.args?.[0] ?? {}, elements);
+      if (p === null || pathText(p) !== pathText(at)) return null;
+    } else {
+      const p = pathOf(lhs, elements);
+      if (p === null || pathText(p) !== pathText(at)) return null;
+    }
+    return { op: c.function, n };
+  };
+  const first = next();
+  // x == int(x): an integer, then its range
+  const fc = call(first);
+  if (fc?.function === "_==_" && call(fc.args?.[1] ?? {})?.function === "int") {
+    const p = pathOf(fc.args![0], elements);
+    if (p === null || pathText(p) !== pathText(at)) return unsupported(`int() over ${JSON.stringify(fc.args![0])}`);
+    const tree: ShapeTree = { kind: "integer" };
+    for (;;) {
+      const b = cursor.i < cs.length ? bound(cs[cursor.i], "value") : null;
+      if (b === null) break;
+      cursor.i++;
+      if (b.op === "_>=_") tree.intMin = b.n;
+      else if (b.op === "_<=_") tree.intMax = b.n;
+      else return unsupported(`${b.op} on an integer of a json value`);
+    }
+    return tree;
+  }
+  const kind = typeOf(first) ?? unsupported(`a json constraint on ${pathText(at)} that does not start by its type`);
+  if (kind === "bool") return { kind: "boolean" };
+  if (kind === "string") {
+    const e = cs[cursor.i];
+    const ec = e === undefined ? undefined : call(e);
+    if (ec?.function === "@in" && ec.args?.length === 2) {
+      const p = pathOf(ec.args[0], elements);
+      if (p !== null && pathText(p) === pathText(at)) {
+        cursor.i++;
+        const members = ec.args[1].listExpr?.elements ?? unsupported("`in` over a non-literal list");
+        return { kind: "string", enumValues: members.map((m) => m.constExpr?.stringValue ?? unsupported("a non-string set member")) };
+      }
+    }
+    const b = e === undefined ? null : bound(e, "size");
+    if (b === null || b.op !== "_<=_") return unsupported(`a string at ${pathText(at)} without its length`);
+    cursor.i++;
+    return { kind: "string", sizeMax: b.n };
+  }
+  if (kind === "list") {
+    const b = cursor.i < cs.length ? bound(cs[cursor.i], "size") : null;
+    if (b === null || b.op !== "_<=_") return unsupported(`a list at ${pathText(at)} without its size`);
+    cursor.i++;
+    const comp = next().comprehensionExpr ?? unsupported(`a list at ${pathText(at)} without its all()`);
+    const pred = allOf(comp) ?? unsupported("a comprehension that is not all()");
+    const range = pathOf(comp.iterRange, elements);
+    if (range === null || pathText(range) !== pathText(at)) return unsupported(`all() over ${JSON.stringify(comp.iterRange)}`);
+    const inner = conjuncts(pred);
+    const innerCursor = { i: 0 };
+    const items = readShape(inner, innerCursor, [comp.iterVar], new Set([...elements, comp.iterVar]));
+    if (innerCursor.i !== inner.length) return unsupported(`all() over ${pathText(at)} states more than its element`);
+    return { kind: "array", maxItems: b.n, items };
+  }
+  if (kind === "map") {
+    const b = cursor.i < cs.length ? bound(cs[cursor.i], "size") : null;
+    if (b === null) return { kind: "object" };
+    if (b.op !== "_==_") return unsupported(`a record at ${pathText(at)} whose size is not fixed`);
+    cursor.i++;
+    const fields: Record<string, ShapeTree> = {};
+    for (let k = 0; k < b.n; k++) {
+      const has = next().selectExpr;
+      if (has?.testOnly !== true) return unsupported(`a record at ${pathText(at)} stating fewer fields than its size`);
+      const p = pathOf(has.operand, elements);
+      if (p === null || pathText(p) !== pathText(at)) return unsupported(`has() off ${JSON.stringify(has.operand)}`);
+      fields[has.field] = readShape(cs, cursor, [...at, has.field], elements);
+    }
+    return { kind: "object", fields };
+  }
+  return unsupported(`type() compared to ${kind}`);
+}
+
+/** The tree a json column's constraint states, or a refusal. */
+export function shapeTree(ir: ParsedExpr): ShapeTree {
+  const cs = conjuncts(ir.expr);
+  const cursor = { i: 0 };
+  const tree = readShape(cs, cursor, ["this"], new Set());
+  if (cursor.i !== cs.length) return unsupported(`a json constraint stating more than its value's shape, from ${JSON.stringify(cs[cursor.i])}`);
+  return tree;
+}
+
+function cueOfTree(t: ShapeTree, used: { strings: boolean; list: boolean }): string {
+  switch (t.kind) {
+    case "boolean":
+      return "bool";
+    case "string":
+      if (t.enumValues !== undefined) return `(${t.enumValues.map(cueString).join(" | ")})`;
+      used.strings = true;
+      return `strings.MaxRunes(${t.sizeMax})`;
+    case "integer":
+      return ["int", ...(t.intMin === undefined ? [] : [`>=${t.intMin}`]), ...(t.intMax === undefined ? [] : [`<=${t.intMax}`])].join(" & ");
+    case "array":
+      used.list = true;
+      return `[...${cueOfTree(t.items, used)}] & list.MaxItems(${t.maxItems})`;
+    case "object":
+      if (t.fields === undefined) return "{...}";
+      return `close({${Object.entries(t.fields).map(([k, v]) => `${quoteCueKey(k)}: ${cueOfTree(v, used)}`).join(", ")}})`;
+  }
+}
+
+const quoteCueKey = (k: string) => (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k) ? k : JSON.stringify(k));
+
 /** The CUE constraint a field-level cel states about the field's value, or
  * the reason there is none. A row-level cel has no field to constrain and is
- * asked for with `field: false`. */
+ * asked for with `field: false`; a json column's is read as a shape. */
 export function cueConstraint(
   ir: ParsedExpr,
   field: boolean,
-): { cue: string; strings: boolean } | { no: string } {
+  json = false,
+): { cue: string; strings: boolean; list: boolean } | { no: string } {
   if (!field) return { no: "row-level: `this` is the row, and a row is not a field's value" };
-  const used = { strings: false };
+  const used = { strings: false, list: false };
   try {
-    return { cue: cue(ir.expr, used), strings: used.strings };
+    return { cue: json ? cueOfTree(shapeTree(ir), used) : cue(ir.expr, used), ...used };
   } catch (e) {
     if (e instanceof CelUnsupported) return { no: e.what };
     throw e;

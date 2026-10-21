@@ -683,6 +683,7 @@
       "validations": {}
     }
   },
+  "hybrids": {},
   "hatches": {},
   "rawMigrations": [],
   "duckstreams": {}

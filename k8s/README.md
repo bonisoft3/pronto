@@ -122,33 +122,51 @@ The schema is built as compose builds it, by two Jobs on the app's images: `<app
 
 ---
 
-## 9. Secrets Management Architecture
+## 9. Timeouts and Load Shedding
+
+Every hop has a bound, and on each path a hop's bound exceeds the one it wraps, so the innermost fails first and every caller still has time to answer. The bounds are one CUE value, `resilience` in `plugins/pronto/resilience`, whose `#Resilience` states each nesting as a constraint: a set that does not nest does not evaluate, so neither the schema, the Caddyfile nor these manifests can be emitted from it. It holds the numbers; what reads them:
+
+| Hop | Bounds | Where |
+|---|---|---|
+| Gateway, by path prefix | the whole response | HTTPRoute `timeouts.request` |
+| Caddy → each upstream | response headers, and a connect; Electric's stream also between reads | `import bounded-<hop>` |
+| Render → its door | each read | `DOOR_TIMEOUT_MS` |
+| Sidecar → each app | the whole response | Dapr `Resiliency` |
+| Postgres, per token role | each statement, lock and idle transaction | the schema's `ALTER ROLE … SET` |
+
+Defaults were measured before they were replaced: Envoy cuts every route at 15s, under Electric's 20s live hold, so every idle live poll 504'd; a 504 cancels nothing, and the query behind it ran on; and PostgREST logged in as `postgres` applied no token role's settings, since it applies only those of roles granted to its login, so it now logs in as `authenticator`.
+
+Load is shed at the gateway, by Envoy's concurrency limits on caddy's pool: past them it answers 503 at once instead of queueing, and an Electric live read holds its slot for its hold. Dapr has no breaker: 1.14 counts any answer outside 200–399 as a failure, so clients' 401s, shapes' 409s and missing rows' 404s would open a target's circuit for every caller. No retry policy is declared, so nothing replays a write; one that timed out may still commit, which only an idempotency key settles. A value more than one emitter reads lives in a package like this one, named for what it guarantees, never in one emitter's file.
+
+---
+
+## 10. Secrets Management Architecture
 
 - **Authoring**: Encrypted via [SOPS](https://github.com/getsops/sops) + Age in Git (`apps/<app>/secrets.enc.yaml`).
 - **Operator Bridge**: External Secrets Operator (ESO) bridges encrypted or external secrets into native Kubernetes `v1/Secret` objects. Without a `ClusterSecretStore`, ESO `Password` generators make each secret once in-cluster; no secret is a literal in a spec.
-- **Database roles**: CloudNativePG sets `postgres`'s and `electric`'s passwords from basic-auth secrets (`<app>-db-postgres`, `<app>-electric-db`); the schema never sets a password.
+- **Database roles**: CloudNativePG sets `postgres`'s, `electric`'s and `authenticator`'s passwords from basic-auth secrets (`<app>-db-postgres`, `<app>-electric-db`, `<app>-authenticator-db`); the schema never sets a password. Compose sets both from `ELECTRIC_PASSWORD` and `AUTHENTICATOR_PASSWORD`, through mecha's initdb step.
 - **Runtime Access**: Workloads and Dapr sidecars consume native Kubernetes secrets (`type: secretstores.kubernetes`).
 
 ---
 
-## 10. Unified CLI Workflow: `sayt release@k8s`
+## 11. Unified CLI Workflow: `sayt release@k8s`
  
 The entire lifecycle—cluster reconciliation, verified operator bootstrapping, container building, local registry push, TLS secret provisioning, and manifest deployment—is automated via the Sayt `release@k8s` verb dispatched through the application's rulemap:
 
 ```bash
 # 1. Full release to Kind (targeted via -d or from inside the app directory)
-sayt -d apps/golaberto release@k8s
+sayt -d /path/to/app release@k8s
 
 # 2. Dry-run (render evaluated CUE manifests for inspection without side effects)
-sayt -d apps/golaberto release@k8s --dry-run
+sayt -d /path/to/app release@k8s --dry-run
 
 # 3. Render for cloud environments (AWS EKS, Azure AKS); deploying there is not
 #    implemented yet: only Kind provisions operators, observability and TLS.
-sayt -d apps/golaberto release@k8s --cluster-env eks --dry-run
-sayt -d apps/golaberto release@k8s --cluster-env aks --dry-run
+sayt -d /path/to/app release@k8s --cluster-env eks --dry-run
+sayt -d /path/to/app release@k8s --cluster-env aks --dry-run
 
 # 4. Skip operator reconciliation on repeated dev iterations
-sayt -d apps/golaberto release@k8s --skip-operators
+sayt -d /path/to/app release@k8s --skip-operators
 ```
 
 ### Direct Script Usage
@@ -156,7 +174,7 @@ sayt -d apps/golaberto release@k8s --skip-operators
 If invoking the Nushell release engine directly:
 
 ```bash
-nu plugins/pronto/k8s/release.nu --app golaberto
+nu k8s/release.nu --app /path/to/app
 ```
 
 ### HTTPS Verification
@@ -164,7 +182,7 @@ nu plugins/pronto/k8s/release.nu --app golaberto
 Each app's Gateway listens on its own hostname, with a certificate from the app's pinned mkcert:
 
 ```bash
-curl -sI https://golaberto.localhost/
+curl -sI https://my-app.localhost/
 # Traces and metrics:
 open http://telemetry.localhost/jaeger/
 ```

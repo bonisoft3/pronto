@@ -11,11 +11,12 @@ export const quoteKey = (k: string) => (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k) ? k
  *
  * Through `mise x` rather than a bare `cue`, so the pin the app declares is the
  * one that answers — a checker reading a different CUE than the writer used
- * would disagree with it for reasons no finding could explain.
+ * would disagree with it for reasons no finding could explain. Only cue: a
+ * locked consumer need not have installed the app's other tools to be read.
  */
 export async function exportJson<T>(appDir: string, expr: string): Promise<T> {
   const out = await new Deno.Command("mise", {
-    args: ["x", "--", "cue", "export", ".", "-e", expr, "--out", "json"],
+    args: ["x", "github:cue-lang/cue", "--", "cue", "export", ".", "-e", expr, "--out", "json"],
     cwd: appDir,
     stdout: "piped",
     stderr: "piped",

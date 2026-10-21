@@ -88,7 +88,7 @@ _freshFiles: (pronto.#emit & {
 	cluster:  _freshCluster
 	terminal: _freshTerminal
 	loop:     _freshLoop
-	build: (pronto.#DefaultBuild & {code: _freshInputs, loop: _freshLoop, cluster: _freshCluster}).out
+	build: (pronto.#DefaultBuild & {code: _freshInputs, loop: _freshLoop, cluster: _freshCluster, terminal: _freshTerminal}).out
 }).files
 _freshCDC:                         strings.Split(_freshFiles["services/database/migrations/008_publication.sql"].text, "-- Electric")[0]
 serverInputStillCaptured:          strings.Contains(_freshCDC, "profile") & true

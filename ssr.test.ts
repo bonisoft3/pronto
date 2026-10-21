@@ -6,7 +6,9 @@
 // all. A value that fails to evaluate cannot sit in the package `cue vet`
 // holds, so the cases are exported one by one.
 
-const dir = new URL("./testdata/emit", import.meta.url).pathname;
+import { fileURLToPath } from "node:url";
+
+const dir = fileURLToPath(new URL("./testdata/emit", import.meta.url));
 
 function exported(expr: string, text: boolean): { ok: boolean; out: string } {
   const out = new Deno.Command("cue", { args: ["export", "read.cue", "ssr.cue", "installed-surface.cue", "-e", expr, ...(text ? ["--out", "text"] : [])], cwd: dir, stdout: "piped", stderr: "piped" }).outputSync();

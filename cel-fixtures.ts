@@ -25,6 +25,8 @@ const IR: Record<string, ParsedExpr> = {
   "this == 'strings.x'": {"expr":{"callExpr":{"function":"_==_","args":[{"identExpr":{"name":"this"}},{"constExpr":{"stringValue":"strings.x"}}]}}},
   "this in [1.5, 2.5]": {"expr":{"callExpr":{"function":"@in","args":[{"identExpr":{"name":"this"}},{"listExpr":{"elements":[{"constExpr":{"doubleValue":1.5}},{"constExpr":{"doubleValue":2.5}}]}}]}}},
   "has(this.a) == has(this.b)": {"expr":{"callExpr":{"function":"_==_","args":[{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"a","testOnly":true}},{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"b","testOnly":true}}]}}},
+  "type(this) == map && size(this) == 2 && has(this.n) && type(this.n) == string && this.n.size() <= 4 && has(this.xs) && type(this.xs) == list && size(this.xs) <= 2 && this.xs.all(e1, e1 == int(e1) && e1 >= 0 && e1 <= 9)": {"expr":{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_==_","args":[{"callExpr":{"function":"type","args":[{"identExpr":{"name":"this"}}]}},{"identExpr":{"name":"map"}}]}},{"callExpr":{"function":"_==_","args":[{"callExpr":{"function":"size","args":[{"identExpr":{"name":"this"}}]}},{"constExpr":{"int64Value":"2"}}]}}]}},{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"n","testOnly":true}}]}},{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_==_","args":[{"callExpr":{"function":"type","args":[{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"n"}}]}},{"identExpr":{"name":"string"}}]}},{"callExpr":{"function":"_<=_","args":[{"callExpr":{"target":{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"n"}},"function":"size"}},{"constExpr":{"int64Value":"4"}}]}}]}}]}},{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_&&_","args":[{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"xs","testOnly":true}},{"callExpr":{"function":"_==_","args":[{"callExpr":{"function":"type","args":[{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"xs"}}]}},{"identExpr":{"name":"list"}}]}}]}},{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_<=_","args":[{"callExpr":{"function":"size","args":[{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"xs"}}]}},{"constExpr":{"int64Value":"2"}}]}},{"comprehensionExpr":{"iterVar":"e1","iterRange":{"selectExpr":{"operand":{"identExpr":{"name":"this"}},"field":"xs"}},"accuVar":"@result","accuInit":{"constExpr":{"boolValue":true}},"loopCondition":{"callExpr":{"function":"@not_strictly_false","args":[{"identExpr":{"name":"@result"}}]}},"loopStep":{"callExpr":{"function":"_&&_","args":[{"identExpr":{"name":"@result"}},{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_==_","args":[{"identExpr":{"name":"e1"}},{"callExpr":{"function":"int","args":[{"identExpr":{"name":"e1"}}]}}]}},{"callExpr":{"function":"_>=_","args":[{"identExpr":{"name":"e1"}},{"constExpr":{"int64Value":"0"}}]}}]}},{"callExpr":{"function":"_<=_","args":[{"identExpr":{"name":"e1"}},{"constExpr":{"int64Value":"9"}}]}}]}}]}},"result":{"identExpr":{"name":"@result"}}}}]}}]}}]}}},
+  "type(this) == map && size(this) == 1": {"expr":{"callExpr":{"function":"_&&_","args":[{"callExpr":{"function":"_==_","args":[{"callExpr":{"function":"type","args":[{"identExpr":{"name":"this"}}]}},{"identExpr":{"name":"map"}}]}},{"callExpr":{"function":"_==_","args":[{"callExpr":{"function":"size","args":[{"identExpr":{"name":"this"}}]}},{"constExpr":{"int64Value":"1"}}]}}]}}},
   "this.startsWith('x')": {"expr":{"callExpr":{"target":{"identExpr":{"name":"this"}},"function":"startsWith","args":[{"constExpr":{"stringValue":"x"}}]}}},
 };
 
@@ -32,7 +34,7 @@ const IR: Record<string, ParsedExpr> = {
  * convention. `sql`/`cue` are the rendering, or null where the form must be
  * refused; `values` is the closed value set, or null where the field admits
  * an open one. */
-const FIXTURES: { cel: string; col: string | null; sql: string | null; cue: string | null; values: string[] | null }[] = [
+const FIXTURES: { cel: string; col: string | null; sql: string | null; cue: string | null; values: string[] | null; json?: true }[] = [
   { cel: "this in ['a', 'b']", col: "c", sql: "c IN ('a', 'b')", cue: `("a" | "b")`, values: ["a", "b"] },
   { cel: "this in [1, 2]", col: "c", sql: "c IN (1, 2)", cue: "(1 | 2)", values: ["1", "2"] },
   // A field pinned to one literal is a closed set of one. Answering null here
@@ -54,6 +56,19 @@ const FIXTURES: { cel: string; col: string | null; sql: string | null; cue: stri
   { cel: "this.a", col: "c", sql: null, cue: null, values: null },
   { cel: "this", col: null, sql: null, cue: null, values: null },
   { cel: "this.startsWith('x')", col: "c", sql: null, cue: null, values: null },
+  // A json column's constraint is the shape #ShapeCel renders (cel-shape.cue),
+  // read back as a tree: the CHECK hands it to portable_shape_valid, CUE closes
+  // the record, and the set stays open since no scalar is enumerated.
+  {
+    cel: "type(this) == map && size(this) == 2 && has(this.n) && type(this.n) == string && this.n.size() <= 4 && has(this.xs) && type(this.xs) == list && size(this.xs) <= 2 && this.xs.all(e1, e1 == int(e1) && e1 >= 0 && e1 <= 9)",
+    col: "c",
+    json: true,
+    sql: "public.portable_shape_valid(c, '" + JSON.stringify({"kind":"object","fields":{"n":{"kind":"string","sizeMax":4},"xs":{"kind":"array","maxItems":2,"items":{"kind":"integer","intMin":0,"intMax":9}}}}) + "'::jsonb)",
+    cue: "close({n: strings.MaxRunes(4), xs: [...int & >=0 & <=9] & list.MaxItems(2)})",
+    values: null,
+  },
+  // A record stating fewer fields than its size is outside the renderer's grammar, and is refused rather than read narrower.
+  { cel: "type(this) == map && size(this) == 1", col: "c", json: true, sql: null, cue: null, values: null },
 ];
 
 export function celFixtures(): Finding[] {
@@ -67,12 +82,12 @@ export function celFixtures(): Finding[] {
     }
     let sql: string | null = null;
     try {
-      sql = sqlCheck(ir, f.col);
+      sql = sqlCheck(ir, f.col, f.json === true);
     } catch (e) {
       if (!(e instanceof CelUnsupported)) throw e;
     }
     if (sql !== f.sql) say(`${f.cel}: SQL is ${JSON.stringify(sql)}, expected ${JSON.stringify(f.sql)}`);
-    const c = cueConstraint(ir, f.col !== null);
+    const c = cueConstraint(ir, f.col !== null, f.json === true);
     const cue = "cue" in c ? c.cue : null;
     if (cue !== f.cue) say(`${f.cel}: CUE is ${JSON.stringify(cue)}, expected ${JSON.stringify(f.cue)}`);
     if (f.col !== null) {

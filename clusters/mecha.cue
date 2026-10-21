@@ -36,17 +36,26 @@ import (
 #ConduitSlot:      impl.#ConduitSlot
 #MachineTimersSql: impl.#MachineTimersSql
 
+// A machine Mecha runs: XState's configuration and the setup beside it.
+#Machine: impl.#Machine
+#XState:  impl.#XState
+#Shape:   impl.#Shape
+
 // The mecha images an app takes by name, as pronto pins them: the consumer
 // pins what it builds on, so a pronto release names a mecha release's images
 // and an app pinning pronto gets them through it. One per service of
 // impl.#Images, from the pin lines a mecha release prints.
+// Those whose targets copy mecha's sources, which a build from a checkout
+// carries as each one's srcs view.
+#Sourced: impl.#Sourced
+
 published: impl.#Published & {
-	airlock:  "bonitao/mecha-airlock:0.12.1@sha256:e8d4f8853ec49672e2515fda2f6429322680da6443b36dce9e41f375af58122f"
-	auth:     "bonitao/mecha-auth:0.12.1@sha256:4d7fc684af603f3c79459ec76fe578ed1c87c7bfa9b2abb8106d6af4d7ba2fd6"
-	clock:    "bonitao/mecha-clock:0.12.1@sha256:7420c2c8dd00c82a6e06bd2cb81e050ba4f7517a9e0824534c5d96f40f8d8d8e"
-	compute:  "bonitao/mecha-compute:0.12.1@sha256:7c7d4e34a91f19ea87c429ec00401c19c1d11067a619d5c5001b7716294953c4"
-	conduit:  "bonitao/mecha-conduit:0.12.1@sha256:15f6d65f0dad3841339acdb20a33da5c77fd9affb16c2d67b6ab665cb7e239d7"
-	database: "bonitao/mecha-database:0.12.1@sha256:8478d56bb4aa2545cad656db0ff059f4c5d8f4ba227ef4cb7fd9edfae861bc09"
-	mesh:     "bonitao/mecha-mesh:0.12.1@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
-	ticker:   "bonitao/mecha-ticker:0.12.1@sha256:f1136ad98ab5a86b9723d75c4a6fbda0236a486f9cb22cde8c479fc8578e8bc1"
+	airlock:  "bonitao/mecha-airlock:0.14.0@sha256:bfa39ef21accc0d5f65cba81e62061abc7d5a8ac4e7d84313b4fc0cadbacc783"
+	auth:     "bonitao/mecha-auth:0.14.0@sha256:c6d99ed3fa0fbf9140a374fdee746b14ee066c877dd96bb5d00838fb823785cb"
+	clock:    "bonitao/mecha-clock:0.14.0@sha256:7420c2c8dd00c82a6e06bd2cb81e050ba4f7517a9e0824534c5d96f40f8d8d8e"
+	compute:  "bonitao/mecha-compute:0.14.0@sha256:34a61cb0cb71deb8bf1c943d26ac4d56bdd8b28df6c27d24446ce2669d45e9ec"
+	conduit:  "bonitao/mecha-conduit:0.14.0@sha256:686b942126aa5b867352c439d5988e02e7c5dc0eb1ffe15ed69c9357208845bc"
+	database: "bonitao/mecha-database:0.14.0@sha256:e20f4190063ed50966dc3cb5ef022cc70de6cf7999b4e9c6abff13d7761696e5"
+	mesh:     "bonitao/mecha-mesh:0.14.0@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
+	ticker:   "bonitao/mecha-ticker:0.14.0@sha256:3f020f4d233531de81a2ab3ba31f734149b2ecadf95fca655e48020016ae9140"
 }

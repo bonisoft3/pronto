@@ -1,17 +1,11 @@
 package emit
 
-import (
-	pronto "github.com/bonisoft3/pronto"
-	bayt "github.com/bonisoft3/bayt/core:bayt"
-)
+import bayt "github.com/bonisoft3/bayt/core:bayt"
 
 configSeats: {
-	mirroredImportRoot: mirroredCheckImportRoot
-	sources: (pronto.#emit & {code: _code, cluster: _cluster, terminal: _terminal, loop: _loop, build: _besideBuild}).loop.surface.sources
 	generate: _loop.surface.sayYaml.say.generate.rulemap.pronto.cmds[0].do
 	build:    _loop.surface.sayYaml.say.build.do
-	terminal: (pronto.#DefaultTerminal & {code: _code, out: surface: runtime: "../../plugins/omnishell/runtime"}).out.surface.verbs.omnishell.cmds[0]
-	installed: _external.surface.sayYaml
+	terminal: _terminal.surface.verbs.omnishell.cmds[0]
 	generateDockerfile: (#ConfigTargetDockerfile & {name: "generate"}).out
 	buildDockerfile: (#ConfigTargetDockerfile & {name: "build"}).out
 	checkDockerfile: (bayt.#render & {
@@ -25,7 +19,6 @@ configSeats: {
 					from: name: "alpine"
 					preamble: _besideTargets["check-plain"].dockerfile.preamble
 					copy:     _besideTargets["check-plain"].dockerfile.copy
-					epilogue: _besideTargets["check-plain"].dockerfile.epilogue
 				}
 				compose: build: additional_contexts: _besideTargets["check-plain"].compose.build.additional_contexts
 			}

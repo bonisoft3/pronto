@@ -10,7 +10,10 @@
 // document as write.ts writes one: the declaration, then the renderer's text
 // spelled after the origin it was handed.
 
-const dir = new URL("./testdata/emit", import.meta.url).pathname;
+import { fileURLToPath } from "node:url";
+import { created } from "./docker-copy.ts";
+
+const dir = fileURLToPath(new URL("./testdata/emit", import.meta.url));
 
 function fail(message: string): never {
   throw new Error(message);
@@ -55,7 +58,7 @@ async function withDoor(env: string[], use: (name: string) => Promise<void>) {
     await Deno.writeTextFile(`${scratch}/${file}`, body);
   }
   try {
-    const run = await docker(["run", "-d", "--name", name, "-e", "ELECTRIC_SECRET=test", ...env.flatMap((e) => ["-e", e]), "-p", "127.0.0.1::8080", "-v", `${scratch}/Caddyfile:/etc/caddy/Caddyfile:ro`, "-v", `${scratch}/srv:/srv`, "-v", `${scratch}/omnishell:/omnishell`, CADDY, ...door]);
+    const run = await docker(["start", await created(["--name", name, "-e", "ELECTRIC_SECRET=test", ...env.flatMap((e) => ["-e", e]), "-p", "127.0.0.1::8080", CADDY, ...door], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], [`${scratch}/srv`, "/srv"], [`${scratch}/omnishell`, "/omnishell"]])]);
     if (!run.ok) fail(run.out);
     await use(name);
   } finally {

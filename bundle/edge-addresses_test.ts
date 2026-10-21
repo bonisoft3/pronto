@@ -82,6 +82,7 @@ Deno.test('edge identity hashes the served bytes, preserves module bases, and au
     const headers = await Deno.readTextFile(path.join(f.out, '_headers'))
     assert.ok(headers.includes('/shell/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable'))
     assert.ok(!headers.includes('/shell/*\n'))
+    assert.ok(headers.startsWith(`/\n  Content-Security-Policy: ${f.document.querySelector('meta')!.getAttribute('content')}\n`))
     assert.deepEqual(JSON.parse(f.map).screens, { team: ['other'], other: [] })
     assert.deepEqual(f.hints.routes[0].screens, ['other'])
   } finally { await Deno.remove(f.out, { recursive: true }) }

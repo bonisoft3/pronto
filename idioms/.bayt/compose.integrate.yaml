@@ -1,17 +1,19 @@
 # generated from bayt.cue — do not edit
 services:
-  apps_idioms-integrate:
+  idioms-integrate:
     build:
       additional_contexts:
-        apps_idioms-launch: service:apps_idioms-launch
-        root: ../../..
+        idioms-launch: service:idioms-launch
+        plugins_omnishell-runtime-image: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.13.0@sha256:0b0bd18f85c8dc71553c8ad106cb0ee3286f8f34997d16c7b34d984b9ac445c2}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}
       context: ..
       dockerfile: .bayt/Dockerfile.integrate
       target: integrate
       tags:
-      - bayt-apps_idioms-integrate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
-      - bayt-apps_idioms-integrate:latest
+      - bayt-idioms-integrate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-idioms-integrate:latest
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
     command:
@@ -28,32 +30,35 @@ services:
     - /omnishell/check-visual.ts
     - '.'
     depends_on:
-      apps_idioms-launch:
+      idioms-launch:
         condition: service_healthy
         restart: true
     environment:
       APP_URL: https://caddy:8443
-    image: bayt-apps_idioms-integrate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      SETTLE_TIMEOUT_MS: "50000"
+    image: bayt-idioms-integrate:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
     scale: 0
-  apps_idioms-integrate_bayt:
+  idioms-integrate_bayt:
     build:
       additional_contexts:
-        apps_idioms-launch_bayt: service:apps_idioms-launch_bayt
+        idioms-launch_bayt: service:idioms-launch_bayt
       context: ..
       dockerfile: .bayt/Dockerfile.integrate
       target: integrate_bayt
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-integrate_bayt:latest
+    image: bayt-idioms-integrate_bayt:latest
     scale: 0
-  apps_idioms-integrate_srcs:
+  idioms-integrate_srcs:
     build:
       context: ..
       dockerfile: .bayt/Dockerfile.integrate
       target: integrate_srcs
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-integrate_srcs:latest
+    image: bayt-idioms-integrate_srcs:latest
     scale: 0

@@ -6,10 +6,7 @@ environment:
 processes:
   "bayt:httpcheck":
     entrypoint:
-    - mise
-    - tool-stub
-    - ../../plugins/bayt/runtime/nu.toml
-    - ../../plugins/bayt/runtime/bayt.nu
+    - bayt
     - microcheck
     - httpcheck
     - --help
@@ -20,7 +17,7 @@ processes:
     entrypoint:
     - sh
     - -c
-    - "case \"$${ORIGIN#http://}\" in \"$$ORIGIN\") h=$${ORIGIN#https://};; *) h=$${ORIGIN#http://};; esac; case \"$$h\" in \"$$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; set -e -o pipefail; roots=$$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$$roots\" ]; then find $$roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$$1; shift; for f do h=$$(sha256sum < \"$$f\"); printf \"$$q%s$$q\" \"$${h%% *}\" > \"$$f.etag\"; done' sh '\"' {} +; fi; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; fi; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
+    - "case \"$${ORIGIN#http://}\" in \"$$ORIGIN\") h=$${ORIGIN#https://};; *) h=$${ORIGIN#http://};; esac; case \"$$h\" in \"$$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; set -e -o pipefail; roots=$$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$$roots\" ]; then find $$roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$$1; shift; for f do h=$$(sha256sum < \"$$f\"); printf \"$$q%s$$q\" \"$${h%% *}\" > \"$$f.etag\"; done' sh '\"' {} +; fi; PRONTO_RELEASE_SCRIPTS=$$(cat /etc/caddy/release-scripts); export PRONTO_RELEASE_SCRIPTS; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; fi; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
     availability:
       exit_on_skipped: true
     environment:
@@ -28,9 +25,7 @@ processes:
     - ORIGIN=${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT}}
     readiness_probe:
       exec:
-        command: >-
-          mise tool-stub ../../plugins/bayt/runtime/nu.toml
-          ../../plugins/bayt/runtime/bayt.nu microcheck httpcheck http://127.0.0.1:8080/health
+        command: bayt microcheck httpcheck http://127.0.0.1:8080/health
       period_seconds: 5
       timeout_seconds: 5
       failure_threshold: 32

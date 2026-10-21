@@ -55,7 +55,7 @@ Deno.test("a settled build preserves outputs and still follows new template read
     return result;
   }
   try {
-    await copyApp(join(repo, "apps/jsfb"), app);
+    await copyJsfb(app);
     await build();
     async function gate(success = true): Promise<string> {
       const result = await new Deno.Command("mise", {
@@ -182,6 +182,14 @@ async function assertRejectsNotFound(path: string): Promise<void> {
   throw new Error(`${path} was not swept`);
 }
 
+// A copy of jsfb sits beside it, outside apps/jsfb, so it states its place
+// (write.ts holds the build's to the checkout).
+async function copyJsfb(app: string): Promise<void> {
+  await copyApp(join(repo, "apps/jsfb"), app);
+  const dir = `apps/${app.replaceAll("\\", "/").split("/").pop()}`;
+  await Deno.writeTextFile(join(app, "place.cue"), `package jsfb\n\nbuild: meta: dir: ${JSON.stringify(dir)}\n`);
+}
+
 async function copyApp(source: string, target: string): Promise<void> {
   await Deno.mkdir(target, { recursive: true });
   // Bayt indexes sibling projects; fixtures must not register the copied app's graph.
@@ -227,7 +235,7 @@ Deno.test("Pronto check gates retain consumer rules and track test fixtures", as
     return output;
   }
   try {
-    await copyApp(join(repo, "apps/jsfb"), app);
+    await copyJsfb(app);
     await Deno.mkdir(join(app, "pronto"), { recursive: true });
     await Deno.writeTextFile(
       join(app, "pronto/config.cue"),

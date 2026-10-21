@@ -288,24 +288,21 @@ pinned CUE version. Nobody reviews it; it must merely be *checkable*.
   ```cue
   code: pronto.#App & {...}
   terminal: (pronto.#DefaultTerminal & {"code": code}).out
-  cluster: (pronto.#DefaultCluster & {"code": code, "local": terminal.surface.runtime != "", statics: terminal.surface.statics}).out
+  cluster: (pronto.#DefaultCluster & {"code": code, statics: terminal.surface.statics}).out
   loop: (pronto.#DefaultLoop & {"code": code, "cluster": cluster, "terminal": terminal}).out
   build: (pronto.#DefaultBuild & {"code": code, "loop": loop, "cluster": cluster, "terminal": terminal}).out
   out: pronto.#emit & {"code": code, "cluster": cluster, "terminal": terminal, "loop": loop, "build": build}
   ```
 
-  `"local": terminal.surface.runtime != ""` on the cluster seat and
-  `"terminal": terminal` on the build seat are the installed layout,
-  derived from the terminal rather than stated: installed, the
-  terminal's runtime is empty, so the cluster serves the app's own files
+  An app has one layout wherever it is built: its repository's root, with
+  the runtime where mise puts it. The cluster serves the app's own files
   (fingerprinted from the build context) and the build takes the
   terminal's statics from its image. In a source checkout, where pronto
-  sits beside its siblings' sources, the runtime is a workspace path, so
-  both stay the workspace's own tree. One shape holds in both layouts
-  because no layout is stated. An installed app
-  whose seats disagree — an installed loop with a checkout's cluster
-  layout — serves docker copies that resolve nowhere; `write.ts`
-  refuses it with the seats named.
+  sits beside its siblings' sources, `write.ts` writes the app's
+  `mise.local.toml`, which a mirror never receives: it points mise at the
+  runtime's trees and sets `MONOREPO_COMPOSE_MODE`, under which the images
+  build the runtime from those trees and lay the app out as the checkout
+  does (`builders/bayt.cue`).
 
   A first `generate` converges without hand-made stubs: decisions carry an
   empty-note default until derivation writes `program_derived.cue`, and a
@@ -469,7 +466,7 @@ still tells markup lint that a pending row may await a database default. A
 singleton machine region without `data-empty-row` requires a
 filter pinning `id`; it binds those defaults, then the filter's equalities,
 then its `field: initial`. An explicit `data-empty-row` remains the whole
-row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.12.1/docs/machines.md) states
+row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/machines.md) states
 the row and effect grammar.
 
 **Screen markup carries no executable code.** The markup check and terminal

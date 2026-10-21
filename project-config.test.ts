@@ -4,7 +4,7 @@ import {
   assertStringIncludes,
 } from "jsr:@std/assert@1.0.11";
 import { fileURLToPath } from "node:url";
-import { projectSay, type Sources } from "./project-config.ts";
+import { projectSay } from "./project-config.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -19,26 +19,21 @@ async function exported(): Promise<unknown> {
   return JSON.parse(new TextDecoder().decode(result.stdout));
 }
 
-Deno.test("consumer configuration follows the emitted source seats and preserves real rule conflicts", async () => {
+// Every command finds its runtime with mise as it runs, so the files the
+// monorepo commits serve the app's mirror unchanged; a checkout's
+// mise.local.toml is what sends mise to the trees.
+Deno.test("consumer configuration follows the emitted seats and preserves real rule conflicts", async () => {
   const seats = await exported() as {
-    sources: Sources;
     generate: string;
     build: string;
     terminal: string;
-    installed: Record<string, unknown>;
     generateDockerfile: string;
     buildDockerfile: string;
     checkDockerfile: string;
-    mirroredImportRoot: boolean;
   };
-  assertEquals(seats.mirroredImportRoot, true);
   assertStringIncludes(
     seats.checkDockerfile,
-    "COPY --parents --from=root plugins/omnishell libraries/mecha /monorepo/",
-  );
-  assertStringIncludes(
-    seats.checkDockerfile,
-    "RUN ln -s /monorepo/plugins/omnishell /omnishell",
+    "COPY --from=plugins_omnishell-runtime-image / /omnishell",
   );
   const run = (dockerfile: string) => {
     const line = dockerfile.split("\n").find((candidate) =>
@@ -52,13 +47,16 @@ Deno.test("consumer configuration follows the emitted source seats and preserves
   assertEquals(run(seats.generateDockerfile), [
     "nu",
     "-c",
-    'mise x -- ^deno run --config ("../../plugins/pronto" | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ("../../plugins/pronto" | path join write.ts) .',
+    "mise x -- ^deno run --config ((^mise where github:bonisoft3/pronto | str trim) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ((^mise where github:bonisoft3/pronto | str trim) | path join write.ts) .",
   ]);
   assertEquals(run(seats.buildDockerfile), [
     "nu",
     "-c",
-    "mise x -- ^nu -I ../../plugins/sayt -c 'use task-leaf.nu; task-leaf build'",
+    "mise x -- ^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf build'",
   ]);
+  for (const dockerfile of [seats.generateDockerfile, seats.buildDockerfile, seats.checkDockerfile]) {
+    if (dockerfile.includes("../../plugins")) throw new Error(`a command names the monorepo:\n${dockerfile}`);
+  }
   const app = await Deno.makeTempDir({ dir: repo, prefix: ".project-config-" });
   try {
     await Deno.mkdir(`${app}/pronto`);
@@ -85,38 +83,26 @@ pronto: say: say: generate: rulemap: custom: {priority: 3, cmds: [{do: "print cu
         },
       },
     };
-    const tree = await projectSay(app, treeProgram, seats.sources) as {
+    const merged = await projectSay(app, treeProgram) as {
       say: {
         build: { do: string };
         generate: { rulemap: Record<string, { cmds: { do: string }[] }> };
       };
     };
-    assertEquals(tree.say.build.do, "null");
+    assertEquals(merged.say.build.do, "null");
     assertEquals(
-      tree.say.generate.rulemap.omnishell.cmds[0].do,
+      merged.say.generate.rulemap.omnishell.cmds[0].do,
       seats.terminal,
     );
-    assertEquals(tree.say.generate.rulemap.pronto.cmds[0].do, seats.generate);
-    assertEquals(tree.say.generate.rulemap.custom.cmds[0].do, "print custom");
-    assertStringIncludes(
-      tree.say.generate.rulemap.pronto.cmds[0].do,
-      "../../plugins/pronto",
-    );
-    const installed = await projectSay(app, seats.installed) as typeof tree;
-    assertStringIncludes(
-      installed.say.generate.rulemap.omnishell.cmds[0].do,
-      "run-mise exec -- omnishell mode .",
-    );
-    assertStringIncludes(
-      installed.say.generate.rulemap.pronto.cmds[0].do,
-      'sources: pronto: ""',
-    );
+    assertEquals(merged.say.generate.rulemap.pronto.cmds[0].do, seats.generate);
+    assertEquals(merged.say.generate.rulemap.custom.cmds[0].do, "print custom");
+    assertStringIncludes(seats.generate, "run-mise where github:bonisoft3/pronto");
+    assertStringIncludes(seats.terminal, "run-mise exec -- omnishell mode .");
     await assertRejects(
       () =>
         projectSay(
           app,
           { say: { build: { do: "print conflicting" } } },
-          seats.sources,
         ),
       Error,
       "consumer configuration conflicts with the program's Sayt rules",

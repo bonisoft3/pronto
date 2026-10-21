@@ -1,7 +1,7 @@
 # Idioms
 
 The least a pure pronto app needs to show each concept working. The authored
-files are `brief.md`, `acceptance.md`, `DESIGN.md`, `ir.html`, `program.cue`,
+files are `brief.md`, `brief.html`, `acceptance.md`, `DESIGN.md`, `ir.html`, `program.cue`,
 `messages/`, `shell/screens/`, `shell/handlers/` and `tests/handlers.test.ts`;
 everything else here is emitted by `generate` and is never copied or edited.
 

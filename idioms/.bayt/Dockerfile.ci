@@ -1,0 +1,169 @@
+# generated from bayt.cue — do not edit
+FROM docker:29.7.1-cli@sha256:27a51d5ab1cd38d9eeaba7b415b8c07bc10c31e1cf1ec8d78f6413fcfab3f44f AS ci
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY --from=bonitao/lazybox:0.8.4@sha256:4afc3200d59fe5744cc7871858c4b04b404449c90578b9fe57136fea0b7dd566 /lazybox/ /root/.local/share/lazybox/
+COPY --from=mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/bin/socat1 /usr/local/bin/socat
+COPY --from=mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/lib/libreadline.so.8 /usr/lib/libncursesw.so.6 /usr/lib/
+ENV PATH=$PATH:/root/.local/bin:/root/.local/share/lazybox/bin
+COPY <<'BKID_MISE' /opt/bkid/mise.toml
+[settings]
+experimental = true
+github_attestations = false
+locked = true
+lockfile = true
+slsa = false
+
+[settings.github]
+github_attestations = false
+slsa = false
+
+[tools]
+'github:depot/cli' = '2.101.78'
+'github:go-task/task' = 'v3.49.1'
+BKID_MISE
+COPY <<'BKID_LOCK' /opt/bkid/mise.lock
+[tools]
+[[tools.'github:depot/cli']]
+backend = 'github:depot/cli'
+version = '2.101.78'
+
+[tools.'github:depot/cli'.platforms]
+[tools.'github:depot/cli'.platforms.linux-arm64]
+checksum = 'sha256:985308b4e9b124c9d8ca712b30b84ea613e7de2f9bb3bb193a710e45e254ea87'
+url = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_arm64.tar.gz'
+url_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083092'
+
+[tools.'github:depot/cli'.platforms.linux-arm64-musl]
+checksum = 'sha256:985308b4e9b124c9d8ca712b30b84ea613e7de2f9bb3bb193a710e45e254ea87'
+url = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_arm64.tar.gz'
+url_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083092'
+
+[tools.'github:depot/cli'.platforms.linux-x64]
+checksum = 'sha256:15d066413b99c4fdd399d5fc79a64e50b2e266b509642995935bb96c01d28f1b'
+url = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_amd64.tar.gz'
+url_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083086'
+
+[tools.'github:depot/cli'.platforms.linux-x64-musl]
+checksum = 'sha256:15d066413b99c4fdd399d5fc79a64e50b2e266b509642995935bb96c01d28f1b'
+url = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_amd64.tar.gz'
+url_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083086'
+
+[[tools.'github:go-task/task']]
+backend = 'github:go-task/task'
+version = 'v3.49.1'
+
+[tools.'github:go-task/task'.platforms]
+[tools.'github:go-task/task'.platforms.linux-arm64]
+checksum = 'sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb'
+url = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz'
+url_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609773'
+
+[tools.'github:go-task/task'.platforms.linux-arm64-musl]
+checksum = 'sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb'
+url = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz'
+url_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609773'
+
+[tools.'github:go-task/task'.platforms.linux-x64]
+checksum = 'sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576'
+url = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz'
+url_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609772'
+
+[tools.'github:go-task/task'.platforms.linux-x64-musl]
+checksum = 'sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576'
+url = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz'
+url_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609772'
+BKID_LOCK
+COPY --from=bayt . /monorepo/plugins/bayt/runtime
+RUN cd /opt/bkid && mise trust -y && mise install && mise exec -- sh -c 'cp "$(mise which task)" /usr/local/bin/task && cp "$(mise which depot)" /usr/local/bin/depot'
+ENV PATH=/monorepo/plugins/bayt/runtime:${PATH}
+ARG MONOREPO_COMPOSE_MODE
+ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE
+ARG BAYT_RUNTIME
+ENV BAYT_RUNTIME=$BAYT_RUNTIME
+COPY --from=libraries_mecha-airlock-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-airlock-image_srcs /monorep[o] /monorepo/
+COPY --from=libraries_mecha-auth-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-auth-image_srcs /monorep[o] /monorepo/
+COPY --from=libraries_mecha-clock-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-clock-image_srcs /monorep[o] /monorepo/
+COPY --from=libraries_mecha-compute-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-compute-image_srcs /monorep[o] /monorepo/
+COPY --from=libraries_mecha-conduit-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-database-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-database-image_srcs /monorep[o] /monorepo/
+COPY --from=libraries_mecha-mesh-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-mesh-image_srcs /monorep[o] /monorepo/
+COPY --from=libraries_mecha-ticker-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-ticker-image_srcs /monorep[o] /monorepo/
+COPY --from=plugins_omnishell-runtime-image_bayt /monorep[o] /monorepo/
+COPY --from=plugins_omnishell-runtime-image_srcs /monorep[o] /monorepo/
+COPY --from=workspaceroot-pronto-sources_bayt /monorep[o] /monorepo/
+COPY --from=workspaceroot-pronto-sources_srcs /monorep[o] /monorepo/
+COPY --parents monorepo/*.yaml ./
+COPY --from=idioms-ci-visual_bayt --link /monorepo /monorepo
+COPY --parents .bayt/** ./
+COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.ci.yaml .bayt/bayt.ci.json ./.bayt/
+ENV BUILDX_BAKE_ENTITLEMENTS_FS=0
+ENV COMPOSE_BAKE=true
+RUN --mount=type=secret,id=docker_host --mount=type=secret,id=buildx_builder --mount=type=secret,id=testcontainers_host --mount=type=secret,id=cache_scope --mount=type=secret,id=cache_scope_fallback --mount=type=secret,id=sayt_buildkit_syntax --mount=type=secret,id=sayt_no_cache --mount=type=secret,id=bayt_image_tag --mount=type=secret,id=bayt_pull_policy --mount=type=secret,id=sayt_no_cache_from --mount=type=secret,id=sayt_no_cache_to --mount=type=secret,id=depot_token --mount=type=secret,id=depot_project_id --mount=type=secret,id=depot_org_id --mount=type=secret,id=depot_disable_otel --mount=type=secret,id=actions_results_url --mount=type=secret,id=actions_runtime_token --mount=type=secret,id=bkid_project --mount=type=secret,id=buildx_instance --mount=type=secret,id=docker_config,mode=0600 --mount=type=cache,target=/root/.cache/bayt,id=idioms-ci:/root/.cache/bayt,sharing=locked <<BAYT_INJECT
+set -e
+export DOCKER_HOST="$(cat /run/secrets/docker_host)"
+export BUILDX_BUILDER="$(cat /run/secrets/buildx_builder)"
+export TESTCONTAINERS_HOST_OVERRIDE="$(cat /run/secrets/testcontainers_host)"
+export CACHE_SCOPE="$(cat /run/secrets/cache_scope)"
+export CACHE_SCOPE_FALLBACK="$(cat /run/secrets/cache_scope_fallback)"
+export BUILDKIT_SYNTAX="$(cat /run/secrets/sayt_buildkit_syntax)"
+export SAYT_NO_CACHE="$(cat /run/secrets/sayt_no_cache)"
+export BAYT_IMAGE_TAG="$(cat /run/secrets/bayt_image_tag)"
+export BAYT_PULL_POLICY="$(cat /run/secrets/bayt_pull_policy)"
+export SAYT_NO_CACHE_FROM="$(cat /run/secrets/sayt_no_cache_from)"
+export SAYT_NO_CACHE_TO="$(cat /run/secrets/sayt_no_cache_to)"
+export DEPOT_TOKEN="$(cat /run/secrets/depot_token)"
+export DEPOT_PROJECT_ID="$(cat /run/secrets/depot_project_id)"
+export DEPOT_ORG_ID="$(cat /run/secrets/depot_org_id)"
+export DEPOT_DISABLE_OTEL="$(cat /run/secrets/depot_disable_otel)"
+export ACTIONS_RESULTS_URL="$(cat /run/secrets/actions_results_url)"
+export ACTIONS_RUNTIME_TOKEN="$(cat /run/secrets/actions_runtime_token)"
+export BKID_PROJECT="$(cat /run/secrets/bkid_project)"
+export BUILDX_INSTANCE="$(cat /run/secrets/buildx_instance)"
+export DOCKER_AUTH_CONFIG="$(cat /run/secrets/docker_config)"
+if [ -s "/run/secrets/docker_config" ]; then mkdir -p "$(dirname "/root/.docker/config.json")"; cp -p "/run/secrets/docker_config" "/root/.docker/config.json"; fi
+if [ -n "$DOCKER_HOST" ] && [ ! -e /var/run/docker.sock ]; then
+  ulimit -n 1048576 2>/dev/null || true
+  addr=${DOCKER_HOST#tcp://}
+  [ -n "$addr" ] || { echo "bkid: DOCKER_HOST=$DOCKER_HOST has no tcp:// address" >&2; exit 1; }
+  socat -d0 -t 86400 UNIX-LISTEN:/var/run/docker.sock,fork,backlog=1024,reuseaddr "TCP:$addr,keepalive,keepidle=30,keepintvl=15,keepcnt=4" &
+  SOCAT_PID=$!
+  trap 'kill $SOCAT_PID 2>/dev/null || true' EXIT INT TERM
+  socat -u OPEN:/dev/null UNIX-CONNECT:/var/run/docker.sock,retry=20,interval=0.2 >/dev/null 2>&1 \
+    || { echo "bkid: socat bridge to /var/run/docker.sock not ready" >&2; exit 1; }
+fi
+if [ -n "$BUILDX_BUILDER" ] && [ -n "$BUILDX_INSTANCE" ]; then
+  install -d -m 0700 /root/.docker/buildx/instances
+  printf '%s' "$BUILDX_INSTANCE" > "/root/.docker/buildx/instances/$BUILDX_BUILDER"
+  chmod 0600 "/root/.docker/buildx/instances/$BUILDX_BUILDER"
+fi
+task -t .bayt/Taskfile.yml bayt:ci
+BAYT_INJECT
+
+FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS ci_ctxs
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY --parents .bayt/** ./
+ARG SOURCE_DATE_EPOCH
+ARG BAYT_CLAMP=1
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
+FROM scratch AS ci_srcs
+COPY --from=ci_ctxs /monorepo /monorepo
+
+FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS ci_bayt_ctxs
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY --parents .bayt/compose.ci.yaml .bayt/Dockerfile.ci .bayt/bayt.ci.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.ci.yaml .bayt/process-compose.yaml ./
+COPY --from=idioms-ci-visual_bayt /monorepo /monorepo
+ARG SOURCE_DATE_EPOCH
+ARG BAYT_CLAMP=1
+RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi
+FROM scratch AS ci_bayt
+COPY --from=ci_bayt_ctxs /monorepo /monorepo

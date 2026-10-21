@@ -1,8 +1,11 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, databaseMode: 'existing' | 'separate' = 'existing') {
+export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, databaseMode: 'existing' | 'separate' = 'existing', clock: 'deadlines' | 'disabled' = 'deadlines') {
   out = await Deno.realPath(out)
+  const headers = await Deno.readTextFile(path.join(out, 'public/_headers'))
+  const policy = headers.match(/^  Content-Security-Policy: (.+)$/m)?.[1]
+  if (!policy) throw new Error('the edge assets carry no Content-Security-Policy header')
   const separate = databaseMode === 'separate'
   const database = separate ? name + '-database' : name
   const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
@@ -18,7 +21,7 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
       if (entry.name === 'node_modules') continue
       const file = path.join(dir, entry.name)
       if (entry.isDirectory) await collect(file)
-      else if (/\.(js|ts|json)$/.test(entry.name)) sources.push([path.relative(omnishell, file), await Deno.readTextFile(file)])
+      else if (/\.(js|ts|json)$/.test(entry.name)) sources.push([path.relative(omnishell, file).replaceAll('\\', '/'), await Deno.readTextFile(file)])
     }
   }
   await collect(server)
@@ -27,8 +30,13 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   const identity = JSON.stringify([origin, sources, await Deno.readTextFile(path.join(generated, 'assets.json'))])
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity)))
   const renderer = name + '-renderer-' + [...digest.slice(0, 6)].map(b => b.toString(16).padStart(2, '0')).join('')
-  const fromSrc = (file: string) => path.relative(path.join(out, 'src'), file)
-  const rel = (file: string) => './' + path.relative(out, file)
+  // Import specifiers, which a Windows path's separators would escape.
+  const specifier = (from: string, file: string) => {
+    const r = path.relative(from, file).replaceAll('\\', '/')
+    return r.startsWith('.') ? r : `./${r}`
+  }
+  const fromSrc = (file: string) => specifier(path.join(out, 'src'), file)
+  const rel = (file: string) => specifier(out, file)
   const edge = path.join(mecha, 'packages/mecha-edge/src')
   await Deno.writeTextFile(path.join(out, 'src/render.ts'), `
 import '${fromSrc(path.join(server, 'worker-roles.ts'))}'
@@ -51,6 +59,7 @@ class SnapshotReader extends RpcTarget {
   read(path) { return this.snapshot.read(path) }
 }
 const Base = edgeObject({
+  clock: ${JSON.stringify(clock)},
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(cfg.tables)},
   schema: ${JSON.stringify(cfg.schema ?? {})},
@@ -78,6 +87,7 @@ import { edgeHints } from '${fromSrc(fileURLToPath(new URL('edge-hints.ts', impo
 import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json' with { type: 'json' }
 ${separate ? '' : "export { Cluster } from './database.ts'"}
+const DOCUMENT_POLICY = ${JSON.stringify(policy)}
 const RENDER_FRESH_MS = 60_000
 const RENDER_SWR_S = 86_400
 const RENDER_CACHE_CONTROL = 'public, no-cache, must-revalidate'
@@ -103,6 +113,7 @@ export default {
         const body = response.body ? await response.arrayBuffer() : null
         const headers = new Headers(response.headers)
         headers.set('Link', linkHeader)
+        headers.set('Content-Security-Policy', DOCUMENT_POLICY)
         if (cache && response.status === 200 && body && !request.headers.has('if-none-match')) {
           const storedHeaders = new Headers(headers)
           storedHeaders.set('cache-control', \`public, max-age=\${RENDER_SWR_S}\`)
@@ -128,6 +139,7 @@ export default {
           headers.delete('x-rendered-at')
           headers.set('cache-control', RENDER_CACHE_CONTROL)
           headers.set('Link', linkHeader)
+          headers.set('Content-Security-Policy', DOCUMENT_POLICY)
           if (age <= RENDER_FRESH_MS) {
             headers.set('x-edge-cache', 'hit')
             return new Response(request.method === 'HEAD' ? null : cached.body, { status: cached.status, headers })
@@ -137,7 +149,10 @@ export default {
           ctx?.waitUntil?.(renderShared())
           // Drop carried reads on a stale hit so the browser paints cached HTML
           // immediately and revalidates live rows from /crud after first paint.
-          const staleBody = request.method === 'HEAD' ? null : stripServedReads(await cached.text())
+          // A prefetch keeps them: the tab holds what it seeds as stale and
+          // refreshes it behind (omnishell's link-prefetch.js).
+          const prefetch = request.headers.get('purpose') === 'prefetch'
+          const staleBody = request.method === 'HEAD' ? null : prefetch ? await cached.text() : stripServedReads(await cached.text())
           return new Response(staleBody, { status: cached.status, headers })
         }
       }
@@ -210,8 +225,9 @@ export default {
 }
 
 if (import.meta.main) {
-  const [out, omnishell, mecha, name, origin, mode = 'existing'] = Deno.args
-  if (!origin) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin>')
+  const [out, omnishell, mecha, name, origin, mode = 'existing', clock = 'deadlines'] = Deno.args
+  if (!origin) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin> [existing|separate] [deadlines|disabled]')
   if (mode !== 'existing' && mode !== 'separate') throw new Error('database mode must be existing or separate')
-  await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, mode)
+  if (clock !== 'deadlines' && clock !== 'disabled') throw new Error('clock must be deadlines or disabled')
+  await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, mode, clock)
 }

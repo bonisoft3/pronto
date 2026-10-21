@@ -1,9 +1,10 @@
 import { seedSql } from "./seed.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 import { typeTable } from "./type-table.ts";
+import { created } from "./docker-copy.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
-const POSTGREST = "postgrest/postgrest:v14.18@sha256:c7cd7e265a85b05248abf53f4473fcec7e327c282d0bd0cf60f1551996d09fcf";
+const POSTGREST = "postgrest/postgrest:v16.4@sha256:d155c6718ed9a9f990d159a2ab7c0a3f16944dbb6d0a0344557421042acfe0df";
 const ELECTRIC = "docker.io/electricsql/electric:1.8.1@sha256:efb6fa43859d67cb8c73439e0c8bc0f7a3daa467500fb06f2a924bcb2070c139";
 
 function fail(message: string): never {
@@ -84,11 +85,11 @@ CREATE PUBLICATION electric_publication_default FOR TABLE public.type_http_smoke
     await Deno.writeTextFile(`${scratch}/001-types.sql`, schema);
     await docker(["network", "create", network]);
     networkStarted = true;
-    await docker(["run", "--rm", "-d", "--name", database, "--network", network,
-      "-e", "POSTGRES_PASSWORD=type_pwd", "-e", "POSTGRES_DB=type_db",
-      "-v", `${scratch}/001-types.sql:/docker-entrypoint-initdb.d/001-types.sql:ro`, POSTGRES,
-      "postgres", "-c", "wal_level=logical"]);
+    const initialized = await created(["--rm", "--name", database, "--network", network,
+      "-e", "POSTGRES_PASSWORD=type_pwd", "-e", "POSTGRES_DB=type_db", POSTGRES,
+      "postgres", "-c", "wal_level=logical"], [[`${scratch}/001-types.sql`, "/docker-entrypoint-initdb.d/001-types.sql"]]);
     databaseStarted = true;
+    await docker(["start", initialized]);
     await eventually(() => docker(["exec", database, "psql", "-U", "postgres", "-d", "type_db", "-c", "SELECT 1 FROM public.type_http_smoke LIMIT 0"]), () => true);
     await docker(["run", "--rm", "-d", "--name", rest, "--network", network, "-p", "127.0.0.1::3000",
       "-e", "PGRST_DB_URI=postgres://postgres:type_pwd@" + database + ":5432/type_db",

@@ -6,8 +6,9 @@ tasks:
     run: once
     cmds:
     - >-
-      nu -c "^nu -I ../../plugins/sayt -c 'use tools.nu [run-mise]; let pronto =
-      \"../../plugins/pronto\"; run-mise exec -- deno run --config (\$pronto | path join
-      deno.json) --allow-read --allow-write=.pronto --allow-run --allow-env (\$pronto |
-      path join check-proto.ts) --baseline .'"
+      nu -c "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use tools.nu
+      [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim);
+      run-mise exec -- deno run --config (\$pronto | path join deno.json) --allow-read
+      --allow-write=.pronto --allow-run --allow-env (\$pronto | path join check-proto.ts)
+      --baseline .'"
 version: "3"

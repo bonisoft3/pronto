@@ -18,7 +18,6 @@
 // exit 1 when any error is reported.
 
 import { fileURLToPath } from "node:url";
-import { exportJson } from "./cue.ts";
 import { exists } from "./missing.ts";
 
 type Finding = { severity: "error" | "advisory"; path: string; message: string };
@@ -269,13 +268,12 @@ export async function main(appDir: string): Promise<number> {
   const config = await run("docker", ["compose", "-f", ".bayt/compose.yaml", "config", "--format", "json"], { cwd: appDir });
   if (!config.ok) throw new Error(`docker compose config failed: ${config.stderr}`);
   // compose answers with absolute build contexts, so the app's is compared as one.
-  // Asked before the schema facts, which a cluster only publishes where there is
-  // a database to publish them about: without this the misuse answers with
-  // `undefined field: schema`, a sentence about CUE rather than about the app.
-  if (await exportJson<boolean>(appDir, "cluster.capabilities.server") !== true) {
+  // The cluster's facts as generate wrote them (emit.cue's .pronto/cluster.json).
+  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published };
+  if (!facts.server || facts.schema === undefined) {
     throw new Error("this app's every entity is a browser tier: it has no schema to replay");
   }
-  const published = await exportJson<Published>(appDir, "cluster.surface.schema");
+  const published = facts.schema;
   const services = JSON.parse(config.stdout) as Config;
   const root = await Deno.realPath(appDir);
   const service = targetService(services, root, published.target);
@@ -315,9 +313,12 @@ export async function replayDatabase({ appDir, published, service, migrator, fix
   if (missing.length > 0) {
     throw new Error(`${service.name} declares no ${missing.join(", ")}: the replay reads the database's settings from the generated compose`);
   }
+  // All of it: a step initdb runs may require more than these four, as mecha's
+  // role passwords step requires ELECTRIC_PASSWORD and AUTHENTICATOR_PASSWORD,
+  // and one it lacks ends the database before it is ever ready.
   const started = await run("docker", [
     "run", "-d", "--name", container,
-    ...settings.flatMap((k) => ["-e", `${k}=${env[k]}`]),
+    ...Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
     service.image,
   ]);
   if (!started.ok) throw new Error(`could not start ${service.image}: ${started.stderr}`);

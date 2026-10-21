@@ -38,6 +38,9 @@ package schema
 
 	database: {
 		storage: string | *"1Gi"
+		// The roles a token may name, which the schema grants PostgREST's login
+		// (the app's .pronto/cluster.json; the release fills it).
+		tokenRoles: [...string]
 	}
 
 	// Present where the app's compose project has a migrate service: the
@@ -51,7 +54,9 @@ package schema
 		// The providers the auth service signs in through, and each one's
 		// client, as the app's compose project gives them: filled by the
 		// release, which fails there when a provider's client is unset.
-		oidc: *{} | {[=~"^OIDC_[A-Z0-9_]+$"]: string}
+		oidc: *{} | {[=~"^OIDC_[A-Z0-9_]+$" & !~"_CLIENT_SECRET$"]: string}
+		oidcSecrets: *[] | [...=~"^OIDC_[A-Z0-9_]+_CLIENT_SECRET$"]
+		oidcSecretDigest: *"" | =~"^[0-9a-f]{64}$"
 	}
 
 	render: {

@@ -99,6 +99,13 @@ map pg_text {
   root = if this.type() != "string" { throw("text is not a JSON string: " + this.string()) } else { this }
 }
 
+# Conduit reads a json or jsonb column as bytes, which its JSON encoding of
+# the row spells as base64 of the text: the column's own for json, Postgres's
+# for jsonb. The bus row carries the value itself.
+map pg_json {
+  root = if this.type() != "string" { throw("json is not base64 text: " + this.string()) } else { this.decode("base64").parse_json(use_number: true) }
+}
+
 # A column no carrier names, or a null, passes through as it came.
 map carrier {
   root = if (this.type == null) || (this.value == null) { this.value } else {
@@ -115,6 +122,8 @@ map carrier {
       this.type == "uuid" => this.value.apply("pg_uuid"),
       this.type == "string" => this.value.apply("pg_text"),
       this.type == "timezone" => this.value.apply("pg_text"),
+      this.type == "json" => this.value.apply("pg_json"),
+      this.type == "geojson" => this.value.apply("pg_json"),
       _ => throw("no measured bus spelling for " + this.type + "; measure conduit's before publishing one"),
     }
   }

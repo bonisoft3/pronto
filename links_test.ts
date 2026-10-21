@@ -6,7 +6,7 @@
 // reaches the published tree as a link to nothing.
 import { strict as assert } from "node:assert";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { dirname, extname, join, normalize, relative } from "node:path";
+import { dirname, extname, join, posix, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -43,8 +43,9 @@ function links(markdown: string): Link[] {
 
 /** Where a link from `file` lands, relative to ROOT, and the sibling whose
  * mirror the rewrite sends it to, if it leaves pronto for one. */
+// A link is a URL path whatever the platform, so it is resolved as one.
 function land(file: string, target: string): { path: string; sibling?: string; carried?: string } {
-  const path = normalize(join(dirname(file), target));
+  const path = posix.normalize(posix.join(posix.dirname(file), target));
   if (path !== ".." && !path.startsWith("../")) return { path };
   const carried = Object.keys(CARRIED).find((at) => path === at || path.startsWith(`${at}/`));
   if (carried) return { path, carried: CARRIED[carried] + path.slice(carried.length) };
@@ -56,7 +57,7 @@ function markdownFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return entry.name === "node_modules" ? [] : markdownFiles(path);
-    return entry.isFile() && entry.name.endsWith(".md") ? [relative(ROOT, path)] : [];
+    return entry.isFile() && entry.name.endsWith(".md") ? [relative(ROOT, path).split(sep).join("/")] : [];
   });
 }
 

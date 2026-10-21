@@ -14,30 +14,28 @@ import (
 	toolchain "github.com/bonisoft3/omnishell/toolchain"
 )
 
-#Project: P={
+#Project: {
 	...
-	omnishell: *"" | string
 	tools: toolchain.#Tools
 	say: say: {
 		...
 		generate: rulemap: {
 			...
-			omnishell: {priority: 0, cmds: [{do: [if P.omnishell == "" {#Generate}, #LocalGenerate][0]}]}
+			omnishell: {priority: 0, cmds: [{do: #Generate}]}
 		}
 	}
 }
 
 #Generate: "if ('program.cue' | path exists) { use tools.nu [run-mise]; run-mise exec -- omnishell mode . | save --force program_terminal.cue }"
-#LocalGenerate: "mise run omnishell -- mode . --local | save --force program_terminal.cue"
 
-// The image of omnishell's runtime tree an installed app's images copy from,
+// The image of omnishell's runtime tree an app's images copy from,
 // as pronto pins it: the consumer pins what it builds on, as with mecha's
 // images (clusters/mecha.cue). From the pin line an omnishell release prints.
 published: runtime: =~"^bonitao/omnishell:[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
-published: runtime: "bonitao/omnishell:0.12.1@sha256:df434871aa11a1863a77ef125f7847a2978fd3ecde76b47f50d51e1a8749e10e"
+published: runtime: "bonitao/omnishell:0.14.0@sha256:014eb4b0ae281bc94b871e134d31f310edb13abaa77c1f585b3772b666b7797a"
 
-// The build context an image of an installed app copies omnishell's runtime
-// tree from: that image, or in the monorepo the target building it.
+// The build context an app's images copy omnishell's runtime tree from: that
+// image, or in the monorepo the target building it.
 #RuntimeImage: "plugins_omnishell-runtime-image"
 
 // Re-exported beside #Terminal because the emitter reads it directly: CUE has
@@ -48,6 +46,7 @@ published: runtime: "bonitao/omnishell:0.12.1@sha256:df434871aa11a1863a77ef125f7
 // Re-exported because the cluster runs it: a route rendered on request is
 // served by this target, which the emitter adds where a route asks for one.
 #Render: impl.#Render
+#Address: impl.#Address
 
 #BkidCheck: impl.#BkidCheck
 
@@ -58,10 +57,11 @@ published: runtime: "bonitao/omnishell:0.12.1@sha256:df434871aa11a1863a77ef125f7
 
 #Terminal: impl.#Terminal & {
 	surface: {
-		runtime: string
+		// Where mise puts omnishell, its release or a checkout's tree.
+		runtime: ""
 		verbs: omnishell: {
 			verb: "generate"
-			cmds: [if runtime == "" {#Generate}, if runtime != "" {#LocalGenerate}]
+			cmds: [#Generate]
 			note: "terminal assets and source layout"
 		}
 	}

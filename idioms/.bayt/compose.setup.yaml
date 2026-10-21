@@ -1,41 +1,40 @@
 # generated from bayt.cue — do not edit
 services:
-  apps_idioms-setup:
+  idioms-setup:
     build:
       additional_contexts:
-        workspaceroot-setup: service:workspaceroot-setup
+        workspaceroot-pronto-sources_srcs: >-
+          ${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}
       context: ..
       dockerfile: .bayt/Dockerfile.setup
       target: setup
       tags:
-      - bayt-apps_idioms-setup:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
-      - bayt-apps_idioms-setup:latest
+      - bayt-idioms-setup:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+      - bayt-idioms-setup:latest
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-setup:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
-    scale: 0
-  apps_idioms-setup_bayt:
+    image: bayt-idioms-setup:${BAYT_IMAGE_TAG:-${COMPOSE_PROJECT_NAME}}
+  idioms-setup_bayt:
     build:
-      additional_contexts:
-        workspaceroot-setup_bayt: service:workspaceroot-setup_bayt
       context: ..
       dockerfile: .bayt/Dockerfile.setup
       target: setup_bayt
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-setup_bayt:latest
+    image: bayt-idioms-setup_bayt:latest
     scale: 0
-  apps_idioms-setup_srcs:
+  idioms-setup_srcs:
     build:
-      additional_contexts:
-        workspaceroot-setup_srcs: service:workspaceroot-setup_srcs
       context: ..
       dockerfile: .bayt/Dockerfile.setup
       target: setup_srcs
       args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/idioms}
         BUILDKIT_SYNTAX: >-
           docker/dockerfile:1.26@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-    image: bayt-apps_idioms-setup_srcs:latest
+    image: bayt-idioms-setup_srcs:latest
     scale: 0

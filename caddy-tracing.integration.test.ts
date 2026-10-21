@@ -4,12 +4,20 @@
 // the request is still answered.
 //
 // Read from what ships: pronto's Caddyfile, which every app's docker/Caddyfile
-// is emitted from.
+// is emitted from, behind resilience's snippets as emit puts them.
+
+import { created } from "./docker-copy.ts";
 
 const CADDYFILE = new URL("./assets/Caddyfile", import.meta.url);
 
 function fail(message: string): never {
   throw new Error(message);
+}
+
+async function bounds(): Promise<string> {
+  const result = await new Deno.Command("cue", { args: ["export", ".", "-e", "caddySnippets", "--out", "text"], cwd: new URL("./resilience/", import.meta.url), stdout: "piped", stderr: "piped" }).output();
+  if (!result.success) fail(`cue export caddySnippets: ${new TextDecoder().decode(result.stderr)}`);
+  return new TextDecoder().decode(result.stdout);
 }
 
 // The image the cluster's door runs.
@@ -37,7 +45,7 @@ Deno.test({ name: "the door's span is the child of the incoming traceparent and 
   const scratch = await Deno.makeTempDir({ prefix: "caddy-tracing-" });
   const started: string[] = [];
   await Deno.writeTextFile(`${scratch}/crud`, CRUD);
-  await Deno.copyFile(CADDYFILE, `${scratch}/door`);
+  await Deno.writeTextFile(`${scratch}/door`, await bounds() + await Deno.readTextFile(CADDYFILE));
   await docker(["network", "create", network]);
   try {
     for (const [name, conf, extra] of [
@@ -46,7 +54,7 @@ Deno.test({ name: "the door's span is the child of the incoming traceparent and 
       // exporter would spend each batch's deadline dialing one.
       [`door-${suffix}`, "door", ["-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", "-e", "PRONTO_TRACING=on", "-p", "127.0.0.1::8080"]],
     ] as const) {
-      await docker(["run", "-d", "--rm", "--name", name, "--network", network, ...extra, "-v", `${scratch}/${conf}:/etc/caddy/Caddyfile:ro`, CADDY]);
+      await docker(["start", await created(["--rm", "--name", name, "--network", network, ...extra, CADDY], [[`${scratch}/${conf}`, "/etc/caddy/Caddyfile"]])]);
       started.push(name);
     }
     const port = (await docker(["port", `door-${suffix}`, "8080"])).trim().split("\n")[0].split(":").pop();

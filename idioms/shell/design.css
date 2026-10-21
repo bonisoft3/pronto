@@ -208,6 +208,11 @@
    emission — program-owned, preset-derived, app-overridable — is the
    only stylesheet they have. Aesthetic values stay behind --shell-*
    variables so an app can retheme without repeating structure. */
+/* The scrollbar's room is kept whether or not the page overflows: a
+   screen swapping in is as short as its loading state until its data
+   lands, and with a classic scrollbar the whole page would jump
+   sideways and back on every navigation. */
+html { scrollbar-gutter: stable; }
 body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
   background: var(--shell-bg); color: var(--shell-fg); }
 /* Sticky, because the navigation stack restores a screen's scroll
@@ -295,21 +300,61 @@ body > nav .shell-signout { font-weight: 400;
 
 /* The login ceremony — the one full surface the terminal renders,
    on the same tokens as everything else. */
-.shell-login { display: grid; place-items: center; min-height: 70vh; }
-.shell-login form { display: grid; gap: 12px; width: min(320px, 90vw);
-  padding: var(--sp-lg, 24px); border: 1px solid var(--shell-rule);
-  border-radius: var(--r-md, 8px); background: var(--surface); }
-.shell-login h1 { margin: 0; font-size: 1.25rem; }
-.shell-login label { display: grid; gap: 4px; font-weight: 600; }
-.shell-login input { font: inherit; padding: 8px 10px;
-  border-radius: var(--r-sm, 6px); border: 1px solid var(--shell-rule);
-  background: var(--surface); color: var(--shell-fg); }
-.shell-login button { font: inherit; font-weight: 600; padding: 8px 10px;
-  border-radius: var(--r-sm, 6px); border: 1px solid var(--shell-rule);
-  background: var(--shell-fg); color: var(--shell-bg);
-  cursor: pointer; min-height: 44px; }
-.shell-login .login-hint { margin: 0; font-weight: 400; font-size: .875rem;
-  color: var(--shell-fg); }
-.shell-login .login-guest { background: var(--surface);
-  color: var(--shell-fg); font-weight: 400; }
-.shell-login .login-error { color: var(--danger); margin: 0; }
+body:has(.shell-login) { background: var(--login-surface, var(--surface)); }
+.shell-login {
+  box-sizing: border-box; min-height: 100svh; display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+  align-items: center; gap: clamp(48px, 8vw, 128px);
+  max-width: 1160px; margin: auto; padding: clamp(32px, 7vw, 96px);
+  color: var(--primary, var(--shell-fg));
+}
+.shell-login .login-intro { padding-block: 32px; }
+.shell-login .login-mark {
+  display: grid; place-items: center; width: 56px; height: 56px;
+  margin-block-end: 48px; color: var(--accent, var(--shell-fg));
+  border: 1px solid var(--shell-rule); border-radius: var(--r-md, 8px);
+  font: 400 32px/1 var(--shell-heading-font, ui-serif, Georgia, serif);
+}
+.shell-login h1 {
+  margin: 0; font-family: var(--shell-heading-font, ui-serif, Georgia, serif);
+  font-size: clamp(48px, 6.5vw, 88px); font-weight: 400; line-height: 1.05;
+  letter-spacing: -.055em; overflow-wrap: anywhere;
+}
+.shell-login .login-hint {
+  margin: 28px 0 0; max-width: 32ch; font-size: 1.125rem; line-height: 1.65;
+  color: var(--secondary, var(--shell-fg));
+}
+.shell-login form {
+  box-sizing: border-box; width: 100%; margin: 0; padding-block: 40px;
+  border-block: 1px solid var(--shell-rule);
+}
+.shell-login .login-actions { display: grid; gap: 12px; }
+.shell-login button, .shell-login .login-provider {
+  box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  width: 100%; min-height: 56px; padding: 14px 20px; font: inherit;
+  font-size: .9375rem; font-weight: 600; text-align: center; text-decoration: none;
+  line-height: 1.5; border: 1px solid var(--shell-rule); border-radius: var(--r-sm, 6px);
+  background: var(--surface); color: var(--primary, var(--shell-fg)); cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+.shell-login .login-provider { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
+.shell-login .login-provider ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
+.shell-login .login-passkey { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
+.shell-login .login-guest { margin-block-start: 12px; border-color: transparent; background: transparent; color: var(--secondary, var(--shell-fg)); font-weight: 400; }
+.shell-login button:hover, .shell-login .login-provider:hover { transform: translateY(-1px); }
+.shell-login .login-provider:hover { filter: brightness(1.15); }
+.shell-login .login-guest:hover { color: var(--primary, var(--shell-fg)); background: var(--surface-muted, var(--surface)); }
+.shell-login :is(button, a):focus-visible { outline: 3px solid var(--accent, var(--shell-fg)); outline-offset: 4px; }
+.shell-login .login-error { color: var(--danger); margin: 0 0 20px; font-size: .9375rem; }
+@media (max-width: 700px) {
+  .shell-login { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 40px; padding: 48px 28px; }
+  .shell-login .login-intro { padding: 0; }
+  .shell-login .login-mark { margin-block-end: 32px; }
+  .shell-login h1 { font-size: clamp(48px, 13vw, 72px); }
+  .shell-login .login-hint { margin-block-start: 20px; font-size: 1rem; }
+  .shell-login form { padding-block: 28px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell-login button, .shell-login .login-provider { transition: none; }
+  .shell-login button:hover, .shell-login .login-provider:hover { transform: none; }
+}

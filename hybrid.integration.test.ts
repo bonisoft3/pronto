@@ -1,9 +1,11 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
 import { compileHybrid } from "./hybrid.ts";
+import { compileMechaPorts } from "./mecha-ports.ts";
+import { type Catalog, CATALOG_SQL, unrecorded } from "./sql-recorded.ts";
 import { instrument } from "../omnishell/instrument.ts";
-import { executeHybrid } from "./testdata/hybrid-local.ts";
-import { DATABASE, fixture, initial, quote, request, run, uuid } from "./testdata/hybrid-fixtures.ts";
+import { executeHybrid } from "./hybrid-local.ts";
+import { DATABASE, fixture, initial, quote, request, run, surface, uuid } from "./testdata/hybrid-fixtures.ts";
 
 Deno.test({ name: "hybrid commands serialize, replay and preserve private projections in PostgreSQL", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   const { spec, rules, compiled } = await fixture();
@@ -14,11 +16,17 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
     const stopped = await run("docker", ["stop", container]);
     if (!stopped.ok) throw new Error(stopped.err);
   };
-  const psql = (source: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=terse", "-U", "postgres"], source);
+  // As the gateway does: each transaction starts at the role's isolation,
+  // which this superuser session has to say for itself.
+  const psql = (source: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=terse", "-U", "postgres"], `SET default_transaction_isolation TO 'serializable';\n${source}`);
+  // As the gateway does: a transaction a serialization conflict aborted is
+  // run again, so racing callers see some serial order of their steps.
   const sql = async (source: string) => {
-    const result = await psql(source);
-    if (!result.ok) throw new Error(result.err);
-    return result.out;
+    for (let attempt = 0; ; attempt++) {
+      const result = await psql(source);
+      if (result.ok) return result.out;
+      if (!result.err.includes("could not serialize") || attempt >= 20) throw new Error(result.err);
+    }
   };
   const schema = "hybrid_truco_turn";
   const seed = async (id: number, deadline = initial().deadline) => {
@@ -26,10 +34,12 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
     await sql(`INSERT INTO ${schema}.instance VALUES ('${uuid(id)}', 1, 0, ${quote(state)});
       INSERT INTO ${schema}.member VALUES ('${uuid(id)}', '${uuid(1)}', 'a'), ('${uuid(id)}', '${uuid(2)}', 'b');`);
   };
-  const call = (id: number, actor: number, command: number, req = request(0)) => `
+  // A command is a row: inserting it dispatches it, and its receipt is read back off it.
+  const call = (id: number, actor: number, command: number, req = request(0), name = "truco_turn") => `
     SET ROLE app_user;
     SET request.jwt.claims = '${JSON.stringify({ sub: uuid(actor) })}';
-    SELECT public.truco_turn_command('${uuid(id)}', '${uuid(command)}', ${quote(req)});`;
+    INSERT INTO public.${name}_command (id, instance_id, request) VALUES ('${uuid(command)}', '${uuid(id)}', ${quote(req)}::text) ON CONFLICT DO NOTHING;
+    SELECT jsonb_build_object('kind', outcome, 'reason', nullif(reason, ''), 'revision', revision::text) FROM public.${name}_command WHERE id = '${uuid(command)}';`;
   const snapshot = (id: number) => sql(`SELECT jsonb_build_object('state', state, 'revision', revision::text) FROM ${schema}.instance WHERE id = '${uuid(id)}';`);
   try {
     for (let i = 0; ; i++) {
@@ -41,7 +51,63 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
       CREATE OR REPLACE FUNCTION public.auth_uid() RETURNS uuid LANGUAGE sql STABLE AS $$
       SELECT (current_setting('request.jwt.claims', true)::jsonb->>'sub')::uuid;
       $$;
+      ${surface("truco_turn")}
       ${compiled.sql}`);
+
+    await t.step("a machine's steps run serializable, and refuse to run otherwise", async () => {
+      // A step read state and then locked it, so under read committed a
+      // concurrent step could commit between the two. Serializable makes every
+      // interleaving some serial order, and a step outside it is refused.
+      assertStringIncludes(await sql("SELECT array_to_string(setconfig, ',') FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole WHERE r.rolname = 'app_user';"), "default_transaction_isolation=serializable");
+      await seed(95);
+      const refused = await psql(`SET default_transaction_isolation TO 'read committed'; ${call(95, 1, 195)}`);
+      assertEquals(refused.ok, false);
+      assertStringIncludes(refused.err, "serializable");
+    });
+
+    // The clock and randomness were refused by a list of their spellings,
+    // and CAST('now' AS timestamptz) was not on it. Postgres's parser reads
+    // the SQL and its catalog says what each call and cast reads.
+    await t.step("a step reads time and randomness only through its clock and draw, as Postgres reads its SQL", async () => {
+      await sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;");
+      const catalog = JSON.parse(await sql(CATALOG_SQL)) as Catalog;
+      assertEquals(await unrecorded(compiled.sql, catalog), []);
+      const read = async (body: string) => await unrecorded(compileMechaPorts({[spec.name]: {...spec, ports: {reads: {r: {params: [], returns: "jsonb", sql: body}}}}}), catalog);
+      for (const [body, finding] of [
+        ["SELECT to_jsonb(now())", "now(), the transaction's clock"],
+        ["SELECT to_jsonb(statement_timestamp())", "statement_timestamp(), the transaction's clock"],
+        ["SELECT to_jsonb(clock_timestamp())", "clock_timestamp(), which the catalog marks volatile"],
+        ["SELECT to_jsonb(CURRENT_TIMESTAMP)", "CURRENT_TIMESTAMP, the transaction's clock"],
+        ["SELECT to_jsonb(CAST('now' AS timestamptz))", "to timestamptz, whose input reads the session"],
+        ["SELECT to_jsonb('today'::date)", "to date, whose input reads the session"],
+        ["SELECT to_jsonb(gen_random_uuid())", "gen_random_uuid(), which the catalog marks volatile"],
+        ["SELECT to_jsonb(random())", "random(), which the catalog marks volatile"],
+        ["SELECT to_jsonb(public.gen_random_bytes(4))", "public.gen_random_bytes(), which the catalog marks volatile"],
+        ["SELECT to_jsonb(age(make_timestamp(2020, 1, 1, 0, 0, 0)))", "age(), the transaction's clock"],
+        ["SELECT to_jsonb('now'::text::timestamptz)", "to timestamptz, whose input reads the session"],
+        ["SELECT to_jsonb(timestamptz('now'))", "to timestamptz, whose input reads the session"],
+        ["SELECT to_jsonb(('{\"at\":\"now\"}'::jsonb->>'at')::timestamptz)", "to timestamptz, whose input reads the session"],
+      ] as const) {
+        const found = await read(body);
+        assertEquals(found.length, 1, `${body}: ${found.join("; ")}`);
+        assertStringIncludes(found[0], finding);
+      }
+      const dynamic = await unrecorded("CREATE FUNCTION hybrid_truco_turn.f() RETURNS void LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'SELECT 1'; END; $f$;", catalog);
+      assertEquals(dynamic.length, 1, dynamic.join("; "));
+      assertStringIncludes(dynamic[0], "runs dynamic SQL");
+      // What reads neither: immutable functions, and settings, which are not the clock.
+      assertEquals(await read("SELECT jsonb_build_object('at', to_timestamp(1.5), 'role', current_setting('role'), 'n', abs(-1))"), []);
+    });
+
+    // The step's time was a setting any session could set, so a play long
+    // past its deadline could claim a time before it and be recorded at it.
+    await t.step("a session cannot set the time a step is given", async () => {
+      await seed(96);
+      const forged = JSON.parse(await sql(`SET mecha.now = '9007199254740991'; ${call(96, 1, 196)}`));
+      assertEquals(forged.kind, "accepted", "the deadline is judged on the transaction's own time");
+      const now = Number(await sql(`SELECT now FROM ${schema}.receipt WHERE instance_id = '${uuid(96)}' AND command_id = '${uuid(196)}';`));
+      assert(Math.abs(now - Date.now()) < 60000, "the receipt records the transaction's time");
+    });
 
     await t.step("one command and all player views commit together", async () => {
       await seed(10);
@@ -49,22 +115,24 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
       assertEquals(answer.kind, "accepted");
       assertEquals(answer.revision, "1");
       const actual = JSON.parse(await snapshot(10));
-      const context = { actor: "a", tier: "omnishell", now: actual.state.deadline - 20000 };
+      // The step replays from its receipt: the request and the time it was given.
+      const now = Number(await sql(`SELECT now FROM ${schema}.receipt WHERE instance_id = '${uuid(10)}' AND command_id = '${uuid(100)}';`));
+      const context = { actor: "a", tier: "omnishell", now };
       const expected = await executeHybrid(compiled.source, spec.fuel, { state: initial(), event: request(0).event, context, viewers: ["a", "b"] }) as { state: unknown; views: unknown };
       assertEquals(actual.state, expected.state);
-      const views = JSON.parse(await sql(`SELECT jsonb_agg(jsonb_build_object('viewer', m.seat, 'value', v.value) ORDER BY m.seat)
-        FROM ${schema}.view v JOIN ${schema}.member m USING (instance_id, actor) WHERE instance_id = '${uuid(10)}';`));
+      const views = JSON.parse(await sql(`SELECT jsonb_agg(jsonb_build_object('viewer', v.seat, 'value', v.view::jsonb) ORDER BY v.seat)
+        FROM public.truco_turn_seat v WHERE instance_id = '${uuid(10)}';`));
       assertEquals(views, expected.views);
     });
 
-    await t.step("lost replies retry before stale revision checks without applying a second move", async () => {
+    await t.step("a resent command is the row already there, and applies no second move", async () => {
       const before = await snapshot(10);
       const answer = await sql(call(10, 1, 100));
       assertEquals(JSON.parse(answer).kind, "accepted");
       assertEquals(await snapshot(10), before);
-      const mismatch = await psql(call(10, 1, 100, request(0, "play", { card: 1 })));
-      assertEquals(mismatch.ok, false);
-      assertStringIncludes(mismatch.err, "different input");
+      // The key is the command's identity: a body resent under it changes nothing.
+      assertEquals(JSON.parse(await sql(call(10, 1, 100, request(0, "play", { card: 1 })))).kind, "accepted");
+      assertEquals(await snapshot(10), before);
       assertEquals(await sql(`SELECT count(*) FROM ${schema}.receipt WHERE instance_id = '${uuid(10)}';`), "1");
     });
 
@@ -111,33 +179,33 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
       const spoof = await psql(call(13, 1, 108, request(0, "play", { card: 0, actor: "b" })));
       assertEquals(spoof.ok, false);
       assertStringIncludes(spoof.err, "undeclared field");
-      for (const query of [`SELECT * FROM ${schema}.instance`, `SELECT * FROM ${schema}.view`, `UPDATE ${schema}.instance SET revision=99`, `SELECT ${schema}.step('{}')`]) {
+      for (const query of [`SELECT * FROM ${schema}.instance`, `SELECT * FROM ${schema}.receipt`, `UPDATE ${schema}.instance SET revision=99`, `SELECT ${schema}.step('{}')`, `UPDATE public.truco_turn_seat SET revision = 99`]) {
         const denied = await psql(`SET ROLE app_user; ${query};`);
         assertEquals(denied.ok, false);
         assertStringIncludes(denied.err, "permission denied");
       }
-      const view = JSON.parse(await sql(`SET ROLE app_user; SET request.jwt.claims = '${JSON.stringify({ sub: uuid(1) })}'; SELECT public.truco_turn_view('${uuid(10)}');`));
-      assertEquals(view.value.hand, [1, 2]);
-      assertEquals(view.value.b, undefined);
-      assertEquals(await sql(`SET ROLE app_user; SET request.jwt.claims = '${JSON.stringify({ sub: uuid(3) })}'; SELECT public.truco_turn_view('${uuid(10)}');`), "");
+      const view = JSON.parse(await sql(`SELECT view FROM public.truco_turn_seat WHERE instance_id = '${uuid(10)}' AND actor = '${uuid(1)}';`));
+      assertEquals(view.hand, [1, 2]);
+      assertEquals(view.b, undefined);
+      assertEquals(await sql(`SELECT count(*) FROM public.truco_turn_seat WHERE instance_id = '${uuid(10)}' AND actor = '${uuid(3)}';`), "0");
     });
 
     await t.step("expired moves cannot beat a delayed ticker and duplicate wakes cannot affect the next turn", async () => {
       await seed(14, 0);
       assertEquals(JSON.parse(await sql(call(14, 1, 109))).reason, "expired");
-      const tick = `SELECT ${schema}.dispatch('${uuid(14)}', '${uuid(0)}', '${uuid(110)}', ${quote(request(0, "timeout", {}))}, 'mecha');`;
+      const tick = `SELECT ${schema}.dispatch('${uuid(14)}', '${uuid(0)}', '110', ${quote(request(0, "timeout", {}))}, 'mecha');`;
       assertEquals(JSON.parse(await sql(tick)).kind, "accepted");
       const before = await snapshot(14);
       assertEquals(JSON.parse(await sql(tick)).kind, "accepted");
       assertEquals(await snapshot(14), before);
-      assertEquals(JSON.parse(await sql(`SELECT ${schema}.dispatch('${uuid(14)}', '${uuid(0)}', '${uuid(111)}', ${quote(request(0, "timeout", {}))}, 'mecha');`)).reason, "stale_revision");
+      assertEquals(JSON.parse(await sql(`SELECT ${schema}.dispatch('${uuid(14)}', '${uuid(0)}', '111', ${quote(request(0, "timeout", {}))}, 'mecha');`)).reason, "stale_revision");
     });
 
     await t.step("a concurrent expired play and timer settle only the timeout move", async () => {
       await seed(18, 0);
       const [play, tick] = await Promise.all([
         sql(call(18, 1, 132)),
-        sql(`SELECT ${schema}.dispatch('${uuid(18)}', '${uuid(0)}', '${uuid(133)}', ${quote(request(0, "timeout", {}))}, 'mecha');`),
+        sql(`SELECT ${schema}.dispatch('${uuid(18)}', '${uuid(0)}', '133', ${quote(request(0, "timeout", {}))}, 'mecha');`),
       ]);
       assertEquals(JSON.parse(play).kind, "rejected");
       assertEquals(JSON.parse(tick).kind, "accepted");
@@ -150,7 +218,7 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
       await seed(15);
       await sql(`BEGIN; ${call(15, 1, 112)} ROLLBACK;`);
       assertEquals(JSON.parse(await snapshot(15)).revision, "0");
-      assertEquals(await sql(`SELECT (SELECT count(*) FROM ${schema}.view WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM ${schema}.receipt WHERE instance_id = '${uuid(15)}');`), "0");
+      assertEquals(await sql(`SELECT (SELECT count(*) FROM public.truco_turn_seat WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM public.truco_turn_command WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM ${schema}.receipt WHERE instance_id = '${uuid(15)}');`), "0");
       assertEquals(JSON.parse(await sql(call(15, 1, 112))).kind, "accepted");
     });
 
@@ -167,7 +235,7 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
         assertEquals(game.state, expected.state);
         previous = game.state;
       }
-      const finish = `SELECT ${schema}.dispatch('${uuid(16)}', '${uuid(0)}', '${uuid(126)}', ${quote(request(6, "finish", {}))}, 'mecha');`;
+      const finish = `SELECT ${schema}.dispatch('${uuid(16)}', '${uuid(0)}', '126', ${quote(request(6, "finish", {}))}, 'mecha');`;
       assertEquals(JSON.parse(await sql(finish)).kind, "accepted");
       assertEquals(JSON.parse(await sql(call(16, 1, 127, request(7)))).reason, "illegal_event");
       assertEquals(JSON.parse(await snapshot(16)).state.phase, "finished");
@@ -176,7 +244,7 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
     await t.step("PLV8 uses the same cage and refuses computed ambient authority", async () => {
       for (const [name, expression] of Object.entries({ random: "Math['random']()", database: "({}).constructor.constructor('return plv8')()" })) {
         const altered = await compileHybrid({ ...spec, name: `truco_${name}` }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", `play: () => ${expression}`), instrument);
-        await sql(altered.sql);
+        await sql(`${surface(`truco_${name}`)} ${altered.sql}`);
         const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
         const failure = await psql(`SELECT hybrid_truco_${name}.step(${quote(input)});`);
         assertEquals(failure.ok, false);
@@ -185,10 +253,17 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
     });
 
     await t.step("bounded Mecha actions reuse native invocation and its transactional Airlock claim", async () => {
-      const declaration = await run("cue", ["export", "./apps/truco/tests/fixtures/hybrid", "-", "-e", "machine"], `package proof
-        machine: states: playing: on: play: actions: [{effect: {
-          op: "update", schema: "public", table: "payment", values: {status: "charging"}, rawWhere: "id = game.id"
-        }}]`);
+      // The fixture's transition is replaced, not unified with: a value CUE
+      // cannot unify is the machine as data, read into its reducer anew.
+      const base = await run("cue", ["export", "./apps/truco/tests/fixtures/hybrid", "-e", "machine"]);
+      if (!base.ok) throw new Error(base.err);
+      const machine = JSON.parse(base.out);
+      machine.config.states.playing.on.play.actions = ["play", "charge"];
+      machine.setup.actions.charge = [{effect: {
+        op: "update", schema: "public", table: "payment", values: {status: "charging"}, rawWhere: "id = game.id",
+      }}];
+      const declaration = await run("cue", ["export", "-", "-e", "reducer"],
+        `package proof\nimport pronto "bonisoft.org/plugins/pronto"\nreducer: (pronto.#Reducer & {machine: ${JSON.stringify(machine)}}).out\n`);
       if (!declaration.ok) throw new Error(declaration.err);
       const composed = await compileHybrid({...JSON.parse(declaration.out), name: "effect_turn"}, rules, instrument);
       const files = await emitFiles(paymentProgram());
@@ -203,11 +278,12 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
         ${await Deno.readTextFile(new URL("../../libraries/mecha/services/ticker/schedule.sql", import.meta.url))}
         ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/airlock.sql", import.meta.url))}
         ${files["services/database/migrations/010_machines.sql"].text}
+        ${surface("effect_turn")}
         ${composed.sql}
         INSERT INTO payment VALUES ('${uuid(90)}', 'pending', 12.50, NULL);
         INSERT INTO hybrid_effect_turn.instance VALUES ('${uuid(90)}', 1, 0, ${quote(initial())});
         INSERT INTO hybrid_effect_turn.member VALUES ('${uuid(90)}', '${uuid(1)}', 'a'), ('${uuid(90)}', '${uuid(2)}', 'b');`);
-      const invoke = call(90, 1, 190).replace("public.truco_turn_command", "public.effect_turn_command");
+      const invoke = call(90, 1, 190, request(0), "effect_turn");
       const counts = `SELECT (SELECT count(*) FROM airlock.external_effect_ledger) || ',' || (SELECT count(*) FROM graphile_worker.added);`;
       await sql(`BEGIN; ${invoke} ROLLBACK;`);
       assertEquals(await sql(counts), "0,0");
@@ -222,7 +298,7 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
 
     await t.step("runaway reducer is terminated by the shared deterministic fuel limit", async () => {
       const altered = await compileHybrid({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), instrument);
-      await sql(altered.sql);
+      await sql(`${surface("truco_spin")} ${altered.sql}`);
       const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
       const start = performance.now();
       const failure = await psql(`SELECT hybrid_truco_spin.step(${quote(input)});`);

@@ -20,7 +20,7 @@ _drainedFiles: (pronto.#emit & {
 	cluster:  _drainedCluster
 	terminal: _drainedTerminal
 	loop:     _drainedLoop
-	build: (pronto.#DefaultBuild & {code: _drained, loop: _drainedLoop, cluster: _drainedCluster}).out
+	build: (pronto.#DefaultBuild & {code: _drained, loop: _drainedLoop, cluster: _drainedCluster, terminal: _drainedTerminal}).out
 }).files
 _drainFile: "docker/emit-profile-refresh.yaml"
 

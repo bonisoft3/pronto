@@ -9,7 +9,10 @@
 // Read from what ships: #ssrCase's emitted Caddyfile for such a route, behind
 // a renderer that says what it was asked.
 
-const dir = new URL("./testdata/emit", import.meta.url).pathname;
+import { fileURLToPath } from "node:url";
+import { created } from "./docker-copy.ts";
+
+const dir = fileURLToPath(new URL("./testdata/emit", import.meta.url));
 
 function fail(message: string): never {
   throw new Error(message);
@@ -50,12 +53,12 @@ Deno.test({ name: "a route rendered on request whose first segment is a :param l
   try {
     await docker(["network", "create", network]);
     networked = true;
-    const run = async (name: string, alias: string, args: string[]) => {
+    const run = async (name: string, alias: string, args: string[], copies: [string, string][]) => {
       started.push(name);
-      await docker(["run", "-d", "--name", name, "--network", network, "--network-alias", alias, ...args]);
+      await docker(["start", await created(["--name", name, "--network", network, "--network-alias", alias, ...args], copies)]);
     };
-    await run(`render-${suffix}`, "render", ["-v", `${scratch}/render:/etc/caddy/Caddyfile:ro`, CADDY]);
-    await run(`door-${suffix}`, "caddy", ["-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", "-p", "127.0.0.1::8080", "-v", `${scratch}/Caddyfile:/etc/caddy/Caddyfile:ro`, "-v", `${scratch}/srv:/srv:ro`, CADDY]);
+    await run(`render-${suffix}`, "render", [CADDY], [[`${scratch}/render`, "/etc/caddy/Caddyfile"]]);
+    await run(`door-${suffix}`, "caddy", ["-e", "ELECTRIC_SECRET=test", "-e", "ORIGIN=https://test.example", "-p", "127.0.0.1::8080", CADDY], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], [`${scratch}/srv`, "/srv"]]);
     const port = (await docker(["port", `door-${suffix}`, "8080"])).trim().split("\n")[0].split(":").pop();
     const url = `http://127.0.0.1:${port}`;
     const get = async (path: string) => {

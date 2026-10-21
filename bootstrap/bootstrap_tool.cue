@@ -1,3 +1,5 @@
+@extern(embed)
+
 package bootstrap
 
 import (
@@ -12,12 +14,12 @@ import (
 
 command: bootstrap: B={
 	existing: {
-		for name in ["pronto", ".say.yaml", ".mise.toml"] {
+		for name in ["pronto", ".say.yaml", ".mise.toml", "mise.lock"] {
 			(name): file.Glob & {glob: name}
 		}
 	}
 	_matches: list.Concat([for _, scan in B.existing {scan.files}])
-	_after: [B.existing.pronto, B.existing[".say.yaml"], B.existing[".mise.toml"]]
+	_after: [B.existing.pronto, B.existing[".say.yaml"], B.existing[".mise.toml"], B.existing["mise.lock"]]
 	if len(_matches) > 0 {
 		occupied: "bootstrap requires absent seed and configuration files" & false
 	}
@@ -61,5 +63,12 @@ command: bootstrap: B={
 				"""
 		}
 		config: #Generate & {_after: B._after, project: distribution.#Project & terminal.#Project & mecha.#Project & bayt.#Toolchain}
+		// The default roster's lock, every platform's URL and checksum, so
+		// the first install fetches each artifact directly and asks GitHub's
+		// API nothing: the seed's .mise.toml already turns off the
+		// attestation checks that would. A roster changed later is relocked.
+		lock: file.Create & {$after: B._after, filename: "mise.lock", contents: _lock}
 	}
 }
+
+_lock: _ @embed(file="mise.lock", type=text)

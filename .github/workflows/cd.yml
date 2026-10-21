@@ -54,6 +54,10 @@ jobs:
       - name: Compiler roster agrees with released dependencies
         run: cue vet -c=false ./builders:bayt ./clusters:mecha ./terminals:omnishell ./distribution ./bootstrap
 
+      - name: Type table exports with released dependencies
+        run: |
+          cue export . -e '{types: #types, aliases: #typeAlias}' > /dev/null
+
       # `source: kind: "git"` in module.cue makes publish reject an unclean
       # working tree, so nothing may write to the checkout before this runs.
       - name: Publish CUE module

@@ -1,6 +1,7 @@
 // Finite batches exercise the emitted processors in the pinned runtime.
 // No observation window can establish that an unbounded input stays idle.
 import { deepStrictEqual as equal } from "node:assert/strict";
+import { created } from "./docker-copy.ts";
 
 const decoder = new TextDecoder();
 
@@ -90,8 +91,8 @@ Deno.test("drains accept only startup and declared changes, and coalesce pending
     await Deno.copyFile(trace, `${scratch}/cdc-trace.yaml`);
     await Deno.writeTextFile(`${scratch}/stream_benthos_test.yaml`, JSON.stringify({ tests }));
     const result = await new Deno.Command("docker", {
-      args: ["run", "--rm", "-v", `${scratch}:/w:ro`, "--entrypoint", "/redpanda-connect",
-        image, "test", "-r", "/w/cdc-trace.yaml", "/w/stream.yaml"], stdout: "piped", stderr: "piped",
+      args: ["start", "-a", await created(["--rm", "--entrypoint", "/redpanda-connect",
+        image, "test", "-r", "/w/cdc-trace.yaml", "/w/stream.yaml"], [[scratch, "/w"]])], stdout: "piped", stderr: "piped",
     }).output();
     if (!result.success) throw new Error(decoder.decode(result.stdout) + decoder.decode(result.stderr));
   } finally {

@@ -17,13 +17,14 @@ import { BOUND_KEYS, extractBounds, type FieldBounds } from "./bounds.ts";
 export type Entity = {
   table: string;
   durability: string;
-  fields: { name: string; cel?: string }[];
+  fields: { name: string; type?: string; cel?: string }[];
   invariant?: { cel: string };
 };
 
 /** Where a constraint is stated. `col` is the column a field-level `this`
- * stands for, or null for an entity's row-level invariant. */
-export type CelSite = { entity: string; durability: string; col: string | null; cel: string };
+ * stands for, or null for an entity's row-level invariant; `json` that the
+ * column holds a json value, whose constraint is read as a shape. */
+export type CelSite = { entity: string; durability: string; col: string | null; cel: string; json?: boolean };
 
 const BROWSER = new Set(["tab", "device"]);
 
@@ -32,7 +33,7 @@ export function celSites(entities: Record<string, Entity>): CelSite[] {
   const sites: CelSite[] = [];
   for (const [entity, e] of Object.entries(entities)) {
     for (const f of e.fields ?? []) {
-      if (f.cel !== undefined) sites.push({ entity, durability: e.durability, col: f.name, cel: f.cel });
+      if (f.cel !== undefined) sites.push({ entity, durability: e.durability, col: f.name, cel: f.cel, ...(f.type === "json" ? { json: true } : {}) });
     }
     if (e.invariant !== undefined) sites.push({ entity, durability: e.durability, col: null, cel: e.invariant.cel });
   }
@@ -66,13 +67,14 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
   // database does not hold, and it must stop the derivation naming itself.
   const sql = (s: CelSite) => {
     try {
-      return sqlCheck(ir(s.cel), s.col);
+      return sqlCheck(ir(s.cel), s.col, s.json === true);
     } catch (e) {
       throw new Error(`${s.entity}.${s.col ?? "<invariant>"}: cel ${JSON.stringify(s.cel)} has no SQL: ${(e as Error).message}`);
     }
   };
   const blocks: string[] = [];
   let usesStrings = false;
+  let usesList = false;
   for (const entity of [...new Set(sites.map((s) => s.entity))]) {
     const mine = sites.filter((s) => s.entity === entity);
     const lines: string[] = [];
@@ -90,12 +92,13 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
     const seed: string[] = [];
     for (const s of mine) {
       if (s.col === null) continue;
-      const c = cueConstraint(ir(s.cel), true);
+      const c = cueConstraint(ir(s.cel), true, s.json === true);
       if ("no" in c) {
         lines.push(`\t// ${s.col} states no CUE constraint: ${c.no}`);
         continue;
       }
       if (c.strings) usesStrings = true;
+      if (c.list) usesList = true;
       seed.push(`\t\t${quoteKey(s.col)}?: ${c.cue}`);
     }
     if (seed.length > 0) lines.push(`\tseed: [...{\n${seed.join("\n")}\n\t}]`);
@@ -120,7 +123,7 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
     const bounds: string[] = [];
     for (const s of mine) {
       if (s.col === null) continue;
-      const stated = boundsCue(extractBounds(ir(s.cel)));
+      const stated = boundsCue(extractBounds(ir(s.cel), s.json === true));
       if (stated !== null) bounds.push(`\t\t\t${quoteKey(s.col)}: ${stated}`);
     }
     if (bounds.length > 0) cel.push(`\t\tbounds: {\n${bounds.join("\n")}\n\t\t}`);
@@ -142,7 +145,9 @@ export function renderCel(pkg: string, sites: CelSite[], irs: Map<string, Parsed
     "// CHECK body and nothing for CUE.",
     `package ${pkg}`,
     "",
-    ...(usesStrings ? ['import "strings"', ""] : []),
+    ...(usesList ? ['import "list"'] : []),
+    ...(usesStrings ? ['import "strings"'] : []),
+    ...(usesList || usesStrings ? [""] : []),
     "code: state: entities: {",
     body,
     "}",

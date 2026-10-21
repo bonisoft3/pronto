@@ -53,45 +53,6 @@ checksum = "sha256:19afc9b22569c7c528c278eb5f3d6706581e1ba9b232f420e0d91ae246762
 url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Windows-x86_64.zip"
 url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280369"
 
-[[tools."github:terrastruct/d2"]]
-version = "0.9.0"
-backend = "github:terrastruct/d2"
-
-[tools."github:terrastruct/d2"."platforms.linux-arm64"]
-checksum = "sha256:ac2c028697199479acb321db1e3d68caee9f2ba492ed73caa3cd13f3829bf913"
-url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549448988"
-
-[tools."github:terrastruct/d2"."platforms.linux-arm64-musl"]
-checksum = "sha256:ac2c028697199479acb321db1e3d68caee9f2ba492ed73caa3cd13f3829bf913"
-url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549448988"
-
-[tools."github:terrastruct/d2"."platforms.linux-x64"]
-checksum = "sha256:5669ddc46b99e942cc96078f4a4e36d5e62103348f4c05179ede27802fdd87a9"
-url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-linux-amd64.tar.gz"
-url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549448945"
-
-[tools."github:terrastruct/d2"."platforms.linux-x64-musl"]
-checksum = "sha256:5669ddc46b99e942cc96078f4a4e36d5e62103348f4c05179ede27802fdd87a9"
-url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-linux-amd64.tar.gz"
-url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549448945"
-
-[tools."github:terrastruct/d2"."platforms.macos-arm64"]
-checksum = "sha256:eaf6c0c143e56dd9fa97bfb6df25ea9c1ebce40245f056a0768cf1a6c15d3064"
-url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549449061"
-
-[tools."github:terrastruct/d2"."platforms.macos-x64"]
-checksum = "sha256:cad39576a480d6bb02ea142fef1726647914b0d2da51ccc9b30b660a2b1babf0"
-url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-macos-amd64.tar.gz"
-url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549449033"
-
-[tools."github:terrastruct/d2"."platforms.windows-x64"]
-checksum = "sha256:5f63b643de8f5a6dfb922d172e1b5496e4caf47497c33c4427cf1127f28c340f"
-url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-windows-amd64.tar.gz"
-url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549449113"
-
 [[tools."github:caddyserver/caddy"]]
 version = "2.10.0"
 backend = "github:caddyserver/caddy"
@@ -184,69 +145,6 @@ checksum = "sha256:a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2
 url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568431369"
 
-[[tools."github:redpanda-data/connect"]]
-version = "4.112.0"
-backend = "github:redpanda-data/connect"
-
-[tools."github:redpanda-data/connect"."platforms.linux-arm64"]
-checksum = "sha256:d8145ba1a85a6eda9511545637d10ea35c66cec004fedcb3ea5dc81fc240d45c"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206911"
-
-[tools."github:redpanda-data/connect"."platforms.linux-arm64-musl"]
-checksum = "sha256:d8145ba1a85a6eda9511545637d10ea35c66cec004fedcb3ea5dc81fc240d45c"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206911"
-
-[tools."github:redpanda-data/connect"."platforms.linux-x64"]
-checksum = "sha256:d7615f24ecacedaee88cd41583e9895bc936df57f230d2ae5383c03a81e10d26"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206921"
-
-[tools."github:redpanda-data/connect"."platforms.linux-x64-musl"]
-checksum = "sha256:d7615f24ecacedaee88cd41583e9895bc936df57f230d2ae5383c03a81e10d26"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206921"
-
-[tools."github:redpanda-data/connect"."platforms.macos-arm64"]
-checksum = "sha256:fca5aca68cb83f9d98b3703c2e691f6f8605c4db6b1d517c6efd6e31050a2585"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206902"
-
-[tools."github:redpanda-data/connect"."platforms.macos-x64"]
-checksum = "sha256:6069f8065a5f2e30f2b7ea9602e61be42e3d098b4d3fbfac74158f84a977fa2b"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206924"
-
-[tools."github:redpanda-data/connect"."platforms.windows-x64"]
-checksum = "sha256:c875c91187b47240d6d7cc3175e2e10f40364a20797794cc3e58e899dfbcb42d"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_windows_amd64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206916"
-
-[[tools."http:duckdb"]]
-version = "1.5.5"
-backend = "http:duckdb"
-
-[tools."http:duckdb"."platforms.linux-arm64"]
-checksum = "blake3:2ec12466e06a0ff8da4728e5ab05b7e2a83fcae92388c06e305d57fd901f6e28"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-arm64.zip"
-
-[tools."http:duckdb"."platforms.linux-x64"]
-checksum = "blake3:2e647c2cc552cdb0fb3d078dcc3b60fa30f6f2b4a3b5db06e4d1ada20e44b484"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip"
-
-[tools."http:duckdb"."platforms.macos-arm64"]
-checksum = "blake3:584f28088b6f94d624d57df0a8a996763a2181cfb5b67ce0fae6a30c690071c5"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-osx-arm64.zip"
-
-[tools."http:duckdb"."platforms.macos-x64"]
-checksum = "blake3:6b1c3170833fd8677190914668a15ff9b056a48c3213552b3338a51c014f25d4"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-osx-amd64.zip"
-
-[tools."http:duckdb"."platforms.windows-x64"]
-checksum = "blake3:1e2c2d61c169427994a673193978d79b66c38862b362390b15d277044e67f225"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-windows-amd64.zip"
-
 [[tools."github:go-task/task"]]
 version = "v3.49.1"
 backend = "github:go-task/task"
@@ -324,3 +222,105 @@ url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/52601541
 checksum = "sha256:b83009cbc88021f4dc293c49320118886b78363f9a4bb14933d33c8803241f46"
 url = "https://github.com/nushell/nushell/releases/download/0.115.1/nu-0.115.1-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/526030176"
+
+[[tools."github:redpanda-data/connect"]]
+version = "4.112.0"
+backend = "github:redpanda-data/connect"
+
+[tools."github:redpanda-data/connect"."platforms.linux-arm64"]
+checksum = "sha256:d8145ba1a85a6eda9511545637d10ea35c66cec004fedcb3ea5dc81fc240d45c"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206911"
+
+[tools."github:redpanda-data/connect"."platforms.linux-arm64-musl"]
+checksum = "sha256:d8145ba1a85a6eda9511545637d10ea35c66cec004fedcb3ea5dc81fc240d45c"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206911"
+
+[tools."github:redpanda-data/connect"."platforms.linux-x64"]
+checksum = "sha256:d7615f24ecacedaee88cd41583e9895bc936df57f230d2ae5383c03a81e10d26"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206921"
+
+[tools."github:redpanda-data/connect"."platforms.linux-x64-musl"]
+checksum = "sha256:d7615f24ecacedaee88cd41583e9895bc936df57f230d2ae5383c03a81e10d26"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206921"
+
+[tools."github:redpanda-data/connect"."platforms.macos-arm64"]
+checksum = "sha256:fca5aca68cb83f9d98b3703c2e691f6f8605c4db6b1d517c6efd6e31050a2585"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206902"
+
+[tools."github:redpanda-data/connect"."platforms.macos-x64"]
+checksum = "sha256:6069f8065a5f2e30f2b7ea9602e61be42e3d098b4d3fbfac74158f84a977fa2b"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206924"
+
+[tools."github:redpanda-data/connect"."platforms.windows-x64"]
+checksum = "sha256:c875c91187b47240d6d7cc3175e2e10f40364a20797794cc3e58e899dfbcb42d"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_windows_amd64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206916"
+
+[[tools."github:terrastruct/d2"]]
+version = "0.9.0"
+backend = "github:terrastruct/d2"
+
+[tools."github:terrastruct/d2"."platforms.linux-arm64"]
+checksum = "sha256:ac2c028697199479acb321db1e3d68caee9f2ba492ed73caa3cd13f3829bf913"
+url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549448988"
+
+[tools."github:terrastruct/d2"."platforms.linux-arm64-musl"]
+checksum = "sha256:ac2c028697199479acb321db1e3d68caee9f2ba492ed73caa3cd13f3829bf913"
+url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549448988"
+
+[tools."github:terrastruct/d2"."platforms.linux-x64"]
+checksum = "sha256:5669ddc46b99e942cc96078f4a4e36d5e62103348f4c05179ede27802fdd87a9"
+url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549448945"
+
+[tools."github:terrastruct/d2"."platforms.linux-x64-musl"]
+checksum = "sha256:5669ddc46b99e942cc96078f4a4e36d5e62103348f4c05179ede27802fdd87a9"
+url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549448945"
+
+[tools."github:terrastruct/d2"."platforms.macos-arm64"]
+checksum = "sha256:eaf6c0c143e56dd9fa97bfb6df25ea9c1ebce40245f056a0768cf1a6c15d3064"
+url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549449061"
+
+[tools."github:terrastruct/d2"."platforms.macos-x64"]
+checksum = "sha256:cad39576a480d6bb02ea142fef1726647914b0d2da51ccc9b30b660a2b1babf0"
+url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-macos-amd64.tar.gz"
+url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549449033"
+
+[tools."github:terrastruct/d2"."platforms.windows-x64"]
+checksum = "sha256:5f63b643de8f5a6dfb922d172e1b5496e4caf47497c33c4427cf1127f28c340f"
+url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-windows-amd64.tar.gz"
+url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549449113"
+
+[[tools."http:duckdb"]]
+version = "1.5.5"
+backend = "http:duckdb"
+
+[tools."http:duckdb"."platforms.linux-arm64"]
+checksum = "blake3:2ec12466e06a0ff8da4728e5ab05b7e2a83fcae92388c06e305d57fd901f6e28"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-arm64.zip"
+
+[tools."http:duckdb"."platforms.linux-x64"]
+checksum = "blake3:2e647c2cc552cdb0fb3d078dcc3b60fa30f6f2b4a3b5db06e4d1ada20e44b484"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip"
+
+[tools."http:duckdb"."platforms.macos-arm64"]
+checksum = "blake3:584f28088b6f94d624d57df0a8a996763a2181cfb5b67ce0fae6a30c690071c5"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-osx-arm64.zip"
+
+[tools."http:duckdb"."platforms.macos-x64"]
+checksum = "blake3:6b1c3170833fd8677190914668a15ff9b056a48c3213552b3338a51c014f25d4"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-osx-amd64.zip"
+
+[tools."http:duckdb"."platforms.windows-x64"]
+checksum = "blake3:1e2c2d61c169427994a673193978d79b66c38862b362390b15d277044e67f225"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-windows-amd64.zip"

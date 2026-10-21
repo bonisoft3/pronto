@@ -4,7 +4,7 @@
     {
       "label": "build",
       "type": "shell",
-      "command": "use tools.nu [run-mise]; let pronto = \"../../plugins/pronto\"; run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join write.ts) .",
+      "command": "./saytw build",
       "group": {
         "kind": "build",
         "isDefault": true

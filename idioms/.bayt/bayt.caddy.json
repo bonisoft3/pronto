@@ -5,7 +5,7 @@
     "manual": false,
     "build": {
       "additional_contexts": {
-        "root": "../../.."
+        "root": ".."
       },
       "secrets": [],
       "args": {}
@@ -49,302 +49,152 @@
           "target": "/certs"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/index.html",
           "target": "/srv/shell/index.html"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/shell.css",
           "target": "/srv/shell/shell.css"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/boot.js",
           "target": "/srv/shell/boot.js"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../offline-first-sw.js",
           "target": "/srv/offline-first-sw.js"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/shell.yaml",
           "target": "/srv/shell/shell.yaml"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/shell.json",
           "target": "/srv/shell/shell.json"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/design.css",
           "target": "/srv/shell/design.css"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/screens/counter.html",
           "target": "/srv/shell/screens/counter.html"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/screens/counter.css",
           "target": "/srv/shell/screens/counter.css"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/screens/todo.html",
           "target": "/srv/shell/screens/todo.html"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/screens/todo.css",
           "target": "/srv/shell/screens/todo.css"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/screens/grid.html",
           "target": "/srv/shell/screens/grid.html"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/screens/grid.css",
           "target": "/srv/shell/screens/grid.css"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/screens/timer.html",
           "target": "/srv/shell/screens/timer.html"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/screens/timer.css",
           "target": "/srv/shell/screens/timer.css"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/handlers/count.js",
           "target": "/srv/shell/handlers/count.js"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/handlers/press.js",
           "target": "/srv/shell/handlers/press.js"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/handlers/remove.js",
           "target": "/srv/shell/handlers/remove.js"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/handlers/roll.js",
           "target": "/srv/shell/handlers/roll.js"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/handlers/tally.js",
           "target": "/srv/shell/handlers/tally.js"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../shell/handlers/tick.js",
           "target": "/srv/shell/handlers/tick.js"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../messages/en.json",
           "target": "/srv/messages/en.json"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../messages/pt-BR.json",
           "target": "/srv/messages/pt-BR.json"
         },
         {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/shell.js",
-          "target": "/omnishell/interpreter/shell.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/chrome.js",
-          "target": "/omnishell/interpreter/chrome.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/screen.js",
-          "target": "/omnishell/interpreter/screen.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/fragment.js",
-          "target": "/omnishell/interpreter/fragment.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/data-sync.js",
-          "target": "/omnishell/interpreter/data-sync.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/hybrid-client.js",
-          "target": "/omnishell/interpreter/hybrid-client.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/cortex-session.js",
-          "target": "/omnishell/interpreter/cortex-session.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/cortex-command.js",
-          "target": "/omnishell/interpreter/cortex-command.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/validate.js",
-          "target": "/omnishell/interpreter/validate.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/render.js",
-          "target": "/omnishell/interpreter/render.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/release-plan.js",
-          "target": "/omnishell/interpreter/release-plan.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/release-assets.js",
-          "target": "/omnishell/interpreter/release-assets.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/preloads.js",
-          "target": "/omnishell/interpreter/preloads.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/markup.js",
-          "target": "/omnishell/interpreter/markup.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/script-url.js",
-          "target": "/omnishell/interpreter/script-url.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/deferred-boot.js",
-          "target": "/omnishell/interpreter/deferred-boot.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/host-dom.js",
-          "target": "/omnishell/interpreter/host-dom.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/hatch.js",
-          "target": "/omnishell/interpreter/hatch.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/hatch-worker.js",
-          "target": "/omnishell/interpreter/hatch-worker.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/storybook.js",
-          "target": "/omnishell/interpreter/storybook.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/jessie.js",
-          "target": "/omnishell/interpreter/jessie.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/kinetic.js",
-          "target": "/omnishell/interpreter/kinetic.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/prng.js",
-          "target": "/omnishell/interpreter/prng.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/vendor/mecha-client.js",
-          "target": "/omnishell/interpreter/vendor/mecha-client.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/vendor/js-yaml.js",
-          "target": "/omnishell/interpreter/vendor/js-yaml.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/vendor/ses.umd.min.js",
-          "target": "/omnishell/interpreter/vendor/ses.umd.min.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/vendor/morphlex.js",
-          "target": "/omnishell/interpreter/vendor/morphlex.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/vendor/messages.js",
-          "target": "/omnishell/interpreter/vendor/messages.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/interpreter/vendor/game-inputs.js",
-          "target": "/omnishell/interpreter/vendor/game-inputs.js"
-        },
-        {
-          "action": "sync+restart",
-          "path": "../../../plugins/omnishell/components/wallclock.js",
-          "target": "/omnishell/components/wallclock.js"
-        },
-        {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../brief.html",
           "target": "/srv/docs/brief.html"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../ir.html",
           "target": "/srv/docs/ir.html"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../ir/card.css",
           "target": "/srv/docs/ir/card.css"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../acceptance.md",
           "target": "/srv/docs/acceptance.md"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../DESIGN.md",
           "target": "/srv/docs/DESIGN.md"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../robots.txt",
           "target": "/srv/robots.txt"
         },
         {
-          "action": "sync+restart",
+          "action": "rebuild",
           "path": "../sitemap.xml",
           "target": "/srv/sitemap.xml"
         }
@@ -397,420 +247,42 @@
         "exclude": []
       },
       {
-        "from": null,
+        "from": {
+          "ref": ":served",
+          "name": "idioms-served"
+        },
         "srcs": [
-          "shell/index.html",
-          "shell/shell.css",
-          "shell/boot.js",
-          "offline-first-sw.js",
-          "shell/shell.yaml",
-          "shell/shell.json",
-          "shell/design.css",
-          "shell/screens/counter.html",
-          "shell/screens/counter.css",
-          "shell/screens/todo.html",
-          "shell/screens/todo.css",
-          "shell/screens/grid.html",
-          "shell/screens/grid.css",
-          "shell/screens/timer.html",
-          "shell/screens/timer.css",
-          "shell/handlers/count.js",
-          "shell/handlers/press.js",
-          "shell/handlers/remove.js",
-          "shell/handlers/roll.js",
-          "shell/handlers/tally.js",
-          "shell/handlers/tick.js",
-          "messages/en.json",
-          "messages/pt-BR.json"
+          "/served/omnishell/"
+        ],
+        "dst": "/omnishell/",
+        "link": true,
+        "parents": false,
+        "exclude": []
+      },
+      {
+        "from": {
+          "ref": ":served",
+          "name": "idioms-served"
+        },
+        "srcs": [
+          "/served/"
         ],
         "dst": "/srv/",
         "link": true,
-        "parents": true,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/shell.js"
-        ],
-        "dst": "/omnishell/interpreter/shell.js",
-        "link": true,
         "parents": false,
         "exclude": []
       },
       {
         "from": {
-          "name": "root"
+          "ref": ":served",
+          "name": "idioms-served"
         },
         "srcs": [
-          "plugins/omnishell/interpreter/chrome.js"
+          "/served.scripts"
         ],
-        "dst": "/omnishell/interpreter/chrome.js",
+        "dst": "/etc/caddy/release-scripts",
         "link": true,
         "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/screen.js"
-        ],
-        "dst": "/omnishell/interpreter/screen.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/fragment.js"
-        ],
-        "dst": "/omnishell/interpreter/fragment.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/data-sync.js"
-        ],
-        "dst": "/omnishell/interpreter/data-sync.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/hybrid-client.js"
-        ],
-        "dst": "/omnishell/interpreter/hybrid-client.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/cortex-session.js"
-        ],
-        "dst": "/omnishell/interpreter/cortex-session.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/cortex-command.js"
-        ],
-        "dst": "/omnishell/interpreter/cortex-command.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/validate.js"
-        ],
-        "dst": "/omnishell/interpreter/validate.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/render.js"
-        ],
-        "dst": "/omnishell/interpreter/render.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/release-plan.js"
-        ],
-        "dst": "/omnishell/interpreter/release-plan.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/release-assets.js"
-        ],
-        "dst": "/omnishell/interpreter/release-assets.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/preloads.js"
-        ],
-        "dst": "/omnishell/interpreter/preloads.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/markup.js"
-        ],
-        "dst": "/omnishell/interpreter/markup.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/script-url.js"
-        ],
-        "dst": "/omnishell/interpreter/script-url.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/deferred-boot.js"
-        ],
-        "dst": "/omnishell/interpreter/deferred-boot.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/host-dom.js"
-        ],
-        "dst": "/omnishell/interpreter/host-dom.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/hatch.js"
-        ],
-        "dst": "/omnishell/interpreter/hatch.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/hatch-worker.js"
-        ],
-        "dst": "/omnishell/interpreter/hatch-worker.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/storybook.js"
-        ],
-        "dst": "/omnishell/interpreter/storybook.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/jessie.js"
-        ],
-        "dst": "/omnishell/interpreter/jessie.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/kinetic.js"
-        ],
-        "dst": "/omnishell/interpreter/kinetic.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/prng.js"
-        ],
-        "dst": "/omnishell/interpreter/prng.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/vendor/mecha-client.js"
-        ],
-        "dst": "/omnishell/interpreter/vendor/mecha-client.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/vendor/js-yaml.js"
-        ],
-        "dst": "/omnishell/interpreter/vendor/js-yaml.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/vendor/ses.umd.min.js"
-        ],
-        "dst": "/omnishell/interpreter/vendor/ses.umd.min.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/vendor/morphlex.js"
-        ],
-        "dst": "/omnishell/interpreter/vendor/morphlex.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/vendor/messages.js"
-        ],
-        "dst": "/omnishell/interpreter/vendor/messages.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/interpreter/vendor/game-inputs.js"
-        ],
-        "dst": "/omnishell/interpreter/vendor/game-inputs.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": {
-          "name": "root"
-        },
-        "srcs": [
-          "plugins/omnishell/components/wallclock.js"
-        ],
-        "dst": "/omnishell/components/wallclock.js",
-        "link": true,
-        "parents": false,
-        "exclude": []
-      },
-      {
-        "from": null,
-        "srcs": [
-          "brief.html",
-          "ir.html",
-          "ir/card.css",
-          "acceptance.md",
-          "DESIGN.md"
-        ],
-        "dst": "/srv/docs/",
-        "link": true,
-        "parents": true,
-        "exclude": []
-      },
-      {
-        "from": null,
-        "srcs": [
-          "robots.txt",
-          "sitemap.xml"
-        ],
-        "dst": "/srv/",
-        "link": true,
-        "parents": true,
         "exclude": []
       }
     ],
@@ -831,7 +303,7 @@
     "cmd": null
   },
   "entrypoint": {
-    "do": "case \"${ORIGIN#http://}\" in \"$ORIGIN\") h=${ORIGIN#https://};; *) h=${ORIGIN#http://};; esac; case \"$h\" in \"$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; set -e -o pipefail; roots=$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$roots\" ]; then find $roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$1; shift; for f do h=$(sha256sum < \"$f\"); printf \"$q%s$q\" \"${h%% *}\" > \"$f.etag\"; done' sh '\"' {} +; fi; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; fi; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
+    "do": "case \"${ORIGIN#http://}\" in \"$ORIGIN\") h=${ORIGIN#https://};; *) h=${ORIGIN#http://};; esac; case \"$h\" in \"$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; set -e -o pipefail; roots=$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$roots\" ]; then find $roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$1; shift; for f do h=$(sha256sum < \"$f\"); printf \"$q%s$q\" \"${h%% *}\" > \"$f.etag\"; done' sh '\"' {} +; fi; PRONTO_RELEASE_SCRIPTS=$(cat /etc/caddy/release-scripts); export PRONTO_RELEASE_SCRIPTS; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; fi; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
     "shell": "sh",
     "env": {
       "ELECTRIC_SECRET": "${ELECTRIC_SECRET:-dev-electric-secret}",
@@ -851,6 +323,8 @@
   "healthcheck": {
     "template": "http",
     "url": "http://127.0.0.1:8080/health",
+    "authorization": null,
+    "headers": [],
     "interval": "5s",
     "start_interval": "500ms",
     "timeout": "5s",
@@ -858,42 +332,12 @@
     "start_period": "10s"
   },
   "name": "caddy",
-  "project": "apps_idioms",
-  "dir": "apps/idioms",
+  "project": "idioms",
+  "dir": ".",
   "activate": "",
   "srcs": {
     "globs": [
-      "docker/Caddyfile",
-      "shell/index.html",
-      "shell/shell.css",
-      "shell/boot.js",
-      "offline-first-sw.js",
-      "shell/shell.yaml",
-      "shell/shell.json",
-      "shell/design.css",
-      "shell/screens/counter.html",
-      "shell/screens/counter.css",
-      "shell/screens/todo.html",
-      "shell/screens/todo.css",
-      "shell/screens/grid.html",
-      "shell/screens/grid.css",
-      "shell/screens/timer.html",
-      "shell/screens/timer.css",
-      "shell/handlers/count.js",
-      "shell/handlers/press.js",
-      "shell/handlers/remove.js",
-      "shell/handlers/roll.js",
-      "shell/handlers/tally.js",
-      "shell/handlers/tick.js",
-      "messages/en.json",
-      "messages/pt-BR.json",
-      "brief.html",
-      "ir.html",
-      "ir/card.css",
-      "acceptance.md",
-      "DESIGN.md",
-      "robots.txt",
-      "sitemap.xml"
+      "docker/Caddyfile"
     ],
     "exclude": []
   },
@@ -908,8 +352,8 @@
   "synthetics": {
     "bayt": {
       "name": "caddy_bayt",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -938,13 +382,14 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "outs": {
       "name": "caddy_outs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -966,13 +411,14 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     },
     "srcs": {
       "name": "caddy_srcs",
-      "project": "apps_idioms",
-      "dir": "apps/idioms",
+      "project": "idioms",
+      "dir": ".",
       "activate": "",
       "srcs": {
         "globs": [],
@@ -980,44 +426,16 @@
       },
       "outs": {
         "globs": [
-          "docker/Caddyfile",
-          "shell/index.html",
-          "shell/shell.css",
-          "shell/boot.js",
-          "offline-first-sw.js",
-          "shell/shell.yaml",
-          "shell/shell.json",
-          "shell/design.css",
-          "shell/screens/counter.html",
-          "shell/screens/counter.css",
-          "shell/screens/todo.html",
-          "shell/screens/todo.css",
-          "shell/screens/grid.html",
-          "shell/screens/grid.css",
-          "shell/screens/timer.html",
-          "shell/screens/timer.css",
-          "shell/handlers/count.js",
-          "shell/handlers/press.js",
-          "shell/handlers/remove.js",
-          "shell/handlers/roll.js",
-          "shell/handlers/tally.js",
-          "shell/handlers/tick.js",
-          "messages/en.json",
-          "messages/pt-BR.json",
-          "brief.html",
-          "ir.html",
-          "ir/card.css",
-          "acceptance.md",
-          "DESIGN.md",
-          "robots.txt",
-          "sitemap.xml"
+          "docker/Caddyfile"
         ],
         "exclude": []
       },
       "env": {},
       "visibility": "internal",
       "deps": [],
-      "transitiveDeps": [],
+      "transitiveDeps": [
+        "served_outs_srcs"
+      ],
       "transitiveCrossDeps": [],
       "chainedDeps": [],
       "cmds": [],
@@ -1026,20 +444,38 @@
         "similar": false
       },
       "upClosure": [
-        "apps/idioms/.bayt/compose.caddy.yaml"
+        "./.bayt/compose.caddy.yaml",
+        "./.bayt/compose.served.yaml"
       ]
     }
   },
   "visibility": "internal",
   "emitsSrcs": true,
-  "deps": [],
-  "sameProjectDeps": [],
-  "transitiveDeps": [],
+  "deps": [
+    "served_outs"
+  ],
+  "sameProjectDeps": [
+    "served_outs"
+  ],
+  "transitiveDeps": [
+    "served_outs"
+  ],
   "transitiveCrossDeps": [],
   "upClosure": [
-    "apps/idioms/.bayt/compose.caddy.yaml"
+    "./.bayt/compose.caddy.yaml",
+    "./.bayt/compose.served.yaml"
   ],
-  "chainedDeps": [],
+  "chainedDeps": [
+    {
+      "name": "served_outs",
+      "project": "idioms",
+      "dir": ".",
+      "outs": {
+        "globs": [],
+        "exclude": []
+      }
+    }
+  ],
   "cmds": [],
   "cache": {
     "full": false,

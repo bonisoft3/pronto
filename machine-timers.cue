@@ -1,6 +1,7 @@
 package pronto
 
 import (
+	"list"
 	"strings"
 )
 
@@ -9,14 +10,35 @@ import (
 	out: [if T.code.state.machines != _|_ for _, m in T.code.state.machines if m._timed {m}]
 }
 
+// A Mecha machine whose phases hold a deadline arms the ticker as they are
+// entered (mecha-ports.ts); one already waiting in such a phase when timers
+// are adopted has no schedule yet.
+#TimedHybrids: T={
+	code: _
+	out: [if T.code.state.hybrids != _|_ for _, h in T.code.state.hybrids if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h.reducer}]
+}
+
 #MachineTimerState: C={
 	code: _
+	_hybrids: (#TimedHybrids & {code: C.code}).out
 	out: {
-		timers: [for m in (#TimedMachines & {code: C.code}).out {m.name}]
+		timers: list.Concat([[for m in (#TimedMachines & {code: C.code}).out {m.name}], [for m in C._hybrids {m.name}]])
 		if len(timers) > 0 {
-			timerCheck: strings.Join([for m in (#TimedMachines & {code: C.code}).out {
+			timerCheck: strings.Join(list.Concat([[for m in (#TimedMachines & {code: C.code}).out {
 				(#mechaMachineSql & {machine: m, entities: C.code.state.entities, effects: [if C.code.state.effects != _|_ {C.code.state.effects}, {}][0]})._timerCheck
-			}], "\n")
+			}], [for m in C._hybrids {
+				let w = m.ports.wake
+				"""
+				DO $$ BEGIN
+				  IF EXISTS (SELECT FROM hybrid_\(m.name).instance i
+				    WHERE i.state->>'phase' IN (\(strings.Join([for ph in w.phases {(#sqlLit & {v: ph}).out}], ", "))) AND (i.state->>\((#sqlLit & {v: w.deadline}).out))::bigint > 0
+				      AND NOT EXISTS (SELECT FROM public.schedule s WHERE s.emits_entity = 'machine_timer_tick'
+				        AND s.emits_values @> jsonb_build_object('machine', '\(m.name)', 'row', jsonb_build_object('id', i.id::text)))) THEN
+				    RAISE EXCEPTION 'machine \(m.name) has instances waiting on a deadline the ticker was never given';
+				  END IF;
+				END $$;
+				"""
+			}]]), "\n")
 		}
 	}
 }

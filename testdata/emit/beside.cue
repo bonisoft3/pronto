@@ -6,11 +6,11 @@
 package emit
 
 import (
-	pronto "github.com/bonisoft3/pronto"
 	"list"
+	pronto "github.com/bonisoft3/pronto"
 )
 
-_besideBuild: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out & {
+_besideBuild: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster, terminal: _terminal}).out & {
 	checks: plain: {priority: 2, cmds: ["deno run tests/plain.ts $HOME"], note: "plain"}
 	checks: painted: {browser: true, srcs: ["fixtures/**"], cmds: ["deno run tests/painted.ts ."], note: "painted"}
 }
@@ -26,19 +26,20 @@ _besideRules: (pronto.#emit & {
 besideRule: _besideRules["pronto-integrate-2"].cmds[0].do & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-plain"
 besideRunner: _besideTargets["ci-plain"] & {#closure: "check-plain", #check: "plain"}
 besidePriority: _besideRules["pronto-integrate-2"].priority & 2
-besideWaits:    _besideTargets["check-plain"].compose.depends_on["apps_emit-launch"].condition & "service_healthy"
+besideWaits:    _besideTargets["check-plain"].compose.depends_on["\(_code.meta.name)-launch"].condition & "service_healthy"
 besideDoor:     _besideTargets["check-plain"].compose.environment.APP_URL & "https://caddy:8443"
 besideEscaped: _besideTargets["check-plain"].compose.command & ["mise", "x", "--", "sh", "-c", "deno run tests/plain.ts $$HOME"]
 besidePlainBase: _besideTargets["check-plain"].dockerfile.from.ref & ":setup"
 besideBrowser:   _besideTargets["check-painted"].dockerfile.from.ref & ":browser"
 besideSources: _besideTargets["check-painted"].srcs.globs & ["tests/**", "fixtures/**"]
-besideNoBrowser: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out.project.targets.browser == _|_) & true
-// The tests import omnishell and mecha by relative path, which resolve in the
-// image only where the trees sit beside the app as they do in the monorepo.
+besideNoBrowser: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project.targets.browser == _|_) & true
+// The tests import omnishell from /omnishell, its runtime image, whichever
+// repository the app is built in; the browser base installs the toolchain as
+// setup does, so it carries the runtime's tree in the monorepo too.
 for check in ["check-plain", "check-painted"] {
-	besideTrees: (check): _besideTargets[check].dockerfile.copy[0] & {from: name: "root", srcs: ["plugins/omnishell", "libraries/mecha"], dst: "/monorepo/", parents: true}
-	besideImportRoot: (check): list.Contains(_besideTargets[check].dockerfile.epilogue, "RUN ln -s /monorepo/plugins/omnishell /omnishell") & true
+	besideImportRoot: (check): _besideTargets[check].dockerfile.copy & [{from: name: "plugins_omnishell-runtime-image", srcs: ["/"], dst: "/omnishell"}]
 }
+besideBrowserToolchain: list.Contains(_besideTargets.browser.dockerfile.epilogue, "COPY --from=workspaceroot-pronto-sources_srcs /monorep[o] /monorepo/") & true
 
 // A check reaches the database only when it asks to: the URL carries the
 // superuser's credentials.

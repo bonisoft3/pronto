@@ -34,7 +34,8 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       ["plugins/omnishell", "omnishell"],
       ["plugins/pronto", "pronto"],
     ].map(([local, name]) => [local, name, name === "sayt" ? Deno.env.get("PRONTO_SAYT_SOURCE") ?? join(repo, local) : join(repo, local)]);
-    let prontoVersion = "";
+    // Fixture module identity stays independent of the published tool self-pin.
+    const prontoVersion = "v0.0.0";
     const versions = new Map<string, Set<string>>();
     // Transitive pins may intentionally lag the direct ones. Publish this
     // fixture's sources at every declared version into the isolated registry.
@@ -68,7 +69,6 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       await cue(mirror, ["mod", "edit", "--source=self"]);
       await cue(mirror, ["mod", "tidy"]);
       if (name === "pronto") {
-        prontoVersion = `v${(await cue(mirror, ["export", "./distribution", "-e", "#Version", "--out", "text"])).trim()}`;
         versions.set("github.com/bonisoft3/pronto@v0", new Set([prontoVersion]));
       }
       const required = versions.get(`github.com/bonisoft3/${name}@v0`);
@@ -83,12 +83,31 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
     const tools = JSON.parse(await cue(app, ["export", ".mise.toml", "--out", "json"])).tools;
+    // The lock bootstrap ships is the roster's: a pin it does not cover would
+    // send the first install to GitHub's API to resolve it.
+    const lock = JSON.parse(await cue(app, ["export", "toml:", "mise.lock", "--out", "json"])).tools as Record<string, { version: string }[]>;
+    const bare = (v: string) => v.replace(/^v/, "");
+    for (const [tool, pin] of Object.entries(tools as Record<string, string | { version: string }>)) {
+      const version = bare(typeof pin === "string" ? pin : pin.version);
+      assert(lock[tool]?.some((entry) => bare(entry.version) === version), `${tool}@${version}: plugins/pronto/bootstrap/mise.lock has no entry; run plugins/pronto/bootstrap/relock.ts`);
+    }
     const d2 = tools["github:terrastruct/d2"];
     assert(typeof d2 === "string" && /^v\d+\.\d+\.\d+$/.test(d2), "D2 must have an exact release pin");
-    const pins = JSON.parse(await cue(repo, ["export", "plugins/pronto/.mirror/cue.mod/module.cue", "-e", "deps", "--out", "json"]));
-    for (const [, name] of modules) {
-      const version = name === "pronto" ? prontoVersion : pins[`github.com/bonisoft3/${name}@v0`].v;
-      assert(tools[`github:bonisoft3/${name}`] === version.slice(1), `${name}: bootstrap tool version differs from the direct CUE dependency`);
+    // A finish tag may update the CUE module while retaining an already
+    // published tool self-pin; the source declarations own the runtime roster.
+    const declaredPins = await Promise.all([
+      ["mecha", "libraries/mecha/toolchain", '#Tools["github:bonisoft3/mecha"]'],
+      ["omnishell", "plugins/omnishell/toolchain", '#Tools["github:bonisoft3/omnishell"]'],
+      ["pronto", "plugins/pronto/distribution", "#Version"],
+      ["sayt", "plugins/pronto/distribution", "#SaytVersion"],
+      ["bayt", "plugins/pronto/builders:bayt", '#Toolchain.tools["github:bonisoft3/bayt"]'],
+    ].map(async ([name, source, expression]) => {
+      const version = (await cue(repo, ["export", `./${source}`, "-e", expression, "--out", "text"])).trim();
+      return { name, source, expression, version };
+    }));
+    for (const { name, source, expression, version } of declaredPins) {
+      assert(/^\d+\.\d+\.\d+$/.test(version), `${source} ${expression}: tool self-pin must be an exact release version`);
+      assert(tools[`github:bonisoft3/${name}`] === version, `${name}: bootstrap tool version differs from ${source} ${expression}`);
     }
     const duckdb = tools["http:duckdb"];
     const assets: Record<string, string> = {
@@ -160,7 +179,7 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       }
       const fixture = join(repo, "apps/jsfb");
       for await (const entry of Deno.readDir(fixture)) {
-        if (entry.name.startsWith(".") || ["mise.lock", "bayt.cue", "bayt.json", "program_terminal.cue", "program_pronto.cue"].includes(entry.name)) continue;
+        if (entry.name.startsWith(".") || ["mise.lock", "mise.local.toml", "bayt.cue", "bayt.json", "program_terminal.cue"].includes(entry.name)) continue;
         const source = join(fixture, entry.name), target = join(app, entry.name);
         if (entry.isDirectory) await copy(source, target);
         else if (entry.isFile) {
@@ -171,7 +190,6 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
           await Deno.writeTextFile(target, content);
         }
       }
-      await Deno.writeTextFile(join(app, "program_pronto.cue"), 'package jsfb\nloop: surface: sources: pronto: ""\n');
       // A prerendered route, whose document the writer renders through the
       // installed omnishell, as it reads markup through it.
       await Deno.writeTextFile(join(app, "program_document.cue"), 'package jsfb\ncode: surface: screens: about: {title: "About", route: "/about", prerender: true, reads: [], writes: [], forms: [], states: ["populated"], files: {handlers: [], adapters: []}}\n');
@@ -186,27 +204,30 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
         assert(result.success === success, text);
         return success ? decoder.decode(result.stdout) : text;
       }
-      // The installed omnishell is this tree's, as the monorepo's
-      // mise.local.toml makes it: derive reads markup through its command.
-      await Deno.writeTextFile(join(app, "mise.local.toml"), `[tools]\n"github:bonisoft3/omnishell" = "path:${join(scratch, "omnishell").replaceAll("\\", "/")}"\n`);
+      // The installed source runtimes are this tree's, as the monorepo's
+      // mise.local.toml makes them: the writer and derive run them through
+      // mise, and derive reads markup through omnishell's command.
+      const local = ["omnishell", "pronto", "mecha"].map((name) => `"github:bonisoft3/${name}" = "path:${join(scratch, name).replaceAll("\\", "/")}"\n`);
+      await Deno.writeTextFile(join(app, "mise.local.toml"), `[tools]\n${local.join("")}`);
       await $`mise trust -q ${app}`;
-      const platformOs: Record<string, string> = { darwin: "macos", linux: "linux", windows: "windows" };
-      const platformArch: Record<string, string> = { aarch64: "arm64", x86_64: "x64" };
-      const currentPlatform = `${platformOs[Deno.build.os]}-${platformArch[Deno.build.arch]}`;
-      assert(!currentPlatform.includes("undefined"), `mise has no fixture platform for ${Deno.build.os}-${Deno.build.arch}`);
-      const runMise = async (args: string[], commandEnv: Record<string, string> = {}): Promise<void> => {
-        const result = await new Deno.Command("mise", { args, cwd: app, env: { MISE_LOCKED: "0", ...commandEnv }, stdout: "piped", stderr: "piped" }).output();
+      const runMise = async (args: string[]): Promise<void> => {
+        const result = await new Deno.Command("mise", { args, cwd: app, stdout: "piped", stderr: "piped" }).output();
         assert(result.success, `${args.join(" ")}: ${decoder.decode(result.stderr)}`);
       };
-      // The consumer is locked. Resolve and install only the released tool
-      // the renderer executes; local source stands in for the other tools.
-      await runMise(["lock", "--platform", currentPlatform, "github:terrastruct/d2"], { MISE_LOCKED: "0" });
-      await runMise(["install", `github:terrastruct/d2@${d2}`]);
+      // The released binaries it executes install from the lock bootstrap
+      // wrote, as a consumer's first install does; local source stands in for
+      // the other tools.
+      const released = ["github:terrastruct/d2", "github:bonisoft3/bayt", "github:bonisoft3/sayt"];
+      await runMise(["install", ...released.map((tool) => `${tool}@${tools[tool]}`)]);
       const terminal = join(scratch, "omnishell/runtime/cli.ts");
       await Deno.writeTextFile(join(app, "program_terminal.cue"), await deno(terminal, ["mode", "."]));
       let written = "";
       for (let pass = 0; pass < 2; pass++) {
         await cue(app, ["cmd", "generate", "./pronto"]);
+        // Beside a program the writer alone owns .say.yaml. A bootstrap copy
+        // standing until the writer ran is what a failed write left behind, and
+        // in the monorepo its rules declared the installed pronto for good.
+        if (pass === 1) assert(await Deno.readTextFile(join(app, ".say.yaml")) === written, "generate rewrote the writer's .say.yaml");
         if (pass === 1) {
           // A tightened grammar must judge the authored screen, not yesterday's output.
           await Deno.writeTextFile(join(app, "program_document.cue"), '\ncode: surface: screens: about: markup: "<section class=\\"screen\\" data-screen=\\"about\\"><h1>About</h1></section>"\n', { append: true });
@@ -232,14 +253,6 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       const missing = await deno(join(scratch, "pronto/write.ts"), ["."], false);
       assert(missing.includes("brief.html: no such file"), "the writer did not refuse the missing static");
       await Deno.writeTextFile(briefPath, brief);
-      // An installed loop with a monorepo cluster layout fails the same
-      // way: the seats below name the disagreement.
-      const programPath = join(app, "program.cue");
-      const program = await Deno.readTextFile(programPath);
-      await Deno.writeTextFile(programPath, program.replace('"local": terminal.surface.runtime != ""', '"local": true'));
-      const layout = await deno(join(scratch, "pronto/write.ts"), ["."], false);
-      assert(layout.includes("kept the monorepo layout"), "the writer did not refuse the monorepo cluster layout");
-      await Deno.writeTextFile(programPath, program);
     } finally {
       if (previousRegistry === undefined) Deno.env.delete("CUE_REGISTRY"); else Deno.env.set("CUE_REGISTRY", previousRegistry);
       if (previousCache === undefined) Deno.env.delete("CUE_CACHE_DIR"); else Deno.env.set("CUE_CACHE_DIR", previousCache);

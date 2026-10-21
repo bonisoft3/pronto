@@ -22,6 +22,7 @@ import (
 	mise "github.com/bonisoft3/bayt/stacks/mise"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
+	"github.com/bonisoft3/pronto/resilience"
 	zypper "github.com/bonisoft3/bayt/distros/zypper"
 )
 
@@ -31,7 +32,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.60.0", ...}
+	tools: {"github:bonisoft3/bayt": "0.65.0", ...}
 	say: say: {
 		...
 
@@ -50,13 +51,11 @@ import (
 // `build:` seat.
 #Build: B={
 	meta: {
-		app:   string
-		local: *true | bool
-		// Where the app sits under the workspace root, and where pronto sits
-		// as the app sees it; program_pronto.cue states both where write.ts
-		// finds them.
+		app: string
+		// Where the app sits under the monorepo's root, which its images take
+		// under the switch (project.imageDir); write.ts holds it to the
+		// checkout.
 		dir:         *"apps/\(app)" | string
-		pronto:      *"../../plugins/pronto" | string
 		generateCmd: string
 		testCmd:     string
 		targets:     *[] | [...string]
@@ -81,12 +80,14 @@ import (
 				"pronto-task": {glob: ".task/**"}
 				"pronto-history": *{glob: ".pronto/proto-baseline.json"} | null
 				"pronto-node": {glob: "**/node_modules/**"}
+				// A checkout's mise lock records its absolute paths.
+				"pronto-local-lock": {glob: "mise.local.lock"}
 			}
 		}
 	}
 
-	_sayt: [if B.meta.local {strings.TrimSuffix(B.meta.pronto, "pronto") + "sayt"}, "(^mise where github:bonisoft3/sayt | str trim)"][0]
-	_prontoNu: [if B.meta.local {"\"\(B.meta.pronto)\""}, "(run-mise where github:bonisoft3/pronto | str trim)"][0]
+	_sayt:     "(^mise where github:bonisoft3/sayt | str trim)"
+	_prontoNu: "(run-mise where github:bonisoft3/pronto | str trim)"
 	_actions: {for verb in ["generate", "build", "lint", "test", "launch", "integrate"] {
 		(verb): [if verb == "lint" {
 			"^nu -I \(B._sayt) -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'"
@@ -98,34 +99,11 @@ import (
 		dockerfile: incremental: true
 	}
 
-	// Where pronto's scripts sit as a target's command sees them: the
-	// workspace's tree, or the mirror's installed release.
-	_pronto: [if B.meta.local {B.meta.pronto}, "$$(mise where github:bonisoft3/pronto)"][0]
+	// Where pronto's scripts sit as a target's command sees them: where mise
+	// resolves it, the pinned release or, under mise.local.toml, the monorepo's.
+	_pronto: "$$(mise where github:bonisoft3/pronto)"
 	// The image the program evaluates in.
-	_base: [if B.meta.local {":program"}, ":setup"][0]
-	// From the app up to the workspace root, the root as compose sees it from
-	// .bayt/, and the runtime's directory under the root.
-	_up: [if B.meta.dir != "" {strings.Repeat("../", len(strings.Split(B.meta.dir, "/")))}, ""][0]
-	_root:    strings.TrimSuffix("../\(_up)", "/")
-	_runtime: strings.TrimPrefix(strings.TrimSuffix(B.meta.pronto, "plugins/pronto"), _up)
-	// In the monorepo, workspace trees copied to where the app's relative paths
-	// find them: `_top` from the root, `_paths` from the runtime's directory.
-	// Compose resolves the root context from .bayt/, not the app directory.
-	_fromRoot: {
-		_top: *[] | [...string]
-		_paths: [...string]
-		_exclude: *[] | [...string]
-		dockerfile: copy: [{
-			from: name: "root"
-			srcs: list.Concat([_top, [for p in _paths {B._runtime + p}]])
-			dst:     "/monorepo/"
-			parents: true
-			exclude: _exclude
-		}]
-		compose: build: additional_contexts: root: B._root
-	}
-	// The trees an app's tests import.
-	_testTrees: ["plugins/omnishell", "libraries/mecha"]
+	_base: ":setup"
 
 	// The app's own integrate checks that run beside the stack: a container on
 	// the runtime's compose network, reaching the app at the TLS door, whose
@@ -154,14 +132,62 @@ import (
 	}
 	_browser: len([for _, c in B.checks if c.browser {c}]) > 0
 
-	// An installed app takes mecha's images by name (#DefaultCluster), and each
-	// build that starts from one resolves the name through a context switch:
-	// the pinned release, unless MONOREPO_COMPOSE_MODE says to build it from
-	// mecha's sources, whose fragments mecha/service.yaml includes from where
-	// MONOREPO_MECHA_PATH says. Neither variable is set outside the monorepo.
+	// One switch decides what is the monorepo's: MONOREPO_COMPOSE_MODE, which
+	// mise.local.toml sets and a mirror never has. Its value is the context
+	// scheme itself, so a context it switches reads the monorepo's service, or
+	// else the pinned image. The app's images take the monorepo's layout under
+	// it (project.imageDir), so whatever a view brings lands where the
+	// checkout keeps it, and mise.local.toml's relative paths hold inside.
+	_switch: S={
+		service: string
+		pin:     string
+		out:     "${MONOREPO_COMPOSE_MODE:-docker-image://\(S.pin)}${MONOREPO_COMPOSE_MODE:+:\(S.service)}"
+	}
+	// mecha's images, named by #DefaultCluster.
 	_mechaContexts: {for s, pin in mecha.published {
-		"libraries_mecha-\(s)-image": "${MONOREPO_COMPOSE_MODE:-docker-image://\(pin)}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-\(s)-image}"
+		"libraries_mecha-\(s)-image": (_switch & {service: "libraries_mecha-\(s)-image", "pin": pin}).out
 	}}
+	// omnishell's runtime tree, as one image.
+	_omnishell:        omnishell.#RuntimeImage
+	_omnishellContext: (_switch & {service: _omnishell, pin: omnishell.published.runtime}).out
+	_omnishellCopy:    "COPY --from=\(B._omnishell) / /omnishell"
+	// Monorepo trees a stage carries in the monorepo: views of the siblings'
+	// targets, which in a mirror switch to an image with no /monorepo, and
+	// so copy nothing.
+	_views: V={
+		#views: [...string]
+		dockerfile: defaultCopy: {for v in V.#views {
+			(v): {
+				from: name: v
+				srcs: ["/monorep[o]"]
+				dst: "/monorepo/"
+			}
+		}}
+		compose: build: additional_contexts: {for v in V.#views {(v): (_switch & {service: v, pin: core.lock.images.busybox}).out}}
+	}
+	// The runtime's toolchain, which mise.local.toml names: brought in after
+	// the pinned install, so an edit to the tree leaves that layer cached, and
+	// resolved by a second install, which fetches nothing for a `path:` tool.
+	// In a mirror nothing is copied and the second install has nothing to do.
+	_toolchainViews: ["workspaceroot-pronto-sources_srcs"]
+	_toolchain: {
+		// Not a source: a source lands ahead of the pinned install, which would
+		// then resolve the trees before they are copied.
+		dockerfile: epilogue: list.Concat([
+			[for v in _toolchainViews {"COPY --from=\(v) /monorep[o] /monorepo/"}],
+			["COPY [m]ise.local.toml ./", "RUN mise install"],
+		])
+		compose: build: additional_contexts: {for v in _toolchainViews {(v): (_switch & {service: v, pin: core.lock.images.busybox}).out}}
+	}
+	// What a stack builds its images from beyond the app: mecha's and
+	// omnishell's targets, with the compose files that declare them.
+	_imageViews: list.Concat([
+		[for s, _ in mecha.published {"libraries_mecha-\(s)-image_bayt"}],
+		[for s in mecha.#Sourced {"libraries_mecha-\(s)-image_srcs"}],
+		[for v in ["srcs", "bayt"] {"\(_omnishell)_\(v)"}],
+		["workspaceroot-pronto-sources_bayt"],
+	])
+
 	_mechaRuntime: mecha.#Runtime & {"project": project.name, "cluster": B.cluster}
 	// A runner rebuilds the stack its closure brings up, from the sources the
 	// runtime's images are built from. Launch reaches them through `:outs`
@@ -170,30 +196,36 @@ import (
 		let t = project.targets[k]
 		if t != null if t.dockerfile != _|_
 		if len(t.srcs.globs) > 0 || t.srcs.defaultGlobs != null {":\(k):srcs"}]
-	// What the stack copies from the workspace root (the terminal's statics,
-	// the trees the tests import) sits outside every srcs view, so in the
-	// monorepo a runner carries those trees too.
-	_runner: {if B.meta.local {B._fromRoot & {_paths: B._testTrees}}}
-	// The module the program evaluates in: what `program` copies from the root.
-	_programTrees: {
-		_top: [#CompilerSources.paths[0]]
-		_paths:   list.Drop(#CompilerSources.paths, 1)
-		_exclude: #CompilerSources.exclude
+	// A runner's RUN builds its stack inside, where only what its image holds
+	// and its build args reach: the switch, bayt's runtime the host names, the
+	// siblings' views, and every mode's file, since the views carry only the
+	// one the outer build's mode named.
+	_runner: (_views & {#views: list.Concat([_toolchainViews, _imageViews])}) & {
+		dockerfile: {
+			preamble: [
+				"ARG MONOREPO_COMPOSE_MODE",
+				"ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
+				"ARG BAYT_RUNTIME",
+				"ENV BAYT_RUNTIME=$BAYT_RUNTIME",
+			]
+			copy: [{srcs: ["monorepo/*.yaml"], dst: "./", parents: true}]
+		}
+		compose: build: args: {
+			MONOREPO_COMPOSE_MODE: "${MONOREPO_COMPOSE_MODE:-}"
+			BAYT_RUNTIME:          "${BAYT_RUNTIME:-}"
+		}
 	}
 
-	// omnishell reaches an installed app's images the same way, as one image of
-	// its runtime tree (omnishell's runtime-image target), named here and
-	// switched by the same mode; mecha/ and omnishell/ hold the fragments.
-	_omnishell:        omnishell.#RuntimeImage
-	_omnishellContext: "${MONOREPO_COMPOSE_MODE:-docker-image://\(omnishell.published.runtime)}${MONOREPO_COMPOSE_MODE:+:\(_omnishell)}"
-	_omnishellCopy: [if B.meta.local {"COPY --from=root \(B._runtime)plugins/omnishell /omnishell"}, "COPY --from=\(B._omnishell) / /omnishell"][0]
+	// The suites `ci` bakes where it was baked itself (sayt/depot's builder)
+	// rather than on the runner's daemon: a suite that brings up no stack,
+	// such as an overlay's native one. They run first.
+	#ciRemote: *[] | [...string]
+
 	// The terminal's statics served from omnishell's tree (target /omnishell/),
-	// which an installed app's caddy copies from that image; the cluster serves
-	// the app's own (#DefaultCluster). Named from omnishell's root.
-	terminalStatics: *[] | [...{file: string, target: string, ...}]
-	// Without them an installed caddy would serve no interpreter: an installed
-	// app hands its terminal to #DefaultBuild.
-	if !B.meta.local {terminalStatics: [_, ...]}
+	// which the caddy copies from that image; the cluster serves the app's
+	// own (#DefaultCluster). Named from omnishell's root, and never none: a
+	// caddy without them would serve no interpreter.
+	terminalStatics: [_, ...{file: string, target: string, ...}]
 	_runtimeStatics: [for s in B.terminalStatics if strings.HasPrefix(s.target, "/omnishell/") {s}]
 
 	project: core.#project & sayt.gate & {
@@ -203,69 +235,52 @@ import (
 				cmds: [{use: "./bayt-task.nu", do: "bayt-task \(verb)-action --generate"}]
 			}
 		}}
-		dir: [if B.meta.local {B.meta.dir}, "."][0]
-		if !B.meta.local {name: B.meta.app}
-
-		// At a mirror's root, the monorepo's name, which its images and
-		// compose project keep.
-		if B.meta.local && B.meta.dir == "" {name: "apps_\(B.meta.app)"}
+		// The app is its repository's root, in its mirror and in the monorepo
+		// alike: the files it commits are its mirror's. Its images take the
+		// monorepo's layout where the switch is on.
+		dir:      "."
+		name:     B.meta.app
+		imageDir: "${MONOREPO_COMPOSE_MODE:+\(B.meta.dir)}"
 
 		targets: B._mechaRuntime.targets
-		// What every up closure includes: an installed app's mode files, and
-		// the networks the cluster's targets join, declared in a file of the
-		// app's (emit.cue writes it). One list, since two declarations of it
-		// would conflict where both apply.
+		// What every up closure includes: the switch's file, and the networks
+		// the cluster's targets join, declared in a file of the app's (emit.cue
+		// writes both). One list, since two declarations of it would conflict
+		// where both apply.
 		compose: includes: [
-			if !B.meta.local {"mecha/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"},
-			if !B.meta.local {"omnishell/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"},
+			"monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml",
 			if B.cluster.surface.networks != _|_ {"compose.networks.yaml"},
 		]
-		if !B.meta.local {
-			if len(B._runtimeStatics) > 0 {
-				targets: caddy: {
-					dockerfile: defaultCopy: {for s in B._runtimeStatics {
-						(s.target): {from: name: B._omnishell, srcs: [s.file], dst: s.target}
-					}}
-					compose: build: additional_contexts: (B._omnishell): B._omnishellContext
-				}
+		// A door built as a release takes them from the release.
+		if len(B._runtimeStatics) > 0 if B.cluster.meta.served == _|_ {
+			targets: caddy: {
+				dockerfile: defaultCopy: {for s in B._runtimeStatics {
+					(s.target): {from: name: B._omnishell, srcs: [s.file], dst: s.target}
+				}}
+				compose: build: additional_contexts: (B._omnishell): B._omnishellContext
 			}
+		}
 
-			// A cluster target copying from omnishell's tree (the renderer)
-			// resolves it through the same switch.
-			targets: {for k, t in B._mechaRuntime.targets
-				if t != null && t.dockerfile != _|_ && t.dockerfile.copy != _|_
-				if len([for c in t.dockerfile.copy if c.from != _|_ if c.from.name != _|_ if c.from.name == B._omnishell {c}]) > 0 {
-					(k): compose: build: additional_contexts: (B._omnishell): B._omnishellContext
-				}
+		// A cluster target copying from omnishell's tree (the renderer)
+		// resolves it through the same switch.
+		targets: {for k, t in B._mechaRuntime.targets
+			if t != null && t.dockerfile != _|_ && t.dockerfile.copy != _|_
+			if len([for c in t.dockerfile.copy if c.from != _|_ if c.from.name != _|_ if c.from.name == B._omnishell {c}]) > 0 {
+				(k): compose: build: additional_contexts: (B._omnishell): B._omnishellContext
 			}
-			targets: {for k, t in B._mechaRuntime.targets
-				if t != null && t.dockerfile != _|_ && t.dockerfile.from != null
-				if t.dockerfile.from.name != _|_
-				if B._mechaContexts[t.dockerfile.from.name] != _|_ {
-					(k): compose: build: additional_contexts: (t.dockerfile.from.name): B._mechaContexts[t.dockerfile.from.name]
-				}
+		}
+		targets: {for k, t in B._mechaRuntime.targets
+			if t != null && t.dockerfile != _|_ && t.dockerfile.from != null
+			if t.dockerfile.from.name != _|_
+			if B._mechaContexts[t.dockerfile.from.name] != _|_ {
+				(k): compose: build: additional_contexts: (t.dockerfile.from.name): B._mechaContexts[t.dockerfile.from.name]
 			}
 		}
 		targets: {
-			// The app's pinned toolchain, on the workspace's setup in the
-			// monorepo.
-			"setup": sayt.setup & mise.install & {
-				if B.meta.local {dockerfile: from: ref: "workspaceroot:setup"}
-				if !B.meta.local {dockerfile: core.nubox}
-			}
-			// The module the program evaluates in, after the toolchain so an edit
-			// to it leaves the install cached. A mirror's setup carries its own.
-			if B.meta.local {
-				"program": sayt.setup & (B._fromRoot & B._programTrees) & {
-					if B.meta.dir != "" {deps: [":setup", "workspaceroot:pronto-sources:srcs"]}
-					if B.meta.dir == "" {
-						deps: [":setup"]
-						srcs: {globs: list.Concat([B._programTrees._top, [for p in B._programTrees._paths {B._runtime + p}]]), exclude: #CompilerSources.exclude}
-					}
-					dockerfile: from: ref: ":setup"
-					// A build stage, never a container.
-					compose: scale: 0
-				}
+			// The app's pinned toolchain, and in the monorepo the runtime's tree,
+			// which mise.local.toml names (_toolchain).
+			"setup": sayt.setup & mise.install & B._toolchain & {
+				dockerfile: core.nubox
 			}
 
 			// Git refs are outside the app tree; sample them before lint's cache check.
@@ -301,8 +316,9 @@ import (
 				cmd: builtin: {do: B._actions.build, shell: "nu"}
 			}
 			"test": sayt.test & mise.exec & {
-				// Local checkers are sibling trees outside this project's source view.
-				if B.meta.local {taskfile: incremental: false}
+				// Its checkers are the runtime's, whose tree in the monorepo sits
+				// outside this project's source view.
+				taskfile: incremental: false
 				srcs: B._program.srcs & {
 					globs: [".bayt/checks.yaml", ".pronto/facts.json"]
 					defaultExclude: {"pronto-tests": null, "pronto-bayt": null}
@@ -350,10 +366,16 @@ import (
 				cmd: "builtin": null
 				compose: {
 					// Compose resolves this from .bayt/, not the app directory.
-					build: additional_contexts: [if B.meta.local {{root: B._root}}, {(B._omnishell): B._omnishellContext}][0]
+					build: additional_contexts: (B._omnishell): B._omnishellContext
 					// The TLS door, so the browser speaks h2 as a reader's does (see
 					// the Caddyfile's door), whose certificate Caddy's own CA signs.
-					environment: APP_URL: "https://caddy:8443"
+					environment: {
+						APP_URL: "https://caddy:8443"
+						// A screen settles once its guest and its reads have
+						// answered, each inside its door's bound.
+						let door = resilience.resilience.timeouts.door
+						SETTLE_TIMEOUT_MS: "\((door.auth + door.crud) * 1000)"
+					}
 					// The aggregate the whole runtime hangs off, healthy: loaded on its
 					// own the closure brings the plane up, and under the verb, which
 					// brought it up first, this is a health check — see the visual
@@ -383,14 +405,11 @@ import (
 			// The migration replay starts throwaway databases from the images the
 			// runtime was built into, so it drives the host's daemon through its
 			// socket; a daemon of its own would hold none of those images. The
-			// image is the program's plus the docker CLI. Not yet for an installed
-			// app, which the loop does not replay either.
-			if B.cluster.capabilities.server && B.meta.local {
-				// The generated compose names the images and the database's
-				// settings, and the app's includes the root's.
-				"replay": sayt.integrate & B._program & B._fromRoot & {
+			// image is the program's plus the docker CLI, and what the generated
+			// compose it reads includes: in the monorepo, the siblings' targets.
+			if B.cluster.capabilities.server {
+				"replay": sayt.integrate & B._program & (B._views & {#views: B._imageViews}) & {
 					deps: [B._base]
-					_paths: list.Concat([[".bayt"], [for path in B._testTrees {"\(path)/.bayt"}]])
 					srcs: defaultExclude: "pronto-bayt": null
 					srcs: defaultExclude: "pronto-tests": null
 					cmd: "builtin": null
@@ -413,18 +432,28 @@ import (
 					}
 					compose: {
 						volumes: ["//var/run/docker.sock:/var/run/docker.sock"]
-						// The tag the host's images carry, which the compose the
-						// replay reads interpolates into their names.
-						environment: BAYT_IMAGE_TAG: "${BAYT_IMAGE_TAG:-latest}"
+						environment: {
+							// The tag the host's images carry, which the compose the
+							// replay reads interpolates into their names, and the
+							// switch that compose's includes read.
+							BAYT_IMAGE_TAG:        "${BAYT_IMAGE_TAG:-latest}"
+							MONOREPO_COMPOSE_MODE: "${MONOREPO_COMPOSE_MODE:-}"
+						}
+						// The images it replays from, which `up --build` builds and
+						// loads only for the services it starts: compose has no edge
+						// that builds an image without starting its service.
+						let schema = B.cluster.surface.schema
+						depends_on: {
+							"\(project.name)-\(schema.target)": condition: "service_started"
+							if schema.pgroll != _|_ {
+								"\(project.name)-\(schema.pgroll.target)": condition: "service_started"
+							}
+						}
 						// `$$` so compose leaves the substitution to the container's shell.
 						command: ["mise", "x", "--", "sh", "-c", "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."]
 					}
 				}
-				// Its closure builds `program` and the replay from root trees.
-				"ci-replay": sayt.ci & B._ciTask & B._fromRoot & {
-					_top: B._programTrees._top
-					_paths: list.Concat([B._programTrees._paths, [".bayt"]])
-					_exclude: [for path in B._programTrees._exclude if path != "**/.bayt/**" {path}]
+				"ci-replay": sayt.ci & B._ciTask & B._runner & {
 					#closure: "replay"
 					#check:   "replay"
 					deps: [":replay:srcs", ":replay:bayt"]
@@ -434,7 +463,7 @@ import (
 			// Playwright's base with mise: its browsers need the libraries of the
 			// distribution they were built for, so the toolchain comes to them.
 			if B._browser {
-				"browser": sayt.setup & mise.install & {
+				"browser": sayt.setup & mise.install & B._toolchain & {
 					dockerfile: {
 						from: name: core.lock.images.playwright
 						defaultPreamble: {
@@ -445,34 +474,33 @@ import (
 					}
 				}
 			}
+
 			for name, c in B.checks {
 				let base = [if c.browser {":browser"}, ":setup"][0]
 
-				// The image is the base, which carries the toolchain, plus, in the
-				// monorepo, the trees the tests import.
+				// The image is the base, which carries the toolchain, and omnishell's
+				// tree, which the tests import from /omnishell (tests/deno.json
+				// maps `omnishell/` there).
 				"check-\(name)": sayt.integrate & {
-					if B.meta.local {B._fromRoot & {_paths: B._testTrees}}
-
 					// The plane is an image-only dep, as visual lint's is.
 					deps: [base, ":launch:outs"]
 					srcs: globs: list.Concat([["tests/**"], c.srcs])
 					dockerfile: {
 						from: ref: base
-						if B.meta.local {epilogue: ["RUN ln -s /monorepo/\(B._runtime)plugins/omnishell /omnishell"]}
-
-						// An installed app's tests import omnishell from /omnishell
-						// (tests/deno.json maps `omnishell/` there).
-						if !B.meta.local {
-							copy: [{from: name: B._omnishell, srcs: ["/"], dst: "/omnishell"}]
-						}
+						copy: [{from: name: B._omnishell, srcs: ["/"], dst: "/omnishell"}]
 					}
 					compose: {
-						if !B.meta.local {build: additional_contexts: (B._omnishell): B._omnishellContext}
+						build: additional_contexts: (B._omnishell): B._omnishellContext
 						environment: {
 							// The TLS door, whose certificate Caddy's own CA signs.
 							APP_URL: "https://caddy:8443"
 							// What the app's absolute addresses are spelled against.
 							ORIGIN: B.cluster.surface.origin
+							// A browser check waits on screens as visual lint does.
+							if c.browser {
+								let door = resilience.resilience.timeouts.door
+								SETTLE_TIMEOUT_MS: "\((door.auth + door.crud) * 1000)"
+							}
 							if c.database {
 								DATABASE_URL:     B.cluster.surface.databaseUrl
 								PGRST_JWT_SECRET: B.cluster.surface.jwtSecret
@@ -489,6 +517,34 @@ import (
 					#check:   name
 					deps: list.Concat([[":check-\(name):srcs", ":check-\(name):bayt"], B._stackSrcs])
 				}
+			}
+			// Every suite in one runner, in turn: the target a CI with one
+			// build per app runs (sayt/depot's `ci`). Each suite brings its own
+			// stack up on the runner's daemon, so they run one at a time.
+			"ci": sayt.ci & B._ciTask & B._runner & {
+				_suites: list.Concat([B.#ciRemote, [for n, _ in project.targets if strings.HasPrefix(n, "ci-") && !list.Contains(B.#ciRemote, n) {n}]])
+				deps: [for n in _suites for v in ["srcs", "bayt"] {":\(n):\(v)"}]
+				srcs: defaultGlobs: graph: {glob: ".bayt/**"}
+				// The remote suites parse with Depot's frontend, which drops the
+				// pin's variable, so their Dockerfiles carry it as a headline; the
+				// runner's daemon parses with its own and takes them without it.
+				cmd: builtin: do: #"""
+					set -eu
+					export DOCKER_HOST_TCP="$DOCKER_HOST"
+					export DEPOT_DISABLE_OTEL=1
+					[ -n "$DEPOT_TOKEN" ] && bake="depot bake --project $DEPOT_PROJECT_ID" || bake="docker buildx bake"
+					pin() { [ -z "$BUILDKIT_SYNTAX" ] || find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i "$1" {} \; ; }
+					docker compose --profile '*' config -o /tmp/ci-compose.yaml
+					docker buildx bake --allow=fs.read=/ -f /tmp/ci-compose.yaml --print \#(strings.Join(_suites, " ")) > /tmp/ci-bake.json
+					\#([if len(B.#ciRemote) > 0 {"pin \"1i # syntax=$BUILDKIT_SYNTAX\""}, ":"][0])
+					for target in \#(strings.Join(_suites, " ")); do
+					 case " \#(strings.Join(B.#ciRemote, " ")) " in
+					 *" $target "*) executor="$bake" ;;
+					 *) executor="docker buildx bake"; \#([if len(B.#ciRemote) > 0 {"pin '1{/^# syntax=/d;}'"}, ":"][0]) ;;
+					 esac
+					 $executor -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' ${SAYT_NO_CACHE:+--no-cache --set "*.cache-from=" --set "*.cache-to="} ${SAYT_NO_CACHE_FROM:+--set "*.cache-from="} ${SAYT_NO_CACHE_TO:+--set "*.cache-to="} "$target"
+					done
+					"""#
 			}
 			if list.Contains(B.meta.targets, "docker") && B.cluster.capabilities.server {
 				"release-docker": {

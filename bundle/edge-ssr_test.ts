@@ -3,7 +3,35 @@ import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeEdgeSsr } from './edge-ssr.ts'
 
+const policy = "script-src 'self'; frame-ancestors 'none'"
+
+async function securityHeaders(out: string) {
+  await Deno.writeTextFile(path.join(out, 'public/_headers'), `/\n  Content-Security-Policy: ${policy}\n`)
+}
+
 type Config = { durable_objects: { bindings: { name: string; script_name?: string }[] } }
+
+Deno.test('SSR database generation preserves the clock policy in both database modes', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    for (const mode of ['existing', 'separate'] as const) {
+      for (const clock of ['deadlines', 'disabled'] as const) {
+        await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
+        await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', mode, clock)
+        const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
+        const options = source.slice(source.indexOf('const Base = edgeObject('), source.indexOf('export class Cluster'))
+        const captured = new Function('edgeObject', 'pgliteWasm', 'initdbWasm', 'pgliteData', 'icu', options + '\nreturn Base')(Object, null, null, null, null)
+        assert.equal(captured.clock, clock)
+      }
+    }
+  } finally { await Deno.remove(out, { recursive: true }) }
+})
 
 Deno.test('installed edge helpers load the supplied runtime without a monorepo sibling', async () => {
   const tmp = await Deno.makeTempDir({ prefix: 'edge installed ' })
@@ -15,6 +43,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
     const jessie = await Deno.readTextFile(new URL('../../omnishell/interpreter/jessie.js', import.meta.url))
     await Deno.writeTextFile(path.join(runtime, 'interpreter/jessie.js'), jessie + '\n// selected runtime witness\n')
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
     const installed = await import(pathToFileURL(path.join(bundle, 'edge-ssr.ts')).href)
     await installed.writeEdgeSsr(out, runtime, path.join(tmp, 'mecha'), 'app', 'https://app.example')
@@ -46,6 +75,7 @@ Deno.test('separate SSR upgrades pin each entry to its renderer while retaining 
     await Deno.mkdir(path.join(out, 'src'))
     await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, migrations: [{ tag: 'old' }] }))
     const build = async (origin = 'https://app.example') => {
       await writeEdgeSsr(out, omnishell, mecha, 'app', origin, 'separate')
@@ -78,6 +108,7 @@ Deno.test('enabling SSR on an existing app retains its Cluster namespace and per
     await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
     const migrations = [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }]
+    await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, migrations }))
     await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example')
     const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
@@ -123,6 +154,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     await Deno.mkdir(path.join(out, 'src'))
     await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
     await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', 'separate')
     await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify({
@@ -198,6 +230,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     releaseRender = null
     unblock()
     const [first, concurrent] = await Promise.all([p1, p2])
+    assert.equal(first.headers.get('content-security-policy'), policy)
     assert.equal(first.headers.get('x-edge-cache'), 'miss')
     assert.equal(first.headers.get('cache-control'), 'public, no-cache, must-revalidate')
     assert.equal(first.headers.get('etag'), '"etag-1"')
@@ -206,6 +239,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     assert.equal(renders, 1)
 
     const second = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    assert.equal(second.headers.get('content-security-policy'), policy)
     assert.equal(second.headers.get('x-edge-cache'), 'hit')
     assert.equal(second.headers.get('cache-control'), 'public, no-cache, must-revalidate')
     assert.equal(second.headers.get('etag'), '"etag-1"')
@@ -221,6 +255,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
 
     const stale1 = await worker.fetch(new Request('https://app.example/'), env, ctx)
     const stale2 = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    assert.equal(stale1.headers.get('content-security-policy'), policy)
     assert.equal(stale1.headers.get('x-edge-cache'), 'stale')
     assert.equal(stale1.headers.get('cache-control'), 'public, no-cache, must-revalidate')
     assert.equal(stale1.headers.get('etag'), null)
@@ -254,6 +289,19 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     assert.equal(await spaHead.text(), '')
     assert.match(spaHead.headers.get('link') ?? '', /gerenciar\.html/)
     assert.equal(renders, 3)
+
+    // A link the shell prefetched seeds its tab from the reads; stripped on a
+    // stale hit, a prefetch of any page past its first minute seeded nothing.
+    await Promise.all(background.splice(0))
+    for (const [key, res] of store) {
+      const headers = new Headers(res.headers)
+      if (!headers.has('x-rendered-at')) continue
+      headers.set('x-rendered-at', String(Date.now() - 61_000))
+      store.set(key, new Response(await res.arrayBuffer(), { status: res.status, headers }))
+    }
+    const prefetched = await worker.fetch(new Request('https://app.example/', { headers: { purpose: 'prefetch' } }), env, ctx)
+    assert.equal(prefetched.headers.get('x-edge-cache'), 'stale')
+    assert.match(await prefetched.text(), /id="pronto-reads"/)
   } finally {
     if (savedCaches) Object.defineProperty(globalThis, 'caches', savedCaches)
     else Reflect.deleteProperty(globalThis, 'caches')

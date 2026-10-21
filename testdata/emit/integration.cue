@@ -4,7 +4,7 @@ import (
 	pronto "github.com/bonisoft3/pronto"
 )
 
-_batchedBuild: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster}).out & {
+_batchedBuild: (pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster, terminal: _terminal}).out & {
 	checks: {
 		first: {priority: 1, cmds: ["check-first"], note: "first"}
 		second: {priority: 1, cmds: ["check-second"], note: "second"}

@@ -30,12 +30,13 @@ import (
 	"github.com/bonisoft3/pronto/clusters:mecha"
 	prontoloop "github.com/bonisoft3/pronto/loops:sayt"
 	"github.com/bonisoft3/pronto/scales"
+	"github.com/bonisoft3/pronto/resilience"
 	"github.com/bonisoft3/pronto/distribution"
 	"github.com/bonisoft3/pronto/terminals:omnishell"
 )
 
 #File: {
-	format: "sql" | "cortex-client" | "hybrid-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
+	format: "sql" | "local-handler" | "hybrid-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -56,7 +57,7 @@ _busCarrier: _busType
 // cdc-types.integration.test.ts. A server column of any other type would
 // wedge its whole table at runtime, every change to it dropped by every
 // pipeline and visible only in a log, so it is refused where the app is built.
-_busTypes: ["string", "bool", "int32", "int64", "double", "uuid", "timestamp", "date", "time", "timezone", "duration", "decimal"]
+_busTypes: ["string", "bool", "int32", "int64", "double", "uuid", "timestamp", "date", "time", "timezone", "duration", "decimal", "json", "geojson"]
 _busCarriers:    _busTypes
 _busConvertible: or(_busTypes)
 
@@ -504,14 +505,17 @@ _sqlType: {
 #mechaActionSql: AC={
 	action: #MechaAction
 	op:     *"INSERT" | "UPDATE" | "DELETE"
+	// The time a machine's step runs at, which the machines it spawns or
+	// sends to run at too; outside a step, each reads its own clock().
+	at: *"NULL" | string
 
 	_spawns: [if AC.action.spawn != _|_ {
         let call = AC.action.spawn
-        "PERFORM hybrid_\(call.machine).spawn(\((#sqlLit & {v: call.id}).out), \((#MechaJsonSql & {fields: call.input}).out), \((#MechaJsonSql & {fields: call.members}).out));"
+        "PERFORM hybrid_\(call.machine).spawn(\((#sqlLit & {v: call.id}).out), \((#MechaJsonSql & {fields: call.input}).out), \((#MechaJsonSql & {fields: call.members}).out), \(AC.at));"
     }]
     _sends: [if AC.action.send != _|_ {
         let call = AC.action.send
-        "PERFORM hybrid_\(call.machine).deliver(\((#sqlLit & {v: call.id}).out), jsonb_build_object('kind', \((#sqlLit & {v: call.event}).out), 'payload', \((#MechaJsonSql & {fields: call.payload}).out)));"
+        "PERFORM hybrid_\(call.machine).deliver(\((#sqlLit & {v: call.id}).out), jsonb_build_object('kind', \((#sqlLit & {v: call.event}).out), 'payload', \((#MechaJsonSql & {fields: call.payload}).out)), \(AC.at));"
     }]
 	_locks: [if AC.action.lock != _|_ {(#mechaLockSql & {lock: AC.action.lock}).out}]
 	_effList: [if AC.action["effect"] != _|_ {
@@ -1362,8 +1366,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // and pipeline topology to the filesystem. All paths are app-relative — the
 // same path language as the manifest.
 #shellConfig: S={
-	code!:       _
-	liveUpdates: bool
+	code!: _
 	migrations: [...string]
 	// The terminal's measured floors, carried into the file visual lint
 	// reads. #scale publishes the same struct as --min-*, so the rung an author
@@ -1505,7 +1508,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 	out: {
 		app:    S.code.meta.name
-		if S.liveUpdates {liveUpdates: true}
 		floors: S.floors
 		server: S.server
 		if S.native {
@@ -1739,7 +1741,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // settings the app gives it as the deployment's defaults.
 #signIn: S={
 	auth: _
-	out: {for p in S.auth.providers {(p): *S.auth.provider[p] | {}}}
+	out: {for p in S.auth.providers {
+		(p): {}
+		if S.auth.provider != _|_ if S.auth.provider[p] != _|_ {
+			(p): S.auth.provider[p]
+		}
+	}}
 }
 
 // Whether an app's cluster keeps server-side state: an entity of a cluster durability,
@@ -1797,28 +1804,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
 		surface: {
-			sources: {
-				pronto: *"../../plugins/pronto" | string
-				// The siblings follow pronto: an app that installs pronto as a
-				// distribution has no monorepo beside it.
-				omnishell: string
-				mecha:     string
-				if pronto == "" {
-					omnishell: *"" | string
-					mecha:     *"" | string
-				}
-				if pronto != "" {
-					let root = strings.TrimSuffix(pronto, "plugins/pronto")
-					omnishell: *"\(root)plugins/omnishell" | string
-					mecha:     *"\(root)libraries/mecha" | string
-				}
-			}
 			_distribution: distribution.#Project & {
-				runtime:   "\(sources.pronto)"
-				omnishell: "\(sources.omnishell)"
-				mecha:     "\(sources.mecha)"
 				if D.code.meta.domain != _|_ {
 					domain: "\(D.code.meta.domain)"
+				}
+				if D.code.meta.edgeClock != _|_ {
+					edgeClock: D.code.meta.edgeClock
 				}
 				if D.code.meta.ssrOrigin != _|_ {
 					ssrOrigin: D.code.meta.ssrOrigin
@@ -1832,7 +1823,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					}
 				}
 			}
-			buildCmd: [if sources.pronto != "" {_distribution.write}, "./saytw build"][0]
+			buildCmd: "./saytw build"
 			testCmd: "deno eval 0"
 			pipelineFiles: [for n, _ in (#streams & {code: D.code}).out {"docker/\(D.code.meta.name)-\(n).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop
@@ -1855,23 +1846,15 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						note: "Pronto release@pages"
 					}
 				}
-				// The edge target: mecha's edge cluster in one Durable Object.
-				// truco alone keeps the native SQLite object, whose alarm sweeps
-				// its lobby, until the edge has a clock; then it moves and that
-				// generator goes.
+				// The edge target: mecha's edge cluster in one Durable Object,
+				// where the app's machines step and their deadlines are its alarm.
 				if list.Contains(D.code.meta.targets, "cloudflare") {
 					cloudflare: {
 						verb:     "release"
 						platform: "cloudflare"
 						note:     "Pronto release@cloudflare"
-						if D.code.meta.name == "truco" {
-							cmds: [_distribution.cloudflare]
-							publish: ["npx wrangler deploy --config dist/cloudflare/wrangler.jsonc"]
-						}
-						if D.code.meta.name != "truco" {
-							cmds: [if len(_distribution.derived.tables) > 0 {_distribution.edgeDerive}, _distribution.edge]
-							publish: [_distribution.publishEdge]
-						}
+						cmds: [if len(_distribution.derived.tables) > 0 {_distribution.edgeDerive}, _distribution.edge]
+						publish: [_distribution.publishEdge]
 					}
 				}
 				if list.Contains(D.code.meta.targets, "docker") {
@@ -1890,11 +1873,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				for name in ["derive", "types", "proto"] {
 					(name): {verb: "lint", cmds: [_distribution.checks[name]], note: "Pronto compiler \(name)"}
 				}
-				// A runtime inside the app is a mirror's, whose sync rewrote the
-				// imports the facts hash; the monorepo holds them.
-				if !_mirrored {
-					facts: {verb: "lint", priority: 1, cmds: [_distribution.checks.facts], note: "Pronto compiler facts"}
-				}
+				facts: {verb: "lint", priority: 1, cmds: [_distribution.checks.facts], note: "Pronto compiler facts"}
 				// Only where there is SQL to read: an app whose every entity is
 				// a browser durability emits no migration and authors none, so the
 				// pass would grade an empty set.
@@ -1913,18 +1892,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					// In the build graph's replay service, whose verdict is its exit
 					// code. A project of its own: --remove-orphans under the runtime's
 					// would take the runtime down, as nothing of it is in this closure.
-					//
-					// Not yet for an installed app: in the monorepo its image would
-					// lack the module the program evaluates in and the runtime at
-					// HEAD, which images take from neither mise.local.toml nor the
-					// root.
-					if sources.pronto != "" {
-						replay: {
-							verb:     "integrate"
-							priority: 1
-							cmds: [(omnishell.#BkidCheck & {runner: "ci-replay"}).out]
-							note: "Pronto compiler replay"
-						}
+					replay: {
+						verb:     "integrate"
+						priority: 1
+						cmds: [(omnishell.#BkidCheck & {runner: "ci-replay"}).out]
+						note: "Pronto compiler replay"
 					}
 				}
 
@@ -1932,6 +1904,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// none to lose, and the check would grade an empty snapshot.
 				if len([for _, e in D.code.state.entities if e.id != _|_ {e}]) > 0 {
 					identity: {verb: "lint", cmds: [_distribution.checks.identity], note: "Pronto compiler identity"}
+				}
+
+				// What a Mecha machine can do, over its declarations.
+				if D.code.state.hybrids != _|_ {
+					hybrids: {verb: "lint", cmds: [_distribution.checks.hybrids], note: "Pronto Mecha machines"}
 				}
 
 				// A computation's tests run it as mecha's compute service does.
@@ -1967,10 +1944,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					"auto-bayt": {priority: 2, cmds: [{use: "./auto-bayt.nu", do: "auto-bayt"}]}
 				}
 			}
-			_mirrored: sources.pronto != "" && !strings.HasPrefix(sources.pronto, "../")
-			if sources.pronto == "" {
-				sayYaml: _distribution.say
-			}
+			sayYaml: _distribution.say
 		}
 	}
 }
@@ -1979,27 +1953,21 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	code!:    _
 	loop!:    _
 	cluster!: _
-	// The terminal, whose own statics an installed app's build serves from
-	// omnishell's image; required there, unread in the monorepo's layout.
-	terminal?: _
+	// The terminal, whose own statics the build serves from omnishell's image.
+	terminal!: _
 	out: prontobuild.#Build & {
-		"cluster": D.cluster
-		if D.terminal != _|_ {terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]}
-		if D.terminal == _|_ if D.loop.surface.sources.pronto == "" {
-			terminalStatics: error("an installed app's build serves its terminal's statics: pass terminal to #DefaultBuild")
-		}
+		"cluster":       D.cluster
+		terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]
 		project: files: "checks.yaml": D.loop.surface.sayYaml
 		// The compose files sit in .bayt/, one level under the app.
 		if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.envFiles != _|_ {
 			project: targets: auth: compose: env_file: [for f in D.code.capabilities.auth.envFiles {path: "../\(f)", required: false}]
 		}
 		meta: {
-			app:      D.code.meta.name
-			local:    D.loop.surface.sources.pronto != ""
-			if local {pronto: D.loop.surface.sources.pronto}
-			generateCmd: (distribution.#Project & {runtime: "\(D.loop.surface.sources.pronto)"}).compiler
-			testCmd:  D.loop.surface.testCmd
-			targets:  D.code.meta.targets
+			app:         D.code.meta.name
+			generateCmd: distribution.#Project.compiler
+			testCmd:     D.loop.surface.testCmd
+			targets:     D.code.meta.targets
 		}
 	}
 }
@@ -2007,7 +1975,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 #DefaultTerminal: D={
 	code!:       _
 	boot?:       string
-	liveUpdates: *false | bool
 	// An adapter the terminal serves is the terminal's file and not the app's,
 	// so only an app's own module joins the set. A declared handler is served
 	// whether or not markup binds it: an app module may fetch one itself.
@@ -2016,10 +1983,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}
 		for _, s in D.code.surface.screens for i in s.files.adapters if !strings.HasPrefix(i, "/") {(i): true}
 	}
-	_sharedSet: {
-        for _, s in D.code.surface.screens for i in s.files.shared {(i): true}
-        if D.code.state.cortex != _|_ for name, _ in D.code.state.cortex {("shell/shared/cortex-\(name).js"): true}
-    }
+	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
 	_rendererSet: {for _, s in D.code.surface.screens if s.files.renderers != _|_ for i in s.files.renderers {(i): true}}
 	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
 	_validationSet: {for _, e in D.code.state.entities for _, v in e.validations {(v.src): true}}
@@ -2042,7 +2006,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	]
 	out: omnishell.#Terminal & {
 		app:         D.code.meta.name
-		liveUpdates: D.liveUpdates
 		description: D.code.meta.description
 		if D.code.meta.i18n != _|_ {
 			language: D.code.meta.i18n.default
@@ -2095,11 +2058,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 #DefaultCluster: D={
 	code!: _
 	statics: [...mecha.#Static]
-	// Whether the app is built in the runtime's workspace, as #DefaultBuild's
-	// meta.local: an installed app takes mecha's images by name, which its
-	// build resolves to the pinned release or, in the monorepo, to mecha's
-	// sources (builders/bayt.cue).
-	local: *true | bool
 
 	// The review ladder's artifacts, served beside the app by caddy's catch-all
 	// /srv root. One directory is load-bearing, not tidiness: brief.html links
@@ -2141,30 +2099,28 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: mecha.#Cluster & {
 		meta: {
 			app: D.code.meta.name
-			// An installed app is its workspace's root, and its runtime sits where
-			// mise put it, outside the app: every static the cluster serves is
-			// then the app's own file, fingerprinted and copied from the build
-			// context. Stated here, never in program_pronto.cue: the layout
-			// file only records what the writer derived (loop sources, build
-			// dir), and the seat already knows the rest.
-			if !D.local {
-				root:    ""
-				runtime: "../"
-			}
-			// An installed app's caddy takes omnishell's own statics from its
-			// image, which the build adds (builders/bayt.cue); the cluster
-			// serves the app's.
-			statics: list.Concat([[for s in D.statics if D.local || !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
-			// mecha's images, reached through the monorepo's bayt federation,
-			// or by name where the app is installed; the auth service's is the
-			// program's when it names one (#App capabilities.auth.image).
+			// The app is its build's root, and its runtime sits where mise put
+			// it, outside the app: every static the cluster serves is then the
+			// app's own file, fingerprinted and copied from the build context.
+			root:    ""
+			runtime: "../"
+			// The caddy takes omnishell's own statics from its image, which the
+			// build adds (builders/bayt.cue); the cluster serves the app's.
+			statics: list.Concat([[for s in D.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
+			// mecha's images by name, which the build resolves to the pinned
+			// release or, in the monorepo, to mecha's sources; the auth
+			// service's is the program's when it names one (#App
+			// capabilities.auth.image).
 			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute", "airlock"] {
 				(s): [
 					if s == "auth" if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.image != _|_ {D.code.capabilities.auth.image},
-					if D.local {{ref: "libraries_mecha:\(s)-image"}},
 					{name: "libraries_mecha-\(s)-image"},
 				][0]
 			}}
+			bounds: {
+				authStatementMs: resilience.resilience.timeouts.statement.client * 1000
+				tickerCallMs:    resilience.resilience.timeouts.tickerCall * 1000
+			}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth
 		// block; the blob plane follows the program's flag; the data plane
@@ -2217,6 +2173,39 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
 			}]
 		}
+		// The door's tree as a release (omnishell.#Address): omnishell's tree
+		// from its runtime image, which the monorepo's switch builds from the
+		// checkout, every static placed at its URL's path, then addressed in
+		// place. The door and the renderer copy what it wrote.
+		if D._terminal {
+			surface: targets: served: {
+				cmd: "builtin": null
+				activate: ""
+				let own = [for s in meta.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}]
+				let runtime = [for s in D.statics if strings.HasPrefix(s.target, "/omnishell/") {s}]
+				srcs: globs: [for s in own {s.file}]
+				dockerfile: {
+					from: name: omnishell.#Address.image
+					// Where bayt copies the srcs, each at its path in the app.
+					workdir: "/app"
+					copy: [{from: {name: omnishell.#RuntimeImage}, srcs: ["/"], dst: omnishell.#Address.home}]
+					let place = [for s in list.Concat([runtime, own]) {
+						let source = [
+							if strings.HasPrefix(s.target, "/omnishell/") {"\(omnishell.#Address.home)/\(strings.TrimPrefix(s.target, "/omnishell/"))"},
+							"/app/\(s.file)",
+						][0]
+						let url = [
+							if strings.HasPrefix(s.target, "/srv/") {strings.TrimPrefix(s.target, "/srv")},
+							s.target,
+						][0]
+						"install -D -m 644 '\(source)' '\(omnishell.#Address.tree)\(url)'"
+					}]
+					epilogue: ["RUN set -e; \(strings.Join(place, "; ")); \(omnishell.#Address.cache) && \(omnishell.#Address.run)"]
+				}
+				compose: {}
+			}
+			meta: served: {ref: ":served", tree: omnishell.#Address.tree, scripts: omnishell.#Address.scripts}
+		}
 		// The terminal's server half, where a route asks to be rendered on
 		// request (#Screen.ssr; #emit decides which routes may). It reads the
 		// app through the door, so it waits on the door, and the aggregate
@@ -2226,6 +2215,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				render: bayt.healthcheck.http & {
 					cmd: "builtin": null
 					activate: ""
+					// The release it takes its entry from (a `from.ref` copy).
+					deps: [":served:outs"]
 					healthcheck: {
 						url: omnishell.#Render.health
 						// Healthy once every table has synced.
@@ -2243,27 +2234,21 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					dockerfile: {
 						from: name: omnishell.#Render.image
 						workdir: omnishell.#Render.workdir
-						// The renderer's tree: from the runtime's workspace, or for an
-						// installed app from omnishell's runtime image, whose root is
-						// omnishell's.
+						// The renderer's tree, from omnishell's runtime image, whose
+						// root is omnishell's.
 						copy: list.Concat([
 							[for d in omnishell.#Render.dirs {
-								[if D.local {{
-									from: {name: "root"}
-									srcs: [strings.TrimPrefix(meta.runtime+d, meta.root)]
-								}}, {
-									from: {name: omnishell.#RuntimeImage}
-									srcs: ["/\(strings.TrimPrefix(d, omnishell.#Render.home+"/"))"]
-								}][0]
+								from: {name: omnishell.#RuntimeImage}
+								srcs: ["/\(strings.TrimPrefix(d, omnishell.#Render.home+"/"))"]
 								dst: "\(omnishell.#Render.workdir)/\(d)"
 							}],
-							[{srcs: [omnishell.#Render.entry.source], dst: omnishell.#Render.entry.target}],
+							// The entry as the release wrote it, carrying its map.
+							[{from: ref: ":served", srcs: ["\(omnishell.#Address.tree)/\(omnishell.#Render.entry.source)"], dst: omnishell.#Render.entry.target}],
 						])
 						epilogue: ["RUN \(omnishell.#Render.cache)"]
 						cmd: omnishell.#Render.command
 					}
 					compose: {
-						if D.local {build: additional_contexts: root: strings.TrimSuffix("../\(meta.root)", "/")}
 						// The door, and what answers behind it: a guest is minted
 						// and every table synced before the renderer is ready.
 						depends_on: {
@@ -2273,10 +2258,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							auth:     {condition: "service_started"}
 						}
 						environment: {
-							DOOR:   "http://caddy:8080"
-							ENTRY:  omnishell.#Render.entry.target
-							ORIGIN: D.out.surface.origin
-							PORT:   "\(omnishell.#Render.port)"
+							DOOR:            "http://caddy:8080"
+							DOOR_TIMEOUT_MS: "\(resilience.resilience.timeouts.renderDoor*1000)"
+							ENTRY:           omnishell.#Render.entry.target
+							ORIGIN:          D.out.surface.origin
+							PORT:            "\(omnishell.#Render.port)"
 						}
 						restart: "on-failure"
 						// An edit to the entry reaches the door, which the renderer
@@ -2289,6 +2275,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 	}
 	_rendersOnRequest: list.Contains([for _, s in D.code.surface.screens {s.ssr}], "ssr")
+	_terminal:         list.Contains([for s in D.statics {s.target}], "/srv/shell/index.html")
 }
 
 // The components of an app package — code, cluster, terminal, loop, build —
@@ -2530,6 +2517,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		   emission — program-owned, preset-derived, app-overridable — is the
 		   only stylesheet they have. Aesthetic values stay behind --shell-*
 		   variables so an app can retheme without repeating structure. */
+		/* The scrollbar's room is kept whether or not the page overflows: a
+		   screen swapping in is as short as its loading state until its data
+		   lands, and with a classic scrollbar the whole page would jump
+		   sideways and back on every navigation. */
+		html { scrollbar-gutter: stable; }
 		body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
 		  background: var(--shell-bg); color: var(--shell-fg); }
 		/* Sticky, because the navigation stack restores a screen's scroll
@@ -2617,24 +2609,64 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 		/* The login ceremony — the one full surface the terminal renders,
 		   on the same tokens as everything else. */
-		.shell-login { display: grid; place-items: center; min-height: 70vh; }
-		.shell-login form { display: grid; gap: 12px; width: min(320px, 90vw);
-		  padding: var(--sp-lg, 24px); border: 1px solid var(--shell-rule);
-		  border-radius: var(--r-md, 8px); background: var(--surface); }
-		.shell-login h1 { margin: 0; font-size: 1.25rem; }
-		.shell-login label { display: grid; gap: 4px; font-weight: 600; }
-		.shell-login input { font: inherit; padding: 8px 10px;
-		  border-radius: var(--r-sm, 6px); border: 1px solid var(--shell-rule);
-		  background: var(--surface); color: var(--shell-fg); }
-		.shell-login button { font: inherit; font-weight: 600; padding: 8px 10px;
-		  border-radius: var(--r-sm, 6px); border: 1px solid var(--shell-rule);
-		  background: var(--shell-fg); color: var(--shell-bg);
-		  cursor: pointer; min-height: 44px; }
-		.shell-login .login-hint { margin: 0; font-weight: 400; font-size: .875rem;
-		  color: var(--shell-fg); }
-		.shell-login .login-guest { background: var(--surface);
-		  color: var(--shell-fg); font-weight: 400; }
-		.shell-login .login-error { color: var(--danger); margin: 0; }
+		body:has(.shell-login) { background: var(--login-surface, var(--surface)); }
+		.shell-login {
+		  box-sizing: border-box; min-height: 100svh; display: grid;
+		  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+		  align-items: center; gap: clamp(48px, 8vw, 128px);
+		  max-width: 1160px; margin: auto; padding: clamp(32px, 7vw, 96px);
+		  color: var(--primary, var(--shell-fg));
+		}
+		.shell-login .login-intro { padding-block: 32px; }
+		.shell-login .login-mark {
+		  display: grid; place-items: center; width: 56px; height: 56px;
+		  margin-block-end: 48px; color: var(--accent, var(--shell-fg));
+		  border: 1px solid var(--shell-rule); border-radius: var(--r-md, 8px);
+		  font: 400 32px/1 var(--shell-heading-font, ui-serif, Georgia, serif);
+		}
+		.shell-login h1 {
+		  margin: 0; font-family: var(--shell-heading-font, ui-serif, Georgia, serif);
+		  font-size: clamp(48px, 6.5vw, 88px); font-weight: 400; line-height: 1.05;
+		  letter-spacing: -.055em; overflow-wrap: anywhere;
+		}
+		.shell-login .login-hint {
+		  margin: 28px 0 0; max-width: 32ch; font-size: 1.125rem; line-height: 1.65;
+		  color: var(--secondary, var(--shell-fg));
+		}
+		.shell-login form {
+		  box-sizing: border-box; width: 100%; margin: 0; padding-block: 40px;
+		  border-block: 1px solid var(--shell-rule);
+		}
+		.shell-login .login-actions { display: grid; gap: 12px; }
+		.shell-login button, .shell-login .login-provider {
+		  box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+		  width: 100%; min-height: 56px; padding: 14px 20px; font: inherit;
+		  font-size: .9375rem; font-weight: 600; text-align: center; text-decoration: none;
+		  line-height: 1.5; border: 1px solid var(--shell-rule); border-radius: var(--r-sm, 6px);
+		  background: var(--surface); color: var(--primary, var(--shell-fg)); cursor: pointer;
+		  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+		}
+		.shell-login .login-provider { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
+		.shell-login .login-provider ~ .login-passkey { background: var(--surface); color: var(--primary, var(--shell-fg)); border-color: var(--shell-rule); }
+		.shell-login .login-passkey { background: var(--primary, var(--shell-fg)); color: var(--surface); border-color: transparent; }
+		.shell-login .login-guest { margin-block-start: 12px; border-color: transparent; background: transparent; color: var(--secondary, var(--shell-fg)); font-weight: 400; }
+		.shell-login button:hover, .shell-login .login-provider:hover { transform: translateY(-1px); }
+		.shell-login .login-provider:hover { filter: brightness(1.15); }
+		.shell-login .login-guest:hover { color: var(--primary, var(--shell-fg)); background: var(--surface-muted, var(--surface)); }
+		.shell-login :is(button, a):focus-visible { outline: 3px solid var(--accent, var(--shell-fg)); outline-offset: 4px; }
+		.shell-login .login-error { color: var(--danger); margin: 0 0 20px; font-size: .9375rem; }
+		@media (max-width: 700px) {
+		  .shell-login { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 40px; padding: 48px 28px; }
+		  .shell-login .login-intro { padding: 0; }
+		  .shell-login .login-mark { margin-block-end: 32px; }
+		  .shell-login h1 { font-size: clamp(48px, 13vw, 72px); }
+		  .shell-login .login-hint { margin-block-start: 20px; font-size: 1rem; }
+		  .shell-login form { padding-block: 28px; }
+		}
+		@media (prefers-reduced-motion: reduce) {
+		  .shell-login button, .shell-login .login-provider { transition: none; }
+		  .shell-login button:hover, .shell-login .login-provider:hover { transform: none; }
+		}
 
 		"""
 
@@ -2667,7 +2699,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
 	// door and the router cannot disagree about what a route is.
-	_shell: (#shellConfig & {"code": E.code, liveUpdates: E.terminal.liveUpdates, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, server: E._serverOn, native: E.code.capabilities.native}).out
+	_shell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, server: E._serverOn, native: E.code.capabilities.native}).out
 	// The locales in one order, so every artifact that lists them lists them the
 	// same way and a regenerated file has no spurious diff.
 	_locales: list.SortStrings([if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}])
@@ -2823,7 +2855,21 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_gated: bool & (E._serverOn == false || E._authOn) & true
 	cluster: capabilities: server: E._serverOn
 
+	// The handlers Pronto composes rather than copies: a Cortex state's child,
+	// the app's module over the Mecha machine it reaches — run by the terminal
+	// for a local child — and the declarations of every machine it may write to.
+	_composedHandlers: {
+		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex for name, actor in cortexMachine.setup.actors {
+			"shell/handlers/\(name).js": {
+				machine:  {machine: E.code.state.hybrids[actor.machine].reducer, rules: E.code.state.hybrids[actor.machine].rules}
+				local:    actor.via == "local"
+				machines: {for n, h in E.code.state.hybrids {(n): h.reducer}}
+				src:      actor.handler
+			}
+		}
+	}
 	files: [string]: #File
+	checkout: [string]: #File
 	files: {
 		if E.code._timerRefusal {}
 		if E.code._hostDomRefusal {}
@@ -2831,37 +2877,47 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if E.code._screenAccessRefusal {}
 		for _, h in E.code.capabilities.hatches if h.kind == "host-dom" {if E.terminal.capabilities.hostDom != true {_unsupportedHostDom: error("terminal does not offer host-dom")}}
 	}
-	// The compose files an installed app's closures include, one per
-	// MONOREPO_COMPOSE_MODE (builders/bayt.cue): `service` builds mecha's images
-	// from its fragments, where MONOREPO_MECHA_PATH puts mecha's tree; unset
-	// pulls the pinned ones and needs no service.
-	if !E.build.meta.local {
-		files: {
-			"mecha/service.yaml": {
-				format: "yaml"
-				data: include: [for s, _ in mecha.published {"../${MONOREPO_MECHA_PATH}/.bayt/compose.\(s)-image.yaml"}]
-			}
-			"mecha/docker-image.yaml": {
-				format: "yaml"
-				data: {}
-			}
-			"omnishell/service.yaml": {
-				format: "yaml"
-				data: include: ["../${MONOREPO_OMNISHELL_PATH}/.bayt/compose.runtime-image.yaml"]
-			}
-			"omnishell/docker-image.yaml": {
-				format: "yaml"
-				data: {}
-			}
-		}
+	// The compose file every closure includes, one per MONOREPO_COMPOSE_MODE
+	// (builders/bayt.cue): `service` declares the monorepo's targets the
+	// switch names, at the paths the checkout and its images keep them;
+	// unset, the pinned images need none. `service` is the checkout's own,
+	// as mise.local.toml is: the writer writes it only there, and records
+	// it nowhere a mirror reads.
+	let up = strings.Repeat("../", len(strings.Split(E.build.meta.dir, "/"))+1)
+	checkout: "monorepo/service.yaml": {
+		format: "yaml"
+		data: include: list.Concat([
+			[for s, _ in mecha.published {"\(up)libraries/mecha/.bayt/compose.\(s)-image.yaml"}],
+			["\(up)plugins/omnishell/.bayt/compose.runtime-image.yaml", "\(up).bayt/compose.pronto-sources.yaml"],
+		])
+	}
+	files: "monorepo/docker-image.yaml": {
+		format: "yaml"
+		data: {}
 	}
 	files: {
+		// What tools outside CUE read of the cluster, evaluated here once:
+		// evaluating a program takes gigabytes, too much to repeat in the
+		// replay's container beside the stack it grades, or in a release. The
+		// token roles are those 001_roles.sql grants authenticator, which a
+		// Kubernetes release's operator would otherwise revoke.
+		".pronto/cluster.json": {
+			format: "json"
+			data: {
+				server: E.cluster.capabilities.server
+				if E.cluster.capabilities.server {
+					schema:     E.cluster.surface.schema
+					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+				}
+			}
+		}
 		".pronto/check-inputs.json": {
 			format: "json"
 			data: {
 				version: 1
 				types: {types: #types, aliases: #typeAlias}
 				entities: E.code.state.entities
+				hybrids: {if E.code.state.hybrids != _|_ for n, h in E.code.state.hybrids {(n): h.reducer}}
 				hatches: E.code.capabilities.hatches
 				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
 				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
@@ -2890,14 +2946,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			format: "yaml"
 			data: {
 				version: "v2"
-				// A mirror's runtime sits inside the app, with protos of its own.
-				let pronto = E.loop.surface.sources.pronto
-				modules: [
-					if pronto != "" && !strings.HasPrefix(pronto, "../") {
-						{path: ".", excludes: [strings.TrimSuffix(pronto, "/plugins/pronto")]}
-					},
-					{path: "."},
-				][0:1]
+				modules: [{path: "."}]
 				breaking: use: ["WIRE_JSON"]
 			}
 		}
@@ -2935,7 +2984,20 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					    CREATE ROLE \(r) NOLOGIN;
 					  END IF;
 					"""
-				}], "\n") + "\nEND $$;\n" + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
+				}], "\n") + "\n" + _authenticator + "END $$;\n" + _login + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
+
+				// PostgREST's login, which switches to the role a request's token
+				// names; it applies that role's settings (the bounds below) only
+				// when the role is granted to it. No password, as electric's: the
+				// deployment's secret sets it (mecha's #RolePasswordsStep).
+				_tokenRoles: [for r in _roles if r != "electric" {r}]
+				_authenticator: """
+					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
+					    CREATE ROLE authenticator NOINHERIT;
+					  END IF;
+
+					"""
+				_login: "\nALTER ROLE authenticator LOGIN;\nGRANT \(strings.Join(_tokenRoles, ", ")) TO authenticator;\n"
 
 				// The tenancy floor binds PUBLIC, which includes service. A pipeline
 				// and the auth service read every tenant's rows by definition, so
@@ -2949,7 +3011,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				_bypass: [
 					if E._serviceOn {"\nALTER ROLE service BYPASSRLS;\n"},
 					// No password: the deployment's secret sets it (mecha's
-					// #ElectricPasswordStep), and a schema that set one would
+					// #RolePasswordsStep), and a schema that set one would
 					// overwrite it whenever it ran.
 					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN;\n" +
 						"GRANT USAGE ON SCHEMA public TO electric;\n" +
@@ -2959,22 +3021,15 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					},
 				]
 
-				_timeouts: [
-					"\n-- Finite machine bounds: statement, lock, and idle timeouts.\n" +
-					"ALTER ROLE anon SET statement_timeout = '5s';\n" +
-					"ALTER ROLE anon SET lock_timeout = '2s';\n" +
-					"ALTER ROLE anon SET idle_in_transaction_session_timeout = '10s';\n",
-					if E._authOn {
-						"ALTER ROLE app_user SET statement_timeout = '5s';\n" +
-						"ALTER ROLE app_user SET lock_timeout = '2s';\n" +
-						"ALTER ROLE app_user SET idle_in_transaction_session_timeout = '10s';\n"
+				// The innermost timeouts of a request (plugins/pronto/resilience), per token role.
+				_timeouts: list.Concat([["\n-- Finite machine bounds: statement, lock, and idle timeouts.\n"], [
+					for r in _tokenRoles
+					let tier = [if r == "service" {"service"}, "client"][0] {
+						"ALTER ROLE \(r) SET statement_timeout = '\(resilience.resilience.timeouts.statement[tier])s';\n" +
+						"ALTER ROLE \(r) SET lock_timeout = '\(resilience.resilience.timeouts.lock[tier])s';\n" +
+						"ALTER ROLE \(r) SET idle_in_transaction_session_timeout = '\(resilience.resilience.timeouts.idleInTransaction[tier])s';\n"
 					},
-					if E._serviceOn {
-						"ALTER ROLE service SET statement_timeout = '30s';\n" +
-						"ALTER ROLE service SET lock_timeout = '5s';\n" +
-						"ALTER ROLE service SET idle_in_transaction_session_timeout = '60s';\n"
-					},
-				]
+				]])
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
@@ -3097,11 +3152,19 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			}
 
 			_machines: [if E.code.state.machines != _|_ {[for _, m in E.code.state.machines for en, e in E.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
-			if E.code.state.cortex != _|_ for name, sessionSpec in E.code.state.cortex {
-                "shell/shared/cortex-\(name).js": {format: "cortex-client", data: {composition: sessionSpec, machines: E.code.state.hybrids}}
-            }
+			// A Mecha machine a Cortex state runs locally is the terminal's: a
+			// handler composing the app's module over the machine's own rules.
+			for path, local in E._composedHandlers {
+				"\(path)": {format: "local-handler", data: local}
+			}
 			if E.code.state.hybrids != _|_ {
-				"services/database/migrations/016_mecha_actors.sql": {format: "hybrid-sql", data: E.code.state.hybrids}
+				// Each machine's surface is entities the app declares; the writer
+				// checks them against the machine before compiling.
+				"services/database/migrations/016_mecha_actors.sql": {format: "hybrid-sql", data: {
+					hybrids: {for n, h in E.code.state.hybrids {(n): {machine: h.reducer, rules: h.rules}}}
+					entities: E.code.state.entities
+					timers: [if len([for _, h in E.code.state.hybrids if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
+				}}
 			}
 			if len(_machines) > 0 {
 				"services/database/migrations/010_machines.sql": {
@@ -3267,6 +3330,23 @@ _traceHeader: include_patterns: ["^traceparent$"]
 								}
 							}]
 							processors: [{
+								// A delete from a table of default replica identity carries
+								// no before-image, only its key: the key becomes the image,
+								// or restore-deleted-row would put `%!s(<nil>)` on the bus.
+								id:        "key-as-before"
+								plugin:    "builtin:field.set"
+								condition: "{{ if or .Payload.After .Payload.Before }}false{{ else }}true{{ end }}"
+								settings: {
+									field: ".Payload.Before"
+									value: "{{ toJson .Key }}"
+								}
+							}, {
+								// field.set writes a string; only the key it wrote is one.
+								id:        "decode-key-before"
+								plugin:    "builtin:json.decode"
+								condition: "{{ if eq (printf \"%T\" .Payload.Before) \"opencdc.RawData\" }}true{{ else }}false{{ end }}"
+								settings: field: ".Payload.Before"
+							}, {
 								// Which table changed, carried in the row itself. The bus
 								// is one topic for every table and each pipeline reads all
 								// of it, so a consumer has to tell its own source's events
@@ -3570,6 +3650,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				    handle @rendered {
 				      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:\(omnishell.#Render.port)} {
 				        header_up dapr-app-id render
+				        import bounded-render
 				      }
 				    }
 
@@ -3621,9 +3702,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 				let matcher = [if len(_unitPaths) > 0 {"  @terminal not path \(strings.Join(_unitPaths, " "))\n  header @terminal"}, "  header"][0]
 
-				"\(matcher) Content-Security-Policy \(json.Marshal(E._browserPolicy))\n"
+				// A door built as a release names the inline scripts its documents
+				// run; an addressed file never changes, so it is never revalidated.
+				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
+				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(immutable)"
 			}, ""][0]
-			text: strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
+			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why
@@ -3800,7 +3885,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				"\(s.files.html)": {format: "html", src: s.files.html}
 			}
 			"\(s.files.css)": {format: "css", src: s.files.css}
-			for i in s.files.handlers {"\(i)": {format: "jessie", src: i}}
+			for i in s.files.handlers if E._composedHandlers[i] == _|_ {"\(i)": {format: "jessie", src: i}}
 			for i in s.files.adapters if !strings.HasPrefix(i, "/") {"\(i)": {format: "jessie", src: i}}
 			if s.files.renderers != _|_ {
 				for i in s.files.renderers {"\(i)": {format: "jessie", src: i}}
@@ -3908,10 +3993,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// An app at the mirror's root releases from there.
 			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]
 			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
-			// An installed app's tools, the runtime among them, are its pinned
-			// releases, which setup installs; a mirror carrying the runtime in
-			// its tree has nothing to install first.
-			let pagesSetup = [if !E.build.meta.local {"\n      - run: sayt setup"}, ""][0]
+			// The app's tools, the runtime among them, are its pinned releases,
+			// which setup installs.
+			let pagesSetup = "\n      - run: sayt setup"
 			".github/workflows/cd.yml": {
 				format: "yaml"
 				text:   """
@@ -3981,20 +4065,4 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 
 	manifest: list.SortStrings([for p, _ in files {p}])
-	release: {
-		enabled: E.terminal.liveUpdates
-		runtime: omnishell.published.runtime
-		_declarations: [for s in list.Concat([E.terminal.surface.statics, E.cluster.meta.statics])
-			if strings.HasPrefix(s.target, "/srv/shell/") || strings.HasPrefix(s.target, "/srv/messages/") || strings.HasPrefix(s.target, "/srv/omnishell/") || s.target == "/srv/offline-first-sw.js"
-			let servedPath = strings.TrimPrefix(s.target, "/srv/")
-			if servedPath != "shell/release.json" {{path: servedPath, src: s.file}}]
-		// Docker copies cluster statics in order; the last destination wins.
-		_served: {for i, s in _declarations
-			if !list.Contains([for later in _declarations[i+1:] {later.path}], s.path) {(s.path): s}}
-		assets: [for p in list.SortStrings([for p, _ in _served {p}]) {_served[p]}]
-		runtimeAssets: [for s in E.terminal.surface.statics if strings.HasPrefix(s.target, "/omnishell/") {
-			path: strings.TrimPrefix(s.target, "/")
-			src:  s.file
-		}]
-	}
 }

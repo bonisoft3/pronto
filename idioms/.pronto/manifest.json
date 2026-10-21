@@ -1,9 +1,9 @@
 {
   "written": [
-    ".config/mise/conf.d/omnishell.toml",
     ".github/workflows/cd.yml",
     ".goreleaser.yaml",
     ".pronto/check-inputs.json",
+    ".pronto/cluster.json",
     ".say.yaml",
     ".vscode/tasks.json",
     "bayt.cue",
@@ -11,6 +11,7 @@
     "buf.yaml",
     "compose.yaml",
     "docker/Caddyfile",
+    "monorepo/docker-image.yaml",
     "offline-first-sw.js",
     "robots.txt",
     "schema/entities.proto",
