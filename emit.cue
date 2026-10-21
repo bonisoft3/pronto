@@ -2232,19 +2232,18 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					"process-compose": activate: "mise x --"
 					expose: http: {port: omnishell.#Render.port, env: "PORT"}
 					entrypoint: {
-						do:    "entry=\"$PWD/\(omnishell.#Render.entry.source)\"; cd \"$(mise where \(distribution.#Runtimes.omnishell))\" && ENTRY=\"$entry\" ORIGIN=\"${HOST_ORIGIN:-\(D.out.meta.door.scheme)://localhost:${HOST_DOOR##*:}}\" exec deno run --frozen --config server/deno.json --allow-net --allow-env --allow-read server/render.ts"
+						do:    "entry=\"$PWD/\(omnishell.#Render.entry.source)\"; cd \"$(mise where \(distribution.#Runtimes.omnishell))\" && ENTRY=\"$entry\" ORIGIN=\"${ORIGIN:-\(D.out.meta.door.scheme)://localhost:${HOST_DOOR##*:}}\" exec deno run --frozen --config server/deno.json --allow-net --allow-env --allow-read server/render.ts"
 						shell: "sh"
 						dockerfile: {
 							do:    strings.Join(omnishell.#Render.command, " ")
 							shell: "exec"
 						}
-						// The origin readers reach the door at: ORIGIN as given, else the
-						// door's port on this host, which the host writes for a peer's
-						// address (HOST_DOOR); the command hands it on as ORIGIN.
+						// The origin readers reach the door at: ORIGIN where the caller
+						// sets it, else the door's port on this host, which the host
+						// writes for a peer's address (HOST_DOOR).
 						env: {
-							for k, v in compose.environment if k != "PORT" && k != "ENTRY" {(k): v}
-							HOST_ORIGIN: "${ORIGIN:-}"
-							HOST_DOOR:   "caddy:\(D.out.meta.door.port)"
+							for k, v in compose.environment if k != "PORT" && k != "ENTRY" && k != "ORIGIN" {(k): v}
+							HOST_DOOR: "caddy:\(D.out.meta.door.port)"
 						}
 						after: {caddy: "healthy", crud: "healthy", electric: "healthy"}
 					}
