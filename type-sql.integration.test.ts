@@ -3,7 +3,7 @@ import { generateTypeSQL } from "./type-sql.ts";
 import { typeTable } from "./type-table.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
-const POSTGREST = "postgrest/postgrest:v12.2.3@sha256:0a46780309a604cdc8b56c776c6e5e15788ce58174d709e40459ab5a2d44d228";
+const POSTGREST = "postgrest/postgrest:v14.18@sha256:c7cd7e265a85b05248abf53f4473fcec7e327c282d0bd0cf60f1551996d09fcf";
 const ELECTRIC = "docker.io/electricsql/electric:1.8.1@sha256:efb6fa43859d67cb8c73439e0c8bc0f7a3daa467500fb06f2a924bcb2070c139";
 
 function fail(message: string): never {
