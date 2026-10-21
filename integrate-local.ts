@@ -41,12 +41,21 @@ const playwright = (await Deno.readTextFile(lint)).match(/npm:playwright@([0-9.]
 const install = ["run", "-A", `npm:playwright@${playwright}`, "install", ...(Deno.build.os === "linux" ? ["--with-deps"] : []), "chromium"]
 if (await run(Deno.execPath(), install) !== 0) fail(`playwright ${playwright} could not install chromium`)
 
-// The door's port on the host: its variable when the caller moved it, else the
-// project's own default, both as bayt wrote them for caddy.
+// Every port the stack binds, moved to one free now: a launch@local of the
+// same app holds the project's own defaults, and a check reaching that
+// stack's database instead of its own would grade the wrong thing. Each is a
+// variable bayt wrote as `${<VAR>:-<default>}`.
 const compose = await Deno.readTextFile(`${appDir}/.bayt/process-compose.yaml`)
-const [, doorVar, doorDefault] = compose.match(/DOOR_PORT=\$\{([A-Z0-9_]+):-([0-9]+)\}/) ??
+const portVars = [...new Set([...compose.matchAll(/\$\{([A-Z0-9_]+_PORT):-[0-9]+\}/g)].map((m) => m[1]))]
+const ports: Record<string, string> = {}
+for (const v of portVars) {
+  const l = Deno.listen({ hostname: "127.0.0.1", port: 0 })
+  ports[v] = String((l.addr as Deno.NetAddr).port)
+  l.close()
+}
+const [, doorVar] = compose.match(/DOOR_PORT=\$\{([A-Z0-9_]+):-[0-9]+\}/) ??
   fail("the door's port is not in .bayt/process-compose.yaml; regenerate the app")
-const door = Deno.env.get(doorVar) ?? doorDefault
+const door = ports[doorVar]
 
 // process-compose with its API on a socket of its own, which `list` reads.
 const dir = await Deno.makeTempDir({ prefix: "integrate-local." })
@@ -62,7 +71,7 @@ const tag = `INTEGRATE_LOCAL_RUN=${crypto.randomUUID()}`
 const stack = new Deno.Command("process-compose", {
   args: pc(["-f", ".bayt/process-compose.yaml", "up", "--tui=false"]),
   cwd: appDir,
-  env: { MISE_LOCKED: "0", [tag.split("=")[0]]: tag.split("=")[1] },
+  env: { MISE_LOCKED: "0", ...ports, [tag.split("=")[0]]: tag.split("=")[1] },
   stdout: "inherit",
   stderr: "inherit",
 }).spawn()

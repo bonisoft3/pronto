@@ -1932,9 +1932,17 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if list.Contains(D.code.meta.targets, "k8s") {
 				sayYaml: say: release: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.k8s}]}
 			}
-			// The same for the cloud tier on GCP: a deploy, not a version.
+			// The same for the cloud tier on GCP: a deploy, not a version. What
+			// it deploys runs first on this machine (integrate@local), and the
+			// release goes no further when it fails: the app's own stack up and
+			// the terminal's visual lint passing, before anything is built or
+			// rolled. Removing a preview deploys nothing, so it runs no check.
 			if list.Contains(D.code.meta.targets, "gcp") {
-				sayYaml: say: release: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.gcp}]}
+				let _check = (distribution.#IntegrateLocal & {prepare: D.cluster.surface.hostPrepare}).out
+				sayYaml: say: release: rulemap: gcp: {platform: "gcp", cmds: [
+					{do: "if ($env.SAY_RELEASE_ARGS_DELETE? | is-empty) { \(_check) }"},
+					{do: _distribution.gcp},
+				]}
 			}
 			// The cluster on this machine, each service a process
 			// (.bayt/process-compose.yaml), where `launch` alone runs it in

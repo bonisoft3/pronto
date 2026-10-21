@@ -240,9 +240,14 @@ export def main [
 	--delete        # Remove the preview, when its pull request closes
 ] {
 	let app_info = (resolve-app $app)
-	# sayt hands a release's own flags over as SAY_RELEASE_ARGS_<FLAG>.
+	# sayt hands a release's own flags over as SAY_RELEASE_ARGS_<FLAG>, and only
+	# so where the rule has more than one command (integrate@local runs first):
+	# each is read from there too, as a dry run that missed it would release.
+	let given = {|flag| ($env | get -o $"SAY_RELEASE_ARGS_($flag)" | default "") not-in ["" "false"] }
 	let preview = ($preview | default ($env.SAY_RELEASE_ARGS_PREVIEW? | default ""))
-	let delete = ($delete or (($env.SAY_RELEASE_ARGS_DELETE? | default "") | is-not-empty))
+	let delete = ($delete or (do $given DELETE))
+	let dry_run = ($dry_run or (do $given DRY_RUN))
+	let snapshot = ($snapshot or (do $given SNAPSHOT))
 	let base = if ($preview | is-empty) { {} } else { {GCP: {preview: $preview}} }
 	let base_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	$base | to json | save -f $base_file
