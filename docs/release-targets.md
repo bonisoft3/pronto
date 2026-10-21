@@ -464,6 +464,8 @@ digest back from the registry and names it in the service and jobs.
 | database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts |
 | migrate | where the app declares pgroll migrations, the cluster's runner as the Job `<app>-migrate`, after initdb and before the service rolls, as compose runs it on every boot |
 | caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
+| ticker | where the app runs one, one more container of the service, writing through crud with the service role's token (`<app>-service-jwt`, signed with the gateway's secret) |
+| clock | the Cloud Scheduler job `<app>-clock`, POSTing the door's `/poke` at the service's run.app address each minute with that token and no retry, as compose's clock does: the service answers anyone, so Cloud Run has no OIDC token to check |
 | electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
 | the stack's secrets | Secret Manager, generated once; the database URLs are composed from the passwords there, since Cloud Run expands no `$(VAR)` |
 
@@ -487,13 +489,18 @@ What bit on a real instance:
 - **One instance takes 1000 requests at once**, Cloud Run's most: at its
   default of 80, a page load's hatch files beside electric's held live
   requests met "Rate exceeded".
+- **A schema initdb built is not rebuilt.** initdb runs once per database, and
+  only pgroll's migrations reach one it built. When an app's initdb set changes
+  in ways none carries (a framework upgrade restating its own steps, say),
+  raising `GCP.sqlGeneration` starts it on a new, empty instance
+  (`<app>-db-<n>`); the earlier one keeps its data and its replication slot,
+  untouched, until its owner deletes it.
 - **The smallest tier admits about 25 connections**, so the instance is raised
   to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
   container at the instance's address, so crud binds `*`.
 
 The release refuses an app whose compose project runs anything else: the
-change-feed unit, a ticker or clock, the airlock,
-compute, blobs, images or render. A provider's settings come from compose as
+change-feed unit, the airlock, compute, blobs, images or render. A provider's settings come from compose as
 the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
 secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
 release maps it onto the service and prints the DNS records it needs; each of
