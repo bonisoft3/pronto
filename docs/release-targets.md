@@ -422,6 +422,11 @@ schema.#Build & {release: GCP}` from [`gcp/schema`](../gcp/schema/gcp.cue).
 Every resource is described before it is made, so a second release with
 nothing changed pushes the same digests and rolls nothing.
 
+Before anything is built, the release runs the app on the machine releasing,
+as `sayt integrate@local` does: the cluster as host processes and the
+terminal's visual lint against its door. A critical finding, or a stack that
+does not come up, stops the release there. `--delete` runs no check.
+
 The images are built in Cloud Build, not on the machine releasing, which needs
 no Docker daemon: the release uploads the app's files as git sees them (never
 `.certs/`, the certificate pair `sayt setup` issues for one machine), and a
