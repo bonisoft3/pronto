@@ -20,6 +20,7 @@ import (
 	core "github.com/bonisoft3/bayt/core:bayt"
 	sayt "github.com/bonisoft3/bayt/stacks/sayt"
 	mise "github.com/bonisoft3/bayt/stacks/mise"
+	"github.com/bonisoft3/pronto/distribution"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 	zypper "github.com/bonisoft3/bayt/distros/zypper"
@@ -197,12 +198,25 @@ import (
 	_runtimeStatics: [for s in B.terminalStatics if strings.HasPrefix(s.target, "/omnishell/") {s}]
 
 	project: core.#project & sayt.gate & {
-		files: "say.yaml": say: {for verb in ["launch", "integrate"] {
-			(verb): rulemap: builtin: {
-				stop: true
-				cmds: [{use: "./bayt-task.nu", do: "bayt-task \(verb)-action --generate"}]
+		files: "say.yaml": say: {
+			for verb in ["launch", "integrate"] {
+				(verb): rulemap: builtin: {
+					stop: true
+					cmds: [{use: "./bayt-task.nu", do: "bayt-task \(verb)-action --generate"}]
+				}
 			}
-		}}
+			// integrate@local, beside the builtin rather than among the loop's
+			// checks: sayt's loop closes integrate's rulemap over them, and a check
+			// names no platform. launch@local is the loop's (emit.cue).
+			if !B.meta.local {
+				integrate: rulemap: local: {
+					platform: "local"
+					priority: -1
+					stop:     true
+					cmds: [{do: (distribution.#IntegrateLocal & {prepare: B.cluster.surface.hostPrepare}).out}]
+				}
+			}
+		}
 		dir: [if B.meta.local {B.meta.dir}, "."][0]
 		if !B.meta.local {name: B.meta.app}
 

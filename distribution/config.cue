@@ -62,6 +62,28 @@ import (
 	out: "use tools.nu [run-mise]; let pronto = \(root); \(args)"
 }
 
+// The cluster as host processes under process-compose, which sayt pins as a
+// tool stub, inside the app's toolchain: every process and probe finds the
+// cluster's tools and bayt's on its PATH. What the cluster prepares first (its
+// surface's hostPrepare) runs in the same toolchain.
+#LaunchLocal: L={
+	prepare: [...string]
+	_prepare: strings.Join([for c in L.prepare {"run-mise exec -- env MISE_LOCKED=0 sh -c \(json.Marshal(c)); "}], "")
+	_stub:    "let stub = (run-mise where github:bonisoft3/sayt | str trim | path join process-compose.toml); "
+	out:      "use tools.nu [run-mise]; \(L._prepare)\(L._stub)run-mise exec -- env MISE_LOCKED=0 mise tool-stub $stub --no-server -f .bayt/process-compose.yaml up --tui=false"
+}
+
+// The same stack, the terminal's visual lint against its door, and the stack
+// down again (integrate-local.ts): `integrate` without containers. The
+// pronto and omnishell trees are the installed ones unless given.
+#IntegrateLocal: I={
+	prepare: [...string]
+	runtime:   *"" | string
+	omnishell: *"(run-mise where \(#Runtimes.omnishell) | str trim)" | string
+	let _l = #LaunchLocal & {prepare: I.prepare}
+	out: (#Run & {runtime: I.runtime, args: "\(_l._prepare)\(_l._stub)run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --stub $stub --omnishell \(I.omnishell)"}).out
+}
+
 #Writer: {
 	root: string
 	out:  "deno run --config (\(root) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env (\(root) | path join write.ts) ."
@@ -135,10 +157,7 @@ import (
 	// a tool stub, inside the app's toolchain: every process and probe finds
 	// the cluster's tools and bayt's on its PATH. What the cluster prepares
 	// first (its surface's hostPrepare) runs in the same toolchain.
-	launchLocal: {
-		prepare: [...string]
-		out: "use tools.nu [run-mise]; \(strings.Join([for c in prepare {"run-mise exec -- env MISE_LOCKED=0 sh -c \(json.Marshal(c)); "}], ""))let stub = (run-mise where github:bonisoft3/sayt | str trim | path join process-compose.toml); run-mise exec -- env MISE_LOCKED=0 mise tool-stub $stub --no-server -f .bayt/process-compose.yaml up --tui=false"
-	}
+	launchLocal: #LaunchLocal
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// An installed pronto has no siblings, which its own tests import.
