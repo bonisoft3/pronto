@@ -74,6 +74,9 @@ import (
 		// The providers the program offers, whose ways in the terminal draws
 		// (compose's OIDC_PROVIDERS), filled by the release.
 		programProviders: *"" | string
+		// The auth service's own settings compose gives it (mecha's AUTH_*, such as
+		// its statement bound), filled by the release.
+		env: *{} | {[=~"^AUTH_[A-Z0-9_]+$"]: string}
 	}
 
 	// Where this release's resources are: a preview's project when it has one.
@@ -223,7 +226,7 @@ import (
 						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
 						if R._rpId != "" {{name: "WEBAUTHN_RP_ID", value: R._rpId}},
 						if R._origin != "" {{name: "WEBAUTHN_ORIGIN", value: R._origin}},
-					], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
+					], [for k, v in R.auth.env {name: k, value: v}], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
 					startupProbe: {tcpSocket: port: P.auth, periodSeconds: 2, failureThreshold: 60}
 				}, {
 					name:  "electric"
