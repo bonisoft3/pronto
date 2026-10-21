@@ -47,7 +47,7 @@ import (
 	}
 
 	// Every pod joins the mesh: caddy reaches its upstreams through its sidecar
-	// (PRONTO_MESH), and each hop's sidecar reports a span to Jaeger.
+	// (PRONTO_UPSTREAM_*), and each hop's sidecar reports a span to Jaeger.
 	#daprSidecar: {
 		id:   string
 		port: string
@@ -625,6 +625,7 @@ import (
 							},
 							{name: "WEBAUTHN_RP_ID", value: authRpId},
 							{name: "WEBAUTHN_ORIGIN", value: authOrigin},
+							for k, v in release.auth.oidc {{name: k, value: v}},
 						]
 						resources: release.resources
 						livenessProbe: {
@@ -699,7 +700,7 @@ import (
 								name:  "ORIGIN"
 								value: originValue
 							},
-							{name: "PRONTO_MESH", value: "localhost:3500"},
+							for up in ["CRUD", "AUTH", "ELECTRIC", "TICKER", "RCLONE_S3", "IMGPROXY", "RENDER"] {name: "PRONTO_UPSTREAM_\(up)", value: "localhost:3500"},
 							{name: "PRONTO_TRACING", value: "on"},
 							for e in (#otelExport & {service: "caddy", port: 4317}).env {e},
 							{
