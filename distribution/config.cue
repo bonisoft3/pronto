@@ -7,7 +7,7 @@ import (
 )
 
 #Version:     "0.16.0"
-#SaytVersion: "0.44.2"
+#SaytVersion: "0.45.0"
 
 // The hybrid oracle harnesses exercise the checkout's terminal.
 #TestModules: ["hybrid-local.ts", "hybrid-battery.ts"]

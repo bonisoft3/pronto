@@ -45,136 +45,136 @@ url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.
 url_api = "https://api.github.com/repos/FiloSottile/mkcert/releases/assets/63709958"
 
 [[tools."github:bonisoft3/bayt"]]
-version = "0.65.0"
+version = "0.66.0"
 backend = "github:bonisoft3/bayt"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-arm64"]
-checksum = "sha256:72fb474186479a52dcb25d724adae04caf78984ddae8145ee34d1b7fa012595e"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.65.0/bayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/657413295"
+checksum = "sha256:3173d4e2cd83adab763bfe0160a445fb686df1de0cfca43b8954c8b0b4d88382"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.0/bayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/666629372"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-arm64-musl"]
-checksum = "sha256:72fb474186479a52dcb25d724adae04caf78984ddae8145ee34d1b7fa012595e"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.65.0/bayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/657413295"
+checksum = "sha256:3173d4e2cd83adab763bfe0160a445fb686df1de0cfca43b8954c8b0b4d88382"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.0/bayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/666629372"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-x64"]
-checksum = "sha256:72fb474186479a52dcb25d724adae04caf78984ddae8145ee34d1b7fa012595e"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.65.0/bayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/657413291"
+checksum = "sha256:3173d4e2cd83adab763bfe0160a445fb686df1de0cfca43b8954c8b0b4d88382"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.0/bayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/666629370"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-x64-musl"]
-checksum = "sha256:72fb474186479a52dcb25d724adae04caf78984ddae8145ee34d1b7fa012595e"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.65.0/bayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/657413291"
+checksum = "sha256:3173d4e2cd83adab763bfe0160a445fb686df1de0cfca43b8954c8b0b4d88382"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.0/bayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/666629370"
 
 [tools."github:bonisoft3/bayt"."platforms.macos-arm64"]
-checksum = "sha256:72fb474186479a52dcb25d724adae04caf78984ddae8145ee34d1b7fa012595e"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.65.0/bayt-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/657413283"
+checksum = "sha256:3173d4e2cd83adab763bfe0160a445fb686df1de0cfca43b8954c8b0b4d88382"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.0/bayt-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/666629366"
 
 [tools."github:bonisoft3/bayt"."platforms.macos-x64"]
-checksum = "sha256:72fb474186479a52dcb25d724adae04caf78984ddae8145ee34d1b7fa012595e"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.65.0/bayt-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/657413289"
+checksum = "sha256:3173d4e2cd83adab763bfe0160a445fb686df1de0cfca43b8954c8b0b4d88382"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.0/bayt-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/666629369"
 
 [tools."github:bonisoft3/bayt"."platforms.windows-arm64"]
-checksum = "sha256:72fb474186479a52dcb25d724adae04caf78984ddae8145ee34d1b7fa012595e"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.65.0/bayt-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/657413282"
+checksum = "sha256:3173d4e2cd83adab763bfe0160a445fb686df1de0cfca43b8954c8b0b4d88382"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.0/bayt-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/666629371"
 
 [tools."github:bonisoft3/bayt"."platforms.windows-x64"]
-checksum = "sha256:72fb474186479a52dcb25d724adae04caf78984ddae8145ee34d1b7fa012595e"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.65.0/bayt-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/657413288"
+checksum = "sha256:3173d4e2cd83adab763bfe0160a445fb686df1de0cfca43b8954c8b0b4d88382"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.0/bayt-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/666629365"
 
 [[tools."github:bonisoft3/mecha"]]
-version = "0.14.0"
+version = "0.15.0"
 backend = "github:bonisoft3/mecha"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-arm64"]
-checksum = "sha256:fa789f7e9a8b030fe655a8036b721e8ef36ecdd03c980d6039930d6ab4e75099"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.14.0/mecha-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/660874790"
+checksum = "sha256:2a387d7bdea8ebe915da96c013c6559cf7bbf745202c41d5604536c89ac6e2b8"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.15.0/mecha-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/666664474"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-arm64-musl"]
-checksum = "sha256:fa789f7e9a8b030fe655a8036b721e8ef36ecdd03c980d6039930d6ab4e75099"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.14.0/mecha-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/660874790"
+checksum = "sha256:2a387d7bdea8ebe915da96c013c6559cf7bbf745202c41d5604536c89ac6e2b8"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.15.0/mecha-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/666664474"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-x64"]
-checksum = "sha256:fa789f7e9a8b030fe655a8036b721e8ef36ecdd03c980d6039930d6ab4e75099"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.14.0/mecha-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/660874794"
+checksum = "sha256:2a387d7bdea8ebe915da96c013c6559cf7bbf745202c41d5604536c89ac6e2b8"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.15.0/mecha-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/666664469"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-x64-musl"]
-checksum = "sha256:fa789f7e9a8b030fe655a8036b721e8ef36ecdd03c980d6039930d6ab4e75099"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.14.0/mecha-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/660874794"
+checksum = "sha256:2a387d7bdea8ebe915da96c013c6559cf7bbf745202c41d5604536c89ac6e2b8"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.15.0/mecha-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/666664469"
 
 [tools."github:bonisoft3/mecha"."platforms.macos-arm64"]
-checksum = "sha256:fa789f7e9a8b030fe655a8036b721e8ef36ecdd03c980d6039930d6ab4e75099"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.14.0/mecha-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/660874789"
+checksum = "sha256:2a387d7bdea8ebe915da96c013c6559cf7bbf745202c41d5604536c89ac6e2b8"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.15.0/mecha-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/666664473"
 
 [tools."github:bonisoft3/mecha"."platforms.macos-x64"]
-checksum = "sha256:fa789f7e9a8b030fe655a8036b721e8ef36ecdd03c980d6039930d6ab4e75099"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.14.0/mecha-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/660874787"
+checksum = "sha256:2a387d7bdea8ebe915da96c013c6559cf7bbf745202c41d5604536c89ac6e2b8"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.15.0/mecha-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/666664472"
 
 [tools."github:bonisoft3/mecha"."platforms.windows-arm64"]
-checksum = "sha256:fa789f7e9a8b030fe655a8036b721e8ef36ecdd03c980d6039930d6ab4e75099"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.14.0/mecha-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/660874791"
+checksum = "sha256:2a387d7bdea8ebe915da96c013c6559cf7bbf745202c41d5604536c89ac6e2b8"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.15.0/mecha-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/666664470"
 
 [tools."github:bonisoft3/mecha"."platforms.windows-x64"]
-checksum = "sha256:fa789f7e9a8b030fe655a8036b721e8ef36ecdd03c980d6039930d6ab4e75099"
-url = "https://github.com/bonisoft3/mecha/releases/download/v0.14.0/mecha-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/660874786"
+checksum = "sha256:2a387d7bdea8ebe915da96c013c6559cf7bbf745202c41d5604536c89ac6e2b8"
+url = "https://github.com/bonisoft3/mecha/releases/download/v0.15.0/mecha-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/666664466"
 
 [[tools."github:bonisoft3/omnishell"]]
-version = "0.14.0"
+version = "0.15.0"
 backend = "github:bonisoft3/omnishell"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-arm64"]
-checksum = "sha256:49daec2735fd226d6cc38eeea2484e2702f4715a113bf6b2a69a5f4f405fe5c9"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.14.0/omnishell-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/660863281"
+checksum = "sha256:7b2108434b5abe7e125a758bbcdddffb44bd5efec9158fd05f964b157ec70049"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.15.0/omnishell-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/666658510"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-arm64-musl"]
-checksum = "sha256:49daec2735fd226d6cc38eeea2484e2702f4715a113bf6b2a69a5f4f405fe5c9"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.14.0/omnishell-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/660863281"
+checksum = "sha256:7b2108434b5abe7e125a758bbcdddffb44bd5efec9158fd05f964b157ec70049"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.15.0/omnishell-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/666658510"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-x64"]
-checksum = "sha256:49daec2735fd226d6cc38eeea2484e2702f4715a113bf6b2a69a5f4f405fe5c9"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.14.0/omnishell-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/660863282"
+checksum = "sha256:7b2108434b5abe7e125a758bbcdddffb44bd5efec9158fd05f964b157ec70049"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.15.0/omnishell-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/666658520"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-x64-musl"]
-checksum = "sha256:49daec2735fd226d6cc38eeea2484e2702f4715a113bf6b2a69a5f4f405fe5c9"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.14.0/omnishell-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/660863282"
+checksum = "sha256:7b2108434b5abe7e125a758bbcdddffb44bd5efec9158fd05f964b157ec70049"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.15.0/omnishell-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/666658520"
 
 [tools."github:bonisoft3/omnishell"."platforms.macos-arm64"]
-checksum = "sha256:49daec2735fd226d6cc38eeea2484e2702f4715a113bf6b2a69a5f4f405fe5c9"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.14.0/omnishell-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/660863278"
+checksum = "sha256:7b2108434b5abe7e125a758bbcdddffb44bd5efec9158fd05f964b157ec70049"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.15.0/omnishell-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/666658509"
 
 [tools."github:bonisoft3/omnishell"."platforms.macos-x64"]
-checksum = "sha256:49daec2735fd226d6cc38eeea2484e2702f4715a113bf6b2a69a5f4f405fe5c9"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.14.0/omnishell-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/660863285"
+checksum = "sha256:7b2108434b5abe7e125a758bbcdddffb44bd5efec9158fd05f964b157ec70049"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.15.0/omnishell-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/666658514"
 
 [tools."github:bonisoft3/omnishell"."platforms.windows-arm64"]
-checksum = "sha256:49daec2735fd226d6cc38eeea2484e2702f4715a113bf6b2a69a5f4f405fe5c9"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.14.0/omnishell-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/660863283"
+checksum = "sha256:7b2108434b5abe7e125a758bbcdddffb44bd5efec9158fd05f964b157ec70049"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.15.0/omnishell-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/666658502"
 
 [tools."github:bonisoft3/omnishell"."platforms.windows-x64"]
-checksum = "sha256:49daec2735fd226d6cc38eeea2484e2702f4715a113bf6b2a69a5f4f405fe5c9"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.14.0/omnishell-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/660863276"
+checksum = "sha256:7b2108434b5abe7e125a758bbcdddffb44bd5efec9158fd05f964b157ec70049"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.15.0/omnishell-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/666658499"
 
 [[tools."github:bonisoft3/pronto"]]
 version = "0.16.0"
@@ -221,48 +221,48 @@ url = "https://github.com/bonisoft3/pronto/releases/download/v0.16.0/pronto-wind
 url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/660889300"
 
 [[tools."github:bonisoft3/sayt"]]
-version = "0.44.2"
+version = "0.45.0"
 backend = "github:bonisoft3/sayt"
 
 [tools."github:bonisoft3/sayt"."platforms.linux-arm64"]
-checksum = "sha256:ab4141053bd7e7300e07c71e51314172076a69cdb67e99bae645790845a54648"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.44.2/sayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/657811780"
+checksum = "sha256:e5f237ad1b5e87343de8e7b6827621a9799b4fe5d8dd12cce4e309f2be8a7176"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.0/sayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/666571348"
 
 [tools."github:bonisoft3/sayt"."platforms.linux-arm64-musl"]
-checksum = "sha256:ab4141053bd7e7300e07c71e51314172076a69cdb67e99bae645790845a54648"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.44.2/sayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/657811780"
+checksum = "sha256:e5f237ad1b5e87343de8e7b6827621a9799b4fe5d8dd12cce4e309f2be8a7176"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.0/sayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/666571348"
 
 [tools."github:bonisoft3/sayt"."platforms.linux-x64"]
-checksum = "sha256:79b0221acb76cd01fd49ea0d93309f1847640685d279935c0ea4517accd59385"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.44.2/sayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/657811868"
+checksum = "sha256:b29c1d84b86b8c1e24327477936756c54bfb61fe5a9df7350f5f9fc82603cb01"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.0/sayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/666571464"
 
 [tools."github:bonisoft3/sayt"."platforms.linux-x64-musl"]
-checksum = "sha256:79b0221acb76cd01fd49ea0d93309f1847640685d279935c0ea4517accd59385"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.44.2/sayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/657811868"
+checksum = "sha256:b29c1d84b86b8c1e24327477936756c54bfb61fe5a9df7350f5f9fc82603cb01"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.0/sayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/666571464"
 
 [tools."github:bonisoft3/sayt"."platforms.macos-arm64"]
-checksum = "sha256:b223dc1e9fe9779ede9aabdfcf71997602fcc85027583fec628edf0372dcd90a"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.44.2/sayt-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/657811853"
+checksum = "sha256:a5884bc47f8248a59224467a00602612ca82a41b881aa15f2a27d59a23e06826"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.0/sayt-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/666571439"
 
 [tools."github:bonisoft3/sayt"."platforms.macos-x64"]
-checksum = "sha256:5f0fc941a7c58de7c93c1d96cbf90192a5f988360242cbecfb1e51f9943d14e2"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.44.2/sayt-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/657811781"
+checksum = "sha256:c81d4ff418f1133eee51f3f9162d7a906dcf622f82be774515dab443c7118e8d"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.0/sayt-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/666571341"
 
 [tools."github:bonisoft3/sayt"."platforms.windows-arm64"]
-checksum = "sha256:fc51c801a3a63734f3cd637615513c237b3dd0760441334c8a2ce0220f4e770a"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.44.2/sayt-windows-arm64.zip"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/657811783"
+checksum = "sha256:eb61d68eb13fa280822cc5399d303e51d7ee503795a487de6c442d2cb75d1ce2"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.0/sayt-windows-arm64.zip"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/666571448"
 
 [tools."github:bonisoft3/sayt"."platforms.windows-x64"]
-checksum = "sha256:5d1cc94647b8d0e78abbe5bc5568906f7bb6d4588a0d5f256d384f792c220152"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.44.2/sayt-windows-x64.zip"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/657811871"
+checksum = "sha256:730e90be08973c3f527f0d81a34379c6a699b9037c7a5cb9e2ee43a7077c93b4"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.0/sayt-windows-x64.zip"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/666571346"
 
 [[tools."github:bufbuild/buf"]]
 version = "1.74.0"

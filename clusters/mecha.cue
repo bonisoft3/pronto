@@ -50,12 +50,12 @@ import (
 #Sourced: impl.#Sourced
 
 published: impl.#Published & {
-	airlock:  "bonitao/mecha-airlock:0.14.0@sha256:bfa39ef21accc0d5f65cba81e62061abc7d5a8ac4e7d84313b4fc0cadbacc783"
-	auth:     "bonitao/mecha-auth:0.14.0@sha256:c6d99ed3fa0fbf9140a374fdee746b14ee066c877dd96bb5d00838fb823785cb"
-	clock:    "bonitao/mecha-clock:0.14.0@sha256:7420c2c8dd00c82a6e06bd2cb81e050ba4f7517a9e0824534c5d96f40f8d8d8e"
-	compute:  "bonitao/mecha-compute:0.14.0@sha256:34a61cb0cb71deb8bf1c943d26ac4d56bdd8b28df6c27d24446ce2669d45e9ec"
-	conduit:  "bonitao/mecha-conduit:0.14.0@sha256:686b942126aa5b867352c439d5988e02e7c5dc0eb1ffe15ed69c9357208845bc"
-	database: "bonitao/mecha-database:0.14.0@sha256:e20f4190063ed50966dc3cb5ef022cc70de6cf7999b4e9c6abff13d7761696e5"
-	mesh:     "bonitao/mecha-mesh:0.14.0@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
-	ticker:   "bonitao/mecha-ticker:0.14.0@sha256:3f020f4d233531de81a2ab3ba31f734149b2ecadf95fca655e48020016ae9140"
+	airlock:  "bonitao/mecha-airlock:0.15.0@sha256:30235c7ad4d07a0339991ef158d476376589659214ad6b401f5b6488138fcb7d"
+	auth:     "bonitao/mecha-auth:0.15.0@sha256:9d963efd8b034f5330e6b572d24c40d76746fa6869d81c35f7df25357add0237"
+	clock:    "bonitao/mecha-clock:0.15.0@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
+	compute:  "bonitao/mecha-compute:0.15.0@sha256:b65cf2ca95e74e6ce889a127eef359d360657249d7c100a6331af807aab35624"
+	conduit:  "bonitao/mecha-conduit:0.15.0@sha256:6d69f4128ebef1b4e0c1a4384204b1da6dfb116c6ce26d3778c307c2e6728d5f"
+	database: "bonitao/mecha-database:0.15.0@sha256:352c3d2664f2595347ab893eae79e47f313bacb42235474e7211aa93cd1740ee"
+	mesh:     "bonitao/mecha-mesh:0.15.0@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
+	ticker:   "bonitao/mecha-ticker:0.15.0@sha256:98acfb434ee857f99368fadde562e95f4ca44f76cf837ae55ff7258b390f3c28"
 }
