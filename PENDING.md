@@ -436,12 +436,11 @@ build reads or writes the Depot bake cache. Checked 2026-10-02.
 `pages` and `cloudflare` are emitted. The remaining designs are
 [release targets](docs/release-targets.md)'s, built on a branch of their own.
 
-**The edge derives nothing and runs no cron**
+**The edge derives nothing**
 ([cloudflare](docs/release-targets.md#cloudflare)): the outbox and Queue, the
 scale-to-zero containers for transform and compute with compute's tables on
-R2, their generation from the compose closure, and the Cron Trigger are
-designed and not built. The object's alarm serves a machine's deadlines
-alone; a cron schedule is refused there.
+R2, and their generation from the compose closure are designed and not built.
+A schedule ticks there, and its tick wakes no drain until the outbox exists.
 
 **`gcp` has no rule**, no `clusters/gcp.cue` and no skaffold profile in
 `builders/bayt.cue` ([the design](docs/release-targets.md#the-clouds-and-k8s)).

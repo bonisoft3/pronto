@@ -2325,16 +2325,18 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_syncTables: [for e in E._serverEntities {e.table}]
 
 	// The refusal that would have caught the original bug: a target whose
-	// schedules nothing wakes. At compose the cluster emits its own clock; at a
-	// target the clock lives in a deploy tree this emitter does not write, and
-	// the failure is silent — the pipelines simply never run. Declaring the
-	// clock is what makes the absence loud, and `meta.clocks` is where the app
-	// says so. The pages target skips schedules (_pagesBundle), so only an
-	// effect asks it for a clock.
+	// schedules nothing wakes. At compose the cluster emits its own clock and
+	// the cloudflare release its Cron Trigger (edge.ts); at a cloud target the
+	// clock lives in a deploy tree this emitter does not write, and the
+	// failure is silent — the pipelines simply never run. Declaring the clock
+	// is what makes the absence loud, and `meta.clocks` is where the app says
+	// so. The pages target skips schedules (_pagesBundle), so only an effect
+	// asks it for a clock; `edgeClock: "disabled"` is a frozen archive saying
+	// in as many words that its schedules do not run there.
 	_timedMachines: (#TimedMachines & {code: E.code}).out
 	_clockDeclared: {
 		for t in E.code.meta.targets {
-			if (t != "pages" && len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0) || (E.code.state.effects != _|_ && len(E.code.state.effects) > 0) {
+			if (t != "pages" && t != "cloudflare" && len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0) || (E.code.state.effects != _|_ && len(E.code.state.effects) > 0) {
 				(t): true & list.Contains(E.code.meta.clocks, t)
 			}
 		}
@@ -3216,7 +3218,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// places it in the database as 800_schedule.sql, and this seeds it
 				// after, one row per declaration. An upsert on the name, which keeps
 				// a watermark a schedule has earned; but initdb runs once per volume,
-				// so nothing restates a schedule on an existing one.
+				// so nothing restates a schedule on an existing one. Fenced for the
+				// page, which runs no clock; the edge's pgdata.ts lifts the fence
+				// and places the table before it.
 				"services/database/migrations/801_schedule_seed.sql": {
 					format: "sql"
 					text: "-- tier: container\n" + strings.Join([for _, sc in E.code.state.schedules {

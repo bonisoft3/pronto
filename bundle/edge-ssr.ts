@@ -1,7 +1,7 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, databaseMode: 'existing' | 'separate' = 'existing', clock: 'deadlines' | 'disabled' = 'deadlines') {
+export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, databaseMode: 'existing' | 'separate' = 'existing', clock: 'ticker' | 'disabled' = 'ticker') {
   out = await Deno.realPath(out)
   const headers = await Deno.readTextFile(path.join(out, 'public/_headers'))
   const policy = headers.match(/^  Content-Security-Policy: (.+)$/m)?.[1]
@@ -49,7 +49,7 @@ export default { fetch() { return new Response(null, { status: 404 }) } }
   await Deno.writeTextFile(path.join(out, 'src/database.ts'), `
 import { RpcTarget } from 'cloudflare:workers'
 import { edgeObject, DataDirectoryLoading } from '${fromSrc(path.join(edge, 'object.ts'))}'
-import { PublicSnapshotCapacity } from '${fromSrc(path.join(edge, 'public-snapshot.ts'))}'
+${separate ? `import { pokeCluster } from '${fromSrc(path.join(edge, 'clock.ts'))}'\n` : ''}import { PublicSnapshotCapacity } from '${fromSrc(path.join(edge, 'public-snapshot.ts'))}'
 import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
@@ -79,7 +79,7 @@ export class Cluster extends Base {
     }
   }
 }
-export default { fetch() { return new Response(null, { status: 404 }) } }
+${separate ? "// The Cron Trigger pokes the object from the Worker that holds it.\nexport default { fetch() { return new Response(null, { status: 404 }) }, scheduled(_controller, env) { return pokeCluster(env) } }" : 'export default { fetch() { return new Response(null, { status: 404 }) } }'}
 `)
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), `
 import { edgeWorker } from '${fromSrc(path.join(edge, 'worker.ts'))}'
@@ -95,7 +95,7 @@ const stripServedReads = (html) => html.replace(/<script type="application\\/jso
 const keyOf = (...parts) => new Request(\`https://edge-cache.invalid/\${parts.map(encodeURIComponent).join('/')}\`)
 const inFlight = new Map()
 export default {
-  async fetch(request, env, ctx) {
+${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, env, ctx) {
     const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
     const found = (request.method === 'GET' || request.method === 'HEAD') ? routeAt(hints, url.pathname, url.search, preferred) : null
@@ -189,8 +189,12 @@ export default {
       linkedom: rel(path.join(server, 'worker/node_modules/linkedom/esm/index.js')),
     },
   }, null, 2) + '\n')
+  // The Cron Trigger (edge.ts) belongs to the Worker holding the object.
+  const triggers = config.triggers
+  delete config.triggers
   const databaseConfig = {
     ...common, name: database, main: 'src/database.ts', workers_dev: false,
+    ...(separate && triggers ? { triggers } : {}),
     version_metadata: { binding: 'CF_VERSION_METADATA' },
     durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
@@ -217,6 +221,7 @@ export default {
     delete config.rules
     delete config.alias
   } else {
+    if (triggers) config.triggers = triggers
     config.migrations ??= databaseConfig.migrations
     config.rules = databaseConfig.rules
     config.alias = databaseConfig.alias
@@ -225,9 +230,9 @@ export default {
 }
 
 if (import.meta.main) {
-  const [out, omnishell, mecha, name, origin, mode = 'existing', clock = 'deadlines'] = Deno.args
-  if (!origin) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin> [existing|separate] [deadlines|disabled]')
+  const [out, omnishell, mecha, name, origin, mode = 'existing', clock = 'ticker'] = Deno.args
+  if (!origin) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin> [existing|separate] [ticker|disabled]')
   if (mode !== 'existing' && mode !== 'separate') throw new Error('database mode must be existing or separate')
-  if (clock !== 'deadlines' && clock !== 'disabled') throw new Error('clock must be deadlines or disabled')
+  if (clock !== 'ticker' && clock !== 'disabled') throw new Error('clock must be ticker or disabled')
   await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, mode, clock)
 }

@@ -74,7 +74,7 @@ import (
 	_valid:    saycfg.say & P.say.say
 	domain:    *"" | string
 	ssrOrigin: *"" | string
-	edgeClock: *"deadlines" | "disabled"
+	edgeClock: *"ticker" | "disabled"
 	// The interpreter's root and mecha's, which the bundler reads from.
 	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
 	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"

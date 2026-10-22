@@ -55,10 +55,11 @@ environment (`SAY_RELEASE_ARGS_SNAPSHOT`, `SAY_RELEASE_ARGS_BASE`), because a
 flag is only a flag to nushell when it is spelled in the call. Deploying is
 never a verb of its own: for `pages` the gesture is the tag push.
 
-Any target other than `pages` where an unsuspended schedule must fire names its clock in
+Any target other than `pages` and `cloudflare` where an unsuspended schedule must fire names its clock in
 `meta.clocks`, or the emitter refuses it (`_clockDeclared`): that clock lives
 in a deploy tree mecha does not write, and without the declaration a schedule
-nothing wakes fails silently. Compose runs the cluster's own clock.
+nothing wakes fails silently. Compose runs the cluster's own clock, and the
+cloudflare release writes its own ([below](#cloudflare)).
 
 **`verify@<target>` adds no checks.** The integrate drivers that measure a
 running app read `APP_URL` ([`base-url.ts`](https://github.com/bonisoft3/omnishell/blob/v0.14.0/base-url.ts)), so
@@ -288,7 +289,7 @@ service, and nothing runs while no one uses the app:
 | database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests only |
 | conduit, mesh-events | an outbox table and a Cloudflare Queue | — | designed |
 | transform, compute | a Container each, from the images bayt builds | after an idle timeout | designed |
-| ticker | the Cron Trigger | — | designed |
+| ticker, clock | the object's alarm, and a Cron Trigger poking it | between occurrences | built |
 | render | none: the page renders, as `pages` does | — | built |
 
 ```
@@ -315,7 +316,10 @@ What fixes its shape, as built:
   in it: [`pgdata.ts`](../bundle/pgdata.ts) applies `rls.sql`, the
   migrations and, for a program with streams or computations, the rows
   `derived.ts` wrote (as for `pages`) with npm's PGlite, the same Postgres the
-  object runs. `--from=<dir>` starts it from a directory built elsewhere
+  object runs. Where the program declares schedules it also applies mecha's
+  `schedule` table, the container image's 800 step, and takes the 801 seed
+  whole — fenced container-tier for the page, which runs no clock, where
+  the object runs one. `--from=<dir>` starts it from a directory built elsewhere
   instead, an archive restored from its database with its pgroll ledger
   ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.14.0/packages/pglite-workerd/restore.ts)),
   applies the cluster's pgroll migrations the ledger lacks, as its migrate step
@@ -340,8 +344,21 @@ What fixes its shape, as built:
 - **Settled reads are the colo's.** A shape response that is not live is a
   prefix of its log, so the Worker answers it again from the Cache API, keyed
   by the object's epoch; a public table's chunks are every guest's.
-- **The derived rows ship as the release found them**: no stream, computation
-  or clock runs at the edge yet.
+- **The derived rows ship as the release found them**: no stream or
+  computation runs at the edge yet.
+- **The clock is two, and sleeps.** The object's alarm stands at the next
+  instant any schedule owes a runnable tick and sweeps as mecha's ticker
+  does; a Cron Trigger (`triggers.crons`, written where the program declares
+  an unsuspended cron schedule or a machine that arms a deadline, and the
+  clock is not disabled) pokes the object hourly from outside it, re-arming
+  an alarm the platform dropped and recording the occurrences a lost span
+  left behind; a publish pokes once.
+  Each wake of the object is a request and a boot, so the alarm, not the
+  trigger, is the resolution: an app with a daily schedule idles inside the
+  Free plan's day (100,000 requests, 13,000 GB-s of object duration, five Cron
+  Triggers an account), where a minutely trigger would hold the object awake
+  for a fifth of it. A drain's tick is a row nothing reads here until the
+  outbox exists.
 
 As designed and [not built](../PENDING.md#release-targets):
 
@@ -361,9 +378,6 @@ As designed and [not built](../PENDING.md#release-targets):
   reads only what it needs. The container classes are generated from the
   compose closure bayt emits, so a service added to the app is a container
   added to the release.
-- **Two clocks**: the Cron Trigger outside the thing woken, as
-  [the ticker](https://github.com/bonisoft3/mecha/blob/v0.14.0/services/ticker/README.md#clocks)
-  requires, and alarms for finer schedules that never run alone.
 - **Cost follows use.** Workers Paid at $5 a month, Containers billed for the
   memory and disk they hold while awake and the CPU they spend, R2 inside its
   free tier: about $5–10 a month for an idle app.
@@ -389,11 +403,12 @@ An app's machines step in the object: the migration declares each step over
 an engine the tier supplies, and the object's is PGlite for workerd's host
 import, handed the machines `edge.ts` renders from the app's rules
 ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.14.0/packages/mecha-edge/README.md#machines)).
-A deadline a machine arms is the object's alarm; an active cron schedule is refused,
-since the edge runs no ticker ([pending](../PENDING.md#release-targets)).
+A deadline a machine arms and a cron schedule the program declares are the
+object's alarm, swept as the ticker sweeps them
+([the clock](https://github.com/bonisoft3/mecha/blob/v0.14.0/packages/mecha-edge/README.md#the-clock)).
 For a frozen archive, `code.meta.edgeClock: "disabled"` emits `--clock disabled`:
-the object preserves schedule rows and clears alarms at boot and delivery.
-The default, `"deadlines"`, runs machine deadlines and accepts suspended cron history.
+the object preserves schedule rows, clears alarms at boot and delivery, and no
+Cron Trigger is written. The default, `"ticker"`, runs them.
 
 ## docker
 

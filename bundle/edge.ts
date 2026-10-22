@@ -4,7 +4,7 @@
 // the data directory the object loads once (publish-edge.ts).
 //
 //   deno run -A --config bundle/deno.json bundle/edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>]
-//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock deadlines|disabled]
+//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]
 //
 // <out>/public   the terminal and app assets; data requests reach the Worker
 // <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
@@ -29,7 +29,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock deadlines|disabled]'
+const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]'
 const app = path.resolve(args.shift() ?? fail(usage))
 const flags: Record<string, string> = {}
 while (args.length) {
@@ -39,8 +39,8 @@ while (args.length) {
 for (const flag of Object.keys(flags)) {
   if (!['--omnishell', '--mecha', '--out', '--domain', '--derived', '--from', '--assets-from', '--ssr-origin', '--ssr-database', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
 }
-const clock = flags['--clock'] ?? 'deadlines'
-if (clock !== 'deadlines' && clock !== 'disabled') fail('--clock must be deadlines or disabled')
+const clock = flags['--clock'] ?? 'ticker'
+if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or disabled')
 const databaseMode = flags['--ssr-database'] ?? 'existing'
 if (databaseMode !== 'existing' && databaseMode !== 'separate') fail('--ssr-database must be existing or separate')
 if (flags['--ssr-database'] && !flags['--ssr-origin']) fail('--ssr-database requires --ssr-origin')
@@ -107,14 +107,27 @@ await run(Deno.execPath(), [
 
 // The app's machines: the migration declared each step over an engine this
 // tier supplies (mecha-edge's machines.ts), so the object is handed the same
-// rules PostgreSQL would run in plv8 (edge-machines.ts).
-const hybridsOut = await new Deno.Command('cue', {
-  args: ['export', '.', '-e', '{hybrids: *code.state.hybrids | {}}', '--out', 'json'],
+// rules PostgreSQL would run in plv8 (edge-machines.ts). And what owes a
+// tick — its cron schedules, its hybrids that arm a deadline; a plv8
+// machine's timers never run here — for the clock outside the object below.
+const stateOut = await new Deno.Command('cue', {
+  args: ['export', '.', '-e', '{hybrids: *code.state.hybrids | {}, crons: [for n, s in code.state.schedules if !s.suspend {n}]}', '--out', 'json'],
   cwd: app, stdout: 'piped', stderr: 'inherit',
 }).output()
-if (!hybridsOut.success) fail('cue export of the machines failed')
-const { hybrids } = JSON.parse(new TextDecoder().decode(hybridsOut.stdout)) as { hybrids: Hybrids }
+if (!stateOut.success) fail('cue export of the machines and schedules failed')
+const { hybrids, crons } = JSON.parse(new TextDecoder().decode(stateOut.stdout)) as { hybrids: Hybrids; crons: string[] }
 if (Object.keys(hybrids).length) await Deno.writeTextFile(path.join(out, 'src/machines.js'), await renderMachines(name, app, omnishell, hybrids))
+
+// The object's clock is the ticker's own sweep (mecha-edge's clock.ts), whose
+// cron reader croner reaches wrangler's bundler through node_modules beside
+// the ticker, installed from its lock.
+await run(Deno.execPath(), ['install', '--frozen'], path.join(mecha, 'services/ticker'))
+// The clock outside the object: a Cron Trigger poking hourly where anything
+// can owe a tick, so the free plan pays a day of object wakes for an alarm
+// the platform lost rather than a minute's; the alarm is the exact one.
+const armed = Object.values(hybrids).some((h) => (h.reducer as { ports?: { wake?: unknown } }).ports?.wake !== undefined)
+const pokes = clock !== 'disabled' && (crons.length > 0 || armed)
+const POKE_CRON = '0 * * * *'
 
 const rel = (p: string) => {
   const r = path.relative(out, p).replaceAll('\\', '/')
@@ -143,6 +156,7 @@ export const Cluster = edgeObject({
   schema: ${JSON.stringify(shell.schema ?? {})},${Object.keys(hybrids).length ? '\n  machines,' : ''}
 })
 export default {
+  scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
     const response = await edgeWorker.fetch(req, env, ctx)
     if (req.method !== 'GET' || response.status !== 200 ||
@@ -165,6 +179,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
   observability: { enabled: true },
+  ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
   ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   rules: [
     { type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false },

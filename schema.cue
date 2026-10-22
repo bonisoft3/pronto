@@ -1730,11 +1730,12 @@ import (
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		domain?: string
 		ssrOrigin?: string
-		// A frozen archive retains its schedules but runs no edge alarms.
-		edgeClock?: "deadlines" | "disabled"
+		// A frozen archive retains its schedules and runs none at the edge.
+		edgeClock?: "ticker" | "disabled"
 		targets: [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
-		// compose clock is emitted by cluster.cue and needs no declaration; a
+		// compose clock is emitted by cluster.cue and the edge's Cron Trigger
+		// by the cloudflare release, so neither needs a declaration; a cloud
 		// target's clock lives in a deploy tree mecha does not write, and the
 		// original bug was not that the clock was in the wrong place but that
 		// nothing could tell. #emit refuses a target that declares a schedule
@@ -2003,7 +2004,7 @@ import (
 		[if len(A._timedMachines) > 0 for target in A.meta.targets if target == "pages" {
 			"server timers cannot target pages"
 		}],
-		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "pages" if !list.Contains(A.meta.clocks, target) {
+		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "pages" if target != "cloudflare" if !list.Contains(A.meta.clocks, target) {
 			"server timers require a declared clock for \(target)"
 		}],
 		[if A.state.machines != _|_ for mn, m in A.state.machines if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if !e.server {

@@ -21,7 +21,7 @@ Deno.test('SSR database generation preserves the clock policy in both database m
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
     await securityHeaders(out)
     for (const mode of ['existing', 'separate'] as const) {
-      for (const clock of ['deadlines', 'disabled'] as const) {
+      for (const clock of ['ticker', 'disabled'] as const) {
         await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
         await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', mode, clock)
         const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
@@ -65,6 +65,35 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
     const links = edgeHints(new Request('https://app.example/'), manifest, (_cfg: unknown, _path: string, _search: string, preferred: string[]) => ({ route: { links: [] }, locale: preferred[0] }), ['en'])
     assert.equal(links, '</en.json>; rel=preload')
   } finally { await Deno.remove(tmp, { recursive: true }) }
+})
+
+Deno.test('the Cron Trigger follows the Worker that holds the object', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    const triggers = { crons: ['0 * * * *'] }
+    for (const mode of ['existing', 'separate'] as const) {
+      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, triggers }))
+      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', mode)
+      const entry = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+      assert.deepEqual(entry.triggers, mode === 'existing' ? triggers : undefined)
+      if (mode === 'separate') assert.deepEqual(JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))).triggers, triggers)
+      const entrySource = await Deno.readTextFile(path.join(out, 'src/index.ts'))
+      const databaseSource = await Deno.readTextFile(path.join(out, 'src/database.ts'))
+      if (mode === 'existing') {
+        assert.match(entrySource, /scheduled: edgeWorker\.scheduled/)
+        assert.doesNotMatch(databaseSource, /scheduled/)
+      } else {
+        assert.doesNotMatch(entrySource, /scheduled/)
+        assert.match(databaseSource, /scheduled\(_controller, env\) \{ return pokeCluster\(env\) \}/)
+      }
+    }
+  } finally { await Deno.remove(out, { recursive: true }) }
 })
 
 Deno.test('separate SSR upgrades pin each entry to its renderer while retaining the database namespace', async () => {

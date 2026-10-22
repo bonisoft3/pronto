@@ -5,7 +5,9 @@
 // Secrets put after a deploy are a version of their own, which a request in
 // between does not see. The load resumes a partial one and leaves a complete
 // directory, live data, alone, unless --reset replaces it: the object answers
-// 503 from the reset until the new directory is complete.
+// 503 from the reset until the new directory is complete. Where the release
+// carries a Cron Trigger, one poke ends the publish, so the object's clock
+// starts now rather than at its first visitor.
 //
 //   deno run -A --config bundle/deno.json bundle/publish-edge.ts <out> --mecha <dir> [--reset]
 import * as path from 'node:path'
@@ -71,7 +73,7 @@ try {
   await Deno.remove(secretsDir, { recursive: true })
 }
 console.log(deployed)
-const settings = JSON.parse(await Deno.readTextFile(config)) as { routes?: { pattern: string }[] }
+const settings = JSON.parse(await Deno.readTextFile(config)) as { routes?: { pattern: string }[]; triggers?: { crons: string[] } }
 const origin = settings.routes?.length ? `https://${settings.routes[0].pattern}` : /https:\/\/\S+\.workers\.dev/.exec(deployed)?.[0] ?? fail('wrangler deploy named no workers.dev URL')
 const send = (route: string, init?: RequestInit) => {
   const headers = new Headers(init?.headers)
@@ -106,5 +108,15 @@ if (ssr) {
   const warm = await fetch(`${origin}/`, { headers: { accept: 'text/html' } })
   await warm.body?.cancel()
   if (!warm.ok) fail(`warming ${origin}/ answered ${warm.status}`)
+}
+// The Cron Trigger is the object's Worker's: database.jsonc where there is one.
+let triggers = settings.triggers
+try { triggers ??= (JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))) as { triggers?: { crons: string[] } }).triggers }
+catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+if (triggers) {
+  const poked = await fetch(`${origin}/poke?caller=publish`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })
+  const report = await poked.text()
+  if (!poked.ok) fail(`deployed and loaded, and the poke answered ${poked.status}: ${report}`)
+  console.log(report)
 }
 console.log(JSON.stringify({ origin, loaded }))
