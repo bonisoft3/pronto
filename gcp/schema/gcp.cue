@@ -292,6 +292,11 @@ import (
 						{name: "IMGPROXY_BIND", value: ":\(P.imgproxy)"},
 						{name: "IMGPROXY_MAX_SRC_RESOLUTION", value: "50"},
 						{name: "IMGPROXY_ALLOWED_SOURCES", value: "s3://mecha-objects/"},
+						// mecha's presets alone (its #ImgproxyPresets), as compose's imgproxy: no
+						// key signs a URL.
+						{name: "IMGPROXY_ONLY_PRESETS", value: "true"},
+						{name: "IMGPROXY_PRESETS", value: "thumb=rs:fill:128:128/f:webp,avatar=rs:fill:256:256/f:webp,picture=rs:fit:1024:1024/f:webp"},
+						{name: "IMGPROXY_MAX_RESULT_DIMENSION", value: "1024"},
 						{name: "IMGPROXY_SET_CANONICAL_HEADER", value: "false"},
 						{name: "IMGPROXY_CACHE_CONTROL_PASSTHROUGH", value: "true"},
 					]

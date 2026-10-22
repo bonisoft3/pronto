@@ -1807,7 +1807,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	    RAISE SQLSTATE 'PT401' USING MESSAGE = 'an account uploads';
 	  END IF;
 	  IF h->>'x-forwarded-method' IS DISTINCT FROM 'PUT'
-	    OR coalesce(h->>'x-forwarded-uri', '') !~ ('^/blobs/mecha-objects/' || auth_uid()::text || '/[0-9a-f-]{36}[.](png|jpg|jpeg|webp)$') THEN
+	    OR coalesce(h->>'x-forwarded-uri', '') !~ ('^/blobs/mecha-objects/' || auth_uid()::text || '/[0-9a-f-]{36}[.](png|jpg|jpeg|webp)$')
+	    -- S3's own headers would make the PUT something else: a copy of another object
+	    -- (x-amz-copy-source) past the size bound, say. Only a request's signing ones pass.
+	    OR EXISTS (SELECT FROM jsonb_object_keys(h) k WHERE k LIKE 'x-amz-%' AND k NOT IN ('x-amz-content-sha256', 'x-amz-date')) THEN
 	    RAISE SQLSTATE 'PT403' USING MESSAGE = 'an account writes a picture under its own id, and nothing else';
 	  END IF;
 	  RETURN true;

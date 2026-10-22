@@ -284,6 +284,8 @@ Deno.test("the blob plane runs over the release's bucket, behind the door", asyn
   assertEquals(env(by("caddy")).PRONTO_UPSTREAM_IMGPROXY, "127.0.0.1:8081");
   assertEquals(env(by("rclone-s3")).RCLONE_CONFIG_OBJECTS_UPSTREAMS, "mecha-objects=gcs:brawl-chess-battlechess-blobs");
   assertEquals(env(by("imgproxy")).IMGPROXY_ALLOWED_SOURCES, "s3://mecha-objects/");
+  assertEquals(env(by("imgproxy")).IMGPROXY_ONLY_PRESETS, "true");
+  assertStringIncludes(env(by("imgproxy")).IMGPROXY_PRESETS ?? "", "avatar=rs:fill:256:256/f:webp");
   assertEquals(env(by("imgproxy")).IMGPROXY_S3_ENDPOINT, "http://127.0.0.1:3900");
   const deps = JSON.parse(r.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
   assertEquals(deps.caddy.includes("rclone-s3") && deps.caddy.includes("imgproxy"), true);
