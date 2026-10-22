@@ -1,10 +1,32 @@
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
 import * as path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { parseHTML } from 'npm:linkedom@0.18.4'
 
-import { addressRelease, local, retainReleases } from '../../omnishell/server/release-addresses.ts'
-export { separateAssetDirectories } from '../../omnishell/server/release-addresses.ts'
+/** What this reads of omnishell's release addressing (server/release-addresses.ts). */
+interface Release {
+  imports: Record<string, string>
+  screens: Record<string, string[]>
+  cfg: {
+    routes: { path: string; screen?: string; paths?: Record<string, string>; access?: 'public' | 'private'; ssr?: 'spa' | 'ssg' | 'ssr'; files: Record<string, string | string[]> }[]
+    i18n?: { locales?: Record<string, unknown> }
+    prefix?: string
+  }
+}
+export interface Addresses {
+  local: (value: string, base: string) => string | null
+  addressRelease: (out: string, options?: { htmlSuffix?: string }) => Promise<Release>
+  retainReleases: (out: string, previous: string) => Promise<Set<string>>
+  separateAssetDirectories: (out: string, previous: string) => void
+}
+
+/** omnishell's release addressing, loaded from where the app's mise puts the
+ * interpreter (edge.ts's --omnishell): an installed pronto has no sibling tree
+ * to import it from. */
+export function releaseAddresses(omnishell: string): Promise<Addresses> {
+  return import(pathToFileURL(path.join(omnishell, 'server/release-addresses.ts')).href)
+}
 
 export interface EdgeHints {
   common: string[]
@@ -17,7 +39,8 @@ export interface EdgeHints {
 /** Cloudflare's assets answer `.html` by their own routing rules, take cache
  * rules from `_headers`, and serve `/` from `index.html`; the Worker reads the
  * hints to send each route's preloads as early hints. */
-export async function addressEdgeAssets(out: string, previous?: string): Promise<EdgeHints> {
+export async function addressEdgeAssets(addresses: Addresses, out: string, previous?: string): Promise<EdgeHints> {
+  const { addressRelease, local, retainReleases } = addresses
   const release = await addressRelease(out, { htmlSuffix: '.txt' })
   const { imports, screens, cfg } = release
   await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))

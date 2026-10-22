@@ -33,13 +33,19 @@ const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
  * each filled from the projection's field of the same name. */
 export type Surface = { seat: string[]; public?: string[] };
 
-/** `instrument` is the terminal's fuel instrumentation (omnishell's
- * instrument.ts), passed in because an installed pronto has no sibling to
- * import it from. */
+/** The terminal's fuel instrumentation (omnishell's instrument.ts) and the
+ * SES the rules are hardened under (omnishell's vendored ses.umd.min.js),
+ * passed in because an installed pronto has no sibling tree to read them
+ * from: the caller reads them where mise puts the interpreter. */
+export interface Terminal {
+  instrument: (source: string) => string;
+  ses: string;
+}
+
 export async function compileMechaReducer(
   spec: MechaReducerMachine,
   source: string,
-  instrument: (source: string) => string,
+  terminal: Terminal,
   surface: Surface = { seat: [], public: [] },
 ): Promise<{ source: string; sql: string }> {
   if (!HYBRID_NAME.test(spec.name)) throw new Error("invalid hybrid name");
@@ -67,10 +73,9 @@ export async function compileMechaReducer(
   const facts = jessieFacts(source, "handler");
   if (facts.references.length) throw new Error(`hybrid rules reach ${facts.references.join(", ")}`);
   const runtime = await Deno.readTextFile(new URL("./hybrid-runtime.js", import.meta.url));
-  const ses = await Deno.readTextFile(new URL("../omnishell/interpreter/vendor/ses.umd.min.js", import.meta.url));
   const script = `(() => {
     const spec = harden(${JSON.stringify(spec, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)});
-    const rules = harden(${instrument(`(() => { ${source}\n })()`)});
+    const rules = harden(${terminal.instrument(`(() => { ${source}\n })()`)});
     for (const name of ['project', 'invariant', ...(spec.public ? ['publish'] : []), ...(spec.initialize ? [spec.initialize.reduce] : []), ...Object.values(spec.states).flatMap(s => [...Object.values(s.on), ...(s.always ?? [])].flatMap(t => [...(t.reduce ? [t.reduce] : []), ...(t.guard ? [t.guard] : [])]))]) {
       if (!Object.prototype.hasOwnProperty.call(rules, name) || typeof rules[name] !== 'function') throw new Error('hybrid missing function ' + name);
     }
@@ -84,7 +89,7 @@ export async function compileMechaReducer(
   const schema = `hybrid_${spec.name}`;
   const body = `
 if (!globalThis.__prontoHybridSES) {
-  ${ses}
+  ${terminal.ses}
   lockdown({errorTaming: 'unsafe'});
   Object.defineProperty(globalThis, '__prontoHybridSES', {value: true});
 }

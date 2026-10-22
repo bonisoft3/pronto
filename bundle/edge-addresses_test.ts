@@ -1,10 +1,13 @@
 /// <reference lib="dom" />
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseHTML } from 'npm:linkedom@0.18.4'
-import { addressEdgeAssets, separateAssetDirectories } from './edge-addresses.ts'
+import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
 import { edgeHints } from './edge-hints.ts'
 import { acceptedLanguages, routeAt } from '../../omnishell/interpreter/fragment.js'
+
+const addresses = await releaseAddresses(fileURLToPath(new URL('../../omnishell', import.meta.url)))
 
 async function fixture(changed = false, previous?: string) {
   const out = await Deno.makeTempDir({ prefix: 'edge-addresses-' })
@@ -39,7 +42,7 @@ async function fixture(changed = false, previous?: string) {
     await Deno.writeTextFile(path.join(out, name), body)
   }
   try {
-    const hints = await addressEdgeAssets(out, previous)
+    const hints = await addressEdgeAssets(addresses, out, previous)
     const { document } = parseHTML(await Deno.readTextFile(path.join(out, 'index.html')))
     const map = document.getElementById('pronto-assets')!.textContent!
     const imports = JSON.parse(map).imports as Record<string, string>
@@ -104,7 +107,7 @@ Deno.test('a deployment retains verified prior URLs for open tabs without replac
     assert.equal(await Deno.readTextFile(path.join(after.out, before.imports['/shell/a.js'])), before.files['shell/a.js'])
     assert.equal(await Deno.readTextFile(path.join(after.out, 'shell/a.js')), after.files['shell/a.js'])
     for (const dir of [after.out, path.dirname(after.out), path.join(after.out, 'public')]) {
-      assert.throws(() => separateAssetDirectories(after.out, dir), /separate directory trees/)
+      assert.throws(() => addresses.separateAssetDirectories(after.out, dir), /separate directory trees/)
     }
     await Deno.writeTextFile(path.join(before.out, before.imports['/shell/a.js']), 'corrupt')
     await assert.rejects(() => fixture(true, before.out), /identity mismatch/)

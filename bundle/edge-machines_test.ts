@@ -13,6 +13,8 @@ import {
 import { executeHybrid } from "../hybrid-local.ts";
 import { evaluateCaged } from "../../omnishell/interpreter/jessie.js";
 import { fuelMeter, instrument } from "../../omnishell/instrument.ts";
+
+const terminal = { instrument, ses: await Deno.readTextFile(new URL("../../omnishell/interpreter/vendor/ses.umd.min.js", import.meta.url)) };
 import {
   fixture,
   initial,
@@ -55,7 +57,7 @@ Deno.test("edge steps initialize rules and spend initialization fuel on every in
       "play: (state, event, context) => putCard(state, event.payload.card, ++count)",
     )
   }`;
-  const compiled = await compileMechaReducer(spec, stateful, instrument);
+  const compiled = await compileMechaReducer(spec, stateful, terminal);
   const input = () => ({
     state: initial(),
     event: request(0).event,
@@ -93,7 +95,7 @@ Deno.test("a projection cannot catch fuel exhaustion and return a successful edg
     "project: (state, viewer) => { try { while (true) {} } catch {} return ({",
   ).replace(/\}\),\n\};\s*$/, "}); },\n};");
   const limited = { ...spec, fuel: 30 };
-  const compiled = await compileMechaReducer(limited, catches, instrument);
+  const compiled = await compileMechaReducer(limited, catches, terminal);
   const edge = await edgeMachine(limited, catches);
   const input = () => ({
     state: initial(),

@@ -3,9 +3,8 @@ import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
 import { compileHybrid } from "./hybrid.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { type Catalog, CATALOG_SQL, unrecorded } from "./sql-recorded.ts";
-import { instrument } from "../omnishell/instrument.ts";
 import { executeHybrid } from "./hybrid-local.ts";
-import { DATABASE, fixture, initial, quote, request, run, surface, uuid } from "./testdata/hybrid-fixtures.ts";
+import { DATABASE, fixture, initial, quote, request, run, surface, terminal, uuid } from "./testdata/hybrid-fixtures.ts";
 
 Deno.test({ name: "hybrid commands serialize, replay and preserve private projections in PostgreSQL", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   const { spec, rules, compiled } = await fixture();
@@ -243,7 +242,7 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
 
     await t.step("PLV8 uses the same cage and refuses computed ambient authority", async () => {
       for (const [name, expression] of Object.entries({ random: "Math['random']()", database: "({}).constructor.constructor('return plv8')()" })) {
-        const altered = await compileHybrid({ ...spec, name: `truco_${name}` }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", `play: () => ${expression}`), instrument);
+        const altered = await compileHybrid({ ...spec, name: `truco_${name}` }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", `play: () => ${expression}`), terminal);
         await sql(`${surface(`truco_${name}`)} ${altered.sql}`);
         const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
         const failure = await psql(`SELECT hybrid_truco_${name}.step(${quote(input)});`);
@@ -265,7 +264,7 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
       const declaration = await run("cue", ["export", "-", "-e", "reducer"],
         `package proof\nimport pronto "bonisoft.org/plugins/pronto"\nreducer: (pronto.#Reducer & {machine: ${JSON.stringify(machine)}}).out\n`);
       if (!declaration.ok) throw new Error(declaration.err);
-      const composed = await compileHybrid({...JSON.parse(declaration.out), name: "effect_turn"}, rules, instrument);
+      const composed = await compileHybrid({...JSON.parse(declaration.out), name: "effect_turn"}, rules, terminal);
       const files = await emitFiles(paymentProgram());
       await sql(`CREATE ROLE electric;
         CREATE SCHEMA graphile_worker;
@@ -297,7 +296,7 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
     });
 
     await t.step("runaway reducer is terminated by the shared deterministic fuel limit", async () => {
-      const altered = await compileHybrid({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), instrument);
+      const altered = await compileHybrid({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
       await sql(`${surface("truco_spin")} ${altered.sql}`);
       const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
       const start = performance.now();

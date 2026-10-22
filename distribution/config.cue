@@ -9,8 +9,11 @@ import (
 #Version:     "0.17.0"
 #SaytVersion: "0.45.0"
 
-// The hybrid oracle harnesses exercise the checkout's terminal.
-#TestModules: ["hybrid-local.ts", "hybrid-battery.ts"]
+// Checkout-only modules, which read the sibling trees at HEAD: the hybrid
+// oracle harnesses exercise the checkout's terminal, and the portable types
+// are refreshed from the checkout's mecha client. An installed pronto neither
+// type-checks nor runs them (installed_test.ts holds the rest to its own tree).
+#TestModules: ["hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.

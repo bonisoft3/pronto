@@ -21,7 +21,7 @@
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
-import { addressEdgeAssets, separateAssetDirectories } from './edge-addresses.ts'
+import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
 import { releaseScripts } from './edge-scripts.ts'
@@ -53,7 +53,8 @@ const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha roo
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
 const domain = flags['--domain'] ?? ''
 const previousAssets = flags['--assets-from'] ? path.resolve(flags['--assets-from']) : undefined
-if (previousAssets) separateAssetDirectories(out, previousAssets)
+const addresses = await releaseAddresses(omnishell)
+if (previousAssets) addresses.separateAssetDirectories(out, previousAssets)
 
 async function run(cmd: string, args: string[], cwd?: string) {
   const r = await new Deno.Command(cmd, { args, cwd, stdout: 'inherit', stderr: 'inherit' }).output()
@@ -84,7 +85,7 @@ const statics = await new Deno.Command('cue', {
 if (!statics.success) fail('cue export of public assets failed')
 const { statics: terminalStatics, clusterStatics } = JSON.parse(new TextDecoder().decode(statics.stdout)) as { statics: StaticAsset[]; clusterStatics: StaticAsset[] }
 await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
-const hints = await addressEdgeAssets(publicDir, previousAssets)
+const hints = await addressEdgeAssets(addresses, publicDir, previousAssets)
 await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints))
 
 // PGlite for workerd. Bake reads the project's compose from its .bayt/, and a
