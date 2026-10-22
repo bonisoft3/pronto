@@ -45,6 +45,16 @@ say:
         priority: -1
         cmds:
           - do: "nu k8s/release_test.nu"
+      # The identity broker and identity.#Signin (docs/identity.md). The front
+      # runs against a real Hydra, which mise fetches here and no consumer's
+      # toolchain carries.
+      signin:
+        priority: -1
+        cmds:
+          - do: "cue vet -c=false ./identity"
+          - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
+          - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker identity/hydra/fake_test.ts"
+          - do: "mise x github:ory/hydra@26.2.0 -- sh -c 'HYDRA_BIN=$(command -v hydra) deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
       type-system:
         priority: -1
         cmds:
