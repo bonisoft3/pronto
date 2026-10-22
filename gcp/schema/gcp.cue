@@ -291,7 +291,8 @@ import (
 						{name: "AWS_REGION", value: "rclone"},
 						{name: "IMGPROXY_BIND", value: ":\(P.imgproxy)"},
 						{name: "IMGPROXY_MAX_SRC_RESOLUTION", value: "50"},
-						{name: "IMGPROXY_ALLOWED_SOURCES", value: "s3://mecha-objects/"},
+						// The store and Google's photo host, as mecha's #ImgproxySources.
+						{name: "IMGPROXY_ALLOWED_SOURCES", value: "s3://mecha-objects/,https://lh3.googleusercontent.com/"},
 						// mecha's presets alone (its #ImgproxyPresets), as compose's imgproxy: no
 						// key signs a URL.
 						{name: "IMGPROXY_ONLY_PRESETS", value: "true"},
