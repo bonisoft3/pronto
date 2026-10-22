@@ -224,6 +224,9 @@ def ensure-clock [clock: record, token: string, project: string, region: string]
 	} else {
 		gc scheduler jobs create http $clock.name ...$common --headers $header | ignore
 	}
+	# A job made just after the API is enabled can sit past its first slot
+	# until something runs it; running it once also pokes the new revision.
+	gc scheduler jobs run $clock.name --location $region --project $project | ignore
 	print $"gcp: the ticker's clock \(($clock.name)\) pokes ($clock.uri) each minute"
 }
 
