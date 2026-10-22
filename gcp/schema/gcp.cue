@@ -309,6 +309,11 @@ import (
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
 							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"
+							# It also owns the tables under FORCE ROW LEVEL SECURITY and the
+							# SECURITY DEFINER functions that write them, which a superuser
+							# bypasses; BYPASSRLS gives it that back. Sessions that switch
+							# roles still meet every policy.
+							psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
 							"""]
 						env: [
 							{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
