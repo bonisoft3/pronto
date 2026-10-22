@@ -497,7 +497,7 @@ nothing changed pushes the same digests and rolls nothing.
 
 | compose | on GCP |
 |---|---|
-| database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts, and reapplies its hybrid machines' code every release |
+| database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts, and reapplies its re-runnable steps every release |
 | migrate | where the app declares pgroll migrations, the cluster's runner as the Job `<app>-migrate`, after initdb and before the service rolls, as compose runs it on every boot |
 | caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
 | ticker | where the app runs one, one more container of the service, writing through crud with the service role's token (`<app>-service-jwt`, signed with the gateway's secret) |
@@ -529,15 +529,19 @@ What bit on a real instance:
   default of 80, a page load's hatch files beside electric's held live
   requests met "Rate exceeded".
 - **A schema initdb built is not rebuilt.** initdb runs once per database, and
-  only pgroll's migrations reach one it built, with one exception: the hybrid
-  machines' step (`016_mecha_actors.sql`) runs again on every release. It
-  replaces their functions and triggers, so a changed guard, rule or port
-  reaches games already in play, and keeps their tables and instances. A new
-  protocol `version` is refused there, since its instances need a migration.
-  When an app's initdb set changes in ways none carries (a framework upgrade
-  restating its own steps, say), raising `GCP.sqlGeneration` starts it on a
-  new, empty instance (`<app>-db-<n>`); the earlier one keeps its data and its
-  replication slot, untouched, until its owner deletes it.
+  only pgroll's migrations reach one it built, with one exception: the steps
+  emit.cue writes re-runnable run again on every release. `005_create_tables`
+  creates a new entity's table and leaves every other alone; `006_policies`,
+  `007_txid` and `008_publication` restate every policy, trigger and
+  publication; `016_mecha_actors` replaces the hybrid machines' functions and
+  triggers, so a changed guard, rule or port reaches games already in play,
+  keeping their instances, and refuses a new protocol `version`, whose
+  instances need a migration. A column added to an existing entity is still
+  pgroll's: `CREATE TABLE IF NOT EXISTS` keeps the table's shape. When an
+  app's initdb set changes in ways none carries (a framework upgrade restating its own steps, say),
+  raising `GCP.sqlGeneration` starts it on a new, empty instance
+  (`<app>-db-<n>`); the earlier one keeps its data and its replication slot,
+  untouched, until its owner deletes it.
 - **The smallest tier admits about 25 connections**, so the instance is raised
   to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
   container at the instance's address, so crud binds `*`.

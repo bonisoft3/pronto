@@ -272,8 +272,8 @@ import (
 	// The schema, as compose's database builds it on a fresh volume: the app's
 	// database image runs its initdb directory once against Cloud SQL, over the
 	// socket Cloud Run mounts, and a database comment marks it done (as the k8s
-	// release's initdb Job does). The hybrid machines' step and the roles' grant
-	// run every release.
+	// release's initdb Job does). Its re-runnable steps and the roles' grant run
+	// every release.
 	job: {
 		apiVersion: "run.googleapis.com/v1"
 		kind:       "Job"
@@ -296,10 +296,13 @@ import (
 							set -euo pipefail
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
-							  # Its hybrid machines' code is the release's, though: their step (emit.cue's
-							  # 016_mecha_actors.sql) runs again, replacing it and keeping their instances.
-							  hybrids=/docker-entrypoint-initdb.d/016_mecha_actors.sql
-							  if [ -f "$hybrids" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$hybrids"; fi
+							  # Its re-runnable steps are the release's, though (emit.cue's): a new
+							  # entity's table, every policy, trigger and publication, and the hybrid
+							  # machines' code run again, keeping every row.
+							  for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do
+							    f=/docker-entrypoint-initdb.d/$step.sql
+							    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+							  done
 							else
 							  source /usr/local/bin/docker-entrypoint.sh
 							  docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
