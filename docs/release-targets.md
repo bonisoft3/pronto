@@ -1,7 +1,7 @@
 ---
 type: concept
 title: Release targets
-description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, and docker are built, and the clouds and k8s are designed."
+description: "Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, docker and gcp are built, and the other clouds and k8s are designed."
 ---
 
 # Release targets
@@ -11,10 +11,12 @@ emitter projects each into a rule of sayt's `release` verb on the platform of
 the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
-carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare` and
-`docker` are built, `cloudflare` for guests and without derivations, `docker` as
-a single-container standalone appliance. `gcp`, `aws`, `azure` and `k8s` are
-designed and [not built](../PENDING.md#release-targets). How an author releases an app is
+carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare`,
+`docker` and `gcp` are built, `cloudflare` for guests and without derivations,
+`docker` as a single-container standalone appliance, `gcp` for a cluster of the
+database, crud, auth and electric alone, and `k8s` against a named kube context
+([the clouds and k8s](#the-clouds-and-k8s)). `aws` and `azure` are designed
+and [not built](../PENDING.md#release-targets). How an author releases an app is
 [the guide's](../GUIDE.md#release).
 
 ## Targets, platforms and tiers
@@ -40,7 +42,8 @@ designed and [not built](../PENDING.md#release-targets). How an author releases 
 | `pages` | browser | one HTML file | none: the page's fetch shim |
 | `cloudflare` | edge | a Worker, one Durable Object running PGlite, and the data directory it loads | the Worker |
 | `docker` | container | single-container appliance image running postgres, crud, caddy, auth, and process-compose | caddy on port 8080 |
-| `gcp`, `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
+| `gcp` | cloud | images by digest in Artifact Registry, one Cloud Run service and the Job that builds its schema | caddy, the service's ingress container |
+| `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
 | `k8s` | k8s | skaffold's manifests | caddy in the named cluster |
 
 ## What a release is
@@ -464,17 +467,152 @@ What fixes its shape:
   defaulting publication to `ghcr.io/bonisoft3/<app>:<tag>` or the registry
   configured via `${BAYT_DOCKER_REPOSITORY}` and `${BAYT_IMAGE_TAG}`.
 
+## gcp
+
+`sayt release@gcp` runs [`gcp/release.nu`](../gcp/release.nu) with gcloud
+alone — the Cloud CLI installed on the machine, the one tool here the
+toolchain does not pin ([pending](../PENDING.md#release-targets)) — against
+the app's `release.cue`, which declares `GCP:
+schema.#Release & {name, project, region, domain, ...}` and `gcpRelease:
+schema.#Build & {release: GCP}` from [`gcp/schema`](../gcp/schema/gcp.cue).
+Every resource is described before it is made, so a second release with
+nothing changed pushes the same digests and rolls nothing.
+
+| compose | on GCP |
+|---|---|
+| database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts |
+| migrate | where the app declares pgroll migrations, the cluster's runner as the Job `<app>-migrate`, after initdb and before the service rolls, as compose runs it on every boot |
+| caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
+| electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
+| the stack's secrets | Secret Manager, generated once; the database URLs are composed from the passwords there, since Cloud Run expands no `$(VAR)` |
+
+This is mecha's [bundled unit](https://github.com/bonisoft3/mecha/blob/v0.12.1/docs/deployment.md#the-bundled-unit)
+applied to the door: the containers wake together, reach each other on
+localhost, and need no invoker between them. The door dials each upstream at
+its own `PRONTO_UPSTREAM_<SERVICE>`, which a gcp release sets to the
+service's port there and a k8s release to its Dapr sidecar. Electric takes
+3002, since crud holds compose's 3000.
+
+What bit on a real instance:
+
+- **Cloud SQL's `postgres` is no superuser.** It creates `anon`, `app_user`
+  and `service` with admin over them but no `SET`, so PostgREST could not
+  switch into `anon`; initdb grants them to it on every release.
+- It does grant `BYPASSRLS` and `REPLICATION` to a role it made, so electric's
+  role is compose's.
+- **Electric's storage cannot be a bucket.** Its shape metadata is SQLite,
+  which a GCS bucket mounted over FUSE cannot lock, so a restarted instance
+  failed to migrate it; mecha's GCP deployment predates that store.
+- **One instance takes 1000 requests at once**, Cloud Run's most: at its
+  default of 80, a page load's hatch files beside electric's held live
+  requests met "Rate exceeded".
+- **The smallest tier admits about 25 connections**, so the instance is raised
+  to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
+  container at the instance's address, so crud binds `*`.
+
+The release refuses an app whose compose project runs anything else: the
+change-feed unit, a ticker or clock, the airlock,
+compute, blobs, images or render. A provider's settings come from compose as
+the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
+secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
+release maps it onto the service and prints the DNS records it needs; each of
+`aliases` (www, say) is mapped too, and the door sends it on to the domain
+(`PRONTO_ALIASES`), since a passkey's relying party is the domain alone. A
+domain is verified once by its owner (Search Console) before Google routes it.
+
+A provider is refused at release in two cases that a program's development
+settings produce. One whose issuer or internal address is a developer's machine
+(`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), as the program's
+defaults for a broker on that machine are, would send every reader to their own.
+One the program offers that production does not serve leaves the terminal's
+way in answering 404. `GCP.auth.oidc` gives the provider its production
+settings: a broker the operator runs, or the provider's own issuer with a
+client registered for the domain.
+
+### Previews
+
+`sayt release@gcp --preview=pr-32` releases a pull request's own copy of the
+app beside the released one, and `sayt release@gcp --preview=pr-32 --delete`
+removes it when the pull request closes. A preview is the release's whole
+stack, not a stand-in for it: its own Cloud Run service (`<service>-pr-32`),
+Cloud SQL instance (`<name>-pr-32-db`), initdb and migrate jobs, and secrets,
+so it builds its schema and carries its migrations exactly as the release
+does. Each thing two copies could not share is its own: the `postgres` and
+`electric` passwords are the instance's, and electric's replication slot is
+named alike in every database. It answers at its run.app address alone, with
+no domain or alias mapped, so a passkey made there belongs to the preview.
+Its images are tagged for it in the repository it releases to; the service
+names them by digest, as the release's does.
+
+What fixes its shape:
+
+- **An instance each.** A first release of a preview waits several minutes
+  for Cloud SQL; later pushes reuse it. The smallest tier costs cents a day,
+  and `--delete` removes it.
+- **A project of its own.** A preview runs a pull request's code, deployed by
+  whatever the pull request's workflow signs in as. With `previewProject` set
+  on the release, every preview lives there: its service, instance, jobs,
+  secrets, images and account. The deployer holds roles there alone and none
+  in the released app's project, so a pull request cannot reach the release.
+  Conditions on resource names cannot give the same: Cloud Run does not
+  recognize `resource.name` in IAM Conditions, so a role on its services would
+  reach the release's service too. Absent, previews run beside the release.
+- **No say over the project.** A preview's release enables no API, makes no
+  repository or service account and grants no role. Previews share one
+  account, `<name>-preview`, which the project's owner makes once; the release
+  refuses to run without it, or without the repository.
+- **`--delete` names a preview.** Without `--preview` it refuses: a release is
+  never deleted here.
+
+What the owner does once, for an app `<name>` whose previews run in project
+`<previews>` (number `<number>`, given the release as `previewProject`), released
+from a GitHub repository `<owner>/<repo>`:
+
+```sh
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com \
+  secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project <previews>
+gcloud artifacts repositories create pronto --repository-format docker --location <region> --project <previews>
+gcloud iam service-accounts create <name>-preview --project <previews>
+for role in roles/cloudsql.client roles/secretmanager.secretAccessor; do
+  gcloud projects add-iam-policy-binding <previews> --role $role --condition None \
+    --member serviceAccount:<name>-preview@<previews>.iam.gserviceaccount.com
+done
+gcloud iam workload-identity-pools create github --project <previews> --location global
+gcloud iam workload-identity-pools providers create-oidc github --project <previews> \
+  --location global --workload-identity-pool github \
+  --issuer-uri https://token.actions.githubusercontent.com \
+  --attribute-mapping google.subject=assertion.sub,attribute.repository=assertion.repository \
+  --attribute-condition "assertion.repository == '<owner>/<repo>'"
+gcloud iam service-accounts create preview-deployer --project <previews>
+gcloud iam service-accounts add-iam-policy-binding preview-deployer@<previews>.iam.gserviceaccount.com \
+  --role roles/iam.workloadIdentityUser \
+  --member principalSet://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/github/attribute.repository/<owner>/<repo>
+for role in roles/run.admin roles/cloudsql.admin roles/secretmanager.admin roles/browser; do
+  gcloud projects add-iam-policy-binding <previews> --role $role --condition None \
+    --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
+done
+gcloud artifacts repositories add-iam-policy-binding pronto --location <region> --project <previews> \
+  --role roles/artifactregistry.writer --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
+gcloud iam service-accounts add-iam-policy-binding <name>-preview@<previews>.iam.gserviceaccount.com \
+  --role roles/iam.serviceAccountUser --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
+```
+
+The repository's workflow signs in through the provider as the deployer: its
+variables `GCP_WORKLOAD_IDENTITY_PROVIDER`
+(`projects/<number>/locations/global/workloadIdentityPools/github/providers/github`)
+and `GCP_PREVIEW_DEPLOYER` (`preview-deployer@<previews>.iam.gserviceaccount.com`).
+
 ## The clouds and k8s
 
 A cloud target carries users, so its floor is dollars a month rather than
 requests a day, and it is tuned for low cost and for scaling with no hand on
 it. Each service of the compose stack becomes the cloud's managed equivalent
-running the images bayt builds, declared as Kubernetes resources that the
-cloud's own controller reconciles:
+running the images bayt builds, declared as resources the cloud's own tool
+applies:
 
 | target | controller | compute | database |
 |---|---|---|---|
-| `gcp` | Config Connector | Cloud Run | Cloud SQL |
+| `gcp` | gcloud ([built](#gcp)) | Cloud Run | Cloud SQL |
 | `aws` | ACK | ECS Express Mode on Fargate | Aurora Serverless v2, from 0.5 ACU |
 | `azure` | Azure Service Operator v2 | Container Apps | Flexible Server, B1ms |
 | `k8s` | skaffold, against a named kube context | mecha's images, scaled from zero by KEDA | CloudNativePG |
@@ -514,6 +652,10 @@ release metadata.
 - **A multicloud target on Crossplane** — deferred until partitioning and
   disaster recovery are solved: with one writer in one region, a second cloud
   is a second bill and not a second chance.
+- **Config Connector for `gcp`** — it reconciles from inside a Kubernetes
+  cluster, GKE or Config Controller, whose bill is a floor beside the
+  database's for an app that otherwise scales to zero; gcloud applies the same
+  declarative documents (`gcloud run services replace`) with none.
 - **Neon as `gcp`'s database** — its regions are another cloud's, so every
   query would cross between clouds.
 - **Postgres at the edge** — it needs fork, threads and sockets, which an

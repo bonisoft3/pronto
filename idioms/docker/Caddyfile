@@ -101,6 +101,11 @@
   # read by a template as `http.vars.origin`. The deployment's, never the
   # request's: this door answers any Host (mecha's docs/proxy.md, "The origin").
   vars origin {$ORIGIN}
+  # Another name the deployment answers to (a gcp release's aliases, such as
+  # www) sends the reader on to the origin: a passkey's relying party is the
+  # origin alone. Unset, it names a host nobody asks for.
+  @alias host {$PRONTO_ALIASES:alias.invalid}
+  redir @alias {$ORIGIN}{uri} 308
   # The interpreter ships as plain ES modules plus a vendored data-plane
   # driver measured in hundreds of KiB; compression at the door is what keeps
   # a cold cache from paying for that in seconds on a slow link.
@@ -143,15 +148,17 @@
   handle /manifest.json {
     redir /manifest.webmanifest 308
   }
-  # Every upstream is dialed at $PRONTO_MESH when set and named by
-  # dapr-app-id: a k8s release sets it to the caddy pod's Dapr sidecar, which
-  # routes by that header (service invocation) and keeps the path; compose and
-  # docker leave it unset and dial the service directly.
+  # Every upstream is dialed at its own PRONTO_UPSTREAM_<SERVICE> when set and
+  # named by dapr-app-id: a k8s release sets each to the caddy pod's Dapr
+  # sidecar, which routes by that header (service invocation) and keeps the
+  # path; a gcp release to the service's localhost port in the one Cloud Run
+  # instance they share; compose and docker leave them unset and dial the
+  # service directly.
   handle /crud/* {
     uri strip_prefix /crud
     @post method POST
     request_header @post Prefer "return=representation,resolution=ignore-duplicates"
-    reverse_proxy {$PRONTO_MESH:crud:3000} {
+    reverse_proxy {$PRONTO_UPSTREAM_CRUD:crud:3000} {
       header_up dapr-app-id crud
       import bounded-crud
     }
@@ -173,7 +180,7 @@
     # refuses the parameter the proxy itself just set. Inside, these run as
     # written.
     route {
-      forward_auth {$PRONTO_MESH:auth:9999} {
+      forward_auth {$PRONTO_UPSTREAM_AUTH:auth:9999} {
         uri /auth/shape/verify
         header_up dapr-app-id auth
         import bounded-auth
@@ -182,7 +189,7 @@
       # proxy and never sent by a client. It is set after the gate, so a client
       # that supplies its own is refused there rather than silently overwritten.
       uri query secret {$ELECTRIC_SECRET}
-      reverse_proxy {$PRONTO_MESH:electric:3000} {
+      reverse_proxy {$PRONTO_UPSTREAM_ELECTRIC:electric:3000} {
         header_up dapr-app-id electric
         flush_interval -1
         import bounded-electric
@@ -202,7 +209,7 @@
   # prefix. Ships unconditionally — in a cluster without an auth service
   # the upstream never resolves and this unused route just 502s.
   handle /auth/* {
-    reverse_proxy {$PRONTO_MESH:auth:9999} {
+    reverse_proxy {$PRONTO_UPSTREAM_AUTH:auth:9999} {
       header_up dapr-app-id auth
       import bounded-auth
     }
@@ -211,7 +218,7 @@
   # for the same reason: the ticker answers POST /poke and 404s everything
   # else, so stripping would 404 every poke.
   handle /poke {
-    reverse_proxy {$PRONTO_MESH:ticker:9998} {
+    reverse_proxy {$PRONTO_UPSTREAM_TICKER:ticker:9998} {
       header_up dapr-app-id ticker
       import bounded-ticker
     }
@@ -221,14 +228,14 @@
   # unused routes just 502.
   handle /blobs/* {
     uri strip_prefix /blobs
-    reverse_proxy {$PRONTO_MESH:rclone-s3:3900} {
+    reverse_proxy {$PRONTO_UPSTREAM_RCLONE_S3:rclone-s3:3900} {
       header_up dapr-app-id rclone-s3
       import bounded-blobs
     }
   }
   handle /img/* {
     uri strip_prefix /img
-    reverse_proxy {$PRONTO_MESH:imgproxy:8081} {
+    reverse_proxy {$PRONTO_UPSTREAM_IMGPROXY:imgproxy:8081} {
       header_up dapr-app-id imgproxy
       import bounded-blobs
     }

@@ -312,7 +312,9 @@ def test_dapr_annotations [] {
 		assert ($yaml | str contains $"dapr.io/app-id: ($id)\n")
 	}
 	assert ($yaml | str contains "dapr.io/config: sample-dapr-config")
-	assert ($yaml | str contains "name: PRONTO_MESH\n              value: localhost:3500")
+	for up in ["CRUD" "AUTH" "ELECTRIC" "TICKER" "RCLONE_S3" "IMGPROXY" "RENDER"] {
+		assert ($yaml | str contains $"name: PRONTO_UPSTREAM_($up)\n              value: localhost:3500")
+	}
 	assert ($yaml | str contains "value: http://localhost:3500/v1.0/invoke/caddy/method")
 	assert ($yaml | str contains "name: OTEL_DENO")
 	assert ($yaml | str contains "kind: Configuration")
