@@ -14,7 +14,7 @@ Deno.test("SQL entropy omits UUID version and variant nibbles and fills byte bou
       rules, terminal,
     );
     const draw = compiled.sql.match(
-      /CREATE FUNCTION hybrid_\w+\.draw\(\)[\s\S]*?\$draw\$;/,
+      /CREATE OR REPLACE FUNCTION hybrid_\w+\.draw\(\)[\s\S]*?\$draw\$;/,
     )?.[0];
     assert(draw);
     functions.push(`CREATE SCHEMA hybrid_${name}; ${draw}`);

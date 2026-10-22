@@ -497,7 +497,7 @@ nothing changed pushes the same digests and rolls nothing.
 
 | compose | on GCP |
 |---|---|
-| database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts |
+| database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts, and reapplies its hybrid machines' code every release |
 | migrate | where the app declares pgroll migrations, the cluster's runner as the Job `<app>-migrate`, after initdb and before the service rolls, as compose runs it on every boot |
 | caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
 | electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
@@ -523,6 +523,12 @@ What bit on a real instance:
 - **One instance takes 1000 requests at once**, Cloud Run's most: at its
   default of 80, a page load's hatch files beside electric's held live
   requests met "Rate exceeded".
+- **A schema initdb built is not rebuilt.** initdb runs once per database, and
+  only pgroll's migrations reach one it built, with one exception: the hybrid
+  machines' step (`016_mecha_actors.sql`) runs again on every release. It
+  replaces their functions and triggers, so a changed guard, rule or port
+  reaches games already in play, and keeps their tables and instances. A new
+  protocol `version` is refused there, since its instances need a migration.
 - **The smallest tier admits about 25 connections**, so the instance is raised
   to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
   container at the instance's address, so crud binds `*`.

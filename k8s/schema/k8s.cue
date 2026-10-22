@@ -216,7 +216,14 @@ import (
 				command: ["bash", "-c", """
 					set -euo pipefail
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
-					if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"; exit 0; fi
+					if [ "$marker" = "pronto initdb" ]; then
+					  echo "initdb: already built"
+					  # Its hybrid machines' code is the release's, though: their step (emit.cue's
+					  # 016_mecha_actors.sql) runs again, replacing it and keeping their instances.
+					  hybrids=/docker-entrypoint-initdb.d/016_mecha_actors.sql
+					  if [ -f "$hybrids" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$hybrids"; fi
+					  exit 0
+					fi
 					source /usr/local/bin/docker-entrypoint.sh
 					docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
 					docker_process_init_files /docker-entrypoint-initdb.d/*

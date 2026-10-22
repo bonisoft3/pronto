@@ -120,11 +120,21 @@ return JSON.parse(run(JSON.stringify(input)));
   // The surface's parts, as the surface check reads them: a trigger on a
   // table the machine has no part in would fail the migration.
   const parts = partsOf(spec);
+  const protocol = literal(`Hybrid ${spec.name} protocol ${spec.version}; no public canonical-state access`);
   const sql = `
 -- tier: container
 CREATE EXTENSION IF NOT EXISTS plv8;
 -- tier: any
-CREATE SCHEMA ${schema};
+-- Run again on a database it built, as each release runs it, this replaces the
+-- machine's code and keeps its instances: its tables keep the shape they were
+-- made with, and each instance the protocol it was made under. A new protocol
+-- is a migration's to carry them forward, refused here rather than half applied.
+DO $protocol$ BEGIN
+  IF to_regnamespace(${literal(schema)}) IS NOT NULL AND obj_description(to_regnamespace(${literal(schema)}), 'pg_namespace') IS DISTINCT FROM ${protocol} THEN
+    RAISE EXCEPTION '${schema} holds instances of another protocol than ${spec.version}' USING ERRCODE = '55000';
+  END IF;
+END $protocol$;
+CREATE SCHEMA IF NOT EXISTS ${schema};
 REVOKE ALL ON SCHEMA ${schema} FROM PUBLIC;
 -- A machine's steps run serializable: every interleaving of its transactions
 -- is then some serial order, and the writer retries the transaction a conflict
@@ -137,7 +147,7 @@ DO $isolation$ BEGIN
   IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN ALTER ROLE app_user SET default_transaction_isolation = 'serializable'; END IF;
   IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service') THEN ALTER ROLE service SET default_transaction_isolation = 'serializable'; END IF;
 END $isolation$;
-CREATE FUNCTION ${schema}.serial() RETURNS void LANGUAGE plpgsql AS $serial$
+CREATE OR REPLACE FUNCTION ${schema}.serial() RETURNS void LANGUAGE plpgsql AS $serial$
 BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'a ${spec.name} step runs serializable, not %', current_setting('transaction_isolation') USING ERRCODE = '25000';
@@ -148,28 +158,28 @@ $serial$;
 -- check in one step agrees on it, and no session can set it. A step a timer
 -- delivers is given the tick's time instead (dispatch's at), so a deadline
 -- is decided on the ticker's clock alone.
-CREATE FUNCTION ${schema}.clock() RETURNS bigint LANGUAGE sql STABLE AS $clock$
+CREATE OR REPLACE FUNCTION ${schema}.clock() RETURNS bigint LANGUAGE sql STABLE AS $clock$
 SELECT floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint;
 $clock$;
 REVOKE ALL ON FUNCTION ${schema}.clock() FROM PUBLIC;
-${entropy ? `CREATE FUNCTION ${schema}.draw() RETURNS text LANGUAGE sql AS $draw$
+${entropy ? `CREATE OR REPLACE FUNCTION ${schema}.draw() RETURNS text LANGUAGE sql AS $draw$
 SELECT left(string_agg(substr(hex, 1, 12) || substr(hex, 14, 3) || substr(hex, 18), ''), ${entropy * 2})
 FROM (SELECT replace(gen_random_uuid()::text, '-', '') AS hex FROM generate_series(1, ${Math.ceil(entropy * 2 / 30)})) random;
 $draw$;
 REVOKE ALL ON FUNCTION ${schema}.draw() FROM PUBLIC;
-` : ""}CREATE TABLE ${schema}.instance (
+` : ""}CREATE TABLE IF NOT EXISTS ${schema}.instance (
   id uuid PRIMARY KEY,
   version integer NOT NULL CHECK (version = ${spec.version}),
   revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
   state jsonb NOT NULL
 );
-CREATE TABLE ${schema}.member (
+CREATE TABLE IF NOT EXISTS ${schema}.member (
   instance_id uuid NOT NULL REFERENCES ${schema}.instance,
   actor uuid NOT NULL,
   seat text NOT NULL,
   PRIMARY KEY(instance_id, actor), UNIQUE(instance_id, seat)
 );
-CREATE TABLE ${schema}.receipt (
+CREATE TABLE IF NOT EXISTS ${schema}.receipt (
   instance_id uuid NOT NULL REFERENCES ${schema}.instance,
   actor uuid NOT NULL,
   command_id text NOT NULL,
@@ -186,10 +196,10 @@ CREATE TABLE ${schema}.receipt (
 -- steps nothing. plpgsql resolves the engine when a step runs, so the step is
 -- declared once, on every tier, before any engine exists.
 -- tier: container
-CREATE FUNCTION ${schema}.engine(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};
+CREATE OR REPLACE FUNCTION ${schema}.engine(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};
 REVOKE ALL ON FUNCTION ${schema}.engine(jsonb) FROM PUBLIC;
 -- tier: any
-CREATE FUNCTION ${schema}.step(input jsonb) RETURNS jsonb LANGUAGE plpgsql AS $step$
+CREATE OR REPLACE FUNCTION ${schema}.step(input jsonb) RETURNS jsonb LANGUAGE plpgsql AS $step$
 BEGIN RETURN ${schema}.engine(input); END;
 $step$;
 REVOKE ALL ON FUNCTION ${schema}.step(jsonb) FROM PUBLIC;
@@ -197,7 +207,7 @@ REVOKE ALL ON FUNCTION ${schema}.step(jsonb) FROM PUBLIC;
 -- What every member and, where declared, everyone reads of the instance: its
 -- seats' rows, each column of the surface filled from the view's field of
 -- the same name.
-CREATE FUNCTION ${schema}.settle(game ${schema}.instance, projected jsonb) RETURNS void
+CREATE OR REPLACE FUNCTION ${schema}.settle(game ${schema}.instance, projected jsonb) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, ${schema} AS $settle$
 BEGIN
   INSERT INTO public.${spec.name}_seat AS v (${seatColumns.map(c => `"${c}"`).join(", ")})
@@ -220,7 +230,7 @@ ${spec.public ? `  IF projected->'public' = 'null'::jsonb THEN
 $settle$;
 REVOKE ALL ON FUNCTION ${schema}.settle(${schema}.instance, jsonb) FROM PUBLIC;
 
-CREATE FUNCTION ${schema}.dispatch(instance_id uuid, actor uuid, command_id text, request jsonb, tier text, at bigint DEFAULT NULL)
+CREATE OR REPLACE FUNCTION ${schema}.dispatch(instance_id uuid, actor uuid, command_id text, request jsonb, tier text, at bigint DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, ${schema}
 SET statement_timeout = '5s'
@@ -295,7 +305,7 @@ END;
 $dispatch$;
 REVOKE ALL ON FUNCTION ${schema}.dispatch(uuid, uuid, text, jsonb, text, bigint) FROM PUBLIC;
 
-CREATE FUNCTION ${schema}.deliver(instance_id uuid, event jsonb, at bigint DEFAULT NULL) RETURNS void
+CREATE OR REPLACE FUNCTION ${schema}.deliver(instance_id uuid, event jsonb, at bigint DEFAULT NULL) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, ${schema} AS $deliver$
 DECLARE revision bigint; answer jsonb;
 BEGIN
@@ -313,7 +323,7 @@ REVOKE ALL ON FUNCTION ${schema}.deliver(uuid, jsonb, bigint) FROM PUBLIC;
 
 ${parts.includes("command") ? `-- A command row is the browser's whole request: inserting it dispatches it,
 -- and the receipt is stamped on the row in the same transaction.
-CREATE FUNCTION ${schema}.command() RETURNS trigger
+CREATE OR REPLACE FUNCTION ${schema}.command() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, ${schema} AS $command$
 DECLARE answer jsonb;
 BEGIN
@@ -324,23 +334,23 @@ BEGIN
 END;
 $command$;
 REVOKE ALL ON FUNCTION ${schema}.command() FROM PUBLIC;
-CREATE TRIGGER ${spec.name}_command_dispatch AFTER INSERT ON public.${spec.name}_command
+CREATE OR REPLACE TRIGGER ${spec.name}_command_dispatch AFTER INSERT ON public.${spec.name}_command
   FOR EACH ROW EXECUTE FUNCTION ${schema}.command();` : ""}
 -- Readers write only commands; everything else on the surface is the
 -- machine's, written from inside its SECURITY DEFINER functions.
-CREATE FUNCTION ${schema}.sealed() RETURNS trigger LANGUAGE plpgsql AS $sealed$
+CREATE OR REPLACE FUNCTION ${schema}.sealed() RETURNS trigger LANGUAGE plpgsql AS $sealed$
 BEGIN
   IF current_user::text IN ('app_user', 'anon') THEN RAISE EXCEPTION '% rows are the machine''s', TG_TABLE_NAME USING ERRCODE = '42501'; END IF;
   RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
 END;
 $sealed$;
-${parts.includes("command") ? `CREATE TRIGGER ${spec.name}_command_sealed BEFORE UPDATE OR DELETE ON public.${spec.name}_command
+${parts.includes("command") ? `CREATE OR REPLACE TRIGGER ${spec.name}_command_sealed BEFORE UPDATE OR DELETE ON public.${spec.name}_command
   FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
-${parts.includes("seat") ? `CREATE TRIGGER ${spec.name}_seat_sealed BEFORE INSERT OR UPDATE OR DELETE ON public.${spec.name}_seat
+${parts.includes("seat") ? `CREATE OR REPLACE TRIGGER ${spec.name}_seat_sealed BEFORE INSERT OR UPDATE OR DELETE ON public.${spec.name}_seat
   FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
-${spec.public ? `CREATE TRIGGER ${spec.name}_public_sealed BEFORE INSERT OR UPDATE OR DELETE ON public.${spec.name}_public
+${spec.public ? `CREATE OR REPLACE TRIGGER ${spec.name}_public_sealed BEFORE INSERT OR UPDATE OR DELETE ON public.${spec.name}_public
   FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
-COMMENT ON SCHEMA ${schema} IS ${literal(`Hybrid ${spec.name} protocol ${spec.version}; no public canonical-state access`)};
+COMMENT ON SCHEMA ${schema} IS ${protocol};
 `;
   return { source: script, sql };
 }
