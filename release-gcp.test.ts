@@ -270,3 +270,24 @@ Deno.test("a preview name Cloud Run, Cloud SQL or a secret would refuse is refus
     assertEquals(r.success, false, bad);
   }
 });
+
+// The blob plane (capabilities.blobs): rclone serves the release's bucket as the
+// S3 bucket every app names, imgproxy reads only from it, and the door dials both.
+Deno.test("the blob plane runs over the release's bucket, behind the door", async () => {
+  const blobsPushed = `{${["caddy", "crud", "auth", "electric", "database", "migrate", "rclone-s3", "imgproxy"].map((s, i) => `"${s}": {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+  const r = await built(`{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${blobsPushed}, blobs: {}}`, "service");
+  assertEquals(r.success, true, r.stderr);
+  const containers = r.value.spec.template.spec.containers;
+  const by = (n: string) => containers.find((c: { name: string }) => c.name === n);
+  const env = (c: { env: { name: string; value?: string }[] }) => Object.fromEntries(c.env.filter((e) => e.value).map((e) => [e.name, e.value]));
+  assertEquals(env(by("caddy")).PRONTO_UPSTREAM_RCLONE_S3, "127.0.0.1:3900");
+  assertEquals(env(by("caddy")).PRONTO_UPSTREAM_IMGPROXY, "127.0.0.1:8081");
+  assertEquals(env(by("rclone-s3")).RCLONE_CONFIG_OBJECTS_UPSTREAMS, "mecha-objects=gcs:brawl-chess-battlechess-blobs");
+  assertEquals(env(by("imgproxy")).IMGPROXY_ALLOWED_SOURCES, "s3://mecha-objects/");
+  assertEquals(env(by("imgproxy")).IMGPROXY_S3_ENDPOINT, "http://127.0.0.1:3900");
+  const deps = JSON.parse(r.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy.includes("rclone-s3") && deps.caddy.includes("imgproxy"), true);
+  assertEquals(deps.imgproxy, ["rclone-s3"]);
+  const plain = await built(release(), "service");
+  assertEquals(plain.value.spec.template.spec.containers.some((c: { name: string }) => c.name === "imgproxy"), false);
+});

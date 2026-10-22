@@ -1790,6 +1790,32 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	]
 }
 
+// The blob plane's gate (assets/Caddyfile's /blobs), which caddy asks through
+// the REST gateway before a request reaches the store, since the store
+// authorizes nothing (mecha's docs/capabilities.md#the-blob-plane). A signed-in
+// account may PUT a picture under its own id, and nothing else passes: the store
+// is never listed, read, emptied or written under another's name through the
+// door, and pictures are read through /img, which transcodes them. A refusal is
+// the gateway's own status: 401 without an account, 403 for the rest.
+#blobGateSql: """
+	CREATE OR REPLACE FUNCTION public.blob_gate() RETURNS boolean LANGUAGE plpgsql STABLE SET search_path = pg_catalog, public AS $gate$
+	DECLARE
+	  h jsonb := coalesce(nullif(current_setting('request.headers', true), '')::jsonb, '{}');
+	  guest boolean := coalesce((nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'guest')::boolean, false);
+	BEGIN
+	  IF auth_uid() IS NULL OR guest THEN
+	    RAISE SQLSTATE 'PT401' USING MESSAGE = 'an account uploads';
+	  END IF;
+	  IF h->>'x-forwarded-method' IS DISTINCT FROM 'PUT'
+	    OR coalesce(h->>'x-forwarded-uri', '') !~ ('^/blobs/mecha-objects/' || auth_uid()::text || '/[0-9a-f-]{36}[.](png|jpg|jpeg|webp)$') THEN
+	    RAISE SQLSTATE 'PT403' USING MESSAGE = 'an account writes a picture under its own id, and nothing else';
+	  END IF;
+	  RETURN true;
+	END $gate$;
+	REVOKE ALL ON FUNCTION public.blob_gate() FROM PUBLIC;
+	GRANT EXECUTE ON FUNCTION public.blob_gate() TO anon, app_user;
+	"""
+
 // Default runtime instances, parameterized by the code. program.cue wires
 // them; overrides land in bayt.cue by unification.
 //
@@ -2222,6 +2248,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				compose: {}
 			}
 			meta: served: {ref: ":served", tree: omnishell.#Address.tree, scripts: omnishell.#Address.scripts}
+		}
+		// imgproxy fetches only from the blob store: a URL naming any other source
+		// would have it fetch for whoever asked.
+		if D.code.capabilities.blobs {
+			surface: targets: imgproxy: compose: environment: IMGPROXY_ALLOWED_SOURCES: "s3://mecha-objects/"
 		}
 		// The terminal's server half, where a route asks to be rendered on
 		// request (#Screen.ssr; #emit decides which routes may). It reads the
@@ -3175,9 +3206,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if len(E._accessed) > 0 {
 				"services/database/migrations/006_policies.sql": {
 					format: "sql"
-					text: strings.Join([for ent in E._entities if ent.access != _|_ {
+					text: strings.Join(list.Concat([[for ent in E._entities if ent.access != _|_ {
 						(#policySql & {e: ent, entities: E.code.state.entities}).out
-					}], "\n\n") + "\n"
+					}], [if E.code.capabilities.blobs && E.code.capabilities.auth != _|_ {#blobGateSql}]]), "\n\n") + "\n"
 				}
 			}
 			if len(E._validated) > 0 {

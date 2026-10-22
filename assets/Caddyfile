@@ -186,10 +186,24 @@
   # without the blobs services the upstreams never resolve and these
   # unused routes just 502.
   handle /blobs/* {
-    uri strip_prefix /blobs
-    reverse_proxy {$PRONTO_UPSTREAM_RCLONE_S3:rclone-s3:3900} {
-      header_up dapr-app-id rclone-s3
-      import bounded-blobs
+    # The store authorizes nothing, so the gate decides (emit.cue's
+    # #blobGateSql, asked through the REST gateway, which verifies the
+    # session): an account's PUT of a picture under its own id, at most 5 MB,
+    # and nothing else. `route` keeps these in the order written, as /electric's.
+    route {
+      request_body {
+        max_size 5MB
+      }
+      forward_auth {$PRONTO_UPSTREAM_CRUD:crud:3000} {
+        uri /rpc/blob_gate
+        header_up dapr-app-id crud
+        import bounded-crud
+      }
+      uri strip_prefix /blobs
+      reverse_proxy {$PRONTO_UPSTREAM_RCLONE_S3:rclone-s3:3900} {
+        header_up dapr-app-id rclone-s3
+        import bounded-blobs
+      }
     }
   }
   handle /img/* {

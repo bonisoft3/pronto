@@ -64,6 +64,12 @@ import (
 	// Cloud Scheduler is its clock (mecha's services/ticker, the cloud clock).
 	ticker?: env: [string]: string
 
+	// Present where the app turns the blob plane on (capabilities.blobs): the
+	// store is the same rclone, serving a Cloud Storage bucket as the S3 bucket
+	// every app names (mecha-objects), and imgproxy reads it, both containers of
+	// the service. Filled by the release.
+	blobs?: {}
+
 	auth: {
 		// The providers compose gives the auth service, filled by the release;
 		// overrides here win, as a deployment's environment does in compose.
@@ -105,6 +111,9 @@ import (
 		migrateJob:     "\(R._id)-migrate"
 		// The Cloud Scheduler job that pokes the ticker.
 		clock: "\(R._id)-clock"
+		// The blob plane's bucket, named for the project too: bucket names are
+		// global.
+		bucket: "\(R._project)-\(R._id)-blobs"
 		// Generated once by the release, never a literal in what it renders;
 		// the URLs are composed from the passwords, since Cloud Run expands no
 		// $(VAR) inside a value.
@@ -130,7 +139,7 @@ import (
 
 // Ports inside the shared instance: compose's own, but for electric, whose 3000
 // is crud's.
-#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, ticker: 9998, database: 5432, proxyHealth: 9090}
+#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, ticker: 9998, database: 5432, proxyHealth: 9090, rcloneS3: 3900, imgproxy: 8081}
 
 // The smallest tier admits about 25 connections, fewer than the pools'
 // defaults together; the instance is raised to 50 and the pools capped.
@@ -174,8 +183,9 @@ import (
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
 				"run.googleapis.com/container-dependencies": json.Marshal({
-					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}]])
+					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
+					if R.blobs != _|_ {imgproxy: ["rclone-s3"]}
 					crud: ["cloud-sql-proxy"]
 					auth: ["cloud-sql-proxy"]
 					electric: ["cloud-sql-proxy"]
@@ -199,6 +209,8 @@ import (
 						{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
 						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
 						if R.ticker != _|_ {{name: "PRONTO_UPSTREAM_TICKER", value: "127.0.0.1:\(P.ticker)"}},
+						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_RCLONE_S3", value: "127.0.0.1:\(P.rcloneS3)"}},
+						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_IMGPROXY", value: "127.0.0.1:\(P.imgproxy)"}},
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
 					]])
 					startupProbe: {httpGet: {path: "/health", port: P.caddy}, periodSeconds: 2, failureThreshold: 60}
@@ -252,6 +264,38 @@ import (
 						(secretOf & {env: "SERVICE_JWT", secret: sq.SERVICE_JWT}).out,
 					], [for k, v in R.ticker.env {name: k, value: v}]])
 					startupProbe: {tcpSocket: port: P.ticker, periodSeconds: 2, failureThreshold: 60}
+				}, if R.blobs != _|_ {
+					// mecha's blob plane over the bucket: a combine remote names its root
+					// mecha-objects, and the service's account reaches it with no key.
+					name:  "rclone-s3"
+					image: (imageOf & {svc: "rclone-s3"}).out
+					command: ["rclone"]
+					args: ["serve", "s3", "--addr=0.0.0.0:\(P.rcloneS3)", "--vfs-cache-mode=off", "objects:"]
+					env: [
+						{name: "RCLONE_CONFIG_OBJECTS_TYPE", value: "combine"},
+						{name: "RCLONE_CONFIG_OBJECTS_UPSTREAMS", value: "mecha-objects=gcs:\(R.names.bucket)"},
+						{name: "RCLONE_CONFIG_GCS_TYPE", value: "google cloud storage"},
+						{name: "RCLONE_CONFIG_GCS_ENV_AUTH", value: "true"},
+						{name: "RCLONE_CONFIG_GCS_BUCKET_POLICY_ONLY", value: "true"},
+					]
+					startupProbe: {tcpSocket: port: P.rcloneS3, periodSeconds: 2, failureThreshold: 60}
+				}, if R.blobs != _|_ {
+					name:  "imgproxy"
+					image: (imageOf & {svc: "imgproxy"}).out
+					env: [
+						{name: "IMGPROXY_USE_S3", value: "true"},
+						{name: "IMGPROXY_S3_ENDPOINT", value: "http://127.0.0.1:\(P.rcloneS3)"},
+						// The store takes any key pair; imgproxy's S3 client insists on one.
+						{name: "AWS_ACCESS_KEY_ID", value: "GK000000000000000000000000"},
+						{name: "AWS_SECRET_ACCESS_KEY", value: "0000000000000000000000000000000000000000000000000000000000000000"},
+						{name: "AWS_REGION", value: "rclone"},
+						{name: "IMGPROXY_BIND", value: ":\(P.imgproxy)"},
+						{name: "IMGPROXY_MAX_SRC_RESOLUTION", value: "50"},
+						{name: "IMGPROXY_ALLOWED_SOURCES", value: "s3://mecha-objects/"},
+						{name: "IMGPROXY_SET_CANONICAL_HEADER", value: "false"},
+						{name: "IMGPROXY_CACHE_CONTROL_PASSTHROUGH", value: "true"},
+					]
+					startupProbe: {tcpSocket: port: P.imgproxy, periodSeconds: 2, failureThreshold: 60}
 				}, {
 					name:  "cloud-sql-proxy"
 					image: #Proxy

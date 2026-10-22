@@ -12,7 +12,7 @@ use ../k8s/release.nu [resolve-app]
 # needs what it does not build yet (PENDING.md#release-targets).
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
 # compose's clock is not one of them: Cloud Scheduler is the ticker's clock here.
-const unbuilt = ["mesh-events" "conduit" "transform" "airlock" "compute" "rclone-s3" "imgproxy" "render"]
+const unbuilt = ["mesh-events" "conduit" "transform" "airlock" "compute" "render"]
 
 def --wrapped gc [...args] {
 	let input = $in
@@ -250,6 +250,17 @@ def ensure-clock [clock: record, token: string, project: string, region: string]
 	print $"gcp: the ticker's clock \(($clock.name)\) pokes ($clock.uri) each minute"
 }
 
+# The blob plane's bucket, in the region, its objects the service account's
+# alone: nothing in it is public, since readers reach a picture through the
+# door's /img. Made once; the grant is restated on every release.
+def ensure-bucket [bucket: string, account: string, project: string, region: string] {
+	if not (exists storage buckets describe $"gs://($bucket)" --project $project) {
+		gc storage buckets create $"gs://($bucket)" --project $project --location $region --uniform-bucket-level-access --public-access-prevention | ignore
+	}
+	gc storage buckets add-iam-policy-binding $"gs://($bucket)" --project $project --member $"serviceAccount:($account)" --role roles/storage.objectAdmin | ignore
+	print $"gcp: pictures are kept in gs://($bucket)"
+}
+
 # A preview removed: its service, jobs, instance and secrets. Its images stay
 # for the repository's cleanup policy; nothing the release made is touched.
 def delete-preview [plan: record] {
@@ -306,7 +317,9 @@ export def main [
 	let has_migrate = ("migrate" in $services)
 	# The ticker, where the app declares a schedule or a machine's timer.
 	let has_ticker = ("ticker" in $services)
-	let images = ($runtime | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }))
+	# The blob plane, where the app turns it on: two more containers over a bucket.
+	let has_blobs = ("rclone-s3" in $services)
+	let images = ($runtime | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }))
 	let pushed = if $snapshot { {} } else { ensure-infrastructure $plan0; push-images $app_info.dir $plan0 $name $images }
 
 	# The providers compose gives the auth service, under what release.cue sets.
@@ -320,7 +333,8 @@ export def main [
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
 	let ticker = if $has_ticker { {ticker: {env: ($compose.services.ticker.environment? | default {} | reject -o CRUD_URL SERVICE_JWT PORT)}} } else { {} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate | merge $ticker | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	let blobs = if $has_blobs { {blobs: {}} } else { {} }
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate | merge $ticker | merge $blobs | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	mkdir dist/gcp
@@ -336,6 +350,7 @@ export def main [
 			error make {msg: $"secret ($key) is missing: create it with `gcloud secrets create ($key) --project ($p) --data-file=-`"}
 		}
 	}
+	if $has_blobs { ensure-bucket $plan.names.bucket $plan.names.serviceAccount $p $r }
 	run-job dist/gcp/job.yaml $plan.names.job "building the schema" $p $r
 	if $has_migrate { run-job dist/gcp/migrate.yaml $plan.names.migrateJob "carrying the schema forward" $p $r }
 	gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
