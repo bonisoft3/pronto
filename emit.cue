@@ -2249,11 +2249,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			}
 			meta: served: {ref: ":served", tree: omnishell.#Address.tree, scripts: omnishell.#Address.scripts}
 		}
-		// imgproxy fetches only from the blob store: a URL naming any other source
-		// would have it fetch for whoever asked.
-		if D.code.capabilities.blobs {
-			surface: targets: imgproxy: compose: environment: IMGPROXY_ALLOWED_SOURCES: "s3://mecha-objects/"
-		}
 		// The terminal's server half, where a route asks to be rendered on
 		// request (#Screen.ssr; #emit decides which routes may). It reads the
 		// app through the door, so it waits on the door, and the aggregate
