@@ -33,6 +33,22 @@ const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
  * each filled from the projection's field of the same name. */
 export type Surface = { seat: string[]; public?: string[] };
 
+/** omnishell's SES bundle: the sibling tree in the monorepo, else the omnishell
+ * mise installed beside this release, which has no sibling. */
+async function sesBundle(): Promise<string | URL> {
+  const vendored = "interpreter/vendor/ses.umd.min.js";
+  const sibling = new URL(`../omnishell/${vendored}`, import.meta.url);
+  try {
+    await Deno.stat(sibling);
+    return sibling;
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
+  const out = await new Deno.Command("mise", { args: ["where", "github:bonisoft3/omnishell"], stdout: "piped", stderr: "piped" }).output();
+  if (!out.success) throw new Error(`hybrid needs omnishell's SES: ${new TextDecoder().decode(out.stderr).trim()}`);
+  return `${new TextDecoder().decode(out.stdout).trim()}/${vendored}`;
+}
+
 /** `instrument` is the terminal's fuel instrumentation (omnishell's
  * instrument.ts), passed in because an installed pronto has no sibling to
  * import it from. */
@@ -67,7 +83,7 @@ export async function compileMechaReducer(
   const facts = jessieFacts(source, "handler");
   if (facts.references.length) throw new Error(`hybrid rules reach ${facts.references.join(", ")}`);
   const runtime = await Deno.readTextFile(new URL("./hybrid-runtime.js", import.meta.url));
-  const ses = await Deno.readTextFile(new URL("../omnishell/interpreter/vendor/ses.umd.min.js", import.meta.url));
+  const ses = await Deno.readTextFile(await sesBundle());
   const script = `(() => {
     const spec = harden(${JSON.stringify(spec, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)});
     const rules = harden(${instrument(`(() => { ${source}\n })()`)});
