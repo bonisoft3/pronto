@@ -28,7 +28,7 @@ function fn(name: string, params: Param[], result: string, body: string, declara
   const signature = `${name}(${params.map(p => p.type).join(", ")})`;
   let tag = "$mecha_port$";
   while (body.includes(tag) || declarations.includes(tag)) tag = tag.slice(0, -1) + "_$";
-  return `CREATE FUNCTION ${name}(${args}) RETURNS ${result}
+  return `CREATE OR REPLACE FUNCTION ${name}(${args}) RETURNS ${result}
 LANGUAGE ${language} SECURITY DEFINER SET search_path = pg_catalog
 AS ${tag}
 ${language === "plpgsql" ? `DECLARE ${declarations}\nBEGIN\n${body}\nEND;` : body}
@@ -73,7 +73,7 @@ PERFORM ${s}.publish(instance_id);`, "seeded jsonb;"));
       if (a.params.some(param => ["current_actor", "admission_id", "request_value", "prior", "answer"].includes(param.name))) throw new Error("admission parameter shadows an execution variable");
       if (["step", "settle", "dispatch", "deliver", "publish", "spawn", "wake", "arm", "join", "command", "open", "lease", "prune", "sealed"].includes(a.name)) throw new Error("admission name shadows a Mecha primitive");
       if (p.lease && a.params.length) throw new Error(`${m.name}: a leased machine's admission takes no arguments`);
-      output.push(`CREATE TABLE ${s}.admission_receipt (id uuid PRIMARY KEY, actor uuid NOT NULL, request jsonb NOT NULL, result jsonb, now bigint NOT NULL);`);
+      output.push(`CREATE TABLE IF NOT EXISTS ${s}.admission_receipt (id uuid PRIMARY KEY, actor uuid NOT NULL, request jsonb NOT NULL, result jsonb, now bigint NOT NULL);`);
       const paramsJson = `jsonb_build_object(${a.params.flatMap(param => [lit(param.name), ident(param.name)]).join(", ")})`;
       const checks = a.checks.map(check => `IF (${check.sql}) IS NOT TRUE THEN
 ${check.mode === "error" ? `RAISE EXCEPTION ${lit(check.reason)};` : `answer := jsonb_build_object('kind', 'rejected', 'reason', ${lit(check.reason)}, 'command_id', admission_id);
@@ -130,7 +130,7 @@ RETURN jsonb_build_object('kind', 'accepted');`, `current_actor uuid := public.a
       const args = a?.params.map(param => param.name === a.id ? "NEW.instance_id"
         : param.type === "jsonb" ? `NEW.input::jsonb->${lit(param.name)}`
         : `coalesce(NEW.input::jsonb->>${lit(param.name)}${param.default != null ? `, ${lit(param.default)}` : ""})::${param.type}`).join(", ");
-      output.push(`CREATE FUNCTION ${s}.open() RETURNS trigger
+      output.push(`CREATE OR REPLACE FUNCTION ${s}.open() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $open$
 DECLARE answer jsonb;
 BEGIN
@@ -144,8 +144,8 @@ BEGIN
 END;
 $open$;
 REVOKE ALL ON FUNCTION ${s}.open() FROM PUBLIC;
-CREATE TRIGGER ${m.name}_open_admit AFTER INSERT ON public.${m.name}_open FOR EACH ROW EXECUTE FUNCTION ${s}.open();
-CREATE TRIGGER ${m.name}_open_sealed BEFORE UPDATE OR DELETE ON public.${m.name}_open FOR EACH ROW EXECUTE FUNCTION ${s}.sealed();`);
+CREATE OR REPLACE TRIGGER ${m.name}_open_admit AFTER INSERT ON public.${m.name}_open FOR EACH ROW EXECUTE FUNCTION ${s}.open();
+CREATE OR REPLACE TRIGGER ${m.name}_open_sealed BEFORE UPDATE OR DELETE ON public.${m.name}_open FOR EACH ROW EXECUTE FUNCTION ${s}.sealed();`);
     }
     if (p.lease) {
       const a = p.admission;
@@ -159,14 +159,14 @@ CREATE TRIGGER ${m.name}_open_sealed BEFORE UPDATE OR DELETE ON public.${m.name}
       const heldField = lit(p.lease.held);
       const holds = (who: string, session: string) =>
         `EXISTS (SELECT 1 FROM ${s}.instance i, jsonb_array_elements(i.state->${heldField}) e WHERE i.id = ${who} AND e->>'id' = ${session})`;
-      output.push(`CREATE FUNCTION ${s}.prune(who uuid) RETURNS void
+      output.push(`CREATE OR REPLACE FUNCTION ${s}.prune(who uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $prune$
 BEGIN
   DELETE FROM public.${m.name}_lease l WHERE l.actor = who AND NOT ${holds("who", "l.id")};
 END;
 $prune$;
 REVOKE ALL ON FUNCTION ${s}.prune(uuid) FROM PUBLIC;
-CREATE FUNCTION ${s}.lease() RETURNS trigger
+CREATE OR REPLACE FUNCTION ${s}.lease() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $lease$
 BEGIN
   PERFORM ${s}.serial();
@@ -183,7 +183,7 @@ BEGIN
 END;
 $lease$;
 REVOKE ALL ON FUNCTION ${s}.lease() FROM PUBLIC;
-CREATE TRIGGER ${m.name}_lease_renew AFTER INSERT OR UPDATE OR DELETE ON public.${m.name}_lease FOR EACH ROW EXECUTE FUNCTION ${s}.lease();`);
+CREATE OR REPLACE TRIGGER ${m.name}_lease_renew AFTER INSERT OR UPDATE OR DELETE ON public.${m.name}_lease FOR EACH ROW EXECUTE FUNCTION ${s}.lease();`);
     }
     if (p.wake) {
       event(m, p.wake.event);
@@ -204,7 +204,7 @@ ELSE PERFORM ${s}.arm(game); END IF;`, `game ${s}.instance;`));
       // A deadline is the ticker's: entering a phase that holds one arms a
       // one-shot schedule named by the revision that armed it, and every
       // settle replaces it.
-      output.push(`CREATE FUNCTION ${s}.arm(game ${s}.instance) RETURNS void
+      output.push(`CREATE OR REPLACE FUNCTION ${s}.arm(game ${s}.instance) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $arm$
 DECLARE deadline bigint := (game.state->>${lit(p.wake.deadline)})::bigint;
 BEGIN
@@ -217,7 +217,7 @@ BEGIN
 END;
 $arm$;
 REVOKE ALL ON FUNCTION ${s}.arm(${s}.instance) FROM PUBLIC;
-CREATE FUNCTION ${s}.fire() RETURNS trigger
+CREATE OR REPLACE FUNCTION ${s}.fire() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $fire$
 BEGIN
   PERFORM ${s}.serial();
@@ -228,7 +228,7 @@ BEGIN
 END;
 $fire$;
 REVOKE ALL ON FUNCTION ${s}.fire() FROM PUBLIC;
-CREATE TRIGGER ${m.name}_timer_fire AFTER INSERT ON public.machine_timer_tick FOR EACH ROW EXECUTE FUNCTION ${s}.fire();`);
+CREATE OR REPLACE TRIGGER ${m.name}_timer_fire AFTER INSERT ON public.machine_timer_tick FOR EACH ROW EXECUTE FUNCTION ${s}.fire();`);
     }
     for (const [name, read] of Object.entries(p.reads ?? {})) {
       output.push(fn(`${s}.${ident(name)}`, read.params, read.returns, read.sql, "", "sql"));

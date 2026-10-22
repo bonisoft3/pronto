@@ -61,12 +61,15 @@ Deno.test("the service is one instance at most and none at rest", async () => {
   assertEquals(JSON.parse(a["run.googleapis.com/container-dependencies"]).caddy, ["crud", "auth", "electric"]);
 });
 
-Deno.test("initdb builds the schema once, over the Cloud SQL socket", async () => {
+Deno.test("initdb builds the schema once, and its hybrids' code every release, over the Cloud SQL socket", async () => {
   const r = await built(release(), "job");
   assertEquals(r.success, true, r.stderr);
   assertEquals(r.value.spec.template.metadata.annotations["run.googleapis.com/cloudsql-instances"], "brawl-chess:us-central1:battlechess-db");
   const c = r.value.spec.template.spec.template.spec.containers[0];
-  assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"; else`);
+  assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"\n`);
+  // A guard the app changed reaches a database built before it (a friend's
+  // refused seat, found in production).
+  assertStringIncludes(c.command[2], `if [ -f "$hybrids" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$hybrids"; fi\nelse`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
   assertStringIncludes(c.command[2], "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE");
