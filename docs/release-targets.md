@@ -327,10 +327,24 @@ What fixes its shape, as built:
   applies the cluster's pgroll migrations the ledger lacks, as its migrate step
   would ([`migrate.ts`](https://github.com/bonisoft3/mecha/blob/v0.14.0/packages/pglite-workerd/migrate.ts)),
   and skips the derivation.
-- **Loading is once.** The object opens only a directory whose load verified
-  every chunk; a load resumes where it stopped and leaves a complete
-  directory alone, so a later release changes the Worker and the page and
-  never the data, unless `--reset` replaces it.
+- **Loading is once, and a later release migrates.** The object opens only
+  a directory whose load verified every chunk; a load resumes where it
+  stopped and leaves a complete directory alone, so a later release changes
+  the Worker and the page and never the data, unless `--reset` replaces it.
+  A directory left alone is handed the release's migrations
+  (`migrations.json`: the shell's files and the cluster's pgroll set, by
+  name), and the object applies the ones its ledger lacks and starts over on
+  the new schema. The ledger is the docker appliance's `_pronto_migrations`,
+  with each script's digest beside its name: a directory records what it
+  applied when it was built (a fresh one applies the pgroll set after its
+  files, as a fresh volume's migrate step does), a script the ledger lacks
+  is applied in name order, a seed never, and a recorded file whose text the
+  release changed is refused by name — a live schema moves only by a pgroll
+  migration ([schema change admission](schema-change-admission.md)), never
+  by the entity file a directory already ran. A directory built before the
+  ledger existed is refused too. A refusal rolls every Worker the publish
+  deployed back to the version it replaced, so the site keeps serving the
+  schema it has, and `--reset` loads a directory built for this release.
 - **One object, every user behind one writer.** PGlite is one connection.
   [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.14.0/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and

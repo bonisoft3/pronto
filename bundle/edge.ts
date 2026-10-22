@@ -14,6 +14,9 @@
 //                or, with --from, a copy of a directory built elsewhere (an
 //                archive) with the pgroll migrations its ledger lacks applied
 //                (pgdata.ts), the set read from the app's cluster by cue
+// <out>/migrations.json   the migrations by name, the cluster's pgroll set
+//                among them: what a publish hands a data directory the object
+//                kept (publish-edge.ts)
 // <out>/src/index.ts, <out>/wrangler.jsonc
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +24,7 @@ import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
 import { addressEdgeAssets, separateAssetDirectories } from './edge-addresses.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
+import { releaseScripts } from './edge-scripts.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -90,20 +94,24 @@ const workerd = path.join(mecha, 'packages/pglite-workerd')
 await run('docker', ['buildx', 'bake', `--allow=fs.read=${workerd}`, `--allow=fs.write=${out}`, '-f', 'compose.yaml', '--set', `package.output=type=local,dest=${pglite}`, 'package'], path.join(workerd, '.bayt'))
 await Deno.remove(path.join(pglite, '.bayt'), { recursive: true })
 
-// An archive's missing migrations are the cluster's pgroll set less its ledger.
+// The cluster's pgroll set: what carries a database forward, a fresh
+// directory's and an archive's alike (pgdata.ts), and a kept one's at publish.
 const pgroll = path.join(out, 'pgroll.json')
-if (flags['--from']) {
-  const r = await new Deno.Command('cue', { args: ['export', '.', '-e', 'cluster.state.pgroll', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
-  if (!r.success) fail(`cue export of cluster.state.pgroll exited ${r.code}`)
-  await Deno.writeFile(pgroll, r.stdout)
-}
+const pgrollOut = await new Deno.Command('cue', { args: ['export', '.', '-e', 'cluster.state.pgroll', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
+if (!pgrollOut.success) fail(`cue export of cluster.state.pgroll exited ${pgrollOut.code}`)
+await Deno.writeFile(pgroll, pgrollOut.stdout)
 const cluster = path.join(mecha, 'packages/mecha-browser')
 await run(Deno.execPath(), [
   'run', '-A', '--config', path.join(cluster, 'cluster.deno.json'), '--lock', path.join(cluster, 'deno.lock'), '--frozen',
-  path.join(here, 'pgdata.ts'), app, '--mecha', mecha, '--out', path.join(out, 'pgdata'),
+  path.join(here, 'pgdata.ts'), app, '--mecha', mecha, '--out', path.join(out, 'pgdata'), '--pgroll', pgroll,
   ...(flags['--derived'] ? ['--derived', path.resolve(flags['--derived'])] : []),
-  ...(flags['--from'] ? ['--from', path.resolve(flags['--from']), '--pgroll', pgroll] : []),
+  ...(flags['--from'] ? ['--from', path.resolve(flags['--from'])] : []),
 ])
+
+// What a publish hands a directory the object kept: the scripts a directory
+// is built from (edge-scripts.ts), the pgroll set among them.
+const release = await releaseScripts(app, mecha, shell.migrations, JSON.parse(new TextDecoder().decode(pgrollOut.stdout)))
+await Deno.writeTextFile(path.join(out, 'migrations.json'), JSON.stringify([...release.files.map(({ name, sql }) => ({ name, sql })), ...release.pgroll]))
 
 // The app's machines: the migration declared each step over an engine this
 // tier supplies (mecha-edge's machines.ts), so the object is handed the same
