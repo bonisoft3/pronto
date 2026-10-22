@@ -166,7 +166,9 @@ container database image's `schedule` table, is container-tier.
 **The derived rows ship as the release found them.** The page runs no stream
 and no computation, so for a program that declares either the rule first runs
 [`derived.ts`](../bundle/derived.ts): it brings the app's container cluster up
-under a compose project of its own, waits until it has settled, writes every
+under a compose project of its own from the launch target's closure, which
+publishes no port, so a running launch keeps the door's, waits until it has
+settled, writes every
 live table — the tables a stream or a computation writes without feeding the
 publication — to `dist/derived.sql`, and tears the cluster down. The bundler
 takes that file with `--derived` and the page runs it after the migrations,

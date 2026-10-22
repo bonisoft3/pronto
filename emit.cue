@@ -3957,16 +3957,21 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			data:   E.loop.surface.tasksJson
 		}
 
-		// The pages target's ceremony and its mirror's release. goreleaser is
-		// the shim iris uses, builds skipped and the GitHub release disabled,
-		// so release.nu has a file to run and nothing to publish; the
-		// workflow bundles and deploys the app on its mirror, where copybara
-		// moves it to the root GitHub reads. Inert here.
-		if list.Contains(E.code.meta.targets, "pages") {
+		// The pages, cloudflare and docker ceremonies run release.nu (the
+		// loop's release rule), which refuses to run without a goreleaser
+		// file: this one is the shim iris uses, builds skipped and the GitHub
+		// release disabled, so there is a file to run and nothing to publish.
+		// Inert here. k8s releases by its own engine and carries none of it.
+		if len([for t in E.code.meta.targets if t == "pages" || t == "cloudflare" || t == "docker" {t}]) > 0 {
 			".goreleaser.yaml": {
 				format: "yaml"
 				data: {version: 2, project_name: E.code.meta.name, dist: "dist/goreleaser", builds: [{builder: "zig", skip: true}], release: {disable: true}, changelog: {disable: true}}
 			}
+		}
+		// The pages target's mirror release: the workflow bundles and deploys
+		// the app on its mirror, where copybara moves it to the root GitHub
+		// reads.
+		if list.Contains(E.code.meta.targets, "pages") {
 			// An app at the mirror's root releases from there.
 			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]
 			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
