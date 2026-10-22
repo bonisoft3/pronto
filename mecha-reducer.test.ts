@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { assert, assertEquals } from "jsr:@std/assert@1.0.11";
 import { compileMechaReducer } from "./mecha-reducer.ts";
 import { instrument } from "../omnishell/instrument.ts";
@@ -27,7 +28,7 @@ Deno.test("SQL entropy omits UUID version and variant nibbles and fills byte bou
       "-A",
       "--no-lock",
       "--config",
-      new URL("libraries/mecha/packages/mecha-edge/deno.json", ROOT).pathname,
+      fileURLToPath(new URL("libraries/mecha/packages/mecha-edge/deno.json", ROOT)),
       "-",
     ],
     `

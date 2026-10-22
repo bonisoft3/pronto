@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import {
   assert,
   assertEquals,
@@ -26,7 +27,7 @@ async function edgeMachine(spec: MechaReducerMachine, rules: string) {
     const source = await renderMachines(
       "parity",
       dir,
-      new URL("plugins/omnishell", ROOT).pathname,
+      fileURLToPath(new URL("plugins/omnishell", ROOT)),
       {
         [spec.name]: {
           reducer: spec as unknown as Record<string, unknown> & {
