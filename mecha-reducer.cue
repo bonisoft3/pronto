@@ -39,7 +39,8 @@ import (
 			target?: string
 			guard?:  string
 			reduce?: string
-			requires?: {sql: string, reason: string & =~"^[a-z][a-z0-9_]{0,63}$"}
+			// Tried in order: the first that is not true refuses the event with its reason.
+			requires?: [...{sql: string, reason: string & =~"^[a-z][a-z0-9_]{0,63}$"}]
 			actions?: [...(#MechaAction & {assign?: _|_, lock?: _|_, raise?: #NotifyRaise | [...#NotifyRaise]})]
 		}
 	}
@@ -105,8 +106,8 @@ import (
 		// rules guard's.
 		contracts: {
 			for n, a in _s.actions if (a & [...]) == _|_ {(n): a}
-			for n, g in _s.guards if g.sql == _|_ {(n): {reads: g.reads}}
-			for _, g in _s.guards if g.sql != _|_ if g.rules != _|_ {(g.rules): {reads: [if g.reads != _|_ {g.reads}, []][0]}}
+			for n, g in _s.guards if g.sql == _|_ if g.checks == _|_ {(n): {reads: g.reads}}
+			for _, g in _s.guards if g.sql != _|_ || g.checks != _|_ if g.rules != _|_ {(g.rules): {reads: [if g.reads != _|_ {g.reads}, []][0]}}
 		}
 		events: _s.types.events
 		states: {for sn, st in _c.states {
@@ -134,7 +135,8 @@ import (
 	_effect: {for a in A._actions if A.setup.actions[a] != _|_ if (A.setup.actions[a] & [...]) != _|_ {(a): A.setup.actions[a]}}
 	_reduces: [for a in A._actions if A._effect[a] == _|_ {a}]
 	_effects: list.Concat([for a in A._actions if A._effect[a] != _|_ {A._effect[a]}])
-	_guard: [if A._t.guard != _|_ if A.setup.guards[A._t.guard] != _|_ if A.setup.guards[A._t.guard].sql != _|_ {A.setup.guards[A._t.guard]}, null][0]
+	// A database guard: one sql and its reason, or checks, each with its own reason, tried in order.
+	_guard: [if A._t.guard != _|_ if A.setup.guards[A._t.guard] != _|_ if A.setup.guards[A._t.guard].sql != _|_ || A.setup.guards[A._t.guard].checks != _|_ {A.setup.guards[A._t.guard]}, null][0]
 	out: {
 		if A._t.target != _|_ {target: A._t.target}
 		if len(A._reduces) == 1 {reduce: A._reduces[0]}
@@ -143,7 +145,8 @@ import (
 		if A._t.guard != _|_ if A._guard == null {guard: A._t.guard}
 		if A._guard != null {
 			if A._guard.rules != _|_ {guard: A._guard.rules}
-			requires: {sql: A._guard.sql, reason: A._guard.reason}
+			if A._guard.checks != _|_ {requires: [for c in A._guard.checks {sql: c.sql, reason: c.reason}]}
+			if A._guard.checks == _|_ {requires: [{sql: A._guard.sql, reason: A._guard.reason}]}
 		}
 		if len(A._effects) > 0 {actions: A._effects}
 	}

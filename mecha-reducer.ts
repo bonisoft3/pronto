@@ -23,8 +23,8 @@ export type MechaReducerMachine = {
   public?: Shape;
   contracts?: Record<string, { reads: string[]; writes?: string[] }>;
   events: Record<string, { tier: "omnishell" | "mecha"; payload: Shape }>;
-  mecha?: {ports?: MechaPortSql; locks: string; transitions: {phase: string; event: string; requires?: {sql: string; reason: string}; sql: string}[]};
-  states: Record<string, { final: boolean; always?: { target: string; guard?: string; reduce?: string }[]; on: Record<string, { target?: string; guard?: string; reduce?: string; requires?: { sql: string; reason: string } }> }>;
+  mecha?: {ports?: MechaPortSql; locks: string; transitions: {phase: string; event: string; requires?: {sql: string; reason: string}[]; sql: string}[]};
+  states: Record<string, { final: boolean; always?: { target: string; guard?: string; reduce?: string }[]; on: Record<string, { target?: string; guard?: string; reduce?: string; requires?: { sql: string; reason: string }[] }> }>;
 };
 
 const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
@@ -107,9 +107,9 @@ return JSON.parse(run(JSON.stringify(input)));
   const branches = mecha.transitions.map(t => {
     if (!spec.states[t.phase]?.on[t.event]) throw new Error("Mecha effect names an undeclared transition");
     return `IF game.state->>'phase' = ${literal(t.phase)} AND request->'event'->>'kind' = ${literal(t.event)} THEN
-      ${t.requires ? `IF (${t.requires.sql}) IS NOT TRUE THEN
-        reduced := jsonb_build_object('kind', 'rejected', 'reason', ${literal(t.requires.reason)});
-      ELSE
+      ${t.requires?.length ? `${t.requires.map((r, i) => `${i ? "ELSIF" : "IF"} (${r.sql}) IS NOT TRUE THEN
+        reduced := jsonb_build_object('kind', 'rejected', 'reason', ${literal(r.reason)});
+      `).join("")}ELSE
         ${t.sql}
       END IF;` : t.sql}
     END IF;`;
