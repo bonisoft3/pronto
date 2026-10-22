@@ -142,8 +142,7 @@ two sets, over the kinds and by the rule [SPEC](../SPEC.md#programcue) states.
   what bayt emits — and files every check under the verb whose layer it needs
   ([checks and verbs](component-contracts.md#checks-and-verbs)),
   never a script nobody runs. Pronto's own: `derive`, `types`, `facts`,
-  `proto`, `identity` and `sql` at `lint`, `replay` at `integrate` after the
-  images exist.
+  `proto`, `identity` and `sql` at `lint`, `replay` at `integrate`.
 
 ## The constraint cascade
 

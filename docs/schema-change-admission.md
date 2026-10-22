@@ -141,10 +141,10 @@ replacements must retain the old reader columns and types. Its data and access
 semantics belong in `verify`. Every unnamed relation keeps the strict identity
 check: replacing a cache does not exempt its source tables.
 
-The replay runs on `integrate`, after the app images are built, under its own
-compose project. It drives the host daemon through its socket, so it inspects
-the same images as the app. A fresh bootstrap/restart check without retained
-fixtures does not establish upgrade compatibility.
+The replay runs on `integrate` inside `ci-replay`'s Dockerfile `RUN` layer,
+where `process-compose` brings the database up and runs `replay` against it. A
+fresh bootstrap/restart check without retained fixtures does not establish
+upgrade compatibility.
 
 ## Inspection and hatches
 
@@ -228,8 +228,4 @@ reports as a column gone ([pending](../PENDING.md#the-lattice)).
   ir element with a note.
 - **`WIRE` for buf breaking.** A rename survives binary decoding and breaks the
   JSON every holder reads.
-- **The replay on `test`.** It would grade whatever image the machine held, and
-  a verdict about a schema nobody would deploy reads exactly like one about this
-  tree.
-- **Ordering the replay by its name.** The alphabet is not a contract;
-  `priority` says it runs after the images exist.
+- **The replay on `test`.** It grades the built database and migrate images.

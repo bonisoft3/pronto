@@ -101,7 +101,7 @@ import (
 
 	// Where pronto's scripts sit as a target's command sees them: where mise
 	// resolves it, the pinned release or, under mise.local.toml, the monorepo's.
-	_pronto: "$$(mise where github:bonisoft3/pronto)"
+	_pronto: "$(mise where github:bonisoft3/pronto)"
 	// The image the program evaluates in.
 	_base: ":setup"
 
@@ -216,10 +216,20 @@ import (
 		}
 	}
 
-	// The suites `ci` bakes where it was baked itself (sayt/depot's builder)
-	// rather than on the runner's daemon: a suite that brings up no stack,
-	// such as an overlay's native one. They run first.
-	#ciRemote: *[] | [...string]
+	_processComposeAdd: [{
+		platforms: {
+			amd64: {
+				url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_amd64.tar.gz"
+				checksum: "sha256:9b6dbc38324c0b0481f1cd1dd828ffdc78117129ec797678f4bf8c4023311281"
+			}
+			arm64: {
+				url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_arm64.tar.gz"
+				checksum: "sha256:52fa7d5a2d5e0db470faec5976204fc215ed7e3d13689e930cf522becfb63778"
+			}
+		}
+		dest:   "/usr/local/bin/process-compose"
+		unpack: true
+	}]
 
 	// The terminal's statics served from omnishell's tree (target /omnishell/),
 	// which the caddy copies from that image; the cluster serves the app's
@@ -402,61 +412,54 @@ import (
 				#check:   "visual"
 				deps: list.Concat([[":integrate:srcs", ":integrate:bayt"], B._stackSrcs])
 			}
-			// The migration replay starts throwaway databases from the images the
-			// runtime was built into, so it drives the host's daemon through its
-			// socket; a daemon of its own would hold none of those images. The
-			// image is the program's plus the docker CLI, and what the generated
-			// compose it reads includes: in the monorepo, the siblings' targets.
 			if B.cluster.capabilities.server {
-				"replay": sayt.integrate & B._program & (B._views & {#views: B._imageViews}) & {
-					deps: [B._base]
-					srcs: defaultExclude: "pronto-bayt": null
-					srcs: defaultExclude: "pronto-tests": null
-					cmd: "builtin": null
-					dockerfile: {
-						defaultPreamble: {
-							"docker": {priority: -10, copy: {
-								from: {name: core.lock.images.docker}
-								srcs: ["/usr/local/bin/docker"]
-								dst: "/usr/local/bin/docker"
-							}}
-							"docker-compose": {priority: -9, copy: {
-								from: {name: core.lock.images.docker}
-								srcs: ["/usr/local/libexec/docker/cli-plugins/docker-compose"]
-								dst: "/usr/local/libexec/docker/cli-plugins/docker-compose"
-							}}
-							// Ahead of setup's lazybox, whose `docker` is a stub that
-							// fetches a CLI through mise on every run.
-							"docker-path": {priority: -8, line: "ENV PATH=/usr/local/bin:$PATH"}
+				let schema = B.cluster.surface.schema
+				"replay": core.#target & {
+					activate: "mise x --"
+					entrypoint: {
+						do:    "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."
+						shell: "sh"
+						env: {
+							for k, v in B.cluster.surface.targets[schema.target].compose.environment {(k): v}
+							if schema.pgroll != _|_ for k, v in B.cluster.surface.targets[schema.pgroll.target].compose.environment if k != "DATABASE_URL" {(k): v}
 						}
-					}
-					compose: {
-						volumes: ["//var/run/docker.sock:/var/run/docker.sock"]
-						environment: {
-							// The tag the host's images carry, which the compose the
-							// replay reads interpolates into their names, and the
-							// switch that compose's includes read.
-							BAYT_IMAGE_TAG:        "${BAYT_IMAGE_TAG:-latest}"
-							MONOREPO_COMPOSE_MODE: "${MONOREPO_COMPOSE_MODE:-}"
-						}
-						// The images it replays from, which `up --build` builds and
-						// loads only for the services it starts: compose has no edge
-						// that builds an image without starting its service.
-						let schema = B.cluster.surface.schema
-						depends_on: {
-							"\(project.name)-\(schema.target)": condition: "service_started"
-							if schema.pgroll != _|_ {
-								"\(project.name)-\(schema.pgroll.target)": condition: "service_started"
-							}
-						}
-						// `$$` so compose leaves the substitution to the container's shell.
-						command: ["mise", "x", "--", "sh", "-c", "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."]
+						after: (schema.target): "healthy"
 					}
 				}
-				"ci-replay": sayt.ci & B._ciTask & B._runner & {
-					#closure: "replay"
-					#check:   "replay"
-					deps: [":replay:srcs", ":replay:bayt"]
+				"ci-replay": core.#target & {
+					activate: ""
+					taskfile: incremental: false
+					deps: list.Concat([
+						[B._base, ":\(schema.target)"],
+						[if schema.pgroll != _|_ {":\(schema.pgroll.target)"}],
+					])
+					srcs: globs: [
+						".bayt/process-compose.yaml",
+						".pronto/cluster.json",
+						"services/database/migrations/**",
+						"tests/[r]eplay.json",
+						"tests/[r]eplay/**",
+					]
+					dockerfile: {
+						from: ref: ":\(schema.target)"
+						add: B._processComposeAdd
+						copy: list.Concat([
+							[
+								{from: {ref: B._base}, srcs: ["/root/.local"], dst: "/root/.local"},
+								{from: {ref: B._base}, srcs: ["/monorep[o]"], dst: "/monorepo/"},
+							],
+							[if schema.pgroll != _|_ {{from: {ref: ":\(schema.pgroll.target)"}, srcs: [schema.pgroll.dir], dst: schema.pgroll.dir}}],
+						])
+						preamble: [
+							"ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH",
+							"ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo",
+							"ENV \(B.cluster.meta.door.env)=\(B.cluster.meta.door.port)",
+						]
+					}
+					cmd: builtin: {
+						shell: "sh"
+						do:    "process-compose --no-server -f .bayt/process-compose.yaml run replay"
+					}
 				}
 			}
 
@@ -522,32 +525,22 @@ import (
 			// build per app runs (sayt/depot's `ci`). Each suite brings its own
 			// stack up on the runner's daemon, so they run one at a time.
 			"ci": sayt.ci & B._ciTask & B._runner & {
-				_suites: list.Concat([B.#ciRemote, [for n, _ in project.targets if strings.HasPrefix(n, "ci-") && !list.Contains(B.#ciRemote, n) {n}]])
+				_suites: [for n, _ in project.targets if strings.HasPrefix(n, "ci-") {n}]
 				deps: [for n in _suites for v in ["srcs", "bayt"] {":\(n):\(v)"}]
 				srcs: defaultGlobs: graph: {glob: ".bayt/**"}
-				// The remote suites parse with Depot's frontend, which drops the
-				// pin's variable, so their Dockerfiles carry it as a headline; the
-				// runner's daemon parses with its own and takes them without it.
 				cmd: builtin: do: #"""
 					set -eu
 					export DOCKER_HOST_TCP="$DOCKER_HOST"
 					export DEPOT_DISABLE_OTEL=1
-					[ -n "$DEPOT_TOKEN" ] && bake="depot bake --project $DEPOT_PROJECT_ID" || bake="docker buildx bake"
-					pin() { [ -z "$BUILDKIT_SYNTAX" ] || find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i "$1" {} \; ; }
 					docker compose --profile '*' config -o /tmp/ci-compose.yaml
 					docker buildx bake --allow=fs.read=/ -f /tmp/ci-compose.yaml --print \#(strings.Join(_suites, " ")) > /tmp/ci-bake.json
-					\#([if len(B.#ciRemote) > 0 {"pin \"1i # syntax=$BUILDKIT_SYNTAX\""}, ":"][0])
 					for target in \#(strings.Join(_suites, " ")); do
-					 case " \#(strings.Join(B.#ciRemote, " ")) " in
-					 *" $target "*) executor="$bake" ;;
-					 *) executor="docker buildx bake"; \#([if len(B.#ciRemote) > 0 {"pin '1{/^# syntax=/d;}'"}, ":"][0]) ;;
-					 esac
-					 $executor -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' ${SAYT_NO_CACHE:+--no-cache --set "*.cache-from=" --set "*.cache-to="} ${SAYT_NO_CACHE_FROM:+--set "*.cache-from="} ${SAYT_NO_CACHE_TO:+--set "*.cache-to="} "$target"
+					 docker buildx bake -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' ${SAYT_NO_CACHE:+--no-cache --set "*.cache-from=" --set "*.cache-to="} ${SAYT_NO_CACHE_FROM:+--set "*.cache-from="} ${SAYT_NO_CACHE_TO:+--set "*.cache-to="} "$target"
 					done
 					"""#
 			}
 			if list.Contains(B.meta.targets, "docker") && B.cluster.capabilities.server {
-				"release-docker": {
+				"release-docker": core.#target & {
 					activate: ""
 					deps: list.Concat([
 						[":database", ":crud", ":caddy"],
@@ -573,20 +566,7 @@ import (
 								"mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql",
 							]
 						}).out
-						add: [{
-							platforms: {
-								amd64: {
-									url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_amd64.tar.gz"
-									checksum: "sha256:9b6dbc38324c0b0481f1cd1dd828ffdc78117129ec797678f4bf8c4023311281"
-								}
-								arm64: {
-									url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_arm64.tar.gz"
-									checksum: "sha256:52fa7d5a2d5e0db470faec5976204fc215ed7e3d13689e930cf522becfb63778"
-								}
-							}
-							dest:   "/usr/local/bin/process-compose"
-							unpack: true
-						}]
+						add: B._processComposeAdd
 						copy: list.Concat([
 							[
 								{from: {name: core.lock.images.microcheck}, srcs: ["/bin/httpcheck"], dst: "/usr/local/bin/httpcheck"},
@@ -624,7 +604,10 @@ import (
 							#"RUN awk '/handle \/electric\/\* \{/{p=1; print "  handle /electric/* {\n    header Content-Type application/json\n    header electric-handle stub\n    header electric-offset 0_0\n    header electric-cursor 0\n    header electric-schema `{\"id\":{\"type\":\"text\"}}`\n    header electric-up-to-date true\n    header Access-Control-Allow-Origin *\n    header Access-Control-Expose-Headers \"electric-handle, electric-offset, electric-cursor, electric-schema, electric-up-to-date, content-type, cache-control, x-txid\"\n\n    @subset query subset__where=*\n    handle @subset {\n      respond `{\"metadata\":{\"xmin\":\"1\",\"xmax\":\"1\",\"xip_list\":[],\"snapshot_mark\":0,\"database_lsn\":\"0\"},\"data\":[]}` 200\n    }\n    handle {\n      respond `[{\"headers\":{\"control\":\"up-to-date\"}}]` 200\n    }\n  }"; next} p && /^  \}/{p=0; next} !p{print}' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile"#,
 						]
 						entrypoint: ["/usr/local/bin/appliance-entrypoint.sh"]
-						cmd: ["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml", "-t=false", "--no-server"]
+						cmd: list.Concat([
+							["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml", "-t=false", "--no-server", "caddy"],
+							[if B.cluster.capabilities.auth {"auth"}],
+						])
 					}
 				}
 			}

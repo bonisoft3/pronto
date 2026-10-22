@@ -1879,22 +1879,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// pass would grade an empty set.
 				if len([for _, e in D.code.state.entities if e.server {e}]) > 0 {
 					sql: {verb: "lint", cmds: [_distribution.checks.sql], note: "Pronto compiler sql"}
-					// On `integrate`, because it grades a built image, and after
-					// the rule that builds one. Nothing in the verb states that
-					// ordering: the rulemap sorts by priority and then by NAME,
-					// so at the default priority "replay" would run before the
-					// "visual" rule whose `up --build` produces the image — and
-					// it would then grade whatever the machine happened to hold,
-					// which reads exactly like a verdict about this tree. The
-					// priority is what says "after the images exist"; the
-					// alphabet is not a contract.
-					//
-					// In the build graph's replay service, whose verdict is its exit
-					// code. A project of its own: --remove-orphans under the runtime's
-					// would take the runtime down, as nothing of it is in this closure.
 					replay: {
-						verb:     "integrate"
-						priority: 1
+						verb: "integrate"
 						cmds: [(omnishell.#BkidCheck & {runner: "ci-replay"}).out]
 						note: "Pronto compiler replay"
 					}
@@ -2884,8 +2870,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 	files: {
 		// What tools outside CUE read of the cluster, evaluated here once:
-		// evaluating a program takes gigabytes, too much to repeat in the
-		// replay's container beside the stack it grades, or in a release. The
+		// evaluating a program takes gigabytes, too much to repeat in
+		// ci-replay or in a release. The
 		// token roles are those 001_roles.sql grants authenticator, which a
 		// Kubernetes release's operator would otherwise revoke.
 		".pronto/cluster.json": {

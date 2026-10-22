@@ -58,7 +58,6 @@ checksum = "sha256:1a8d6778176f8d6dfc9182342109a44a8dfafb73f91f5d297276f25960589
 url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Darwin-x86_64.tar.gz"
 url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641110851"
 
-
 [tools."github:bufbuild/buf"."platforms.windows-x64"]
 checksum = "sha256:b0e26af2a4bef62724f6a58114a6027e3a19bdf98033b2107995bc243d7c8c97"
 url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Windows-x86_64.zip"
@@ -97,7 +96,6 @@ url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607245
 checksum = "sha256:110c53e5c093e4cfce6eda787f94f23bef913c309f620fab26b4f678031841ad"
 url = "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_mac_amd64.tar.gz"
 url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607244902"
-
 
 [tools."github:caddyserver/caddy"."platforms.windows-x64"]
 checksum = "sha256:0a1edc0b799512051c57071ce0e798d3f2cf67dc98171366f1d2b326072e3b06"
@@ -206,7 +204,6 @@ checksum = "sha256:0543b0844a725814c0412d3f4bed12873ce9ed0da207b15775f63a97d734a
 url = "https://github.com/go-task/task/releases/download/v3.54.0/task_darwin_amd64.tar.gz"
 url_api = "https://api.github.com/repos/go-task/task/releases/assets/604090006"
 
-
 [tools."github:go-task/task"."platforms.windows-x64"]
 checksum = "sha256:837f42f71899ea41d07a47acc81d4d6ea80cb41c68292345f915c656473efcb7"
 url = "https://github.com/go-task/task/releases/download/v3.54.0/task_windows_amd64.zip"
@@ -246,7 +243,6 @@ checksum = "sha256:44306f0766f2be0e763d0c7a6a6774537589a335797a199d8e5b473d766ec
 url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-x86_64-apple-darwin.tar.gz"
 url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/610039812"
 
-
 [tools."github:nushell/nushell"."platforms.windows-x64"]
 checksum = "sha256:6658c9e61fe42c88326c1caa99e8dc9ad99bec6c0bc353e6ecb7c5d3f79feed7"
 url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-x86_64-pc-windows-msvc.zip"
@@ -285,7 +281,6 @@ url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/64
 checksum = "sha256:bbb658c40711b7dc37a258d6cb110a6b0ae4d0bc61c93c38c045e01b091f2edf"
 url = "https://github.com/redpanda-data/connect/releases/download/v4.114.0/redpanda-connect_4.114.0_darwin_amd64.tar.gz"
 url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/646824862"
-
 
 [tools."github:redpanda-data/connect"."platforms.windows-x64"]
 checksum = "sha256:02dc10a107b6965d111f08f4841a1cb7e6415d84234ce93c52722695bd862324"
@@ -358,7 +353,6 @@ url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-osx-
 [tools."http:duckdb"."platforms.macos-x64"]
 checksum = "sha256:ae74c8cd74304bde1d92d941aca37bc72084ee8daa5660913819d8a9e9d29331"
 url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-osx-amd64.zip"
-
 
 [tools."http:duckdb"."platforms.windows-x64"]
 checksum = "sha256:798eae475d07c645ff3b914f7b0e676d06502b5412dd7552638fafed81f9e916"
