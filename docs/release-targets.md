@@ -69,7 +69,9 @@ door and no compose prepend. Two things come first. The base: a driver that
 navigates to `${origin}/ar` (`apps/truco/tests/acceptance.ts`) cannot reach a
 site under a subpath, and an `APP_URL` ending in a slash yields `//`, which the
 router refuses. And the budgets, whose 20 s are tuned to a warm local stack
-that a cold page boot exceeds. The projection is
+that a cold page boot exceeds. The projection is emitted for `gcp` alone
+(`verify@gcp`, [gcp](#gcp)), whose address is a host with no subpath and no
+trailing slash; the other targets' are
 [not emitted](../PENDING.md#release-targets).
 
 ## A release is its entry
@@ -444,10 +446,25 @@ schema.#Build & {release: GCP}` from [`gcp/schema`](../gcp/schema/gcp.cue).
 Every resource is described before it is made, so a second release with
 nothing changed pushes the same digests and rolls nothing.
 
-Before anything is built, the release runs the app on the machine releasing,
-as `sayt integrate@local` does: the cluster as host processes and the
-terminal's visual lint against its door. A critical finding, or a stack that
-does not come up, stops the release there. `--delete` runs no check.
+A release goes behind its integration tests, run against a preview of what
+it deploys rather than a stack on the machine releasing: `release.nu` first
+releases the checkout as the preview `rc-<commit>` ([Previews](#previews)),
+then runs `verify@gcp` against it, and only when every driver passes releases
+the app; the preview is removed whatever happened. A failing driver, or a
+preview that does not come up, stops the release there. `--preview`,
+`--dry-run` and `--snapshot` deploy as asked, untested, and `--no-gate`
+releases without the preview. A local stack (`sayt integrate@local`) is for
+development and CI.
+
+`sayt verify@gcp` ([`gcp/verify.nu`](../gcp/verify.nu)) runs the drivers of
+`verify@<target>` against the release's address, or a preview's with
+`--preview`: every service of the app's compose project that reads `APP_URL`,
+built as integrate builds it and run as integrate runs it, with `APP_URL` at
+the service's `run.app` address and nothing else of the stack up. They run in
+Cloud Build in the target's project, on 8 vCPUs, since a driver's browser
+renders in software and a 2-CPU runner timed a 3D page out; a machine whose
+network refuses `run.app` verifies all the same. A check that reads no
+`APP_URL` drives the cluster itself, and stays with integrate.
 
 The images are built in Cloud Build, not on the machine releasing, which needs
 no Docker daemon: the release uploads the app's files as git sees them (never

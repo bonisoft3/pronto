@@ -7,6 +7,7 @@
 # images push the same digests and roll nothing, and initdb finds its marker.
 
 use ../k8s/release.nu [resolve-app]
+use verify.nu [run-drivers plan-of builder]
 
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
@@ -134,9 +135,9 @@ def ensure-infrastructure [plan: record] {
 	}
 }
 
-# What builds the runtime images: Docker's own CLI image, with its buildx and
-# compose plugins, run by Cloud Build against the Docker of the build's worker.
-const builder = "docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d"
+# What builds the runtime images is verify.nu's builder: Docker's own CLI
+# image, with its buildx and compose plugins, run by Cloud Build against the
+# Docker of the build's worker.
 
 # The account Cloud Build runs a build as in the project: the project's
 # default, which pushes the images and writes the build's log.
@@ -282,32 +283,11 @@ def delete-preview [plan: record] {
 	print $"gcp: preview ($plan.preview) removed"
 }
 
-export def main [
-	--snapshot      # Build and render only, change nothing in the project
-	--dry-run       # Print what would be applied and exit
-	--app: string   # Application name or path
-	--preview: string # A pull request's own copy beside the release, such as pr-32
-	--delete        # Remove the preview, when its pull request closes
-] {
-	let app_info = (resolve-app $app)
-	# sayt hands a release's own flags over as SAY_RELEASE_ARGS_<FLAG>, and only
-	# so where the rule has more than one command (integrate@local runs first):
-	# each is read from there too, as a dry run that missed it would release.
-	let given = {|flag| ($env | get -o $"SAY_RELEASE_ARGS_($flag)" | default "") not-in ["" "false"] }
-	let preview = ($preview | default ($env.SAY_RELEASE_ARGS_PREVIEW? | default ""))
-	let delete = ($delete or (do $given DELETE))
-	let dry_run = ($dry_run or (do $given DRY_RUN))
-	let snapshot = ($snapshot or (do $given SNAPSHOT))
+# What a release or a preview deploys, from the plan release.cue renders for
+# it, ending once its address answers.
+def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
 	let base = if ($preview | is-empty) { {} } else { {GCP: {preview: $preview}} }
-	let base_file = (mktemp -t gcp.XXXXXX.json | str trim)
-	$base | to json | save -f $base_file
-	let plan0 = (render $app_info.cue_path $base_file)
-	rm $base_file
-	if $delete {
-		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }
-		delete-preview $plan0
-		return
-	}
+	let plan0 = (plan-of $app_info.cue_path $preview)
 	let services = (do { cd $app_info.dir; ^docker compose --profile "*" config --services } | lines)
 	let refused = ($services | where {|s| $s in $unbuilt })
 	if ($refused | is-not-empty) {
@@ -373,4 +353,47 @@ export def main [
 	let health = (^curl --silent --output /dev/null --write-out "%{http_code}" --retry 8 --retry-all-errors $"($address)/health")
 	if $health != "200" { error make {msg: $"($address)/health answered ($health)"} }
 	print $"gcp: ($plan.service) is live at ($address)"
+}
+
+export def main [
+	--snapshot      # Build and render only, change nothing in the project
+	--dry-run       # Print what would be applied and exit
+	--app: string   # Application name or path
+	--preview: string # A pull request's own copy beside the release, such as pr-32
+	--delete        # Remove the preview, when its pull request closes
+	--no-gate       # Release without testing a preview of it first
+] {
+	let app_info = (resolve-app $app)
+	# sayt hands a release's own flags over as SAY_RELEASE_ARGS_<FLAG>, and only
+	# so where the rule has more than one command: each is read from there too,
+	# as a dry run that missed it would release.
+	let given = {|flag| ($env | get -o $"SAY_RELEASE_ARGS_($flag)" | default "") not-in ["" "false"] }
+	let preview = ($preview | default ($env.SAY_RELEASE_ARGS_PREVIEW? | default ""))
+	let delete = ($delete or (do $given DELETE))
+	let dry_run = ($dry_run or (do $given DRY_RUN))
+	let snapshot = ($snapshot or (do $given SNAPSHOT))
+	let no_gate = ($no_gate or (do $given NO_GATE))
+	if $delete {
+		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }
+		delete-preview (plan-of $app_info.cue_path $preview)
+		return
+	}
+	# A release goes behind its integration tests, run against a preview of
+	# what it deploys (verify.nu), rather than a stack on the machine releasing:
+	# the preview, then the tests, then the release, and the preview removed
+	# whatever happened. A preview, a dry run or a snapshot deploys as asked.
+	if ($preview | is-not-empty) or $dry_run or $snapshot or $no_gate {
+		deploy $app_info $preview $dry_run $snapshot
+		return
+	}
+	let rc = $"rc-(do { cd $app_info.dir; ^git rev-parse --short=7 HEAD } | str trim)"
+	print $"gcp: testing a preview \(($rc)\) before the release"
+	let failure = (try {
+		deploy $app_info $rc false false
+		run-drivers $app_info.dir (plan-of $app_info.cue_path $rc)
+		deploy $app_info "" false false
+		null
+	} catch {|e| $e.msg })
+	delete-preview (plan-of $app_info.cue_path $rc)
+	if $failure != null { error make {msg: $failure} }
 }

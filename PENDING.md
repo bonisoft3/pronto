@@ -457,8 +457,10 @@ contract wants a poke-specific credential.
 **`k8s` is in neither `#Target` nor `#Tier`**
 ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 
-**`verify@<target>` is not emitted**
-([the design](docs/release-targets.md#what-a-release-is)).
+**`verify@<target>` is emitted for `gcp` alone**
+([the design](docs/release-targets.md#what-a-release-is)): `pages`,
+`cloudflare` and `k8s` have no rule that runs the drivers against their
+address.
 
 **The page derives nothing live** ([pages](docs/release-targets.md#pages)).
 Its streams' and computations' rows are the release's, so a result recorded in
