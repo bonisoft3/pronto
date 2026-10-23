@@ -15,17 +15,13 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
     const stopped = await run("docker", ["stop", container]);
     if (!stopped.ok) throw new Error(stopped.err);
   };
-  // As the gateway does: each transaction starts at the role's isolation,
-  // which this superuser session has to say for itself.
-  const psql = (source: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=terse", "-U", "postgres"], `SET default_transaction_isolation TO 'serializable';\n${source}`);
-  // As the gateway does: a transaction a serialization conflict aborted is
-  // run again, so racing callers see some serial order of their steps.
+  // As the gateway does: each transaction starts at the database's default,
+  // read committed, and racing callers are ordered by the players they hold.
+  const psql = (source: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=terse", "-U", "postgres"], source);
   const sql = async (source: string) => {
-    for (let attempt = 0; ; attempt++) {
-      const result = await psql(source);
-      if (result.ok) return result.out;
-      if (!result.err.includes("could not serialize") || attempt >= 20) throw new Error(result.err);
-    }
+    const result = await psql(source);
+    if (result.ok) return result.out;
+    throw new Error(result.err);
   };
   const schema = "hybrid_truco_turn";
   const seed = async (id: number, deadline = initial().deadline) => {
@@ -53,15 +49,15 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
       ${surface("truco_turn")}
       ${compiled.sql}`);
 
-    await t.step("a machine's steps run serializable, and refuse to run otherwise", async () => {
-      // A step read state and then locked it, so under read committed a
-      // concurrent step could commit between the two. Serializable makes every
-      // interleaving some serial order, and a step outside it is refused.
-      assertStringIncludes(await sql("SELECT array_to_string(setconfig, ',') FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole WHERE r.rolname = 'app_user';"), "default_transaction_isolation=serializable");
+    await t.step("a machine's steps run read committed, and refuse to run otherwise", async () => {
+      // A step holds its players before it locks a row, and reads what their
+      // last step left once it has them: a snapshot taken before that wait
+      // would not show it, so a step under one is refused.
+      assertEquals((await sql("SELECT coalesce(array_to_string(setconfig, ','), '') FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole WHERE r.rolname = 'app_user';")).includes("default_transaction_isolation"), false);
       await seed(95);
-      const refused = await psql(`SET default_transaction_isolation TO 'read committed'; ${call(95, 1, 195)}`);
+      const refused = await psql(`SET default_transaction_isolation TO 'serializable'; ${call(95, 1, 195)}`);
       assertEquals(refused.ok, false);
-      assertStringIncludes(refused.err, "serializable");
+      assertStringIncludes(refused.err, "read committed");
     });
 
     // The clock and randomness were refused by a list of their spellings,

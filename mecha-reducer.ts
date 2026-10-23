@@ -136,24 +136,50 @@ DO $protocol$ BEGIN
 END $protocol$;
 CREATE SCHEMA IF NOT EXISTS ${schema};
 REVOKE ALL ON SCHEMA ${schema} FROM PUBLIC;
--- A machine's steps run serializable: every interleaving of its transactions
--- is then some serial order, and the writer retries the transaction a conflict
--- aborts. The roles that drive a step default to it — app_user through the
--- gateway, service for the ticker and the pipelines — and the gateway starts
--- each request's transaction at its role's. Every other session keeps the
--- database's default, which its writers were written against and owe no
--- retry to; a step reaching one is refused, not trusted.
+-- A machine's steps run read committed, ordered by locks rather than by a
+-- snapshot: a step holds each player of its instance (hold) before it locks
+-- any row, so two steps sharing a player run one after the other, and a check
+-- reading that player's other instances (seated elsewhere, unavailable) reads
+-- them settled. Steps sharing no player share no lock and never abort each
+-- other. Under serializable they did: PostgreSQL locks a serializable read by
+-- index page, so two players writing their own rows of one small table read
+-- each other's page, one was aborted for a conflict no data caused, and the
+-- writer took the abort as final. The roles that drive a step, app_user through
+-- the gateway and service for the ticker, keep the database's default, which a
+-- database built when they were serializable gets back here.
 DO $isolation$ BEGIN
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN ALTER ROLE app_user SET default_transaction_isolation = 'serializable'; END IF;
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service') THEN ALTER ROLE service SET default_transaction_isolation = 'serializable'; END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN ALTER ROLE app_user RESET default_transaction_isolation; ALTER ROLE app_user RESET enable_seqscan; END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service') THEN ALTER ROLE service RESET default_transaction_isolation; ALTER ROLE service RESET enable_seqscan; END IF;
 END $isolation$;
+-- A step that waited for a player must read what that player's last step
+-- left, which a snapshot taken before the wait would not show.
 CREATE OR REPLACE FUNCTION ${schema}.serial() RETURNS void LANGUAGE plpgsql AS $serial$
 BEGIN
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
-    RAISE EXCEPTION 'a ${spec.name} step runs serializable, not %', current_setting('transaction_isolation') USING ERRCODE = '25000';
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'a ${spec.name} step runs read committed, not %', current_setting('transaction_isolation') USING ERRCODE = '25000';
   END IF;
 END;
 $serial$;
+-- A player's lock, the same in every machine's schema: an advisory lock held
+-- to the end of the transaction, keyed by the player and taken in key order,
+-- so two steps holding several never wait on each other's. One call takes a
+-- step's whole set: a second would take its keys out of order.
+CREATE OR REPLACE FUNCTION ${schema}.hold(actors uuid[]) RETURNS void LANGUAGE plpgsql AS $hold$
+DECLARE k integer;
+BEGIN
+  FOR k IN SELECT DISTINCT hashtext(a::text) FROM unnest(actors) a WHERE a IS NOT NULL ORDER BY 1 LOOP
+    PERFORM pg_advisory_xact_lock(hashtext('mecha player'), k);
+  END LOOP;
+END;
+$hold$;
+REVOKE ALL ON FUNCTION ${schema}.hold(uuid[]) FROM PUBLIC;
+-- An instance's players, and one about to join it.
+CREATE OR REPLACE FUNCTION ${schema}.hold_instance(room uuid, joining uuid DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $hold_instance$
+BEGIN
+  PERFORM ${schema}.hold(ARRAY(SELECT m.actor FROM ${schema}.member m WHERE m.instance_id = room) || joining);
+END;
+$hold_instance$;
+REVOKE ALL ON FUNCTION ${schema}.hold_instance(uuid, uuid) FROM PUBLIC;
 -- A step's time: the transaction's, the same on every read in it, so every
 -- check in one step agrees on it, and no session can set it. A step a timer
 -- delivers is given the tick's time instead (dispatch's at), so a deadline
@@ -179,6 +205,9 @@ CREATE TABLE IF NOT EXISTS ${schema}.member (
   seat text NOT NULL,
   PRIMARY KEY(instance_id, actor), UNIQUE(instance_id, seat)
 );
+-- An actor's seats across instances (an admission asks whether one sits elsewhere),
+-- read by index so a step locks that actor's rows and no one else's.
+CREATE INDEX IF NOT EXISTS member_actor ON ${schema}.member (actor);
 CREATE TABLE IF NOT EXISTS ${schema}.receipt (
   instance_id uuid NOT NULL REFERENCES ${schema}.instance,
   actor uuid NOT NULL,
@@ -248,6 +277,7 @@ DECLARE
   prepared_revision bigint;
 BEGIN
   PERFORM ${schema}.serial();
+  PERFORM ${schema}.hold_instance(instance_id);
   ${mecha.locks ? `SELECT * INTO STRICT game FROM ${schema}.instance i WHERE i.id = instance_id;
   IF tier = 'omnishell' AND NOT EXISTS (SELECT FROM ${schema}.member m WHERE m.instance_id = game.id AND m.actor = dispatch.actor) THEN
     RAISE EXCEPTION 'not a member' USING ERRCODE = '42501';
@@ -310,6 +340,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, ${schema} AS $de
 DECLARE revision bigint; answer jsonb;
 BEGIN
   -- Locked as dispatch will lock it, so the revision read is the one it checks.
+  PERFORM ${schema}.hold_instance(instance_id);
   SELECT i.revision INTO STRICT revision FROM ${schema}.instance i WHERE i.id = instance_id FOR UPDATE;
   -- One delivery is accepted per revision, so the revision names it.
   answer := ${schema}.dispatch(instance_id, '00000000-0000-0000-0000-000000000000', 'mecha/' || revision::text,
