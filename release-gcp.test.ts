@@ -349,3 +349,19 @@ Deno.test("a sidecar on a port the cluster holds, or two on one port, is refused
     assertEquals(r.success, false, bad);
   }
 });
+
+// Cloud Run caps an instance's containers at 8 CPUs together, and gives one
+// with no limit a whole CPU: the light ones ask for a share.
+Deno.test("the whole cluster, scraped sidecar and all, fits Cloud Run's 8 CPUs", async () => {
+  const all = `{${["caddy", "crud", "auth", "electric", "database", "migrate", "ticker", "rclone-s3", "imgproxy", "perf-collector"].map((s, i) => `"${s}": {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+  const full = (sidecar: string) => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${all}, ticker: {}, blobs: {}, sidecars: "perf-collector": ${sidecar}}`;
+  const s = await built(full(`{port: 8687, metrics: port: 9599}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const cpu = s.value.spec.template.spec.containers.map((c: { name: string; resources?: { limits?: { cpu?: string } } }) => [c.name, c.resources?.limits?.cpu ?? "1000m"]);
+  const total = cpu.reduce((n: number, [, c]: string[]) => n + Number(c.replace(/m$/, "")), 0);
+  assert(total <= 8000, JSON.stringify(cpu));
+  assertEquals(Object.fromEntries(cpu)["perf-collector"], "250m");
+  const r = await built(full(`{port: 8687, cpu: 4000}`), "plan");
+  assertEquals(r.success, false, "a sidecar asking for more than is left is refused");
+  assertStringIncludes(r.stderr, "over Cloud Run's 8000");
+});

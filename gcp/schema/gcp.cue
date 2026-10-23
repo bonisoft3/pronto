@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/yaml"
 	"list"
+	"strconv"
 	"strings"
 )
 
@@ -78,6 +79,9 @@ import (
 	// and dashboards read them.
 	sidecars: [=~"^[a-z][a-z0-9-]*$"]: {
 		port!: int & >1024 & <65536
+		// Its share of the instance's CPU, in millicpu: Cloud Run gives a
+		// container with none a whole one, against a cap of 8 for them all.
+		cpu: *250 | int & >=80 & <=8000
 		metrics?: {
 			port!:    int & >1024 & <65536
 			path:     *"/metrics" | =~"^/"
@@ -298,6 +302,7 @@ import (
 						(secretOf & {env: "SERVICE_JWT", secret: sq.SERVICE_JWT}).out,
 					], [for k, v in R.ticker.env {name: k, value: v}]])
 					startupProbe: {tcpSocket: port: P.ticker, periodSeconds: 2, failureThreshold: 60}
+					resources: limits: cpu: "250m"
 				}, if R.blobs != _|_ {
 					// mecha's blob plane over the bucket: a combine remote names its root
 					// mecha-objects, and the service's account reaches it with no key.
@@ -341,13 +346,16 @@ import (
 					image: #Proxy
 					args: ["--port=\(P.database)", "--health-check", "--http-port=\(P.proxyHealth)", "--http-address=0.0.0.0", R.names.connection]
 					startupProbe: {httpGet: {path: "/startup", port: P.proxyHealth}, periodSeconds: 2, failureThreshold: 60}
+					resources: limits: cpu: "500m"
 				}], [for n, c in R.sidecars {
 					name:  n
 					image: (imageOf & {svc: n}).out
 					startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+					resources: limits: cpu: "\(c.cpu)m"
 				}], [if len(R._scraped) > 0 {
 					name:  "gmp-collector"
 					image: #Gmp
+					resources: limits: cpu: "250m"
 					volumeMounts: [{name: "gmp-config", mountPath: "/etc/rungmp"}]
 				}]])
 			}
@@ -501,7 +509,12 @@ import (
 		// The compose services built and run beside the cluster's.
 		sidecars: [for n, _ in R.sidecars {n}]
 		if len(R._sidecarClashes) > 0 {sidecarPorts: error("GCP.sidecars listen on \(strings.Join(R._sidecarClashes, ", "))")}
+		if B._millicpu > 8000 {cpu: error("the service's containers ask for \(B._millicpu) millicpu, over Cloud Run's 8000: lower GCP.sidecars' cpu")}
 		scrapeConfig: [if len(R._scraped) > 0 {B.scrapeConfig}, ""][0]
 	}
+	// A container with no limit is given a whole CPU.
+	_millicpu: list.Sum([for c in B.service.spec.template.spec.containers {
+		[if c.resources.limits.cpu != _|_ {strconv.Atoi(strings.TrimSuffix(c.resources.limits.cpu, "m"))}, 1000][0]
+	}])
 	_noLiteralSecret: true & !strings.Contains(json.Marshal(B.service), "postgres://")
 }
