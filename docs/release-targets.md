@@ -454,8 +454,9 @@ configured, Deno running the app's `auth` service.
 
 What fixes its shape:
 
-- **Single self-contained image.** The appliance inherits OpenSUSE Tumbleweed,
-  PostgreSQL 18 with ICU collations (`--locale-provider=icu --icu-locale=und`),
+- **Single self-contained image.** The appliance builds on `core.nubox`
+  (openSUSE Leap 16.0 with the lazybox toolbelt, Nushell, and GNU utilities),
+  adding PostgreSQL 18 with ICU collations (`--locale-provider=icu --icu-locale=und`),
   `setpriv`, PostgREST, Caddy and `process-compose`. When `capabilities.auth` is
   enabled, the Deno binary and cached `/deno-dir` are copied into the image and
   run alongside the other services.
@@ -478,6 +479,11 @@ What fixes its shape:
   (`[{"headers":{"control":"up-to-date"}}]` with `electric-offset: 0_0` and
   `electric-up-to-date: true`). Browser sync engines settle cleanly in
   standalone mode without requiring a full live replication cluster.
+- **Configuration knobs and persistence.** The appliance runs standalone or with mounted state:
+  - `PGDATA`: path to PostgreSQL database directory (default `/var/lib/pgsql/data`). Bind-mounting a host directory or named volume to `/var/lib/pgsql/data` preserves database state across container updates while executing idempotent migrations on startup.
+  - `PORT`: external HTTP ingress port served by Caddy (default `8080`).
+  - `ORIGIN`: public base URL of the service (default `http://localhost:8080`).
+  - `WEBAUTHN_RP_ID` and `WEBAUTHN_ORIGIN`: WebAuthn relying party identity and origin; automatically inferred from `ORIGIN` when unset.
 - **Image tagging and publication.** Distribution tasks derive the OCI image tag
   by stripping any path prefix from a prefixed release tag (`$tag | path basename`),
   defaulting publication to `ghcr.io/bonisoft3/<app>:<tag>` or the registry

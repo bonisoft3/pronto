@@ -1735,7 +1735,7 @@ import (
 		// A frozen archive retains its schedules and runs none, at the edge or
 		// in a page.
 		edgeClock?: "ticker" | "disabled"
-		targets: [...#Target]
+		targets: *["docker"] | [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
 		// compose clock is emitted by cluster.cue and the edge's Cron Trigger
 		// by the cloudflare release, so neither needs a declaration; a cloud
