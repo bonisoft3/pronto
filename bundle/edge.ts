@@ -130,8 +130,10 @@ if (Object.keys(hybrids).length) await Deno.writeTextFile(path.join(out, 'src/ma
 
 // The object's clock is the ticker's own sweep (mecha-edge's clock.ts), whose
 // cron reader croner reaches wrangler's bundler through node_modules beside
-// the ticker, installed from its lock.
+// the ticker, installed from its lock; mecha-edge's node_modules provides the
+// pinned WebAuthn server dependency.
 await run(Deno.execPath(), ['install', '--frozen'], path.join(mecha, 'services/ticker'))
+await run(Deno.execPath(), ['install', '--frozen', '--node-modules-dir=auto'], path.join(mecha, 'packages/mecha-edge'))
 // The clock outside the object: a Cron Trigger poking hourly where anything
 // can owe a tick, so the free plan pays a day of object wakes for an alarm
 // the platform lost rather than a minute's; the alarm is the exact one.

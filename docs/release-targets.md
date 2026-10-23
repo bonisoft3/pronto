@@ -230,10 +230,9 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 `dist/cloudflare/`. The terminal modules and declared public files live in
 `public/`, so each route loads only its own screen and required catalogues.
 The terminal asks the Worker's origin for `/crud`, `/auth` and `/electric`.
-Social sign-in providers are currently refused (`_authTargetRefusal`): the
-edge cluster runs guest sessions and shape tokens in its Durable Object,
-leaving social provider integration to container and cloud tiers (`gcp`,
-`k8s`, `docker`).
+Social sign-in providers are currently refused (`_authTargetRefusal`): the edge
+cluster runs guest sessions, passkey ceremonies and shape tokens in its Durable Object,
+leaving social provider integration to container and cloud tiers (`gcp`, `k8s`, `docker`).
 
 The public tree is addressed as every target's is ([a release is its
 entry](#a-release-is-its-entry)); Cloudflare's assets take its immutable rules
