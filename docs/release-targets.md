@@ -217,7 +217,10 @@ releases without it.
 The page serves no blob, and nothing refuses a program that declares one
 ([pending](../PENDING.md#release-targets)): `_pagesBundle` does not read
 `capabilities.blobs`, and the shim routes only `/crud`, `/auth` and
-`/electric`. A duckstream is neither a stream nor a computation, so xpense
+`/electric`. Social sign-in providers (`capabilities.auth.providers`) are
+refused at release (`_authTargetRefusal`): the browser tier runs a local
+one-user cluster with guest sessions and has no server to redeem OIDC codes or
+receive callbacks. A duckstream is neither a stream nor a computation, so xpense
 targets `pages`, declares `recount-months` and `recount-buckets`, and nothing
 in the page fills `MonthStat` or `CategoryMonthStat`.
 
@@ -227,6 +230,10 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 `dist/cloudflare/`. The terminal modules and declared public files live in
 `public/`, so each route loads only its own screen and required catalogues.
 The terminal asks the Worker's origin for `/crud`, `/auth` and `/electric`.
+Social sign-in providers are currently refused (`_authTargetRefusal`): the
+edge cluster runs guest sessions and shape tokens in its Durable Object,
+leaving social provider integration to container and cloud tiers (`gcp`,
+`k8s`, `docker`).
 
 The public tree is addressed as every target's is ([a release is its
 entry](#a-release-is-its-entry)); Cloudflare's assets take its immutable rules

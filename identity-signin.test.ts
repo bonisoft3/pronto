@@ -37,7 +37,7 @@ Deno.test("a local launch brings the broker up: Hydra, then the front waiting on
   const hydra = targets.value["identity-hydra"];
   const front = targets.value.identity;
   assertStringIncludes(hydra.dockerfile.from.name, "oryd/hydra:v26.2.0@sha256:");
-  assertStringIncludes(front.dockerfile.from.name, "ghcr.io/bsoneca/pronto-identity:0.1.0@sha256:");
+  assertStringIncludes(front.dockerfile.from.name, "denoland/deno:distroless-2.5.0@sha256:");
   assertEquals(front.entrypoint.after, { "identity-hydra": "healthy" });
   assertEquals(targets.value.launch.compose.depends_on.identity.condition, "service_healthy");
   // The auth service reaches the front by its service name, which the host projection reads as loopback.
@@ -64,5 +64,25 @@ Deno.test("a provider name or broker address that is not one is refused", async 
   for (const settings of [`providers: ["Google"]`, `providers: []`, `broker: "id.example.com"`, `broker: "https://id.example.com/path"`]) {
     const res = await exported(signin(settings), "_cluster.surface.targets.auth");
     assert(!res.success, settings);
+  }
+});
+
+Deno.test("pages and cloudflare release targets refuse social sign-in providers", async () => {
+  for (const [target, reason] of [
+    ["pages", "pages release target does not support social sign-in providers"],
+    ["cloudflare", "cloudflare release target does not yet support social sign-in providers"],
+  ]) {
+    const program = signin().replace("targets: []", `targets: ["${target}"]`);
+    const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
+    assertEquals(res.success, false, `expected target ${target} to fail`);
+    assertStringIncludes(res.stderr, reason);
+  }
+});
+
+Deno.test("gcp, k8s and docker targets admit social sign-in providers", async () => {
+  for (const target of ["gcp", "k8s", "docker"]) {
+    const program = signin().replace("targets: []", `targets: ["${target}"]`);
+    const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
+    assertEquals(res.success, true, res.stderr);
   }
 });

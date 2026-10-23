@@ -24,11 +24,10 @@ import bayt "github.com/bonisoft3/bayt/core:bayt"
 
 #Url: string & =~"^https?://[A-Za-z0-9.-]+(:[0-9]+)?$"
 
-// The broker's release: the front's image (publish.sh prints it), which a
-// docker launch runs and from which a local launch takes the files it runs on
-// the host (hydra/local.sh), and Hydra's.
+// The broker's release: the front's image (official denoland/deno, or
+// published under mecha's roster), and Hydra's.
 runtime:    "0.1.0"
-frontImage: "ghcr.io/bsoneca/pronto-identity:0.1.0@sha256:6cebc51e3f4c1e40bf1673813442b0d2e8ffd7e6316c7faaad819353f25a4c7c"
+frontImage: *"denoland/deno:distroless-2.5.0@sha256:5c4530d4babe37ded3566803e9498e2b5d643b915cce701d8b7b82f87a86629e" | string
 hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9"
 
 // The broker a local launch runs, whose issuer an app names by default.
@@ -85,9 +84,9 @@ localBroker: "http://localhost:28443"
 				healthcheck: url: "http://127.0.0.1:28453/health/ready"
 				// Fixed on the host as in a container: the front reaches them so.
 				expose: {public: port: 28453, admin: port: 28455}
-				"process-compose": activate: _crane
+				"process-compose": activate: ""
 				entrypoint: {
-					do:    _fromImage.hydra
+					do:    _hydraCmd
 					shell: "sh"
 					dockerfile: {do: "hydra serve all --dev", shell: "exec"}
 					env: compose.environment
@@ -112,9 +111,9 @@ localBroker: "http://localhost:28443"
 				healthcheck: url: "http://127.0.0.1:28443/health"
 				// The broker's issuer, which the browser and Google's redirect name.
 				expose: http: port: 28443
-				"process-compose": activate: _crane
+				"process-compose": activate: ""
 				entrypoint: {
-					do:    _fromImage.front
+					do:    _frontCmd
 					shell: "sh"
 					dockerfile: {do: "deno run --no-config --allow-net --allow-env /app/hydra/front.ts", shell: "exec"}
 					env: compose.environment
@@ -140,7 +139,19 @@ localBroker: "http://localhost:28443"
 	...
 }
 
-// On the host, each of the two takes the image's /app once per release into
-// the user's cache, then runs hydra/local.sh from there.
-_crane: "mise x github:google/go-containerregistry[bin=crane]@v0.20.2 --"
-_fromImage: {for mode in ["hydra", "front"] {(mode): "d=\"${XDG_CACHE_HOME:-$HOME/.cache}/pronto-identity/\(runtime)\"; [ -f \"$d/hydra/local.sh\" ] || { t=$(mktemp -d) && crane export --platform linux/amd64 \(frontImage) - | tar -xf - -C \"$t\" app && mkdir -p \"${d%/*}\" && { [ -f \"$d/hydra/local.sh\" ] || mv \"$t/app\" \"$d\"; }; }; exec sh \"$d/hydra/local.sh\" \(mode)"}}
+// On the host, hydra runs directly via mise and the front directly under deno,
+// with no custom container image needed.
+_hydraCmd: "exec mise x github:ory/hydra@26.2.0 -- hydra serve all --dev"
+_frontCmd: """
+	p="${PRONTO_DIR:-}"
+	if [ -z "$p" ]; then
+		if [ -f "plugins/pronto/identity/hydra/front.ts" ]; then
+			p="plugins/pronto"
+		elif [ -f "identity/hydra/front.ts" ]; then
+			p="."
+		else
+			p="$(mise where github:bonisoft3/pronto 2>/dev/null || true)"
+		fi
+	fi
+	exec deno run --no-config --allow-net --allow-env "$p/identity/hydra/front.ts"
+"""

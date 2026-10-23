@@ -2357,6 +2357,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			units: true & (len(E.code.capabilities.vendored) == 0)
 			shared: true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
+			providers: true & (E.code.capabilities.auth == _|_ || E.code.capabilities.auth.providers == _|_ || len(E.code.capabilities.auth.providers) == 0)
 		}
 	}
 

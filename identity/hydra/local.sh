@@ -3,9 +3,7 @@
 # a local test brings up everything sign-in needs:
 #   local.sh hydra   Hydra in memory, its public and admin APIs on loopback
 #   local.sh front   the front, at http://localhost:28443, the broker's issuer
-# Run from the files of the front's image (ghcr.io/bsoneca/pronto-identity),
-# which the app's launch@local takes into the user's cache, under the app's own
-# toolchain (deno, mise). With the operator's broker env file
+# Run under the app's own toolchain (deno, mise). With the operator's broker env file
 # (~/.config/pronto-identity/broker.env, or PRONTO_IDENTITY_ENV) it signs in
 # through the operator's Google client; without it, through the stand-in for
 # Google (fake.ts). Either way the issuer is the one identity.#Signin names by

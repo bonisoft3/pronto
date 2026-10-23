@@ -2031,6 +2031,17 @@ import (
 	])
 	_timerRefusal: [if len(_timerViolations) == 0 {true}, _timerViolations[0]][0] & true
 
+	_authProviders: [if A.capabilities != null if A.capabilities.auth != _|_ if A.capabilities.auth.providers != _|_ for p in A.capabilities.auth.providers {p}]
+	_authTargetViolations: list.Concat([
+		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
+			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
+		}],
+		[if len(_authProviders) > 0 for target in A.meta.targets if target == "cloudflare" {
+			"cloudflare release target does not yet support social sign-in providers; use guest sessions or deploy to container/cloud tiers (gcp, k8s, docker)"
+		}],
+	])
+	_authTargetRefusal: [if len(_authTargetViolations) == 0 {true}, _authTargetViolations[0]][0] & true
+
 	_unitViolations: list.Concat([
 		[for un, u in A.capabilities.vendored for r in u.ports.reads if A.state.entities[r] == _|_ {
 			"unit \(un) reads \(r), which is no declared entity"

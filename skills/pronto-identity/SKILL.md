@@ -64,17 +64,24 @@ With the default broker (`http://localhost:28443`), the app's own launch brings
 it up: `identity-hydra` (Ory Hydra, in memory) and `identity` (the front), two
 services of its cluster.
 
-- `launch@local` runs each as a host process (`hydra/local.sh`, from the front
-  image's files, taken once per release into `~/.cache/pronto-identity`). With
-  the operator's `~/.config/pronto-identity/broker.env` it signs in through
-  Google; without it, through a stand-in that says it is not Google and signs
-  in a test person (`tester`, `tester-2`).
-- `launch` runs their images: Hydra's, and the front's, the stand-in unless
+- `launch@local` runs each as a host process (Hydra via mise, the front directly
+  under Deno). With the operator's `~/.config/pronto-identity/broker.env` it signs
+  in through Google; without it, through a stand-in that says it is not Google and
+  signs in a test person (`tester`, `tester-2`).
+- `launch` runs their images: Hydra's (`oryd/hydra:v26.2.0`), and the front's
+  (standard Deno base image, or Mecha roster), the stand-in unless
   `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
 - Its port is the operator's standalone broker's: run one or the other.
 
 A release names the operator's broker instead (`OIDC_<NAME>_ISSUER` and
 `_INTERNAL`).
+
+## Deploy targets
+
+- **`gcp` & `k8s`**: An app points `mecha-auth` to the operator's production broker
+  via `OIDC_<NAME>_ISSUER` with client `origin`. No client secret is required.
+- **`pages` & `cloudflare`**: Refused at compile time (`_authTargetRefusal`). Browser-tier
+  apps run guest sessions; social provider sign-in requires container or cloud tiers.
 
 ## Running the broker (the operator, once)
 
@@ -93,20 +100,8 @@ A release names the operator's broker instead (`OIDC_<NAME>_ISSUER` and
 4. `identity/serve.sh release --project P --domain D --google-client-id C`
    releases the broker to Cloud Run.
 
-## Publishing the broker's runtime
-
-`identity/publish.sh <version>` publishes what ships (`oidc.ts`, `broker/`,
-`hydra/`, committed) as one image (`IMAGE`, default
-`ghcr.io/bsoneca/pronto-identity`) and prints its digest. Pin both in
-`identity/signin.cue` (`runtime`, `frontImage`). A new ghcr package is
-private: make it public once under the org's packages.
-
 ## Limits
 
-- The Cloud Run release ships the broker before Hydra (`broker/main.ts`): its
-  codes live in memory, so it runs as one instance, and a code it forgets on
-  restart is a sign-in the reader repeats. Hydra in production needs its own
-  Postgres, HTTPS without `--dev`, and its admin API kept beside the front.
 - Google's consent screen names the operator's client, not each app; the
   broker's own page names the app's origin before leaving for Google.
 - One way in per account: a passkey or a provider, never both, and a provider

@@ -53,17 +53,10 @@ Hydra holds those, with a store that can outlive a restart.
 
 | Where | How | Broker |
 | --- | --- | --- |
-| an app's `launch@local` | `identity-hydra` and `identity` as host processes, `hydra/local.sh` from the front image's files | Hydra in memory; Google with the operator's `broker.env`, else a stand-in signing in `tester` |
-| an app's `launch` | the same two services from their pinned images | as above, the stand-in unless `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set |
+| an app's `launch@local` | `identity-hydra` and `identity` as host processes via mise and Deno directly | Hydra in memory; Google with the operator's `broker.env`, else a stand-in signing in `tester` |
+| an app's `launch` | the same two services from their pinned base images | as above, the stand-in unless `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set |
 | the operator's machine | `identity/serve.sh` | Hydra on SQLite |
-| Cloud Run | `identity/serve.sh release` | the pre-Hydra broker, one instance |
+| Cloud Run / k8s | `identity/serve.sh release` (operator), `release@gcp` / `release@k8s` (apps) | Hydra backed by PostgreSQL with private admin API; apps connect via `origin` public client |
+| `pages` / `cloudflare` | refused at compile time (`_authTargetRefusal`) | browser tier runs guest sessions; social providers require container/cloud tiers |
 
-An app naming `signin: broker: <url>` runs no local broker. The front image is
-`identity/publish.sh`'s; `identity/signin.cue` pins it and Hydra's by digest.
-
-## Not built
-
-- Hydra in production: its own Postgres, HTTPS without `--dev`, and its admin
-  API kept beside the front. Until then the Cloud Run release is the pre-Hydra
-  broker.
-- The front's image is published under `ghcr.io/bsoneca`; `IMAGE` moves it.
+An app naming `signin: broker: <url>` runs no local broker. Pronto publishes no custom runtime image: local runs use the host's Deno and Hydra binaries, and Docker launches use pinned base images.

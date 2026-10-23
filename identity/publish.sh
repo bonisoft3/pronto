@@ -1,16 +1,14 @@
 #!/bin/sh
 # Publishes the identity broker's runtime: $IMAGE:<version> (default
-# ghcr.io/bsoneca/pronto-identity), the broker's code at this commit, without
-# its tests, on Deno. An app's docker launch runs the image as
-# the front; its launch@local takes the image's /app and runs hydra/local.sh
-# from it on the host (signin.cue).
+# bonitao/mecha-identity), the broker's code at this commit, without
+# its tests, on Deno.
 # Run from anywhere, with what ships (oidc.ts, broker/, hydra/) committed:
 #   identity/publish.sh 0.1.0
 # A version once published never changes: what is already there is reused.
 # It prints the image's digest, which signin.cue pins beside the version.
 set -eu
 V=${1:?the version to publish, e.g. 0.1.0}
-IMAGE=${IMAGE:-ghcr.io/bsoneca/pronto-identity}
+IMAGE=${IMAGE:-bonitao/mecha-identity}
 # The Deno the broker's Cloud Run release runs (release.nu).
 DENO=denoland/deno:distroless-2.5.0@sha256:5c4530d4babe37ded3566803e9498e2b5d643b915cce701d8b7b82f87a86629e
 here=$(cd "$(dirname "$0")" && pwd)
