@@ -46,8 +46,11 @@ export def plan-of [cue_path: string, preview: string]: nothing -> record {
 # one fails, after all have run.
 export def run-drivers [app_dir: string, plan: record] {
 	let p = $plan.project
-	let url = (gc run services describe $plan.service --region $plan.region --project $p --format "value(status.url)" | str trim)
-	if ($url | is-empty) { error make {msg: $"($plan.service) has no address in ($p): release it first"} }
+	# The address release.nu configures the service for, its passkeys' relying
+	# party among it: Cloud Run's other one, status.url, is another host.
+	gc run services describe $plan.service --region $plan.region --project $p --format "value(status.url)" | ignore
+	let number = (gc projects describe $p --format "value(projectNumber)" | str trim)
+	let url = $"https://($plan.service)-($number).($plan.region).run.app"
 	let work = (mktemp -d -t gcp-verify.XXXXXX | str trim)
 	# The app's own files, as git sees them, as its images are built from.
 	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
