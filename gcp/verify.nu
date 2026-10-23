@@ -18,6 +18,8 @@ use ../k8s/release.nu [resolve-app]
 # What builds and runs the drivers: Docker's own CLI image, with its buildx
 # and compose plugins, run by Cloud Build against the Docker of its worker.
 export const builder = "docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d"
+# What uploads the drivers' screenshots: Google's own gsutil builder.
+const uploader = "gcr.io/cloud-builders/gsutil"
 
 def --wrapped gc [...args] {
 	let r = (^gcloud --quiet ...$args | complete)
@@ -63,18 +65,40 @@ export def run-drivers [app_dir: string, plan: record] {
 		"echo \"verify: $(echo $drivers) against $APP_URL\""
 		"docker buildx create --use --driver docker-container >/dev/null"
 		"docker compose --profile '*' config | docker buildx bake -f - --load --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $drivers"
-		# Every driver runs, whatever the one before it answered.
+		# Every driver runs, whatever the one before it answered, with SHOTS
+		# naming where it may leave screenshots, copied out of its container.
 		"failed=''"
+		"mkdir -p /workspace/shots"
 		"for d in $drivers; do"
 		"  echo \"verify: $d\""
-		"  if docker compose --profile '*' run --rm --no-deps -e APP_URL=\"$APP_URL\" \"$d\"; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\" >&2; failed=\"$failed $d\"; fi"
+		"  if docker compose --profile '*' run --name \"verify-$d\" --no-deps -e APP_URL=\"$APP_URL\" -e SHOTS=/shots \"$d\"; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\" >&2; failed=\"$failed $d\"; fi"
+		"  docker cp \"verify-$d:/shots\" \"/workspace/shots/$d\" 2>/dev/null || true"
+		"  docker rm -f \"verify-$d\" >/dev/null 2>&1 || true"
 		"done"
+		"echo \"$failed\" > /workspace/failed"
+	] | str join "\n")
+	# The screenshots go to the project's Cloud Build bucket whatever the
+	# drivers answered; the verdict is the last step's.
+	let upload = ([
+		"if [ -n \"$(ls -A /workspace/shots 2>/dev/null)\" ]; then"
+		"  gsutil -q -m cp -r /workspace/shots \"gs://${PROJECT_ID}_cloudbuild/verify/${BUILD_ID}/\""
+		"  echo \"verify: screenshots in gs://${PROJECT_ID}_cloudbuild/verify/${BUILD_ID}/shots/\""
+		"fi"
+	] | str join "\n")
+	let verdict = ([
+		"failed=$(cat /workspace/failed)"
 		"[ -z \"$failed\" ] || { echo \"verify: failed:$failed\" >&2; exit 1; }"
 		"echo 'verify: every driver passed'"
 	] | str join "\n")
+	# Cloud Build reads `$NAME` in a step as its own substitution, and `$$` is
+	# a `$`: the scripts' own are escaped, ${PROJECT_ID} and ${BUILD_ID} are its.
+	let shell = {|s| $s | str replace -a "$" "$$" | str replace -a "$${PROJECT_ID}" "${PROJECT_ID}" | str replace -a "$${BUILD_ID}" "${BUILD_ID}" }
 	{
-		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
-		steps: [{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: [$"APP_URL=($url)" "SOURCE_DATE_EPOCH=0"]}]
+		steps: [
+			{name: $builder, entrypoint: "sh", args: ["-c" (do $shell $script)], env: [$"APP_URL=($url)" "SOURCE_DATE_EPOCH=0"]}
+			{name: $uploader, entrypoint: "bash", args: ["-c" (do $shell $upload)]}
+			{name: $builder, entrypoint: "sh", args: ["-c" (do $shell $verdict)]}
+		]
 		options: {machineType: "E2_HIGHCPU_32", logging: "CLOUD_LOGGING_ONLY"}
 		timeout: "3600s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
