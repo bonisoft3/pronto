@@ -3,13 +3,14 @@
 #
 # A driver is what verify@<target> names one: a service of the app's compose
 # project that measures a running app through APP_URL, such as omnishell's
-# visual lint or an app's browser acceptance at integrate. Each is built as
+# visual lint or an app's browser acceptance at integrate (bayt's base of
+# each, at scale 0, only describes its build). Each is built as
 # bayt builds it, from the compose config, and runs as integrate runs it with
 # APP_URL at the target and nothing else of the stack up. A check that reads
 # no APP_URL drives the cluster itself, and stays with integrate.
 #
 # The drivers run in Cloud Build in the target's project, which reaches its
-# address wherever the machine verifying is, on 8 vCPUs: a driver's browser
+# address wherever the machine verifying is, on 32 vCPUs: a driver's browser
 # renders in software, and a 2-CPU runner timed a 3D page out.
 
 use ../k8s/release.nu [resolve-app]
@@ -54,7 +55,7 @@ export def run-drivers [app_dir: string, plan: record] {
 	let script = ([
 		"set -eu"
 		"apk add --no-cache jq >/dev/null"
-		"drivers=$(docker compose --profile '*' config --format json | jq -r '.services | to_entries[] | select(.value.environment.APP_URL != null) | .key' | sort)"
+		"drivers=$(docker compose --profile '*' config --format json | jq -r '.services | to_entries[] | select(.value.environment.APP_URL != null and (.value.scale // 1) != 0) | .key' | sort)"
 		"[ -n \"$drivers\" ] || { echo 'verify: no service of the app reads APP_URL' >&2; exit 1; }"
 		"echo \"verify: $(echo $drivers) against $APP_URL\""
 		"docker buildx create --use --driver docker-container >/dev/null"
@@ -71,14 +72,25 @@ export def run-drivers [app_dir: string, plan: record] {
 	{
 		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
 		steps: [{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: [$"APP_URL=($url)" "SOURCE_DATE_EPOCH=0"]}]
-		options: {machineType: "E2_HIGHCPU_8", logging: "CLOUD_LOGGING_ONLY"}
+		options: {machineType: "E2_HIGHCPU_32", logging: "CLOUD_LOGGING_ONLY"}
 		timeout: "3600s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
 	print $"gcp: testing ($url) in Cloud Build"
-	# The build's log streams here, each driver's verdict in it.
-	let passed = (try { ^gcloud --quiet builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p; true } catch { false })
+	# The build logs to Cloud Logging alone, which `builds submit` does not
+	# stream: its log is printed once it ends, without the image builds' lines.
+	let build = (gc builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
 	rm -rf $work
-	if not $passed { error make {msg: $"the tests failed against ($url): each driver's verdict is in the build's log above"} }
+	print $"gcp: build ($build): https://console.cloud.google.com/cloud-build/builds/($build)?project=($p)"
+	mut status = "QUEUED"
+	while $status in ["QUEUED" "PENDING" "WORKING"] {
+		sleep 20sec
+		$status = (gc builds describe $build --project $p --format "value(status)" | str trim)
+	}
+	# Cloud Logging takes the last lines a moment after the build ends.
+	sleep 10sec
+	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($build)\"" --project $p --order asc --limit 100000 --format "value(textPayload)"
+		| lines | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
+	if $status != "SUCCESS" { error make {msg: $"the tests failed against ($url) \(($status)\): each driver's verdict is in the log above"} }
 	print $"gcp: every test passed against ($url)"
 }
 
