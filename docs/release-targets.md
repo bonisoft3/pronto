@@ -521,6 +521,26 @@ release maps it onto the service and prints the DNS records it needs; each of
 (`PRONTO_ALIASES`), since a passkey's relying party is the domain alone. A
 domain is verified once by its owner (Search Console) before Google routes it.
 
+`GCP.sidecars` adds containers of the app's own beside the cluster's: each
+names a service of the app's compose project (a plugin's collector, such as
+pronto-perf's `perf-collector`), which the release builds and pushes as it does
+the cluster's images and runs in the same instance, on a port none of the
+cluster's holds. The door dials it at `PRONTO_UPSTREAM_<NAME>`, without waiting
+on it: a collector down is no outage. One with `metrics: port` exports
+Prometheus metrics, and Google's Managed Service for Prometheus collector for
+Cloud Run runs beside it, scraping that port on loopback from a `RunMonitoring`
+config the release keeps in the secret `<name>-gmp-config`; the release enables
+Monitoring and gives the service's account `roles/monitoring.metricWriter`. The
+series keep their names, so the app's PromQL rules and dashboards read them in
+Cloud Monitoring (or a Grafana over its Prometheus API). A preview runs its
+sidecars and scrapes nothing.
+
+```cue
+GCP: schema.#Release & {
+	sidecars: "perf-collector": {port: 8687, metrics: port: 9599}
+}
+```
+
 A provider is refused at release in two cases that a program's development
 settings produce. One whose issuer or internal address is a developer's machine
 (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), as the program's
