@@ -448,9 +448,13 @@ nothing changed pushes the same digests and rolls nothing.
 
 A release goes behind its integration tests, run against a preview of what
 it deploys rather than a stack on the machine releasing: `release.nu` first
-releases the checkout as the preview `rc-<commit>` ([Previews](#previews)),
-then runs `verify@gcp` against it, and only when every driver passes releases
-the app; the preview is removed whatever happened. A failing driver, or a
+releases the checkout as the preview `rc` ([Previews](#previews)), then runs
+`verify@gcp` against it, and only when every driver passes releases the app,
+with the very images tested: copied by digest from the previews' repository,
+not built again. The preview is stopped whatever happened (its service, jobs
+and clock), and its Cloud SQL instance stays for the next release, which
+starts it on an empty database: making an instance is most of ten minutes.
+One release at a time, then; `--preview rc --delete` removes it all. A failing driver, or a
 preview that does not come up, stops the release there. `--preview`,
 `--dry-run` and `--snapshot` deploy as asked, untested, and `--no-gate`
 releases without the preview. A local stack (`sayt integrate@local`) is for
@@ -460,8 +464,8 @@ development and CI.
 `verify@<target>` against the release's address, or a preview's with
 `--preview`: every service of the app's compose project that reads `APP_URL`,
 built as integrate builds it and run as integrate runs it, with `APP_URL` at
-the service's `run.app` address and nothing else of the stack up. They run in
-Cloud Build in the target's project, on 8 vCPUs, since a driver's browser
+the service's `run.app` address and nothing else of the stack up, all at once.
+They run in Cloud Build in the target's project, on 32 vCPUs, since a driver's browser
 renders in software and a 2-CPU runner timed a 3D page out; a machine whose
 network refuses `run.app` verifies all the same. A check that reads no
 `APP_URL` drives the cluster itself, and stays with integrate.
@@ -641,6 +645,12 @@ gcloud artifacts repositories add-iam-policy-binding pronto --location <region> 
   --role roles/artifactregistry.writer --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
 gcloud iam service-accounts add-iam-policy-binding <name>-preview@<previews>.iam.gserviceaccount.com \
   --role roles/iam.serviceAccountUser --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
+# The release copies the images its gate tested: Cloud Build of the release's
+# project reads the previews' repository (nothing of the release's is granted
+# to previews).
+released=$(gcloud builds get-default-service-account --project <project> --format 'value(serviceAccountEmail)' | awk -F/ '{print $NF}')
+gcloud artifacts repositories add-iam-policy-binding pronto --location <region> --project <previews> \
+  --role roles/artifactregistry.reader --member serviceAccount:$released
 ```
 
 The repository's workflow signs in through the provider as the deployer: its

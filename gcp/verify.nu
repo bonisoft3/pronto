@@ -64,16 +64,31 @@ export def run-drivers [app_dir: string, plan: record] {
 		"[ -n \"$drivers\" ] || { echo 'verify: no service of the app reads APP_URL' >&2; exit 1; }"
 		"echo \"verify: $(echo $drivers) against $APP_URL\""
 		"docker buildx create --use --driver docker-container >/dev/null"
-		"docker compose --profile '*' config | docker buildx bake -f - --load --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $drivers"
-		# Every driver runs, whatever the one before it answered, with SHOTS
-		# naming where it may leave screenshots, copied out of its container.
+		# Loaded with their layers uncompressed: gzip of a browser's image is a
+		# minute and more, for a tarball that only crosses a socket.
+		"docker compose --profile '*' config | docker buildx bake -f - --set '*.output=type=docker,compression=uncompressed' --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $drivers"
+		# The drivers run together, each to its end whatever the others answer,
+		# with SHOTS naming where it may leave screenshots, copied out of its
+		# container; each one's log is printed whole once all are done. The
+		# first makes the compose project's network, which the others join.
+		"mkdir -p /workspace/shots /workspace/verdicts /workspace/logs"
+		"drive() {"
+		"  docker compose --profile '*' run --name \"verify-$1\" --no-deps -e APP_URL=\"$APP_URL\" -e SHOTS=/shots \"$1\" >\"/workspace/logs/$1\" 2>&1 || true"
+		"  docker inspect -f '{{.State.ExitCode}}' \"verify-$1\" >\"/workspace/verdicts/$1\" 2>/dev/null || echo 1 >\"/workspace/verdicts/$1\""
+		"  docker cp \"verify-$1:/shots\" \"/workspace/shots/$1\" 2>/dev/null || true"
+		"  docker rm -f \"verify-$1\" >/dev/null 2>&1 || true"
+		"}"
+		"first=1"
+		"for d in $drivers; do"
+		"  drive \"$d\" &"
+		"  if [ \"$first\" = 1 ]; then first=0; until docker inspect \"verify-$d\" >/dev/null 2>&1 || [ -s \"/workspace/verdicts/$d\" ]; do sleep 1; done; fi"
+		"done"
+		"wait"
 		"failed=''"
-		"mkdir -p /workspace/shots"
 		"for d in $drivers; do"
 		"  echo \"verify: $d\""
-		"  if docker compose --profile '*' run --name \"verify-$d\" --no-deps -e APP_URL=\"$APP_URL\" -e SHOTS=/shots \"$d\"; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\" >&2; failed=\"$failed $d\"; fi"
-		"  docker cp \"verify-$d:/shots\" \"/workspace/shots/$d\" 2>/dev/null || true"
-		"  docker rm -f \"verify-$d\" >/dev/null 2>&1 || true"
+		"  cat \"/workspace/logs/$d\""
+		"  if [ \"$(cat \"/workspace/verdicts/$d\")\" = 0 ]; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\" >&2; failed=\"$failed $d\"; fi"
 		"done"
 		"echo \"$failed\" > /workspace/failed"
 	] | str join "\n")

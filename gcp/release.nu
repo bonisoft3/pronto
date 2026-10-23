@@ -190,6 +190,41 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
 
+# What copies a tested preview's images into the release's registry: Google's
+# crane, which logs in as the build's account through the worker's metadata.
+const copier = "gcr.io/go-containerregistry/gcrane:v0.22.1@sha256:67b9993e083198db3d30ae6d2bb685cc67a45494a3c485ef2fa9994715bee9ff"
+
+# The release's images, copied by digest from the preview its tests ran
+# against, so what was tested is, byte for byte, what releases. Cloud Build in
+# the release's project copies them, and its account reads the previews'
+# repository: a grant its owner makes once (docs/release-targets.md#previews).
+def copy-images [plan: record, name: string, services: list<string>, from: record]: nothing -> record {
+	let p = $plan.project
+	let refs = ($services | each {|svc|
+		let src = ($from.pushed | get -o $svc)
+		if $src == null { error make {msg: $"the preview has no ($svc) image to release"} }
+		{svc: $svc, src: $"($from.registry)/($name)-($svc)@($src.digest)", digest: $src.digest, ref: $"($plan.registry)/($name)-($svc):release"}
+	})
+	let work = (mktemp -d -t gcp-copy.XXXXXX | str trim)
+	{
+		steps: ($refs | each {|r| {name: $copier, args: ["cp" $r.src $r.ref]} })
+		options: {logging: "CLOUD_LOGGING_ONLY"}
+		timeout: "1200s"
+	} | to yaml | save -f $"($work)/cloudbuild.yaml"
+	print $"gcp: copying the tested ($services | str join ', ') from the preview"
+	let r = (^gcloud --quiet builds submit --no-source --config $"($work)/cloudbuild.yaml" --project $p | complete)
+	rm -rf $work
+	if $r.exit_code != 0 {
+		let builds = (build-account $p)
+		error make {msg: $"the preview's images were not copied \(its repository may not let ($builds) read it: gcloud artifacts repositories add-iam-policy-binding ($from.registry | split row '/' | last) --project ($from.registry | split row '/' | get 1) --location ($plan.region) --member serviceAccount:($builds) --role roles/artifactregistry.reader\):\n(($r.stdout + $r.stderr) | lines | last 20 | str join (char nl))"}
+	}
+	$refs | each {|r|
+		let digest = (gc artifacts docker images describe $r.ref --format "value(image_summary.digest)" | str trim)
+		if $digest != $r.digest { error make {msg: $"($r.ref) is ($digest), not the tested ($r.digest)"} }
+		{svc: $r.svc, ref: {tag: "release", digest: $digest}}
+	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
+}
+
 # The domain onto the service, through Cloud Run's domain-mapping API: gcloud
 # reaches it only from its beta component, which a release cannot assume. The
 # records it prints go to the domain's DNS; Google wants the domain verified
@@ -265,9 +300,9 @@ def ensure-bucket [bucket: string, account: string, project: string, region: str
 	print $"gcp: pictures are kept in gs://($bucket)"
 }
 
-# A preview removed: its service, jobs, instance and secrets. Its images stay
-# for the repository's cleanup policy; nothing the release made is touched.
-def delete-preview [plan: record] {
+# A preview stopped: what runs against its database (its service, jobs and
+# clock), so the database is no one's.
+def stop-preview [plan: record] {
 	let p = $plan.project
 	let r = $plan.region
 	let n = $plan.names
@@ -276,6 +311,26 @@ def delete-preview [plan: record] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
 	}
 	if (exists scheduler jobs describe $n.clock --location $r --project $p) { gc scheduler jobs delete $n.clock --location $r --project $p | ignore }
+}
+
+# A preview to deploy afresh on its instance as it stands: stopped, and its
+# database dropped, which the deploy makes again and builds the schema in.
+# Dropping it drops the replication slot its electric left there.
+def empty-preview [plan: record] {
+	stop-preview $plan
+	let n = $plan.names
+	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
+		print $"gcp: emptying the preview ($plan.preview): dropping its database on ($n.instance)"
+		gc sql databases delete $n.database --instance $n.instance --project $plan.project | ignore
+	}
+}
+
+# A preview removed: its service, jobs, instance and secrets. Its images stay
+# for the repository's cleanup policy; nothing the release made is touched.
+def delete-preview [plan: record] {
+	let p = $plan.project
+	let n = $plan.names
+	stop-preview $plan
 	if (exists sql instances describe $n.instance --project $p) { gc sql instances delete $n.instance --project $p | ignore }
 	for secret in ($n.secrets | values) {
 		if (exists secrets describe $secret --project $p) { gc secrets delete $secret --project $p | ignore }
@@ -284,8 +339,9 @@ def delete-preview [plan: record] {
 }
 
 # What a release or a preview deploys, from the plan release.cue renders for
-# it, ending once its address answers.
-def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
+# it, ending once its address answers; the images it ran, by digest. A
+# release given a tested preview's (`from`) runs those, copied, not rebuilt.
+def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record]: nothing -> record {
 	let base = if ($preview | is-empty) { {} } else { {GCP: {preview: $preview}} }
 	let plan0 = (plan-of $app_info.cue_path $preview)
 	let services = (do { cd $app_info.dir; ^docker compose --profile "*" config --services } | lines)
@@ -293,7 +349,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
 	if ($refused | is-not-empty) {
 		error make {msg: $"release@gcp does not run ($refused | str join ', ') yet \(PENDING.md#release-targets\)"}
 	}
-	if $dry_run { print $plan0.jobYaml; print "---"; print $plan0.serviceYaml; return }
+	if $dry_run { print $plan0.jobYaml; print "---"; print $plan0.serviceYaml; return {} }
 
 	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
 	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
@@ -308,7 +364,10 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
 		error make {msg: $"GCP.sidecars names ($missing | str join ', '), which the app's compose project does not define"}
 	}
 	let images = ($runtime | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars)
-	let pushed = if $snapshot { {} } else { ensure-infrastructure $plan0; push-images $app_info.dir $plan0 $name $images }
+	let pushed = if $snapshot { {} } else {
+		ensure-infrastructure $plan0
+		if $from != null { copy-images $plan0 $name $images $from } else { push-images $app_info.dir $plan0 $name $images }
+	}
 
 	# The providers compose gives the auth service, under what release.cue sets.
 	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
@@ -329,7 +388,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
 	$plan.jobYaml | save -f dist/gcp/job.yaml
 	$plan.serviceYaml | save -f dist/gcp/service.yaml
 	if $has_migrate { $plan.migrateJobYaml | save -f dist/gcp/migrate.yaml }
-	if $snapshot { print "gcp: rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return }
+	if $snapshot { print "gcp: rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {} }
 
 	let p = $plan.project
 	let r = $plan.region
@@ -355,6 +414,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
 	let health = (^curl --silent --output /dev/null --write-out "%{http_code}" --connect-timeout 5 --retry 10 --retry-delay 3 --retry-max-time 30 --retry-all-errors $"($address)/health")
 	if $health != "200" { error make {msg: $"($address)/health answered ($health)"} }
 	print $"gcp: ($plan.service) is live at ($address)"
+	$pushed
 }
 
 export def main [
@@ -382,20 +442,26 @@ export def main [
 	}
 	# A release goes behind its integration tests, run against a preview of
 	# what it deploys (verify.nu), rather than a stack on the machine releasing:
-	# the preview, then the tests, then the release, and the preview removed
-	# whatever happened. A preview, a dry run or a snapshot deploys as asked.
+	# the preview, then the tests, then the release of the very images tested,
+	# and the preview stopped whatever happened. A preview, a dry run or a
+	# snapshot deploys as asked.
 	if ($preview | is-not-empty) or $dry_run or $snapshot or $no_gate {
-		deploy $app_info $preview $dry_run $snapshot
+		deploy $app_info $preview $dry_run $snapshot | ignore
 		return
 	}
-	let rc = $"rc-(do { cd $app_info.dir; ^git rev-parse --short=7 HEAD } | str trim)"
+	# The gate's preview is `rc`, whose Cloud SQL instance outlives it: making
+	# one is most of ten minutes. Each release starts it on an empty database,
+	# so one release at a time; `--preview rc --delete` removes it all.
+	let rc = "rc"
+	let rc_plan = (plan-of $app_info.cue_path $rc)
 	print $"gcp: testing a preview \(($rc)\) before the release"
 	let failure = (try {
-		deploy $app_info $rc false false
-		run-drivers $app_info.dir (plan-of $app_info.cue_path $rc)
-		deploy $app_info "" false false
+		empty-preview $rc_plan
+		let tested = (deploy $app_info $rc false false)
+		run-drivers $app_info.dir $rc_plan
+		deploy $app_info "" false false {registry: $rc_plan.registry, pushed: $tested} | ignore
 		null
 	} catch {|e| $e.msg })
-	delete-preview (plan-of $app_info.cue_path $rc)
+	stop-preview $rc_plan
 	if $failure != null { error make {msg: $failure} }
 }
