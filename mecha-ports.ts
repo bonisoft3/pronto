@@ -159,9 +159,8 @@ CREATE OR REPLACE TRIGGER ${m.name}_open_sealed BEFORE UPDATE OR DELETE ON publi
       const heldField = lit(p.lease.held);
       const holds = (who: string, session: string) =>
         `EXISTS (SELECT 1 FROM ${s}.instance i, jsonb_array_elements(i.state->${heldField}) e WHERE i.id = ${who} AND e->>'id' = ${session})`;
-      // A session's lapsed leases are found by actor, by index: a renewal then locks its own
-      // reader's rows, not every reader's, and two readers' renewals do not abort each other.
-      output.push(`CREATE INDEX IF NOT EXISTS ${m.name}_lease_actor ON public.${m.name}_lease (actor);`);
+      // A session's lapsed leases are found by actor, through the index the lease entity
+      // declares (mecha-surface.ts).
       output.push(`CREATE OR REPLACE FUNCTION ${s}.prune(who uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $prune$
 BEGIN
