@@ -293,3 +293,59 @@ Deno.test("the blob plane runs over the release's bucket, behind the door", asyn
   const plain = await built(release(), "service");
   assertEquals(plain.value.spec.template.spec.containers.some((c: { name: string }) => c.name === "imgproxy"), false);
 });
+
+// An app's own containers (a plugin's collector): built and pushed as the
+// cluster's images, dialed by the door, and, where one exports Prometheus
+// metrics, scraped into Managed Service for Prometheus by its sidecar.
+const sidecarPushed = `{${["caddy", "crud", "auth", "electric", "database", "migrate", "perf-collector"].map((s, i) => `"${s}": {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+const withSidecar = (sidecar: string) => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${sidecarPushed}, sidecars: "perf-collector": ${sidecar}}`;
+
+Deno.test("a sidecar runs beside the cluster, by its pushed digest, behind the door", async () => {
+  const r = await built(withSidecar(`{port: 8687}`), "plan");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.sidecars, ["perf-collector"]);
+  assertEquals(r.value.scrapeConfig, "");
+  const s = await built(withSidecar(`{port: 8687}`), "service");
+  const containers = s.value.spec.template.spec.containers;
+  const by = (n: string) => containers.find((c: { name: string }) => c.name === n);
+  assertStringIncludes(by("perf-collector").image, `battlechess-perf-collector@${digest("6")}`);
+  assertEquals(by("perf-collector").startupProbe.tcpSocket.port, 8687);
+  const caddy = Object.fromEntries(by("caddy").env.filter((e: { value?: string }) => e.value).map((e: { name: string; value: string }) => [e.name, e.value]));
+  assertEquals(caddy.PRONTO_UPSTREAM_PERF_COLLECTOR, "127.0.0.1:8687");
+  // Unscraped: no collector of Google's, no volume.
+  assertEquals(by("gmp-collector"), undefined);
+  assertEquals(s.value.spec.template.spec.volumes, undefined);
+  // The door does not wait on it: a collector down is no outage.
+  const deps = JSON.parse(s.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy.includes("perf-collector"), false);
+});
+
+Deno.test("a sidecar's metrics are scraped into Managed Prometheus, its config a mounted secret", async () => {
+  const r = await built(withSidecar(`{port: 8687, metrics: port: 9599}`), "plan");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.names.scrapeConfig, "battlechess-gmp-config");
+  assertStringIncludes(r.value.scrapeConfig, "kind: RunMonitoring");
+  assertStringIncludes(r.value.scrapeConfig, "port: 9599");
+  assertStringIncludes(r.value.scrapeConfig, "path: /metrics");
+  const s = await built(withSidecar(`{port: 8687, metrics: port: 9599}`), "service");
+  const spec = s.value.spec.template.spec;
+  const gmp = spec.containers.find((c: { name: string }) => c.name === "gmp-collector");
+  assert(/cloud-run-gmp-sidecar:[0-9.]+@sha256:[0-9a-f]{64}$/.test(gmp.image), gmp.image);
+  assertEquals(gmp.volumeMounts, [{ name: "gmp-config", mountPath: "/etc/rungmp" }]);
+  assertEquals(spec.volumes, [{ name: "gmp-config", secret: { secretName: "battlechess-gmp-config", items: [{ key: "latest", path: "config.yaml" }] } }]);
+  const deps = JSON.parse(s.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps["gmp-collector"], ["perf-collector"]);
+  // A preview runs the sidecar but scrapes nothing.
+  const preview = await built(withSidecar(`{port: 8687, metrics: port: 9599}`).replace(/}$/, `, preview: "pr-9"}`), "plan");
+  assertEquals(preview.success, true, preview.stderr);
+  assertEquals(preview.value.scrapeConfig, "");
+  assertStringIncludes(preview.value.serviceYaml, "name: perf-collector");
+  assert(!preview.value.serviceYaml.includes("gmp-collector"));
+});
+
+Deno.test("a sidecar on a port the cluster holds, or two on one port, is refused", async () => {
+  for (const bad of [`{port: 3000}`, `{port: 8080}`, `{port: 8687, metrics: port: 8687}`, `{port: 80}`]) {
+    const r = await built(withSidecar(bad), "plan");
+    assertEquals(r.success, false, bad);
+  }
+});
