@@ -22,11 +22,9 @@ Deno.test("replay follows the runtime ledger and protects retained data", async 
     const initdb = `${context}/initdb`;
     const pgroll = `${context}/pgroll`;
     const bin = `${context}/bin`;
-    const tmp = `${context}/tmp`;
     await Deno.mkdir(initdb);
     await Deno.mkdir(pgroll);
     await Deno.mkdir(bin);
-    await Deno.mkdir(tmp);
     await Deno.writeTextFile(`${initdb}/010_account.sql`, `
       CREATE TABLE account (id integer PRIMARY KEY, value text NOT NULL);
       INSERT INTO account VALUES (1, 'bootstrap');
@@ -41,7 +39,17 @@ Deno.test("replay follows the runtime ledger and protects retained data", async 
     for (const tool of ["pg_isready", "psql", "pg_dump"]) {
       await Deno.writeTextFile(`${bin}/${tool}`, `#!/bin/sh\nexec docker exec -i -e PGPASSWORD="\${PGPASSWORD:-}" ${container} ${tool} "$@"\n`, { mode: 0o755 });
     }
-    await Deno.writeTextFile(`${bin}/migrate.sh`, `#!/bin/sh\nexec docker exec -i -e DATABASE_URL="$DATABASE_URL" ${container} /migrate.sh "$@"\n`, { mode: 0o755 });
+    await Deno.writeTextFile(`${bin}/migrate.sh`, `#!/bin/sh
+set -eu
+dir=$1
+shift
+tar -C "$dir" -cf - . | docker exec -i -e DATABASE_URL="$DATABASE_URL" ${container} sh -ec '
+  d=$(mktemp -d)
+  trap "rm -rf \\"$d\\"" EXIT
+  tar -C "$d" -xf -
+  /migrate.sh "$d" "$@"
+' sh "$@"
+`, { mode: 0o755 });
     // The broken runner changes data without changing the catalog or ledger.
     await Deno.writeTextFile(`${bin}/broken.sh`, `#!/bin/sh
 set -eu
@@ -50,7 +58,6 @@ set -eu
 `, { mode: 0o755 });
     await docker([
       "run", "-d", "--name", container,
-      "-v", `${context}:${context}`,
       "-e", "POSTGRES_USER=postgres",
       "-e", "POSTGRES_PASSWORD=replay",
       "-e", "POSTGRES_DB=fixture",
@@ -63,7 +70,6 @@ set -eu
       published: { target: "database", initdb, pgroll: { target: "migrate", dir: pgroll, baseline: "00_initdb" } },
       env: {
         POSTGRES_USER: "postgres", POSTGRES_PASSWORD: "replay", POSTGRES_DB: "fixture", POSTGRES_INITDB_ARGS: "--encoding=UTF8",
-        TMPDIR: tmp,
       },
       migrator: { entrypoint: [`${bin}/migrate.sh`], command: [pgroll, "00_initdb"] },
     };

@@ -329,7 +329,7 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
       if (through !== undefined) {
         if (!declared.includes(through)) throw new Error(`retained fixture names unknown migration ${through}`);
         if (!command.includes(dir)) throw new Error("migration runner command does not expose its migration directory");
-        const subset = await Deno.makeTempDir({ dir: env.TMPDIR, prefix: "pronto-replay-migrations-" });
+        const subset = await Deno.makeTempDir({ prefix: "pronto-replay-migrations-" });
         try {
           for (const n of declared.filter(n => n <= through)) {
             await Deno.copyFile(`${dir}/${n}.json`, `${subset}/${n}.json`);
