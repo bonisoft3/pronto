@@ -70,6 +70,31 @@ import (
 	// the service. Filled by the release.
 	blobs?: {}
 
+	// Containers of the app's own beside the cluster's: each names a service of
+	// the app's compose project, built and pushed as the cluster's images are,
+	// and reached by the door at PRONTO_UPSTREAM_<NAME> (a plugin's collector,
+	// say). One that exports Prometheus metrics is scraped into Google Cloud
+	// Managed Service for Prometheus by its sidecar, where the app's PromQL rules
+	// and dashboards read them.
+	sidecars: [=~"^[a-z][a-z0-9-]*$"]: {
+		port!: int & >1024 & <65536
+		metrics?: {
+			port!:    int & >1024 & <65536
+			path:     *"/metrics" | =~"^/"
+			interval: *"30s" | =~"^[1-9][0-9]*s$"
+		}
+	}
+	_sidecarPorts: [for _, c in R.sidecars for p in [c.port, if c.metrics != _|_ {c.metrics.port}] {p}]
+	// A port the cluster's containers hold, or one two sidecars share, would
+	// leave one of them unable to listen in the shared instance.
+	_sidecarClashes: list.Concat([
+		[for _, p in #Ports if list.Contains(R._sidecarPorts, p) {"\(p), which the cluster holds"}],
+		[if len(R._sidecarPorts) != len({for p in R._sidecarPorts {"\(p)": true}}) {"one port twice"}],
+	])
+	// A preview's metrics stay in its instance: its release may not enable
+	// Monitoring nor grant its account a role there.
+	_scraped: [for n, c in R.sidecars if c.metrics != _|_ if R.preview == _|_ {n}]
+
 	auth: {
 		// The providers compose gives the auth service, filled by the release;
 		// overrides here win, as a deployment's environment does in compose.
@@ -114,6 +139,8 @@ import (
 		// The blob plane's bucket, named for the project too: bucket names are
 		// global.
 		bucket: "\(R._project)-\(R._id)-blobs"
+		// What the Managed Prometheus sidecar scrapes, as a secret it mounts.
+		scrapeConfig: "\(R._id)-gmp-config"
 		// Generated once by the release, never a literal in what it renders;
 		// the URLs are composed from the passwords, since Cloud Run expands no
 		// $(VAR) inside a value.
@@ -145,6 +172,9 @@ import (
 // defaults together; the instance is raised to 50 and the pools capped.
 #Pools: {crud: 5, electric: 5}
 #SqlFlags: "cloudsql.logical_decoding=on,max_connections=50"
+
+// Google Cloud Managed Service for Prometheus's collector for Cloud Run, pinned.
+#Gmp: "us-docker.pkg.dev/cloud-ops-agents-artifacts/cloud-run-gmp-sidecar/cloud-run-gmp-sidecar:1.9.4@sha256:8f8ac35f4bc82aa9547b1458343acb79b2594b35b56fb4c13dbe62c1f5a64679"
 
 // The Cloud SQL Auth Proxy, pinned.
 #Proxy: "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2@sha256:fc224915ef435afeb5b2a9421260a0d31986d5c8b7c7f5783c7f5d5885700cd2"
@@ -186,6 +216,7 @@ import (
 					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
 					if R.blobs != _|_ {imgproxy: ["rclone-s3"]}
+					if len(R._scraped) > 0 {"gmp-collector": R._scraped}
 					crud: ["cloud-sql-proxy"]
 					auth: ["cloud-sql-proxy"]
 					electric: ["cloud-sql-proxy"]
@@ -198,7 +229,10 @@ import (
 				// A page load asks for every hatch file at once while electric's
 				// live requests hold theirs, and this one instance is all there is.
 				containerConcurrency: 1000
-				containers: [{
+				if len(R._scraped) > 0 {
+					volumes: [{name: "gmp-config", secret: {secretName: R.names.scrapeConfig, items: [{key: "latest", path: "config.yaml"}]}}]
+				}
+				containers: list.Concat([[{
 					name:  "caddy"
 					image: (imageOf & {svc: "caddy"}).out
 					ports: [{name: "http1", containerPort: P.caddy}]
@@ -212,7 +246,7 @@ import (
 						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_RCLONE_S3", value: "127.0.0.1:\(P.rcloneS3)"}},
 						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_IMGPROXY", value: "127.0.0.1:\(P.imgproxy)"}},
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
-					]])
+					], [for n, c in R.sidecars {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "127.0.0.1:\(c.port)"}]])
 					startupProbe: {httpGet: {path: "/health", port: P.caddy}, periodSeconds: 2, failureThreshold: 60}
 				}, {
 					name:  "crud"
@@ -307,7 +341,15 @@ import (
 					image: #Proxy
 					args: ["--port=\(P.database)", "--health-check", "--http-port=\(P.proxyHealth)", "--http-address=0.0.0.0", R.names.connection]
 					startupProbe: {httpGet: {path: "/startup", port: P.proxyHealth}, periodSeconds: 2, failureThreshold: 60}
-				}]
+				}], [for n, c in R.sidecars {
+					name:  n
+					image: (imageOf & {svc: n}).out
+					startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+				}], [if len(R._scraped) > 0 {
+					name:  "gmp-collector"
+					image: #Gmp
+					volumeMounts: [{name: "gmp-config", mountPath: "/etc/rungmp"}]
+				}]])
 			}
 		}
 	}
@@ -417,6 +459,15 @@ import (
 		if R.auth.oidc[key] =~ "//(localhost|127\\.0\\.0\\.1|\\[::1\\]|host\\.docker\\.internal)([:/]|$)" {"\(key) is \(R.auth.oidc[key])"}]
 	let unserved = [for p in strings.Split(R.auth.programProviders, ",") if p != "" if !list.Contains(served, p) {p}]
 
+	// What the Managed Prometheus sidecar scrapes: each sidecar's metrics, on
+	// the instance's loopback.
+	scrapeConfig: yaml.Marshal({
+		apiVersion: "monitoring.googleapis.com/v1beta"
+		kind:       "RunMonitoring"
+		metadata: name: R._id
+		spec: endpoints: [for n in R._scraped let m = R.sidecars[n].metrics {port: m.port, path: m.path, interval: m.interval}]
+	})
+
 	// What the release needs besides the two documents, as JSON.
 	plan: {
 		project:        R._project
@@ -447,6 +498,10 @@ import (
 			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
 		}}
 		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
+		// The compose services built and run beside the cluster's.
+		sidecars: [for n, _ in R.sidecars {n}]
+		if len(R._sidecarClashes) > 0 {sidecarPorts: error("GCP.sidecars listen on \(strings.Join(R._sidecarClashes, ", "))")}
+		scrapeConfig: [if len(R._scraped) > 0 {B.scrapeConfig}, ""][0]
 	}
 	_noLiteralSecret: true & !strings.Contains(json.Marshal(B.service), "postgres://")
 }

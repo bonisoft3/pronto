@@ -69,6 +69,8 @@ def ensure-infrastructure [plan: record] {
 	# A preview's release may not enable APIs: the project's first release did.
 	if ($plan.preview? | is-empty) {
 		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com cloudbuild.googleapis.com cloudscheduler.googleapis.com --project $p | ignore
+		# Where a sidecar's metrics are scraped to: Managed Service for Prometheus.
+		if ($plan.scrapeConfig | is-not-empty) { gc services enable monitoring.googleapis.com --project $p | ignore }
 	}
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $p) {
 		# Nor make the repository its images go to, in a project of previews.
@@ -95,7 +97,8 @@ def ensure-infrastructure [plan: record] {
 		if not (exists iam service-accounts describe $n.serviceAccount --project $p) {
 			gc iam service-accounts create $sa --project $p --display-name $"($plan.service) on Cloud Run" | ignore
 		}
-		for role in ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] {
+		let roles = ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] | append (if ($plan.scrapeConfig | is-not-empty) { ["roles/monitoring.metricWriter"] } else { [] })
+		for role in $roles {
 			gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role $role --condition None --quiet | ignore
 		}
 	}
@@ -299,7 +302,12 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
 	let has_ticker = ("ticker" in $services)
 	# The blob plane, where the app turns it on: two more containers over a bucket.
 	let has_blobs = ("rclone-s3" in $services)
-	let images = ($runtime | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }))
+	# The app's own containers beside them (GCP.sidecars), each one of its compose services.
+	let missing = ($plan0.sidecars | where {|s| $s not-in $services })
+	if ($missing | is-not-empty) {
+		error make {msg: $"GCP.sidecars names ($missing | str join ', '), which the app's compose project does not define"}
+	}
+	let images = ($runtime | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars)
 	let pushed = if $snapshot { {} } else { ensure-infrastructure $plan0; push-images $app_info.dir $plan0 $name $images }
 
 	# The providers compose gives the auth service, under what release.cue sets.
@@ -331,6 +339,8 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
 		}
 	}
 	if $has_blobs { ensure-bucket $plan.names.bucket $plan.names.serviceAccount $p $r }
+	# What the Managed Prometheus sidecar scrapes, which it reads as a mounted secret.
+	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
 	run-job dist/gcp/job.yaml $plan.names.job "building the schema" $p $r
 	if $has_migrate { run-job dist/gcp/migrate.yaml $plan.names.migrateJob "carrying the schema forward" $p $r }
 	gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
