@@ -106,8 +106,8 @@ export function surfaceOf(m: MechaReducerMachine, entities: Record<string, Surfa
       if ((ALIAS[field.type] ?? field.type) !== type) throw new Error(`${table}.${name} is ${field.type}, the protocol's is ${type}`);
     }
     if (!declared.get("id")?.pk) throw new Error(`${table}: id is the key`);
-    // A renewal prunes its actor's lapsed leases. Found by a scan, they would put a serializable
-    // lock on the whole table, and two readers' renewals would abort each other.
+    // A renewal prunes its actor's lapsed leases, found by actor: by a scan, it would read and
+    // try to lock every reader's.
     if (part === "lease" && !entity.indexes?.some((i) => i.on === "actor")) throw new Error(`${table}: indexes must hold {on: "actor"}, which the renewal prunes by`);
     const projected = fieldsOf(part === "seat" ? m.view : part === "public" ? m.public : undefined);
     for (const name of declared.keys()) {

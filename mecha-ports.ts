@@ -61,6 +61,7 @@ PERFORM ${s}.settle(game, ${s}.step(jsonb_build_object('state', game.state, 'eve
       output.push(fn(`${s}.spawn`, [...roomParam, {name: "input", type: "jsonb"}, {name: "participants", type: "jsonb"}, {name: "at", type: "bigint", default: null}], "void", `
 IF instance_id IS NULL OR jsonb_typeof(participants) IS DISTINCT FROM 'object' OR participants = '{}'::jsonb THEN
  RAISE EXCEPTION 'initialization requires an identity and participants'; END IF;
+PERFORM ${s}.hold(ARRAY(SELECT value::uuid FROM jsonb_each_text(participants)));
 seeded := ${s}.step(jsonb_build_object('initialize', true, 'payload', input,
  'context', jsonb_build_object('tier', 'mecha', 'now', coalesce(at, ${s}.clock())), 'viewers', '[]'::jsonb));
 INSERT INTO ${s}.instance (id, version, state) VALUES (instance_id, ${m.version}, seeded->'state');
@@ -85,6 +86,8 @@ ${auth}
 admission_id := ${a.id};
 IF admission_id IS NULL THEN RAISE EXCEPTION 'admission identity required'; END IF;
 request_value := ${paramsJson};
+-- Its players, before its checks read where they sit.
+PERFORM ${s}.hold(ARRAY(SELECT value::uuid FROM jsonb_each_text(${expressions.members})) || current_actor);
 ${expressions.locks}
 INSERT INTO ${s}.admission_receipt (id, actor, request, now) VALUES (admission_id, current_actor, request_value, ${s}.clock()) ON CONFLICT DO NOTHING;
 SELECT * INTO STRICT prior FROM ${s}.admission_receipt r WHERE r.id = admission_id FOR UPDATE;
@@ -115,6 +118,7 @@ IF chosen IS NULL THEN RETURN jsonb_build_object('kind', 'rejected', 'reason', '
       const payload = slots ? `jsonb_build_object(${lit(p.join.membersPayload!)}, (SELECT jsonb_agg(m.seat ORDER BY m.seat) FROM ${s}.member m WHERE m.instance_id = game.id))` : "'{}'::jsonb";
       output.push(fn(`${s}.join`, [...roomParam, {name: "requested_seat", type: "text", default: ""}], "jsonb", `
 ${auth}
+PERFORM ${s}.hold_instance(instance_id, current_actor);
 SELECT * INTO game FROM ${s}.instance i WHERE i.id = instance_id FOR UPDATE;
 IF NOT FOUND THEN RETURN jsonb_build_object('kind', 'rejected', 'reason', 'room_unavailable'); END IF;
 IF EXISTS (SELECT FROM ${s}.member m WHERE m.instance_id = game.id AND m.actor = current_actor) THEN
@@ -160,11 +164,14 @@ CREATE OR REPLACE TRIGGER ${m.name}_open_sealed BEFORE UPDATE OR DELETE ON publi
       const holds = (who: string, session: string) =>
         `EXISTS (SELECT 1 FROM ${s}.instance i, jsonb_array_elements(i.state->${heldField}) e WHERE i.id = ${who} AND e->>'id' = ${session})`;
       // A session's lapsed leases are found by actor, through the index the lease entity
-      // declares (mecha-surface.ts).
+      // declares (mecha-surface.ts). One a renewal is writing is left for the next prune:
+      // that renewal waits for the player this one holds, so waiting for its row would
+      // deadlock.
       output.push(`CREATE OR REPLACE FUNCTION ${s}.prune(who uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $prune$
 BEGIN
-  DELETE FROM public.${m.name}_lease l WHERE l.actor = who AND NOT ${holds("who", "l.id")};
+  DELETE FROM public.${m.name}_lease l WHERE l.id IN (SELECT c.id FROM public.${m.name}_lease c
+    WHERE c.actor = who AND NOT ${holds("who", "c.id")} FOR UPDATE OF c SKIP LOCKED);
 END;
 $prune$;
 REVOKE ALL ON FUNCTION ${s}.prune(uuid) FROM PUBLIC;
@@ -172,6 +179,7 @@ CREATE OR REPLACE FUNCTION ${s}.lease() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $lease$
 BEGIN
   PERFORM ${s}.serial();
+  PERFORM ${s}.hold(ARRAY[CASE WHEN TG_OP = 'DELETE' THEN OLD.actor ELSE NEW.actor END]);
   IF TG_OP = 'DELETE' THEN
     -- A row the machine already let lapse leaves nothing to deliver.
     PERFORM 1 FROM ${s}.instance i WHERE i.id = OLD.actor FOR UPDATE;
@@ -196,6 +204,7 @@ CREATE OR REPLACE TRIGGER ${m.name}_lease_renew AFTER INSERT OR UPDATE OR DELETE
       // decided, its transaction's clock(), and never before `due`: a late
       // tick that ran at `due` would set the next deadline in the past.
       output.push(fn(`${s}.wake`, [...roomParam, {name: "due", type: "bigint"}], "void", `
+PERFORM ${s}.hold_instance(instance_id);
 SELECT * INTO STRICT game FROM ${s}.instance i WHERE i.id = instance_id FOR UPDATE;
 IF game.state->>'phase' IN (${p.wake.phases.map(lit).join(", ")}) AND (game.state->>${lit(p.wake.deadline)})::bigint > 0
  AND (game.state->>${lit(p.wake.deadline)})::bigint <= due THEN
@@ -224,6 +233,8 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $fire$
 BEGIN
   PERFORM ${s}.serial();
   IF NEW.machine <> ${lit(m.name)} OR NEW.late THEN RETURN NEW; END IF;
+  -- Its players first: a step holding them may be re-arming this schedule.
+  PERFORM ${s}.hold_instance((NEW."row"->>'id')::uuid);
   DELETE FROM public.schedule WHERE name = NEW.schedule;
   PERFORM ${s}.wake((NEW."row"->>'id')::uuid, round(extract(epoch FROM NEW.tick_at) * 1000)::bigint);
   RETURN NEW;
