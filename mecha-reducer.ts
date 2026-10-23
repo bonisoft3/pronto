@@ -154,9 +154,16 @@ REVOKE ALL ON SCHEMA ${schema} FROM PUBLIC;
 -- each request's transaction at its role's. Every other session keeps the
 -- database's default, which its writers were written against and owe no
 -- retry to; a step reaching one is refused, not trusted.
+-- Those roles plan no sequential scan where an index serves: a serializable
+-- transaction that scans a table holds a predicate lock on all of it, so two
+-- players writing their own rows of one small table at once (each board saving
+-- the same move) read each other's and one is aborted, a conflict no data
+-- caused. An index scan locks the rows and pages it reads alone (PostgreSQL's
+-- docs on serializable isolation: a sequential scan always takes a
+-- relation-level predicate lock).
 DO $isolation$ BEGIN
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN ALTER ROLE app_user SET default_transaction_isolation = 'serializable'; END IF;
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service') THEN ALTER ROLE service SET default_transaction_isolation = 'serializable'; END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_user') THEN ALTER ROLE app_user SET default_transaction_isolation = 'serializable'; ALTER ROLE app_user SET enable_seqscan = off; END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service') THEN ALTER ROLE service SET default_transaction_isolation = 'serializable'; ALTER ROLE service SET enable_seqscan = off; END IF;
 END $isolation$;
 CREATE OR REPLACE FUNCTION ${schema}.serial() RETURNS void LANGUAGE plpgsql AS $serial$
 BEGIN
@@ -190,6 +197,9 @@ CREATE TABLE IF NOT EXISTS ${schema}.member (
   seat text NOT NULL,
   PRIMARY KEY(instance_id, actor), UNIQUE(instance_id, seat)
 );
+-- An actor's seats across instances (an admission asks whether one sits elsewhere),
+-- read by index so a step locks that actor's rows and no one else's.
+CREATE INDEX IF NOT EXISTS member_actor ON ${schema}.member (actor);
 CREATE TABLE IF NOT EXISTS ${schema}.receipt (
   instance_id uuid NOT NULL REFERENCES ${schema}.instance,
   actor uuid NOT NULL,
