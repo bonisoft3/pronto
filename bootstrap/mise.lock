@@ -690,3 +690,27 @@ url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-wind
 [tools."http:duckdb"."platforms.windows-x64"]
 checksum = "sha256:798eae475d07c645ff3b914f7b0e676d06502b5412dd7552638fafed81f9e916"
 url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-windows-amd64.zip"
+
+[[tools."github:ory/hydra"]]
+version = "26.2.0"
+backend = "github:ory/hydra"
+
+[tools."github:ory/hydra"."platforms.linux-arm64"]
+checksum = "sha256:18e73ac632d2081b76fbceb03130803a63bdb9b8e2ecc3f06f4a6e6820cabe26"
+url = "https://github.com/ory/hydra/releases/download/v26.2.0/hydra_26.2.0-linux_sqlite_arm64.tar.gz"
+
+[tools."github:ory/hydra"."platforms.linux-x64"]
+checksum = "sha256:28baf98c6d5da617c905d5ca77826fe863db9f9edab8f72664c69a56bde56b5a"
+url = "https://github.com/ory/hydra/releases/download/v26.2.0/hydra_26.2.0-linux_sqlite_64bit.tar.gz"
+
+[tools."github:ory/hydra"."platforms.macos-arm64"]
+checksum = "sha256:d45f26be758196e66e98dff06a9eaefcd21d719123f74f43a0f1fabcfb71da60"
+url = "https://github.com/ory/hydra/releases/download/v26.2.0/hydra_26.2.0-macOS_sqlite_arm64.tar.gz"
+
+[tools."github:ory/hydra"."platforms.macos-x64"]
+checksum = "sha256:ede453fa15c82cfb23e61b138a0b4d9558127a26ebf51eead97d0c58a7eff422"
+url = "https://github.com/ory/hydra/releases/download/v26.2.0/hydra_26.2.0-macOS_sqlite_64bit.tar.gz"
+
+[tools."github:ory/hydra"."platforms.windows-x64"]
+checksum = "sha256:f76a5e605551a2c89c24ffc189b9f2faba0c1288632d086366e137084f75b815"
+url = "https://github.com/ory/hydra/releases/download/v26.2.0/hydra_26.2.0-windows_sqlite_64bit.zip"

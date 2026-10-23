@@ -40,6 +40,7 @@ How pronto works inside, what it decided and what it superseded.
 * [Localization](localization.md) - concept: How an app's declared locales become catalogues, addresses, door redirects and crawlable documents, where locale-dependent code may run, and how text sorts — each gap a refusal before release, never a fallback that ships.
 * [The design scale](design-scale.md) - concept: The value vocabulary beneath an app's design roles: rungs quoted byte for byte from vendored Open Props and Primer, a lint that refuses a literal wherever a rung exists, and a hatch with two checkable reasons.
 * [Screens](screens.md) - concept: How pronto compiles a screen — what it derives from the markup, what it checks the markup against, and how each route's first document is rendered and cached.
+* [Identity](identity.md) - concept: Social sign-in beside the passkey through one operator's broker on Ory Hydra — the app embeds `identity.#Signin`, each app a tenant with pairwise subjects, the broker brought up by the app's own launch.
 * [Release targets](release-targets.md) - concept: Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, and docker are built, and the clouds and k8s are designed.
 
 ## Decisions
