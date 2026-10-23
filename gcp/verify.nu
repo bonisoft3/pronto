@@ -116,7 +116,7 @@ export def run-drivers [app_dir: string, plan: record] {
 	# Cloud Logging takes the last lines a moment after the build ends.
 	sleep 10sec
 	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($build)\"" --project $p --order asc --limit 100000 --format "value(textPayload)"
-		| lines | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
+		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
 	if $status != "SUCCESS" { error make {msg: $"the tests failed against ($url) \(($status)\): each driver's verdict is in the log above"} }
 	print $"gcp: every test passed against ($url)"
 }
