@@ -11,7 +11,7 @@ import { exactBounds } from "./bounds.ts";
 import { parseCel } from "./cel.ts";
 
 type Field = { name: string; type: string; pk?: boolean; cel?: string };
-export type SurfaceEntity = { table: string; durability: string; access?: { scope: string; owner?: string }; fields: Field[] };
+export type SurfaceEntity = { table: string; durability: string; access?: { scope: string; owner?: string }; fields: Field[]; indexes?: { on: string }[] };
 
 const ALIAS: Record<string, string> = { text: "string", int: "int32", bigint: "int64", timestamptz: "timestamp" };
 // A seat's view, a command's request and an open's input hold a value of the
@@ -106,6 +106,9 @@ export function surfaceOf(m: MechaReducerMachine, entities: Record<string, Surfa
       if ((ALIAS[field.type] ?? field.type) !== type) throw new Error(`${table}.${name} is ${field.type}, the protocol's is ${type}`);
     }
     if (!declared.get("id")?.pk) throw new Error(`${table}: id is the key`);
+    // A renewal prunes its actor's lapsed leases, found by actor: by a scan, it would read and
+    // try to lock every reader's.
+    if (part === "lease" && !entity.indexes?.some((i) => i.on === "actor")) throw new Error(`${table}: indexes must hold {on: "actor"}, which the renewal prunes by`);
     const projected = fieldsOf(part === "seat" ? m.view : part === "public" ? m.public : undefined);
     for (const name of declared.keys()) {
       if (Object.hasOwn(spec.fields, name)) continue;

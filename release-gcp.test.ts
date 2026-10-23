@@ -61,12 +61,16 @@ Deno.test("the service is one instance at most and none at rest", async () => {
   assertEquals(JSON.parse(a["run.googleapis.com/container-dependencies"]).caddy, ["crud", "auth", "electric"]);
 });
 
-Deno.test("initdb builds the schema once, over the Cloud SQL socket", async () => {
+Deno.test("initdb builds the schema once, and its re-runnable steps every release, over the Cloud SQL socket", async () => {
   const r = await built(release(), "job");
   assertEquals(r.success, true, r.stderr);
   assertEquals(r.value.spec.template.metadata.annotations["run.googleapis.com/cloudsql-instances"], "brawl-chess:us-central1:battlechess-db");
   const c = r.value.spec.template.spec.template.spec.containers[0];
-  assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"; else`);
+  assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"\n`);
+  // A guard the app changed reaches a database built before it (a friend's
+  // refused seat, found in production), and so does a new entity's table.
+  assertStringIncludes(c.command[2], `for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do`);
+  assertStringIncludes(c.command[2], `if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi\n  done\nelse`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
   assertStringIncludes(c.command[2], "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE");
@@ -279,4 +283,54 @@ Deno.test("a preview name Cloud Run, Cloud SQL or a secret would refuse is refus
     const r = await built(release(`, preview: "${bad}"`), "plan");
     assertEquals(r.success, false, bad);
   }
+});
+
+// A machine's timers and a chess clock's flag fall only where the ticker runs.
+const ticking = `, image: pushed: ticker: {tag: "latest", digest: "${digest("7")}"}, ticker: env: TICKER_LOG: "info", runHost: "bonk-chess-1.us-central1.run.app"`;
+
+Deno.test("the ticker is one more container of the service, writing through crud with the service token", async () => {
+  const r = await built(release(ticking), "service");
+  assertEquals(r.success, true, r.stderr);
+  const t = r.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "ticker");
+  assert(t, "no ticker container");
+  const env = Object.fromEntries(t.env.map((e: { name: string; value?: string; valueFrom?: unknown }) => [e.name, e.value ?? e.valueFrom]));
+  assertEquals(env.CRUD_URL, "http://127.0.0.1:3000");
+  assertEquals(env.PORT, "9998");
+  assertEquals(env.TICKER_LOG, "info");
+  assertStringIncludes(JSON.stringify(env.SERVICE_JWT), "battlechess-service-jwt");
+  assertStringIncludes(t.image, "battlechess-ticker@");
+  const deps = JSON.parse(r.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals([deps.caddy.includes("ticker"), deps.ticker], [true, ["crud"]]);
+  const caddy = r.value.spec.template.spec.containers[0];
+  assertEquals(caddy.env.find((e: { name: string }) => e.name === "PRONTO_UPSTREAM_TICKER").value, "127.0.0.1:9998");
+});
+
+Deno.test("an app without a ticker gets no ticker container and no clock", async () => {
+  const service = await built(release(), "service");
+  assertEquals(service.success, true, service.stderr);
+  assertEquals(service.value.spec.template.spec.containers.some((c: { name: string }) => c.name === "ticker"), false);
+  const plan = await built(release(), "plan");
+  assertEquals(plan.value.clock, undefined);
+});
+
+Deno.test("the ticker's clock pokes the service's run.app address each minute", async () => {
+  const r = await built(release(ticking), "plan");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.clock, { name: "battlechess-clock", schedule: "* * * * *", uri: "https://bonk-chess-1.us-central1.run.app/poke?caller=cloud-scheduler" });
+});
+
+Deno.test("initdb gives postgres BYPASSRLS, since the machines' writers are its own", async () => {
+  const r = await built(release(), "job");
+  assertEquals(r.success, true, r.stderr);
+  const c = r.value.spec.template.spec.template.spec.containers[0];
+  // Cloud SQL's postgres owns the forced-RLS tables and the SECURITY DEFINER
+  // functions that write them, and is no superuser (found on a real instance).
+  assertStringIncludes(c.command[2], `ALTER ROLE postgres BYPASSRLS`);
+  for (const step of ["005_create_tables", "006_policies", "007_txid", "008_publication", "016_mecha_actors"]) assertStringIncludes(c.command[2], step);
+});
+
+Deno.test("raising sqlGeneration names a new instance and leaves the first's name alone", async () => {
+  const first = await built(release(), "plan");
+  const next = await built(release(`, sqlGeneration: 2`), "plan");
+  assertEquals([first.value.names.instance, next.value.names.instance], ["battlechess-db", "battlechess-db-2"]);
 });

@@ -450,9 +450,11 @@ and Queue, the scale-to-zero containers for transform and compute with
 compute's tables on R2, and their generation from the compose closure are
 designed and not built.
 
-**`gcp` runs the database, crud, auth and electric alone**
-([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, a ticker or clock, the airlock, compute, blobs, images and
-render, each of which needs its own Cloud Run shape and wake.
+**`gcp` runs the database, crud, auth, electric and the ticker alone**
+([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, the airlock, compute, blobs, images and
+render, each of which needs its own Cloud Run shape and wake. Its clock pokes
+the ticker with the service role's token on a public path, where mecha's
+contract wants a poke-specific credential.
 
 **`aws` has no rule** ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 

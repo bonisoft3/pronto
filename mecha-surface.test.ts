@@ -34,6 +34,16 @@ Deno.test("a machine's surface is the entities its parts need, each held to the 
   assertThrows(() => surfaceOf(machine, { S: { ...seat(spec.name), fields: asText }, C: command(spec.name) }), Error, "the protocol's is json");
 });
 
+Deno.test("a lease is found by its actor, through an index the entity declares", () => {
+  const machine = { name: "presence", events: {}, ports: { lease: { touch: "timeout", leave: "timeout", held: "leases" } } } as unknown as MechaReducerMachine;
+  assertEquals(partsOf(machine), ["lease"]);
+  const lease = (indexes?: { on: string }[]): SurfaceEntity => ({
+    ...owned, table: "presence_lease", indexes, fields: [{ name: "id", type: "text", pk: true }, { name: "actor", type: "uuid" }, { name: "beat", type: "int" }],
+  });
+  assertThrows(() => surfaceOf(machine, { L: lease() }), Error, `indexes must hold {on: "actor"}`);
+  assertEquals(surfaceOf(machine, { L: lease([{ on: "actor" }]) }), { seat: [], public: [] });
+});
+
 // A value its column refused aborted the step that projected it, for every
 // reader, whatever the rules computed. Every value a view's shape admits must
 // fit the column it fills, and a constraint no reading can prove is a finding.
