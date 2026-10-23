@@ -349,8 +349,10 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool] {
 
 	let address = $"https://($plan.service)-($number).($r).run.app"
 	for d in ([$plan.domain?] | compact | append $plan.aliases) { map-domain $d $plan.service $p $r }
-	# Live means the address answers, not that gcloud returned.
-	let health = (^curl --silent --output /dev/null --write-out "%{http_code}" --retry 8 --retry-all-errors $"($address)/health")
+	# Live means the address answers, not that gcloud returned, which waits for
+	# the revision to be ready: half a minute at most, not curl's backoff,
+	# whose eighth retry comes four minutes in.
+	let health = (^curl --silent --output /dev/null --write-out "%{http_code}" --connect-timeout 5 --retry 10 --retry-delay 3 --retry-max-time 30 --retry-all-errors $"($address)/health")
 	if $health != "200" { error make {msg: $"($address)/health answered ($health)"} }
 	print $"gcp: ($plan.service) is live at ($address)"
 }
