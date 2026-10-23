@@ -4,7 +4,7 @@ services:
     build:
       additional_contexts:
         plugins_omnishell-runtime-image: >-
-          ${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.14.0@sha256:014eb4b0ae281bc94b871e134d31f310edb13abaa77c1f585b3772b666b7797a}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}
+          ${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.16.0@sha256:3acf4cf266932be73c5e7beaefb29457304b7d28e1ce88484497fa31d81aa8de}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}
       context: ..
       dockerfile: .bayt/Dockerfile.served
       target: served

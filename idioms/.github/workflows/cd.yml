@@ -38,9 +38,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The released sayt at the version the toolchain pins, its mise cached.
-      - uses: bonisoft3/sayt/.github/actions/sayt/install@v0.44.2
+      - uses: bonisoft3/sayt/.github/actions/sayt/install@v0.45.0
         with:
-          version: v0.44.2
+          version: v0.45.0
       - run: sayt setup
       - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"
         working-directory: .
