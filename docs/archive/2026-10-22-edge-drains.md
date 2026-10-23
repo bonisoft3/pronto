@@ -9,7 +9,7 @@ status: built
 
 The contract is in [pipelines and schedules](../pipelines-and-schedules.md#drains),
 [release targets](../release-targets.md#pages) and mecha's
-[drains and the clock](https://github.com/bonisoft3/mecha/blob/v0.15.1/docs/browser.md#drains-and-the-clock).
+[drains and the clock](https://github.com/bonisoft3/mecha/blob/v0.16.1/docs/browser.md#drains-and-the-clock).
 This record keeps why it is shaped so.
 
 ## The problem
