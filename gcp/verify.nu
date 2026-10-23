@@ -1,0 +1,92 @@
+# verify.nu: verify@gcp, the integration tests of an app against its address
+# on Cloud Run, the release's or a preview's (docs/release-targets.md#gcp).
+#
+# A driver is what verify@<target> names one: a service of the app's compose
+# project that measures a running app through APP_URL, such as omnishell's
+# visual lint or an app's browser acceptance at integrate. Each is built as
+# bayt builds it, from the compose config, and runs as integrate runs it with
+# APP_URL at the target and nothing else of the stack up. A check that reads
+# no APP_URL drives the cluster itself, and stays with integrate.
+#
+# The drivers run in Cloud Build in the target's project, which reaches its
+# address wherever the machine verifying is, on 8 vCPUs: a driver's browser
+# renders in software, and a 2-CPU runner timed a 3D page out.
+
+use ../k8s/release.nu [resolve-app]
+
+# What builds and runs the drivers: Docker's own CLI image, with its buildx
+# and compose plugins, run by Cloud Build against the Docker of its worker.
+export const builder = "docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d"
+
+def --wrapped gc [...args] {
+	let r = (^gcloud --quiet ...$args | complete)
+	if $r.exit_code != 0 { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
+	$r.stdout
+}
+
+def render [cue_path: string, data?: string]: nothing -> record {
+	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
+	let res = (do { ^cue export --expression gcpRelease.plan --out json ...$inputs } | complete)
+	if $res.exit_code != 0 { error make {msg: $"($cue_path): ($res.stderr)"} }
+	$res.stdout | from json
+}
+
+# The plan a release or a preview renders.
+export def plan-of [cue_path: string, preview: string]: nothing -> record {
+	if ($preview | is-empty) { return (render $cue_path) }
+	let base_file = (mktemp -t gcp.XXXXXX.json | str trim)
+	{GCP: {preview: $preview}} | to json | save -f $base_file
+	let plan = (render $cue_path $base_file)
+	rm $base_file
+	$plan
+}
+
+# Every driver of the app against the service the plan names; an error when
+# one fails, after all have run.
+export def run-drivers [app_dir: string, plan: record] {
+	let p = $plan.project
+	let url = (gc run services describe $plan.service --region $plan.region --project $p --format "value(status.url)" | str trim)
+	if ($url | is-empty) { error make {msg: $"($plan.service) has no address in ($p): release it first"} }
+	let work = (mktemp -d -t gcp-verify.XXXXXX | str trim)
+	# The app's own files, as git sees them, as its images are built from.
+	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
+	with-env {COPYFILE_DISABLE: "1"} { ^tar -czf $"($work)/source.tgz" -C $app_dir -T $"($work)/files" }
+	let script = ([
+		"set -eu"
+		"apk add --no-cache jq >/dev/null"
+		"drivers=$(docker compose --profile '*' config --format json | jq -r '.services | to_entries[] | select(.value.environment.APP_URL != null) | .key' | sort)"
+		"[ -n \"$drivers\" ] || { echo 'verify: no service of the app reads APP_URL' >&2; exit 1; }"
+		"echo \"verify: $(echo $drivers) against $APP_URL\""
+		"docker buildx create --use --driver docker-container >/dev/null"
+		"docker compose --profile '*' config | docker buildx bake -f - --load --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $drivers"
+		# Every driver runs, whatever the one before it answered.
+		"failed=''"
+		"for d in $drivers; do"
+		"  echo \"verify: $d\""
+		"  if docker compose --profile '*' run --rm --no-deps -e APP_URL=\"$APP_URL\" \"$d\"; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\" >&2; failed=\"$failed $d\"; fi"
+		"done"
+		"[ -z \"$failed\" ] || { echo \"verify: failed:$failed\" >&2; exit 1; }"
+		"echo 'verify: every driver passed'"
+	] | str join "\n")
+	{
+		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
+		steps: [{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: [$"APP_URL=($url)" "SOURCE_DATE_EPOCH=0"]}]
+		options: {machineType: "E2_HIGHCPU_8", logging: "CLOUD_LOGGING_ONLY"}
+		timeout: "3600s"
+	} | to yaml | save -f $"($work)/cloudbuild.yaml"
+	print $"gcp: testing ($url) in Cloud Build"
+	# The build's log streams here, each driver's verdict in it.
+	let passed = (try { ^gcloud --quiet builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p; true } catch { false })
+	rm -rf $work
+	if not $passed { error make {msg: $"the tests failed against ($url): each driver's verdict is in the build's log above"} }
+	print $"gcp: every test passed against ($url)"
+}
+
+export def main [
+	--app: string     # Application name or path
+	--preview: string # The preview to test, such as pr-32; the release when absent
+] {
+	let app_info = (resolve-app $app)
+	let preview = ($preview | default ($env.SAY_VERIFY_ARGS_PREVIEW? | default ""))
+	run-drivers $app_info.dir (plan-of $app_info.cue_path $preview)
+}
