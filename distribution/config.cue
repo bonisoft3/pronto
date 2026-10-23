@@ -112,7 +112,7 @@ import (
 	derive: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle derived.ts) . --tables \(strings.Join(P.derived.tables, ","))\([if len(P.derived.streams) > 0 {" --streams \(strings.Join(P.derived.streams, ","))"}, ""][0]) --out \(P._derivedOut)"}).out
 	// The browser tier's artifact: the app bundled into dist/browser/index.html,
 	// under the path prefix `sayt release@pages --base=/<prefix>` names.
-	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])"}).out
+	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])"}).out
 	// The edge tier's artifact, dist/cloudflare (bundle/edge.ts): the page, the
 	// Worker on mecha's edge cluster and the data directory its object loads.
 	// `--from`, given to `sayt release@cloudflare`, starts that directory from

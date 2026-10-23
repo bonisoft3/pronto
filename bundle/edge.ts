@@ -24,7 +24,7 @@ import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
 import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
-import { releaseScripts } from './edge-scripts.ts'
+import { clusterDrains, releaseScripts } from './edge-scripts.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -72,6 +72,7 @@ if (shell.migrations.length === 0) fail('the app has no migration, so no cluster
 // A unit also needs the terminal door's per-unit security headers.
 if (Object.keys(shell.units ?? {}).length) fail(`units are not packaged yet: ${Object.keys(shell.units!).join(', ')}`)
 const name = shell.app ?? path.basename(app)
+const drains = await clusterDrains(path.join(app, '.pronto/cluster.json'))
 
 await Deno.remove(out, { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
 await Deno.mkdir(path.join(out, 'src'), { recursive: true })
@@ -162,7 +163,8 @@ export const Cluster = edgeObject({
   clock: ${JSON.stringify(clock)},
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(shell.tables)},
-  schema: ${JSON.stringify(shell.schema ?? {})},${Object.keys(hybrids).length ? '\n  machines,' : ''}
+  schema: ${JSON.stringify(shell.schema ?? {})},
+  drains: ${JSON.stringify(drains)},${Object.keys(hybrids).length ? '\n  machines,' : ''}
 })
 export default {
   scheduled: edgeWorker.scheduled,
@@ -205,6 +207,6 @@ if (flags['--ssr-origin']) {
   const origin = new URL(flags['--ssr-origin'])
   if (origin.origin !== flags['--ssr-origin'] || origin.protocol !== 'https:') fail('--ssr-origin must be an HTTPS origin without a trailing slash')
   await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], path.join(omnishell, 'server/worker'))
-  await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, databaseMode, clock)
+  await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, drains, databaseMode, clock)
 }
 console.error(`edge: ${out}`)

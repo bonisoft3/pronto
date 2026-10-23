@@ -837,9 +837,9 @@ import (
 #Schedule: S={
 	name: string
 	ir:   *name | string
-	// Five fields, the only grammar. `n/step` means n to the end of the field,
-	// so `5/10` in minutes is 5, 15, 25 … 55.
-	cron:     string
+	// Five fields, the only grammar. A step steps over `*` or a range
+	// (`*/10`, `5-59/10`); `n/step` is refused here, as the ticker refuses it.
+	cron:     string & !~"(^|[ ,])[0-9]+/"
 	timeZone: *"UTC" | string
 	suspend:  *false | bool
 	// Older than this and a tick is recorded `late` and not run: the moment it
@@ -885,10 +885,12 @@ import (
 	// is the app's to add, as an app narrowing its publication adds all of them.
 	// A function whose answer moves with the date names a #Schedule's tick
 	// entity here, and the tick wakes it.
-	on: [string, ...string]
+	// Unqualified, as a change names its table: `public.x` would never match.
+	on: [=~"^[a-z_][a-z0-9_]{0,62}$", ...=~"^[a-z_][a-z0-9_]{0,62}$"]
 	call: string & =~"^[a-z_][a-z0-9_]{0,62}$"
-	// The JSON arguments of every call.
-	body: *{} | {[string]: bool | int | string}
+	// The JSON arguments of every call, each named as a function's argument
+	// is: the page's and the edge's clusters call `call(key => value, …)`.
+	body: *{} | {[=~"^[a-z_][a-z0-9_]{0,62}$"]: bool | int | string}
 	// The HTTP deadline of one call, in seconds above the service role's
 	// statement_timeout so the database, not the client, ends a slow call
 	// (resilience's drain bound).
@@ -1730,7 +1732,8 @@ import (
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		domain?: string
 		ssrOrigin?: string
-		// A frozen archive retains its schedules and runs none at the edge.
+		// A frozen archive retains its schedules and runs none, at the edge or
+		// in a page.
 		edgeClock?: "ticker" | "disabled"
 		targets: [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The

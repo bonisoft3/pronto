@@ -72,7 +72,7 @@ if (from) {
   const { migrate } = await import(String(pathToFileURL(path.join(mecha, 'packages/pglite-workerd/migrate.ts'))))
   await migrate(db, pgrollSet, (l: string) => console.error(`pgdata: ${l}`))
 } else {
-  for (const { sql, fenced } of release.files) await db.exec(fenced ? browserTier(sql) : sql)
+  for (const { sql } of release.files) await db.exec(browserTier(sql))
   for (const script of release.pgroll) {
     if (script.sql === null) throw new UnrunnableScript(script.name, 'an operation')
     await db.exec(browserTier(script.sql))

@@ -64,3 +64,4 @@ How pronto works inside, what it decided and what it superseded.
 
 * [[archive/2026-10-10-hatches|Hatches]] — built decision: derive effect levels and delivery, declare escape hatches, and review entities and machines by consequence. Contracts live in [[../SPEC|the artifact spec]], [[../GUIDE|the guide]] and [the terminal](https://github.com/bonisoft3/omnishell/blob/v0.15.1/docs/terminal.md).
 * [[archive/2026-10-12-lifecycle-guards|Predicates belong to lifecycle transitions]] — built decision: guarded writes share the machine interpreter; access remains RLS.
+* [[archive/2026-10-22-edge-drains|Drains where no stream runs]] — built decision: the page's and the edge's clusters call the drains and sweep the schedules themselves, bloblang left to the release's snapshot. Contract moved to [pipelines and schedules](pipelines-and-schedules.md#drains) and mecha's [drains and the clock](https://github.com/bonisoft3/mecha/blob/v0.15.1/docs/browser.md#drains-and-the-clock).

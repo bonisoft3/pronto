@@ -12,7 +12,7 @@ the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
 carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare`,
-`docker` and `gcp` are built, `cloudflare` for guests and without derivations,
+`docker` and `gcp` are built, `cloudflare` for guests and, of the derivations, with its drains and its clock alone,
 `docker` as a single-container standalone appliance, `gcp` for a cluster of the
 database, crud, auth and electric alone, and `k8s` against a named kube context
 ([the clouds and k8s](#the-clouds-and-k8s)). `aws` and `azure` are designed
@@ -161,13 +161,18 @@ a broken release, for a program with:
   keyed shape per grant, which the page's cluster does not serve;
 - a validation, which runs in plv8, and PGlite has none.
 
-A schedule is skipped rather than refused. Its tick wakes only streams, and
-the page runs none, so the page holds the same derived rows with or without
-one; the target asks for no clock, and the schedule's seed, which writes the
-container database image's `schedule` table, is container-tier.
+**The page runs its drains and its clock**
+([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.15.1/docs/browser.md#drains-and-the-clock)):
+the bundler carries the drains from `.pronto/cluster.json` and places mecha's
+`schedule` table before the seed, as the edge's data directory does
+([`edge-scripts.ts`](../bundle/edge-scripts.ts)). The clock runs while the
+page is open, so the target asks for no clock: a boot records what came due
+meanwhile, late where its lateness has passed. `code.meta.edgeClock:
+"disabled"` stops it in a page as at the edge.
 
-**The derived rows ship as the release found them.** The page runs no stream
-and no computation, so for a program that declares either the rule first runs
+**The derived rows ship as the release found them.** The page runs no stream,
+whose mapping is bloblang, and no computation, so for a program that declares
+either the rule first runs
 [`derived.ts`](../bundle/derived.ts): it brings the app's container cluster up
 under a compose project of its own from the launch target's closure, which
 publishes no port, so a running launch keeps the door's, waits until it has
@@ -179,9 +184,10 @@ each table emptied and refilled whole, so a seeded row the derivation no longer
 produces is gone. Restoration is atomic and temporarily suspends user triggers
 on the restored tables, preventing derived rows from being computed again.
 Foreign-key checks remain active; original trigger modes are restored. The file is a release artifact, rebuilt at every release and
-never committed. A write in the page recounts nothing: the archive the page
-holds is read-mostly, and its derived tables answer the rows it was bundled
-with ([pending](../PENDING.md#release-targets)).
+never committed. A write in the page recounts what its drains recount and
+nothing a stream or a computation derives: those tables answer the rows it
+was bundled with ([pending](../PENDING.md#release-targets)). A drain's sink
+among them is recomputed at boot.
 
 Settlement requires unchanged committed table contents, started stream inputs,
 drained bus groups, completed pipeline work, and at least one completed run of
@@ -292,7 +298,7 @@ service, and nothing runs while no one uses the app:
 |---|---|---|---|
 | caddy | the Worker: static files, `/crud`, `/auth`, `/electric`, settled reads from the Cache API | per request | built |
 | database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests only |
-| conduit, mesh-events | an outbox table and a Cloudflare Queue | — | designed |
+| conduit, mesh-events | for drains, a trigger per table and the object's dispatcher; for streams, an outbox table and a Cloudflare Queue | with the object | drains built, streams designed |
 | transform, compute | a Container each, from the images bayt builds | after an idle timeout | designed |
 | ticker, clock | the object's alarm, and a Cron Trigger poking it | between occurrences | built |
 | render | none: the page renders, as `pages` does | — | built |
@@ -322,9 +328,8 @@ What fixes its shape, as built:
   migrations and, for a program with streams or computations, the rows
   `derived.ts` wrote (as for `pages`) with npm's PGlite, the same Postgres the
   object runs. Where the program declares schedules it also applies mecha's
-  `schedule` table, the container image's 800 step, and takes the 801 seed
-  whole — fenced container-tier for the page, which runs no clock, where
-  the object runs one. `--from=<dir>` starts it from a directory built elsewhere
+  `schedule` table, the container image's 800 step, before the 801 seed.
+  `--from=<dir>` starts it from a directory built elsewhere
   instead, an archive restored from its database with its pgroll ledger
   ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.15.1/packages/pglite-workerd/restore.ts)),
   applies the cluster's pgroll migrations the ledger lacks, as its migrate step
@@ -363,8 +368,14 @@ What fixes its shape, as built:
 - **Settled reads are the colo's.** A shape response that is not live is a
   prefix of its log, so the Worker answers it again from the Cache API, keyed
   by the object's epoch; a public table's chunks are every guest's.
-- **The derived rows ship as the release found them**: no stream or
-  computation runs at the edge yet.
+- **The drains run in the object**, called as their tables change and once
+  after every boot that serves, a failed one's retry at the alarm
+  ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.15.1/packages/mecha-edge/README.md#drains)).
+  A drain's writes reach a guest's cached `/crud` read once its 5 seconds pass,
+  and a cached render once its minute does, as every write the object makes
+  itself; the shape stream carries them at once.
+- **The derived rows ship as the release found them**: no stream, whose
+  mapping is bloblang, and no computation runs at the edge yet.
 - **The clock is two, and sleeps.** The object's alarm stands at the next
   instant any schedule owes a runnable tick and sweeps as mecha's ticker
   does; a Cron Trigger (`triggers.crons`, written where the program declares
@@ -376,8 +387,7 @@ What fixes its shape, as built:
   trigger, is the resolution: an app with a daily schedule idles inside the
   Free plan's day (100,000 requests, 13,000 GB-s of object duration, five Cron
   Triggers an account), where a minutely trigger would hold the object awake
-  for a fifth of it. A drain's tick is a row nothing reads here until the
-  outbox exists.
+  for a fifth of it. A tick wakes the drains that name its table.
 
 As designed and [not built](../PENDING.md#release-targets):
 

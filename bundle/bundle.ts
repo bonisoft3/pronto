@@ -1,13 +1,14 @@
 // Bundles a pronto app into one HTML document: the interpreter and the cluster
 // as one module written inline, the files shell.json serves in a base64 table,
-// the migrations and RLS for the cluster the page boots, and PGlite's wasm and
-// data as base64 of gzip inflated at boot. The module is `deno bundle`'s, so
+// the migrations and RLS for the cluster the page boots with the drains it
+// calls (.pronto/cluster.json), and PGlite's wasm and data as base64 of gzip
+// inflated at boot. The module is `deno bundle`'s, so
 // the page resolves through the same map and lock `deno run` would, and it is
 // written inline so `import.meta.url` is the page's own, which PGlite's
 // relative asset URLs resolve against. Inline script data cannot carry `<!--`
 // or `</script`: the data rides as base64, and executable scripts escape both.
 //
-//   deno run -A --config bundle/deno.json bundle/bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>]
+//   deno run -A --config bundle/deno.json bundle/bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>] [--clock ticker|disabled]
 //
 // The interpreter is omnishell's and the cluster is mecha's, so both roots are
 // named by the caller; the module resolves `omnishell/` and `mecha-browser/`
@@ -19,11 +20,13 @@
 // written as 404.html, which is what makes a deep link boot instead of 404.
 //
 // --derived names the rows the app's streams and computations derive, as
-// derived.ts writes them, run after the migrations: the page runs neither, so
-// what they derive ships as it stood when the page was bundled.
+// derived.ts writes them, run after the migrations: the page runs neither, its
+// drains and its clock aside, so what they derive ships as it stood when the
+// page was bundled.
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { clusterDrains, releaseFiles } from './edge-scripts.ts'
 
 function fail(msg: string): never {
   console.error(`bundle: ${msg}`)
@@ -32,7 +35,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const app = path.resolve(args.shift() ?? fail('usage: bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>]'))
+const app = path.resolve(args.shift() ?? fail('usage: bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>] [--clock ticker|disabled]'))
 const flags: Record<string, string> = {}
 while (args.length) {
   const flag = args.shift()!
@@ -47,7 +50,10 @@ const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha roo
 const base = (flags['--base'] ?? '').replace(/\/$/, '')
 if (base && !base.startsWith('/')) fail(`--base is a path from the site root, such as /truco, not ${base}`)
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/browser'))
-for (const flag of Object.keys(flags)) if (!['--omnishell', '--mecha', '--base', '--derived', '--out', '--no-cluster'].includes(flag)) fail(`unknown flag ${flag}`)
+for (const flag of Object.keys(flags)) if (!['--omnishell', '--mecha', '--base', '--derived', '--out', '--no-cluster', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
+// A frozen archive's page runs no clock over the schedules it keeps.
+const clock = flags['--clock'] ?? 'ticker'
+if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or disabled')
 
 const read = (p: string) => Deno.readTextFile(path.join(app, p))
 const shell = JSON.parse(await read('shell/shell.json')) as {
@@ -91,16 +97,35 @@ const IMPORT = /@import\s+(?:url\(\s*["']?([^"')]+?)["']?\s*\)|["']([^"']+)["'])
 const inHead = new Set(['shell/shell.css', 'shell/design.css', ...shell.routes.map((r) => r.files.css as string)])
 const baseOf = (p: string) => (inHead.has(p) ? 'file:///shell/' : `file:///${path.posix.dirname(p)}/`)
 const inlined = new Map<string, string>()
+// A comment is prose: an @import in one is neither inlined nor refused. A
+// string is code, and a `/*` inside one opens no comment.
+const TOKEN = /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\/\*[\s\S]*?\*\//g
+/** The sheet as alternating code and comments, code first. */
+function parts(sheet: string): string[] {
+  const out = ['']
+  let at = 0
+  for (const m of sheet.matchAll(TOKEN)) {
+    out[out.length - 1] += sheet.slice(at, m.index)
+    if (m[0].startsWith('/*')) out.push(m[0], '')
+    else out[out.length - 1] += m[0]
+    at = m.index + m[0].length
+  }
+  out[out.length - 1] += sheet.slice(at)
+  return out
+}
+const comment = (i: number) => i % 2 === 1
+const outsideComments = (sheet: string, f: (code: string) => string) =>
+  parts(sheet).map((part, i) => (comment(i) ? part : f(part))).join('')
 function inline(p: string, asking: string[]): string {
   if (asking.includes(p)) fail(`${asking.join(' imports ')} imports ${p} again`)
   let sheet = inlined.get(p)
   if (sheet === undefined) {
-    sheet = files[p].replace(IMPORT, (_m, a, b) => {
+    sheet = outsideComments(files[p], (code) => code.replace(IMPORT, (_m, a, b) => {
       const target = new URL(a ?? b, baseOf(p)).pathname.slice(1)
       if (!(target in files)) fail(`${p} imports ${target}, which shell.json does not serve`)
       return inline(target, [...asking, p])
-    })
-    if (/@import\b/.test(sheet)) fail(`${p} carries an @import the bundler does not inline`)
+    }))
+    if (parts(sheet).some((part, i) => !comment(i) && /@import\b/.test(part))) fail(`${p} carries an @import the bundler does not inline`)
     inlined.set(p, sheet)
   }
   return sheet
@@ -112,14 +137,12 @@ for (const p of Object.keys(files)) if (p.endsWith('.css')) files[p] = inline(p,
 const clustered = !flags['--no-cluster'] && shell.migrations.length > 0
 const derived = flags['--derived']
 if (derived && !clustered) fail('--derived names rows for a cluster, and this app has no migration')
-const steps = ['rls.sql', ...shell.migrations, ...(derived ? [derived] : [])]
-const sql = clustered
-  ? [
-    await Deno.readTextFile(path.join(mecha, 'services/database/rls/rls.sql')),
-    ...(await Promise.all(shell.migrations.map(read))),
-    ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : []),
-  ]
-  : []
+// The scripts the edge's data directory is built from, so the page's
+// database is the same: mecha's schedule table before the seed among them.
+const scripts = clustered ? await releaseFiles(app, mecha, shell.migrations) : []
+const steps = [...scripts.map((f) => f.name), ...(derived ? [derived] : [])]
+const sql = [...scripts.map((f) => f.sql), ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : [])]
+const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 // A publication and a replica identity are a WAL reader's, which the page has
 // none of: the cluster skips them by the fence the emitter and an author write,
 // read here by the cluster's own grammar, so one outside a fence is refused.
@@ -200,7 +223,7 @@ if (clustered) {
 const payload = {
   files,
   ...(clustered
-    ? { cluster: { sql, tables: shell.tables, assets } }
+    ? { cluster: { sql, tables: shell.tables, drains, clock, assets } }
     : {}),
 }
 

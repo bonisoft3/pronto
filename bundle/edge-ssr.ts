@@ -1,7 +1,10 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { clusterDrains } from './edge-scripts.ts'
 
-export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, databaseMode: 'existing' | 'separate' = 'existing', clock: 'ticker' | 'disabled' = 'ticker') {
+/** `drains` is the app's drain table (.pronto/cluster.json), which the
+ * database object calls. */
+export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, drains: unknown[], databaseMode: 'existing' | 'separate' = 'existing', clock: 'ticker' | 'disabled' = 'ticker') {
   out = await Deno.realPath(out)
   const headers = await Deno.readTextFile(path.join(out, 'public/_headers'))
   const policy = headers.match(/^  Content-Security-Policy: (.+)$/m)?.[1]
@@ -63,6 +66,7 @@ const Base = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(cfg.tables)},
   schema: ${JSON.stringify(cfg.schema ?? {})},
+  drains: ${JSON.stringify(drains)},
   ${separate ? "storageFormat: { version: 1, blockSize: 131072, codec: 'deflate' }," : ''}
 })
 export class Cluster extends Base {
@@ -323,9 +327,10 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
 }
 
 if (import.meta.main) {
-  const [out, omnishell, mecha, name, origin, mode = 'existing', clock = 'ticker'] = Deno.args
-  if (!origin) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin> [existing|separate] [ticker|disabled]')
+  const [out, omnishell, mecha, name, origin, clusterJson, mode = 'existing', clock = 'ticker'] = Deno.args
+  if (!clusterJson) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin> <app>/.pronto/cluster.json [existing|separate] [ticker|disabled]')
   if (mode !== 'existing' && mode !== 'separate') throw new Error('database mode must be existing or separate')
   if (clock !== 'ticker' && clock !== 'disabled') throw new Error('clock must be ticker or disabled')
-  await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, mode, clock)
+  const drains = await clusterDrains(clusterJson)
+  await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, drains, mode, clock)
 }

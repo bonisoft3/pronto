@@ -2334,9 +2334,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// clock lives in a deploy tree this emitter does not write, and the
 	// failure is silent — the pipelines simply never run. Declaring the clock
 	// is what makes the absence loud, and `meta.clocks` is where the app says
-	// so. The pages target skips schedules (_pagesBundle), so only an effect
-	// asks it for a clock; `edgeClock: "disabled"` is a frozen archive saying
-	// in as many words that its schedules do not run there.
+	// so. The page runs its own clock while it is open (mecha-browser's
+	// clock.ts), so only an effect asks it for one; `edgeClock: "disabled"` is
+	// a frozen archive saying in as many words that its schedules do not run
+	// there.
 	_timedMachines: (#TimedMachines & {code: E.code}).out
 	_clockDeclared: {
 		for t in E.code.meta.targets {
@@ -2351,11 +2352,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// while the client opens a keyed shape per grant that the page's cluster
 	// does not serve; and a validation runs in plv8, which PGlite has none of.
 	// The pages target is refused rather than released broken.
-	//
-	// A schedule is skipped, not refused: its tick wakes only streams, and the
-	// page runs none, so a page holds what derived tables held at bundling with
-	// or without one. Its seed is container-tier, as the `schedule` table it
-	// writes is the container database image's.
 	_pagesBundle: {
 		if list.Contains(E.code.meta.targets, "pages") {
 			units: true & (len(E.code.capabilities.vendored) == 0)
@@ -2879,7 +2875,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// evaluating a program takes gigabytes, too much to repeat in
 		// ci-replay or in a release. The
 		// token roles are those 001_roles.sql grants authenticator, which a
-		// Kubernetes release's operator would otherwise revoke.
+		// Kubernetes release's operator would otherwise revoke. The drains are
+		// what the page's and the edge's clusters call (mecha-browser's
+		// drains.ts), where no stream runs them.
 		".pronto/cluster.json": {
 			format: "json"
 			data: {
@@ -2887,6 +2885,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if E.cluster.capabilities.server {
 					schema:     E.cluster.surface.schema
 					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+					drains: [for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}]
 				}
 			}
 		}
@@ -3222,12 +3221,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// places it in the database as 800_schedule.sql, and this seeds it
 				// after, one row per declaration. An upsert on the name, which keeps
 				// a watermark a schedule has earned; but initdb runs once per volume,
-				// so nothing restates a schedule on an existing one. Fenced for the
-				// page, which runs no clock; the edge's pgdata.ts lifts the fence
-				// and places the table before it.
+				// so nothing restates a schedule on an existing one. The page's and
+				// the edge's builds place the table before it (bundle/edge-scripts.ts).
 				"services/database/migrations/801_schedule_seed.sql": {
 					format: "sql"
-					text: "-- tier: container\n" + strings.Join([for _, sc in E.code.state.schedules {
+					text: strings.Join([for _, sc in E.code.state.schedules {
 						"""
 						INSERT INTO schedule (name, cron, time_zone, suspended, max_lateness_seconds,
 						                      concurrency_policy, done_entity, done_filter,
@@ -3243,7 +3241,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						  done_entity = EXCLUDED.done_entity, done_filter = EXCLUDED.done_filter,
 						  emits_entity = EXCLUDED.emits_entity, emits_values = EXCLUDED.emits_values;
 						"""
-					}], "\n") + "\n-- tier: any\n"
+					}], "\n") + "\n"
 				}
 			}
 			"services/database/migrations/007_txid.sql": {

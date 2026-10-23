@@ -121,11 +121,23 @@ GolAberto's `apps/golaberto/cdc.cue` adds its drains' tables to
 its feed and nowhere else: Electric's publication and the tables' policies
 are untouched.
 
+Where no stream runs, at `pages` and `cloudflare`, the cluster calls the
+drains itself from the table the emitter writes into `.pronto/cluster.json`:
+a trigger on each `on` table, the same one-second batch, every drain called
+once as the cluster installs them in place of the stream's start, and a failed call retried after
+a backoff rather than redelivered
+([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.15.1/docs/browser.md#drains-and-the-clock)).
+No publication is involved, so a table outside it wakes the drain there too.
+The two obligations above are what keep that loop finite, as they keep the
+stream's. PGlite enforces no `statement_timeout`, so `timeout` bounds a call
+on the container tier alone.
+
 ## Below the cluster
 
-The browser cluster a page boots serves CRUD and shapes and runs no stream. A
-transform's `shim` and a fold's module are emitted into the app, and nothing in
-the page executes either: `evaluateFold` in omnishell's `jessie.js` has no
+The browser cluster a page boots serves CRUD and shapes, calls the drains and
+sweeps the schedules ([drains](#drains)), and runs no stream: a stream's
+mapping is bloblang. A transform's `shim` and a fold's module are emitted into
+the app, and nothing in the page executes either: `evaluateFold` in omnishell's `jessie.js` has no
 caller. What the terminal does run, at every tier, is the projection of a fold
 sink: `others + intent` over the synced sink and pair, where `intent` counts a
 row unless it is retracted. It never calls `step`, `combine` or `result`, so it

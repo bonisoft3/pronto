@@ -23,7 +23,7 @@ Deno.test('SSR database generation preserves the clock policy in both database m
     for (const mode of ['existing', 'separate'] as const) {
       for (const clock of ['ticker', 'disabled'] as const) {
         await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
-        await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', mode, clock)
+        await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode, clock)
         const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
         const options = source.slice(source.indexOf('const Base = edgeObject('), source.indexOf('export class Cluster'))
         const captured = new Function('edgeObject', 'pgliteWasm', 'initdbWasm', 'pgliteData', 'icu', options + '\nreturn Base')(Object, null, null, null, null)
@@ -38,7 +38,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
   try {
     const bundle = path.join(tmp, 'pronto/bundle'), runtime = path.join(tmp, 'selected runtime'), out = path.join(tmp, 'release')
     for (const dir of [bundle, path.join(runtime, 'server'), path.join(runtime, 'interpreter'), path.join(out, 'src'), path.join(out, 'public/shell')]) await Deno.mkdir(dir, { recursive: true })
-    for (const file of ['edge-ssr.ts', 'edge-hints.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
+    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
     await Deno.copyFile(new URL('../../omnishell/server/prepare-worker.ts', import.meta.url), path.join(runtime, 'server/prepare-worker.ts'))
     const jessie = await Deno.readTextFile(new URL('../../omnishell/interpreter/jessie.js', import.meta.url))
     await Deno.writeTextFile(path.join(runtime, 'interpreter/jessie.js'), jessie + '\n// selected runtime witness\n')
@@ -46,7 +46,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
     await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
     const installed = await import(pathToFileURL(path.join(bundle, 'edge-ssr.ts')).href)
-    await installed.writeEdgeSsr(out, runtime, path.join(tmp, 'mecha'), 'app', 'https://app.example')
+    await installed.writeEdgeSsr(out, runtime, path.join(tmp, 'mecha'), 'app', 'https://app.example', [])
     assert.match(await Deno.readTextFile(path.join(out, 'renderer/jessie-startup.js')), /selected runtime witness/)
     const entry = await Deno.readTextFile(path.join(out, 'src/index.ts'))
     const hintsImport = entry.match(/^import \{ edgeHints \} from '([^']+)'$/m)
@@ -79,7 +79,7 @@ Deno.test('the Cron Trigger follows the Worker that holds the object', async () 
     const triggers = { crons: ['0 * * * *'] }
     for (const mode of ['existing', 'separate'] as const) {
       await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, triggers }))
-      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', mode)
+      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
       const entry = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
       assert.deepEqual(entry.triggers, mode === 'existing' ? triggers : undefined)
       if (mode === 'separate') assert.deepEqual(JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))).triggers, triggers)
@@ -107,7 +107,7 @@ Deno.test('separate SSR upgrades pin each entry to its renderer while retaining 
     await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, migrations: [{ tag: 'old' }] }))
     const build = async (origin = 'https://app.example') => {
-      await writeEdgeSsr(out, omnishell, mecha, 'app', origin, 'separate')
+      await writeEdgeSsr(out, omnishell, mecha, 'app', origin, [], 'separate')
       return JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
     }
     const first = await build(), second = await build()
@@ -139,7 +139,7 @@ Deno.test('enabling SSR on an existing app retains its Cluster namespace and per
     const migrations = [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }]
     await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, migrations }))
-    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example')
+    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [])
     const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
     assert.equal(config.name, 'app')
     assert.deepEqual(config.durable_objects.bindings.find((b: { name: string }) => b.name === 'CLUSTER'), { name: 'CLUSTER', class_name: 'Cluster' })
@@ -185,7 +185,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
     await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
-    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', 'separate')
+    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], 'separate')
     await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify({
       common: ['</shell/boot.js>; rel=preload; as=script'],
       catalogues: {},

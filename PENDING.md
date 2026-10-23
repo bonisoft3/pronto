@@ -441,11 +441,14 @@ machine has: its SDK is its own install, and the k8s release pins neither
 kubectl nor skaffold; a pin in `#Tools` would carry it to every consumer's
 toolchain. The release refuses to start without it.
 
-**The edge derives nothing**
-([cloudflare](docs/release-targets.md#cloudflare)): the outbox and Queue, the
-scale-to-zero containers for transform and compute with compute's tables on
-R2, and their generation from the compose closure are designed and not built.
-A schedule ticks there, and its tick wakes no drain until the outbox exists.
+**The edge derives by drain alone**
+([cloudflare](docs/release-targets.md#cloudflare)): its drains and its clock
+run in the object, and no stream or computation does. A stream's mapping is
+bloblang, and a computation's queries are DuckDB's, whose engine (8 MB of
+WebAssembly gzipped, measured) does not fit a Worker beside PGlite. The outbox
+and Queue, the scale-to-zero containers for transform and compute with
+compute's tables on R2, and their generation from the compose closure are
+designed and not built.
 
 **`gcp` runs the database, crud, auth and electric alone**
 ([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, a ticker or clock, the airlock, compute, blobs, images and
@@ -462,10 +465,10 @@ render, each of which needs its own Cloud Run shape and wake.
 **`verify@<target>` is not emitted**
 ([the design](docs/release-targets.md#what-a-release-is)).
 
-**The page derives nothing live** ([pages](docs/release-targets.md#pages)).
+**The page derives by drain alone** ([pages](docs/release-targets.md#pages)).
 Its streams' and computations' rows are the release's, so a result recorded in
-the page moves no table, chance or rating; the derivation running in the page
-on DuckStream's machinery is what closes it.
+the page moves no stream's table, chance or rating; the derivation running in
+the page on DuckStream's machinery is what closes it.
 
 **A duckstream's sink is empty in the page** ([pages](docs/release-targets.md#pages)):
 the release derives the rows of streams and computations, and xpense's
