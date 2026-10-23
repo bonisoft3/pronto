@@ -43,7 +43,7 @@ import '${fromSrc(path.join(server, 'worker-roles.ts'))}'
 import { appRenderer } from '${fromSrc(path.join(server, 'worker-document.ts'))}'
 import { renderObject } from '${fromSrc(path.join(server, 'render-object.ts'))}'
 import assets from '../renderer/assets.json'
-export class DocumentRenderer extends renderObject(appRenderer(assets, ${JSON.stringify(origin)})) {}
+export class DocumentRenderer extends renderObject(appRenderer(assets, ${JSON.stringify(origin)}), ${JSON.stringify(renderer)}) {}
 export default { fetch() { return new Response(null, { status: 404 }) } }
 `)
   await Deno.writeTextFile(path.join(out, 'src/database.ts'), `
@@ -68,11 +68,33 @@ const Base = edgeObject({
 export class Cluster extends Base {
   async render(request, renderer) {
     try {
-      return await this.readPublic(async snapshot => {
-        const response = await renderer.render(request, snapshot.revision, new SnapshotReader(snapshot))
-        // Consume the RPC stream while the snapshot capability is still alive.
-        return new Response(response.body ? await response.arrayBuffer() : null, response)
+      const priority = request.headers.get('x-pronto-speculative') === '1' ? 'low' : 'high'
+      let resolveResponse
+      let rejectResponse
+      let committed = false
+      const responseReady = new Promise((resolve, reject) => {
+        resolveResponse = (res) => { committed = true; resolve(res) }
+        rejectResponse = reject
       })
+      const snapshotDone = this.readPublic(async snapshot => {
+        const response = await renderer.render(request, snapshot.revision, new SnapshotReader(snapshot))
+        const init = { status: response.status, headers: new Headers(response.headers) }
+        if (!response.body) {
+          resolveResponse(new Response(null, init))
+          return
+        }
+        const { readable, writable } = new TransformStream()
+        resolveResponse(new Response(readable, init))
+        await response.body.pipeTo(writable)
+      }, priority).catch(error => {
+        if (!committed) {
+          rejectResponse(error)
+          return
+        }
+        throw error
+      })
+      this.ctx?.waitUntil?.(snapshotDone)
+      return await responseReady
     } catch (error) {
       if (!(error instanceof PublicSnapshotCapacity) && !(error instanceof DataDirectoryLoading)) throw error
       return new Response(request.method === 'HEAD' ? null : error.message, { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '1' } })
@@ -84,7 +106,7 @@ ${separate ? "// The Cron Trigger pokes the object from the Worker that holds it
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), `
 import { edgeWorker } from '${fromSrc(path.join(edge, 'worker.ts'))}'
 import { edgeHints } from '${fromSrc(fileURLToPath(new URL('edge-hints.ts', import.meta.url)))}'
-import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
+import { acceptedLanguages, routeAt, stripProgressiveReads } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json' with { type: 'json' }
 ${separate ? '' : "export { Cluster } from './database.ts'"}
 const DOCUMENT_POLICY = ${JSON.stringify(policy)}
@@ -92,7 +114,7 @@ const RENDER_FRESH_MS = 60_000
 const RENDER_SWR_S = 86_400
 const RENDER_CACHE_CONTROL = 'public, no-cache, must-revalidate'
 const stripServedReads = (html) => html.replace(/<script type="application\\/json" id="pronto-reads">[\\s\\S]*?<\\/script>/, '')
-const keyOf = (...parts) => new Request(\`https://edge-cache.invalid/\${parts.map(encodeURIComponent).join('/')}\`)
+const keyOf = (...parts) => new Request(\`https://edge-cache.invalid/\${parts.filter(Boolean).map(encodeURIComponent).join('/')}\`)
 const inFlight = new Map()
 export default {
 ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, env, ctx) {
@@ -100,33 +122,100 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
     const found = (request.method === 'GET' || request.method === 'HEAD') ? routeAt(hints, url.pathname, url.search, preferred) : null
     if (found && found.route.ssr === 'ssr') {
-      const linkHeader = edgeHints(request, hints, routeAt, preferred)
+      const prefetch = request.headers.get('x-pronto-prefetch') === '1' || request.headers.get('purpose') === 'prefetch' || Boolean(request.headers.get('sec-purpose')?.includes('prefetch'))
+      const linkHeader = prefetch ? null : edgeHints(request, hints, routeAt, preferred)
       const cache = globalThis.caches?.default
       const version = env.CF_VERSION_METADATA?.id ?? ''
       const reset = cache ? ((await (await cache.match(keyOf(version, 'reset')))?.text()) ?? '0') : '0'
       const lastWrite = cache ? ((await (await cache.match(keyOf(version, reset, 'writes', 'public')))?.text()) ?? '0') : '0'
-      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${found.locale ?? ''}\${url.pathname}\${url.search}\`)
-      const renderFresh = async () => {
-        const getReq = request.method === 'HEAD' ? new Request(request.url, { headers: request.headers }) : request
+      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
+      const renderFresh = async (speculative = false) => {
+        const reqHeaders = new Headers(request.headers)
+        if (speculative) reqHeaders.set('x-pronto-speculative', '1')
+        const getReq = request.method === 'HEAD' || speculative ? new Request(request.url, { headers: reqHeaders }) : request
         const renderer = env.RENDERER.get(env.RENDERER.idFromName('public'))
         const response = await env.CLUSTER.get(env.CLUSTER.idFromName('cluster')).render(getReq, renderer)
-        const body = response.body ? await response.arrayBuffer() : null
         const headers = new Headers(response.headers)
-        headers.set('Link', linkHeader)
+        headers.set('Link', edgeHints(request, hints, routeAt, preferred))
         headers.set('Content-Security-Policy', DOCUMENT_POLICY)
-        if (cache && response.status === 200 && body && !request.headers.has('if-none-match')) {
-          const storedHeaders = new Headers(headers)
-          storedHeaders.set('cache-control', \`public, max-age=\${RENDER_SWR_S}\`)
-          storedHeaders.set('x-rendered-at', String(Date.now()))
-          await cache.put(cacheKey, new Response(body.slice(0), { status: 200, headers: storedHeaders }))
-        }
+        const storedHeaders = new Headers(headers)
         headers.set('x-edge-cache', 'miss')
-        return { status: response.status, headers, body }
+        if (!response.body) {
+          return { status: response.status, headers, makeStream: () => null, done: Promise.resolve() }
+        }
+        const chunks = []
+        const writers = new Set()
+        let streamDone = false
+        let streamErr = null
+        const onWriterDisconnect = (w) => {
+          writers.delete(w)
+          if (writers.size === 0 && !streamDone) ctx?.waitUntil?.(done)
+        }
+        const makeStream = () => {
+          const { readable, writable } = new TransformStream()
+          const writer = writable.getWriter()
+          for (const c of chunks) writer.write(c).catch(() => onWriterDisconnect(writer))
+          if (streamDone) {
+            if (streamErr) writer.abort(streamErr).catch(() => {})
+            else writer.close().catch(() => {})
+          } else {
+            writers.add(writer)
+          }
+          return readable
+        }
+        const reader = response.body.getReader()
+        const done = (async () => {
+          try {
+            for (;;) {
+              const { done, value } = await reader.read()
+              if (done) break
+              if (value && value.byteLength > 0) {
+                chunks.push(value)
+                for (const w of writers) w.write(value).catch(() => onWriterDisconnect(w))
+              }
+            }
+            streamDone = true
+            if (cache && response.status === 200 && chunks.length > 0 && !request.headers.has('if-none-match')) {
+              const total = chunks.reduce((n, c) => n + c.byteLength, 0)
+              const combined = new Uint8Array(total)
+              let offset = 0
+              for (const c of chunks) {
+                combined.set(c, offset)
+                offset += c.byteLength
+              }
+              const cleanBody = prefetch
+                ? new TextEncoder().encode(stripProgressiveReads(new TextDecoder().decode(combined)))
+                : combined
+              storedHeaders.delete('vary')
+              storedHeaders.delete('link')
+              storedHeaders.set('cache-control', \`public, max-age=\${RENDER_SWR_S}\`)
+              storedHeaders.set('x-rendered-at', String(Date.now()))
+              // Keep downstream writers open until cache.put settles so the isolate stays alive without waitUntil.
+              await cache.put(cacheKey, new Response(cleanBody, { status: 200, headers: storedHeaders }))
+            }
+            for (const w of writers) w.close().catch(() => {})
+            writers.clear()
+          } catch (err) {
+            streamErr = err
+            streamDone = true
+            for (const w of writers) w.abort(err).catch(() => {})
+            writers.clear()
+            throw err
+          }
+        })()
+        return { status: response.status, headers, makeStream, done }
       }
-      const renderShared = () => {
+      const renderShared = (speculative = false) => {
         let pending = inFlight.get(cacheKey.url)
         if (!pending) {
-          pending = renderFresh().finally(() => inFlight.delete(cacheKey.url))
+          const clear = () => inFlight.delete(cacheKey.url)
+          pending = renderFresh(speculative).then(res => {
+            res.done.then(clear, clear)
+            return res
+          }, err => {
+            clear()
+            throw err
+          })
           inFlight.set(cacheKey.url, pending)
         }
         return pending
@@ -138,7 +227,9 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
           const headers = new Headers(cached.headers)
           headers.delete('x-rendered-at')
           headers.set('cache-control', RENDER_CACHE_CONTROL)
-          headers.set('Link', linkHeader)
+          headers.set('vary', 'Accept-Language')
+          if (linkHeader) headers.set('Link', linkHeader)
+          else headers.delete('Link')
           headers.set('Content-Security-Policy', DOCUMENT_POLICY)
           if (age <= RENDER_FRESH_MS) {
             headers.set('x-edge-cache', 'hit')
@@ -146,18 +237,20 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
           }
           headers.delete('etag')
           headers.set('x-edge-cache', 'stale')
-          ctx?.waitUntil?.(renderShared())
+          ctx?.waitUntil?.(renderShared(true).then(r => r.done))
           // Drop carried reads on a stale hit so the browser paints cached HTML
           // immediately and revalidates live rows from /crud after first paint.
           // A prefetch keeps them: the tab holds what it seeds as stale and
           // refreshes it behind (omnishell's link-prefetch.js).
-          const prefetch = request.headers.get('purpose') === 'prefetch'
           const staleBody = request.method === 'HEAD' ? null : prefetch ? await cached.text() : stripServedReads(await cached.text())
           return new Response(staleBody, { status: cached.status, headers })
         }
       }
       const fresh = await (request.headers.has('if-none-match') ? renderFresh() : renderShared())
-      return new Response(request.method === 'HEAD' ? null : fresh.body, { status: fresh.status, headers: new Headers(fresh.headers) })
+      const freshHeaders = new Headers(fresh.headers)
+      if (!linkHeader) freshHeaders.delete('Link')
+      if (request.method === 'HEAD') ctx?.waitUntil?.(fresh.done)
+      return new Response(request.method === 'HEAD' ? null : fresh.makeStream(), { status: fresh.status, headers: freshHeaders })
     }
     if (found) {
       let asset = await env.ASSETS.fetch(request)
