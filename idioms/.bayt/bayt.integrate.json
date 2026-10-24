@@ -5,7 +5,7 @@
     "manual": true,
     "build": {
       "additional_contexts": {
-        "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.16.0@sha256:3acf4cf266932be73c5e7beaefb29457304b7d28e1ce88484497fa31d81aa8de}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
+        "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.17.0@sha256:57a8ea55cc8cbd7c3084b430d9344226a0e66847adb1caf755df90f5eb1aba84}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
       },
       "secrets": [],
       "args": {}
