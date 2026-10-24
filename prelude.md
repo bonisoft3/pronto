@@ -145,6 +145,15 @@ ports), then a container (with a declared shim at the browser tier),
 then an external API endpoint. Every escape is a
 box in ir.html; an app with none says so in its Decisions section.
 
+JavaScript an app serves is Jessie the cage runs, a declared unit's or
+host-DOM hatch's file, or the terminal's own; `check-facts` warns on anything
+else, naming the file, and the warning becomes an error once no app has one.
+An agent unit without a memo is a presenter: its worker paints and raises
+nothing, under a policy that refuses every connection but blob: and data:.
+A kinetic engine is Jessie too: a module graph of relative static imports,
+linked at build time and imported by the cage, endowed with nothing
+([the kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.17.0/docs/kinetic.md#a-jessie-engine)).
+
 ## The virtual team
 
 Compilation itself is staffed: the brief's `team:` (default squad —

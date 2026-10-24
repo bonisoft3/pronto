@@ -23,6 +23,22 @@ import (
 	mecha:     "github:bonisoft3/mecha"
 }
 
+// The ICE servers a release's terminal hands an online race's
+// RTCPeerConnection, by target (docs/release-targets.md#ice-servers): derived
+// from where the app is released and never declared by it. A dev or CI stack
+// writes none. An entry is an RTCIceServer, so a TURN relay's credentials fit.
+#IceServer: {
+	urls:        string | [string, ...string]
+	username?:   string
+	credential?: string
+}
+#IceServers: [string]: [...#IceServer]
+#IceServers: {
+	cloudflare: [{urls: "stun:stun.cloudflare.com:3478"}]
+	// The images the container targets ship: docker, gcp and k8s.
+	container: [{urls: "stun:stun.l.google.com:19302"}]
+}
+
 #Tools: {
 	...
 	"github:cue-lang/cue":     "0.16.1"
@@ -119,10 +135,11 @@ import (
 	// an archive built elsewhere instead of the migrations and derived rows;
 	// derive then has nothing to do.
 	_edgeData: "let data = if ($env.SAY_RELEASE_ARGS_FROM? | is-not-empty) { ['--from' $env.SAY_RELEASE_ARGS_FROM] } else { [\([if len(P.derived.tables) > 0 {"'--derived' '\(P._derivedOut)'"}, ""][0])] }"
-	edge: (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
+	edge: (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data --ice-servers '\(json.Marshal(#IceServers.cloudflare))'\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
 	edgeDerive: "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
-	// `--reset` replaces the object's data with this release's.
-	publishEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle publish-edge.ts) dist/cloudflare --mecha \(P._mecha) ...(if ($env.SAY_RELEASE_ARGS_RESET? | is-empty) { [] } else { ['--reset'] })"}).out
+	// `--reset` replaces the object's data with this release's; `--temporary`
+	// deploys to a throwaway account when none is logged in.
+	publishEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle publish-edge.ts) dist/cloudflare --mecha \(P._mecha) ...(if ($env.SAY_RELEASE_ARGS_RESET? | is-empty) { [] } else { ['--reset'] }) ...(if ($env.SAY_RELEASE_ARGS_TEMPORARY? | is-empty) { [] } else { ['--temporary'] })"}).out
 	// The container tier's artifact: the self-contained appliance image.
 	docker:        "docker compose build release-docker"
 	publishDocker: "use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag; let image_tag = ($tag | path basename); with-env { BAYT_IMAGE_TAG: $image_tag } { docker compose build release-docker; docker compose push release-docker }"

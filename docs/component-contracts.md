@@ -236,16 +236,33 @@ never a clock.
 
 ## Dual planes and the kinetic contract
 
-Pronto separates application state into two planes:
-1. **The relational plane**: Durable entities (`tab`, `device`, `server`, `live`) queryable via PostgREST and synchronized via ElectricSQL shapes. Mutations occur on-demand via forms and pure Jessie handlers.
-2. **The kinetic plane**: Ephemeral high-frequency states living below `tab` (e.g. 35Hz, 60Hz, 120Hz physics loops, 3D simulations, and canvas interactions).
+A program's state lives in two planes, a hierarchy traded on fan-out
+against latency:
 
-Rather than abandoning determinism at the kinetic boundary, Omnishell's runtime provides `createKineticHost` governed by the pure engine contract (see [Kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.17.0/docs/kinetic.md)):
-- **`initState(seed)`**: Returns immutable initial state.
-- **`advanceFrame(state, cmd)`**: Pure fixed-step transition step.
-- **`saveState(state)`** and **`loadState(snapshot)`**: Formally verify the algebraic isomorphism $\text{loadState} \circ \text{saveState} = \text{id}$.
+| | DOM plane | Kinetic plane |
+| --- | --- | --- |
+| State | durable entities (`tab`, `device`, `offline`, `live`, `server`) moved by IVM: the store, Electric shapes, the pipelines | a deterministic engine's frames below `tab`, moved by GGPO-style rollback with prediction |
+| Presented by | HTML and CSS over rows | canvas, in a presenter's worker ([the seats](https://github.com/bonisoft3/omnishell/blob/v0.17.0/docs/terminal.md#the-seats)) |
+| Fans out | one to many | few to few: one session's peers |
+| Latency | a round trip per change | none locally; a late input is a rollback |
 
-The kinetic host decouples simulation ticks from variable display refresh rates, maintains an in-memory snapshot ring buffer, and injects a deterministic Mulberry32 PRNG. This extends Pronto's universal time travel from low-frequency database transactions down to frame-by-frame physics scrubbing, rollback networking, and timeline branching.
+The DOM plane composes the kinetic one: a Cortex state hosts a kinetic
+child, and the child reaches rows only by **lifting milestones**, the
+app-level events the engine names (a checkpoint, a stage's end, a duel's
+finish), each at a confirmed frame, with every seat's inputs since the last
+one. Confirmation is the condition and the milestone the trigger, so a
+lifted row is never rolled back and nothing is lifted per frame. Authority
+runs one way: a row can overrule the kinetic plane, never the reverse. A
+reader past the session's peers reads the lifted rows. Scrubbing the DOM
+plane's history to a milestone loads the kinetic host at its frame; between
+milestones the host's ring travels frame by frame.
+
+The engine contract that makes this hold is the kinetic host's
+([Kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.17.0/docs/kinetic.md)): `initState(seed)`,
+`advanceFrame(state, cmd)`, and `saveState`/`loadState` with
+$\text{loadState} \circ \text{saveState} = \text{id}$, checked by its sync
+test on every tick. Why each piece is where it is, and what was rejected, is
+[[decisions/2026-10-23-kinetic-machine|the kinetic-machine record]].
 
 ## Rejected
 

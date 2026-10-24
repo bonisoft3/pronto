@@ -31,6 +31,7 @@ import { enumValues } from "./cel-emit.ts";
 import { parseCel } from "./cel.ts";
 import { celFixtures } from "./cel-fixtures.ts";
 import { DENIED, jessieFacts, jessieSelfTest, splitCompletion } from "./jessie.ts";
+import { linkEngine, LinkError } from "./engine-link.ts";
 import {
   EXCEPTION_REASONS,
   type Scale,
@@ -72,6 +73,7 @@ import {
   renderFacts,
   scanTemplateI18n,
   scaleFacts,
+  scriptFacts,
   sha256Hex,
 } from "./facts.ts";
 type Spec = { col: string; op: string; value?: string }[] | null;
@@ -374,6 +376,13 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
         "markupReader: app.out.terminal.surface.markupReader, " +
         "machineSchema: app.out.terminal.surface.machineSchema, " +
         "statics: [for s in app.out.cluster.meta.statics {file: s.file, target: s.target}], " +
+        // The scripts accounted for without being Jessie: a declared unit's or
+        // host-DOM hatch's files, and the terminal's own service worker and boot
+        // script, the boot only where the app has not replaced it.
+        "scripts: {units: [for _, v in app.code.capabilities.vendored for f in v.files {f}], " +
+        "hatches: [for _, h in app.code.capabilities.hatches if h.kind == \"host-dom\" for f in h.files {f}], " +
+        "sw: app.out.terminal.surface.sw, boot: app.out.terminal.surface.boot, bootText: app.out.terminal.surface.assets.boot, " +
+        "interpreterRoot: app.out.terminal.surface.interpreterRoot}, " +
         "shared: {for k, s in app.code.surface.screens {(k): s.files.shared}}, " +
         "pendingLiterals: app.code.meta.design.pendingLiterals, " +
         // Which tables the terminal reads lazily and why, as the program
@@ -423,6 +432,7 @@ export async function derive(appDir: string): Promise<void> {
     markupReader: string;
     machineSchema: string;
     statics: { file: string; target: string }[];
+    scripts: { units: string[]; hatches: string[]; sw: string; boot: string; bootText: string; interpreterRoot: string };
     shared: Record<string, string[]>;
     pendingLiterals: number;
     read: Record<string, { table: string; mode: string; reason: string }>;
@@ -435,6 +445,7 @@ export async function derive(appDir: string): Promise<void> {
     surface: {
       screens: Record<string, { markup?: string; forms?: { id: string; entity: string }[]; files: { html: string; renderers?: string[] } }>;
       endowments?: Record<string, string[]>;
+      engines?: Record<string, { src: string }>;
     };
     state: {
       pipelines?: Record<string, { fold?: { src: string; pair: { table: string } } }>;
@@ -518,6 +529,23 @@ export async function derive(appDir: string): Promise<void> {
     const src = await ifMissing(Deno.readTextFile(`${appDir}/${p.fold.src}`), null);
     if (src === null) fail(`pipeline ${pname}: fold ${p.fold.src} is not a file`);
     modules.push({ path: p.fold.src, references: jessieFacts(src, "fold", surfaceEndowments[p.fold.src] ?? []).references, completion: "exports", role: "fold" });
+  }
+
+  // A kinetic engine is linked here, every module of its graph a fact row in
+  // the engine's cage, and the graph written where the terminal serves it.
+  for (const [ename, e] of Object.entries(surface.engines ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+    let graph;
+    try {
+      graph = await linkEngine(appDir, e.src);
+    } catch (err) {
+      if (err instanceof LinkError) fail(`engine ${ename}: ${err.message}`);
+      throw err;
+    }
+    for (const key of Object.keys(graph.modules).sort()) modules.push({ path: key.slice(2), references: [], completion: "exports", role: "engine" });
+    await Deno.mkdir(`${appDir}/shell/engines`, { recursive: true });
+    const text = JSON.stringify(graph) + "\n";
+    const path = `${appDir}/shell/engines/${ename}.json`;
+    if (await ifMissing(Deno.readTextFile(path), null) !== text) await Deno.writeTextFile(path, text);
   }
 
   modules.push(...await effectModules(appDir, state.effects ?? {}));
@@ -840,6 +868,10 @@ export async function derive(appDir: string): Promise<void> {
   // document's directory (#Screen.files.shared says so, and is what makes
   // `shared/screen.css` the spelling); a shared sheet is reached as a stylesheet
   // in its own right, so its own served directory is the base.
+  // The terminal's own boot script, beside its interpreter: an app that
+  // passes its own in its place serves a script the rule accounts for as the
+  // app's.
+  const terminalBoot = await Deno.readTextFile(await terminalPath(`${exp.scripts.interpreterRoot}/../boot.js`, appDir));
   const servedAt = new Map(exp.statics.map((s) => [s.file, s.target]));
   const servedDir = (file: string): string => {
     const target = servedAt.get(file) ??
@@ -940,6 +972,7 @@ export async function derive(appDir: string): Promise<void> {
       scaleFacts(scaleSources(exp.scale), scaleDeclarations(exp.scale)),
       designCssFacts(tokenDeclarations(exp.designCss)),
       importFacts(exp.statics, imports),
+      scriptFacts([...exp.scripts.units, ...exp.scripts.hatches], [exp.scripts.sw, ...(exp.scripts.bootText === terminalBoot ? [exp.scripts.boot] : [])]),
       jessieFactRows(DENIED, modules),
       { enum_value },
       { read_mode: Object.entries(exp.read).map(([entity, s]) => ({ entity, ...s })) },

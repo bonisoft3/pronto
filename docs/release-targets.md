@@ -95,6 +95,43 @@ tree and the scripts its documents run, which its `script-src` names as
 `launch --watch` rebuilds the door, so the development loop takes a deployment
 as a reader's tab does.
 
+## ICE servers
+
+An online race's data channel (omnishell's [kinetic](https://github.com/bonisoft3/omnishell/blob/v0.17.0/docs/kinetic.md))
+gathers its candidates over the ICE servers in the terminal config,
+`shell.json`'s `iceServers`. They are derived from the release target, by
+`#IceServers` in [`distribution/config.cue`](../distribution/config.cue), and
+an app never declares them:
+
+| where | `iceServers` |
+|---|---|
+| tests, `launch`, `integrate` | none: host candidates only, so no test depends on a server outside the stack |
+| `release@cloudflare` | `stun:stun.cloudflare.com:3478` |
+| `release@docker`, `release@gcp`, `k8s` | `stun:stun.l.google.com:19302` |
+
+The emitter writes `iceServers: []` beside `kinetic` in every app that mounts a
+kinetic child, and a release writes its list into the config as it addresses
+the tree (omnishell's `addressRelease`), so the list is part of the release's
+identity. The cloudflare rule passes `edge.ts --ice-servers`. The container
+targets share one stage, `served-release`, the door's tree addressed with
+`--ice-servers`: the docker image copies it in place of the door's, and the gcp
+and k8s releases bake their images from the app's compose project with every
+`<app>-served` context moved to it (`release-tree` in
+[`k8s/release.nu`](../k8s/release.nu)), so their door and renderer serve it.
+`edge.ts` holds the tree it
+built to the list, and `publish-edge.ts` holds what the deployed `/` maps
+`shell.json` to the build's ([`edge-ice.ts`](../bundle/edge-ice.ts)).
+`kinetic-child.test.ts` holds each target to its own list and the dev stack
+to none, and `k8s/release_test.nu` the bake to the release's tree. Nothing
+tests a NAT.
+
+A STUN server sees each player's public address as the race connects. A
+symmetric NAT needs a TURN relay as well
+([RFC 8656](https://www.rfc-editor.org/rfc/rfc8656)), which needs an account and
+short-lived credentials minted by a server-side key; it is not built, and an
+entry is an `RTCIceServer`, so a relay's `username` and `credential` fit
+beside a STUN `urls`.
+
 ## pages
 
 `sayt release@pages` runs [`bundle.ts`](../bundle/bundle.ts), which writes
@@ -289,6 +326,14 @@ The integrated deployment has been exercised on Paid; Free enforcement,
 including the documented per-object storage limit discrepancy, requires
 verification on a Free account before claiming a free deployment.
 
+A program that declares `capabilities.blobSeed` (a manifest of `{file, sha256}`
+and the public origin the files come from) ships that set as static assets
+under `public/blobs/mecha-objects/`, the URLs the blob plane answers in compose:
+each file is fetched from the origin and refused unless it hashes to its sha256
+([`edge-blobs.ts`](../bundle/edge-blobs.ts)), and `_headers` marks `/blobs/*`
+immutable. Blobs written at run time, such as uploads, have no store at the
+edge yet; a seed is the set known at release.
+
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
 ([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.17.0/packages/pglite-workerd/README.md));
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
@@ -297,7 +342,11 @@ as its one Durable Object, over the shell's tables. `publish` runs
 [`publish-edge.ts`](../bundle/publish-edge.ts): `wrangler deploy` at the
 version pglite-workerd's `mise.toml` pins, with `JWT_SECRET` (once) and a new
 `IMPORT_TOKEN` in the same version, then the data directory loaded into the
-object. The target keeps the compose stack's shape, one Cloudflare piece per
+object. `sayt release@cloudflare --temporary` deploys with no login, to a
+throwaway account wrangler creates and reuses; it expires unless claimed at
+the link wrangler prints. wrangler cannot list a temporary account's
+deployments, so such a publish has no version to roll back to when the data
+directory refuses its migrations. The target keeps the compose stack's shape, one Cloudflare piece per
 service, and nothing runs while no one uses the app:
 
 | compose service | at the edge | sleeps | |

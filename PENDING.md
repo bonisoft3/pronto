@@ -454,6 +454,8 @@ designed and not built.
 ([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, a ticker or clock, the airlock, compute, blobs, images and
 render, each of which needs its own Cloud Run shape and wake.
 
+**No TURN relay is built** ([ICE servers](docs/release-targets.md#ice-servers)).
+
 **`aws` has no rule** ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 
 **`azure` is not in `#Target`**

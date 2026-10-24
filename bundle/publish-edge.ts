@@ -10,14 +10,16 @@
 // the object applies the ones its ledger lacks; one it refuses — built before
 // the ledger existed, or holding a file this release changed — rolls every
 // Worker this publish deployed back to the version it replaced, so the
-// refusal is the publish's and not the site's. Where the release
+// refusal is the publish's and not the site's. The deployment's terminal
+// config is then held to the build's ICE servers. Where the release
 // carries a Cron Trigger, one poke ends the publish, so the object's clock
 // starts now rather than at its first visitor.
 //
-//   deno run -A --config bundle/deno.json bundle/publish-edge.ts <out> --mecha <dir> [--reset]
+//   deno run -A --config bundle/deno.json bundle/publish-edge.ts <out> --mecha <dir> [--reset] [--temporary]
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
+import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
 
 function fail(msg: string): never {
   console.error(`publish-edge: ${msg}`)
@@ -25,11 +27,19 @@ function fail(msg: string): never {
 }
 
 const args = Deno.args.slice()
-const out = path.resolve(args.shift() ?? fail('usage: publish-edge.ts <out> --mecha <dir> [--reset]'))
+const out = path.resolve(args.shift() ?? fail('usage: publish-edge.ts <out> --mecha <dir> [--reset] [--temporary]'))
 if (args.shift() !== '--mecha') fail('--mecha names the mecha root')
 const mecha = path.resolve(args.shift() ?? fail('--mecha takes a value'))
-const reset = args[0] === '--reset' && args.length === 1
-if (args.length && !reset) fail(`unknown arguments ${args.join(' ')}`)
+const flag = (name: string) => {
+  const i = args.indexOf(name)
+  if (i >= 0) args.splice(i, 1)
+  return i >= 0
+}
+const reset = flag('--reset')
+// A throwaway Cloudflare account wrangler makes when none is logged in; it
+// expires unless claimed.
+const temporary = flag('--temporary') ? ['--temporary'] : []
+if (args.length) fail(`unknown arguments ${args.join(' ')}`)
 const workerd = path.join(mecha, 'packages/pglite-workerd')
 const config = path.join(out, 'wrangler.jsonc')
 
@@ -40,9 +50,13 @@ async function run(cmd: string, args: string[], { cwd = out }: { cwd?: string } 
   return text
 }
 
-// By path: mise puts the npm backend's bin/ on PATH, where a bare `wrangler`
-// can resolve to another install.
-const wrangler = `${(await run('mise', ['where', 'npm:wrangler'], { cwd: workerd })).trim()}/node_modules/.bin/wrangler`
+// By path: a bare `wrangler` on PATH can resolve to another install, and
+// where the npm backend puts its bin differs between mise versions.
+// wrangler's bin starts `#!/usr/bin/env node`: run by path it takes whatever
+// node leads PATH. It runs under the node the package's mise config pins.
+const wranglerBin = (await run('mise', ['which', 'wrangler'], { cwd: workerd })).trim()
+const node = (await run('mise', ['which', 'node'], { cwd: workerd })).trim()
+const wrangler = (args: string[]) => run(node, [wranglerBin, ...args])
 const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')
 
 const token = random()
@@ -60,10 +74,23 @@ const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSe
 /** The Workers this publish deploys, each with the version it replaces, for
  * the rollback a refused migration asks for; a first deploy has none. */
 const deployed: { config: string; previous: string | null }[] = []
+/** The version a Worker serves now; null before its first deploy, which
+ * Cloudflare answers with error 10007 (no such Worker). */
+async function previousVersion(configPath: string): Promise<string | null> {
+  const r = await new Deno.Command(node, { args: [wranglerBin, 'deployments', 'list', '--config', configPath, '--json'], cwd: out, stdin: 'null', stdout: 'piped', stderr: 'piped' }).output()
+  const stderr = new TextDecoder().decode(r.stderr)
+  if (!r.success) {
+    if (stderr.includes('[code: 10007]')) return null
+    fail(`wrangler deployments list --config ${configPath} exited ${r.code}:\n${stderr}`)
+  }
+  const listed = JSON.parse(new TextDecoder().decode(r.stdout)) as { versions: { version_id: string }[] }[]
+  return listed.at(-1)?.versions[0]?.version_id ?? null
+}
 async function deploy(configPath: string, ...flags: string[]): Promise<string> {
-  const listed = JSON.parse(await run(wrangler, ['deployments', 'list', '--config', configPath, '--json'])) as { versions: { version_id: string }[] }[]
-  const previous = listed.at(-1)?.versions[0]?.version_id ?? null
-  const text = await run(wrangler, ['deploy', '--config', configPath, ...flags])
+  // wrangler cannot list a temporary account's deployments, so a temporary
+  // publish records no earlier version and cannot be rolled back.
+  const previous = temporary.length ? null : await previousVersion(configPath)
+  const text = await wrangler(['deploy', '--config', configPath, ...flags, ...temporary])
   deployed.push({ config: configPath, previous })
   return text
 }
@@ -127,7 +154,7 @@ if ('skipped' in loaded) {
   if (!migrated.ok) {
     for (const { config: configPath, previous } of deployed.reverse()) {
       if (previous === null) continue
-      console.log(await run(wrangler, ['rollback', previous, '--config', configPath, '--yes', '--message', 'the data directory refused this release\'s migrations']))
+      console.log(await wrangler(['rollback', previous, '--config', configPath, '--yes', '--message', 'the data directory refused this release\'s migrations']))
     }
     fail(`the data directory the object kept refused this release's migrations, and the Workers are rolled back: ${migrated.status} ${answer}`)
   }
@@ -142,6 +169,9 @@ if (ssr) {
   await warm.body?.cancel()
   if (!warm.ok) fail(`warming ${origin}/ answered ${warm.status}`)
 }
+// What a page reads at the deployment's door is what the build wrote: its
+// terminal config carries the target's ICE servers (edge-ice.ts).
+await holdIceServers(deployedRelease(origin), await releasedIceServers(builtRelease(path.join(out, 'public'))), origin)
 // The Cron Trigger is the object's Worker's: database.jsonc where there is one.
 let triggers = settings.triggers
 try { triggers ??= (JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))) as { triggers?: { crons: string[] } }).triggers }

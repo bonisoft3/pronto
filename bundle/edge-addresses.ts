@@ -12,11 +12,19 @@ interface Release {
     routes: { path: string; screen?: string; paths?: Record<string, string>; access?: 'public' | 'private'; ssr?: 'spa' | 'ssg' | 'ssr'; files: Record<string, string | string[]> }[]
     i18n?: { locales?: Record<string, unknown> }
     prefix?: string
+    presenter?: { policy: string }
   }
+}
+/** An RTCIceServer, as omnishell's release addressing writes it. */
+export interface IceServer {
+  urls: string | string[]
+  username?: string
+  credential?: string
 }
 export interface Addresses {
   local: (value: string, base: string) => string | null
-  addressRelease: (out: string, options?: { htmlSuffix?: string }) => Promise<Release>
+  addressRelease: (out: string, options?: { htmlSuffix?: string; iceServers?: IceServer[] }) => Promise<Release>
+  parseIceServers: (text: string) => IceServer[]
   retainReleases: (out: string, previous: string) => Promise<Set<string>>
   separateAssetDirectories: (out: string, previous: string) => void
 }
@@ -38,10 +46,11 @@ export interface EdgeHints {
 
 /** Cloudflare's assets answer `.html` by their own routing rules, take cache
  * rules from `_headers`, and serve `/` from `index.html`; the Worker reads the
- * hints to send each route's preloads as early hints. */
-export async function addressEdgeAssets(addresses: Addresses, out: string, previous?: string): Promise<EdgeHints> {
+ * hints to send each route's preloads as early hints. The terminal config
+ * carries the target's ICE servers. */
+export async function addressEdgeAssets(addresses: Addresses, out: string, { previous, iceServers }: { previous?: string; iceServers: IceServer[] }): Promise<EdgeHints> {
   const { addressRelease, local, retainReleases } = addresses
-  const release = await addressRelease(out, { htmlSuffix: '.txt' })
+  const release = await addressRelease(out, { htmlSuffix: '.txt', iceServers })
   const { imports, screens, cfg } = release
   await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
   const directories = new Set(Object.values(imports).map(url => path.posix.dirname(url)))
@@ -52,8 +61,10 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, previ
   const { document } = parseHTML(await Deno.readTextFile(path.join(out, 'shell/index.html')))
   const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')
   if (!policy) throw new Error('the document carries no Content-Security-Policy')
+  // A presenter's worker takes its policy from its script's own response.
   await Deno.writeTextFile(path.join(out, '_headers'), [
     `/\n  Content-Security-Policy: ${policy}\n`,
+    ...(cfg.presenter ? [`/omnishell/interpreter/presenter.js\n  Content-Security-Policy: ${cfg.presenter.policy}\n`] : []),
     ...[...directories].sort().map(dir => `${dir === '/' ? '' : dir}/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable\n`),
   ].join('\n'))
 

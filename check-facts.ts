@@ -23,6 +23,7 @@ import {
   mergeFacts,
   nestingFacts,
   scaleFacts,
+  scriptFacts,
   sha256Hex,
   styleFacts,
   vendorFacts,
@@ -135,6 +136,8 @@ const SCHEMA: Record<string, Record<string, string>> = {
   },
   design_reference: { block: "VARCHAR", token: "VARCHAR", ref: "VARCHAR" },
   served_file: { file: "VARCHAR", target: "VARCHAR" },
+  script_declared: { path: "VARCHAR" },
+  script_platform: { path: "VARCHAR" },
   app_import: { path: "VARCHAR", line: "BIGINT", target: "VARCHAR", resolved: "VARCHAR" },
   ir_route: { id: "VARCHAR", route: "VARCHAR" },
   ir_nest: { id: "VARCHAR", kind: "VARCHAR", inside: "VARCHAR", inside_kind: "VARCHAR" },
@@ -425,11 +428,31 @@ async function convictedOnce(appDir: string, scale: Scale, needles: string[], ow
   return found.length === 1 ? [] : [`${owed} (matched ${found.length})`];
 }
 
+/**
+ * The served-script rule, over four scripts: a Jessie module, a declared
+ * unit's file, the terminal's own, and one that is none of them, which is the
+ * one finding — and a warning, as the rule is.
+ */
+async function scriptFailures(appDir: string): Promise<string[]> {
+  const served = ["shell/handlers/save.js", "shell/units/paint/unit.js", "offline-first-sw.js", "shell/game.js", "shell/game.css"]
+    .map((file) => ({ file, target: `/srv/${file}` }));
+  const facts = mergeFacts(
+    importFacts(served, []),
+    { handler: [{ path: "shell/handlers/save.js", completion: "arrow", role: "handler" }] },
+    scriptFacts(["shell/units/paint/unit.js"], ["offline-first-sw.js"]),
+  );
+  const findings = (await query(`${inlineViews(facts)}\n${await invariants}`, appDir)).filter((f) => f.path.endsWith(".js"));
+  return findings.length === 1 && findings[0].path === "shell/game.js" && findings[0].severity === "warning"
+    ? []
+    : [`want one warning for shell/game.js alone, got ${JSON.stringify(findings)}`];
+}
+
 async function main(appDir: string): Promise<void> {
   const fixture = (await Promise.all([
     fixtureFailures(appDir),
     witnessFailures(appDir),
     provenanceFailures(appDir),
+    scriptFailures(appDir),
   ])).flat();
   if (fixture.length > 0) {
     console.log(JSON.stringify(

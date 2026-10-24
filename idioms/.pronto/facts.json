@@ -1080,6 +1080,13 @@
     {"name":"timer"},
     {"name":"todo"}
   ],
+  "script_declared": [
+
+  ],
+  "script_platform": [
+    {"path":"offline-first-sw.js"},
+    {"path":"shell/boot.js"}
+  ],
   "served_file": [
     {"file":"shell/index.html","target":"/srv/shell/index.html"},
     {"file":"shell/shell.css","target":"/srv/shell/shell.css"},

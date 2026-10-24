@@ -544,6 +544,7 @@ import (
 					activate: ""
 					deps: list.Concat([
 						[":database", ":crud", ":caddy"],
+						if B.cluster.meta.served != _|_ {[":served-release"]},
 						if B.cluster.capabilities.auth {[":auth"]},
 					])
 					srcs: globs: [".bayt/process-compose.yaml"]
@@ -573,10 +574,19 @@ import (
 								{from: {ref: ":crud"}, srcs: ["/usr/bin/postgrest"], dst: "/usr/local/bin/postgrest"},
 								{from: {ref: ":caddy"}, srcs: ["/usr/bin/caddy"], dst: "/usr/bin/caddy"},
 								{from: {ref: ":caddy"}, srcs: ["/etc/caddy/Caddyfile"], dst: "/etc/caddy/Caddyfile"},
-								{from: {ref: ":caddy"}, srcs: ["/srv"], dst: "/srv"},
-								{from: {ref: ":caddy"}, srcs: ["/omnishell"], dst: "/omnishell"},
 								{srcs: [".bayt/process-compose.yaml"], dst: "/.bayt/process-compose.yaml"},
 							],
+							// The door's tree as this target releases it (emit.cue's
+							// served-release), and the inline scripts its policy names.
+							if B.cluster.meta.served != _|_ {[
+								{from: {ref: ":served-release"}, srcs: ["\(omnishell.#Address.tree)/omnishell/"], dst: "/omnishell/"},
+								{from: {ref: ":served-release"}, srcs: ["\(omnishell.#Address.tree)/"], dst: "/srv/"},
+								{from: {ref: ":served-release"}, srcs: [omnishell.#Address.scripts], dst: "/etc/caddy/release-scripts"},
+							]},
+							if B.cluster.meta.served == _|_ {[
+								{from: {ref: ":caddy"}, srcs: ["/srv"], dst: "/srv"},
+								{from: {ref: ":caddy"}, srcs: ["/omnishell"], dst: "/omnishell"},
+							]},
 							if B.cluster.capabilities.auth {[
 								{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"},
 								{from: {ref: ":auth"}, srcs: ["/app"], dst: "/app"},
