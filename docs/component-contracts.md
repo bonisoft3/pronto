@@ -121,6 +121,25 @@ build: checks: "paint": {
 }
 ```
 
+### Test configs
+
+An app's tests import the runtime by platform specifier, `/omnishell/…` and
+`/pronto/…`, never by a path into a sibling tree. The app authors its deno
+config as `tests/<name>.app.json`, and pronto writes `tests/<name>.json`
+from it ([`test-config.ts`](../test-config.ts)), the app's imports joined by
+each specifier mapped to where mise keeps that runtime: the checkout's tree,
+by `mise.local.toml`, or the pinned release. A runtime that reaches another
+as its checkout sibling, as pronto's `hybrid-local.ts` reaches
+`../omnishell/`, has that sibling's URL mapped too where mise keeps the two
+apart. The paths are the machine's, so the written config is ignored by git
+and written where the tests run, by the `test-config` rule that runs first in
+`test`. A check's image keeps omnishell's runtime at `/omnishell`, where
+`/omnishell/` resolves unmapped, so its container copies each
+`tests/<name>.app.json` to `tests/<name>.json` before the check's commands:
+the image's toolchain is the app's pins even in the monorepo, and a pinned
+pronto would not be the one under test. An app's own config naming a platform
+specifier is refused.
+
 ## Web platform envelope
 
 An app's inner domain is its state ([entities and pipelines](#what-each-part-declares)) and surface ([screens](screens.md)). Between the client runtime and the outside world sits the **web platform envelope**: the metadata, HTTP door routing, and discovery documents declared under `#App.meta` that browsers, OS shells, crawlers, and LLMs read before or outside screen execution.
@@ -265,6 +284,16 @@ test on every tick. Why each piece is where it is, and what was rejected, is
 [[decisions/2026-10-23-kinetic-machine|the kinetic-machine record]].
 
 ## Rejected
+
+- **A test import map of committed paths** — a mirror's tests mapped
+  `/omnishell/` to `../../../plugins/omnishell/`, which the monorepo has and
+  the mirror does not. Where mise keeps a release is the machine's.
+- **The platform map as a deno workspace root** — a member inherits the
+  root's imports, but the lock moves to the root's shape, which a container
+  without that root rewrites and `--frozen` refuses, `nodeModulesDir` belongs
+  to the root alone, and a second config in `tests/` inherits nothing. Deno
+  ignores a config's `importMap` beside its `imports`, and `--import-map`
+  replaces them, so pronto writes the one config the tests name.
 
 - **Returned requests as a namespace beside state** — it repeats MVC's
   controller, which collapses what changed into where things live.
