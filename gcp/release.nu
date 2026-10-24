@@ -381,7 +381,14 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
 	let ticker = if $has_ticker { {ticker: {env: ($compose.services.ticker.environment? | default {} | reject -o CRUD_URL SERVICE_JWT PORT)}} } else { {} }
 	let blobs = if $has_blobs { {blobs: {}} } else { {} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate | merge $ticker | merge $blobs | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	# Each sidecar's compose environment, its peers at their loopback ports.
+	let sidecars = ($plan0.sidecars | reduce -f {} {|n, acc|
+		let compose_env = ($compose.services | get $n | get environment? | default {} | transpose key value
+			| reduce -f {} {|e, all| $all | insert $e.key ($plan0.loopback | transpose peer at | reduce -f ($e.value | into string) {|l, v| $v | str replace -a $l.peer $l.at }) })
+		$acc | insert $n {env: $compose_env}
+	})
+	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate | merge $ticker | merge $blobs | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	mkdir dist/gcp
