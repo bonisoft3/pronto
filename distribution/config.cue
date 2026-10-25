@@ -6,7 +6,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "0.22.0"
+#Version:     "0.23.0"
 #SaytVersion: "0.45.0"
 
 // Checkout-only modules, which read the sibling trees at HEAD: the hybrid
