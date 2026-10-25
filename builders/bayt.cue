@@ -42,8 +42,10 @@ import (
 	}
 }
 
+// apps/deno.json maps the platform URLs an app's checks import to these trees
+// (docs/component-contracts.md#platform-pins).
 #CompilerSources: {
-	paths: ["cue.mod", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
+	paths: ["cue.mod", "apps/deno.json", "apps/*/tests/deno.json", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
 	exclude: ["**/docs/**", "**/testdata/**", "**/*_test.*", "**/*.test.*", "**/.bayt/**", "**/.task/**", "**/node_modules/**"]
 }
 

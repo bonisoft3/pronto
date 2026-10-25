@@ -171,6 +171,16 @@ clone.
   pronto's CUE module requires. pronto's own tests run that release, not the
   sibling tree: pronto is no member, because its `deno.lock` ships with it and
   a member's lock moves to the workspace.
+- **Rejected alternatives.** Rewriting `tests/*.json` in `copy.bara.sky` to
+  point at mise's install paths breaks when a check image's `/omnishell` is the
+  runtime image (which omits `instrument.ts`), when pronto's own modules reach
+  omnishell, or when tests run outside the check image. Generating a per-machine
+  Deno config at setup time drifts across host and container environments and
+  hides integrity from `deno.lock`. JSR adds a centralized registry account
+  beside the git mirrors and the CUE registry. `pnpm` `github:` dependencies
+  fail under Deno because Deno refuses to strip TypeScript types under
+  `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), and
+  `nodeModulesDir: "manual"` forces every `npm:` import through `node_modules`.
 
 ## Web platform envelope
 
