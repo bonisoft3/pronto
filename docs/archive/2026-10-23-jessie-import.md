@@ -8,7 +8,7 @@ description: A Jessie module graph for kinetic engines — each module precompil
 # Jessie import
 
 **Status: built; archived 2026-10-23.** The contract is the reference's:
-[omnishell's kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/kinetic.md#a-jessie-engine)
+[omnishell's kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/kinetic.md#a-jessie-engine)
 and `schema.cue` `surface.engines`. This record keeps what the code cannot
 argue: why the link is Endo's and happens at build time.
 

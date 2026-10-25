@@ -65,7 +65,7 @@ nothing wakes fails silently. Compose runs the cluster's own clock, and the
 cloudflare release writes its own ([below](#cloudflare)).
 
 **`verify@<target>` adds no checks.** The integrate drivers that measure a
-running app read `APP_URL` ([`base-url.ts`](https://github.com/bonisoft3/omnishell/blob/v0.18.1/base-url.ts)), so
+running app read `APP_URL` ([`base-url.ts`](https://github.com/bonisoft3/omnishell/blob/v0.19.1/base-url.ts)), so
 each becomes a `verify` rule per target with `APP_URL` bound to that target's
 door and no compose prepend. Two things come first. The base: a driver that
 navigates to `${origin}/ar` (`apps/truco/tests/acceptance.ts`) cannot reach a
@@ -80,9 +80,9 @@ Every target serves the files a page runs or fetches at their content
 addresses, `_immutable-<sha256>-<name>` beside each file, and every document
 that boots the terminal — the entry, a prerendered document, one rendered on
 request — carries the map from logical path to address as its import map,
-`#pronto-assets` (omnishell's [`release-addresses.ts`](https://github.com/bonisoft3/omnishell/blob/v0.18.1/server/release-addresses.ts)).
+`#pronto-assets` (omnishell's [`release-addresses.ts`](https://github.com/bonisoft3/omnishell/blob/v0.19.1/server/release-addresses.ts)).
 A page therefore runs one release, and an open one takes the next at the
-level its changes allow ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/screen-updates.md#when-a-deployment-lands)).
+level its changes allow ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/screen-updates.md#when-a-deployment-lands)).
 An address never changes and is served `immutable`; the map is an inline
 script, so the door's policy names its hash.
 
@@ -97,7 +97,7 @@ as a reader's tab does.
 
 ## ICE servers
 
-An online race's data channel (omnishell's [kinetic](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/kinetic.md))
+An online race's data channel (omnishell's [kinetic](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/kinetic.md))
 gathers its candidates over the ICE servers in the terminal config,
 `shell.json`'s `iceServers`. They are derived from the release target, by
 `#IceServers` in [`distribution/config.cue`](../distribution/config.cue), and
@@ -319,7 +319,7 @@ are no longer serving or needed for rollback.
 Every navigation renders under public RLS from a fresh database transaction,
 without guest login. No HTML cache can bypass that transaction. Language
 negotiation matches the browser, and the response varies on `Accept-Language`.
-See [omnishell/docs/native-worker-ssr](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/native-worker-ssr.md) for the freshness and isolation
+See [omnishell/docs/native-worker-ssr](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/native-worker-ssr.md) for the freshness and isolation
 contract. Authentication and derivation support remain the edge target's.
 
 The integrated deployment has been exercised on Paid; Free enforcement,

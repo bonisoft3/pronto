@@ -57,14 +57,14 @@ statistics lake. See [[docs/lattice#The durability ladder]].
 
 ## Screens and the shell
 
-Screens are interpreted [omnishell](https://github.com/bonisoft3/omnishell/tree/v0.18.1) config plus emitted HTML/CSS:
+Screens are interpreted [omnishell](https://github.com/bonisoft3/omnishell/tree/v0.19.1) config plus emitted HTML/CSS:
 single data path, forms-only mutations, reactive live queries. There is no
 build step and no application-owned effects. Residual computation lives in
 Jessie handlers running in SES Compartments, each receiving its arguments and
 nothing else — no DOM, no store, no ambient authority; time and randomness
 are injected. A handler returns a description of an effect for the shell to
 perform (Elm's `Cmd`, not `update` — a handler never receives the whole
-model); see [`plugins/omnishell/docs/terminal.md`](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/terminal.md) for the full comparison
+model); see [`plugins/omnishell/docs/terminal.md`](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md) for the full comparison
 and [component contracts](docs/component-contracts.md#rejected) for why
 "handler," not "island" or "update."
 
@@ -152,7 +152,7 @@ An agent unit without a memo is a presenter: its worker paints and raises
 nothing, under a policy that refuses every connection but blob: and data:.
 A kinetic engine is Jessie too: a module graph of relative static imports,
 linked at build time and imported by the cage, endowed with nothing
-([the kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/kinetic.md#a-jessie-engine)).
+([the kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/kinetic.md#a-jessie-engine)).
 
 ## The virtual team
 

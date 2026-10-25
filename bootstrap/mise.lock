@@ -132,48 +132,48 @@ checksum = "sha256:b82ca0ada498a934ac22b45ed25fdfe3f48f6edadc5f82e63273aa9c53959
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.17.0/mecha-windows-x64.tar.gz"
 url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/670624524"
 [[tools."github:bonisoft3/omnishell"]]
-version = "0.18.0"
+version = "0.19.0"
 backend = "github:bonisoft3/omnishell"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-arm64"]
-checksum = "sha256:68365db748dc6fc374c996471a9a3c199da1406795f53b8381b28aa069a63f1e"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.18.0/omnishell-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/672219722"
+checksum = "sha256:fc7a57863ebd4adcec839ee261f0992f771033326f8d7f9805e20bb0a2ac037a"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.19.0/omnishell-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/674596961"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-arm64-musl"]
-checksum = "sha256:68365db748dc6fc374c996471a9a3c199da1406795f53b8381b28aa069a63f1e"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.18.0/omnishell-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/672219722"
+checksum = "sha256:fc7a57863ebd4adcec839ee261f0992f771033326f8d7f9805e20bb0a2ac037a"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.19.0/omnishell-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/674596961"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-x64"]
-checksum = "sha256:68365db748dc6fc374c996471a9a3c199da1406795f53b8381b28aa069a63f1e"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.18.0/omnishell-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/672219723"
+checksum = "sha256:fc7a57863ebd4adcec839ee261f0992f771033326f8d7f9805e20bb0a2ac037a"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.19.0/omnishell-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/674596965"
 
 [tools."github:bonisoft3/omnishell"."platforms.linux-x64-musl"]
-checksum = "sha256:68365db748dc6fc374c996471a9a3c199da1406795f53b8381b28aa069a63f1e"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.18.0/omnishell-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/672219723"
+checksum = "sha256:fc7a57863ebd4adcec839ee261f0992f771033326f8d7f9805e20bb0a2ac037a"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.19.0/omnishell-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/674596965"
 
 [tools."github:bonisoft3/omnishell"."platforms.macos-arm64"]
-checksum = "sha256:68365db748dc6fc374c996471a9a3c199da1406795f53b8381b28aa069a63f1e"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.18.0/omnishell-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/672219724"
+checksum = "sha256:fc7a57863ebd4adcec839ee261f0992f771033326f8d7f9805e20bb0a2ac037a"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.19.0/omnishell-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/674596962"
 
 [tools."github:bonisoft3/omnishell"."platforms.macos-x64"]
-checksum = "sha256:68365db748dc6fc374c996471a9a3c199da1406795f53b8381b28aa069a63f1e"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.18.0/omnishell-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/672219718"
+checksum = "sha256:fc7a57863ebd4adcec839ee261f0992f771033326f8d7f9805e20bb0a2ac037a"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.19.0/omnishell-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/674596964"
 
 [tools."github:bonisoft3/omnishell"."platforms.windows-arm64"]
-checksum = "sha256:68365db748dc6fc374c996471a9a3c199da1406795f53b8381b28aa069a63f1e"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.18.0/omnishell-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/672219719"
+checksum = "sha256:fc7a57863ebd4adcec839ee261f0992f771033326f8d7f9805e20bb0a2ac037a"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.19.0/omnishell-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/674596966"
 
 [tools."github:bonisoft3/omnishell"."platforms.windows-x64"]
-checksum = "sha256:68365db748dc6fc374c996471a9a3c199da1406795f53b8381b28aa069a63f1e"
-url = "https://github.com/bonisoft3/omnishell/releases/download/v0.18.0/omnishell-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/672219716"
+checksum = "sha256:fc7a57863ebd4adcec839ee261f0992f771033326f8d7f9805e20bb0a2ac037a"
+url = "https://github.com/bonisoft3/omnishell/releases/download/v0.19.0/omnishell-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/674596960"
 [[tools."github:bonisoft3/pronto"]]
 version = "0.23.0"
 backend = "github:bonisoft3/pronto"

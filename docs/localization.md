@@ -15,7 +15,7 @@ finding — rather than shown in the default language. Formatting belongs to the
 terminal; of the modules an app writes, only an adapter holds `Intl`, and a
 guarded one. What an author writes is
 [the guide's i18n section](../GUIDE.md#i18n); what a screen may say is
-omnishell's [REFERENCE](https://github.com/bonisoft3/omnishell/blob/v0.18.1/REFERENCE.md#placeholders).
+omnishell's [REFERENCE](https://github.com/bonisoft3/omnishell/blob/v0.19.1/REFERENCE.md#placeholders).
 
 ## Locale tags
 
@@ -109,7 +109,7 @@ to the Portuguese document. The router reads `location.pathname`: a hash is
 invisible to the server, so no rendered document could answer `#/reglas`.
 
 **The terminal resolves a page's locale** in the order omnishell's
-[reference](https://github.com/bonisoft3/omnishell/blob/v0.18.1/REFERENCE.md#placeholders) gives, and the
+[reference](https://github.com/bonisoft3/omnishell/blob/v0.19.1/REFERENCE.md#placeholders) gives, and the
 document renderer and the storybook are handed the locale they render. The order puts
 present intent above a standing preference: `Accept-Language` is declared once
 to a browser for every site, so it beats an app's default and never overrides a

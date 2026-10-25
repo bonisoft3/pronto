@@ -125,7 +125,7 @@ or presenter is undeclared, and one whose screen carries no
 own reduce, named by the mount's region: it hears each lifted milestone and
 menu press as an event and answers in rows, and the row's columns are the
 mount's props, so the race is the row's to start, hold and hand to the menu
-([the kinetic child](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/kinetic.md#the-kinetic-child)). With
+([the kinetic child](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/kinetic.md#the-kinetic-child)). With
 `mode: online` the row races one seat of a GGRS session whose two session
 descriptions a Mecha machine's rows carry, and its milestones go back to that
 machine as commands, which Apex Run's lobby fold sends to `apexrun_duel`. Why

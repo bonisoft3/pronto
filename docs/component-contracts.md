@@ -21,7 +21,7 @@ as one graph.
 |---|---|---|---|
 | `code` | `#App` ([`schema.cue`](../schema.cue)) | — | the app's `program.cue` |
 | `cluster` | `#Cluster` ([`cluster.cue`](https://github.com/bonisoft3/mecha/blob/v0.17.1/cluster.cue)) | [`clusters/mecha.cue`](../clusters/mecha.cue) | `#DefaultCluster` |
-| `terminal` | `#Terminal` ([`terminal.cue`](https://github.com/bonisoft3/omnishell/blob/v0.18.1/terminal.cue)) | [`terminals/omnishell.cue`](../terminals/omnishell.cue) | `#DefaultTerminal` |
+| `terminal` | `#Terminal` ([`terminal.cue`](https://github.com/bonisoft3/omnishell/blob/v0.19.1/terminal.cue)) | [`terminals/omnishell.cue`](../terminals/omnishell.cue) | `#DefaultTerminal` |
 | `loop` | `#Loop` ([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.45.0/loop.cue)) | [`loops/sayt.cue`](../loops/sayt.cue) | `#DefaultLoop` |
 | `build` | `#Build` ([`builders/bayt.cue`](../builders/bayt.cue)), over bayt's `#project` | — | `#DefaultBuild` |
 
@@ -72,7 +72,7 @@ its directory, and `write.ts` refuses a `src` outside the app.
 
 **Returned requests are a protocol, not a field.** A reduce's `{updates, then}`
 and a machine's effects are how a unit acts on state
-([the terminal's surfaces](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/terminal.md#what-the-terminal-owns)).
+([the terminal's surfaces](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md#what-the-terminal-owns)).
 They are the verb, not a third noun beside state and capabilities, so no part
 declares them. `#App.surface.flows` is the one place a program names one,
 filed under the screen it starts from.
@@ -213,7 +213,7 @@ collections ──► live query ──► region ──► DOM          bus ◄
 - **Postgres is upstream of reads and downstream of writes.**
 - **The region is the sink**, and the terminal owns it. Rows are keyed by
   primary key, so the sink applies a delta rather than diffing two trees
-  ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/screen-updates.md#when-data-changes)).
+  ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/screen-updates.md#when-data-changes)).
   A sink whose input empties takes its output with it: a vanished row is a
   removal, never a template left standing over the last value.
 - **A pipeline is the same shape one tier down.** The bus carries the
@@ -228,7 +228,7 @@ collections ──► live query ──► region ──► DOM          bus ◄
   second data language.
 
 A region's read is a query the store maintains
-([omnishell's data](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/data.md#a-regions-rows)).
+([omnishell's data](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/data.md#a-regions-rows)).
 Server-computed reads (full-text search, embed-path filters, hinted or nested
 embeds, a filter the store cannot translate) stay PostgREST queries, re-run
 when a table they depend on changes. The collections are the change signal,
@@ -242,7 +242,7 @@ against latency:
 | | DOM plane | Kinetic plane |
 | --- | --- | --- |
 | State | durable entities (`tab`, `device`, `offline`, `live`, `server`) moved by IVM: the store, Electric shapes, the pipelines | a deterministic engine's frames below `tab`, moved by GGPO-style rollback with prediction |
-| Presented by | HTML and CSS over rows | canvas, in a presenter's worker ([the seats](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/terminal.md#the-seats)) |
+| Presented by | HTML and CSS over rows | canvas, in a presenter's worker ([the seats](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md#the-seats)) |
 | Fans out | one to many | few to few: one session's peers |
 | Latency | a round trip per change | none locally; a late input is a rollback |
 
@@ -258,7 +258,7 @@ plane's history to a milestone loads the kinetic host at its frame; between
 milestones the host's ring travels frame by frame.
 
 The engine contract that makes this hold is the kinetic host's
-([Kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.18.1/docs/kinetic.md)): `initState(seed)`,
+([Kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/kinetic.md)): `initState(seed)`,
 `advanceFrame(state, cmd)`, and `saveState`/`loadState` with
 $\text{loadState} \circ \text{saveState} = \text{id}$, checked by its sync
 test on every tick. Why each piece is where it is, and what was rejected, is
