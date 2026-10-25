@@ -82,11 +82,30 @@ import (
 		// Its share of the instance's CPU, in millicpu: Cloud Run gives a
 		// container with none a whole one, against a cap of 8 for them all.
 		cpu: *250 | int & >=80 & <=8000
+		// The environment compose gives the service, filled by the release, as
+		// the ticker's is; release.cue may add to it. In the instance, a peer
+		// compose names (http://crud:3000, another sidecar) is the loopback
+		// port that container holds there (_loopback), a key naming one of the
+		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
+		// development value, and ORIGIN is where readers are.
+		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
 		metrics?: {
 			port!:    int & >1024 & <65536
 			path:     *"/metrics" | =~"^/"
 			interval: *"30s" | =~"^[1-9][0-9]*s$"
 		}
+	}
+	// Each peer compose names, as host:port, and where it is in the instance:
+	// the cluster's containers, and each sidecar at its own port.
+	_loopback: {
+		"crud:3000":      "127.0.0.1:\(#Ports.crud)"
+		"auth:9999":      "127.0.0.1:\(#Ports.auth)"
+		"electric:3000":  "127.0.0.1:\(#Ports.electric)"
+		"ticker:9998":    "127.0.0.1:\(#Ports.ticker)"
+		"database:5432":  "127.0.0.1:\(#Ports.database)"
+		"rclone-s3:3900": "127.0.0.1:\(#Ports.rcloneS3)"
+		"imgproxy:8080":  "127.0.0.1:\(#Ports.imgproxy)"
+		for n, c in R.sidecars {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
 	}
 	_sidecarPorts: [for _, c in R.sidecars for p in [c.port, if c.metrics != _|_ {c.metrics.port}] {p}]
 	// A port the cluster's containers hold, or one two sidecars share, would
@@ -350,6 +369,13 @@ import (
 				}], [for n, c in R.sidecars {
 					name:  n
 					image: (imageOf & {svc: n}).out
+					if len(c.env) > 0 {
+						env: [for k, v in c.env {[
+							if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
+							if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
+							{name: k, value: v},
+						][0]}]
+					}
 					startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
 					resources: limits: cpu: "\(c.cpu)m"
 				}], [if len(R._scraped) > 0 {
@@ -508,6 +534,9 @@ import (
 		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
 		// The compose services built and run beside the cluster's.
 		sidecars: [for n, _ in R.sidecars {n}]
+		// Where each peer compose names is in the instance, which the release
+		// rewrites a sidecar's compose environment by.
+		loopback: R._loopback
 		if len(R._sidecarClashes) > 0 {sidecarPorts: error("GCP.sidecars listen on \(strings.Join(R._sidecarClashes, ", "))")}
 		if B._millicpu > 8000 {cpu: error("the service's containers ask for \(B._millicpu) millicpu, over Cloud Run's 8000: lower GCP.sidecars' cpu")}
 		scrapeConfig: [if len(R._scraped) > 0 {B.scrapeConfig}, ""][0]

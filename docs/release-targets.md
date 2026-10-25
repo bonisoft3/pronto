@@ -556,9 +556,21 @@ series keep their names, so the app's PromQL rules and dashboards read them in
 Cloud Monitoring (or a Grafana over its Prometheus API). A preview runs its
 sidecars and scrapes nothing.
 
+A sidecar runs with the environment compose gives its service, as the ticker
+does, so one that talks to the cluster (a plugin's service writing through the
+REST gateway) needs nothing more in `release.cue`. In the instance a peer
+compose names is the port that container holds there: `http://crud:3000` is
+`http://127.0.0.1:3000`, `electric:3000` is `127.0.0.1:3002`, and another
+sidecar is its own port (the plan's `loopback`). A key naming one of the
+cluster's secrets (`SERVICE_JWT`, `PGRST_JWT_SECRET`, …) is mounted from Secret
+Manager, never compose's development value, and `ORIGIN` is where readers are.
+`sidecars: <name>: env` adds to what compose gives.
+
 ```cue
 GCP: schema.#Release & {
 	sidecars: "perf-collector": {port: 8687, metrics: port: 9599}
+	// A plugin's service writing through the gateway, as the service.
+	sidecars: billing: {port: 8688, cpu: 100}
 }
 ```
 

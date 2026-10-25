@@ -320,6 +320,29 @@ Deno.test("a sidecar runs beside the cluster, by its pushed digest, behind the d
   assertEquals(deps.caddy.includes("perf-collector"), false);
 });
 
+// A sidecar that talks to the cluster (a plugin's service): compose's environment, its peers at
+// their loopback ports, the cluster's secrets from Secret Manager, and readers' origin.
+Deno.test("a sidecar's environment: the cluster's secrets mounted, the origin the release's", async () => {
+  const env = `{CRUD_URL: "http://127.0.0.1:3000", SERVICE_JWT: "the-development-token", ORIGIN: "https://localhost:28102", BILLING_DOCUMENT: "{\\"plans\\":{}}"}`;
+  const s = await built(withSidecar(`{port: 8687, env: ${env}}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const c = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  const by = Object.fromEntries(c.env.map((e: { name: string }) => [e.name, e]));
+  assertEquals(by.SERVICE_JWT.valueFrom, { secretKeyRef: { name: "battlechess-service-jwt", key: "latest" } });
+  assertEquals(by.SERVICE_JWT.value, undefined, "never compose's development token");
+  assertEquals(by.ORIGIN.value, "https://bonkchess.com");
+  assertEquals(by.CRUD_URL.value, "http://127.0.0.1:3000");
+  assertEquals(by.BILLING_DOCUMENT.value, '{"plans":{}}');
+  // Where the release finds each peer compose names, the sidecar's own among them.
+  const plan = await built(withSidecar(`{port: 8687}`), "plan");
+  assertEquals(plan.value.loopback["crud:3000"], "127.0.0.1:3000");
+  assertEquals(plan.value.loopback["electric:3000"], "127.0.0.1:3002");
+  assertEquals(plan.value.loopback["perf-collector:8687"], "127.0.0.1:8687");
+  // A sidecar given none has none.
+  const bare = await built(withSidecar(`{port: 8687}`), "service");
+  assertEquals(bare.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector").env, undefined);
+});
+
 Deno.test("a sidecar's metrics are scraped into Managed Prometheus, its config a mounted secret", async () => {
   const r = await built(withSidecar(`{port: 8687, metrics: port: 9599}`), "plan");
   assertEquals(r.success, true, r.stderr);
