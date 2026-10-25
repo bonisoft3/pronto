@@ -110,7 +110,7 @@ on playwright's base. It carries `tests/**`, plus whatever `srcs` names.
 ```cue
 build: checks: "favorites": {
 	priority: 1
-	cmds: ["deno run --config tests/deno.json --no-lock --allow-env --allow-read --allow-net --unsafely-ignore-certificate-errors=caddy tests/favorites.ts ."]
+	cmds: ["deno run --config tests/deno.json --lock tests/deno.lock --frozen --allow-env --allow-read --allow-net --unsafely-ignore-certificate-errors=caddy tests/favorites.ts ."]
 	note: "a favourite is counted by the pipelines"
 }
 build: checks: "paint": {
@@ -120,6 +120,57 @@ build: checks: "paint": {
 	note: "the painted colours against the ground truth"
 }
 ```
+
+## Platform pins
+
+An installed app's tests take the platform the way its mirror does: by the raw
+URLs of omnishell's and pronto's mirrors at the tags the app's CUE module
+requires (`.mirror/cue.mod/module.cue`), such as
+`https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/instrument.ts`.
+One module per app, `tests/platform.ts`, re-exports what its tests use, so a
+release train moves the tags of one file, and the tests import it relatively.
+A mirror's tests then resolve anywhere: on a host, in a check image, in a fresh
+clone.
+
+- **The monorepo runs them at HEAD.** `apps/deno.json` is a deno workspace of
+  the installed apps' `tests/` (`copy.bara.sky`'s `installed_app`s). Its
+  `imports` map each pinned prefix to the checkout's tree, and `/omnishell/`,
+  where an app's own modules import the terminal, to omnishell's: a member's
+  `imports` reach its `tests/` alone, so an app's own `/omnishell/` mapping,
+  to the pinned URL for its mirror, never reaches its shell. `just
+  generate-all` writes the file from the pins it finds
+  (the monorepo's `apps/platform_pins.nu write`), and
+  its `check`, in CI's test step, fails when the map, a tree's pins and its
+  CUE module disagree. Compose-mode check images carry `apps/deno.json` with
+  the compiler's sources and resolve to `/monorepo/plugins/`; a mirror's check
+  image fetches the pins, so it needs the network.
+- **Its settings.** The workspace sits in `apps/` rather than at the root,
+  whose `package.json` is mecha's npm workspace: its linking needs
+  `nodeModulesDir` manual, the members want none, and a workspace has one.
+  `"lock": false` there, and every check passes `--lock tests/deno.lock
+  --frozen`, since deno anchors a member's lock at the workspace. A member
+  config declares no `npm:` or `jsr:` import, so the lock has one shape with
+  the workspace and without it. The other deno projects under `apps/` warn that
+  they are no members and ignore it.
+- **Integrity.** The monorepo never fetches a pinned URL, so `platform_pins.nu
+  lock <app>` records two graphs in the one `tests/deno.lock`: the checkout's,
+  for HEAD's own `npm:` and `jsr:` imports, and a copy of the app outside the
+  repository, which fetches every pin as its mirror does. That half needs the
+  tags pushed. A pin may name the release its own train tags: the monorepo
+  never fetches it, so only the lock and the mirror's sync wait for the tag.
+  deno.lock records module imports, not `text` or `bytes` ones
+  (`--unstable-raw-imports`), so a module also imports as code a file it reads
+  as text (SES in `tests/platform.ts`, `hybrid-runtime.js` in
+  `mecha-reducer.ts`); GGRS's wasm is the one file only read as bytes. `check`
+  fails when a lock lacks a module its app imports by pin.
+- **Platform modules load by URL.** What an app's tests reach in omnishell and
+  pronto imports relatively or by full `npm:` and `jsr:` specifiers, reads a
+  neighbouring file by import rather than `Deno.readTextFile(new URL(…,
+  import.meta.url))`, and reaches the other package by its pinned URL:
+  `hybrid-local.ts` and `testdata/hybrid-fixtures.ts` take omnishell at the tag
+  pronto's CUE module requires. pronto's own tests run that release, not the
+  sibling tree: pronto is no member, because its `deno.lock` ships with it and
+  a member's lock moves to the workspace.
 
 ## Web platform envelope
 
@@ -266,18 +317,17 @@ test on every tick. Why each piece is where it is, and what was rejected, is
 
 ## Rejected
 
-- **A test config pronto writes from where mise keeps each runtime** — a
-  generated, gitignored `tests/<name>.json` mapping `/omnishell/` and
-  `/pronto/` to `mise where` carries one machine's absolute paths: neither
-  reproducible, portable nor relocatable. An app's committed config maps them
-  to the monorepo's trees, which its checkout and compose-mode check images
-  both hold, and an installed app's mirror has them rewritten by
-  `copy.bara.sky`'s `installed_app` to where its check image keeps each
-  runtime.
-- **The platform map as a deno workspace root** — a member inherits the
-  root's imports, but the lock moves to the root's shape, which a container
-  without that root rewrites and `--frozen` refuses, `nodeModulesDir` belongs
-  to the root alone, and a second config in `tests/` inherits nothing.
+- **Test configs that name where the platform lives** — written from `mise
+  where`, they carry one machine's absolute paths; rewritten by copybara for
+  each mirror, the mirror runs a config the monorepo never tested, and a
+  rewrite whose text drifted passes as a no-op.
+- **The workspace at the repository's root** — the root's `package.json` is
+  mecha's npm workspace, which needs `nodeModulesDir` manual where the apps'
+  tests need none, and a workspace has one.
+- **JSR for the platform's modules** — publishing needs an account, and the
+  registry is a central service the mirrors do not need.
+- **pnpm `github:` dependencies** — they install into `node_modules`, under
+  which deno refuses to strip TypeScript.
 - **Returned requests as a namespace beside state** — it repeats MVC's
   controller, which collapses what changed into where things live.
 - **Deriving `#emit` by matching field names across the parts** — CUE

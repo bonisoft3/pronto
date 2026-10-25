@@ -3,6 +3,10 @@ import type { MechaPorts, MechaPortSql } from "./mecha-ports.ts";
 import { jessieFacts } from "./jessie.ts";
 import { partsOf } from "./mecha-surface.ts";
 import { contracted } from "./mecha-contracts.ts";
+// Read as text, so it loads wherever this module does (an app's tests take it
+// by URL); deno.lock records the module import of the same file, not the text.
+import "./hybrid-runtime.js";
+import runtime from "./hybrid-runtime.js" with { type: "text" };
 
 export type Shape =
   | { type: "string"; maxLength: number; values?: string[] }
@@ -72,7 +76,6 @@ export async function compileMechaReducer(
   contracted(spec);
   const facts = jessieFacts(source, "handler");
   if (facts.references.length) throw new Error(`hybrid rules reach ${facts.references.join(", ")}`);
-  const runtime = await Deno.readTextFile(new URL("./hybrid-runtime.js", import.meta.url));
   const script = `(() => {
     const spec = harden(${JSON.stringify(spec, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)});
     const rules = harden(${terminal.instrument(`(() => { ${source}\n })()`)});

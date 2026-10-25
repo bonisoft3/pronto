@@ -2,5 +2,8 @@
   "nodeModulesDir": "none",
   "imports": {
     "@std/encoding/base64": "jsr:@std/encoding@1.0.7/base64"
-  }
+  },
+  "unstable": [
+    "raw-imports"
+  ]
 }
