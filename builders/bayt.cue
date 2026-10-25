@@ -151,8 +151,6 @@ import (
 	_omnishell:        omnishell.#RuntimeImage
 	_omnishellContext: (_switch & {service: _omnishell, pin: omnishell.published.runtime}).out
 	_omnishellCopy:    "COPY --from=\(B._omnishell) / /omnishell"
-	// A check's first command: each tests/<name>.app.json as tests/<name>.json.
-	_testConfig: #"for f in tests/*.app.json; do [ ! -e "$f" ] || cp "$f" "${f%.app.json}.json"; done"#
 	// Monorepo trees a stage carries in the monorepo: views of the siblings'
 	// targets, which in a mirror switch to an image with no /monorepo, and
 	// so copy nothing.
@@ -484,8 +482,8 @@ import (
 				let base = [if c.browser {":browser"}, ":setup"][0]
 
 				// The image is the base, which carries the toolchain, and omnishell's
-				// tree at /omnishell, where the tests' `/omnishell/` resolves
-				// unmapped: a check's config is the app's own (test-config.ts).
+				// tree, which the tests import from /omnishell (tests/deno.json
+				// maps `omnishell/` there).
 				"check-\(name)": sayt.integrate & {
 					// The plane is an image-only dep, as visual lint's is.
 					deps: [base, ":launch:outs"]
@@ -513,7 +511,7 @@ import (
 						}
 						depends_on: "\(project.name)-launch": condition: "service_healthy"
 						// `$$` so compose leaves a variable to the container's shell.
-						command: ["mise", "x", "--", "sh", "-c", strings.Join([for x in list.Concat([[B._testConfig], c.cmds]) {strings.Replace(x, "$", "$$", -1)}], " && ")]
+						command: ["mise", "x", "--", "sh", "-c", strings.Join([for x in c.cmds {strings.Replace(x, "$", "$$", -1)}], " && ")]
 					}
 				}
 				// The check's bkid runner (omnishell.#BkidCheck).

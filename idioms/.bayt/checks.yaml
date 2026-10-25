@@ -136,14 +136,6 @@ say:
       unit:
         cmds:
         - do: deno test --allow-read tests/handlers.test.ts
-      test-config:
-        priority: -1
-        cmds:
-        - do: >-
-            use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
-            str trim); run-mise exec -- deno run --config ($pronto | path join deno.json)
-            --allow-read --allow-write=tests --allow-run=mise ($pronto | path join
-            test-config.ts) .
       machines:
         cmds:
         - do: use tools.nu [run-mise]; run-mise exec -- omnishell check machines .

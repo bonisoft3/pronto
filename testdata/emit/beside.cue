@@ -28,16 +28,14 @@ besideRunner: _besideTargets["ci-plain"] & {#closure: "check-plain", #check: "pl
 besidePriority: _besideRules["pronto-integrate-2"].priority & 2
 besideWaits:    _besideTargets["check-plain"].compose.depends_on["\(_code.meta.name)-launch"].condition & "service_healthy"
 besideDoor:     _besideTargets["check-plain"].compose.environment.APP_URL & "https://caddy:8443"
-besideEscaped: _besideTargets["check-plain"].compose.command & ["mise", "x", "--", "sh", "-c", #"for f in tests/*.app.json; do [ ! -e "$$f" ] || cp "$$f" "$${f%.app.json}.json"; done && deno run tests/plain.ts $$HOME"#]
+besideEscaped: _besideTargets["check-plain"].compose.command & ["mise", "x", "--", "sh", "-c", "deno run tests/plain.ts $$HOME"]
 besidePlainBase: _besideTargets["check-plain"].dockerfile.from.ref & ":setup"
 besideBrowser:   _besideTargets["check-painted"].dockerfile.from.ref & ":browser"
 besideSources: _besideTargets["check-painted"].srcs.globs & ["tests/**", "fixtures/**"]
 besideNoBrowser: ((pronto.#DefaultBuild & {code: _code, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project.targets.browser == _|_) & true
 // The tests import omnishell from /omnishell, its runtime image, whichever
-// repository the app is built in, so a check's config maps no platform path:
-// a mirror's check once mapped it to a monorepo path its image did not have.
-// The browser base installs the toolchain as setup does, so it carries the
-// runtime's tree in the monorepo too.
+// repository the app is built in; the browser base installs the toolchain as
+// setup does, so it carries the runtime's tree in the monorepo too.
 for check in ["check-plain", "check-painted"] {
 	besideImportRoot: (check): _besideTargets[check].dockerfile.copy & [{from: name: "plugins_omnishell-runtime-image", srcs: ["/"], dst: "/omnishell"}]
 }

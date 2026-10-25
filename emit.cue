@@ -1911,8 +1911,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					(name): {verb: "lint", cmds: [_distribution.checks[name]], note: "Pronto compiler \(name)"}
 				}
 				facts: {verb: "lint", priority: 1, cmds: [_distribution.checks.facts], note: "Pronto compiler facts"}
-				// First, so every test after it runs under the configs it writes.
-				"test-config": {verb: "test", priority: -1, cmds: [_distribution.checks.testConfig], note: "Pronto test configs"}
 				// Only where there is SQL to read: an app whose every entity is
 				// a browser durability emits no migration and authors none, so the
 				// pass would grade an empty set.
