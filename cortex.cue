@@ -47,5 +47,7 @@ import mecha "github.com/bonisoft3/pronto/clusters:mecha"
 }
 
 // An action's keys as omnishell's input mapper reads them: a KeyboardEvent
-// code or key, or `gamepad:button:<n>` and `gamepad:axis:<n>:<sign>`.
+// code or key, `gamepad:button:<n>` and `gamepad:axis:<n>:<sign>`, or
+// `touch:<zone>`, a `data-touch-zone` on the screen (omnishell's
+// docs/kinetic.md, "Touch").
 #Bindings: [=~"^[a-z][a-z0-9_]*$"]: [...string]
