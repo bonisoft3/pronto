@@ -417,11 +417,14 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let blobs = if $has_blobs { {blobs: {}} } else { {} }
 	# Each sidecar's compose environment, its peers where it finds them: at their
 	# loopback ports in the cluster's instance, through the door and at the
-	# others' addresses for one apart, which the service's address names.
+	# others' addresses for one apart, which the service's address names. A key
+	# release.cue sets is the release's, over compose's, as auth.oidc's are.
 	let run_host = $"($plan0.service)-($number).($plan0.region).run.app"
 	let peers = (plan-with $app_info.cue_path ({GCP: {runHost: $run_host}} | merge deep $base)).peers
+	let own = (^cue export --expression '{for n, c in GCP.sidecars {(n): [for k, _ in c.env {k}]}}' --out json $app_info.cue_path | from json)
 	let sidecars = ($plan0.sidecars | reduce -f {} {|n, acc|
-		let compose_env = ($compose.services | get $n | get environment? | default {} | transpose key value
+		let set = ($own | get -o $n | default [])
+		let compose_env = ($compose.services | get $n | get environment? | default {} | transpose key value | where {|e| $e.key not-in $set }
 			| reduce -f {} {|e, all| $all | insert $e.key ($peers | get $n | transpose peer at | reduce -f ($e.value | into string) {|l, v| $v | str replace -a $l.peer $l.at }) })
 		$acc | insert $n {env: $compose_env}
 	})
