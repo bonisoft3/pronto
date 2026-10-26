@@ -453,7 +453,18 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	run-job dist/gcp/job.yaml $plan.names.job "building the schema" $p $r
 	if $has_migrate { run-job dist/gcp/migrate.yaml $plan.names.migrateJob "carrying the schema forward" $p $r }
 	gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
-	gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+	if ($plan.iap? | default false) {
+		# Behind Identity-Aware Proxy only IAP's own agent invokes the service, and
+		# only the people the owner admits reach it: nobody else at all.
+		gc services enable iap.googleapis.com --project $p | ignore
+		# IAP's service agent, made once a project (gcloud has it only in beta).
+		let token = (gc auth print-access-token | str trim)
+		^curl --silent --fail --show-error --output /dev/null -X POST -H $"Authorization: Bearer ($token)" $"https://serviceusage.googleapis.com/v1beta1/projects/($number)/services/iap.googleapis.com:generateServiceIdentity"
+		gc run services add-iam-policy-binding $plan.service --region $r --project $p --member $"serviceAccount:service-($number)@gcp-sa-iap.iam.gserviceaccount.com" --role roles/run.invoker | ignore
+		do { ^gcloud --quiet run services remove-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker } | complete | ignore
+	} else {
+		gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+	}
 	# Each sidecar apart, once the door it reaches the gateway through is up;
 	# public as the door is, which dials it.
 	for s in ($plan.sidecarServicesYaml | columns) {
@@ -470,7 +481,9 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	# the revision to be ready: half a minute at most, not curl's backoff,
 	# whose eighth retry comes four minutes in.
 	let health = (^curl --silent --output /dev/null --write-out "%{http_code}" --connect-timeout 5 --retry 10 --retry-delay 3 --retry-max-time 30 --retry-all-errors $"($address)/health")
-	if $health != "200" { error make {msg: $"($address)/health answered ($health)"} }
+	# Behind IAP the address answers with its sign-in, a redirect, to a stranger such as this.
+	let ok = if ($plan.iap? | default false) { ["200", "302"] } else { ["200"] }
+	if $health not-in $ok { error make {msg: $"($address)/health answered ($health)"} }
 	print $"gcp: ($plan.service) is live at ($address)"
 	$pushed
 }
