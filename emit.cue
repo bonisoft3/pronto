@@ -1374,6 +1374,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	floors: [string]: int
 	// The terminal's hatch seats, for the detail grammar an answer crosses in.
 	hatch: [string]: {detail: {keys: int, ...}, ...}
+	// The terminal's presenter offer: the pinned scripts' integrity, the
+	// policy both doors send with the presenter's worker script, and the
+	// fetch destinations they answer from static files only.
+	presenter: {policy: string, scripted: [...string], scripts: [string]: string}
 	// Whether the cluster runs an auth and a crud service: #serverOn, the
 	// predicate that emits them, carried into the file visual lint reads.
 	server: bool
@@ -1691,10 +1695,43 @@ _traceHeader: include_patterns: ["^traceparent$"]
 								columns: [if len(_unfit) == 0 {_columns}, _unfit[0]][0] & [...string]
 							}
 						}
+						if v.role == "presenter" && v.isolation == "agent" {
+							role: "presenter"
+							scripts: [for u in v.scripts {url: u, integrity: S.presenter.scripts[u]}]
+							// What it may read through the seat: its own files, and
+							// the objects a blob seed ships by content address.
+							files: v.files
+							seed:  S.code.capabilities.blobSeed != _|_
+						}
 						src: v.src
 					}
 				}
 			}
+		}
+		// Each kinetic child the terminal mounts on a data-kinetic, as it
+		// loads them: the linked graphs, the presenter unit, the mappers.
+		let _kinetic = {if S.code.state.cortex != _|_ for _, c in S.code.state.cortex for n, a in c.setup.actors if a.via == "kinetic" {(n): a}}
+		if len(_kinetic) > 0 {
+			kinetic: {for n, a in _kinetic {(n): {
+				engine: "shell/engines/\(a.engine).json"
+				if a.sound != _|_ {sound: "shell/engines/\(a.sound).json"}
+				presenter: a.presenter
+				bindings:  a.bindings
+				if a.seats != _|_ {seats: a.seats}
+				menu:  a.menu
+				pause: a.pause
+			}}}
+			// The ICE servers its online race gathers over: none in a dev or
+			// CI stack, the release target's in a release (distribution's
+			// #IceServers, written as the tree is addressed).
+			iceServers: []
+		}
+		// The worker script's own policy, which an edge door sends as a
+		// header the way the container door's Caddyfile does, and the
+		// destinations its Worker refuses.
+		if len([for _, v in S.code.capabilities.vendored if v.role == "presenter" && v.isolation == "agent" {v}]) > 0 {
+			presenter: policy:   S.presenter.policy
+			presenter: scripted: S.presenter.scripted
 		}
 		if S.code.surface.endowments != _|_ {
 			endowments: S.code.surface.endowments
@@ -2012,6 +2049,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			])
 			validations: list.SortStrings([for s, _ in D._validationSet {s}])
 			hostDom: list.SortStrings([for f, _ in {for _, h in D.code.capabilities.hatches if h.kind == "host-dom" for f in h.files {(f): true}} {f}])
+			engines: list.SortStrings([for n, _ in D.code.surface.engines {"shell/engines/\(n).json"}])
 			// A unit's whole directory, not just its src: the wrapper's own
 			// imports are files the browser fetches by name.
 			units: list.SortStrings([for f, _ in D._unitSet {f}])
@@ -2155,7 +2193,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// checkout, every static placed at its URL's path, then addressed in
 		// place. The door and the renderer copy what it wrote.
 		if D._terminal {
-			surface: targets: served: {
+			let _served = {
+				// The release target's ICE servers, for a tree a release ships.
+				_iceServers: *null | [...]
 				cmd: "builtin": null
 				activate: ""
 				let own = [for s in meta.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}]
@@ -2177,11 +2217,23 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						][0]
 						"install -D -m 644 '\(source)' '\(omnishell.#Address.tree)\(url)'"
 					}]
-					epilogue: ["RUN set -e; \(strings.Join(place, "; ")); \(omnishell.#Address.cache) && \(omnishell.#Address.run)"]
+					let ice = [if _iceServers != null {" --ice-servers '\(json.Marshal(_iceServers))'"}, ""][0]
+					epilogue: ["RUN set -e; \(strings.Join(place, "; ")); \(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)"]
 				}
 				compose: {}
 			}
+			surface: targets: served: _served
 			meta: served: {ref: ":served", tree: omnishell.#Address.tree, scripts: omnishell.#Address.scripts}
+			// The tree a container target's door serves: the door's, with the
+			// target's ICE servers. release@docker's image copies it
+			// (builders/bayt.cue); gcp and k8s bake the door over it
+			// (k8s/release.nu release-tree).
+			if len([for t in D.code.meta.targets if t == "docker" || t == "gcp" || t == "k8s" {t}]) > 0 {
+				surface: targets: "served-release": _served & {
+					_iceServers: distribution.#IceServers.container
+					compose: manual: true
+				}
+			}
 		}
 		// The terminal's server half, where a route asks to be rendered on
 		// request (#Screen.ssr; #emit decides which routes may). It reads the
@@ -2675,7 +2727,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
 	// door and the router cannot disagree about what a route is.
-	_shell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, server: E._serverOn, native: E.code.capabilities.native}).out
+	_shell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, presenter: E.terminal.capabilities.presenter, server: E._serverOn, native: E.code.capabilities.native}).out
 	// The locales in one order, so every artifact that lists them lists them the
 	// same way and a regenerated file has no spurious diff.
 	_locales: list.SortStrings([if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}])
@@ -2745,7 +2797,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			][0]
 		},
 	]
-	_resources: [if E.code.capabilities.resources != _|_ for _, r in E.code.capabilities.resources {kind: r.kind, source: r.source}]
+	// A presenter's pinned scripts are fetched by the terminal against their
+	// integrity, so the page connects to each file and to nothing else there.
+	_resources: list.Concat([
+		[if E.code.capabilities.resources != _|_ for _, r in E.code.capabilities.resources {kind: r.kind, source: r.source}],
+		[for _, v in E.code.capabilities.vendored for u in v.scripts {kind: "connect", source: u}],
+	])
 	_resourceSources: {for r in _resources {(r.kind): (r.source): true}}
 	_browserPolicy: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 		[if len(_resources) == 0 {E.terminal.surface.contentSecurityPolicy},
@@ -2835,7 +2892,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// the app's module over the Mecha machine it reaches — run by the terminal
 	// for a local child — and the declarations of every machine it may write to.
 	_composedHandlers: {
-		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex for name, actor in cortexMachine.setup.actors {
+		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex for name, actor in cortexMachine.setup.actors if actor.via != "kinetic" {
 			"shell/handlers/\(name).js": {
 				machine:  {machine: E.code.state.hybrids[actor.machine].reducer, rules: E.code.state.hybrids[actor.machine].rules}
 				local:    actor.via == "local"
@@ -3679,14 +3736,22 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				for _, v in E.code.capabilities.vendored if v.isolation != "compartment"
 				for f in v.files {(f): true}
 			} {"/\(f)"}])
+			// A presenter's worker script answers with the presenter's own
+			// policy, which governs the worker it starts.
+			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
+			_fenced: list.Concat([_unitPaths, _presenterAt])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
-				let matcher = [if len(_unitPaths) > 0 {"  @terminal not path \(strings.Join(_unitPaths, " "))\n  header @terminal"}, "  header"][0]
+				let matcher = [if len(_fenced) > 0 {"  @terminal not path \(strings.Join(_fenced, " "))\n  header @terminal"}, "  header"][0]
+				let presenter = [for p in _presenterAt {"  @presenter path \(p)\n  header @presenter Content-Security-Policy \(json.Marshal(E._shell.presenter.policy))\n"}]
+				// What the presenter's script-src 'self' admits is answered
+				// from a file the door holds, never by an upstream.
+				let scripted = [for p in _presenterAt {"  @scripted {\n    header_regexp Sec-Fetch-Dest ^(\(strings.Join(E._shell.presenter.scripted, "|")))$\n    not file {\n      root /srv\n    }\n  }\n  handle @scripted {\n    respond \"\" 403\n  }\n"}]
 
 				// A door built as a release names the inline scripts its documents
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(immutable)"
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
 			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}

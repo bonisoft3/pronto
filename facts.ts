@@ -444,6 +444,15 @@ export function importFacts(
   };
 }
 
+/** The scripts an app serves that are not Jessie and are still accounted for:
+ * a declared unit's or host-DOM hatch's files, and the terminal's own. */
+export function scriptFacts(declared: string[], platform: string[]): Facts {
+  return {
+    script_declared: declared.map((path) => ({ path })),
+    script_platform: platform.map((path) => ({ path })),
+  };
+}
+
 /**
  * What each Jessie module reaches for and what it evaluates to, beside the list
  * of identifiers it may not reach for. The scan and the query read one list.

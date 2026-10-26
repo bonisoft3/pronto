@@ -302,6 +302,35 @@ export def read-environment [cluster_env: string]: nothing -> record {
 	$res.stdout | from json
 }
 
+# The project with the door's tree as a release ships it: every image the dev
+# stack builds from an `<app>-served` stage (caddy, render) takes
+# `<app>-served-release`'s, the same tree addressed with the target's ICE
+# servers (emit.cue), so a released page gathers over STUN and the dev stack
+# over host candidates alone.
+export def release-tree []: string -> string {
+	let project = ($in | from yaml)
+	let names = ($project.services | columns)
+	let served = ($project.services | values
+		| each {|svc| $svc.build?.additional_contexts? | default {} | values }
+		| flatten
+		| where {|v| ($v | str starts-with "service:") and ($v | str ends-with "-served") }
+		| uniq)
+	let missing = ($served | where {|v| $"($v | str substring 8..)-release" not-in $names })
+	if ($missing | is-not-empty) {
+		error make {msg: $"the project builds from ($missing | str join ', '), and has no ($missing | each {|v| $"($v | str substring 8..)-release" } | str join ', ') to release it from"}
+	}
+	let release = {|v| if $v in $served { $"($v)-release" } else { $v } }
+	$project | update services {|p|
+		$p.services | transpose name svc | reduce -f {} {|row, acc|
+			let contexts = ($row.svc.build?.additional_contexts? | default {})
+			let built = if ($contexts | is-empty) { $row.svc } else {
+				$row.svc | upsert build.additional_contexts ($contexts | transpose key value | reduce -f {} {|c, a| $a | insert $c.key (do $release $c.value) })
+			}
+			$acc | insert $row.name $built
+		}
+	} | to yaml
+}
+
 # The runtime images baked from the app's flattened compose project, which
 # `compose` holds as text (bake resolves no `extends` context, and compose
 # leaves the platform of the service-named targets unset). Reproducible, so an
@@ -311,6 +340,7 @@ export def read-environment [cluster_env: string]: nothing -> record {
 # omnishell), outside the app directory bake runs in. Answers what bake named
 # each target, by service.
 export def bake-images [app_dir: string, compose: string, services: list<string>, --platform: string]: nothing -> record {
+	let compose = ($compose | release-tree)
 	let root = (do { cd $app_dir; ^git rev-parse --show-toplevel } | str trim)
 	let platform_set = if ($platform | is-not-empty) { [--set $"*.platform=($platform)"] } else { [] }
 	do {

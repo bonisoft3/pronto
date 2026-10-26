@@ -63,6 +63,9 @@ Deno.test("a settled build preserves outputs and still follows new template read
           "tool-stub",
           join(repo, "plugins/sayt/nu.toml"),
           join(repo, "plugins/sayt/sayt.nu"),
+          // Piped and outside CI, sayt folds each command's output into a log
+          // it names; the assertions read what write.ts itself printed.
+          "--verbose",
           "build",
         ],
         cwd: app,

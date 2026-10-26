@@ -3,7 +3,7 @@
 // (libraries/mecha/packages/mecha-edge), with the page as its static assets and
 // the data directory the object loads once (publish-edge.ts).
 //
-//   deno run -A --config bundle/deno.json bundle/edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>]
+//   deno run -A --config bundle/deno.json bundle/edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--domain <host>]
 //     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]
 //
 // <out>/public   the terminal and app assets; data requests reach the Worker
@@ -22,6 +22,8 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
 import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
+import { builtRelease, holdIceServers } from './edge-ice.ts'
+import { BLOB_CACHE_RULE, writeEdgeBlobs } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
 import { clusterDrains, releaseScripts } from './edge-scripts.ts'
@@ -33,7 +35,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]'
+const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]'
 const app = path.resolve(args.shift() ?? fail(usage))
 const flags: Record<string, string> = {}
 while (args.length) {
@@ -41,7 +43,7 @@ while (args.length) {
   flags[flag] = args.shift() ?? fail(`${flag} takes a value`)
 }
 for (const flag of Object.keys(flags)) {
-  if (!['--omnishell', '--mecha', '--out', '--domain', '--derived', '--from', '--assets-from', '--ssr-origin', '--ssr-database', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
+  if (!['--omnishell', '--mecha', '--ice-servers', '--out', '--domain', '--derived', '--from', '--assets-from', '--ssr-origin', '--ssr-database', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
 }
 const clock = flags['--clock'] ?? 'ticker'
 if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or disabled')
@@ -54,6 +56,8 @@ const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
 const domain = flags['--domain'] ?? ''
 const previousAssets = flags['--assets-from'] ? path.resolve(flags['--assets-from']) : undefined
 const addresses = await releaseAddresses(omnishell)
+// The target's, from distribution's #IceServers: the release rule names them.
+const iceServers = addresses.parseIceServers(flags['--ice-servers'] ?? fail('--ice-servers names the target\'s ICE servers'))
 if (previousAssets) addresses.separateAssetDirectories(out, previousAssets)
 
 async function run(cmd: string, args: string[], cwd?: string) {
@@ -66,11 +70,15 @@ const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.jso
   tables: string[]
   schema?: Record<string, { durability?: string }>
   migrations: string[]
-  units?: Record<string, unknown>
+  units?: Record<string, { role?: string }>
+  presenter?: { policy: string; scripted: string[] }
 }
 if (shell.migrations.length === 0) fail('the app has no migration, so no cluster: release it to pages')
-// A unit also needs the terminal door's per-unit security headers.
-if (Object.keys(shell.units ?? {}).length) fail(`units are not packaged yet: ${Object.keys(shell.units!).join(', ')}`)
+// A unit also needs the terminal door's per-unit security headers. A
+// presenter's are its worker script's own, which _headers carries
+// (edge-addresses.ts), and the refusal of its scripted fetches below.
+const unpackaged = Object.entries(shell.units ?? {}).filter(([, unit]) => unit.role !== 'presenter').map(([unit]) => unit)
+if (unpackaged.length) fail(`units are not packaged yet: ${unpackaged.join(', ')}`)
 const name = shell.app ?? path.basename(app)
 const drains = await clusterDrains(path.join(app, '.pronto/cluster.json'))
 
@@ -86,8 +94,20 @@ const statics = await new Deno.Command('cue', {
 if (!statics.success) fail('cue export of public assets failed')
 const { statics: terminalStatics, clusterStatics } = JSON.parse(new TextDecoder().decode(statics.stdout)) as { statics: StaticAsset[]; clusterStatics: StaticAsset[] }
 await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
-const hints = await addressEdgeAssets(addresses, publicDir, previousAssets)
+const hints = await addressEdgeAssets(addresses, publicDir, { previous: previousAssets, iceServers })
+await holdIceServers(builtRelease(publicDir), iceServers, publicDir)
 await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints))
+
+// The blob plane's seed rides as static assets, after addressing: its files
+// are already named by their content and keep the URLs the page asks for.
+const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{seed: *code.capabilities.blobSeed | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
+if (!seedOut.success) fail('cue export of code.capabilities.blobSeed failed')
+const { seed } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { seed: { manifest: string; origin: string } | null }
+if (seed) {
+  const count = await writeEdgeBlobs(publicDir, JSON.parse(await Deno.readTextFile(path.join(app, seed.manifest))), seed.origin)
+  await Deno.writeTextFile(path.join(publicDir, '_headers'), '\n' + BLOB_CACHE_RULE, { append: true })
+  console.error(`edge: ${count} seeded blobs`)
+}
 
 // PGlite for workerd. Bake reads the project's compose from its .bayt/, and a
 // local export adds to its destination, which is fresh here.
@@ -130,8 +150,10 @@ if (Object.keys(hybrids).length) await Deno.writeTextFile(path.join(out, 'src/ma
 
 // The object's clock is the ticker's own sweep (mecha-edge's clock.ts), whose
 // cron reader croner reaches wrangler's bundler through node_modules beside
-// the ticker, installed from its lock.
+// the ticker, installed from its lock; mecha-edge's node_modules provides the
+// pinned WebAuthn server dependency.
 await run(Deno.execPath(), ['install', '--frozen'], path.join(mecha, 'services/ticker'))
+await run(Deno.execPath(), ['install', '--frozen', '--node-modules-dir=auto'], path.join(mecha, 'packages/mecha-edge'))
 // The clock outside the object: a Cron Trigger poking hourly where anything
 // can owe a tick, so the free plan pays a day of object wakes for an alarm
 // the platform lost rather than a minute's; the alarm is the exact one.
@@ -169,7 +191,11 @@ export const Cluster = edgeObject({
 export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
-    const response = await edgeWorker.fetch(req, env, ctx)
+${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
+    // asset, which never reaches this Worker, or not at all: the cluster's
+    // GET may act (omnishell's terminal.cue \`presenter.scripted\`).
+    if (${JSON.stringify(shell.presenter.scripted)}.includes(req.headers.get('sec-fetch-dest') ?? '')) return new Response(null, { status: 403 })
+` : ''}    const response = await edgeWorker.fetch(req, env, ctx)
     if (req.method !== 'GET' || response.status !== 200 ||
         !(response.headers.get('content-type') ?? '').includes('text/html') ||
         !(req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') ?? '').includes('text/html'))) return response

@@ -16,6 +16,7 @@ use release.nu [
 	read-environment
 	auth-provider-environment
 	auth-provider-secret
+	release-tree
 ]
 
 def main [] {
@@ -33,6 +34,7 @@ def run-tests [] {
 	test_schema_jobs
 	test_auth_providers
 	test_auth_provider_secrets
+	test_release_tree
 	test_read_environment
 	test_render_manifests_kind
 	test_render_manifests_eks
@@ -97,6 +99,26 @@ def test_auth_providers [] {
 	assert equal $vars.OIDC_GOOGLE_CLIENT_ID "client.apps.googleusercontent.com"
 	# Given none, the auth service is deployed as before.
 	assert not ((render-manifests $app.cue_path "kind") | str contains "OIDC_")
+}
+
+# The door's own tree is the dev stack's, with no ICE servers: a gcp or k8s
+# release baked from it would duel on one network and fail between two homes.
+def test_release_tree [] {
+	print "test a release bakes the door and the renderer over the release's tree..."
+	let project = {services: {
+		caddy: {build: {additional_contexts: {app-crud: "service:app-crud", app-served: "service:app-served", root: "/w"}}}
+		render: {build: {additional_contexts: {app-served: "service:app-served"}}}
+		crud: {build: {context: "/w"}}
+		app-served: {build: {context: "/w"}}
+		app-served-release: {build: {context: "/w"}}
+	}}
+	let released = ($project | to yaml | release-tree | from yaml)
+	assert equal $released.services.caddy.build.additional_contexts {app-crud: "service:app-crud", app-served: "service:app-served-release", root: "/w"}
+	assert equal $released.services.render.build.additional_contexts {app-served: "service:app-served-release"}
+	assert equal $released.services.crud $project.services.crud
+	let unreleased = ($project | reject services.app-served-release | to yaml)
+	let refused = (try { $unreleased | release-tree; "" } catch {|e| $e.msg })
+	assert ($refused | str contains "the project builds from service:app-served, and has no app-served-release to release it from")
 }
 
 def test_auth_provider_secrets [] {

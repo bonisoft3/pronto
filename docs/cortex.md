@@ -1,9 +1,9 @@
 # Cortex machines
 
 `state.cortex` declares `#CortexMachine`s ([[../cortex.cue]]): the app's
-screens over the Mecha machines in `state.hybrids`. Each state names the screen
-that hosts it and the machine its child reaches, and every child is a fold the
-terminal runs. Nothing runs in the browser that the terminal does not record:
+screens over the Mecha machines in `state.hybrids`, and over the races its
+screens host. Each state names the screen that hosts it and the child it
+invokes: a fold the terminal runs over a Mecha machine, or a kinetic child. Nothing runs in the browser that the terminal does not record:
 a child's state is rows, its pauses are the terminal's clock, its entropy is
 the terminal's draw, and everything it asks of a Mecha machine is a row it
 writes.
@@ -31,7 +31,8 @@ join, and a sync child whose screen's route does not carry its `instance`.
 ## Invoking a Mecha machine
 
 An invoke's `src` names an actor of `setup.actors`, `{machine, via, handler}`:
-the Mecha machine it reaches, how, and the fold that does. A sync child's
+the Mecha machine it reaches, how, and the fold that does; or a
+[kinetic](#kinetic) child. A sync child's
 `input.instance` names the route parameter that carries the instance.
 
 | `via` | Child | Lifetime |
@@ -39,6 +40,7 @@ the Mecha machine it reaches, how, and the fold that does. A sync child's
 | `session` | holds a lease row on the terminal's clock | while the screen is open; a lapsed lease is the ticker's to drop |
 | `sync` | opens the instance its route names and commands it | attached: leaving detaches, and the instance plays on |
 | `local` | plays the machine's own reducer in the terminal | owned; its state is the app's rows |
+| `kinetic` | hosts a race on the screen's mount ([below](#kinetic)) | the screen's: leaving stops the host and drops its ring |
 
 `handler` is the fold: `write.ts` emits `shell/handlers/<actor>.js` from the
 app's Jessie module at that path — a function `(state, event, machine, machines)`.
@@ -110,6 +112,26 @@ replays like any other screen:
 
 The module decides when a game starts and what a save from another machine
 version means; Truco deals a new game rather than resume one.
+
+## Kinetic
+
+`via: "kinetic"` hosts a race rather than reaching a machine: the actor
+names its `engine` and `sound` (`surface.engines`), its `presenter`
+(`capabilities.vendored`), the car's `bindings` (and each hot seat's), and the
+`menu` and `pause` presses a reduce hears between races
+(`cortex.cue` `#KineticActor`). `#App` refuses one whose engine, sound role
+or presenter is undeclared, and one whose screen carries no
+`data-kinetic="<actor>"`. Its `handler` is no composed fold but the screen's
+own reduce, named by the mount's region: it hears each lifted milestone and
+menu press as an event and answers in rows, and the row's columns are the
+mount's props, so the race is the row's to start, hold and hand to the menu
+([the kinetic child](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/kinetic.md#the-kinetic-child)). With
+`mode: online` the row races one seat of a GGRS session whose two session
+descriptions a Mecha machine's rows carry, and its milestones go back to that
+machine as commands, which Apex Run's lobby fold sends to `apexrun_duel`. Why
+the race reaches rows only so is
+[[decisions/2026-10-23-kinetic-machine|the kinetic-machine record]]; Apex
+Run's run machine (`shell/handlers/run.js`) is the instance.
 
 ## Evidence
 

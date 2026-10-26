@@ -1589,6 +1589,15 @@ import (
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
 		blobs: *false | bool
+		// A static set the blob plane carries from the start: every
+		// { file, sha256 } the app-relative manifest names, fetched from the
+		// public origin and refused unless its bytes hash to its sha256. The
+		// edge release ships it as immutable assets under /blobs/mecha-objects.
+		blobSeed?: {
+			manifest: string
+			origin:   =~"^https://[^/]+(/.*[^/])?$"
+		}
+		if blobSeed != _|_ {blobs: true}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
 		// inside. A `container` hatch withholds a service, whose definition is
 		// the program's cluster unification beside it. A `sql` or `proto` hatch
@@ -1632,8 +1641,21 @@ import (
 			// rungs: a `compartment` has no ambient authority; a `realm` is an
 			// iframe with its own globals and DOM (ECMA-262 realm) and may
 			// present; an `agent` is a worker with its own thread (ECMA-262
-			// agent) and reaches the network, so it may only ask.
+			// agent). The boundary does not say what the unit is for: an agent
+			// with a memo is a question, and one without is a presenter, whose
+			// worker the terminal strips to painting (`role`).
 			isolation: "compartment" | "realm" | "agent"
+			// Derived, never authored: a question asks and its answer lands in
+			// the memo; a presenter shows. An agent presenter paints the frames
+			// the terminal hands it on a canvas the terminal transfers, in a
+			// worker whose policy refuses every connection but blob: and data:
+			// and whose globals are pruned to what drawing needs.
+			role: [if memo != _|_ {"question"}, "presenter"][0]
+			// The terminal's pinned scripts an agent presenter runs before its
+			// own code (the terminal's `presenter.scripts` offer): fetched by
+			// the terminal against their integrity, evaluated in the worker
+			// before the prune.
+			scripts: [...string]
 			// Everything the unit touches, as entities and events (ports and
 			// adapters, Cockburn 2005): `reads` the entities whose rows it is
 			// handed, read-only, and `raises` the events it may post. The
@@ -1705,6 +1727,16 @@ import (
 		// screen, `src` the assembly module, served by the terminal. The loader
 		// resolves the screen's files.handlers, which markup binding derives.
 		handlers: [Name=string]: {ir: *Name | string, of: string, src: #Jessie, note: string}
+		// The kinetic plane's Jessie module graphs: `src` is the entry, its
+		// static imports relative paths to the app's own modules. derive links
+		// it (engine-link.ts) into shell/engines/<Name>.json, which the
+		// terminal serves and its cage imports, endowed with nothing. An
+		// `engine` exports initState, advanceFrame, saveState and loadState
+		// (omnishell's docs/kinetic.md); a `sound` exports createSound, which
+		// the terminal hands the AudioContext it tames (kinetic-sound.js), so
+		// the context is the role's one authority and an argument, not a
+		// global.
+		engines: [Name=string]: {src: #Jessie, note: string, role: *"engine" | "sound"}
 		design: #Design
 		flows: [Name=string]: #Flow & {name: Name}
 		// What a terminal module may use past the language, keyed by its
@@ -1735,7 +1767,7 @@ import (
 		// A frozen archive retains its schedules and runs none, at the edge or
 		// in a page.
 		edgeClock?: "ticker" | "disabled"
-		targets: [...#Target]
+		targets: *["docker"] | [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
 		// compose clock is emitted by cluster.cue and the edge's Cron Trigger
 		// by the cloudflare release, so neither needs a declaration; a cloud
@@ -1888,7 +1920,17 @@ import (
 		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] {
 			[if c.setup.actors[inv.src] == _|_ {"\(cName).\(sName): the setup implements no actor \(inv.src)"}]
 		},
-		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ {
+		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via == "kinetic" {
+			let actor = c.setup.actors[inv.src]
+			let markup = [if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] != _|_ if A.surface.screens[st.meta.screen].markup != _|_ {A.surface.screens[st.meta.screen].markup}, ""][0]
+			list.Concat([
+				[if [for n, e in A.surface.engines if n == actor.engine if e.role == "engine" {n}] == [] {"\(cName).\(sName): no engine \(actor.engine) races the kinetic child \(inv.src)"}],
+				[if actor.sound != _|_ if [for n, e in A.surface.engines if n == actor.sound if e.role == "sound" {n}] == [] {"\(cName).\(sName): no sound role \(actor.sound) voices the kinetic child \(inv.src)"}],
+				[if [for n, v in A.capabilities.vendored if n == actor.presenter if v.role == "presenter" if v.isolation == "agent" {n}] == [] {"\(cName).\(sName): no presenter \(actor.presenter) paints the kinetic child \(inv.src)"}],
+				[if !strings.Contains(markup, "data-kinetic=\"\(inv.src)\"") {"\(cName).\(sName): no data-kinetic=\"\(inv.src)\" mounts the kinetic child on its screen"}],
+			])
+		},
+		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via != "kinetic" {
 			let actor = c.setup.actors[inv.src]
 			list.Concat([
 				[if _callTargets[actor.machine] == _|_ {"\(cName).\(sName): no Mecha machine \(actor.machine)"}],
@@ -2046,8 +2088,11 @@ import (
 		[for un, u in A.capabilities.vendored for r in u.ports.reads if A.state.entities[r] == _|_ {
 			"unit \(un) reads \(r), which is no declared entity"
 		}],
-		[for un, u in A.capabilities.vendored if u.isolation == "agent" if u.memo == _|_ {
-			"unit \(un) is an agent with no memo: an agent is a question whose answer lands in a memo; a unit that acts on the world is a process hatch"
+		[for un, u in A.capabilities.vendored if u.isolation == "agent" if u.memo == _|_ if len(u.ports.raises) > 0 {
+			"unit \(un) is an agent presenter and raises \(strings.Join(u.ports.raises, ", ")): what it computes is a function of its thread's timing, not of anything a person did, so it paints and raises nothing"
+		}],
+		[for un, u in A.capabilities.vendored if len(u.scripts) > 0 if !(u.isolation == "agent" && u.memo == _|_) {
+			"unit \(un) names scripts and is no agent presenter: only a presenter's worker runs the terminal's pinned scripts"
 		}],
 		[for un, u in A.capabilities.vendored if u.isolation != "agent" if u.memo != _|_ {
 			"unit \(un) is a \(u.isolation) with a memo: only an agent asks a question"
