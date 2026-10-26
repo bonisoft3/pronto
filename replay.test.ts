@@ -4,7 +4,7 @@
 
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { fileURLToPath } from "node:url";
-import { targetService, locate, pgrollMigrations, plain, fixtureDefinitions, replacementFindings, compareCatalogs, type Column } from "./check-replay.ts";
+import { locate, pgrollMigrations, plain, fixtureDefinitions, replacementFindings, compareCatalogs, type Column } from "./check-replay.ts";
 
 type Row = { step: number; mig: string; rel: number; tbl: string; col: string; typ: string; ordinal: number };
 type Finding = { severity: string; path: string | null; message: string };
@@ -125,19 +125,6 @@ Deno.test("the migration that drops the last table is still named", async () => 
   );
   assertEquals(found.length, 1);
   assertEquals(found[0].path, "b_drops_everything.sql");
-});
-
-Deno.test("the database service is picked by build context, not by name alone", () => {
-  // The cluster an app instantiates declares a database of its own under a
-  // name ending the same way; only one of the two is built out of this
-  // directory. `target` is the cluster's published name for it.
-  const picked = targetService({
-    services: {
-      "libraries_mecha-database": { image: "cluster:latest", build: { context: "/repo/libraries/mecha" } },
-      "apps_realworld-database": { image: "app:latest", build: { context: "/repo/apps/realworld" } },
-    },
-  }, "/repo/apps/realworld", "database");
-  assertEquals(picked?.image, "app:latest");
 });
 
 Deno.test("a spinner's escape codes do not reach a finding", () => {

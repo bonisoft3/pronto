@@ -13,8 +13,8 @@ navigation stack holds, and how its first document is rendered. The markup is
 the authority on what a screen reads and binds; the program is the authority on
 what exists. pronto derives the first from the markup, checks the markup
 against the second, and decides per route what a crawler and a first paint
-receive. Writing a screen is omnishell's [GUIDE](https://github.com/bonisoft3/omnishell/blob/v0.14.0/GUIDE.md), and
-every attribute it may carry is its [REFERENCE](https://github.com/bonisoft3/omnishell/blob/v0.14.0/REFERENCE.md).
+receive. Writing a screen is omnishell's [GUIDE](https://github.com/bonisoft3/omnishell/blob/v0.19.1/GUIDE.md), and
+every attribute it may carry is its [REFERENCE](https://github.com/bonisoft3/omnishell/blob/v0.19.1/REFERENCE.md).
 
 ## Derived from the markup
 
@@ -99,7 +99,7 @@ derive writes each mode and its first reason into the fact store as
 `read_mode`, and `shell.yaml` names the lazy tables under `read`. An author
 cannot override the derived mode. The terminal refuses incidental partial
 collection reads by validation, visibility and fold code; query snapshot reads
-instead acquire explicit completeness ([data](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/data.md)).
+instead acquire explicit completeness ([data](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/data.md)).
 
 ## Checked against the program
 
@@ -113,7 +113,7 @@ what the app emitted, so a terminal consumed without pronto brings them along.
 | omnishell `check markup` | `lint` | `shell.yaml`'s `schema:` and `routes:` | a table the program does not declare; a `data-filter` column its entity lacks; a slot that may bind more than one row; a format its column cannot carry; a machine write its column cannot hold; an item template that is not one element; a control no seam reaches; a link written as a path instead of a route |
 | omnishell `check handlers` | `lint` | the role each module runs in | a declared module that does not load in its compartment |
 | pronto `check-facts` | `lint` | `.pronto/facts.json`, through `invariants.sql` | a stylesheet redeclaring a token the shared layer owns; an `@import` nothing serves; a route the ir and the program spell differently; a literal where a rung exists ([the design scale](design-scale.md)) |
-| visual lint | `integrate` | the running app | binding text such as `{col}` painted on screen, among its other checks ([visual lint](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/visual-lint.md)) |
+| visual lint | `integrate` | the running app | binding text such as `{col}` painted on screen, among its other checks ([visual lint](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/visual-lint.md)) |
 
 **A rule that reports the platform's own grammar as an error is not ready.**
 The filter rule reads the one filter grammar (`parseFilterSpec`), where `limit`
@@ -153,7 +153,7 @@ What is not built is found at hydrate instead ([pending](../PENDING.md#screens))
 pronto owns the policy: which routes are rendered where, and what the door and
 a crawler are told. omnishell owns the mechanism: rendering a document anywhere
 a DOM exists, and the shell taking it over where it stands once it boots
-([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/screen-updates.md#a-pre-rendered-page)).
+([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/screen-updates.md#a-pre-rendered-page)).
 The policy is a screen's `access` (`"public" | "private"`) and `ssr` (`"spa" | "ssg" | "ssr"`), both derived from the program unless explicitly narrowed:
 
 - `access` defaults to `"private"` when `auth.required` is true, when the screen declares forms (`len(forms) > 0`) or writes to server entities, or when every top-level live region reads a restricted server entity (`access.scope != "public"`). Otherwise `access` defaults to `"public"`. A screen with no server writes or restricted-only top-level reads that still requires sign-in (such as an entry shell redirecting to a signed-in editor) sets `access: "private"`. Declaring `access: "public"` on a screen under `auth.required: true` or with restricted-only top-level reads is refused.
@@ -213,11 +213,11 @@ of the document, any other `{{` in it written as the template's own literal of
 it. The door answers them at `/srv<address>/index.html` through Caddy's
 `templates`, so the origin is the deployment's `ORIGIN`, which the door holds
 as `{$ORIGIN}` and never reads off the request: it answers any Host
-([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.14.0/docs/proxy.md#the-origin)). In
+([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/proxy.md#the-origin)). In
 development that is `https://localhost:<port>`, on the port the door binds.
 
 **`ssr`.** A route whose `ssr` is `"ssr"` is answered by the terminal's server
-renderer ([the server terminal](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/terminal.md#the-server-terminal)),
+renderer ([the server terminal](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md#the-server-terminal)),
 which the emitter adds to the cluster (`terminal.cue`'s `#Render`) beside a
 Caddy route sending the route's addresses there, none of which is a file the
 door serves: a route whose first segment is a :param widens to every path of
@@ -248,7 +248,7 @@ Cloudflare Edge worker (`edge-ssr.ts`), only routes with `ssr: "ssr"` invoke the
 from `ASSETS` with `Link` preload hints. What the
 door answers through `templates` (a prerendered document, `robots.txt`,
 `sitemap.xml`) is answered with a hash of its bytes as its ETag, as every file
-the door serves is (mecha's [proxy](https://github.com/bonisoft3/mecha/blob/v0.14.0/docs/proxy.md)),
+the door serves is (mecha's [proxy](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/proxy.md)),
 so a revalidation of an unchanged one is a 304: `templates` deletes the
 validator, since a template's output is in general no function of its file,
 but these spell nothing beyond the address asked, and the asset's `templated`
@@ -289,7 +289,7 @@ kept document at once, however old.
   the delta is already computed upstream (WAL, shape, collection, live query),
   and rows carry a real key, so hydrating is adopting nodes by `data-id` in one
   pass with no component tree to re-execute
-  ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/screen-updates.md#rejected)).
+  ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/screen-updates.md#rejected)).
 - **Streaming HTML and Suspense chunks** — the document is whole, and changes
   stream over the sync connection.
 - **Serialising machine state into the page** — only rows cross the wire, as
@@ -298,7 +298,7 @@ kept document at once, however old.
   the rows from. Clients keep no rows across loads, so a booting shell's first
   read is never older than the document it adopts, and Electric cannot resume a
   shape at a log position without the shape's handle
-  ([pending](https://github.com/bonisoft3/omnishell/blob/v0.14.0/PENDING.md#the-terminal)).
+  ([pending](https://github.com/bonisoft3/omnishell/blob/v0.19.1/PENDING.md#the-terminal)).
 - **Rendering the first screen beside the served one and swapping them** — it
   paints the same pixels, and throws away every node the reader was on, with
   their focus, their scroll in it and what they had typed.

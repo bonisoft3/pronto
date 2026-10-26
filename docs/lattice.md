@@ -31,7 +31,7 @@ the five points that exist, where two fields would also name a sixth that cannot
 The emitter derives everything from the word. `tab` and `device` emit no
 table, trigger, publication entry, policy or seed SQL, take no `access`, and
 reach the terminal as `local` collections
-([omnishell's side](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/data.md#declaration-follows-durability)).
+([omnishell's side](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/data.md#declaration-follows-durability)).
 The cluster rungs each get a table with `txid`, the policies its access
 declares and an outbox. Browser freshness does not decide whether authoritative
 inputs reach the statistics lake: the CDC publication retains `server` tables
@@ -47,7 +47,7 @@ retaining all dependency rows. `offline` keeps the existing eager collection
 behavior. Validations, access rules and folds can independently require local
 collections; those costs belong to those features rather than to a server read.
 See [[screens#The reads decide how a table is read]] and
-[omnishell/docs/data#A region's rows](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/data.md#a-regions-rows).
+[omnishell/docs/data#A region's rows](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/data.md#a-regions-rows).
 
 ## Views, folds and the DOM
 
@@ -73,7 +73,7 @@ only between symmetric writers, and the ladder never produces one: every fact
 lives at one rung, and lower rungs hold derived copies beside their own
 private facts. Where a writer threatens symmetry, each arrow carries a veto
 instead of a merge: upward, the server's no arriving as a `refused` event
-([omnishell](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/data.md#a-refused-write-is-an-event));
+([omnishell](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/data.md#a-refused-write-is-an-event));
 downward, an input holding unsent text refusing the store's re-bind until
 submit or reset. Offline stays asymmetric by identity, idempotent replay and
 the veto. The one exception admitted is collaborative free-form text, a column
@@ -121,13 +121,13 @@ replay and a `put` be stated twice.
 | durability × schedule | `_scheduleShape`: `emits` is `server`, `done` is another, `live` entity | yes, `cue vet` |
 | durability × read | `#App.#read` (`read.cue`): `offline` is eager, a browser rung has no mode, an authored mode the rule contradicts fails to unify | yes, `cue vet` |
 | target × program | `_pagesBundle` ([release targets](release-targets.md)) | yes, `cue vet` |
-| effect level × `refused` arrow | `machineLint` reads the effect target's durability from `shell.yaml`; every compensable effect owes the arrow | yes, at lint ([machines](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/machines.md#effects)) |
+| effect level × `refused` arrow | `machineLint` reads the effect target's durability from `shell.yaml`; every compensable effect owes the arrow | yes, at lint ([machines](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/machines.md#effects)) |
 | durability × effect level | `#Entity.level` derives from `#DurabilityEffectLevel`; a machine invoking an external effect has level 4; chart effects carry no authored level | yes, by derivation |
-| posing × effect | omnishell's posing (`test/storybook-battery.ts`, run over every app by `test/universal-storybook.test.ts`) mounts each chart state with handlers off over a store that refuses every write ([machine harnesses](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/machines.md#machine-harnesses)) | yes, in omnishell's own tests |
-| effect level × fuel | `FuelMeter.spendEffect` ([fuel](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/automated-tests-battery.md#fuel)) | where a harness calls it |
+| posing × effect | omnishell's posing (`test/storybook-battery.ts`, run over every app by `test/universal-storybook.test.ts`) mounts each chart state with handlers off over a store that refuses every write ([machine harnesses](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/machines.md#machine-harnesses)) | yes, in omnishell's own tests |
+| effect level × fuel | `FuelMeter.spendEffect` ([fuel](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/automated-tests-battery.md#fuel)) | where a harness calls it |
 | effect level × test layer | nothing picks where an arrow is proven from its level | no |
 
-The levels are [omnishell's table](https://github.com/bonisoft3/omnishell/blob/v0.14.0/REFERENCE.md#effects); the
+The levels are [omnishell's table](https://github.com/bonisoft3/omnishell/blob/v0.19.1/REFERENCE.md#effects); the
 access modes are [access](access.md).
 
 ## The validation ladder

@@ -1,0 +1,44 @@
+# The broker on Hydra on the operator's machine: Hydra on SQLite, so its keys,
+# clients and codes outlive a restart, behind the front on the broker's port.
+# ../serve.sh runs it from here with Hydra, Deno and process-compose pinned
+# and the broker's env file loaded.
+version: "0.5"
+processes:
+  migrate:
+    command: hydra migrate sql up -e --yes
+    availability:
+      restart: "no"
+  hydra:
+    command: hydra serve all --dev
+    environment:
+      - URLS_SELF_ISSUER=${BROKER_ISSUER}
+      - URLS_LOGIN=${BROKER_ISSUER}/login
+      - URLS_CONSENT=${BROKER_ISSUER}/consent
+      - SERVE_PUBLIC_HOST=127.0.0.1
+      - SERVE_PUBLIC_PORT=28453
+      - SERVE_ADMIN_HOST=127.0.0.1
+      - SERVE_ADMIN_PORT=28455
+      - OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS=true
+      - TTL_ID_TOKEN=5m
+      - LOG_LEVEL=warn
+    depends_on:
+      migrate:
+        condition: process_completed_successfully
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 28453
+        path: /health/ready
+  front:
+    command: deno run --no-config --allow-net --allow-env front.ts
+    environment:
+      - HYDRA_PUBLIC=http://127.0.0.1:28453
+      - HYDRA_ADMIN=http://127.0.0.1:28455
+    depends_on:
+      hydra:
+        condition: process_healthy
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 28443
+        path: /health

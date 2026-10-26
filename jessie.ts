@@ -75,6 +75,9 @@ export const ENDOWABLE: Record<string, readonly string[]> = {
   renderer: TERMINAL,
   validation: TERMINAL,
   fold: TERMINAL,
+  // A kinetic engine steps at the frame rate on nothing but its own state and
+  // the commands it is handed, so its cage endows nothing at all.
+  engine: [],
   computation: MECHA,
   effect: MECHA,
 };
@@ -227,13 +230,21 @@ function lastStatement(stripped: string): string {
   return seg === null ? "" : stripped.slice(seg.start, seg.end).trim();
 }
 
+// A static import declaration once its specifier's text is stripped: default,
+// named or namespace bindings, or none, from an emptied string.
+const STATIC_IMPORT = /(^|[;}\n])\s*import\s*(?:[A-Za-z_$][\w$]*\s*,?\s*)?(?:\{[^}]*\}|\*\s*as\s+[A-Za-z_$][\w$]*)?\s*(?:from\s*)?(["'])\2/g;
+
 /** The denied names a module reaches for, and which completion shape it ends
  * in — `other` where it is none. */
 export function jessieFacts(source: string, role: string, grantedEndowments: string[] = []): { references: string[]; completion: string } {
   const endowable = ENDOWABLE[role];
   if (endowable === undefined) throw new Error(`jessieFacts: unknown role ${JSON.stringify(role)}`);
-  const stripped = stripAtoms(source);
-  const scans = [stripped, stripAtoms(source, false)];
+  // An engine is a module graph, linked at build time (engine-link.ts): its
+  // static import declarations are the links, so they are no reach for
+  // `import`, while `import(...)` and `import.meta` still are.
+  const linked = (text: string) => role === "engine" ? text.replace(STATIC_IMPORT, "$1") : text;
+  const stripped = linked(stripAtoms(source));
+  const scans = [stripped, linked(stripAtoms(source, false))];
   const endowments = new Set(grantedEndowments);
   const unpermittedEndowments = [...endowments].filter((name) => !endowable.includes(name));
   const references = [...new Set([
@@ -252,7 +263,8 @@ export function jessieFacts(source: string, role: string, grantedEndowments: str
     ...unpermittedEndowments,
   ])];
   const last = lastStatement(stripped);
-  const completion = ARROW_HEAD.test(last) ? "arrow" : OBJECT_HEAD.test(last) ? "object" : NAME.test(last) ? "name" : "other";
+  // An engine is a module: what it completes in is its exports.
+  const completion = role === "engine" ? "exports" : ARROW_HEAD.test(last) ? "arrow" : OBJECT_HEAD.test(last) ? "object" : NAME.test(last) ? "name" : "other";
   return { references, completion };
 }
 
@@ -287,6 +299,30 @@ const label = "a Date for the window";
       name: "Date is denylisted",
       source: `(state, event) => ({ at: Date.now() });\n`,
       expect: ["Date"],
+    },
+    {
+      name: "an engine's static imports are its links, not a reach",
+      source: `import { step } from "./step.js";\nimport * as table from './table.js';\nimport seed, { mix } from "./prng.js";\nexport const advanceFrame = (s, c) => step(s, c, table, seed, mix);\n`,
+      role: "engine",
+      expect: [],
+    },
+    {
+      name: "an engine's import() and import.meta are still a reach",
+      source: `export const loadState = (s) => import("./x.js").then(() => import.meta.url);\n`,
+      role: "engine",
+      expect: ["import"],
+    },
+    {
+      name: "a static import is a reach in every role but an engine's",
+      source: `import { step } from "./step.js";\n(state, event) => step(state, event);\n`,
+      expect: ["import"],
+    },
+    {
+      name: "an engine is endowed with nothing",
+      source: `export const initState = () => ({ at: new Intl.NumberFormat("en").format(1) });\n`,
+      role: "engine",
+      granted: ["Intl"],
+      expect: ["Intl"],
     },
     {
       name: "a completion naming the binding that holds the value passes",

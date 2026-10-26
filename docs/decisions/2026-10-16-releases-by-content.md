@@ -125,7 +125,7 @@ its entry draws documents whose addresses the host retains.
 
 The first phase is built, and its contract is the references':
 [release targets](../release-targets.md#a-release-is-its-entry) and
-[screen updates](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/screen-updates.md#when-a-deployment-lands).
+[screen updates](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/screen-updates.md#when-a-deployment-lands).
 
 - The edge's addressing is omnishell's `server/release-addresses.ts`, which
   every target runs: every document that boots the terminal is an entry,

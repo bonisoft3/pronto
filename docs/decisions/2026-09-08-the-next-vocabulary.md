@@ -18,7 +18,7 @@ namespaces and compiler are the grammar classes are written in, shadcn's names
 are the roles shared code consumes. Which values fill them is the app's.
 
 None of it is built but the contrast grading, which omnishell's
-[visual lint](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/visual-lint.md) runs on the rendered page
+[visual lint](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/visual-lint.md) runs on the rendered page
 in each appearance `color-scheme` claims. `#scale` still quotes Open Props and
 Primer ([the design scale](../design-scale.md)), no compiler runs over template
 classes, no app exports DTCG, no app declares which appearances it covers, and

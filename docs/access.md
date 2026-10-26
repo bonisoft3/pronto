@@ -13,7 +13,7 @@ entity takes none ([the lattice](lattice.md#the-durability-ladder)).
 Pronto compiles the declaration into what mecha's tenancy floor needs, a
 `scope_id` per row and one call, and into the permissive policies that decide
 who inside the floor may do what. The floor, its audit and its tests are
-[mecha's](https://github.com/bonisoft3/mecha/blob/v0.14.0/services/database/rls/README.md); the
+[mecha's](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/database/rls/README.md); the
 author's examples are [the guide's](../GUIDE.md#access).
 
 ## The four modes

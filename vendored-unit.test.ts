@@ -84,8 +84,50 @@ Deno.test("a read naming no entity is refused", async () => {
   await refused(program(engine({ reads: `["Nope"]` })), "unit engine reads Nope, which is no declared entity");
 });
 
-Deno.test("an agent without a memo is refused: an agent is a question whose answer lands in a memo", async () => {
-  await refused(program(engine({ memo: "" })), "unit engine is an agent with no memo: an agent is a question whose answer lands in a memo; a unit that acts on the world is a process hatch");
+const BABYLON = "https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/babylon.js";
+const presenter = ({ raises = "[]", scripts = `["${BABYLON}"]` } = {}) => `
+    painter: {
+      isolation: "agent"
+      ports: {reads: [], raises: ${raises}}
+      scripts: ${scripts}
+      src: "shell/units/painter/unit.js"
+      files: ["shell/units/painter/unit.js", "assets/manifest.json"]
+      note: "paints the kinetic plane"
+    }`;
+
+Deno.test("an agent without a memo is a presenter, and shell.yaml carries its scripts' integrity, what it reads and its worker's policy", async () => {
+  const vet = await cue(["vet", "-c", "-"], program(presenter()));
+  assert(vet.success, vet.stderr);
+  const files = await emitFiles(program(presenter())) as unknown as Record<string, { data: { units: unknown; presenter: { policy: string } } }>;
+  assertEquals(files["shell/shell.yaml"].data.units, {
+    painter: {
+      isolation: "agent",
+      ports: { reads: [], raises: [] },
+      role: "presenter",
+      scripts: [{ url: BABYLON, integrity: "sha384-GbwOam+gaf7GWvN708CvUiGqRFPFMS/lpYod2JfIip04KMa4TIJ8HXRjhwvT9DMC" }],
+      files: ["shell/units/painter/unit.js", "assets/manifest.json"],
+      seed: false,
+      src: "shell/units/painter/unit.js",
+    },
+  });
+  assertStringIncludes(files["shell/shell.yaml"].data.presenter.policy, "connect-src blob:;");
+  assertEquals((files["shell/shell.yaml"].data.presenter as unknown as { scripted: string[] }).scripted, ["script", "worker", "sharedworker", "serviceworker"]);
+});
+
+// A presenter's worker is unsealed: what it computes depends on its thread's
+// timing, so an event from it would land a nondeterministic source in a chart.
+Deno.test("a presenter that raises is refused: it paints and raises nothing", async () => {
+  await refused(program(presenter({ raises: `["drawn"]` })), "unit painter is an agent presenter and raises drawn: what it computes is a function of its thread's timing, not of anything a person did, so it paints and raises nothing");
+});
+
+Deno.test("scripts on a unit that is no agent presenter are refused", async () => {
+  await refused(program(engine({ isolation: `"realm"`, memo: "", raises: "[]" }).replace("note:", `scripts: ["${BABYLON}"]\n      note:`)), "unit engine names scripts and is no agent presenter: only a presenter's worker runs the terminal's pinned scripts");
+});
+
+Deno.test("a script the terminal does not offer is refused", async () => {
+  const res = await cue(["export", "-", "-e", "out"], program(presenter({ scripts: `["https://cdn.example/x.js"]` })));
+  assertEquals(res.success, false);
+  assertStringIncludes(res.stderr, `undefined field: "https://cdn.example/x.js"`);
 });
 
 Deno.test("a memo on a realm is refused: only an agent asks a question", async () => {

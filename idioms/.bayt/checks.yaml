@@ -55,9 +55,9 @@ say:
         - do: >-
             use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto |
             str trim); let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts
-            *.test.ts hybrid-local.ts hybrid-battery.ts] '*.ts') ...(glob --no-dir
-            'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json)
-            ...$files
+            *.test.ts hybrid-local.ts hybrid-battery.ts refresh-portable-types.ts] '*.ts')
+            ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config
+            ($pronto | path join deno.json) ...$files
       proto:
         cmds:
         - do: >-
@@ -81,7 +81,7 @@ say:
         - do: "if ($env.SAY_RELEASE_ARGS_SNAPSHOT? | is-empty) { use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag }"
         platform: pages
   self:
-    version: v0.44.2
+    version: v0.45.0
   doctor:
     do: >-
       use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno

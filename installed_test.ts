@@ -15,17 +15,21 @@ const classification = new Deno.Command("cue", {
 assert.ok(classification.success, `cue export of test modules failed: ${new TextDecoder().decode(classification.stderr).trim()}`);
 const testModules = new Set<string>(JSON.parse(new TextDecoder().decode(classification.stdout)));
 
-const shipped = ["", "scales"].flatMap((dir) =>
+const shipped = ["", "scales", "bundle"].flatMap((dir) =>
   readdirSync(join(ROOT, dir))
     .filter((name) => name.endsWith(".ts") && !name.endsWith("_test.ts") && !name.endsWith(".test.ts"))
     .map((name) => join(dir, name))
     .filter((file) => !testModules.has(file))
 );
 
-Deno.test("no installed module imports outside pronto", () => {
+// A module reaches outside by an import specifier or by a file it reads
+// beside itself (`new URL("../…", import.meta.url)`): mecha-reducer.ts read
+// omnishell's SES that way and an installed pronto died on it (NotFound) on
+// the first clean runner that ran it.
+Deno.test("no installed module imports or reads outside pronto", () => {
   const escapes = shipped.flatMap((file) =>
-    [...readFileSync(join(ROOT, file), "utf8").matchAll(/^\s*(?:import|export)\b[^\n]*?\bfrom\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']/gm)]
-      .map(([, from, call]) => from ?? call)
+    [...readFileSync(join(ROOT, file), "utf8").matchAll(/^\s*(?:import|export)\b[^\n]*?\bfrom\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']|\bnew URL\(\s*["']([^"']+)["']/gm)]
+      .map(([, from, call, url]) => from ?? call ?? url)
       .filter((spec) => spec.startsWith("../") && join(dirname(file), spec).startsWith(".."))
       .map((spec) => `${file}: ${spec}`)
   );

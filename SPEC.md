@@ -466,7 +466,7 @@ still tells markup lint that a pending row may await a database default. A
 singleton machine region without `data-empty-row` requires a
 filter pinning `id`; it binds those defaults, then the filter's equalities,
 then its `field: initial`. An explicit `data-empty-row` remains the whole
-row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/machines.md) states
+row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/machines.md) states
 the row and effect grammar.
 
 **Screen markup carries no executable code.** The markup check and terminal

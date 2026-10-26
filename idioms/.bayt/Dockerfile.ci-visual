@@ -1,10 +1,10 @@
 # generated from bayt.cue — do not edit
-FROM docker:29.7.1-cli@sha256:27a51d5ab1cd38d9eeaba7b415b8c07bc10c31e1cf1ec8d78f6413fcfab3f44f AS ci-visual
+FROM docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800 AS ci-visual
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --from=bonitao/lazybox:0.8.4@sha256:4afc3200d59fe5744cc7871858c4b04b404449c90578b9fe57136fea0b7dd566 /lazybox/ /root/.local/share/lazybox/
-COPY --from=mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/bin/socat1 /usr/local/bin/socat
-COPY --from=mirror.gcr.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/lib/libreadline.so.8 /usr/lib/libncursesw.so.6 /usr/lib/
+COPY --from=bonitao/lazybox:0.8.5@sha256:091a3b63ba222777000acc3bf8327faebfea4870e23ee07c6eb42431dadb2ac6 /lazybox/ /root/.local/share/lazybox/
+COPY --from=alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/bin/socat1 /usr/local/bin/socat
+COPY --from=alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8 /usr/lib/libreadline.so.8 /usr/lib/libncursesw.so.6 /usr/lib/
 ENV PATH=$PATH:/root/.local/bin:/root/.local/share/lazybox/bin
 COPY <<'BKID_MISE' /opt/bkid/mise.toml
 [settings]
@@ -19,60 +19,60 @@ github_attestations = false
 slsa = false
 
 [tools]
-'github:depot/cli' = '2.101.78'
-'github:go-task/task' = 'v3.49.1'
+'github:depot/cli' = '2.102.25'
+'github:go-task/task' = 'v3.54.0'
 BKID_MISE
 COPY <<'BKID_LOCK' /opt/bkid/mise.lock
 [tools]
 [[tools.'github:depot/cli']]
 backend = 'github:depot/cli'
-version = '2.101.78'
+version = '2.102.25'
 
 [tools.'github:depot/cli'.platforms]
 [tools.'github:depot/cli'.platforms.linux-arm64]
-checksum = 'sha256:985308b4e9b124c9d8ca712b30b84ea613e7de2f9bb3bb193a710e45e254ea87'
-url = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_arm64.tar.gz'
-url_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083092'
+checksum = 'sha256:52abe04ef24cd06f2ed37e15dbaa1d52d282db26ead04ff2493faf181347d6eb'
+url = 'https://github.com/depot/cli/releases/download/v2.102.25/depot_2.102.25_linux_arm64.tar.gz'
+url_api = 'https://api.github.com/repos/depot/cli/releases/assets/660782767'
 
 [tools.'github:depot/cli'.platforms.linux-arm64-musl]
-checksum = 'sha256:985308b4e9b124c9d8ca712b30b84ea613e7de2f9bb3bb193a710e45e254ea87'
-url = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_arm64.tar.gz'
-url_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083092'
+checksum = 'sha256:52abe04ef24cd06f2ed37e15dbaa1d52d282db26ead04ff2493faf181347d6eb'
+url = 'https://github.com/depot/cli/releases/download/v2.102.25/depot_2.102.25_linux_arm64.tar.gz'
+url_api = 'https://api.github.com/repos/depot/cli/releases/assets/660782767'
 
 [tools.'github:depot/cli'.platforms.linux-x64]
-checksum = 'sha256:15d066413b99c4fdd399d5fc79a64e50b2e266b509642995935bb96c01d28f1b'
-url = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_amd64.tar.gz'
-url_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083086'
+checksum = 'sha256:b62952f5951a0bcd4f48597b59fe29a4b7d84cac4e82710ee19d79262bf271af'
+url = 'https://github.com/depot/cli/releases/download/v2.102.25/depot_2.102.25_linux_amd64.tar.gz'
+url_api = 'https://api.github.com/repos/depot/cli/releases/assets/660782770'
 
 [tools.'github:depot/cli'.platforms.linux-x64-musl]
-checksum = 'sha256:15d066413b99c4fdd399d5fc79a64e50b2e266b509642995935bb96c01d28f1b'
-url = 'https://github.com/depot/cli/releases/download/v2.101.78/depot_2.101.78_linux_amd64.tar.gz'
-url_api = 'https://api.github.com/repos/depot/cli/releases/assets/501083086'
+checksum = 'sha256:b62952f5951a0bcd4f48597b59fe29a4b7d84cac4e82710ee19d79262bf271af'
+url = 'https://github.com/depot/cli/releases/download/v2.102.25/depot_2.102.25_linux_amd64.tar.gz'
+url_api = 'https://api.github.com/repos/depot/cli/releases/assets/660782770'
 
 [[tools.'github:go-task/task']]
 backend = 'github:go-task/task'
-version = 'v3.49.1'
+version = 'v3.54.0'
 
 [tools.'github:go-task/task'.platforms]
 [tools.'github:go-task/task'.platforms.linux-arm64]
-checksum = 'sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb'
-url = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz'
-url_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609773'
+checksum = 'sha256:d7189d439d4a6058e39e1b2acd7c8b27acd4856691b408f23b242e4294e1df5b'
+url = 'https://github.com/go-task/task/releases/download/v3.54.0/task_linux_arm64.tar.gz'
+url_api = 'https://api.github.com/repos/go-task/task/releases/assets/604090041'
 
 [tools.'github:go-task/task'.platforms.linux-arm64-musl]
-checksum = 'sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb'
-url = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz'
-url_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609773'
+checksum = 'sha256:d7189d439d4a6058e39e1b2acd7c8b27acd4856691b408f23b242e4294e1df5b'
+url = 'https://github.com/go-task/task/releases/download/v3.54.0/task_linux_arm64.tar.gz'
+url_api = 'https://api.github.com/repos/go-task/task/releases/assets/604090041'
 
 [tools.'github:go-task/task'.platforms.linux-x64]
-checksum = 'sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576'
-url = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz'
-url_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609772'
+checksum = 'sha256:680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb'
+url = 'https://github.com/go-task/task/releases/download/v3.54.0/task_linux_amd64.tar.gz'
+url_api = 'https://api.github.com/repos/go-task/task/releases/assets/604090073'
 
 [tools.'github:go-task/task'.platforms.linux-x64-musl]
-checksum = 'sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576'
-url = 'https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz'
-url_api = 'https://api.github.com/repos/go-task/task/releases/assets/369609772'
+checksum = 'sha256:680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb'
+url = 'https://github.com/go-task/task/releases/download/v3.54.0/task_linux_amd64.tar.gz'
+url_api = 'https://api.github.com/repos/go-task/task/releases/assets/604090073'
 BKID_LOCK
 COPY --from=bayt . /monorepo/plugins/bayt/runtime
 RUN cd /opt/bkid && mise trust -y && mise install && mise exec -- sh -c 'cp "$(mise which task)" /usr/local/bin/task && cp "$(mise which depot)" /usr/local/bin/depot'

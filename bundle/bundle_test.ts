@@ -301,14 +301,18 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       await Deno.writeTextFile(path.join(app, p), text)
     }
     await write('shell/shell.json', JSON.stringify({
-      routes: [{ files: { css: 'shell/screens/home.css', shared: ['shell/shared/chrome.css'] } }],
+      routes: [{ files: { css: 'shell/screens/home.css', shared: ['shell/shared/chrome.css', 'shell/shared/rail.css'] } }],
       migrations: ['m/001.sql', 'm/900_seed.sql'], tables: ['tally', 'tally_read'],
       schema: { tally: { durability: 'live' }, tally_read: { durability: 'server' } },
     }))
     await write('shell/shell.css', '')
     await write('shell/design.css', '')
     await write('shell/screens/home.css', '')
-    await write('shell/shared/chrome.css', 'body { padding-top: 72px; }')
+    // A comment naming the @import a screen's sheet carries is prose, not an
+    // import, which the bundler refused a shared sheet for.
+    // A string's `/*` opens no comment: the import after it is still inlined.
+    await write('shell/shared/chrome.css', '/* shared through the @import atop each screen; was @import "./gone.css"; */ body { padding-top: 72px; } a::after { content: "/*"; } @import "./rail.css";')
+    await write('shell/shared/rail.css', '.rail { gap: 0; }')
     await write('shell/index.html', [
       '<!doctype html><html><head>',
       '<link rel="stylesheet" href="./shell.css">',
@@ -327,7 +331,12 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       "CREATE COLLATION search (provider = icu, locale = 'und-u-ks-level1', deterministic = false);",
       'CREATE TABLE names (name text COLLATE search);',
       "INSERT INTO names VALUES ('Flamengo'), ('São Paulo'), ('Other');",
+      // A drain the page calls as the service role, over the rows it boots with.
+      'CREATE ROLE service NOLOGIN BYPASSRLS; GRANT USAGE ON SCHEMA public TO service;',
+      'CREATE TABLE tally_count (n int NOT NULL); GRANT SELECT ON tally TO service; GRANT ALL ON tally_count TO service;',
+      'CREATE FUNCTION count_tallies() RETURNS integer LANGUAGE sql AS $$ DELETE FROM tally_count; INSERT INTO tally_count SELECT count(*) FROM tally; SELECT 1 $$;',
     ].join('\n'))
+    await write('.pronto/cluster.json', JSON.stringify({ server: true, drains: [{ name: 'count', on: ['tally'], call: 'count_tallies', body: {} }] }))
     // A seeded row the derivation no longer produces, which the page must not keep.
     await write('m/900_seed.sql', "INSERT INTO tally VALUES ('gone', 9);")
     const order = dependencyOrder(['tally_note', 'tally'], [['tally_note', 'tally']])
@@ -347,7 +356,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     }).output()
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
-    assert.ok(html.includes('<style>body { padding-top: 72px; }</style>'))
+    assert.ok(html.includes('<style>/* shared through the @import atop each screen; was @import "./gone.css"; */ body { padding-top: 72px; } a::after { content: "/*"; } .rail { gap: 0; }</style>'))
     assert.ok(!/<link rel="stylesheet"/.test(html))
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
 
@@ -372,13 +381,16 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))))
       globalThis.fetch = () => { throw new Error('the bundled database must boot offline') }
       const db = await createPageDatabase(payload.cluster.assets)
-      await createCluster({ db, sql: payload.cluster.sql, tables: payload.cluster.tables, schema: JSON.parse(payload.files['shell/shell.json']).schema, log: console.error, fail: (e) => { throw e } })
+      const cluster = await createCluster({ db, sql: payload.cluster.sql, tables: payload.cluster.tables, drains: payload.cluster.drains, schema: JSON.parse(payload.files['shell/shell.json']).schema, log: console.error, fail: (e) => { throw e } })
+      await cluster.drains.idle()
+      await cluster.stop()
       const rows = async (sql: string) => (await db.query(sql)).rows
       console.log(JSON.stringify({
         tally: await rows('SELECT id, n FROM tally ORDER BY id'),
         note: await rows('SELECT id, tally_id, note FROM tally_note'),
         read: await rows('SELECT id, n FROM tally_read ORDER BY id'),
         search: await rows("SELECT name FROM names WHERE name LIKE '%flamengo%' OR name LIKE '%sao%' ORDER BY name"),
+        counted: await rows('SELECT n FROM tally_count'),
       }))
       await db.close()
     `)
@@ -397,6 +409,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       note: [{ id: 'x', tally_id: 'b', note: "it's $derived$" }],
       read: [{ id: 'a', n: 2 }, { id: 'b', n: 3 }],
       search: [{ name: 'Flamengo' }, { name: 'São Paulo' }],
+      counted: [{ n: 2 }],
     })
   } finally {
     await Deno.remove(app, { recursive: true })
@@ -491,6 +504,7 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
     const policy = (await Deno.readTextFile(path.join(repo, 'plugins/omnishell/content-security-policy.txt'))).trim()
     await write('shell/index.html', `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>`)
     await write('m/001.sql', 'CREATE TABLE item (id text PRIMARY KEY);')
+    await write('.pronto/cluster.json', JSON.stringify({ server: true, drains: [] }))
 
     const bundled = await new Deno.Command(Deno.execPath(), {
       args: [

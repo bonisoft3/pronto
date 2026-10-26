@@ -93,22 +93,22 @@ installedCheckOmnishell: _installedChecked.targets["check-probe"].dockerfile.cop
 installedCheckContext: _installedChecked.targets["check-probe"].compose.build.additional_contexts["plugins_omnishell-runtime-image"] & _omnishellContext
 installedNoCopy: [for k, t in _installedProject.targets if t != null && t.srcs != _|_ for g in t.srcs.globs if g =~ "omnishell" {k}] & []
 
-// Every app with a server replays its migrations, from the images the runtime
-// was built into: the image reads the generated compose, whose switch's file
-// includes the siblings' composes, so it carries their views.
-installedReplayRule:     _loop.surface.checks.replay.cmds[0] & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-replay"
-installedReplayFixtures: (_installedProject.targets.replay.srcs.defaultExclude["pronto-tests"] == null) & true
-installedReplaySwitch:   _installedProject.targets.replay.compose.environment.MONOREPO_COMPOSE_MODE & "${MONOREPO_COMPOSE_MODE:-}"
-installedReplayViews:    (_installedProject.targets.replay.dockerfile.defaultCopy["libraries_mecha-database-image_bayt"] != _|_) & true
-installedReplayRunner:   _installedProject.targets["ci-replay"] & {#closure: "replay", #check: "replay"}
+// Every app with a server replays its migrations inside ci-replay's RUN layer:
+// process-compose brings the database up and runs replay against it.
+installedReplayRule:   _loop.surface.checks.replay.cmds[0] & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-replay"
+installedReplayAfter:  _installedProject.targets.replay.entrypoint.after.database & "healthy"
+installedReplayRunner: _installedProject.targets["ci-replay"] & {
+	dockerfile: from: ref: ":database"
+	cmd: builtin: do: "process-compose --no-server -f .bayt/process-compose.yaml run replay"
+}
 // Commands reach sayt through the wrapper the app commits, at its pin.
 installedBuildCmd: _loop.surface.buildCmd & "./saytw build"
 // The wrapper reaches the build image on the app's whole tree.
 installedBuildWrapper: _installedProject.targets.build.srcs.defaultGlobs["pronto-tree"].glob & "**"
 
-// The app type-checks pronto's own modules, not its tests, which import their
-// siblings.
-installedTypes: _loop.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts hybrid-local\\.ts hybrid-battery\\.ts\\]"
+// The app type-checks pronto's own modules, not its checkout-only ones, which
+// import their siblings.
+installedTypes: _loop.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts hybrid-local\\.ts hybrid-battery\\.ts refresh-portable-types\\.ts\\]"
 // The terminal's checks reach omnishell through the app's mise, not PATH:
 // mise makes no shim for a `path:` version.
 _installedTerminal: (pronto.#DefaultTerminal & {code: _code}).out.surface & {runtime: ""}

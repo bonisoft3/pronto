@@ -21,7 +21,7 @@ say:
         priority: -1
         cmds:
           - do: "cue vet -c ./testdata/emit"
-          - do: "deno test --no-config --allow-read --allow-run=cue read.test.ts ssr.test.ts builder-inputs.test.ts"
+          - do: "deno test --no-config --allow-read --allow-run=cue read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts"
       distribution:
         priority: -1
         cmds:
@@ -45,6 +45,16 @@ say:
         priority: -1
         cmds:
           - do: "nu k8s/release_test.nu"
+      # The identity broker and identity.#Signin (docs/identity.md). The front
+      # runs against a real Hydra, which mise fetches here and no consumer's
+      # toolchain carries.
+      signin:
+        priority: -1
+        cmds:
+          - do: "cue vet -c=false ./identity"
+          - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
+          - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker identity/hydra/fake_test.ts"
+          - do: "mise x github:ory/hydra@26.2.0 -- sh -c 'HYDRA_BIN=$(command -v hydra) deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
       type-system:
         priority: -1
         cmds:
@@ -66,7 +76,7 @@ say:
       machines:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts browser-security.test.ts objects_test.ts"
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts"
           - do: 'mise exec -- deno test --config deno.json --allow-read --allow-run=cue --filter "server timers refuse" machine-timers.integration.test.ts'
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
       # What each Jessie role may be granted, held against both cages and the schema.
@@ -75,6 +85,9 @@ say:
         cmds:
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-env --allow-run=cue endowments_test.ts"
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-write --allow-env derive_effects_test.ts"
+          # An engine's module graph: linked here by Endo's ModuleSource,
+          # imported by the terminal's cage, every way out refused at the link.
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-write --allow-env engine-link.test.ts"
       duckstream:
         priority: -1
         cmds:

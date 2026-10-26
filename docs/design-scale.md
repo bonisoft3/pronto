@@ -175,7 +175,7 @@ omnishell's `test/design-tokens.test.ts` grades daisyUI's 35 themes against
 pronto's role set, with verdicts derived from the schema's export rather than a
 hand-written column, since copying an oracle's columns grades only the
 fixture's consistency with itself. What it finds is what the role set cannot
-name ([its finding](https://github.com/bonisoft3/omnishell/blob/v0.14.0/test/design-tokens.md)). What must hold in
+name ([its finding](https://github.com/bonisoft3/omnishell/blob/v0.19.1/test/design-tokens.md)). What must hold in
 every app (one scale everywhere, no colour in it, no appearance fork) lives in
 `invariants.sql` and `derive.ts --self-test` instead, because an app's design
 block is outside omnishell's CI filter, so a change there would never trigger
@@ -183,7 +183,7 @@ it.
 
 **Layout is what a vocabulary cannot constrain.** A defect spelled in tokens
 passes this lint. The two escapes cheapest to reach for, `overflow: hidden` and
-`opacity: 0`, are measured by [visual lint](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/visual-lint.md)'s
+`opacity: 0`, are measured by [visual lint](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/visual-lint.md)'s
 `clipped-content` and `focusable-but-invisible`; the answer is that spacing
 between children belongs to the parent.
 

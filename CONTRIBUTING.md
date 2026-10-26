@@ -97,7 +97,7 @@ policy pronto owns over omnishell's mechanism: [screens.md](docs/screens.md).
 **Release targets** project each target a program declares into a sayt
 `release@<target>` rule on one tier: [release-targets.md](docs/release-targets.md).
 
-The terminal's arguments are [omnishell's index](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/index.md),
-the cluster's [mecha's](https://github.com/bonisoft3/mecha/blob/v0.14.0/docs/index.md), and what is argued
+The terminal's arguments are [omnishell's index](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/index.md),
+the cluster's [mecha's](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/index.md), and what is argued
 and not built is [`PENDING.md`](PENDING.md). Everything else:
 [docs/index.md](docs/index.md).

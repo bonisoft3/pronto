@@ -20,7 +20,7 @@ aqua.minisign = false
 "github:denoland/deno" = "v2.9.7"
 "protoc" = "33.0"
 # check-proto.ts compares every proto the app does not withhold against its git history.
-"github:bufbuild/buf" = "1.73.0"
+"github:bufbuild/buf" = "1.74.0"
 # ir-render.ts draws an entity's machines into ir.html with it: one binary from its
 # GitHub release, ELK layout, no browser (decisions/2026-10-10-hatches.md).
 "github:terrastruct/d2" = "v0.9.0"
@@ -28,7 +28,7 @@ aqua.minisign = false
 # check-facts.ts and check-replay.ts run the fact store and the replay through
 # duckdb; http: and per platform for the reasons distribution/config.cue gives.
 [tools."http:duckdb"]
-version = "1.5.5"
+version = "1.5.6"
 url = 'https://github.com/duckdb/duckdb/releases/download/v{{ version }}/duckdb_cli-{{ os(macos="osx") }}-{{ arch(x64="amd64") }}.zip'
 
 [tools."http:duckdb".platforms]

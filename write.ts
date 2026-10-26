@@ -26,7 +26,7 @@ import { parseHeld, seedSql, type SeedData } from "./seed.ts";
 import { type Program, renderIr, writeIrStylesheet } from "./ir-render.ts";
 import { declaredMachine } from "./hybrid-spec.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
-import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
+import { compileMechaReducer, type MechaReducerMachine, type Terminal } from "./mecha-reducer.ts";
 import { surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
@@ -78,6 +78,13 @@ function sqlFile(rel: string, body: string): string {
 }
 
 const appDir = Deno.args[0] ?? fail("usage: write.ts <appDir>  (runs `cue export` in appDir — needs --allow-run=cue)");
+
+/** What the reducer compiler takes from the interpreter, read where the app's
+ * mise puts omnishell (terminalPath). */
+async function terminal(): Promise<Terminal> {
+  const { instrument } = await import(pathToFileURL(resolve(await terminalPath("instrument.ts", appDir))).href);
+  return { instrument, ses: await Deno.readTextFile(await terminalPath("interpreter/vendor/ses.umd.min.js", appDir)) };
+}
 
 function render(rel: string, f: EmitFile): string {
   if (f.format === "type-sql" || f.format === "carrier-sql") return sqlFile(rel, generateTypeSQL(f.data as { precision: number; scale: number }[]));
@@ -185,10 +192,9 @@ async function rendered(emission: Emission): Promise<Map<string, string>> {
       let machine = "{spec}";
       if (data.local) {
         const rules = await Deno.readTextFile(`${appDir}/${data.machine.rules}`);
-        const { instrument } = await import(pathToFileURL(resolve(await terminalPath("instrument.ts", appDir))).href);
         // Compiled for its refusals alone: the rules the terminal embeds are
         // the ones PostgreSQL would accept, contracts and reach included.
-        await compileMechaReducer(data.machine.machine, rules, instrument);
+        await compileMechaReducer(data.machine.machine, rules, await terminal());
         const runtime = (await Deno.readTextFile(new URL("./hybrid-runtime.js", import.meta.url))).trim();
         machine = `{spec, execute: (${runtime})(spec, (() => {\n${rules.trim()}\n})())}`;
       }
@@ -197,13 +203,13 @@ async function rendered(emission: Emission): Promise<Map<string, string>> {
     }
     if (f.format === "hybrid-sql") {
       const { hybrids, entities, timers } = f.data as { hybrids: Record<string, { machine: MechaReducerMachine; rules: string }>; entities: Record<string, SurfaceEntity>; timers: string };
-      const { instrument } = await import(pathToFileURL(resolve(await terminalPath("instrument.ts", appDir))).href);
+      const terminalOf = await terminal();
       const statements: string[] = timers ? [timers] : [];
       for (const name of Object.keys(hybrids).sort()) {
         const hybrid = hybrids[name];
         if (unsafe(hybrid.rules)) fail(`${rel}: unsafe hybrid rules path`);
         const rules = await Deno.readTextFile(`${appDir}/${hybrid.rules}`);
-        statements.push((await compileMechaReducer(hybrid.machine, rules, instrument, surfaceOf(hybrid.machine, entities))).sql);
+        statements.push((await compileMechaReducer(hybrid.machine, rules, terminalOf, surfaceOf(hybrid.machine, entities))).sql);
       }
       statements.push(compileMechaPorts(Object.fromEntries(Object.entries(hybrids).map(([name, hybrid]) => [name, hybrid.machine]))));
       contents.set(rel, sqlFile(rel, statements.join("\n")));

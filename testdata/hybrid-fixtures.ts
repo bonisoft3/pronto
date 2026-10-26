@@ -1,5 +1,10 @@
 import { compileHybrid, type HybridMachine } from "../hybrid.ts";
-import { instrument } from "../../omnishell/instrument.ts";
+import { instrument } from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/instrument.ts";
+import ses from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/interpreter/vendor/ses.umd.min.js" with { type: "text" };
+
+/** The compiler's terminal, from the omnishell hybrid-local.ts runs: what
+ * write.ts reads where mise puts it. */
+export const terminal = { instrument, ses };
 
 export const ROOT = new URL("../../../", import.meta.url);
 export const DATABASE = "bonitao/mecha-database:0.8.0@sha256:ccb59fdc18217eb679456c62b0f5aa05d79138bcc8c431087984a6ff1e2b552b";
@@ -36,5 +41,5 @@ export async function fixture() {
   if (!result.ok) throw new Error(result.err);
   const spec: HybridMachine = JSON.parse(result.out);
   const rules = await Deno.readTextFile(new URL("apps/truco/tests/fixtures/hybrid/turn.js", ROOT));
-  return { spec, rules, compiled: await compileHybrid(spec, rules, instrument) };
+  return { spec, rules, compiled: await compileHybrid(spec, rules, terminal) };
 }
