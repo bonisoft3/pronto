@@ -592,7 +592,7 @@ digest back from the registry and names it in the service and jobs.
 | compose | on GCP |
 |---|---|
 | database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts, and reapplies its re-runnable steps every release |
-| migrate | where the app declares pgroll migrations, the cluster's runner as the Job `<app>-migrate`, after initdb and before the service rolls, as compose runs it on every boot |
+| migrate | where the app declares pgroll migrations, the cluster's runner in the same Job `<app>-initdb`, after initdb and before the service rolls, as compose runs it on every boot: its image is `<app>-schema`, migrate's with the database image's initdb directory, which the release builds beside compose's, so the Job starts once |
 | caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
 | ticker | where the app runs one, one more container of the service, writing through crud with the service role's token (`<app>-service-jwt`, signed with the gateway's secret) |
 | clock | the Cloud Scheduler job `<app>-clock`, POSTing the door's `/poke` at the service's run.app address each minute with that token and no retry, as compose's clock does: the service answers anyone, so Cloud Run has no OIDC token to check |

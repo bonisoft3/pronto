@@ -184,7 +184,20 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 	# Never a certificate pair `sayt setup` issued for this machine: an image
 	# carries none.
 	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
-	with-env {COPYFILE_DISABLE: "1"} { ^tar -czf $"($work)/source.tgz" -C $app_dir -T $"($work)/files" }
+	# The schema job's image, `schema`: migrate's, with the database's initdb
+	# directory, so one job builds the schema and carries it forward. A bake
+	# target beside compose's, from theirs.
+	let schema = ("schema" in $services)
+	if $schema {
+		{target: {schema: {
+			context: "."
+			contexts: {migrate: "target:migrate", database: "target:database"}
+			dockerfile-inline: "FROM migrate\nCOPY --from=database /docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/\n"
+		}}} | to json | save -f $"($work)/.pronto-schema.bake.json"
+	}
+	let extra = if $schema { ["-C" $work ".pronto-schema.bake.json"] } else { [] }
+	with-env {COPYFILE_DISABLE: "1"} { ^tar -czf $"($work)/source.tgz" -C $app_dir -T $"($work)/files" ...$extra }
+	let bake_files = if $schema { "-f - -f .pronto-schema.bake.json" } else { "-f -" }
 	let sets = ($refs | each {|r| $"--set ($r.svc).tags=($r.ref)" } | str join " ")
 	# The worker's metadata server lends the build's account a token, which
 	# logs Docker into the registry; reproducible, so an unchanged source
@@ -194,7 +207,7 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 		"token=$(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\"access_token\":\"\\([^\"]*\\)\".*/\\1/p')"
 		$"echo \"$token\" | docker login --username oauth2accesstoken --password-stdin https://($host) >/dev/null"
 		"docker buildx create --use --driver docker-container >/dev/null"
-		$"docker compose --profile '*' config | docker buildx bake -f - --push --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' ($sets) ($services | str join ' ')"
+		$"docker compose --profile '*' config | docker buildx bake ($bake_files) --push --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' ($sets) ($services | str join ' ')"
 	] | str join "\n")
 	{
 		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
@@ -418,7 +431,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	if ($missing | is-not-empty) {
 		error make {msg: $"GCP.sidecars names ($missing | str join ', '), which the app's compose project does not define"}
 	}
-	let images = ($runtime | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars)
+	let images = ($runtime | append (if $has_migrate { ["migrate" "schema"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars)
 	let pushed = if $snapshot { {} } else {
 		ensure-infrastructure $plan0
 		if $from == null { push-images $app_info.dir $plan0 $name $images } else {
@@ -461,7 +474,6 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	mkdir dist/gcp
 	$plan.jobYaml | save -f dist/gcp/job.yaml
 	$plan.serviceYaml | save -f dist/gcp/service.yaml
-	if $has_migrate { $plan.migrateJobYaml | save -f dist/gcp/migrate.yaml }
 	for s in ($plan.sidecarServicesYaml | transpose name yaml) { $s.yaml | save -f $"dist/gcp/sidecar-($s.name).yaml" }
 	if $snapshot { print "gcp: rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {} }
 
@@ -476,8 +488,9 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	# What the Managed Prometheus sidecar scrapes, which it reads as a mounted secret.
 	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
 	for c in ($plan.sidecarScrapeConfigs | transpose secret config) { ensure-secret $c.secret $p $c.config | ignore }
-	run-job dist/gcp/job.yaml $plan.names.job "building the schema" $p $r
-	if $has_migrate { run-job dist/gcp/migrate.yaml $plan.names.migrateJob "carrying the schema forward" $p $r }
+	run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
+	# The migrate job an earlier release ran apart, which this one's job does.
+	if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) { gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore }
 	gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
 	if ($plan.iap? | default false) {
 		# Behind Identity-Aware Proxy only IAP's own agent invokes the service, and

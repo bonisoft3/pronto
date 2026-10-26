@@ -184,20 +184,30 @@ Deno.test("the door sends an alias host on to the origin", async () => {
 });
 
 // A database built before a change is carried forward by the cluster's pgroll runner, as
-// compose's migrate step and the k8s release's Job do, after initdb and before any reader starts.
-Deno.test("an app with migrations gets a migrate job over the Cloud SQL socket", async () => {
-  const r = await built(release(`, migrate: env: {REQUIRED_TABLES: "schedule"}`), "plan");
+// compose's migrate step and the k8s release's Job do, after initdb and before any reader starts:
+// in the schema job itself, from the release's `schema` image, so the job starts once.
+Deno.test("an app with migrations carries its schema forward in the schema job, over the Cloud SQL socket", async () => {
+  const withSchema = `${pushed.slice(0, -1)}, schema: {tag: "latest", digest: "${digest("9")}"}}`;
+  const app = `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${withSchema}, database: tokenRoles: ["anon", "app_user", "service"], migrate: env: {REQUIRED_TABLES: "schedule", PGHOST: "database"}}`;
+  const r = await built(app, "plan");
   assertEquals(r.success, true, r.stderr);
-  const job = (await built(release(`, migrate: env: {REQUIRED_TABLES: "schedule"}`), "migrateJob")).value;
-  assertEquals(job.metadata.name, "battlechess-migrate");
+  assertEquals(r.value.migrateJobYaml, undefined);
+  const job = (await built(app, "job")).value;
+  assertEquals(job.metadata.name, "battlechess-initdb");
   assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/cloudsql-instances"], "brawl-chess:us-central1:battlechess-db");
-  const c = job.spec.template.spec.template.spec.containers[0];
-  assert(/battlechess-migrate@sha256:/.test(c.image), c.image);
+  const [c, ...more] = job.spec.template.spec.template.spec.containers;
+  assertEquals(more.length, 0);
+  assert(/battlechess-schema@sha256:9{64}$/.test(c.image), c.image);
+  assert(c.command[2].trimEnd().endsWith('exec "/migrate.sh" "/pgroll" "00_initdb"'), c.command[2]);
   assertEquals(c.env.find((e: { name: string }) => e.name === "DATABASE_URL").valueFrom.secretKeyRef.name, "battlechess-migrate-database-url");
   assertEquals(c.env.find((e: { name: string }) => e.name === "REQUIRED_TABLES").value, "schedule");
-  assert(!r.value.migrateJobYaml.includes("postgres://"));
-  const none = await built(release(), "plan");
-  assertEquals(none.value.migrateJobYaml, "");
+  // initdb's own socket wins over a compose host that names its database service.
+  assertEquals(c.env.filter((e: { name: string }) => e.name === "PGHOST").map((e: { value: string }) => e.value), ["/cloudsql/brawl-chess:us-central1:battlechess-db"]);
+  assert(!r.value.jobYaml.includes("postgres://"));
+  const none = (await built(release(), "job")).value.spec.template.spec.template.spec.containers[0];
+  assert(/battlechess-database@sha256:/.test(none.image), none.image);
+  assert(!none.command[2].includes("migrate.sh"));
+  assert(!none.env.some((e: { name: string }) => e.name === "DATABASE_URL"));
 });
 
 // A provider is configured by the program for development, against a broker on the developer's
