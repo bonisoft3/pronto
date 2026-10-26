@@ -31,6 +31,16 @@ def render [cue_path: string, data?: string]: nothing -> record {
 	$res.stdout | from json
 }
 
+# The plan rendered over what the release knows so far (data), such as the
+# service's address.
+def plan-with [cue_path: string, data: record]: nothing -> record {
+	let f = (mktemp -t gcp.XXXXXX.json | str trim)
+	$data | to json | save -f $f
+	let plan = (render $cue_path $f)
+	rm $f
+	$plan
+}
+
 # The service role's token, HS256 under the gateway's secret, as mecha's
 # cluster signs its own (role service, the nil subject) but with no expiry:
 # the release restates it from the secret, so it changes only with it.
@@ -63,6 +73,11 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 	$current
 }
 
+# Whether any sidecar's metrics are scraped, in the cluster's instance or apart.
+def scraped [plan: record]: nothing -> bool {
+	($plan.scrapeConfig | is-not-empty) or ($plan.sidecarScrapeConfigs? | default {} | is-not-empty)
+}
+
 def ensure-infrastructure [plan: record] {
 	let p = $plan.project
 	let n = $plan.names
@@ -70,7 +85,7 @@ def ensure-infrastructure [plan: record] {
 	if ($plan.preview? | is-empty) {
 		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com cloudbuild.googleapis.com cloudscheduler.googleapis.com --project $p | ignore
 		# Where a sidecar's metrics are scraped to: Managed Service for Prometheus.
-		if ($plan.scrapeConfig | is-not-empty) { gc services enable monitoring.googleapis.com --project $p | ignore }
+		if (scraped $plan) { gc services enable monitoring.googleapis.com --project $p | ignore }
 	}
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $p) {
 		# Nor make the repository its images go to, in a project of previews.
@@ -97,7 +112,7 @@ def ensure-infrastructure [plan: record] {
 		if not (exists iam service-accounts describe $n.serviceAccount --project $p) {
 			gc iam service-accounts create $sa --project $p --display-name $"($plan.service) on Cloud Run" | ignore
 		}
-		let roles = ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] | append (if ($plan.scrapeConfig | is-not-empty) { ["roles/monitoring.metricWriter"] } else { [] })
+		let roles = ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] | append (if (scraped $plan) { ["roles/monitoring.metricWriter"] } else { [] })
 		for role in $roles {
 			gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role $role --condition None --quiet | ignore
 		}
@@ -307,6 +322,9 @@ def stop-preview [plan: record] {
 	let r = $plan.region
 	let n = $plan.names
 	if (exists run services describe $plan.service --region $r --project $p) { gc run services delete $plan.service --region $r --project $p | ignore }
+	for svc in ($n.sidecarServices? | default {} | values) {
+		if (exists run services describe $svc --region $r --project $p) { gc run services delete $svc --region $r --project $p | ignore }
+	}
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
 	}
@@ -349,7 +367,11 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	if ($refused | is-not-empty) {
 		error make {msg: $"release@gcp does not run ($refused | str join ', ') yet \(PENDING.md#release-targets\)"}
 	}
-	if $dry_run { print $plan0.jobYaml; print "---"; print $plan0.serviceYaml; return {} }
+	if $dry_run {
+		print $plan0.jobYaml; print "---"; print $plan0.serviceYaml
+		for y in ($plan0.sidecarServicesYaml | values) { print "---"; print $y }
+		return {}
+	}
 
 	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
 	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
@@ -381,20 +403,25 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
 	let ticker = if $has_ticker { {ticker: {env: ($compose.services.ticker.environment? | default {} | reject -o CRUD_URL SERVICE_JWT PORT)}} } else { {} }
 	let blobs = if $has_blobs { {blobs: {}} } else { {} }
-	# Each sidecar's compose environment, its peers at their loopback ports.
+	# Each sidecar's compose environment, its peers where it finds them: at their
+	# loopback ports in the cluster's instance, through the door and at the
+	# others' addresses for one apart, which the service's address names.
+	let run_host = $"($plan0.service)-($number).($plan0.region).run.app"
+	let peers = (plan-with $app_info.cue_path ({GCP: {runHost: $run_host}} | merge deep $base)).peers
 	let sidecars = ($plan0.sidecars | reduce -f {} {|n, acc|
 		let compose_env = ($compose.services | get $n | get environment? | default {} | transpose key value
-			| reduce -f {} {|e, all| $all | insert $e.key ($plan0.loopback | transpose peer at | reduce -f ($e.value | into string) {|l, v| $v | str replace -a $l.peer $l.at }) })
+			| reduce -f {} {|e, all| $all | insert $e.key ($peers | get $n | transpose peer at | reduce -f ($e.value | into string) {|l, v| $v | str replace -a $l.peer $l.at }) })
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $"($plan0.service)-($number).($plan0.region).run.app"} | merge $migrate | merge $ticker | merge $blobs | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	mkdir dist/gcp
 	$plan.jobYaml | save -f dist/gcp/job.yaml
 	$plan.serviceYaml | save -f dist/gcp/service.yaml
 	if $has_migrate { $plan.migrateJobYaml | save -f dist/gcp/migrate.yaml }
+	for s in ($plan.sidecarServicesYaml | transpose name yaml) { $s.yaml | save -f $"dist/gcp/sidecar-($s.name).yaml" }
 	if $snapshot { print "gcp: rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {} }
 
 	let p = $plan.project
@@ -407,10 +434,19 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	if $has_blobs { ensure-bucket $plan.names.bucket $plan.names.serviceAccount $p $r }
 	# What the Managed Prometheus sidecar scrapes, which it reads as a mounted secret.
 	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
+	for c in ($plan.sidecarScrapeConfigs | transpose secret config) { ensure-secret $c.secret $p $c.config | ignore }
 	run-job dist/gcp/job.yaml $plan.names.job "building the schema" $p $r
 	if $has_migrate { run-job dist/gcp/migrate.yaml $plan.names.migrateJob "carrying the schema forward" $p $r }
 	gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
 	gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+	# Each sidecar apart, once the door it reaches the gateway through is up;
+	# public as the door is, which dials it.
+	for s in ($plan.sidecarServicesYaml | columns) {
+		let svc = ($plan.names.sidecarServices | get $s)
+		print $"gcp: ($s) apart \(($svc)\)"
+		gc run services replace $"dist/gcp/sidecar-($s).yaml" --region $r --project $p | ignore
+		gc run services add-iam-policy-binding $svc --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+	}
 	if ($plan.clock? | is-not-empty) { ensure-clock $plan.clock (gc secrets versions access latest --secret $plan.names.secrets.SERVICE_JWT --project $p) $p $r }
 
 	let address = $"https://($plan.service)-($number).($r).run.app"

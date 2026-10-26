@@ -574,6 +574,33 @@ GCP: schema.#Release & {
 }
 ```
 
+Cloud Run runs at most 10 containers in a revision, and the cluster holds up to
+eight of them (caddy, crud, auth, electric, the Auth Proxy, the ticker, and the
+blob plane's two), so the release refuses a service of more. A sidecar given
+`apart: {}` runs as a Cloud Run service of its own, `<service>-<name>`, in
+place of a container of the cluster's instance: one container taking the
+service's requests at its port, beside Managed Prometheus's collector where it
+exports metrics (its config the secret `<name>-<sidecar>-gmp-config`). The
+release applies it after the cluster's service, public as the door is, and a
+preview's goes with the preview. The door dials it at its run.app address over
+TLS, so the app's route to it sets the Host that address answers to (`header_up
+Host {upstream_hostport}`, as pronto-perf's, pronto-billing's and
+pronto-flags' routes do). Outside the instance, the cluster is reached through
+the door: compose's `http://crud:3000` is `https://<the service's run.app
+address>/crud`, another sidecar apart is its own address, and nothing else of
+the cluster's is reachable (the plan's `peers`). It scales on its own
+requests, none at rest; one that serves none, a worker polling the gateway,
+keeps `apart: minScale` instances, its CPU unthrottled between requests.
+
+```cue
+GCP: schema.#Release & {
+	// Behind the door's /perf, its own service and collector.
+	sidecars: "perf-collector": {port: 8687, metrics: port: 9599, apart: {}}
+	// A worker, which nothing calls: one instance kept.
+	sidecars: analyst: {port: 8689, apart: minScale: 1}
+}
+```
+
 A provider is refused at release in two cases that a program's development
 settings produce. One whose issuer or internal address is a developer's machine
 (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), as the program's

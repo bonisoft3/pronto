@@ -94,7 +94,24 @@ import (
 			path:     *"/metrics" | =~"^/"
 			interval: *"30s" | =~"^[1-9][0-9]*s$"
 		}
+		// Present, the sidecar runs as a Cloud Run service of its own
+		// (<service>-<name>), not a container of the cluster's instance, which
+		// holds at most 10. The door dials it at its run.app address, and it
+		// reaches the cluster through the door: compose's http://crud:3000 is
+		// the door's /crud. It scales on its own requests, so one that serves
+		// none (a worker polling the gateway) keeps minScale instances.
+		apart?: {
+			minScale: *0 | int & >=0
+		}
 	}
+	// The sidecars in the cluster's instance, and those running apart.
+	_inside: {for n, c in R.sidecars if c.apart == _|_ {(n): c}}
+	_apart: {for n, c in R.sidecars if c.apart != _|_ {(n): c}}
+	// The project's number, from the service's run.app address: a service's own
+	// address is <name>-<number>.<region>.run.app.
+	_number: strings.TrimSuffix(strings.TrimPrefix(R.runHost, "\(R._service)-"), ".\(R.region).run.app")
+	// Where the door reaches each sidecar apart: its own run.app address.
+	_apartHost: {for n, _ in R._apart {(n): "\(R.names.sidecarServices[n])-\(R._number).\(R.region).run.app"}}
 	// Each peer compose names, as host:port, and where it is in the instance:
 	// the cluster's containers, and each sidecar at its own port.
 	_loopback: {
@@ -105,9 +122,16 @@ import (
 		"database:5432":  "127.0.0.1:\(#Ports.database)"
 		"rclone-s3:3900": "127.0.0.1:\(#Ports.rcloneS3)"
 		"imgproxy:8080":  "127.0.0.1:\(#Ports.imgproxy)"
-		for n, c in R.sidecars {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
+		for n, c in R._inside {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
 	}
-	_sidecarPorts: [for _, c in R.sidecars for p in [c.port, if c.metrics != _|_ {c.metrics.port}] {p}]
+	// What a sidecar apart reaches its peers by, as compose names them: the
+	// gateway through the door, and another sidecar apart at its own address.
+	// Nothing else of the cluster's is reachable from outside its instance.
+	_remote: {
+		"http://crud:3000": "https://\(R.runHost)/crud"
+		for n, c in R._apart {"http://\(n):\(c.port)": "https://\(R._apartHost[n])"}
+	}
+	_sidecarPorts: [for _, c in R._inside for p in [c.port, if c.metrics != _|_ {c.metrics.port}] {p}]
 	// A port the cluster's containers hold, or one two sidecars share, would
 	// leave one of them unable to listen in the shared instance.
 	_sidecarClashes: list.Concat([
@@ -116,7 +140,8 @@ import (
 	])
 	// A preview's metrics stay in its instance: its release may not enable
 	// Monitoring nor grant its account a role there.
-	_scraped: [for n, c in R.sidecars if c.metrics != _|_ if R.preview == _|_ {n}]
+	_scraped: [for n, c in R._inside if c.metrics != _|_ if R.preview == _|_ {n}]
+	_scrapedApart: [for n, c in R._apart if c.metrics != _|_ if R.preview == _|_ {n}]
 
 	auth: {
 		// The providers compose gives the auth service, filled by the release;
@@ -164,6 +189,9 @@ import (
 		bucket: "\(R._project)-\(R._id)-blobs"
 		// What the Managed Prometheus sidecar scrapes, as a secret it mounts.
 		scrapeConfig: "\(R._id)-gmp-config"
+		// Each sidecar apart's service, and what its own collector scrapes.
+		sidecarServices: {for n, _ in R._apart {(n): "\(R._service)-\(n)"}}
+		sidecarScrapeConfigs: {for n in R._scrapedApart {(n): "\(R._id)-\(n)-gmp-config"}}
 		// Generated once by the release, never a literal in what it renders;
 		// the URLs are composed from the passwords, since Cloud Run expands no
 		// $(VAR) inside a value.
@@ -269,7 +297,10 @@ import (
 						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_RCLONE_S3", value: "127.0.0.1:\(P.rcloneS3)"}},
 						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_IMGPROXY", value: "127.0.0.1:\(P.imgproxy)"}},
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
-					], [for n, c in R.sidecars {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "127.0.0.1:\(c.port)"}]])
+					], [for n, c in R._inside {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "127.0.0.1:\(c.port)"}],
+						// One apart is dialed over TLS: the app's route to it sets the
+						// Host its address answers to (docs/release-targets.md#gcp).
+						[for n, _ in R._apart {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "https://\(R._apartHost[n])"}]])
 					startupProbe: {httpGet: {path: "/health", port: P.caddy}, periodSeconds: 2, failureThreshold: 60}
 				}, {
 					name:  "crud"
@@ -366,27 +397,74 @@ import (
 					args: ["--port=\(P.database)", "--health-check", "--http-port=\(P.proxyHealth)", "--http-address=0.0.0.0", R.names.connection]
 					startupProbe: {httpGet: {path: "/startup", port: P.proxyHealth}, periodSeconds: 2, failureThreshold: 60}
 					resources: limits: cpu: "500m"
-				}], [for n, c in R.sidecars {
-					name:  n
-					image: (imageOf & {svc: n}).out
-					if len(c.env) > 0 {
-						env: [for k, v in c.env {[
-							if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
-							if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
-							{name: k, value: v},
-						][0]}]
-					}
-					startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+				}], [for n, c in R._inside {
+					(sidecarOf & {"n": n, "c": c}).out
 					resources: limits: cpu: "\(c.cpu)m"
-				}], [if len(R._scraped) > 0 {
-					name:  "gmp-collector"
-					image: #Gmp
-					resources: limits: cpu: "250m"
-					volumeMounts: [{name: "gmp-config", mountPath: "/etc/rungmp"}]
-				}]])
+				}], [if len(R._scraped) > 0 {gmpCollector}]])
 			}
 		}
 	}
+
+	// A sidecar's container, in the cluster's instance or its own service.
+	let sidecarOf = {
+		n: string
+		c: _
+		out: {
+			name:  n
+			image: (imageOf & {svc: n}).out
+			if len(c.env) > 0 {
+				env: [for k, v in c.env {[
+					if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
+					if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
+					{name: k, value: v},
+				][0]}]
+			}
+			startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+		}
+	}
+	let gmpCollector = {
+		name:  "gmp-collector"
+		image: #Gmp
+		resources: limits: cpu: "250m"
+		volumeMounts: [{name: "gmp-config", mountPath: "/etc/rungmp"}]
+	}
+
+	// Each sidecar apart, a service of its own: its container takes the
+	// service's requests at its port, beside Managed Prometheus's collector
+	// where it exports metrics. Public as the door is, which dials it.
+	sidecarServices: {for n, c in R._apart {
+		(n): {
+			let scraped = list.Contains(R._scrapedApart, n)
+			apiVersion: "serving.knative.dev/v1"
+			kind:       "Service"
+			metadata: {
+				name: R.names.sidecarServices[n]
+				labels: "cloud.googleapis.com/location": R.region
+				annotations: "run.googleapis.com/ingress": "all"
+			}
+			spec: template: {
+				metadata: annotations: {
+					"autoscaling.knative.dev/minScale":         "\(c.apart.minScale)"
+					"autoscaling.knative.dev/maxScale":         "1"
+					"run.googleapis.com/execution-environment": "gen2"
+					// One kept at rest works between requests: its CPU is not
+					// throttled outside them.
+					if c.apart.minScale > 0 {"run.googleapis.com/cpu-throttling": "false"}
+					if scraped {"run.googleapis.com/container-dependencies": json.Marshal({"gmp-collector": [n]})}
+				}
+				spec: {
+					serviceAccountName: R.names.serviceAccount
+					if scraped {
+						volumes: [{name: "gmp-config", secret: {secretName: R.names.sidecarScrapeConfigs[n], items: [{key: "latest", path: "config.yaml"}]}}]
+					}
+					containers: list.Concat([[{
+						(sidecarOf & {"n": n, "c": c}).out
+						ports: [{name: "http1", containerPort: c.port}]
+					}], [if scraped {gmpCollector}]])
+				}
+			}
+		}
+	}}
 
 	// The schema, as compose's database builds it on a fresh volume: the app's
 	// database image runs its initdb directory once against Cloud SQL, over the
@@ -501,6 +579,16 @@ import (
 		metadata: name: R._id
 		spec: endpoints: [for n in R._scraped let m = R.sidecars[n].metrics {port: m.port, path: m.path, interval: m.interval}]
 	})
+	// What each sidecar apart's own collector scrapes: its metrics, on its
+	// instance's loopback.
+	sidecarScrapeConfigs: {for n in R._scrapedApart let m = R.sidecars[n].metrics {
+		(R.names.sidecarScrapeConfigs[n]): yaml.Marshal({
+			apiVersion: "monitoring.googleapis.com/v1beta"
+			kind:       "RunMonitoring"
+			metadata: name: "\(R._id)-\(n)"
+			spec: endpoints: [{port: m.port, path: m.path, interval: m.interval}]
+		})
+	}}
 
 	// What the release needs besides the two documents, as JSON.
 	plan: {
@@ -537,7 +625,17 @@ import (
 		// Where each peer compose names is in the instance, which the release
 		// rewrites a sidecar's compose environment by.
 		loopback: R._loopback
+		// The same, for each sidecar: the instance's loopback for one inside
+		// it, and the door and the other services' addresses for one apart.
+		peers: {
+			for n, _ in R._inside {(n): R._loopback}
+			for n, _ in R._apart {(n): R._remote}
+		}
+		// Each sidecar apart's service, applied after the cluster's.
+		sidecarServicesYaml: {for n, s in B.sidecarServices {(n): yaml.Marshal(s)}}
+		sidecarScrapeConfigs: B.sidecarScrapeConfigs
 		if len(R._sidecarClashes) > 0 {sidecarPorts: error("GCP.sidecars listen on \(strings.Join(R._sidecarClashes, ", "))")}
+		if len(B.service.spec.template.spec.containers) > 10 {containers: error("the service has \(len(B.service.spec.template.spec.containers)) containers, over Cloud Run's 10 a revision: run some of GCP.sidecars apart (apart: {})")}
 		if B._millicpu > 8000 {cpu: error("the service's containers ask for \(B._millicpu) millicpu, over Cloud Run's 8000: lower GCP.sidecars' cpu")}
 		scrapeConfig: [if len(R._scraped) > 0 {B.scrapeConfig}, ""][0]
 	}
