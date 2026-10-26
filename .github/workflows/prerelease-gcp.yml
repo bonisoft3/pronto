@@ -1,0 +1,76 @@
+# Publishes a forks' prerelease of pronto (bsoneca/pronto forks/README.md) from
+# Actions: the CUE module to ghcr.io/bsoneca/cue-modules and the runtime
+# tarballs as a release here. It does what forks/publish.sh does for pronto,
+# without a local machine.
+#
+# Push the commit to publish as `publish/v<version>`, such as
+# publish/v0.16.1-gcp.23: the version is the branch's, and the mecha module the
+# snapshot pins is .github/prerelease.env's MECHA_V, a version
+# ghcr.io/bsoneca/cue-modules already holds.
+name: prerelease-gcp
+on:
+  push:
+    branches: ['publish/v*']
+permissions:
+  contents: write
+  packages: write
+env:
+  SRC: ${{ github.sha }}
+  MODULE: ghcr.io/bsoneca/cue-modules/github.com/bonisoft3/pronto
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: versions
+        run: |
+          echo "PRONTO_V=${GITHUB_REF_NAME#publish/v}" >> "$GITHUB_ENV"
+          grep -E '^MECHA_V=[0-9A-Za-z.-]+$' .github/prerelease.env >> "$GITHUB_ENV"
+      - uses: cue-lang/setup-cue@v1.0.1
+        with:
+          version: v0.16.1
+      # GHCR_TOKEN, a token with write:packages, when the package doesn't
+      # grant this repository's Actions write.
+      - name: crane
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sSL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz | tar xz -C /usr/local/bin crane
+          echo "$GH_TOKEN" | crane auth login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+      - name: refuse a published version
+        run: |
+          if crane digest "$MODULE:v$PRONTO_V" >/dev/null 2>&1; then echo "$MODULE:v$PRONTO_V is already published" >&2; exit 1; fi
+      - name: snapshot
+        run: |
+          mkdir "$RUNNER_TEMP/pronto"
+          git archive "$SRC" | tar x -C "$RUNNER_TEMP/pronto"
+          cd "$RUNNER_TEMP/pronto"
+          python3 -I - "$MECHA_V" "$PRONTO_V" <<'EOF'
+          import re, sys
+          mecha_v, pronto_v = sys.argv[1:]
+          def edit(p, f):
+              s = open(p).read(); t = f(s); assert t != s, p; open(p, 'w').write(t)
+          edit('cue.mod/module.cue', lambda s: re.sub(r'("github.com/bonisoft3/mecha@v0": \{\n\t\tv:\s+)"[^"]+"', lambda m: m.group(1) + f'"v{mecha_v}"', s))
+          edit('distribution/config.cue', lambda s: re.sub(r'#Version:(\s+)"([^"]+)"', lambda m: f'#Version:{m.group(1)}"{pronto_v}" // was "{m.group(2)}"', s, count=1))
+          EOF
+          grep -n 'mecha@v0' -A2 cue.mod/module.cue
+          grep -n '#Version' distribution/config.cue
+      - name: module
+        run: |
+          crane registry serve --address localhost:5051 >/dev/null 2>&1 &
+          sleep 2
+          cd "$RUNNER_TEMP/pronto"
+          git init -q && git add -A && git -c user.email=fork@local -c user.name=fork commit -qm "pronto v$PRONTO_V"
+          CUE_REGISTRY='github.com/bonisoft3/pronto=localhost:5051+insecure,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,registry.cue.works' cue mod publish "v$PRONTO_V"
+          crane copy --insecure "localhost:5051/github.com/bonisoft3/pronto:v$PRONTO_V" "$MODULE:v$PRONTO_V"
+      - name: runtime
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir dist
+          for triple in linux-x64 linux-arm64 linux-armv7 macos-x64 macos-arm64 windows-x64 windows-arm64; do
+            tar czf "dist/pronto-$triple.tar.gz" -C "$RUNNER_TEMP/pronto" --exclude=.git --exclude=.github --exclude=node_modules .
+          done
+          gh release create "v$PRONTO_V" dist/*.tar.gz --target "$SRC" --prerelease --title "pronto v$PRONTO_V (fork prerelease)" --notes "Runtime of the forks' prerelease: see bsoneca/pronto forks/README.md."
