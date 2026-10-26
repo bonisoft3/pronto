@@ -6,6 +6,8 @@ import (
 	"list"
 	"strconv"
 	"strings"
+
+	"github.com/bonisoft3/pronto/resilience"
 )
 
 // #Release is an app on GCP: Cloud SQL for its database, and caddy, crud, auth
@@ -30,7 +32,7 @@ import (
 	// Other names mapped onto the service, each sent on to the domain by the
 	// door (www, say): a passkey's relying party is the domain alone.
 	aliases: *[] | [...=~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"]
-	sqlTier:  *"db-f1-micro" | string
+	sqlTier: *"db-f1-micro" | string
 	// Which Cloud SQL instance holds the database: raising it starts the app on
 	// a new, empty one, the way an initdb set no pgroll migration carries forward
 	// reaches production. The earlier instance is left as it was, a backup and
@@ -71,8 +73,8 @@ import (
 	// The roles the app's schema grants PostgREST's login, as generate wrote them
 	// (.pronto/cluster.json, the k8s release's source too): what the job grants
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
-	// Filled by the release where generate wrote them.
-	database: tokenRoles: *["anon", "app_user", "service"] | [...string]
+	// Filled by the release.
+	database: tokenRoles: [...string]
 
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
@@ -178,30 +180,30 @@ import (
 	}
 
 	// Where this release's resources are: a preview's project when it has one.
-	_project:  [if R.preview != _|_ && R.previewProject != _|_ {R.previewProject}, R.project][0]
+	_project: [if R.preview != _|_ && R.previewProject != _|_ {R.previewProject}, R.project][0]
 	_registry: "\(R.region)-docker.pkg.dev/\(R._project)/\(R.repository)"
 	// What a preview's resources are named for: the app, and the preview.
-	_id:      [if R.preview != _|_ {"\(R.name)-\(R.preview)"}, R.name][0]
+	_id: [if R.preview != _|_ {"\(R.name)-\(R.preview)"}, R.name][0]
 	_service: [if R.preview != _|_ {"\(R.service)-\(R.preview)"}, R.service][0]
-	_domain:  [if R.domain != _|_ && R.preview == _|_ {R.domain}, ""][0]
+	_domain: [if R.domain != _|_ && R.preview == _|_ {R.domain}, ""][0]
 	_aliases: [if R.preview != _|_ {[]}, R.aliases][0]
-	_iap:     R.iap && R.preview == _|_
+	_iap: R.iap && R.preview == _|_
 	// Where readers are, which the door and a passkey's relying party are told
 	// (ORIGIN and WEBAUTHN_* in compose).
 	_host: [if _domain != "" {_domain}, R.runHost][0]
 	_origin: [if _host != "" {"https://\(_host)"}, ""][0]
-	_rpId:   _host
+	_rpId: _host
 
 	names: {
-		instance:       "\(R._id)-db" + [if R.sqlGeneration > 1 {"-\(R.sqlGeneration)"}, ""][0]
-		connection:     "\(R._project):\(R.region):\(instance)"
-		database:       R.name
+		instance: "\(R._id)-db" + [if R.sqlGeneration > 1 {"-\(R.sqlGeneration)"}, ""][0]
+		connection: "\(R._project):\(R.region):\(instance)"
+		database:   R.name
 		// Previews share one, made once by the project's owner with only what
 		// a revision needs (docs/release-targets.md#previews), so the release
 		// that makes a preview needs no say over the project's IAM.
 		serviceAccount: [if R.preview != _|_ {"\(R.name)-preview"}, "\(R.name)-run"][0] + "@\(R._project).iam.gserviceaccount.com"
-		job:            "\(R._id)-initdb"
-		migrateJob:     "\(R._id)-migrate"
+		job:        "\(R._id)-initdb"
+		migrateJob: "\(R._id)-migrate"
 		// The Cloud Scheduler job that pokes the ticker.
 		clock: "\(R._id)-clock"
 		// The blob plane's bucket, named for the project too: bucket names are
@@ -221,11 +223,11 @@ import (
 			// mecha's authenticator role, which PostgREST logs in as and switches
 			// from into anon, app_user or service; initdb sets its password.
 			AUTHENTICATOR_PASSWORD: "\(R._id)-authenticator-password"
-			PGRST_JWT_SECRET:  "\(R._id)-pgrst-jwt-secret"
-			ELECTRIC_SECRET:   "\(R._id)-electric-secret"
-			CRUD_DB_URI:       "\(R._id)-crud-db-uri"
-			AUTH_DATABASE_URL: "\(R._id)-auth-database-url"
-			ELECTRIC_DB_URL:   "\(R._id)-electric-database-url"
+			PGRST_JWT_SECRET:       "\(R._id)-pgrst-jwt-secret"
+			ELECTRIC_SECRET:        "\(R._id)-electric-secret"
+			CRUD_DB_URI:            "\(R._id)-crud-db-uri"
+			AUTH_DATABASE_URL:      "\(R._id)-auth-database-url"
+			ELECTRIC_DB_URL:        "\(R._id)-electric-database-url"
 			// pgroll's runner, over the socket Cloud Run mounts for a job.
 			MIGRATE_DATABASE_URL: "\(R._id)-migrate-database-url"
 			// The service role's token, signed with PGRST_JWT_SECRET: the ticker
@@ -267,6 +269,7 @@ import (
 		out: {name: env, valueFrom: secretKeyRef: {name: secret, key: "latest"}}
 	}
 	let sq = R.names.secrets
+	let bounds = resilience.resilience.timeouts
 
 	service: {
 		apiVersion: "serving.knative.dev/v1"
@@ -277,7 +280,7 @@ import (
 			annotations: {
 				"run.googleapis.com/ingress": "all"
 				if R._iap {
-					"run.googleapis.com/iap-enabled": "true"
+					"run.googleapis.com/iap-enabled":  "true"
 					"run.googleapis.com/launch-stage": "BETA"
 				}
 			}
@@ -286,7 +289,7 @@ import (
 			metadata: annotations: {
 				"autoscaling.knative.dev/minScale": "0"
 				// electric is one instance (mecha's docs/deployment.md#clouds-as-built).
-				"autoscaling.knative.dev/maxScale":       "1"
+				"autoscaling.knative.dev/maxScale":         "1"
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
 				if R.alwaysOn {"run.googleapis.com/cpu-throttling": "false"}
@@ -311,7 +314,7 @@ import (
 					volumes: [{name: "gmp-config", secret: {secretName: R.names.scrapeConfig, items: [{key: "latest", path: "config.yaml"}]}}]
 				}
 				containers: list.Concat([[{
-					name:  "caddy"
+					name: "caddy"
 					image: (imageOf & {svc: "caddy"}).out
 					ports: [{name: "http1", containerPort: P.caddy}]
 					env: list.Concat([[
@@ -330,7 +333,7 @@ import (
 						[for n, _ in R._apart {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "https://\(R._apartHost[n])"}]])
 					startupProbe: {httpGet: {path: "/health", port: P.caddy}, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name:  "crud"
+					name: "crud"
 					image: (imageOf & {svc: "crud"}).out
 					env: [
 						(secretOf & {env: "PGRST_DB_URI", secret: sq.CRUD_DB_URI}).out,
@@ -346,17 +349,21 @@ import (
 					]
 					startupProbe: {httpGet: {path: "/ready", port: P.crudAdmin}, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name:  "auth"
+					name: "auth"
 					image: (imageOf & {svc: "auth"}).out
 					env: list.Concat([[
 						(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
 						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
 						if R._rpId != "" {{name: "WEBAUTHN_RP_ID", value: R._rpId}},
 						if R._origin != "" {{name: "WEBAUTHN_ORIGIN", value: R._origin}},
-					], [for k, v in R.auth.env {name: k, value: v}], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
+					],
+						// The service refuses to start without its statement bound: compose's
+						// where it gives one, else resilience's client statement, in ms.
+						[if R.auth.env.AUTH_STATEMENT_TIMEOUT_MS == _|_ {{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"}}],
+						[for k, v in R.auth.env {name: k, value: v}], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
 					startupProbe: {tcpSocket: port: P.auth, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name:  "electric"
+					name: "electric"
 					image: (imageOf & {svc: "electric"}).out
 					env: [
 						(secretOf & {env: "DATABASE_URL", secret: sq.ELECTRIC_DB_URL}).out,
@@ -371,7 +378,7 @@ import (
 					]
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
 				}, if R.ticker != _|_ {
-					name:  "ticker"
+					name: "ticker"
 					image: (imageOf & {svc: "ticker"}).out
 					env: list.Concat([[
 						{name: "CRUD_URL", value: "http://127.0.0.1:\(P.crud)"},
@@ -383,7 +390,7 @@ import (
 				}, if R.blobs != _|_ {
 					// mecha's blob plane over the bucket: a combine remote names its root
 					// mecha-objects, and the service's account reaches it with no key.
-					name:  "rclone-s3"
+					name: "rclone-s3"
 					image: (imageOf & {svc: "rclone-s3"}).out
 					command: ["rclone"]
 					args: ["serve", "s3", "--addr=0.0.0.0:\(P.rcloneS3)", "--vfs-cache-mode=off", "objects:"]
@@ -396,7 +403,7 @@ import (
 					]
 					startupProbe: {tcpSocket: port: P.rcloneS3, periodSeconds: 2, failureThreshold: 60}
 				}, if R.blobs != _|_ {
-					name:  "imgproxy"
+					name: "imgproxy"
 					image: (imageOf & {svc: "imgproxy"}).out
 					env: [
 						{name: "IMGPROXY_USE_S3", value: "true"},
@@ -440,7 +447,7 @@ import (
 		n: string
 		c: _
 		out: {
-			name:  n
+			name: n
 			image: (imageOf & {svc: n}).out
 			if len(c.env) > 0 {
 				env: [for k, v in c.env {[
@@ -469,7 +476,7 @@ import (
 			kind:       "Service"
 			metadata: {
 				name: R.names.sidecarServices[n]
-				labels: "cloud.googleapis.com/location": R.region
+				labels: "cloud.googleapis.com/location":   R.region
 				annotations: "run.googleapis.com/ingress": "all"
 			}
 			spec: template: {
@@ -518,7 +525,7 @@ import (
 					maxRetries:         0
 					timeoutSeconds:     600
 					containers: [{
-						name:  "initdb"
+						name: "initdb"
 						image: (imageOf & {svc: "database"}).out
 						command: ["bash", "-c", """
 							set -euo pipefail
@@ -582,7 +589,7 @@ import (
 						maxRetries:         0
 						timeoutSeconds:     600
 						containers: [{
-							name:  "migrate"
+							name: "migrate"
 							image: (imageOf & {svc: "migrate"}).out
 							env: list.Concat([[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out], [for k, v in R.migrate.env {name: k, value: v}]])
 						}]
@@ -623,25 +630,26 @@ import (
 
 	// What the release needs besides the two documents, as JSON.
 	plan: {
-		project:        R._project
-		region:         R.region
-		repository:     R.repository
-		registry:       R._registry
-		service:        R._service
+		project:    R._project
+		region:     R.region
+		repository: R.repository
+		registry:   R._registry
+		service:    R._service
 		if R.preview != _|_ {preview: R.preview}
-		names:          R.names
-		sqlTier:        R.sqlTier
-		sqlFlags:       #SqlFlags
+		names:    R.names
+		sqlTier:  R.sqlTier
+		sqlFlags: #SqlFlags
 		if R._domain != "" {domain: R._domain}
-		aliases:        R._aliases
+		aliases: R._aliases
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}
 		if len(unserved) > 0 {providers: error("the terminal offers \(strings.Join(unserved, ", ")), which production does not serve, so its way in would answer 404: give GCP.auth.oidc the provider's production settings")}
+
 		// An alias sends readers on to the domain, so it needs one.
 		if len(R._aliases) > 0 {aliasTarget: R.domain}
-		hasRpId:        R._rpId != ""
-		iap:            R._iap
-		serviceYaml:    yaml.Marshal(B.service)
-		jobYaml:        yaml.Marshal(B.job)
+		hasRpId:     R._rpId != ""
+		iap:         R._iap
+		serviceYaml: yaml.Marshal(B.service)
+		jobYaml:     yaml.Marshal(B.job)
 		migrateJobYaml: [if B.migrateJob != _|_ {yaml.Marshal(B.migrateJob)}, ""][0]
 		// The ticker's clock, once a minute, the floor (mecha's services/ticker,
 		// the cloud clock): the service's own run.app address, which a domain

@@ -13,7 +13,7 @@ async function built(release: string, field = "plan") {
 }
 
 const pushed = `{${["caddy", "crud", "auth", "electric", "database", "migrate"].map((s, i) => `${s}: {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
-const release = (extra = "") => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${pushed}${extra}}`;
+const release = (extra = "") => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${pushed}, database: tokenRoles: ["anon", "app_user", "service"]${extra}}`;
 
 Deno.test("the door dials each upstream at its own port in the shared instance", async () => {
   const r = await built(release(), "service");
@@ -77,11 +77,16 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertEquals(c.env.find((e: { name: string }) => e.name === "PGHOST").value, "/cloudsql/brawl-chess:us-central1:battlechess-db");
 });
 
-Deno.test("the job grants the roles the schema has: an app without auth has no app_user", async () => {
-  // A literal grant would die on a role the schema does not make.
-  const job = (await built(release(", database: tokenRoles: [\"anon\", \"service\"]"), "job")).value;
-  const c = job.spec.template.spec.template.spec.containers[0];
-  assertStringIncludes(c.command[2], "GRANT anon, service TO postgres WITH INHERIT FALSE, SET TRUE");
+Deno.test("the job grants the roles the schema has, and auth gets its statement bound", async () => {
+  // An app without auth has no app_user; a literal grant would die on it.
+  const job = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "service"]'), "job")).value;
+  assertStringIncludes(job.spec.template.spec.template.spec.containers[0].command[2], "GRANT anon, service TO postgres WITH INHERIT FALSE, SET TRUE");
+  const auth = (await built(release(), "service")).value.spec.template.spec.containers[2];
+  // The service refuses to start without it; the bound is resilience's client statement, in ms.
+  assertEquals(auth.env.find((e: { name: string }) => e.name === "AUTH_STATEMENT_TIMEOUT_MS").value, "5000");
+  // Compose's own, where it gives one.
+  const own = (await built(release(`, auth: env: {AUTH_STATEMENT_TIMEOUT_MS: "9000"}`), "service")).value.spec.template.spec.containers[2];
+  assertEquals(own.env.filter((e: { name: string }) => e.name === "AUTH_STATEMENT_TIMEOUT_MS").map((e: { value: string }) => e.value), ["9000"]);
 });
 
 Deno.test("a passkey's relying party is the domain, else the run.app host the release fills", async () => {
