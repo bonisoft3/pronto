@@ -1,12 +1,15 @@
 {
   "tasks": {
-    "test:hybrid": "deno test --no-config --allow-env --allow-read --allow-run=docker,cue hybrid.test.ts mecha-surface.test.ts mecha-ports.test.ts hybrid.integration.test.ts",
-    "test:truco-online": "deno test --config ../../apps/truco/tests/online-deno.json --no-lock --allow-env --allow-read --allow-run=docker,cue --allow-net=127.0.0.1 ../../apps/truco/tests/online-machine.test.ts ../../apps/truco/tests/lobby-machine.test.ts ../../apps/truco/tests/online.integration.test.ts",
+    "test:hybrid": "deno test --no-config --unstable-raw-imports --allow-env --allow-read --allow-run=docker,cue hybrid.test.ts mecha-surface.test.ts mecha-ports.test.ts hybrid.integration.test.ts",
+    "test:truco-online": "deno test --config ../../apps/truco/tests/online-deno.json --unstable-raw-imports --no-lock --allow-env --allow-read --allow-run=docker,cue --allow-net=127.0.0.1 ../../apps/truco/tests/online-machine.test.ts ../../apps/truco/tests/lobby-machine.test.ts ../../apps/truco/tests/online.integration.test.ts",
     "test:integration": "deno test --no-config --allow-read --allow-write --allow-run=docker,cue,curl --allow-net=127.0.0.1,0.0.0.0 type-sql.integration.test.ts cdc-types.integration.test.ts cdc-trace.integration.test.ts drain.integration.test.ts caddy-fault.integration.test.ts caddy-etag.integration.test.ts caddy-rendered.integration.test.ts caddy-origin.integration.test.ts external-effects.integration.test.ts machine-timers.integration.test.ts lifecycle-guards.integration.test.ts txn-trace.integration.test.ts",
-    "test:replay": "deno test --no-config --allow-read --allow-write --allow-run=docker,mise --allow-env replay.integration.test.ts"
+    "test:replay": "deno test --no-config --allow-read --allow-write --allow-run --allow-env replay.integration.test.ts"
   },
   "imports": {
     "@david/dax": "jsr:@david/dax@0.50.0"
   },
-  "lock": true
+  "lock": true,
+  "unstable": [
+    "raw-imports"
+  ]
 }

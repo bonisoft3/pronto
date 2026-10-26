@@ -45,7 +45,7 @@ A derived pipeline declares its application tempo rather than its storage sink:
 
 ## 2. Static proof of the mutation loop in CUE
 
-In Pronto, imperative component mutations are banned ([`no-fetch-in-components`](https://github.com/bonisoft3/omnishell/blob/v0.14.0/src/lint/eslint/rules/no-fetch-in-components.ts)). Every TanStack DB mutation—whether a multi-field form, an inline checkbox, a drag-and-drop target, or a delete button—is structurally declared as a `#Form` on the screen.
+In Pronto, imperative component mutations are banned ([`no-fetch-in-components`](https://github.com/bonisoft3/omnishell/blob/v0.19.1/src/lint/eslint/rules/no-fetch-in-components.ts)). Every TanStack DB mutation—whether a multi-field form, an inline checkbox, a drag-and-drop target, or a delete button—is structurally declared as a `#Form` on the screen.
 
 Therefore, for any screen $S$:
 $$\text{Mutated Entities } E(S) = \bigcup_{f \in S.\text{forms}} f.\text{entity}$$

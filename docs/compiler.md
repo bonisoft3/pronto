@@ -150,8 +150,7 @@ two sets, over the kinds and by the rule [SPEC](../SPEC.md#programcue) states.
   what bayt emits — and files every check under the verb whose layer it needs
   ([checks and verbs](component-contracts.md#checks-and-verbs)),
   never a script nobody runs. Pronto's own: `derive`, `types`, `facts`,
-  `proto`, `identity` and `sql` at `lint`, `replay` at `integrate` after the
-  images exist.
+  `proto`, `identity` and `sql` at `lint`, `replay` at `integrate`.
 
 ## The constraint cascade
 
@@ -161,7 +160,7 @@ them: `jessie.ts` refuses a module that reaches for `window`, `fetch`, `Date`,
 `Math.random`, `eval`, `this` and the rest of `DENIED`; omnishell's `check
 handlers` loads each module in the compartment its role runs in; the
 interpreter runs it under SES with time and randomness supplied by the
-terminal ([the terminal](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/terminal.md)). Nothing parses a
+terminal ([the terminal](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md)). Nothing parses a
 module against Jessie's grammar ([pending](../PENDING.md#the-compiler)). A
 vendored unit is the declared exception to ambient authority: code an engineer
 audited, contracted and visible as an ir box.

@@ -302,6 +302,56 @@ export def read-environment [cluster_env: string]: nothing -> record {
 	$res.stdout | from json
 }
 
+# The project with the door's tree as a release ships it: every image the dev
+# stack builds from an `<app>-served` stage (caddy, render) takes
+# `<app>-served-release`'s, the same tree addressed with the target's ICE
+# servers (emit.cue), so a released page gathers over STUN and the dev stack
+# over host candidates alone.
+export def release-tree []: string -> string {
+	let project = ($in | from yaml)
+	let names = ($project.services | columns)
+	let served = ($project.services | values
+		| each {|svc| $svc.build?.additional_contexts? | default {} | values }
+		| flatten
+		| where {|v| ($v | str starts-with "service:") and ($v | str ends-with "-served") }
+		| uniq)
+	let missing = ($served | where {|v| $"($v | str substring 8..)-release" not-in $names })
+	if ($missing | is-not-empty) {
+		error make {msg: $"the project builds from ($missing | str join ', '), and has no ($missing | each {|v| $"($v | str substring 8..)-release" } | str join ', ') to release it from"}
+	}
+	let release = {|v| if $v in $served { $"($v)-release" } else { $v } }
+	$project | update services {|p|
+		$p.services | transpose name svc | reduce -f {} {|row, acc|
+			let contexts = ($row.svc.build?.additional_contexts? | default {})
+			let built = if ($contexts | is-empty) { $row.svc } else {
+				$row.svc | upsert build.additional_contexts ($contexts | transpose key value | reduce -f {} {|c, a| $a | insert $c.key (do $release $c.value) })
+			}
+			$acc | insert $row.name $built
+		}
+	} | to yaml
+}
+
+# The runtime images baked from the app's flattened compose project, which
+# `compose` holds as text (bake resolves no `extends` context, and compose
+# leaves the platform of the service-named targets unset). Reproducible, so an
+# unchanged source pushes the digest it pushed before and rolls nothing:
+# timestamps pinned as bayt pins them, and no provenance attestation, whose
+# build time would change the index. Contexts span the monorepo (mecha,
+# omnishell), outside the app directory bake runs in. Answers what bake named
+# each target, by service.
+export def bake-images [app_dir: string, compose: string, services: list<string>, --platform: string]: nothing -> record {
+	let compose = ($compose | release-tree)
+	let root = (do { cd $app_dir; ^git rev-parse --show-toplevel } | str trim)
+	let platform_set = if ($platform | is-not-empty) { [--set $"*.platform=($platform)"] } else { [] }
+	do {
+		cd $app_dir
+		with-env {SOURCE_DATE_EPOCH: "0"} {
+			$compose | ^docker buildx bake -f - --load --provenance=false $"--allow=fs.read=($root)" ...$platform_set ...$services
+		}
+	}
+	do { cd $app_dir; $compose | ^docker buildx bake -f - --print ...$services } | from json | get target
+}
+
 export def auth-provider-environment [environment: record]: nothing -> record {
 	let entries = ($environment | transpose key value | where {|e| $e.key starts-with "OIDC_" })
 	let secrets = ($entries | where {|e| $e.key ends-with "_CLIENT_SECRET" and $e.value != "" }
@@ -406,24 +456,7 @@ export def main [
 	let has_migrate = ("migrate" in $compose_services)
 	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] })
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
-	do {
-		cd $app_source_dir
-		# Bake the flattened project rather than `compose build`: compose leaves
-		# the platform of the service-named targets unset, so an amd64 release
-		# built on an arm64 host would carry its own layers for the builder's
-		# arch. Flattening resolves `extends` contexts, which bake cannot.
-		let platform_set = if ($target_env.platform? | is-not-empty) { [--set $"*.platform=($target_env.platform)"] } else { [] }
-		# Contexts span the monorepo (mecha, omnishell), outside the app directory bake runs in.
-		# Reproducible, so an unchanged source pushes the digest it pushed before
-		# and rolls nothing: timestamps pinned as bayt pins them, and no
-		# provenance attestation, whose build time would change the index.
-		with-env {SOURCE_DATE_EPOCH: "0"} {
-			docker compose --profile "*" config | docker buildx bake -f - --load --provenance=false $"--allow=fs.read=($root)" ...$platform_set ...$build_svcs
-		}
-	}
-	# The image each target loaded, as bake names it: the tag carries bayt's
-	# project name.
-	let bake_targets = (do { cd $app_source_dir; docker compose --profile "*" config | docker buildx bake -f - --print ...$build_svcs } | from json | get target)
+	let bake_targets = (bake-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs --platform ($target_env.platform? | default ""))
 	let pushed = ($build_svcs | each {|svc|
 		let local = ($bake_targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
 		# The database's tag is its Postgres major, which CloudNativePG reads; the

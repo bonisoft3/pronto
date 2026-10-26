@@ -837,9 +837,9 @@ import (
 #Schedule: S={
 	name: string
 	ir:   *name | string
-	// Five fields, the only grammar. `n/step` means n to the end of the field,
-	// so `5/10` in minutes is 5, 15, 25 … 55.
-	cron:     string
+	// Five fields, the only grammar. A step steps over `*` or a range
+	// (`*/10`, `5-59/10`); `n/step` is refused here, as the ticker refuses it.
+	cron:     string & !~"(^|[ ,])[0-9]+/"
 	timeZone: *"UTC" | string
 	suspend:  *false | bool
 	// Older than this and a tick is recorded `late` and not run: the moment it
@@ -885,10 +885,12 @@ import (
 	// is the app's to add, as an app narrowing its publication adds all of them.
 	// A function whose answer moves with the date names a #Schedule's tick
 	// entity here, and the tick wakes it.
-	on: [string, ...string]
+	// Unqualified, as a change names its table: `public.x` would never match.
+	on: [=~"^[a-z_][a-z0-9_]{0,62}$", ...=~"^[a-z_][a-z0-9_]{0,62}$"]
 	call: string & =~"^[a-z_][a-z0-9_]{0,62}$"
-	// The JSON arguments of every call.
-	body: *{} | {[string]: bool | int | string}
+	// The JSON arguments of every call, each named as a function's argument
+	// is: the page's and the edge's clusters call `call(key => value, …)`.
+	body: *{} | {[=~"^[a-z_][a-z0-9_]{0,62}$"]: bool | int | string}
 	// The HTTP deadline of one call, in seconds above the service role's
 	// statement_timeout so the database, not the client, ends a slow call
 	// (resilience's drain bound).
@@ -1598,6 +1600,15 @@ import (
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
 		blobs: *false | bool
+		// A static set the blob plane carries from the start: every
+		// { file, sha256 } the app-relative manifest names, fetched from the
+		// public origin and refused unless its bytes hash to its sha256. The
+		// edge release ships it as immutable assets under /blobs/mecha-objects.
+		blobSeed?: {
+			manifest: string
+			origin:   =~"^https://[^/]+(/.*[^/])?$"
+		}
+		if blobSeed != _|_ {blobs: true}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
 		// inside. A `container` hatch withholds a service, whose definition is
 		// the program's cluster unification beside it. A `sql` or `proto` hatch
@@ -1641,8 +1652,21 @@ import (
 			// rungs: a `compartment` has no ambient authority; a `realm` is an
 			// iframe with its own globals and DOM (ECMA-262 realm) and may
 			// present; an `agent` is a worker with its own thread (ECMA-262
-			// agent) and reaches the network, so it may only ask.
+			// agent). The boundary does not say what the unit is for: an agent
+			// with a memo is a question, and one without is a presenter, whose
+			// worker the terminal strips to painting (`role`).
 			isolation: "compartment" | "realm" | "agent"
+			// Derived, never authored: a question asks and its answer lands in
+			// the memo; a presenter shows. An agent presenter paints the frames
+			// the terminal hands it on a canvas the terminal transfers, in a
+			// worker whose policy refuses every connection but blob: and data:
+			// and whose globals are pruned to what drawing needs.
+			role: [if memo != _|_ {"question"}, "presenter"][0]
+			// The terminal's pinned scripts an agent presenter runs before its
+			// own code (the terminal's `presenter.scripts` offer): fetched by
+			// the terminal against their integrity, evaluated in the worker
+			// before the prune.
+			scripts: [...string]
 			// Everything the unit touches, as entities and events (ports and
 			// adapters, Cockburn 2005): `reads` the entities whose rows it is
 			// handed, read-only, and `raises` the events it may post. The
@@ -1714,6 +1738,16 @@ import (
 		// screen, `src` the assembly module, served by the terminal. The loader
 		// resolves the screen's files.handlers, which markup binding derives.
 		handlers: [Name=string]: {ir: *Name | string, of: string, src: #Jessie, note: string}
+		// The kinetic plane's Jessie module graphs: `src` is the entry, its
+		// static imports relative paths to the app's own modules. derive links
+		// it (engine-link.ts) into shell/engines/<Name>.json, which the
+		// terminal serves and its cage imports, endowed with nothing. An
+		// `engine` exports initState, advanceFrame, saveState and loadState
+		// (omnishell's docs/kinetic.md); a `sound` exports createSound, which
+		// the terminal hands the AudioContext it tames (kinetic-sound.js), so
+		// the context is the role's one authority and an argument, not a
+		// global.
+		engines: [Name=string]: {src: #Jessie, note: string, role: *"engine" | "sound"}
 		design: #Design
 		flows: [Name=string]: #Flow & {name: Name}
 		// What a terminal module may use past the language, keyed by its
@@ -1741,11 +1775,13 @@ import (
 		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
 		domain?: string
 		ssrOrigin?: string
-		// A frozen archive retains its schedules but runs no edge alarms.
-		edgeClock?: "deadlines" | "disabled"
-		targets: [...#Target]
+		// A frozen archive retains its schedules and runs none, at the edge or
+		// in a page.
+		edgeClock?: "ticker" | "disabled"
+		targets: *["docker"] | [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
-		// compose clock is emitted by cluster.cue and needs no declaration; a
+		// compose clock is emitted by cluster.cue and the edge's Cron Trigger
+		// by the cloudflare release, so neither needs a declaration; a cloud
 		// target's clock lives in a deploy tree mecha does not write, and the
 		// original bug was not that the clock was in the wrong place but that
 		// nothing could tell. #emit refuses a target that declares a schedule
@@ -1895,7 +1931,17 @@ import (
 		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] {
 			[if c.setup.actors[inv.src] == _|_ {"\(cName).\(sName): the setup implements no actor \(inv.src)"}]
 		},
-		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ {
+		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via == "kinetic" {
+			let actor = c.setup.actors[inv.src]
+			let markup = [if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] != _|_ if A.surface.screens[st.meta.screen].markup != _|_ {A.surface.screens[st.meta.screen].markup}, ""][0]
+			list.Concat([
+				[if [for n, e in A.surface.engines if n == actor.engine if e.role == "engine" {n}] == [] {"\(cName).\(sName): no engine \(actor.engine) races the kinetic child \(inv.src)"}],
+				[if actor.sound != _|_ if [for n, e in A.surface.engines if n == actor.sound if e.role == "sound" {n}] == [] {"\(cName).\(sName): no sound role \(actor.sound) voices the kinetic child \(inv.src)"}],
+				[if [for n, v in A.capabilities.vendored if n == actor.presenter if v.role == "presenter" if v.isolation == "agent" {n}] == [] {"\(cName).\(sName): no presenter \(actor.presenter) paints the kinetic child \(inv.src)"}],
+				[if !strings.Contains(markup, "data-kinetic=\"\(inv.src)\"") {"\(cName).\(sName): no data-kinetic=\"\(inv.src)\" mounts the kinetic child on its screen"}],
+			])
+		},
+		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via != "kinetic" {
 			let actor = c.setup.actors[inv.src]
 			list.Concat([
 				[if _callTargets[actor.machine] == _|_ {"\(cName).\(sName): no Mecha machine \(actor.machine)"}],
@@ -2014,7 +2060,7 @@ import (
 		[if len(A._timedMachines) > 0 for target in A.meta.targets if target == "pages" {
 			"server timers cannot target pages"
 		}],
-		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "pages" if !list.Contains(A.meta.clocks, target) {
+		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "pages" if target != "cloudflare" if !list.Contains(A.meta.clocks, target) {
 			"server timers require a declared clock for \(target)"
 		}],
 		[if A.state.machines != _|_ for mn, m in A.state.machines if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if !e.server {
@@ -2038,12 +2084,26 @@ import (
 	])
 	_timerRefusal: [if len(_timerViolations) == 0 {true}, _timerViolations[0]][0] & true
 
+	_authProviders: [if A.capabilities != null if A.capabilities.auth != _|_ if A.capabilities.auth.providers != _|_ for p in A.capabilities.auth.providers {p}]
+	_authTargetViolations: list.Concat([
+		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
+			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
+		}],
+		[if len(_authProviders) > 0 for target in A.meta.targets if target == "cloudflare" {
+			"cloudflare release target does not yet support social sign-in providers; use guest sessions or deploy to container/cloud tiers (gcp, k8s, docker)"
+		}],
+	])
+	_authTargetRefusal: [if len(_authTargetViolations) == 0 {true}, _authTargetViolations[0]][0] & true
+
 	_unitViolations: list.Concat([
 		[for un, u in A.capabilities.vendored for r in u.ports.reads if A.state.entities[r] == _|_ {
 			"unit \(un) reads \(r), which is no declared entity"
 		}],
-		[for un, u in A.capabilities.vendored if u.isolation == "agent" if u.memo == _|_ {
-			"unit \(un) is an agent with no memo: an agent is a question whose answer lands in a memo; a unit that acts on the world is a process hatch"
+		[for un, u in A.capabilities.vendored if u.isolation == "agent" if u.memo == _|_ if len(u.ports.raises) > 0 {
+			"unit \(un) is an agent presenter and raises \(strings.Join(u.ports.raises, ", ")): what it computes is a function of its thread's timing, not of anything a person did, so it paints and raises nothing"
+		}],
+		[for un, u in A.capabilities.vendored if len(u.scripts) > 0 if !(u.isolation == "agent" && u.memo == _|_) {
+			"unit \(un) names scripts and is no agent presenter: only a presenter's worker runs the terminal's pinned scripts"
 		}],
 		[for un, u in A.capabilities.vendored if u.isolation != "agent" if u.memo != _|_ {
 			"unit \(un) is a \(u.isolation) with a memo: only an agent asks a question"

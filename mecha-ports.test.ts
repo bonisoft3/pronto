@@ -1,15 +1,14 @@
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
-import { instrument } from "../omnishell/instrument.ts";
 import { executeHybrid } from "./hybrid-local.ts";
-import { fixture, initial } from "./testdata/hybrid-fixtures.ts";
+import { fixture, initial, terminal } from "./testdata/hybrid-fixtures.ts";
 
 Deno.test("initializers use the bounded input, initial-phase, invariant and projection checks", async () => {
   const {spec, rules} = await fixture();
   const initialized: MechaReducerMachine = {...spec, initialize: {reduce: "initial", input: {type: "object", fields: {}}}};
   const run = async (state = initial(), payload: unknown = {}) => {
-    const compiled = await compileMechaReducer(initialized, `return {...(() => { ${rules} })(), initial: () => (${JSON.stringify(state)})};`, instrument);
+    const compiled = await compileMechaReducer(initialized, `return {...(() => { ${rules} })(), initial: () => (${JSON.stringify(state)})};`, terminal);
     return await executeHybrid(compiled.source, spec.fuel, {initialize: true, payload, context: {tier: "mecha", now: 0}, viewers: ["a", "b"]}) as {state: unknown; views: {value: {hand: number[]}}[]};
   };
   const result = await run();
@@ -41,7 +40,7 @@ Deno.test("equivalent CUE field orders emit identical reducer programs without r
   const {spec, rules} = await fixture();
   const reorder = (value: unknown): unknown => Array.isArray(value) ? value.map(reorder)
     : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reorder(child)])) : value;
-  const original = await compileMechaReducer(spec, rules, instrument);
-  const reversed = await compileMechaReducer(reorder(spec) as MechaReducerMachine, rules, instrument);
+  const original = await compileMechaReducer(spec, rules, terminal);
+  const reversed = await compileMechaReducer(reorder(spec) as MechaReducerMachine, rules, terminal);
   assertEquals(reversed, original);
 });

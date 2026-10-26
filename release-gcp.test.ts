@@ -77,6 +77,13 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertEquals(c.env.find((e: { name: string }) => e.name === "PGHOST").value, "/cloudsql/brawl-chess:us-central1:battlechess-db");
 });
 
+Deno.test("the job grants the roles the schema has: an app without auth has no app_user", async () => {
+  // A literal grant would die on a role the schema does not make.
+  const job = (await built(release(", database: tokenRoles: [\"anon\", \"service\"]"), "job")).value;
+  const c = job.spec.template.spec.template.spec.containers[0];
+  assertStringIncludes(c.command[2], "GRANT anon, service TO postgres WITH INHERIT FALSE, SET TRUE");
+});
+
 Deno.test("a passkey's relying party is the domain, else the run.app host the release fills", async () => {
   const withDomain = await built(release(), "service");
   const auth = withDomain.value.spec.template.spec.containers[2];

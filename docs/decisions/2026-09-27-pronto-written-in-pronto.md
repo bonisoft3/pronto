@@ -16,7 +16,7 @@ The entire development loop runs in a browser tab:
   the version the loop pins, so an export in the tab is byte-identical to one
   on a laptop or in CI — which is what makes a commit of generated files made
   in the tab safe to review
-- **Running**: mecha's [browser platform](https://github.com/bonisoft3/mecha/blob/v0.14.0/docs/browser.md),
+- **Running**: mecha's [browser platform](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/browser.md),
   the cluster `release@pages` already ships
 - **Version control**: a real git repository in OPFS, pushed through the
   GitHub REST API (blobs, tree, commit, ref), which answers CORS where
@@ -76,7 +76,7 @@ trusted to run, never to emit unsandboxed code.
 a bridge from a clicked element to its ir id, handed to the chat as context, so
 "edit this" edits the right artifact exactly. It needs the emitter to stamp a
 stable identity on emitted elements, which it does not
-([pending](https://github.com/bonisoft3/omnishell/blob/v0.14.0/PENDING.md#visual-lint)).
+([pending](https://github.com/bonisoft3/omnishell/blob/v0.19.1/PENDING.md#visual-lint)).
 
 **The model and the compute are the user's.** Nothing runs on infrastructure
 the project operates: the model is in-tab WebLLM, then the user's own API key;

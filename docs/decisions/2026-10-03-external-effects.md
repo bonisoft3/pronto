@@ -133,7 +133,7 @@ its outcome lands.
 ## The ledger
 
 `airlock.external_effect_ledger` is mecha's, in the airlock's
-[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.14.0/services/airlock/airlock.sql), and the
+[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/airlock/airlock.sql), and the
 cluster places it as it places the ticker's `schedule`. A row holds the key
 (`<effect>:<key fields>`, also the sink's idempotency key), the instance's primary key,
 the input frozen at the claim, the count of runs begun, and the outcome, set once.
@@ -183,7 +183,7 @@ call.
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
   key; the others are the frozen `input` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
   "no answer", not "failed". The airlock's
-  [README](https://github.com/bonisoft3/mecha/blob/v0.14.0/services/airlock/README.md) is the contract.
+  [README](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/airlock/README.md) is the contract.
 - **A thrown error** is retried by Graphile with backoff, and each retry is a re-entry.
   After `attempts` runs counted by the ledger the outcome is `unknown`: no answer ever
   came, and the sink may have acted. The ledger counts, not Graphile, which counts a run
@@ -353,7 +353,7 @@ ticker only where one declares a schedule: `state.effects` in mecha's `cluster.c
 effect's name and its origin or bridge, brings two services (`airlock` and its daprd
 `airlock-mesh`), a `bridge-<name>` per declared bridge, the ticker and its clock, two initdb
 steps, and four networks. The
-airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.14.0/services/airlock/README.md#in-a-cluster) is
+airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/airlock/README.md#in-a-cluster) is
 the contract; what follows is why it has that shape.
 
 ### The networks
@@ -496,7 +496,7 @@ airlock's side there.
 
 The wall travels with the daprd: its allowlist and its bindings are its configuration on
 every tier, so compose, k8s and Cloud Run hold the same one.
-[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.14.0/docs/deployment.md#the-airlocks-wake-and-wall)
+[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/deployment.md#the-airlocks-wake-and-wall)
 holds the table. Crash recovery reads each process's own advisory key, so an overlap of two
 revisions, or any number of instances, unlocks nothing a live process holds.
 

@@ -4,6 +4,7 @@
 // resolve through the map the bundler writes from the roots it is given.
 import { decodeBase64 } from '@std/encoding/base64'
 import { createCluster, type Cluster } from 'mecha-browser/cluster.ts'
+import type { Drain } from 'mecha-browser/drains.ts'
 import { createPageDatabase, type DatabaseAssets } from './database.ts'
 // @ts-ignore untyped interpreter module
 import { createShell } from 'omnishell/shell.js'
@@ -14,7 +15,7 @@ import { installSes } from 'pronto-bundle-ses'
 interface Payload {
   files: Record<string, string>
   /** Absent for an app with no server entity, which boots no cluster. */
-  cluster?: { sql: string[]; tables: string[]; assets: DatabaseAssets }
+  cluster?: { sql: string[]; tables: string[]; drains: Drain[]; clock: 'ticker' | 'disabled'; assets: DatabaseAssets }
 }
 
 const payload: Payload = JSON.parse(new TextDecoder().decode(decodeBase64(document.getElementById('pronto-payload')!.textContent!)))
@@ -50,13 +51,13 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
 
 ;(async () => {
   if (payload.cluster) {
-    const { sql, tables, assets: a } = payload.cluster
+    const { sql, tables, drains, clock, assets: a } = payload.cluster
     const { schema } = JSON.parse(payload.files['shell/shell.json'])
     const db = await createPageDatabase(a)
     // A change the cluster lost leaves a table no read can trust again, so
     // the page dies of it where its boot would.
     cluster = await createCluster({
-      db, sql, tables, schema, log: console.error,
+      db, sql, tables, schema, drains, clock, log: console.error,
       fail: (e) => {
         document.body.textContent = `page failed: ${e.message}`
         reportError(e)

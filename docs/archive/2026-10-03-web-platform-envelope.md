@@ -21,7 +21,7 @@ Three platform constraints govern everything in the envelope:
    [`shell/index.html`](../screens.md#how-a-routes-first-document-is-rendered) is emitted by pronto from omnishell's template. The template owns `<base href="/shell/">` and suppresses unconfigured icons with `<link rel="icon" href="data:,">`. An app has no raw `<head>` to author; every tag must be synthesized from CUE declarations.
 
 2. **The HTTP door routes unsolicited requests**:
-   Mecha's [Caddy door](https://github.com/bonisoft3/mecha/blob/v0.14.0/docs/proxy.md) answers requests that arrive before any HTML is parsed:
+   Mecha's [Caddy door](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/proxy.md) answers requests that arrive before any HTML is parsed:
    - Chromium and Safari probe `/favicon.ico` unsolicited when a page declares no icon or for non-HTML responses (e.g. raw assets, API endpoints, 404s); the 204 response prevents network console errors and satisfies Lighthouse Best Practices.
    - iOS queries `/.well-known/apple-app-site-association` without an extension and refuses responses lacking `Content-Type: application/json`.
    - Web crawlers probe `/robots.txt` and `/sitemap.xml`.

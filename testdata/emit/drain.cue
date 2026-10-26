@@ -28,3 +28,10 @@ drainEmitted: _drainedFiles[_drainFile].data.output.http_client.url & "${CRUD_UR
 drainRun: list.Contains([for p in _drainedCluster.state.pipelines {p.file}], _drainFile) & true
 drainRunsFeed: list.Contains([for t, _ in _drainedCluster.surface.targets {t}], "conduit") & true
 drainLinted: list.Contains(_drainedLoop.surface.pipelineFiles, _drainFile) & true
+// The clusters that run no stream — the page's and the edge's — call the drain
+// from the table .pronto/cluster.json carries: the stream's on, call and body.
+drainListed: _drainedFiles[".pronto/cluster.json"].data.drains & [{name: "profile-refresh", on: ["profile", "profile_dirty"], call: "refresh_profiles", body: {}}]
+// A body key is an argument's name, which the page's and the edge's calls
+// spell bare; one that is not refuses at vet rather than killing their boot.
+drainQualifiedTableRefused: ((pronto.#Drain & {name: "x", on: ["public.t"], call: "f"}).on == _|_) & true
+drainBodyKeyRefused: ((pronto.#Drain & {name: "x", on: ["t"], call: "f", body: {batchSize: 1}}).body == _|_) & true

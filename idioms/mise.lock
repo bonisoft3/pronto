@@ -25,57 +25,82 @@ url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.
 url_api = "https://api.github.com/repos/FiloSottile/mkcert/releases/assets/63709958"
 
 [[tools."github:bufbuild/buf"]]
-version = "1.73.0"
+version = "1.74.0"
 backend = "github:bufbuild/buf"
 
 [tools."github:bufbuild/buf"."platforms.linux-arm64"]
-checksum = "sha256:e928fa64061ddb5144d93df30fe48f3451231b0e77ea5ade684cb7b53037cc66"
-url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Linux-aarch64.tar.gz"
-url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280183"
+checksum = "sha256:54a5d5500992deb3239bfee61c9f0ef7646b6f6b231d2c255fdfc16eeb50564c"
+url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Linux-aarch64.tar.gz"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641110968"
+
+[tools."github:bufbuild/buf"."platforms.linux-arm64-musl"]
+checksum = "sha256:54a5d5500992deb3239bfee61c9f0ef7646b6f6b231d2c255fdfc16eeb50564c"
+url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Linux-aarch64.tar.gz"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641110968"
 
 [tools."github:bufbuild/buf"."platforms.linux-x64"]
-checksum = "sha256:f8092c1be08d5606a8d22b4ae0e4079dd690154cebb4894dc5e24a5046093aff"
-url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Linux-x86_64.tar.gz"
-url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280270"
+checksum = "sha256:cc482285b2c388c93f8bed0a972330695c1c8dd121d5ece460d25ceed93f21ac"
+url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Linux-x86_64.tar.gz"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641111222"
+
+[tools."github:bufbuild/buf"."platforms.linux-x64-musl"]
+checksum = "sha256:cc482285b2c388c93f8bed0a972330695c1c8dd121d5ece460d25ceed93f21ac"
+url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Linux-x86_64.tar.gz"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641111222"
 
 [tools."github:bufbuild/buf"."platforms.macos-arm64"]
-checksum = "sha256:7eb1b167b729815b470e88d85cc1dbcb5d16bfbe73af248c9ed20cfbc4de060b"
-url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Darwin-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280123"
+checksum = "sha256:4bc72e8d823e3b0e27df1715dec2c0c7a1a533bc07b67f98f8fdfbc4007a82ca"
+url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Darwin-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641110844"
 
 [tools."github:bufbuild/buf"."platforms.macos-x64"]
-checksum = "sha256:12ededc2a5b55eee89be6f35b5f290938eb4c710109d47746d29fb5fc6c4d66c"
-url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Darwin-x86_64.tar.gz"
-url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280115"
+checksum = "sha256:1a8d6778176f8d6dfc9182342109a44a8dfafb73f91f5d297276f25960589483"
+url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Darwin-x86_64.tar.gz"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641110851"
 
 [tools."github:bufbuild/buf"."platforms.windows-x64"]
-checksum = "sha256:19afc9b22569c7c528c278eb5f3d6706581e1ba9b232f420e0d91ae246762566"
-url = "https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Windows-x86_64.zip"
-url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/557280369"
+checksum = "sha256:b0e26af2a4bef62724f6a58114a6027e3a19bdf98033b2107995bc243d7c8c97"
+url = "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Windows-x86_64.zip"
+url_api = "https://api.github.com/repos/bufbuild/buf/releases/assets/641111438"
 
 [[tools."github:caddyserver/caddy"]]
-version = "2.10.0"
+version = "2.11.7"
 backend = "github:caddyserver/caddy"
 
 [tools."github:caddyserver/caddy"."platforms.linux-arm64"]
-url = "https://github.com/caddyserver/caddy/releases/download/v2.10.0/caddy_2.10.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/247559242"
+checksum = "sha256:d8fc6d179a5d283028a472a5618564f6ad8a86fed513e64f032b3b0b7cc45e42"
+url = "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607244906"
+
+[tools."github:caddyserver/caddy"."platforms.linux-arm64-musl"]
+checksum = "sha256:d8fc6d179a5d283028a472a5618564f6ad8a86fed513e64f032b3b0b7cc45e42"
+url = "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607244906"
 
 [tools."github:caddyserver/caddy"."platforms.linux-x64"]
-url = "https://github.com/caddyserver/caddy/releases/download/v2.10.0/caddy_2.10.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/247559237"
+checksum = "sha256:727b91701a392de6ebc5027509f548bf39979e5216340d0faed8fa5e69c84f8b"
+url = "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607245028"
+
+[tools."github:caddyserver/caddy"."platforms.linux-x64-musl"]
+checksum = "sha256:727b91701a392de6ebc5027509f548bf39979e5216340d0faed8fa5e69c84f8b"
+url = "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607245028"
 
 [tools."github:caddyserver/caddy"."platforms.macos-arm64"]
-url = "https://github.com/caddyserver/caddy/releases/download/v2.10.0/caddy_2.10.0_mac_arm64.tar.gz"
-url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/247559252"
+checksum = "sha256:cda3030e5d5b13eb9f0b6fb541037f633bddd958c070c5f561d7a5cccb581665"
+url = "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_mac_arm64.tar.gz"
+url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607245027"
 
 [tools."github:caddyserver/caddy"."platforms.macos-x64"]
-url = "https://github.com/caddyserver/caddy/releases/download/v2.10.0/caddy_2.10.0_mac_amd64.tar.gz"
-url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/247559229"
+checksum = "sha256:110c53e5c093e4cfce6eda787f94f23bef913c309f620fab26b4f678031841ad"
+url = "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_mac_amd64.tar.gz"
+url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607244902"
 
 [tools."github:caddyserver/caddy"."platforms.windows-x64"]
-url = "https://github.com/caddyserver/caddy/releases/download/v2.10.0/caddy_2.10.0_windows_amd64.zip"
-url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/247559247"
+checksum = "sha256:0a1edc0b799512051c57071ce0e798d3f2cf67dc98171366f1d2b326072e3b06"
+url = "https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_windows_amd64.zip"
+url_api = "https://api.github.com/repos/caddyserver/caddy/releases/assets/607244987"
 
 [[tools."github:cue-lang/cue"]]
 version = "0.16.1"
@@ -146,121 +171,121 @@ url = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-pc-
 url_api = "https://api.github.com/repos/denoland/deno/releases/assets/568431369"
 
 [[tools."github:go-task/task"]]
-version = "v3.49.1"
+version = "v3.54.0"
 backend = "github:go-task/task"
 
 [tools."github:go-task/task"."platforms.linux-arm64"]
-checksum = "sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb"
-url = "https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/go-task/task/releases/assets/369609773"
+checksum = "sha256:d7189d439d4a6058e39e1b2acd7c8b27acd4856691b408f23b242e4294e1df5b"
+url = "https://github.com/go-task/task/releases/download/v3.54.0/task_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/go-task/task/releases/assets/604090041"
 
 [tools."github:go-task/task"."platforms.linux-arm64-musl"]
-checksum = "sha256:aa6732c9c66397c5380ec2b60c070fd599075b2a8538dba03f3a21edc99ab0cb"
-url = "https://github.com/go-task/task/releases/download/v3.49.1/task_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/go-task/task/releases/assets/369609773"
+checksum = "sha256:d7189d439d4a6058e39e1b2acd7c8b27acd4856691b408f23b242e4294e1df5b"
+url = "https://github.com/go-task/task/releases/download/v3.54.0/task_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/go-task/task/releases/assets/604090041"
 
 [tools."github:go-task/task"."platforms.linux-x64"]
-checksum = "sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576"
-url = "https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/go-task/task/releases/assets/369609772"
+checksum = "sha256:680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb"
+url = "https://github.com/go-task/task/releases/download/v3.54.0/task_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/go-task/task/releases/assets/604090073"
 
 [tools."github:go-task/task"."platforms.linux-x64-musl"]
-checksum = "sha256:4e7d24f1bf38218aec8f244eb7ba671f898830f9f87b3c9b30ff1c09e3135576"
-url = "https://github.com/go-task/task/releases/download/v3.49.1/task_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/go-task/task/releases/assets/369609772"
+checksum = "sha256:680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb"
+url = "https://github.com/go-task/task/releases/download/v3.54.0/task_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/go-task/task/releases/assets/604090073"
 
 [tools."github:go-task/task"."platforms.macos-arm64"]
-checksum = "sha256:0f556b66df69d53b790c7fd26bfab73543b4a5ce1767df6b2e8499619e2a205b"
-url = "https://github.com/go-task/task/releases/download/v3.49.1/task_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/go-task/task/releases/assets/369609792"
+checksum = "sha256:12a69fcf37bb8d5bc9150c44f9a936775b73e59ff044c2c245232f198c135637"
+url = "https://github.com/go-task/task/releases/download/v3.54.0/task_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/go-task/task/releases/assets/604090068"
 
 [tools."github:go-task/task"."platforms.macos-x64"]
-checksum = "sha256:8bc4dd3baed1c71956ade0bb0a9c1b94e3ed7b65e7f2ff3aab13d0562c820e59"
-url = "https://github.com/go-task/task/releases/download/v3.49.1/task_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/go-task/task/releases/assets/369609774"
+checksum = "sha256:0543b0844a725814c0412d3f4bed12873ce9ed0da207b15775f63a97d734aac0"
+url = "https://github.com/go-task/task/releases/download/v3.54.0/task_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/go-task/task/releases/assets/604090006"
 
 [tools."github:go-task/task"."platforms.windows-x64"]
-checksum = "sha256:725c551f699d4d6c0dc57bd8148f72bef8d5b2fb650d9c985f271a61522fd521"
-url = "https://github.com/go-task/task/releases/download/v3.49.1/task_windows_amd64.zip"
-url_api = "https://api.github.com/repos/go-task/task/releases/assets/369609805"
+checksum = "sha256:837f42f71899ea41d07a47acc81d4d6ea80cb41c68292345f915c656473efcb7"
+url = "https://github.com/go-task/task/releases/download/v3.54.0/task_windows_amd64.zip"
+url_api = "https://api.github.com/repos/go-task/task/releases/assets/604090005"
 
 [[tools."github:nushell/nushell"]]
-version = "0.115.1"
+version = "0.116.1"
 backend = "github:nushell/nushell"
 
 [tools."github:nushell/nushell"."platforms.linux-arm64"]
-checksum = "sha256:5c4a5bca0af5b070e903a68fa014cc24e6419d0ac9cec03a2948494b2d310e08"
-url = "https://github.com/nushell/nushell/releases/download/0.115.1/nu-0.115.1-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/526013775"
+checksum = "sha256:e7bbb1639253fb83e2391600b957ba3e918f04a2c81850e9f30a68cb1ef20ef8"
+url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/610027667"
 
 [tools."github:nushell/nushell"."platforms.linux-arm64-musl"]
-checksum = "sha256:86a869f44c2abd37f4a4c215af78c8da058812b76fa131476d28e62fc0262a91"
-url = "https://github.com/nushell/nushell/releases/download/0.115.1/nu-0.115.1-aarch64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/526013290"
+checksum = "sha256:b103770c00bf322c409caa007aad44882d1cc5d24d82f719f877812ac33d6ad1"
+url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/610022369"
 
 [tools."github:nushell/nushell"."platforms.linux-x64"]
-checksum = "sha256:d11d825241f6504a3617c535fa725a9dd6d009c86d7b19fb3168b47635b9d8b0"
-url = "https://github.com/nushell/nushell/releases/download/0.115.1/nu-0.115.1-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/526012815"
+checksum = "sha256:d6d8ace4be491ed8abba4026e73b60c0470b4671d7039307e7d772282ef863da"
+url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/610020338"
 
 [tools."github:nushell/nushell"."platforms.linux-x64-musl"]
-checksum = "sha256:8a9722177ddd421eba927b4baae4ae341a4d1c3434504be7b1b17d998bafdd87"
-url = "https://github.com/nushell/nushell/releases/download/0.115.1/nu-0.115.1-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/526013643"
+checksum = "sha256:13ef75df08df30f8d7b031df538e82a52c6e74ce839b1a9091c3a3f1969c3742"
+url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/610034802"
 
 [tools."github:nushell/nushell"."platforms.macos-arm64"]
-checksum = "sha256:2e6ed1eb043869ff05b5f2448a8c443e4d3a93557ba4303b21008a0523c96734"
-url = "https://github.com/nushell/nushell/releases/download/0.115.1/nu-0.115.1-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/526010403"
+checksum = "sha256:302fb3dfc5d44e7fe0d5b8227be8e75b4c3956ca8d4804234e5c68fbdd3e4917"
+url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/610028991"
 
 [tools."github:nushell/nushell"."platforms.macos-x64"]
-checksum = "sha256:0292f4b92af29cfe5d9c4b2ec06eeb325b705d1d6c19536a8bec2b75859b3485"
-url = "https://github.com/nushell/nushell/releases/download/0.115.1/nu-0.115.1-x86_64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/526015418"
+checksum = "sha256:44306f0766f2be0e763d0c7a6a6774537589a335797a199d8e5b473d766ec6bd"
+url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/610039812"
 
 [tools."github:nushell/nushell"."platforms.windows-x64"]
-checksum = "sha256:b83009cbc88021f4dc293c49320118886b78363f9a4bb14933d33c8803241f46"
-url = "https://github.com/nushell/nushell/releases/download/0.115.1/nu-0.115.1-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/526030176"
+checksum = "sha256:6658c9e61fe42c88326c1caa99e8dc9ad99bec6c0bc353e6ecb7c5d3f79feed7"
+url = "https://github.com/nushell/nushell/releases/download/0.116.1/nu-0.116.1-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/nushell/nushell/releases/assets/610069956"
 
 [[tools."github:redpanda-data/connect"]]
-version = "4.112.0"
+version = "4.114.0"
 backend = "github:redpanda-data/connect"
 
 [tools."github:redpanda-data/connect"."platforms.linux-arm64"]
-checksum = "sha256:d8145ba1a85a6eda9511545637d10ea35c66cec004fedcb3ea5dc81fc240d45c"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206911"
+checksum = "sha256:30d01e69be04488595c1a91342fd353a47c9d7d0e4b1b1693cd0a9b9427fba81"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.114.0/redpanda-connect_4.114.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/646824866"
 
 [tools."github:redpanda-data/connect"."platforms.linux-arm64-musl"]
-checksum = "sha256:d8145ba1a85a6eda9511545637d10ea35c66cec004fedcb3ea5dc81fc240d45c"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206911"
+checksum = "sha256:30d01e69be04488595c1a91342fd353a47c9d7d0e4b1b1693cd0a9b9427fba81"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.114.0/redpanda-connect_4.114.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/646824866"
 
 [tools."github:redpanda-data/connect"."platforms.linux-x64"]
-checksum = "sha256:d7615f24ecacedaee88cd41583e9895bc936df57f230d2ae5383c03a81e10d26"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206921"
+checksum = "sha256:fdf47e8ecdc35c0f6bde7f3884d3bb2f99c0df89bbb2c0e3ea2787aba7ee3c10"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.114.0/redpanda-connect_4.114.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/646824871"
 
 [tools."github:redpanda-data/connect"."platforms.linux-x64-musl"]
-checksum = "sha256:d7615f24ecacedaee88cd41583e9895bc936df57f230d2ae5383c03a81e10d26"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206921"
+checksum = "sha256:fdf47e8ecdc35c0f6bde7f3884d3bb2f99c0df89bbb2c0e3ea2787aba7ee3c10"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.114.0/redpanda-connect_4.114.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/646824871"
 
 [tools."github:redpanda-data/connect"."platforms.macos-arm64"]
-checksum = "sha256:fca5aca68cb83f9d98b3703c2e691f6f8605c4db6b1d517c6efd6e31050a2585"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206902"
+checksum = "sha256:0b3462d2a53202abbeafe6e7a117d2d078be8227c9245c092008f937fdd4ed71"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.114.0/redpanda-connect_4.114.0_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/646824859"
 
 [tools."github:redpanda-data/connect"."platforms.macos-x64"]
-checksum = "sha256:6069f8065a5f2e30f2b7ea9602e61be42e3d098b4d3fbfac74158f84a977fa2b"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206924"
+checksum = "sha256:bbb658c40711b7dc37a258d6cb110a6b0ae4d0bc61c93c38c045e01b091f2edf"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.114.0/redpanda-connect_4.114.0_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/646824862"
 
 [tools."github:redpanda-data/connect"."platforms.windows-x64"]
-checksum = "sha256:c875c91187b47240d6d7cc3175e2e10f40364a20797794cc3e58e899dfbcb42d"
-url = "https://github.com/redpanda-data/connect/releases/download/v4.112.0/redpanda-connect_4.112.0_windows_amd64.tar.gz"
-url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/605206916"
+checksum = "sha256:02dc10a107b6965d111f08f4841a1cb7e6415d84234ce93c52722695bd862324"
+url = "https://github.com/redpanda-data/connect/releases/download/v4.114.0/redpanda-connect_4.114.0_windows_amd64.tar.gz"
+url_api = "https://api.github.com/repos/redpanda-data/connect/releases/assets/646824847"
 
 [[tools."github:terrastruct/d2"]]
 version = "0.9.0"
@@ -302,25 +327,33 @@ url = "https://github.com/d2lang/d2/releases/download/v0.9.0/d2-v0.9.0-windows-a
 url_api = "https://api.github.com/repos/d2lang/d2/releases/assets/549449113"
 
 [[tools."http:duckdb"]]
-version = "1.5.5"
+version = "1.5.6"
 backend = "http:duckdb"
 
 [tools."http:duckdb"."platforms.linux-arm64"]
-checksum = "blake3:2ec12466e06a0ff8da4728e5ab05b7e2a83fcae92388c06e305d57fd901f6e28"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-arm64.zip"
+checksum = "sha256:c544e92c9b7c31fc53c2139802cabd8e2d1b2b3e3f933117f31611239c1402db"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-linux-arm64.zip"
+
+[tools."http:duckdb"."platforms.linux-arm64-musl"]
+checksum = "sha256:c544e92c9b7c31fc53c2139802cabd8e2d1b2b3e3f933117f31611239c1402db"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-linux-arm64.zip"
 
 [tools."http:duckdb"."platforms.linux-x64"]
-checksum = "blake3:2e647c2cc552cdb0fb3d078dcc3b60fa30f6f2b4a3b5db06e4d1ada20e44b484"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip"
+checksum = "sha256:6e89deac1ebbc36eed0291caf8b567b030c7b86ac35998f71854e22b3c5d5e2f"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-linux-amd64.zip"
+
+[tools."http:duckdb"."platforms.linux-x64-musl"]
+checksum = "sha256:6e89deac1ebbc36eed0291caf8b567b030c7b86ac35998f71854e22b3c5d5e2f"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-linux-amd64.zip"
 
 [tools."http:duckdb"."platforms.macos-arm64"]
-checksum = "blake3:584f28088b6f94d624d57df0a8a996763a2181cfb5b67ce0fae6a30c690071c5"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-osx-arm64.zip"
+checksum = "sha256:8e0f6825653f8d057922e6147db920bebf072cb41f4b041fd35521c18d7d126e"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-osx-arm64.zip"
 
 [tools."http:duckdb"."platforms.macos-x64"]
-checksum = "blake3:6b1c3170833fd8677190914668a15ff9b056a48c3213552b3338a51c014f25d4"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-osx-amd64.zip"
+checksum = "sha256:ae74c8cd74304bde1d92d941aca37bc72084ee8daa5660913819d8a9e9d29331"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-osx-amd64.zip"
 
 [tools."http:duckdb"."platforms.windows-x64"]
-checksum = "blake3:1e2c2d61c169427994a673193978d79b66c38862b362390b15d277044e67f225"
-url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-windows-amd64.zip"
+checksum = "sha256:798eae475d07c645ff3b914f7b0e676d06502b5412dd7552638fafed81f9e916"
+url = "https://github.com/duckdb/duckdb/releases/download/v1.5.6/duckdb_cli-windows-amd64.zip"

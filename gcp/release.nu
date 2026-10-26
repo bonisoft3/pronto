@@ -22,7 +22,16 @@ def --wrapped gc [...args] {
 	if $r.exit_code != 0 { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
 	$r.stdout
 }
-def --wrapped exists [...args]: nothing -> bool { (^gcloud --quiet ...$args | complete).exit_code == 0 }
+# Whether a resource is there. Only its absence answers false: an expired
+# token, a disabled API or a network that dropped would otherwise read as a
+# resource to create, and the creation then dies on one that exists.
+def --wrapped exists [...args]: nothing -> bool {
+	let r = (^gcloud --quiet ...$args | complete)
+	if $r.exit_code != 0 and not ($r.stderr =~ "NOT_FOUND|HTTPError 404|Cannot find|does not exist|not found|was not found") {
+		error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"}
+	}
+	$r.exit_code == 0
+}
 
 def render [cue_path: string, data?: string]: nothing -> record {
 	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
@@ -360,7 +369,10 @@ def delete-preview [plan: record] {
 # it, ending once its address answers; the images it ran, by digest. A
 # release given a tested preview's (`from`) runs those, copied, not rebuilt.
 def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record]: nothing -> record {
-	let base = if ($preview | is-empty) { {} } else { {GCP: {preview: $preview}} }
+	# The roles the app's schema grants PostgREST's login, as generate wrote them.
+	let facts_path = ($app_info.cue_path | path dirname | path join .pronto cluster.json)
+	let roles = if ($facts_path | path exists) { {database: {tokenRoles: (open $facts_path).tokenRoles}} } else { {} }
+	let base = {GCP: ($roles | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }))}
 	let plan0 = (plan-of $app_info.cue_path $preview)
 	let services = (do { cd $app_info.dir; ^docker compose --profile "*" config --services } | lines)
 	let refused = ($services | where {|s| $s in $unbuilt })

@@ -59,6 +59,12 @@ import (
 	// environment compose gives it beside its DATABASE_URL, filled by the release.
 	migrate?: env: [string]: string
 
+	// The roles the app's schema grants PostgREST's login, as generate wrote them
+	// (.pronto/cluster.json, the k8s release's source too): what the job grants
+	// Cloud SQL's postgres SET on, since which of them exist is the program's.
+	// Filled by the release where generate wrote them.
+	database: tokenRoles: *["anon", "app_user", "service"] | [...string]
+
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
 	// by the release. The ticker runs as one more container of the service, and
@@ -508,7 +514,7 @@ import (
 							fi
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
-							psql -v ON_ERROR_STOP=1 -XqAc "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE"
+							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"
 							# It also owns the tables under FORCE ROW LEVEL SECURITY and the
 							# SECURITY DEFINER functions that write them, which a superuser
 							# bypasses; BYPASSRLS gives it that back. Sessions that switch

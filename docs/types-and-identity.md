@@ -235,7 +235,7 @@ validations alone ([the lattice](lattice.md#the-validation-ladder)):
 | `invariant` on an entity | rows that may not exist | a SQL `CHECK` at the cluster rungs; nothing at `tab` or `device` |
 | `unique`, `uniques` | rows that may not coexist | a unique index at the cluster rungs, and `reconcile()` when a browser collection loads |
 | a validation | rows inconsistent with those they reference | the store at every rung, and a plv8 trigger at the cluster rungs |
-| a machine | transitions a field may not make | the terminal, for a `tab` or `device` row only ([machines](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/machines.md#the-chart)) |
+| a machine | transitions a field may not make | the terminal, for a `tab` or `device` row only ([machines](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/machines.md#the-chart)) |
 | `access` | readers a row may not reach | RLS policies at the cluster rungs ([access](access.md)) |
 
 The reviewer's question with a right answer is *could this have been said one

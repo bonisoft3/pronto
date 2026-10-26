@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en" dir="ltr">
 <head>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-eval' 'inline-speculation-rules'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; require-trusted-types-for 'script'; trusted-types omnishell-markup omnishell-url default">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-eval' 'inline-speculation-rules' https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/ https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/ https://cdn.jsdelivr.net/npm/babylonjs-loaders@9.31.0/; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; require-trusted-types-for 'script'; trusted-types omnishell-markup omnishell-url default">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="The smallest working instance of each idiom a pure pronto app is made of.">
@@ -31,6 +31,8 @@
 <link rel="modulepreload" href="/omnishell/interpreter/host-dom.js">
 <link rel="modulepreload" href="/omnishell/interpreter/hatch.js">
 <link rel="modulepreload" href="/omnishell/interpreter/hatch-worker.js">
+<link rel="modulepreload" href="/omnishell/interpreter/hatch-presenter.js">
+<link rel="modulepreload" href="/omnishell/interpreter/presenter-realm.js">
 <link rel="modulepreload" href="/omnishell/interpreter/jessie.js">
 <link rel="modulepreload" href="/omnishell/interpreter/vendor/mecha-client.js">
 <link rel="modulepreload" href="/omnishell/interpreter/vendor/messages.js">

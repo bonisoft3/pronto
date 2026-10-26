@@ -25,6 +25,12 @@ Deno.test("a terminal module may be granted what the terminal's cage endows and 
   assertEquals(await admitted("(n & #SafeEndowment) != _|_"), terminal);
 });
 
+// An engine steps on its state and its commands alone: its cage
+// (evaluateEngine) and the scan both grant nothing.
+Deno.test("an engine may be granted nothing", () => {
+  assertEquals(ENDOWABLE.engine, []);
+});
+
 Deno.test("a mecha module may be granted what mecha's cages endow and the schema admits", async () => {
   const mecha = sorted(MECHA);
   for (const role of ["computation", "effect"]) assertEquals(sorted(ENDOWABLE[role]), mecha, role);

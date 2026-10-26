@@ -60,7 +60,7 @@ relationship.
 **No shape fingerprint.** It would be sha256 over the RFC 8785 form of the
 identity projection — the type id, then each ordinal's type, `required` and
 `retired`, with no label — so a rename leaves it unchanged. A versioned device
-collection needs it ([omnishell's pending](https://github.com/bonisoft3/omnishell/blob/v0.14.0/PENDING.md#data)), and
+collection needs it ([omnishell's pending](https://github.com/bonisoft3/omnishell/blob/v0.19.1/PENDING.md#data)), and
 a message on the bus would carry it in its metadata to say which shape wrote
 it. Nothing computes it, and nothing in the tree implements RFC 8785.
 
@@ -101,7 +101,7 @@ certain over `ParsedExpr`; a type checker would also refuse a string compared
 with an integer.
 
 **A server row's transitions cannot be stated.** A machine governs a `tab` or
-`device` row only ([omnishell's chart](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/machines.md#the-chart)),
+`device` row only ([omnishell's chart](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/machines.md#the-chart)),
 and nothing else speaks of transitions. Either machines govern cluster rows
 too, or CEL gains a binding for the previous row.
 
@@ -133,7 +133,7 @@ drop retires. Those are in GUIDE and SPEC, which a compile does not read.
 **A statement is declared inside its entity.** The argued rule is that a
 reference goes from what cannot stand alone to what can, so a validation or an
 access rule would name its entity rather than be declared inside it. The
-machine case is [omnishell's](https://github.com/bonisoft3/omnishell/blob/v0.14.0/PENDING.md#data).
+machine case is [omnishell's](https://github.com/bonisoft3/omnishell/blob/v0.19.1/PENDING.md#data).
 
 **An enum value cannot be renamed.** A value in `this in [...]` and a chart's
 state names are data every holder keeps in rows, so renaming one has a field
@@ -167,7 +167,7 @@ or `device` collection, and none of the four readers sees it.
 durability, so an ephemeral effect on a `server` entity passes `cue vet`, lint
 and every test. Unifying each effect's level against its entity's row — at
 `cue vet`, where the program holds both, or in `machineLint`, which already
-reads the level ([omnishell's half](https://github.com/bonisoft3/omnishell/blob/v0.14.0/PENDING.md#machines)) — makes
+reads the level ([omnishell's half](https://github.com/bonisoft3/omnishell/blob/v0.19.1/PENDING.md#machines)) — makes
 the lattice's first join a refusal, and lets one copy of the table import the
 other.
 
@@ -213,7 +213,7 @@ would make "a sink is written by its pipeline alone" a rule.
 **A `tab` or `device` write is judged by its validations alone**
 ([the lattice](docs/lattice.md#the-validation-ladder)); a judge beside
 `validate.js`, where every write passes, would hold type, field CEL and row CEL
-at every rung ([omnishell's `cel:` line](https://github.com/bonisoft3/omnishell/blob/v0.14.0/PENDING.md#data)).
+at every rung ([omnishell's `cel:` line](https://github.com/bonisoft3/omnishell/blob/v0.19.1/PENDING.md#data)).
 
 ## Access
 
@@ -436,18 +436,27 @@ build reads or writes the Depot bake cache. Checked 2026-10-02.
 `pages` and `cloudflare` are emitted. The remaining designs are
 [release targets](docs/release-targets.md)'s, built on a branch of their own.
 
-**The edge derives nothing and runs no cron**
-([cloudflare](docs/release-targets.md#cloudflare)): the outbox and Queue, the
-scale-to-zero containers for transform and compute with compute's tables on
-R2, their generation from the compose closure, and the Cron Trigger are
-designed and not built. The object's alarm serves a machine's deadlines
-alone; a cron schedule is refused there.
+**gcloud is not a pinned tool.** `release@gcp` runs with the Cloud CLI the
+machine has: its SDK is its own install, and the k8s release pins neither
+kubectl nor skaffold; a pin in `#Tools` would carry it to every consumer's
+toolchain. The release refuses to start without it.
+
+**The edge derives by drain alone**
+([cloudflare](docs/release-targets.md#cloudflare)): its drains and its clock
+run in the object, and no stream or computation does. A stream's mapping is
+bloblang, and a computation's queries are DuckDB's, whose engine (8 MB of
+WebAssembly gzipped, measured) does not fit a Worker beside PGlite. The outbox
+and Queue, the scale-to-zero containers for transform and compute with
+compute's tables on R2, and their generation from the compose closure are
+designed and not built.
 
 **`gcp` runs the database, crud, auth, electric and the ticker alone**
 ([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, the airlock, compute, blobs, images and
 render, each of which needs its own Cloud Run shape and wake. Its clock pokes
 the ticker with the service role's token on a public path, where mecha's
 contract wants a poke-specific credential.
+
+**No TURN relay is built** ([ICE servers](docs/release-targets.md#ice-servers)).
 
 **`aws` has no rule** ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 
@@ -462,10 +471,10 @@ contract wants a poke-specific credential.
 `cloudflare` and `k8s` have no rule that runs the drivers against their
 address.
 
-**The page derives nothing live** ([pages](docs/release-targets.md#pages)).
+**The page derives by drain alone** ([pages](docs/release-targets.md#pages)).
 Its streams' and computations' rows are the release's, so a result recorded in
-the page moves no table, chance or rating; the derivation running in the page
-on DuckStream's machinery is what closes it.
+the page moves no stream's table, chance or rating; the derivation running in
+the page on DuckStream's machinery is what closes it.
 
 **A duckstream's sink is empty in the page** ([pages](docs/release-targets.md#pages)):
 the release derives the rows of streams and computations, and xpense's

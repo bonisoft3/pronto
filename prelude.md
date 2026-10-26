@@ -11,7 +11,7 @@ these components; it only speaks up where it deviates from or extends them.
 
 ## Entities
 
-An entity is a typed table managed by [mecha](https://github.com/bonisoft3/mecha/tree/v0.14.0). Fields
+An entity is a typed table managed by [mecha](https://github.com/bonisoft3/mecha/tree/v0.17.1). Fields
 carry CEL constraints (`this` bound to the field value); rows may carry a
 row-level CEL invariant. Schema DDL, migrations, and API routes are generated
 from the program — there is nothing to hand-configure.
@@ -57,14 +57,14 @@ statistics lake. See [[docs/lattice#The durability ladder]].
 
 ## Screens and the shell
 
-Screens are interpreted [omnishell](https://github.com/bonisoft3/omnishell/tree/v0.14.0) config plus emitted HTML/CSS:
+Screens are interpreted [omnishell](https://github.com/bonisoft3/omnishell/tree/v0.19.1) config plus emitted HTML/CSS:
 single data path, forms-only mutations, reactive live queries. There is no
 build step and no application-owned effects. Residual computation lives in
 Jessie handlers running in SES Compartments, each receiving its arguments and
 nothing else — no DOM, no store, no ambient authority; time and randomness
 are injected. A handler returns a description of an effect for the shell to
 perform (Elm's `Cmd`, not `update` — a handler never receives the whole
-model); see [`plugins/omnishell/docs/terminal.md`](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/terminal.md) for the full comparison
+model); see [`plugins/omnishell/docs/terminal.md`](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md) for the full comparison
 and [component contracts](docs/component-contracts.md#rejected) for why
 "handler," not "island" or "update."
 
@@ -145,6 +145,15 @@ ports), then a container (with a declared shim at the browser tier),
 then an external API endpoint. Every escape is a
 box in ir.html; an app with none says so in its Decisions section.
 
+JavaScript an app serves is Jessie the cage runs, a declared unit's or
+host-DOM hatch's file, or the terminal's own; `check-facts` warns on anything
+else, naming the file, and the warning becomes an error once no app has one.
+An agent unit without a memo is a presenter: its worker paints and raises
+nothing, under a policy that refuses every connection but blob: and data:.
+A kinetic engine is Jessie too: a module graph of relative static imports,
+linked at build time and imported by the cage, endowed with nothing
+([the kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/kinetic.md#a-jessie-engine)).
+
 ## The virtual team
 
 Compilation itself is staffed: the brief's `team:` (default squad —
@@ -193,7 +202,7 @@ layer, not grounds for demoting a check to a slower one.
 ## Tiers
 
 Pronto names four rungs of
-[mecha's ladder](https://github.com/bonisoft3/mecha/blob/v0.14.0/README.md#4-vertical-scalability-down-and-up)
+[mecha's ladder](https://github.com/bonisoft3/mecha/blob/v0.17.1/README.md#4-vertical-scalability-down-and-up)
 — `browser`, `edge`, `container`, which is mecha's single machine, and `cloud`
 — of which the browser and the container are built; where an app is released,
 and what each target refuses, is [release targets](docs/release-targets.md).

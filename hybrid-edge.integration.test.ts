@@ -6,10 +6,9 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { compileHybrid } from "./hybrid.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
-import { instrument } from "../omnishell/instrument.ts";
 import { executeHybrid } from "./hybrid-local.ts";
 import { renderMachines } from "./bundle/edge-machines.ts";
-import { fixture, initial, quote, request, ROOT, run, surface, uuid } from "./testdata/hybrid-fixtures.ts";
+import { ROOT, fixture, initial, quote, request, run, surface, terminal, uuid } from "./testdata/hybrid-fixtures.ts";
 import { startWorker } from "../../libraries/mecha/packages/pglite-workerd/wrangler-dev.ts";
 import { load } from "../../libraries/mecha/packages/pglite-workerd/load.ts";
 import { browserTier } from "../../libraries/mecha/packages/mecha-browser/fence.ts";
@@ -20,7 +19,7 @@ const mecha = `${root}libraries/mecha`;
 Deno.test({ name: "hybrid commands step in the edge object, and its alarm wakes a deadline", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   Deno.statSync(`${mecha}/packages/pglite-workerd/dist/pglite.wasm`);
   const { spec, rules, compiled } = await fixture();
-  const spin = await compileHybrid({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), instrument);
+  const spin = await compileHybrid({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
   const schema = "hybrid_truco_turn";
   const tmp = await Deno.makeTempDir({ prefix: "pronto-hybrid-edge-" });
 
@@ -294,7 +293,7 @@ Deno.test({ name: "hybrid commands step in the edge object, and its alarm wakes 
       assertEquals(game.revision, "1", "the alarm's tick stepped the instance");
       assertEquals(game.state.plays, [{ seat: "a", card: 0 }], "the timeout played the lowest card");
       assertEquals(Number(await one(`SELECT count(*) FROM public.schedule;`)), 0, "the fire took the schedule");
-      assertEquals(Number(await one(`SELECT count(*) FROM public.machine_timer_tick WHERE caller = 'edge';`)), 1);
+      assertEquals(Number(await one(`SELECT count(*) FROM public.machine_timer_tick WHERE caller = 'alarm';`)), 1);
     });
   } finally {
     await worker.stop();

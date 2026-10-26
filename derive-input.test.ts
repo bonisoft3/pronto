@@ -13,13 +13,14 @@ code: {
   surface: {screens: home: #Screen, design: colors: ink: "#123456"}
   meta: {ir: source: "ir.html", decisions: save: ir: "save", tests: saved: ir: "saved", design: pendingLiterals: 0}
   #read: Item: {table: "item", mode: "lazy", reason: "screen"}
+  capabilities: {vendored: {}, hatches: {}}
   extra: {preserved: true}
 }
 if !_deriving {code: meta: tests: uncited: ir: string}
 out: {
   scale: [1, 2]
   files: {"shell/design.css": text: "authored design override", "shell/shell.css": text: "authored shell override"}
-  terminal: surface: {entry: "home", markupReader: "reader.js", machineSchema: "machine.cue"}
+  terminal: surface: {entry: "home", markupReader: "reader.js", machineSchema: "machine.cue", sw: "sw.js", boot: "boot.js", assets: boot: "", interpreterRoot: "interpreter"}
   cluster: meta: statics: [{file: "asset.svg", target: "/authored-asset.svg"}]
 }
 deployment: string
@@ -56,7 +57,7 @@ for (const [name, subdir, module] of [
       }).output();
       assert(!deployment.success, "unrelated deployment root unexpectedly became concrete");
       const input = await readDerivation(app, "sample", true) as Record<string, unknown>;
-      assert(Object.keys(input).length === 17, "canonical input fields changed");
+      assert(Object.keys(input).length === 18, "canonical input fields changed");
       assert(input.designCss === "authored design override" && input.shellCss === "authored shell override", "emitted stylesheet overrides lost");
       assert(JSON.stringify(input.statics) === '[{"file":"asset.svg","target":"/authored-asset.svg"}]', "emitted static overrides lost");
       const program = input.program as {

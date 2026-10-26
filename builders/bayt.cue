@@ -33,7 +33,7 @@ import (
 
 #Toolchain: {
 	...
-	tools: {"github:bonisoft3/bayt": "0.65.0", ...}
+	tools: {"github:bonisoft3/bayt": "0.66.0", ...}
 	say: say: {
 		...
 
@@ -102,7 +102,7 @@ import (
 
 	// Where pronto's scripts sit as a target's command sees them: where mise
 	// resolves it, the pinned release or, under mise.local.toml, the monorepo's.
-	_pronto: "$$(mise where github:bonisoft3/pronto)"
+	_pronto: "$(mise where github:bonisoft3/pronto)"
 	// The image the program evaluates in.
 	_base: ":setup"
 
@@ -217,10 +217,20 @@ import (
 		}
 	}
 
-	// The suites `ci` bakes where it was baked itself (sayt/depot's builder)
-	// rather than on the runner's daemon: a suite that brings up no stack,
-	// such as an overlay's native one. They run first.
-	#ciRemote: *[] | [...string]
+	_processComposeAdd: [{
+		platforms: {
+			amd64: {
+				url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_amd64.tar.gz"
+				checksum: "sha256:9b6dbc38324c0b0481f1cd1dd828ffdc78117129ec797678f4bf8c4023311281"
+			}
+			arm64: {
+				url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_arm64.tar.gz"
+				checksum: "sha256:52fa7d5a2d5e0db470faec5976204fc215ed7e3d13689e930cf522becfb63778"
+			}
+		}
+		dest:   "/usr/local/bin/process-compose"
+		unpack: true
+	}]
 
 	// The terminal's statics served from omnishell's tree (target /omnishell/),
 	// which the caddy copies from that image; the cluster serves the app's
@@ -414,61 +424,54 @@ import (
 				#check:   "visual"
 				deps: list.Concat([[":integrate:srcs", ":integrate:bayt"], B._stackSrcs])
 			}
-			// The migration replay starts throwaway databases from the images the
-			// runtime was built into, so it drives the host's daemon through its
-			// socket; a daemon of its own would hold none of those images. The
-			// image is the program's plus the docker CLI, and what the generated
-			// compose it reads includes: in the monorepo, the siblings' targets.
 			if B.cluster.capabilities.server {
-				"replay": sayt.integrate & B._program & (B._views & {#views: B._imageViews}) & {
-					deps: [B._base]
-					srcs: defaultExclude: "pronto-bayt": null
-					srcs: defaultExclude: "pronto-tests": null
-					cmd: "builtin": null
-					dockerfile: {
-						defaultPreamble: {
-							"docker": {priority: -10, copy: {
-								from: {name: core.lock.images.docker}
-								srcs: ["/usr/local/bin/docker"]
-								dst: "/usr/local/bin/docker"
-							}}
-							"docker-compose": {priority: -9, copy: {
-								from: {name: core.lock.images.docker}
-								srcs: ["/usr/local/libexec/docker/cli-plugins/docker-compose"]
-								dst: "/usr/local/libexec/docker/cli-plugins/docker-compose"
-							}}
-							// Ahead of setup's lazybox, whose `docker` is a stub that
-							// fetches a CLI through mise on every run.
-							"docker-path": {priority: -8, line: "ENV PATH=/usr/local/bin:$PATH"}
+				let schema = B.cluster.surface.schema
+				"replay": core.#target & {
+					activate: "mise x --"
+					entrypoint: {
+						do:    "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."
+						shell: "sh"
+						env: {
+							for k, v in B.cluster.surface.targets[schema.target].compose.environment {(k): v}
+							if schema.pgroll != _|_ for k, v in B.cluster.surface.targets[schema.pgroll.target].compose.environment if k != "DATABASE_URL" {(k): v}
 						}
-					}
-					compose: {
-						volumes: ["//var/run/docker.sock:/var/run/docker.sock"]
-						environment: {
-							// The tag the host's images carry, which the compose the
-							// replay reads interpolates into their names, and the
-							// switch that compose's includes read.
-							BAYT_IMAGE_TAG:        "${BAYT_IMAGE_TAG:-latest}"
-							MONOREPO_COMPOSE_MODE: "${MONOREPO_COMPOSE_MODE:-}"
-						}
-						// The images it replays from, which `up --build` builds and
-						// loads only for the services it starts: compose has no edge
-						// that builds an image without starting its service.
-						let schema = B.cluster.surface.schema
-						depends_on: {
-							"\(project.name)-\(schema.target)": condition: "service_started"
-							if schema.pgroll != _|_ {
-								"\(project.name)-\(schema.pgroll.target)": condition: "service_started"
-							}
-						}
-						// `$$` so compose leaves the substitution to the container's shell.
-						command: ["mise", "x", "--", "sh", "-c", "deno run --config \"\(B._pronto)/deno.json\" --allow-read --allow-write --allow-run --allow-env \"\(B._pronto)/check-replay.ts\" ."]
+						after: (schema.target): "healthy"
 					}
 				}
-				"ci-replay": sayt.ci & B._ciTask & B._runner & {
-					#closure: "replay"
-					#check:   "replay"
-					deps: [":replay:srcs", ":replay:bayt"]
+				"ci-replay": core.#target & {
+					activate: ""
+					taskfile: incremental: false
+					deps: list.Concat([
+						[B._base, ":\(schema.target)"],
+						[if schema.pgroll != _|_ {":\(schema.pgroll.target)"}],
+					])
+					srcs: globs: [
+						".bayt/process-compose.yaml",
+						".pronto/cluster.json",
+						"services/database/migrations/**",
+						"tests/[r]eplay.json",
+						"tests/[r]eplay/**",
+					]
+					dockerfile: {
+						from: ref: ":\(schema.target)"
+						add: B._processComposeAdd
+						copy: list.Concat([
+							[
+								{from: {ref: B._base}, srcs: ["/root/.local"], dst: "/root/.local"},
+								{from: {ref: B._base}, srcs: ["/monorep[o]"], dst: "/monorepo/"},
+							],
+							[if schema.pgroll != _|_ {{from: {ref: ":\(schema.pgroll.target)"}, srcs: [schema.pgroll.dir], dst: schema.pgroll.dir}}],
+						])
+						preamble: [
+							"ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH",
+							"ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo",
+							"ENV \(B.cluster.meta.door.env)=\(B.cluster.meta.door.port)",
+						]
+					}
+					cmd: builtin: {
+						shell: "sh"
+						do:    "process-compose --no-server -f .bayt/process-compose.yaml run replay"
+					}
 				}
 			}
 
@@ -534,71 +537,47 @@ import (
 			// build per app runs (sayt/depot's `ci`). Each suite brings its own
 			// stack up on the runner's daemon, so they run one at a time.
 			"ci": sayt.ci & B._ciTask & B._runner & {
-				_suites: list.Concat([B.#ciRemote, [for n, _ in project.targets if strings.HasPrefix(n, "ci-") && !list.Contains(B.#ciRemote, n) {n}]])
+				_suites: [for n, _ in project.targets if strings.HasPrefix(n, "ci-") {n}]
 				deps: [for n in _suites for v in ["srcs", "bayt"] {":\(n):\(v)"}]
 				srcs: defaultGlobs: graph: {glob: ".bayt/**"}
-				// The remote suites parse with Depot's frontend, which drops the
-				// pin's variable, so their Dockerfiles carry it as a headline; the
-				// runner's daemon parses with its own and takes them without it.
 				cmd: builtin: do: #"""
 					set -eu
 					export DOCKER_HOST_TCP="$DOCKER_HOST"
 					export DEPOT_DISABLE_OTEL=1
-					[ -n "$DEPOT_TOKEN" ] && bake="depot bake --project $DEPOT_PROJECT_ID" || bake="docker buildx bake"
-					pin() { [ -z "$BUILDKIT_SYNTAX" ] || find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i "$1" {} \; ; }
 					docker compose --profile '*' config -o /tmp/ci-compose.yaml
 					docker buildx bake --allow=fs.read=/ -f /tmp/ci-compose.yaml --print \#(strings.Join(_suites, " ")) > /tmp/ci-bake.json
-					\#([if len(B.#ciRemote) > 0 {"pin \"1i # syntax=$BUILDKIT_SYNTAX\""}, ":"][0])
 					for target in \#(strings.Join(_suites, " ")); do
-					 case " \#(strings.Join(B.#ciRemote, " ")) " in
-					 *" $target "*) executor="$bake" ;;
-					 *) executor="docker buildx bake"; \#([if len(B.#ciRemote) > 0 {"pin '1{/^# syntax=/d;}'"}, ":"][0]) ;;
-					 esac
-					 $executor -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' ${SAYT_NO_CACHE:+--no-cache --set "*.cache-from=" --set "*.cache-to="} ${SAYT_NO_CACHE_FROM:+--set "*.cache-from="} ${SAYT_NO_CACHE_TO:+--set "*.cache-to="} "$target"
+					 docker buildx bake -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' ${SAYT_NO_CACHE:+--no-cache --set "*.cache-from=" --set "*.cache-to="} ${SAYT_NO_CACHE_FROM:+--set "*.cache-from="} ${SAYT_NO_CACHE_TO:+--set "*.cache-to="} "$target"
 					done
 					"""#
 			}
 			if list.Contains(B.meta.targets, "docker") && B.cluster.capabilities.server {
-				"release-docker": {
+				"release-docker": core.#target & {
 					activate: ""
 					deps: list.Concat([
 						[":database", ":crud", ":caddy"],
+						if B.cluster.meta.served != _|_ {[":served-release"]},
 						if B.cluster.capabilities.auth {[":auth"]},
 					])
 					srcs: globs: [".bayt/process-compose.yaml"]
 					compose: {
 						manual: true
-						ports: ["8080:8080"]
+						ports: ["${PORT:-8080}:${PORT:-8080}"]
 						image: "${BAYT_DOCKER_REPOSITORY:-ghcr.io/bonisoft3/\(B.meta.app)}:${BAYT_IMAGE_TAG:-latest}"
 					}
-					dockerfile: {
-						from: name: core.lock.images.leap
+					dockerfile: core.nubox & {
 						defaultPreamble: "zypper-postgres": (zypper.#install & {
 							pkgs: [
 								"postgresql18-server=18.6-160000.1.1",
 								"postgresql18-contrib=18.6-160000.1.1",
 								"libopenssl3=3.5.0-160000.10.1",
-								"findutils=4.10.0-160000.2.2",
 							]
 							then: [
 								"rm -rf /usr/lib/locale/*",
 								"mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql",
 							]
 						}).out
-						add: [{
-							platforms: {
-								amd64: {
-									url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_amd64.tar.gz"
-									checksum: "sha256:9b6dbc38324c0b0481f1cd1dd828ffdc78117129ec797678f4bf8c4023311281"
-								}
-								arm64: {
-									url:      "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_arm64.tar.gz"
-									checksum: "sha256:52fa7d5a2d5e0db470faec5976204fc215ed7e3d13689e930cf522becfb63778"
-								}
-							}
-							dest:   "/usr/local/bin/process-compose"
-							unpack: true
-						}]
+						add: B._processComposeAdd
 						copy: list.Concat([
 							[
 								{from: {name: core.lock.images.microcheck}, srcs: ["/bin/httpcheck"], dst: "/usr/local/bin/httpcheck"},
@@ -607,10 +586,19 @@ import (
 								{from: {ref: ":crud"}, srcs: ["/usr/bin/postgrest"], dst: "/usr/local/bin/postgrest"},
 								{from: {ref: ":caddy"}, srcs: ["/usr/bin/caddy"], dst: "/usr/bin/caddy"},
 								{from: {ref: ":caddy"}, srcs: ["/etc/caddy/Caddyfile"], dst: "/etc/caddy/Caddyfile"},
-								{from: {ref: ":caddy"}, srcs: ["/srv"], dst: "/srv"},
-								{from: {ref: ":caddy"}, srcs: ["/omnishell"], dst: "/omnishell"},
 								{srcs: [".bayt/process-compose.yaml"], dst: "/.bayt/process-compose.yaml"},
 							],
+							// The door's tree as this target releases it (emit.cue's
+							// served-release), and the inline scripts its policy names.
+							if B.cluster.meta.served != _|_ {[
+								{from: {ref: ":served-release"}, srcs: ["\(omnishell.#Address.tree)/omnishell/"], dst: "/omnishell/"},
+								{from: {ref: ":served-release"}, srcs: ["\(omnishell.#Address.tree)/"], dst: "/srv/"},
+								{from: {ref: ":served-release"}, srcs: [omnishell.#Address.scripts], dst: "/etc/caddy/release-scripts"},
+							]},
+							if B.cluster.meta.served == _|_ {[
+								{from: {ref: ":caddy"}, srcs: ["/srv"], dst: "/srv"},
+								{from: {ref: ":caddy"}, srcs: ["/omnishell"], dst: "/omnishell"},
+							]},
 							if B.cluster.capabilities.auth {[
 								{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"},
 								{from: {ref: ":auth"}, srcs: ["/app"], dst: "/app"},
@@ -621,6 +609,7 @@ import (
 							[
 								"ENV PATH=/usr/lib/postgresql18/bin:/usr/local/bin:$PATH",
 								"ENV PGDATA=/var/lib/pgsql/data",
+								"ENV PORT=8080",
 								"ENV ORIGIN=http://localhost:8080",
 								"ENV CADDY_TLS_HOST_PORT=8080",
 							],
@@ -631,12 +620,16 @@ import (
 						epilogue: [
 							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'export PGDATA="${PGDATA:-/var/lib/pgsql/data}"' 'export POSTGRES_DB="${POSTGRES_DB:-\#(B.meta.app)}"' 'export PATH="/usr/lib/postgresql18/bin:$PATH"' 'q=$(printf "\047")' 'if [ ! -s "$PGDATA/PG_VERSION" ]; then' '  mkdir -p "$PGDATA" /run/postgresql' '  chown -R postgres:postgres "$PGDATA" /run/postgresql' '  setpriv --reuid=postgres --regid=postgres --clear-groups initdb -D "$PGDATA" --no-sync --encoding=UTF8 --auth=trust --locale-provider=icu --icu-locale=und --locale=C' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\''" start' '  if [ "$POSTGRES_DB" != "postgres" ]; then setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\""; fi' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      echo "Applying $f..."' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '      base=$(basename "$f")' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q) ON CONFLICT DO NOTHING"' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'else' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\''" start' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      base=$(basename "$f")' '      case "$base" in *seed*) continue;; esac' '      applied=$(setpriv --reuid=postgres --regid=postgres --clear-groups psql -t -A -U postgres -d "$POSTGRES_DB" -c "SELECT count(*) FROM _pronto_migrations WHERE name = $q$base$q")' '      if [ "$applied" = "0" ]; then' '        echo "Applying pending migration $f..."' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q)"' '      fi' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'fi' 'if [ "$1" = "postgres" ]; then shift; fi' 'exec setpriv --reuid=postgres --regid=postgres --clear-groups postgres -D "$PGDATA" -c listen_addresses=127.0.0.1 "$@"' > /usr/local/bin/docker-entrypoint.sh && chmod 755 /usr/local/bin/docker-entrypoint.sh"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'if [ "$1" = "microcheck" ]; then' '  shift' '  exec "$@"' 'fi' 'exec "$@"' > /usr/local/bin/bayt && chmod 755 /usr/local/bin/bayt"#,
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if ! grep -q "crud" /etc/hosts 2>/dev/null; then' '  echo "127.0.0.1 crud database auth" >> /etc/hosts 2>/dev/null || true' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if ! grep -q "crud" /etc/hosts 2>/dev/null; then' '  echo "127.0.0.1 crud database auth" >> /etc/hosts 2>/dev/null || true' 'fi' 'export PORT="${PORT:-8080}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
+							"RUN sed -i 's|http://127.0.0.1:8080/health|http://127.0.0.1:${PORT:-8080}/health|g' /.bayt/process-compose.yaml",
 							"RUN sed -i '/handle @rendered {/,/^[[:space:]]*}[[:space:]]*$/d' /etc/caddy/Caddyfile",
 							#"RUN awk '/handle \/electric\/\* \{/{p=1; print "  handle /electric/* {\n    header Content-Type application/json\n    header electric-handle stub\n    header electric-offset 0_0\n    header electric-cursor 0\n    header electric-schema `{\"id\":{\"type\":\"text\"}}`\n    header electric-up-to-date true\n    header Access-Control-Allow-Origin *\n    header Access-Control-Expose-Headers \"electric-handle, electric-offset, electric-cursor, electric-schema, electric-up-to-date, content-type, cache-control, x-txid\"\n\n    @subset query subset__where=*\n    handle @subset {\n      respond `{\"metadata\":{\"xmin\":\"1\",\"xmax\":\"1\",\"xip_list\":[],\"snapshot_mark\":0,\"database_lsn\":\"0\"},\"data\":[]}` 200\n    }\n    handle {\n      respond `[{\"headers\":{\"control\":\"up-to-date\"}}]` 200\n    }\n  }"; next} p && /^  \}/{p=0; next} !p{print}' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile"#,
 						]
 						entrypoint: ["/usr/local/bin/appliance-entrypoint.sh"]
-						cmd: ["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml", "-t=false", "--no-server"]
+						cmd: list.Concat([
+							["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml", "-t=false", "--no-server", "caddy"],
+							[if B.cluster.capabilities.auth {"auth"}],
+						])
 					}
 				}
 			}

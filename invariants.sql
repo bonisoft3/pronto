@@ -668,4 +668,22 @@ WHERE NOT ((kind IN ('state', 'paths') AND inside_kind = 'screen')
         OR (kind = 'effect' AND inside_kind = 'machine'))
 GROUP BY inside, inside_kind
 
+UNION ALL
+
+-- CLOSED against CLOSED. JavaScript the app serves is Jessie the cage runs and
+-- jessie.ts reads, a declared unit's or host-DOM hatch's file, or the
+-- terminal's own; anything else is plain JavaScript in the page, which can
+-- reach whatever the page can and which nothing here has read.
+--
+-- `warning`, like the literal rule above: apps' own scripts, Apex Run's game
+-- among them, still trip it.
+SELECT 'warning',
+       s.file,
+       s.file || ' is JavaScript the app serves that is neither Jessie pronto checks nor a declared unit''s or hatch''s file'
+FROM served_file s
+WHERE (s.file LIKE '%.js' OR s.file LIKE '%.mjs')
+  AND NOT EXISTS (SELECT 1 FROM handler h WHERE h.path = s.file)
+  AND NOT EXISTS (SELECT 1 FROM script_declared d WHERE d.path = s.file)
+  AND NOT EXISTS (SELECT 1 FROM script_platform p WHERE p.path = s.file)
+
 ORDER BY path, message

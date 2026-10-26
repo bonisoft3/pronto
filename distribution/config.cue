@@ -7,11 +7,14 @@ import (
 	"github.com/bonisoft3/pronto/resilience"
 )
 
-#Version:     "0.16.0"
-#SaytVersion: "0.44.2"
+#Version:     "0.24.0"
+#SaytVersion: "0.45.0"
 
-// The hybrid oracle harnesses exercise the checkout's terminal.
-#TestModules: ["hybrid-local.ts", "hybrid-battery.ts"]
+// Test-only modules: an app's tests import the hybrid oracle harnesses by URL,
+// and the portable types are refreshed from the checkout's mecha client. An
+// installed pronto neither type-checks nor runs them (installed_test.ts holds
+// the rest to its own tree).
+#TestModules: ["hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.
@@ -21,17 +24,33 @@ import (
 	mecha:     "github:bonisoft3/mecha"
 }
 
+// The ICE servers a release's terminal hands an online race's
+// RTCPeerConnection, by target (docs/release-targets.md#ice-servers): derived
+// from where the app is released and never declared by it. A dev or CI stack
+// writes none. An entry is an RTCIceServer, so a TURN relay's credentials fit.
+#IceServer: {
+	urls:        string | [string, ...string]
+	username?:   string
+	credential?: string
+}
+#IceServers: [string]: [...#IceServer]
+#IceServers: {
+	cloudflare: [{urls: "stun:stun.cloudflare.com:3478"}]
+	// The images the container targets ship: docker, gcp and k8s.
+	container: [{urls: "stun:stun.l.google.com:19302"}]
+}
+
 #Tools: {
 	...
 	"github:cue-lang/cue":     "0.16.1"
 	"github:denoland/deno":    "v2.9.7"
-	"github:go-task/task":     "v3.49.1"
-	"github:nushell/nushell":  "0.115.1"
+	"github:go-task/task":     "v3.54.0"
+	"github:nushell/nushell":  "0.116.1"
 	"github:bonisoft3/pronto": #Version
 	"github:bonisoft3/sayt":   #SaytVersion
 	// Compares every proto the app does not withhold against its own git
 	// history (check-proto.ts).
-	"github:bufbuild/buf": "1.73.0"
+	"github:bufbuild/buf": "1.74.0"
 	// Reads every SQL file the app does not withhold (check-sql.ts). A single
 	// binary per platform, windows included, so the lint runs wherever the
 	// toolchain does.
@@ -45,7 +64,7 @@ import (
 	// toolchain on PATH, as sayt's stub, which resets PATH on Linux, does not.
 	"github:F1bonacc1/process-compose": "v1.122.0"
 	"http:duckdb": {
-		version: "1.5.5"
+		version: "1.5.6"
 		platforms: {
 			for platform, asset in {
 				"linux-x64":        "linux-amd64"
@@ -103,7 +122,7 @@ import (
 	_valid:    saycfg.say & P.say.say
 	domain:    *"" | string
 	ssrOrigin: *"" | string
-	edgeClock: *"deadlines" | "disabled"
+	edgeClock: *"ticker" | "disabled"
 	// The interpreter's root and mecha's, which the bundler reads from.
 	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
 	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
@@ -138,17 +157,18 @@ import (
 	derive: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle derived.ts) . --tables \(strings.Join(P.derived.tables, ","))\([if len(P.derived.streams) > 0 {" --streams \(strings.Join(P.derived.streams, ","))"}, ""][0]) --out \(P._derivedOut)"}).out
 	// The browser tier's artifact: the app bundled into dist/browser/index.html,
 	// under the path prefix `sayt release@pages --base=/<prefix>` names.
-	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])"}).out
+	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])"}).out
 	// The edge tier's artifact, dist/cloudflare (bundle/edge.ts): the page, the
 	// Worker on mecha's edge cluster and the data directory its object loads.
 	// `--from`, given to `sayt release@cloudflare`, starts that directory from
 	// an archive built elsewhere instead of the migrations and derived rows;
 	// derive then has nothing to do.
 	_edgeData: "let data = if ($env.SAY_RELEASE_ARGS_FROM? | is-not-empty) { ['--from' $env.SAY_RELEASE_ARGS_FROM] } else { [\([if len(P.derived.tables) > 0 {"'--derived' '\(P._derivedOut)'"}, ""][0])] }"
-	edge: (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
+	edge: (_run & {args: "\(P._edgeData); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle edge.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/cloudflare ...$data --ice-servers '\(json.Marshal(#IceServers.cloudflare))'\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.domain != "" {" --domain \(P.domain)"}, ""][0])\([if P.ssrOrigin != "" {" --ssr-origin \(json.Marshal(P.ssrOrigin))"}, ""][0])"}).out
 	edgeDerive: "if ($env.SAY_RELEASE_ARGS_FROM? | is-empty) { \(P.derive) }"
-	// `--reset` replaces the object's data with this release's.
-	publishEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle publish-edge.ts) dist/cloudflare --mecha \(P._mecha) ...(if ($env.SAY_RELEASE_ARGS_RESET? | is-empty) { [] } else { ['--reset'] })"}).out
+	// `--reset` replaces the object's data with this release's; `--temporary`
+	// deploys to a throwaway account when none is logged in.
+	publishEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle publish-edge.ts) dist/cloudflare --mecha \(P._mecha) ...(if ($env.SAY_RELEASE_ARGS_RESET? | is-empty) { [] } else { ['--reset'] }) ...(if ($env.SAY_RELEASE_ARGS_TEMPORARY? | is-empty) { [] } else { ['--temporary'] })"}).out
 	// The container tier's artifact: the self-contained appliance image.
 	docker:        "docker compose build release-docker"
 	publishDocker: "use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag; let image_tag = ($tag | path basename); with-env { BAYT_IMAGE_TAG: $image_tag } { docker compose build release-docker; docker compose push release-docker }"

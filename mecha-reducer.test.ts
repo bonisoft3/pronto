@@ -1,7 +1,7 @@
+import { fileURLToPath } from "node:url";
 import { assert, assertEquals } from "jsr:@std/assert@1.0.11";
 import { compileMechaReducer } from "./mecha-reducer.ts";
-import { instrument } from "../omnishell/instrument.ts";
-import { fixture, ROOT, run } from "./testdata/hybrid-fixtures.ts";
+import { ROOT, fixture, run, terminal } from "./testdata/hybrid-fixtures.ts";
 
 Deno.test("SQL entropy omits UUID version and variant nibbles and fills byte boundaries", async () => {
   const { spec, rules } = await fixture();
@@ -11,8 +11,7 @@ Deno.test("SQL entropy omits UUID version and variant nibbles and fills byte bou
     const name = `entropy_${entropy}`;
     const compiled = await compileMechaReducer(
       { ...spec, name, entropy },
-      rules,
-      instrument,
+      rules, terminal,
     );
     const draw = compiled.sql.match(
       /CREATE OR REPLACE FUNCTION hybrid_\w+\.draw\(\)[\s\S]*?\$draw\$;/,
@@ -27,7 +26,7 @@ Deno.test("SQL entropy omits UUID version and variant nibbles and fills byte bou
       "-A",
       "--no-lock",
       "--config",
-      new URL("libraries/mecha/packages/mecha-edge/deno.json", ROOT).pathname,
+      fileURLToPath(new URL("libraries/mecha/packages/mecha-edge/deno.json", ROOT)),
       "-",
     ],
     `

@@ -1,18 +1,25 @@
 /// <reference lib="dom" />
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseHTML } from 'npm:linkedom@0.18.4'
-import { addressEdgeAssets, separateAssetDirectories } from './edge-addresses.ts'
+import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
+import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
 import { edgeHints } from './edge-hints.ts'
 import { acceptedLanguages, routeAt } from '../../omnishell/interpreter/fragment.js'
 
-async function fixture(changed = false, previous?: string) {
+const addresses = await releaseAddresses(fileURLToPath(new URL('../../omnishell', import.meta.url)))
+
+const stun = [{ urls: 'stun:stun.example:3478' }]
+
+async function fixture(changed = false, previous?: string, presenter?: { policy: string }) {
   const out = await Deno.makeTempDir({ prefix: 'edge-addresses-' })
   const cfg = {
+    ...(presenter ? { presenter } : {}),
     i18n: { default: 'pt-BR', locales: { 'pt-BR': { path: 'pt' }, 'en-GB': { path: 'en' } } },
     routes: [
-      { path: '/equipe/:id', paths: { 'pt-BR': '/equipe/:id', 'en-GB': '/team/:id' }, files: { html: 'shell/screens/team.html', css: 'shell/screens/team.css', handlers: ['shell/handlers/save.js'], shared: ['shell/shared/base.css'] } },
-      { path: '/other', files: { html: 'shell/screens/other.html', css: 'shell/screens/other.css' } },
+      { path: '/equipe/:id', nav: { label: 'Equipe' }, paths: { 'pt-BR': '/equipe/:id', 'en-GB': '/team/:id' }, files: { html: 'shell/screens/team.html', css: 'shell/screens/team.css', handlers: ['shell/handlers/save.js'], shared: ['shell/shared/base.css'] } },
+      { path: '/other', nav: { label: 'Other' }, files: { html: 'shell/screens/other.html', css: 'shell/screens/other.css' } },
     ],
   }
   const files: Record<string, string> = {
@@ -39,7 +46,7 @@ async function fixture(changed = false, previous?: string) {
     await Deno.writeTextFile(path.join(out, name), body)
   }
   try {
-    const hints = await addressEdgeAssets(out, previous)
+    const hints = await addressEdgeAssets(addresses, out, { previous, iceServers: stun })
     const { document } = parseHTML(await Deno.readTextFile(path.join(out, 'index.html')))
     const map = document.getElementById('pronto-assets')!.textContent!
     const imports = JSON.parse(map).imports as Record<string, string>
@@ -88,6 +95,15 @@ Deno.test('edge identity hashes the served bytes, preserves module bases, and au
   } finally { await Deno.remove(f.out, { recursive: true }) }
 })
 
+Deno.test("a presenter's worker script is sent with the presenter's policy, and none is sent without one", async () => {
+  const policy = "default-src 'none'; connect-src blob: data:"
+  const [with_, without] = [await fixture(false, undefined, { policy }), await fixture()]
+  try {
+    assert.ok((await Deno.readTextFile(path.join(with_.out, '_headers'))).includes(`/omnishell/interpreter/presenter.js\n  Content-Security-Policy: ${policy}\n`))
+    assert.ok(!(await Deno.readTextFile(path.join(without.out, '_headers'))).includes('presenter.js'))
+  } finally { await Promise.all([with_, without].map(f => Deno.remove(f.out, { recursive: true }))) }
+})
+
 Deno.test('changing a module keeps unrelated asset URLs and its importing module reusable', async () => {
   const before = await fixture(), after = await fixture(true)
   try {
@@ -104,7 +120,7 @@ Deno.test('a deployment retains verified prior URLs for open tabs without replac
     assert.equal(await Deno.readTextFile(path.join(after.out, before.imports['/shell/a.js'])), before.files['shell/a.js'])
     assert.equal(await Deno.readTextFile(path.join(after.out, 'shell/a.js')), after.files['shell/a.js'])
     for (const dir of [after.out, path.dirname(after.out), path.join(after.out, 'public')]) {
-      assert.throws(() => separateAssetDirectories(after.out, dir), /separate directory trees/)
+      assert.throws(() => addresses.separateAssetDirectories(after.out, dir), /separate directory trees/)
     }
     await Deno.writeTextFile(path.join(before.out, before.imports['/shell/a.js']), 'corrupt')
     await assert.rejects(() => fixture(true, before.out), /identity mismatch/)
@@ -123,4 +139,31 @@ Deno.test('route hints follow the shell’s locale and parameter resolution with
     const portuguese = edgeHints(new Request('https://app.test/equipe/42'), f.hints, routeAt, acceptedLanguages('en-GB;q=0, pt-BR;q=1'))
     assert.ok(!portuguese.includes(f.imports['/messages/en-GB.json']))
   } finally { await Deno.remove(f.out, { recursive: true }) }
+})
+
+// A release that dropped the target's list would still duel in every dev and
+// CI stack, which share a network, and fail only between two homes.
+Deno.test('the built edge tree serves the target\'s ICE servers, built and deployed alike', async () => {
+  const f = await fixture()
+  const fetched = globalThis.fetch
+  // The door, answering each path from the built tree.
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    assert.equal(url.origin, 'https://door.example')
+    try {
+      return new Response(await builtRelease(f.out)(url.pathname))
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error
+      return new Response(null, { status: 404 })
+    }
+  }
+  try {
+    assert.deepEqual(await releasedIceServers(builtRelease(f.out)), stun)
+    const deployed = deployedRelease('https://door.example')
+    await holdIceServers(deployed, stun, 'the deployment')
+    await assert.rejects(holdIceServers(deployed, [], 'the deployment'), /the deployment carries ICE servers \[\{"urls":"stun:stun.example:3478"\}\], not \[\]/)
+  } finally {
+    globalThis.fetch = fetched
+    await Deno.remove(f.out, { recursive: true })
+  }
 })

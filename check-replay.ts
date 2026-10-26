@@ -8,11 +8,9 @@
 // fixtures exercise upgrades and compare their catalogs through replay.sql;
 // intermediate bootstrap tables have never been exposed to a reader.
 //
-// Compose selects the app's built images, settings and runner command;
-// cluster.surface.schema publishes their initdb and migration directories.
-// The integrate build graph ensures those images match the current source.
-// Docker runs through the host daemon, including when this checker is itself
-// in a container, so fixtures cannot depend on host bind mounts.
+// Compose runs this checker in the replay process after the database is
+// healthy; cluster.surface.schema publishes the initdb and migration
+// directories baked into the image.
 //
 // Findings print as {severity, path, message} JSON (SPEC.md lint format);
 // exit 1 when any error is reported.
@@ -26,9 +24,6 @@ const here = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
 
 /** The scratch database the replay builds up; never the one the image seeded. */
 const REPLAY_DB = "pronto_replay";
-
-/** Unique per run so concurrent worktrees never remove each other’s database. */
-const CONTAINER_PREFIX = "pronto-replay-";
 
 /** Where a finding about a pgroll migration sends its reader: the program. */
 const declaredAt = (name: string) => `code.state.migrations.${name}`;
@@ -187,10 +182,11 @@ export function plain(text: string): string {
   return seen.findLast((f) => DIAGNOSIS.test(f)) ?? seen.at(-1) ?? "";
 }
 
-async function run(cmd: string, args: string[], opts: { cwd?: string; stdin?: string } = {}) {
+async function run(cmd: string, args: string[], opts: { cwd?: string; stdin?: string; env?: Record<string, string> } = {}) {
   const proc = new Deno.Command(cmd, {
     args,
     cwd: opts.cwd,
+    env: opts.env,
     stdin: opts.stdin === undefined ? "null" : "piped",
     stdout: "piped",
     stderr: "piped",
@@ -211,31 +207,6 @@ async function run(cmd: string, args: string[], opts: { cwd?: string; stdin?: st
 /** What the cluster publishes about its database (mecha's cluster.cue). */
 export type Published = { target: string; initdb: string; pgroll?: { target: string; dir: string; baseline: string } };
 
-type Service = {
-  entrypoint?: string[];
-  command?: string[];
-  image?: string;
-  environment?: Record<string, string>;
-  build?: { context?: string };
-};
-type Config = { services?: Record<string, Service> };
-
-/**
- * The service running one of the cluster's targets — its database, its
- * migrate step — as compose resolves it in whatever repo this is. Picked by
- * build context and not by name alone: the cluster the app instantiates
- * declares a database of its own under a name that ends the same way, and only
- * one of the two is built out of this directory.
- */
-export function targetService(config: Config, appDir: string, target: string): Runtime | undefined {
-  for (const [name, svc] of Object.entries(config.services ?? {})) {
-    if (!name.endsWith(`-${target}`) || !svc.image) continue;
-    if (svc.build?.context !== appDir) continue;
-    return { name, image: svc.image, env: svc.environment ?? {}, entrypoint: svc.entrypoint, command: svc.command };
-  }
-  return undefined;
-}
-
 /**
  * What initdb applies, in the order it applies it — read out of the image
  * rather than off the app's migrations directory, because that directory is not
@@ -244,10 +215,12 @@ export function targetService(config: Config, appDir: string, target: string): R
  * the app is broken, which is a fact about the replay. Byte order is initdb's
  * own: mecha's cluster refuses a step name under which the two would differ.
  */
-async function steps(container: string, initdb: string): Promise<string[]> {
-  const listed = await run("docker", ["exec", container, "find", initdb, "-maxdepth", "1", "-name", "*.sql", "-print"]);
-  if (!listed.ok) throw new Error(`could not list the image's initdb scripts: ${listed.stderr}`);
-  return listed.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "").sort();
+async function steps(initdb: string): Promise<string[]> {
+  const out: string[] = [];
+  for await (const entry of Deno.readDir(initdb)) {
+    if (entry.isFile && entry.name.endsWith(".sql")) out.push(`${initdb}/${entry.name}`);
+  }
+  return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /**
@@ -265,67 +238,36 @@ export async function locate(appDir: string, scriptPath: string): Promise<string
 }
 
 export async function main(appDir: string): Promise<number> {
-  const config = await run("docker", ["compose", "-f", ".bayt/compose.yaml", "config", "--format", "json"], { cwd: appDir });
-  if (!config.ok) throw new Error(`docker compose config failed: ${config.stderr}`);
-  // compose answers with absolute build contexts, so the app's is compared as one.
-  // The cluster's facts as generate wrote them (emit.cue's .pronto/cluster.json).
   const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published };
   if (!facts.server || facts.schema === undefined) {
     throw new Error("this app's every entity is a browser tier: it has no schema to replay");
   }
-  const published = facts.schema;
-  const services = JSON.parse(config.stdout) as Config;
-  const root = await Deno.realPath(appDir);
-  const service = targetService(services, root, published.target);
-  if (service === undefined) throw new Error("no database service in the generated compose: this app has no server tier to replay");
-
-  const present = await run("docker", ["image", "inspect", service.image]);
-  if (!present.ok) {
-    throw new Error(`${service.image} is not built — build the app before replaying its migrations`);
-  }
-  // Published only by a cluster given pgroll migrations.
-  const migrator = published.pgroll === undefined ? undefined : targetService(services, root, published.pgroll.target);
-  if (published.pgroll !== undefined && migrator === undefined) {
-    throw new Error(`the cluster publishes a ${published.pgroll.target} target the generated compose does not run: regenerate the app`);
-  }
-  if (migrator !== undefined && !(await run("docker", ["image", "inspect", migrator.image])).ok) {
-    throw new Error(`${migrator.image} is not built — build the app before replaying its migrations`);
-  }
-
   const fixtures = await loadFixtures(appDir);
-  const found = await replayDatabase({ appDir, published, service, migrator, fixtures });
+  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures });
   console.log(JSON.stringify(found, null, 2));
   return found.some((f) => f.severity === "error") ? 1 : 0;
 }
 
-export type Runtime = { name: string; image: string; env: Record<string, string>; entrypoint?: string[]; command?: string[] };
-export async function replayDatabase({ appDir, published, service, migrator, fixtures = [] }: {
-  appDir: string; published: Published; service: Runtime; migrator?: Runtime; fixtures?: UpgradeFixture[];
+export type Migrator = { entrypoint?: string[]; command?: string[]; env?: Record<string, string> };
+export async function replayDatabase({ appDir, published, env, migrator, fixtures = [] }: {
+  appDir: string; published: Published; env: Record<string, string>; migrator?: Migrator; fixtures?: UpgradeFixture[];
 }): Promise<Finding[]> {
-  const mine = `${CONTAINER_PREFIX}${service.name}-`;
-  const container = `${mine}${crypto.randomUUID().slice(0, 12)}`;
-  // Taken from the compose the app ships and never guessed: a replay that
-  // invents a user or a database name grades a schema built under settings the
-  // app does not run with, and says nothing about having done so.
-  const env = service.env;
   const settings = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_INITDB_ARGS"];
   const missing = settings.filter((k) => env[k] === undefined);
   if (missing.length > 0) {
-    throw new Error(`${service.name} declares no ${missing.join(", ")}: the replay reads the database's settings from the generated compose`);
+    throw new Error(`${published.target} declares no ${missing.join(", ")}: the replay reads the database's settings from its entrypoint environment`);
   }
-  // All of it: a step initdb runs may require more than these four, as mecha's
-  // role passwords step requires ELECTRIC_PASSWORD and AUTHENTICATOR_PASSWORD,
-  // and one it lacks ends the database before it is ever ready.
-  const started = await run("docker", [
-    "run", "-d", "--name", container,
-    ...Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
-    service.image,
-  ]);
-  if (!started.ok) throw new Error(`could not start ${service.image}: ${started.stderr}`);
 
   const user = env.POSTGRES_USER;
+  const pgEnv = { ...Deno.env.toObject(), ...env, PGPASSWORD: env.POSTGRES_PASSWORD };
   const psql = (db: string, sql: string, extra: string[] = []) =>
-    run("docker", ["exec", "-i", container, "psql", "-U", user, "-d", db, "-v", "ON_ERROR_STOP=1", "-q", ...extra], { stdin: sql });
+    run("psql", ["-h", "127.0.0.1", "-U", user, "-d", db, "-v", "ON_ERROR_STOP=1", "-q", ...extra], { stdin: sql, env: pgEnv });
+  const created: string[] = [];
+  let finished = false;
+  const finish = (findings: Finding[]) => {
+    finished = true;
+    return findings;
+  };
 
   try {
     // Waited for over TCP, and that is the whole point: while initdb applies
@@ -333,22 +275,17 @@ export async function replayDatabase({ appDir, published, service, migrator, fix
     // unix socket alone, which answers pg_isready and then goes away to be
     // restarted. Asking on 127.0.0.1 skips that one and waits for the server
     // that stays.
-    const ready = () => run("docker", ["exec", container, "pg_isready", "-h", "127.0.0.1", "-U", user]);
+    const ready = () => run("pg_isready", ["-h", "127.0.0.1", "-U", user], { env: pgEnv });
     for (let i = 0; i < 480; i++) {
       if ((await ready()).ok) break;
       await new Promise((r) => setTimeout(r, 500));
     }
     const live = await ready();
-    if (!live.ok) throw new Error(`${service.image} never became ready: ${live.stderr || live.stdout}`);
+    if (!live.ok) throw new Error(`${published.target} never became ready: ${live.stderr || live.stdout}`);
 
-    const scripts = await steps(container, published.initdb);
+    const scripts = await steps(published.initdb);
     if (scripts.length === 0) throw new Error("the database image carries no initdb scripts to replay");
     const findings: Finding[] = [];
-    const read = async (script: string) => {
-      const got = await run("docker", ["exec", container, "cat", script]);
-      if (!got.ok) throw new Error(`could not read ${script}: ${got.stderr}`);
-      return got.stdout;
-    };
     const must = async (result: ReturnType<typeof run>, what: string) => {
       const out = await result;
       if (!out.ok) throw new Error(`${what}: ${out.stderr || out.stdout}`);
@@ -361,9 +298,10 @@ export async function replayDatabase({ appDir, published, service, migrator, fix
         if (!scripts.some(s => s.endsWith(`/${name}`))) throw new Error(`retained fixture omits unknown initdb step ${name}`);
       }
       await sql("postgres", `CREATE DATABASE ${db}`);
+      created.push(db);
       for (const script of scripts) {
         if (omitted.includes(script.split("/").at(-1)!)) continue;
-        const applied = await psql(db, await read(script));
+        const applied = await psql(db, await Deno.readTextFile(script));
         if (!applied.ok) {
           findings.push({ severity: "error", path: await locate(appDir, script), message: `${db}: bootstrap failed: ${plain(applied.stderr)}` });
           return false;
@@ -371,39 +309,43 @@ export async function replayDatabase({ appDir, published, service, migrator, fix
       }
       return true;
     };
-    if (!await bootstrap(REPLAY_DB)) return findings;
-    if (!published.pgroll || !migrator) {
+    if (!await bootstrap(REPLAY_DB)) return finish(findings);
+    if (!published.pgroll) {
       if (fixtures.length) throw new Error("retained fixtures require a migration runner");
-      return findings;
+      return finish(findings);
     }
-    const { dir } = published.pgroll;
-    const declared = pgrollMigrations(await must(run("docker", ["run", "--rm", "--entrypoint", "ls", migrator.image, dir]), "list migrations"));
-    const imageConfig = JSON.parse(await must(run("docker", ["image", "inspect", migrator.image, "--format", "{{json .Config}}"]), "inspect migrator"));
-    const entrypoint = migrator.entrypoint ?? imageConfig.Entrypoint ?? [];
-    const command = migrator.command ?? imageConfig.Cmd ?? [];
+    const { dir, baseline } = published.pgroll;
+    const entries: string[] = [];
+    for await (const entry of Deno.readDir(dir)) {
+      if (entry.isFile) entries.push(entry.name);
+    }
+    const declared = pgrollMigrations(entries.join("\n"));
+    const entrypoint = migrator?.entrypoint ?? ["/migrate.sh"];
+    const command = migrator?.command ?? [dir, baseline];
     if (!Array.isArray(entrypoint) || !Array.isArray(command) || !entrypoint.length) throw new Error("migration runner must have an executable entrypoint");
-    const migrate = (db: string, through?: string) => {
+    const migrate = async (db: string, through?: string) => {
       const url = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(env.POSTGRES_PASSWORD)}@127.0.0.1:5432/${db}?sslmode=disable`;
-      const args = ["run", "--rm", "--network", `container:${container}`,
-        ...Object.entries({ ...migrator.env, DATABASE_URL: url }).flatMap(([k, v]) => ["-e", `${k}=${v}`])];
+      const runEnv = { ...pgEnv, ...migrator?.env, DATABASE_URL: url };
       if (through !== undefined) {
         if (!declared.includes(through)) throw new Error(`retained fixture names unknown migration ${through}`);
         if (!command.includes(dir)) throw new Error("migration runner command does not expose its migration directory");
-        const subset = "/tmp/pronto-replay-migrations";
-        // Copy inside the image: the daemon may be remote, so a local bind
-        // mount would select a directory on a different machine.
-        args.push("--entrypoint", "sh", migrator.image, "-c",
-          'set -eu; dest=$1; shift; mkdir "$dest"; while [ "$1" != -- ]; do cp "$1" "$dest/"; shift; done; shift; exec "$@"',
-          "replay-prefix", subset, ...declared.filter(n => n <= through).map(n => `${dir}/${n}.json`), "--",
-          ...entrypoint, ...command.map((arg: string) => arg === dir ? subset : arg));
-      } else {
-        args.push("--entrypoint", entrypoint[0], migrator.image, ...entrypoint.slice(1), ...command);
+        const subset = await Deno.makeTempDir({ prefix: "pronto-replay-migrations-" });
+        try {
+          for (const n of declared.filter(n => n <= through)) {
+            await Deno.copyFile(`${dir}/${n}.json`, `${subset}/${n}.json`);
+          }
+          const argv = [...entrypoint, ...command.map((arg: string) => arg === dir ? subset : arg)];
+          return await run(argv[0], argv.slice(1), { env: runEnv });
+        } finally {
+          await Deno.remove(subset, { recursive: true });
+        }
       }
-      return run("docker", args);
+      const argv = [...entrypoint, ...command];
+      return await run(argv[0], argv.slice(1), { env: runEnv });
     };
     const ledger = (db: string) => sql(db, "SELECT coalesce(json_agg(m ORDER BY name), '[]') FROM pgroll.migrations m WHERE schema = 'public'");
     const snapshot = async (db: string) => {
-      const schema = await must(run("docker", ["exec", container, "pg_dump", "-U", user, "-d", db, "--schema-only", "--schema=public"]), "dump schema");
+      const schema = await must(run("pg_dump", ["-h", "127.0.0.1", "-U", user, "-d", db, "--schema-only", "--schema=public"], { env: pgEnv }), "dump schema");
       return JSON.stringify({
         schema: schema.split("\n").filter(l => !/^\\(?:un)?restrict /.test(l)).join("\n"),
         catalog: await catalog(db),
@@ -430,7 +372,7 @@ export async function replayDatabase({ appDir, published, service, migrator, fix
       else if (before !== await snapshot(db)) findings.push({ severity: "error", path, message: "migration runner changed the schema, stored rows or ledger on restart" });
       return true;
     };
-    if (!await runAndRepeat(REPLAY_DB, "code.state.migrations")) return findings;
+    if (!await runAndRepeat(REPLAY_DB, "code.state.migrations")) return finish(findings);
     if (!fixtures.length) findings.push({ severity: "advisory", path: "tests/replay.json", message: "fresh bootstrap and migration restart checked; no retained-data upgrade fixtures are declared" });
     for (const [i, fixture] of fixtures.entries()) {
       const db = `${REPLAY_DB}_${i}`;
@@ -449,10 +391,12 @@ export async function replayDatabase({ appDir, published, service, migrator, fix
       const replaced = new Set(Object.keys(fixture.replacements));
       findings.push(...await compareCatalogs(before.filter(c => !replaced.has(c.tbl)), after.filter(c => !replaced.has(c.tbl)), path, appDir));
     }
-    return findings;
+    return finish(findings);
   } finally {
-    const removed = await run("docker", ["rm", "-f", "-v", container]);
-    if (!removed.ok) throw new Error(`could not remove replay database: ${removed.stderr}`);
+    for (const db of created) {
+      const dropped = await psql("postgres", `DROP DATABASE IF EXISTS ${db} WITH (FORCE)`);
+      if (!dropped.ok && finished) throw new Error(`could not drop replay database ${db}: ${dropped.stderr}`);
+    }
   }
 }
 

@@ -20,9 +20,9 @@ as one graph.
 | part | type | re-exported by | default instance |
 |---|---|---|---|
 | `code` | `#App` ([`schema.cue`](../schema.cue)) | — | the app's `program.cue` |
-| `cluster` | `#Cluster` ([`cluster.cue`](https://github.com/bonisoft3/mecha/blob/v0.14.0/cluster.cue)) | [`clusters/mecha.cue`](../clusters/mecha.cue) | `#DefaultCluster` |
-| `terminal` | `#Terminal` ([`terminal.cue`](https://github.com/bonisoft3/omnishell/blob/v0.14.0/terminal.cue)) | [`terminals/omnishell.cue`](../terminals/omnishell.cue) | `#DefaultTerminal` |
-| `loop` | `#Loop` ([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.44.2/loop.cue)) | [`loops/sayt.cue`](../loops/sayt.cue) | `#DefaultLoop` |
+| `cluster` | `#Cluster` ([`cluster.cue`](https://github.com/bonisoft3/mecha/blob/v0.17.1/cluster.cue)) | [`clusters/mecha.cue`](../clusters/mecha.cue) | `#DefaultCluster` |
+| `terminal` | `#Terminal` ([`terminal.cue`](https://github.com/bonisoft3/omnishell/blob/v0.19.1/terminal.cue)) | [`terminals/omnishell.cue`](../terminals/omnishell.cue) | `#DefaultTerminal` |
+| `loop` | `#Loop` ([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.45.0/loop.cue)) | [`loops/sayt.cue`](../loops/sayt.cue) | `#DefaultLoop` |
 | `build` | `#Build` ([`builders/bayt.cue`](../builders/bayt.cue)), over bayt's `#project` | — | `#DefaultBuild` |
 
 The brief's frontmatter and [SPEC](../SPEC.md#frontmatter-the-per-app-harness)
@@ -72,7 +72,7 @@ its directory, and `write.ts` refuses a `src` outside the app.
 
 **Returned requests are a protocol, not a field.** A reduce's `{updates, then}`
 and a machine's effects are how a unit acts on state
-([the terminal's surfaces](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/terminal.md#what-the-terminal-owns)).
+([the terminal's surfaces](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md#what-the-terminal-owns)).
 They are the verb, not a third noun beside state and capabilities, so no part
 declares them. `#App.surface.flows` is the one place a program names one,
 filed under the screen it starts from.
@@ -110,7 +110,7 @@ on playwright's base. It carries `tests/**`, plus whatever `srcs` names.
 ```cue
 build: checks: "favorites": {
 	priority: 1
-	cmds: ["deno run --config tests/deno.json --no-lock --allow-env --allow-read --allow-net --unsafely-ignore-certificate-errors=caddy tests/favorites.ts ."]
+	cmds: ["deno run --config tests/deno.json --lock tests/deno.lock --frozen --allow-env --allow-read --allow-net --unsafely-ignore-certificate-errors=caddy tests/favorites.ts ."]
 	note: "a favourite is counted by the pipelines"
 }
 build: checks: "paint": {
@@ -120,6 +120,57 @@ build: checks: "paint": {
 	note: "the painted colours against the ground truth"
 }
 ```
+
+## Platform pins
+
+An installed app's tests take the platform the way its mirror does: by the raw
+URLs of omnishell's and pronto's mirrors at the tags the app's CUE module
+requires (`.mirror/cue.mod/module.cue`), such as
+`https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/instrument.ts`.
+One module per app, `tests/platform.ts`, re-exports what its tests use, so a
+release train moves the tags of one file, and the tests import it relatively.
+A mirror's tests then resolve anywhere: on a host, in a check image, in a fresh
+clone.
+
+- **The monorepo runs them at HEAD.** `apps/deno.json` is a deno workspace of
+  the installed apps' `tests/` (`copy.bara.sky`'s `installed_app`s). Its
+  `imports` map each pinned prefix to the checkout's tree, and `/omnishell/`,
+  where an app's own modules import the terminal, to omnishell's: a member's
+  `imports` reach its `tests/` alone, so an app's own `/omnishell/` mapping,
+  to the pinned URL for its mirror, never reaches its shell. `just
+  generate-all` writes the file from the pins it finds
+  (the monorepo's `apps/platform_pins.nu write`), and
+  its `check`, in CI's test step, fails when the map, a tree's pins and its
+  CUE module disagree. Compose-mode check images carry `apps/deno.json` with
+  the compiler's sources and resolve to `/monorepo/plugins/`; a mirror's check
+  image fetches the pins, so it needs the network.
+- **Its settings.** The workspace sits in `apps/` rather than at the root,
+  whose `package.json` is mecha's npm workspace: its linking needs
+  `nodeModulesDir` manual, the members want none, and a workspace has one.
+  `"lock": false` there, and every check passes `--lock tests/deno.lock
+  --frozen`, since deno anchors a member's lock at the workspace. A member
+  config declares no `npm:` or `jsr:` import, so the lock has one shape with
+  the workspace and without it. The other deno projects under `apps/` warn that
+  they are no members and ignore it.
+- **Integrity.** The monorepo never fetches a pinned URL, so `platform_pins.nu
+  lock <app>` records two graphs in the one `tests/deno.lock`: the checkout's,
+  for HEAD's own `npm:` and `jsr:` imports, and a copy of the app outside the
+  repository, which fetches every pin as its mirror does. That half needs the
+  tags pushed. A pin may name the release its own train tags: the monorepo
+  never fetches it, so only the lock and the mirror's sync wait for the tag.
+  deno.lock records module imports, not `text` or `bytes` ones
+  (`--unstable-raw-imports`), so a module also imports as code a file it reads
+  as text (SES in `tests/platform.ts`, `hybrid-runtime.js` in
+  `mecha-reducer.ts`); GGRS's wasm is the one file only read as bytes. `check`
+  fails when a lock lacks a module its app imports by pin.
+- **Platform modules load by URL.** What an app's tests reach in omnishell and
+  pronto imports relatively or by full `npm:` and `jsr:` specifiers, reads a
+  neighbouring file by import rather than `Deno.readTextFile(new URL(…,
+  import.meta.url))`, and reaches the other package by its pinned URL:
+  `hybrid-local.ts` and `testdata/hybrid-fixtures.ts` take omnishell at the tag
+  pronto's CUE module requires. pronto's own tests run that release, not the
+  sibling tree: pronto is no member, because its `deno.lock` ships with it and
+  a member's lock moves to the workspace.
 
 ## Web platform envelope
 
@@ -157,7 +208,7 @@ Declared via `meta.social: #Social`:
 
 - **Tags emitted**: OpenGraph (`og:title`, `og:description`, `og:type`, `og:image`, `og:image:alt`) and Twitter Card (`twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`, `twitter:site`, `twitter:creator`).
 - **Defaults**: `title` and `description` inherit from `#App.meta`. `card` defaults to `"summary_large_image"` if `image` is set, else `"summary"`. `type` defaults to `"website"`.
-- **The origin is the deployment's**: a card names no address of its own. The app's absolute addresses are spelled against one origin, the deployment's `ORIGIN`, stated beside the auth service's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.14.0/docs/proxy.md#the-origin)); the image never holds it. `#Social` has no `url`, so declaring one is a compile error rather than a second statement of the origin that the build would fix into an image every deployment runs.
+- **The origin is the deployment's**: a card names no address of its own. The app's absolute addresses are spelled against one origin, the deployment's `ORIGIN`, stated beside the auth service's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/proxy.md#the-origin)); the image never holds it. `#Social` has no `url`, so declaring one is a compile error rather than a second statement of the origin that the build would fix into an image every deployment runs.
 - **Local images**: Social card scrapers require absolute image URLs. A local `image` is mounted as a cluster static under `/srv/` and named from the root (`/preview.png`) in the entry; a rendered document spells it absolute against the origin. A remote `https://` or `http://` image is named as written. Protocol-relative URLs (`//`), data URIs and path traversal (`..`) are refused at compile time.
 - **Per address**: the card above is the entry's, spelled for the app, and the entry is the shell every client-routed address is answered with, so it names no `og:url`, as it names no canonical: either would claim the root for every address. A [rendered document](screens.md#how-a-routes-first-document-is-rendered) (`ssg` or `ssr`) states its own canonical, absolute against the deployment's origin, and its card follows it: `og:url` is the canonical (dropped where the address has none), `og:title` and `twitter:title` are the page's title, a local image is absolute; the rest of the card stands. An address meant to be shared with a scraper-readable image is one that is rendered.
 
@@ -213,7 +264,7 @@ collections ──► live query ──► region ──► DOM          bus ◄
 - **Postgres is upstream of reads and downstream of writes.**
 - **The region is the sink**, and the terminal owns it. Rows are keyed by
   primary key, so the sink applies a delta rather than diffing two trees
-  ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/screen-updates.md#when-data-changes)).
+  ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/screen-updates.md#when-data-changes)).
   A sink whose input empties takes its output with it: a vanished row is a
   removal, never a template left standing over the last value.
 - **A pipeline is the same shape one tier down.** The bus carries the
@@ -228,7 +279,7 @@ collections ──► live query ──► region ──► DOM          bus ◄
   second data language.
 
 A region's read is a query the store maintains
-([omnishell's data](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/data.md#a-regions-rows)).
+([omnishell's data](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/data.md#a-regions-rows)).
 Server-computed reads (full-text search, embed-path filters, hinted or nested
 embeds, a filter the store cannot translate) stay PostgREST queries, re-run
 when a table they depend on changes. The collections are the change signal,
@@ -236,19 +287,47 @@ never a clock.
 
 ## Dual planes and the kinetic contract
 
-Pronto separates application state into two planes:
-1. **The relational plane**: Durable entities (`tab`, `device`, `server`, `live`) queryable via PostgREST and synchronized via ElectricSQL shapes. Mutations occur on-demand via forms and pure Jessie handlers.
-2. **The kinetic plane**: Ephemeral high-frequency states living below `tab` (e.g. 35Hz, 60Hz, 120Hz physics loops, 3D simulations, and canvas interactions).
+A program's state lives in two planes, a hierarchy traded on fan-out
+against latency:
 
-Rather than abandoning determinism at the kinetic boundary, Omnishell's runtime provides `createKineticHost` governed by the pure engine contract (see [Kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.14.0/docs/kinetic.md)):
-- **`initState(seed)`**: Returns immutable initial state.
-- **`advanceFrame(state, cmd)`**: Pure fixed-step transition step.
-- **`saveState(state)`** and **`loadState(snapshot)`**: Formally verify the algebraic isomorphism $\text{loadState} \circ \text{saveState} = \text{id}$.
+| | DOM plane | Kinetic plane |
+| --- | --- | --- |
+| State | durable entities (`tab`, `device`, `offline`, `live`, `server`) moved by IVM: the store, Electric shapes, the pipelines | a deterministic engine's frames below `tab`, moved by GGPO-style rollback with prediction |
+| Presented by | HTML and CSS over rows | canvas, in a presenter's worker ([the seats](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md#the-seats)) |
+| Fans out | one to many | few to few: one session's peers |
+| Latency | a round trip per change | none locally; a late input is a rollback |
 
-The kinetic host decouples simulation ticks from variable display refresh rates, maintains an in-memory snapshot ring buffer, and injects a deterministic Mulberry32 PRNG. This extends Pronto's universal time travel from low-frequency database transactions down to frame-by-frame physics scrubbing, rollback networking, and timeline branching.
+The DOM plane composes the kinetic one: a Cortex state hosts a kinetic
+child, and the child reaches rows only by **lifting milestones**, the
+app-level events the engine names (a checkpoint, a stage's end, a duel's
+finish), each at a confirmed frame, with every seat's inputs since the last
+one. Confirmation is the condition and the milestone the trigger, so a
+lifted row is never rolled back and nothing is lifted per frame. Authority
+runs one way: a row can overrule the kinetic plane, never the reverse. A
+reader past the session's peers reads the lifted rows. Scrubbing the DOM
+plane's history to a milestone loads the kinetic host at its frame; between
+milestones the host's ring travels frame by frame.
+
+The engine contract that makes this hold is the kinetic host's
+([Kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/kinetic.md)): `initState(seed)`,
+`advanceFrame(state, cmd)`, and `saveState`/`loadState` with
+$\text{loadState} \circ \text{saveState} = \text{id}$, checked by its sync
+test on every tick. Why each piece is where it is, and what was rejected, is
+[[decisions/2026-10-23-kinetic-machine|the kinetic-machine record]].
 
 ## Rejected
 
+- **Test configs that name where the platform lives** — written from `mise
+  where`, they carry one machine's absolute paths; rewritten by copybara for
+  each mirror, the mirror runs a config the monorepo never tested, and a
+  rewrite whose text drifted passes as a no-op.
+- **The workspace at the repository's root** — the root's `package.json` is
+  mecha's npm workspace, which needs `nodeModulesDir` manual where the apps'
+  tests need none, and a workspace has one.
+- **JSR for the platform's modules** — publishing needs an account, and the
+  registry is a central service the mirrors do not need.
+- **pnpm `github:` dependencies** — they install into `node_modules`, under
+  which deno refuses to strip TypeScript.
 - **Returned requests as a namespace beside state** — it repeats MVC's
   controller, which collapses what changed into where things live.
 - **Deriving `#emit` by matching field names across the parts** — CUE

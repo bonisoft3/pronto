@@ -10,16 +10,9 @@ tasks:
       sh -c "set -eu
       export DOCKER_HOST_TCP=\"\$DOCKER_HOST\"
       export DEPOT_DISABLE_OTEL=1
-      [ -n \"\$DEPOT_TOKEN\" ] && bake=\"depot bake --project \$DEPOT_PROJECT_ID\" || bake=\"docker buildx bake\"
-      pin() { [ -z \"\$BUILDKIT_SYNTAX\" ] || find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i \"\$1\" {} \\; ; }
       docker compose --profile '*' config -o /tmp/ci-compose.yaml
       docker buildx bake --allow=fs.read=/ -f /tmp/ci-compose.yaml --print ci-visual > /tmp/ci-bake.json
-      :
       for target in ci-visual; do
-       case \"  \" in
-       *\" \$target \"*) executor=\"\$bake\" ;;
-       *) executor=\"docker buildx bake\"; : ;;
-       esac
-       \$executor -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' \${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} \${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} \${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} \"\$target\"
+       docker buildx bake -f /tmp/ci-bake.json --progress plain --set '*.output=type=cacheonly' \${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} \${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} \${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} \"\$target\"
       done"
 version: "3"

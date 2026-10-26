@@ -59,9 +59,9 @@ scheduleOutcomeCaptured: strings.Contains(_scheduledCDC, "tick_done") & true
 scheduleCDCSourceTables: json.Marshal(list.SortStrings(strings.Split(
 	_scheduledFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["profile", "tick", "tick_done"])
 
-// Released to pages, a schedule is skipped rather than refused: the page runs
-// no stream a tick could wake. It asks the target for no clock, and its seed,
-// which writes the container image's `schedule` table, stays out of the page.
+// Released to pages, a schedule asks the target for no clock: the page runs
+// its own while it is open, over the seed it takes whole, with the table the
+// bundler places before it.
 _scheduledPaged: pronto.#App & {
 	for k, v in _scheduled if k != "meta" {(k): v}
 	meta: {
@@ -80,9 +80,14 @@ _scheduledPagedFiles: (pronto.#emit & {
 	build: (pronto.#DefaultBuild & {code: _scheduledPaged, loop: _scheduledPagedLoop, cluster: _scheduledPagedCluster, terminal: _scheduledPagedTerminal}).out
 }).files
 _pagedSeed: _scheduledPagedFiles["\(_migrations)/801_schedule_seed.sql"].text
-pagedSeedContainerOnly: (strings.HasPrefix(_pagedSeed, "-- tier: container\n") && strings.HasSuffix(_pagedSeed, "\n-- tier: any\n")) & true
+pagedSeedWhole: strings.Contains(_pagedSeed, "-- tier:") & false
 
 // The framework's steps hold 800-899, so an app step there is refused rather
 // than left to collide with whichever one a later declaration places.
 appStepInFrameworkRange: ((pronto.#App & {state: rawMigrations: [{name: "801_mine.sql", src: "x.sql"}]}).state == _|_) & true
 appStepBelowFrameworkRange: ((pronto.#App & {state: rawMigrations: [{name: "799_mine.sql", src: "x.sql"}]}).state.rawMigrations[0].name) & "799_mine.sql"
+
+// A step over a single value is refused at vet, as croner 10 and the ticker
+// refuse it at run time, where a schedule that never ticks says nothing.
+cronSingleStepRefused: ((pronto.#Schedule & {name: "s", cron: "5/10 2 * * *", emits: {entity: "Tick", values: {}}}).cron == _|_) & true
+cronRangeStep: (pronto.#Schedule & {name: "s", cron: "5-59/10 2 * * *", emits: {entity: "Tick", values: {}}}).cron & "5-59/10 2 * * *"

@@ -203,8 +203,14 @@ async function main() {
   if (!(timeout > 0)) fail(`--timeout is seconds, not ${flags['--timeout']}`)
 
   const project = `${path.basename(app)}-derived`.toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+  // Nothing on the host reads this cluster — every call is a compose exec —
+  // so it comes up from the launch target's closure, which bayt writes
+  // without the ports file: the door's host port stays the running launch's.
+  const closure = path.join('.bayt', 'compose.launch.closure.yaml')
+  await Deno.stat(path.join(app, closure)).catch(() => fail(`${closure} is not emitted; bayt writes it for the launch target`))
+  const composeRun = (...a: string[]) => run('docker', ['compose', '-p', project, '-f', closure, ...a], app)
   const compose = async (...a: string[]) => {
-    const r = await run('docker', ['compose', '-p', project, ...a], app)
+    const r = await composeRun(...a)
     if (!r.ok) throw new Error(`docker compose ${a.join(' ')} failed:\n${r.stderr}`)
     return r.stdout
   }
@@ -215,6 +221,8 @@ async function main() {
   const service = (target: string) =>
     Object.entries(services).find(([name, s]) => name.endsWith(`-${target}`) && s.build?.context === app)
   const database = service('database') ?? fail('the compose runs no database')
+  // The closure's services carry the app's prefix, the launch entry too.
+  const launch = Object.keys(services).find((name) => name.endsWith('-launch')) ?? fail('the closure runs no launch')
   const transform = service('transform')
   const redis = service('redis')
   const compute = service('compute')
@@ -308,7 +316,7 @@ async function main() {
   try {
     await compose('down', '-v', '--remove-orphans')
     console.error(`derived: building and launching ${project}`)
-    await compose('up', '-d', '--wait', '--build', 'launch')
+    await compose('up', '-d', '--wait', '--build', launch)
     const deadline = Date.now() + timeout * 1000
     const settlement = new Settlement(window, Date.now())
     let said = '', sql = ''
@@ -338,7 +346,7 @@ async function main() {
   } catch (e) {
     failure = e
   }
-  const down = await run('docker', ['compose', '-p', project, 'down', '-v', '--remove-orphans'], app)
+  const down = await composeRun('down', '-v', '--remove-orphans')
   if (failure) throw failure
   if (!down.ok) fail(`tearing ${project} down failed:\n${down.stderr}`)
 }

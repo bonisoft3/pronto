@@ -21,10 +21,12 @@ const HEAD = /<head\b[^>]*>/;
 
 async function keptCopy(response) {
   const html = await response.text();
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
   return new Response(html.replace(SERVED_READS, "").replace(HEAD, (head) => `${head}<meta name="pronto-kept">`), {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
+    headers,
   });
 }
 
