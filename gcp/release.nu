@@ -346,6 +346,9 @@ def stop-preview [plan: record] {
 def empty-preview [plan: record] {
 	stop-preview $plan
 	let n = $plan.names
+	# Cloud SQL answers a database on a missing instance with a 403, not a
+	# 404: an app's first preview has no instance yet.
+	if not (exists sql instances describe $n.instance --project $plan.project) { return }
 	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
 		print $"gcp: emptying the preview ($plan.preview): dropping its database on ($n.instance)"
 		gc sql databases delete $n.database --instance $n.instance --project $plan.project | ignore
