@@ -89,7 +89,9 @@ import (
 		// container with none a whole one, against a cap of 8 for them all.
 		cpu: *250 | int & >=80 & <=8000
 		// The environment compose gives the service, filled by the release, as
-		// the ticker's is; release.cue may add to it. In the instance, a peer
+		// the ticker's is; release.cue may add to it, and a key it sets is the
+		// release's in place of compose's (a broker's production address, say,
+		// where compose names a developer's machine). In the instance, a peer
 		// compose names (http://crud:3000, another sidecar) is the loopback
 		// port that container holds there (_loopback), a key naming one of the
 		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
