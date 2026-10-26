@@ -147,6 +147,9 @@ import (
 	k8s: (_run & {args: "run-mise exec -- nu ($pronto | path join k8s release.nu)"}).out
 	// The cloud tier on GCP: Cloud Run beside Cloud SQL, with gcloud alone.
 	gcp: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp release.nu)"}).out
+	// Its integration tests against a deployed copy (verify@gcp): the drivers
+	// integrate runs that read APP_URL, in Cloud Build against its address.
+	gcpVerify: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp verify.nu)"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// Its own tests import siblings a release of it does not carry.

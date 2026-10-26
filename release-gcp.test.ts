@@ -285,52 +285,205 @@ Deno.test("a preview name Cloud Run, Cloud SQL or a secret would refuse is refus
   }
 });
 
-// A machine's timers and a chess clock's flag fall only where the ticker runs.
-const ticking = `, image: pushed: ticker: {tag: "latest", digest: "${digest("7")}"}, ticker: env: TICKER_LOG: "info", runHost: "bonk-chess-1.us-central1.run.app"`;
+// An app's own containers (a plugin's collector): built and pushed as the
+// cluster's images, dialed by the door, and, where one exports Prometheus
+// metrics, scraped into Managed Service for Prometheus by its sidecar.
+const sidecarPushed = `{${["caddy", "crud", "auth", "electric", "database", "migrate", "perf-collector"].map((s, i) => `"${s}": {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+const withSidecar = (sidecar: string) => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${sidecarPushed}, sidecars: "perf-collector": ${sidecar}}`;
 
-Deno.test("the ticker is one more container of the service, writing through crud with the service token", async () => {
-  const r = await built(release(ticking), "service");
+Deno.test("a sidecar runs beside the cluster, by its pushed digest, behind the door", async () => {
+  const r = await built(withSidecar(`{port: 8687}`), "plan");
   assertEquals(r.success, true, r.stderr);
-  const t = r.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "ticker");
-  assert(t, "no ticker container");
-  const env = Object.fromEntries(t.env.map((e: { name: string; value?: string; valueFrom?: unknown }) => [e.name, e.value ?? e.valueFrom]));
-  assertEquals(env.CRUD_URL, "http://127.0.0.1:3000");
-  assertEquals(env.PORT, "9998");
-  assertEquals(env.TICKER_LOG, "info");
-  assertStringIncludes(JSON.stringify(env.SERVICE_JWT), "battlechess-service-jwt");
-  assertStringIncludes(t.image, "battlechess-ticker@");
-  const deps = JSON.parse(r.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
-  assertEquals([deps.caddy.includes("ticker"), deps.ticker], [true, ["crud"]]);
-  const caddy = r.value.spec.template.spec.containers[0];
-  assertEquals(caddy.env.find((e: { name: string }) => e.name === "PRONTO_UPSTREAM_TICKER").value, "127.0.0.1:9998");
+  assertEquals(r.value.sidecars, ["perf-collector"]);
+  assertEquals(r.value.scrapeConfig, "");
+  const s = await built(withSidecar(`{port: 8687}`), "service");
+  const containers = s.value.spec.template.spec.containers;
+  const by = (n: string) => containers.find((c: { name: string }) => c.name === n);
+  assertStringIncludes(by("perf-collector").image, `battlechess-perf-collector@${digest("6")}`);
+  assertEquals(by("perf-collector").startupProbe.tcpSocket.port, 8687);
+  const caddy = Object.fromEntries(by("caddy").env.filter((e: { value?: string }) => e.value).map((e: { name: string; value: string }) => [e.name, e.value]));
+  assertEquals(caddy.PRONTO_UPSTREAM_PERF_COLLECTOR, "127.0.0.1:8687");
+  // Unscraped: no collector of Google's, no volume.
+  assertEquals(by("gmp-collector"), undefined);
+  assertEquals(s.value.spec.template.spec.volumes, undefined);
+  // The door does not wait on it: a collector down is no outage.
+  const deps = JSON.parse(s.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy.includes("perf-collector"), false);
 });
 
-Deno.test("an app without a ticker gets no ticker container and no clock", async () => {
-  const service = await built(release(), "service");
-  assertEquals(service.success, true, service.stderr);
-  assertEquals(service.value.spec.template.spec.containers.some((c: { name: string }) => c.name === "ticker"), false);
-  const plan = await built(release(), "plan");
-  assertEquals(plan.value.clock, undefined);
+// A sidecar that talks to the cluster (a plugin's service): compose's environment, its peers at
+// their loopback ports, the cluster's secrets from Secret Manager, and readers' origin.
+Deno.test("a sidecar's environment: the cluster's secrets mounted, the origin the release's", async () => {
+  const env = `{CRUD_URL: "http://127.0.0.1:3000", SERVICE_JWT: "the-development-token", ORIGIN: "https://localhost:28102", BILLING_DOCUMENT: "{\\"plans\\":{}}"}`;
+  const s = await built(withSidecar(`{port: 8687, env: ${env}}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const c = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  const by = Object.fromEntries(c.env.map((e: { name: string }) => [e.name, e]));
+  assertEquals(by.SERVICE_JWT.valueFrom, { secretKeyRef: { name: "battlechess-service-jwt", key: "latest" } });
+  assertEquals(by.SERVICE_JWT.value, undefined, "never compose's development token");
+  assertEquals(by.ORIGIN.value, "https://bonkchess.com");
+  assertEquals(by.CRUD_URL.value, "http://127.0.0.1:3000");
+  assertEquals(by.BILLING_DOCUMENT.value, '{"plans":{}}');
+  // Where the release finds each peer compose names, the sidecar's own among them.
+  const plan = await built(withSidecar(`{port: 8687}`), "plan");
+  assertEquals(plan.value.loopback["crud:3000"], "127.0.0.1:3000");
+  assertEquals(plan.value.loopback["electric:3000"], "127.0.0.1:3002");
+  assertEquals(plan.value.loopback["perf-collector:8687"], "127.0.0.1:8687");
+  // A sidecar given none has none.
+  const bare = await built(withSidecar(`{port: 8687}`), "service");
+  assertEquals(bare.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector").env, undefined);
 });
 
-Deno.test("the ticker's clock pokes the service's run.app address each minute", async () => {
-  const r = await built(release(ticking), "plan");
+Deno.test("a sidecar's metrics are scraped into Managed Prometheus, its config a mounted secret", async () => {
+  const r = await built(withSidecar(`{port: 8687, metrics: port: 9599}`), "plan");
   assertEquals(r.success, true, r.stderr);
-  assertEquals(r.value.clock, { name: "battlechess-clock", schedule: "* * * * *", uri: "https://bonk-chess-1.us-central1.run.app/poke?caller=cloud-scheduler" });
+  assertEquals(r.value.names.scrapeConfig, "battlechess-gmp-config");
+  assertStringIncludes(r.value.scrapeConfig, "kind: RunMonitoring");
+  assertStringIncludes(r.value.scrapeConfig, "port: 9599");
+  assertStringIncludes(r.value.scrapeConfig, "path: /metrics");
+  const s = await built(withSidecar(`{port: 8687, metrics: port: 9599}`), "service");
+  const spec = s.value.spec.template.spec;
+  const gmp = spec.containers.find((c: { name: string }) => c.name === "gmp-collector");
+  assert(/cloud-run-gmp-sidecar:[0-9.]+@sha256:[0-9a-f]{64}$/.test(gmp.image), gmp.image);
+  assertEquals(gmp.volumeMounts, [{ name: "gmp-config", mountPath: "/etc/rungmp" }]);
+  assertEquals(spec.volumes, [{ name: "gmp-config", secret: { secretName: "battlechess-gmp-config", items: [{ key: "latest", path: "config.yaml" }] } }]);
+  const deps = JSON.parse(s.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps["gmp-collector"], ["perf-collector"]);
+  // A preview runs the sidecar but scrapes nothing.
+  const preview = await built(withSidecar(`{port: 8687, metrics: port: 9599}`).replace(/}$/, `, preview: "pr-9"}`), "plan");
+  assertEquals(preview.success, true, preview.stderr);
+  assertEquals(preview.value.scrapeConfig, "");
+  assertStringIncludes(preview.value.serviceYaml, "name: perf-collector");
+  assert(!preview.value.serviceYaml.includes("gmp-collector"));
 });
 
-Deno.test("initdb gives postgres BYPASSRLS, since the machines' writers are its own", async () => {
-  const r = await built(release(), "job");
+Deno.test("a sidecar on a port the cluster holds, or two on one port, is refused", async () => {
+  for (const bad of [`{port: 3000}`, `{port: 8080}`, `{port: 8687, metrics: port: 8687}`, `{port: 80}`]) {
+    const r = await built(withSidecar(bad), "plan");
+    assertEquals(r.success, false, bad);
+  }
+});
+
+// Cloud Run caps an instance's containers at 8 CPUs together, and gives one
+// with no limit a whole CPU: the light ones ask for a share.
+Deno.test("the whole cluster, scraped sidecar and all, fits Cloud Run's 8 CPUs", async () => {
+  const all = `{${["caddy", "crud", "auth", "electric", "database", "migrate", "ticker", "perf-collector"].map((s, i) => `"${s}": {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+  const full = (sidecar: string) => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${all}, ticker: {}, sidecars: "perf-collector": ${sidecar}}`;
+  const s = await built(full(`{port: 8687, metrics: port: 9599}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const cpu = s.value.spec.template.spec.containers.map((c: { name: string; resources?: { limits?: { cpu?: string } } }) => [c.name, c.resources?.limits?.cpu ?? "1000m"]);
+  const total = cpu.reduce((n: number, [, c]: string[]) => n + Number(c.replace(/m$/, "")), 0);
+  assert(total <= 8000, JSON.stringify(cpu));
+  assertEquals(Object.fromEntries(cpu)["perf-collector"], "250m");
+  const r = await built(full(`{port: 8687, cpu: 4000}`), "plan");
+  assertEquals(r.success, false, "a sidecar asking for more than is left is refused");
+  assertStringIncludes(r.stderr, "over Cloud Run's 8000");
+});
+
+// A sidecar apart: a Cloud Run service of its own, since one revision holds at most 10
+// containers. The door dials it at its run.app address, and it reaches the gateway through
+// the door.
+const apartPushed = `{${["caddy", "crud", "auth", "electric", "database", "migrate", "billing", "perf-collector"].map((s, i) => `"${s}": {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+const withApart = (perf: string, extra = "") => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", runHost: "bonk-chess-123.us-central1.run.app", image: pushed: ${apartPushed}, sidecars: {billing: {port: 8688}, "perf-collector": ${perf}}${extra}}`;
+
+Deno.test("a sidecar apart runs as its own service, dialed by the door at its address", async () => {
+  const r = await built(withApart(`{port: 8687, apart: {}}`), "plan");
   assertEquals(r.success, true, r.stderr);
-  const c = r.value.spec.template.spec.template.spec.containers[0];
-  // Cloud SQL's postgres owns the forced-RLS tables and the SECURITY DEFINER
-  // functions that write them, and is no superuser (found on a real instance).
-  assertStringIncludes(c.command[2], `ALTER ROLE postgres BYPASSRLS`);
-  for (const step of ["005_create_tables", "006_policies", "007_txid", "008_publication", "016_mecha_actors"]) assertStringIncludes(c.command[2], step);
+  assertEquals(r.value.sidecars, ["billing", "perf-collector"]);
+  assertEquals(r.value.names.sidecarServices, { "perf-collector": "bonk-chess-perf-collector" });
+  assertEquals(Object.keys(r.value.sidecarServicesYaml), ["perf-collector"]);
+  const s = await built(withApart(`{port: 8687, apart: {}}`), "service");
+  const names = s.value.spec.template.spec.containers.map((c: { name: string }) => c.name);
+  assert(names.includes("billing") && !names.includes("perf-collector"), names.join(","));
+  const caddy = Object.fromEntries(s.value.spec.template.spec.containers[0].env.filter((e: { value?: string }) => e.value).map((e: { name: string; value: string }) => [e.name, e.value]));
+  assertEquals(caddy.PRONTO_UPSTREAM_BILLING, "127.0.0.1:8688");
+  assertEquals(caddy.PRONTO_UPSTREAM_PERF_COLLECTOR, "https://bonk-chess-perf-collector-123.us-central1.run.app");
+  const own = (await built(withApart(`{port: 8687, apart: {}}`), "sidecarServices")).value["perf-collector"];
+  assertEquals(own.metadata.name, "bonk-chess-perf-collector");
+  const [c] = own.spec.template.spec.containers;
+  assertStringIncludes(c.image, `battlechess-perf-collector@${digest("7")}`);
+  assertEquals(c.ports, [{ name: "http1", containerPort: 8687 }]);
+  assertEquals(own.spec.template.spec.serviceAccountName, "battlechess-run@brawl-chess.iam.gserviceaccount.com");
+  // None at rest, as the cluster: it wakes on the door's requests.
+  assertEquals(own.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"], "0");
+  assertEquals(own.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], undefined);
+  // A preview's is named for it.
+  const preview = await built(withApart(`{port: 8687, apart: {}}`, `, preview: "rc"`), "plan");
+  assertEquals(preview.value.names.sidecarServices, { "perf-collector": "bonk-chess-rc-perf-collector" });
 });
 
-Deno.test("raising sqlGeneration names a new instance and leaves the first's name alone", async () => {
-  const first = await built(release(), "plan");
-  const next = await built(release(`, sqlGeneration: 2`), "plan");
-  assertEquals([first.value.names.instance, next.value.names.instance], ["battlechess-db", "battlechess-db-2"]);
+Deno.test("a sidecar apart reaches the gateway through the door, one inside at loopback", async () => {
+  const r = await built(withApart(`{port: 8687, apart: {}}`), "plan");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.peers["perf-collector"]["http://crud:3000"], "https://bonk-chess-123.us-central1.run.app/crud");
+  assertEquals(r.value.peers["perf-collector"]["http://perf-collector:8687"], "https://bonk-chess-perf-collector-123.us-central1.run.app");
+  assertEquals(r.value.peers.billing["crud:3000"], "127.0.0.1:3000");
+  assertEquals(r.value.peers.billing["perf-collector:8687"], undefined, "one apart is no peer at loopback");
+});
+
+Deno.test("a worker apart keeps an instance, its CPU unthrottled between requests", async () => {
+  const own = (await built(withApart(`{port: 8687, apart: minScale: 1}`), "sidecarServices")).value["perf-collector"];
+  assertEquals(own.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"], "1");
+  assertEquals(own.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+});
+
+Deno.test("a sidecar apart's metrics are scraped by a collector in its own service", async () => {
+  const r = await built(withApart(`{port: 8687, metrics: port: 9599, apart: {}}`), "plan");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.scrapeConfig, "", "the cluster's instance scrapes nothing");
+  assertEquals(r.value.names.sidecarScrapeConfigs, { "perf-collector": "battlechess-perf-collector-gmp-config" });
+  assertStringIncludes(r.value.sidecarScrapeConfigs["battlechess-perf-collector-gmp-config"], "port: 9599");
+  const own = (await built(withApart(`{port: 8687, metrics: port: 9599, apart: {}}`), "sidecarServices")).value["perf-collector"];
+  const spec = own.spec.template.spec;
+  assertEquals(spec.containers.map((c: { name: string }) => c.name), ["perf-collector", "gmp-collector"]);
+  assertEquals(spec.volumes[0].secret.secretName, "battlechess-perf-collector-gmp-config");
+  assertEquals(JSON.parse(own.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]), { "gmp-collector": ["perf-collector"] });
+  const main = await built(withApart(`{port: 8687, metrics: port: 9599, apart: {}}`), "service");
+  assert(!main.value.spec.template.spec.containers.some((c: { name: string }) => c.name === "gmp-collector"));
+});
+
+Deno.test("a revision of more than 10 containers is refused, and fits with sidecars apart", async () => {
+  const many = ["s1", "s2", "s3", "s4", "s5", "s6"];
+  const pushedAll = `{${["caddy", "crud", "auth", "electric", "database", "migrate", "ticker", ...many].map((s, i) => `"${s}": {tag: "latest", digest: "${digest(String(i % 10))}"}`).join(", ")}}`;
+  const full = (apart: string[]) => `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", runHost: "bonk-chess-123.us-central1.run.app", image: pushed: ${pushedAll}, ticker: {}, sidecars: {${many.map((n, i) => `${n}: {port: ${8700 + i}, cpu: 100${apart.includes(n) ? ", apart: {}" : ""}}`).join(", ")}}}`;
+  const over = await built(full([]), "plan");
+  assertEquals(over.success, false, "12 containers in one revision");
+  assertStringIncludes(over.stderr, "over Cloud Run's 10");
+  const fits = await built(full(["s1", "s2"]), "plan");
+  assertEquals(fits.success, true, fits.stderr);
+});
+
+// An app that acts for its owner alone:
+// Identity-Aware Proxy in front, so only the people the project's owner admits reach it.
+Deno.test("an app behind IAP is the owner's alone; a preview of it is not, so its drivers reach it", async () => {
+  const r = await built(release(", iap: true"), "plan");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.iap, true);
+  const s = await built(release(", iap: true"), "service");
+  assertEquals(s.value.metadata.annotations["run.googleapis.com/iap-enabled"], "true");
+  const p = await built(release(", iap: true, preview: \"pr-7\""), "plan");
+  assertEquals(p.value.iap, false);
+  const ps = await built(release(", iap: true, preview: \"pr-7\""), "service");
+  assertEquals(ps.value.metadata.annotations["run.googleapis.com/iap-enabled"], undefined);
+  const plain = await built(release(), "plan");
+  assertEquals(plain.value.iap, false);
+});
+
+Deno.test("an app always on keeps its CPU between requests; by default it is throttled", async () => {
+  const on = await built(release(", alwaysOn: true"), "service");
+  assertEquals(on.success, true, on.stderr);
+  assertEquals(on.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+  const off = await built(release(), "service");
+  assertEquals(off.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], undefined);
+});
+
+Deno.test("a sidecar's memory is its container's, inside the instance or apart", async () => {
+  const s = await built(withSidecar(`{port: 8687, memory: "4Gi"}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const inside = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(inside.resources.limits, { cpu: "250m", memory: "4Gi" });
+  const apart = (await built(withApart(`{port: 8687, memory: "2Gi", apart: {}}`), "sidecarServices")).value["perf-collector"];
+  assertEquals(apart.spec.template.spec.containers[0].resources.limits.memory, "2Gi");
+  const bad = await built(withSidecar(`{port: 8687, memory: "lots"}`), "service");
+  assertEquals(bad.success, false);
 });
