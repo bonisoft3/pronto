@@ -706,6 +706,24 @@ GCP: schema.#Release & {
 }
 ```
 
+A sidecar's `memory` is its container's (`"4Gi"`), as Cloud Run spells it;
+absent, Cloud Run's default. `alwaysOn: true` keeps the instance's CPU
+unthrottled between requests, for a sidecar inside it whose work runs while
+nobody is asking.
+
+An app that acts for its owner alone sets `iap: true`: Identity-Aware Proxy
+stands in front of the service, the release grants `roles/run.invoker` to IAP's
+service agent instead of `allUsers`, and only the people the project's owner
+admits reach it, once, outside any release:
+
+```sh
+gcloud iap web add-iam-policy-binding --resource-type cloud-run --service <service> \
+  --region <region> --project <project> --member user:<email> --role roles/iap.httpsResourceAccessor
+```
+
+A preview has no proxy, so the gate's drivers reach it; it holds nothing of the
+release's.
+
 A provider is refused at release in two cases that a program's development
 settings produce. One whose issuer or internal address is a developer's machine
 (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), as the program's

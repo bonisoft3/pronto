@@ -50,6 +50,15 @@ import (
 	// run beside the release.
 	previewProject?: =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
 
+	// Identity-Aware Proxy in front of the service: only the people the project's
+	// owner admits (roles/iap.httpsResourceAccessor on it) reach the app, for an
+	// app that acts for its owner alone. A preview has none, so the gate's
+	// drivers reach it; it holds nothing of the release's.
+	iap: *false | bool
+	// The instance's CPU unthrottled between requests, for work that runs while
+	// nobody is asking (a sidecar's long task).
+	alwaysOn: *false | bool
+
 	// Filled by the release from what it pushed: a revision resolves a tag once,
 	// so every image is named by digest (mecha's docs/deployment.md, what bites).
 	image: {
@@ -90,6 +99,8 @@ import (
 		// Its share of the instance's CPU, in millicpu: Cloud Run gives a
 		// container with none a whole one, against a cap of 8 for them all.
 		cpu: *250 | int & >=80 & <=8000
+		// Its memory, as Cloud Run spells it; absent, Cloud Run's default.
+		memory?: =~"^[1-9][0-9]*(Mi|Gi)$"
 		// The environment compose gives the service, filled by the release, as
 		// the ticker's is; release.cue may add to it, and a key it sets is the
 		// release's in place of compose's (a broker's production address, say,
@@ -176,6 +187,7 @@ import (
 	_service: [if R.preview != _|_ {"\(R.service)-\(R.preview)"}, R.service][0]
 	_domain: [if R.domain != _|_ && R.preview == _|_ {R.domain}, ""][0]
 	_aliases: [if R.preview != _|_ {[]}, R.aliases][0]
+	_iap: R.iap && R.preview == _|_
 	// Where readers are, which the door and a passkey's relying party are told
 	// (ORIGIN and WEBAUTHN_* in compose).
 	_host: [if _domain != "" {_domain}, R.runHost][0]
@@ -264,8 +276,14 @@ import (
 		kind:       "Service"
 		metadata: {
 			name: R._service
-			labels: "cloud.googleapis.com/location":   R.region
-			annotations: "run.googleapis.com/ingress": "all"
+			labels: "cloud.googleapis.com/location": R.region
+			annotations: {
+				"run.googleapis.com/ingress": "all"
+				if R._iap {
+					"run.googleapis.com/iap-enabled":  "true"
+					"run.googleapis.com/launch-stage": "BETA"
+				}
+			}
 		}
 		spec: template: {
 			metadata: annotations: {
@@ -274,6 +292,7 @@ import (
 				"autoscaling.knative.dev/maxScale":         "1"
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
+				if R.alwaysOn {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
 					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
@@ -414,7 +433,10 @@ import (
 					resources: limits: cpu: "500m"
 				}], [for n, c in R._inside {
 					(sidecarOf & {"n": n, "c": c}).out
-					resources: limits: cpu: "\(c.cpu)m"
+					resources: limits: {
+						cpu: "\(c.cpu)m"
+						if c.memory != _|_ {memory: c.memory}
+					}
 				}], [if len(R._scraped) > 0 {gmpCollector}]])
 			}
 		}
@@ -475,6 +497,7 @@ import (
 					containers: list.Concat([[{
 						(sidecarOf & {"n": n, "c": c}).out
 						ports: [{name: "http1", containerPort: c.port}]
+						if c.memory != _|_ {resources: limits: memory: c.memory}
 					}], [if scraped {gmpCollector}]])
 				}
 			}
@@ -624,6 +647,7 @@ import (
 		// An alias sends readers on to the domain, so it needs one.
 		if len(R._aliases) > 0 {aliasTarget: R.domain}
 		hasRpId:     R._rpId != ""
+		iap:         R._iap
 		serviceYaml: yaml.Marshal(B.service)
 		jobYaml:     yaml.Marshal(B.job)
 		migrateJobYaml: [if B.migrateJob != _|_ {yaml.Marshal(B.migrateJob)}, ""][0]

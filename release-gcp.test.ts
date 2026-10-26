@@ -473,3 +473,38 @@ Deno.test("a revision of more than 10 containers is refused, and fits with sidec
   const fits = await built(full(["s1", "s2"]), "plan");
   assertEquals(fits.success, true, fits.stderr);
 });
+
+// An app that acts for its owner alone (Pronto Studio, which drives Claude and git for them):
+// Identity-Aware Proxy in front, so only the people the project's owner admits reach it.
+Deno.test("an app behind IAP is the owner's alone; a preview of it is not, so its drivers reach it", async () => {
+  const r = await built(release(", iap: true"), "plan");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.iap, true);
+  const s = await built(release(", iap: true"), "service");
+  assertEquals(s.value.metadata.annotations["run.googleapis.com/iap-enabled"], "true");
+  const p = await built(release(", iap: true, preview: \"pr-7\""), "plan");
+  assertEquals(p.value.iap, false);
+  const ps = await built(release(", iap: true, preview: \"pr-7\""), "service");
+  assertEquals(ps.value.metadata.annotations["run.googleapis.com/iap-enabled"], undefined);
+  const plain = await built(release(), "plan");
+  assertEquals(plain.value.iap, false);
+});
+
+Deno.test("an app always on keeps its CPU between requests; by default it is throttled", async () => {
+  const on = await built(release(", alwaysOn: true"), "service");
+  assertEquals(on.success, true, on.stderr);
+  assertEquals(on.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+  const off = await built(release(), "service");
+  assertEquals(off.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], undefined);
+});
+
+Deno.test("a sidecar's memory is its container's, inside the instance or apart", async () => {
+  const s = await built(withSidecar(`{port: 8687, memory: "4Gi"}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const inside = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(inside.resources.limits, { cpu: "250m", memory: "4Gi" });
+  const apart = (await built(withApart(`{port: 8687, memory: "2Gi", apart: {}}`), "sidecarServices")).value["perf-collector"];
+  assertEquals(apart.spec.template.spec.containers[0].resources.limits.memory, "2Gi");
+  const bad = await built(withSidecar(`{port: 8687, memory: "lots"}`), "service");
+  assertEquals(bad.success, false);
+});
