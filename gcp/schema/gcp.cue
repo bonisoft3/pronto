@@ -67,8 +67,13 @@ import (
 	}
 
 	// Present where the app's compose project runs the cluster's migrate step: the
-	// environment compose gives it beside its DATABASE_URL, filled by the release.
-	migrate?: env: [string]: string
+	// environment compose gives it beside its DATABASE_URL, filled by the release,
+	// and what its image runs (mecha's migrate entrypoint), which the schema job
+	// runs after initdb.
+	migrate?: {
+		env: [string]: string
+		command: *["/migrate.sh", "/pgroll", "00_initdb"] | [...string]
+	}
 
 	// The roles the app's schema grants PostgREST's login, as generate wrote them
 	// (.pronto/cluster.json, the k8s release's source too): what the job grants
@@ -509,6 +514,24 @@ import (
 	// socket Cloud Run mounts, and a database comment marks it done (as the k8s
 	// release's initdb Job does). Its re-runnable steps and the roles' grant run
 	// every release.
+	//
+	// Where the app has pgroll migrations, the same job then carries the schema
+	// forward with the cluster's pgroll runner, as compose's migrate step does
+	// (mecha's docs/schema.md, carrying a live database forward), after initdb
+	// and before the service rolls, as the k8s release's migrate Job: its image
+	// is the release's `schema`, migrate's with the database's initdb directory,
+	// so one job starts once, not twice.
+	let initdbEnv = [
+		{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
+		{name: "PGUSER", value: "postgres"},
+		{name: "PGDATABASE", value: R.names.database},
+		{name: "POSTGRES_USER", value: "postgres"},
+		{name: "POSTGRES_DB", value: R.names.database},
+		(secretOf & {env: "PGPASSWORD", secret: sq.POSTGRES_PASSWORD}).out,
+		(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
+		(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
+	]
+	let initdbNames = [for e in initdbEnv {e.name}]
 	job: {
 		apiVersion: "run.googleapis.com/v1"
 		kind:       "Job"
@@ -526,7 +549,7 @@ import (
 					timeoutSeconds:     600
 					containers: [{
 						name: "initdb"
-						image: (imageOf & {svc: "database"}).out
+						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
 						command: ["bash", "-c", """
 							set -euo pipefail
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
@@ -552,48 +575,12 @@ import (
 							# bypasses; BYPASSRLS gives it that back. Sessions that switch
 							# roles still meet every policy.
 							psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
-							"""]
-						env: [
-							{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
-							{name: "PGUSER", value: "postgres"},
-							{name: "PGDATABASE", value: R.names.database},
-							{name: "POSTGRES_USER", value: "postgres"},
-							{name: "POSTGRES_DB", value: R.names.database},
-							(secretOf & {env: "PGPASSWORD", secret: sq.POSTGRES_PASSWORD}).out,
-							(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
-							(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
-						]
+							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
+						env: list.Concat([initdbEnv, [if R.migrate != _|_ for e in list.Concat([
+							[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out],
+							[for k, v in R.migrate.env {name: k, value: v}],
+						]) if !list.Contains(initdbNames, e.name) {e}]])
 					}]
-				}
-			}
-		}
-	}
-
-	// A database built before a change is carried forward by the cluster's pgroll runner, the
-	// image compose's migrate step runs (mecha's docs/schema.md, carrying a live database
-	// forward), after initdb and before the service rolls: the k8s release's migrate Job.
-	if R.migrate != _|_ {
-		migrateJob: {
-			apiVersion: "run.googleapis.com/v1"
-			kind:       "Job"
-			metadata: {
-				name: R.names.migrateJob
-				labels: "cloud.googleapis.com/location": R.region
-			}
-			spec: template: {
-				metadata: annotations: "run.googleapis.com/cloudsql-instances": R.names.connection
-				spec: {
-					taskCount: 1
-					template: spec: {
-						serviceAccountName: R.names.serviceAccount
-						maxRetries:         0
-						timeoutSeconds:     600
-						containers: [{
-							name: "migrate"
-							image: (imageOf & {svc: "migrate"}).out
-							env: list.Concat([[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out], [for k, v in R.migrate.env {name: k, value: v}]])
-						}]
-					}
 				}
 			}
 		}
@@ -650,7 +637,6 @@ import (
 		iap:         R._iap
 		serviceYaml: yaml.Marshal(B.service)
 		jobYaml:     yaml.Marshal(B.job)
-		migrateJobYaml: [if B.migrateJob != _|_ {yaml.Marshal(B.migrateJob)}, ""][0]
 		// The ticker's clock, once a minute, the floor (mecha's services/ticker,
 		// the cloud clock): the service's own run.app address, which a domain
 		// mapping still provisioning cannot stall.
