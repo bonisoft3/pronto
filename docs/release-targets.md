@@ -556,7 +556,11 @@ it deploys rather than a stack on the machine releasing: `release.nu` first
 releases the checkout as the preview `rc` ([Previews](#previews)), then runs
 `verify@gcp` against it, and only when every driver passes releases the app,
 with the very images tested: copied by digest from the previews' repository,
-not built again. The preview is stopped whatever happened (its service, jobs
+not built again. The drivers' images build in Cloud Build while the preview
+deploys, and the build waits for the release's go, a marker in the project's
+Cloud Build bucket, to run them; while they run, the release's project copies
+the preview's images as `candidate`, and tags them `release` only once every
+driver passed. The preview is stopped whatever happened (its service, jobs
 and clock), and its Cloud SQL instance stays for the next release, which
 starts it on an empty database: making an instance is most of ten minutes.
 One release at a time, then; `--preview rc --delete` removes it all. A failing driver, or a

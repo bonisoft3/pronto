@@ -7,7 +7,7 @@
 # images push the same digests and roll nothing, and initdb finds its marker.
 
 use ../k8s/release.nu [resolve-app]
-use verify.nu [run-drivers plan-of builder]
+use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of builder]
 
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
@@ -222,29 +222,45 @@ const copier = "gcr.io/go-containerregistry/gcrane:v0.22.1@sha256:67b9993e083198
 # against, so what was tested is, byte for byte, what releases. Cloud Build in
 # the release's project copies them, and its account reads the previews'
 # repository: a grant its owner makes once (docs/release-targets.md#previews).
-def copy-images [plan: record, name: string, services: list<string>, from: record]: nothing -> record {
+# The copy starts while the tests run, as `candidate`; `finish-copy` tags the
+# release's only after they passed.
+def start-copy [plan: record, name: string, services: list<string>, from: record]: nothing -> record {
 	let p = $plan.project
 	let refs = ($services | each {|svc|
 		let src = ($from.pushed | get -o $svc)
 		if $src == null { error make {msg: $"the preview has no ($svc) image to release"} }
-		{svc: $svc, src: $"($from.registry)/($name)-($svc)@($src.digest)", digest: $src.digest, ref: $"($plan.registry)/($name)-($svc):release"}
+		{svc: $svc, src: $"($from.registry)/($name)-($svc)@($src.digest)", digest: $src.digest, repo: $"($plan.registry)/($name)-($svc)"}
 	})
 	let work = (mktemp -d -t gcp-copy.XXXXXX | str trim)
 	{
-		steps: ($refs | each {|r| {name: $copier, args: ["cp" $r.src $r.ref]} })
+		steps: ($refs | each {|r| {name: $copier, args: ["cp" $r.src $"($r.repo):candidate"]} })
 		options: {logging: "CLOUD_LOGGING_ONLY"}
 		timeout: "1200s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
 	print $"gcp: copying the tested ($services | str join ', ') from the preview"
-	let r = (^gcloud --quiet builds submit --no-source --config $"($work)/cloudbuild.yaml" --project $p | complete)
+	let build = (gc builds submit --no-source --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
 	rm -rf $work
-	if $r.exit_code != 0 {
-		let builds = (build-account $p)
-		error make {msg: $"the preview's images were not copied \(its repository may not let ($builds) read it: gcloud artifacts repositories add-iam-policy-binding ($from.registry | split row '/' | last) --project ($from.registry | split row '/' | get 1) --location ($plan.region) --member serviceAccount:($builds) --role roles/artifactregistry.reader\):\n(($r.stdout + $r.stderr) | lines | last 20 | str join (char nl))"}
+	{build: $build, project: $p, registry: $from.registry, refs: $refs}
+}
+
+# The copy to its end, and each image tagged the release's once its digest is
+# the tested one.
+def finish-copy [copy: record]: nothing -> record {
+	let p = $copy.project
+	mut status = "QUEUED"
+	while $status in ["QUEUED" "PENDING" "WORKING"] {
+		$status = (gc builds describe $copy.build --project $p --format "value(status)" | str trim)
+		if $status in ["QUEUED" "PENDING" "WORKING"] { sleep 3sec }
 	}
-	$refs | each {|r|
-		let digest = (gc artifacts docker images describe $r.ref --format "value(image_summary.digest)" | str trim)
-		if $digest != $r.digest { error make {msg: $"($r.ref) is ($digest), not the tested ($r.digest)"} }
+	if $status != "SUCCESS" {
+		let builds = (build-account $p)
+		let log = (do { ^gcloud --quiet logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($copy.build)\"" --project $p --order desc --limit 20 --format "value(textPayload)" } | complete | get stdout | lines | reverse | str join (char nl))
+		error make {msg: $"the preview's images were not copied \(($status); its repository may not let ($builds) read it: gcloud artifacts repositories add-iam-policy-binding ($copy.registry | split row '/' | last) --project ($copy.registry | split row '/' | get 1) --location ($copy.registry | split row '-docker' | first) --member serviceAccount:($builds) --role roles/artifactregistry.reader\):\n($log)"}
+	}
+	$copy.refs | each {|r|
+		gc artifacts docker tags add $"($r.repo)@($r.digest)" $"($r.repo):release" | ignore
+		let digest = (gc artifacts docker images describe $"($r.repo):release" --format "value(image_summary.digest)" | str trim)
+		if $digest != $r.digest { error make {msg: $"($r.repo):release is ($digest), not the tested ($r.digest)"} }
 		{svc: $r.svc, ref: {tag: "release", digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
@@ -405,7 +421,12 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let images = ($runtime | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars)
 	let pushed = if $snapshot { {} } else {
 		ensure-infrastructure $plan0
-		if $from != null { copy-images $plan0 $name $images $from } else { push-images $app_info.dir $plan0 $name $images }
+		if $from == null { push-images $app_info.dir $plan0 $name $images } else {
+			# The copy the gate started while it tested, when it copied these images.
+			let started = ($from.copy? | default null)
+			let copy = if $started != null and (($started.refs | get svc | sort) == ($images | sort)) { $started } else { start-copy $plan0 $name $images $from }
+			finish-copy $copy
+		}
 	}
 
 	# The providers compose gives the auth service, under what release.cue sets.
@@ -471,14 +492,20 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 		gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
 	}
 	# Each sidecar apart, once the door it reaches the gateway through is up;
-	# public as the door is, which dials it.
-	for s in ($plan.sidecarServicesYaml | columns) {
-		let svc = ($plan.names.sidecarServices | get $s)
-		print $"gcp: ($s) apart \(($svc)\)"
-		gc run services replace $"dist/gcp/sidecar-($s).yaml" --region $r --project $p | ignore
-		gc run services add-iam-policy-binding $svc --region $r --project $p --member allUsers --role roles/run.invoker | ignore
-	}
-	if ($plan.clock? | is-not-empty) { ensure-clock $plan.clock (gc secrets versions access latest --secret $plan.names.secrets.SERVICE_JWT --project $p) $p $r }
+	# public as the door is, which dials it. They and the ticker's clock are
+	# each other's strangers, so they are made together.
+	let sidecars = ($plan.sidecarServicesYaml | columns | each {|s| {sidecar: $s} })
+	let clock = if ($plan.clock? | is-not-empty) { [{clock: $plan.clock}] } else { [] }
+	$sidecars | append $clock | par-each {|t|
+		if ($t.clock? | is-not-empty) {
+			ensure-clock $t.clock (gc secrets versions access latest --secret $plan.names.secrets.SERVICE_JWT --project $p) $p $r
+		} else {
+			let svc = ($plan.names.sidecarServices | get $t.sidecar)
+			print $"gcp: ($t.sidecar) apart \(($svc)\)"
+			gc run services replace $"dist/gcp/sidecar-($t.sidecar).yaml" --region $r --project $p | ignore
+			gc run services add-iam-policy-binding $svc --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+		}
+	} | ignore
 
 	let address = $"https://($plan.service)-($number).($r).run.app"
 	for d in ([$plan.domain?] | compact | append $plan.aliases) { map-domain $d $plan.service $p $r }
@@ -491,6 +518,16 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	if $health not-in $ok { error make {msg: $"($address)/health answered ($health)"} }
 	print $"gcp: ($plan.service) is live at ($address)"
 	$pushed
+}
+
+# The release's copy of a tested preview's images, started before its tests
+# end, where the release's repository is there already; null where it is not,
+# for the release to copy them once it made it.
+def start-early-copy [cue_path: string, from: record]: nothing -> any {
+	let plan = (plan-of $cue_path "")
+	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $plan.project) { return null }
+	let name = (^cue export --expression GCP.name --out text $cue_path | str trim)
+	start-copy $plan $name ($from.pushed | columns) $from
 }
 
 export def main [
@@ -531,11 +568,19 @@ export def main [
 	let rc = "rc"
 	let rc_plan = (plan-of $app_info.cue_path $rc)
 	print $"gcp: testing a preview \(($rc)\) before the release"
+	#
+	# The tests' own images build in Cloud Build while the preview deploys, and
+	# run once it is up; while they run, the release's project copies the
+	# preview's images, which it tags the release's only once they passed.
 	let failure = (try {
 		empty-preview $rc_plan
-		let tested = (deploy $app_info $rc false false)
-		run-drivers $app_info.dir $rc_plan
-		deploy $app_info "" false false {registry: $rc_plan.registry, pushed: $tested} | ignore
+		let drivers = (start-drivers $app_info.dir $rc_plan)
+		let tested = (try { deploy $app_info $rc false false } catch {|e| cancel-drivers $drivers; error make {msg: $e.msg} })
+		go-drivers $drivers
+		let from = {registry: $rc_plan.registry, pushed: $tested}
+		let copy = (start-early-copy $app_info.cue_path $from)
+		finish-drivers $drivers
+		deploy $app_info "" false false ($from | merge {copy: $copy}) | ignore
 		null
 	} catch {|e| $e.msg })
 	stop-preview $rc_plan
