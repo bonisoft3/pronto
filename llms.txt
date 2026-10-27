@@ -492,7 +492,7 @@ The developer TDD loop is driven by Sayt (`./saytw` inside `apps/<app_name>`), P
 ```bash
 # 0. Bootstrap a brand-new app (first-time emission before .say.yaml & mise.local.toml exist):
 deno run -A plugins/pronto/write.ts apps/<app_name>
-mise trust apps/<app_name>/.mise.toml apps/<app_name>/mise.local.toml
+mise trust apps/<app_name>/.mise.toml && mise trust apps/<app_name>/mise.local.toml
 
 # 1. Canonical Sayt TDD Ladder (run in foreground inside apps/<app_name>, layer by layer until exit 0):
 cd apps/<app_name>
@@ -530,9 +530,10 @@ deno run -A --config plugins/pronto/bundle/deno.json \
   --mecha libraries/mecha
 ```
 
-#### Custom Playwright Journeys (`apps/<app_name>/tests/verify.ts`) & Runtime Testing Seams:
+#### Containerized `build: checks` (`tests/acceptance.ts`), Custom `verify.ts` Journeys & Runtime Seams:
+- **Containerized `build: checks` under `./saytw integrate`:** Inside the acceptance container, the target URL is supplied via `Deno.env.get("APP_URL") ?? "https://caddy:8443"`, and the pre-installed Chromium binary matches `import { chromium } from "npm:playwright@1.61.1"` (pass `args: ["--ignore-certificate-errors"]`).
 - `verify.ts` discovers `tests/verify.ts` and runs exported `journeys` under a zero-tolerance network error trap (`run` must call `page.goto(ctx.targetUrl)`).
-- **Deterministic PRNG Replay (`?seed=<n>`):** Appending `?seed=36` to the URL pins Omnishell's PRNG draw stream (`then: { seed: true }`) for deterministic Playwright playthroughs.
+- **Deterministic PRNG Replay (`?seed=<n>`) & Manual Clock (`?clock=manual`):** Appending `?seed=36` pins Omnishell's PRNG draw stream (`then: { seed: true }`); appending `?clock=manual` holds `data-machine` `after` timers for `await page.evaluate(() => (globalThis as any).__prontoClock.advance(1000))`.
 - **In-Memory Store Inspection (`__prontoStore`):** In Playwright `page.evaluate()`, `globalThis.__prontoStore.tabSnapshot("<table>")` returns `{ <table>: { schema, rows } }` for live `tab`-durability tables.
 - **Local HTTPS & ServiceWorker (`--ignore-certificate-errors`):** When testing against `./saytw launch` (`https://localhost:<port>`), pass `args: ["--ignore-certificate-errors"]` to `chromium.launch()` so `offline-first-sw.js` does not abort on self-signed `mkcert` certificates.
 ```typescript
