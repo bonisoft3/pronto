@@ -292,7 +292,23 @@ _sqlType: {
 			}
 		}).out + ";"
 	}]
-	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);" + strings.Join([for a in _added {"\n" + a}], "")
+	// A built database's column keeps the CHECK it was made with, which a field
+	// whose cel (or a machine's states) changed since no longer says: Bonk
+	// Chess's seat views refused the `arm` action added after its database was
+	// built, so no game online could begin. Each checked field's CHECK is set
+	// again as the program says it, under the name Postgres gives a column's
+	// own (<table>_<field>_check), NOT VALID so rows written before are kept.
+	_reasserted: [for fld in T.e.fields if !fld.pk {
+		let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		let check = [
+			if T.e.cel.checks[fld.name] != _|_ {T.e.cel.checks[fld.name]},
+			if fld.cel == _|_ if column.states != _|_ {"\"\(fld.name)\" IN (" + strings.Join([for n in column.states {(#sqlLit & {v: n}).out}], ", ") + ")"},
+		]
+		if len(check) > 0 {
+			"ALTER TABLE \(T.e.table) DROP CONSTRAINT IF EXISTS \"\(T.e.table)_\(fld.name)_check\", ADD CONSTRAINT \"\(T.e.table)_\(fld.name)_check\" CHECK (\(check[0])) NOT VALID;"
+		}
+	}]
+	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);" + strings.Join([for a in _added {"\n" + a}], "") + strings.Join([for a in _reasserted {"\n" + a}], "")
 }
 
 #sqlLit: L={
