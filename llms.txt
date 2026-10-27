@@ -230,7 +230,7 @@ Before running `write.ts` on a new app, create these **7 prerequisite files** (d
 1. `.mise.toml`, `mise.lock`, `saytw`, `saytw.ps1`: Copy `.mise.toml` & `mise.lock` from `apps/jsfb` (or `apps/snapcards`) and `saytw` & `saytw.ps1` from `apps/snapcards` (`chmod +x saytw`).
 2. `brief.md` & `brief.html`: Problem statement and HTML brief.
 3. `acceptance.md`: Acceptance ledger where every claim line ends with a `{#accept-<slug>}` anchor (parsed via `/\{#(accept-[a-z0-9-]+)\}/g`, e.g., `- First click is guaranteed safe. {#accept-start}`). Every ID in `paths.<p>.accepts` must appear here.
-4. `DESIGN.md` & `shell/screens/<screen>.css`: `DESIGN.md` starts with YAML frontmatter (`preset: "press"`). Pre-create `shell/screens/<screen>.css` before the first `write.ts` run; scope selectors under `[data-screen="<screen>"]` and use enforced design tokens instead of raw literals (`var(--surface)`, `var(--surface-muted)`, `var(--primary)`, `var(--accent)`, `var(--danger)`, `var(--border)`, `var(--border-size-1)`, `var(--border-size-2)`, `var(--size-1)`, `var(--sp-sm|md|lg)`, `var(--r-sm|md)`, `var(--type-label|caption|body|subtitle)`).
+4. `DESIGN.md` & `shell/screens/<screen>.css`: `DESIGN.md` starts with YAML frontmatter (`preset: "press"`). Pre-create `shell/screens/<screen>.css` before the first `write.ts` run; scope selectors under `[data-screen="<screen>"]`, keep interactive cell/button dimensions on the 4px baseline (e.g. `32px`), use `var(--fg)` for text contrast across light/dark themes (enforced by `ci-visual` under `./saytw integrate`), and use enforced design tokens instead of raw literals (`var(--surface)`, `var(--surface-muted)`, `var(--fg)`, `var(--primary)`, `var(--accent)`, `var(--danger)`, `var(--border)`, `var(--border-size-1)`, `var(--border-size-2)`, `var(--size-1)`, `var(--sp-sm|md|lg)`, `var(--r-sm|md)`, `var(--type-label|caption|body|subtitle)`). Avoid `font:` shorthand when consuming font-size tokens; use `font-size: var(--type-...)` longhand.
 5. `ir.html`: Must contain:
    - `<section id="<EntityName>" data-kind="entity" data-durability="tab">` with `<table data-extract="fields">`.
    - `<section id="<screen>" data-kind="screen" data-route="/">` with `<p data-extract="reads">`, `<p data-extract="mutations">`, `<figure id="<screen>-<state>" data-kind="state" data-of="<screen>" data-state="<state>"></figure>`, and `<script type="application/json" data-kind="paths" data-of="<screen>">{"start":{"states":["ready","playing"],"accepts":["accept-start"]}}</script>`.
@@ -307,7 +307,9 @@ const indexOf = (r, c) => r * 9 + c;
     };
 }
 ```
-*Fixpoint Rule:* A `data-on-mutation` fold wakes whenever its `data-live` table changes. Always compare desired state against existing rows and emit `updates: []` when nothing changed, otherwise the fold will wake itself in an infinite loop.
+*Fixpoint & Single-Write-Per-Row Rules:*
+- **Fixpoint:** A `data-on-mutation` fold wakes whenever its `data-live` table changes. Always compare desired state against existing rows and emit `updates: []` when nothing changed, otherwise the fold will wake itself in an infinite loop.
+- **At most one `put`/`patch` per `(entity, id)` per fold return:** Within a single `updates` array, the *last* mutation naming a given `(entity, id)` replaces earlier mutations for that row (earlier fields do not merge across separate `patch` objects in the same batch). Always merge all field changes for a row into a single `put` or `patch` object per fold invocation.
 
 ---
 
@@ -466,12 +468,16 @@ The developer TDD loop is driven by Sayt (`./saytw` inside `apps/<app_name>`), P
 
 ### In the Monorepo (Sayt TDD Ladder + Direct Gates):
 ```bash
+# 0. Bootstrap a brand-new app (first-time emission before .say.yaml & mise.local.toml exist):
+deno run -A plugins/pronto/write.ts apps/<app_name>
+mise trust apps/<app_name>/.mise.toml apps/<app_name>/mise.local.toml
+
 # 1. Canonical Sayt TDD Ladder (run in foreground inside apps/<app_name>, layer by layer until exit 0):
 cd apps/<app_name>
 ./saytw generate   # Runs write.ts + auto-bayt (mints .pronto/identity.json, emits program_derived.cue, bayt.json, .bayt/, .say.yaml)
 ./saytw lint       # Runs derive, types, proto, facts, identity, cue vet, handlers, and markup checks
 ./saytw test       # Runs unit/handler checks (`loop: surface: checks` with verb: "test") and state machines
-./saytw integrate  # Boots containerized stack via Bayt/bkid, runs `ci-visual` (2-viewport DOM checks) + `build: checks` Playwright acceptance suite
+./saytw integrate  # Boots containerized stack via Bayt/bkid, runs `ci-visual` (2-viewport DOM/contrast/grid checks) + `build: checks` Playwright suite
 
 # 2. Direct compiler & static gates (from repo root, equivalent to generate + lint):
 deno run -A plugins/pronto/write.ts apps/<app_name>
@@ -482,7 +488,10 @@ deno run -A plugins/omnishell/check-handlers.ts apps/<app_name>
 deno run --node-modules-dir=none -A plugins/omnishell/check-markup.ts apps/<app_name>
 
 # 3. Bundle static browser release (dist/browser) & run `verify` (Tier 1 HTTP + Tier 2 Playwright journeys):
-deno run -A plugins/pronto/bundle/bundle.ts apps/<app_name>
+deno run -A --config plugins/pronto/bundle/deno.json \
+  plugins/pronto/bundle/bundle.ts apps/<app_name> \
+  --omnishell plugins/omnishell --mecha libraries/mecha \
+  --out apps/<app_name>/dist/browser
 deno run -A plugins/pronto/verify/verify.ts apps/<app_name> --platform pages --target http://localhost:<port>
 # Or via `./saytw verify@pages` (`@pages` rulemap suffix required):
 (cd apps/<app_name> && SAY_VERIFY_ARGS_TARGET="http://localhost:<port>" SAY_VERIFY_ARGS_TIER="2" ./saytw verify@pages)
@@ -499,8 +508,11 @@ deno run -A --config plugins/pronto/bundle/deno.json \
   --mecha libraries/mecha
 ```
 
-#### Custom Playwright Journeys (`apps/<app_name>/tests/verify.ts`):
-`verify.ts` discovers `tests/verify.ts` and runs exported `journeys` under a zero-tolerance network error trap (`run` must call `page.goto(ctx.targetUrl)`):
+#### Custom Playwright Journeys (`apps/<app_name>/tests/verify.ts`) & Runtime Testing Seams:
+- `verify.ts` discovers `tests/verify.ts` and runs exported `journeys` under a zero-tolerance network error trap (`run` must call `page.goto(ctx.targetUrl)`).
+- **Deterministic PRNG Replay (`?seed=<n>`):** Appending `?seed=36` to the URL pins Omnishell's PRNG draw stream (`then: { seed: true }`) for deterministic Playwright playthroughs.
+- **In-Memory Store Inspection (`__prontoStore`):** In Playwright `page.evaluate()`, `globalThis.__prontoStore.tabSnapshot("<table>")` returns `{ <table>: { schema, rows } }` for live `tab`-durability tables.
+- **Local HTTPS & ServiceWorker (`--ignore-certificate-errors`):** When testing against `./saytw launch` (`https://localhost:<port>`), pass `args: ["--ignore-certificate-errors"]` to `chromium.launch()` so `offline-first-sw.js` does not abort on self-signed `mkcert` certificates.
 ```typescript
 export const journeys = [{
   screen: "arena",
