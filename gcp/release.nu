@@ -174,7 +174,15 @@ def build-account [project: string]: nothing -> string {
 # the build is told. Equal keys build equal images, the build being
 # reproducible: what was pushed for a key is what building again would push.
 def source-key [app_dir: string, files: string, told: string]: nothing -> string {
-	let hashes = (do { cd $app_dir; open --raw $files | ^git hash-object --stdin-paths } | str trim)
+	# hash-object reads the paths it is given from the repository's top, and
+	# ls-files wrote them from the app's own directory: the app's prefix
+	# (apps/<name>/ in a monorepo) turns one into the other.
+	let hashes = (do {
+		cd $app_dir
+		let prefix = (^git rev-parse --show-prefix | str trim)
+		let top = (^git rev-parse --show-toplevel | str trim)
+		open --raw $files | lines | each {|f| $"($prefix)($f)" } | str join (char nl) | ^git -C $top hash-object --stdin-paths
+	} | str trim)
 	[(open --raw $files) $hashes $told] | str join (char nl) | hash sha256 | str substring 0..23
 }
 
