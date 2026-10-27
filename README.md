@@ -4,6 +4,8 @@ Pronto is a programming language where the source code is markdown and the compi
 
 The insight: AI can generate anything, but "anything" is where bugs live. Pronto constrains generation to an architecture where entire categories of bugs — deployment drift, data inconsistency, infrastructure misconfiguration — cannot exist. The same way Rust constrains C to gain memory safety, Pronto constrains AI-generated code to gain architectural safety.
 
+For LLM agents generating or modifying Pronto applications, see [`llms.txt`](../../llms.txt) (or `llms.txt` at the repository root of `bonisoft3/pronto`) for the machine-readable specification, contract grammar, and DOM truth tables.
+
 ## Installation
 
 Install the Pronto plugin for your agent. The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill, specialist studio seats, and project bootstrap knowledge.

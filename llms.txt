@@ -4,6 +4,22 @@
 
 ---
 
+## 0. ECOSYSTEM REPOSITORIES & SOURCE OF TRUTH
+
+Pronto is a federated relational application compiler. It is maintained across modular upstream repositories under the `bonisoft3` organization, and embedded inside monorepos under `plugins/` and `libraries/`:
+
+| Component | Upstream GitHub Repository | Monorepo Path | Role & Invariant |
+| :--- | :--- | :--- | :--- |
+| **Pronto** | [`bonisoft3/pronto`](https://github.com/bonisoft3/pronto) | `plugins/pronto` | Compiler, CUE schema envelopes (`#App`, `#Entity`), derivation emitter (`write.ts`), edge bundler (`bundle/edge.ts`), and Cloudflare publisher (`bundle/publish-edge.ts`). |
+| **Omnishell** | [`bonisoft3/omnishell`](https://github.com/bonisoft3/omnishell) | `plugins/omnishell` | Zero-VDOM browser runtime. Evaluates `data-live` DOM projections, executes pure Jessie folds in hardened SES compartments, manages WebRTC DataChannels and PGlite local stores. |
+| **Mecha** | [`bonisoft3/mecha`](https://github.com/bonisoft3/mecha) | `libraries/mecha` | Database and state machine engine. PostgreSQL RLS tenancy floor (`003_rls.sql`), hybrid actor state machines (`016_mecha_actors.sql`), CDC conduits, and edge pglite-workerd durable objects. |
+| **Bayt** | [`bonisoft3/bayt`](https://github.com/bonisoft3/bayt) | `plugins/bayt` / `bayt` | Declarative, hermetic build and packaging DAG. Pure CUE tasks, Docker buildx / Depot execution, cryptographic layer caching. |
+| **Sayt** | [`bonisoft3/sayt`](https://github.com/bonisoft3/sayt) | `sayt` / `saytw` | Development harness and verification CLI. Standardizes verbs across local, bare, and containerized platforms (`sayt lint`, `test`, `integrate`, `launch`). |
+
+*Resolution Note:* When working in the monorepo, dependencies are located at `plugins/pronto`, `plugins/omnishell`, and `libraries/mecha`. When working with the standalone `bonisoft3/pronto` repository, `write.ts` and `bundle/` reside at repository root, and sibling packages are resolved via pinned dependency paths.
+
+---
+
 ## 1. SYSTEM AXIOMS & MENTAL INVARIANTS
 
 1. **Zero Ambient State:**
@@ -29,6 +45,11 @@
    - `program.cue` is the algebraic specification of the application.
    - SQL schema DDL, RLS policies, Mecha actor state machines, Electric/Conduit sync shapes, Omnishell HTML contracts, and build graphs are mechanically derived by `pronto write`.
    - Never hand-edit emitted files (e.g. files in `shell/handlers/`, `services/database/migrations/`, `compose.yaml`). Modify `program.cue`, the screen markup, or the source machine in `machines/`, then compile.
+
+6. **Hermetic Tooling Invariant (Mise & D2):**
+   - All toolchain binaries (including `d2` for architecture/neighbourhood diagrams, `duckdb` for replay verification, and `cue`) are hermetically managed by `mise` (pinned in `.mise.toml`).
+   - Pronto's compiler (`ir-render.ts`) invokes D2 internally via `mise x github:terrastruct/d2 -- d2 --layout elk`.
+   - **Zero-Bypass Rule:** An agent must NEVER alter, degrade, or omit design specifications (e.g. stripping `<section data-kind="screen">` or avoiding neighbourhood diagrams in `ir.html`) on the assumption that a binary is missing from ambient shell `$PATH`. Pronto executes required tooling through mise automatically.
 
 ---
 
@@ -168,6 +189,14 @@ terminal: (pronto.#DefaultTerminal & {
 }).out
 ```
 *Rule:* Never hand-edit `shell/boot.js`. Place the source in `boot.js` at the app root, embed it in `program.cue`, and pass `"boot": _customBoot`. `pronto write` will emit it permanently.
+
+### F. Architecture Document Contract (`ir.html`)
+
+Every Pronto application maintains an `ir.html` design contract with machine-readable tags:
+- `<section id="<EntityName>" data-kind="entity">`: Entity declaration, contracts, and lifecycle cards.
+- `<section id="<screen_name>" data-kind="screen">`: Screen declarations and neighbourhood graphs linking observed tables and active folds.
+
+`pronto write` automatically parses these tags and renders SVG state-chart and neighbourhood diagrams via D2 (`d2Svg` invoking `mise x github:terrastruct/d2 -- d2`). Authors supply the semantics and prose; the compiler draws the architecture. Never omit `data-kind="screen"` or `data-kind="entity"` tags.
 
 ---
 
@@ -378,12 +407,28 @@ In multiplayer and turn-based games (e.g. `truco`, `apexrun`), coordination betw
 + </form>
 ```
 
+### 8. Authoring Architecture Contracts & Tooling Assumptions
+```diff
+- // WRONG: Omitting screen sections from ir.html assuming `which d2` must succeed in ambient shell
+- <!-- Omitting data-kind="screen" so d2 is never invoked -->
+- <section id="arena">
+-     <p>Arena screen without machine-readable kind tag</p>
+- </section>
+
++ // RIGHT: Author full design sections; pronto write executes d2 via mise automatically
++ <section id="arena" data-kind="screen">
++     <h2>Arena Screen</h2>
++     <p>Observes match and player tables; renders reactive 9x9 board.</p>
++ </section>
+```
+
 ---
 
 ## 8. CLI VERIFICATION & WORKFLOW CHECKSUM
 
-The developer loop is managed through Sayt (`saytw`) and Deno:
+The developer loop is managed through Sayt (`saytw`), Pronto, and Deno:
 
+### In the Monorepo:
 ```bash
 # 1. Compile CUE and emit derived schemas, SQL, and shell files:
 deno run -A plugins/pronto/write.ts apps/<app_name>
@@ -408,6 +453,20 @@ deno run -A --config plugins/pronto/bundle/deno.json \
 deno run -A --config plugins/pronto/bundle/deno.json \
   plugins/pronto/bundle/publish-edge.ts apps/<app_name>/dist/cloudflare \
   --mecha libraries/mecha
+```
+
+### In Standalone `bonisoft3/pronto`:
+```bash
+# 1. Compile CUE and emit derived files:
+deno run -A write.ts <path/to/app>
+# Or via CLI alias if installed:
+pronto write <path/to/app>
+
+# 2. Bundle release for edge:
+deno run -A --config bundle/deno.json \
+  bundle/edge.ts <path/to/app> \
+  --omnishell <path/to/omnishell> --mecha <path/to/mecha> \
+  --out <path/to/app>/dist/cloudflare
 ```
 
 ---
