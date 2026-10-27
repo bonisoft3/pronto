@@ -92,6 +92,8 @@ import (
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
 	// Filled by the release.
 	database: tokenRoles: [...string]
+	// The app's own migrations (rawMigrations), replayed on a built database.
+	database: replays: *[] | [...string]
 
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
@@ -568,11 +570,12 @@ import (
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
-							  # entity's table, every policy, trigger and publication, and the hybrid
-							  # machines' code run again, keeping every row.
-							  for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do
-							    f=/docker-entrypoint-initdb.d/$step.sql
-							    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+							  # entity's table and a new field's column, every policy, trigger and
+							  # publication, the hybrid machines' code, and the app's own
+							  # migrations, each idempotent, run again, keeping every row.
+							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 016_mecha_actors.sql \(strings.Join(R.database.replays, " ")); do
+							    f=/docker-entrypoint-initdb.d/$step
+							    if [ -f "$f" ]; then echo "initdb: replaying $step"; psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
 							  done
 							else
 							  source /usr/local/bin/docker-entrypoint.sh
