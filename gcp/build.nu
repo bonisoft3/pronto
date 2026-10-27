@@ -6,6 +6,8 @@
 # What builds and runs the drivers: Docker's own CLI image, with its buildx
 # and compose plugins, run by Cloud Build against the Docker of its worker.
 export const builder = "docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d"
+# What lets an amd64 worker build another platform's images: QEMU's handlers.
+const binfmt = "tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 # How long the release has run, before each of its lines: where its time
 # goes, read off the log.
 export def stamp []: nothing -> string {
@@ -143,6 +145,11 @@ export def push-images [
 		"set -eu"
 		"token=$(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\"access_token\":\"\\([^\"]*\\)\".*/\\1/p')"
 		$"echo \"$token\" | docker login --username oauth2accesstoken --password-stdin https://($host) >/dev/null"
+	] | append (if $platform == "linux/amd64" { [] } else {
+		# Cloud Build's workers are amd64: another platform's build steps run
+		# under QEMU, which binfmt registers with the worker's kernel.
+		[$"docker run --privileged --rm ($binfmt) --install ($platform | split row '/' | last) >/dev/null"]
+	}) | append [
 		"docker buildx create --use --driver docker-container >/dev/null"
 		$"docker compose ($compose_files)--profile '*' config | docker buildx bake ($bake_files) --push --provenance=false --allow=fs.read=/workspace --set '*.platform=($platform)' ($sets) ($services | str join ' ')"
 	] | str join "\n")
