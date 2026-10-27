@@ -1,5 +1,6 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { edgeRoutingRules } from './edge-addresses.ts'
 import { clusterDrains } from './edge-scripts.ts'
 
 /** `drains` is the app's drain table (.pronto/cluster.json), which the
@@ -263,12 +264,13 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
       if (result.status === 200) result.headers.set('Link', edgeHints(request, hints, routeAt, preferred))
       return result
     }
-    if (!['auth', 'crud', 'electric', 'import'].includes(url.pathname.split('/')[1]) &&
-        (request.method === 'GET' || request.method === 'HEAD') &&
-        (request.headers.get('accept') ?? '').includes('text/html')) {
+    if (env.ASSETS &&
+        !['auth', 'crud', 'electric', 'import', 'poke'].includes(url.pathname.split('/')[1]) &&
+        (request.method === 'GET' || request.method === 'HEAD')) {
       const asset = await env.ASSETS.fetch(request)
       if (asset.status !== 404) return asset
-      return new Response(request.method === 'HEAD' ? null : 'Page not found', { status: 404, headers: { 'Cache-Control': 'no-store' } })
+      const notFound = (request.headers.get('accept') ?? '').includes('text/html') ? 'Page not found' : 'Not found'
+      return new Response(request.method === 'HEAD' ? null : notFound, { status: 404, headers: { 'Cache-Control': 'no-store' } })
     }
     return edgeWorker.fetch(request, env, ctx)
   },
@@ -312,7 +314,7 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
   config.name = name
   config.main = 'src/index.ts'
   config.durable_objects = { bindings: [{ name: 'CLUSTER', class_name: 'Cluster', ...(separate ? { script_name: database } : {}) }, { name: 'RENDERER', class_name: 'DocumentRenderer', script_name: renderer }] }
-  config.assets.run_worker_first = ['/']
+  config.assets.run_worker_first = await edgeRoutingRules(path.join(out, 'public'))
   if (separate) {
     delete config.migrations
     delete config.rules

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseHTML } from 'npm:linkedom@0.18.4'
-import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
+import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
 import { edgeHints } from './edge-hints.ts'
 import { acceptedLanguages, routeAt } from '../../omnishell/interpreter/fragment.js'
@@ -167,3 +167,32 @@ Deno.test('the built edge tree serves the target\'s ICE servers, built and deplo
     await Deno.remove(f.out, { recursive: true })
   }
 })
+
+Deno.test('edge routing rules route /* to worker while excluding static directories and files', async () => {
+  const tmp = await Deno.makeTempDir()
+  try {
+    for (const dir of ['shell/screens', 'messages', 'omnishell/interpreter', 'docs']) {
+      await Deno.mkdir(path.join(tmp, dir), { recursive: true })
+    }
+    for (const file of ['index.html', 'favicon.ico', 'robots.txt', 'sitemap.xml', 'offline-first-sw.js', '_headers']) {
+      await Deno.writeTextFile(path.join(tmp, file), '')
+    }
+    const rules = await edgeRoutingRules(tmp)
+    assert.deepEqual(rules, [
+      '/*',
+      '!/docs/*',
+      '!/favicon.ico',
+      '!/messages/*',
+      '!/offline-first-sw.js',
+      '!/omnishell/*',
+      '!/robots.txt',
+      '!/shell/*',
+      '!/sitemap.xml',
+    ])
+    assert.ok(!rules.includes('!/index.html'))
+    assert.ok(!rules.some(r => r.includes('_headers')))
+  } finally {
+    await Deno.remove(tmp, { recursive: true })
+  }
+})
+

@@ -100,3 +100,24 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
   const catalogues = Object.fromEntries(Object.keys(cfg.i18n?.locales ?? {}).map(tag => [tag, link(`/messages/${tag}.json`, 'fetch')]))
   return { common: [...common], routes, catalogues, i18n: cfg.i18n, prefix: cfg.prefix }
 }
+
+/** Routing rules for Cloudflare Workers Assets run_worker_first: dynamic routes
+ * and navigations run the Worker first, while static asset directories bypass
+ * the Worker so cold edge PoPs serve assets directly without depending on CDN cache. */
+export async function edgeRoutingRules(publicDir: string): Promise<string[]> {
+  const rules = ['/*']
+  try {
+    const entries: string[] = []
+    for await (const entry of Deno.readDir(publicDir)) {
+      if (entry.name === 'index.html' || entry.name.startsWith('.') || entry.name.startsWith('_')) continue
+      if (entry.isDirectory) entries.push(`!/${entry.name}/*`)
+      else if (entry.isFile) entries.push(`!/${entry.name}`)
+    }
+    entries.sort()
+    return [...rules, ...entries]
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return rules
+    throw error
+  }
+}
+

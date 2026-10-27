@@ -38,7 +38,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
   try {
     const bundle = path.join(tmp, 'pronto/bundle'), runtime = path.join(tmp, 'selected runtime'), out = path.join(tmp, 'release')
     for (const dir of [bundle, path.join(runtime, 'server'), path.join(runtime, 'interpreter'), path.join(out, 'src'), path.join(out, 'public/shell')]) await Deno.mkdir(dir, { recursive: true })
-    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
+    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts', 'edge-addresses.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
     await Deno.copyFile(new URL('../../omnishell/server/prepare-worker.ts', import.meta.url), path.join(runtime, 'server/prepare-worker.ts'))
     const jessie = await Deno.readTextFile(new URL('../../omnishell/interpreter/jessie.js', import.meta.url))
     await Deno.writeTextFile(path.join(runtime, 'interpreter/jessie.js'), jessie + '\n// selected runtime witness\n')
@@ -47,6 +47,8 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
     const installed = await import(pathToFileURL(path.join(bundle, 'edge-ssr.ts')).href)
     await installed.writeEdgeSsr(out, runtime, path.join(tmp, 'mecha'), 'app', 'https://app.example', [])
+    const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+    assert.deepEqual(config.assets.run_worker_first, ['/*', '!/shell/*'])
     assert.match(await Deno.readTextFile(path.join(out, 'renderer/jessie-startup.js')), /selected runtime witness/)
     const entry = await Deno.readTextFile(path.join(out, 'src/index.ts'))
     const hintsImport = entry.match(/^import \{ edgeHints \} from '([^']+)'$/m)
@@ -224,9 +226,10 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
       CF_VERSION_METADATA: { id: 'v1' },
       ASSETS: {
         async fetch(req: Request) {
-          return new URL(req.url).pathname === '/'
-            ? new Response('<!doctype html><title>SPA</title>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
-            : new Response('Not found', { status: 404 })
+          const pathname = new URL(req.url).pathname
+          if (pathname === '/') return new Response('<!doctype html><title>SPA</title>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
+          if (pathname === '/shell/screens/home.css') return new Response('body { color: red }', { status: 200, headers: { 'content-type': 'text/css' } })
+          return new Response('Not found', { status: 404 })
         },
       },
       RENDERER: { idFromName: (n: string) => n, get: () => ({}) },
@@ -350,6 +353,27 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     assert.equal(prefetched.headers.get('x-edge-cache'), 'stale')
     assert.equal(prefetched.headers.get('link'), null)
     assert.match(await prefetched.text(), /id="pronto-reads"/)
+
+    // Non-cluster static asset routes fetch directly from env.ASSETS without passing through edgeWorker.
+    const css = await worker.fetch(new Request('https://app.example/shell/screens/home.css', { headers: { accept: 'text/css' } }), env, ctx)
+    assert.equal(css.status, 200)
+    assert.equal(await css.text(), 'body { color: red }')
+
+    // Missing assets return 404 with no-store so edge CDNs never cache missing immutable assets.
+    const missingCss = await worker.fetch(new Request('https://app.example/shell/screens/missing.css', { headers: { accept: 'text/css' } }), env, ctx)
+    assert.equal(missingCss.status, 404)
+    assert.equal(await missingCss.text(), 'Not found')
+    assert.equal(missingCss.headers.get('cache-control'), 'no-store')
+
+    // Unmatched HTML requests return 404 Page not found with no-store.
+    const missingHtml = await worker.fetch(new Request('https://app.example/unknown-page', { headers: { accept: 'text/html' } }), env, ctx)
+    assert.equal(missingHtml.status, 404)
+    assert.equal(await missingHtml.text(), 'Page not found')
+    assert.equal(missingHtml.headers.get('cache-control'), 'no-store')
+
+    // Cluster routes still pass through to edgeWorker.
+    const cluster = await worker.fetch(new Request('https://app.example/crud/game'), env, ctx)
+    assert.equal(await cluster.text(), 'api')
   } finally {
     if (savedCaches) Object.defineProperty(globalThis, 'caches', savedCaches)
     else Reflect.deleteProperty(globalThis, 'caches')

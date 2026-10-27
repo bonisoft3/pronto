@@ -21,7 +21,7 @@
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
-import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
+import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, holdIceServers } from './edge-ice.ts'
 import { BLOB_CACHE_RULE, writeEdgeBlobs } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
@@ -82,6 +82,22 @@ if (unpackaged.length) fail(`units are not packaged yet: ${unpackaged.join(', ')
 const name = shell.app ?? path.basename(app)
 const drains = await clusterDrains(path.join(app, '.pronto/cluster.json'))
 
+let retainedFrom = previousAssets
+let tempRetained: string | undefined
+if (!retainedFrom) {
+  const existingPublic = path.join(out, 'public')
+  try {
+    if ((await Deno.stat(existingPublic)).isDirectory) {
+      tempRetained = await Deno.makeTempDir({ dir: path.dirname(out), prefix: '.retained-' })
+      const stage = path.join(tempRetained, 'public')
+      await Deno.rename(existingPublic, stage)
+      retainedFrom = stage
+    }
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e
+  }
+}
+
 await Deno.remove(out, { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
 await Deno.mkdir(path.join(out, 'src'), { recursive: true })
 
@@ -94,7 +110,8 @@ const statics = await new Deno.Command('cue', {
 if (!statics.success) fail('cue export of public assets failed')
 const { statics: terminalStatics, clusterStatics } = JSON.parse(new TextDecoder().decode(statics.stdout)) as { statics: StaticAsset[]; clusterStatics: StaticAsset[] }
 await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
-const hints = await addressEdgeAssets(addresses, publicDir, { previous: previousAssets, iceServers })
+const hints = await addressEdgeAssets(addresses, publicDir, { previous: retainedFrom, iceServers })
+if (tempRetained) await Deno.remove(tempRetained, { recursive: true }).catch(() => {})
 await holdIceServers(builtRelease(publicDir), iceServers, publicDir)
 await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints))
 
@@ -209,9 +226,10 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   name,
   main: 'src/index.ts',
   compatibility_date: '2026-09-01',
-  // No asset matches a route of the page or the cluster's: those reach the
-  // Worker, which answers a navigation with the document (mecha-edge's worker.ts).
-  assets: { directory: './public', binding: 'ASSETS', run_worker_first: ['/'] },
+  // Non-negative /* runs the Worker first for dynamic routes and navigations,
+  // while negative rules (!/shell/*, !/messages/*, etc.) let static assets bypass
+  // to the asset server directly on cold and warm edge PoPs alike.
+  assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir) },
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
