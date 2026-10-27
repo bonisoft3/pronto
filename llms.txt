@@ -149,8 +149,8 @@ state: entities: {
 *Portable Field Types (15 closed types):* `string`, `bool`, `int32`, `int64`, `double`, `bytes`, `uuid`, `timestamp`, `date`, `time`, `timezone`, `duration`, `decimal`, `json`, `geojson`.
 
 #### The 5 Durability Rungs:
-1. `tab`: In-memory in the single browser tab. Never reaches disk or server. Omit `access`. Ideal for UI view state, game boards, modal toggles, ephemeral filters.
-2. `device`: Stored in IndexedDB in the browser. Persists across page reloads on that device, never leaves the browser. Omit `access`.
+1. `tab`: In-memory in the single browser tab. Never reaches disk or server. Omit `access`. Ideal for UI view state, game boards, modal toggles, ephemeral filters. Supports `seed: [...]` in `program.cue`.
+2. `device`: Stored in IndexedDB in the browser. Persists across page reloads on that device, never leaves the browser. Omit `access`. **Cannot declare non-empty `seed:` in `program.cue`** (`schema.cue` enforces `if durability == "device" { seed: [] }`); for `device` singleton slots, use `data-empty-row='{...}'` in markup and `op: "put"` in handlers.
 3. `offline`: Client-first sync. Writes succeed locally immediately, background-reconcile to the cluster when online.
 4. `server`: Canonical PostgreSQL table on the server/edge. Replicated to clients matching authorized sync shapes.
 5. `live`: Server-authoritative table with high-frequency live subscriptions.
@@ -184,22 +184,24 @@ Access modes map mechanically to PostgreSQL RLS policies:
 
 ### D. Screen Contract (`#Screen`)
 
-Screens declare their route, inline `markup:` string (`write.ts` emits it to `shell/screens/<screen>.html` and derives `reads`, `writes`, `charts`, and `files` into `program_derived.cue` — never write those derived fields in `program.cue`), storyboard states, and acceptance paths:
+Screens declare their route, inline `markup:` string (`write.ts` emits it to `shell/screens/<screen>.html` and derives `reads`, `writes`, `charts`, and `files` into `program_derived.cue` — never write those derived fields in `program.cue`), storyboard states, and acceptance paths. **Root Element Rule:** The outermost element of `markup:` (or `shell/screens/<screen>.html`) MUST be `<section class="screen" data-screen="<screen>">` and MUST NOT carry `data-live` itself (`interpretScreen` calls `screen.querySelectorAll("[data-live]")` on descendants only; placing `data-live` on the root `<section>` causes Omnishell to skip hydrating both the root and all nested `[data-live]` and `<form>` elements):
 
 ```cue
 surface: screens: arena: {
     title: "Arena"
     route: "/"
     markup: """
-        <div class="board" data-live="game" data-filter="id=eq.the" data-reads="game,cell" data-handler="board" data-empty="">
-          <span class="lcd" data-text="{mines_left}">10</span>
-          <button id="reset" type="button" class="face-{face}" data-on-click="board"></button>
-          <div class="grid" data-live="cell" data-order="pos.asc" data-reads="game,cell" data-handler="board" data-empty="">
-            <template data-item>
-              <button type="button" id="cell-{id}" class="cell cell-{state}" data-on-click="board" data-text="{display}"></button>
-            </template>
+        <section class="screen" data-screen="arena">
+          <div class="board" data-live="game" data-filter="id=eq.the" data-reads="game,cell" data-handler="board" data-empty="">
+            <span class="lcd" data-text="{mines_left}">10</span>
+            <button id="reset" type="button" class="face-{face}" data-on-click="board"></button>
+            <div class="grid" data-live="cell" data-order="pos.asc" data-reads="game,cell" data-handler="board" data-empty="">
+              <template data-item>
+                <button type="button" id="cell-{id}" class="cell cell-{state}" data-on-click="board" data-text="{display}"></button>
+              </template>
+            </div>
           </div>
-        </div>
+        </section>
         """
     forms:  []
     states: ["ready", "playing", "won", "lost"]
@@ -249,19 +251,19 @@ Before running `write.ts` on a new app, create these **7 prerequisite files** (d
 
 | Attribute | Role | Target | Execution Timing |
 | :--- | :--- | :--- | :--- |
-| `data-screen="<name>"` | Screen Root | Outermost `<section class="screen" data-screen="...">`. | Scopes emitted screen CSS and mounts screen lifecycle. |
-| `data-live="<table_name>"` | Subscription Anchor | Identifies the table that controls this DOM region's lifecycle. | Re-renders automatically whenever rows matching `data-filter` mutate in the local store. |
+| `data-screen="<name>"` | Screen Root | Outermost `<section class="screen" data-screen="...">`. | Scopes emitted screen CSS and mounts screen lifecycle. **Never place `data-live` on the root `[data-screen]` element itself**; place `data-live` on child elements inside it. |
+| `data-live="<table_name>"` | Subscription Anchor | Identifies the table that controls a child DOM region's lifecycle. | Re-renders automatically whenever rows matching `data-filter` mutate in the local store. |
 | `data-item` | Row Template | Placed on `<template data-item>` inside a `data-live` region. | Instantiated once per matching row; **must wrap exactly one root child element**. (Omit `<template data-item>` for a single-row *slot*). |
-| `data-text="{col}"` | Text Projection | Placed on any element whose text content comes from a row column. | Updates `textContent` on row change (`bindTexts`). **Never write raw `{col}` inside HTML text nodes** (`<div>{col}</div>` renders literal `{col}`); `{col}` interpolation without `data-text` works only inside attributes (`id="c-{id}"`, `class="st-{state}"`). |
+| `data-text="{col}"` | Text Projection | Placed on any element whose text content comes from a row column. | Updates `textContent` on row change (`bindTexts`). **Must include `{}` braces** (`data-text="{title}"`, NOT `data-text="title"`). **Never write raw `{col}` inside HTML text nodes** (`<div>{col}</div>` renders literal `{col}`); `{col}` interpolation without `data-text` works only inside attributes (`id="c-{id}"`, `class="st-{state}"`). |
 | `data-filter="<postgrest_filter>"` | Query Predicate | PostgREST filter string (e.g. `id=eq.the`, `status=eq.waiting&seat=eq.a`). | Evaluated against table rows; supports `{column}` and `{param.x}` interpolation. |
 | `data-order="<col>.<asc\|desc>"` | Ordering | Column and sort direction (e.g. `ord.asc`, `created_at.desc`). | Orders instantiated template children. |
-| `data-reads="a,b,c"` | Context Injection | Comma-separated list of tables to provide in `state.rows`. | Passive read: does NOT wake the fold on change, but supplies `state.rows.<table>` on wake. |
+| `data-reads="a,b,c"` | Context Injection | Comma-separated list of tables to provide in `state.rows`. | Passive read: does NOT wake the fold on change, but supplies `state.rows.<table>` on wake. **Always include the region's own `data-live` table in `data-reads` if the handler reads `state.rows.<own_table>`** (otherwise only `state.items` holds the region's own rows). |
 | `data-empty="<text>"` | Empty Copy | Fallback text (or `""` for blank) when a list or nested slot returns 0 rows. | Use `data-empty=""` on pre-seeded singleton slots or lists without `data-empty-row`. |
 | `data-empty-row='{...}'` | Fallback Prototype | Valid JSON object string (e.g. `'{"id":"the"}'`) rendered on a **slot** when 0 rows match. | Must be valid JSON (`JSON.parse`); non-JSON values throw at runtime in `hydrateRegion`. |
 | `data-handler="<name>"` | Fold Binding | Names the handler module `shell/handlers/<name>.js` for the region. | Paired with `data-on-click` or `data-on-mutation`. |
 | `data-on-mutation="<handler>"` | Reactive Fold | Wakes `shell/handlers/<handler>.js` with `{ type: "mutation" }`. | Fires on first paint and every change to the region's *own* `data-live` table. |
 | `data-on-click="<handler>"` | Gesture Fold | Placed **directly on the clickable element** (`<button data-on-click="board">`). | Wakes handler with `{ type: "click", id: "<row.id>", from: "<element.id>" }`. Click carries NO custom payload; encode intent in row `id` or element DOM `id`. |
-| `data-action="<create\|update\|upsert\|delete\|navigate>"` | Declarative Form Action | Applied on `<form data-entity="<table>" data-action="...">`. | Form submission. Validates and writes input values matching entity columns. |
+| `data-action="<create\|update\|upsert\|delete\|navigate>"` | Declarative Form Action | Applied on `<form data-entity="<table>" data-action="...">`. | Form submission. On `create`, Omnishell mints `id` (`uuid` or unconstrained `string`) when no `id` input is present; supply any non-input schema columns via `<input type="hidden" name="<col>" value="...">` or `data-value="{now}"` (CUE `default:` only emits SQL DDL defaults for `cluster` tables, not browser `tab`/`device` stores). |
 
 #### PostgREST `data-filter` Mini-Reference:
 1. **Equality & Inequality:** `id=eq.the`, `status=neq.closed`, `turn=gt.0`, `rank=lte.10` — joined with `&` (`&amp;` in HTML attributes, e.g. `current=eq.yes&amp;seat=eq.a`).
@@ -281,8 +283,8 @@ const indexOf = (r, c) => r * 9 + c;
 // Final top-level expression MUST be the arrow function (no `export default`):
 (state, event) => {
     const rows = state.rows ?? {};
-    // rows:  Record<string, Row[]>  (Tables declared in data-reads)
-    // state.items: Row[]            (The waking region's own rows in DOM order)
+    // rows:  Record<string, Row[]>  (ONLY tables explicitly listed in data-reads! Include the region's own table in data-reads if reading rows.<own_table>)
+    // state.items: Row[]            (The waking region's own data-live rows in DOM order)
     
     // event shapes:
     // { type: "mutation" }
