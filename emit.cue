@@ -275,7 +275,24 @@ _sqlType: {
 		}],
 		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
 	])
-	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
+	// A database built before a field was added has the table, which CREATE
+	// TABLE IF NOT EXISTS leaves as it was: each field is added where it is
+	// missing, so a release (gcp's schema job replays this file) brings a built
+	// database to the program's columns. A required field with no default
+	// cannot be added to a table holding rows, and says so then.
+	_added: [for fld in T.e.fields if !fld.pk {
+		let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		"ALTER TABLE \(T.e.table) ADD COLUMN IF NOT EXISTS " + (#colSql & {
+			f: fld
+			if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
+			table: T.e.table
+			if T.e.cel.checks[fld.name] != _|_ {check: T.e.cel.checks[fld.name]}
+			if fld.cel == _|_ if column.states != _|_ {
+				check: "\"\(fld.name)\" IN (" + strings.Join([for n in column.states {(#sqlLit & {v: n}).out}], ", ") + ")"
+			}
+		}).out + ";"
+	}]
+	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);" + strings.Join([for a in _added {"\n" + a}], "")
 }
 
 #sqlLit: L={
@@ -3017,6 +3034,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if E.cluster.capabilities.server {
 					schema:     E.cluster.surface.schema
 					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+					// The app's own migrations, replayed on a built database with the
+					// framework's re-runnable steps (gcp's schema job): each is
+					// idempotent, as initdb replays it on a fresh volume.
+					replays: [for r in [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0] {r.name}]
 					drains: [for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}]
 				}
 			}
