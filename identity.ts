@@ -135,28 +135,31 @@ function mintId(): string {
  * read: a seed row may open with `name:` too. */
 export function stampCue(source: string, e: ProgramEntity, id: string | undefined): string {
   const lines = source.split("\n");
-  const open = lines.findIndex((l) => new RegExp(`^\\s*${e.name}: \\{\\s*$`).test(l));
+  const open = lines.findIndex((l) => new RegExp(`^\\s*${e.name}:\\s*\\{\\s*$`).test(l));
   if (open < 0) throw new Error(`no "${e.name}: {" line opens the entity`);
   const indent = /^\s*/.exec(lines[open])![0];
-  const close = lines.findIndex((l, i) => i > open && l === `${indent}}`);
+  const close = lines.findIndex((l, i) => i > open && new RegExp(`^${indent}\\}\\s*$`).test(l));
   if (close < 0) throw new Error(`${e.name}: the entity's block does not close at its own indent`);
-  const first = lines.findIndex((l, i) => i > open && i < close && l.startsWith(`${indent}\tfields: [`));
-  const last = lines.findIndex((l, i) => i >= first && i < close && (l === `${indent}\t]` || (i === first && l.trimEnd().endsWith("]"))));
+  const fieldRe = new RegExp(`^(${indent}(?:\\t| +))fields:\\s*\\[`);
+  const first = lines.findIndex((l, i) => i > open && i < close && fieldRe.test(l));
+  const childIndent = first >= 0 ? fieldRe.exec(lines[first])![1] : `${indent}\t`;
+  const closeBracketRe = new RegExp(`^${childIndent}\\]\\s*$`);
+  const last = lines.findIndex((l, i) => i >= first && i < close && (closeBracketRe.test(l) || (i === first && l.trimEnd().endsWith("]"))));
   if (first < 0 || last < 0) throw new Error(`${e.name}: no \`fields: [\` list closing at its own indent`);
   let next = Math.max(0, ...e.fields.map((f) => f.ordinal ?? 0));
   const seen = new Set<string>();
   for (let i = first; i <= last; i++) {
-    lines[i] = lines[i].replace(/\{(ordinal: \d+, )?name: "([^"]+)"/g, (whole, had: string | undefined, name: string) => {
+    lines[i] = lines[i].replace(/\{(\s*)(ordinal:\s*\d+,\s*)?name:\s*"([^"]+)"/g, (whole, ws: string, had: string | undefined, name: string) => {
       if (!e.fields.some((f) => f.name === name)) return whole;
       seen.add(name);
-      return had === undefined ? `{ordinal: ${++next}, name: "${name}"` : whole;
+      return had === undefined ? `{${ws}ordinal: ${++next}, name: "${name}"` : whole;
     });
   }
   if (seen.size !== e.fields.length) {
     const missed = e.fields.filter((f) => !seen.has(f.name)).map((f) => f.name);
     throw new Error(`${e.name}: ${missed.join(", ")} not declared as a {name: "…"} literal in its fields list: mint reads no other shape`);
   }
-  if (id !== undefined) lines.splice(open + 1, 0, `${indent}\tid: "${id}"`);
+  if (id !== undefined) lines.splice(open + 1, 0, `${childIndent}id: "${id}"`);
   return lines.join("\n");
 }
 
@@ -200,7 +203,7 @@ export async function mint(appDir: string): Promise<void> {
   for (const file of await cueFiles(appDir)) sources.set(file, await Deno.readTextFile(file));
   for (const e of before) {
     if (e.id !== undefined && e.fields.every((f) => f.ordinal !== undefined)) continue;
-    const home = [...sources].find(([, text]) => new RegExp(`^\\s*${e.name}: \\{\\s*$`, "m").test(text));
+    const home = [...sources].find(([, text]) => new RegExp(`^\\s*${e.name}:\\s*\\{\\s*$`, "m").test(text));
     if (home === undefined) throw new Error(`${e.name} is declared in no .cue file of ${appDir}`);
     sources.set(home[0], stampCue(home[1], e, e.id === undefined ? mintId() : undefined));
   }

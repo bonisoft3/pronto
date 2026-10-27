@@ -22,34 +22,14 @@ Pronto is a federated relational application compiler. It is maintained across m
 
 ## 1. SYSTEM AXIOMS & MENTAL INVARIANTS
 
-1. **Zero Ambient State:**
-   - There is NO global `window` state, NO `localStorage`, NO `sessionStorage`, NO manual `fetch()`, NO raw `WebSocket` instances, and NO unmanaged background threads.
-   - The client application is an enclosed, deterministic relational state projection.
-
-2. **Relational Equivalence (Everything is a Table):**
-   - Every domain concept, UI view state, user gesture, network packet, timer tick, or peer synchronization event is represented as a row in a relational table.
-   - The DOM does not hold primary state; it is a live declarative projection (`data-live`) of local store tables.
-   - State mutations are strictly discrete relational operations: `{ op: "put" | "patch" | "delete", entity, id, row }`.
-
-3. **Deterministic State Transitions (Cortex / SES Sandboxing):**
-   - Client-side event folds and state machines execute in hardened SES (Secure ECMAScript) compartments with **zero ambient endowments**.
-   - Handlers are pure transition functions: `(state, event) => { updates: Mutation[], then?: NextEvent }`.
-   - `Math.random()`, `Date.now()`, `crypto.getRandomValues()`, and `setTimeout()` are strictly forbidden inside machines and folds.
-   - Non-determinism (entropy and clock) is injected exclusively via the runtime runtime seed mechanism: `{ then: { type: "<event>", seed: true } }`.
-
-4. **Tenancy Floor & The RLS Security Boundary:**
-   - Security, multi-tenant isolation, and access control are enforced at the PostgreSQL Row-Level Security (RLS) engine floor (`003_rls.sql`, `016_mecha_actors.sql`), NOT in client or API middleware.
-   - Restrictive policies (`RESTRICTIVE`) create an impenetrable floor: even if frontend code attempts an unauthorized write or forged revision, PostgreSQL aborts the transaction before any state mutation can occur.
-
-5. **Single Source of Truth via CUE:**
-   - `program.cue` is the algebraic specification of the application.
-   - SQL schema DDL, RLS policies, Mecha actor state machines, Electric/Conduit sync shapes, Omnishell HTML contracts, and build graphs are mechanically derived by `pronto write`.
-   - Never hand-edit emitted files (e.g. files in `shell/handlers/`, `services/database/migrations/`, `compose.yaml`). Modify `program.cue`, the screen markup, or the source machine in `machines/`, then compile.
-
-6. **Hermetic Tooling Invariant (Mise & D2):**
-   - All toolchain binaries (including `d2` for architecture/neighbourhood diagrams, `duckdb` for replay verification, and `cue`) are hermetically managed by `mise` (pinned in `.mise.toml`).
-   - Pronto's compiler (`ir-render.ts`) invokes D2 internally via `mise x github:terrastruct/d2 -- d2 --layout elk`.
-   - **Zero-Bypass Rule:** An agent must NEVER alter, degrade, or omit design specifications (e.g. stripping `<section data-kind="screen">` or avoiding neighbourhood diagrams in `ir.html`) on the assumption that a binary is missing from ambient shell `$PATH`. Pronto executes required tooling through mise automatically.
+| # | Axiom | Invariant & Enforcement |
+| :--- | :--- | :--- |
+| **1** | **Zero Ambient State** | No global `window`, `localStorage`, `sessionStorage`, manual `fetch()`, raw `WebSocket`, or unmanaged background threads. The client is a closed, deterministic relational projection. |
+| **2** | **Relational Equivalence** | Every domain concept, UI view state, user gesture, network packet, timer tick, or peer sync event is a row in a table. DOM holds no primary state (`data-live` projects local store tables). Mutations are discrete row ops: `{ op: "put" \| "patch" \| "delete", entity, id, row }`. |
+| **3** | **SES / Pure Jessie Sandbox** | Client folds and machines run in hardened SES compartments with **zero ambient endowments**. Signature: `(state, event) => ({ updates, then? })`. `Math.random()`, `Date.now()`, `crypto.getRandomValues()`, and `setTimeout()` are forbidden. Entropy and clock arrive exclusively via `{ then: { type: "<event>", seed: true, delay: ms } }`. |
+| **4** | **RLS Tenancy Floor** | Multi-tenant isolation and access control live at PostgreSQL Row-Level Security (`003_rls.sql`, `016_mecha_actors.sql`), not middleware. `RESTRICTIVE` policies abort unauthorized writes or forged revisions transactionally. |
+| **5** | **CUE Single Source of Truth** | `program.cue` is the algebraic specification. SQL DDL, RLS, Mecha actors, sync shapes, shell manifests, and build graphs are derived by `pronto write`. Never hand-edit emitted files (`services/database/migrations/`, `compose.yaml`, `program_*.cue`, `shell/boot.js`). |
+| **6** | **Hermetic Tooling (Mise & D2)** | Toolchain binaries (`d2`, `duckdb`, `cue`, `buf`) are pinned in `.mise.toml`. `ir-render.ts` invokes D2 internally via `mise x github:terrastruct/d2 -- d2 --layout elk`. **Zero-Bypass Rule:** Never strip `<section data-kind="screen">` or skip neighbourhood diagrams assuming `d2` is absent from ambient `$PATH`. |
 
 ---
 
@@ -73,76 +53,123 @@ Pronto is a federated relational application compiler. It is maintained across m
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Component Roles & Responsibilities
-
-| Tier | Component | Function | Invariant |
-| :--- | :--- | :--- | :--- |
-| **Pronto** | Compiler / Derivation Engine | Reads `program.cue` + screen markup; derives and emits SQL, proto schemas, shell manifests, and CUE twins. | Reconciles to a fixed point; stale emitted files are swept via `.pronto/manifest.json`. |
-| **Omnishell** | Browser Shell & Presenter | Renders declarative HTML; manages reactive subscriptions (`data-live`); executes Jessie handlers in SES compartments. | Unhandled exceptions fail loudly; mutations flow strictly through the store. |
-| **Mecha** | Edge & Cluster Database Engine | Embeds PostgreSQL (PGlite in WASM at the edge, native PG in cluster); enforces RLS; executes hybrid actor state machines. | Serial execution per instance ID; transactional state rollbacks on guard refusal. |
-| **Bayt** | Build & Packaging DAG | CUE-driven hermetic target builder (`bayt.cue`); Docker buildx / Depot execution; multi-platform caching. | Pure/impure task separation; cache keys derive from source hashes. |
-| **Sayt** | Development Loop & Harness | Unified CLI runner for verification verbs (`sayt lint`, `test`, `integrate`, `launch`). | No unverified commits; contracts validated against local or containerized dependencies. |
-
 ---
 
 ## 3. CUE CORE SCHEMAS & CONTRACT GRAMMAR
 
-### A. Application Envelope (`#App`)
+### A. Application Envelope & Harness Seats (`#App`, `#emit`)
 
-Every app declares `code: pronto.#App` in its package:
+Every `program.cue` defines `code: pronto.#App` and wires the five harness seats using **quoted labels** (`"code": code`) to avoid CUE self-reference cycles:
 
 ```cue
+@extern(embed)
 package myapp
 
 import (
     pronto "github.com/bonisoft3/pronto"
 )
 
+_designMd: _ @embed(file="DESIGN.md", type=text)
+
 code: pronto.#App & {
     state: {
         entities: { ... }
+        pipelines: {}
         cortex?: { ... }
         hybrids?: { ... }
         machines?: { ... }
     }
-    surface: {
-        screens: { ... }
-    }
-    capabilities?: {
+    capabilities: {
+        blobs: false
+        hatches: {}
+        vendored: {}
         auth?: { required: bool, service: string, promote?: bool }
         blobSeed?: { manifest: string, origin: string }
     }
+    surface: {
+        screens: { ... }
+        handlers: {}
+        design: (pronto.#DesignMd & {text: _designMd}).design
+        flows: {
+            "<flow-id>": { of: "<screen>", entity: "<Entity>", action: "create" | "update" | "delete" }
+        }
+    }
+    meta: {
+        name: "myapp"
+        description: "..."
+        ir: { sha256: "<64-hex-sha256-of-ir.html>" }
+        targets: ["pages"] // or ["cloudflare"]
+        decisions: { "decision-01": {} }
+        tests: {}
+    }
 }
+
+cluster:  (pronto.#DefaultCluster & {"code": code, statics: terminal.surface.statics}).out
+terminal: (pronto.#DefaultTerminal & {"code": code}).out
+loop:     (pronto.#DefaultLoop & {"code": code, "cluster": cluster, "terminal": terminal}).out
+loop: surface: checks: "unit": {
+    verb: "test"
+    cmds: ["deno test --no-config --allow-read tests/unit.test.ts"]
+    note: "pure handler fold unit checks"
+}
+build:    (pronto.#DefaultBuild & {"code": code, "loop": loop, "cluster": cluster, "terminal": terminal}).out
+build: checks: "acceptance": {
+    browser: true
+    cmds: ["deno run --no-config --no-lock --allow-all --unsafely-ignore-certificate-errors=caddy,localhost tests/acceptance.ts ."]
+    note: "walks the acceptance checklist against the running app via Playwright under `./saytw integrate`"
+}
+out:      pronto.#emit & {"code": code, "cluster": cluster, "terminal": terminal, "loop": loop, "build": build}
 ```
 
-### B. Entity Declaration & Durability Lattice (`#Entity`)
+### B. Entity Declaration, Identity Minting, Durability Lattice & CEL Cheat-Sheet (`#Entity`)
 
-Entities are declared under `state.entities.<EntityName>`:
+Entities are declared under `state.entities.<EntityName>`. **No model mints identity:** author new entities without `id:` and new fields without `ordinal:` (each field as a single-line `{name: "col", type: "..."}` literal inside `fields: [...]`). When `pronto write` (or `identity.ts mint`) runs, it automatically stamps `id` and `ordinal` into `program.cue`, stamps `data-type-id` and `data-ordinal` into `ir.html`, and records them in `.pronto/identity.json` (`identity.ts check` refuses hand-invented IDs or ordinals not recorded in `.pronto/identity.json`):
 
 ```cue
 state: entities: {
-    Player: {
-        id: "0x99e921962d8130b3"             // 64-bit unique hex ID
-        table: "player"                       // PostgreSQL table name
-        durability: "server"                  // Lattice tier
-        access: { scope: "public" }           // RLS scope
-        fields: [
-            { ordinal: 1, name: "id", type: "uuid", pk: true },
-            { ordinal: 2, name: "handle", type: "string", unique: true, cel: "this.size() > 0" },
-            { ordinal: 3, name: "score", type: "int32", default: "0", cel: "this >= 0" },
-            { ordinal: 4, name: "created_at", type: "timestamp", default: "now()" }
-        ]
-        seed?: [ ... ]
-    }
+	Player: {
+		// Do NOT hand-author `id: "0x..."` on new entities; `write.ts` / `identity.ts mint` stamps it!
+		table:      "player"          // PostgreSQL / store table name
+		durability: "server"          // Lattice tier: tab | device | offline | server | live
+		access:     {scope: "public"} // Required for server/live/offline; omit for tab/device
+		fields: [
+			// Do NOT hand-author `ordinal:` on new fields; keep each field a single-line `{name: "...", ...}` literal:
+			{name: "id", type: "uuid", pk: true},
+			{name: "handle", type: "string", unique: true, cel: "this.size() > 0 && this.size() <= 24"},
+			{name: "score", type: "int32", default: "0", cel: "this >= 0"},
+			{name: "status", type: "string", cel: "this in ['idle', 'playing', 'won', 'lost']"},
+			{name: "created_at", type: "timestamp", default: "now()"},
+		]
+		invariant?: {cel: "this.min_val <= this.max_val"} // Row-level CEL (`this` = row)
+		seed?: [{id: "...", handle: "AAA", score: 0, status: "idle"}]
+	}
 }
 ```
 
+*Portable Field Types (15 closed types):* `string`, `bool`, `int32`, `int64`, `double`, `bytes`, `uuid`, `timestamp`, `date`, `time`, `timezone`, `duration`, `decimal`, `json`, `geojson`.
+
 #### The 5 Durability Rungs:
-1. `tab`: In-memory in the single browser tab. Never reaches disk or server. Ideal for UI view state, modal open toggles, ephemeral filters.
-2. `device`: Stored in IndexedDB in the browser. Persists across page reloads on that device, never leaves the browser. Ideal for offline settings, device preferences.
+1. `tab`: In-memory in the single browser tab. Never reaches disk or server. Omit `access`. Ideal for UI view state, game boards, modal toggles, ephemeral filters.
+2. `device`: Stored in IndexedDB in the browser. Persists across page reloads on that device, never leaves the browser. Omit `access`.
 3. `offline`: Client-first sync. Writes succeed locally immediately, background-reconcile to the cluster when online.
 4. `server`: Canonical PostgreSQL table on the server/edge. Replicated to clients matching authorized sync shapes.
 5. `live`: Server-authoritative table with high-frequency live subscriptions.
+
+#### CEL Validation Cheat-Sheet (`cel:`):
+`plugins/pronto/cel.ts` parses each `cel:` once into `.pronto/cel.json` and derives CUE constraints (`program_cel.cue`), SQL `CHECK` bodies, enum value sets, and fuzz bounds:
+
+| Constraint Pattern | CEL Expression (`this` = field value) | Derived SQL / CUE Semantics |
+| :--- | :--- | :--- |
+| **Non-empty string** | `this.size() > 0` | `char_length(col) > 0` / `strings.MinRunes(1)` |
+| **Trimmed non-empty** | `this.trim().size() > 0` | Rejects Unicode whitespace-only strings |
+| **Length bounds** | `this.size() >= 3 && this.size() <= 60` | `sizeMin: 3, sizeMax: 60` bounds + SQL `char_length` |
+| **Closed enum** | `this in ['hidden', 'revealed', 'flagged']` | `col IN (...)` / CUE union `"hidden" \| "revealed" \| "flagged"` |
+| **Integer enum / bool text** | `this in [1, 2, 3]` or `this in ['true', 'false']` | Closed value set validated at compile & runtime |
+| **Numeric range** | `this >= 0 && this <= 99` | `col >= 0 AND col <= 99` / `>=0 & <=99` |
+| **Regex pattern** | `this.matches('^[A-Z]{3}$')` | `col ~ '^[A-Z]{3}$'` / `=~ "^[A-Z]{3}$"` |
+| **Prefix check** | `this.startsWith('https://')` | Evaluated in client/server CEL validator |
+| **Row invariant** | `invariant: { cel: "this.a != this.b" }` | Cross-column SQL `CHECK (a <> b)` (`this` = row) |
+| **Null-pair invariant** | `invariant: { cel: "has(this.a) == has(this.b)" }` | `CHECK ((a IS NOT NULL) = (b IS NOT NULL))` |
 
 ### C. Access Scopes & RLS Boundaries (`#Access`)
 
@@ -157,21 +184,28 @@ Access modes map mechanically to PostgreSQL RLS policies:
 
 ### D. Screen Contract (`#Screen`)
 
-Screens declare what data they observe and what handlers they bind:
+Screens declare their route, inline `markup:` string (`write.ts` emits it to `shell/screens/<screen>.html` and derives `reads`, `writes`, `charts`, and `files` into `program_derived.cue` — never write those derived fields in `program.cue`), storyboard states, and acceptance paths:
 
 ```cue
 surface: screens: arena: {
     title: "Arena"
-    route: "/arena"
-    reads: [
-        { table: "match", filter: "status=eq.active" },
-        { table: "player" }
-    ]
-    files: {
-        html: "shell/screens/arena.html"
-        css:  "shell/screens/arena.css"
-        handlers: ["shell/handlers/arena.js"]
-        renderers?: ["shell/renderers/score.js"]
+    route: "/"
+    markup: """
+        <div class="board" data-live="game" data-filter="id=eq.the" data-reads="game,cell" data-handler="board" data-empty="">
+          <span class="lcd" data-text="{mines_left}">10</span>
+          <button id="reset" type="button" class="face-{face}" data-on-click="board"></button>
+          <div class="grid" data-live="cell" data-order="pos.asc" data-reads="game,cell" data-handler="board" data-empty="">
+            <template data-item>
+              <button type="button" id="cell-{id}" class="cell cell-{state}" data-on-click="board" data-text="{display}"></button>
+            </template>
+          </div>
+        </div>
+        """
+    forms:  []
+    states: ["ready", "playing", "won", "lost"]
+    paths: {
+        start: { states: ["ready", "playing"], accepts: ["accept-start"] }
+        win:   { states: ["playing", "won"],   accepts: ["accept-win"] }
     }
 }
 ```
@@ -190,13 +224,22 @@ terminal: (pronto.#DefaultTerminal & {
 ```
 *Rule:* Never hand-edit `shell/boot.js`. Place the source in `boot.js` at the app root, embed it in `program.cue`, and pass `"boot": _customBoot`. `pronto write` will emit it permanently.
 
-### F. Architecture Document Contract (`ir.html`)
+### F. Architecture Document, Review Ladder & Cold-Start Checklist (`brief.md` → `ir.html` → `program.cue`)
 
-Every Pronto application maintains an `ir.html` design contract with machine-readable tags:
-- `<section id="<EntityName>" data-kind="entity">`: Entity declaration, contracts, and lifecycle cards.
-- `<section id="<screen_name>" data-kind="screen">`: Screen declarations and neighbourhood graphs linking observed tables and active folds.
+Before running `write.ts` on a new app, create these **7 prerequisite files** (do not hand-create `.say.yaml` or `program_derived.cue`; `write.ts` emits them):
+1. `.mise.toml`, `mise.lock`, `saytw`, `saytw.ps1`: Copy `.mise.toml` & `mise.lock` from `apps/jsfb` (or `apps/snapcards`) and `saytw` & `saytw.ps1` from `apps/snapcards` (`chmod +x saytw`).
+2. `brief.md` & `brief.html`: Problem statement and HTML brief.
+3. `acceptance.md`: Acceptance ledger where every claim line ends with a `{#accept-<slug>}` anchor (parsed via `/\{#(accept-[a-z0-9-]+)\}/g`, e.g., `- First click is guaranteed safe. {#accept-start}`). Every ID in `paths.<p>.accepts` must appear here.
+4. `DESIGN.md` & `shell/screens/<screen>.css`: `DESIGN.md` starts with YAML frontmatter (`preset: "press"`). Pre-create `shell/screens/<screen>.css` before the first `write.ts` run; scope selectors under `[data-screen="<screen>"]` and use enforced design tokens instead of raw literals (`var(--surface)`, `var(--surface-muted)`, `var(--primary)`, `var(--accent)`, `var(--danger)`, `var(--border)`, `var(--border-size-1)`, `var(--border-size-2)`, `var(--size-1)`, `var(--sp-sm|md|lg)`, `var(--r-sm|md)`, `var(--type-label|caption|body|subtitle)`).
+5. `ir.html`: Must contain:
+   - `<section id="<EntityName>" data-kind="entity" data-durability="tab">` with `<table data-extract="fields">`.
+   - `<section id="<screen>" data-kind="screen" data-route="/">` with `<p data-extract="reads">`, `<p data-extract="mutations">`, `<figure id="<screen>-<state>" data-kind="state" data-of="<screen>" data-state="<state>"></figure>`, and `<script type="application/json" data-kind="paths" data-of="<screen>">{"start":{"states":["ready","playing"],"accepts":["accept-start"]}}</script>`.
+   - `<section id="<flow_id>" data-kind="flow" data-of="<screen">`: Every flow key in `program.cue` `surface.flows` must have a matching section.
+   - `<p id="decision-01" data-kind="decision">`: Every decision key in `program.cue` `meta.decisions` must match an `id="decision-XX"` tag.
+6. `shell/handlers/<name>.js`: Pure Jessie fold ending with a bare `(state, event) => { ... }` arrow expression.
+7. `program.cue`: App contract (`#App` + `cluster`, `terminal`, `loop`, `build`, `out`).
 
-`pronto write` automatically parses these tags and renders SVG state-chart and neighbourhood diagrams via D2 (`d2Svg` invoking `mise x github:terrastruct/d2 -- d2`). Authors supply the semantics and prose; the compiler draws the architecture. Never omit `data-kind="screen"` or `data-kind="entity"` tags.
+`pronto write` parses `ir.html`, mints missing entity/field IDs into `.pronto/identity.json`, emits `program_derived.cue` + `.say.yaml` + `shell/screens/<screen>.html`, and renders SVG diagrams via `mise x github:terrastruct/d2 -- d2`. Never omit `data-kind="screen"` or `data-kind="entity"` tags.
 
 ---
 
@@ -206,28 +249,42 @@ Every Pronto application maintains an `ir.html` design contract with machine-rea
 
 | Attribute | Role | Target | Execution Timing |
 | :--- | :--- | :--- | :--- |
-| `data-live="<table_name>"` | Subscription Anchor | Identifies the table that controls this DOM node's lifecycle. | Re-renders automatically whenever rows matching `data-filter` mutate in the local store. |
-| `data-filter="<postgrest_filter>"` | Query Predicate | PostgREST filter string (e.g. `id=eq.the`, `status=eq.waiting&seat=eq.a`). | Evaluated against table rows; supports `{column}` template interpolation from parent scope. |
-| `data-order="<col>.<asc|desc>"` | Ordering | Column and sort direction (e.g. `tick.desc`, `created_at.asc`). | Orders template children. |
-| `data-reads="A,B,C"` | Context Injection | Comma-separated list of auxiliary tables to provide in `state.rows`. | Passive read: does NOT wake the fold on change, but makes tables available in `state.rows`. |
-| `data-empty-row='{...}'` | Fallback Prototype | Fallback JSON row rendered when the query returns zero rows. | Ensures clean layout before first network/store fetch resolves. |
-| `data-on-mutation="<handler>"` | Reactive Fold | Wakes the named handler in `shell/handlers/<name>.js`. | Fires on every refresh of the element's *own* `data-live` table (including first paint). |
-| `data-on-click="<handler>"` | Gesture Fold | Wakes handler with `{ type: "click", id: "<row.id>", from: "<element.id>" }`. | User click. Note: Click carries NO custom payload; encode intent in row ID or element ID. |
-| `data-action="<write|update|drop>"` | Declarative Form Action | Applied on `<form>` to dispatch automatic store mutations. | Form submission (`requestSubmit()`). Reads input values matching entity columns. |
-| `data-entity="<table_name>"` | Form Target Table | Target table for declarative form actions. | Paired with `data-action`. |
+| `data-screen="<name>"` | Screen Root | Outermost `<section class="screen" data-screen="...">`. | Scopes emitted screen CSS and mounts screen lifecycle. |
+| `data-live="<table_name>"` | Subscription Anchor | Identifies the table that controls this DOM region's lifecycle. | Re-renders automatically whenever rows matching `data-filter` mutate in the local store. |
+| `data-item` | Row Template | Placed on `<template data-item>` inside a `data-live` region. | Instantiated once per matching row; **must wrap exactly one root child element**. (Omit `<template data-item>` for a single-row *slot*). |
+| `data-text="{col}"` | Text Projection | Placed on any element whose text content comes from a row column. | Updates `textContent` on row change (`bindTexts`). **Never write raw `{col}` inside HTML text nodes** (`<div>{col}</div>` renders literal `{col}`); `{col}` interpolation without `data-text` works only inside attributes (`id="c-{id}"`, `class="st-{state}"`). |
+| `data-filter="<postgrest_filter>"` | Query Predicate | PostgREST filter string (e.g. `id=eq.the`, `status=eq.waiting&seat=eq.a`). | Evaluated against table rows; supports `{column}` and `{param.x}` interpolation. |
+| `data-order="<col>.<asc\|desc>"` | Ordering | Column and sort direction (e.g. `ord.asc`, `created_at.desc`). | Orders instantiated template children. |
+| `data-reads="a,b,c"` | Context Injection | Comma-separated list of tables to provide in `state.rows`. | Passive read: does NOT wake the fold on change, but supplies `state.rows.<table>` on wake. |
+| `data-empty="<text>"` | Empty Copy | Fallback text (or `""` for blank) when a list or nested slot returns 0 rows. | Use `data-empty=""` on pre-seeded singleton slots or lists without `data-empty-row`. |
+| `data-empty-row='{...}'` | Fallback Prototype | Valid JSON object string (e.g. `'{"id":"the"}'`) rendered on a **slot** when 0 rows match. | Must be valid JSON (`JSON.parse`); non-JSON values throw at runtime in `hydrateRegion`. |
+| `data-handler="<name>"` | Fold Binding | Names the handler module `shell/handlers/<name>.js` for the region. | Paired with `data-on-click` or `data-on-mutation`. |
+| `data-on-mutation="<handler>"` | Reactive Fold | Wakes `shell/handlers/<handler>.js` with `{ type: "mutation" }`. | Fires on first paint and every change to the region's *own* `data-live` table. |
+| `data-on-click="<handler>"` | Gesture Fold | Placed **directly on the clickable element** (`<button data-on-click="board">`). | Wakes handler with `{ type: "click", id: "<row.id>", from: "<element.id>" }`. Click carries NO custom payload; encode intent in row `id` or element DOM `id`. |
+| `data-action="<create\|update\|upsert\|delete\|navigate>"` | Declarative Form Action | Applied on `<form data-entity="<table>" data-action="...">`. | Form submission. Validates and writes input values matching entity columns. |
+
+#### PostgREST `data-filter` Mini-Reference:
+1. **Equality & Inequality:** `id=eq.the`, `status=neq.closed`, `turn=gt.0`, `rank=lte.10` — joined with `&` (`&amp;` in HTML attributes, e.g. `current=eq.yes&amp;seat=eq.a`).
+2. **Nulls, Booleans & Caps:** `cover_url=not.is.null`, `graded=eq.false`, `active=is.true`, `limit=20` (row cap applied after `data-order`).
+3. **Parent Row Interpolation (`{col}`):** Nested regions resolve `{col}` against the enclosing row (e.g. `<ul data-live="play" data-filter="round_id=eq.{id}">`).
+4. **Route Param Interpolation (`{param.x}`):** Regions on parameterized routes (`/board/:game`) pin route params via `data-filter="id=eq.{param.game}"`.
 
 ### B. Jessie Handler / Cortex Execution Contract
 
-All client folds (`shell/handlers/*.js`) and state machine reducers (`machines/*.js`) adhere to the strict pure signature:
+All client folds (`shell/handlers/*.js`), validations (`shell/validations/*.js`), and state machine reducers (`machines/*.js`) evaluate in an SES `Compartment` where the **last top-level expression in the file must be the bare arrow function** (do NOT use `export default`; `plugins/pronto/jessie.ts` checks `completion === "arrow"`):
 
 ```javascript
-// (state, event, machine?, machines?) => StepResult
-export default (state, event) => {
-    const { rows, items } = state;
-    // rows:  Record<string, Row[]>  (Auxiliary tables declared in data-reads)
-    // items: Row[]                  (The element's own rows in DOM order)
+// File: shell/handlers/board.js
+// Helper declarations may precede the final arrow expression:
+const indexOf = (r, c) => r * 9 + c;
+
+// Final top-level expression MUST be the arrow function (no `export default`):
+(state, event) => {
+    const rows = state.rows ?? {};
+    // rows:  Record<string, Row[]>  (Tables declared in data-reads)
+    // state.items: Row[]            (The waking region's own rows in DOM order)
     
-    // event types:
+    // event shapes:
     // { type: "mutation" }
     // { type: "click", id: string, from: string }
     // { type: "refused", entity: string, kind: string, id: string, validation?: string }
@@ -235,80 +292,48 @@ export default (state, event) => {
 
     return {
         updates: [
-            // Mutation operations applied synchronously to the local store:
-            { op: "put",   entity: "tab_table", id: "row-id", row: { id: "row-id", val: 123 } },
-            { op: "patch", entity: "tab_table", id: "row-id", row: { val: 456 } },
-            { op: "delete",entity: "tab_table", id: "row-id" }
+            // Discrete relational mutations (recompute absolutely, write differentially):
+            { op: "put",    entity: "cell", id: "0", row: { pos: 0, state: "revealed", adj: 1 } },
+            { op: "patch",  entity: "game", id: "game", row: { status: "playing" } },
+            { op: "delete", entity: "flag", id: "0" }
         ],
         then: {
-            // Optional scheduled re-wake
-            type: "next_phase",
-            delay: 1000,    // Milliseconds to wait (uses virtual clock in test/replay)
-            seed: true,     // Request deterministic PRNG seed in event.seed
-            with: { foo: "bar" } // State payload carried into next event.with
+            // Optional scheduled re-wake or entropy request:
+            type: "tick",
+            delay: 1000,         // Milliseconds (stepped deterministically under ?clock=manual)
+            seed: true,          // Injects deterministic 32-bit PRNG draw in next event.seed
+            with: { step: 1 }    // Payload carried into next event.with
         }
     };
-};
+}
 ```
+*Fixpoint Rule:* A `data-on-mutation` fold wakes whenever its `data-live` table changes. Always compare desired state against existing rows and emit `updates: []` when nothing changed, otherwise the fold will wake itself in an infinite loop.
 
 ---
 
 ## 5. MECHA ACTORS & HYBRID STATE MACHINES
 
-In multiplayer and turn-based games (e.g. `truco`, `apexrun`), coordination between multiple players is handled by **Hybrid Mecha Actors** (`016_mecha_actors.sql`).
+In multiplayer and turn-based games (`truco`, `apexrun`), multi-player coordination is managed by **Hybrid Mecha Actors** (`016_mecha_actors.sql`):
 
-### State Machine Lifecycle
-1. **Admission (`<machine>_open`):**
-   - A player opens a match or joins by inserting a row into `<machine>_open` with `{ kind: "create" | "join", input: { ... } }`.
-   - The PostgreSQL trigger `hybrid_<machine>.open()` executes, verifies capacity, validates RLS, and inserts the player into `hybrid_<machine>.member`.
-2. **Commands (`<machine>_command`):**
-   - Players act by inserting rows into `<machine>_command` keyed by:
-     $$\text{id} = \text{instance\_id} / \text{revision} / \text{seat} / \text{kind}$$
-   - PostgreSQL locks the instance row (`FOR UPDATE`), checks `expected_revision == current_revision`, and executes the transition rule in the embedded JS runtime (plv8/SES).
-3. **Revisions & Conflict Resolution:**
-   - Every accepted command increments `instance.revision` atomically.
-   - If a client sends a command with a stale revision, the database rejects it with `{ kind: "rejected", reason: "stale_revision" }`.
-   - The client fold observes the rejection in `state.rows.<machine>_command` and resubmits at the new revision.
-4. **Ticker & Deadlines (`hybrid_<machine>.arm`):**
-   - When a state specifies a timeout (e.g. 15s turn timer, 10-minute challenge wait), the database registers a trigger on `public.schedule`.
-   - When the deadline elapses, `machine_timer_tick` fires `hybrid_<machine>.fire()`, advancing the state machine to its timeout state (e.g. `abandoned` or `expired`).
+| Phase | Table / Trigger | Contract & Invariant |
+| :--- | :--- | :--- |
+| **1. Admission** | `<machine>_open` → `hybrid_<machine>.open()` | Client puts `{ id, instance_id, kind: "create" \| "join", input: {...} }`. Trigger verifies capacity + RLS and inserts player into `hybrid_<machine>.member`. |
+| **2. Commands** | `<machine>_command` | Keyed by `id = "${instance_id}/${revision}/${seat}/${kind}"`. PG locks instance (`FOR UPDATE`), checks `expected_revision == current_revision`, runs transition in embedded plv8/SES. |
+| **3. Revisions** | `instance.revision` | Increments atomically on each accepted command. Stale commands are marked `{ outcome: "rejected", reason: "stale_revision" }`; client fold observes rejection in `state.rows.<machine>_command` and resubmits at new revision. |
+| **4. Deadlines** | `hybrid_<machine>.arm` / `public.schedule` | Timed states register a `public.schedule` row. On deadline, `machine_timer_tick` fires `hybrid_<machine>.fire()`, advancing to timeout state (`abandoned` / `expired`). |
 
 ---
 
 ## 6. CANONICAL APP ARCHITECTURES
 
-### A. Real-Time 3D & Rollback Netcode (`apps/apexrun`)
-- **Pattern:** Hybrid arcade racing game combining an embedded 3D engine (Babylon.js) with WebRTC rollback synchronization (GGRS).
-- **Architecture:**
-  - **Lobby Machine (`apps/apexrun/machines/lobby.js`):** Cortex machine managing player presence leases, active callsigns, stage selection, and challenge link generation.
-  - **Duel Machine (`apps/apexrun/machines/duel.js`):** Mecha actor orchestrating WebRTC SDP offer/answer handshakes between Seat A and Seat B with automatic 10-minute challenge waiting timeouts.
-  - **Presenter (`plugins/omnishell/interpreter/kinetic-mount.js`):** Runs the 60Hz deterministic game loop inside an isolated Jessie realm, binding user gamepad/keyboard inputs and syncing over WebRTC DataChannel.
-
-### B. Turn-Based Multiplayer & Table Reservations (`apps/truco`)
-- **Pattern:** Turn-based Latin American card game with 1v1, 2v2, and 2v2v2 team seating.
-- **Architecture:**
-  - **Chairs & Members:** Six chairs (`a` through `f`), seated via `hybrid_truco_match.join()`.
-  - **Strict State Machine (`apps/truco/machines/match.js`):** Validates legal card plays, bet raises (Truco, Retruco, Vale Quatro), score updates, and round tricks.
-  - **Presence & Leases:** Ephemeral tabs lease presence rows. Closing a browser tab automatically marks the player away without disconnecting active game state.
-
-### C. Wasm Runtimes & Host-DOM Hatches (`apps/doom`)
-- **Pattern:** Classic Wasm-compiled game running inside Omnishell with custom HUD overlay.
-- **Architecture:**
-  - **Custom Boot (`apps/doom/boot.js`):** Injected via `#DefaultTerminal.boot`. Downloads Wasm bytecode, binds WebAudio and WebGL contexts.
-  - **Host-DOM Hatch:** Passes game ticks and player stats into Omnishell store tables (`match`, `player`, `frag`).
-  - **Declarative HUD:** The player HUD is written as pure Omnishell HTML (`data-live="player" data-text="{health}"`), completely decoupled from the game's internal C/Wasm rendering loop.
-
-### D. Offline-First Children's Press (`apps/snapcards`)
-- **Pattern:** Card collector and educational flashcards running entirely on client tabs.
-- **Architecture:**
-  - **Durability:** `tab` and `offline`. Zero server migrations emitted.
-  - **Multilingual Catalogues:** Embedded JSON message packs (`messages/pt-BR.json`, `es-LA.json`, `he-IL.json`) resolved at compile time for localized paths.
-
-### E. Analytics Dashboard & Rollups (`apps/plausible`)
-- **Pattern:** Time-series visitor analytics and bounce rate computation.
-- **Architecture:**
-  - **Dual Reduce Folds:** Two `data-on-mutation` folds aggregate raw pageview hits into daily visitor counts and path popularity entirely in browser memory.
-  - **Virtual Time:** Injects a `zone` table with offsets to evaluate local midnight boundaries without relying on system `Intl` or `Date`.
+| App | Domain Pattern | Durability & Key Mechanisms |
+| :--- | :--- | :--- |
+| `apps/jsfb` | Single-screen benchmark / pure client fold | `tab` only (`Bench` singleton + `Row` list). Single fold (`shell/handlers/bench.js`) handles create, append, update, swap (`ord` exchange), select (`cls` column), and delete without `<form>` elements. |
+| `apps/apexrun` | Real-time 3D racing & GGRS rollback netcode | `tab` (`run`, `lobby_tab`) + `server` (`high_score`) + hybrid actors (`presence`, `challenge`, `duel`). 60Hz deterministic step in isolated Jessie realm (`kinetic-mount.js`) over WebRTC DataChannel. |
+| `apps/truco` | Turn-based card game & 6-chair seating | Hybrid actor `truco_match` (`machines/match.js`) validates legal card plays, raises (Truco/Retruco/Vale Quatro), and round tricks; ephemeral tab leases track presence. |
+| `apps/doom` | Wasm runtime + declarative HUD overlay | Custom `boot.js` embedded via `#DefaultTerminal.boot` loads Wasm/WebGL; host-DOM hatch writes `match`, `player`, `frag` tables projected by pure `data-live` HUD markup. |
+| `apps/snapcards` | Offline-first multilingual flashcards | `tab` and `offline` durability (zero server migrations); compile-time localized message catalogues (`messages/pt-BR.json`, `es-LA.json`, `he-IL.json`). |
+| `apps/plausible` | Time-series analytics & rollups | Dual `data-on-mutation` reduce folds aggregate pageviews into daily visitor counts and path popularity in memory; `zone` table evaluates local midnight without `Date`/`Intl`. |
 
 ---
 
@@ -381,17 +406,20 @@ In multiplayer and turn-based games (e.g. `truco`, `apexrun`), coordination betw
 + terminal: (pronto.#DefaultTerminal & { "code": code, "boot": _customBoot }).out
 ```
 
-### 6. Reading Auxiliary Tables in Handlers
+### 6. Reading Auxiliary Tables in Handlers (Pure Jessie Completion)
 ```diff
-- // WRONG: Querying store imperatively inside a handler
-- const user = await store.get("app_user", authId);
+- // WRONG: Using `export default` or querying store imperatively inside a handler
+- export default async (state, event) => {
+-     const user = await store.get("app_user", authId);
+- };
 
-+ // RIGHT: Declare table in data-reads on the DOM element and access via state.rows
++ // RIGHT: Declare table in data-reads on DOM element; end file with bare arrow function
 + // HTML: <div data-live="match" data-reads="app_user,player">
-+ export default (state, event) => {
++ (state, event) => {
 +     const users = state.rows.app_user ?? [];
 +     const players = state.rows.player ?? [];
-+ };
++     return { updates: [] };
++ }
 ```
 
 ### 7. Form Submissions
@@ -400,59 +428,88 @@ In multiplayer and turn-based games (e.g. `truco`, `apexrun`), coordination betw
 - form.addEventListener("submit", (e) => { e.preventDefault(); doCustomSave(); });
 
 + // RIGHT: Use declarative data-entity and data-action attributes
-+ <form data-entity="high_score" data-action="write">
++ <form data-entity="high_score" data-action="create">
 +     <input name="initials" maxlength="3" required />
 +     <input type="hidden" name="score" value="12000" />
 +     <button type="submit">SAVE SCORE</button>
 + </form>
 ```
 
-### 8. Authoring Architecture Contracts & Tooling Assumptions
+### 8. Authoring Architecture Contracts, Identity Minting & Tooling Assumptions
 ```diff
-- // WRONG: Omitting screen sections from ir.html assuming `which d2` must succeed in ambient shell
-- <!-- Omitting data-kind="screen" so d2 is never invoked -->
-- <section id="arena">
--     <p>Arena screen without machine-readable kind tag</p>
-- </section>
+- // WRONG: Pre-inventing `id: "0x..."` / `ordinal:` in program.cue or omitting `data-kind="screen"` assuming `which d2` must succeed
+- Game: {
+-     id: "0x1234567890abcdef"
+-     table: "game"
+-     fields: [{ ordinal: 1, name: "id", type: "string", pk: true }]
+- }
 
-+ // RIGHT: Author full design sections; pronto write executes d2 via mise automatically
-+ <section id="arena" data-kind="screen">
-+     <h2>Arena Screen</h2>
-+     <p>Observes match and player tables; renders reactive 9x9 board.</p>
++ // RIGHT: Author entities without `id`/`ordinal` and full `data-kind` sections in ir.html; `write.ts` mints IDs and runs d2 via mise automatically
++ Game: {
++     table: "game"
++     durability: "tab"
++     fields: [{name: "id", type: "string", pk: true}]
++ }
++ <!-- In ir.html: -->
++ <section id="arena" data-kind="screen" data-route="/">
++     <h3>arena — 9x9 board</h3>
++     <p data-extract="reads">Reads: <a href="#Game">Game</a>, <a href="#Cell">Cell</a>.</p>
++     <p data-extract="mutations">Mutations: click bindings to <code>board</code> fold.</p>
 + </section>
 ```
 
 ---
 
-## 8. CLI VERIFICATION & WORKFLOW CHECKSUM
+## 8. CLI VERIFICATION, SAYT TDD LOOP & WORKFLOW CHECKSUM
 
-The developer loop is managed through Sayt (`saytw`), Pronto, and Deno:
+The developer TDD loop is driven by Sayt (`./saytw` inside `apps/<app_name>`), Pronto, and Deno (never hand-edit `.say.yaml`; `write.ts` / `./saytw generate` emits it from `loop` and `build`):
 
-### In the Monorepo:
+### In the Monorepo (Sayt TDD Ladder + Direct Gates):
 ```bash
-# 1. Compile CUE and emit derived schemas, SQL, and shell files:
+# 1. Canonical Sayt TDD Ladder (run in foreground inside apps/<app_name>, layer by layer until exit 0):
+cd apps/<app_name>
+./saytw generate   # Runs write.ts + auto-bayt (mints .pronto/identity.json, emits program_derived.cue, bayt.json, .bayt/, .say.yaml)
+./saytw lint       # Runs derive, types, proto, facts, identity, cue vet, handlers, and markup checks
+./saytw test       # Runs unit/handler checks (`loop: surface: checks` with verb: "test") and state machines
+./saytw integrate  # Boots containerized stack via Bayt/bkid, runs `ci-visual` (2-viewport DOM checks) + `build: checks` Playwright acceptance suite
+
+# 2. Direct compiler & static gates (from repo root, equivalent to generate + lint):
 deno run -A plugins/pronto/write.ts apps/<app_name>
-
-# 2. Run static analysis & type validation:
 cue vet ./apps/<app_name>
+deno run -A plugins/pronto/identity.ts check apps/<app_name>
+deno run -A plugins/pronto/check-facts.ts apps/<app_name>
+deno run -A plugins/omnishell/check-handlers.ts apps/<app_name>
+deno run --node-modules-dir=none -A plugins/omnishell/check-markup.ts apps/<app_name>
 
-# 3. Execute unit tests (Cortex machines, folds, and mechanics):
-deno test --config apps/<app_name>/tests/deno.json \
-  --unstable-raw-imports --allow-read --allow-env \
-  apps/<app_name>/tests/
+# 3. Bundle static browser release (dist/browser) & run `verify` (Tier 1 HTTP + Tier 2 Playwright journeys):
+deno run -A plugins/pronto/bundle/bundle.ts apps/<app_name>
+deno run -A plugins/pronto/verify/verify.ts apps/<app_name> --platform pages --target http://localhost:<port>
+# Or via `./saytw verify@pages` (`@pages` rulemap suffix required):
+(cd apps/<app_name> && SAY_VERIFY_ARGS_TARGET="http://localhost:<port>" SAY_VERIFY_ARGS_TIER="2" ./saytw verify@pages)
 
-# 4. Bundle edge release (PGlite WASM + Cloudflare Worker):
+# 4. Bundle & publish Cloudflare Edge release (PGlite WASM + Cloudflare Worker):
 deno run -A --config plugins/pronto/bundle/deno.json \
   plugins/pronto/bundle/edge.ts apps/<app_name> \
   --omnishell plugins/omnishell --mecha libraries/mecha \
   --out apps/<app_name>/dist/cloudflare \
   --ice-servers '[{"urls":"stun:stun.cloudflare.com:3478"}]' \
   --domain <app_domain>
-
-# 5. Publish to Cloudflare Edge:
 deno run -A --config plugins/pronto/bundle/deno.json \
   plugins/pronto/bundle/publish-edge.ts apps/<app_name>/dist/cloudflare \
   --mecha libraries/mecha
+```
+
+#### Custom Playwright Journeys (`apps/<app_name>/tests/verify.ts`):
+`verify.ts` discovers `tests/verify.ts` and runs exported `journeys` under a zero-tolerance network error trap (`run` must call `page.goto(ctx.targetUrl)`):
+```typescript
+export const journeys = [{
+  screen: "arena",
+  path: "/",
+  run: async (page: any, ctx: { targetUrl: string }) => {
+    await page.goto(ctx.targetUrl, { waitUntil: "networkidle" });
+    await page.click("#cell-0");
+  },
+}];
 ```
 
 ### In Standalone `bonisoft3/pronto`:
