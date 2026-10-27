@@ -241,7 +241,7 @@ Before running `write.ts` on a new app, create these **7 prerequisite files** (d
 6. `shell/handlers/<name>.js`: Pure Jessie fold ending with a bare `(state, event) => { ... }` arrow expression.
 7. `program.cue`: App contract (`#App` + `cluster`, `terminal`, `loop`, `build`, `out`).
 
-`pronto write` parses `ir.html`, mints missing entity/field IDs into `.pronto/identity.json`, emits `program_derived.cue` + `.say.yaml` + `shell/screens/<screen>.html`, and renders SVG diagrams via `mise x github:terrastruct/d2 -- d2`. Never omit `data-kind="screen"` or `data-kind="entity"` tags.
+`pronto write` (`write.ts` / `./saytw generate`) parses `ir.html`, mints missing entity/field IDs into `.pronto/identity.json`, emits `program_derived.cue` + `.say.yaml` + `shell/screens/<screen>.html`, and renders SVG diagrams via `mise x github:terrastruct/d2 -- d2`. **Guided Cold-Start Tip:** `meta.ir.sha256` defaults to `""`, and running `./saytw generate` (or `deno run -A plugins/pronto/write.ts apps/<app_name>`) as soon as `program.cue` is written reports every missing companion file (`ir.html`, `acceptance.md`, `DESIGN.md`, `brief.html`, `shell/screens/<screen>.css`, `shell/handlers/<name>.js`) along with the exact `<article id="..." data-kind="...">` tags, `paths` blocks, and `#accept-...` claim IDs your `program.cue` owes in one pass.
 
 ---
 

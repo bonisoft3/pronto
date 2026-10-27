@@ -175,6 +175,48 @@ Deno.test("a settled build preserves outputs and still follows new template read
   }
 });
 
+Deno.test("cold-start preflight reports all missing authored files and owed ids in one pass", async () => {
+  const app = await Deno.makeTempDir({
+    dir: join(repo, "apps"),
+    prefix: ".write-cold-start-",
+  });
+  const decoder = new TextDecoder();
+  try {
+    await copyJsfb(app);
+    for (const rel of ["ir.html", "acceptance.md", "DESIGN.md", "brief.html", "shell/screens/main.css"]) {
+      await Deno.remove(join(app, rel));
+    }
+    const result = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--no-check",
+        "--config",
+        join(repo, "plugins/pronto/deno.json"),
+        "--allow-read",
+        "--allow-write=.",
+        "--allow-run",
+        "--allow-env",
+        writer,
+        ".",
+      ],
+      cwd: app,
+      env: { ...Deno.env.toObject(), MISE_TRUSTED_CONFIG_PATHS: repo },
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    const text = decoder.decode(result.stderr);
+    assertEquals(result.success, false, text);
+    assertStringIncludes(text, "ir.html: no such file — author ir.html with owed elements:");
+    assertStringIncludes(text, '<article id="main" data-kind="screen" data-route="/">');
+    assertStringIncludes(text, "acceptance.md: no such file — author acceptance.md");
+    assertStringIncludes(text, "DESIGN.md: no such file");
+    assertStringIncludes(text, "brief.html: no such file");
+    assertStringIncludes(text, "shell/screens/main.css does not open");
+  } finally {
+    await Deno.remove(app, { recursive: true });
+  }
+});
+
 async function assertRejectsNotFound(path: string): Promise<void> {
   try {
     await Deno.stat(path);

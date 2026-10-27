@@ -1761,7 +1761,7 @@ import (
 		dnsPrefetch?: string | [...string]
 		themeColor?:  string
 		sitemap?:     #Sitemap
-		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
+		ir: {source: *"ir.html" | string, sha256: *"" | string} // the pinned IR this program was compiled from
 		domain?: string
 		ssrOrigin?: string
 		// A frozen archive retains its schedules and runs none, at the edge or
