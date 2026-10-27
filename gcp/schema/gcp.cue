@@ -59,6 +59,18 @@ import (
 	// nobody is asking (a sidecar's long task).
 	alwaysOn: *false | bool
 
+	// Electric's share of the instance. Its memory holds every shape it keeps
+	// (its storage is the instance's /tmp, which Cloud Run keeps in memory), so
+	// an app whose screens keep many shapes live, one per parent row for a
+	// folder under a shared parent, asks for more: without it a page's first
+	// load ran the container out of memory and restarted the instance. Its
+	// pool is how many snapshots it builds at once.
+	electric: {
+		memory: *"1Gi" | =~"^[1-9][0-9]*(Mi|Gi)$"
+		cpu:    *1000 | int & >=250 & <=4000
+		pool:   *#Pools.electric | int & >=2 & <=40
+	}
+
 	// Filled by the release from what it pushed: a revision resolves a tag once,
 	// so every image is named by digest (mecha's docs/deployment.md, what bites).
 	image: {
@@ -375,12 +387,13 @@ import (
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
 						{name: "ELECTRIC_PORT", value: "\(P.electric)"},
 						{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
-						{name: "ELECTRIC_DB_POOL_SIZE", value: "\(#Pools.electric)"},
+						{name: "ELECTRIC_DB_POOL_SIZE", value: "\(R.electric.pool)"},
 						// The instance's own: electric's shape metadata is SQLite,
 						// which a bucket mounted over FUSE cannot lock. A new
 						// instance rebuilds its shapes from Postgres.
 						{name: "ELECTRIC_STORAGE_DIR", value: "/tmp/electric"},
 					]
+					resources: limits: {cpu: "\(R.electric.cpu)m", memory: R.electric.memory}
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
 				}, if R.ticker != _|_ {
 					name: "ticker"

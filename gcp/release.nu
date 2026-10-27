@@ -7,7 +7,7 @@
 # images push the same digests and roll nothing, and initdb finds its marker.
 
 use ../k8s/release.nu [resolve-app]
-use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of builder]
+use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of builder stamp]
 
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
@@ -143,13 +143,13 @@ def ensure-infrastructure [plan: record] {
 	ensure-secret $n.secrets.MIGRATE_DATABASE_URL $p $"postgres://postgres:($pg)@/($n.database)?host=/cloudsql/($n.connection)&sslmode=disable" | ignore
 
 	if not (exists sql instances describe $n.instance --project $p) {
-		print $"gcp: creating Cloud SQL ($n.instance) \(several minutes\)"
+		print $"gcp: (stamp) creating Cloud SQL ($n.instance) \(several minutes\)"
 		gc sql instances create $n.instance --project $p --region $plan.region --database-version POSTGRES_18 --edition enterprise --tier $plan.sqlTier --storage-size 10 --storage-type HDD --database-flags $plan.sqlFlags --root-password $pg | ignore
 	}
 	# Flags an earlier release set differently are patched, which restarts it.
 	let flags = (gc sql instances describe $n.instance --project $p --format json | from json | get settings.databaseFlags? | default [] | each {|f| $"($f.name)=($f.value)" } | sort | str join ",")
 	if $flags != ($plan.sqlFlags | split row "," | sort | str join ",") {
-		print $"gcp: setting ($plan.sqlFlags) on ($n.instance) \(it restarts\)"
+		print $"gcp: (stamp) setting ($plan.sqlFlags) on ($n.instance) \(it restarts\)"
 		gc sql instances patch $n.instance --project $p --database-flags $plan.sqlFlags --quiet | ignore
 	}
 	# The password the URLs carry is the user's, whichever came first.
@@ -223,7 +223,7 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 	let key = (source-key $app_dir $"($work)/files" ([$builder ($services | str join " ") "linux/amd64"] | str join " "))
 	let before = (pushed-for $refs $key)
 	if $before != null {
-		print $"gcp: ($services | str join ', ') unchanged since they were last built: reusing them"
+		print $"gcp: (stamp) ($services | str join ', ') unchanged since they were last built: reusing them"
 		rm -rf $work
 		return ($before | each {|b|
 			gc artifacts docker tags add $"($b.repo)@($b.digest)" $"($b.repo):($tag)" | ignore
@@ -272,7 +272,7 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 		options: {machineType: "E2_HIGHCPU_8", logging: "CLOUD_LOGGING_ONLY"}
 		timeout: "1800s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
-	print $"gcp: building ($services | str join ', ') in Cloud Build"
+	print $"gcp: (stamp) building ($services | str join ', ') in Cloud Build"
 	let r = (^gcloud --quiet builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p | complete)
 	rm -rf $work
 	if $r.exit_code != 0 {
@@ -309,7 +309,7 @@ def start-copy [plan: record, name: string, services: list<string>, from: record
 		options: {logging: "CLOUD_LOGGING_ONLY"}
 		timeout: "1200s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
-	print $"gcp: copying the tested ($services | str join ', ') from the preview"
+	print $"gcp: (stamp) copying the tested ($services | str join ', ') from the preview"
 	let build = (gc builds submit --no-source --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
 	rm -rf $work
 	{build: $build, project: $p, registry: $from.registry, refs: $refs}
@@ -352,8 +352,8 @@ def map-domain [domain: string, service: string, project: string, region: string
 			spec: {routeName: $service}
 		})
 		if $made.status >= 300 {
-			print $"gcp: ($domain) is not mapped: ($made.body.error?.message? | default ($made.body | to json))"
-			print $"gcp: verify it first: gcloud domains verify ($domain)"
+			print $"gcp: (stamp) ($domain) is not mapped: ($made.body.error?.message? | default ($made.body | to json))"
+			print $"gcp: (stamp) verify it first: gcloud domains verify ($domain)"
 			return
 		}
 		$made.body
@@ -362,12 +362,12 @@ def map-domain [domain: string, service: string, project: string, region: string
 	} else { $got.body }
 	let ready = ($mapping.status?.conditions? | default [] | where type == "Ready" | get 0?)
 	if ($ready.status? | default "") != "True" {
-		print $"gcp: ($domain) is mapped but not ready: ($ready.message? | default 'Google is still provisioning it')"
-		print $"gcp: an unverified domain is verified once by its owner: gcloud domains verify ($domain)"
+		print $"gcp: (stamp) ($domain) is mapped but not ready: ($ready.message? | default 'Google is still provisioning it')"
+		print $"gcp: (stamp) an unverified domain is verified once by its owner: gcloud domains verify ($domain)"
 	}
 	let records = ($mapping.status?.resourceRecords? | default [])
 	if ($records | is-not-empty) {
-		print $"gcp: ($domain)'s DNS records:"
+		print $"gcp: (stamp) ($domain)'s DNS records:"
 		print ($records | select -o type name rrdata | table)
 	}
 }
@@ -375,7 +375,7 @@ def map-domain [domain: string, service: string, project: string, region: string
 # A job applied and run to its end; its logs are where a failure says why.
 def run-job [file: string, name: string, what: string, project: string, region: string] {
 	gc run jobs replace $file --region $region --project $project | ignore
-	print $"gcp: ($what) \(($name)\)"
+	print $"gcp: (stamp) ($what) \(($name)\)"
 	let run = (^gcloud --quiet run jobs execute $name --region $region --project $project --wait | complete)
 	if $run.exit_code != 0 {
 		error make {msg: $"($name) failed: ($run.stderr | str trim)\nlogs: gcloud logging read 'resource.labels.job_name=($name)' --project ($project) --limit 40"}
@@ -398,7 +398,7 @@ def ensure-clock [clock: record, token: string, project: string, region: string]
 	# A job made just after the API is enabled can sit past its first slot
 	# until something runs it; running it once also pokes the new revision.
 	gc scheduler jobs run $clock.name --location $region --project $project | ignore
-	print $"gcp: the ticker's clock \(($clock.name)\) pokes ($clock.uri) each minute"
+	print $"gcp: (stamp) the ticker's clock \(($clock.name)\) pokes ($clock.uri) each minute"
 }
 
 # The blob plane's bucket, in the region, its objects the service account's
@@ -409,7 +409,7 @@ def ensure-bucket [bucket: string, account: string, project: string, region: str
 		gc storage buckets create $"gs://($bucket)" --project $project --location $region --uniform-bucket-level-access --public-access-prevention | ignore
 	}
 	gc storage buckets add-iam-policy-binding $"gs://($bucket)" --project $project --member $"serviceAccount:($account)" --role roles/storage.objectAdmin | ignore
-	print $"gcp: pictures are kept in gs://($bucket)"
+	print $"gcp: (stamp) pictures are kept in gs://($bucket)"
 }
 
 # A preview stopped: what runs against its database (its service, jobs and
@@ -438,7 +438,7 @@ def empty-preview [plan: record] {
 	# 404: an app's first preview has no instance yet.
 	if not (exists sql instances describe $n.instance --project $plan.project) { return }
 	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
-		print $"gcp: emptying the preview ($plan.preview): dropping its database on ($n.instance)"
+		print $"gcp: (stamp) emptying the preview ($plan.preview): dropping its database on ($n.instance)"
 		gc sql databases delete $n.database --instance $n.instance --project $plan.project | ignore
 	}
 }
@@ -453,7 +453,7 @@ def delete-preview [plan: record] {
 	for secret in ($n.secrets | values) {
 		if (exists secrets describe $secret --project $p) { gc secrets delete $secret --project $p | ignore }
 	}
-	print $"gcp: preview ($plan.preview) removed"
+	print $"gcp: (stamp) preview ($plan.preview) removed"
 }
 
 # What a release or a preview deploys, from the plan release.cue renders for
@@ -492,6 +492,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	}
 	let images = ($runtime | append (if $has_migrate { ["migrate" "schema"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars)
 	let pushed = if $snapshot { {} } else {
+		print $"gcp: (stamp) setting up ($plan0.service)'s project"
 		ensure-infrastructure $plan0
 		if $from == null { push-images $app_info.dir $plan0 $name $images } else {
 			# The copy the gate started while it tested, when it copied these images.
@@ -534,7 +535,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	$plan.jobYaml | save -f dist/gcp/job.yaml
 	$plan.serviceYaml | save -f dist/gcp/service.yaml
 	for s in ($plan.sidecarServicesYaml | transpose name yaml) { $s.yaml | save -f $"dist/gcp/sidecar-($s.name).yaml" }
-	if $snapshot { print "gcp: rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {} }
+	if $snapshot { print $"gcp: (stamp) rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {} }
 
 	let p = $plan.project
 	let r = $plan.region
@@ -550,6 +551,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
 	# The migrate job an earlier release ran apart, which this one's job does.
 	if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) { gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore }
+	print $"gcp: (stamp) deploying ($plan.service)"
 	gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
 	if ($plan.iap? | default false) {
 		# Behind Identity-Aware Proxy only IAP's own agent invokes the service, and
@@ -573,7 +575,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 			ensure-clock $t.clock (gc secrets versions access latest --secret $plan.names.secrets.SERVICE_JWT --project $p) $p $r
 		} else {
 			let svc = ($plan.names.sidecarServices | get $t.sidecar)
-			print $"gcp: ($t.sidecar) apart \(($svc)\)"
+			print $"gcp: (stamp) ($t.sidecar) apart \(($svc)\)"
 			gc run services replace $"dist/gcp/sidecar-($t.sidecar).yaml" --region $r --project $p | ignore
 			gc run services add-iam-policy-binding $svc --region $r --project $p --member allUsers --role roles/run.invoker | ignore
 		}
@@ -588,7 +590,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	# Behind IAP the address answers with its sign-in, a redirect, to a stranger such as this.
 	let ok = if ($plan.iap? | default false) { ["200", "302"] } else { ["200"] }
 	if $health not-in $ok { error make {msg: $"($address)/health answered ($health)"} }
-	print $"gcp: ($plan.service) is live at ($address)"
+	print $"gcp: (stamp) ($plan.service) is live at ($address)"
 	$pushed
 }
 
@@ -610,6 +612,7 @@ export def main [
 	--delete        # Remove the preview, when its pull request closes
 	--no-gate       # Release without testing a preview of it first
 ] {
+	$env.GCP_T0 = (date now)
 	let app_info = (resolve-app $app)
 	# sayt hands a release's own flags over as SAY_RELEASE_ARGS_<FLAG>, and only
 	# so where the rule has more than one command: each is read from there too,
@@ -639,7 +642,7 @@ export def main [
 	# so one release at a time; `--preview rc --delete` removes it all.
 	let rc = "rc"
 	let rc_plan = (plan-of $app_info.cue_path $rc)
-	print $"gcp: testing a preview \(($rc)\) before the release"
+	print $"gcp: (stamp) testing a preview \(($rc)\) before the release"
 	#
 	# The tests' own images build in Cloud Build while the preview deploys, and
 	# run once it is up; while they run, the release's project copies the

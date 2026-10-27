@@ -35,6 +35,14 @@ def render [cue_path: string, data?: string]: nothing -> record {
 }
 
 # The plan a release or a preview renders.
+# How long the release has run, before each of its lines: where its time
+# goes, read off the log.
+export def stamp []: nothing -> string {
+	let ran = ((date now) - ($env.GCP_T0? | default (date now)))
+	let s = ($ran / 1sec | math floor)
+	$"[+($s // 60 | fill -a r -c '0' -w 2):($s mod 60 | fill -a r -c '0' -w 2)]"
+}
+
 export def plan-of [cue_path: string, preview: string]: nothing -> record {
 	if ($preview | is-empty) { return (render $cue_path) }
 	let base_file = (mktemp -t gcp.XXXXXX.json | str trim)
@@ -140,12 +148,12 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		options: {machineType: "E2_HIGHCPU_32", logging: "CLOUD_LOGGING_ONLY"}
 		timeout: "3600s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
-	print $"gcp: building the tests of ($url) in Cloud Build"
+	print $"gcp: (stamp) building the tests of ($url) in Cloud Build"
 	# The build logs to Cloud Logging alone, which `builds submit` does not
 	# stream: its log is printed once it ends, without the image builds' lines.
 	let build = (gc builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
 	rm -rf $work
-	print $"gcp: build ($build): https://console.cloud.google.com/cloud-build/builds/($build)?project=($p)"
+	print $"gcp: (stamp) build ($build): https://console.cloud.google.com/cloud-build/builds/($build)?project=($p)"
 	{build: $build, project: $p, url: $url, service: $plan.service, region: $plan.region}
 }
 
@@ -156,7 +164,7 @@ export def go-drivers [run: record] {
 	"go" | save -f $f
 	gc storage cp $f $"gs://($run.project)_cloudbuild/verify/($run.build)/go" | ignore
 	rm $f
-	print $"gcp: testing ($run.url)"
+	print $"gcp: (stamp) testing ($run.url)"
 }
 
 # The drivers' build stopped, when the service it waits for never came up.
@@ -169,6 +177,7 @@ export def cancel-drivers [run: record] {
 export def finish-drivers [run: record] {
 	let p = $run.project
 	let build = $run.build
+	print $"gcp: (stamp) waiting for the tests to end"
 	mut status = "QUEUED"
 	while $status in ["QUEUED" "PENDING" "WORKING"] {
 		sleep 5sec
@@ -179,7 +188,7 @@ export def finish-drivers [run: record] {
 	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($build)\"" --project $p --order asc --limit 100000 --format "value(textPayload)"
 		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
 	if $status != "SUCCESS" { error make {msg: $"the tests failed against ($run.url) \(($status)\): each driver's verdict is in the log above"} }
-	print $"gcp: every test passed against ($run.url)"
+	print $"gcp: (stamp) every test passed against ($run.url)"
 }
 
 # Every driver of the app against the service the plan names, up already; an
