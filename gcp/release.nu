@@ -195,8 +195,15 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 			dockerfile-inline: "FROM migrate\nCOPY --from=database /docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/\n"
 		}}} | to json | save -f $"($work)/.pronto-schema.bake.json"
 	}
-	let extra = if $schema { ["-C" $work ".pronto-schema.bake.json"] } else { [] }
-	with-env {COPYFILE_DISABLE: "1"} { ^tar -czf $"($work)/source.tgz" -C $app_dir -T $"($work)/files" ...$extra }
+	# The bake file is appended in a second tar: macOS's bsdtar reads `-T`'s
+	# list only after every `-C`, so one `-C $app_dir -T … -C $work` call looks
+	# for the app's files in $work.
+	with-env {COPYFILE_DISABLE: "1"} {
+		^tar -cf $"($work)/source.tar" -C $app_dir -T $"($work)/files"
+		if $schema { ^tar -rf $"($work)/source.tar" -C $work .pronto-schema.bake.json }
+	}
+	^gzip -n $"($work)/source.tar"
+	mv $"($work)/source.tar.gz" $"($work)/source.tgz"
 	let bake_files = if $schema { "-f - -f .pronto-schema.bake.json" } else { "-f -" }
 	let sets = ($refs | each {|r| $"--set ($r.svc).tags=($r.ref)" } | str join " ")
 	# The worker's metadata server lends the build's account a token, which
