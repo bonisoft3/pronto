@@ -87,7 +87,34 @@ def scraped [plan: record]: nothing -> bool {
 	($plan.scrapeConfig | is-not-empty) or ($plan.sidecarScrapeConfigs? | default {} | is-not-empty)
 }
 
+# This script, so a change to how a project is set up sets it up again.
+const SELF = path self
+
+# The project as a release leaves it, set up once for what it depends on: the
+# plan's project, names, region, repository and database settings, and this
+# script. A release since which none changed reads one secret and goes on; the
+# setup is some thirty gcloud calls, most of two minutes for each of a
+# release's preview and its project, which changed nothing. PRONTO_SETUP=always
+# sets it up anyway, after a change made by hand.
 def ensure-infrastructure [plan: record] {
+	let marker = ($plan.names.job | str replace -r '-initdb$' '-setup')
+	let key = ([
+		($plan | select -o project region repository preview names sqlTier sqlFlags | to json --raw)
+		(scraped $plan | into string)
+		(open --raw $SELF)
+	] | str join (char nl) | hash sha256 | str substring 0..23)
+	if ($env.PRONTO_SETUP? | default "") != "always" {
+		let last = (^gcloud --quiet secrets versions access latest --secret $marker --project $plan.project | complete)
+		if $last.exit_code == 0 and ($last.stdout | str trim) == $key {
+			print $"gcp: (stamp) ($plan.service)'s project is as the last release set it up"
+			return
+		}
+	}
+	set-up-project $plan
+	ensure-secret $marker $plan.project $key | ignore
+}
+
+def set-up-project [plan: record] {
 	let p = $plan.project
 	let n = $plan.names
 	# A preview's release may not enable APIs: the project's first release did.
