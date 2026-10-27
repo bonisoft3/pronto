@@ -161,7 +161,8 @@ sayt -d /path/to/app release@k8s
 sayt -d /path/to/app release@k8s --dry-run
 
 # 3. Render for cloud environments (AWS EKS, Azure AKS); deploying there is not
-#    implemented yet: only Kind provisions operators, observability and TLS.
+#    implemented yet: only Kind and a metal cluster (section 12) provision
+#    operators and observability.
 sayt -d /path/to/app release@k8s --cluster-env eks --dry-run
 sayt -d /path/to/app release@k8s --cluster-env aks --dry-run
 
@@ -194,3 +195,84 @@ open http://telemetry.localhost/jaeger/
 ctlptl delete -f plugins/pronto/k8s/cluster.yaml
 ```
 
+
+---
+
+## 12. Metal: a Cluster of Your Own, Behind NAT
+
+`envs.Metal` releases to a cluster the operator runs on their own machines —
+k3s on one node at home, say — with no public address. Three things a cloud
+gives stand in from elsewhere:
+
+| A cloud's | Metal's |
+| :--- | :--- |
+| A load balancer with a public address | A [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/): `cloudflared` in the cluster dials out, and Cloudflare serves each app's host and terminates its TLS. The gateway listens on HTTP alone. |
+| A registry beside the nodes | Artifact Registry, which the node pulls from with a reader's key (k3s's `registries.yaml`) |
+| Building where it deploys | Cloud Build, as `release@gcp` builds (`gcp/build.nu`), so the machine releasing needs no Docker daemon |
+
+The cluster, its tunnel and its registry are the operator's, made once and
+shared by every app released there. An app's `release.cue` names them:
+
+```cue
+Metal: envs.Metal & {
+	context:  "home"                                      // the kube context
+	registry: "us-central1-docker.pkg.dev/<project>/pronto"
+	build: project: "<project>"                           // where Cloud Build runs
+	ingress: id: "<tunnel id>"
+	domainSuffix: "<zone>"                                // <app>.<zone>, or App.gateway.host
+	// platform: "linux/arm64"                            // for an ARM node
+}
+metalManifests: (schema.#BuildManifests & {release: App, env: Metal}).manifests
+```
+
+`sayt release@k8s` releases there when the app gives a `Metal` (`-e kind`
+still releases to Kind), and installs the operators, observability and
+`cloudflared` on the first run.
+
+### Once, for the node
+
+```sh
+# k3s, without its own ingress and load balancer: Envoy Gateway is the door.
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.34.12+k3s1 sh -s - --disable traefik --disable servicelb
+# Artifact Registry's reader, as the node's credentials for its host.
+sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<YAML
+configs:
+  us-central1-docker.pkg.dev:
+    auth:
+      username: _json_key
+      password: '$(cat reader-key.json | tr -d '\n')'
+YAML
+sudo systemctl restart k3s
+```
+
+Copy `/etc/rancher/k3s/k3s.yaml` to the machine releasing, with `127.0.0.1`
+replaced by the node's address, as the context the environment names.
+
+### Once, for the project the images build in
+
+```sh
+gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com --project <project>
+gcloud artifacts repositories create pronto --repository-format docker --location us-central1 --project <project>
+builds=$(gcloud builds get-default-service-account --project <project> --format 'value(serviceAccountEmail)' | sed 's|.*/||')
+gcloud artifacts repositories add-iam-policy-binding pronto --location us-central1 --project <project> \
+  --member serviceAccount:$builds --role roles/artifactregistry.writer
+gcloud iam service-accounts create metal-reader --project <project>
+gcloud artifacts repositories add-iam-policy-binding pronto --location us-central1 --project <project> \
+  --member serviceAccount:metal-reader@<project>.iam.gserviceaccount.com --role roles/artifactregistry.reader
+gcloud iam service-accounts keys create reader-key.json --iam-account metal-reader@<project>.iam.gserviceaccount.com
+```
+
+### Once, for the tunnel
+
+```sh
+cloudflared tunnel login                 # the zone the apps' hosts are in
+cloudflared tunnel create home           # prints the tunnel's id
+kubectl --context home create namespace cloudflared
+kubectl --context home create secret generic tunnel-credentials -n cloudflared \
+  --from-file=credentials.json=$HOME/.cloudflared/<id>.json
+```
+
+The tunnel carries every request to the gateway, which routes each by its
+host, so a new app needs only its DNS record, which the release prints:
+`cloudflared tunnel route dns <id> <host>`. No wildcard record: one would
+publish `telemetry.<zone>`, the observability stack's gateway, as well.

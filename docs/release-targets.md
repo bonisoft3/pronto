@@ -839,6 +839,10 @@ applies:
 | `azure` | Azure Service Operator v2 | Container Apps | Flexible Server, B1ms |
 | `k8s` | skaffold, against a named kube context | mecha's images, scaled from zero by KEDA | CloudNativePG |
 
+`k8s` is built for Kind and for a cluster the operator runs behind NAT
+(`envs.Metal`): its images built in Cloud Build and pulled from Artifact
+Registry, its door a Cloudflare Tunnel ([k8s/README.md](../k8s/README.md#12-metal-a-cluster-of-your-own-behind-nat)).
+
 The compute scales by itself; the floor is the database, and AWS's is the
 highest, since Aurora does not pause while logical replication is on. Project,
 account, region and domain are declarations on the cluster; credentials are

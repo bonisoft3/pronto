@@ -924,7 +924,8 @@ import (
 						hostname: gatewayHostname
 						allowedRoutes: namespaces: from: "Same"
 					},
-					if release.gateway.tls.enabled {
+					// Behind a tunnel, Cloudflare holds the certificate.
+					if release.gateway.tls.enabled && targetEnv.ingress.by != "tunnel" {
 						{
 							name:     "https"
 							protocol: "HTTPS"

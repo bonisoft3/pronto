@@ -7,31 +7,14 @@
 # images push the same digests and roll nothing, and initdb finds its marker.
 
 use ../k8s/release.nu [resolve-app]
-use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of builder stamp]
+use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of]
+use build.nu [builder stamp gc exists build-account push-images]
 
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
 # compose's clock is not one of them: Cloud Scheduler is the ticker's clock here.
 const unbuilt = ["mesh-events" "conduit" "transform" "airlock" "compute" "render"]
-
-def --wrapped gc [...args] {
-	let input = $in
-	# Never a prompt: a release runs where nobody answers one.
-	let r = ($input | ^gcloud --quiet ...$args | complete)
-	if $r.exit_code != 0 { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
-	$r.stdout
-}
-# Whether a resource is there. Only its absence answers false: an expired
-# token, a disabled API or a network that dropped would otherwise read as a
-# resource to create, and the creation then dies on one that exists.
-def --wrapped exists [...args]: nothing -> bool {
-	let r = (^gcloud --quiet ...$args | complete)
-	if $r.exit_code != 0 and not ($r.stderr =~ "NOT_FOUND|HTTPError 404|Cannot find|does not exist|not found|was not found") {
-		error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"}
-	}
-	$r.exit_code == 0
-}
 
 def render [cue_path: string, data?: string]: nothing -> record {
 	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
@@ -184,133 +167,6 @@ def set-up-project [plan: record] {
 	if not (exists sql databases describe $n.database --instance $n.instance --project $p) {
 		gc sql databases create $n.database --instance $n.instance --project $p | ignore
 	}
-}
-
-# What builds the runtime images is verify.nu's builder: Docker's own CLI
-# image, with its buildx and compose plugins, run by Cloud Build against the
-# Docker of the build's worker.
-
-# The account Cloud Build runs a build as in the project: the project's
-# default, which pushes the images and writes the build's log.
-def build-account [project: string]: nothing -> string {
-	gc builds get-default-service-account --project $project --format "value(serviceAccountEmail)" | str trim | split row "/" | last
-}
-
-# What an image build reads, as one key: every file of the app's as git sees
-# it (its path and its content's hash, unsaved ones included), and what else
-# the build is told. Equal keys build equal images, the build being
-# reproducible: what was pushed for a key is what building again would push.
-def source-key [app_dir: string, files: string, told: string]: nothing -> string {
-	# hash-object reads the paths it is given from the repository's top, and
-	# ls-files wrote them from the app's own directory: the app's prefix
-	# (apps/<name>/ in a monorepo) turns one into the other.
-	let hashes = (do {
-		cd $app_dir
-		let prefix = (^git rev-parse --show-prefix | str trim)
-		let top = (^git rev-parse --show-toplevel | str trim)
-		open --raw $files | lines | each {|f| $"($prefix)($f)" } | str join (char nl) | ^git -C $top hash-object --stdin-paths
-	} | str trim)
-	[(open --raw $files) $hashes $told] | str join (char nl) | hash sha256 | str substring 0..23
-}
-
-# The tag an image's key leaves on it, which a later release finds it by.
-def key-tag [key: string]: nothing -> string { $"src-($key)" }
-
-# The images pushed for this key before, by service, when every one of them
-# was: a release whose app did not change since (a retry, a release again)
-# builds nothing. Null when any is missing.
-def pushed-for [refs: list<record>, key: string]: nothing -> any {
-	let found = ($refs | each {|r|
-		let at = $"($r.repo):(key-tag $key)"
-		if (exists artifacts docker images describe $at) {
-			{svc: $r.svc, repo: $r.repo, digest: (gc artifacts docker images describe $at --format "value(image_summary.digest)" | str trim)}
-		}
-	} | compact)
-	if ($found | length) == ($refs | length) { $found } else { null }
-}
-
-# The runtime images, built in Cloud Build as the app's compose project builds
-# them, so the machine releasing needs no Docker daemon, and pushed by digest:
-# what integrate tested is what releases. The build reads the app's own files
-# alone, as git sees them: every context of its images is the app's
-# directory or an image by digest. Each image's layers are cached in the
-# registry beside it (`:buildcache`), so a layer whose inputs did not change is
-# pulled, not built again; and an app unchanged since its last push builds
-# nothing at all (source-key).
-def push-images [app_dir: string, plan: record, name: string, services: list<string>]: nothing -> record {
-	let p = $plan.project
-	let host = ($plan.registry | split row "/" | first)
-	# A preview's images are tagged for it, never as the release's.
-	let tag = ($plan.preview? | default "release")
-	let refs = ($services | each {|svc| {svc: $svc, repo: $"($plan.registry)/($name)-($svc)", ref: $"($plan.registry)/($name)-($svc):($tag)"} })
-	let work = (mktemp -d -t gcp-build.XXXXXX | str trim)
-	# Never a certificate pair `sayt setup` issued for this machine: an image
-	# carries none.
-	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
-	let key = (source-key $app_dir $"($work)/files" ([$builder ($services | str join " ") "linux/amd64"] | str join " "))
-	let before = (pushed-for $refs $key)
-	if $before != null {
-		print $"gcp: (stamp) ($services | str join ', ') unchanged since they were last built: reusing them"
-		rm -rf $work
-		return ($before | each {|b|
-			gc artifacts docker tags add $"($b.repo)@($b.digest)" $"($b.repo):($tag)" | ignore
-			{svc: $b.svc, ref: {tag: $tag, digest: $b.digest}}
-		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
-	}
-	# The schema job's image, `schema`: migrate's, with the database's initdb
-	# directory, so one job builds the schema and carries it forward. A bake
-	# target beside compose's, from theirs.
-	let schema = ("schema" in $services)
-	if $schema {
-		{target: {schema: {
-			context: "."
-			contexts: {migrate: "target:migrate", database: "target:database"}
-			dockerfile-inline: "FROM migrate\nCOPY --from=database /docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/\n"
-		}}} | to json | save -f $"($work)/.pronto-schema.bake.json"
-	}
-	# The bake file is appended in a second tar: macOS's bsdtar reads `-T`'s
-	# list only after every `-C`, so one `-C $app_dir -T … -C $work` call looks
-	# for the app's files in $work.
-	with-env {COPYFILE_DISABLE: "1"} {
-		^tar -cf $"($work)/source.tar" -C $app_dir -T $"($work)/files"
-		if $schema { ^tar -rf $"($work)/source.tar" -C $work .pronto-schema.bake.json }
-	}
-	^gzip -n $"($work)/source.tar"
-	mv $"($work)/source.tar.gz" $"($work)/source.tgz"
-	let bake_files = if $schema { "-f - -f .pronto-schema.bake.json" } else { "-f -" }
-	# Artifact Registry takes a cache as an image manifest, OCI's.
-	let sets = ($refs | each {|r|
-		let cache = $"($r.repo):buildcache"
-		$"--set ($r.svc).tags=($r.ref) --set ($r.svc).cache-from=type=registry,ref=($cache) --set ($r.svc).cache-to=type=registry,ref=($cache),mode=max,image-manifest=true,oci-mediatypes=true"
-	} | str join " ")
-	# The worker's metadata server lends the build's account a token, which
-	# logs Docker into the registry; reproducible, so an unchanged source
-	# pushes the digest it pushed before.
-	let script = ([
-		"set -eu"
-		"token=$(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\"access_token\":\"\\([^\"]*\\)\".*/\\1/p')"
-		$"echo \"$token\" | docker login --username oauth2accesstoken --password-stdin https://($host) >/dev/null"
-		"docker buildx create --use --driver docker-container >/dev/null"
-		$"docker compose --profile '*' config | docker buildx bake ($bake_files) --push --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' ($sets) ($services | str join ' ')"
-	] | str join "\n")
-	{
-		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
-		steps: [{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: ["SOURCE_DATE_EPOCH=0"]}]
-		options: {machineType: "E2_HIGHCPU_8", logging: "CLOUD_LOGGING_ONLY"}
-		timeout: "1800s"
-	} | to yaml | save -f $"($work)/cloudbuild.yaml"
-	print $"gcp: (stamp) building ($services | str join ', ') in Cloud Build"
-	let r = (^gcloud --quiet builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p | complete)
-	rm -rf $work
-	if $r.exit_code != 0 {
-		error make {msg: $"Cloud Build failed:\n(($r.stdout + $r.stderr) | lines | last 40 | str join (char nl))"}
-	}
-	$refs | each {|r|
-		let digest = (gc artifacts docker images describe $r.ref --format "value(image_summary.digest)" | str trim)
-		# Found by its key the next time, should nothing change.
-		gc artifacts docker tags add $"($r.repo)@($digest)" $"($r.repo):(key-tag $key)" | ignore
-		{svc: $r.svc, ref: {tag: $tag, digest: $digest}}
-	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
 
 # What copies a tested preview's images into the release's registry: Google's
