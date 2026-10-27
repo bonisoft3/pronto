@@ -2905,7 +2905,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// the app's module over the Mecha machine it reaches — run by the terminal
 	// for a local child — and the declarations of every machine it may write to.
 	_composedHandlers: {
-		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex for name, actor in cortexMachine.setup.actors if actor.via != "kinetic" {
+		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex for name, actor in cortexMachine.setup.actors if actor.via != "kinetic" if actor.handler != _|_ {
 			"shell/handlers/\(name).js": {
 				machine:  {machine: E.code.state.hybrids[actor.machine].reducer, rules: E.code.state.hybrids[actor.machine].rules}
 				local:    actor.via == "local"

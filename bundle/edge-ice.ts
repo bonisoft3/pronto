@@ -28,8 +28,7 @@ export async function releasedIceServers(read: Read): Promise<unknown> {
   const url = (JSON.parse(map) as { imports: Record<string, string> }).imports['/shell/shell.json']
   if (!url) throw new Error('the entry\'s import map names no /shell/shell.json')
   const cfg = JSON.parse(await read(url)) as { iceServers?: unknown }
-  if (!('iceServers' in cfg)) throw new Error(`${url} carries no iceServers`)
-  return cfg.iceServers
+  return cfg.iceServers ?? null
 }
 
 /** Throws unless the release's terminal config carries exactly `expected`. */

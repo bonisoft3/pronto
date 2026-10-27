@@ -38,7 +38,8 @@
     "npm:fast-check@3.23.2": "3.23.2",
     "npm:linkedom@0.18.4": "0.18.4",
     "npm:mermaid@11.9.0": "11.9.0_cytoscape@3.34.2",
-    "npm:playwright@1.61.1": "1.61.1"
+    "npm:playwright@1.61.1": "1.61.1",
+    "npm:xstate@5.32.6": "5.32.6"
   },
   "jsr": {
     "@david/console-static-text@0.3.4": {
@@ -1230,6 +1231,9 @@
     },
     "vscode-uri@3.0.8": {
       "integrity": "sha512-AyFQ0EVmsOZOlAnxoFOGOq1SQDWAB7C6aqMGS23svWAllfOaxbuFvcT8D1i8z3Gyn8fraVeZNNmN6e9bxxXkKw=="
+    },
+    "xstate@5.32.6": {
+      "integrity": "sha512-WfA8WNrh6r9osuGwVm+aIPM4jmMW2LKHV1Yv9thYpOtL4HVF/kobh95K/O8v2jDCpDmP2EoY+6uvuqHXCZ6ZLw=="
     }
   },
   "remote": {

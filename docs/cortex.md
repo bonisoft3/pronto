@@ -16,24 +16,50 @@ pipeline or ledger.
 
 ## The parent
 
-A `#CortexMachine` is XState's own `{config, setup}`. A state of `config`
-names the screen that hosts it in `meta.screen` and invokes its children by
-`invoke.src`; `setup.actors` implements each, as XState's `setup()` does.
+A `#CortexMachine` is XState's own `{config, setup}`: the single statechart
+coordinating the application across tiers.
 
-A Cortex state is hosted by a screen. Navigating to the screen enters the
-state and mounts the child's regions; leaving unmounts them, and a child's late
-write lands as a row like any other. The parent's state is the terminal's
-navigation, which it already holds and replays, so there is no second chart to
-persist. `#App` refuses a state whose screen or machine is undeclared, a
-session over a machine without a lease, a sync child over a machine without a
-join, and a sync child whose screen's route does not carry its `instance`.
+A top-level state is hosted by a screen, named in `meta.screen`. Navigating to
+the screen enters the state; leaving unmounts its children and drops its active
+regions. Within a screen-hosted state, `states` declares the protocol and
+lifecycle phases of that screen (e.g. `presence: offline | online`,
+`matchmaking: idle | challenging | dueling`). The parent's top-level state is
+the terminal's navigation; nested states track multi-machine coordination.
+
+`#App` refuses a state whose screen or machine is undeclared, a session over a
+machine without a lease, a sync child over a machine without a join, and a sync
+child whose screen's route does not carry its `instance`.
+
+## Affordances, Commands, and Intents
+
+To prevent overlap with [Omnishell machines](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/machines.md#omnishell-machines),
+Cortex does not listen to raw DOM gestures (`click@<id>`, keyboard events).
+Local UI widget concerns — modal visibility, selected tab, input field values,
+and hover states — remain strictly in **Omnishell `#Machine`** on `tab` rows (Level ≤ 2).
+
+Instead, Cortex answers **Intents**, piggybacking on the WHATWG
+`CommandEvent` standard (`commandfor` and `command`) and DOM `CustomEvent`
+bubbling:
+
+1. **Affordance (DOM):** A button declares its semantic command:
+   `<button commandfor="lobby" command="--challenge" value="{{racer.id}}">`.
+2. **Omnishell Machine (Level ≤ 2):** Responds to the `command` event, updates
+   local presentation rows (spinners, form state), and raises a typed
+   semantic Intent.
+3. **Cortex Machine (Level 4):** Catches the Intent (`intent:challenge`),
+   checks protocol preconditions (e.g. is the inviter online?), coordinates
+   transitional states, and invokes the child Mecha machine.
+
+Expected user input is therefore formally defined: in any active Cortex state,
+the enabled `intent:*` transitions dictate which user actions are valid. An
+affordance whose command raises an intent unhandled by the active Cortex state
+is statically refused at generate time.
 
 ## Invoking a Mecha machine
 
-An invoke's `src` names an actor of `setup.actors`, `{machine, via, handler}`:
-the Mecha machine it reaches, how, and the fold that does; or a
-[kinetic](#kinetic) child. A sync child's
-`input.instance` names the route parameter that carries the instance.
+A Cortex state invokes a Mecha machine (`invoke.src`) through its declared
+ports, either declaratively with explicit `input` or through an actor fold
+where custom aggregation is required:
 
 | `via` | Child | Lifetime |
 | --- | --- | --- |
@@ -42,13 +68,12 @@ the Mecha machine it reaches, how, and the fold that does; or a
 | `local` | plays the machine's own reducer in the terminal | owned; its state is the app's rows |
 | `kinetic` | hosts a race on the screen's mount ([below](#kinetic)) | the screen's: leaving stops the host and drops its ring |
 
-`handler` is the fold: `write.ts` emits `shell/handlers/<actor>.js` from the
-app's Jessie module at that path — a function `(state, event, machine, machines)`.
-`machine` is the invoked machine's declaration, `{spec}`, and for a local child
-also `execute`, the hybrid runtime and rules PostgreSQL runs, evaluated in the
-handler's cage. `machines` holds every hybrid's declaration, so a fold that
-opens another machine (a lobby opening a challenge) states its protocol version
-from the declaration rather than a copy.
+Declarative invocations allow the compiler to derive surface row writes
+(`<m>_open`, `<m>_command`, `<m>_lease`) directly from the invocation input,
+verifying Mecha's admission rules as precondition guards on the transition.
+Where custom client entropy or multi-machine aggregation is needed, `handler`
+supplies the fold: `write.ts` emits `shell/handlers/<actor>.js` from the app's
+Jessie module `(state, event, machine, machines)`.
 
 ### Through rows
 
@@ -141,7 +166,18 @@ rows, and the surface check's refusals. `test:truco-online` runs Truco's
 machines through their surface in PostgreSQL under the generated policies —
 leases, challenges, admissions, seat races, team matches, the ticker's
 timeouts — and two readers completing a match through PostgREST as the store
-writes it. Truco's mounted lobby and table screens check the folds' keys,
-draws and renewal on the harness's store and clock. Mounting does not establish
-browser layout, Electric delivery or full-shell acceptance; these are
-executable safety checks, not an unbounded proof of liveness.
+writes it.
+
+The interactive graph is verified by walking the composition:
+- **The walk** (`test/walker.ts`, extending Omnishell's Chinese Postman tour):
+  exercises the composition from DOM affordances (`command=...`) through
+  Omnishell's local state, raising intents (`intent:...`) into Cortex's statechart
+  and driving Mecha invocations. An unhandled intent, dead arrow, or intent fired
+  without satisfying protocol prerequisites (e.g. issuing a challenge while
+  offline) fails coverage.
+- **Surface checks**: Truco's mounted lobby and table screens check the folds'
+  keys, draws and renewal on the harness's store and clock.
+
+Mounting does not establish browser layout, Electric delivery or full-shell
+acceptance; these are executable safety checks, not an unbounded proof of
+liveness.

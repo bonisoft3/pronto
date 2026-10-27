@@ -128,9 +128,13 @@ tests a NAT.
 A STUN server sees each player's public address as the race connects. A
 symmetric NAT needs a TURN relay as well
 ([RFC 8656](https://www.rfc-editor.org/rfc/rfc8656)), which needs an account and
-short-lived credentials minted by a server-side key; it is not built, and an
-entry is an `RTCIceServer`, so a relay's `username` and `credential` fit
-beside a STUN `urls`.
+short-lived credentials minted by a server-side key. At `release@cloudflare`, the
+Worker serves dynamic ICE servers from `/rtc-ice`: when `CLOUDFLARE_TURN_KEY_ID`
+and `CLOUDFLARE_TURN_KEY_TOKEN` are configured as secrets (or via `.turn-secret`),
+the Worker calls Cloudflare Calls TURN to mint ephemeral credentials. Without
+them, the release defaults to STUN alone, preserving deployment on the free
+card-less tier. Omnishell's kinetic child prefetches `/rtc-ice` to use dynamic
+relays when available.
 
 ## pages
 

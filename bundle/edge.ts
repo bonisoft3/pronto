@@ -228,7 +228,43 @@ ${shell.presenter ? `    // A presenter's module import of this origin is answer
       }
       return new Response(null, { status: 403 })
     }
-` : ''}    const response = await edgeWorker.fetch(req, env, ctx)
+` : ''}    const url = new URL(req.url)
+    if (req.method === 'GET' && url.pathname === '/rtc-ice') {
+      const baseIce = ${JSON.stringify(iceServers)}
+      const keyId = env.CLOUDFLARE_TURN_KEY_ID
+      const token = env.CLOUDFLARE_TURN_KEY_TOKEN
+      if (!keyId || !token) {
+        return new Response(JSON.stringify(baseIce), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        })
+      }
+      try {
+        const turnRes = await fetch(\`https://rtc.live.cloudflare.com/v1/turn/keys/\${keyId}/credentials/generate-ice-servers\`, {
+          method: 'POST',
+          headers: {
+            'Authorization': \`Bearer \${token}\`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'cloudflare-worker/1.0',
+          },
+          body: JSON.stringify({ ttl: 86400 }),
+        })
+        if (!turnRes.ok) {
+          return new Response(JSON.stringify(baseIce), {
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+          })
+        }
+        const turnData = await turnRes.json()
+        const dynamicServers = Array.isArray(turnData.iceServers) ? turnData.iceServers : [turnData.iceServers]
+        return new Response(JSON.stringify(dynamicServers.filter(Boolean)), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        })
+      } catch (_) {
+        return new Response(JSON.stringify(baseIce), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        })
+      }
+    }
+    const response = await edgeWorker.fetch(req, env, ctx)
     if (req.method !== 'GET' || response.status !== 200 ||
         !(response.headers.get('content-type') ?? '').includes('text/html') ||
         !(req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') ?? '').includes('text/html'))) return response

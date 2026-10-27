@@ -76,6 +76,21 @@ if (!jwtSecret) {
 }
 if (!jwtSecret) fail('JWT secret is empty')
 const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSecret }
+const turnId = Deno.env.get('CLOUDFLARE_TURN_KEY_ID')
+const turnToken = Deno.env.get('CLOUDFLARE_TURN_KEY_TOKEN')
+if (turnId && turnToken) {
+  secrets.CLOUDFLARE_TURN_KEY_ID = turnId
+  secrets.CLOUDFLARE_TURN_KEY_TOKEN = turnToken
+} else {
+  try {
+    const turnPath = path.join(path.dirname(out), '.turn-secret')
+    const turnConfig = JSON.parse(await Deno.readTextFile(turnPath)) as { id?: string; token?: string }
+    if (turnConfig.id && turnConfig.token) {
+      secrets.CLOUDFLARE_TURN_KEY_ID = turnConfig.id
+      secrets.CLOUDFLARE_TURN_KEY_TOKEN = turnConfig.token
+    }
+  } catch (_) {}
+}
 /** The Workers this publish deploys, each with the version it replaces, for
  * the rollback a refused migration asks for; a first deploy has none. */
 const deployed: { config: string; previous: string | null }[] = []
@@ -159,7 +174,18 @@ await settled('the deploy')
 const { load } = await import(String(pathToFileURL(path.join(workerd, 'load.ts'))))
 const loaded = await load(path.join(out, 'pgdata'), send, { reset })
 if ('skipped' in loaded) {
-  const migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: await Deno.readFile(path.join(out, 'migrations.json')) })
+  let migrationsBody: Uint8Array
+  try {
+    migrationsBody = await Deno.readFile(path.join(out, 'migrations.json'))
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) migrationsBody = new TextEncoder().encode('[]')
+    else throw e
+  }
+  let migrated: Response = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
+  for (let attempt = 0; attempt < 5 && migrated.status === 401; attempt++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
+  }
   const answer = await migrated.text()
   if (!migrated.ok) {
     for (const { config: configPath, previous } of deployed.reverse()) {

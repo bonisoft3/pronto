@@ -20,7 +20,7 @@ import mecha "github.com/bonisoft3/pronto/clusters:mecha"
 
 #MachineActor: {
 	machine: =~"^[a-z][a-z0-9_]{0,30}$"
-	handler: =~"^[a-z0-9_/-]+\\.js$"
+	handler?: =~"^[a-z0-9_/-]+\\.js$"
 	// Leased: the fold holds a lease row on the terminal's clock. Attached
 	// (`sync`): the fold opens the instance the invoke's `input.instance`
 	// names from the route, and leaving detaches. Local: played in the
