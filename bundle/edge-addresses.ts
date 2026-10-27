@@ -53,19 +53,19 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
   const release = await addressRelease(out, { htmlSuffix: '.txt', iceServers })
   const { imports, screens, cfg } = release
   await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
-  const directories = new Set(Object.values(imports).map(url => path.posix.dirname(url)))
-  if (previous) for (const dir of await retainReleases(out, previous)) directories.add(dir)
-  if (directories.size > 100) throw new Error('edge asset cache rules exceed Cloudflare’s 100-rule limit')
+  if (previous) await retainReleases(out, previous)
   // The document's policy as a header too, as the container door sends it:
   // the Worker answers every navigation with `/`, so the rule covers them all.
   const { document } = parseHTML(await Deno.readTextFile(path.join(out, 'shell/index.html')))
   const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')
   if (!policy) throw new Error('the document carries no Content-Security-Policy')
   // A presenter's worker takes its policy from its script's own response.
+  // Cache-Control headers are omitted here because Cloudflare's _headers applies
+  // to 404 responses unconditionally; immutable caching is attached on 200 responses
+  // only by the worker.
   await Deno.writeTextFile(path.join(out, '_headers'), [
     `/\n  Content-Security-Policy: ${policy}\n`,
     ...(cfg.presenter ? [`/omnishell/interpreter/presenter.js\n  Content-Security-Policy: ${cfg.presenter.policy}\n`] : []),
-    ...[...directories].sort().map(dir => `${dir === '/' ? '' : dir}/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable\n`),
   ].join('\n'))
 
   const link = (name: string, as: string) => {
@@ -102,22 +102,10 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
 }
 
 /** Routing rules for Cloudflare Workers Assets run_worker_first: dynamic routes
- * and navigations run the Worker first, while static asset directories bypass
- * the Worker so cold edge PoPs serve assets directly without depending on CDN cache. */
-export async function edgeRoutingRules(publicDir: string): Promise<string[]> {
-  const rules = ['/*']
-  try {
-    const entries: string[] = []
-    for await (const entry of Deno.readDir(publicDir)) {
-      if (entry.name === 'index.html' || entry.name.startsWith('.') || entry.name.startsWith('_')) continue
-      if (entry.isDirectory) entries.push(`!/${entry.name}/*`)
-      else if (entry.isFile) entries.push(`!/${entry.name}`)
-    }
-    entries.sort()
-    return [...rules, ...entries]
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return rules
-    throw error
-  }
+ * and asset requests run the Worker first, so immutable assets attach
+ * Cache-Control: public, max-age=31536000, immutable strictly on 200 responses,
+ * while 404 responses are served with Cache-Control: no-store. */
+export async function edgeRoutingRules(_publicDir: string): Promise<string[]> {
+  return ['/*']
 }
 

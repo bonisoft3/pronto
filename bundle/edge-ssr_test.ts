@@ -48,7 +48,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
     const installed = await import(pathToFileURL(path.join(bundle, 'edge-ssr.ts')).href)
     await installed.writeEdgeSsr(out, runtime, path.join(tmp, 'mecha'), 'app', 'https://app.example', [])
     const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
-    assert.deepEqual(config.assets.run_worker_first, ['/*', '!/shell/*'])
+    assert.deepEqual(config.assets.run_worker_first, ['/*'])
     assert.match(await Deno.readTextFile(path.join(out, 'renderer/jessie-startup.js')), /selected runtime witness/)
     const entry = await Deno.readTextFile(path.join(out, 'src/index.ts'))
     const hintsImport = entry.match(/^import \{ edgeHints \} from '([^']+)'$/m)
@@ -364,6 +364,11 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     assert.equal(missingCss.status, 404)
     assert.equal(await missingCss.text(), 'Not found')
     assert.equal(missingCss.headers.get('cache-control'), 'no-store')
+
+    // Missing asset requests under asset prefixes never rewrite to the SPA entry document even with text/html accept.
+    const missingAssetHtml = await worker.fetch(new Request('https://app.example/_immutable-missing.js', { headers: { accept: 'text/html' } }), env, ctx)
+    assert.equal(missingAssetHtml.status, 404)
+    assert.equal(missingAssetHtml.headers.get('cache-control'), 'no-store')
 
     // Unmatched HTML requests return 404 Page not found with no-store.
     const missingHtml = await worker.fetch(new Request('https://app.example/unknown-page', { headers: { accept: 'text/html' } }), env, ctx)

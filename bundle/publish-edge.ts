@@ -61,15 +61,20 @@ const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => 
 
 const token = random()
 const secretPath = path.join(path.dirname(out), '.jwt-secret')
-let jwtSecret: string
-try {
-  jwtSecret = (await Deno.readTextFile(secretPath)).trim()
-} catch (error) {
-  if (!(error instanceof Deno.errors.NotFound)) throw error
-  jwtSecret = random()
-  await Deno.writeTextFile(secretPath, jwtSecret, { mode: 0o600 })
+let jwtSecret = Deno.env.get('JWT_SECRET')?.trim()
+if (!jwtSecret) {
+  try {
+    jwtSecret = (await Deno.readTextFile(secretPath)).trim()
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error
+    if (Deno.env.get('CI')) {
+      fail('JWT_SECRET must be configured as a repository secret (secrets.JWT_SECRET) for CI releases')
+    }
+    jwtSecret = random()
+    await Deno.writeTextFile(secretPath, jwtSecret, { mode: 0o600 })
+  }
 }
-if (!jwtSecret) fail('JWT secret file is empty')
+if (!jwtSecret) fail('JWT secret is empty')
 const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSecret }
 /** The Workers this publish deploys, each with the version it replaces, for
  * the rollback a refused migration asks for; a first deploy has none. */
@@ -117,6 +122,11 @@ try {
 console.log(deployedText)
 const settings = JSON.parse(await Deno.readTextFile(config)) as { routes?: { pattern: string }[]; triggers?: { crons: string[] } }
 const origin = settings.routes?.length ? `https://${settings.routes[0].pattern}` : /https:\/\/\S+\.workers\.dev/.exec(deployedText)?.[0] ?? fail('wrangler deploy named no workers.dev URL')
+await Deno.writeTextFile(path.join(out, 'origin.txt'), origin)
+const ghEnv = Deno.env.get('GITHUB_ENV')
+if (ghEnv) {
+  await Deno.writeTextFile(ghEnv, `PRONTO_DEPLOYED_URL=${origin}\n`, { append: true })
+}
 const send = (route: string, init?: RequestInit) => {
   const headers = new Headers(init?.headers)
   headers.set('authorization', `Bearer ${token}`)

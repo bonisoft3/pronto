@@ -81,13 +81,19 @@ Deno.test('edge identity hashes the served bytes, preserves module bases, and au
     assert.ok(f.document.querySelector('meta')!.getAttribute('content')!.includes(`'sha256-${rulesHash}'`))
     assert.equal(f.document.head.children[0].tagName, 'META')
     assert.equal(f.document.head.children[1].id, 'pronto-assets')
-    assert.equal(f.document.querySelectorAll('link[rel="modulepreload"]').length, 2)
+    const preloads = f.document.querySelectorAll('link[rel="modulepreload"]')
+    assert.equal(preloads.length, 2)
+    for (const preload of preloads) {
+      assert.ok(preload.getAttribute('integrity')?.startsWith('sha256-'))
+    }
+    const bootScript = f.document.querySelector('script[type="module"][src]')
+    assert.ok(bootScript?.getAttribute('integrity')?.startsWith('sha256-'))
     assert.ok(!f.hints.common.some(link => link.includes('as=script') || link.includes('modulepreload')))
     assert.ok(!f.hints.common.some(link => link.includes('unused.js')))
     assert.ok(!f.hints.common.some(link => link.includes('team.html')))
     assert.ok(f.imports['/shell/screens/team.html'].endsWith('.txt'))
     const headers = await Deno.readTextFile(path.join(f.out, '_headers'))
-    assert.ok(headers.includes('/shell/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable'))
+    assert.ok(!headers.includes('Cache-Control'))
     assert.ok(!headers.includes('/shell/*\n'))
     assert.ok(headers.startsWith(`/\n  Content-Security-Policy: ${f.document.querySelector('meta')!.getAttribute('content')}\n`))
     assert.deepEqual(JSON.parse(f.map).screens, { team: ['other'], other: [] })
@@ -168,7 +174,7 @@ Deno.test('the built edge tree serves the target\'s ICE servers, built and deplo
   }
 })
 
-Deno.test('edge routing rules route /* to worker while excluding static directories and files', async () => {
+Deno.test('edge routing rules route /* to worker', async () => {
   const tmp = await Deno.makeTempDir()
   try {
     for (const dir of ['shell/screens', 'messages', 'omnishell/interpreter', 'docs']) {
@@ -178,19 +184,7 @@ Deno.test('edge routing rules route /* to worker while excluding static director
       await Deno.writeTextFile(path.join(tmp, file), '')
     }
     const rules = await edgeRoutingRules(tmp)
-    assert.deepEqual(rules, [
-      '/*',
-      '!/docs/*',
-      '!/favicon.ico',
-      '!/messages/*',
-      '!/offline-first-sw.js',
-      '!/omnishell/*',
-      '!/robots.txt',
-      '!/shell/*',
-      '!/sitemap.xml',
-    ])
-    assert.ok(!rules.includes('!/index.html'))
-    assert.ok(!rules.some(r => r.includes('_headers')))
+    assert.deepEqual(rules, ['/*'])
   } finally {
     await Deno.remove(tmp, { recursive: true })
   }

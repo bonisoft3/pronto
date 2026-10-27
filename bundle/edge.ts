@@ -209,9 +209,25 @@ export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
 ${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
-    // asset, which never reaches this Worker, or not at all: the cluster's
+    // asset, which never reaches upstream dynamic handlers, or not at all: the cluster's
     // GET may act (omnishell's terminal.cue \`presenter.scripted\`).
-    if (${JSON.stringify(shell.presenter.scripted)}.includes(req.headers.get('sec-fetch-dest') ?? '')) return new Response(null, { status: 403 })
+    if (${JSON.stringify(shell.presenter.scripted)}.includes(req.headers.get('sec-fetch-dest') ?? '')) {
+      if (env.ASSETS) {
+        const asset = await env.ASSETS.fetch(req)
+        if (asset.status === 200 || asset.status === 304) {
+          if (asset.status === 200) {
+            const path = new URL(req.url).pathname
+            if (path.startsWith('/_immutable-') || path.includes('/_immutable-')) {
+              const out = new Response(req.method === 'HEAD' ? null : asset.body, asset)
+              out.headers.set('cache-control', 'public, max-age=31536000, immutable')
+              return out
+            }
+          }
+          return asset
+        }
+      }
+      return new Response(null, { status: 403 })
+    }
 ` : ''}    const response = await edgeWorker.fetch(req, env, ctx)
     if (req.method !== 'GET' || response.status !== 200 ||
         !(response.headers.get('content-type') ?? '').includes('text/html') ||
@@ -226,9 +242,9 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   name,
   main: 'src/index.ts',
   compatibility_date: '2026-09-01',
-  // Non-negative /* runs the Worker first for dynamic routes and navigations,
-  // while negative rules (!/shell/*, !/messages/*, etc.) let static assets bypass
-  // to the asset server directly on cold and warm edge PoPs alike.
+  // run_worker_first routes /* to the Worker so immutable assets attach
+  // Cache-Control: public, max-age=31536000, immutable strictly on 200 responses,
+  // while 404 responses are served with Cache-Control: no-store.
   assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir) },
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
   version_metadata: { binding: 'CF_VERSION_METADATA' },

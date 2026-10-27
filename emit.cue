@@ -1959,6 +1959,19 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if list.Contains(D.code.meta.targets, "gcp") {
 				sayYaml: say: release: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.gcp}]}
 			}
+			// Post-release verification across live deployments.
+			if list.Contains(D.code.meta.targets, "pages") {
+				sayYaml: say: verify: rulemap: pages: {platform: "pages", cmds: [{do: _distribution.verifyPages}]}
+			}
+			if list.Contains(D.code.meta.targets, "cloudflare") {
+				sayYaml: say: verify: rulemap: cloudflare: {platform: "cloudflare", cmds: [{do: _distribution.verifyEdge}]}
+			}
+			if list.Contains(D.code.meta.targets, "k8s") {
+				sayYaml: say: verify: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.verifyK8s}]}
+			}
+			if list.Contains(D.code.meta.targets, "gcp") {
+				sayYaml: say: verify: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.verifyGcp}]}
+			}
 			sayYaml: say: {
 				lint: rulemap: cue: cmds: [{do: "mise exec -- cue vet -c ./..."}]
 				build: _distribution.say.say.build
@@ -4036,20 +4049,75 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				data: {version: 2, project_name: E.code.meta.name, dist: "dist/goreleaser", builds: [{builder: "zig", skip: true}], release: {disable: true}, changelog: {disable: true}}
 			}
 		}
-		// The pages target's mirror release: the workflow bundles and deploys
-		// the app on its mirror, where copybara moves it to the root GitHub
-		// reads.
-		if list.Contains(E.code.meta.targets, "pages") {
+		// The mirror release: the workflow bundles and deploys the app on its
+		// mirror, where copybara moves it to the root GitHub reads.
+		let hasPages = list.Contains(E.code.meta.targets, "pages")
+		let hasCloudflare = list.Contains(E.code.meta.targets, "cloudflare")
+		if hasPages || hasCloudflare {
 			// An app at the mirror's root releases from there.
 			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]
 			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
 			// The app's tools, the runtime among them, are its pinned releases,
 			// which setup installs.
 			let pagesSetup = "\n      - run: sayt setup"
+
+			let pagesJob = """
+				  pages:
+				    runs-on: ubuntu-24.04
+				    environment:
+				      name: github-pages
+				      url: ${{ steps.deploy.outputs.page_url }}
+				    steps:
+				      - uses: actions/checkout@v7
+				      # The released sayt at the version the toolchain pins, its mise cached.
+				      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
+				        with:
+				          version: v\(distribution.#SaytVersion)\(pagesSetup)
+				      - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"\(pagesDir)
+				      - uses: actions/configure-pages@v5
+				      - uses: actions/upload-pages-artifact@v4
+				        with:
+				          path: \(pagesPrefix)dist/browser
+				      - id: deploy
+				        uses: actions/deploy-pages@v4
+				      - run: sayt verify@pages --target="${{ steps.deploy.outputs.page_url }}"\(pagesDir)
+				"""
+
+			let cloudflareJob = """
+				  cloudflare:
+				    runs-on: ubuntu-24.04
+				    env:
+				      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+				      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+				      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+				    steps:
+				      - uses: actions/checkout@v7
+				      # The released sayt at the version the toolchain pins, its mise cached.
+				      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
+				        with:
+				          version: v\(distribution.#SaytVersion)\(pagesSetup)
+				      - if: "${{ env.CLOUDFLARE_API_TOKEN != '' }}"
+				        run: sayt release@cloudflare\(pagesDir)
+				      - if: "${{ env.CLOUDFLARE_API_TOKEN != '' }}"
+				        run: |
+				          TARGET=$(cat \(pagesPrefix)dist/cloudflare/origin.txt 2>/dev/null || cat dist/cloudflare/origin.txt 2>/dev/null || echo "$PRONTO_DEPLOYED_URL")
+				          if [ -n "$TARGET" ]; then
+				            sayt verify@cloudflare --target="$TARGET"
+				          else
+				            sayt verify@cloudflare
+				          fi\(pagesDir)
+				"""
+
+			let jobsList = [
+				if hasPages { pagesJob },
+				if hasCloudflare { cloudflareJob },
+			]
+			let jobsBody = strings.Join(jobsList, "\n")
+
 			".github/workflows/cd.yml": {
 				format: "yaml"
 				text:   """
-					# Release the app to GitHub Pages: bundle it into one document and deploy it.
+					# Release the app: bundle it into one document and deploy it.
 					#
 					# GitHub reads workflows only from a repository's root .github/, so this
 					# file is inert in the monorepo and active in the mirror, where copybara
@@ -4076,28 +4144,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					  id-token: write
 
 					concurrency:
-					  group: pages
+					  group: cd
 					  cancel-in-progress: false
 
 					jobs:
-					  pages:
-					    runs-on: ubuntu-24.04
-					    environment:
-					      name: github-pages
-					      url: ${{ steps.deploy.outputs.page_url }}
-					    steps:
-					      - uses: actions/checkout@v7
-					      # The released sayt at the version the toolchain pins, its mise cached.
-					      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
-					        with:
-					          version: v\(distribution.#SaytVersion)\(pagesSetup)
-					      - run: sayt release@pages --snapshot --base="/${GITHUB_REPOSITORY##*/}"\(pagesDir)
-					      - uses: actions/configure-pages@v5
-					      - uses: actions/upload-pages-artifact@v4
-					        with:
-					          path: \(pagesPrefix)dist/browser
-					      - id: deploy
-					        uses: actions/deploy-pages@v4
+					\(jobsBody)
 					"""
 			}
 		}

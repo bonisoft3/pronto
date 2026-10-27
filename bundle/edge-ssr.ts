@@ -125,7 +125,8 @@ export default {
 ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, env, ctx) {
     const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
-    const found = (request.method === 'GET' || request.method === 'HEAD') ? routeAt(hints, url.pathname, url.search, preferred) : null
+    const isAsset = /^\\/(?:_immutable-|(?:shell|omnishell|messages)\\/)/.test(url.pathname)
+    const found = (!isAsset && (request.method === 'GET' || request.method === 'HEAD')) ? routeAt(hints, url.pathname, url.search, preferred) : null
     if (found && found.route.ssr === 'ssr') {
       const prefetch = request.headers.get('x-pronto-prefetch') === '1' || request.headers.get('purpose') === 'prefetch' || Boolean(request.headers.get('sec-purpose')?.includes('prefetch'))
       const linkHeader = prefetch ? null : edgeHints(request, hints, routeAt, preferred)
@@ -268,6 +269,14 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
         !['auth', 'crud', 'electric', 'import', 'poke'].includes(url.pathname.split('/')[1]) &&
         (request.method === 'GET' || request.method === 'HEAD')) {
       const asset = await env.ASSETS.fetch(request)
+      if (asset.status === 200) {
+        if (url.pathname.startsWith('/_immutable-') || url.pathname.includes('/_immutable-')) {
+          const headers = new Headers(asset.headers)
+          headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+          return new Response(request.method === 'HEAD' ? null : asset.body, { status: 200, headers })
+        }
+        return asset
+      }
       if (asset.status !== 404) return asset
       const notFound = (request.headers.get('accept') ?? '').includes('text/html') ? 'Page not found' : 'Not found'
       return new Response(request.method === 'HEAD' ? null : notFound, { status: 404, headers: { 'Cache-Control': 'no-store' } })
