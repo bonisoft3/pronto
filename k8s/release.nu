@@ -691,6 +691,11 @@ export def main [
 	# authenticator's memberships name roles initdb creates, so the operator
 	# reconciles it, password included, only after the Jobs; crud logs in as it.
 	let cluster = $"cluster.postgresql.cnpg.io/($app_info.name)-db"
+	# An attempt made before the Jobs (the instance is up first) stays failed:
+	# CloudNativePG syncs roles when the Cluster changes, not on a timer, so a
+	# first release on k3s waited out its five minutes on a role that was
+	# already there. Changing the Cluster has it look again.
+	kubectl annotate $cluster -n $target_ns --overwrite $"pronto.dev/schema-built=(date now | format date '%s')" | ignore
 	print $"Waiting for ($cluster) to reconcile its managed roles..."
 	let deadline = (date now) + 300sec
 	loop {
