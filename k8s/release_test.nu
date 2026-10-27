@@ -44,6 +44,7 @@ def run-tests [] {
 	test_render_manifests_kind
 	test_render_manifests_eks
 	test_render_manifests_metal
+	test_schema_jobs_wait_for_database
 	test_release_override
 	test_tunnel_manifests
 	test_envoy_proxy
@@ -365,6 +366,19 @@ def test_envoy_proxy [] {
 	assert equal ($docs.0.spec.provider.kubernetes.envoyService.name) "pronto-gateway"
 	assert equal ($docs.1.metadata.name) "eg"
 	assert equal ($docs.1.spec.parametersRef.name) "tunnel-proxy"
+}
+
+def test_schema_jobs_wait_for_database [] {
+	print "test each schema job begins once the database answers it..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let jobs = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Job")
+	assert ($jobs | is-not-empty)
+	for job in $jobs {
+		let wait = ($job.spec.template.spec.initContainers | first)
+		assert equal $wait.name "database-ready"
+		assert ($wait.command | last | str contains "pg_isready")
+		assert equal ($wait.env | where name == "PGHOST" | first | get value) "database"
+	}
 }
 
 def test_render_manifests_eks [] {
