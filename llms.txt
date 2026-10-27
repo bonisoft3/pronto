@@ -264,6 +264,7 @@ Before running `write.ts` on a new app, create these **7 prerequisite files** (d
 | `data-on-mutation="<handler>"` | Reactive Fold | Wakes `shell/handlers/<handler>.js` with `{ type: "mutation" }`. | Fires on first paint and every change to the region's *own* `data-live` table. |
 | `data-on-click="<handler>"` | Gesture Fold | Placed **directly on the clickable element** (`<button data-on-click="board">`). | Wakes handler with `{ type: "click", id: "<row.id>", from: "<element.id>" }`. Click carries NO custom payload; encode intent in row `id` or element DOM `id`. |
 | `data-action="<create\|update\|upsert\|delete\|navigate>"` | Declarative Form Action | Applied on `<form data-entity="<table>" data-action="...">`. | Form submission. On `create`, Omnishell mints `id` (`uuid` or unconstrained `string`) when no `id` input is present; supply any non-input schema columns via `<input type="hidden" name="<col>" value="...">` or `data-value="{now}"` (CUE `default:` only emits SQL DDL defaults for `cluster` tables, not browser `tab`/`device` stores). |
+| `data-machine='{...}'` | Client Statechart & Timer | Applied on a singleton `[data-live="<table>"]` region (`data-filter="id=eq.<id>"`). | Runs an XState-JSON statechart over one column (`"field"`) of the row, including periodic `after` timers (`"after":{"1000":{"assign":{"n":"tick"},"target":"running"}}`). |
 
 #### PostgREST `data-filter` Mini-Reference:
 1. **Equality & Inequality:** `id=eq.the`, `status=neq.closed`, `turn=gt.0`, `rank=lte.10` — joined with `&` (`&amp;` in HTML attributes, e.g. `current=eq.yes&amp;seat=eq.a`).
@@ -309,9 +310,28 @@ const indexOf = (r, c) => r * 9 + c;
     };
 }
 ```
-*Fixpoint & Single-Write-Per-Row Rules:*
+*Fixpoint, Single-Write-Per-Row & Periodic Timer Rules (`data-machine` vs `then`):*
 - **Fixpoint:** A `data-on-mutation` fold wakes whenever its `data-live` table changes. Always compare desired state against existing rows and emit `updates: []` when nothing changed, otherwise the fold will wake itself in an infinite loop.
 - **At most one `put`/`patch` per `(entity, id)` per fold return:** Within a single `updates` array, the *last* mutation naming a given `(entity, id)` replaces earlier mutations for that row (earlier fields do not merge across separate `patch` objects in the same batch). Always merge all field changes for a row into a single `put` or `patch` object per fold invocation.
+- **Never use handler `then: { delay }` for continuous/periodic timers (capped at 16 steps):** A handler's `then:` chain is depth-bounded to `STEPS = 16` (`handler chain did not settle in 16 steps`). For continuous countdowns/clocks (e.g. Pomodoro, stopwatch, game clock), use a **`data-machine` with `after`** on a `tab` singleton (`apps/idioms/shell/screens/timer.html`):
+  ```html
+  <!-- 1. data-machine region owns `run` ('paused' | 'running') and ticks `n` every 1000ms while running: -->
+  <div class="clock" data-live="clock" data-filter="id=eq.clock" data-empty=""
+       data-machine='{"field":"run","initial":"paused","states":{"paused":{"on":{"click@toggle":[{"target":"running"}]}},"running":{"after":{"1000":{"assign":{"n":"tick"},"target":"running"}},"on":{"click@toggle":[{"target":"paused"}]}}}}'>
+    <button type="button" id="toggle" data-run="{run}">Start / Pause</button>
+  </div>
+  <!-- 2. Sibling/child region reacts to clock.n mutations + control button clicks (Reset, Skip, Mode tabs): -->
+  <div class="timer" data-live="clock" data-filter="id=eq.clock" data-reads="clock,timer" data-handler="pomodoro" data-on-mutation="pomodoro" data-empty="">
+    ...
+  </div>
+  ```
+  - **Machine `assign` module (`shell/handlers/tick.js`):** Unlike a gesture/mutation handler (which returns `{ updates: [...] }`), a module referenced in `data-machine` `"assign": {"n": "tick"}` receives `(state, event)` (`state.items[0]` is the machine's row) and **returns the new scalar value for that column directly**:
+    ```javascript
+    // File: shell/handlers/tick.js
+    (state) => Number(state.items[0]?.n ?? 0) + 1
+    ```
+  - **Machine ownership:** Only the `data-machine` may write its `"field"` column (`run`), and buttons wired via `click@<dom-id>` inside the `data-machine` region must NOT also carry `data-on-click`.
+  - **Deterministic Clock in Playwright (`?clock=manual` & `?tempo=50`):** Open `/?clock=manual` in Playwright to hold all `after` timers and step time deterministically via `await page.evaluate(() => (window as any).__prontoClock.advance(1000))` (or open `/?tempo=50` to speed up timers 50×).
 
 ---
 
