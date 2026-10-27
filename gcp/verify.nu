@@ -55,6 +55,10 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 	let number = (gc projects describe $p --format "value(projectNumber)" | str trim)
 	let url = $"https://($plan.service)-($number).($plan.region).run.app"
 	let work = (mktemp -d -t gcp-verify.XXXXXX | str trim)
+	# Where the drivers' layer caches live: the project's registry, beside the
+	# images the release pushes there.
+	let registry_host = ($plan.registry | split row "/" | first)
+	let cache_repo = $"($plan.registry)/($plan.service)-verify"
 	# The app's own files, as git sees them, as its images are built from.
 	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
 	with-env {COPYFILE_DISABLE: "1"} { ^tar -czf $"($work)/source.tgz" -C $app_dir -T $"($work)/files" }
@@ -65,9 +69,15 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		"[ -n \"$drivers\" ] || { echo 'verify: no service of the app reads APP_URL' >&2; exit 1; }"
 		"echo \"verify: building $(echo $drivers)\""
 		"docker buildx create --use --driver docker-container >/dev/null"
+		# Each driver's layers cached in the registry, as the runtime images'
+		# are (release.nu push-images): a browser and its packages are pulled,
+		# not installed again, while the drivers' own files are unchanged.
+		$"echo \"$\(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\\\"access_token\\\":\\\"\\\([^\\\"]*\\\)\\\".*/\\1/p'\)\" | docker login --username oauth2accesstoken --password-stdin https://($registry_host) >/dev/null"
+		"caches=''"
+		$"for d in $drivers; do c=\"($cache_repo)-$d:buildcache\"; caches=\"$caches --set $d.cache-from=type=registry,ref=$c --set $d.cache-to=type=registry,ref=$c,mode=max,image-manifest=true,oci-mediatypes=true\"; done"
 		# Loaded with their layers uncompressed: gzip of a browser's image is a
 		# minute and more, for a tarball that only crosses a socket.
-		"docker compose --profile '*' config | docker buildx bake -f - --set '*.output=type=docker,compression=uncompressed' --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $drivers"
+		"docker compose --profile '*' config | docker buildx bake -f - --set '*.output=type=docker,compression=uncompressed' --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $caches $drivers"
 		# What `compose run` would build first, the images the drivers' own are
 		# made from, built and loaded now: from the bake's cache, before the wait.
 		"docker compose --profile '*' build --with-dependencies $drivers"

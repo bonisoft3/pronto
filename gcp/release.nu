@@ -169,21 +169,59 @@ def build-account [project: string]: nothing -> string {
 	gc builds get-default-service-account --project $project --format "value(serviceAccountEmail)" | str trim | split row "/" | last
 }
 
+# What an image build reads, as one key: every file of the app's as git sees
+# it (its path and its content's hash, unsaved ones included), and what else
+# the build is told. Equal keys build equal images, the build being
+# reproducible: what was pushed for a key is what building again would push.
+def source-key [app_dir: string, files: string, told: string]: nothing -> string {
+	let hashes = (do { cd $app_dir; open --raw $files | ^git hash-object --stdin-paths } | str trim)
+	[(open --raw $files) $hashes $told] | str join (char nl) | hash sha256 | str substring 0..23
+}
+
+# The tag an image's key leaves on it, which a later release finds it by.
+def key-tag [key: string]: nothing -> string { $"src-($key)" }
+
+# The images pushed for this key before, by service, when every one of them
+# was: a release whose app did not change since (a retry, a release again)
+# builds nothing. Null when any is missing.
+def pushed-for [refs: list<record>, key: string]: nothing -> any {
+	let found = ($refs | each {|r|
+		let at = $"($r.repo):(key-tag $key)"
+		if (exists artifacts docker images describe $at) {
+			{svc: $r.svc, repo: $r.repo, digest: (gc artifacts docker images describe $at --format "value(image_summary.digest)" | str trim)}
+		}
+	} | compact)
+	if ($found | length) == ($refs | length) { $found } else { null }
+}
+
 # The runtime images, built in Cloud Build as the app's compose project builds
 # them, so the machine releasing needs no Docker daemon, and pushed by digest:
 # what integrate tested is what releases. The build reads the app's own files
 # alone, as git sees them: every context of its images is the app's
-# directory or an image by digest.
+# directory or an image by digest. Each image's layers are cached in the
+# registry beside it (`:buildcache`), so a layer whose inputs did not change is
+# pulled, not built again; and an app unchanged since its last push builds
+# nothing at all (source-key).
 def push-images [app_dir: string, plan: record, name: string, services: list<string>]: nothing -> record {
 	let p = $plan.project
 	let host = ($plan.registry | split row "/" | first)
 	# A preview's images are tagged for it, never as the release's.
 	let tag = ($plan.preview? | default "release")
-	let refs = ($services | each {|svc| {svc: $svc, ref: $"($plan.registry)/($name)-($svc):($tag)"} })
+	let refs = ($services | each {|svc| {svc: $svc, repo: $"($plan.registry)/($name)-($svc)", ref: $"($plan.registry)/($name)-($svc):($tag)"} })
 	let work = (mktemp -d -t gcp-build.XXXXXX | str trim)
 	# Never a certificate pair `sayt setup` issued for this machine: an image
 	# carries none.
 	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
+	let key = (source-key $app_dir $"($work)/files" ([$builder ($services | str join " ") "linux/amd64"] | str join " "))
+	let before = (pushed-for $refs $key)
+	if $before != null {
+		print $"gcp: ($services | str join ', ') unchanged since they were last built: reusing them"
+		rm -rf $work
+		return ($before | each {|b|
+			gc artifacts docker tags add $"($b.repo)@($b.digest)" $"($b.repo):($tag)" | ignore
+			{svc: $b.svc, ref: {tag: $tag, digest: $b.digest}}
+		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
+	}
 	# The schema job's image, `schema`: migrate's, with the database's initdb
 	# directory, so one job builds the schema and carries it forward. A bake
 	# target beside compose's, from theirs.
@@ -205,7 +243,11 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 	^gzip -n $"($work)/source.tar"
 	mv $"($work)/source.tar.gz" $"($work)/source.tgz"
 	let bake_files = if $schema { "-f - -f .pronto-schema.bake.json" } else { "-f -" }
-	let sets = ($refs | each {|r| $"--set ($r.svc).tags=($r.ref)" } | str join " ")
+	# Artifact Registry takes a cache as an image manifest, OCI's.
+	let sets = ($refs | each {|r|
+		let cache = $"($r.repo):buildcache"
+		$"--set ($r.svc).tags=($r.ref) --set ($r.svc).cache-from=type=registry,ref=($cache) --set ($r.svc).cache-to=type=registry,ref=($cache),mode=max,image-manifest=true,oci-mediatypes=true"
+	} | str join " ")
 	# The worker's metadata server lends the build's account a token, which
 	# logs Docker into the registry; reproducible, so an unchanged source
 	# pushes the digest it pushed before.
@@ -230,6 +272,8 @@ def push-images [app_dir: string, plan: record, name: string, services: list<str
 	}
 	$refs | each {|r|
 		let digest = (gc artifacts docker images describe $r.ref --format "value(image_summary.digest)" | str trim)
+		# Found by its key the next time, should nothing change.
+		gc artifacts docker tags add $"($r.repo)@($digest)" $"($r.repo):(key-tag $key)" | ignore
 		{svc: $r.svc, ref: {tag: $tag, digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
