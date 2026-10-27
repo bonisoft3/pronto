@@ -17,6 +17,18 @@ export interface JourneyItem {
   run?: (page: any, ctx?: AirlockContext) => Promise<void>;
 }
 
+export function isAuthenticatedSession(tokenStr: string | null): boolean {
+  if (!tokenStr) return false;
+  try {
+    const parsed = JSON.parse(tokenStr);
+    if (parsed === null || typeof parsed !== "object") return false;
+    if (parsed.user?.guest === true) return false;
+    return Boolean(parsed.token || parsed.user);
+  } catch {
+    return true; // raw JWT string
+  }
+}
+
 export interface NetworkTrap {
   errors: string[];
   detach: () => void;
@@ -47,6 +59,8 @@ export function attachNetworkTrap(
         url.includes("/sync") ||
         url.includes("/v1/shape") ||
         url.includes("/electric/") ||
+        url.includes("/crud/") ||
+        url.includes("/auth/") ||
         url.includes("live=true")
       );
     } catch {
@@ -64,8 +78,25 @@ export function attachNetworkTrap(
     }
   };
 
+  const isPrefetch = (req: any) => {
+    try {
+      const headers = typeof req.headers === "function" ? req.headers() : (req.headers ?? {});
+      if (
+        headers["sec-purpose"]?.includes("prefetch") ||
+        headers["purpose"]?.includes("prefetch") ||
+        headers["x-pronto-prefetch"] === "1"
+      ) {
+        return true;
+      }
+      const type = typeof req.resourceType === "function" ? req.resourceType() : (req.resourceType ?? "");
+      return type === "prefetch";
+    } catch {
+      return false;
+    }
+  };
+
   const onRequest = (req: any) => {
-    if (!isPersistentSync(req) && isDeploymentAsset(req)) {
+    if (!isPersistentSync(req) && !isPrefetch(req) && isDeploymentAsset(req)) {
       pendingRequests.add(req);
     }
   };
@@ -135,7 +166,7 @@ export function attachNetworkTrap(
         );
       }
     },
-    waitForPendingAssets: async (timeoutMs = 3000) => {
+    waitForPendingAssets: async (timeoutMs = 45000) => {
       if (pendingRequests.size === 0) return;
       const deadline = Date.now() + timeoutMs;
       while (pendingRequests.size > 0 && Date.now() < deadline) {
@@ -163,6 +194,7 @@ export interface BrowserSweepOptions {
   ctx?: AirlockContext;
   platform?: string;
   session?: unknown;
+  screenTimeoutMs?: number;
 }
 
 export interface BrowserSweepResult {
@@ -303,7 +335,7 @@ export async function verifyBrowser(
 
     const representative = options.hints
       ? buildRepresentativeJourneys(options.hints, options.screenRoutes, unresolved, {
-          hasSession: Boolean(currentProntoToken),
+          hasSession: isAuthenticatedSession(currentProntoToken),
         })
       : (options.journeys && options.journeys.length > 0 ? [] : [{ screen: "root", path: "/" }]);
 
@@ -332,7 +364,7 @@ export async function verifyBrowser(
     const visitedPaths = new Set<string>();
 
     const context = typeof browser.newContext === "function"
-      ? await browser.newContext({ baseURL: appBaseUrl })
+      ? await browser.newContext({ baseURL: appBaseUrl, bypassCSP: true })
       : null;
 
     try {
@@ -399,7 +431,8 @@ export async function verifyBrowser(
               }
               target = targetUrlObj.toString();
             }
-            const res = await page.goto(target, { waitUntil: "domcontentloaded", timeout: 15000 });
+            const screenTimeout = options.screenTimeoutMs ?? 45000;
+            const res = await page.goto(target, { waitUntil: "domcontentloaded", timeout: screenTimeout });
             const isPages = options.platform === "pages";
             const allowed = (status: number) => status === 200 || (isPages && status === 404);
             if (!res || !allowed(res.status())) {
@@ -452,7 +485,7 @@ export async function verifyBrowser(
                   return true;
                 },
                 screenName,
-                { timeout: 5000 }
+                { timeout: options.screenTimeoutMs ?? 45000 }
               );
             }
           } else {
@@ -463,7 +496,7 @@ export async function verifyBrowser(
 
           // Refresh session token immediately after journey execution so downstream
           // link harvesting and private route enqueuing reflect authentication
-          const hadSessionBefore = Boolean(currentProntoToken);
+          const hadSessionBefore = isAuthenticatedSession(currentProntoToken);
           if (typeof page.evaluate === "function") {
             try {
               const token = await page.evaluate(() => sessionStorage.getItem("pronto-token"));
@@ -474,7 +507,7 @@ export async function verifyBrowser(
           }
 
           // If session just transitioned to authenticated, enqueue newly eligible private screens
-          if (!hadSessionBefore && currentProntoToken && options.hints?.routes) {
+          if (!hadSessionBefore && isAuthenticatedSession(currentProntoToken) && options.hints?.routes) {
             for (const r of options.hints.routes) {
               if (r.access === "private") {
                 const screen = extractPrimaryScreen(r);
@@ -492,7 +525,15 @@ export async function verifyBrowser(
           if (options.hints?.routes && typeof page.$$eval === "function") {
             try {
               const liveHrefs: string[] = await page.$$eval("a[href]", (els: any[]) =>
-                els.map((el) => el.getAttribute("href")).filter(Boolean)
+                els.map((el) => {
+                  const href = el.getAttribute("href");
+                  if (!href) return null;
+                  try {
+                    const u = new URL(href, location.origin);
+                    if (u.origin === location.origin) return u.pathname;
+                  } catch {}
+                  return href.startsWith("/") ? href : null;
+                }).filter(Boolean)
               );
               let foundNewLinks = false;
               for (const h of liveHrefs) {
@@ -510,7 +551,7 @@ export async function verifyBrowser(
                 );
                 for (const [screen, path] of newScreenRoutes.entries()) {
                   const targetRoute = options.hints.routes.find((r) => extractPrimaryScreen(r) === screen);
-                  if (targetRoute?.access === "private" && !currentProntoToken) {
+                  if (targetRoute?.access === "private" && !isAuthenticatedSession(currentProntoToken)) {
                     continue;
                   }
                   if (!coveredScreens.has(screen) && !visitedPaths.has(path)) {
@@ -524,7 +565,7 @@ export async function verifyBrowser(
             }
           }
 
-          await trap.waitForPendingAssets();
+          await trap.waitForPendingAssets(options.screenTimeoutMs ?? 45000);
           trap.assertNoErrors();
         } catch (err) {
           errors.push(

@@ -1056,3 +1056,62 @@ Deno.test("verifyBrowser clears retained session after logout journey", async ()
   assertEquals(sessionsSeenOnNewPage.length, 1);
   assertEquals(sessionsSeenOnNewPage[0], "active-token");
 });
+
+Deno.test("verifyBrowser does not enqueue private routes when session is a guest token", async () => {
+  const visitedUrls: string[] = [];
+  const fakePage = {
+    on: () => {},
+    off: () => {},
+    close: async () => {},
+    addInitScript: async () => {},
+    goto: async (url: string) => {
+      visitedUrls.push(url);
+      return { status: () => 200 };
+    },
+    evaluate: async () => JSON.stringify({ token: "guest-jwt", user: { id: "g1", guest: true } }),
+    $$eval: async () => ["/admin-edit/123"],
+    waitForFunction: async () => true,
+  };
+
+  const result = await verifyBrowser({
+    targetUrl: "https://app.example.com",
+    browser: { newPage: async () => fakePage },
+    hints: {
+      routes: [
+        { path: "/", screen: "home" },
+        { path: "/admin", screen: "admin", access: "private" },
+        { path: "/admin-edit/:id", screen: "admin-edit", access: "private" },
+      ],
+    },
+  });
+
+  assertEquals(result.passed, true);
+  assertEquals(visitedUrls, ["https://app.example.com/"]);
+});
+
+Deno.test("attachNetworkTrap excludes prefetch and API requests from pending asset tracking", async () => {
+  const listeners: Record<string, ((...args: any[]) => void)[]> = {};
+  const fakePage = {
+    on: (evt: string, fn: (...args: any[]) => void) => {
+      listeners[evt] ??= [];
+      listeners[evt].push(fn);
+    },
+    off: (evt: string, fn: (...args: any[]) => void) => {
+      listeners[evt] = (listeners[evt] || []).filter((f) => f !== fn);
+    },
+  };
+
+  const trap = attachNetworkTrap(fakePage, { targetOrigin: "https://app.example.com" });
+
+  for (const req of [
+    { url: () => "https://app.example.com/equipes", headers: () => ({ accept: "text/html", "x-pronto-prefetch": "1" }) },
+    { url: () => "https://app.example.com/crud/game?select=*", headers: () => ({ accept: "application/json" }) },
+    { url: () => "https://app.example.com/auth/guest", headers: () => ({ accept: "application/json" }) },
+  ]) {
+    listeners["request"]?.forEach((fn) => fn(req));
+  }
+
+  await trap.waitForPendingAssets(50);
+  trap.assertNoErrors();
+  trap.detach();
+});

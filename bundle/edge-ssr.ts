@@ -134,7 +134,7 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
       const version = env.CF_VERSION_METADATA?.id ?? ''
       const reset = cache ? ((await (await cache.match(keyOf(version, 'reset')))?.text()) ?? '0') : '0'
       const lastWrite = cache ? ((await (await cache.match(keyOf(version, reset, 'writes', 'public')))?.text()) ?? '0') : '0'
-      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
+      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(version)}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
       const renderFresh = async (speculative = false) => {
         const reqHeaders = new Headers(request.headers)
         if (speculative) reqHeaders.set('x-pronto-speculative', '1')
@@ -322,6 +322,7 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
   }
   config.name = name
   config.main = 'src/index.ts'
+  config.version_metadata = { binding: 'CF_VERSION_METADATA' }
   config.durable_objects = { bindings: [{ name: 'CLUSTER', class_name: 'Cluster', ...(separate ? { script_name: database } : {}) }, { name: 'RENDERER', class_name: 'DocumentRenderer', script_name: renderer }] }
   config.assets.run_worker_first = await edgeRoutingRules(path.join(out, 'public'))
   if (separate) {

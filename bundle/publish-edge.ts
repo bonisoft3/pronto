@@ -43,8 +43,8 @@ if (args.length) fail(`unknown arguments ${args.join(' ')}`)
 const workerd = path.join(mecha, 'packages/pglite-workerd')
 const config = path.join(out, 'wrangler.jsonc')
 
-async function run(cmd: string, args: string[], { cwd = out }: { cwd?: string } = {}): Promise<string> {
-  const r = await new Deno.Command(cmd, { args, cwd, stdin: 'null', stdout: 'piped', stderr: 'inherit' }).output()
+async function run(cmd: string, args: string[], { cwd = out, env }: { cwd?: string; env?: Record<string, string> } = {}): Promise<string> {
+  const r = await new Deno.Command(cmd, { args, cwd, env, stdin: 'null', stdout: 'piped', stderr: 'inherit' }).output()
   const text = new TextDecoder().decode(r.stdout)
   if (!r.success) fail(`${cmd} ${args.join(' ')} exited ${r.code}:\n${text}`)
   return text
@@ -52,11 +52,12 @@ async function run(cmd: string, args: string[], { cwd = out }: { cwd?: string } 
 
 // By path: a bare `wrangler` on PATH can resolve to another install, and
 // where the npm backend puts its bin differs between mise versions.
-// wrangler's bin starts `#!/usr/bin/env node`: run by path it takes whatever
-// node leads PATH. It runs under the node the package's mise config pins.
+// The package's pinned node leads PATH for wrangler and its subprocesses.
 const wranglerBin = (await run('mise', ['which', 'wrangler'], { cwd: workerd })).trim()
 const node = (await run('mise', ['which', 'node'], { cwd: workerd })).trim()
-const wrangler = (args: string[]) => run(node, [wranglerBin, ...args])
+const nodeDir = path.dirname(node)
+const runEnv = { ...Deno.env.toObject(), PATH: `${nodeDir}${path.delimiter}${Deno.env.get('PATH') ?? ''}` }
+const wrangler = (args: string[]) => run(wranglerBin, args, { env: runEnv })
 const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')
 
 const token = random()
@@ -97,7 +98,7 @@ const deployed: { config: string; previous: string | null }[] = []
 /** The version a Worker serves now; null before its first deploy, which
  * Cloudflare answers with error 10007 (no such Worker). */
 async function previousVersion(configPath: string): Promise<string | null> {
-  const r = await new Deno.Command(node, { args: [wranglerBin, 'deployments', 'list', '--config', configPath, '--json'], cwd: out, stdin: 'null', stdout: 'piped', stderr: 'piped' }).output()
+  const r = await new Deno.Command(wranglerBin, { args: ['deployments', 'list', '--config', configPath, '--json'], cwd: out, env: runEnv, stdin: 'null', stdout: 'piped', stderr: 'piped' }).output()
   const stderr = new TextDecoder().decode(r.stderr)
   if (!r.success) {
     if (stderr.includes('[code: 10007]')) return null
@@ -186,7 +187,13 @@ if ('skipped' in loaded) {
     await new Promise((r) => setTimeout(r, 2000))
     migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
   }
-  const answer = await migrated.text()
+  let answer = await migrated.text()
+  if (!migrated.ok && (answer.includes('Durable Object was reset') || answer.includes('reset') || migrated.status === 503)) {
+    console.log(`Durable Object reset during migration (${migrated.status}); waiting for settled state on new code...`)
+    await settled('the reset')
+    migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
+    answer = await migrated.text()
+  }
   if (!migrated.ok) {
     for (const { config: configPath, previous } of deployed.reverse()) {
       if (previous === null) continue
@@ -202,7 +209,7 @@ try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
 catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (ssr) {
   const warm = await fetch(`${origin}/`, { headers: { accept: 'text/html' } })
-  await warm.body?.cancel()
+  await warm.text()
   if (!warm.ok) fail(`warming ${origin}/ answered ${warm.status}`)
 }
 // What a page reads at the deployment's door is what the build wrote: its

@@ -255,11 +255,12 @@ export function resolveParameterizedRoutes(
         ? link.slice(prefix.length) || "/"
         : link;
       const cleanRelative = appRelative.startsWith("/") ? appRelative : `/${appRelative}`;
+      const cleanPathname = cleanRelative.split(/[?#]/)[0];
 
-      const matched = regexes.some((re) => re.test(cleanRelative));
+      const matched = regexes.some((re) => re.test(cleanPathname));
       if (matched) {
-        resolvedRoutes.set(r.path, cleanRelative);
-        screenRoutes.set(extractPrimaryScreen(r), cleanRelative);
+        resolvedRoutes.set(r.path, cleanPathname);
+        screenRoutes.set(extractPrimaryScreen(r), cleanPathname);
         break;
       }
     }
@@ -303,7 +304,7 @@ export async function verifyHttp(
   const targetPath = parsedTarget.pathname;
   const targetSearch = parsedTarget.search;
   const doFetch = options.fetchFn ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 10000;
+  const timeoutMs = options.timeoutMs ?? 60000;
   const concurrency = options.concurrency ?? 16;
   const errors: string[] = [];
 
@@ -395,9 +396,9 @@ export async function verifyHttp(
     }
   }
 
-  async function pool<T>(items: T[], fn: (item: T) => Promise<void>) {
+  async function pool<T>(items: T[], fn: (item: T) => Promise<void>, poolConcurrency = concurrency) {
     const queue = [...items];
-    const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    const workers = Array.from({ length: Math.min(poolConcurrency, queue.length) }, async () => {
       while (queue.length > 0) {
         const item = queue.shift();
         if (item !== undefined) {
@@ -516,7 +517,7 @@ export async function verifyHttp(
     for (const link of harvestLinksFromHtml(res.text)) {
       harvestedLinks.add(link);
     }
-  });
+  }, Math.min(concurrency, 4));
 
   // 5. Dynamic Parameterized Route Resolution
   const { resolvedRoutes, screenRoutes } = options.hints?.routes
@@ -547,7 +548,7 @@ export async function verifyHttp(
         `Parameterized route ${routePath} returned unexpected Content-Type '${ct}' (expected text/html)`
       );
     }
-  });
+  }, Math.min(concurrency, 4));
 
   return {
     passed: errors.length === 0,

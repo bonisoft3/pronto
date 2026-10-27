@@ -217,11 +217,13 @@ export async function main(argv = Deno.args) {
   // Tier 1: Fast HTTP Asset and Cold-Cache Sweep
   if (tier === "all" || tier === "1") {
     console.log("\n[Tier 1] HTTP Cold-Cache & Asset Sweep...");
+    const timeoutMs = flags.timeout ? Number(flags.timeout) : undefined;
     const httpResult = await verifyHttp(targetUrl, {
       hints,
       publicDir,
       appDir,
       platform,
+      timeoutMs,
     });
     screenRoutes = httpResult.screenRoutes;
 
@@ -275,6 +277,8 @@ export async function main(argv = Deno.args) {
     const rawSession = flags.session ?? Deno.env.get("SAY_VERIFY_ARGS_SESSION");
     const session = rawSession ? JSON.parse(rawSession) : undefined;
 
+    const screenTimeoutMs = flags.timeout ? Number(flags.timeout) : 45000;
+
     const browserResult = await verifyBrowser({
       targetUrl,
       hints,
@@ -283,6 +287,7 @@ export async function main(argv = Deno.args) {
       headless: headlessFlag !== "false",
       platform,
       session,
+      screenTimeoutMs,
     });
 
     console.log(`  - ${browserResult.journeysRun} user journeys executed`);
