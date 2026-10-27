@@ -142,16 +142,18 @@ localBroker: "http://localhost:28443"
 // On the host, hydra runs directly via mise and the front directly under deno,
 // with no custom container image needed.
 _hydraCmd: "exec mise x github:ory/hydra@26.2.0 -- hydra serve all --dev"
+// Spaces, not tabs: the script lands in a YAML block scalar, where a tab
+// after its indentation breaks the file process-compose reads.
 _frontCmd: """
-	p="${PRONTO_DIR:-}"
-	if [ -z "$p" ]; then
-		if [ -f "plugins/pronto/identity/hydra/front.ts" ]; then
-			p="plugins/pronto"
-		elif [ -f "identity/hydra/front.ts" ]; then
-			p="."
-		else
-			p="$(mise where github:bonisoft3/pronto 2>/dev/null || true)"
-		fi
-	fi
-	exec deno run --no-config --allow-net --allow-env "$p/identity/hydra/front.ts"
+p="${PRONTO_DIR:-}"
+if [ -z "$p" ]; then
+  if [ -f "plugins/pronto/identity/hydra/front.ts" ]; then
+    p="plugins/pronto"
+  elif [ -f "identity/hydra/front.ts" ]; then
+    p="."
+  else
+    p="$(mise where github:bonisoft3/pronto 2>/dev/null || true)"
+  fi
+fi
+exec deno run --no-config --allow-net --allow-env "$p/identity/hydra/front.ts"
 """
