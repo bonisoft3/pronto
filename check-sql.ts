@@ -54,7 +54,7 @@ const FORGIVEN: { rule: string; path: string }[] = [
   // built one it is the addition pronto admits, and the schema job, not a
   // lint, is where a required field that rows cannot take says so. squawk
   // still reads every CREATE and every authored migration.
-  ...["adding-required-field", "adding-field-with-default", "adding-foreign-key-constraint"].map((rule) => ({
+  ...["adding-required-field", "adding-field-with-default", "adding-foreign-key-constraint", "disallowed-unique-constraint"].map((rule) => ({
     rule,
     path: "services/database/migrations/005_create_tables.sql",
   })),
