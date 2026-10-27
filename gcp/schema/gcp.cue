@@ -264,6 +264,12 @@ import (
 // defaults together; the instance is raised to 50 and the pools capped.
 #Pools: {crud: 5, electric: 5}
 #SqlFlags: "cloudsql.logical_decoding=on,max_connections=50"
+// A preview's database is the smallest tier and its tests open every shape at once: electric
+// fell behind the replication stream there for over a minute, Postgres's default
+// wal_sender_timeout cut it, and its live requests hung until the tests failed (seen five times
+// on Bonk Chess's preview, never on its release). A preview's database waits five minutes.
+// Only a preview's: a release's database would restart for the flag.
+#PreviewSqlFlags: #SqlFlags + ",wal_sender_timeout=300000"
 
 // Google Cloud Managed Service for Prometheus's collector for Cloud Run, pinned.
 #Gmp: "us-docker.pkg.dev/cloud-ops-agents-artifacts/cloud-run-gmp-sidecar/cloud-run-gmp-sidecar:1.9.4@sha256:8f8ac35f4bc82aa9547b1458343acb79b2594b35b56fb4c13dbe62c1f5a64679"
@@ -311,7 +317,9 @@ import (
 				"autoscaling.knative.dev/maxScale":         "1"
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
-				if R.alwaysOn {"run.googleapis.com/cpu-throttling": "false"}
+				// A preview keeps its CPU between requests too: electric reads the replication
+				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
+				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
 					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
@@ -641,7 +649,7 @@ import (
 		if R.preview != _|_ {preview: R.preview}
 		names:    R.names
 		sqlTier:  R.sqlTier
-		sqlFlags: #SqlFlags
+		sqlFlags: [if R.preview != _|_ {#PreviewSqlFlags}, #SqlFlags][0]
 		if R._domain != "" {domain: R._domain}
 		aliases: R._aliases
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}

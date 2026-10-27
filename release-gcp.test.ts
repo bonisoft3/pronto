@@ -500,6 +500,19 @@ Deno.test("an app behind IAP is the owner's alone; a preview of it is not, so it
   assertEquals(plain.value.iap, false);
 });
 
+// A preview's electric fell behind the replication stream under its tests and Postgres cut it
+// (wal_sender_timeout): a preview keeps its CPU and its database waits longer; a release's
+// database keeps its flags, so it isn't restarted for this.
+Deno.test("a preview keeps electric's CPU and waits longer on its replication", async () => {
+  const pv = await built(release(", preview: \"rc\""), "service");
+  assertEquals(pv.success, true, pv.stderr);
+  assertEquals(pv.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+  const plan = await built(release(", preview: \"rc\""), "plan");
+  assertEquals(plan.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=50,wal_sender_timeout=300000");
+  const live = await built(release(), "plan");
+  assertEquals(live.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=50");
+});
+
 Deno.test("an app always on keeps its CPU between requests; by default it is throttled", async () => {
   const on = await built(release(", alwaysOn: true"), "service");
   assertEquals(on.success, true, on.stderr);
