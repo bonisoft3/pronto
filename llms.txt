@@ -1,0 +1,566 @@
+# llms.txt — Pronto Platform Canonical Specification & Agent Oracle
+> Machine-oriented reference specification for Google Antigravity, Pronto, Mecha, Omnishell, Bayt, and Sayt.
+> Designed for LLM agent zero-shot comprehension, contract reasoning, and invariant enforcement.
+
+---
+
+## 0. ECOSYSTEM REPOSITORIES & SOURCE OF TRUTH
+
+Pronto is a federated relational application compiler. It is maintained across modular upstream repositories under the `bonisoft3` organization, and embedded inside monorepos under `plugins/` and `libraries/`:
+
+| Component | Upstream GitHub Repository | Monorepo Path | Role & Invariant |
+| :--- | :--- | :--- | :--- |
+| **Pronto** | [`bonisoft3/pronto`](https://github.com/bonisoft3/pronto) | `plugins/pronto` | Compiler, CUE schema envelopes (`#App`, `#Entity`), derivation emitter (`write.ts`), edge bundler (`bundle/edge.ts`), and Cloudflare publisher (`bundle/publish-edge.ts`). |
+| **Omnishell** | [`bonisoft3/omnishell`](https://github.com/bonisoft3/omnishell) | `plugins/omnishell` | Zero-VDOM browser runtime. Evaluates `data-live` DOM projections, executes pure Jessie folds in hardened SES compartments, manages WebRTC DataChannels and PGlite local stores. |
+| **Mecha** | [`bonisoft3/mecha`](https://github.com/bonisoft3/mecha) | `libraries/mecha` | Database and state machine engine. PostgreSQL RLS tenancy floor (`003_rls.sql`), hybrid actor state machines (`016_mecha_actors.sql`), CDC conduits, and edge pglite-workerd durable objects. |
+| **Bayt** | [`bonisoft3/bayt`](https://github.com/bonisoft3/bayt) | `plugins/bayt` / `bayt` | Declarative, hermetic build and packaging DAG. Pure CUE tasks, Docker buildx / Depot execution, cryptographic layer caching. |
+| **Sayt** | [`bonisoft3/sayt`](https://github.com/bonisoft3/sayt) | `sayt` / `saytw` | Development harness and verification CLI. Standardizes verbs across local, bare, and containerized platforms (`sayt lint`, `test`, `integrate`, `launch`). |
+
+*Tool resolution:* Run commands from the app directory through `mise x --`. The app’s `.mise.toml` pins released tools; its checkout-local `mise.local.toml` selects source trees with `path:` overrides. Commands stay the same in either layout. Resolve source distributions with `mise where github:bonisoft3/<component>` rather than spelling repository paths. Pronto ships source, so invoke its resolved compiler or the generated Sayt gates below.
+
+---
+
+## 1. SYSTEM AXIOMS & MENTAL INVARIANTS
+
+| # | Axiom | Invariant & Enforcement |
+| :--- | :--- | :--- |
+| **1** | **Zero Ambient State** | No global `window`, `localStorage`, `sessionStorage`, manual `fetch()`, raw `WebSocket`, or unmanaged background threads. The client is a closed, deterministic relational projection. |
+| **2** | **Relational Equivalence** | Every domain concept, UI view state, user gesture, network packet, timer tick, or peer sync event is a row in a table. DOM holds no primary state (`data-live` projects local store tables). Mutations are discrete row ops: `{ op: "put" \| "patch" \| "delete", entity, id, row }`. |
+| **3** | **SES / Pure Jessie Sandbox** | Client folds and machines run in hardened SES compartments with **zero ambient endowments**. Signature: `(state, event) => ({ updates, then? })`. `Math.random()`, `Date.now()`, `crypto.getRandomValues()`, and `setTimeout()` are forbidden. Entropy and clock arrive exclusively via `{ then: { type: "<event>", seed: true, delay: ms } }`. |
+| **4** | **RLS Tenancy Floor** | Multi-tenant isolation and access control live at PostgreSQL Row-Level Security (`003_rls.sql`, `016_mecha_actors.sql`), not middleware. `RESTRICTIVE` policies abort unauthorized writes or forged revisions transactionally. |
+| **5** | **CUE Single Source of Truth** | `program.cue` is the algebraic specification. SQL DDL, RLS, Mecha actors, sync shapes, shell manifests, and build graphs are derived by `mise x -- ./saytw generate`. Never hand-edit emitted files (`services/database/migrations/`, `compose.yaml`, `program_*.cue`, `shell/boot.js`). |
+| **6** | **Hermetic Tooling (Mise & D2)** | Toolchain binaries (`d2`, `duckdb`, `cue`, `buf`) are pinned in `.mise.toml`. `ir-render.ts` resolves D2 through the pinned mise toolchain. **Zero-Bypass Rule:** Never strip `<section data-kind="screen">` or skip neighbourhood diagrams assuming `d2` is absent from ambient `$PATH`. |
+
+---
+
+## 2. THE MULTI-TIER STACK ARCHITECTURE
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ BROWSER TIER (Omnishell)                                                               │
+│ DOM Projections (data-live) ◄──► Local Store (PGlite / Tab Cache) ◄──► SES Cortex Folds│
+└────────────────────────────────────────┬───────────────────────────────────────────────┘
+                                         │ Sync Shapes / PostgREST / WebRTC DataChannel
+┌────────────────────────────────────────▼───────────────────────────────────────────────┐
+│ EDGE / SERVER TIER (Mecha & Cloudflare Workers)                                        │
+│ Caddy / Door ──► PostgREST / Electric ──► PostgreSQL 18 (RLS Tenancy Floor)            │
+│ Mecha Actors (016_mecha_actors.sql) ◄──► Schedules / Ticker ◄──► Conduit CDC           │
+└────────────────────────────────────────┬───────────────────────────────────────────────┘
+                                         │ Hermetic Build & Task Execution
+┌────────────────────────────────────────▼───────────────────────────────────────────────┐
+│ TOOLCHAIN & RUNTIME (Sayt & Bayt)                                                      │
+│ Sayt (Outer verification loop: lint, test, integrate) ──► Bayt (CUE Target & Task Graph)│
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. CUE CORE SCHEMAS & CONTRACT GRAMMAR
+
+### A. Application Envelope & Harness Seats (`#App`, `#emit`)
+
+Every `program.cue` defines `code: pronto.#App` and wires the five harness seats using **quoted labels** (`"code": code`) to avoid CUE self-reference cycles:
+
+```cue
+@extern(embed)
+package myapp
+
+import (
+    pronto "github.com/bonisoft3/pronto"
+)
+
+_designMd: _ @embed(file="DESIGN.md", type=text)
+
+code: pronto.#App & {
+    state: {
+        entities: { ... }
+        pipelines: {}
+        cortex?: { ... }
+        hybrids?: { ... }
+        machines?: { ... }
+    }
+    capabilities: {
+        blobs: false
+        hatches: {}
+        vendored: {}
+        auth?: { required: bool, service: string, promote?: bool }
+        blobSeed?: { manifest: string, origin: string }
+    }
+    surface: {
+        screens: { ... }
+        handlers: {}
+        design: (pronto.#DesignMd & {text: _designMd}).design
+        flows: {
+            "<flow-id>": { of: "<screen>", entity: "<Entity>", action: "create" | "update" | "delete" }
+        }
+    }
+    meta: {
+        name: "myapp"
+        description: "..."
+        ir: { sha256: "<64-hex-sha256-of-ir.html>" }
+        targets: ["pages"] // or ["cloudflare"]
+        decisions: { "decision-01": {} }
+        tests: {}
+    }
+}
+
+cluster:  (pronto.#DefaultCluster & {"code": code, statics: terminal.surface.statics}).out
+terminal: (pronto.#DefaultTerminal & {"code": code}).out
+loop:     (pronto.#DefaultLoop & {"code": code, "cluster": cluster, "terminal": terminal}).out
+loop: surface: checks: "unit": {
+    verb: "test"
+    cmds: ["deno test --no-config --allow-read tests/unit.test.ts"]
+    note: "pure handler fold unit checks"
+}
+build:    (pronto.#DefaultBuild & {"code": code, "loop": loop, "cluster": cluster, "terminal": terminal}).out
+build: checks: "acceptance": {
+    browser: true
+    cmds: ["deno run --no-config --no-lock --allow-all --unsafely-ignore-certificate-errors=caddy,localhost tests/acceptance.ts ."]
+    note: "walks the acceptance checklist against the running app via Playwright under `mise x -- ./saytw integrate`"
+}
+out:      pronto.#emit & {"code": code, "cluster": cluster, "terminal": terminal, "loop": loop, "build": build}
+```
+
+### B. Entity Declaration, Identity Minting, Durability Lattice & CEL Cheat-Sheet (`#Entity`)
+
+Entities are declared under `state.entities.<EntityName>`. **No model mints identity:** author new entities without `id:` and new fields without `ordinal:` (each field as a single-line `{name: "col", type: "..."}` literal inside `fields: [...]`). When `mise x -- ./saytw generate` (or `identity.ts mint`) runs, it automatically stamps `id` and `ordinal` into `program.cue`, stamps `data-type-id` and `data-ordinal` into `ir.html`, and records them in `.pronto/identity.json` (`identity.ts check` refuses hand-invented IDs or ordinals not recorded in `.pronto/identity.json`):
+
+```cue
+state: entities: {
+	Player: {
+		// Do NOT hand-author `id: "0x..."` on new entities; `write.ts` / `identity.ts mint` stamps it!
+		table:      "player"          // PostgreSQL / store table name
+		durability: "server"          // Lattice tier: tab | device | offline | server | live
+		access:     {scope: "public"} // Required for server/live/offline; omit for tab/device
+		fields: [
+			// Do NOT hand-author `ordinal:` on new fields; keep each field a single-line `{name: "...", ...}` literal:
+			{name: "id", type: "uuid", pk: true},
+			{name: "handle", type: "string", unique: true, cel: "this.size() > 0 && this.size() <= 24"},
+			{name: "score", type: "int32", default: "0", cel: "this >= 0"},
+			{name: "status", type: "string", cel: "this in ['idle', 'playing', 'won', 'lost']"},
+			{name: "created_at", type: "timestamp", default: "now()"},
+		]
+		invariant?: {cel: "this.min_val <= this.max_val"} // Row-level CEL (`this` = row)
+		seed?: [{id: "...", handle: "AAA", score: 0, status: "idle"}]
+	}
+}
+```
+
+*Portable Field Types (15 closed types):* `string`, `bool`, `int32`, `int64`, `double`, `bytes`, `uuid`, `timestamp`, `date`, `time`, `timezone`, `duration`, `decimal`, `json`, `geojson`.
+
+#### The 5 Durability Rungs:
+1. `tab`: In-memory in the single browser tab. Never reaches disk or server. Omit `access`. Ideal for UI view state, game boards, modal toggles, ephemeral filters. Supports `seed: [...]` in `program.cue`.
+2. `device`: Stored in IndexedDB in the browser. Persists across page reloads on that device, never leaves the browser. Omit `access`. **Cannot declare non-empty `seed:` in `program.cue`** (`schema.cue` enforces `if durability == "device" { seed: [] }`); for `device` singleton slots, use `data-empty-row='{...}'` in markup and `op: "put"` in handlers.
+3. `offline`: Client-first sync. Writes succeed locally immediately, background-reconcile to the cluster when online.
+4. `server`: Canonical PostgreSQL table on the server/edge. Replicated to clients matching authorized sync shapes.
+5. `live`: Server-authoritative table with high-frequency live subscriptions.
+
+#### CEL Validation Cheat-Sheet (`cel:`):
+`plugins/pronto/cel.ts` parses each `cel:` once into `.pronto/cel.json` and derives CUE constraints (`program_cel.cue`), SQL `CHECK` bodies, enum value sets, and fuzz bounds:
+
+| Constraint Pattern | CEL Expression (`this` = field value) | Derived SQL / CUE Semantics |
+| :--- | :--- | :--- |
+| **Non-empty string** | `this.size() > 0` | `char_length(col) > 0` / `strings.MinRunes(1)` |
+| **Trimmed non-empty** | `this.trim().size() > 0` | Rejects Unicode whitespace-only strings |
+| **Length bounds** | `this.size() >= 3 && this.size() <= 60` | `sizeMin: 3, sizeMax: 60` bounds + SQL `char_length` |
+| **Closed enum** | `this in ['hidden', 'revealed', 'flagged']` | `col IN (...)` / CUE union `"hidden" \| "revealed" \| "flagged"` |
+| **Integer enum / bool text** | `this in [1, 2, 3]` or `this in ['true', 'false']` | Closed value set validated at compile & runtime |
+| **Numeric range** | `this >= 0 && this <= 99` | `col >= 0 AND col <= 99` / `>=0 & <=99` |
+| **Regex pattern** | `this.matches('^[A-Z]{3}$')` | `col ~ '^[A-Z]{3}$'` / `=~ "^[A-Z]{3}$"` |
+| **Prefix check** | `this.matches('^https://')` | SQL regex check and CUE pattern constraint |
+| **Row invariant** | `invariant: { cel: "this.a != this.b" }` | Cross-column SQL `CHECK (a <> b)` (`this` = row) |
+| **Null-pair invariant** | `invariant: { cel: "has(this.a) == has(this.b)" }` | `CHECK ((a IS NOT NULL) = (b IS NOT NULL))` |
+
+### C. Access Scopes & RLS Boundaries (`#Access`)
+
+Access modes map mechanically to PostgreSQL RLS policies:
+
+| Scope | CUE Syntax | Enforcement | Use Case |
+| :--- | :--- | :--- | :--- |
+| `public` | `access: { scope: "public" }` | Read-only for all subjects (signed-in or anonymous). Writes forbidden from client unless `write: true`. | Global catalogues, high-score leaderboards, game static assets. |
+| `private` | `access: { scope: "private", owner: "user_id" }` | Row is strictly accessible by the subject matching `auth_uid() == owner`. | Private user profile, account settings, drafts. |
+| `folder` | `access: { scope: "folder", parent: "ParentEntity", on: "parent_id" }` | Inherits tenant access from parent row joined on foreign key `on`. | Child comments, order line items, game turns within a match. |
+| `internal` | `access: { scope: "internal" }` | Inaccessible from browser PostgREST APIs; accessible strictly to backend workers and pipelines. | Secret tokens, encryption keys, background queue jobs. |
+
+### D. Screen Contract (`#Screen`)
+
+Screens declare their route, inline `markup:` string (`write.ts` emits it to `shell/screens/<screen>.html` and derives `reads`, `writes`, `charts`, and `files` into `program_derived.cue` — never write those derived fields in `program.cue`), storyboard states, and acceptance paths. **Root Element Rule:** The outermost element of `markup:` (or `shell/screens/<screen>.html`) MUST be `<section class="screen" data-screen="<screen>">` and MUST NOT carry `data-live` itself (`interpretScreen` calls `screen.querySelectorAll("[data-live]")` on descendants only; placing `data-live` on the root `<section>` causes Omnishell to skip hydrating both the root and all nested `[data-live]` and `<form>` elements):
+
+```cue
+surface: screens: arena: {
+    title: "Arena"
+    route: "/"
+    markup: """
+        <section class="screen" data-screen="arena">
+          <div class="board" data-live="game" data-filter="id=eq.the" data-reads="game,cell" data-handler="board" data-empty="">
+            <span class="lcd" data-text="{mines_left}">10</span>
+            <button id="reset" type="button" class="face-{face}" data-on-click="board"></button>
+            <div class="grid" data-live="cell" data-order="pos.asc" data-reads="game,cell" data-handler="board" data-empty="">
+              <template data-item>
+                <button type="button" id="cell-{id}" class="cell cell-{state}" data-on-click="board" data-text="{display}"></button>
+              </template>
+            </div>
+          </div>
+        </section>
+        """
+    forms:  []
+    states: ["ready", "playing", "won", "lost"]
+    paths: {
+        start: { states: ["ready", "playing"], accepts: ["accept-start"] }
+        win:   { states: ["playing", "won"],   accepts: ["accept-win"] }
+    }
+}
+```
+
+### E. Custom Boot Script Binding (`#Terminal`)
+
+If an application requires custom initialization (e.g. challenge link parsing, custom clipboard helpers, wasm boot loaders):
+
+```cue
+// In program.cue:
+_customBoot: _ @embed(file="boot.js", type=text)
+terminal: (pronto.#DefaultTerminal & {
+    "code": code
+    "boot": _customBoot
+}).out
+```
+*Rule:* Never hand-edit `shell/boot.js`. Place the source in `boot.js` at the app root, embed it in `program.cue`, and pass `"boot": _customBoot`. `mise x -- ./saytw generate` will emit it permanently.
+
+### F. Architecture Document, Review Ladder & Cold-Start Checklist (`brief.md` → `ir.html` → `program.cue`)
+
+Before the first compiler run on a new app, prepare these **7 prerequisite groups** (do not hand-create `.say.yaml` or `program_derived.cue`; `write.ts` emits them):
+1. `.mise.toml`, `mise.lock`, `saytw`, `saytw.ps1`: Bootstrap the app’s pinned toolchain using Pronto’s `skills/pronto-turn/references/bootstrap.md`. Configure checkout source overrides in `mise.local.toml` during checkout setup. Keep tool locations in mise configuration; the command examples below work from any app directory.
+2. `brief.md` & `brief.html`: Problem statement and HTML brief.
+3. `acceptance.md`: Acceptance ledger where every claim line ends with a `{#accept-<slug>}` anchor (parsed via `/\{#(accept-[a-z0-9-]+)\}/g`, e.g., `- First click is guaranteed safe. {#accept-start}`). Every ID in `paths.<p>.accepts` must appear here.
+4. `DESIGN.md` & `shell/screens/<screen>.css`: `DESIGN.md` starts with YAML frontmatter (`preset: "press"`). Pre-create `shell/screens/<screen>.css` before the first `write.ts` run; scope selectors under `[data-screen="<screen>"]`, keep interactive cell/button dimensions on the 4px baseline (e.g. `32px`), use `var(--fg)` for text contrast across light/dark themes (enforced by `ci-visual` under `mise x -- ./saytw integrate`), and use enforced design tokens instead of raw literals (`var(--surface)`, `var(--surface-muted)`, `var(--fg)`, `var(--primary)`, `var(--accent)`, `var(--danger)`, `var(--border)`, `var(--border-size-1)`, `var(--border-size-2)`, `var(--size-1)`, `var(--sp-sm|md|lg)`, `var(--r-sm|md)`, `var(--type-label|caption|body|subtitle)`). Avoid `font:` shorthand when consuming font-size tokens; use `font-size: var(--type-...)` longhand.
+5. `ir.html`: Must contain:
+   - `<section id="<EntityName>" data-kind="entity" data-durability="tab">` with `<table data-extract="fields">`.
+   - `<section id="<screen>" data-kind="screen" data-route="/">` with `<p data-extract="reads">`, `<p data-extract="mutations">`, `<figure id="<screen>-<state>" data-kind="state" data-of="<screen>" data-state="<state>"></figure>`, and `<script type="application/json" data-kind="paths" data-of="<screen>">{"start":{"states":["ready","playing"],"accepts":["accept-start"]}}</script>`.
+   - `<section id="<flow_id>" data-kind="flow" data-of="<screen">`: Every flow key in `program.cue` `surface.flows` must have a matching section.
+   - `<p id="decision-01" data-kind="decision">`: Every decision key in `program.cue` `meta.decisions` must match an `id="decision-XX"` tag.
+6. `shell/handlers/<name>.js`: Pure Jessie fold ending with a bare `(state, event) => { ... }` arrow expression.
+7. `program.cue`: App contract (`#App` + `cluster`, `terminal`, `loop`, `build`, `out`).
+
+`mise x -- ./saytw generate` parses `ir.html`, mints missing entity/field IDs into `.pronto/identity.json`, emits `program_derived.cue` + `.say.yaml` + `shell/screens/<screen>.html`, and renders SVG diagrams through the pinned D2 tool. **Guided Cold-Start Tip:** `meta.ir.sha256` defaults to `""`, and running the resolved compiler command below as soon as `program.cue` is written reports every missing companion file (`ir.html`, `acceptance.md`, `DESIGN.md`, `brief.html`, `shell/screens/<screen>.css`, `shell/handlers/<name>.js`) along with the exact `<article id="..." data-kind="...">` tags, `paths` blocks, and `#accept-...` claim IDs your `program.cue` owes in one pass.
+
+---
+
+## 4. DOM ↔ FOLD TRUTH TABLES & LIFECYCLE MATRIX
+
+### A. Omnishell HTML Data Attributes
+
+| Attribute | Role | Target | Execution Timing |
+| :--- | :--- | :--- | :--- |
+| `data-screen="<name>"` | Screen Root | Outermost `<section class="screen" data-screen="...">`. | Scopes emitted screen CSS and mounts screen lifecycle. **Never place `data-live` on the root `[data-screen]` element itself**; place `data-live` on child elements inside it. |
+| `data-live="<table_name>"` | Subscription Anchor | Identifies the table that controls a child DOM region's lifecycle. | Re-renders automatically whenever rows matching `data-filter` mutate in the local store. |
+| `data-item` | Row Template | Placed on `<template data-item>` inside a `data-live` region. | Instantiated once per matching row; **must wrap exactly one root child element**. (Omit `<template data-item>` for a single-row *slot*). |
+| `data-text="{col}"` | Text Projection | Placed on any element whose text content comes from a row column. | Updates `textContent` on row change (`bindTexts`). **Must include `{}` braces** (`data-text="{title}"`, NOT `data-text="title"`). **Never write raw `{col}` inside HTML text nodes** (`<div>{col}</div>` renders literal `{col}`); `{col}` interpolation without `data-text` works only inside attributes (`id="c-{id}"`, `class="st-{state}"`). |
+| `data-filter="<postgrest_filter>"` | Query Predicate | PostgREST filter string (e.g. `id=eq.the`, `status=eq.waiting&seat=eq.a`). | Evaluated against table rows; supports `{column}` and `{param.x}` interpolation. |
+| `data-order="<col>.<asc\|desc>"` | Ordering | Column and sort direction (e.g. `ord.asc`, `created_at.desc`). | Orders instantiated template children. |
+| `data-reads="a,b,c"` | Context Injection | Comma-separated list of tables to provide in `state.rows`. | Passive read: does NOT wake the fold on change, but supplies `state.rows.<table>` on wake. **Always include the region's own `data-live` table in `data-reads` if the handler reads `state.rows.<own_table>`** (otherwise only `state.items` holds the region's own rows). |
+| `data-empty="<text>"` | Empty Copy | Fallback text (or `""` for blank) when a list or nested slot returns 0 rows. | Use `data-empty=""` on pre-seeded singleton slots or lists without `data-empty-row`. |
+| `data-empty-row='{...}'` | Fallback Prototype | Valid JSON object string (e.g. `'{"id":"the"}'`) rendered on a **slot** when 0 rows match. | Must be valid JSON (`JSON.parse`); non-JSON values throw at runtime in `hydrateRegion`. |
+| `data-handler="<name>"` | Fold Binding | Names the handler module `shell/handlers/<name>.js` for the region. | Paired with `data-on-click` or `data-on-mutation`. |
+| `data-on-mutation="<handler>"` | Reactive Fold | Wakes `shell/handlers/<handler>.js` with `{ type: "mutation" }`. | Fires on first paint and every change to the region's *own* `data-live` table. |
+| `data-on-click="<handler>"` | Gesture Fold | Placed **directly on the clickable element** (`<button data-on-click="board">`). | Wakes handler with `{ type: "click", id: "<row.id>", from: "<element.id>" }`. Click carries NO custom payload; encode intent in row `id` or element DOM `id`. |
+| `data-action="<create\|update\|upsert\|delete\|navigate>"` | Declarative Form Action | Applied on `<form data-entity="<table>" data-action="...">`. | Form submission. On `create`, Omnishell mints `id` (`uuid` or unconstrained `string`) when no `id` input is present; supply any non-input schema columns via `<input type="hidden" name="<col>" value="...">` or `data-value="{now}"` (CUE `default:` only emits SQL DDL defaults for `cluster` tables, not browser `tab`/`device` stores). |
+| `data-machine='{...}'` | Client Statechart & Timer | Applied on a singleton `[data-live="<table>"]` region (`data-filter="id=eq.<id>"`). | Runs an XState-JSON statechart over one column (`"field"`) of the row, including periodic `after` timers (`"after":{"1000":{"assign":{"n":"tick"},"target":"running"}}`). |
+
+#### PostgREST `data-filter` Mini-Reference:
+1. **Equality & Inequality:** `id=eq.the`, `status=neq.closed`, `turn=gt.0`, `rank=lte.10` — joined with `&` (`&amp;` in HTML attributes, e.g. `current=eq.yes&amp;seat=eq.a`).
+2. **Nulls, Booleans & Caps:** `cover_url=not.is.null`, `graded=eq.false`, `active=is.true`, `limit=20` (row cap applied after `data-order`).
+3. **Parent Row Interpolation (`{col}`):** Nested regions resolve `{col}` against the enclosing row (e.g. `<ul data-live="play" data-filter="round_id=eq.{id}">`).
+4. **Route Param Interpolation (`{param.x}`):** Regions on parameterized routes (`/board/:game`) pin route params via `data-filter="id=eq.{param.game}"`.
+
+### B. Jessie Handler / Cortex Execution Contract
+
+Client folds (`shell/handlers/*.js`) and validations (`shell/validations/*.js`) evaluate in an SES `Compartment` where the **last top-level expression in the file must be the bare arrow function** (do NOT use `export default`; `plugins/pronto/jessie.ts` checks `completion === "arrow"`). Hybrid Mecha rule modules (`machines/*.js`) instead form a function body that returns an object of named rule functions (`return {project, invariant, ...}`); copy the rule shape from `apps/truco/machines/match.js`.
+
+```javascript
+// File: shell/handlers/board.js
+// Helper declarations may precede the final arrow expression:
+const indexOf = (r, c) => r * 9 + c;
+
+// Final top-level expression MUST be the arrow function (no `export default`):
+(state, event) => {
+    const rows = state.rows ?? {};
+    // rows:  Record<string, Row[]>  (ONLY tables explicitly listed in data-reads! Include the region's own table in data-reads if reading rows.<own_table>)
+    // state.items: Row[]            (The waking region's own data-live rows in DOM order)
+    
+    // event shapes:
+    // { type: "mutation" }
+    // { type: "click", id: string, from: string }
+    // { type: "refused", entity: string, kind: string, id: string, validation?: string }
+    // { type: "<custom_then_type>", seed?: number, with?: Record<string, any> }
+
+    return {
+        updates: [
+            // Discrete relational mutations (recompute absolutely, write differentially):
+            { op: "put",    entity: "cell", id: "0", row: { pos: 0, state: "revealed", adj: 1 } },
+            { op: "patch",  entity: "game", id: "game", row: { status: "playing" } },
+            { op: "delete", entity: "flag", id: "0" }
+        ],
+        then: {
+            // Optional scheduled re-wake or entropy request:
+            type: "tick",
+            delay: 1000,         // Milliseconds (stepped deterministically under ?clock=manual)
+            seed: true,          // Injects deterministic 32-bit PRNG draw in next event.seed
+            with: { step: 1 }    // Payload carried into next event.with
+        }
+    };
+}
+```
+*Fixpoint, Single-Write-Per-Row & Periodic Timer Rules (`data-machine` vs `then`):*
+- **Fixpoint:** A `data-on-mutation` fold wakes whenever its `data-live` table changes. Always compare desired state against existing rows and emit `updates: []` when nothing changed, otherwise the fold will wake itself in an infinite loop.
+- **At most one `put`/`patch` per `(entity, id)` per fold return:** Within a single `updates` array, the *last* mutation naming a given `(entity, id)` replaces earlier mutations for that row (earlier fields do not merge across separate `patch` objects in the same batch). Always merge all field changes for a row into a single `put` or `patch` object per fold invocation.
+- **Never use handler `then: { delay }` for continuous/periodic timers (capped at 8 steps):** A handler's `then:` chain is depth-bounded to `STEPS = 8` (`handler chain did not settle in 8 steps`). For continuous countdowns/clocks (e.g. Pomodoro, stopwatch, game clock), use a **`data-machine` with `after`** on a `tab` singleton (`apps/idioms/shell/screens/timer.html`):
+  ```html
+  <!-- 1. data-machine region owns `run` ('paused' | 'running') and ticks `n` every 1000ms while running: -->
+  <div class="clock" data-live="clock" data-filter="id=eq.clock" data-empty=""
+       data-machine='{"field":"run","initial":"paused","states":{"paused":{"on":{"click@toggle":[{"target":"running"}]}},"running":{"after":{"1000":{"assign":{"n":"tick"},"target":"running"}},"on":{"click@toggle":[{"target":"paused"}]}}}}'>
+    <button type="button" id="toggle" data-run="{run}">Start / Pause</button>
+  </div>
+  <!-- 2. Sibling/child region reacts to clock.n mutations + control button clicks (Reset, Skip, Mode tabs): -->
+  <div class="timer" data-live="clock" data-filter="id=eq.clock" data-reads="clock,timer" data-handler="pomodoro" data-on-mutation="pomodoro" data-empty="">
+    ...
+  </div>
+  ```
+  - **Machine `assign` module (`shell/handlers/tick.js`):** Unlike a gesture/mutation handler (which returns `{ updates: [...] }`), a module referenced in `data-machine` `"assign": {"n": "tick"}` receives `(state, event)` (`state.items[0]` is the machine's row) and **returns the new scalar value for that column directly**:
+    ```javascript
+    // File: shell/handlers/tick.js
+    (state) => Number(state.items[0]?.n ?? 0) + 1
+    ```
+  - **Machine ownership:** Only the `data-machine` may write its `"field"` column (`run`), and buttons wired via `click@<dom-id>` inside the `data-machine` region must NOT also carry `data-on-click`.
+  - **Deterministic Clock in Playwright (`?clock=manual` & `?tempo=50`):** Open `/?clock=manual` in Playwright to hold all `after` timers and step time deterministically via `await page.evaluate(() => (window as any).__prontoClock.advance(1000))` (or open `/?tempo=50` to speed up timers 50×).
+
+---
+
+## 5. MECHA ACTORS & HYBRID STATE MACHINES
+
+In multiplayer and turn-based games (`truco`, `apexrun`), multi-player coordination is managed by **Hybrid Mecha Actors** (`016_mecha_actors.sql`):
+
+| Phase | Table / Trigger | Contract & Invariant |
+| :--- | :--- | :--- |
+| **1. Admission** | `<machine>_open` → `hybrid_<machine>.open()` | Client puts `{ id, instance_id, kind: "create" \| "join", input: {...} }`. Trigger verifies capacity + RLS and inserts player into `hybrid_<machine>.member`. |
+| **2. Commands** | `<machine>_command` | Keyed by `id = "${instance_id}/${revision}/${seat}/${kind}"`. PG locks instance (`FOR UPDATE`), checks `expected_revision == current_revision`, runs transition in embedded plv8/SES. |
+| **3. Revisions** | `instance.revision` | Increments atomically on each accepted command. Stale commands are marked `{ outcome: "rejected", reason: "stale_revision" }`; client fold observes rejection in `state.rows.<machine>_command` and resubmits at new revision. |
+| **4. Deadlines** | `hybrid_<machine>.arm` / `public.schedule` | Timed states register a `public.schedule` row. On deadline, `machine_timer_tick` fires `hybrid_<machine>.fire()`, advancing to timeout state (`abandoned` / `expired`). |
+
+---
+
+## 6. CANONICAL APP ARCHITECTURES
+
+| App | Domain Pattern | Durability & Key Mechanisms |
+| :--- | :--- | :--- |
+| `apps/jsfb` | Single-screen benchmark / pure client fold | `tab` only (`Bench` singleton + `Row` list). Single fold (`shell/handlers/bench.js`) handles create, append, update, swap (`ord` exchange), select (`cls` column), and delete without `<form>` elements. |
+| `apps/apexrun` | Real-time 3D racing & GGRS rollback netcode | `tab` (`run`, `lobby_tab`) + `server` (`high_score`) + hybrid actors (`presence`, `challenge`, `duel`). 60Hz deterministic step in isolated Jessie realm (`kinetic-mount.js`) over WebRTC DataChannel. |
+| `apps/truco` | Turn-based card game & 6-chair seating | Hybrid actor `truco_match` (`machines/match.js`) validates legal card plays, raises (Truco/Retruco/Vale Quatro), and round tricks; ephemeral tab leases track presence. |
+| `apps/doom` | Wasm runtime + declarative HUD overlay | Custom `boot.js` embedded via `#DefaultTerminal.boot` loads Wasm/WebGL; host-DOM hatch writes `match`, `player`, `frag` tables projected by pure `data-live` HUD markup. |
+| `apps/snapcards` | Offline-first multilingual flashcards | `tab` and `offline` durability (zero server migrations); compile-time localized message catalogues (`messages/pt-BR.json`, `es-LA.json`, `he-IL.json`). |
+| `apps/plausible` | Time-series analytics & rollups | Dual `data-on-mutation` reduce folds aggregate pageviews into daily visitor counts and path popularity in memory; `zone` table evaluates local midnight without `Date`/`Intl`. |
+
+---
+
+## 7. CONTRASTIVE CANONICAL DIFFS ("NEVER DO THIS / ALWAYS DO THIS")
+
+### 1. Generating Identifiers
+```diff
+- // WRONG: Uses ambient non-deterministic crypto API
+- const challengeId = crypto.randomUUID();
+
++ // RIGHT: Request deterministic seed from Pronto runtime
++ if (event.type !== "draw") return { then: { type: "draw", seed: true } };
++ const challengeId = uuidOf(event.with.draws);
+```
+
+### 2. Communicating User Actions to the Server
+```diff
+- // WRONG: Imperative fetch to a backend endpoint
+- await fetch("/api/challenge/accept", { method: "POST", body: JSON.stringify({ id }) });
+
++ // RIGHT: Put an action row into the Mecha command table
++ const cmdId = `${instanceId}/${revision}/${seat}/accept`;
++ return {
++     updates: [{
++         op: "put",
++         entity: "apexrun_challenge_command",
++         id: cmdId,
++         row: { id: cmdId, instance_id: instanceId, request: { kind: "accept", payload: {} } }
++     }]
++ };
+```
+
+### 3. Toggling UI Modals and Ephemeral Tabs
+```diff
+- // WRONG: Imperative DOM mutation
+- document.querySelector(".lobby-modal").classList.add("open");
+
++ // RIGHT: Mutate the tab-durability UI table
++ return {
++     updates: [{
++         op: "patch",
++         entity: "lobby_tab",
++         id: "the",
++         row: { open: "yes" }
++     }]
++ };
+```
+
+### 4. Waiting on a Timer / Delayed Event
+```diff
+- // WRONG: Imperative setTimeout
+- setTimeout(() => { checkMatchStatus(); }, 5000);
+
++ // RIGHT: Return scheduled 'then' descriptor
++ return {
++     updates: [],
++     then: { type: "check_timeout", delay: 5000 }
++ };
+```
+
+### 5. Custom Boot Script Implementation
+```diff
+- // WRONG: Editing apps/<app>/shell/boot.js directly (Pronto will overwrite it)
+- // file: apps/apexrun/shell/boot.js
+- setupCustomClipboard();
+
++ // RIGHT: Author in apps/<app>/boot.js and bind in program.cue
++ // file: apps/apexrun/program.cue
++ _customBoot: _ @embed(file="boot.js", type=text)
++ terminal: (pronto.#DefaultTerminal & { "code": code, "boot": _customBoot }).out
+```
+
+### 6. Reading Auxiliary Tables in Handlers (Pure Jessie Completion)
+```diff
+- // WRONG: Using `export default` or querying store imperatively inside a handler
+- export default async (state, event) => {
+-     const user = await store.get("app_user", authId);
+- };
+
++ // RIGHT: Declare table in data-reads on DOM element; end file with bare arrow function
++ // HTML: <div data-live="match" data-reads="app_user,player">
++ (state, event) => {
++     const users = state.rows.app_user ?? [];
++     const players = state.rows.player ?? [];
++     return { updates: [] };
++ }
+```
+
+### 7. Form Submissions
+```diff
+- // WRONG: Adding an onSubmit event listener that prevents default
+- form.addEventListener("submit", (e) => { e.preventDefault(); doCustomSave(); });
+
++ // RIGHT: Use declarative data-entity and data-action attributes
++ <form data-entity="high_score" data-action="create">
++     <input name="initials" maxlength="3" required />
++     <input type="hidden" name="score" value="12000" />
++     <button type="submit">SAVE SCORE</button>
++ </form>
+```
+
+### 8. Authoring Architecture Contracts, Identity Minting & Tooling Assumptions
+```diff
+- // WRONG: Pre-inventing `id: "0x..."` / `ordinal:` in program.cue or omitting `data-kind="screen"` assuming `which d2` must succeed
+- Game: {
+-     id: "0x1234567890abcdef"
+-     table: "game"
+-     fields: [{ ordinal: 1, name: "id", type: "string", pk: true }]
+- }
+
++ // RIGHT: Author entities without `id`/`ordinal` and full `data-kind` sections in ir.html; `write.ts` mints IDs and runs d2 via mise automatically
++ Game: {
++     table: "game"
++     durability: "tab"
++     fields: [{name: "id", type: "string", pk: true}]
++ }
++ <!-- In ir.html: -->
++ <section id="arena" data-kind="screen" data-route="/">
++     <h3>arena — 9x9 board</h3>
++     <p data-extract="reads">Reads: <a href="#Game">Game</a>, <a href="#Cell">Cell</a>.</p>
++     <p data-extract="mutations">Mutations: click bindings to <code>board</code> fold.</p>
++ </section>
+```
+
+---
+
+## 8. CLI VERIFICATION, SAYT TDD LOOP & WORKFLOW CHECKSUM
+
+Run every command from the app directory. Bootstrap and trust the app’s mise configuration first. `.mise.toml` and `mise.lock` select released tools; `mise.local.toml` supplies checkout source overrides. Resolve each source root once, and use the same `mise x -- <command>` form for both layouts. On Windows, use `./saytw.ps1` for the project launcher.
+
+### Compile, Check & Release
+
+```bash
+# Resolve the configured source distributions; these may be releases or checkout trees.
+pronto_root="$(mise where github:bonisoft3/pronto)"
+omnishell_root="$(mise where github:bonisoft3/omnishell)"
+mecha_root="$(mise where github:bonisoft3/mecha)"
+
+# First emission / cold-start preflight, before the app's generated gates exist:
+mise x -- deno run -A --config "$pronto_root/deno.json" "$pronto_root/write.ts" .
+
+# Canonical Sayt ladder: run each verb in the foreground until exit 0.
+mise x -- ./saytw generate
+mise x -- ./saytw lint
+mise x -- ./saytw test
+mise x -- ./saytw integrate
+
+# Direct compiler and static checks, when diagnosing a particular gate:
+mise x -- deno run -A --config "$pronto_root/deno.json" "$pronto_root/write.ts" .
+mise x -- cue vet .
+mise x -- deno run -A --config "$pronto_root/deno.json" "$pronto_root/identity.ts" check .
+mise x -- deno run -A --config "$pronto_root/deno.json" "$pronto_root/check-facts.ts" .
+mise x -- deno run -A "$omnishell_root/check-handlers.ts" .
+mise x -- deno run --node-modules-dir=none -A "$omnishell_root/check-markup.ts" .
+
+# Bundle the browser release without publishing:
+mise x -- deno run -A --config "$pronto_root/bundle/deno.json" \
+  "$pronto_root/bundle/bundle.ts" . \
+  --omnishell "$omnishell_root" --mecha "$mecha_root" --out dist/browser
+
+# Verify a running pages release; @pages selects the generated rule.
+SAY_VERIFY_ARGS_TARGET="http://localhost:<port>" SAY_VERIFY_ARGS_TIER="2" \
+  mise x -- ./saytw verify@pages
+
+# Bundle the Cloudflare edge release without publishing:
+mise x -- deno run -A --config "$pronto_root/bundle/deno.json" \
+  "$pronto_root/bundle/edge.ts" . \
+  --omnishell "$omnishell_root" --mecha "$mecha_root" --out dist/cloudflare \
+  --ice-servers '[{"urls":"stun:stun.cloudflare.com:3478"}]' --domain <app_domain>
+
+# Publish the prepared edge release when deployment is requested:
+mise x -- deno run -A --config "$pronto_root/bundle/deno.json" \
+  "$pronto_root/bundle/publish-edge.ts" dist/cloudflare --mecha "$mecha_root"
+```
+
+Sayt’s generated gates resolve the component roots internally. The direct commands expose `mise where` only for preflight and focused diagnostics. `./saytw` is the app’s pinned Sayt launcher, so this works even when a source override supplies no standalone `sayt` binary. Never hand-edit `.say.yaml`; the compiler emits it from `loop` and `build`.
+
+#### Containerized `build: checks` (`tests/acceptance.ts`), Custom `verify.ts` Journeys & Runtime Seams:
+- **Containerized `build: checks` under `mise x -- ./saytw integrate`:** Inside the acceptance container, the target URL is supplied via `Deno.env.get("APP_URL") ?? "https://caddy:8443"`, and the pre-installed Chromium binary matches `import { chromium } from "npm:playwright@1.61.1"` (pass `args: ["--ignore-certificate-errors"]`).
+- `verify.ts` discovers `tests/verify.ts` and runs exported `journeys` under a zero-tolerance network error trap (`run` must call `page.goto(ctx.targetUrl)`).
+- **Deterministic PRNG Replay (`?seed=<n>`) & Manual Clock (`?clock=manual`):** Appending `?seed=36` pins Omnishell's PRNG draw stream (`then: { seed: true }`); appending `?clock=manual` holds `data-machine` `after` timers for `await page.evaluate(() => (globalThis as any).__prontoClock.advance(1000))`.
+- **In-Memory Store Inspection (`__prontoStore`):** In Playwright `page.evaluate()`, `await globalThis.__prontoStore.tabSnapshot()` returns `{ <table>: { schema, rows } }` for all live `tab`-durability tables. Inspect one table with `(await globalThis.__prontoStore.tabSnapshot())["<table>"]` inside an async evaluation callback.
+- **Local HTTPS & ServiceWorker (`--ignore-certificate-errors`):** When testing against `mise x -- ./saytw launch` (`https://localhost:<port>`), pass `args: ["--ignore-certificate-errors"]` to `chromium.launch()` so `offline-first-sw.js` does not abort on self-signed `mkcert` certificates.
+```typescript
+export const journeys = [{
+  screen: "arena",
+  path: "/",
+  run: async (page: any, ctx: { targetUrl: string }) => {
+    await page.goto(ctx.targetUrl, { waitUntil: "networkidle" });
+    await page.click("#cell-0");
+  },
+}];
+```
+
+---
+
+## 9. QUICK GLOSSARY FOR AGENTS
+
+- **Bijection:** The mathematical 1:1 mapping between design requirements in `ir.html`, CUE schemas in `program.cue`, acceptance checks in `acceptance.md`, and test assertions.
+- **Cortex:** The deterministic state machine execution engine running pure transition rules inside SES sandboxes.
+- **Durability:** The storage level of an entity (`tab`, `device`, `offline`, `server`, `live`).
+- **Mecha:** The PostgreSQL-backed edge/cluster runtime managing RLS floors, change data capture (CDC), and actor state machines.
+- **Omnishell:** The browser runtime interpreting declarative HTML data-attributes (`data-live`, `data-reads`, `data-on-mutation`) without React or virtual DOM overhead.
+- **PGlite:** PostgreSQL compiled to WebAssembly running directly inside the edge Worker or browser tab.
+- **Sync Shape:** A scoped query predicate defining the subset of server rows pushed to a client's local store.
+- **Virtual Time (`?clock=manual`):** Testing mode where timers do not run in wall-clock time; time is stepped deterministically via `__prontoClock.advance(ms)`.

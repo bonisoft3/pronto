@@ -1781,7 +1781,7 @@ import (
 		dnsPrefetch?: string | [...string]
 		themeColor?:  string
 		sitemap?:     #Sitemap
-		ir: {source: *"ir.html" | string, sha256: string} // the pinned IR this program was compiled from
+		ir: {source: *"ir.html" | string, sha256: *"" | string} // the pinned IR this program was compiled from
 		domain?: string
 		ssrOrigin?: string
 		// A frozen archive retains its schedules and runs none, at the edge or
@@ -1934,13 +1934,21 @@ import (
 	// A Cortex state names the screen that hosts it and the actor its child
 	// is; what an actor's `via` needs of its Mecha machine is what that
 	// machine's ports carry.
-	_cortexViolations: [if A.state.cortex != _|_ for cName, c in A.state.cortex for sName, st in c.config.states for v in list.Concat([
-		[if st.meta == _|_ || st.meta.screen == _|_ {"\(cName).\(sName): no meta.screen hosts it"}],
-		[if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] == _|_ {"\(cName).\(sName): no screen \(st.meta.screen)"}],
-		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] {
-			[if c.setup.actors[inv.src] == _|_ {"\(cName).\(sName): the setup implements no actor \(inv.src)"}]
-		},
-		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via == "kinetic" {
+	_cortexViolations: [if A.state.cortex != _|_ for cName, c in A.state.cortex for sName, st in c.config.states
+		let rootInvokes = [if st.invoke == _|_ {[]}, if (st.invoke & [...]) != _|_ {st.invoke}, {[st.invoke]}][0]
+		let subInvokes = list.Concat([
+			for _, sub in [if st.states != _|_ {st.states}, {}][0] if sub.invoke != _|_ {
+				[if (sub.invoke & [...]) != _|_ {sub.invoke}, {[sub.invoke]}][0]
+			}
+		])
+		let screenInvokes = list.Concat([rootInvokes, subInvokes])
+		for v in list.Concat([
+			[if st.meta == _|_ || st.meta.screen == _|_ {"\(cName).\(sName): no meta.screen hosts it"}],
+			[if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] == _|_ {"\(cName).\(sName): no screen \(st.meta.screen)"}],
+			for inv in screenInvokes {
+				[if c.setup.actors[inv.src] == _|_ {"\(cName).\(sName): the setup implements no actor \(inv.src)"}]
+			},
+		for inv in screenInvokes if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via == "kinetic" {
 			let actor = c.setup.actors[inv.src]
 			let markup = [if st.meta != _|_ if st.meta.screen != _|_ if A.surface.screens[st.meta.screen] != _|_ if A.surface.screens[st.meta.screen].markup != _|_ {A.surface.screens[st.meta.screen].markup}, ""][0]
 			list.Concat([
@@ -1950,7 +1958,7 @@ import (
 				[if !strings.Contains(markup, "data-kinetic=\"\(inv.src)\"") {"\(cName).\(sName): no data-kinetic=\"\(inv.src)\" mounts the kinetic child on its screen"}],
 			])
 		},
-		for inv in [if st.invoke == _|_ {[]}, if st.invoke != _|_ if (st.invoke & [...]) != _|_ {st.invoke}, if st.invoke != _|_ {[st.invoke]}][0] if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via != "kinetic" {
+		for inv in screenInvokes if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via != "kinetic" {
 			let actor = c.setup.actors[inv.src]
 			list.Concat([
 				[if _callTargets[actor.machine] == _|_ {"\(cName).\(sName): no Mecha machine \(actor.machine)"}],

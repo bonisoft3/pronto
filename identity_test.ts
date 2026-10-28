@@ -75,6 +75,44 @@ Deno.test("several fields on one line are each stamped, and a seed row that open
   assert.deepEqual(out.includes('seed: [{name: "label", id: "x"}]'), true);
 });
 
+Deno.test("space-indented entity blocks and spaced field braces are stamped", () => {
+  const spaced = [
+    "    Row: {",
+    '        table: "row"',
+    "        fields: [",
+    '            { name: "id", type: "text", pk: true },',
+    '            { name: "label", type: "text" },',
+    "        ]",
+    "    }",
+  ].join("\n");
+  const out = stampCue(spaced, bare, "0xc75ee275aaa2d971");
+  assert.deepEqual(out.split("\n")[1], '        id: "0xc75ee275aaa2d971"');
+  assert.deepEqual(out.includes('{ ordinal: 1, name: "id", type: "text", pk: true }'), true);
+  assert.deepEqual(out.includes('{ ordinal: 2, name: "label", type: "text" }'), true);
+});
+
+Deno.test("mint ignores a nested fields example before the entity's own fields", () => {
+  const example = [
+    "        _example: {",
+    "            fields: [",
+    '                {name: "id"}, {name: "label"}',
+    "            ]",
+    "        }",
+  ].join("\n");
+  const source = [
+    "    Row: {",
+    example,
+    "// Helpers are outside the entity field list.",
+    '        table: "row"',
+    '        fields: [{name: "id", type: "string"}, {name: "label", type: "string"}]',
+    "    }",
+  ].join("\n");
+  const out = stampCue(source, bare, "0xc75ee275aaa2d971");
+  assert.equal(out.includes(example), true);
+  assert.equal(out.split("\n")[1], '        id: "0xc75ee275aaa2d971"');
+  assert.equal(out.includes('fields: [{ordinal: 1, name: "id", type: "string"}, {ordinal: 2, name: "label", type: "string"}]'), true);
+});
+
 // A field mint cannot see would be skipped and leave a gap under the next one.
 Deno.test("a field declared in a shape mint does not read is refused, not skipped", () => {
   const multiline = cue.replace('{name: "label", type: "text"},', '{\n\t\t\t\t\tname: "label"\n\t\t\t\t\ttype: "text"\n\t\t\t\t},');

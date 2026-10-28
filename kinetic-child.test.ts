@@ -123,6 +123,28 @@ Deno.test("a kinetic child's screen mounts it", async () => {
   await refused(program({ markup: `<main data-live="run"></main>` }), `root.arena: no data-kinetic=\\"race\\" mounts the kinetic child on its screen`);
 });
 
+Deno.test("cortex states support hierarchical sub-states and intent transitions", async () => {
+  const hierarchicalProgram = (invokeSrc = "race") => program().replace(
+    'states: arena: {meta: screen: "arena", invoke: [{src: "race"}]}',
+    `states: arena: {
+          meta: screen: "arena"
+          initial: "idle"
+          states: {
+            idle: {
+              on: {"intent:start": "racing"}
+            }
+            racing: {
+              invoke: [{src: "${invokeSrc}"}]
+              on: {"intent:stop": "idle"}
+            }
+          }
+        }`,
+  );
+  const res = await cue(["vet", "-c", "-"], hierarchicalProgram("race"));
+  assertEquals(res.success, true, res.stderr);
+  await refused(hierarchicalProgram("ghost"), "root.arena: the setup implements no actor ghost");
+});
+
 // STUN is the release target's, never the app's (distribution's #IceServers):
 // a dev or CI stack gathers host candidates only, so no test reaches a server
 // outside it, and a release that lost its list would still duel on one network

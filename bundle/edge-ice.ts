@@ -22,14 +22,20 @@ export const deployedRelease = (origin: string): Read => async (url) => {
 }
 
 export async function releasedIceServers(read: Read): Promise<unknown> {
-  const { document } = parseHTML(await read('/'))
-  const map = document.getElementById('pronto-assets')?.textContent
-  if (!map) throw new Error('the entry at / carries no import map')
-  const url = (JSON.parse(map) as { imports: Record<string, string> }).imports['/shell/shell.json']
-  if (!url) throw new Error('the entry\'s import map names no /shell/shell.json')
-  const cfg = JSON.parse(await read(url)) as { iceServers?: unknown }
-  if (!('iceServers' in cfg)) throw new Error(`${url} carries no iceServers`)
-  return cfg.iceServers
+  for (let attempt = 0; ; attempt++) {
+    const html = await read('/')
+    const { document } = parseHTML(html)
+    const map = (document.getElementById('pronto-assets') ?? document.querySelector('#pronto-assets, script[type="importmap"]'))?.textContent
+      ?? /<script\b[^>]*\bid="pronto-assets"[^>]*>([\s\S]*?)<\/script>/i.exec(html)?.[1]
+    if (map) {
+      const url = (JSON.parse(map) as { imports: Record<string, string> }).imports['/shell/shell.json']
+      if (!url) throw new Error('the entry\'s import map names no /shell/shell.json')
+      const cfg = JSON.parse(await read(url)) as { iceServers?: unknown }
+      return cfg.iceServers ?? null
+    }
+    if (attempt >= 20) throw new Error('the entry at / carries no import map')
+    await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+  }
 }
 
 /** Throws unless the release's terminal config carries exactly `expected`. */

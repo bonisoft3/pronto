@@ -1,5 +1,6 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { edgeRoutingRules } from './edge-addresses.ts'
 import { clusterDrains } from './edge-scripts.ts'
 
 /** `drains` is the app's drain table (.pronto/cluster.json), which the
@@ -124,7 +125,8 @@ export default {
 ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, env, ctx) {
     const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
-    const found = (request.method === 'GET' || request.method === 'HEAD') ? routeAt(hints, url.pathname, url.search, preferred) : null
+    const isAsset = /^\\/(?:_immutable-|(?:shell|omnishell|messages)\\/)/.test(url.pathname)
+    const found = (!isAsset && (request.method === 'GET' || request.method === 'HEAD')) ? routeAt(hints, url.pathname, url.search, preferred) : null
     if (found && found.route.ssr === 'ssr') {
       const prefetch = request.headers.get('x-pronto-prefetch') === '1' || request.headers.get('purpose') === 'prefetch' || Boolean(request.headers.get('sec-purpose')?.includes('prefetch'))
       const linkHeader = prefetch ? null : edgeHints(request, hints, routeAt, preferred)
@@ -132,7 +134,7 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
       const version = env.CF_VERSION_METADATA?.id ?? ''
       const reset = cache ? ((await (await cache.match(keyOf(version, 'reset')))?.text()) ?? '0') : '0'
       const lastWrite = cache ? ((await (await cache.match(keyOf(version, reset, 'writes', 'public')))?.text()) ?? '0') : '0'
-      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
+      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(version)}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
       const renderFresh = async (speculative = false) => {
         const reqHeaders = new Headers(request.headers)
         if (speculative) reqHeaders.set('x-pronto-speculative', '1')
@@ -263,12 +265,21 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
       if (result.status === 200) result.headers.set('Link', edgeHints(request, hints, routeAt, preferred))
       return result
     }
-    if (!['auth', 'crud', 'electric', 'import'].includes(url.pathname.split('/')[1]) &&
-        (request.method === 'GET' || request.method === 'HEAD') &&
-        (request.headers.get('accept') ?? '').includes('text/html')) {
+    if (env.ASSETS &&
+        !['auth', 'crud', 'electric', 'import', 'poke'].includes(url.pathname.split('/')[1]) &&
+        (request.method === 'GET' || request.method === 'HEAD')) {
       const asset = await env.ASSETS.fetch(request)
+      if (asset.status === 200) {
+        if (url.pathname.startsWith('/_immutable-') || url.pathname.includes('/_immutable-')) {
+          const headers = new Headers(asset.headers)
+          headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+          return new Response(request.method === 'HEAD' ? null : asset.body, { status: 200, headers })
+        }
+        return asset
+      }
       if (asset.status !== 404) return asset
-      return new Response(request.method === 'HEAD' ? null : 'Page not found', { status: 404, headers: { 'Cache-Control': 'no-store' } })
+      const notFound = (request.headers.get('accept') ?? '').includes('text/html') ? 'Page not found' : 'Not found'
+      return new Response(request.method === 'HEAD' ? null : notFound, { status: 404, headers: { 'Cache-Control': 'no-store' } })
     }
     return edgeWorker.fetch(request, env, ctx)
   },
@@ -313,8 +324,9 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
   }
   config.name = name
   config.main = 'src/index.ts'
+  config.version_metadata = { binding: 'CF_VERSION_METADATA' }
   config.durable_objects = { bindings: [{ name: 'CLUSTER', class_name: 'Cluster', ...(separate ? { script_name: database } : {}) }, { name: 'RENDERER', class_name: 'DocumentRenderer', script_name: renderer }] }
-  config.assets.run_worker_first = ['/']
+  config.assets.run_worker_first = await edgeRoutingRules(path.join(out, 'public'))
   if (separate) {
     delete config.migrations
     delete config.rules

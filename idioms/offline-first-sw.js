@@ -55,6 +55,9 @@ self.addEventListener("fetch", (event) => {
       if (cached) return cached;
       const fresh = await fetch(req);
       if (fresh.ok) event.waitUntil(cache.put(url.pathname, fresh.clone()));
+      else if (fresh.status === 404 || fresh.status === 410) {
+        event.waitUntil(caches.delete(ENTRY_CACHE));
+      }
       return fresh;
     })());
     return;
@@ -84,4 +87,10 @@ self.addEventListener("fetch", (event) => {
     }
     return update;
   })());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data === "pronto:purge-entries" || event.data?.type === "pronto:purge-entries") {
+    event.waitUntil(caches.delete(ENTRY_CACHE));
+  }
 });

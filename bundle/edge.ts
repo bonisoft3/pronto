@@ -23,7 +23,7 @@
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
-import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
+import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, holdIceServers } from './edge-ice.ts'
 import { BLOB_CACHE_RULE, writeEdgeBlobs } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
@@ -86,6 +86,22 @@ if (unpackaged.length) fail(`units are not packaged yet: ${unpackaged.join(', ')
 const name = shell.app ?? path.basename(app)
 const drains = await clusterDrains(path.join(app, '.pronto/cluster.json'))
 
+let retainedFrom = previousAssets
+let tempRetained: string | undefined
+if (!retainedFrom) {
+  const existingPublic = path.join(out, 'public')
+  try {
+    if ((await Deno.stat(existingPublic)).isDirectory) {
+      tempRetained = await Deno.makeTempDir({ dir: path.dirname(out), prefix: '.retained-' })
+      const stage = path.join(tempRetained, 'public')
+      await Deno.rename(existingPublic, stage)
+      retainedFrom = stage
+    }
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e
+  }
+}
+
 await Deno.remove(out, { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
 await Deno.mkdir(path.join(out, 'src'), { recursive: true })
 
@@ -107,7 +123,8 @@ let vars: Record<string, string>
 try { vars = signInVars(JSON.parse(new TextDecoder().decode(signIn.stdout)), (name) => Deno.env.get(name)) }
 catch (e) { fail((e as Error).message) }
 await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
-const hints = await addressEdgeAssets(addresses, publicDir, { previous: previousAssets, iceServers })
+const hints = await addressEdgeAssets(addresses, publicDir, { previous: retainedFrom, iceServers })
+if (tempRetained) await Deno.remove(tempRetained, { recursive: true }).catch(() => {})
 await holdIceServers(builtRelease(publicDir), iceServers, publicDir)
 await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints))
 
@@ -203,10 +220,62 @@ export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
 ${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
-    // asset, which never reaches this Worker, or not at all: the cluster's
+    // asset, which never reaches upstream dynamic handlers, or not at all: the cluster's
     // GET may act (omnishell's terminal.cue \`presenter.scripted\`).
-    if (${JSON.stringify(shell.presenter.scripted)}.includes(req.headers.get('sec-fetch-dest') ?? '')) return new Response(null, { status: 403 })
-` : ''}    const response = await edgeWorker.fetch(req, env, ctx)
+    if (${JSON.stringify(shell.presenter.scripted)}.includes(req.headers.get('sec-fetch-dest') ?? '')) {
+      if (env.ASSETS) {
+        const asset = await env.ASSETS.fetch(req)
+        if (asset.status === 200 || asset.status === 304) {
+          if (asset.status === 200) {
+            const path = new URL(req.url).pathname
+            if (path.startsWith('/_immutable-') || path.includes('/_immutable-')) {
+              const out = new Response(req.method === 'HEAD' ? null : asset.body, asset)
+              out.headers.set('cache-control', 'public, max-age=31536000, immutable')
+              return out
+            }
+          }
+          return asset
+        }
+      }
+      return new Response(null, { status: 403 })
+    }
+` : ''}    const url = new URL(req.url)
+    if (req.method === 'GET' && url.pathname === '/rtc-ice') {
+      const baseIce = ${JSON.stringify(iceServers)}
+      const keyId = env.CLOUDFLARE_TURN_KEY_ID
+      const token = env.CLOUDFLARE_TURN_KEY_TOKEN
+      if (!keyId || !token) {
+        return new Response(JSON.stringify(baseIce), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        })
+      }
+      try {
+        const turnRes = await fetch(\`https://rtc.live.cloudflare.com/v1/turn/keys/\${keyId}/credentials/generate-ice-servers\`, {
+          method: 'POST',
+          headers: {
+            'Authorization': \`Bearer \${token}\`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'cloudflare-worker/1.0',
+          },
+          body: JSON.stringify({ ttl: 86400 }),
+        })
+        if (!turnRes.ok) {
+          return new Response(JSON.stringify(baseIce), {
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+          })
+        }
+        const turnData = await turnRes.json()
+        const dynamicServers = Array.isArray(turnData.iceServers) ? turnData.iceServers : [turnData.iceServers]
+        return new Response(JSON.stringify(dynamicServers.filter(Boolean)), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        })
+      } catch (_) {
+        return new Response(JSON.stringify(baseIce), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        })
+      }
+    }
+    const response = await edgeWorker.fetch(req, env, ctx)
     if (req.method !== 'GET' || response.status !== 200 ||
         !(response.headers.get('content-type') ?? '').includes('text/html') ||
         !(req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') ?? '').includes('text/html'))) return response
@@ -220,9 +289,10 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   name,
   main: 'src/index.ts',
   compatibility_date: '2026-09-01',
-  // No asset matches a route of the page or the cluster's: those reach the
-  // Worker, which answers a navigation with the document (mecha-edge's worker.ts).
-  assets: { directory: './public', binding: 'ASSETS', run_worker_first: ['/'] },
+  // run_worker_first routes /* to the Worker so immutable assets attach
+  // Cache-Control: public, max-age=31536000, immutable strictly on 200 responses,
+  // while 404 responses are served with Cache-Control: no-store.
+  assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir) },
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   ...(Object.keys(vars).length ? { vars } : {}),

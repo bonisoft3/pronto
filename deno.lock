@@ -37,7 +37,9 @@
     "npm:css-tree@3.1.0": "3.1.0",
     "npm:fast-check@3.23.2": "3.23.2",
     "npm:linkedom@0.18.4": "0.18.4",
-    "npm:mermaid@11.9.0": "11.9.0_cytoscape@3.34.2"
+    "npm:mermaid@11.9.0": "11.9.0_cytoscape@3.34.2",
+    "npm:playwright@1.61.1": "1.61.1",
+    "npm:xstate@5.32.6": "5.32.6"
   },
   "jsr": {
     "@david/console-static-text@0.3.4": {
@@ -333,8 +335,7 @@
         "@protobufjs/utf8",
         "@types/node",
         "long"
-      ],
-      "scripts": true
+      ]
     },
     "@libpg-query/parser@17.6.10": {
       "integrity": "sha512-AT/IM9H24/u70HvBhzkYlSBlYQWhJK3Z4CTmTnd3PnMqHU7Ib3o5pk2TEik6IblWsU64D+4GGURn94v2iSRe1A==",
@@ -949,6 +950,10 @@
         "pure-rand"
       ]
     },
+    "fsevents@2.3.2": {
+      "integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==",
+      "os": ["darwin"]
+    },
     "globals@15.15.0": {
       "integrity": "sha512-7ACyT3wmyp3I61S4fG682L0VA2RGD9otkqGJIwNUMF1SWUombIIk+af1unuDYgMm082aHYwD+mzJvv9Iu8dsgg=="
     },
@@ -1120,6 +1125,20 @@
         "pathe"
       ]
     },
+    "playwright-core@1.61.1": {
+      "integrity": "sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==",
+      "bin": true
+    },
+    "playwright@1.61.1": {
+      "integrity": "sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ==",
+      "dependencies": [
+        "playwright-core"
+      ],
+      "optionalDependencies": [
+        "fsevents"
+      ],
+      "bin": true
+    },
     "points-on-curve@0.2.0": {
       "integrity": "sha512-0mYKnYYe9ZcqMCWhUjItv/oHjvgEsfKvnUTg8sAtnHr3GVy7rGkXCb6d5cSyqrWqL4k81b9CPg3urd+T7aop3A=="
     },
@@ -1212,11 +1231,18 @@
     },
     "vscode-uri@3.0.8": {
       "integrity": "sha512-AyFQ0EVmsOZOlAnxoFOGOq1SQDWAB7C6aqMGS23svWAllfOaxbuFvcT8D1i8z3Gyn8fraVeZNNmN6e9bxxXkKw=="
+    },
+    "xstate@5.32.6": {
+      "integrity": "sha512-WfA8WNrh6r9osuGwVm+aIPM4jmMW2LKHV1Yv9thYpOtL4HVF/kobh95K/O8v2jDCpDmP2EoY+6uvuqHXCZ6ZLw=="
     }
   },
   "remote": {
     "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
-    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7"
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7",
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.1/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7",
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.3/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.3/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7"
   },
   "workspace": {
     "dependencies": [

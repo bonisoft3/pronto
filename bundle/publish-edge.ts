@@ -46,8 +46,8 @@ if (args.length) fail(`unknown arguments ${args.join(' ')}`)
 const workerd = path.join(mecha, 'packages/pglite-workerd')
 const config = path.join(out, 'wrangler.jsonc')
 
-async function run(cmd: string, args: string[], { cwd = out }: { cwd?: string } = {}): Promise<string> {
-  const r = await new Deno.Command(cmd, { args, cwd, stdin: 'null', stdout: 'piped', stderr: 'inherit' }).output()
+async function run(cmd: string, args: string[], { cwd = out, env }: { cwd?: string; env?: Record<string, string> } = {}): Promise<string> {
+  const r = await new Deno.Command(cmd, { args, cwd, env, stdin: 'null', stdout: 'piped', stderr: 'inherit' }).output()
   const text = new TextDecoder().decode(r.stdout)
   if (!r.success) fail(`${cmd} ${args.join(' ')} exited ${r.code}:\n${text}`)
   return text
@@ -55,36 +55,57 @@ async function run(cmd: string, args: string[], { cwd = out }: { cwd?: string } 
 
 // By path: a bare `wrangler` on PATH can resolve to another install, and
 // where the npm backend puts its bin differs between mise versions.
-// wrangler's bin starts `#!/usr/bin/env node`: run by path it takes whatever
-// node leads PATH. It runs under the node the package's mise config pins.
+// The package's pinned node leads PATH for wrangler and its subprocesses.
 const wranglerBin = (await run('mise', ['which', 'wrangler'], { cwd: workerd })).trim()
 const node = (await run('mise', ['which', 'node'], { cwd: workerd })).trim()
-const wrangler = (args: string[]) => run(node, [wranglerBin, ...args])
+const nodeDir = path.dirname(node)
+const runEnv = { ...Deno.env.toObject(), PATH: `${nodeDir}${path.delimiter}${Deno.env.get('PATH') ?? ''}` }
+const wrangler = (args: string[]) => run(wranglerBin, args, { env: runEnv })
 const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')
 
 const token = random()
 const secretPath = path.join(path.dirname(out), '.jwt-secret')
-let jwtSecret: string
-try {
-  jwtSecret = (await Deno.readTextFile(secretPath)).trim()
-} catch (error) {
-  if (!(error instanceof Deno.errors.NotFound)) throw error
-  jwtSecret = random()
-  await Deno.writeTextFile(secretPath, jwtSecret, { mode: 0o600 })
+let jwtSecret = Deno.env.get('JWT_SECRET')?.trim()
+if (!jwtSecret) {
+  try {
+    jwtSecret = (await Deno.readTextFile(secretPath)).trim()
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error
+    if (Deno.env.get('CI')) {
+      fail('JWT_SECRET must be configured as a repository secret (secrets.JWT_SECRET) for CI releases')
+    }
+    jwtSecret = random()
+    await Deno.writeTextFile(secretPath, jwtSecret, { mode: 0o600 })
+  }
 }
-if (!jwtSecret) fail('JWT secret file is empty')
+if (!jwtSecret) fail('JWT secret is empty')
 const { vars = {} } = JSON.parse(await Deno.readTextFile(config)) as { vars?: Record<string, string> }
 let providerSecrets: Record<string, string>
 try { releasedIssuers(vars); providerSecrets = signInSecrets(vars, (name) => Deno.env.get(name)) }
 catch (e) { fail((e as Error).message) }
 const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSecret, ...providerSecrets }
+const turnId = Deno.env.get('CLOUDFLARE_TURN_KEY_ID')
+const turnToken = Deno.env.get('CLOUDFLARE_TURN_KEY_TOKEN')
+if (turnId && turnToken) {
+  secrets.CLOUDFLARE_TURN_KEY_ID = turnId
+  secrets.CLOUDFLARE_TURN_KEY_TOKEN = turnToken
+} else {
+  try {
+    const turnPath = path.join(path.dirname(out), '.turn-secret')
+    const turnConfig = JSON.parse(await Deno.readTextFile(turnPath)) as { id?: string; token?: string }
+    if (turnConfig.id && turnConfig.token) {
+      secrets.CLOUDFLARE_TURN_KEY_ID = turnConfig.id
+      secrets.CLOUDFLARE_TURN_KEY_TOKEN = turnConfig.token
+    }
+  } catch (_) {}
+}
 /** The Workers this publish deploys, each with the version it replaces, for
  * the rollback a refused migration asks for; a first deploy has none. */
 const deployed: { config: string; previous: string | null }[] = []
 /** The version a Worker serves now; null before its first deploy, which
  * Cloudflare answers with error 10007 (no such Worker). */
 async function previousVersion(configPath: string): Promise<string | null> {
-  const r = await new Deno.Command(node, { args: [wranglerBin, 'deployments', 'list', '--config', configPath, '--json'], cwd: out, stdin: 'null', stdout: 'piped', stderr: 'piped' }).output()
+  const r = await new Deno.Command(wranglerBin, { args: ['deployments', 'list', '--config', configPath, '--json'], cwd: out, env: runEnv, stdin: 'null', stdout: 'piped', stderr: 'piped' }).output()
   const stderr = new TextDecoder().decode(r.stderr)
   if (!r.success) {
     if (stderr.includes('[code: 10007]')) return null
@@ -124,6 +145,11 @@ try {
 console.log(deployedText)
 const settings = JSON.parse(await Deno.readTextFile(config)) as { routes?: { pattern: string }[]; triggers?: { crons: string[] } }
 const origin = settings.routes?.length ? `https://${settings.routes[0].pattern}` : /https:\/\/\S+\.workers\.dev/.exec(deployedText)?.[0] ?? fail('wrangler deploy named no workers.dev URL')
+await Deno.writeTextFile(path.join(out, 'origin.txt'), origin)
+const ghEnv = Deno.env.get('GITHUB_ENV')
+if (ghEnv) {
+  await Deno.writeTextFile(ghEnv, `PRONTO_DEPLOYED_URL=${origin}\n`, { append: true })
+}
 const send = (route: string, init?: RequestInit) => {
   const headers = new Headers(init?.headers)
   headers.set('authorization', `Bearer ${token}`)
@@ -156,8 +182,25 @@ await settled('the deploy')
 const { load } = await import(String(pathToFileURL(path.join(workerd, 'load.ts'))))
 const loaded = await load(path.join(out, 'pgdata'), send, { reset })
 if ('skipped' in loaded) {
-  const migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: await Deno.readFile(path.join(out, 'migrations.json')) })
-  const answer = await migrated.text()
+  let migrationsBody: Uint8Array
+  try {
+    migrationsBody = await Deno.readFile(path.join(out, 'migrations.json'))
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) migrationsBody = new TextEncoder().encode('[]')
+    else throw e
+  }
+  let migrated: Response = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
+  for (let attempt = 0; attempt < 5 && migrated.status === 401; attempt++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
+  }
+  let answer = await migrated.text()
+  if (!migrated.ok && (answer.includes('Durable Object was reset') || answer.includes('reset') || migrated.status === 503)) {
+    console.log(`Durable Object reset during migration (${migrated.status}); waiting for settled state on new code...`)
+    await settled('the reset')
+    migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
+    answer = await migrated.text()
+  }
   if (!migrated.ok) {
     for (const { config: configPath, previous } of deployed.reverse()) {
       if (previous === null) continue
@@ -173,7 +216,7 @@ try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
 catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (ssr) {
   const warm = await fetch(`${origin}/`, { headers: { accept: 'text/html' } })
-  await warm.body?.cancel()
+  await warm.text()
   if (!warm.ok) fail(`warming ${origin}/ answered ${warm.status}`)
 }
 // What a page reads at the deployment's door is what the build wrote: its
