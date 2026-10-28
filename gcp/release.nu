@@ -7,7 +7,7 @@
 # images push the same digests and roll nothing, and initdb finds its marker.
 
 use ../k8s/release.nu [resolve-app]
-use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of]
+use verify.nu [start-drivers go-drivers finish-drivers drivers-log cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images]
 
 # The services this target runs; anything else in the app's compose project
@@ -212,7 +212,8 @@ def finish-copy [copy: record]: nothing -> record {
 		let log = (do { ^gcloud --quiet logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($copy.build)\"" --project $p --order desc --limit 20 --format "value(textPayload)" } | complete | get stdout | lines | reverse | str join (char nl))
 		error make {msg: $"the preview's images were not copied \(($status); its repository may not let ($builds) read it: gcloud artifacts repositories add-iam-policy-binding ($copy.registry | split row '/' | last) --project ($copy.registry | split row '/' | get 1) --location ($copy.registry | split row '-docker' | first) --member serviceAccount:($builds) --role roles/artifactregistry.reader\):\n($log)"}
 	}
-	$copy.refs | each {|r|
+	# Each image at once: one after another, its two calls apiece were a minute.
+	$copy.refs | par-each --keep-order {|r|
 		gc artifacts docker tags add $"($r.repo)@($r.digest)" $"($r.repo):release" | ignore
 		let digest = (gc artifacts docker images describe $"($r.repo):release" --format "value(image_summary.digest)" | str trim)
 		if $digest != $r.digest { error make {msg: $"($r.repo):release is ($digest), not the tested ($r.digest)"} }
@@ -542,6 +543,9 @@ export def main [
 		let copy = (start-early-copy $app_info.cue_path $from)
 		finish-drivers $drivers
 		deploy $app_info "" false false ($from | merge {copy: $copy}) | ignore
+		# The tests' log, read once the release is live rather than before it.
+		print $"gcp: (stamp) what the tests printed:"
+		try { drivers-log $drivers } catch {|e| print $"gcp: (stamp) the tests' log was not read: ($e.msg)" }
 		null
 	} catch {|e| $e.msg })
 	stop-preview $rc_plan

@@ -63,9 +63,10 @@ export def key-tag [key: string]: nothing -> string { $"src-($key)" }
 
 # The images pushed for this key before, by service, when every one of them
 # was: a release whose app did not change since (a retry, a release again)
-# builds nothing. Null when any is missing.
+# builds nothing. Null when any is missing. Each image is asked after at once:
+# one after another, a dozen gcloud calls were most of a minute.
 export def pushed-for [refs: list<record>, key: string]: nothing -> any {
-	let found = ($refs | each {|r|
+	let found = ($refs | par-each --keep-order {|r|
 		let at = $"($r.repo):(key-tag $key)"
 		if (exists artifacts docker images describe $at) {
 			{svc: $r.svc, repo: $r.repo, digest: (gc artifacts docker images describe $at --format "value(image_summary.digest)" | str trim)}
@@ -104,7 +105,7 @@ export def push-images [
 	if $before != null {
 		print $"gcp: (stamp) ($services | str join ', ') unchanged since they were last built: reusing them"
 		rm -rf $work
-		return ($before | each {|b|
+		return ($before | par-each --keep-order {|b|
 			gc artifacts docker tags add $"($b.repo)@($b.digest)" $"($b.repo):($tag)" | ignore
 			{svc: $b.svc, ref: {tag: $tag, digest: $b.digest}}
 		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
@@ -165,7 +166,8 @@ export def push-images [
 	if $r.exit_code != 0 {
 		error make {msg: $"Cloud Build failed:\n(($r.stdout + $r.stderr) | lines | last 40 | str join (char nl))"}
 	}
-	$refs | each {|r|
+	# Each image's digest read and tagged at once, as pushed-for reads them.
+	$refs | par-each --keep-order {|r|
 		let digest = (gc artifacts docker images describe $r.ref --format "value(image_summary.digest)" | str trim)
 		# Found by its key the next time, should nothing change.
 		gc artifacts docker tags add $"($r.repo)@($digest)" $"($r.repo):(key-tag $key)" | ignore
