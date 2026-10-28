@@ -343,7 +343,10 @@ as its one Durable Object, over the shell's tables. `publish` runs
 [`publish-edge.ts`](../bundle/publish-edge.ts): `wrangler deploy` at the
 version pglite-workerd's `mise.toml` pins, with `JWT_SECRET` (once) and a new
 `IMPORT_TOKEN` in the same version, then the data directory loaded into the
-object. `sayt release@cloudflare --temporary` deploys with no login, to a
+object. CI's first cluster release requires `secrets.JWT_SECRET`. Later
+releases without an explicit key preserve the deployed secret after checking
+that every JWT-bearing Worker has it; they never generate a replacement key.
+`sayt release@cloudflare --temporary` deploys with no login, to a
 throwaway account wrangler creates and reuses; it expires unless claimed at
 the link wrangler prints. wrangler cannot list a temporary account's
 deployments, so such a publish has no version to roll back to when the data

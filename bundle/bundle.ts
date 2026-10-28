@@ -57,7 +57,7 @@ if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or 
 
 const read = (p: string) => Deno.readTextFile(path.join(app, p))
 const shell = JSON.parse(await read('shell/shell.json')) as {
-  routes: { files: Record<string, string | string[]> }[]
+  routes: { files: Record<string, string | string[]>; ssr?: string }[]
   i18n?: { locales: Record<string, unknown> }
   migrations: string[]
   tables: string[]
@@ -82,10 +82,9 @@ for (const p of [...served].sort()) {
   else if (p.startsWith('/')) fail(`${p} is served from neither the app nor the terminal`)
   else files[p] = await read(p)
 }
-if (base) {
-  shell.prefix = base
-  files['shell/shell.json'] = JSON.stringify(shell)
-}
+if (base) shell.prefix = base
+for (const route of shell.routes) route.ssr = 'spa'
+files['shell/shell.json'] = JSON.stringify(shell)
 
 // A stylesheet's @import is fetched by the browser, not by the shim, so each
 // import is inlined into the sheet that asks for it, imports of imports too. A
@@ -97,6 +96,24 @@ const IMPORT = /@import\s+(?:url\(\s*["']?([^"')]+?)["']?\s*\)|["']([^"']+)["'])
 const inHead = new Set(['shell/shell.css', 'shell/design.css', ...shell.routes.map((r) => r.files.css as string)])
 const baseOf = (p: string) => (inHead.has(p) ? 'file:///shell/' : `file:///${path.posix.dirname(p)}/`)
 const inlined = new Map<string, string>()
+const cssAssets = new Map<string, string>()
+const CSS_TOKEN = /@import\s+(?:url\(\s*["']?[^"')]+?["']?\s*\)|["'][^"']+["'])\s*;|\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|url\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\[\s\S]|[^\s)\\])+))\s*\)/gi
+function rebaseAssets(sheet: string, p: string): string {
+  return sheet.replace(CSS_TOKEN, (token, double, single, bare) => {
+    const value = double ?? single ?? bare
+    if (value === undefined) return token
+    if (value.includes('\\')) fail(`${p} names a CSS asset with escapes: ${value}`)
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(value)) return token
+    const resolved = new URL(value, baseOf(p))
+    const target = decodeURIComponent(resolved.pathname).slice(1)
+    if (target.split('/').includes('..') || target.includes('\\')) fail(`${p} names an invalid CSS asset: ${value}`)
+    const source = target.startsWith('omnishell/')
+      ? path.join(omnishell, target.slice('omnishell/'.length))
+      : path.join(app, target)
+    cssAssets.set(target, source)
+    return `url("${base}${resolved.pathname}${resolved.search}${resolved.hash}")`
+  })
+}
 // A comment is prose: an @import in one is neither inlined nor refused. A
 // string is code, and a `/*` inside one opens no comment.
 const TOKEN = /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\/\*[\s\S]*?\*\//g
@@ -120,7 +137,7 @@ function inline(p: string, asking: string[]): string {
   if (asking.includes(p)) fail(`${asking.join(' imports ')} imports ${p} again`)
   let sheet = inlined.get(p)
   if (sheet === undefined) {
-    sheet = outsideComments(files[p], (code) => code.replace(IMPORT, (_m, a, b) => {
+    sheet = outsideComments(rebaseAssets(files[p], p), (code) => code.replace(IMPORT, (_m, a, b) => {
       const target = new URL(a ?? b, baseOf(p)).pathname.slice(1)
       if (!(target in files)) fail(`${p} imports ${target}, which shell.json does not serve`)
       return inline(target, [...asking, p])
@@ -365,6 +382,11 @@ html = replace(
 )
 
 await Deno.mkdir(out, { recursive: true })
+for (const [target, source] of cssAssets) {
+  const destination = path.join(out, target)
+  await Deno.mkdir(path.dirname(destination), { recursive: true })
+  await Deno.copyFile(source, destination)
+}
 await Deno.writeTextFile(path.join(out, 'index.html'), html)
 // A host that answers an unknown path with 404.html serves the same document
 // there, and the deep link boots.

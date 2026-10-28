@@ -20,6 +20,7 @@ import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
+import { releaseJwtSecret } from './edge-jwt.ts'
 
 function fail(msg: string): never {
   console.error(`publish-edge: ${msg}`)
@@ -61,7 +62,7 @@ const nodeDir = path.dirname(node)
 const runEnv = { ...Deno.env.toObject(), PATH: `${nodeDir}${path.delimiter}${Deno.env.get('PATH') ?? ''}` }
 const wrangler = (args: string[]) => run(wranglerBin, args, { env: runEnv })
 const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')
-const settings = JSON.parse(await Deno.readTextFile(config)) as { durable_objects?: unknown; routes?: { pattern: string }[] }
+const settings = JSON.parse(await Deno.readTextFile(config)) as { durable_objects?: { bindings: { name: string; script_name?: string }[] }; routes?: { pattern: string }[] }
 if (!settings.durable_objects) {
   if (reset) fail('--reset requires a cluster')
   const deployed = await wrangler(['deploy', '--config', config, ...temporary])
@@ -76,21 +77,16 @@ if (!settings.durable_objects) {
 
 const token = random()
 const secretPath = path.join(path.dirname(out), '.jwt-secret')
-let jwtSecret = Deno.env.get('JWT_SECRET')?.trim()
-if (!jwtSecret) {
-  try {
-    jwtSecret = (await Deno.readTextFile(secretPath)).trim()
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error
-    if (Deno.env.get('CI')) {
-      fail('JWT_SECRET must be configured as a repository secret (secrets.JWT_SECRET) for CI releases')
-    }
-    jwtSecret = random()
-    await Deno.writeTextFile(secretPath, jwtSecret, { mode: 0o600 })
-  }
-}
-if (!jwtSecret) fail('JWT secret is empty')
-const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSecret }
+let ssr = false
+try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
+catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+const database = ssr && settings.durable_objects.bindings.some(binding => binding.name === 'CLUSTER' && binding.script_name)
+  ? path.join(out, 'database.jsonc') : undefined
+const jwtSecret = await releaseJwtSecret({
+  secret: Deno.env.get('JWT_SECRET'), secretPath, ci: !!Deno.env.get('CI'), temporary: !!temporary.length,
+  configs: database ? [database, config] : [config], wrangler, random,
+})
+const secrets: Record<string, string> = { IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}) }
 const turnId = Deno.env.get('CLOUDFLARE_TURN_KEY_ID')
 const turnToken = Deno.env.get('CLOUDFLARE_TURN_KEY_TOKEN')
 if (turnId && turnToken) {
@@ -134,14 +130,10 @@ const secretsFile = path.join(secretsDir, 'secrets.json')
 let deployedText: string
 try {
   await Deno.writeTextFile(secretsFile, JSON.stringify(secrets), { mode: 0o600 })
-  let ssr = false
-  try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
-  catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
   if (ssr) {
     console.log(await deploy(path.join(out, 'renderer.jsonc'), '--durable-objects-code-update-mode', 'immediate'))
-    const settings = JSON.parse(await Deno.readTextFile(config))
-    if (settings.durable_objects.bindings.some((binding: { name: string; script_name?: string }) => binding.name === 'CLUSTER' && binding.script_name)) {
-      console.log(await deploy(path.join(out, 'database.jsonc'), '--secrets-file', secretsFile, '--durable-objects-code-update-mode', 'immediate'))
+    if (database) {
+      console.log(await deploy(database, '--secrets-file', secretsFile, '--durable-objects-code-update-mode', 'immediate'))
     }
   }
   // The object restarts on the new code rather than at its next idle.
@@ -218,9 +210,6 @@ if ('skipped' in loaded) {
   console.log(answer)
   if ((JSON.parse(answer) as { applied: string[] }).applied.length) await settled('the migration')
 }
-let ssr = false
-try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
-catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (ssr) {
   const warm = await fetch(`${origin}/`, { headers: { accept: 'text/html' } })
   await warm.text()

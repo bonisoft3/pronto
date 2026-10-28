@@ -1,6 +1,8 @@
 // The derived rows a pages release ships: derived.ts's SQL, and bundle.ts
 // carrying it into a page whose PGlite runs it after the migrations.
 import './edge-addresses_test.ts'
+import './css-assets_test.ts'
+import './edge-jwt_test.ts'
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import * as path from 'node:path'
@@ -494,7 +496,7 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
       await Deno.writeTextFile(path.join(app, p), text)
     }
     await write('shell/shell.json', JSON.stringify({
-      routes: [{ files: { css: 'shell/screens/home.css' } }],
+      routes: [{ ssr: 'ssr', files: { css: 'shell/screens/home.css' } }, { ssr: 'ssg', files: { css: 'shell/screens/home.css' } }],
       migrations: ['m/001.sql'], tables: ['item'],
       schema: { item: { durability: 'live' } },
     }))
@@ -516,6 +518,9 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
     }).output()
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
+    const encoded = /<script type="application\/octet-stream" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1]
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))))
+    assert.deepEqual(JSON.parse(payload.files['shell/shell.json']).routes.map((route: { ssr: string }) => route.ssr), ['spa', 'spa'])
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
     const scripts = [...html.matchAll(/<script(?: type="module")?>([\s\S]*?)<\/script>/g)].map((m) => m[1])
     assert.equal(scripts.length, 1, 'SES must initialize through the interpreter inside the application module')
