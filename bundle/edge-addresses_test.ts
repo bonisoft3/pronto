@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseHTML } from 'npm:linkedom@0.18.4'
-import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
+import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
 import { edgeHints } from './edge-hints.ts'
 import { acceptedLanguages, routeAt } from '../../omnishell/interpreter/fragment.js'
@@ -81,13 +81,19 @@ Deno.test('edge identity hashes the served bytes, preserves module bases, and au
     assert.ok(f.document.querySelector('meta')!.getAttribute('content')!.includes(`'sha256-${rulesHash}'`))
     assert.equal(f.document.head.children[0].tagName, 'META')
     assert.equal(f.document.head.children[1].id, 'pronto-assets')
-    assert.equal(f.document.querySelectorAll('link[rel="modulepreload"]').length, 2)
+    const preloads = f.document.querySelectorAll('link[rel="modulepreload"]')
+    assert.equal(preloads.length, 2)
+    for (const preload of preloads) {
+      assert.ok(preload.getAttribute('integrity')?.startsWith('sha256-'))
+    }
+    const bootScript = f.document.querySelector('script[type="module"][src]')
+    assert.ok(bootScript?.getAttribute('integrity')?.startsWith('sha256-'))
     assert.ok(!f.hints.common.some(link => link.includes('as=script') || link.includes('modulepreload')))
     assert.ok(!f.hints.common.some(link => link.includes('unused.js')))
     assert.ok(!f.hints.common.some(link => link.includes('team.html')))
     assert.ok(f.imports['/shell/screens/team.html'].endsWith('.txt'))
     const headers = await Deno.readTextFile(path.join(f.out, '_headers'))
-    assert.ok(headers.includes('/shell/_immutable-*\n  Cache-Control: public, max-age=31536000, immutable'))
+    assert.ok(!headers.includes('Cache-Control'))
     assert.ok(!headers.includes('/shell/*\n'))
     assert.ok(headers.startsWith(`/\n  Content-Security-Policy: ${f.document.querySelector('meta')!.getAttribute('content')}\n`))
     assert.deepEqual(JSON.parse(f.map).screens, { team: ['other'], other: [] })
@@ -167,3 +173,20 @@ Deno.test('the built edge tree serves the target\'s ICE servers, built and deplo
     await Deno.remove(f.out, { recursive: true })
   }
 })
+
+Deno.test('edge routing rules route /* to worker', async () => {
+  const tmp = await Deno.makeTempDir()
+  try {
+    for (const dir of ['shell/screens', 'messages', 'omnishell/interpreter', 'docs']) {
+      await Deno.mkdir(path.join(tmp, dir), { recursive: true })
+    }
+    for (const file of ['index.html', 'favicon.ico', 'robots.txt', 'sitemap.xml', 'offline-first-sw.js', '_headers']) {
+      await Deno.writeTextFile(path.join(tmp, file), '')
+    }
+    const rules = await edgeRoutingRules(tmp)
+    assert.deepEqual(rules, ['/*'])
+  } finally {
+    await Deno.remove(tmp, { recursive: true })
+  }
+})
+
