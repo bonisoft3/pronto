@@ -60,6 +60,11 @@ import (
 			"dapr.io/config":         "\(release.name)-dapr-config"
 			"dapr.io/enable-metrics": "true"
 			"dapr.io/metrics-port":   "9090"
+			// A pod being replaced is still the one other sidecars resolve for a
+			// few seconds after its successor is ready: its own sidecar keeps
+			// answering through its container's preStop pause rather than
+			// leaving those calls to fail (each a 500 at the door).
+			"dapr.io/block-shutdown-duration": "20s"
 		}
 	}
 
@@ -466,6 +471,9 @@ import (
 						name:            "crud"
 						image:           (#appImage & {svc: "crud"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [
 							{name: "http", containerPort: 3000},
 							{name: "admin", containerPort: 3001},
@@ -569,6 +577,9 @@ import (
 						name:            "electric"
 						image:           (#appImage & {svc: "electric"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: 3000}]
 						env: [
 							{name: "ELECTRIC_PORT", value: "3000"},
@@ -668,6 +679,9 @@ import (
 						name:            "auth"
 						image:           (#appImage & {svc: "auth"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: 9999}]
 						env: [
 							for e in (#denoTelemetry & {service: "auth"}).env {e},
@@ -768,6 +782,9 @@ import (
 						name:            "caddy"
 						image:           (#appImage & {svc: "caddy"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: 8080}]
 						env: [
 							if release.env["ORIGIN"] == _|_ {
@@ -863,6 +880,9 @@ import (
 						name:            "render"
 						image:           (#appImage & {svc: "render"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: release.render.port}]
 						env: [
 							{name: "DOOR", value: "http://localhost:3500/v1.0/invoke/caddy/method"},
