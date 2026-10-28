@@ -3848,7 +3848,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// A presenter's worker script answers with the presenter's own
 			// policy, which governs the worker it starts.
 			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
-			_fenced: list.Concat([_unitPaths, _presenterAt])
+			// A container hatch's pages that post a form to another site
+			// (#Capabilities.hatches.forms): their own policy, the door's with
+			// those origins added to form-action alone.
+			_forms: [for _, h in E.code.capabilities.hatches if h.forms != _|_ for p, origins in h.forms {path: p, to: origins}]
+			_fenced: list.Concat([_unitPaths, _presenterAt, [for f in _forms {f.path}]])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 				let matcher = [if len(_fenced) > 0 {"  @terminal not path \(strings.Join(_fenced, " "))\n  header @terminal"}, "  header"][0]
 				let presenter = [for p in _presenterAt {"  @presenter path \(p)\n  header @presenter Content-Security-Policy \(json.Marshal(E._shell.presenter.policy))\n"}]
@@ -3860,7 +3864,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
+				let forms = [for i, f in _forms {"  @form\(i) path \(f.path)\n  header @form\(i) Content-Security-Policy \(json.Marshal(strings.Replace(policy, "form-action 'self'", strings.Join(list.Concat([["form-action 'self'"], f.to]), " "), 1)))\n"}]
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(forms, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
 			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}
