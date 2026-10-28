@@ -218,7 +218,7 @@ Why data, and why judged this way rather than in TypeScript or not at all, is
 ### Schedules
 
 Periodic work is declared as `schedules` (`#Schedule` in `schema.cue`), and
-mecha's [ticker](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/ticker/README.md) turns each
+mecha's [ticker](https://github.com/bonisoft3/mecha/blob/v0.19.2/services/ticker/README.md) turns each
 occurrence into a row the app's pipelines read; how it wakes, what it
 guarantees and how to choose a cadence are there.
 

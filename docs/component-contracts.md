@@ -20,7 +20,7 @@ as one graph.
 | part | type | re-exported by | default instance |
 |---|---|---|---|
 | `code` | `#App` ([`schema.cue`](../schema.cue)) | — | the app's `program.cue` |
-| `cluster` | `#Cluster` ([`cluster.cue`](https://github.com/bonisoft3/mecha/blob/v0.18.1/cluster.cue)) | [`clusters/mecha.cue`](../clusters/mecha.cue) | `#DefaultCluster` |
+| `cluster` | `#Cluster` ([`cluster.cue`](https://github.com/bonisoft3/mecha/blob/v0.19.2/cluster.cue)) | [`clusters/mecha.cue`](../clusters/mecha.cue) | `#DefaultCluster` |
 | `terminal` | `#Terminal` ([`terminal.cue`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/terminal.cue)) | [`terminals/omnishell.cue`](../terminals/omnishell.cue) | `#DefaultTerminal` |
 | `loop` | `#Loop` ([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.45.1/loop.cue)) | [`loops/sayt.cue`](../loops/sayt.cue) | `#DefaultLoop` |
 | `build` | `#Build` ([`builders/bayt.cue`](../builders/bayt.cue)), over bayt's `#project` | — | `#DefaultBuild` |
@@ -218,7 +218,7 @@ Declared via `meta.social: #Social`:
 
 - **Tags emitted**: OpenGraph (`og:title`, `og:description`, `og:type`, `og:image`, `og:image:alt`) and Twitter Card (`twitter:card`, `twitter:title`, `twitter:description`, `twitter:image`, `twitter:site`, `twitter:creator`).
 - **Defaults**: `title` and `description` inherit from `#App.meta`. `card` defaults to `"summary_large_image"` if `image` is set, else `"summary"`. `type` defaults to `"website"`.
-- **The origin is the deployment's**: a card names no address of its own. The app's absolute addresses are spelled against one origin, the deployment's `ORIGIN`, stated beside the auth service's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/proxy.md#the-origin)); the image never holds it. `#Social` has no `url`, so declaring one is a compile error rather than a second statement of the origin that the build would fix into an image every deployment runs.
+- **The origin is the deployment's**: a card names no address of its own. The app's absolute addresses are spelled against one origin, the deployment's `ORIGIN`, stated beside the auth service's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/proxy.md#the-origin)); the image never holds it. `#Social` has no `url`, so declaring one is a compile error rather than a second statement of the origin that the build would fix into an image every deployment runs.
 - **Local images**: Social card scrapers require absolute image URLs. A local `image` is mounted as a cluster static under `/srv/` and named from the root (`/preview.png`) in the entry; a rendered document spells it absolute against the origin. A remote `https://` or `http://` image is named as written. Protocol-relative URLs (`//`), data URIs and path traversal (`..`) are refused at compile time.
 - **Per address**: the card above is the entry's, spelled for the app, and the entry is the shell every client-routed address is answered with, so it names no `og:url`, as it names no canonical: either would claim the root for every address. A [rendered document](screens.md#how-a-routes-first-document-is-rendered) (`ssg` or `ssr`) states its own canonical, absolute against the deployment's origin, and its card follows it: `og:url` is the canonical (dropped where the address has none), `og:title` and `twitter:title` are the page's title, a local image is absolute; the rest of the card stands. An address meant to be shared with a scraper-readable image is one that is rendered.
 

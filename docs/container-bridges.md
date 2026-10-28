@@ -26,7 +26,7 @@ selected container and port, and Airlock's mesh waits for that container to star
 The role adds `airlock-out` and a dedicated `bridge-<name>-egress` network. It does
 not implicitly join the default network. Additional networks are explicit hatch
 capabilities. No database credential, host port publication or callback permission
-is granted by being a bridge. See [Airlock](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/airlock/README.md)
+is granted by being a bridge. See [Airlock](https://github.com/bonisoft3/mecha/blob/v0.19.2/services/airlock/README.md)
 for the ledger and transport contract.
 
 This wiring is implemented by the Compose runtime. Declaring a bridge does not

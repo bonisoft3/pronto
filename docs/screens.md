@@ -213,7 +213,7 @@ of the document, any other `{{` in it written as the template's own literal of
 it. The door answers them at `/srv<address>/index.html` through Caddy's
 `templates`, so the origin is the deployment's `ORIGIN`, which the door holds
 as `{$ORIGIN}` and never reads off the request: it answers any Host
-([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/proxy.md#the-origin)). In
+([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/proxy.md#the-origin)). In
 development that is `https://localhost:<port>`, on the port the door binds.
 
 **`ssr`.** A route whose `ssr` is `"ssr"` is answered by the terminal's server
@@ -248,7 +248,7 @@ Cloudflare Edge worker (`edge-ssr.ts`), only routes with `ssr: "ssr"` invoke the
 from `ASSETS` with `Link` preload hints. What the
 door answers through `templates` (a prerendered document, `robots.txt`,
 `sitemap.xml`) is answered with a hash of its bytes as its ETag, as every file
-the door serves is (mecha's [proxy](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/proxy.md)),
+the door serves is (mecha's [proxy](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/proxy.md)),
 so a revalidation of an unchanged one is a 304: `templates` deletes the
 validator, since a template's output is in general no function of its file,
 but these spell nothing beyond the address asked, and the asset's `templated`
