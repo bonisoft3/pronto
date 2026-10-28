@@ -245,7 +245,11 @@ its document, a route rendered on request from the renderer, `{path}` or
 path that matches a route, else 404, all `Cache-Control: no-cache`. On the
 Cloudflare Edge worker (`edge-ssr.ts`), only routes with `ssr: "ssr"` invoke the
 `RENDERER` and `CLUSTER` Durable Objects; `spa` and `ssg` routes serve directly
-from `ASSETS` with `Link` preload hints. What the
+from `ASSETS` with `Link` preload hints. Edge assets keep extensionless routes
+without a trailing slash, so a prerendered `index.html` cannot change the
+address the shell matches. The edge binds the generated origin templates to
+the request origin, preserving the source validator; Caddy's literal escapes
+are removed before release addressing hashes inline scripts. What the
 door answers through `templates` (a prerendered document, `robots.txt`,
 `sitemap.xml`) is answered with a hash of its bytes as its ETag, as every file
 the door serves is (mecha's [proxy](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/proxy.md)),

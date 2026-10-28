@@ -38,7 +38,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
   try {
     const bundle = path.join(tmp, 'pronto/bundle'), runtime = path.join(tmp, 'selected runtime'), out = path.join(tmp, 'release')
     for (const dir of [bundle, path.join(runtime, 'server'), path.join(runtime, 'interpreter'), path.join(out, 'src'), path.join(out, 'public/shell')]) await Deno.mkdir(dir, { recursive: true })
-    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts', 'edge-addresses.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
+    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts', 'edge-addresses.ts', 'edge-templates.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
     await Deno.copyFile(new URL('../../omnishell/server/prepare-worker.ts', import.meta.url), path.join(runtime, 'server/prepare-worker.ts'))
     const jessie = await Deno.readTextFile(new URL('../../omnishell/interpreter/jessie.js', import.meta.url))
     await Deno.writeTextFile(path.join(runtime, 'interpreter/jessie.js'), jessie + '\n// selected runtime witness\n')
@@ -49,6 +49,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
     await installed.writeEdgeSsr(out, runtime, path.join(tmp, 'mecha'), 'app', 'https://app.example', [])
     const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
     assert.deepEqual(config.assets.run_worker_first, ['/*'])
+    assert.equal(config.assets.html_handling, 'drop-trailing-slash')
     assert.match(await Deno.readTextFile(path.join(out, 'renderer/jessie-startup.js')), /selected runtime witness/)
     const entry = await Deno.readTextFile(path.join(out, 'src/index.ts'))
     const hintsImport = entry.match(/^import \{ edgeHints \} from '([^']+)'$/m)

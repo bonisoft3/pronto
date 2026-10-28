@@ -3,6 +3,7 @@
 import './edge-addresses_test.ts'
 import './css-assets_test.ts'
 import './edge-jwt_test.ts'
+import './edge-templates_test.ts'
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import * as path from 'node:path'

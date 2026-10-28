@@ -111,6 +111,7 @@ ${separate ? "// The Cron Trigger pokes the object from the Worker that holds it
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), `
 import { edgeWorker } from '${fromSrc(path.join(edge, 'worker.ts'))}'
 import { edgeHints } from '${fromSrc(fileURLToPath(new URL('edge-hints.ts', import.meta.url)))}'
+import { originAssets } from '${fromSrc(fileURLToPath(new URL('edge-templates.ts', import.meta.url)))}'
 import { acceptedLanguages, routeAt, stripProgressiveReads } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json' with { type: 'json' }
 ${separate ? '' : "export { Cluster } from './database.ts'"}
@@ -123,6 +124,7 @@ const keyOf = (...parts) => new Request(\`https://edge-cache.invalid/\${parts.fi
 const inFlight = new Map()
 export default {
 ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, env, ctx) {
+    if (env.ASSETS) env = { ...env, ASSETS: originAssets(env.ASSETS) }
     const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
     const isAsset = /^\\/(?:_immutable-|(?:shell|omnishell|messages)\\/)/.test(url.pathname)
@@ -325,6 +327,7 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
   config.version_metadata = { binding: 'CF_VERSION_METADATA' }
   config.durable_objects = { bindings: [{ name: 'CLUSTER', class_name: 'Cluster', ...(separate ? { script_name: database } : {}) }, { name: 'RENDERER', class_name: 'DocumentRenderer', script_name: renderer }] }
   config.assets.run_worker_first = await edgeRoutingRules(path.join(out, 'public'))
+  config.assets.html_handling = 'drop-trailing-slash'
   if (separate) {
     delete config.migrations
     delete config.rules

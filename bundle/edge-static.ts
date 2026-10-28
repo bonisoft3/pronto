@@ -1,5 +1,8 @@
+import { originAssets } from './edge-templates.ts'
+
 export default {
   async fetch(req: Request, env: { ASSETS: { fetch(req: Request): Promise<Response> } }): Promise<Response> {
+    env = { ...env, ASSETS: originAssets(env.ASSETS) }
     const path = new URL(req.url).pathname
     const res = await env.ASSETS.fetch(req)
     if (res.status === 200 && (path.startsWith('/_immutable-') || path.includes('/_immutable-'))) {

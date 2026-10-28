@@ -1,4 +1,5 @@
 import * as path from 'node:path'
+import { prepareEdgeTemplate } from './edge-templates.ts'
 
 export interface StaticAsset { file: string; target: string }
 
@@ -21,7 +22,9 @@ export async function writeEdgeAssets(app: string, terminal: string, out: string
   for (const [target, source] of held) {
     const destination = path.join(out, target)
     await Deno.mkdir(path.dirname(destination), { recursive: true })
-    await Deno.copyFile(source, destination)
+    if (/\.(html|xml|txt)$/.test(target)) {
+      await Deno.writeTextFile(destination, prepareEdgeTemplate(await Deno.readTextFile(source)))
+    } else await Deno.copyFile(source, destination)
   }
   await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
 }

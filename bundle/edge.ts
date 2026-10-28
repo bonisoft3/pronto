@@ -132,7 +132,7 @@ if (!clustered) {
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), `export { default } from '${worker.startsWith('.') ? worker : `./${worker}`}'\n`)
   await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
     name, main: 'src/index.ts', compatibility_date: '2026-09-01',
-    assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), not_found_handling: 'none' },
+    assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash', not_found_handling: 'none' },
     observability: { enabled: true },
     ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   }, null, 2) + '\n')
@@ -205,6 +205,7 @@ await Deno.writeTextFile(path.join(out, 'src/index.ts'), `// Written by pronto's
 import { edgeObject } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/object.ts'))}'
 import { edgeWorker } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/worker.ts'))}'
 import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
+import { originAssets } from '${fromSrc(path.join(here, 'edge-templates.ts'))}'
 import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
 ${Object.keys(hybrids).length ? "import machines from './machines.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
@@ -222,6 +223,7 @@ export const Cluster = edgeObject({
 export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
+    env = { ...env, ASSETS: originAssets(env.ASSETS) }
 ${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
     // asset, which never reaches upstream dynamic handlers, or not at all: the cluster's
     // GET may act (omnishell's terminal.cue \`presenter.scripted\`).
@@ -295,7 +297,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   // run_worker_first routes /* to the Worker so immutable assets attach
   // Cache-Control: public, max-age=31536000, immutable strictly on 200 responses,
   // while 404 responses are served with Cache-Control: no-store.
-  assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir) },
+  assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash' },
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
