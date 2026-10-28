@@ -1500,9 +1500,7 @@ import (
 		// Each also a Dapr output binding of the airlock's, and a handler the
 		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
 		effects?: [Name=string]: #ExternalEffect & {name: Name}
-		// What an effect's sink reaches through when it does not speak HTTP:
-		// a container on the airlock's outbound network speaking the other
-		// protocol to one declared server (mecha's #Bridge).
+		// An Airlock-facing endpoint of a declared container hatch.
 		bridges?: [Name=string]: mecha.#Bridge & {name: Name}
 		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
 		// Seed rows held as data rather than stated: a JSON file beside the
@@ -2231,6 +2229,12 @@ import (
 
 	_declaredBridges: [if A.state.bridges != _|_ {A.state.bridges}, {}][0]
 	_bridgeViolations: list.Concat([
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] == _|_ {
+			"bridge \(n) names undeclared container hatch: \(b.container)"
+		}],
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].kind != "container" {
+			"bridge \(n) names hatch \(b.container), which is not a container"
+		}],
 		[for n, x in _effects if x.sink.bridge != _|_ if _declaredBridges[x.sink.bridge] == _|_ {
 			"effect \(n) reaches undeclared bridge: \(x.sink.bridge)"
 		}],

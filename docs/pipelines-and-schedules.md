@@ -13,8 +13,8 @@ must be idempotent, and it is, because the read is absolute: a redelivered
 change recomputes the same rows. Periodic work is a schedule, an occurrence
 the cluster's clock turns into a row a pipeline hears. The declarations are
 [the guide's](../GUIDE.md#schedules); the bus under the pipelines is mecha's
-[change capture](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/change-capture.md); the clock is
-the [ticker's contract](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/ticker/README.md).
+[change capture](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/change-capture.md); the clock is
+the [ticker's contract](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/ticker/README.md).
 
 ## When a value earns a pipeline
 
@@ -126,7 +126,7 @@ drains itself from the table the emitter writes into `.pronto/cluster.json`:
 a trigger on each `on` table, the same one-second batch, every drain called
 once as the cluster installs them in place of the stream's start, and a failed call retried after
 a backoff rather than redelivered
-([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/browser.md#drains-and-the-clock)).
+([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/browser.md#drains-and-the-clock)).
 No publication is involved, so a table outside it wakes the drain there too.
 The two obligations above are what keep that loop finite, as they keep the
 stream's. PGlite enforces no `statement_timeout`, so `timeout` bounds a call
@@ -153,7 +153,7 @@ A `#Schedule` names a five-field `cron`, a `timeZone` (UTC unless stated),
 tick table carries the five columns in `#tickFields`, which the ticker writes
 last so no declared value overwrites them. How a tick is keyed, when it is
 late, how the ticker wakes the change-capture unit and why a tick needs no
-durability are the [ticker's](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/ticker/README.md).
+durability are the [ticker's](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/ticker/README.md).
 
 What the emitter holds, at `cue vet`:
 
@@ -166,7 +166,7 @@ What the emitter holds, at `cue vet`:
 
 The `schedule` table is mecha's: the cluster is handed the schedules' names,
 and its database image creates the table as `800_schedule.sql`
-([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/schema.md#how-a-schema-reaches-the-database)),
+([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/schema.md#how-a-schema-reaches-the-database)),
 with a ticker and a clock beside it. The emitter seeds it in
 `801_schedule_seed.sql`, by an upsert on the name, and the table's `CHECK`
 refuses a `Forbid` without `done` in the row itself. Both are initdb steps,
@@ -184,7 +184,7 @@ twenty thousand times, a rating refit over a decade — is a computation
 names its module (`src`, `computations/<name>.js` unless stated), the `live`
 entities it alone writes (`to`) and the committed Wasm modules its jobs call
 (`wasm`). mecha's compute service
-runs it; [its header](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/compute/main.ts) is the
+runs it; [its header](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/compute/main.ts) is the
 contract, from the lake snapshot to the writes. The module is one file that
 imports nothing, and exports exactly four names:
 
@@ -226,8 +226,24 @@ admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
 `eval(` in a string, and top-level await are each refused — without the
 clock, randomness, time zone and locale. `endowments` grants it what it names
 of `Crypto` (WebCrypto's deterministic-by-specification subset),
-`TextEncoder`, `TextDecoder`, `URL` and `URLSearchParams`, as a surface module
+`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams` and `Cheerio`, as a surface module
 is granted `Intl`; an undeclared one throws where it is reached.
+
+`Cheerio.load(html)` creates a private mutable document using the pinned Cheerio
+slim parser (htmlparser2). The full document API supports traversal, callbacks,
+mutation and serialization; it does not execute page scripts. The endowment itself
+is frozen and exposes only `load`, not the top-level network or stream loaders.
+Documents are local scratch state, not sink values; return plain records. The cage
+is discarded after a computation, so mutated documents and parser prototypes do not
+cross runs. Parsed HTML does not sanitize strings for later rendering.
+
+A computation can call an ordinary Crawlee-shaped function without changing the
+platform contract. Keep that function in the same module, call it from `finish`,
+and supply app-owned `pushData` and `addRequests` functions that collect records and
+request intents. Return those arrays under the computation's declared sink names;
+collection does not itself perform networking or write to a queue. Persisting source
+responses allows reparsing them without reacquisition. Request execution remains an
+external effect, with stable request identities and application source policies.
 
 What pronto holds: write fails on a module or Wasm file that is not there; the
 module joins the fact rows as the `computation` role, so `lint` reports a

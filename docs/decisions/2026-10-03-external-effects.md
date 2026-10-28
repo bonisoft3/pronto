@@ -133,7 +133,7 @@ its outcome lands.
 ## The ledger
 
 `airlock.external_effect_ledger` is mecha's, in the airlock's
-[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/airlock/airlock.sql), and the
+[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/airlock/airlock.sql), and the
 cluster places it as it places the ticker's `schedule`. A row holds the key
 (`<effect>:<key fields>`, also the sink's idempotency key), the instance's primary key,
 the input frozen at the claim, the count of runs begun, and the outcome, set once.
@@ -183,7 +183,7 @@ call.
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
   key; the others are the frozen `input` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
   "no answer", not "failed". The airlock's
-  [README](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/airlock/README.md) is the contract.
+  [README](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/airlock/README.md) is the contract.
 - **A thrown error** is retried by Graphile with backoff, and each retry is a re-entry.
   After `attempts` runs counted by the ledger the outcome is `unknown`: no answer ever
   came, and the sink may have acted. The ledger counts, not Graphile, which counts a run
@@ -279,16 +279,12 @@ traffic may leave the cluster, and a hosted bridge sits behind the second and be
 first. What the platform offers is only that: it treats a bridge as any other sink, same
 ledger and same re-entry, and it walls the bridge's own reach.
 
-```cue
-state: bridges: mail: {kind: "mail", server: "smtp.provider.example:587", domain: "mail.example"}
-state: effects: confirm: sink: {bridge: "mail", idempotent: false}
-```
+The implemented declaration and container recipe are documented in
+[[../container-bridges|container bridges]]. A bridge is a role of a declared
+container hatch; it does not introduce a second container definition. Mail is one
+reusable implementation. Its Deno network permissions and connected-address check
+belong to that implementation, not to arbitrary bridge containers.
 
-- **A bridge's wall is its own permission set.** It runs on Deno with `--allow-net` set to
-  its port and its declared server, and it refuses a server whose name resolves inward,
-  checking the socket it actually connected before any byte crosses. Only the airlock's
-  daprd reaches it, on the internal `airlock-out` network, where its effect's binding `url`
-  is `http://bridge-<name>:8080`.
 - **Re-entry follows the protocol.** SMTP carries no idempotency key, so a mail bridge is
   a sink that is not idempotent: the server's `250` is the done answer, and a crash
   between that answer and the ledger's outcome is decided by the effect's `reentry`. The
@@ -351,9 +347,9 @@ builds the body.
 The cluster places the airlock only where a program declares an effect, as it places the
 ticker only where one declares a schedule: `state.effects` in mecha's `cluster.cue`, each
 effect's name and its origin or bridge, brings two services (`airlock` and its daprd
-`airlock-mesh`), a `bridge-<name>` per declared bridge, the ticker and its clock, two initdb
+`airlock-mesh`), each referenced container hatch, the ticker and its clock, two initdb
 steps, and four networks. The
-airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/airlock/README.md#in-a-cluster) is
+airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.17.1/services/airlock/README.md#in-a-cluster) is
 the contract; what follows is why it has that shape.
 
 ### The networks
@@ -363,8 +359,9 @@ the airlock reaches the world only through its daprd (B7). `airlock-out` holds t
 the bridges, which nothing else reaches. `airlock-wake` holds the airlock and the ticker
 alone, so the ticker's wake reaches the airlock's health port and nothing of its daprd.
 What goes out leaves on a network of its own:
-`airlock-egress` for the daprd's bindings, `bridge-<name>-egress` for each bridge's server.
-None of them stands on the default network, where every other service is (B10): a
+`airlock-egress` for the daprd's bindings, `bridge-<name>-egress` for each bridge.
+The role attaches no bridge to the default network; a hatch may explicitly add
+networks and thereby change that boundary. On the default network (B10), a
 service there that reached the daprd's bindings API, or a bridge's `/send`, would perform
 an effect with no claim and no ledger row.
 
@@ -496,7 +493,7 @@ airlock's side there.
 
 The wall travels with the daprd: its allowlist and its bindings are its configuration on
 every tier, so compose, k8s and Cloud Run hold the same one.
-[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/deployment.md#the-airlocks-wake-and-wall)
+[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.17.1/docs/deployment.md#the-airlocks-wake-and-wall)
 holds the table. Crash recovery reads each process's own advisory key, so an overlap of two
 revisions, or any number of instances, unlocks nothing a live process holds.
 
@@ -668,7 +665,7 @@ One PR. These are its commits, in order, each green:
    and every refusal, `testdata/emit/effect.cue` pronto's wiring, and
    `tests/airlock_test.ts` the plane bayt lowers, end to end.
 4. **Bridges, Crypto and the bindings wall** (built). `state.bridges` in pronto and the
-   cluster, each placed as `bridge-<name>` with its server as its only reach, and mecha's
+   cluster through declared container hatches, and mecha's
    mail bridge on nodemailer; `Crypto` in the realm and `secrets` as the handler's third
    argument; the airlock calling a Dapr output binding per effect, its daprd allowed the
    bindings API alone, in place of HTTPEndpoints and the CONNECT proxy.

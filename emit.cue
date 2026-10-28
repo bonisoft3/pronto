@@ -3276,7 +3276,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							metadata: [
 								// A bridge is the cluster's own, reached in plain HTTP on the
 								// airlock's outbound network.
-								{name: "url", value: [if i.effect.sink.bridge != _|_ {"http://bridge-\(i.effect.sink.bridge):\(mecha.#BridgePort)"}, i.effect.sink.origin][0]},
+								{name: "url", value: [if i.effect.sink.bridge != _|_ {"http://\(E.code.state.bridges[i.effect.sink.bridge].container):\(E.code.state.bridges[i.effect.sink.bridge].port)"}, i.effect.sink.origin][0]},
 								// The sink's own status comes back to the handler, a refusal
 								// being an answer rather than a binding error.
 								{name: "errorIfNot2XX", value: "false"},

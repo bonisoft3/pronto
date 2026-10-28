@@ -492,8 +492,8 @@ Deno.test("secrets are declared by their environment variables, reaching the man
 const bridged = (bridges: string, sink = `sink: {bridge: "mail", idempotent: false}\n      reentry: "unknown"`) =>
   paymentProgram()
     .replace('sink: {origin: "https://api.acquirer.example", idempotent: true}', sink)
-    .replace("effects: charge:", `${bridges}\n    effects: charge:`);
-const MAIL_BRIDGE = `bridges: mail: {kind: "mail", server: "smtp.mail.example:587", domain: "airlock.example"}`;
+    .replace("effects: charge:", `${bridges}\n    effects: charge:`) + `\napp: capabilities: hatches: smtp: {kind: "container", note: "SMTP transport outside confinement"}\n_cluster: surface: targets: smtp: {cmd: builtin: null, activate: "", dockerfile: from: name: "bridge-fixture:1", compose: {}}\n`;
+const MAIL_BRIDGE = `bridges: mail: {container: "smtp", port: 8080}`;
 
 Deno.test("a sink's credential is a header the airlock adds from a declared secret, required of the environment and handed to no handler", async () => {
   const program = paymentProgram({ effect: `secrets: ["ACQUIRER_WEBHOOK_KEY"]` }).replace(
@@ -558,7 +558,7 @@ Deno.test("the roles migration leaves electric's password to the deployment", as
 
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {
   const files = await emitFiles(bridged(MAIL_BRIDGE));
-  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", value: "http://bridge-mail:8080" });
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", value: "http://smtp:8080" });
   assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, "unknown");
 });
 
@@ -575,7 +575,9 @@ Deno.test("a bridge no effect reaches, or an effect reaching an undeclared bridg
     await refusal(bridged(MAIL_BRIDGE, 'sink: {origin: "https://api.acquirer.example", idempotent: true}')),
     "bridge mail is reached by no effect",
   );
-  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE.replace("smtp.mail.example:587", "localhost:25"))), "server");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE.replace('container: "smtp"', 'container: "missing"'))), "undeclared container hatch: missing");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE).replace('kind: "container"', 'kind: "sql", files: ["m.sql"]')), "which is not a container");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE.replace("8080", "0"))), "port");
 });
 
 Deno.test("an effect declares its handler's endowments, as an omnishell module declares Intl", async () => {
@@ -1217,4 +1219,16 @@ app: state: machines: PaymentMachine: states: pending: entry: [
     assertEquals(result.success, false);
     assertStringIncludes(result.stderr, reason);
   }
+});
+
+Deno.test("a bridge uses its container hatch's address and selected port", async () => {
+  const files = await emitFiles(bridged(MAIL_BRIDGE.replace("8080", "9090")));
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", value: "http://smtp:9090" });
+});
+
+Deno.test("declaring a bridge hatch without supplying its container fails emission", async () => {
+  const program = bridged(MAIL_BRIDGE).replace(/_cluster: surface: targets: smtp:.*\n/, "");
+  const result = await cue(["export", "-", "-e", "out"], program);
+  assertEquals(result.success, false);
+  assertStringIncludes(result.stderr, "smtp");
 });

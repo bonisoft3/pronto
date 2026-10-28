@@ -17,7 +17,7 @@ _computed: _code & {
 			durability: "live"
 			fields: [{name: "id", type: "uuid", pk: true}, {name: "odds", type: "int"}]
 		}
-		computations: chances: {to: ["Chance"], endowments: ["Crypto", "TextEncoder"]}
+		computations: chances: {to: ["Chance"], endowments: ["Crypto", "TextEncoder", "Cheerio"]}
 	}
 }
 
@@ -30,11 +30,11 @@ _admit: _computedLoop.surface.checks.admit
 
 admitLints:       _admit.verb & "lint"
 // A computation's endowments ride with its module, as the service loads it.
-admitLoadsModule: strings.HasSuffix(_admit.cmds[0], #"admit.ts) "computations/chances.js=Crypto,TextEncoder""#) & true
+admitLoadsModule: strings.HasSuffix(_admit.cmds[0], #"admit.ts) "computations/chances.js=Crypto,TextEncoder,Cheerio""#) & true
 admitUnderPins:   strings.Contains(_admit.cmds[0], "services compute deno.json") & true
 // And they reach the service that cages it.
 _computedCluster: (pronto.#DefaultCluster & {code: _computed, statics: []}).out
-computeEndowed: strings.Contains(_computedCluster.surface.targets.compute.compose.environment.COMPUTATIONS, #""endowments":["Crypto","TextEncoder"]"#) & true
+computeEndowed: strings.Contains(_computedCluster.surface.targets.compute.compose.environment.COMPUTATIONS, #""endowments":["Crypto","TextEncoder","Cheerio"]"#) & true
 
 _withHook: _computed & {state: computations: chances: onComplete: "capture_team_odds_history"}
 _hookCluster: (pronto.#DefaultCluster & {code: _withHook, statics: []}).out
