@@ -48,6 +48,8 @@ jobs:
       - name: plv8
         env:
           XDG_CACHE_HOME: ${{ runner.temp }}/cache
+          # The PostgreSQL the apps pin, which this repository's own lockfile does not name.
+          MISE_LOCKED: "0"
         run: mise x "github:theseus-rs/postgresql-binaries@$POSTGRES" -- bash mecha/services/database/plv8.sh build
       - name: release
         env:
