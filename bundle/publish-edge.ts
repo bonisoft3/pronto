@@ -22,7 +22,7 @@ import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
-import { signInSecrets } from './edge-signin.ts'
+import { releasedIssuers, signInSecrets } from './edge-signin.ts'
 
 function fail(msg: string): never {
   console.error(`publish-edge: ${msg}`)
@@ -75,7 +75,7 @@ try {
 if (!jwtSecret) fail('JWT secret file is empty')
 const { vars = {} } = JSON.parse(await Deno.readTextFile(config)) as { vars?: Record<string, string> }
 let providerSecrets: Record<string, string>
-try { providerSecrets = signInSecrets(vars, (name) => Deno.env.get(name)) }
+try { releasedIssuers(vars); providerSecrets = signInSecrets(vars, (name) => Deno.env.get(name)) }
 catch (e) { fail((e as Error).message) }
 const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSecret, ...providerSecrets }
 /** The Workers this publish deploys, each with the version it replaces, for
