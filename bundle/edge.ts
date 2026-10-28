@@ -7,7 +7,8 @@
 //     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]
 //
 // <out>/public   the terminal and app assets; data requests reach the Worker
-// <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
+// <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources,
+//                in Cloud Build with EDGE_BUILD_PROJECT=<project>
 // <out>/src/machines.js   the app's machines, each the step its migration
 //                declares (mecha-reducer.ts), for the object's host import
 // <out>/pgdata   rls.sql, the migrations and --derived's rows, applied on disk;
@@ -17,7 +18,8 @@
 // <out>/migrations.json   the migrations by name, the cluster's pgroll set
 //                among them: what a publish hands a data directory the object
 //                kept (publish-edge.ts)
-// <out>/src/index.ts, <out>/wrangler.jsonc
+// <out>/src/index.ts, <out>/wrangler.jsonc, whose vars name the providers a
+//                person signs in through (edge-signin.ts)
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
@@ -27,6 +29,8 @@ import { BLOB_CACHE_RULE, writeEdgeBlobs } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
 import { clusterDrains, releaseScripts } from './edge-scripts.ts'
+import { buildPglite } from './edge-pglite.ts'
+import { signInVars } from './edge-signin.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -109,6 +113,15 @@ const statics = await new Deno.Command('cue', {
 }).output()
 if (!statics.success) fail('cue export of public assets failed')
 const { statics: terminalStatics, clusterStatics } = JSON.parse(new TextDecoder().decode(statics.stdout)) as { statics: StaticAsset[]; clusterStatics: StaticAsset[] }
+const signIn = await new Deno.Command('cue', {
+  // A cluster with no provider sign-in has no signIn: no provider either.
+  args: ['export', '.', '-e', '*cluster.capabilities.signIn | {}', '--out', 'json'],
+  cwd: app, stdout: 'piped', stderr: 'inherit',
+}).output()
+if (!signIn.success) fail("cue export of the cluster's signIn failed")
+let vars: Record<string, string>
+try { vars = signInVars(JSON.parse(new TextDecoder().decode(signIn.stdout)), (name) => Deno.env.get(name)) }
+catch (e) { fail((e as Error).message) }
 await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
 const hints = await addressEdgeAssets(addresses, publicDir, { previous: retainedFrom, iceServers })
 if (tempRetained) await Deno.remove(tempRetained, { recursive: true }).catch(() => {})
@@ -126,12 +139,10 @@ if (seed) {
   console.error(`edge: ${count} seeded blobs`)
 }
 
-// PGlite for workerd. Bake reads the project's compose from its .bayt/, and a
-// local export adds to its destination, which is fresh here.
+// PGlite for workerd: baked in Cloud Build when EDGE_BUILD_PROJECT names a
+// project, by the local Docker otherwise (edge-pglite.ts).
 const pglite = path.join(out, 'pglite')
-const workerd = path.join(mecha, 'packages/pglite-workerd')
-await run('docker', ['buildx', 'bake', `--allow=fs.read=${workerd}`, `--allow=fs.write=${out}`, '-f', 'compose.yaml', '--set', `package.output=type=local,dest=${pglite}`, 'package'], path.join(workerd, '.bayt'))
-await Deno.remove(path.join(pglite, '.bayt'), { recursive: true })
+await buildPglite(path.join(mecha, 'packages/pglite-workerd'), pglite, Deno.env.get('EDGE_BUILD_PROJECT') || undefined, run, fail)
 
 // The cluster's pgroll set: what carries a database forward, a fresh
 // directory's and an archive's alike (pgdata.ts), and a kept one's at publish.
@@ -284,6 +295,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir) },
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
   version_metadata: { binding: 'CF_VERSION_METADATA' },
+  ...(Object.keys(vars).length ? { vars } : {}),
   migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
   observability: { enabled: true },
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),

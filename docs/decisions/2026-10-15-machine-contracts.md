@@ -1,7 +1,7 @@
 ---
 type: decision
-title: "Machine contracts: serializable steps, recorded time, declared reads and writes, and checks over them"
-description: Rules out the races and stalls the review of Truco's machines found by construction — steps run serializable, time and randomness enter only as recorded input, each rule declares what it reads and writes — and lints every machine over those declarations, independent of the app, instead of simulating the backends.
+title: "Machine contracts: steps that hold their players, recorded time, declared reads and writes, and checks over them"
+description: Rules out the races and stalls the review of Truco's machines found by construction — steps hold their players, time and randomness enter only as recorded input, each rule declares what it reads and writes — and lints every machine over those declarations, independent of the app, instead of simulating the backends.
 status: partially-built
 ---
 
@@ -21,37 +21,40 @@ stalls instead:
 Each was fixed where it was found. This record makes the classes impossible or
 checked, without a language to replace SQL and without simulating backends.
 
-## Steps run serializable
+## Steps hold their players
 
-Built. Every entry point of a machine (`dispatch`, and the `open`, `lease` and
-`fire` triggers) refuses a transaction that is not serializable, and PostgreSQL
-then guarantees every committed outcome is some serial order of the steps: a
-race aborts one side with `40001` instead of committing a wrong answer.
+Built, replacing serializable steps (below). Every entry point of a machine
+(`dispatch`, `deliver`, `wake`, an admission, `join`, and the `open`, `lease`
+and `fire` triggers) first takes a transaction-scoped advisory lock on each
+player of its instance (`hold`, keyed by the player and the same in every
+machine's schema), in key order and in one call, before it locks any row. Two
+steps that share a player then run one after the other, and a check reading
+that player's other instances (seated elsewhere, unavailable) reads them as
+their last step left them. Steps that share no player share no lock and never
+abort each other. `serial()` refuses a step outside read committed: one that
+waited for a player must read what that player's last step committed, which a
+snapshot taken before the wait would not show. The gateway starts each
+request's transaction at the database's default, read committed, for
+`app_user` and `service` alike; a database built when they were serializable
+gets that back when the machines' SQL runs again on release.
 
-A request reaches a step through PostgREST, which begins each transaction at
-the isolation it reads for the request's role (`ALTER ROLE app_user SET
-default_transaction_isolation`) or for the RPC function called; the database's
-default and a session's play no part. It reads a role's settings only through
-its login's grants, so crud logs in as `authenticator`, granted `anon`,
-`app_user` and `service`, with its password from the deployment
-(`AUTHENTICATOR_PASSWORD`, as `electric`'s is). Logged in as the superuser, as
-it was, PostgREST read no role's settings at all, and the roles' declared
-statement and lock timeouts never applied either — measured on 16.4. The
-machine's SQL sets the roles' default and no other: a session that reaches
-the database directly keeps the database's, which its writers were written
-against and owe no retry to, and a step from one is refused.
+A lapsed lease that a renewal is writing is left for the next prune (`SKIP
+LOCKED`): that renewal waits for the player the pruning step holds, so waiting
+for its row in turn would deadlock.
 
-PostgREST up to 15 ran a transaction aborted by `40001` again without end; 16
-returns it as a 500 naming the code. The writers run it again, a bounded number
-of times, since each write is idempotent by its key: `data-sync`'s transport
-and the ticker send it up to five times, the pause doubling from 25ms, and then
-refuse it — the browser's as a refusal its outbox does not resend.
+### Why not serializable
 
-What it costs: some aborts of transactions that only touched the same page or
-table (predicate locks coarsen without an index), memory for those locks, and a
-rule that every writer of machine tables runs serializable — the guard enforces
-it at the machine's own entry points. A long serializable reader can force
-writers to abort; reports read `READ ONLY DEFERRABLE`.
+Steps first ran serializable, and PostgreSQL guaranteed every committed outcome
+was some serial order of them: a race aborted one side with `40001`. But
+PostgreSQL locks a serializable read by index page, so on the small tables a
+machine keeps, two players writing only their own rows read each other's page,
+and one was aborted for a conflict no data caused. Measured on brawl-chess on
+2026-10-22: two players saving the same move aborted each other until the roles
+stopped planning sequential scans, and with every scan by index, four players
+renewing presence leases at once still lost one renewal in a few hundred, when a
+player first went online. The browser's outbox took the 500 as final, and the
+board stopped following its game. A retry of the abort was the alternative;
+holding the players removes the conflict instead.
 
 ## Time and randomness are recorded input
 
@@ -79,7 +82,7 @@ PL/pgSQL refusal as text that fails as JSON, so the refusal's own words are
 lost.
 
 - `clock()` is the transaction's time, the same on every read in it, so every
-  check in one serializable step agrees on it, and no session can set it.
+  check in one step agrees on it, and no session can set it.
 - A timer's fire meets the deadline by the instant the ticker found due, so the
   database's clock decides no deadline, and runs the step it delivers at the
   later of that instant and the fire's own `clock()` (`deliver` and `dispatch`
@@ -167,7 +170,7 @@ chart or a comparison of declared domains:
 
 Z3 is deferred until a property turns on guards stated as constraints a solver
 can reason over — the SQL `requires` guards over locks, or bounded sequences of
-steps by several actors, which serializable steps make every interleaving. None
+steps by several actors, which holding their players makes every interleaving. None
 does today. Measured on 2026-10-15: the `z3-solver` WASM build runs under Node
 only (Deno's worker shim overflows its stack on 4.15.4 and refuses its
 `location` on 4.12.2; Bun fails in its worker threads); Z3's own 5.3.0 binary
@@ -185,9 +188,9 @@ glibc builds and no musl one, and would take the obligations as SMT-LIB.
   TLA+ stays possible later, for the protocol alone.
 - **Translating Jessie to SMT.** Unnecessary once actions declare their
   contracts and the runtime enforces them.
-- **A generated language in place of SQL for locking.** Unnecessary under
-  serializable steps: lock order becomes a performance concern, not a
-  correctness one.
+- **A generated language in place of SQL for locking.** Unnecessary: every
+  step takes its players' locks in one call, in key order, before any row, so
+  the framework fixes the order and no machine states one.
 
 ## Platform parity
 

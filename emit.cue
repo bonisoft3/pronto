@@ -275,7 +275,38 @@ _sqlType: {
 		}],
 		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
 	])
-	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
+	// A database built before a field was added has the table, which CREATE
+	// TABLE IF NOT EXISTS leaves as it was: each field is added where it is
+	// missing, so a release (gcp's schema job replays this file) brings a built
+	// database to the program's columns. A required field with no default
+	// cannot be added to a table holding rows, and says so then.
+	_added: [for fld in T.e.fields if !fld.pk {
+		let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		"ALTER TABLE \(T.e.table) ADD COLUMN IF NOT EXISTS " + (#colSql & {
+			f: fld
+			if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
+			table: T.e.table
+			if T.e.cel.checks[fld.name] != _|_ {check: T.e.cel.checks[fld.name]}
+			if fld.cel == _|_ if column.states != _|_ {
+				check: "\"\(fld.name)\" IN (" + strings.Join([for n in column.states {(#sqlLit & {v: n}).out}], ", ") + ")"
+			}
+		}).out + ";"
+	}]
+	// A built database's column keeps the CHECK it was made with, which a field
+	// whose cel (or a machine's states) changed since no longer says: Bonk
+	// Chess's seat views refused the `arm` action added after its database was
+	// built, so no game online could begin. Each checked field's CHECK is set
+	// again as the program says it, under the name Postgres gives a column's
+	// own (<table>_<field>_check), NOT VALID so rows written before are kept.
+	_reasserted: [for fld in T.e.fields if !fld.pk
+		let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		for check in [
+			if T.e.cel.checks[fld.name] != _|_ {T.e.cel.checks[fld.name]},
+			if fld.cel == _|_ if column.states != _|_ {"\"\(fld.name)\" IN (" + strings.Join([for n in column.states {(#sqlLit & {v: n}).out}], ", ") + ")"},
+		] {
+			"ALTER TABLE \(T.e.table) DROP CONSTRAINT IF EXISTS \"\(T.e.table)_\(fld.name)_check\", ADD CONSTRAINT \"\(T.e.table)_\(fld.name)_check\" CHECK (\(check)) NOT VALID;"
+		}]
+	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);" + strings.Join([for a in _added {"\n" + a}], "") + strings.Join([for a in _reasserted {"\n" + a}], "")
 }
 
 #sqlLit: L={
@@ -1518,8 +1549,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			native: true
 		}
 		if S.code.capabilities.auth != _|_ {
-			// A provider's settings are the cluster's (#signIn).
-			auth: {for k, v in S.code.capabilities.auth if k != "provider" {(k): v}}
+			// A provider's settings are the cluster's (#signIn); the auth image and env files too.
+			auth: {for k, v in S.code.capabilities.auth if k != "image" && k != "envFiles" && k != "provider" {(k): v}}
 		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the
@@ -1827,6 +1858,35 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	]
 }
 
+// The blob plane's gate (assets/Caddyfile's /blobs), which caddy asks through
+// the REST gateway before a request reaches the store, since the store
+// authorizes nothing (mecha's docs/capabilities.md#the-blob-plane). A signed-in
+// account may PUT a picture under its own id, and nothing else passes: the store
+// is never listed, read, emptied or written under another's name through the
+// door, and pictures are read through /img, which transcodes them. A refusal is
+// the gateway's own status: 401 without an account, 403 for the rest.
+#blobGateSql: """
+	CREATE OR REPLACE FUNCTION public.blob_gate() RETURNS boolean LANGUAGE plpgsql STABLE SET search_path = pg_catalog, public AS $gate$
+	DECLARE
+	  h jsonb := coalesce(nullif(current_setting('request.headers', true), '')::jsonb, '{}');
+	  guest boolean := coalesce((nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'guest')::boolean, false);
+	BEGIN
+	  IF auth_uid() IS NULL OR guest THEN
+	    RAISE SQLSTATE 'PT401' USING MESSAGE = 'an account uploads';
+	  END IF;
+	  IF h->>'x-forwarded-method' IS DISTINCT FROM 'PUT'
+	    OR coalesce(h->>'x-forwarded-uri', '') !~ ('^/blobs/mecha-objects/' || auth_uid()::text || '/[0-9a-f-]{36}[.](png|jpg|jpeg|webp)$')
+	    -- S3's own headers would make the PUT something else: a copy of another object
+	    -- (x-amz-copy-source) past the size bound, say. Only a request's signing ones pass.
+	    OR EXISTS (SELECT FROM jsonb_object_keys(h) k WHERE k LIKE 'x-amz-%' AND k NOT IN ('x-amz-content-sha256', 'x-amz-date')) THEN
+	    RAISE SQLSTATE 'PT403' USING MESSAGE = 'an account writes a picture under its own id, and nothing else';
+	  END IF;
+	  RETURN true;
+	END $gate$;
+	REVOKE ALL ON FUNCTION public.blob_gate() FROM PUBLIC;
+	GRANT EXECUTE ON FUNCTION public.blob_gate() TO anon, app_user;
+	"""
+
 // Default runtime instances, parameterized by the code. program.cue wires
 // them; overrides land in bayt.cue by unification.
 //
@@ -1955,10 +2015,19 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if list.Contains(D.code.meta.targets, "k8s") {
 				sayYaml: say: release: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.k8s}]}
 			}
-			// The same for the cloud tier on GCP: a deploy, not a version.
+			// The same for the cloud tier on GCP: a deploy, not a version. The
+			// release goes behind its integration tests, run against a preview of
+			// what it deploys rather than a stack on this machine (release.nu):
+			// the drivers integrate runs that read APP_URL, which verify@gcp runs
+			// alone against the release or a named preview (verify.nu).
 			if list.Contains(D.code.meta.targets, "gcp") {
 				sayYaml: say: release: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.gcp}]}
+				sayYaml: say: verify: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.gcpVerify}]}
 			}
+			// The cluster on this machine, each service a process
+			// (.bayt/process-compose.yaml), where `launch` alone runs it in
+			// containers.
+			sayYaml: say: launch: rulemap: local: {platform: "local", priority: -1, stop: true, cmds: [{do: (_distribution.launchLocal & {prepare: D.cluster.surface.hostPrepare}).out}]}
 			// Post-release verification across live deployments.
 			if list.Contains(D.code.meta.targets, "pages") {
 				sayYaml: say: verify: rulemap: pages: {platform: "pages", cmds: [{do: _distribution.verifyPages}]}
@@ -1969,9 +2038,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if list.Contains(D.code.meta.targets, "k8s") {
 				sayYaml: say: verify: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.verifyK8s}]}
 			}
-			if list.Contains(D.code.meta.targets, "gcp") {
-				sayYaml: say: verify: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.verifyGcp}]}
-			}
+			// verify@gcp is the fork's own (above): the drivers against a deployed copy, which
+			// release@gcp's gate runs. Upstream's live check for gcp (verifyGcp) is not wired.
 			sayYaml: say: {
 				lint: rulemap: cue: cmds: [{do: "mise exec -- cue vet -c ./..."}]
 				build: _distribution.say.say.build
@@ -1995,6 +2063,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"cluster":       D.cluster
 		terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]
 		project: files: "checks.yaml": D.loop.surface.sayYaml
+		// The compose files sit in .bayt/, one level under the app.
+		if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.envFiles != _|_ {
+			project: targets: auth: compose: env_file: [for f in D.code.capabilities.auth.envFiles {path: "../\(f)", required: false}]
+		}
 		meta: {
 			app:         D.code.meta.name
 			generateCmd: distribution.#Project.compiler
@@ -2132,18 +2204,28 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: mecha.#Cluster & {
 		meta: {
 			app: D.code.meta.name
+			// The database runs PLV8 where a server entity's validation or a
+			// hybrid machine's rules need it (000_extensions.sql, 016's).
+			plv8: len([for _, e in D.code.state.entities if e.server if len([for n, _ in e.validations {n}]) > 0 {e}]) > 0 || len([if D.code.state.hybrids != _|_ for n, _ in D.code.state.hybrids {n}]) > 0
 			// The app is its build's root, and its runtime sits where mise put
 			// it, outside the app: every static the cluster serves is then the
 			// app's own file, fingerprinted and copied from the build context.
 			root:    ""
 			runtime: "../"
 			// The caddy takes omnishell's own statics from its image, which the
-			// build adds (builders/bayt.cue); the cluster serves the app's.
+			// build adds (builders/bayt.cue), and a host launch from the
+			// omnishell mise installs; the cluster serves the app's.
 			statics: list.Concat([[for s in D.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
+			toolStatics: [for s in D.statics if strings.HasPrefix(s.target, "/omnishell/") {file: s.file, target: s.target, tool: distribution.#Runtimes.omnishell}]
 			// mecha's images by name, which the build resolves to the pinned
-			// release or, in the monorepo, to mecha's sources.
+			// release or, in the monorepo, to mecha's sources; the auth
+			// service's is the program's when it names one (#App
+			// capabilities.auth.image).
 			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute", "airlock"] {
-				(s): {name: "libraries_mecha-\(s)-image"}
+				(s): [
+					if s == "auth" if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.image != _|_ {D.code.capabilities.auth.image},
+					{name: "libraries_mecha-\(s)-image"},
+				][0]
 			}}
 			bounds: {
 				authStatementMs: resilience.resilience.timeouts.statement.client * 1000
@@ -2253,10 +2335,33 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// app through the door, so it waits on the door, and the aggregate
 		// waits on it: a launch is up when its documents can be answered.
 		if D._rendersOnRequest {
+			// A host launch runs it beside the cluster's own processes, and the
+			// door proxies to it at its host address.
+			meta: hostPeers: ["render=\(omnishell.#Render.port)"]
 			surface: targets: {
 				render: bayt.healthcheck.http & {
 					cmd: "builtin": null
 					activate: ""
+					// As the cluster's own processes run under process-compose: the
+					// renderer from the omnishell mise installs, the entry the app's own.
+					"process-compose": activate: "mise x --"
+					expose: http: {port: omnishell.#Render.port, env: "PORT"}
+					entrypoint: {
+						do:    "entry=\"$PWD/\(omnishell.#Render.entry.source)\"; cd \"$(mise where \(distribution.#Runtimes.omnishell))\" && ENTRY=\"$entry\" ORIGIN=\"${ORIGIN:-\(D.out.meta.door.scheme)://localhost:${HOST_DOOR##*:}}\" exec deno run --frozen --config server/deno.json --allow-net --allow-env --allow-read server/render.ts"
+						shell: "sh"
+						dockerfile: {
+							do:    strings.Join(omnishell.#Render.command, " ")
+							shell: "exec"
+						}
+						// The origin readers reach the door at: ORIGIN where the caller
+						// sets it, else the door's port on this host, which the host
+						// writes for a peer's address (HOST_DOOR).
+						env: {
+							for k, v in compose.environment if k != "PORT" && k != "ENTRY" && k != "ORIGIN" {(k): v}
+							HOST_DOOR: "caddy:\(D.out.meta.door.port)"
+						}
+						after: {caddy: "healthy", crud: "healthy", electric: "healthy"}
+					}
 					// The release it takes its entry from (a `from.ref` copy).
 					deps: [":served:outs"]
 					healthcheck: {
@@ -2288,7 +2393,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							[{from: ref: ":served", srcs: ["\(omnishell.#Address.tree)/\(omnishell.#Render.entry.source)"], dst: omnishell.#Render.entry.target}],
 						])
 						epilogue: ["RUN \(omnishell.#Render.cache)"]
-						cmd: omnishell.#Render.command
 					}
 					compose: {
 						// The door, and what answers behind it: a guest is minted
@@ -2956,6 +3060,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if E.cluster.capabilities.server {
 					schema:     E.cluster.surface.schema
 					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+					// The app's own migrations, replayed on a built database with the
+					// framework's re-runnable steps (gcp's schema job): each is
+					// idempotent, as initdb replays it on a fresh volume.
+					replays: [for r in [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0] {r.name}]
 					drains: [for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}]
 				}
 			}
@@ -3185,9 +3293,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if len(E._accessed) > 0 {
 				"services/database/migrations/006_policies.sql": {
 					format: "sql"
-					text: strings.Join([for ent in E._entities if ent.access != _|_ {
+					text: strings.Join(list.Concat([[for ent in E._entities if ent.access != _|_ {
 						(#policySql & {e: ent, entities: E.code.state.entities}).out
-					}], "\n\n") + "\n"
+					}], [if E.code.capabilities.blobs && E.code.capabilities.auth != _|_ {#blobGateSql}]]), "\n\n") + "\n"
 				}
 			}
 			if len(E._validated) > 0 {
@@ -3752,7 +3860,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// A presenter's worker script answers with the presenter's own
 			// policy, which governs the worker it starts.
 			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
-			_fenced: list.Concat([_unitPaths, _presenterAt])
+			// A container hatch's pages that post a form to another site
+			// (#Capabilities.hatches.forms): their own policy, the door's with
+			// those origins added to form-action alone.
+			_forms: [for _, h in E.code.capabilities.hatches if h.forms != _|_ for p, origins in h.forms {path: p, to: origins}]
+			_fenced: list.Concat([_unitPaths, _presenterAt, [for f in _forms {f.path}]])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 				let matcher = [if len(_fenced) > 0 {"  @terminal not path \(strings.Join(_fenced, " "))\n  header @terminal"}, "  header"][0]
 				let presenter = [for p in _presenterAt {"  @presenter path \(p)\n  header @presenter Content-Security-Policy \(json.Marshal(E._shell.presenter.policy))\n"}]
@@ -3764,7 +3876,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
+				let forms = [for i, f in _forms {"  @form\(i) path \(f.path)\n  header @form\(i) Content-Security-Policy \(json.Marshal(strings.Replace(policy, "form-action 'self'", strings.Join(list.Concat([["form-action 'self'"], f.to]), " "), 1)))\n"}]
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(forms, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
 			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}

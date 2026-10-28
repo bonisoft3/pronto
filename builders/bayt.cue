@@ -20,6 +20,7 @@ import (
 	core "github.com/bonisoft3/bayt/core:bayt"
 	sayt "github.com/bonisoft3/bayt/stacks/sayt"
 	mise "github.com/bonisoft3/bayt/stacks/mise"
+	"github.com/bonisoft3/pronto/distribution"
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 	"github.com/bonisoft3/pronto/resilience"
@@ -241,12 +242,23 @@ import (
 	_runtimeStatics: [for s in B.terminalStatics if strings.HasPrefix(s.target, "/omnishell/") {s}]
 
 	project: core.#project & sayt.gate & {
-		files: "say.yaml": say: {for verb in ["launch", "integrate"] {
-			(verb): rulemap: builtin: {
-				stop: true
-				cmds: [{use: "./bayt-task.nu", do: "bayt-task \(verb)-action --generate"}]
+		files: "say.yaml": say: {
+			for verb in ["launch", "integrate"] {
+				(verb): rulemap: builtin: {
+					stop: true
+					cmds: [{use: "./bayt-task.nu", do: "bayt-task \(verb)-action --generate"}]
+				}
 			}
-		}}
+			// integrate@local, beside the builtin rather than among the loop's
+			// checks: sayt's loop closes integrate's rulemap over them, and a check
+			// names no platform. launch@local is the loop's (emit.cue).
+			integrate: rulemap: local: {
+				platform: "local"
+				priority: -1
+				stop:     true
+				cmds: [{do: (distribution.#IntegrateLocal & {prepare: B.cluster.surface.hostPrepare}).out}]
+			}
+		}
 		// The app is its repository's root, in its mirror and in the monorepo
 		// alike: the files it commits are its mirror's. Its images take the
 		// monorepo's layout where the switch is on.

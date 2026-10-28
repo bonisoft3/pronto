@@ -17,6 +17,11 @@ use release.nu [
 	auth-provider-environment
 	auth-provider-secret
 	release-tree
+	release-override
+	defines
+	default-environment
+	envoy-proxy
+	tunnel-manifests
 ]
 
 def main [] {
@@ -38,6 +43,14 @@ def run-tests [] {
 	test_read_environment
 	test_render_manifests_kind
 	test_render_manifests_eks
+	test_render_manifests_metal
+	test_render_ready_through_the_door
+	test_pods_hand_over
+	test_environment_access
+	test_schema_jobs_wait_for_database
+	test_release_override
+	test_tunnel_manifests
+	test_envoy_proxy
 	test_render_manifests_aks
 	test_dapr_annotations
 	test_timeout_budget_nests
@@ -212,6 +225,19 @@ def test_read_environment [] {
 	assert equal (read-environment "kind" | get registry) "localhost:5001"
 	assert equal (read-environment "eks" | get platform) "linux/amd64"
 	assert equal (read-environment "aks" | get platform) "linux/amd64"
+	# A metal cluster is the operator's: the app's release.cue gives it.
+	let sample = (resolve-app ($fixtures_dir | path join "sample"))
+	let minimal = (resolve-app ($fixtures_dir | path join "minimal"))
+	let metal = (read-environment "metal" $sample.cue_path)
+	assert equal $metal.context "home"
+	assert equal $metal.build {by: "cloudbuild", project: "ops"}
+	assert equal $metal.ingress.by "tunnel"
+	assert equal $metal.imagePullPolicy "IfNotPresent"
+	# Kind is pronto's own, whether or not the app gives a metal cluster.
+	assert equal (read-environment "kind" $sample.cue_path | get build.by) "docker"
+	assert equal (default-environment $sample.cue_path) "metal"
+	assert equal (default-environment $minimal.cue_path) "kind"
+	assert not (defines $minimal.cue_path "Metal")
 }
 
 def test_render_manifests_kind [] {
@@ -287,6 +313,107 @@ def test_render_manifests_kind [] {
 	assert not ($minimal_yaml | str contains "namespace: default")
 	assert ($yaml | str contains "namespace: sample")
 	assert ($minimal_yaml | str contains "namespace: minimal")
+}
+
+def test_render_manifests_metal [] {
+	print "test render-manifests for a metal cluster behind a tunnel..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let docs = (render-manifests $app.cue_path "metal" | from yaml)
+	let caddy = ($docs | where kind == "Deployment" and metadata.name == "sample-caddy" | first)
+	assert equal ($caddy.spec.template.spec.containers | where name == "caddy" | first | get image) "us-central1-docker.pkg.dev/ops/pronto/sample-caddy:latest"
+	assert equal ($caddy.spec.template.spec.containers | where name == "caddy" | first | get imagePullPolicy) "IfNotPresent"
+	# Cloudflare holds the certificate: the gateway listens on HTTP alone.
+	let gateway = ($docs | where kind == "Gateway" | first)
+	assert equal ($gateway.spec.listeners | get name) ["http"]
+	assert equal ($gateway.spec.listeners.0.hostname) "sample.apps.example.com"
+	assert equal ($docs | where kind == "Cluster" | first | get spec.storage.storageClass) "local-path"
+	# Kind keeps its HTTPS listener.
+	let kind_gateway = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Gateway" | first)
+	assert equal ($kind_gateway.spec.listeners | get name) ["http" "https"]
+}
+
+def test_release_override [] {
+	print "test the release tree as a compose file read over the app's own..."
+	let project = {services: {
+		caddy: {build: {additional_contexts: {app-crud: "service:app-crud", app-served: "service:app-served", root: "/w"}}}
+		render: {build: {additional_contexts: {app-served: "service:app-served"}}}
+		crud: {build: {context: "/w"}}
+		app-served: {build: {context: "/w"}}
+		app-served-release: {build: {context: "/w"}}
+	}}
+	# Only what changes, so the app's own paths stay the build's.
+	assert equal ($project | to yaml | release-override | from yaml) {services: {
+		caddy: {build: {additional_contexts: {app-served: "service:app-served-release"}}}
+		render: {build: {additional_contexts: {app-served: "service:app-served-release"}}}
+	}}
+	let refused = (try { $project | reject services.app-served-release | to yaml | release-override; "" } catch {|e| $e.msg })
+	assert ($refused | str contains "has no app-served-release")
+}
+
+def test_render_ready_through_the_door [] {
+	print "test render is ready only once the door answers it, and lives on its own health..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let render = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-render" | first | get spec.template.spec.containers | where name == "render" | first)
+	let probe = ($render.readinessProbe.exec.command | str join " ")
+	assert ($probe | str contains "DOOR") "readiness reads the door"
+	assert ($probe | str contains "/shell/shell.json") "readiness reads a page's shell through the door"
+	assert ($probe | str contains "/health") "readiness keeps render's own health"
+	assert equal $render.livenessProbe.httpGet.path "/health"
+}
+
+def test_pods_hand_over [] {
+	print "test a replaced pod keeps serving while the mesh learns of its successor..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let docs = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment")
+	for c in ["crud" "electric" "auth" "caddy" "render"] {
+		let d = ($docs | where metadata.name == $"sample-($c)" | first)
+		assert equal ($d.spec.template.spec.containers | where name == $c | first | get lifecycle.preStop.sleep.seconds) 15 $"($c) pauses before it stops"
+		assert equal ($d.spec.template.metadata.annotations | get "dapr.io/block-shutdown-duration") "20s" $"($c)'s sidecar outlasts the pause"
+	}
+}
+
+def test_environment_access [] {
+	print "test an environment's access names an SSH target..."
+	let schema = ($k8s_dir | path join "schema" "release.cue")
+	let check = {|v| do { $v | ^cue vet -c $schema -d "#Environment" json: - } | complete }
+	let base = {name: "metal", registry: "r", gatewayClassName: "eg", storageClass: "s", imagePullPolicy: "IfNotPresent", domainSuffix: "d"}
+	assert equal (($base | merge {access: {ssh: "pronto@144.91.92.217"}} | to json | do $check $in).exit_code) 0
+	assert equal (($base | to json | do $check $in).exit_code) 0 "access is optional"
+	assert (($base | merge {access: {ssh: "144.91.92.217"}} | to json | do $check $in).exit_code != 0) "a target names its user"
+}
+
+def test_tunnel_manifests [] {
+	print "test the tunnel carries every request to the gateway's named Service..."
+	let docs = (tunnel-manifests "6ff42ae2-765d-4adf-8112-31c55c1551ef" | from yaml)
+	let config = ($docs | where kind == "ConfigMap" | first | get data."config.yaml" | from yaml)
+	assert equal $config.tunnel "6ff42ae2-765d-4adf-8112-31c55c1551ef"
+	assert equal $config.ingress [{service: "http://pronto-gateway.envoy-gateway-system.svc.cluster.local:80"}]
+	let deployment = ($docs | where kind == "Deployment" | first)
+	let container = ($deployment.spec.template.spec.containers | first)
+	assert ($container.image =~ '^cloudflare/cloudflared:[0-9.]+@sha256:[0-9a-f]{64}$')
+	assert equal ($deployment.spec.template.spec.volumes | where name == "credentials" | first | get secret.secretName) "tunnel-credentials"
+}
+
+def test_envoy_proxy [] {
+	print "test the tunnel's proxy is a Service by name, under the class eg..."
+	let docs = (envoy-proxy "tunnel-proxy" {envoyService: {type: "ClusterIP", name: "pronto-gateway"}} | from yaml)
+	assert equal ($docs | get kind) ["EnvoyProxy" "GatewayClass"]
+	assert equal ($docs.0.spec.provider.kubernetes.envoyService.name) "pronto-gateway"
+	assert equal ($docs.1.metadata.name) "eg"
+	assert equal ($docs.1.spec.parametersRef.name) "tunnel-proxy"
+}
+
+def test_schema_jobs_wait_for_database [] {
+	print "test each schema job begins once the database answers it..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let jobs = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Job")
+	assert ($jobs | is-not-empty)
+	for job in $jobs {
+		let wait = ($job.spec.template.spec.initContainers | first)
+		assert equal $wait.name "database-ready"
+		assert ($wait.command | last | str contains "pg_isready")
+		assert equal ($wait.env | where name == "PGHOST" | first | get value) "database"
+	}
 }
 
 def test_render_manifests_eks [] {
@@ -460,14 +587,20 @@ def test_fetch_verified_cache_hit [] {
 
 def test_release_k8s_dry_run_cli [] {
 	print "test release.nu --dry-run prints manifests without cluster mutation..."
-	let res = (do { nu ($k8s_dir | path join "release.nu") --dry-run --app ($fixtures_dir | path join "sample") } | complete)
+	let res = (do { nu ($k8s_dir | path join "release.nu") --dry-run --app ($fixtures_dir | path join "minimal") } | complete)
 
 	assert equal $res.exit_code 0
 	assert ($res.stdout | str contains "kind: Service")
 	assert ($res.stdout | str contains "kind: Deployment")
 	assert ($res.stdout | str contains "kind: Gateway")
 	assert ($res.stdout | str contains "kind: HTTPRoute")
-	assert ($res.stdout | str contains "localhost:5001/sample-caddy:latest")
+	assert ($res.stdout | str contains "localhost:5001/minimal-caddy:latest")
+	# An app that gives a metal cluster releases there when not told otherwise,
+	# and to Kind when told.
+	let metal = (do { nu ($k8s_dir | path join "release.nu") --dry-run --app ($fixtures_dir | path join "sample") } | complete)
+	assert ($metal.stdout | str contains "us-central1-docker.pkg.dev/ops/pronto/sample-caddy:latest")
+	let kind = (do { nu ($k8s_dir | path join "release.nu") --dry-run --app ($fixtures_dir | path join "sample") -e kind } | complete)
+	assert ($kind.stdout | str contains "localhost:5001/sample-caddy:latest")
 }
 
 def test_release_nu_k8s_platform_cli [] {

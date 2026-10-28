@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/yaml"
 	"list"
+	"strconv"
 	"strings"
 
 	"github.com/bonisoft3/pronto/resilience"
@@ -31,7 +32,12 @@ import (
 	// Other names mapped onto the service, each sent on to the domain by the
 	// door (www, say): a passkey's relying party is the domain alone.
 	aliases: *[] | [...=~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"]
-	sqlTier:  *"db-f1-micro" | string
+	sqlTier: *"db-f1-micro" | string
+	// Which Cloud SQL instance holds the database: raising it starts the app on
+	// a new, empty one, the way an initdb set no pgroll migration carries forward
+	// reaches production. The earlier instance is left as it was, a backup and
+	// the way back, until its owner deletes it.
+	sqlGeneration: *1 | int & >=1
 	// A pull request's own copy of the app, beside the released one: its own
 	// service, Cloud SQL instance, jobs and secrets, each named for the app and
 	// the preview, at the service's run.app address with no domain or alias
@@ -44,6 +50,27 @@ import (
 	// run beside the release.
 	previewProject?: =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
 
+	// Identity-Aware Proxy in front of the service: only the people the project's
+	// owner admits (roles/iap.httpsResourceAccessor on it) reach the app, for an
+	// app that acts for its owner alone. A preview has none, so the gate's
+	// drivers reach it; it holds nothing of the release's.
+	iap: *false | bool
+	// The instance's CPU unthrottled between requests, for work that runs while
+	// nobody is asking (a sidecar's long task).
+	alwaysOn: *false | bool
+
+	// Electric's share of the instance. Its memory holds every shape it keeps
+	// (its storage is the instance's /tmp, which Cloud Run keeps in memory), so
+	// an app whose screens keep many shapes live, one per parent row for a
+	// folder under a shared parent, asks for more: without it a page's first
+	// load ran the container out of memory and restarted the instance. Its
+	// pool is how many snapshots it builds at once.
+	electric: {
+		memory: *"1Gi" | =~"^[1-9][0-9]*(Mi|Gi)$"
+		cpu:    *1000 | int & >=250 & <=4000
+		pool:   *#Pools.electric | int & >=2 & <=40
+	}
+
 	// Filled by the release from what it pushed: a revision resolves a tag once,
 	// so every image is named by digest (mecha's docs/deployment.md, what bites).
 	image: {
@@ -52,14 +79,109 @@ import (
 	}
 
 	// Present where the app's compose project runs the cluster's migrate step: the
-	// environment compose gives it beside its DATABASE_URL, filled by the release.
-	migrate?: env: [string]: string
+	// environment compose gives it beside its DATABASE_URL, filled by the release,
+	// and what its image runs (mecha's migrate entrypoint), which the schema job
+	// runs after initdb.
+	migrate?: {
+		env: [string]: string
+		command: *["/migrate.sh", "/pgroll", "00_initdb"] | [...string]
+	}
 
 	// The roles the app's schema grants PostgREST's login, as generate wrote them
 	// (.pronto/cluster.json, the k8s release's source too): what the job grants
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
 	// Filled by the release.
 	database: tokenRoles: [...string]
+	// The app's own migrations (rawMigrations), replayed on a built database.
+	database: replays: *[] | [...string]
+
+	// Present where the app's compose project runs mecha's ticker: the
+	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
+	// by the release. The ticker runs as one more container of the service, and
+	// Cloud Scheduler is its clock (mecha's services/ticker, the cloud clock).
+	ticker?: env: [string]: string
+
+	// Present where the app turns the blob plane on (capabilities.blobs): the
+	// store is the same rclone, serving a Cloud Storage bucket as the S3 bucket
+	// every app names (mecha-objects), and imgproxy reads it, both containers of
+	// the service. Filled by the release.
+	blobs?: {}
+
+	// Containers of the app's own beside the cluster's: each names a service of
+	// the app's compose project, built and pushed as the cluster's images are,
+	// and reached by the door at PRONTO_UPSTREAM_<NAME> (a plugin's collector,
+	// say). One that exports Prometheus metrics is scraped into Google Cloud
+	// Managed Service for Prometheus by its sidecar, where the app's PromQL rules
+	// and dashboards read them.
+	sidecars: [=~"^[a-z][a-z0-9-]*$"]: {
+		port!: int & >1024 & <65536
+		// Its share of the instance's CPU, in millicpu: Cloud Run gives a
+		// container with none a whole one, against a cap of 8 for them all.
+		cpu: *250 | int & >=80 & <=8000
+		// Its memory, as Cloud Run spells it; absent, Cloud Run's default.
+		memory?: =~"^[1-9][0-9]*(Mi|Gi)$"
+		// The environment compose gives the service, filled by the release, as
+		// the ticker's is; release.cue may add to it, and a key it sets is the
+		// release's in place of compose's (a broker's production address, say,
+		// where compose names a developer's machine). In the instance, a peer
+		// compose names (http://crud:3000, another sidecar) is the loopback
+		// port that container holds there (_loopback), a key naming one of the
+		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
+		// development value, and ORIGIN is where readers are.
+		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		metrics?: {
+			port!:    int & >1024 & <65536
+			path:     *"/metrics" | =~"^/"
+			interval: *"30s" | =~"^[1-9][0-9]*s$"
+		}
+		// Present, the sidecar runs as a Cloud Run service of its own
+		// (<service>-<name>), not a container of the cluster's instance, which
+		// holds at most 10. The door dials it at its run.app address, and it
+		// reaches the cluster through the door: compose's http://crud:3000 is
+		// the door's /crud. It scales on its own requests, so one that serves
+		// none (a worker polling the gateway) keeps minScale instances.
+		apart?: {
+			minScale: *0 | int & >=0
+		}
+	}
+	// The sidecars in the cluster's instance, and those running apart.
+	_inside: {for n, c in R.sidecars if c.apart == _|_ {(n): c}}
+	_apart: {for n, c in R.sidecars if c.apart != _|_ {(n): c}}
+	// The project's number, from the service's run.app address: a service's own
+	// address is <name>-<number>.<region>.run.app.
+	_number: strings.TrimSuffix(strings.TrimPrefix(R.runHost, "\(R._service)-"), ".\(R.region).run.app")
+	// Where the door reaches each sidecar apart: its own run.app address.
+	_apartHost: {for n, _ in R._apart {(n): "\(R.names.sidecarServices[n])-\(R._number).\(R.region).run.app"}}
+	// Each peer compose names, as host:port, and where it is in the instance:
+	// the cluster's containers, and each sidecar at its own port.
+	_loopback: {
+		"crud:3000":      "127.0.0.1:\(#Ports.crud)"
+		"auth:9999":      "127.0.0.1:\(#Ports.auth)"
+		"electric:3000":  "127.0.0.1:\(#Ports.electric)"
+		"ticker:9998":    "127.0.0.1:\(#Ports.ticker)"
+		"database:5432":  "127.0.0.1:\(#Ports.database)"
+		"rclone-s3:3900": "127.0.0.1:\(#Ports.rcloneS3)"
+		"imgproxy:8080":  "127.0.0.1:\(#Ports.imgproxy)"
+		for n, c in R._inside {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
+	}
+	// What a sidecar apart reaches its peers by, as compose names them: the
+	// gateway through the door, and another sidecar apart at its own address.
+	// Nothing else of the cluster's is reachable from outside its instance.
+	_remote: {
+		"http://crud:3000": "https://\(R.runHost)/crud"
+		for n, c in R._apart {"http://\(n):\(c.port)": "https://\(R._apartHost[n])"}
+	}
+	_sidecarPorts: [for _, c in R._inside for p in [c.port, if c.metrics != _|_ {c.metrics.port}] {p}]
+	// A port the cluster's containers hold, or one two sidecars share, would
+	// leave one of them unable to listen in the shared instance.
+	_sidecarClashes: list.Concat([
+		[for _, p in #Ports if list.Contains(R._sidecarPorts, p) {"\(p), which the cluster holds"}],
+		[if len(R._sidecarPorts) != len({for p in R._sidecarPorts {"\(p)": true}}) {"one port twice"}],
+	])
+	// A preview's metrics stay in its instance: its release may not enable
+	// Monitoring nor grant its account a role there.
+	_scraped: [for n, c in R._inside if c.metrics != _|_ if R.preview == _|_ {n}]
+	_scrapedApart: [for n, c in R._apart if c.metrics != _|_ if R.preview == _|_ {n}]
 
 	auth: {
 		// The providers compose gives the auth service, filled by the release;
@@ -71,59 +193,86 @@ import (
 		// The providers the program offers, whose ways in the terminal draws
 		// (compose's OIDC_PROVIDERS), filled by the release.
 		programProviders: *"" | string
+		// The auth service's own settings compose gives it (mecha's AUTH_*, such as
+		// its statement bound), filled by the release.
+		env: *{} | {[=~"^AUTH_[A-Z0-9_]+$"]: string}
 	}
 
 	// Where this release's resources are: a preview's project when it has one.
-	_project:  [if R.preview != _|_ && R.previewProject != _|_ {R.previewProject}, R.project][0]
+	_project: [if R.preview != _|_ && R.previewProject != _|_ {R.previewProject}, R.project][0]
 	_registry: "\(R.region)-docker.pkg.dev/\(R._project)/\(R.repository)"
 	// What a preview's resources are named for: the app, and the preview.
-	_id:      [if R.preview != _|_ {"\(R.name)-\(R.preview)"}, R.name][0]
+	_id: [if R.preview != _|_ {"\(R.name)-\(R.preview)"}, R.name][0]
 	_service: [if R.preview != _|_ {"\(R.service)-\(R.preview)"}, R.service][0]
-	_domain:  [if R.domain != _|_ && R.preview == _|_ {R.domain}, ""][0]
+	_domain: [if R.domain != _|_ && R.preview == _|_ {R.domain}, ""][0]
 	_aliases: [if R.preview != _|_ {[]}, R.aliases][0]
+	_iap: R.iap && R.preview == _|_
 	// Where readers are, which the door and a passkey's relying party are told
 	// (ORIGIN and WEBAUTHN_* in compose).
 	_host: [if _domain != "" {_domain}, R.runHost][0]
 	_origin: [if _host != "" {"https://\(_host)"}, ""][0]
-	_rpId:   _host
+	_rpId: _host
 
 	names: {
-		instance:       "\(R._id)-db"
-		connection:     "\(R._project):\(R.region):\(instance)"
-		database:       R.name
+		instance: "\(R._id)-db" + [if R.sqlGeneration > 1 {"-\(R.sqlGeneration)"}, ""][0]
+		connection: "\(R._project):\(R.region):\(instance)"
+		database:   R.name
 		// Previews share one, made once by the project's owner with only what
 		// a revision needs (docs/release-targets.md#previews), so the release
 		// that makes a preview needs no say over the project's IAM.
 		serviceAccount: [if R.preview != _|_ {"\(R.name)-preview"}, "\(R.name)-run"][0] + "@\(R._project).iam.gserviceaccount.com"
-		job:            "\(R._id)-initdb"
-		migrateJob:     "\(R._id)-migrate"
+		job:        "\(R._id)-initdb"
+		migrateJob: "\(R._id)-migrate"
+		// The Cloud Scheduler job that pokes the ticker.
+		clock: "\(R._id)-clock"
+		// The blob plane's bucket, named for the project too: bucket names are
+		// global.
+		bucket: "\(R._project)-\(R._id)-blobs"
+		// What the Managed Prometheus sidecar scrapes, as a secret it mounts.
+		scrapeConfig: "\(R._id)-gmp-config"
+		// Each sidecar apart's service, and what its own collector scrapes.
+		sidecarServices: {for n, _ in R._apart {(n): "\(R._service)-\(n)"}}
+		sidecarScrapeConfigs: {for n in R._scrapedApart {(n): "\(R._id)-\(n)-gmp-config"}}
 		// Generated once by the release, never a literal in what it renders;
 		// the URLs are composed from the passwords, since Cloud Run expands no
 		// $(VAR) inside a value.
 		secrets: {
 			POSTGRES_PASSWORD: "\(R._id)-postgres-password"
-			// The roles' passwords the image's initdb step sets (899_role_passwords.sh).
-			ELECTRIC_PASSWORD:      "\(R._id)-electric-password"
+			ELECTRIC_PASSWORD: "\(R._id)-electric-password"
+			// mecha's authenticator role, which PostgREST logs in as and switches
+			// from into anon, app_user or service; initdb sets its password.
 			AUTHENTICATOR_PASSWORD: "\(R._id)-authenticator-password"
-			PGRST_JWT_SECRET:  "\(R._id)-pgrst-jwt-secret"
-			ELECTRIC_SECRET:   "\(R._id)-electric-secret"
-			CRUD_DB_URI:       "\(R._id)-crud-db-uri"
-			AUTH_DATABASE_URL: "\(R._id)-auth-database-url"
-			ELECTRIC_DB_URL:   "\(R._id)-electric-database-url"
+			PGRST_JWT_SECRET:       "\(R._id)-pgrst-jwt-secret"
+			ELECTRIC_SECRET:        "\(R._id)-electric-secret"
+			CRUD_DB_URI:            "\(R._id)-crud-db-uri"
+			AUTH_DATABASE_URL:      "\(R._id)-auth-database-url"
+			ELECTRIC_DB_URL:        "\(R._id)-electric-database-url"
 			// pgroll's runner, over the socket Cloud Run mounts for a job.
 			MIGRATE_DATABASE_URL: "\(R._id)-migrate-database-url"
+			// The service role's token, signed with PGRST_JWT_SECRET: the ticker
+			// writes with it, and its clock's poke carries it.
+			SERVICE_JWT: "\(R._id)-service-jwt"
 		}
 	}
 }
 
 // Ports inside the shared instance: compose's own, but for electric, whose 3000
 // is crud's.
-#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, database: 5432, proxyHealth: 9090}
+#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, ticker: 9998, database: 5432, proxyHealth: 9090, rcloneS3: 3900, imgproxy: 8081}
 
 // The smallest tier admits about 25 connections, fewer than the pools'
 // defaults together; the instance is raised to 50 and the pools capped.
 #Pools: {crud: 5, electric: 5}
 #SqlFlags: "cloudsql.logical_decoding=on,max_connections=50"
+// A preview's database is the smallest tier and its tests open every shape at once: electric
+// fell behind the replication stream there for over a minute, Postgres's default
+// wal_sender_timeout cut it, and its live requests hung until the tests failed (seen five times
+// on Bonk Chess's preview, never on its release). A preview's database waits five minutes.
+// Only a preview's: a release's database would restart for the flag.
+#PreviewSqlFlags: #SqlFlags + ",wal_sender_timeout=300000"
+
+// Google Cloud Managed Service for Prometheus's collector for Cloud Run, pinned.
+#Gmp: "us-docker.pkg.dev/cloud-ops-agents-artifacts/cloud-run-gmp-sidecar/cloud-run-gmp-sidecar:1.9.4@sha256:8f8ac35f4bc82aa9547b1458343acb79b2594b35b56fb4c13dbe62c1f5a64679"
 
 // The Cloud SQL Auth Proxy, pinned.
 #Proxy: "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2@sha256:fc224915ef435afeb5b2a9421260a0d31986d5c8b7c7f5783c7f5d5885700cd2"
@@ -153,17 +302,29 @@ import (
 		metadata: {
 			name: R._service
 			labels: "cloud.googleapis.com/location": R.region
-			annotations: "run.googleapis.com/ingress": "all"
+			annotations: {
+				"run.googleapis.com/ingress": "all"
+				if R._iap {
+					"run.googleapis.com/iap-enabled":  "true"
+					"run.googleapis.com/launch-stage": "BETA"
+				}
+			}
 		}
 		spec: template: {
 			metadata: annotations: {
 				"autoscaling.knative.dev/minScale": "0"
 				// electric is one instance (mecha's docs/deployment.md#clouds-as-built).
-				"autoscaling.knative.dev/maxScale":       "1"
+				"autoscaling.knative.dev/maxScale":         "1"
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
+				// A preview keeps its CPU between requests too: electric reads the replication
+				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
+				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
-					caddy: ["crud", "auth", "electric"]
+					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
+					if R.ticker != _|_ {ticker: ["crud"]}
+					if R.blobs != _|_ {imgproxy: ["rclone-s3"]}
+					if len(R._scraped) > 0 {"gmp-collector": R._scraped}
 					crud: ["cloud-sql-proxy"]
 					auth: ["cloud-sql-proxy"]
 					electric: ["cloud-sql-proxy"]
@@ -176,8 +337,11 @@ import (
 				// A page load asks for every hatch file at once while electric's
 				// live requests hold theirs, and this one instance is all there is.
 				containerConcurrency: 1000
-				containers: [{
-					name:  "caddy"
+				if len(R._scraped) > 0 {
+					volumes: [{name: "gmp-config", secret: {secretName: R.names.scrapeConfig, items: [{key: "latest", path: "config.yaml"}]}}]
+				}
+				containers: list.Concat([[{
+					name: "caddy"
 					image: (imageOf & {svc: "caddy"}).out
 					ports: [{name: "http1", containerPort: P.caddy}]
 					env: list.Concat([[
@@ -186,11 +350,17 @@ import (
 						{name: "PRONTO_UPSTREAM_CRUD", value: "127.0.0.1:\(P.crud)"},
 						{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
 						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
+						if R.ticker != _|_ {{name: "PRONTO_UPSTREAM_TICKER", value: "127.0.0.1:\(P.ticker)"}},
+						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_RCLONE_S3", value: "127.0.0.1:\(P.rcloneS3)"}},
+						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_IMGPROXY", value: "127.0.0.1:\(P.imgproxy)"}},
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
-					]])
+					], [for n, c in R._inside {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "127.0.0.1:\(c.port)"}],
+						// One apart is dialed over TLS: the app's route to it sets the
+						// Host its address answers to (docs/release-targets.md#gcp).
+						[for n, _ in R._apart {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "https://\(R._apartHost[n])"}]])
 					startupProbe: {httpGet: {path: "/health", port: P.caddy}, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name:  "crud"
+					name: "crud"
 					image: (imageOf & {svc: "crud"}).out
 					env: [
 						(secretOf & {env: "PGRST_DB_URI", secret: sq.CRUD_DB_URI}).out,
@@ -206,46 +376,185 @@ import (
 					]
 					startupProbe: {httpGet: {path: "/ready", port: P.crudAdmin}, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name:  "auth"
+					name: "auth"
 					image: (imageOf & {svc: "auth"}).out
 					env: list.Concat([[
 						(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
-						// The service refuses to start without its statement bound.
-						{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"},
 						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
 						if R._rpId != "" {{name: "WEBAUTHN_RP_ID", value: R._rpId}},
 						if R._origin != "" {{name: "WEBAUTHN_ORIGIN", value: R._origin}},
-					], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
+					],
+						// The service refuses to start without its statement bound: compose's
+						// where it gives one, else resilience's client statement, in ms.
+						[if R.auth.env.AUTH_STATEMENT_TIMEOUT_MS == _|_ {{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"}}],
+						[for k, v in R.auth.env {name: k, value: v}], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
 					startupProbe: {tcpSocket: port: P.auth, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name:  "electric"
+					name: "electric"
 					image: (imageOf & {svc: "electric"}).out
 					env: [
 						(secretOf & {env: "DATABASE_URL", secret: sq.ELECTRIC_DB_URL}).out,
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
 						{name: "ELECTRIC_PORT", value: "\(P.electric)"},
 						{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
-						{name: "ELECTRIC_DB_POOL_SIZE", value: "\(#Pools.electric)"},
+						{name: "ELECTRIC_DB_POOL_SIZE", value: "\(R.electric.pool)"},
 						// The instance's own: electric's shape metadata is SQLite,
 						// which a bucket mounted over FUSE cannot lock. A new
 						// instance rebuilds its shapes from Postgres.
 						{name: "ELECTRIC_STORAGE_DIR", value: "/tmp/electric"},
 					]
+					resources: limits: {cpu: "\(R.electric.cpu)m", memory: R.electric.memory}
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
+				}, if R.ticker != _|_ {
+					name: "ticker"
+					image: (imageOf & {svc: "ticker"}).out
+					env: list.Concat([[
+						{name: "CRUD_URL", value: "http://127.0.0.1:\(P.crud)"},
+						{name: "PORT", value: "\(P.ticker)"},
+						(secretOf & {env: "SERVICE_JWT", secret: sq.SERVICE_JWT}).out,
+					], [for k, v in R.ticker.env {name: k, value: v}]])
+					startupProbe: {tcpSocket: port: P.ticker, periodSeconds: 2, failureThreshold: 60}
+					resources: limits: cpu: "250m"
+				}, if R.blobs != _|_ {
+					// mecha's blob plane over the bucket: a combine remote names its root
+					// mecha-objects, and the service's account reaches it with no key.
+					name: "rclone-s3"
+					image: (imageOf & {svc: "rclone-s3"}).out
+					command: ["rclone"]
+					args: ["serve", "s3", "--addr=0.0.0.0:\(P.rcloneS3)", "--vfs-cache-mode=off", "objects:"]
+					env: [
+						{name: "RCLONE_CONFIG_OBJECTS_TYPE", value: "combine"},
+						{name: "RCLONE_CONFIG_OBJECTS_UPSTREAMS", value: "mecha-objects=gcs:\(R.names.bucket)"},
+						{name: "RCLONE_CONFIG_GCS_TYPE", value: "google cloud storage"},
+						{name: "RCLONE_CONFIG_GCS_ENV_AUTH", value: "true"},
+						{name: "RCLONE_CONFIG_GCS_BUCKET_POLICY_ONLY", value: "true"},
+					]
+					startupProbe: {tcpSocket: port: P.rcloneS3, periodSeconds: 2, failureThreshold: 60}
+				}, if R.blobs != _|_ {
+					name: "imgproxy"
+					image: (imageOf & {svc: "imgproxy"}).out
+					env: [
+						{name: "IMGPROXY_USE_S3", value: "true"},
+						{name: "IMGPROXY_S3_ENDPOINT", value: "http://127.0.0.1:\(P.rcloneS3)"},
+						// The store takes any key pair; imgproxy's S3 client insists on one.
+						{name: "AWS_ACCESS_KEY_ID", value: "GK000000000000000000000000"},
+						{name: "AWS_SECRET_ACCESS_KEY", value: "0000000000000000000000000000000000000000000000000000000000000000"},
+						{name: "AWS_REGION", value: "rclone"},
+						{name: "IMGPROXY_BIND", value: ":\(P.imgproxy)"},
+						{name: "IMGPROXY_MAX_SRC_RESOLUTION", value: "50"},
+						// The store and Google's photo host, as mecha's #ImgproxySources.
+						{name: "IMGPROXY_ALLOWED_SOURCES", value: "s3://mecha-objects/,https://lh3.googleusercontent.com/"},
+						// mecha's presets alone (its #ImgproxyPresets), as compose's imgproxy: no
+						// key signs a URL.
+						{name: "IMGPROXY_ONLY_PRESETS", value: "true"},
+						{name: "IMGPROXY_PRESETS", value: "thumb=rs:fill:128:128/f:webp,avatar=rs:fill:256:256/f:webp,picture=rs:fit:1024:1024/f:webp"},
+						{name: "IMGPROXY_MAX_RESULT_DIMENSION", value: "1024"},
+						{name: "IMGPROXY_SET_CANONICAL_HEADER", value: "false"},
+						{name: "IMGPROXY_CACHE_CONTROL_PASSTHROUGH", value: "true"},
+					]
+					startupProbe: {tcpSocket: port: P.imgproxy, periodSeconds: 2, failureThreshold: 60}
 				}, {
 					name:  "cloud-sql-proxy"
 					image: #Proxy
 					args: ["--port=\(P.database)", "--health-check", "--http-port=\(P.proxyHealth)", "--http-address=0.0.0.0", R.names.connection]
 					startupProbe: {httpGet: {path: "/startup", port: P.proxyHealth}, periodSeconds: 2, failureThreshold: 60}
-				}]
+					resources: limits: cpu: "500m"
+				}], [for n, c in R._inside {
+					(sidecarOf & {"n": n, "c": c}).out
+					resources: limits: {
+						cpu: "\(c.cpu)m"
+						if c.memory != _|_ {memory: c.memory}
+					}
+				}], [if len(R._scraped) > 0 {gmpCollector}]])
 			}
 		}
 	}
 
+	// A sidecar's container, in the cluster's instance or its own service.
+	let sidecarOf = {
+		n: string
+		c: _
+		out: {
+			name: n
+			image: (imageOf & {svc: n}).out
+			if len(c.env) > 0 {
+				env: [for k, v in c.env {[
+					if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
+					if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
+					{name: k, value: v},
+				][0]}]
+			}
+			startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+		}
+	}
+	let gmpCollector = {
+		name:  "gmp-collector"
+		image: #Gmp
+		resources: limits: cpu: "250m"
+		volumeMounts: [{name: "gmp-config", mountPath: "/etc/rungmp"}]
+	}
+
+	// Each sidecar apart, a service of its own: its container takes the
+	// service's requests at its port, beside Managed Prometheus's collector
+	// where it exports metrics. Public as the door is, which dials it.
+	sidecarServices: {for n, c in R._apart {
+		(n): {
+			let scraped = list.Contains(R._scrapedApart, n)
+			apiVersion: "serving.knative.dev/v1"
+			kind:       "Service"
+			metadata: {
+				name: R.names.sidecarServices[n]
+				labels: "cloud.googleapis.com/location":   R.region
+				annotations: "run.googleapis.com/ingress": "all"
+			}
+			spec: template: {
+				metadata: annotations: {
+					"autoscaling.knative.dev/minScale":         "\(c.apart.minScale)"
+					"autoscaling.knative.dev/maxScale":         "1"
+					"run.googleapis.com/execution-environment": "gen2"
+					// One kept at rest works between requests: its CPU is not
+					// throttled outside them.
+					if c.apart.minScale > 0 {"run.googleapis.com/cpu-throttling": "false"}
+					if scraped {"run.googleapis.com/container-dependencies": json.Marshal({"gmp-collector": [n]})}
+				}
+				spec: {
+					serviceAccountName: R.names.serviceAccount
+					if scraped {
+						volumes: [{name: "gmp-config", secret: {secretName: R.names.sidecarScrapeConfigs[n], items: [{key: "latest", path: "config.yaml"}]}}]
+					}
+					containers: list.Concat([[{
+						(sidecarOf & {"n": n, "c": c}).out
+						ports: [{name: "http1", containerPort: c.port}]
+						if c.memory != _|_ {resources: limits: memory: c.memory}
+					}], [if scraped {gmpCollector}]])
+				}
+			}
+		}
+	}}
+
 	// The schema, as compose's database builds it on a fresh volume: the app's
 	// database image runs its initdb directory once against Cloud SQL, over the
 	// socket Cloud Run mounts, and a database comment marks it done (as the k8s
-	// release's initdb Job does). The roles' grant runs every release.
+	// release's initdb Job does). Its re-runnable steps and the roles' grant run
+	// every release.
+	//
+	// Where the app has pgroll migrations, the same job then carries the schema
+	// forward with the cluster's pgroll runner, as compose's migrate step does
+	// (mecha's docs/schema.md, carrying a live database forward), after initdb
+	// and before the service rolls, as the k8s release's migrate Job: its image
+	// is the release's `schema`, migrate's with the database's initdb directory,
+	// so one job starts once, not twice.
+	let initdbEnv = [
+		{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
+		{name: "PGUSER", value: "postgres"},
+		{name: "PGDATABASE", value: R.names.database},
+		{name: "POSTGRES_USER", value: "postgres"},
+		{name: "POSTGRES_DB", value: R.names.database},
+		(secretOf & {env: "PGPASSWORD", secret: sq.POSTGRES_PASSWORD}).out,
+		(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
+		(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
+	]
+	let initdbNames = [for e in initdbEnv {e.name}]
 	job: {
 		apiVersion: "run.googleapis.com/v1"
 		kind:       "Job"
@@ -262,12 +571,29 @@ import (
 					maxRetries:         0
 					timeoutSeconds:     600
 					containers: [{
-						name:  "initdb"
-						image: (imageOf & {svc: "database"}).out
+						name: "initdb"
+						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
 						command: ["bash", "-c", """
 							set -euo pipefail
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
-							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"; else
+							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
+							  # Its re-runnable steps are the release's, though (emit.cue's): a new
+							  # entity's table and a new field's column, every policy, trigger and
+							  # publication, the hybrid machines' code, and the app's own
+							  # migrations, each idempotent, run again, keeping every row. Live traffic
+							  # can deadlock a step's ALTER (a lease's renewal against ENABLE ROW LEVEL
+							  # SECURITY); being idempotent, the step is run again, up to three times.
+							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 016_mecha_actors.sql \(strings.Join(R.database.replays, " ")); do
+							    f=/docker-entrypoint-initdb.d/$step
+							    if [ -f "$f" ]; then echo "initdb: replaying $step"
+							      for try in 1 2 3; do
+							        if psql -v ON_ERROR_STOP=1 -Xq -f "$f"; then break; fi
+							        if [ "$try" = 3 ]; then exit 1; fi
+							        echo "initdb: $step failed, again in 10s"; sleep 10
+							      done
+							    fi
+							  done
+							else
 							  source /usr/local/bin/docker-entrypoint.sh
 							  docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
 							  docker_process_init_files /docker-entrypoint-initdb.d/*
@@ -276,48 +602,17 @@ import (
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
 							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"
-							"""]
-						env: [
-							{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
-							{name: "PGUSER", value: "postgres"},
-							{name: "PGDATABASE", value: R.names.database},
-							{name: "POSTGRES_USER", value: "postgres"},
-							{name: "POSTGRES_DB", value: R.names.database},
-							(secretOf & {env: "PGPASSWORD", secret: sq.POSTGRES_PASSWORD}).out,
-							(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
-							(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
-						]
+							# It also owns the tables under FORCE ROW LEVEL SECURITY and the
+							# SECURITY DEFINER functions that write them, which a superuser
+							# bypasses; BYPASSRLS gives it that back. Sessions that switch
+							# roles still meet every policy.
+							psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
+							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
+						env: list.Concat([initdbEnv, [if R.migrate != _|_ for e in list.Concat([
+							[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out],
+							[for k, v in R.migrate.env {name: k, value: v}],
+						]) if !list.Contains(initdbNames, e.name) {e}]])
 					}]
-				}
-			}
-		}
-	}
-
-	// A database built before a change is carried forward by the cluster's pgroll runner, the
-	// image compose's migrate step runs (mecha's docs/schema.md, carrying a live database
-	// forward), after initdb and before the service rolls: the k8s release's migrate Job.
-	if R.migrate != _|_ {
-		migrateJob: {
-			apiVersion: "run.googleapis.com/v1"
-			kind:       "Job"
-			metadata: {
-				name: R.names.migrateJob
-				labels: "cloud.googleapis.com/location": R.region
-			}
-			spec: template: {
-				metadata: annotations: "run.googleapis.com/cloudsql-instances": R.names.connection
-				spec: {
-					taskCount: 1
-					template: spec: {
-						serviceAccountName: R.names.serviceAccount
-						maxRetries:         0
-						timeoutSeconds:     600
-						containers: [{
-							name:  "migrate"
-							image: (imageOf & {svc: "migrate"}).out
-							env: list.Concat([[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out], [for k, v in R.migrate.env {name: k, value: v}]])
-						}]
-					}
 				}
 			}
 		}
@@ -333,28 +628,78 @@ import (
 		if R.auth.oidc[key] =~ "//(localhost|127\\.0\\.0\\.1|\\[::1\\]|host\\.docker\\.internal)([:/]|$)" {"\(key) is \(R.auth.oidc[key])"}]
 	let unserved = [for p in strings.Split(R.auth.programProviders, ",") if p != "" if !list.Contains(served, p) {p}]
 
+	// What the Managed Prometheus sidecar scrapes: each sidecar's metrics, on
+	// the instance's loopback.
+	scrapeConfig: yaml.Marshal({
+		apiVersion: "monitoring.googleapis.com/v1beta"
+		kind:       "RunMonitoring"
+		metadata: name: R._id
+		spec: endpoints: [for n in R._scraped let m = R.sidecars[n].metrics {port: m.port, path: m.path, interval: m.interval}]
+	})
+	// What each sidecar apart's own collector scrapes: its metrics, on its
+	// instance's loopback.
+	sidecarScrapeConfigs: {for n in R._scrapedApart let m = R.sidecars[n].metrics {
+		(R.names.sidecarScrapeConfigs[n]): yaml.Marshal({
+			apiVersion: "monitoring.googleapis.com/v1beta"
+			kind:       "RunMonitoring"
+			metadata: name: "\(R._id)-\(n)"
+			spec: endpoints: [{port: m.port, path: m.path, interval: m.interval}]
+		})
+	}}
+
 	// What the release needs besides the two documents, as JSON.
 	plan: {
-		project:        R._project
-		region:         R.region
-		repository:     R.repository
-		registry:       R._registry
-		service:        R._service
+		project:    R._project
+		region:     R.region
+		repository: R.repository
+		registry:   R._registry
+		service:    R._service
 		if R.preview != _|_ {preview: R.preview}
-		names:          R.names
-		sqlTier:        R.sqlTier
-		sqlFlags:       #SqlFlags
+		names:    R.names
+		sqlTier:  R.sqlTier
+		sqlFlags: [if R.preview != _|_ {#PreviewSqlFlags}, #SqlFlags][0]
 		if R._domain != "" {domain: R._domain}
-		aliases:        R._aliases
+		aliases: R._aliases
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}
 		if len(unserved) > 0 {providers: error("the terminal offers \(strings.Join(unserved, ", ")), which production does not serve, so its way in would answer 404: give GCP.auth.oidc the provider's production settings")}
+
 		// An alias sends readers on to the domain, so it needs one.
 		if len(R._aliases) > 0 {aliasTarget: R.domain}
-		hasRpId:        R._rpId != ""
-		serviceYaml:    yaml.Marshal(B.service)
-		jobYaml:        yaml.Marshal(B.job)
-		migrateJobYaml: [if B.migrateJob != _|_ {yaml.Marshal(B.migrateJob)}, ""][0]
+		hasRpId:     R._rpId != ""
+		iap:         R._iap
+		serviceYaml: yaml.Marshal(B.service)
+		jobYaml:     yaml.Marshal(B.job)
+		// The ticker's clock, once a minute, the floor (mecha's services/ticker,
+		// the cloud clock): the service's own run.app address, which a domain
+		// mapping still provisioning cannot stall.
+		if R.ticker != _|_ && R.runHost != "" {clock: {
+			name:     R.names.clock
+			schedule: "* * * * *"
+			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
+		}}
 		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
+		// The compose services built and run beside the cluster's.
+		sidecars: [for n, _ in R.sidecars {n}]
+		// Where each peer compose names is in the instance, which the release
+		// rewrites a sidecar's compose environment by.
+		loopback: R._loopback
+		// The same, for each sidecar: the instance's loopback for one inside
+		// it, and the door and the other services' addresses for one apart.
+		peers: {
+			for n, _ in R._inside {(n): R._loopback}
+			for n, _ in R._apart {(n): R._remote}
+		}
+		// Each sidecar apart's service, applied after the cluster's.
+		sidecarServicesYaml: {for n, s in B.sidecarServices {(n): yaml.Marshal(s)}}
+		sidecarScrapeConfigs: B.sidecarScrapeConfigs
+		if len(R._sidecarClashes) > 0 {sidecarPorts: error("GCP.sidecars listen on \(strings.Join(R._sidecarClashes, ", "))")}
+		if len(B.service.spec.template.spec.containers) > 10 {containers: error("the service has \(len(B.service.spec.template.spec.containers)) containers, over Cloud Run's 10 a revision: run some of GCP.sidecars apart (apart: {})")}
+		if B._millicpu > 8000 {cpu: error("the service's containers ask for \(B._millicpu) millicpu, over Cloud Run's 8000: lower GCP.sidecars' cpu")}
+		scrapeConfig: [if len(R._scraped) > 0 {B.scrapeConfig}, ""][0]
 	}
+	// A container with no limit is given a whole CPU.
+	_millicpu: list.Sum([for c in B.service.spec.template.spec.containers {
+		[if c.resources.limits.cpu != _|_ {strconv.Atoi(strings.TrimSuffix(c.resources.limits.cpu, "m"))}, 1000][0]
+	}])
 	_noLiteralSecret: true & !strings.Contains(json.Marshal(B.service), "postgres://")
 }

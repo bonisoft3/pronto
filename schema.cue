@@ -1558,6 +1558,17 @@ import (
 			// one gesture that signs in, or keeps the guest's identity under a
 			// new passkey.
 			promote: *false | bool
+			// The image the cluster's auth service runs in place of mecha's: a
+			// target of the program's cluster unification (`{ref: ":<target>"}`)
+			// built FROM mecha's, or a pinned name. The service keeps mecha's
+			// entrypoint, environment and route, so the image answers mecha's
+			// token contract; the cluster's, not the terminal's, so shell.yaml
+			// never carries it.
+			image?: {ref: string & =~"^:[a-z][a-z0-9-]*$"} | {name: string & !=""}
+			// Env files, app-relative, compose reads beside mecha's environment
+			// for the auth service, each optional: an image's settings, and a
+			// secret kept in a file git ignores rather than in any emitted one.
+			envFiles?: [...(string & =~"^[A-Za-z0-9_][A-Za-z0-9._/-]*\\.env$" & !~"\\.\\.")]
 			// The providers a person may sign in through besides a passkey,
 			// each one the terminal offers (#emit): a way in at the gate and in
 			// a guest's strip, run by the cluster's auth service. A provider's
@@ -1623,6 +1634,15 @@ import (
 			// removing the terminal CSP or Trusted Types boundary.
 			if H.kind != "container" {
 				files!: [string, ...string]
+			}
+			// A container hatch's own pages that hand a form to another site,
+			// such as an OAuth or app-registration flow that takes a POST: each
+			// page's path under the hatch's door route, and the origins it may
+			// post to. The door's policy keeps form-action 'self' everywhere
+			// else; these pages add exactly their origins to it, and nothing
+			// more of the policy changes.
+			if H.kind == "container" {
+				forms: [=~"^/\(Name)/[A-Za-z0-9_/.-]+$"]: [...(string & =~"^https://[A-Za-z0-9.-]+$")]
 			}
 		}
 		// Terminal-tier hatch: a vendored unit running inside the terminal, under
@@ -2085,9 +2105,6 @@ import (
 	_authTargetViolations: list.Concat([
 		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
 			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
-		}],
-		[if len(_authProviders) > 0 for target in A.meta.targets if target == "cloudflare" {
-			"cloudflare release target does not yet support social sign-in providers; use guest sessions or deploy to container/cloud tiers (gcp, k8s, docker)"
 		}],
 	])
 	_authTargetRefusal: [if len(_authTargetViolations) == 0 {true}, _authTargetViolations[0]][0] & true

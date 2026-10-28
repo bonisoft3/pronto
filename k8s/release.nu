@@ -1,6 +1,7 @@
 # release.nu — Kubernetes release engine with immutable verified operators
 #
-# Cluster & operator lifecycle powered by kind + ctlptl and verified remote manifests.
+# Cluster & operator lifecycle powered by kind + ctlptl and verified remote manifests,
+# or against a cluster the operator runs (envs/metal.cue), behind a Cloudflare Tunnel.
 # No vendored operator YAMLs in git; remote manifests are pinned to immutable URLs
 # with SHA256 checksums verified before execution (ADD --checksum pattern).
 
@@ -8,6 +9,13 @@
 # This engine's own directory: cluster.yaml, envs/, schema/ and observability/
 # sit beside it wherever pronto is installed, monorepo or mirror.
 const k8s_dir = path self .
+
+use ../gcp/build.nu [push-images]
+
+# What carries a metal cluster's requests out through its tunnel to Cloudflare.
+const cloudflared = "cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c"
+# The gateway's Service behind a tunnel, named so the tunnel can dial it.
+const tunnel_gateway = "pronto-gateway"
 
 export const OPERATORS = [
 	{
@@ -105,40 +113,58 @@ export def ensure-cluster [] {
 # Ensure operators are installed with verified checksums
 export def ensure-operators [
 	--timeout: string = "90s"
+	--ingress: record = {by: "hostPort"} # the environment's
+	--reopen: closure # opens the release's tunnel to the API again (#Environment.access)
 ] {
 	for entry in $OPERATORS {
-		if ($entry.namespace? | is-not-empty) {
-			kubectl create namespace $entry.namespace --dry-run=client -o yaml | kubectl apply -f -
-		}
-
-		let file = (fetch-verified $entry)
-		if ($entry.kind? | default "") == "helm" {
-			# Split as text: a YAML round trip through nu rewrites values kubectl then rejects.
-			let docs = (helm template $entry.name $file --include-crds --namespace $entry.namespace ...($entry.set? | default [] | each { [--set $in] } | flatten) | split row --regex '(?m)^---\s*$' | where ($it | str trim | is-not-empty))
-			let is_crd = {|d| $d =~ '(?m)^kind:\s*CustomResourceDefinition\s*$' }
-			# A chart's own custom resources map only once its CRDs are established.
-			let crds = ($docs | where {|d| do $is_crd $d })
-			if ($crds | is-not-empty) {
-				$crds | str join "\n---\n" | kubectl apply --server-side --force-conflicts -f -
-				kubectl wait --for=condition=Established $"--timeout=($timeout)" crd --all
-			}
-			# helm template leaves namespace off objects that do not set it; the chart's namespace is theirs.
-			$docs | where {|d| not (do $is_crd $d) } | str join "\n---\n" | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false -f -
-		} else {
-			kubectl apply --server-side --force-conflicts --validate=false -f $file
-		}
-
-		for d in ($entry.check_deployments? | default []) {
-			print $"Waiting for deployment ($d) in ($entry.namespace)..."
-			kubectl rollout status $"deployment/($d)" -n $entry.namespace $"--timeout=($timeout)"
+		try { install-operator $entry $timeout } catch {|e|
+			if $reopen == null { error make {msg: $e.msg} }
+			print $"($entry.name) failed through the tunnel to the API \(($e.msg)\): opening it again"
+			do $reopen
+			install-operator $entry $timeout
 		}
 	}
 
-	ensure-envoy-gateway-class
+	ensure-envoy-gateway-class $ingress
 }
 
-# Ensure Envoy Gateway GatewayClass and hostPort proxy configuration for Kind
-export def ensure-envoy-gateway-class [] {
+# One operator: its manifests applied, its deployments waited for.
+def install-operator [entry: record, timeout: string] {
+	if ($entry.namespace? | is-not-empty) {
+		kubectl create namespace $entry.namespace --dry-run=client -o yaml | kubectl apply -f -
+	}
+
+	let file = (fetch-verified $entry)
+	if ($entry.kind? | default "") == "helm" {
+		# Split as text: a YAML round trip through nu rewrites values kubectl then rejects.
+		let docs = (helm template $entry.name $file --include-crds --namespace $entry.namespace ...($entry.set? | default [] | each { [--set $in] } | flatten) | split row --regex '(?m)^---\s*$' | where ($it | str trim | is-not-empty))
+		let is_crd = {|d| $d =~ '(?m)^kind:\s*CustomResourceDefinition\s*$' }
+		# A chart's own custom resources map only once its CRDs are established.
+		let crds = ($docs | where {|d| do $is_crd $d })
+		if ($crds | is-not-empty) {
+			$crds | str join "\n---\n" | kubectl apply --server-side --force-conflicts --request-timeout=120s -f -
+			kubectl wait --for=condition=Established $"--timeout=($timeout)" crd --all
+		}
+		# helm template leaves namespace off objects that do not set it; the chart's namespace is theirs.
+		$docs | where {|d| not (do $is_crd $d) } | str join "\n---\n" | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false --request-timeout=120s -f -
+	} else {
+		kubectl apply --server-side --force-conflicts --validate=false --request-timeout=120s -f $file
+	}
+
+	for d in ($entry.check_deployments? | default []) {
+		print $"Waiting for deployment ($d) in ($entry.namespace)..."
+		kubectl rollout status $"deployment/($d)" -n $entry.namespace $"--timeout=($timeout)"
+	}
+}
+
+# Ensure Envoy Gateway's GatewayClass, `eg`, and the proxy behind it: on Kind
+# a DaemonSet on the node's host ports, behind a tunnel a Service the tunnel
+# dials by name. Every app's Gateway merges into the one proxy.
+export def ensure-envoy-gateway-class [ingress: record = {by: "hostPort"}] {
+	if $ingress.by == "tunnel" {
+		envoy-proxy "tunnel-proxy" {envoyService: {type: "ClusterIP", name: $tunnel_gateway}} | kubectl apply -f -
+		return
+	}
 	let eg_config = "apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:
@@ -189,6 +215,105 @@ spec:
     namespace: envoy-gateway-system
 "
 	$eg_config | kubectl apply -f -
+}
+
+
+# The EnvoyProxy `name` and the GatewayClass `eg` naming it, with tracing to
+# Jaeger and `kubernetes` as its provider's settings.
+export def envoy-proxy [name: string, kubernetes: record]: nothing -> string {
+	[
+		{
+			apiVersion: "gateway.envoyproxy.io/v1alpha1", kind: "EnvoyProxy"
+			metadata: {name: $name, namespace: "envoy-gateway-system"}
+			spec: {
+				mergeGateways: true
+				telemetry: {tracing: {provider: {type: "OpenTelemetry", host: "jaeger.observability.svc.cluster.local", port: 4317}}}
+				provider: {type: "Kubernetes", kubernetes: $kubernetes}
+			}
+		}
+		{
+			apiVersion: "gateway.networking.k8s.io/v1", kind: "GatewayClass"
+			metadata: {name: "eg"}
+			spec: {
+				controllerName: "gateway.envoyproxy.io/gatewayclass-controller"
+				parametersRef: {group: "gateway.envoyproxy.io", kind: "EnvoyProxy", name: $name, namespace: "envoy-gateway-system"}
+			}
+		}
+	] | each { to yaml } | str join "---\n"
+}
+
+# cloudflared in the cluster, carrying every request for the tunnel's hosts to
+# the gateway, which routes each by its host. The tunnel is the operator's,
+# made once with `cloudflared tunnel create`; its credentials are the Secret
+# `tunnel-credentials` in `cloudflared` (k8s/README.md#metal).
+export def tunnel-manifests [id: string]: nothing -> string {
+	let config = {
+		tunnel: $id
+		credentials-file: "/etc/cloudflared/credentials/credentials.json"
+		metrics: "0.0.0.0:2000"
+		no-autoupdate: true
+		ingress: [{service: $"http://($tunnel_gateway).envoy-gateway-system.svc.cluster.local:80"}]
+	}
+	let labels = {"app.kubernetes.io/name": "cloudflared"}
+	[
+		{apiVersion: "v1", kind: "ConfigMap", metadata: {name: "cloudflared", namespace: "cloudflared"}, data: {"config.yaml": ($config | to yaml)}}
+		{
+			apiVersion: "apps/v1", kind: "Deployment"
+			metadata: {name: "cloudflared", namespace: "cloudflared", labels: $labels}
+			spec: {
+				# Two connectors, so a restart of one drops no request.
+				replicas: 2
+				selector: {matchLabels: $labels}
+				template: {
+					metadata: {labels: $labels, annotations: {"pronto.dev/config": ($config | to json | hash sha256)}}
+					spec: {
+						containers: [{
+							name: "cloudflared"
+							image: $cloudflared
+							args: ["tunnel" "--config" "/etc/cloudflared/config/config.yaml" "run"]
+							livenessProbe: {httpGet: {path: "/ready", port: 2000}, failureThreshold: 1, initialDelaySeconds: 10, periodSeconds: 10}
+							resources: {requests: {cpu: "10m", memory: "32Mi"}, limits: {memory: "128Mi"}}
+							securityContext: {runAsNonRoot: true, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+							volumeMounts: [
+								{name: "config", mountPath: "/etc/cloudflared/config", readOnly: true}
+								{name: "credentials", mountPath: "/etc/cloudflared/credentials", readOnly: true}
+							]
+						}]
+						volumes: [
+							{name: "config", configMap: {name: "cloudflared"}}
+							{name: "credentials", secret: {secretName: "tunnel-credentials"}}
+						]
+					}
+				}
+			}
+		}
+	] | each { to yaml } | str join "---\n"
+}
+
+# The API through an SSH tunnel of this release's own (#Environment.access): a
+# free local port forwarded to the node's 6443, which the release's kubeconfig
+# names. Its remote end is a bounded sleep, so a release that dies leaves no
+# tunnel past the hour; close-api-tunnel ends it when the release does.
+export def open-api-tunnel [target: string, port: int, socket: string] {
+	^ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -M -S $socket -f -L $"($port):127.0.0.1:6443" $target sleep 3600
+	for _ in 1..30 {
+		if (do { ^kubectl get --raw /readyz --request-timeout=5s } | complete).exit_code == 0 { return }
+		sleep 1sec
+	}
+	error make {msg: $"the cluster's API does not answer through the tunnel to ($target)"}
+}
+
+export def close-api-tunnel [target: string, socket: string] {
+	do { ^ssh -S $socket -O exit $target } | complete | ignore
+}
+
+export def ensure-tunnel [id: string, --timeout: string = "90s"] {
+	kubectl create namespace cloudflared --dry-run=client -o yaml | kubectl apply -f -
+	if (kubectl get secret tunnel-credentials -n cloudflared --ignore-not-found -o name | str trim | is-empty) {
+		error make {msg: $"the cluster has no credentials for tunnel ($id): kubectl create secret generic tunnel-credentials -n cloudflared --from-file=credentials.json=$HOME/.cloudflared/($id).json \(k8s/README.md#metal\)"}
+	}
+	tunnel-manifests $id | kubectl apply -f -
+	kubectl rollout status deployment/cloudflared -n cloudflared $"--timeout=($timeout)"
 }
 
 # Ensure VictoriaMetrics, Jaeger, and Vector observability stack
@@ -292,14 +417,33 @@ export def render-manifests [
 	$res.stdout
 }
 
-# The target environment's #Environment, from plugins/pronto/k8s/envs
-export def read-environment [cluster_env: string]: nothing -> record {
-	let field = { kind: "Kind", eks: "EKS", aks: "AKS" } | get $cluster_env
+# The target environment's #Environment: the app's own where its release.cue
+# gives one (a metal cluster's context, registry and tunnel are the
+# operator's), else pronto's, from k8s/envs.
+export def read-environment [cluster_env: string, cue_path?: string]: nothing -> record {
+	let field = { kind: "Kind", eks: "EKS", aks: "AKS", metal: "Metal" } | get $cluster_env
+	if ($cue_path | is-not-empty) and (defines $cue_path $field) {
+		let own = (do { cue export --expression $field $cue_path } | complete)
+		if $own.exit_code != 0 { error make { msg: $"Failed to read ($cluster_env) environment from ($cue_path): ($own.stderr)" } }
+		return ($own.stdout | from json)
+	}
 	let res = (do { cd $k8s_dir; cue export --expression $field ./envs } | complete)
 	if $res.exit_code != 0 {
 		error make { msg: $"Failed to read ($cluster_env) environment: ($res.stderr)" }
 	}
 	$res.stdout | from json
+}
+
+# Whether the release package at `cue_path` defines `field`.
+export def defines [cue_path: string, field: string]: nothing -> bool {
+	let r = (do { cue eval --expression $field $cue_path } | complete)
+	not ($r.exit_code != 0 and ($r.stderr =~ $"reference \"($field)\" not found"))
+}
+
+# Where a release goes when it is not told: the app's metal cluster, where its
+# release.cue gives one, else Kind.
+export def default-environment [cue_path: string]: nothing -> string {
+	if (defines $cue_path "Metal") { "metal" } else { "kind" }
 }
 
 # The project with the door's tree as a release ships it: every image the dev
@@ -339,6 +483,49 @@ export def release-tree []: string -> string {
 # build time would change the index. Contexts span the monorepo (mecha,
 # omnishell), outside the app directory bake runs in. Answers what bake named
 # each target, by service.
+# What release-tree changes, as a compose file read over the app's own: each
+# service that builds from an `<app>-served` stage builds from its release.
+export def release-override []: string -> string {
+	let project = ($in | from yaml)
+	let released = ($in | release-tree | from yaml)
+	let changed = ($project.services | columns | where {|n|
+		($project.services | get $n | get -o build.additional_contexts) != ($released.services | get $n | get -o build.additional_contexts)
+	})
+	{services: ($changed | reduce -f {} {|n, acc| $acc | insert $n {build: {additional_contexts: ($released.services | get $n | get build.additional_contexts | transpose key value | where {|c| $c.value ends-with "-served-release" } | reduce -f {} {|c, a| $a | insert $c.key $c.value })}} })} | to yaml
+}
+
+# The Postgres major an image at `repo@digest` in Artifact Registry runs, as
+# its official base states it (PG_MAJOR), read from the registry: CloudNativePG
+# reads the database's tag as it, and Cloud Build left no image here to inspect.
+export def registry-pg-major [repo: string, digest: string]: nothing -> string {
+	let host = ($repo | split row "/" | first)
+	let path = ($repo | split row "/" | skip 1 | str join "/")
+	let headers = [
+		Authorization $"Bearer (^gcloud auth print-access-token | str trim)"
+		Accept "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+	]
+	let get = {|what| http get --raw --headers $headers $"https://($host)/v2/($path)/($what)" | if ($in | describe) == "binary" { decode utf-8 } else { $in } | from json }
+	let top = (do $get $"manifests/($digest)")
+	let manifest = if ($top.manifests? | is-not-empty) { do $get $"manifests/($top.manifests | first | get digest)" } else { $top }
+	do $get $"blobs/($manifest.config.digest)" | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last
+}
+
+# The runtime images built in Cloud Build and pushed to the environment's
+# registry (gcp/build.nu), by service: the database's tagged with its Postgres
+# major, every other with the release's tag.
+export def cloud-build-images [app_dir: string, name: string, services: list<string>, target_env: record, tag: string]: nothing -> record {
+	let override = (do { cd $app_dir; ^docker compose --profile "*" config } | release-override)
+	let plan = {project: $target_env.build.project, registry: $target_env.registry, preview: $tag}
+	let built = (push-images $app_dir $plan $name $services --platform ($target_env.platform? | default "linux/amd64") --override $override)
+	$built | items {|svc, ref|
+		if $svc != "database" { return {svc: $svc, ref: $ref} }
+		let repo = $"($target_env.registry)/($name)-database"
+		let major = (registry-pg-major $repo $ref.digest)
+		^gcloud --quiet artifacts docker tags add $"($repo)@($ref.digest)" $"($repo):($major)" | ignore
+		{svc: $svc, ref: {tag: $major, digest: $ref.digest}}
+	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
+}
+
 export def bake-images [app_dir: string, compose: string, services: list<string>, --platform: string]: nothing -> record {
 	let compose = ($compose | release-tree)
 	let root = (do { cd $app_dir; ^git rev-parse --show-toplevel } | str trim)
@@ -379,11 +566,12 @@ export def main [
 	--snapshot               # Build and render only, do not deploy
 	--dry-run                # Print rendered manifests to stdout and exit
 	--app: string            # Application name or path
-	--cluster-env (-e): string = "kind"  # Target cluster environment (kind, eks, aks)
+	--cluster-env (-e): string  # kind, metal, eks or aks; absent, the app's metal cluster where it gives one, else kind
 	--skip-operators = false # Skip operator bootstrap
 	--skip-observability = false # Skip VictoriaMetrics/Jaeger/Vector bootstrap
 ] {
 	let app_info = (resolve-app $app)
+	let cluster_env = ($cluster_env | default $env.SAY_RELEASE_ARGS_CLUSTER_ENV? | default (default-environment $app_info.cue_path))
 	let manifests = (render-manifests $app_info.cue_path $cluster_env)
 
 	if $dry_run {
@@ -397,8 +585,8 @@ export def main [
 	}
 
 	# A cloud release needs its operators, observability and TLS on the target,
-	# which only the Kind path provisions so far.
-	if $cluster_env != "kind" {
+	# which only the Kind and metal paths provision so far.
+	if $cluster_env not-in ["kind" "metal"] {
 		error make { msg: $"release to ($cluster_env) is not implemented: only --dry-run and --snapshot render its manifests" }
 	}
 
@@ -425,23 +613,29 @@ export def main [
 		error make { msg: $"($app_info.cue_path): render.enabled is ($has_render) but the app's compose project (if $compose_render { 'defines' } else { 'lacks' }) a render service" }
 	}
 
-	let target_env = (read-environment $cluster_env)
+	let target_env = (read-environment $cluster_env $app_info.cue_path)
 	let registry = $target_env.registry
 
-	# Ensure cluster and operators for local Kind
-	if $cluster_env == "kind" {
-		ensure-cluster
-		# Every kubectl call below targets this cluster, whatever context is current.
-		let context = (open --raw ($k8s_dir | path join "cluster.yaml") | from yaml | where kind == "Cluster" | first | get name)
-		let kubeconfig = (mktemp -t kubeconfig.XXXXXX | str trim)
-		kubectl config view --minify --flatten --context $context | save -f $kubeconfig
-		$env.KUBECONFIG = $kubeconfig
-		if not $skip_operators {
-			ensure-operators
-		}
-		if not $skip_observability {
-			ensure-observability $target_env.domainSuffix
-		}
+	# Kind's cluster is made here; a metal one is the operator's, named by its context.
+	if $cluster_env == "kind" { ensure-cluster }
+	let context = ($target_env.context? | default (open --raw ($k8s_dir | path join "cluster.yaml") | from yaml | where kind == "Cluster" | first | get name))
+	# Every kubectl call below targets this cluster, whatever context is current.
+	let kubeconfig = (mktemp -t kubeconfig.XXXXXX | str trim)
+	kubectl config view --minify --flatten --context $context | save -f $kubeconfig
+	$env.KUBECONFIG = $kubeconfig
+	let tunnel = if ($target_env.access? | is-not-empty) {
+		let t = {target: $target_env.access.ssh, port: (port), socket: $"/tmp/pronto-api-(random chars --length 8).sock"}
+		kubectl config set-cluster (kubectl config view -o jsonpath='{.clusters[0].name}') --server $"https://127.0.0.1:($t.port)" | ignore
+		open-api-tunnel $t.target $t.port $t.socket
+		$t
+	}
+	let reopen = if $tunnel != null { {|| close-api-tunnel $tunnel.target $tunnel.socket; open-api-tunnel $tunnel.target $tunnel.port $tunnel.socket } }
+	if not $skip_operators {
+		ensure-operators --ingress $target_env.ingress --reopen $reopen
+		if $target_env.ingress.by == "tunnel" { ensure-tunnel $target_env.ingress.id }
+	}
+	if not $skip_observability {
+		ensure-observability $target_env.domainSuffix
 	}
 
 
@@ -456,23 +650,27 @@ export def main [
 	let has_migrate = ("migrate" in $compose_services)
 	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] })
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
-	let bake_targets = (bake-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs --platform ($target_env.platform? | default ""))
-	let pushed = ($build_svcs | each {|svc|
-		let local = ($bake_targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
-		# The database's tag is its Postgres major, which CloudNativePG reads; the
-		# official postgres base the image derives from states it as PG_MAJOR.
-		let tag = if $svc == "database" {
-			docker image inspect --format '{{json .Config.Env}}' $local | from json | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last
-		} else { $app_meta.image.tag }
-		let repo = if ($registry | is-not-empty) { $"($registry)/($app_info.name)-($svc)" } else { $"($app_info.name)-($svc)" }
-		docker tag $local $"($repo):($tag)"
-		if ($registry | is-not-empty) {
-			print $"Pushing ($repo):($tag)..."
-			docker push $"($repo):($tag)"
-		}
-		let digest = (docker image inspect --format '{{json .RepoDigests}}' $"($repo):($tag)" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
-		{svc: $svc, ref: {tag: $tag, digest: $digest}}
-	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
+	let pushed = if $target_env.build.by == "cloudbuild" {
+		cloud-build-images $app_source_dir $app_info.name $build_svcs $target_env $app_meta.image.tag
+	} else {
+		let bake_targets = (bake-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs --platform ($target_env.platform? | default ""))
+		$build_svcs | each {|svc|
+			let local = ($bake_targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
+			# The database's tag is its Postgres major, which CloudNativePG reads; the
+			# official postgres base the image derives from states it as PG_MAJOR.
+			let tag = if $svc == "database" {
+				docker image inspect --format '{{json .Config.Env}}' $local | from json | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last
+			} else { $app_meta.image.tag }
+			let repo = if ($registry | is-not-empty) { $"($registry)/($app_info.name)-($svc)" } else { $"($app_info.name)-($svc)" }
+			docker tag $local $"($repo):($tag)"
+			if ($registry | is-not-empty) {
+				print $"Pushing ($repo):($tag)..."
+				docker push $"($repo):($tag)"
+			}
+			let digest = (docker image inspect --format '{{json .RepoDigests}}' $"($repo):($tag)" | from json | where {|d| $d starts-with $"($repo)@" } | first | split row "@" | last)
+			{svc: $svc, ref: {tag: $tag, digest: $digest}}
+		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
+	}
 	# What compose gives the migrate service beyond the database it names.
 	let migrate = if $has_migrate {
 		{migrate: {env: (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.migrate.environment | reject DATABASE_URL)}}
@@ -528,6 +726,11 @@ export def main [
 	# authenticator's memberships name roles initdb creates, so the operator
 	# reconciles it, password included, only after the Jobs; crud logs in as it.
 	let cluster = $"cluster.postgresql.cnpg.io/($app_info.name)-db"
+	# An attempt made before the Jobs (the instance is up first) stays failed:
+	# CloudNativePG syncs roles when the Cluster changes, not on a timer, so a
+	# first release on k3s waited out its five minutes on a role that was
+	# already there. Changing the Cluster has it look again.
+	kubectl annotate $cluster -n $target_ns --overwrite $"pronto.dev/schema-built=(date now | format date '%s')" | ignore
 	print $"Waiting for ($cluster) to reconcile its managed roles..."
 	let deadline = (date now) + 300sec
 	loop {
@@ -555,6 +758,10 @@ export def main [
 		error make { msg: $"Pods running without their Dapr sidecar: ($bare | str join ', ')" }
 	}
 
+	if $target_env.ingress.by == "tunnel" {
+		print $"The tunnel answers for ($gateway_host) once its DNS is a proxied CNAME onto ($target_env.ingress.id).cfargotunnel.com: cloudflared tunnel route dns ($target_env.ingress.id) ($gateway_host)"
+	}
+	if $tunnel != null { close-api-tunnel $tunnel.target $tunnel.socket }
 	print $"\n[SUCCESS] Released ($app_info.name) natively to ($cluster_env): https://($gateway_host)/"
 }
 

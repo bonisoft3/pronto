@@ -12,7 +12,7 @@ the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
 carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare`,
-`docker` and `gcp` are built, `cloudflare` for guests and, of the derivations, with its drains and its clock alone,
+`docker` and `gcp` are built, `cloudflare` for guests, passkeys and providers and, of the derivations, with its drains and its clock alone,
 `docker` as a single-container standalone appliance, `gcp` for a cluster of the
 database, crud, auth and electric alone, and `k8s` against a named kube context
 ([the clouds and k8s](#the-clouds-and-k8s)). `aws` and `azure` are designed
@@ -71,7 +71,9 @@ door and no compose prepend. Two things come first. The base: a driver that
 navigates to `${origin}/ar` (`apps/truco/tests/acceptance.ts`) cannot reach a
 site under a subpath, and an `APP_URL` ending in a slash yields `//`, which the
 router refuses. And the budgets, whose 20 s are tuned to a warm local stack
-that a cold page boot exceeds. The projection is
+that a cold page boot exceeds. The projection is emitted for `gcp` alone
+(`verify@gcp`, [gcp](#gcp)), whose address is a host with no subpath and no
+trailing slash; the other targets' are
 [not emitted](../PENDING.md#release-targets).
 
 ## A release is its entry
@@ -271,9 +273,10 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 `dist/cloudflare/`. The terminal modules and declared public files live in
 `public/`, so each route loads only its own screen and required catalogues.
 The terminal asks the Worker's origin for `/crud`, `/auth` and `/electric`.
-Social sign-in providers are currently refused (`_authTargetRefusal`): the edge
-cluster runs guest sessions, passkey ceremonies and shape tokens in its Durable Object,
-leaving social provider integration to container and cloud tiers (`gcp`, `k8s`, `docker`).
+The edge cluster runs guest sessions, passkey ceremonies, the auth service's
+provider sign-in and shape tokens in its Durable Object, so social sign-in
+providers (`capabilities.auth.providers`) are admitted here as on the
+container and cloud tiers ([below](#cloudflare-sign-in)).
 
 The public tree is addressed as every target's is ([a release is its
 entry](#a-release-is-its-entry)); Cloudflare's assets take its immutable rules
@@ -339,7 +342,11 @@ immutable. Blobs written at run time, such as uploads, have no store at the
 edge yet; a seed is the set known at release.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
-([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.18.1/packages/pglite-workerd/README.md));
+([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.18.1/packages/pglite-workerd/README.md))
+([`edge-pglite.ts`](../bundle/edge-pglite.ts)): with `EDGE_BUILD_PROJECT=<project>` in that
+project's Cloud Build, kept in `gs://<project>-pronto-edge` under a hash of those sources, so
+the next release on the same mecha downloads it and the machine releasing needs no Docker;
+without it, by the local Docker;
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
 [mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.18.1/packages/mecha-edge/README.md)
 as its one Durable Object, over the shell's tables. `publish` runs
@@ -356,7 +363,7 @@ service, and nothing runs while no one uses the app:
 | compose service | at the edge | sleeps | |
 |---|---|---|---|
 | caddy | the Worker: static files, `/crud`, `/auth`, `/electric`, settled reads from the Cache API | per request | built |
-| database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests only |
+| database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests, passkeys and providers |
 | conduit, mesh-events | for drains, a trigger per table and the object's dispatcher; for streams, an outbox table and a Cloudflare Queue | with the object | drains built, streams designed |
 | transform, compute | a Container each, from the images bayt builds | after an idle timeout | designed |
 | ticker, clock | the object's alarm, and a Cron Trigger poking it | between occurrences | built |
@@ -416,9 +423,17 @@ What fixes its shape, as built:
   [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.18.1/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and
   `request.jwt.claims`, so a shared connection never leaks a subject, and row
-  policy is Postgres's own here as on a single machine. Guests only:
-  `/auth/guest` mints the credentials; passkeys and providers wait for mecha's
-  auth service to run in the Worker.
+  policy is Postgres's own here as on a single machine.
+- <a id="cloudflare-sign-in"></a>**The auth service's sign-in, in the object.**
+  `/auth/guest` mints a guest's credentials, the passkey ceremonies run with
+  the Worker's door as the relying party, and the object runs the auth
+  service's provider sign-in (`/auth/oidc/*`) for the providers the program
+  names (`auth.providers`): [`edge-signin.ts`](../bundle/edge-signin.ts)
+  writes the settings compose would give the auth service into the Worker's
+  vars, the program's or the build environment's `OIDC_<NAME>_<SETTING>`, and
+  `publish-edge.ts` puts each client secret, `OIDC_<NAME>_CLIENT_SECRET` from
+  its environment, beside `JWT_SECRET`; register the callback
+  `<origin>/auth/oidc/<name>/callback` with the provider (or the broker).
 - **Sync holds requests open.** A tab's live shape request waits on the
   object, which keeps the object awake while a tab is open; that is the price
   of the simplest path, and a poke on a hibernating WebSocket is the cheaper
@@ -553,11 +568,51 @@ schema.#Build & {release: GCP}` from [`gcp/schema`](../gcp/schema/gcp.cue).
 Every resource is described before it is made, so a second release with
 nothing changed pushes the same digests and rolls nothing.
 
+A release goes behind its integration tests, run against a preview of what
+it deploys rather than a stack on the machine releasing: `release.nu` first
+releases the checkout as the preview `rc` ([Previews](#previews)), then runs
+`verify@gcp` against it, and only when every driver passes releases the app,
+with the very images tested: copied by digest from the previews' repository,
+not built again. The drivers' images build in Cloud Build while the preview
+deploys, and the build waits for the release's go, a marker in the project's
+Cloud Build bucket, to run them; while they run, the release's project copies
+the preview's images as `candidate`, and tags them `release` only once every
+driver passed. The preview is stopped whatever happened (its service, jobs
+and clock), and its Cloud SQL instance stays for the next release, which
+starts it on an empty database: making an instance is most of ten minutes.
+One release at a time, then; `--preview rc --delete` removes it all. A failing driver, or a
+preview that does not come up, stops the release there. `--preview`,
+`--dry-run` and `--snapshot` deploy as asked, untested, and `--no-gate`
+releases without the preview. A local stack (`sayt integrate@local`) is for
+development and CI.
+
+`sayt verify@gcp` ([`gcp/verify.nu`](../gcp/verify.nu)) runs the drivers of
+`verify@<target>` against the release's address, or a preview's with
+`--preview`: every service of the app's compose project that reads `APP_URL`,
+built as integrate builds it and run as integrate runs it, with `APP_URL` at
+the service's `run.app` address and nothing else of the stack up, all at once.
+They run in Cloud Build in the target's project, on 32 vCPUs, since a driver's browser
+renders in software and a 2-CPU runner timed a 3D page out; a machine whose
+network refuses `run.app` verifies all the same. A check that reads no
+`APP_URL` drives the cluster itself, and stays with integrate.
+
+The images are built in Cloud Build, not on the machine releasing, which needs
+no Docker daemon: the release uploads the app's files as git sees them (never
+`.certs/`, the certificate pair `sayt setup` issues for one machine), and a
+build step runs the app's compose project through `docker buildx bake --push`,
+as integrate builds it, for linux/amd64 and reproducibly. Every context of the
+app's images is its own directory or an image by digest, so nothing else is
+sent. The build runs as the project's default Cloud Build account, which the
+release lets push to the repository and write its log; the release reads each
+digest back from the registry and names it in the service and jobs.
+
 | compose | on GCP |
 |---|---|
-| database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts |
-| migrate | where the app declares pgroll migrations, the cluster's runner as the Job `<app>-migrate`, after initdb and before the service rolls, as compose runs it on every boot |
+| database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts, and reapplies its re-runnable steps every release |
+| migrate | where the app declares pgroll migrations, the cluster's runner in the same Job `<app>-initdb`, after initdb and before the service rolls, as compose runs it on every boot: its image is `<app>-schema`, migrate's with the database image's initdb directory, which the release builds beside compose's, so the Job starts once |
 | caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
+| ticker | where the app runs one, one more container of the service, writing through crud with the service role's token (`<app>-service-jwt`, signed with the gateway's secret) |
+| clock | the Cloud Scheduler job `<app>-clock`, POSTing the door's `/poke` at the service's run.app address each minute with that token and no retry, as compose's clock does: the service answers anyone, so Cloud Run has no OIDC token to check |
 | electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
 | the stack's secrets | Secret Manager, generated once; the database URLs are composed from the passwords there, since Cloud Run expands no `$(VAR)` |
 
@@ -572,7 +627,12 @@ What bit on a real instance:
 
 - **Cloud SQL's `postgres` is no superuser.** It creates `anon`, `app_user`
   and `service` with admin over them but no `SET`, so PostgREST could not
-  switch into `anon`; initdb grants them to it on every release.
+  switch into `anon`; initdb grants them to it on every release. PostgREST
+  logs in as mecha's `authenticator` role, whose password initdb sets from
+  `<app>-authenticator-password`, as compose's does. It owns the tables
+  mecha puts under `FORCE ROW LEVEL SECURITY` and the `SECURITY DEFINER`
+  functions that write them, so without a superuser's bypass every
+  hybrid-machine write failed its policies; initdb gives it `BYPASSRLS`.
 - It does grant `BYPASSRLS` and `REPLICATION` to a role it made, so electric's
   role is compose's.
 - **Electric's storage cannot be a bucket.** Its shape metadata is SQLite,
@@ -581,19 +641,109 @@ What bit on a real instance:
 - **One instance takes 1000 requests at once**, Cloud Run's most: at its
   default of 80, a page load's hatch files beside electric's held live
   requests met "Rate exceeded".
+- **A schema initdb built is not rebuilt.** initdb runs once per database, and
+  only pgroll's migrations reach one it built, with one exception: the steps
+  emit.cue writes re-runnable run again on every release. `005_create_tables`
+  creates a new entity's table and leaves every other alone; `006_policies`,
+  `007_txid` and `008_publication` restate every policy, trigger and
+  publication; `016_mecha_actors` replaces the hybrid machines' functions and
+  triggers, so a changed guard, rule or port reaches games already in play,
+  keeping their instances, and refuses a new protocol `version`, whose
+  instances need a migration. A column added to an existing entity is still
+  pgroll's: `CREATE TABLE IF NOT EXISTS` keeps the table's shape. When an app's initdb set changes
+  in ways none carries (a framework upgrade restating its own steps, say),
+  raising `GCP.sqlGeneration` starts it on a new, empty instance
+  (`<app>-db-<n>`); the earlier one keeps its data and its replication slot,
+  untouched, until its owner deletes it.
 - **The smallest tier admits about 25 connections**, so the instance is raised
   to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
   container at the instance's address, so crud binds `*`.
 
 The release refuses an app whose compose project runs anything else: the
-change-feed unit, a ticker or clock, the airlock,
-compute, blobs, images or render. A provider's settings come from compose as
+change-feed unit, the airlock, compute, blobs, images or render. A provider's settings come from compose as
 the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
 secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
 release maps it onto the service and prints the DNS records it needs; each of
 `aliases` (www, say) is mapped too, and the door sends it on to the domain
 (`PRONTO_ALIASES`), since a passkey's relying party is the domain alone. A
 domain is verified once by its owner (Search Console) before Google routes it.
+
+`GCP.sidecars` adds containers of the app's own beside the cluster's: each
+names a service of the app's compose project (a plugin's collector, such as
+pronto-perf's `perf-collector`), which the release builds and pushes as it does
+the cluster's images and runs in the same instance, on a port none of the
+cluster's holds. The door dials it at `PRONTO_UPSTREAM_<NAME>`, without waiting
+on it: a collector down is no outage. One with `metrics: port` exports
+Prometheus metrics, and Google's Managed Service for Prometheus collector for
+Cloud Run runs beside it, scraping that port on loopback from a `RunMonitoring`
+config the release keeps in the secret `<name>-gmp-config`; the release enables
+Monitoring and gives the service's account `roles/monitoring.metricWriter`. The
+series keep their names, so the app's PromQL rules and dashboards read them in
+Cloud Monitoring (or a Grafana over its Prometheus API). A preview runs its
+sidecars and scrapes nothing.
+
+A sidecar runs with the environment compose gives its service, as the ticker
+does, so one that talks to the cluster (a plugin's service writing through the
+REST gateway) needs nothing more in `release.cue`. In the instance a peer
+compose names is the port that container holds there: `http://crud:3000` is
+`http://127.0.0.1:3000`, `electric:3000` is `127.0.0.1:3002`, and another
+sidecar is its own port (the plan's `loopback`). A key naming one of the
+cluster's secrets (`SERVICE_JWT`, `PGRST_JWT_SECRET`, …) is mounted from Secret
+Manager, never compose's development value, and `ORIGIN` is where readers are.
+`sidecars: <name>: env` adds to what compose gives.
+
+```cue
+GCP: schema.#Release & {
+	sidecars: "perf-collector": {port: 8687, metrics: port: 9599}
+	// A plugin's service writing through the gateway, as the service.
+	sidecars: billing: {port: 8688, cpu: 100}
+}
+```
+
+Cloud Run runs at most 10 containers in a revision, and the cluster holds up to
+eight of them (caddy, crud, auth, electric, the Auth Proxy, the ticker, and the
+blob plane's two), so the release refuses a service of more. A sidecar given
+`apart: {}` runs as a Cloud Run service of its own, `<service>-<name>`, in
+place of a container of the cluster's instance: one container taking the
+service's requests at its port, beside Managed Prometheus's collector where it
+exports metrics (its config the secret `<name>-<sidecar>-gmp-config`). The
+release applies it after the cluster's service, public as the door is, and a
+preview's goes with the preview. The door dials it at its run.app address over
+TLS, so the app's route to it sets the Host that address answers to (`header_up
+Host {upstream_hostport}`, as pronto-perf's, pronto-billing's and
+pronto-flags' routes do). Outside the instance, the cluster is reached through
+the door: compose's `http://crud:3000` is `https://<the service's run.app
+address>/crud`, another sidecar apart is its own address, and nothing else of
+the cluster's is reachable (the plan's `peers`). It scales on its own
+requests, none at rest; one that serves none, a worker polling the gateway,
+keeps `apart: minScale` instances, its CPU unthrottled between requests.
+
+```cue
+GCP: schema.#Release & {
+	// Behind the door's /perf, its own service and collector.
+	sidecars: "perf-collector": {port: 8687, metrics: port: 9599, apart: {}}
+	// A worker, which nothing calls: one instance kept.
+	sidecars: analyst: {port: 8689, apart: minScale: 1}
+}
+```
+
+A sidecar's `memory` is its container's (`"4Gi"`), as Cloud Run spells it;
+absent, Cloud Run's default. `alwaysOn: true` keeps the instance's CPU
+unthrottled between requests, for a sidecar inside it whose work runs while
+nobody is asking.
+
+An app that acts for its owner alone sets `iap: true`: Identity-Aware Proxy
+stands in front of the service, the release grants `roles/run.invoker` to IAP's
+service agent instead of `allUsers`, and only the people the project's owner
+admits reach it, once, outside any release:
+
+```sh
+gcloud iap web add-iam-policy-binding --resource-type cloud-run --service <service> \
+  --region <region> --project <project> --member user:<email> --role roles/iap.httpsResourceAccessor
+```
+
+A preview has no proxy, so the gate's drivers reach it; it holds nothing of the
+release's.
 
 A provider is refused at release in two cases that a program's development
 settings produce. One whose issuer or internal address is a developer's machine
@@ -633,7 +783,7 @@ What fixes its shape:
   recognize `resource.name` in IAM Conditions, so a role on its services would
   reach the release's service too. Absent, previews run beside the release.
 - **No say over the project.** A preview's release enables no API, makes no
-  repository or service account and grants no role. Previews share one
+  repository or service account and grants no role, Cloud Build's included. Previews share one
   account, `<name>-preview`, which the project's owner makes once; the release
   refuses to run without it, or without the repository.
 - **`--delete` names a preview.** Without `--preview` it refuses: a release is
@@ -645,8 +795,15 @@ from a GitHub repository `<owner>/<repo>`:
 
 ```sh
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com \
-  secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project <previews>
+  secretmanager.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \
+  cloudbuild.googleapis.com --project <previews>
 gcloud artifacts repositories create pronto --repository-format docker --location <region> --project <previews>
+# The account Cloud Build builds the images as pushes them and writes the build's log.
+builds=$(gcloud builds get-default-service-account --project <previews> --format 'value(serviceAccountEmail)' | awk -F/ '{print $NF}')
+gcloud artifacts repositories add-iam-policy-binding pronto --location <region> --project <previews> \
+  --role roles/artifactregistry.writer --member serviceAccount:$builds
+gcloud projects add-iam-policy-binding <previews> --role roles/logging.logWriter --condition None \
+  --member serviceAccount:$builds
 gcloud iam service-accounts create <name>-preview --project <previews>
 for role in roles/cloudsql.client roles/secretmanager.secretAccessor; do
   gcloud projects add-iam-policy-binding <previews> --role $role --condition None \
@@ -662,7 +819,8 @@ gcloud iam service-accounts create preview-deployer --project <previews>
 gcloud iam service-accounts add-iam-policy-binding preview-deployer@<previews>.iam.gserviceaccount.com \
   --role roles/iam.workloadIdentityUser \
   --member principalSet://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/github/attribute.repository/<owner>/<repo>
-for role in roles/run.admin roles/cloudsql.admin roles/secretmanager.admin roles/browser; do
+for role in roles/run.admin roles/cloudsql.admin roles/secretmanager.admin roles/browser \
+  roles/cloudbuild.builds.editor roles/storage.admin roles/logging.viewer; do
   gcloud projects add-iam-policy-binding <previews> --role $role --condition None \
     --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
 done
@@ -670,6 +828,12 @@ gcloud artifacts repositories add-iam-policy-binding pronto --location <region> 
   --role roles/artifactregistry.writer --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
 gcloud iam service-accounts add-iam-policy-binding <name>-preview@<previews>.iam.gserviceaccount.com \
   --role roles/iam.serviceAccountUser --member serviceAccount:preview-deployer@<previews>.iam.gserviceaccount.com
+# The release copies the images its gate tested: Cloud Build of the release's
+# project reads the previews' repository (nothing of the release's is granted
+# to previews).
+released=$(gcloud builds get-default-service-account --project <project> --format 'value(serviceAccountEmail)' | awk -F/ '{print $NF}')
+gcloud artifacts repositories add-iam-policy-binding pronto --location <region> --project <previews> \
+  --role roles/artifactregistry.reader --member serviceAccount:$released
 ```
 
 The repository's workflow signs in through the provider as the deployer: its
@@ -691,6 +855,10 @@ applies:
 | `aws` | ACK | ECS Express Mode on Fargate | Aurora Serverless v2, from 0.5 ACU |
 | `azure` | Azure Service Operator v2 | Container Apps | Flexible Server, B1ms |
 | `k8s` | skaffold, against a named kube context | mecha's images, scaled from zero by KEDA | CloudNativePG |
+
+`k8s` is built for Kind and for a cluster the operator runs behind NAT
+(`envs.Metal`): its images built in Cloud Build and pulled from Artifact
+Registry, its door a Cloudflare Tunnel ([k8s/README.md](../k8s/README.md#12-metal-a-cluster-of-your-own-behind-nat)).
 
 The compute scales by itself; the floor is the database, and AWS's is the
 highest, since Aurora does not pause while logical replication is on. Project,

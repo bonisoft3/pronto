@@ -450,9 +450,11 @@ and Queue, the scale-to-zero containers for transform and compute with
 compute's tables on R2, and their generation from the compose closure are
 designed and not built.
 
-**`gcp` runs the database, crud, auth and electric alone**
-([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, a ticker or clock, the airlock, compute, blobs, images and
-render, each of which needs its own Cloud Run shape and wake.
+**`gcp` runs the database, crud, auth, electric and the ticker alone**
+([gcp](docs/release-targets.md#gcp)): it refuses the change-feed unit, the airlock, compute, blobs, images and
+render, each of which needs its own Cloud Run shape and wake. Its clock pokes
+the ticker with the service role's token on a public path, where mecha's
+contract wants a poke-specific credential.
 
 **No container TURN relay is built** ([ICE servers](docs/release-targets.md#ice-servers)):
 `release@cloudflare` mints ephemeral credentials from Cloudflare Calls TURN
@@ -466,8 +468,10 @@ when opted in; container targets (`docker`, `gcp`, `k8s`) configure STUN alone.
 **`k8s` is in neither `#Target` nor `#Tier`**
 ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 
-**`verify@<target>` is not emitted**
-([the design](docs/release-targets.md#what-a-release-is)).
+**`verify@<target>` is emitted for `gcp` alone**
+([the design](docs/release-targets.md#what-a-release-is)): `pages`,
+`cloudflare` and `k8s` have no rule that runs the drivers against their
+address.
 
 **The page derives by drain alone** ([pages](docs/release-targets.md#pages)).
 Its streams' and computations' rows are the release's, so a result recorded in

@@ -38,18 +38,27 @@ const SKIP = new Set(["node_modules", "dist", "build"]);
 const EXCLUDED_RULES = ["prefer-bigint-over-int"];
 
 /**
- * The one rule forgiven, and only in the file pronto derives from the type
- * table. Every portable_* domain carries its CHECK by design — a domain is
+ * The rules forgiven, each only in a file pronto derives. The first, in the
+ * file derived from the type table. Every portable_* domain carries its CHECK by design — a domain is
  * kept only where PostgREST needs its representation functions, and its
  * bounds belong with them — and squawk prefers table constraints because a
  * domain constraint is awkward to change later. Changing one is a type-system
  * change, which is the checks' subject rather than something to hide from
  * them.
  */
-const FORGIVEN: { rule: string; path: string } = {
-  rule: "ban-create-domain-with-constraint",
-  path: "services/database/migrations/004_types.sql",
-};
+const FORGIVEN: { rule: string; path: string }[] = [
+  { rule: "ban-create-domain-with-constraint", path: "services/database/migrations/004_types.sql" },
+  // The tables' file adds each field's column where a database built before
+  // the field lacks it (emit.cue #tableSql), which squawk reads as adding a
+  // field to a live table. On a fresh database every one is a no-op; on a
+  // built one it is the addition pronto admits, and the schema job, not a
+  // lint, is where a required field that rows cannot take says so. squawk
+  // still reads every CREATE and every authored migration.
+  ...["adding-required-field", "adding-field-with-default", "adding-foreign-key-constraint", "disallowed-unique-constraint"].map((rule) => ({
+    rule,
+    path: "services/database/migrations/005_create_tables.sql",
+  })),
+];
 
 /** Every *.sql under the app, app-relative, in a stable order. */
 async function sqlFiles(appDir: string): Promise<string[]> {
@@ -89,12 +98,12 @@ export function withheld(hatches: Record<string, Hatch>, raw: RawMigration[]): M
   return out;
 }
 
-/** squawk's findings as lint findings, with the forgiven rule dropped. */
+/** squawk's findings as lint findings, with the forgiven rules dropped. */
 export function findings(reported: Squawk[], appDir: string): Finding[] {
   const out: Finding[] = [];
   for (const r of reported) {
     const path = r.file.startsWith(appDir + "/") ? r.file.slice(appDir.length + 1) : r.file;
-    if (r.rule_name === FORGIVEN.rule && path === FORGIVEN.path) continue;
+    if (FORGIVEN.some((f) => r.rule_name === f.rule && path === f.path)) continue;
     out.push({
       severity: "error",
       path,

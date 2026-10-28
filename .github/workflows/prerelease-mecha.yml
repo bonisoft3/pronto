@@ -1,0 +1,96 @@
+# Publishes a forks' prerelease of mecha (bsoneca/pronto forks/README.md) from
+# Actions: the CUE module to ghcr.io/bsoneca/cue-modules and the runtime
+# tarballs as a release here, tagged mecha-v<version> (GHCR_TOKEN cannot
+# release on bsoneca/mecha-fork). It does what forks/publish.sh does for mecha,
+# without a local machine, from here because this repository holds GHCR_TOKEN.
+# A module already published is kept, so a run that failed later runs again.
+#
+# Push a branch named `publish-mecha/v<version>`, such as
+# publish-mecha/v0.17.1-host.1: the version is the branch's, and the commit is
+# .github/prerelease-mecha.env's MECHA_REF.
+name: prerelease-mecha
+on:
+  push:
+    branches: ['publish-mecha/v*']
+permissions:
+  contents: write
+  packages: write
+env:
+  REG: ghcr.io/bsoneca/cue-modules/github.com/bonisoft3/mecha
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: versions
+        run: |
+          echo "MECHA_V=${GITHUB_REF_NAME#publish-mecha/v}" >> "$GITHUB_ENV"
+          grep -E '^MECHA_REF=[0-9a-f]{40}$' .github/prerelease-mecha.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: bsoneca/mecha-fork
+          ref: ${{ env.MECHA_REF }}
+          path: mecha
+          fetch-depth: 1
+      - uses: cue-lang/setup-cue@v1.0.1
+        with:
+          version: v0.16.1
+      # GHCR_TOKEN, a token with write:packages, when the package doesn't
+      # grant this repository's Actions write.
+      - name: crane
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sSL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz | tar xz -C /usr/local/bin crane
+          echo "$GH_TOKEN" | crane auth login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+      - name: published already
+        id: published
+        run: |
+          if crane digest "$REG:v$MECHA_V" >/dev/null 2>&1; then echo "$REG:v$MECHA_V is published: the module is kept"; echo "module=true" >> "$GITHUB_OUTPUT"; fi
+      - name: snapshot
+        run: |
+          mkdir "$RUNNER_TEMP/mecha"
+          git -C mecha archive HEAD | tar x -C "$RUNNER_TEMP/mecha"
+          cd "$RUNNER_TEMP/mecha"
+          # The runtime mise installs as github:bonisoft3/mecha is this
+          # prerelease too, so the module's toolchain names its own version.
+          python3 -I - "$MECHA_V" <<'PY'
+          import re, sys
+          v = sys.argv[1]
+          p = 'toolchain/tools.cue'
+          s = open(p).read()
+          t = re.sub(r'("github:bonisoft3/mecha":\s+)"[^"]+"', lambda m: m.group(1) + f'"{v}"', s, count=1)
+          assert t != s, p
+          open(p, 'w').write(t)
+          PY
+          grep -n '"github:bonisoft3/mecha"' toolchain/tools.cue
+          grep -n 'module:' cue.mod/module.cue
+      # ghcr takes no single upload over 4MiB and `cue mod publish` sends a
+      # module in one: publish to a local registry and let crane copy it up.
+      - name: module
+        if: steps.published.outputs.module != 'true'
+        run: |
+          crane registry serve --address localhost:5051 >/dev/null 2>&1 &
+          sleep 2
+          cd "$RUNNER_TEMP/mecha"
+          git init -q && git add -A && git -c user.email=fork@local -c user.name=fork commit -qm "mecha v$MECHA_V"
+          CUE_REGISTRY='github.com/bonisoft3/mecha=localhost:5051+insecure,registry.cue.works' cue mod publish "v$MECHA_V"
+          crane copy --insecure "localhost:5051/github.com/bonisoft3/mecha:v$MECHA_V" "$REG:v$MECHA_V"
+      # An app routes every version of mecha to ghcr, so the upstream release
+      # the fork branches from (which omnishell and pronto require) is there too.
+      - name: base
+        run: |
+          base=$(git -C mecha describe --tags --abbrev=0 2>/dev/null || true)
+          for v in v0.17.1 $base; do
+            crane digest "$REG:$v" >/dev/null 2>&1 || crane copy "registry.cue.works/github.com/bonisoft3/mecha:$v" "$REG:$v"
+          done
+      - name: runtime
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir dist
+          for triple in linux-x64 linux-arm64 linux-armv7 macos-x64 macos-arm64 windows-x64 windows-arm64; do
+            tar czf "dist/mecha-$triple.tar.gz" -C "$RUNNER_TEMP/mecha" --exclude=.git --exclude=.github --exclude=node_modules .
+          done
+          gh release create "mecha-v$MECHA_V" dist/*.tar.gz --target "$GITHUB_SHA" --prerelease --title "mecha v$MECHA_V (fork prerelease)" --notes "mecha's runtime of the forks' prerelease, from bsoneca/mecha-fork@$MECHA_REF: see bsoneca/pronto forks/README.md."
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/mecha-v$MECHA_V" --jq '.assets[]|"\(.name) \(.id) \(.digest)"' | tee -a "$GITHUB_STEP_SUMMARY"

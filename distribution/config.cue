@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	saycfg "github.com/bonisoft3/sayt:say"
+	"github.com/bonisoft3/pronto/resilience"
 )
 
 #Version:     "0.25.2"
@@ -57,6 +58,11 @@ import (
 	// Draws an entity's machines into ir.html (ir-render.ts): one binary from
 	// its GitHub release, never aqua (whose registry meets rate limits).
 	"github:terrastruct/d2": "v0.9.0"
+	// Runs the cluster as host processes (launch@local, integrate@local): a
+	// tool of the app's own, at the version sayt's stub names, so it starts
+	// inside the app's toolchain and every process it starts finds that
+	// toolchain on PATH, as sayt's stub, which resets PATH on Linux, does not.
+	"github:F1bonacc1/process-compose": "v1.122.0"
 	"http:duckdb": {
 		version: "1.5.6"
 		platforms: {
@@ -82,6 +88,29 @@ import (
 #Run: {
 	args: string
 	out:  "use tools.nu [run-mise]; let pronto = (run-mise where \(#Runtimes.pronto) | str trim); \(args)"
+}
+
+// The cluster as host processes under process-compose, inside the app's
+// toolchain: every process and probe finds the cluster's tools and bayt's on
+// its PATH. What the cluster prepares first (its surface's hostPrepare) runs
+// in the same toolchain.
+#LaunchLocal: L={
+	prepare: [...string]
+	_prepare: strings.Join([for c in L.prepare {"run-mise exec -- env MISE_LOCKED=0 sh -c \(json.Marshal(c)); "}], "")
+	out:      "use tools.nu [run-mise]; \(L._prepare)run-mise exec -- env MISE_LOCKED=0 process-compose --no-server -f .bayt/process-compose.yaml up --tui=false"
+}
+
+// The same stack, the terminal's visual lint against its door, and the stack
+// down again (integrate-local.ts): `integrate` without containers. The
+// omnishell tree is the installed one unless given.
+#IntegrateLocal: I={
+	prepare: [...string]
+	// A screen settles inside its door's bounds, as the visual check's.
+	let _door = resilience.resilience.timeouts.door
+	settleMs:  *((_door.auth + _door.crud) * 1000) | (int & >0)
+	omnishell: *"(run-mise where \(#Runtimes.omnishell) | str trim)" | string
+	let _l = #LaunchLocal & {prepare: I.prepare}
+	out: (#Run & {args: "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell) --settle \(I.settleMs)"}).out
 }
 
 #Writer: {
@@ -147,6 +176,11 @@ import (
 	k8s: (_run & {args: "run-mise exec -- nu ($pronto | path join k8s release.nu)"}).out
 	// The cloud tier on GCP: Cloud Run beside Cloud SQL, with gcloud alone.
 	gcp: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp release.nu)"}).out
+	// Its integration tests against a deployed copy (verify@gcp): the drivers
+	// integrate runs that read APP_URL, in Cloud Build against its address.
+	gcpVerify: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp verify.nu)"}).out
+	// The cluster as host processes (#LaunchLocal).
+	launchLocal: #LaunchLocal
 	// Post-release verification across live deployments.
 	let _verifyArgs = "...(if ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else { ['--target', $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty) { [] } else { ['--tier', $env.SAY_VERIFY_ARGS_TIER] }) ...(if ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { [] } else { ['--headless', $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else { ['--session', $env.SAY_VERIFY_ARGS_SESSION] })"
 	verifyPages: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform pages\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out

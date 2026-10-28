@@ -60,6 +60,11 @@ import (
 			"dapr.io/config":         "\(release.name)-dapr-config"
 			"dapr.io/enable-metrics": "true"
 			"dapr.io/metrics-port":   "9090"
+			// A pod being replaced is still the one other sidecars resolve for a
+			// few seconds after its successor is ready: its own sidecar keeps
+			// answering through its container's preStop pause rather than
+			// leaving those calls to fail (each a 500 at the door).
+			"dapr.io/block-shutdown-duration": "20s"
 		}
 	}
 
@@ -190,6 +195,17 @@ import (
 					metadata: labels: appLabels & {"app.kubernetes.io/component": component}
 					spec: {
 						restartPolicy: "Never"
+						// A cluster that enforces NetworkPolicy (k3s's kube-router; Kind
+						// enforces none) admits a new pod's address a moment after it
+						// starts, and refuses it until then: the Job's one attempt once
+						// failed there. It begins once the database answers it.
+						initContainers: [{
+							name:            "database-ready"
+							image:           (#appImage & {"svc": "database"}).out
+							imagePullPolicy: targetEnv.imagePullPolicy
+							command: ["bash", "-c", "for _ in $(seq 120); do pg_isready -q && exit 0; sleep 1; done; echo \"$PGHOST:$PGPORT does not answer\" >&2; exit 1"]
+							"env": schemaEnv
+						}]
 						containers: [{
 							name:            component
 							image:           (#appImage & {"svc": svc}).out
@@ -216,7 +232,17 @@ import (
 				command: ["bash", "-c", """
 					set -euo pipefail
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
-					if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"; exit 0; fi
+					if [ "$marker" = "pronto initdb" ]; then
+					  echo "initdb: already built"
+					  # Its re-runnable steps are the release's, though (emit.cue's): a new
+					  # entity's table, every policy, trigger and publication, and the hybrid
+					  # machines' code run again, keeping every row.
+					  for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do
+					    f=/docker-entrypoint-initdb.d/$step.sql
+					    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+					  done
+					  exit 0
+					fi
 					source /usr/local/bin/docker-entrypoint.sh
 					docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
 					docker_process_init_files /docker-entrypoint-initdb.d/*
@@ -445,6 +471,9 @@ import (
 						name:            "crud"
 						image:           (#appImage & {svc: "crud"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [
 							{name: "http", containerPort: 3000},
 							{name: "admin", containerPort: 3001},
@@ -548,6 +577,9 @@ import (
 						name:            "electric"
 						image:           (#appImage & {svc: "electric"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: 3000}]
 						env: [
 							{name: "ELECTRIC_PORT", value: "3000"},
@@ -647,6 +679,9 @@ import (
 						name:            "auth"
 						image:           (#appImage & {svc: "auth"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: 9999}]
 						env: [
 							for e in (#denoTelemetry & {service: "auth"}).env {e},
@@ -747,6 +782,9 @@ import (
 						name:            "caddy"
 						image:           (#appImage & {svc: "caddy"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: 8080}]
 						env: [
 							if release.env["ORIGIN"] == _|_ {
@@ -842,6 +880,9 @@ import (
 						name:            "render"
 						image:           (#appImage & {svc: "render"}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: release.render.port}]
 						env: [
 							{name: "DOOR", value: "http://localhost:3500/v1.0/invoke/caddy/method"},
@@ -860,13 +901,17 @@ import (
 							initialDelaySeconds: 5
 							periodSeconds:       10
 						}
+						// Ready only once it renders: its own /health, and the door it
+						// reads every page from (DOOR, caddy through the sidecar)
+						// answering. A rollout keeps the old pod serving until then,
+						// where /health alone let it go while caddy was still starting
+						// and every page answered 500. Liveness stays its own /health,
+						// so a slow door never restarts it.
 						readinessProbe: {
-							httpGet: {
-								path: "/health"
-								port: release.render.port
-							}
+							exec: command: ["deno", "eval", "for (const u of [`http://localhost:${Deno.env.get('PORT')}/health`, `${Deno.env.get('DOOR')}/shell/shell.json`]) { const r = await fetch(u); await r.body?.cancel(); if (!r.ok) Deno.exit(1) }"]
 							initialDelaySeconds: 2
 							periodSeconds:       5
+							timeoutSeconds:      5
 						}
 					}]
 				}
@@ -914,7 +959,8 @@ import (
 						hostname: gatewayHostname
 						allowedRoutes: namespaces: from: "Same"
 					},
-					if release.gateway.tls.enabled {
+					// Behind a tunnel, Cloudflare holds the certificate.
+					if release.gateway.tls.enabled && targetEnv.ingress.by != "tunnel" {
 						{
 							name:     "https"
 							protocol: "HTTPS"

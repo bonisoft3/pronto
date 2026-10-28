@@ -95,3 +95,24 @@ Deno.test("projected emission refuses undeclared, unserved and malformed host-DO
     assertEquals(result.success, false, change);
   }
 });
+
+Deno.test("a container hatch's page that hands a form to another site adds that origin to its own form-action alone", async () => {
+  const files = await emitFiles(paymentProgram() + `
+app: capabilities: hatches: builder: {kind: "container", note: "registers an app on GitHub", forms: "/builder/github/new": ["https://github.com"]}
+`);
+  const caddy = files["docker/Caddyfile"].text;
+  assertStringIncludes(caddy, "@terminal not path /builder/github/new\n  header @terminal Content-Security-Policy");
+  const page = caddy.split("\n").find((l) => l.startsWith("  header @form0 Content-Security-Policy")) ?? "";
+  assertStringIncludes(page, "form-action 'self' https://github.com;");
+  assertStringIncludes(page, "script-src-attr 'none';");
+  const rest = caddy.split("\n").find((l) => l.startsWith("  header @terminal Content-Security-Policy")) ?? "";
+  assertStringIncludes(rest, "form-action 'self';");
+  assertEquals(page.replace(" https://github.com", ""), rest.replace("@terminal", "@form0"));
+});
+
+Deno.test("a hatch's form page is under its own route and posts only to an https origin", async () => {
+  for (const forms of ['"/elsewhere/new": ["https://github.com"]', '"/builder/new": ["http://github.com"]', '"/builder/new": ["https://github.com/path"]']) {
+    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `\napp: capabilities: hatches: builder: {kind: "container", note: "x", forms: {${forms}}}`);
+    assertEquals(res.success, false, forms);
+  }
+});
