@@ -2089,9 +2089,6 @@ import (
 		[if len(_authProviders) > 0 for target in A.meta.targets if target == "pages" {
 			"pages release target does not support social sign-in providers; only guest sessions run in the browser tier"
 		}],
-		[if len(_authProviders) > 0 for target in A.meta.targets if target == "cloudflare" {
-			"cloudflare release target does not yet support social sign-in providers; use guest sessions or deploy to container/cloud tiers (gcp, k8s, docker)"
-		}],
 	])
 	_authTargetRefusal: [if len(_authTargetViolations) == 0 {true}, _authTargetViolations[0]][0] & true
 

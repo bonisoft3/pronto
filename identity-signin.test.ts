@@ -67,10 +67,9 @@ Deno.test("a provider name or broker address that is not one is refused", async 
   }
 });
 
-Deno.test("pages and cloudflare release targets refuse social sign-in providers", async () => {
+Deno.test("the pages release target refuses social sign-in providers", async () => {
   for (const [target, reason] of [
     ["pages", "pages release target does not support social sign-in providers"],
-    ["cloudflare", "cloudflare release target does not yet support social sign-in providers"],
   ]) {
     const program = signin().replace("targets: []", `targets: ["${target}"]`);
     const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
@@ -79,8 +78,10 @@ Deno.test("pages and cloudflare release targets refuse social sign-in providers"
   }
 });
 
-Deno.test("gcp, k8s and docker targets admit social sign-in providers", async () => {
-  for (const target of ["gcp", "k8s", "docker"]) {
+// The edge cluster runs the auth service's provider sign-in in its object
+// (bundle/edge-signin.ts carries the settings to the Worker).
+Deno.test("gcp, k8s, docker and cloudflare targets admit social sign-in providers", async () => {
+  for (const target of ["gcp", "k8s", "docker", "cloudflare"]) {
     const program = signin().replace("targets: []", `targets: ["${target}"]`);
     const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
     assertEquals(res.success, true, res.stderr);

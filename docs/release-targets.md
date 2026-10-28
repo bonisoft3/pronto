@@ -12,7 +12,7 @@ the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
 carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare`,
-`docker` and `gcp` are built, `cloudflare` for guests and, of the derivations, with its drains and its clock alone,
+`docker` and `gcp` are built, `cloudflare` for guests, passkeys and providers and, of the derivations, with its drains and its clock alone,
 `docker` as a single-container standalone appliance, `gcp` for a cluster of the
 database, crud, auth and electric alone, and `k8s` against a named kube context
 ([the clouds and k8s](#the-clouds-and-k8s)). `aws` and `azure` are designed
@@ -269,9 +269,10 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 `dist/cloudflare/`. The terminal modules and declared public files live in
 `public/`, so each route loads only its own screen and required catalogues.
 The terminal asks the Worker's origin for `/crud`, `/auth` and `/electric`.
-Social sign-in providers are currently refused (`_authTargetRefusal`): the edge
-cluster runs guest sessions, passkey ceremonies and shape tokens in its Durable Object,
-leaving social provider integration to container and cloud tiers (`gcp`, `k8s`, `docker`).
+The edge cluster runs guest sessions, passkey ceremonies, the auth service's
+provider sign-in and shape tokens in its Durable Object, so social sign-in
+providers (`capabilities.auth.providers`) are admitted here as on the
+container and cloud tiers ([below](#cloudflare-sign-in)).
 
 The public tree is addressed as every target's is ([a release is its
 entry](#a-release-is-its-entry)); Cloudflare's assets take its immutable rules
@@ -337,7 +338,11 @@ immutable. Blobs written at run time, such as uploads, have no store at the
 edge yet; a seed is the set known at release.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
-([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.17.1/packages/pglite-workerd/README.md));
+([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.17.1/packages/pglite-workerd/README.md))
+([`edge-pglite.ts`](../bundle/edge-pglite.ts)): with `EDGE_BUILD_PROJECT=<project>` in that
+project's Cloud Build, kept in `gs://<project>-pronto-edge` under a hash of those sources, so
+the next release on the same mecha downloads it and the machine releasing needs no Docker;
+without it, by the local Docker;
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
 [mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.17.1/packages/mecha-edge/README.md)
 as its one Durable Object, over the shell's tables. `publish` runs
@@ -354,7 +359,7 @@ service, and nothing runs while no one uses the app:
 | compose service | at the edge | sleeps | |
 |---|---|---|---|
 | caddy | the Worker: static files, `/crud`, `/auth`, `/electric`, settled reads from the Cache API | per request | built |
-| database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests only |
+| database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests, passkeys and providers |
 | conduit, mesh-events | for drains, a trigger per table and the object's dispatcher; for streams, an outbox table and a Cloudflare Queue | with the object | drains built, streams designed |
 | transform, compute | a Container each, from the images bayt builds | after an idle timeout | designed |
 | ticker, clock | the object's alarm, and a Cron Trigger poking it | between occurrences | built |
@@ -414,9 +419,17 @@ What fixes its shape, as built:
   [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.17.1/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and
   `request.jwt.claims`, so a shared connection never leaks a subject, and row
-  policy is Postgres's own here as on a single machine. Guests only:
-  `/auth/guest` mints the credentials; passkeys and providers wait for mecha's
-  auth service to run in the Worker.
+  policy is Postgres's own here as on a single machine.
+- <a id="cloudflare-sign-in"></a>**The auth service's sign-in, in the object.**
+  `/auth/guest` mints a guest's credentials, the passkey ceremonies run with
+  the Worker's door as the relying party, and the object runs the auth
+  service's provider sign-in (`/auth/oidc/*`) for the providers the program
+  names (`auth.providers`): [`edge-signin.ts`](../bundle/edge-signin.ts)
+  writes the settings compose would give the auth service into the Worker's
+  vars, the program's or the build environment's `OIDC_<NAME>_<SETTING>`, and
+  `publish-edge.ts` puts each client secret, `OIDC_<NAME>_CLIENT_SECRET` from
+  its environment, beside `JWT_SECRET`; register the callback
+  `<origin>/auth/oidc/<name>/callback` with the provider (or the broker).
 - **Sync holds requests open.** A tab's live shape request waits on the
   object, which keeps the object awake while a tab is open; that is the price
   of the simplest path, and a poke on a hibernating WebSocket is the cheaper
