@@ -2,7 +2,7 @@ package schema
 
 // #Environment defines the infrastructure profile for target clusters.
 #Environment: {
-	name:             "kind" | "eks" | "aks"
+	name:             "kind" | "eks" | "aks" | "metal"
 	registry:         string
 	gatewayClassName: string
 	storageClass:     string
@@ -11,6 +11,18 @@ package schema
 	// Build platform for every image in a release's FROM chain; absent builds
 	// for the builder's own, which is what a local Kind node runs.
 	platform?: string
+	// The kube context a release applies to; absent, Kind's own (cluster.yaml).
+	context?: string
+	// What builds the images: Docker on the machine releasing, or Cloud Build
+	// in a project of the operator's, which pushes them to `registry` (an
+	// Artifact Registry repository the cluster pulls from), so the machine
+	// releasing needs no Docker daemon.
+	build: *{by: "docker"} | {by: "cloudbuild", project: string}
+	// How requests reach the gateway: the node's host ports 80 and 443 (Kind),
+	// or a Cloudflare Tunnel the cluster dials out through, for a cluster
+	// behind NAT. Cloudflare terminates TLS there, so the gateway listens on
+	// HTTP alone, and each app's host is a DNS record onto the tunnel.
+	ingress: *{by: "hostPort"} | {by: "tunnel", id: =~"^[0-9a-f-]{36}$"}
 }
 
 // #ReleaseSpec defines a Pronto application workload intent independent of the target cluster.

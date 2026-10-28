@@ -190,6 +190,17 @@ import (
 					metadata: labels: appLabels & {"app.kubernetes.io/component": component}
 					spec: {
 						restartPolicy: "Never"
+						// A cluster that enforces NetworkPolicy (k3s's kube-router; Kind
+						// enforces none) admits a new pod's address a moment after it
+						// starts, and refuses it until then: the Job's one attempt once
+						// failed there. It begins once the database answers it.
+						initContainers: [{
+							name:            "database-ready"
+							image:           (#appImage & {"svc": "database"}).out
+							imagePullPolicy: targetEnv.imagePullPolicy
+							command: ["bash", "-c", "for _ in $(seq 120); do pg_isready -q && exit 0; sleep 1; done; echo \"$PGHOST:$PGPORT does not answer\" >&2; exit 1"]
+							"env": schemaEnv
+						}]
 						containers: [{
 							name:            component
 							image:           (#appImage & {"svc": svc}).out
@@ -924,7 +935,8 @@ import (
 						hostname: gatewayHostname
 						allowedRoutes: namespaces: from: "Same"
 					},
-					if release.gateway.tls.enabled {
+					// Behind a tunnel, Cloudflare holds the certificate.
+					if release.gateway.tls.enabled && targetEnv.ingress.by != "tunnel" {
 						{
 							name:     "https"
 							protocol: "HTTPS"

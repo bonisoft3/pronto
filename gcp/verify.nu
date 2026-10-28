@@ -14,10 +14,8 @@
 # renders in software, and a 2-CPU runner timed a 3D page out.
 
 use ../k8s/release.nu [resolve-app]
+use build.nu [builder stamp]
 
-# What builds and runs the drivers: Docker's own CLI image, with its buildx
-# and compose plugins, run by Cloud Build against the Docker of its worker.
-export const builder = "docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d"
 # What uploads the drivers' screenshots: Google's own gsutil builder.
 const uploader = "gcr.io/cloud-builders/gsutil"
 
@@ -35,14 +33,6 @@ def render [cue_path: string, data?: string]: nothing -> record {
 }
 
 # The plan a release or a preview renders.
-# How long the release has run, before each of its lines: where its time
-# goes, read off the log.
-export def stamp []: nothing -> string {
-	let ran = ((date now) - ($env.GCP_T0? | default (date now)))
-	let s = ($ran / 1sec | math floor)
-	$"[+($s // 60 | fill -a r -c '0' -w 2):($s mod 60 | fill -a r -c '0' -w 2)]"
-}
-
 export def plan-of [cue_path: string, preview: string]: nothing -> record {
 	if ($preview | is-empty) { return (render $cue_path) }
 	let base_file = (mktemp -t gcp.XXXXXX.json | str trim)
