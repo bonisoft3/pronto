@@ -847,12 +847,17 @@ export async function derive(appDir: string): Promise<void> {
 
   if (irHtml === null) {
     const routesByIr = new Map(Object.values(surface.screens).map((s) => [s.ir, s.route]));
-    const owedTags = decls.filter((d) => d.owed).map((d) => {
-      if (d.kind === "screen") return `<article id="${d.id}" data-kind="screen" data-route="${routesByIr.get(d.id) ?? "/"}">`;
-      if (d.kind === "decision") return `<article id="${d.id}" data-kind="decision"><p>...</p></article>`;
-      if (d.kind === "test") return `<article id="${d.id}" data-kind="test" data-accepts="...">`;
-      return `<article id="${d.id}" data-kind="${d.kind}">`;
-    });
+    const owedTags = [
+      ...Object.values(programEntities).map(
+        (ent) => `<section id="${ent.ir}" data-kind="entity" data-durability="${ent.durability}"><table data-extract="fields">`,
+      ),
+      ...decls.filter((d) => d.owed && d.kind !== "entity").map((d) => {
+        if (d.kind === "screen") return `<article id="${d.id}" data-kind="screen" data-route="${routesByIr.get(d.id) ?? "/"}">`;
+        if (d.kind === "decision") return `<article id="${d.id}" data-kind="decision"><p>...</p></article>`;
+        if (d.kind === "test") return `<article id="${d.id}" data-kind="test" data-accepts="...">`;
+        return `<article id="${d.id}" data-kind="${d.kind}">`;
+      }),
+    ];
     for (const [sname, pmap] of Object.entries(exp.paths)) {
       const keys = Object.keys(pmap);
       if (keys.length > 0) {
