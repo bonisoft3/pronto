@@ -7,7 +7,7 @@ import (
 )
 
 #Version:     "0.24.0"
-#SaytVersion: "0.45.0"
+#SaytVersion: "0.45.1"
 
 // Test-only modules: an app's tests import the hybrid oracle harnesses by URL,
 // and the portable types are refreshed from the checkout's mecha client. An
