@@ -312,8 +312,10 @@ def stop-preview [plan: record] {
 }
 
 # A preview to deploy afresh on its instance as it stands: stopped, and its
-# database dropped, which the deploy makes again and builds the schema in.
-# Dropping it drops the replication slot its electric left there.
+# database dropped and made again empty, for the deploy to build the schema in.
+# Dropping it drops the replication slot its electric left there. Making it
+# again is here, not left to setup, which a release skips when nothing it sets
+# changed: the schema job would find no database at all.
 def empty-preview [plan: record] {
 	stop-preview $plan
 	let n = $plan.names
@@ -323,6 +325,7 @@ def empty-preview [plan: record] {
 	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
 		print $"gcp: (stamp) emptying the preview ($plan.preview): dropping its database on ($n.instance)"
 		gc sql databases delete $n.database --instance $n.instance --project $plan.project | ignore
+		gc sql databases create $n.database --instance $n.instance --project $plan.project | ignore
 	}
 }
 
