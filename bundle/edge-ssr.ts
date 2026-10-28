@@ -292,6 +292,8 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
   const databaseConfig = {
     ...common, name: database, main: 'src/database.ts', workers_dev: false,
     ...(separate && triggers ? { triggers } : {}),
+    // The object reads the providers it signs in through (edge-signin.ts).
+    ...(separate && config.vars ? { vars: config.vars } : {}),
     version_metadata: { binding: 'CF_VERSION_METADATA' },
     durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],

@@ -1,7 +1,9 @@
 // Makes an edge release live: deploys <out> (edge.ts's) with the wrangler
 // mecha's pglite-workerd pins, its secrets in the same version, and loads the
 // data directory into its object. JWT_SECRET is set once, since every session
-// is signed with it; IMPORT_TOKEN is new at every publish and lives only here.
+// is signed with it; IMPORT_TOKEN is new at every publish and lives only here;
+// a provider's client secret comes from this environment at every publish
+// (edge-signin.ts).
 // Secrets put after a deploy are a version of their own, which a request in
 // between does not see. The load resumes a partial one and leaves a complete
 // directory, live data, alone, unless --reset replaces it: the object answers
@@ -20,6 +22,7 @@ import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
+import { signInSecrets } from './edge-signin.ts'
 
 function fail(msg: string): never {
   console.error(`publish-edge: ${msg}`)
@@ -70,7 +73,11 @@ try {
   await Deno.writeTextFile(secretPath, jwtSecret, { mode: 0o600 })
 }
 if (!jwtSecret) fail('JWT secret file is empty')
-const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSecret }
+const { vars = {} } = JSON.parse(await Deno.readTextFile(config)) as { vars?: Record<string, string> }
+let providerSecrets: Record<string, string>
+try { providerSecrets = signInSecrets(vars, (name) => Deno.env.get(name)) }
+catch (e) { fail((e as Error).message) }
+const secrets: Record<string, string> = { IMPORT_TOKEN: token, JWT_SECRET: jwtSecret, ...providerSecrets }
 /** The Workers this publish deploys, each with the version it replaces, for
  * the rollback a refused migration asks for; a first deploy has none. */
 const deployed: { config: string; previous: string | null }[] = []
