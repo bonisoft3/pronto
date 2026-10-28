@@ -22,6 +22,7 @@ say:
         cmds:
           - do: "cue vet -c ./testdata/emit"
           - do: "deno test --no-config --allow-read --allow-run=cue,nu read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts"
+          - do: "deno test --no-config --allow-read --allow-write --allow-env --allow-run=git,nu,tar,sh gcp-build.test.ts"
       distribution:
         priority: -1
         cmds:

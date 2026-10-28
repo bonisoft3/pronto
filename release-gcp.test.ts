@@ -100,18 +100,16 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertEquals(c.env.find((e: { name: string }) => e.name === "PGHOST").value, "/cloudsql/brawl-chess:us-central1:battlechess-db");
 });
 
-Deno.test("the job sets the roles' passwords and grants the roles the schema has, and auth gets its statement bound", async () => {
+Deno.test("the job grants the roles the schema has, and auth gets its statement bound", async () => {
   // An app without auth has no app_user; a literal grant would die on it.
   const job = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "service"]'), "job")).value;
-  const c = job.spec.template.spec.template.spec.containers[0];
-  assertStringIncludes(c.command[2], "GRANT anon, service TO postgres WITH INHERIT FALSE, SET TRUE");
-  // 899_role_passwords.sh sets both, and refuses to run without either.
-  const names = c.env.map((e: { name: string }) => e.name);
-  assert(names.includes("ELECTRIC_PASSWORD") && names.includes("AUTHENTICATOR_PASSWORD"), names.join(","));
-  assertStringIncludes(JSON.stringify(c.env), "battlechess-authenticator-password");
+  assertStringIncludes(job.spec.template.spec.template.spec.containers[0].command[2], "GRANT anon, service TO postgres WITH INHERIT FALSE, SET TRUE");
   const auth = (await built(release(), "service")).value.spec.template.spec.containers[2];
   // The service refuses to start without it; the bound is resilience's client statement, in ms.
   assertEquals(auth.env.find((e: { name: string }) => e.name === "AUTH_STATEMENT_TIMEOUT_MS").value, "5000");
+  // Compose's own, where it gives one.
+  const own = (await built(release(`, auth: env: {AUTH_STATEMENT_TIMEOUT_MS: "9000"}`), "service")).value.spec.template.spec.containers[2];
+  assertEquals(own.env.filter((e: { name: string }) => e.name === "AUTH_STATEMENT_TIMEOUT_MS").map((e: { value: string }) => e.value), ["9000"]);
 });
 
 Deno.test("a passkey's relying party is the domain, else the run.app host the release fills", async () => {
@@ -209,20 +207,30 @@ Deno.test("the door sends an alias host on to the origin", async () => {
 });
 
 // A database built before a change is carried forward by the cluster's pgroll runner, as
-// compose's migrate step and the k8s release's Job do, after initdb and before any reader starts.
-Deno.test("an app with migrations gets a migrate job over the Cloud SQL socket", async () => {
-  const r = await built(release(`, migrate: env: {REQUIRED_TABLES: "schedule"}`), "plan");
+// compose's migrate step and the k8s release's Job do, after initdb and before any reader starts:
+// in the schema job itself, from the release's `schema` image, so the job starts once.
+Deno.test("an app with migrations carries its schema forward in the schema job, over the Cloud SQL socket", async () => {
+  const withSchema = `${pushed.slice(0, -1)}, schema: {tag: "latest", digest: "${digest("9")}"}}`;
+  const app = `{name: "battlechess", service: "bonk-chess", project: "brawl-chess", domain: "bonkchess.com", image: pushed: ${withSchema}, database: tokenRoles: ["anon", "app_user", "service"], migrate: env: {REQUIRED_TABLES: "schedule", PGHOST: "database"}}`;
+  const r = await built(app, "plan");
   assertEquals(r.success, true, r.stderr);
-  const job = (await built(release(`, migrate: env: {REQUIRED_TABLES: "schedule"}`), "migrateJob")).value;
-  assertEquals(job.metadata.name, "battlechess-migrate");
+  assertEquals(r.value.migrateJobYaml, undefined);
+  const job = (await built(app, "job")).value;
+  assertEquals(job.metadata.name, "battlechess-initdb");
   assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/cloudsql-instances"], "brawl-chess:us-central1:battlechess-db");
-  const c = job.spec.template.spec.template.spec.containers[0];
-  assert(/battlechess-migrate@sha256:/.test(c.image), c.image);
+  const [c, ...more] = job.spec.template.spec.template.spec.containers;
+  assertEquals(more.length, 0);
+  assert(/battlechess-schema@sha256:9{64}$/.test(c.image), c.image);
+  assert(c.command[2].trimEnd().endsWith('exec "/migrate.sh" "/pgroll" "00_initdb"'), c.command[2]);
   assertEquals(c.env.find((e: { name: string }) => e.name === "DATABASE_URL").valueFrom.secretKeyRef.name, "battlechess-migrate-database-url");
   assertEquals(c.env.find((e: { name: string }) => e.name === "REQUIRED_TABLES").value, "schedule");
-  assert(!r.value.migrateJobYaml.includes("postgres://"));
-  const none = await built(release(), "plan");
-  assertEquals(none.value.migrateJobYaml, "");
+  // initdb's own socket wins over a compose host that names its database service.
+  assertEquals(c.env.filter((e: { name: string }) => e.name === "PGHOST").map((e: { value: string }) => e.value), ["/cloudsql/brawl-chess:us-central1:battlechess-db"]);
+  assert(!r.value.jobYaml.includes("postgres://"));
+  const none = (await built(release(), "job")).value.spec.template.spec.template.spec.containers[0];
+  assert(/battlechess-database@sha256:/.test(none.image), none.image);
+  assert(!none.command[2].includes("migrate.sh"));
+  assert(!none.env.some((e: { name: string }) => e.name === "DATABASE_URL"));
 });
 
 // A provider is configured by the program for development, against a broker on the developer's
@@ -476,7 +484,7 @@ Deno.test("a revision of more than 10 containers is refused, and fits with sidec
   assertEquals(fits.success, true, fits.stderr);
 });
 
-// An app that acts for its owner alone:
+// An app that acts for its owner alone (Pronto Studio, which drives Claude and git for them):
 // Identity-Aware Proxy in front, so only the people the project's owner admits reach it.
 Deno.test("an app behind IAP is the owner's alone; a preview of it is not, so its drivers reach it", async () => {
   const r = await built(release(", iap: true"), "plan");
@@ -490,6 +498,19 @@ Deno.test("an app behind IAP is the owner's alone; a preview of it is not, so it
   assertEquals(ps.value.metadata.annotations["run.googleapis.com/iap-enabled"], undefined);
   const plain = await built(release(), "plan");
   assertEquals(plain.value.iap, false);
+});
+
+// A preview's electric fell behind the replication stream under its tests and Postgres cut it
+// (wal_sender_timeout): a preview keeps its CPU and its database waits longer; a release's
+// database keeps its flags, so it isn't restarted for this.
+Deno.test("a preview keeps electric's CPU and waits longer on its replication", async () => {
+  const pv = await built(release(", preview: \"rc\""), "service");
+  assertEquals(pv.success, true, pv.stderr);
+  assertEquals(pv.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+  const plan = await built(release(", preview: \"rc\""), "plan");
+  assertEquals(plan.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=50,wal_sender_timeout=300000");
+  const live = await built(release(), "plan");
+  assertEquals(live.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=50");
 });
 
 Deno.test("an app always on keeps its CPU between requests; by default it is throttled", async () => {

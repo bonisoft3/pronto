@@ -584,10 +584,20 @@ sent. The build runs as the project's default Cloud Build account, which the
 release lets push to the repository and write its log; the release reads each
 digest back from the registry and names it in the service and jobs.
 
+Runtime and driver layers are cached in Artifact Registry. Unchanged app
+sources reuse their previously built digests; the cache key includes file
+contents, modes, symlink targets, the build recipe, and platform. Driver images
+build while the preview deploys. Image copies start while tests run, under a
+candidate tag; promotion waits for a passing verdict and verifies each digest.
+
+Infrastructure setup is cached by its plan and release script. After changing
+resources manually, set `PRONTO_SETUP=always` to reconcile them. Deleting a
+preview also deletes its setup marker so recreating it provisions resources.
+
 | compose | on GCP |
 |---|---|
 | database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts, and reapplies its re-runnable steps every release |
-| migrate | where the app declares pgroll migrations, the cluster's runner as the Job `<app>-migrate`, after initdb and before the service rolls, as compose runs it on every boot |
+| migrate | where the app declares pgroll migrations, the same `<app>-initdb` job runs the cluster's migration runner after initdb, using a combined `schema` image; the former separate migration job is removed |
 | caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
 | ticker | where the app runs one, one more container of the service, writing through crud with the service role's token (`<app>-service-jwt`, signed with the gateway's secret) |
 | clock | the Cloud Scheduler job `<app>-clock`, POSTing the door's `/poke` at the service's run.app address each minute with that token and no retry, as compose's clock does: the service answers anyone, so Cloud Run has no OIDC token to check |
@@ -634,7 +644,10 @@ What bit on a real instance:
   (`<app>-db-<n>`); the earlier one keeps its data and its replication slot,
   untouched, until its owner deletes it.
 - **The smallest tier admits about 25 connections**, so the instance is raised
-  to 50 and crud's and electric's pools are capped at 5; and a probe reaches a
+  to 50. Crud's pool is capped at 5; Electric defaults to 5 and can be set with
+  `GCP.electric.pool`. Its CPU and memory use `GCP.electric.cpu` (millicpu)
+  and `GCP.electric.memory`. Previews keep CPU active between requests and
+  allow a longer replication timeout while tests open shapes. A probe reaches a
   container at the instance's address, so crud binds `*`.
 
 The release refuses an app whose compose project runs anything else: the

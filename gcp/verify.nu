@@ -14,10 +14,8 @@
 # renders in software, and a 2-CPU runner timed a 3D page out.
 
 use ../k8s/release.nu [resolve-app]
+use build.nu [builder stamp]
 
-# What builds and runs the drivers: Docker's own CLI image, with its buildx
-# and compose plugins, run by Cloud Build against the Docker of its worker.
-export const builder = "docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d"
 # What uploads the drivers' screenshots: Google's own gsutil builder.
 const uploader = "gcr.io/cloud-builders/gsutil@sha256:6aa906ae0de2bf3d8d232c51e628fec491c70d6144d6c71277a5e7e1e7d433e8"
 
@@ -44,29 +42,52 @@ export def plan-of [cue_path: string, preview: string]: nothing -> record {
 	$plan
 }
 
-# Every driver of the app against the service the plan names; an error when
-# one fails, after all have run.
-export def run-drivers [app_dir: string, plan: record] {
+# The drivers' build, started before the service they test is up: their
+# images build while the release deploys it, then the build waits for
+# `go-drivers` (a marker in the project's Cloud Build bucket) to run them.
+# A record `go-drivers`, `finish-drivers` and `cancel-drivers` take.
+export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 	let p = $plan.project
 	# The address release.nu configures the service for, its passkeys' relying
 	# party among it: Cloud Run's other one, status.url, is another host.
-	gc run services describe $plan.service --region $plan.region --project $p --format "value(status.url)" | ignore
 	let number = (gc projects describe $p --format "value(projectNumber)" | str trim)
 	let url = $"https://($plan.service)-($number).($plan.region).run.app"
 	let work = (mktemp -d -t gcp-verify.XXXXXX | str trim)
+	# Where the drivers' layer caches live: the project's registry, beside the
+	# images the release pushes there.
+	let registry_host = ($plan.registry | split row "/" | first)
+	let cache_repo = $"($plan.registry)/($plan.service)-verify"
 	# The app's own files, as git sees them, as its images are built from.
 	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
 	with-env {COPYFILE_DISABLE: "1"} { ^tar -czf $"($work)/source.tgz" -C $app_dir -T $"($work)/files" }
 	let script = ([
 		"set -eu"
-		"apk add --no-cache jq >/dev/null"
+		"apk add --no-cache jq=1.8.2-r0 >/dev/null"
 		"drivers=$(docker compose --profile '*' config --format json | jq -r '.services | to_entries[] | select(.value.environment.APP_URL != null and (.value.scale // 1) != 0) | .key' | sort)"
 		"[ -n \"$drivers\" ] || { echo 'verify: no service of the app reads APP_URL' >&2; exit 1; }"
-		"echo \"verify: $(echo $drivers) against $APP_URL\""
+		"echo \"verify: building $(echo $drivers)\""
 		"docker buildx create --use --driver docker-container >/dev/null"
+		# Each driver's layers cached in the registry, as the runtime images'
+		# are (release.nu push-images): a browser and its packages are pulled,
+		# not installed again, while the drivers' own files are unchanged.
+		$"echo \"$\(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\\\"access_token\\\":\\\"\\\([^\\\"]*\\\)\\\".*/\\1/p'\)\" | docker login --username oauth2accesstoken --password-stdin https://($registry_host) >/dev/null"
+		"caches=''"
+		$"for d in $drivers; do c=\"($cache_repo)-$d:buildcache\"; caches=\"$caches --set $d.cache-from=type=registry,ref=$c --set $d.cache-to=type=registry,ref=$c,mode=max,image-manifest=true,oci-mediatypes=true\"; done"
 		# Loaded with their layers uncompressed: gzip of a browser's image is a
 		# minute and more, for a tarball that only crosses a socket.
-		"docker compose --profile '*' config | docker buildx bake -f - --set '*.output=type=docker,compression=uncompressed' --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $drivers"
+		"docker compose --profile '*' config | docker buildx bake -f - --set '*.output=type=docker,compression=uncompressed' --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $caches $drivers"
+		# What `compose run` would build first, the images the drivers' own are
+		# made from, built and loaded now: from the bake's cache, before the wait.
+		"docker compose --profile '*' build --with-dependencies $drivers"
+		# The release says go once the service is up: a marker in the bucket,
+		# read with the build account's token from the worker's metadata.
+		"echo 'verify: waiting for the service to be up'"
+		# Forty minutes at most, should the release that says it be gone.
+		"waited=0"
+		"until token=$(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\"access_token\":\"\\([^\"]*\\)\".*/\\1/p') && wget -qO /dev/null --header \"Authorization: Bearer $token\" \"https://storage.googleapis.com/storage/v1/b/${PROJECT_ID}_cloudbuild/o/verify%2F${BUILD_ID}%2Fgo\" 2>/dev/null; do"
+		"  waited=$((waited + 2)); [ \"$waited\" -lt 2400 ] || { echo 'verify: the release never said go' >&2; exit 1; }; sleep 2"
+		"done"
+		"echo \"verify: $(echo $drivers) against $APP_URL\""
 		# The drivers run together, each to its end whatever the others answer,
 		# with SHOTS naming where it may leave screenshots, copied out of its
 		# container; each one's log is printed whole once all are done. The
@@ -117,23 +138,56 @@ export def run-drivers [app_dir: string, plan: record] {
 		options: {machineType: "E2_HIGHCPU_32", logging: "CLOUD_LOGGING_ONLY"}
 		timeout: "3600s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
-	print $"gcp: testing ($url) in Cloud Build"
+	print $"gcp: (stamp) building the tests of ($url) in Cloud Build"
 	# The build logs to Cloud Logging alone, which `builds submit` does not
 	# stream: its log is printed once it ends, without the image builds' lines.
 	let build = (gc builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
 	rm -rf $work
-	print $"gcp: build ($build): https://console.cloud.google.com/cloud-build/builds/($build)?project=($p)"
+	print $"gcp: (stamp) build ($build): https://console.cloud.google.com/cloud-build/builds/($build)?project=($p)"
+	{build: $build, project: $p, url: $url, service: $plan.service, region: $plan.region}
+}
+
+# The drivers' build told to run them, now that the service is up.
+export def go-drivers [run: record] {
+	gc run services describe $run.service --region $run.region --project $run.project --format "value(status.url)" | ignore
+	let f = (mktemp -t gcp-go.XXXXXX | str trim)
+	"go" | save -f $f
+	gc storage cp $f $"gs://($run.project)_cloudbuild/verify/($run.build)/go" | ignore
+	rm $f
+	print $"gcp: (stamp) testing ($run.url)"
+}
+
+# The drivers' build stopped, when the service it waits for never came up.
+export def cancel-drivers [run: record] {
+	let status = (gc builds describe $run.build --project $run.project --format "value(status)" | str trim)
+	if $status in ["QUEUED" "PENDING" "WORKING"] { gc builds cancel $run.build --project $run.project | ignore }
+}
+
+# The drivers' build to its end, its log printed; an error when one failed,
+# after all have run.
+export def finish-drivers [run: record] {
+	let p = $run.project
+	let build = $run.build
+	print $"gcp: (stamp) waiting for the tests to end"
 	mut status = "QUEUED"
 	while $status in ["QUEUED" "PENDING" "WORKING"] {
-		sleep 20sec
+		sleep 5sec
 		$status = (gc builds describe $build --project $p --format "value(status)" | str trim)
 	}
 	# Cloud Logging takes the last lines a moment after the build ends.
 	sleep 10sec
 	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($build)\"" --project $p --order asc --limit 100000 --format "value(textPayload)"
 		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
-	if $status != "SUCCESS" { error make {msg: $"the tests failed against ($url) \(($status)\): each driver's verdict is in the log above"} }
-	print $"gcp: every test passed against ($url)"
+	if $status != "SUCCESS" { error make {msg: $"the tests failed against ($run.url) \(($status)\): each driver's verdict is in the log above"} }
+	print $"gcp: (stamp) every test passed against ($run.url)"
+}
+
+# Every driver of the app against the service the plan names, up already; an
+# error when one fails, after all have run.
+export def run-drivers [app_dir: string, plan: record] {
+	let run = (start-drivers $app_dir $plan)
+	go-drivers $run
+	finish-drivers $run
 }
 
 export def main [

@@ -59,6 +59,18 @@ import (
 	// nobody is asking (a sidecar's long task).
 	alwaysOn: *false | bool
 
+	// Electric's share of the instance. Its memory holds every shape it keeps
+	// (its storage is the instance's /tmp, which Cloud Run keeps in memory), so
+	// an app whose screens keep many shapes live, one per parent row for a
+	// folder under a shared parent, asks for more: without it a page's first
+	// load ran the container out of memory and restarted the instance. Its
+	// pool is how many snapshots it builds at once.
+	electric: {
+		memory: *"1Gi" | =~"^[1-9][0-9]*(Mi|Gi)$"
+		cpu:    *1000 | int & >=250 & <=4000
+		pool:   *#Pools.electric | int & >=2 & <=40
+	}
+
 	// Filled by the release from what it pushed: a revision resolves a tag once,
 	// so every image is named by digest (mecha's docs/deployment.md, what bites).
 	image: {
@@ -67,14 +79,20 @@ import (
 	}
 
 	// Present where the app's compose project runs the cluster's migrate step: the
-	// environment compose gives it beside its DATABASE_URL, filled by the release.
-	migrate?: env: [string]: string
+	// environment compose gives it beside its DATABASE_URL, filled by the release,
+	// and what its image runs (mecha's migrate entrypoint), which the schema job
+	// runs after initdb.
+	migrate?: {
+		env: [string]: string
+		command: *["/migrate.sh", "/pgroll", "00_initdb"] | [...string]
+	}
 
 	// The roles the app's schema grants PostgREST's login, as generate wrote them
 	// (.pronto/cluster.json, the k8s release's source too): what the job grants
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
 	// Filled by the release.
 	database: tokenRoles: [...string]
+
 
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
@@ -130,11 +148,11 @@ import (
 	// Each peer compose names, as host:port, and where it is in the instance:
 	// the cluster's containers, and each sidecar at its own port.
 	_loopback: {
-		"crud:3000":     "127.0.0.1:\(#Ports.crud)"
-		"auth:9999":     "127.0.0.1:\(#Ports.auth)"
-		"electric:3000": "127.0.0.1:\(#Ports.electric)"
-		"ticker:9998":   "127.0.0.1:\(#Ports.ticker)"
-		"database:5432": "127.0.0.1:\(#Ports.database)"
+		"crud:3000":      "127.0.0.1:\(#Ports.crud)"
+		"auth:9999":      "127.0.0.1:\(#Ports.auth)"
+		"electric:3000":  "127.0.0.1:\(#Ports.electric)"
+		"ticker:9998":    "127.0.0.1:\(#Ports.ticker)"
+		"database:5432":  "127.0.0.1:\(#Ports.database)"
 		for n, c in R._inside {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
 	}
 	// What a sidecar apart reaches its peers by, as compose names them: the
@@ -234,6 +252,12 @@ import (
 // defaults together; the instance is raised to 50 and the pools capped.
 #Pools: {crud: 5, electric: 5}
 #SqlFlags: "cloudsql.logical_decoding=on,max_connections=50"
+// A preview's database is the smallest tier and its tests open every shape at once: electric
+// fell behind the replication stream there for over a minute, Postgres's default
+// wal_sender_timeout cut it, and its live requests hung until the tests failed (seen five times
+// on Bonk Chess's preview, never on its release). A preview's database waits five minutes.
+// Only a preview's: a release's database would restart for the flag.
+#PreviewSqlFlags: #SqlFlags + ",wal_sender_timeout=300000"
 
 // Google Cloud Managed Service for Prometheus's collector for Cloud Run, pinned.
 #Gmp: "us-docker.pkg.dev/cloud-ops-agents-artifacts/cloud-run-gmp-sidecar/cloud-run-gmp-sidecar:1.9.4@sha256:8f8ac35f4bc82aa9547b1458343acb79b2594b35b56fb4c13dbe62c1f5a64679"
@@ -281,7 +305,9 @@ import (
 				"autoscaling.knative.dev/maxScale":         "1"
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
-				if R.alwaysOn {"run.googleapis.com/cpu-throttling": "false"}
+				// A preview keeps its CPU between requests too: electric reads the replication
+				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
+				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
 					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
@@ -356,12 +382,13 @@ import (
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
 						{name: "ELECTRIC_PORT", value: "\(P.electric)"},
 						{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
-						{name: "ELECTRIC_DB_POOL_SIZE", value: "\(#Pools.electric)"},
+						{name: "ELECTRIC_DB_POOL_SIZE", value: "\(R.electric.pool)"},
 						// The instance's own: electric's shape metadata is SQLite,
 						// which a bucket mounted over FUSE cannot lock. A new
 						// instance rebuilds its shapes from Postgres.
 						{name: "ELECTRIC_STORAGE_DIR", value: "/tmp/electric"},
 					]
+					resources: limits: {cpu: "\(R.electric.cpu)m", memory: R.electric.memory}
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
 				}, if R.ticker != _|_ {
 					name: "ticker"
@@ -457,6 +484,24 @@ import (
 	// socket Cloud Run mounts, and a database comment marks it done (as the k8s
 	// release's initdb Job does). Its re-runnable steps and the roles' grant run
 	// every release.
+	//
+	// Where the app has pgroll migrations, the same job then carries the schema
+	// forward with the cluster's pgroll runner, as compose's migrate step does
+	// (mecha's docs/schema.md, carrying a live database forward), after initdb
+	// and before the service rolls, as the k8s release's migrate Job: its image
+	// is the release's `schema`, migrate's with the database's initdb directory,
+	// so one job starts once, not twice.
+	let initdbEnv = [
+		{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
+		{name: "PGUSER", value: "postgres"},
+		{name: "PGDATABASE", value: R.names.database},
+		{name: "POSTGRES_USER", value: "postgres"},
+		{name: "POSTGRES_DB", value: R.names.database},
+		(secretOf & {env: "PGPASSWORD", secret: sq.POSTGRES_PASSWORD}).out,
+		(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
+		(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
+	]
+	let initdbNames = [for e in initdbEnv {e.name}]
 	job: {
 		apiVersion: "run.googleapis.com/v1"
 		kind:       "Job"
@@ -474,7 +519,7 @@ import (
 					timeoutSeconds:     600
 					containers: [{
 						name: "initdb"
-						image: (imageOf & {svc: "database"}).out
+						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
 						command: ["bash", "-c", """
 							set -euo pipefail
 							# Validation migrations and machine writers run as this owner
@@ -498,48 +543,12 @@ import (
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
 							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"
-							"""]
-						env: [
-							{name: "PGHOST", value: "/cloudsql/\(R.names.connection)"},
-							{name: "PGUSER", value: "postgres"},
-							{name: "PGDATABASE", value: R.names.database},
-							{name: "POSTGRES_USER", value: "postgres"},
-							{name: "POSTGRES_DB", value: R.names.database},
-							(secretOf & {env: "PGPASSWORD", secret: sq.POSTGRES_PASSWORD}).out,
-							(secretOf & {env: "ELECTRIC_PASSWORD", secret: sq.ELECTRIC_PASSWORD}).out,
-							(secretOf & {env: "AUTHENTICATOR_PASSWORD", secret: sq.AUTHENTICATOR_PASSWORD}).out,
-						]
+							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
+						env: list.Concat([initdbEnv, [if R.migrate != _|_ for e in list.Concat([
+							[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out],
+							[for k, v in R.migrate.env {name: k, value: v}],
+						]) if !list.Contains(initdbNames, e.name) {e}]])
 					}]
-				}
-			}
-		}
-	}
-
-	// A database built before a change is carried forward by the cluster's pgroll runner, the
-	// image compose's migrate step runs (mecha's docs/schema.md, carrying a live database
-	// forward), after initdb and before the service rolls: the k8s release's migrate Job.
-	if R.migrate != _|_ {
-		migrateJob: {
-			apiVersion: "run.googleapis.com/v1"
-			kind:       "Job"
-			metadata: {
-				name: R.names.migrateJob
-				labels: "cloud.googleapis.com/location": R.region
-			}
-			spec: template: {
-				metadata: annotations: "run.googleapis.com/cloudsql-instances": R.names.connection
-				spec: {
-					taskCount: 1
-					template: spec: {
-						serviceAccountName: R.names.serviceAccount
-						maxRetries:         0
-						timeoutSeconds:     600
-						containers: [{
-							name: "migrate"
-							image: (imageOf & {svc: "migrate"}).out
-							env: list.Concat([[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out], [for k, v in R.migrate.env {name: k, value: v}]])
-						}]
-					}
 				}
 			}
 		}
@@ -584,7 +593,7 @@ import (
 		if R.preview != _|_ {preview: R.preview}
 		names:    R.names
 		sqlTier:  R.sqlTier
-		sqlFlags: #SqlFlags
+		sqlFlags: [if R.preview != _|_ {#PreviewSqlFlags}, #SqlFlags][0]
 		if R._domain != "" {domain: R._domain}
 		aliases: R._aliases
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}
@@ -596,7 +605,6 @@ import (
 		iap:         R._iap
 		serviceYaml: yaml.Marshal(B.service)
 		jobYaml:     yaml.Marshal(B.job)
-		migrateJobYaml: [if B.migrateJob != _|_ {yaml.Marshal(B.migrateJob)}, ""][0]
 		// The ticker's clock, once a minute, the floor (mecha's services/ticker,
 		// the cloud clock): the service's own run.app address, which a domain
 		// mapping still provisioning cannot stall.
