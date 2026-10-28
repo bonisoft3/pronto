@@ -1635,6 +1635,15 @@ import (
 			if H.kind != "container" {
 				files!: [string, ...string]
 			}
+			// A container hatch's own pages that hand a form to another site,
+			// such as an OAuth or app-registration flow that takes a POST: each
+			// page's path under the hatch's door route, and the origins it may
+			// post to. The door's policy keeps form-action 'self' everywhere
+			// else; these pages add exactly their origins to it, and nothing
+			// more of the policy changes.
+			if H.kind == "container" {
+				forms: [=~"^/\(Name)/[A-Za-z0-9_/.-]+$"]: [...(string & =~"^https://[A-Za-z0-9.-]+$")]
+			}
 		}
 		// Terminal-tier hatch: a vendored unit running inside the terminal, under
 		// one of `isolation`'s boundaries, touching the app only through its
