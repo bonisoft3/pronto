@@ -60,7 +60,7 @@ relationship.
 **No shape fingerprint.** It would be sha256 over the RFC 8785 form of the
 identity projection — the type id, then each ordinal's type, `required` and
 `retired`, with no label — so a rename leaves it unchanged. A versioned device
-collection needs it ([omnishell's pending](https://github.com/bonisoft3/omnishell/blob/v0.20.1/PENDING.md#data)), and
+collection needs it ([omnishell's pending](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#data)), and
 a message on the bus would carry it in its metadata to say which shape wrote
 it. Nothing computes it, and nothing in the tree implements RFC 8785.
 
@@ -101,7 +101,7 @@ certain over `ParsedExpr`; a type checker would also refuse a string compared
 with an integer.
 
 **A server row's transitions cannot be stated.** A machine governs a `tab` or
-`device` row only ([omnishell's chart](https://github.com/bonisoft3/omnishell/blob/v0.20.1/docs/machines.md#the-chart)),
+`device` row only ([omnishell's chart](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/machines.md#the-chart)),
 and nothing else speaks of transitions. Either machines govern cluster rows
 too, or CEL gains a binding for the previous row.
 
@@ -133,7 +133,7 @@ drop retires. Those are in GUIDE and SPEC, which a compile does not read.
 **A statement is declared inside its entity.** The argued rule is that a
 reference goes from what cannot stand alone to what can, so a validation or an
 access rule would name its entity rather than be declared inside it. The
-machine case is [omnishell's](https://github.com/bonisoft3/omnishell/blob/v0.20.1/PENDING.md#data).
+machine case is [omnishell's](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#data).
 
 **An enum value cannot be renamed.** A value in `this in [...]` and a chart's
 state names are data every holder keeps in rows, so renaming one has a field
@@ -167,7 +167,7 @@ or `device` collection, and none of the four readers sees it.
 durability, so an ephemeral effect on a `server` entity passes `cue vet`, lint
 and every test. Unifying each effect's level against its entity's row — at
 `cue vet`, where the program holds both, or in `machineLint`, which already
-reads the level ([omnishell's half](https://github.com/bonisoft3/omnishell/blob/v0.20.1/PENDING.md#machines)) — makes
+reads the level ([omnishell's half](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#machines)) — makes
 the lattice's first join a refusal, and lets one copy of the table import the
 other.
 
@@ -213,7 +213,7 @@ would make "a sink is written by its pipeline alone" a rule.
 **A `tab` or `device` write is judged by its validations alone**
 ([the lattice](docs/lattice.md#the-validation-ladder)); a judge beside
 `validate.js`, where every write passes, would hold type, field CEL and row CEL
-at every rung ([omnishell's `cel:` line](https://github.com/bonisoft3/omnishell/blob/v0.20.1/PENDING.md#data)).
+at every rung ([omnishell's `cel:` line](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#data)).
 
 ## Access
 

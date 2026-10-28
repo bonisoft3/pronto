@@ -7,7 +7,7 @@ status: partially-built
 
 # Hybrid machines: omnishell, mecha, duckstream and cortex
 
-The unbreakable machine of [machines.md](https://github.com/bonisoft3/omnishell/blob/v0.20.1/docs/machines.md) was designed
+The unbreakable machine of [machines.md](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/machines.md) was designed
 for the browser: a chart closed over one row whose transitions emit typed effects the
 terminal executes and answers. A backend architecture designed from the cluster
 side arrived at the same four laws: state is a row, operators are pure
@@ -49,7 +49,7 @@ three tiers are mathematically pure, closed over rows, and replayable.
 
 ## 1. Omnishell Machines (Client UI)
 
-*Specification: [`machine.cue`](https://github.com/bonisoft3/omnishell/blob/v0.20.1/machine.cue).*
+*Specification: [`machine.cue`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/machine.cue).*
 
 - **Role**: Drives interactive DOM regions, form submissions, optimistic screen state,
   and keyboard/focus navigation.

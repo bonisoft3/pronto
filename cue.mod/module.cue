@@ -34,7 +34,7 @@ deps: {
 		default: true
 	}
 	"github.com/bonisoft3/omnishell@v0": {
-		v:       "v0.20.1"
+		v:       "v0.20.3"
 		default: true
 	}
 	"github.com/bonisoft3/sayt@v0": {

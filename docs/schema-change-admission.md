@@ -14,7 +14,7 @@ ordinals, retirement) is [types and identity](types-and-identity.md). How an
 author declares a change is [the guide](../GUIDE.md#identity). How a running
 cluster notices one is mecha's [schema](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/schema.md),
 and what an already-served page does is omnishell's
-[data](https://github.com/bonisoft3/omnishell/blob/v0.20.1/docs/data.md#skew).
+[data](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/data.md#skew).
 
 ## Who cannot be migrated
 
