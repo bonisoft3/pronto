@@ -45,6 +45,7 @@ def run-tests [] {
 	test_render_manifests_eks
 	test_render_manifests_metal
 	test_render_ready_through_the_door
+	test_pods_hand_over
 	test_environment_access
 	test_schema_jobs_wait_for_database
 	test_release_override
@@ -358,6 +359,17 @@ def test_render_ready_through_the_door [] {
 	assert ($probe | str contains "/shell/shell.json") "readiness reads a page's shell through the door"
 	assert ($probe | str contains "/health") "readiness keeps render's own health"
 	assert equal $render.livenessProbe.httpGet.path "/health"
+}
+
+def test_pods_hand_over [] {
+	print "test a replaced pod keeps serving while the mesh learns of its successor..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let docs = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment")
+	for c in ["crud" "electric" "auth" "caddy" "render"] {
+		let d = ($docs | where metadata.name == $"sample-($c)" | first)
+		assert equal ($d.spec.template.spec.containers | where name == $c | first | get lifecycle.preStop.sleep.seconds) 15 $"($c) pauses before it stops"
+		assert equal ($d.spec.template.metadata.annotations | get "dapr.io/block-shutdown-duration") "20s" $"($c)'s sidecar outlasts the pause"
+	}
 }
 
 def test_environment_access [] {
