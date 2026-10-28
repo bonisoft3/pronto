@@ -114,36 +114,47 @@ export def ensure-cluster [] {
 export def ensure-operators [
 	--timeout: string = "90s"
 	--ingress: record = {by: "hostPort"} # the environment's
+	--reopen: closure # opens the release's tunnel to the API again (#Environment.access)
 ] {
 	for entry in $OPERATORS {
-		if ($entry.namespace? | is-not-empty) {
-			kubectl create namespace $entry.namespace --dry-run=client -o yaml | kubectl apply -f -
-		}
-
-		let file = (fetch-verified $entry)
-		if ($entry.kind? | default "") == "helm" {
-			# Split as text: a YAML round trip through nu rewrites values kubectl then rejects.
-			let docs = (helm template $entry.name $file --include-crds --namespace $entry.namespace ...($entry.set? | default [] | each { [--set $in] } | flatten) | split row --regex '(?m)^---\s*$' | where ($it | str trim | is-not-empty))
-			let is_crd = {|d| $d =~ '(?m)^kind:\s*CustomResourceDefinition\s*$' }
-			# A chart's own custom resources map only once its CRDs are established.
-			let crds = ($docs | where {|d| do $is_crd $d })
-			if ($crds | is-not-empty) {
-				$crds | str join "\n---\n" | kubectl apply --server-side --force-conflicts -f -
-				kubectl wait --for=condition=Established $"--timeout=($timeout)" crd --all
-			}
-			# helm template leaves namespace off objects that do not set it; the chart's namespace is theirs.
-			$docs | where {|d| not (do $is_crd $d) } | str join "\n---\n" | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false -f -
-		} else {
-			kubectl apply --server-side --force-conflicts --validate=false -f $file
-		}
-
-		for d in ($entry.check_deployments? | default []) {
-			print $"Waiting for deployment ($d) in ($entry.namespace)..."
-			kubectl rollout status $"deployment/($d)" -n $entry.namespace $"--timeout=($timeout)"
+		try { install-operator $entry $timeout } catch {|e|
+			if $reopen == null { error make {msg: $e.msg} }
+			print $"($entry.name) failed through the tunnel to the API \(($e.msg)\): opening it again"
+			do $reopen
+			install-operator $entry $timeout
 		}
 	}
 
 	ensure-envoy-gateway-class $ingress
+}
+
+# One operator: its manifests applied, its deployments waited for.
+def install-operator [entry: record, timeout: string] {
+	if ($entry.namespace? | is-not-empty) {
+		kubectl create namespace $entry.namespace --dry-run=client -o yaml | kubectl apply -f -
+	}
+
+	let file = (fetch-verified $entry)
+	if ($entry.kind? | default "") == "helm" {
+		# Split as text: a YAML round trip through nu rewrites values kubectl then rejects.
+		let docs = (helm template $entry.name $file --include-crds --namespace $entry.namespace ...($entry.set? | default [] | each { [--set $in] } | flatten) | split row --regex '(?m)^---\s*$' | where ($it | str trim | is-not-empty))
+		let is_crd = {|d| $d =~ '(?m)^kind:\s*CustomResourceDefinition\s*$' }
+		# A chart's own custom resources map only once its CRDs are established.
+		let crds = ($docs | where {|d| do $is_crd $d })
+		if ($crds | is-not-empty) {
+			$crds | str join "\n---\n" | kubectl apply --server-side --force-conflicts --request-timeout=120s -f -
+			kubectl wait --for=condition=Established $"--timeout=($timeout)" crd --all
+		}
+		# helm template leaves namespace off objects that do not set it; the chart's namespace is theirs.
+		$docs | where {|d| not (do $is_crd $d) } | str join "\n---\n" | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false --request-timeout=120s -f -
+	} else {
+		kubectl apply --server-side --force-conflicts --validate=false --request-timeout=120s -f $file
+	}
+
+	for d in ($entry.check_deployments? | default []) {
+		print $"Waiting for deployment ($d) in ($entry.namespace)..."
+		kubectl rollout status $"deployment/($d)" -n $entry.namespace $"--timeout=($timeout)"
+	}
 }
 
 # Ensure Envoy Gateway's GatewayClass, `eg`, and the proxy behind it: on Kind
@@ -277,6 +288,23 @@ export def tunnel-manifests [id: string]: nothing -> string {
 			}
 		}
 	] | each { to yaml } | str join "---\n"
+}
+
+# The API through an SSH tunnel of this release's own (#Environment.access): a
+# free local port forwarded to the node's 6443, which the release's kubeconfig
+# names. Its remote end is a bounded sleep, so a release that dies leaves no
+# tunnel past the hour; close-api-tunnel ends it when the release does.
+export def open-api-tunnel [target: string, port: int, socket: string] {
+	^ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -M -S $socket -f -L $"($port):127.0.0.1:6443" $target sleep 3600
+	for _ in 1..30 {
+		if (do { ^kubectl get --raw /readyz --request-timeout=5s } | complete).exit_code == 0 { return }
+		sleep 1sec
+	}
+	error make {msg: $"the cluster's API does not answer through the tunnel to ($target)"}
+}
+
+export def close-api-tunnel [target: string, socket: string] {
+	do { ^ssh -S $socket -O exit $target } | complete | ignore
 }
 
 export def ensure-tunnel [id: string, --timeout: string = "90s"] {
@@ -595,8 +623,15 @@ export def main [
 	let kubeconfig = (mktemp -t kubeconfig.XXXXXX | str trim)
 	kubectl config view --minify --flatten --context $context | save -f $kubeconfig
 	$env.KUBECONFIG = $kubeconfig
+	let tunnel = if ($target_env.access? | is-not-empty) {
+		let t = {target: $target_env.access.ssh, port: (port), socket: $"/tmp/pronto-api-(random chars --length 8).sock"}
+		kubectl config set-cluster (kubectl config view -o jsonpath='{.clusters[0].name}') --server $"https://127.0.0.1:($t.port)" | ignore
+		open-api-tunnel $t.target $t.port $t.socket
+		$t
+	}
+	let reopen = if $tunnel != null { {|| close-api-tunnel $tunnel.target $tunnel.socket; open-api-tunnel $tunnel.target $tunnel.port $tunnel.socket } }
 	if not $skip_operators {
-		ensure-operators --ingress $target_env.ingress
+		ensure-operators --ingress $target_env.ingress --reopen $reopen
 		if $target_env.ingress.by == "tunnel" { ensure-tunnel $target_env.ingress.id }
 	}
 	if not $skip_observability {
@@ -726,6 +761,7 @@ export def main [
 	if $target_env.ingress.by == "tunnel" {
 		print $"The tunnel answers for ($gateway_host) once its DNS is a proxied CNAME onto ($target_env.ingress.id).cfargotunnel.com: cloudflared tunnel route dns ($target_env.ingress.id) ($gateway_host)"
 	}
+	if $tunnel != null { close-api-tunnel $tunnel.target $tunnel.socket }
 	print $"\n[SUCCESS] Released ($app_info.name) natively to ($cluster_env): https://($gateway_host)/"
 }
 

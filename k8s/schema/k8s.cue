@@ -881,13 +881,17 @@ import (
 							initialDelaySeconds: 5
 							periodSeconds:       10
 						}
+						// Ready only once it renders: its own /health, and the door it
+						// reads every page from (DOOR, caddy through the sidecar)
+						// answering. A rollout keeps the old pod serving until then,
+						// where /health alone let it go while caddy was still starting
+						// and every page answered 500. Liveness stays its own /health,
+						// so a slow door never restarts it.
 						readinessProbe: {
-							httpGet: {
-								path: "/health"
-								port: release.render.port
-							}
+							exec: command: ["deno", "eval", "for (const u of [`http://localhost:${Deno.env.get('PORT')}/health`, `${Deno.env.get('DOOR')}/shell/shell.json`]) { const r = await fetch(u); await r.body?.cancel(); if (!r.ok) Deno.exit(1) }"]
 							initialDelaySeconds: 2
 							periodSeconds:       5
+							timeoutSeconds:      5
 						}
 					}]
 				}
