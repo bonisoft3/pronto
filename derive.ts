@@ -600,7 +600,7 @@ export async function derive(appDir: string): Promise<void> {
 
   // CUE-authored HTML must reach the markup reader before chart validation,
   // which judges the current declaration rather than an earlier emission.
-  const missingScreens: string[] = [];
+  const problems: string[] = [];
   for (const [sname, screen] of Object.entries(surface.screens)) {
     if (screen.markup !== undefined) {
       const path = `${appDir}/${screen.files.html}`;
@@ -608,27 +608,27 @@ export async function derive(appDir: string): Promise<void> {
       const text = GENERATED_HTML_HEADER + screen.markup;
       if (await ifMissing(Deno.readTextFile(path), null) !== text) await Deno.writeTextFile(path, text);
     } else if (!(await exists(`${appDir}/${screen.files.html}`))) {
-      missingScreens.push(
+      problems.push(
         `${screen.files.html}: no such file — author ${screen.files.html} with <section class="screen" data-screen="${sname}"> or set surface.screens.${sname}.markup in program.cue`,
       );
     }
   }
-  if (missingScreens.length > 0) fail(missingScreens.join("\n"));
 
   // What the screens say, as the terminal reads them. Spawned like the export
   // above and from the same directory, so the path the program's terminal
   // declares is the path that resolves; --no-config because every module the
   // reader loads is a static import of its own.
-  const read = await new Deno.Command("deno", {
-    args: ["run", "--no-lock", "--no-check", "--no-config", "--allow-read=.", await terminalPath(exp.markupReader, appDir), "."],
-    cwd: appDir,
-    stdout: "piped",
-    stderr: "inherit",
-  }).output();
-  if (!read.success) fail(`${exp.markupReader} refused this app's markup`);
-  const { screens: projected }: { screens: Record<string, ScreenProjection> } = JSON.parse(
-    new TextDecoder().decode(read.stdout),
-  );
+  let projected: Record<string, ScreenProjection> = {};
+  if (problems.length === 0 || await exists(`${appDir}/shell/screens`)) {
+    const read = await new Deno.Command("deno", {
+      args: ["run", "--no-lock", "--no-check", "--no-config", "--allow-read=.", await terminalPath(exp.markupReader, appDir), "."],
+      cwd: appDir,
+      stdout: "piped",
+      stderr: "inherit",
+    }).output();
+    if (!read.success) fail(`${exp.markupReader} refused this app's markup`);
+    ({ screens: projected } = JSON.parse(new TextDecoder().decode(read.stdout)));
+  }
 
   const screens: DerivedScreen[] = [];
   const machines: { screen: string; region: MachineProjection }[] = [];
@@ -828,7 +828,6 @@ export async function derive(appDir: string): Promise<void> {
       .map((h) => [h.src.replace(/^.*\//, "").replace(/\.js$/, ""), h.ir]),
   );
 
-  const problems: string[] = [];
   let decls: ReturnType<typeof declarations> = [];
   try {
     decls = [
@@ -935,7 +934,7 @@ export async function derive(appDir: string): Promise<void> {
   // does not — never a file to skip, which would drop it from both token rules.
   const sharedPaths = new Set(Object.values(exp.shared).flat());
   const appCss: { path: string; css: string }[] = [];
-  for (const rel of [...screens.map((s) => `shell/screens/${s.name}.css`), ...[...sharedPaths].sort()]) {
+  for (const rel of [...Object.keys(surface.screens).map((name) => `shell/screens/${name}.css`), ...[...sharedPaths].sort()]) {
     const css = await ifMissing(Deno.readTextFile(`${appDir}/${rel}`), null);
     if (css === null) problems.push(`${rel} does not open — author ${rel}`);
     else appCss.push({ path: rel, css });

@@ -141,8 +141,11 @@ export function stampCue(source: string, e: ProgramEntity, id: string | undefine
   const close = lines.findIndex((l, i) => i > open && new RegExp(`^${indent}\\}\\s*$`).test(l));
   if (close < 0) throw new Error(`${e.name}: the entity's block does not close at its own indent`);
   const fieldRe = new RegExp(`^(${indent}(?:\\t| +))fields:\\s*\\[`);
-  const first = lines.findIndex((l, i) => i > open && i < close && fieldRe.test(l));
-  const childIndent = first >= 0 ? fieldRe.exec(lines[first])![1] : `${indent}\t`;
+  const candidates = lines.map((line, index) => ({ index, match: fieldRe.exec(line) }))
+    .filter(({ index, match }) => index > open && index < close && match !== null)
+    .sort((a, b) => a.match![1].length - b.match![1].length);
+  const first = candidates[0]?.index ?? -1;
+  const childIndent = candidates[0]?.match![1];
   const closeBracketRe = new RegExp(`^${childIndent}\\]\\s*$`);
   const last = lines.findIndex((l, i) => i >= first && i < close && (closeBracketRe.test(l) || (i === first && l.trimEnd().endsWith("]"))));
   if (first < 0 || last < 0) throw new Error(`${e.name}: no \`fields: [\` list closing at its own indent`);
