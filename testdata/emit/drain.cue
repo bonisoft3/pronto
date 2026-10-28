@@ -35,3 +35,19 @@ drainListed: _drainedFiles[".pronto/cluster.json"].data.drains & [{name: "profil
 // spell bare; one that is not refuses at vet rather than killing their boot.
 drainQualifiedTableRefused: ((pronto.#Drain & {name: "x", on: ["public.t"], call: "f"}).on == _|_) & true
 drainBodyKeyRefused: ((pronto.#Drain & {name: "x", on: ["t"], call: "f", body: {batchSize: 1}}).body == _|_) & true
+
+_edgeDrain: _code & {
+	state: drains: "edge-refresh": {on: ["profile"], call: "refresh_profiles", stream: false}
+}
+_edgeCluster: (pronto.#DefaultCluster & {code: _edgeDrain, statics: []}).out
+_edgeTerminal: (pronto.#DefaultTerminal & {code: _edgeDrain}).out
+_edgeLoop: (pronto.#DefaultLoop & {code: _edgeDrain, terminal: _edgeTerminal, cluster: _edgeCluster}).out
+_edgeFiles: (pronto.#emit & {
+	code: _edgeDrain
+	cluster: _edgeCluster
+	terminal: _edgeTerminal
+	loop: _edgeLoop
+	build: (pronto.#DefaultBuild & {code: _edgeDrain, loop: _edgeLoop, cluster: _edgeCluster, terminal: _edgeTerminal}).out
+}).files
+edgeDrainNotStreamed: list.Contains([for p in _edgeCluster.state.pipelines {p.file}], "docker/emit-edge-refresh.yaml") & false
+edgeDrainListed: _edgeFiles[".pronto/cluster.json"].data.drains & [{name: "edge-refresh", on: ["profile"], call: "refresh_profiles", body: {}}]

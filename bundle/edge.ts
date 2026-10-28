@@ -70,17 +70,18 @@ const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.jso
   tables: string[]
   schema?: Record<string, { durability?: string }>
   migrations: string[]
-  units?: Record<string, { role?: string }>
+  units?: Record<string, { role?: string; isolation?: string }>
   presenter?: { policy: string; scripted: string[] }
 }
-if (shell.migrations.length === 0) fail('the app has no migration, so no cluster: release it to pages')
+const clustered = shell.migrations.length > 0
+if (!clustered && (flags['--derived'] || flags['--from'] || flags['--ssr-origin'])) fail('a release without a cluster cannot use --derived, --from, or --ssr-origin')
 // A unit also needs the terminal door's per-unit security headers. A
 // presenter's are its worker script's own, which _headers carries
 // (edge-addresses.ts), and the refusal of its scripted fetches below.
-const unpackaged = Object.entries(shell.units ?? {}).filter(([, unit]) => unit.role !== 'presenter').map(([unit]) => unit)
+const unpackaged = Object.entries(shell.units ?? {}).filter(([, unit]) => unit.role !== 'presenter' && unit.isolation !== 'compartment').map(([unit]) => unit)
 if (unpackaged.length) fail(`units are not packaged yet: ${unpackaged.join(', ')}`)
 const name = shell.app ?? path.basename(app)
-const drains = await clusterDrains(path.join(app, '.pronto/cluster.json'))
+const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 
 let retainedFrom = previousAssets
 let tempRetained: string | undefined
@@ -124,6 +125,19 @@ if (seed) {
   const count = await writeEdgeBlobs(publicDir, JSON.parse(await Deno.readTextFile(path.join(app, seed.manifest))), seed.origin)
   await Deno.writeTextFile(path.join(publicDir, '_headers'), '\n' + BLOB_CACHE_RULE, { append: true })
   console.error(`edge: ${count} seeded blobs`)
+}
+
+if (!clustered) {
+  const worker = path.relative(path.join(out, 'src'), path.join(here, 'edge-static.ts')).replaceAll('\\', '/')
+  await Deno.writeTextFile(path.join(out, 'src/index.ts'), `export { default } from '${worker.startsWith('.') ? worker : `./${worker}`}'\n`)
+  await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
+    name, main: 'src/index.ts', compatibility_date: '2026-09-01',
+    assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), not_found_handling: 'none' },
+    observability: { enabled: true },
+    ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
+  }, null, 2) + '\n')
+  console.error(`edge: ${out}`)
+  Deno.exit(0)
 }
 
 // PGlite for workerd. Bake reads the project's compose from its .bayt/, and a

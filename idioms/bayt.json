@@ -2987,7 +2987,11 @@
         "expose": [],
         "entrypoint": null,
         "incremental": false,
-        "cmd": null
+        "cmd": null,
+        "finalCopy": [
+          "/served",
+          "/served.scripts"
+        ]
       },
       "compose": {
         "up": false,

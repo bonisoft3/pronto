@@ -1357,7 +1357,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	code: _
 	out: {
 		for n, _ in S.code.state.pipelines {(n): "pipeline"}
-		for n, _ in S.code.state.drains {(n): "drain"}
+		for n, d in S.code.state.drains if d.stream {(n): "drain"}
 	}
 }
 
@@ -2222,6 +2222,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					from: name: omnishell.#Address.image
 					// Where bayt copies the srcs, each at its path in the app.
 					workdir: "/app"
+					finalCopy: [omnishell.#Address.tree, omnishell.#Address.scripts]
 					copy: [{from: {name: omnishell.#RuntimeImage}, srcs: ["/"], dst: omnishell.#Address.home}]
 					let place = [for s in list.Concat([runtime, own]) {
 						let source = [
@@ -2235,7 +2236,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						"install -D -m 644 '\(source)' '\(omnishell.#Address.tree)\(url)'"
 					}]
 					let ice = [if _iceServers != null {" --ice-servers '\(json.Marshal(_iceServers))'"}, ""][0]
-					epilogue: ["RUN set -e; \(strings.Join(place, "; ")); \(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)"]
+					let separator = [if len(strings.Join(place, "; ")) > 60000 {"; \\\n  "}, "; "][0]
+					epilogue: ["RUN set -e; \(strings.Join(place, separator)); \(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)"]
 				}
 				compose: {}
 			}
@@ -2827,7 +2829,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				let kind = strings.TrimSuffix(strings.Split(part, " ")[0], "-src")
 				let sources = list.SortStrings([if _resourceSources[kind] != _|_ for src, _ in _resourceSources[kind] {src}])
 				strings.Join(list.Concat([[part], sources]), " ")
-			}], "; ")}][0]
+			}], "; ")
+			}][0]
 	}, ""][0]
 	_envelope: #envelopePlan & {
 		meta:         E.code.meta
@@ -2841,8 +2844,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			let route = [if scr != _|_ if scr.route != _|_ { scr.route }, (r.screen)][0]
 			(r.screen): len([
 				for ex in _envelope.sitemap.exclude
-				if route == ex || (ex != "/" && strings.HasPrefix(route, strings.TrimSuffix(ex, "/") + "/"))
-				{ ex }
+				if route == ex || (ex != "/" && strings.HasPrefix(route, strings.TrimSuffix(ex, "/")+"/")) {ex},
 			]) > 0
 		}
 	}
@@ -2857,10 +2859,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					[
 						if "\(scr.priority)" == "1" { "1.0" },
 						if "\(scr.priority)" == "0" { "0.0" },
-						"\(scr.priority)"
+						"\(scr.priority)",
 					][0]
 				},
-				""
+				"",
 			][0]
 			let inferredPriority = [if isRoot { "1.0" }, if hasReads { "0.8" }, "0.6"][0]
 			let priority = [if authoredPriority != "" { authoredPriority }, inferredPriority][0]
@@ -3485,7 +3487,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				}
 			}
 
-			for _, dr in E.code.state.drains {
+			for _, dr in E.code.state.drains if dr.stream {
 				"docker/\(E.code.meta.name)-\(dr.name).yaml": {
 					format: "yaml"
 					data: (#rpkDrain & {d: dr, app: E.code.meta.name, authOn: E._authOn}).out
@@ -3856,7 +3858,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					if _isAdvanced for ext in E._envelope.sitemap.extra {
 						let loc = [
 							if strings.HasPrefix(ext, "http://") || strings.HasPrefix(ext, "https://") { ext },
-							"\(_o)\(ext)"
+							"\(_o)\(ext)",
 						][0]
 						let locEsc = strings.Replace(
 							strings.Replace(
@@ -4063,7 +4065,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
 			// The app's tools, the runtime among them, are its pinned releases,
 			// which setup installs.
-			let pagesSetup = "\n      - run: sayt setup"
+			let pagesSetup = "\n      - run: sayt setup\(pagesDir)"
 
 			let pagesJob = """
 				  pages:
@@ -4100,16 +4102,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
 				        with:
 				          version: v\(distribution.#SaytVersion)\(pagesSetup)
-				      - if: "${{ env.CLOUDFLARE_API_TOKEN != '' }}"
-				        run: sayt release@cloudflare\(pagesDir)
-				      - if: "${{ env.CLOUDFLARE_API_TOKEN != '' }}"
+				      - name: Check deployment credentials
 				        run: |
-				          TARGET=$(cat \(pagesPrefix)dist/cloudflare/origin.txt 2>/dev/null || cat dist/cloudflare/origin.txt 2>/dev/null || echo "$PRONTO_DEPLOYED_URL")
-				          if [ -n "$TARGET" ]; then
-				            sayt verify@cloudflare --target="$TARGET"
-				          else
-				            sayt verify@cloudflare
-				          fi\(pagesDir)
+				          : "${CLOUDFLARE_API_TOKEN:?Set CLOUDFLARE_API_TOKEN}"
+				          : "${CLOUDFLARE_ACCOUNT_ID:?Set CLOUDFLARE_ACCOUNT_ID}"
+				      - run: sayt release@cloudflare\(pagesDir)
+				      - run: sayt verify@cloudflare --target="$(cat dist/cloudflare/origin.txt)"\(pagesDir)
 				"""
 
 			let jobsList = [
@@ -4121,7 +4119,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			".github/workflows/cd.yml": {
 				format: "yaml"
 				text:   """
-					# Release the app: bundle it into one document and deploy it.
+					# Release the app to its declared hosting targets.
 					#
 					# GitHub reads workflows only from a repository's root .github/, so this
 					# file is inert in the monorepo and active in the mirror, where copybara
@@ -4129,10 +4127,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					# cd.yml creates here once the mirror holds the tagged commit; nothing
 					# publishes from a branch, and a dispatch redeploys what main holds.
 					#
-					# The release verb builds the document as a developer would, a snapshot
-					# since the tag is the release already. The site is a project site, so
-					# the document is bundled for the repository's path prefix and doubles
-					# as the site's 404.html, which is what makes a deep link boot.
+					# Pages bundles use the repository's path prefix and a 404 document
+					# for deep links. Cloudflare publishes its Worker and verifies the
+					# deployed origin.
 
 					name: cd
 

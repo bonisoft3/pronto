@@ -888,6 +888,7 @@ import (
 	// Unqualified, as a change names its table: `public.x` would never match.
 	on: [=~"^[a-z_][a-z0-9_]{0,62}$", ...=~"^[a-z_][a-z0-9_]{0,62}$"]
 	call: string & =~"^[a-z_][a-z0-9_]{0,62}$"
+	stream: *true | bool
 	// The JSON arguments of every call, each named as a function's argument
 	// is: the page's and the edge's clusters call `call(key => value, …)`.
 	body: *{} | {[=~"^[a-z_][a-z0-9_]{0,62}$"]: bool | int | string}

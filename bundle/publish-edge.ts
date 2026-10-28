@@ -53,12 +53,26 @@ async function run(cmd: string, args: string[], { cwd = out, env }: { cwd?: stri
 // By path: a bare `wrangler` on PATH can resolve to another install, and
 // where the npm backend puts its bin differs between mise versions.
 // The package's pinned node leads PATH for wrangler and its subprocesses.
+await run('mise', ['trust', '--yes', '--all'], { cwd: workerd })
+await run('mise', ['install', 'node', 'npm:wrangler'], { cwd: workerd })
 const wranglerBin = (await run('mise', ['which', 'wrangler'], { cwd: workerd })).trim()
 const node = (await run('mise', ['which', 'node'], { cwd: workerd })).trim()
 const nodeDir = path.dirname(node)
 const runEnv = { ...Deno.env.toObject(), PATH: `${nodeDir}${path.delimiter}${Deno.env.get('PATH') ?? ''}` }
 const wrangler = (args: string[]) => run(wranglerBin, args, { env: runEnv })
 const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')
+const settings = JSON.parse(await Deno.readTextFile(config)) as { durable_objects?: unknown; routes?: { pattern: string }[] }
+if (!settings.durable_objects) {
+  if (reset) fail('--reset requires a cluster')
+  const deployed = await wrangler(['deploy', '--config', config, ...temporary])
+  console.log(deployed)
+  const origin = settings.routes?.length ? `https://${settings.routes[0].pattern}` : /https:\/\/\S+\.workers\.dev/.exec(deployed)?.[0] ?? fail('wrangler deploy named no workers.dev URL')
+  await Deno.writeTextFile(path.join(out, 'origin.txt'), origin)
+  const ghEnv = Deno.env.get('GITHUB_ENV')
+  if (ghEnv) await Deno.writeTextFile(ghEnv, `PRONTO_DEPLOYED_URL=${origin}\n`, { append: true })
+  await holdIceServers(deployedRelease(origin), await releasedIceServers(builtRelease(path.join(out, 'public'))), origin)
+  Deno.exit(0)
+}
 
 const token = random()
 const secretPath = path.join(path.dirname(out), '.jwt-secret')
@@ -136,8 +150,8 @@ try {
   await Deno.remove(secretsDir, { recursive: true })
 }
 console.log(deployedText)
-const settings = JSON.parse(await Deno.readTextFile(config)) as { routes?: { pattern: string }[]; triggers?: { crons: string[] } }
-const origin = settings.routes?.length ? `https://${settings.routes[0].pattern}` : /https:\/\/\S+\.workers\.dev/.exec(deployedText)?.[0] ?? fail('wrangler deploy named no workers.dev URL')
+const deployedSettings = JSON.parse(await Deno.readTextFile(config)) as { routes?: { pattern: string }[]; triggers?: { crons: string[] } }
+const origin = deployedSettings.routes?.length ? `https://${deployedSettings.routes[0].pattern}` : /https:\/\/\S+\.workers\.dev/.exec(deployedText)?.[0] ?? fail('wrangler deploy named no workers.dev URL')
 await Deno.writeTextFile(path.join(out, 'origin.txt'), origin)
 const ghEnv = Deno.env.get('GITHUB_ENV')
 if (ghEnv) {
@@ -175,11 +189,11 @@ await settled('the deploy')
 const { load } = await import(String(pathToFileURL(path.join(workerd, 'load.ts'))))
 const loaded = await load(path.join(out, 'pgdata'), send, { reset })
 if ('skipped' in loaded) {
-  let migrationsBody: Uint8Array
+  let migrationsBody: string
   try {
-    migrationsBody = await Deno.readFile(path.join(out, 'migrations.json'))
+    migrationsBody = await Deno.readTextFile(path.join(out, 'migrations.json'))
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) migrationsBody = new TextEncoder().encode('[]')
+    if (e instanceof Deno.errors.NotFound) migrationsBody = '[]'
     else throw e
   }
   let migrated: Response = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
@@ -216,7 +230,7 @@ if (ssr) {
 // terminal config carries the target's ICE servers (edge-ice.ts).
 await holdIceServers(deployedRelease(origin), await releasedIceServers(builtRelease(path.join(out, 'public'))), origin)
 // The Cron Trigger is the object's Worker's: database.jsonc where there is one.
-let triggers = settings.triggers
+let triggers = deployedSettings.triggers
 try { triggers ??= (JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))) as { triggers?: { crons: string[] } }).triggers }
 catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (triggers) {

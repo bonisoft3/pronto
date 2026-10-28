@@ -163,7 +163,9 @@
     "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
     "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7",
     "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.1/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
-    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7"
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7",
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.3/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.3/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7"
   },
   "workspace": {
     "dependencies": [

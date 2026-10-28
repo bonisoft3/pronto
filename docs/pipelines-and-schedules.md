@@ -111,7 +111,11 @@ woken for them), and a call with nothing to do must write nothing to its own
 `on` tables, or it never sleeps. A function that recomputes a projection
 whole names its sources in `on`, and must not name its sink.
 
-Every `on` table must be in the publication. The default publication carries
+A drain with `stream: false` runs only in the page and edge clusters. Use it
+when a separate CDC pipeline already keeps the same projection in a streamed
+cluster.
+
+Every `on` table must be in the publication for a streamed drain. The default publication carries
 every `server` entity; a queue table the app creates in its own SQL, or any
 table an app's narrowed publication leaves out, is the app's to add. Conduit
 keys each event by a single-column primary key and will not start over a

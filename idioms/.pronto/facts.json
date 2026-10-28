@@ -115,6 +115,7 @@
     {"name":"Date","reason":"handlers run in an SES compartment with no endowments","except_role":"adapter"},
     {"name":"Intl","reason":"only an adapter or a module granted Intl via manifest endowments is endowed with Intl","except_role":"adapter"},
     {"name":"Crypto","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
+    {"name":"Cheerio","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"TextEncoder","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"TextDecoder","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"URL","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
