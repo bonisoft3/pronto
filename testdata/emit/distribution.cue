@@ -77,3 +77,9 @@ externalBuildRunsConsumerRules: strings.Contains(_externalBuild.targets.build.cm
 
 frozenArchiveClock: strings.Contains((dist.#Project & {edgeClock: "disabled"}).edge, "--clock disabled") & true
 defaultEdgeClock: strings.Contains(_project.edge, "--clock disabled") & false
+
+// Explicit live targets keep the HTTP/browser runner; the default GCP check
+// runs the app's integration drivers in Cloud Build.
+gcpVerifyLiveTarget: strings.Contains(_project.verifyGcp, "SAY_VERIFY_ARGS_TARGET") & true
+gcpVerifyHttp:       strings.Contains(_project.verifyGcp, "verify verify.ts") & true
+gcpVerifyDrivers:    strings.Contains(_project.verifyGcp, "gcp verify.nu") & true

@@ -468,8 +468,9 @@ when opted in; container targets (`docker`, `gcp`, `k8s`) configure STUN alone.
 **`k8s` is in neither `#Target` nor `#Tier`**
 ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 
-**`verify@<target>` is not emitted**
-([the design](docs/release-targets.md#what-a-release-is)).
+**Compose integration drivers run remotely for `gcp` alone.**
+The other targets use HTTP and browser verification; they do not yet run the
+compose drivers against the deployed address ([[docs/release-targets]]).
 
 **The page derives by drain alone** ([pages](docs/release-targets.md#pages)).
 Its streams' and computations' rows are the release's, so a result recorded in

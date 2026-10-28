@@ -1955,7 +1955,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if list.Contains(D.code.meta.targets, "k8s") {
 				sayYaml: say: release: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.k8s}]}
 			}
-			// The same for the cloud tier on GCP: a deploy, not a version.
+			// The same for the cloud tier on GCP: a deploy, not a version. The
+			// release goes behind its integration tests, run against a preview of
+			// what it deploys rather than a stack on this machine (release.nu):
+			// the drivers integrate runs that read APP_URL, which verify@gcp runs
+			// alone against the release or a named preview (verify.nu).
 			if list.Contains(D.code.meta.targets, "gcp") {
 				sayYaml: say: release: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.gcp}]}
 			}

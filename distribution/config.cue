@@ -28,7 +28,7 @@ import (
 // from where the app is released and never declared by it. A dev or CI stack
 // writes none. An entry is an RTCIceServer, so a TURN relay's credentials fit.
 #IceServer: {
-	urls:        string | [string, ...string]
+	urls: string | [string, ...string]
 	username?:   string
 	credential?: string
 }
@@ -97,7 +97,7 @@ import (
 	// The interpreter's root and mecha's, which the bundler reads from.
 	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
 	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
-	tools: #Tools
+	tools:      #Tools
 	mise: {
 		...
 		settings: {
@@ -114,7 +114,7 @@ import (
 		}
 		tools: P.tools
 	}
-	_run: #Run
+	_run:     #Run
 	compiler: "^\((#Writer & {root: "(^mise where \(#Runtimes.pronto) | str trim)"}).out)"
 	write: (_run & {args: "run-mise exec -- \((#Writer & {root: "$pronto"}).out)"}).out
 	// The live tables a pages release fills from the settled container
@@ -150,9 +150,9 @@ import (
 	// Post-release verification across live deployments.
 	let _verifyArgs = "...(if ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else { ['--target', $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty) { [] } else { ['--tier', $env.SAY_VERIFY_ARGS_TIER] }) ...(if ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { [] } else { ['--headless', $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else { ['--session', $env.SAY_VERIFY_ARGS_SESSION] })"
 	verifyPages: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform pages\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyEdge:  (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform cloudflare\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyK8s:   (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform k8s\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyGcp:   (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform gcp\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
+	verifyEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform cloudflare\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
+	verifyK8s: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform k8s\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
+	verifyGcp: (_run & {args: "if ([$env.SAY_VERIFY_ARGS_TARGET? $env.SAY_VERIFY_ARGS_TIER? $env.SAY_VERIFY_ARGS_HEADLESS? $env.SAY_VERIFY_ARGS_SESSION? $env.APP_URL?] | compact | any {|v| $v != \"\"}) { run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform gcp\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs) } else { run-mise exec -- nu ($pronto | path join gcp verify.nu) }"}).out
 	checks: {
 		derive: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read=. ($pronto | path join derive.ts) --self-test"}).out
 		// Its own tests import siblings a release of it does not carry.
@@ -178,6 +178,7 @@ import (
 		doctor: do:    "use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno --version; run-mise where github:bonisoft3/pronto"
 		generate: rulemap: {
 			...
+
 			// An app that bootstraps its repository's root from pronto keeps that
 			// project in pronto/, with the command that writes it; a pronto/
 			// holding only an app's own rules has nothing to write.
