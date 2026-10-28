@@ -15,10 +15,15 @@ export const builtRelease = (publicDir: string): Read => (url) =>
 
 /** A deployed release, read through its origin. */
 export const deployedRelease = (origin: string): Read => async (url) => {
-  const res = await fetch(new URL(url, origin), { headers: url === '/' ? { accept: 'text/html' } : {} })
-  const text = await res.text()
-  if (!res.ok) throw new Error(`${new URL(url, origin)} answered ${res.status}`)
-  return text
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(new URL(url, origin), { headers: url === '/' ? { accept: 'text/html' } : {} })
+    const text = await res.text()
+    if (res.ok) return text
+    if (![404, 502, 503, 504].includes(res.status) || attempt === 11) {
+      throw new Error(`${new URL(url, origin)} answered ${res.status}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * 2 ** attempt, 5000)))
+  }
 }
 
 export async function releasedIceServers(read: Read): Promise<unknown> {

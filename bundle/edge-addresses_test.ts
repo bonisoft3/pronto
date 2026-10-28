@@ -190,3 +190,20 @@ Deno.test('edge routing rules route /* to worker', async () => {
   }
 })
 
+
+Deno.test('a new deployment can propagate before its release is checked, while permanent errors fail', async () => {
+  const fetched = globalThis.fetch
+  let requests = 0
+  globalThis.fetch = async () => ++requests === 1
+    ? new Response(null, { status: 404 })
+    : new Response('the release')
+  try {
+    const read = deployedRelease('https://new-worker.example')
+    assert.equal(await read('/'), 'the release')
+    assert.equal(requests, 2)
+    globalThis.fetch = async () => new Response(null, { status: 403 })
+    await assert.rejects(read('/'), /answered 403/)
+  } finally {
+    globalThis.fetch = fetched
+  }
+})
