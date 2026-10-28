@@ -153,16 +153,16 @@ Deno.test({ name: "hybrid commands step in the edge object, and its alarm wakes 
     await t.step("the object supplies the engine the migration left to the tier", async () => {
       assertEquals(await one(`SELECT (SELECT lanname FROM pg_language WHERE oid = prolang) FROM pg_proc WHERE oid = '${schema}.engine(jsonb)'::regprocedure;`), "sql");
       assertEquals(await one(`SELECT (SELECT lanname FROM pg_language WHERE oid = prolang) FROM pg_proc WHERE oid = 'public.pgl_step(text, jsonb)'::regprocedure;`), "c");
-      assertEquals(await one("SHOW default_transaction_isolation;"), "serializable");
+      assertEquals(await one("SHOW default_transaction_isolation;"), "read committed");
     });
 
-    await t.step("a machine's steps run serializable, and refuse to run otherwise", async () => {
+    await t.step("a machine's steps run read committed, and refuse to run otherwise", async () => {
       await seed(95);
-      await sql("SET default_transaction_isolation TO 'read committed';");
-      const refused = await psql(call(95, 1, 195));
       await sql("SET default_transaction_isolation TO 'serializable';");
+      const refused = await psql(call(95, 1, 195));
+      await sql("SET default_transaction_isolation TO 'read committed';");
       assertEquals(refused.ok, false);
-      assertStringIncludes(refused.err, "serializable");
+      assertStringIncludes(refused.err, "read committed");
     });
 
     await t.step("one command and all player views commit together", async () => {

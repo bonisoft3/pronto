@@ -28,7 +28,7 @@ function fn(name: string, params: Param[], result: string, body: string, declara
   const signature = `${name}(${params.map(p => p.type).join(", ")})`;
   let tag = "$mecha_port$";
   while (body.includes(tag) || declarations.includes(tag)) tag = tag.slice(0, -1) + "_$";
-  return `CREATE FUNCTION ${name}(${args}) RETURNS ${result}
+  return `CREATE OR REPLACE FUNCTION ${name}(${args}) RETURNS ${result}
 LANGUAGE ${language} SECURITY DEFINER SET search_path = pg_catalog
 AS ${tag}
 ${language === "plpgsql" ? `DECLARE ${declarations}\nBEGIN\n${body}\nEND;` : body}
@@ -61,6 +61,7 @@ PERFORM ${s}.settle(game, ${s}.step(jsonb_build_object('state', game.state, 'eve
       output.push(fn(`${s}.spawn`, [...roomParam, {name: "input", type: "jsonb"}, {name: "participants", type: "jsonb"}, {name: "at", type: "bigint", default: null}], "void", `
 IF instance_id IS NULL OR jsonb_typeof(participants) IS DISTINCT FROM 'object' OR participants = '{}'::jsonb THEN
  RAISE EXCEPTION 'initialization requires an identity and participants'; END IF;
+PERFORM ${s}.hold(ARRAY(SELECT value::uuid FROM jsonb_each_text(participants)));
 seeded := ${s}.step(jsonb_build_object('initialize', true, 'payload', input,
  'context', jsonb_build_object('tier', 'mecha', 'now', coalesce(at, ${s}.clock())), 'viewers', '[]'::jsonb));
 INSERT INTO ${s}.instance (id, version, state) VALUES (instance_id, ${m.version}, seeded->'state');
@@ -73,7 +74,7 @@ PERFORM ${s}.publish(instance_id);`, "seeded jsonb;"));
       if (a.params.some(param => ["current_actor", "admission_id", "request_value", "prior", "answer"].includes(param.name))) throw new Error("admission parameter shadows an execution variable");
       if (["step", "settle", "dispatch", "deliver", "publish", "spawn", "wake", "arm", "join", "command", "open", "lease", "prune", "sealed"].includes(a.name)) throw new Error("admission name shadows a Mecha primitive");
       if (p.lease && a.params.length) throw new Error(`${m.name}: a leased machine's admission takes no arguments`);
-      output.push(`CREATE TABLE ${s}.admission_receipt (id uuid PRIMARY KEY, actor uuid NOT NULL, request jsonb NOT NULL, result jsonb, now bigint NOT NULL);`);
+      output.push(`CREATE TABLE IF NOT EXISTS ${s}.admission_receipt (id uuid PRIMARY KEY, actor uuid NOT NULL, request jsonb NOT NULL, result jsonb, now bigint NOT NULL);`);
       const paramsJson = `jsonb_build_object(${a.params.flatMap(param => [lit(param.name), ident(param.name)]).join(", ")})`;
       const checks = a.checks.map(check => `IF (${check.sql}) IS NOT TRUE THEN
 ${check.mode === "error" ? `RAISE EXCEPTION ${lit(check.reason)};` : `answer := jsonb_build_object('kind', 'rejected', 'reason', ${lit(check.reason)}, 'command_id', admission_id);
@@ -85,6 +86,8 @@ ${auth}
 admission_id := ${a.id};
 IF admission_id IS NULL THEN RAISE EXCEPTION 'admission identity required'; END IF;
 request_value := ${paramsJson};
+-- Its players, before its checks read where they sit.
+PERFORM ${s}.hold(ARRAY(SELECT value::uuid FROM jsonb_each_text(${expressions.members})) || current_actor);
 ${expressions.locks}
 INSERT INTO ${s}.admission_receipt (id, actor, request, now) VALUES (admission_id, current_actor, request_value, ${s}.clock()) ON CONFLICT DO NOTHING;
 SELECT * INTO STRICT prior FROM ${s}.admission_receipt r WHERE r.id = admission_id FOR UPDATE;
@@ -115,6 +118,7 @@ IF chosen IS NULL THEN RETURN jsonb_build_object('kind', 'rejected', 'reason', '
       const payload = slots ? `jsonb_build_object(${lit(p.join.membersPayload!)}, (SELECT jsonb_agg(m.seat ORDER BY m.seat) FROM ${s}.member m WHERE m.instance_id = game.id))` : "'{}'::jsonb";
       output.push(fn(`${s}.join`, [...roomParam, {name: "requested_seat", type: "text", default: ""}], "jsonb", `
 ${auth}
+PERFORM ${s}.hold_instance(instance_id, current_actor);
 SELECT * INTO game FROM ${s}.instance i WHERE i.id = instance_id FOR UPDATE;
 IF NOT FOUND THEN RETURN jsonb_build_object('kind', 'rejected', 'reason', 'room_unavailable'); END IF;
 IF EXISTS (SELECT FROM ${s}.member m WHERE m.instance_id = game.id AND m.actor = current_actor) THEN
@@ -130,7 +134,7 @@ RETURN jsonb_build_object('kind', 'accepted');`, `current_actor uuid := public.a
       const args = a?.params.map(param => param.name === a.id ? "NEW.instance_id"
         : param.type === "jsonb" ? `NEW.input::jsonb->${lit(param.name)}`
         : `coalesce(NEW.input::jsonb->>${lit(param.name)}${param.default != null ? `, ${lit(param.default)}` : ""})::${param.type}`).join(", ");
-      output.push(`CREATE FUNCTION ${s}.open() RETURNS trigger
+      output.push(`CREATE OR REPLACE FUNCTION ${s}.open() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $open$
 DECLARE answer jsonb;
 BEGIN
@@ -144,8 +148,8 @@ BEGIN
 END;
 $open$;
 REVOKE ALL ON FUNCTION ${s}.open() FROM PUBLIC;
-CREATE TRIGGER ${m.name}_open_admit AFTER INSERT ON public.${m.name}_open FOR EACH ROW EXECUTE FUNCTION ${s}.open();
-CREATE TRIGGER ${m.name}_open_sealed BEFORE UPDATE OR DELETE ON public.${m.name}_open FOR EACH ROW EXECUTE FUNCTION ${s}.sealed();`);
+CREATE OR REPLACE TRIGGER ${m.name}_open_admit AFTER INSERT ON public.${m.name}_open FOR EACH ROW EXECUTE FUNCTION ${s}.open();
+CREATE OR REPLACE TRIGGER ${m.name}_open_sealed BEFORE UPDATE OR DELETE ON public.${m.name}_open FOR EACH ROW EXECUTE FUNCTION ${s}.sealed();`);
     }
     if (p.lease) {
       const a = p.admission;
@@ -159,17 +163,23 @@ CREATE TRIGGER ${m.name}_open_sealed BEFORE UPDATE OR DELETE ON public.${m.name}
       const heldField = lit(p.lease.held);
       const holds = (who: string, session: string) =>
         `EXISTS (SELECT 1 FROM ${s}.instance i, jsonb_array_elements(i.state->${heldField}) e WHERE i.id = ${who} AND e->>'id' = ${session})`;
-      output.push(`CREATE FUNCTION ${s}.prune(who uuid) RETURNS void
+      // A session's lapsed leases are found by actor, through the index the lease entity
+      // declares (mecha-surface.ts). One a renewal is writing is left for the next prune:
+      // that renewal waits for the player this one holds, so waiting for its row would
+      // deadlock.
+      output.push(`CREATE OR REPLACE FUNCTION ${s}.prune(who uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $prune$
 BEGIN
-  DELETE FROM public.${m.name}_lease l WHERE l.actor = who AND NOT ${holds("who", "l.id")};
+  DELETE FROM public.${m.name}_lease l WHERE l.id IN (SELECT c.id FROM public.${m.name}_lease c
+    WHERE c.actor = who AND NOT ${holds("who", "c.id")} FOR UPDATE OF c SKIP LOCKED);
 END;
 $prune$;
 REVOKE ALL ON FUNCTION ${s}.prune(uuid) FROM PUBLIC;
-CREATE FUNCTION ${s}.lease() RETURNS trigger
+CREATE OR REPLACE FUNCTION ${s}.lease() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $lease$
 BEGIN
   PERFORM ${s}.serial();
+  PERFORM ${s}.hold(ARRAY[CASE WHEN TG_OP = 'DELETE' THEN OLD.actor ELSE NEW.actor END]);
   IF TG_OP = 'DELETE' THEN
     -- A row the machine already let lapse leaves nothing to deliver.
     PERFORM 1 FROM ${s}.instance i WHERE i.id = OLD.actor FOR UPDATE;
@@ -183,7 +193,7 @@ BEGIN
 END;
 $lease$;
 REVOKE ALL ON FUNCTION ${s}.lease() FROM PUBLIC;
-CREATE TRIGGER ${m.name}_lease_renew AFTER INSERT OR UPDATE OR DELETE ON public.${m.name}_lease FOR EACH ROW EXECUTE FUNCTION ${s}.lease();`);
+CREATE OR REPLACE TRIGGER ${m.name}_lease_renew AFTER INSERT OR UPDATE OR DELETE ON public.${m.name}_lease FOR EACH ROW EXECUTE FUNCTION ${s}.lease();`);
     }
     if (p.wake) {
       event(m, p.wake.event);
@@ -194,6 +204,7 @@ CREATE TRIGGER ${m.name}_lease_renew AFTER INSERT OR UPDATE OR DELETE ON public.
       // decided, its transaction's clock(), and never before `due`: a late
       // tick that ran at `due` would set the next deadline in the past.
       output.push(fn(`${s}.wake`, [...roomParam, {name: "due", type: "bigint"}], "void", `
+PERFORM ${s}.hold_instance(instance_id);
 SELECT * INTO STRICT game FROM ${s}.instance i WHERE i.id = instance_id FOR UPDATE;
 IF game.state->>'phase' IN (${p.wake.phases.map(lit).join(", ")}) AND (game.state->>${lit(p.wake.deadline)})::bigint > 0
  AND (game.state->>${lit(p.wake.deadline)})::bigint <= due THEN
@@ -204,7 +215,7 @@ ELSE PERFORM ${s}.arm(game); END IF;`, `game ${s}.instance;`));
       // A deadline is the ticker's: entering a phase that holds one arms a
       // one-shot schedule named by the revision that armed it, and every
       // settle replaces it.
-      output.push(`CREATE FUNCTION ${s}.arm(game ${s}.instance) RETURNS void
+      output.push(`CREATE OR REPLACE FUNCTION ${s}.arm(game ${s}.instance) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $arm$
 DECLARE deadline bigint := (game.state->>${lit(p.wake.deadline)})::bigint;
 BEGIN
@@ -217,18 +228,20 @@ BEGIN
 END;
 $arm$;
 REVOKE ALL ON FUNCTION ${s}.arm(${s}.instance) FROM PUBLIC;
-CREATE FUNCTION ${s}.fire() RETURNS trigger
+CREATE OR REPLACE FUNCTION ${s}.fire() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $fire$
 BEGIN
   PERFORM ${s}.serial();
   IF NEW.machine <> ${lit(m.name)} OR NEW.late THEN RETURN NEW; END IF;
+  -- Its players first: a step holding them may be re-arming this schedule.
+  PERFORM ${s}.hold_instance((NEW."row"->>'id')::uuid);
   DELETE FROM public.schedule WHERE name = NEW.schedule;
   PERFORM ${s}.wake((NEW."row"->>'id')::uuid, round(extract(epoch FROM NEW.tick_at) * 1000)::bigint);
   RETURN NEW;
 END;
 $fire$;
 REVOKE ALL ON FUNCTION ${s}.fire() FROM PUBLIC;
-CREATE TRIGGER ${m.name}_timer_fire AFTER INSERT ON public.machine_timer_tick FOR EACH ROW EXECUTE FUNCTION ${s}.fire();`);
+CREATE OR REPLACE TRIGGER ${m.name}_timer_fire AFTER INSERT ON public.machine_timer_tick FOR EACH ROW EXECUTE FUNCTION ${s}.fire();`);
     }
     for (const [name, read] of Object.entries(p.reads ?? {})) {
       output.push(fn(`${s}.${ident(name)}`, read.params, read.returns, read.sql, "", "sql"));

@@ -216,7 +216,17 @@ import (
 				command: ["bash", "-c", """
 					set -euo pipefail
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
-					if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"; exit 0; fi
+					if [ "$marker" = "pronto initdb" ]; then
+					  echo "initdb: already built"
+					  # Its re-runnable steps are the release's, though (emit.cue's): a new
+					  # entity's table, every policy, trigger and publication, and the hybrid
+					  # machines' code run again, keeping every row.
+					  for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do
+					    f=/docker-entrypoint-initdb.d/$step.sql
+					    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+					  done
+					  exit 0
+					fi
 					source /usr/local/bin/docker-entrypoint.sh
 					docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
 					docker_process_init_files /docker-entrypoint-initdb.d/*

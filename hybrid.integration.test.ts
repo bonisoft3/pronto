@@ -15,17 +15,13 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
     const stopped = await run("docker", ["stop", container]);
     if (!stopped.ok) throw new Error(stopped.err);
   };
-  // As the gateway does: each transaction starts at the role's isolation,
-  // which this superuser session has to say for itself.
-  const psql = (source: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=terse", "-U", "postgres"], `SET default_transaction_isolation TO 'serializable';\n${source}`);
-  // As the gateway does: a transaction a serialization conflict aborted is
-  // run again, so racing callers see some serial order of their steps.
+  // As the gateway does: each transaction starts at the database's default,
+  // read committed, and racing callers are ordered by the players they hold.
+  const psql = (source: string) => run("docker", ["exec", "-i", container, "psql", "-qtAX", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=terse", "-U", "postgres"], source);
   const sql = async (source: string) => {
-    for (let attempt = 0; ; attempt++) {
-      const result = await psql(source);
-      if (result.ok) return result.out;
-      if (!result.err.includes("could not serialize") || attempt >= 20) throw new Error(result.err);
-    }
+    const result = await psql(source);
+    if (result.ok) return result.out;
+    throw new Error(result.err);
   };
   const schema = "hybrid_truco_turn";
   const seed = async (id: number, deadline = initial().deadline) => {
@@ -53,15 +49,15 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
       ${surface("truco_turn")}
       ${compiled.sql}`);
 
-    await t.step("a machine's steps run serializable, and refuse to run otherwise", async () => {
-      // A step read state and then locked it, so under read committed a
-      // concurrent step could commit between the two. Serializable makes every
-      // interleaving some serial order, and a step outside it is refused.
-      assertStringIncludes(await sql("SELECT array_to_string(setconfig, ',') FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole WHERE r.rolname = 'app_user';"), "default_transaction_isolation=serializable");
+    await t.step("a machine's steps run read committed, and refuse to run otherwise", async () => {
+      // A step holds its players before it locks a row, and reads what their
+      // last step left once it has them: a snapshot taken before that wait
+      // would not show it, so a step under one is refused.
+      assertEquals((await sql("SELECT coalesce(array_to_string(setconfig, ','), '') FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole WHERE r.rolname = 'app_user';")).includes("default_transaction_isolation"), false);
       await seed(95);
-      const refused = await psql(`SET default_transaction_isolation TO 'read committed'; ${call(95, 1, 195)}`);
+      const refused = await psql(`SET default_transaction_isolation TO 'serializable'; ${call(95, 1, 195)}`);
       assertEquals(refused.ok, false);
-      assertStringIncludes(refused.err, "serializable");
+      assertStringIncludes(refused.err, "read committed");
     });
 
     // The clock and randomness were refused by a list of their spellings,
@@ -81,6 +77,8 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
         ["SELECT to_jsonb('today'::date)", "to date, whose input reads the session"],
         ["SELECT to_jsonb(gen_random_uuid())", "gen_random_uuid(), which the catalog marks volatile"],
         ["SELECT to_jsonb(random())", "random(), which the catalog marks volatile"],
+        ["SELECT to_jsonb(pg_try_advisory_xact_lock(1))", "pg_try_advisory_xact_lock(), which the catalog marks volatile"],
+        ["SELECT public.pg_advisory_xact_lock(1)", "public.pg_advisory_xact_lock(), which the catalog marks volatile"],
         ["SELECT to_jsonb(public.gen_random_bytes(4))", "public.gen_random_bytes(), which the catalog marks volatile"],
         ["SELECT to_jsonb(age(make_timestamp(2020, 1, 1, 0, 0, 0)))", "age(), the transaction's clock"],
         ["SELECT to_jsonb('now'::text::timestamptz)", "to timestamptz, whose input reads the session"],
@@ -133,6 +131,36 @@ Deno.test({ name: "hybrid commands serialize, replay and preserve private projec
       assertEquals(JSON.parse(await sql(call(10, 1, 100, request(0, "play", { card: 1 })))).kind, "accepted");
       assertEquals(await snapshot(10), before);
       assertEquals(await sql(`SELECT count(*) FROM ${schema}.receipt WHERE instance_id = '${uuid(10)}';`), "1");
+    });
+
+    await t.step("replacing machine code preserves instances and refuses a protocol change", async () => {
+      const before = await snapshot(10);
+      await sql(compiled.sql);
+      assertEquals(await snapshot(10), before);
+      const changed = await compileHybrid({ ...spec, version: spec.version + 1 }, rules, terminal);
+      const refused = await psql(changed.sql);
+      assertEquals(refused.ok, false);
+      assertStringIncludes(refused.err, "another protocol");
+      assertEquals(await snapshot(10), before);
+    });
+
+    await t.step("database checks refuse in order and a passing guard applies the move", async () => {
+      const checks = [0, 1].map((card) => ({
+        sql: `(request->'event'->'payload'->>'card')::integer > ${card}`,
+        reason: card === 0 ? "first_check" : "second_check",
+      }));
+      const checked = await compileHybrid({ ...spec, name: "truco_checks", mecha: {
+        locks: "", transitions: [{ phase: "playing", event: "play", requires: checks, sql: "NULL;" }],
+      } }, rules, terminal);
+      await sql(`${surface("truco_checks")} ${checked.sql}`);
+      for (const card of [0, 1, 2]) {
+        const id = uuid(800 + card);
+        await sql(`INSERT INTO hybrid_truco_checks.instance VALUES ('${id}', 1, 0, ${quote(initial())});
+          INSERT INTO hybrid_truco_checks.member VALUES ('${id}', '${uuid(1)}', 'a'), ('${id}', '${uuid(2)}', 'b');`);
+        const answer = JSON.parse(await sql(call(800 + card, 1, 900 + card, request(0, "play", { card }), "truco_checks")));
+        assertEquals([answer.kind, answer.reason], card < 2 ? ["rejected", checks[card].reason] : ["accepted", null]);
+        assertEquals(await sql(`SELECT revision FROM hybrid_truco_checks.instance WHERE id = '${id}';`), card < 2 ? "0" : "1");
+      }
     });
 
     await t.step("two tabs race at one revision and only one move commits", async () => {
