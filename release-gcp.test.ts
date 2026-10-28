@@ -51,6 +51,18 @@ Deno.test("no secret is a literal: each comes from Secret Manager", async () => 
   assertStringIncludes(r.value.jobYaml, "name: battlechess-postgres-password");
 });
 
+// An app beside others in one project reads its own secrets and none of theirs:
+// its account is granted each secret its containers name, never the project.
+Deno.test("the account reads exactly the secrets its service and job name", async () => {
+  const r = await built(release(`, auth: {oidc: {OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "abc"}, oidcSecrets: {OIDC_GOOGLE_CLIENT_SECRET: "battlechess-google-secret"}}`), "plan");
+  assertEquals(r.success, true, r.stderr);
+  const named = new Set([r.value.serviceYaml, r.value.jobYaml].flatMap((doc: string) =>
+    [...doc.matchAll(/secretKeyRef:\n\s+key: latest\n\s+name: (\S+)|secretKeyRef:\n\s+name: (\S+)/g)].map((m) => m[1] ?? m[2])));
+  assertEquals(r.value.readSecrets, [...named].sort());
+  assert(r.value.readSecrets.every((s: string) => s.startsWith("battlechess-")), r.value.readSecrets.join(", "));
+  for (const s of ["battlechess-postgres-password", "battlechess-crud-db-uri", "battlechess-google-secret"]) assert(r.value.readSecrets.includes(s), s);
+});
+
 // electric is one instance (mecha's docs/deployment.md#clouds-as-built), and so
 // is the service it shares; none while nobody plays.
 Deno.test("the service is one instance at most and none at rest", async () => {

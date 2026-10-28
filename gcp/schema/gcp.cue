@@ -647,6 +647,22 @@ import (
 		})
 	}}
 
+	// Every secret the app's containers read, each env's secretKeyRef and each secret mounted, in
+	// the service, its job and each sidecar apart: what its account is granted, secret by secret,
+	// so an app beside others in one project reads its own secrets and none of theirs.
+	let podSecrets = {
+		pod: _
+		out: list.Concat([
+			[for c in pod.containers if c.env != _|_ for e in c.env if e.valueFrom != _|_ {e.valueFrom.secretKeyRef.name}],
+			[if pod.volumes != _|_ for v in pod.volumes if v.secret != _|_ {v.secret.secretName}],
+		])
+	}
+	_readSecrets: {for s in list.Concat([
+		(podSecrets & {pod: B.service.spec.template.spec}).out,
+		(podSecrets & {pod: B.job.spec.template.spec.template.spec}).out,
+		for _, s in B.sidecarServices {(podSecrets & {pod: s.spec.template.spec}).out},
+	]) {(s): true}}
+
 	// What the release needs besides the two documents, as JSON.
 	plan: {
 		project:    R._project
@@ -678,6 +694,8 @@ import (
 			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
 		}}
 		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
+		// The secrets its account reads, each granted on the secret alone.
+		readSecrets: list.SortStrings([for s, _ in B._readSecrets {s}])
 		// The compose services built and run beside the cluster's.
 		sidecars: [for n, _ in R.sidecars {n}]
 		// Where each peer compose names is in the instance, which the release

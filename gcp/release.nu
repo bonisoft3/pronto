@@ -65,6 +65,24 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 	$current
 }
 
+# The app's account reads each secret its containers name (the plan's readSecrets), granted on
+# that secret alone, never on the project. A preview's release may grant no role in its project,
+# so where its account is refused it says which secret, and the owner's grant on the project, as
+# before, still holds.
+def grant-secrets [plan: record] {
+	let member = $"serviceAccount:($plan.names.serviceAccount)"
+	for s in $plan.readSecrets {
+		let r = (^gcloud --quiet secrets add-iam-policy-binding $s --project $plan.project --member $member --role roles/secretmanager.secretAccessor | complete)
+		if $r.exit_code != 0 {
+			if ($plan.preview? | is-not-empty) {
+				print $"gcp: (stamp) ($s) not granted to ($member) alone: ($r.stderr | str trim | lines | last)"
+			} else {
+				error make {msg: $"gcloud secrets add-iam-policy-binding ($s): ($r.stderr | str trim)"}
+			}
+		}
+	}
+}
+
 # Whether any sidecar's metrics are scraped, in the cluster's instance or apart.
 def scraped [plan: record]: nothing -> bool {
 	($plan.scrapeConfig | is-not-empty) or ($plan.sidecarScrapeConfigs? | default {} | is-not-empty)
@@ -131,9 +149,12 @@ def set-up-project [plan: record] {
 		if not (exists iam service-accounts describe $n.serviceAccount --project $p) {
 			gc iam service-accounts create $sa --project $p --display-name $"($plan.service) on Cloud Run" | ignore
 		}
-		let roles = ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] | append (if (scraped $plan) { ["roles/monitoring.metricWriter"] } else { [] })
-		for role in $roles {
-			gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role $role --condition None --quiet | ignore
+		# Its own database alone, by a condition on the instance's name, and (grant-secrets, once
+		# they exist) its own secrets alone: an app beside others in one project reaches none of
+		# theirs. A role on the whole project an earlier release granted is left to its owner.
+		gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role roles/cloudsql.client --condition $"expression=resource.name == 'projects/($p)/instances/($n.instance)',title=($n.instance) alone" --quiet | ignore
+		if (scraped $plan) {
+			gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role roles/monitoring.metricWriter --condition None --quiet | ignore
 		}
 	}
 
@@ -435,6 +456,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	# What the Managed Prometheus sidecar scrapes, which it reads as a mounted secret.
 	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
 	for c in ($plan.sidecarScrapeConfigs | transpose secret config) { ensure-secret $c.secret $p $c.config | ignore }
+	grant-secrets $plan
 	run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
 	# The migrate job an earlier release ran apart, which this one's job does.
 	if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) { gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore }
