@@ -13,6 +13,12 @@ package schema
 	platform?: string
 	// The kube context a release applies to; absent, Kind's own (cluster.yaml).
 	context?: string
+	// How the release reaches the context's API when it listens only on the
+	// node: an SSH tunnel the release opens for its own run, to the node's
+	// 6443, on a free local port its kubeconfig then names. A tunnel kept open
+	// for hours was seen to stall large applies; one per release does not
+	// outlive it, and is opened again if an apply through it fails.
+	access?: {ssh: =~"^[^@\\s]+@[^@\\s]+$"}
 	// What builds the images: Docker on the machine releasing, or Cloud Build
 	// in a project of the operator's, which pushes them to `registry` (an
 	// Artifact Registry repository the cluster pulls from), so the machine

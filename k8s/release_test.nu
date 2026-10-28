@@ -44,6 +44,8 @@ def run-tests [] {
 	test_render_manifests_kind
 	test_render_manifests_eks
 	test_render_manifests_metal
+	test_render_ready_through_the_door
+	test_environment_access
 	test_schema_jobs_wait_for_database
 	test_release_override
 	test_tunnel_manifests
@@ -345,6 +347,27 @@ def test_release_override [] {
 	}}
 	let refused = (try { $project | reject services.app-served-release | to yaml | release-override; "" } catch {|e| $e.msg })
 	assert ($refused | str contains "has no app-served-release")
+}
+
+def test_render_ready_through_the_door [] {
+	print "test render is ready only once the door answers it, and lives on its own health..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let render = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-render" | first | get spec.template.spec.containers | where name == "render" | first)
+	let probe = ($render.readinessProbe.exec.command | str join " ")
+	assert ($probe | str contains "DOOR") "readiness reads the door"
+	assert ($probe | str contains "/shell/shell.json") "readiness reads a page's shell through the door"
+	assert ($probe | str contains "/health") "readiness keeps render's own health"
+	assert equal $render.livenessProbe.httpGet.path "/health"
+}
+
+def test_environment_access [] {
+	print "test an environment's access names an SSH target..."
+	let schema = ($k8s_dir | path join "schema" "release.cue")
+	let check = {|v| do { $v | ^cue vet -c $schema -d "#Environment" json: - } | complete }
+	let base = {name: "metal", registry: "r", gatewayClassName: "eg", storageClass: "s", imagePullPolicy: "IfNotPresent", domainSuffix: "d"}
+	assert equal (($base | merge {access: {ssh: "pronto@144.91.92.217"}} | to json | do $check $in).exit_code) 0
+	assert equal (($base | to json | do $check $in).exit_code) 0 "access is optional"
+	assert (($base | merge {access: {ssh: "144.91.92.217"}} | to json | do $check $in).exit_code != 0) "a target names its user"
 }
 
 def test_tunnel_manifests [] {
