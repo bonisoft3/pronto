@@ -36,3 +36,20 @@ export function signInSecrets(vars: Record<string, string>, env: (name: string) 
   }
   return secrets
 }
+
+/** A published Worker's issuers, or the reason it may not go out: one a
+ * reader could not reach, a loopback host or plain http, which is the local
+ * broker a program names for a developer's machine. Its links name the issuer
+ * they were signed in through, an earlier edge's taking this one
+ * (mecha-edge's cluster.ts), so a wrong one would part every person from
+ * who they were. */
+export function releasedIssuers(vars: Record<string, string>): void {
+  for (const provider of (vars.OIDC_PROVIDERS ?? '').split(',').filter(Boolean)) {
+    const name = `OIDC_${provider.toUpperCase()}_ISSUER`
+    const issuer = vars[name]
+    if (!issuer) continue
+    const url = new URL(issuer)
+    const loopback = url.hostname === 'localhost' || url.hostname.endsWith('.localhost') || url.hostname === '[::1]' || /^127\./.test(url.hostname)
+    if (url.protocol !== 'https:' || loopback) throw new Error(`${name} is ${issuer}, a local broker: a release names the operator's, in its environment`)
+  }
+}

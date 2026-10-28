@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { signInSecrets, signInVars } from './edge-signin.ts'
+import { releasedIssuers, signInSecrets, signInVars } from './edge-signin.ts'
 
 const env = (values: Record<string, string>) => (name: string) => values[name]
 
@@ -36,4 +36,14 @@ Deno.test("a client secret is a publish's secret, never a var, and Google's own 
   // A broker in Google's place, a public client named by the door's origin.
   const broker = signInVars({ google: { client: 'origin', issuer: 'https://broker.example' } }, env({}))
   assert.deepEqual(signInSecrets(broker, env({})), {})
+})
+
+Deno.test("a release goes out only through an issuer a reader reaches: the local broker's is refused", () => {
+  const vars = (issuer: string) => ({ OIDC_PROVIDERS: 'google', OIDC_GOOGLE_CLIENT_ID: 'origin', OIDC_GOOGLE_ISSUER: issuer })
+  releasedIssuers(vars('https://id.bonkchess.com'))
+  releasedIssuers({ OIDC_PROVIDERS: 'google', OIDC_GOOGLE_CLIENT_ID: 'app.apps.googleusercontent.com' })
+  releasedIssuers({})
+  for (const local of ['http://localhost:28443', 'https://localhost:28443', 'http://127.0.0.1:28443', 'https://id.localhost', 'http://id.example.com']) {
+    assert.throws(() => releasedIssuers(vars(local)), /OIDC_GOOGLE_ISSUER is .* a local broker/, local)
+  }
 })
