@@ -152,7 +152,7 @@ them: `jessie.ts` refuses a module that reaches for `window`, `fetch`, `Date`,
 `Math.random`, `eval`, `this` and the rest of `DENIED`; omnishell's `check
 handlers` loads each module in the compartment its role runs in; the
 interpreter runs it under SES with time and randomness supplied by the
-terminal ([the terminal](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md)). Nothing parses a
+terminal ([the terminal](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/terminal.md)). Nothing parses a
 module against Jessie's grammar ([pending](../PENDING.md#the-compiler)). A
 vendored unit is the declared exception to ambient authority: code an engineer
 audited, contracted and visible as an ir box.

@@ -126,7 +126,7 @@ presenter (`schema.cue` `vendored.role`). A presenter that declares a raise is
 refused, and only a presenter names `scripts`, the terminal's pinned
 libraries with their integrity (`terminal.cue` `presenter.scripts`). The seat
 and the worker are the terminal's contract
-([the seats](https://github.com/bonisoft3/omnishell/blob/v0.19.1/docs/terminal.md#the-seats)):
+([the seats](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/terminal.md#the-seats)):
 
 - **The policy.** Both doors send `interpreter/presenter.js` with its own
   `Content-Security-Policy`: `default-src 'none'; script-src 'self'
