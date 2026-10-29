@@ -65,6 +65,19 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 	$current
 }
 
+# A gcloud call granting a role to an account made a moment before: IAM does not know a new account
+# for some seconds ("does not exist"), so the call is asked again, a minute at most, before it fails;
+# any other refusal fails at once.
+def --wrapped gc-fresh [...args] {
+	let input = $in
+	for tried in 1..12 {
+		let r = ($input | ^gcloud --quiet ...$args | complete)
+		if $r.exit_code == 0 { return $r.stdout }
+		if not ($r.stderr =~ "does not exist") or $tried == 12 { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
+		sleep 5sec
+	}
+}
+
 # The app's account reads each secret its containers name (the plan's readSecrets), granted on
 # that secret alone, never on the project. A preview's release may grant no role in its project,
 # so where its account is refused it says which secret, and the owner's grant on the project, as
@@ -72,7 +85,7 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 def grant-secrets [plan: record] {
 	let member = $"serviceAccount:($plan.names.serviceAccount)"
 	for s in $plan.readSecrets {
-		let r = (^gcloud --quiet secrets add-iam-policy-binding $s --project $plan.project --member $member --role roles/secretmanager.secretAccessor | complete)
+		let r = (try { gc-fresh secrets add-iam-policy-binding $s --project $plan.project --member $member --role roles/secretmanager.secretAccessor; {exit_code: 0, stderr: ""} } catch {|e| {exit_code: 1, stderr: $e.msg} })
 		if $r.exit_code != 0 {
 			if ($plan.preview? | is-not-empty) {
 				print $"gcp: (stamp) ($s) not granted to ($member) alone: ($r.stderr | str trim | lines | last)"
@@ -152,9 +165,9 @@ def set-up-project [plan: record] {
 		# Its own database alone, by a condition on the instance's name, and (grant-secrets, once
 		# they exist) its own secrets alone: an app beside others in one project reaches none of
 		# theirs. A role on the whole project an earlier release granted is left to its owner.
-		gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role roles/cloudsql.client --condition $"expression=resource.name == 'projects/($p)/instances/($n.instance)',title=($n.instance) alone" --quiet | ignore
+		gc-fresh projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role roles/cloudsql.client --condition $"expression=resource.name == 'projects/($p)/instances/($n.instance)',title=($n.instance) alone" --quiet | ignore
 		if (scraped $plan) {
-			gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role roles/monitoring.metricWriter --condition None --quiet | ignore
+			gc-fresh projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role roles/monitoring.metricWriter --condition None --quiet | ignore
 		}
 	}
 
