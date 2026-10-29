@@ -31,7 +31,7 @@ there IVM fans them out. A spectator, a board or a replay list is
 one-to-many and so reads the lifted rows, delayed and confirmed, never the
 session. The contract is the reference's
 ([[../component-contracts#Dual planes and the kinetic contract|dual planes]],
-[kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/kinetic.md)); this record decides the
+[kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.21.2/docs/kinetic.md)); this record decides the
 pieces.
 
 ## Milestones: how the kinetic plane reaches rows

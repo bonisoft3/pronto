@@ -1,6 +1,6 @@
 import { compileHybrid, type HybridMachine } from "../hybrid.ts";
-import { instrument } from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.3/instrument.ts";
-import ses from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.3/interpreter/vendor/ses.umd.min.js" with { type: "text" };
+import { instrument } from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.21.2/instrument.ts";
+import ses from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.21.2/interpreter/vendor/ses.umd.min.js" with { type: "text" };
 
 /** The compiler's terminal, from the omnishell hybrid-local.ts runs: what
  * write.ts reads where mise puts it. */

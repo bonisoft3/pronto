@@ -1,7 +1,7 @@
 // omnishell at the tag pronto's CUE module requires, so this module loads by
 // URL (docs/component-contracts.md#platform-pins).
-import { evaluateCaged } from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.3/interpreter/jessie.js";
-import { METER } from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.3/instrument.ts";
+import { evaluateCaged } from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.21.2/interpreter/jessie.js";
+import { METER } from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.21.2/instrument.ts";
 
 type Runner = {
   reset: (limit: number) => void;

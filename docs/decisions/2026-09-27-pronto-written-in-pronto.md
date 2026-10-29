@@ -76,7 +76,7 @@ trusted to run, never to emit unsandboxed code.
 a bridge from a clicked element to its ir id, handed to the chat as context, so
 "edit this" edits the right artifact exactly. It needs the emitter to stamp a
 stable identity on emitted elements, which it does not
-([pending](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#visual-lint)).
+([pending](https://github.com/bonisoft3/omnishell/blob/v0.21.2/PENDING.md#visual-lint)).
 
 **The model and the compute are the user's.** Nothing runs on infrastructure
 the project operates: the model is in-tab WebLLM, then the user's own API key;

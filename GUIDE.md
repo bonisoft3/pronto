@@ -10,8 +10,8 @@ The author's tour of one app, from the first turn to a release. What a
 conforming `brief.md`, `ir.html` and `program.cue` contain is
 [`SPEC.md`](SPEC.md); the component knowledge every compile assumes is
 [`prelude.md`](prelude.md); a screen, in detail, is omnishell's
-[`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/GUIDE.md), and every attribute it may carry is
-omnishell's [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/REFERENCE.md).
+[`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.21.2/GUIDE.md), and every attribute it may carry is
+omnishell's [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.21.2/REFERENCE.md).
 
 ## Starting an app and running a turn
 
@@ -67,7 +67,7 @@ fixed point, so a markup change reports errors about the previous markup on the
 first run — run it again. Do not delete `shell/screens/*.html` to clear a stale
 error: manifest cleanup removes what the last manifest listed and the current
 bundle lacks, hand-authored handlers included; omnishell's guide has
-[the recovery](https://github.com/bonisoft3/omnishell/blob/v0.20.3/GUIDE.md#the-writer-deleted-my-handler).
+[the recovery](https://github.com/bonisoft3/omnishell/blob/v0.21.2/GUIDE.md#the-writer-deleted-my-handler).
 
 The verbs are sayt's, and every check lands under the verb whose layer it
 needs: `lint` for anything that fails in seconds without executing the app
@@ -293,9 +293,9 @@ migration ([the two-step rule](docs/schema-change-admission.md#pgroll-migrations
 ## Screens
 
 A screen is HTML the terminal interprets, with no build step and no component
-per screen. Omnishell's [`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/GUIDE.md) is the contract and
-the rules that bite, and [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/REFERENCE.md) is every
-attribute and placeholder, [machines](https://github.com/bonisoft3/omnishell/blob/v0.20.3/REFERENCE.md#machines)
+per screen. Omnishell's [`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.21.2/GUIDE.md) is the contract and
+the rules that bite, and [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.21.2/REFERENCE.md) is every
+attribute and placeholder, [machines](https://github.com/bonisoft3/omnishell/blob/v0.21.2/REFERENCE.md#machines)
 included.
 
 ## i18n
@@ -330,7 +330,7 @@ asks to be rendered with its rows on request with `ssr: "ssr"`
 ([addresses](docs/localization.md#addresses),
 [crawlable documents](docs/localization.md#crawlable-documents)). An internal
 link names a route rather than a path — `<a data-route="<screen>">`, with
-`data-param-<name>` for its params ([links](https://github.com/bonisoft3/omnishell/blob/v0.20.3/REFERENCE.md#links)) —
+`data-param-<name>` for its params ([links](https://github.com/bonisoft3/omnishell/blob/v0.21.2/REFERENCE.md#links)) —
 and a language switcher is the same link with `data-locale`.
 
 A missing translation is refused, never shown in the default language: at
@@ -356,7 +356,7 @@ app, each case citing the ids it realizes — `apps/truco/tests/acceptance.ts`
 (standalone readers: the `bonisoft3/truco` mirror), declared as an
 `integrate` check, drives the table under `?clock=manual`.
 Omnishell's `check battery` (at `test`) runs
-[the battery](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/automated-tests-battery.md) over every handler
+[the battery](https://github.com/bonisoft3/omnishell/blob/v0.21.2/docs/automated-tests-battery.md) over every handler
 and validation module; `check machines` fires every arrow of every chart;
 visual lint (at `integrate`) fails only on `critical`. The battery runs from
 the committed `.bayt` closure: render it with the cue.mod-pinned `bayt`
