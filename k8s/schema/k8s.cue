@@ -792,6 +792,7 @@ import (
 								value: originValue
 							},
 							for up in ["CRUD", "AUTH", "ELECTRIC", "TICKER", "RCLONE_S3", "IMGPROXY", "RENDER"] {name: "PRONTO_UPSTREAM_\(up)", value: "localhost:3500"},
+							for n, _ in release.services {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "localhost:3500"},
 							{name: "PRONTO_TRACING", value: "on"},
 							for e in (#otelExport & {service: "caddy", port: 4317}).env {e},
 							{
@@ -938,6 +939,133 @@ import (
 			}
 		},
 
+	]
+
+	// The app's own services (release.services): a Deployment and a Service each,
+	// in the mesh as render is. Compose's SERVICE_JWT is a development value: the
+	// release's own is minted against the cluster's PGRST_JWT_SECRET (release.nu
+	// ensure-service-jwt) into <name>-service-jwt.
+	let appServiceObjs = [for n, s in release.services {
+		let labels = appLabels & {"app.kubernetes.io/component": n}
+		[{
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {
+				name:      "\(release.name)-\(n)"
+				namespace: release.namespace
+				"labels":  labels
+			}
+			spec: {
+				replicas: release.replicas
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": n
+				}
+				template: {
+					metadata: {
+						"labels":    labels
+						annotations: (#daprSidecar & {id: n, port: "\(s.port)"}).out
+					}
+					spec: containers: [{
+						name:            n
+						image:           (#appImage & {svc: n}).out
+						imagePullPolicy: targetEnv.imagePullPolicy
+						// A pod going away keeps serving while the mesh learns of its
+						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
+						lifecycle: preStop: sleep: seconds: 15
+						ports: [{name: "http", containerPort: s.port}]
+						env: list.Concat([
+							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" {name: k, value: v}],
+							[
+								{name: "PORT", value: "\(s.port)"},
+								{name: "ORIGIN", value: originValue},
+								{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}},
+							],
+							(#denoTelemetry & {service: n}).env,
+						])
+						resources: release.resources
+					}]
+				}
+			}
+		}, {
+			apiVersion: "v1"
+			kind:       "Service"
+			metadata: {
+				name:      n
+				namespace: release.namespace
+				"labels":  labels
+			}
+			spec: {
+				type: "ClusterIP"
+				selector: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": n
+				}
+				ports: [{name: "http", port: s.port, targetPort: s.port, protocol: "TCP"}]
+			}
+		}]
+	}]
+
+	// Each of the app's own services takes the door's requests on its port and
+	// the mesh's, and reaches the cluster through the mesh and the internet on
+	// 443 (a broker): the backends' policy holds the cluster's own, which reach
+	// nothing outside.
+	let appServicesNetworkPolicyObj = [
+		if release.networkPolicy.enabled if len(release.services) > 0 {
+			apiVersion: "networking.k8s.io/v1"
+			kind:       "NetworkPolicy"
+			metadata: {
+				name:      "\(release.name)-services-netpol"
+				namespace: release.namespace
+				labels:    appLabels
+			}
+			spec: {
+				podSelector: matchExpressions: [{
+					key:      "app.kubernetes.io/component"
+					operator: "In"
+					values: [for n, _ in release.services {n}]
+				}]
+				policyTypes: ["Ingress", "Egress"]
+				ingress: [
+					{
+						from: [{podSelector: matchLabels: "app.kubernetes.io/name": release.name}]
+						ports: list.Concat([
+							[for _, s in release.services {port: s.port, protocol: "TCP"}],
+							[{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}],
+						])
+					},
+					{
+						from: [{namespaceSelector: matchLabels: "kubernetes.io/metadata.name": "observability"}]
+						ports: [{port: 9090, protocol: "TCP"}]
+					},
+				]
+				egress: [
+					{ports: [{port: 53, protocol: "UDP"}, {port: 53, protocol: "TCP"}]},
+					{
+						to: [{podSelector: matchLabels: "app.kubernetes.io/name": release.name}]
+						ports: [{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}]
+					},
+					{
+						to: [{namespaceSelector: matchLabels: "kubernetes.io/metadata.name": "observability"}]
+						ports: [{port: 4317, protocol: "TCP"}, {port: 4318, protocol: "TCP"}, {port: 9411, protocol: "TCP"}]
+					},
+					{
+						to: [{namespaceSelector: matchLabels: "kubernetes.io/metadata.name": "dapr-system"}]
+						ports: [
+							{port: 4000, protocol: "TCP"},
+							{port: 50001, protocol: "TCP"},
+							{port: 50005, protocol: "TCP"},
+							{port: 50006, protocol: "TCP"},
+							{port: 6500, protocol: "TCP"},
+						]
+					},
+					{
+						to: [{ipBlock: {cidr: "0.0.0.0/0", except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}}]
+						ports: [{port: 443, protocol: "TCP"}]
+					},
+				]
+			}
+		},
 	]
 
 	let gatewayObj = [
@@ -1348,12 +1476,14 @@ import (
 			prontoCaddyServiceObj,
 			prontoRenderDeploymentObj,
 			prontoRenderServiceObj,
+			for o in appServiceObjs {o},
 			gatewayObj,
 			httpRouteObj,
 			backendTrafficPolicyObj,
 			caddyNetworkPolicyObj,
 			backendsNetworkPolicyObj,
 			databaseNetworkPolicyObj,
+			appServicesNetworkPolicyObj,
 		]
 		for item in list {item},
 	]

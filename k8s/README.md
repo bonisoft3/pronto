@@ -120,6 +120,8 @@ Every service runs the image the app's own compose project builds (database, mig
 
 The schema is built as compose builds it, by two Jobs on the app's images: `<app>-initdb` runs the database image's `/docker-entrypoint-initdb.d` once, on a fresh database (a database comment marks it built), and `<app>-migrate`, where the app has pgroll migrations, carries the schema forward on every release. The services are applied after both, so none starts on a missing schema.
 
+An app's own services, a plugin's (pronto-billing's `billing`, say), are `App.services`, as `GCP.sidecars` are on Cloud Run: `services: billing: {port: 8688, env: BILLING_BROKER: "https://…"}`. Each names a service of the compose project, built and pushed with the cluster's images, and runs as a Deployment of its own in the mesh, which the door reaches at `PRONTO_UPSTREAM_<NAME>`. Its environment is compose's under what release.cue sets, a peer compose names (`http://crud:3000`) is that peer through the mesh, and `SERVICE_JWT` is the release's own: the service role's token signed with the cluster's `PGRST_JWT_SECRET`, kept in `<app>-service-jwt`. Its network policy lets it reach the internet on 443 (a broker), which the cluster's own services cannot.
+
 ---
 
 ## 9. Timeouts and Load Shedding

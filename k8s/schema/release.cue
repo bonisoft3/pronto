@@ -82,6 +82,20 @@ package schema
 		port:    int | *8090
 	}
 
+	// Services of the app's own beside the cluster's, a plugin's (pronto-billing's
+	// billing, say), as GCP.sidecars are on Cloud Run: each names a service of the
+	// app's compose project, built and pushed as the cluster's images are, a
+	// Deployment of its own in the mesh, reached by the door at
+	// PRONTO_UPSTREAM_<NAME>. Its environment is compose's, filled by the release,
+	// under what release.cue sets (a broker's production address, where compose
+	// names a developer's machine); a peer compose names (http://crud:3000) is that
+	// peer through the mesh, SERVICE_JWT the release's own (<name>-service-jwt),
+	// and ORIGIN where readers are. It may reach the internet on 443 (a broker).
+	services: [=~"^[a-z][a-z0-9-]*$"]: {
+		port!: int & >1024 & <65536
+		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+	}
+
 
 	resources: {
 		requests: {

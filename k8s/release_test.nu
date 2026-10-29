@@ -22,6 +22,7 @@ use release.nu [
 	default-environment
 	envoy-proxy
 	tunnel-manifests
+	app-services-environment
 ]
 
 def main [] {
@@ -45,6 +46,8 @@ def run-tests [] {
 	test_render_manifests_eks
 	test_render_manifests_metal
 	test_render_ready_through_the_door
+	test_app_services
+	test_app_services_environment
 	test_pods_hand_over
 	test_environment_access
 	test_schema_jobs_wait_for_database
@@ -359,6 +362,43 @@ def test_render_ready_through_the_door [] {
 	assert ($probe | str contains "/shell/shell.json") "readiness reads a page's shell through the door"
 	assert ($probe | str contains "/health") "readiness keeps render's own health"
 	assert equal $render.livenessProbe.httpGet.path "/health"
+}
+
+def test_app_services [] {
+	print "test an app's own service runs in the mesh beside the cluster's, reached by the door..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let none = (render-manifests $app.cue_path "metal" | from yaml)
+	assert (($none | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol") | is-empty) "no services, no policy for them"
+	let data = (mktemp -t services.XXXXXX.json | str trim)
+	{App: {services: {billing: {port: 8688, env: {CRUD_URL: "http://localhost:3500/v1.0/invoke/crud/method", BILLING_BROKER: "https://broker.example"}}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let dep = ($objs | where kind == "Deployment" and metadata.name == "sample-billing" | first)
+	assert equal $dep.spec.template.metadata.annotations."dapr.io/app-id" "billing"
+	let c = ($dep.spec.template.spec.containers | first)
+	assert equal $c.image "us-central1-docker.pkg.dev/ops/pronto/sample-billing:latest"
+	let vars = ($c.env | reduce -f {} {|e, acc| $acc | insert $e.name ($e.value? | default $e.valueFrom?) })
+	assert equal $vars.PORT "8688"
+	assert equal $vars.CRUD_URL "http://localhost:3500/v1.0/invoke/crud/method"
+	assert equal $vars.ORIGIN "https://sample.apps.example.com"
+	assert equal $vars.SERVICE_JWT.secretKeyRef.name "sample-service-jwt"
+	assert equal ($objs | where kind == "Service" and metadata.name == "billing" | first | get spec.ports.0.port) 8688
+	let caddy = ($objs | where kind == "Deployment" and metadata.name == "sample-caddy" | first | get spec.template.spec.containers | where name == "caddy" | first)
+	assert (($caddy.env | where name == "PRONTO_UPSTREAM_BILLING" | first | get value) == "localhost:3500") "the door reaches it through the mesh"
+	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert equal $pol.spec.podSelector.matchExpressions.0.values ["billing"]
+	assert ($pol.spec.egress | any {|e| ($e.ports? | default [] | any {|p| $p.port == 443 }) }) "it reaches a broker on 443"
+}
+
+def test_app_services_environment [] {
+	print "test an app's own service's environment is compose's, its peers through the mesh, under release.cue's..."
+	let compose = {services: {
+		crud: {environment: {}}
+		"billing-broker": {environment: {}}
+		billing: {environment: {CRUD_URL: "http://crud:3000", BILLING_BROKER: "http://billing-broker:28463", BILLING_DOCUMENT: "{}", SERVICE_JWT: "dev", PORT: "8688", ORIGIN: "https://localhost"}}
+	}}
+	let given = (app-services-environment $compose ["billing"] {billing: ["BILLING_BROKER"]})
+	assert equal $given {billing: {env: {CRUD_URL: "http://localhost:3500/v1.0/invoke/crud/method", BILLING_DOCUMENT: "{}"}}}
 }
 
 def test_pods_hand_over [] {

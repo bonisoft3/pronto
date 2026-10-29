@@ -10,7 +10,7 @@
 # sit beside it wherever pronto is installed, monorepo or mirror.
 const k8s_dir = path self .
 
-use ../gcp/build.nu [push-images]
+use ../gcp/build.nu [push-images service-jwt]
 
 # What carries a metal cluster's requests out through its tunnel to Cloudflare.
 const cloudflared = "cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c"
@@ -345,6 +345,30 @@ export def apply-sops-secrets [app_dir: string, namespace: string] {
 }
 
 # Resolve application to release
+# Each of the app's own services' compose environment, as release.cue does not set
+# it (own: the keys it sets, which are the release's): a peer compose names at
+# http://<service>:<port> is that service through the mesh, and SERVICE_JWT,
+# PORT and ORIGIN are the manifest's own.
+export def app-services-environment [compose: record, services: list<string>, own: record]: nothing -> record {
+	let peers = ($compose.services | columns)
+	$services | reduce -f {} {|n, acc|
+		let set = ($own | get -o $n | default [])
+		let given = ($compose.services | get $n | get environment? | default {} | transpose key value
+			| where {|e| $e.key not-in $set and $e.key not-in ["SERVICE_JWT" "PORT" "ORIGIN"] }
+			| reduce -f {} {|e, all| $all | insert $e.key ($peers | reduce -f ($e.value | default "" | into string) {|p, v| $v | str replace -r $"http://($p):[0-9]+" $"http://localhost:3500/v1.0/invoke/($p)/method" }) })
+		$acc | insert $n {env: $given}
+	}
+}
+
+# <name>-service-jwt: the service role's token, signed with <name>-auth-secrets'
+# PGRST_JWT_SECRET, restated each release so it follows the secret. The value
+# goes through stdin, never a command line.
+def ensure-service-jwt [name: string, namespace: string] {
+	let key = (kubectl get secret $"($name)-auth-secrets" -n $namespace -o jsonpath='{.data.PGRST_JWT_SECRET}' | decode base64 | decode utf-8)
+	if ($key | is-empty) { error make { msg: $"secret ($name)-auth-secrets has no PGRST_JWT_SECRET yet" } }
+	service-jwt $key | kubectl create secret generic $"($name)-service-jwt" -n $namespace --from-file=SERVICE_JWT=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - | ignore
+}
+
 export def resolve-app [app_arg?: string]: nothing -> record {
 	let dir = if ($app_arg | is-empty) {
 		$env.PWD
@@ -593,7 +617,7 @@ export def main [
 	let root = (git rev-parse --show-toplevel | str trim)
 	let app_source_dir = $app_info.dir
 
-	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render}" $app_info.cue_path } | complete)
+	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path } | complete)
 	if $meta_res.exit_code != 0 {
 		error make { msg: $"Failed to read release metadata from ($app_info.cue_path): ($meta_res.stderr)" }
 	}
@@ -611,6 +635,13 @@ export def main [
 	let compose_render = ("render" in $compose_services)
 	if $compose_render != $has_render {
 		error make { msg: $"($app_info.cue_path): render.enabled is ($has_render) but the app's compose project (if $compose_render { 'defines' } else { 'lacks' }) a render service" }
+	}
+
+	# The app's own services (App.services), each a service of its compose project.
+	let services = ($app_meta.services | columns)
+	let missing = ($services | where {|s| $s not-in $compose_services })
+	if ($missing | is-not-empty) {
+		error make { msg: $"($app_info.cue_path): App.services names ($missing | str join ', '), which the app's compose project lacks" }
 	}
 
 	let target_env = (read-environment $cluster_env $app_info.cue_path)
@@ -648,7 +679,7 @@ export def main [
 
 	# migrate runs where the app has pgroll migrations to carry, as in compose.
 	let has_migrate = ("migrate" in $compose_services)
-	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] })
+	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append $services
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
 	let pushed = if $target_env.build.by == "cloudbuild" {
 		cloud-build-images $app_source_dir $app_info.name $build_svcs $target_env $app_meta.image.tag
@@ -678,8 +709,9 @@ export def main [
 	# The providers compose gives the auth service, and each one's client:
 	# compose refuses to render a provider whose client is unset.
 	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment))
+	let own_env = (app-services-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json) $services $app_meta.own)
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate)} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }))} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file)
 	rm $pushed_file
 
@@ -741,9 +773,14 @@ export def main [
 		sleep 3sec
 	}
 
+	# The app's own services call crud as the service role, with a token signed by
+	# the JWT secret the cluster generated (an ExternalSecret, there by now: crud
+	# logs in with it).
+	if ($services | is-not-empty) { ensure-service-jwt $workload_name $target_ns }
+
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
-	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] })
+	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services
 	for d in ($components | each { $"deployment/($app_info.name)-($in)" }) {
 		print $"Waiting for ($d) rollout..."
 		kubectl rollout status $d -n $target_ns --timeout=180s
