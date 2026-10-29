@@ -23,7 +23,7 @@ starts runs on the fork from its first install:
 
 ```sh
 export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,registry.cue.works'
-./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v0.24.1-gcp.28
+./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v0.24.1-gcp.29   # the fork's latest: gh release list --repo bsoneca/pronto-fork
 ```
 
 1. Download both project wrappers from the same pinned Sayt tag:
