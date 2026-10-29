@@ -310,7 +310,17 @@ import (
 				}
 			}
 		}
+		// Every release sends all traffic to the revision it deploys, back from wherever a
+		// rollback (release.nu --rollback) pinned it.
+		spec: traffic: [{percent: 100, latestRevision: true}]
 		spec: template: {
+			// The schema a revision was released with, its schema image's digest (the
+			// database's, where the app has no migrations): a rollback goes back only to
+			// a revision with the same one.
+			let schemaImage = [if R.migrate != _|_ {"schema"}, "database"][0]
+			if R.image.pushed[schemaImage] != _|_ {
+				metadata: labels: "pronto-schema": strings.SliceRunes(strings.TrimPrefix(R.image.pushed[schemaImage].digest, "sha256:"), 0, 40)
+			}
 			metadata: annotations: {
 				"autoscaling.knative.dev/minScale": "0"
 				// electric is one instance (mecha's docs/deployment.md#clouds-as-built).
@@ -507,6 +517,7 @@ import (
 				labels: "cloud.googleapis.com/location":   R.region
 				annotations: "run.googleapis.com/ingress": "all"
 			}
+			spec: traffic: [{percent: 100, latestRevision: true}]
 			spec: template: {
 				metadata: annotations: {
 					"autoscaling.knative.dev/minScale":         "\(c.apart.minScale)"
