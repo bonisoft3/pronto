@@ -11,8 +11,8 @@ package bootstrap
 		"bsoneca-pronto-plugins": source: {source: "github", repo: "bsoneca/pronto-plugins"}
 	}
 	enabledPlugins: {
-		"pronto@bonisoft3-pronto":               true
-		"pronto-android@bsoneca-pronto-plugins": true
+		"pronto@bonisoft3-pronto":              true
+		"pronto-studio@bsoneca-pronto-plugins": true
 	}
 	permissions: allow: [for intent in ["release", "plan", "connect", "deploy"] {"Bash(pronto \(intent):*)"}]
 }
