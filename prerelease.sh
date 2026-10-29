@@ -68,6 +68,13 @@ def fork_lock(s):
     me = re.sub(r'\[tools\."github:bonisoft3/mecha"\."platforms\.[a-z0-9-]+"\](?:\n[^\[\n][^\n]*)*', platform, me)
     return s[:a] + me + s[b:]
 edit('bootstrap/mise.lock', fork_lock)
+# The tools the fork's roster adds (bootstrap/fork.lock), each one the shipped lock lacks.
+def with_fork_tools(s):
+    extra = open('bootstrap/fork.lock').read()
+    for m in re.finditer(r'\[\[tools\."([^"]+)"\]\][\s\S]*?(?=\n\[\[tools\.|\Z)', extra):
+        if f'[[tools."{m.group(1)}"]]' not in s: s = s.rstrip('\n') + '\n\n' + m.group(0).strip('\n') + '\n'
+    return s
+edit('bootstrap/mise.lock', with_fork_tools)
 EOF
 
 # The module: published to a registry crane serves on this machine, then copied to ghcr.
