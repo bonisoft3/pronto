@@ -174,3 +174,15 @@ export def push-images [
 		{svc: $r.svc, ref: {tag: $tag, digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
+
+# The service role's token, HS256 under the gateway's secret, as mecha's
+# cluster signs its own (role service, the nil subject) but with no expiry:
+# the release restates it from the secret, so it changes only with it.
+export def service-jwt [secret: string]: nothing -> string {
+	$secret | ^python3 -I -c 'import sys,hmac,hashlib,base64,json
+b=lambda d: base64.urlsafe_b64encode(d).rstrip(b"=").decode()
+h=b(json.dumps({"alg":"HS256","typ":"JWT"},separators=(",",":")).encode())
+p=b(json.dumps({"role":"service","sub":"00000000-0000-0000-0000-000000000000"},separators=(",",":")).encode())
+k=sys.stdin.buffer.read()
+print(h+"."+p+"."+b(hmac.new(k,(h+"."+p).encode(),hashlib.sha256).digest()),end="")'
+}
