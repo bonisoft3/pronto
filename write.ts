@@ -24,6 +24,7 @@ import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
 import { parseHeld, seedSql, type SeedData } from "./seed.ts";
 import { type Program, renderIr, writeIrStylesheet } from "./ir-render.ts";
+import { irMarkdown } from "./ir-md.ts";
 import { declaredMachine } from "./hybrid-spec.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { compileMechaReducer, type MechaReducerMachine, type Terminal } from "./mecha-reducer.ts";
@@ -476,5 +477,11 @@ async function drawIr(): Promise<boolean> {
   if (!out.success) fail(new TextDecoder().decode(out.stderr));
   const { program, ir } = JSON.parse(new TextDecoder().decode(out.stdout)) as { program: Program; ir: string };
   const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/facts.json`));
-  return await renderIr(appDir, ir, program, facts);
+  const drawn = await renderIr(appDir, ir, program, facts);
+  // ir.md beside it, the whole document as Markdown: from the author's prose and the cards both,
+  // so it is written whenever either moved (ir-md.ts).
+  const md = irMarkdown(await Deno.readTextFile(`${appDir}/${ir}`), ir);
+  const mdPath = `${appDir}/${ir.replace(/\.html$/, "")}.md`;
+  if ((await Deno.readTextFile(mdPath).catch(() => null)) !== md) await Deno.writeTextFile(mdPath, md);
+  return drawn;
 }
