@@ -1784,6 +1784,11 @@ import (
 		ir: {source: *"ir.html" | string, sha256: *"" | string} // the pinned IR this program was compiled from
 		domain?: string
 		ssrOrigin?: string
+		// Services beside the door that a host launch runs too and the door
+		// proxies to at their host addresses, by name and port: a plugin's
+		// (pronto-billing's billing, pronto-flags' flagd). The renderer is
+		// pronto's own (#DefaultCluster), so a plugin's join it.
+		hostPeers?: [=~"^[a-z][a-z0-9-]*$"]: int & >0
 		// A frozen archive retains its schedules and runs none, at the edge or
 		// in a page.
 		edgeClock?: "ticker" | "disabled"

@@ -2231,6 +2231,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				authStatementMs: resilience.resilience.timeouts.statement.client * 1000
 				tickerCallMs:    resilience.resilience.timeouts.tickerCall * 1000
 			}
+			// Stated only where there are any: an app whose plugins still state
+			// the list themselves (pronto-billing's, -flags', -perf's before
+			// code.meta.hostPeers) keeps theirs.
+			if len(D._hostPeers) > 0 {
+				hostPeers: [for n, p in D._hostPeers {"\(n)=\(p)"}]
+			}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth
 		// block; the blob plane follows the program's flag; the data plane
@@ -2336,8 +2342,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// waits on it: a launch is up when its documents can be answered.
 		if D._rendersOnRequest {
 			// A host launch runs it beside the cluster's own processes, and the
-			// door proxies to it at its host address.
-			meta: hostPeers: ["render=\(omnishell.#Render.port)"]
+			// door proxies to it at its host address (_hostPeers).
 			surface: targets: {
 				render: bayt.healthcheck.http & {
 					cmd: "builtin": null
@@ -2421,6 +2426,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 	}
 	_rendersOnRequest: list.Contains([for _, s in D.code.surface.screens {s.ssr}], "ssr")
+	// The services beside the door a host launch runs too: the program's
+	// (code.meta.hostPeers, a plugin's) and the renderer, pronto's own.
+	_hostPeers: {
+		if D.code.meta.hostPeers != _|_ {D.code.meta.hostPeers}
+		if D._rendersOnRequest {render: omnishell.#Render.port}
+	}
 	_terminal:         list.Contains([for s in D.statics {s.target}], "/srv/shell/index.html")
 }
 

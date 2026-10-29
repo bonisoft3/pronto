@@ -19,6 +19,19 @@ import pronto "github.com/bonisoft3/pronto"
 	statics: _cluster.meta.statics
 }
 
+// The services beside the door a host launch runs: the renderer, pronto's own,
+// and those the program names (a plugin's, code.meta.hostPeers) in one list;
+// an app whose plugin states the list itself, as one did before, keeps it.
+#peersCase: {
+	peers: [string]: int
+	ssr: *true | bool
+	stated: *null | [...string]
+	_base: (#readCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}}
+	_app: _base & {meta: hostPeers: peers} & {if ssr {(#ssrCase & {reads: []})._app}}
+	_cluster: (pronto.#DefaultCluster & {code: _app, statics: []}).out & {if stated != null {meta: hostPeers: stated}}
+	hostPeers: _cluster.meta.hostPeers
+}
+
 // A route rendered before any request (#Screen.prerender): a document per
 // address, which the door answers as a template naming the origin, and
 // refused over rows the server holds.
