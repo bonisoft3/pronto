@@ -1,35 +1,22 @@
 ---
 name: studio
-description: The visual-heavy five — backend, frontend, designer, ux, qa — plus an advisory platform advisor. For apps whose bar is how they look and feel, not just what they do.
+description: Consumer and visual-craft products — four seats tuned for first-minute delight, local-first speed, and responsive polish.
 ---
 
 # Studio
 
-A team weighted toward the visible surface: two of five seats own pixels
-(designer, frontend), one owns the felt experience (ux), and the machine
-(backend) and the evidence (qa) hold the floor under them. A brief selects
-it with `team: studio`; a compile driven by agents turns each card into
-one role agent — the card is the agent's charter, verbatim.
+Product: First-minute delight, zero-friction onboarding, and empty states that sell the next action. Explore outside the constraint set first; reject generic SaaS templates and features that cannot name whose pain they remove.
 
-Those five own a surface each and gate it. The sixth owns none: the
-platform advisor reads across what the others signed, for how the work is
-written, how it is joined, and whether the platform's seams were used or
-worked around. It is advisory forever — no gate, by construction — and is
-listed last because it reads last: there is nothing to read across until
-the other five have signed.
+Architect: Optimistic local-first writes, instant read paths, and clean public-versus-member access boundaries. Keep the client replica fast and offline-capable by default.
 
-Roles. Each carries one review section, on the surface its card names:
-the ir for the seats that shape it, the assembly for the seats that own
-what is built from it.
+Engineer: Crisp typographic hierarchy, purposeful micro-interactions, and zero layout shift. Responsive layouts must look native on iPhone, Android, and desktop — passing structural visual lint is the floor, not the bar.
 
-![[studio/backend.md]]
+QA: Walk cold-start onboarding, social sharing, and recovery flows in a live browser on phone and desktop viewports. Fail any state that feels dead-ended, cramped, or visually indistinguishable from its neighbor.
 
-![[studio/frontend.md]]
+![[seats/product.md]]
 
-![[studio/designer.md]]
+![[seats/architect.md]]
 
-![[studio/ux.md]]
+![[seats/engineer.md]]
 
-![[studio/qa.md]]
-
-![[studio/platform-advisor.md]]
+![[seats/qa.md]]

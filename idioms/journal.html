@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Idioms — Journal</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 48rem; margin: 2.5rem auto; padding: 0 1.25rem; font: 16px/1.6 system-ui, -apple-system, sans-serif; }
+  header { border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); padding-bottom: 1rem; margin-bottom: 2rem; }
+  .eyebrow { font: 600 0.75rem/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.12em; opacity: 0.75; }
+  h1 { margin: 0.4rem 0; font-size: 2rem; line-height: 1.15; }
+  article { border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding-top: 1.5rem; margin-top: 1.5rem; }
+  article:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+  article time { font: 600 0.75rem/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; display: block; margin-bottom: 0.4rem; }
+  code { font: 0.9em ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">Idioms · Project journal</div>
+    <h1>Idioms — Interactive Catalog of Pronto UI &amp; State Patterns</h1>
+    <p>A hands-on reference application demonstrating Pronto’s reactive forms, statecharts, optimistic mutations, and zero-effect screen bindings in a single self-contained catalog. <a href="#initial-brief">Latest product brief ↓</a></p>
+  </header>
+<main>
+  <article id="initial-brief">
+    <time datetime="2026-10-01">2026-10-01 · Initial Brief</time>
+    <h2>Idioms</h2>
+    <p>Four small screens, each the least a pure pronto app needs to show one thing working. They exist to be copied from.</p>
+    <h3>Data</h3>
+    <p>A counter, a todo list that survives a reload, a five-by-five board of lights, and a timer with a die.</p>
+    <h3>Screens</h3>
+    <ul>
+      <li><strong>Counter</strong> — two buttons step a number.</li>
+      <li><strong>Todo</strong> — add a task, tick it off, remove it.</li>
+      <li><strong>Lights out</strong> — pressing a light flips it and its four neighbours; the board counts the moves and the lights still lit.</li>
+      <li><strong>Timer</strong> — start and pause a clock that counts seconds; roll a die.</li>
+    </ul>
+    <h3>Behavior</h3>
+    <p>Everything happens in the reader's browser and the same presses give the same screens, rolls included when the page is opened with a seed.</p>
+    <p>See <a href="acceptance.md">acceptance.md</a>.</p>
+    <h3>Out of scope</h3>
+    <p>Accounts, sharing, and anything that needs a server.</p>
+  </article>
+</main>
+</body>
+</html>

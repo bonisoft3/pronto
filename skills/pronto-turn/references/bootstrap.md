@@ -48,14 +48,19 @@ replace it; copy from the checkout's idioms and bootstrap from the release.
    URL and checksum. With the attestation checks `.mise.toml` turns off,
    installing from it asks GitHub's API nothing.
 
-4. Inspect and trust `.mise.toml`, then install and check the toolchain:
+4. Inspect and trust `.mise.toml`, then install and check the toolchain (prefix `./saytw` with `mise x --` when `nu` is not on the host `PATH`):
 
    ```sh
    ./saytw --script tools.nu mise trust .mise.toml
-   ./saytw setup
-   ./saytw doctor
-   ./saytw generate
-   ./saytw lint
+   mise x -- ./saytw setup
+   mise x -- ./saytw doctor
+   ```
+
+5. Author `program.cue` first, then run `mise x -- ./saytw generate` once: the compiler emits a single cold-start preflight checklist of every owed file (`journal.html`, `ir.html`, `acceptance.md`, `DESIGN.md`, `shell/*`, `tests/*`) and every owed `data-kind` / `id` tag for `ir.html` and `acceptance.md`. Create those files and run:
+
+   ```sh
+   mise x -- ./saytw generate
+   mise x -- ./saytw lint
    ```
 
    Every step stays locked. The checksums pin the downloaded bytes, not an

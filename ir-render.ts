@@ -17,6 +17,8 @@
 // answered without the author drawing them. write.ts runs this after derive.
 
 
+import { render as peleRender } from "npm:pele@1.12.0";
+import { labelledKind } from "./diagrams.ts";
 import { chartVariantSuffixes } from "./objects.ts";
 
 type TerminalChart = {
@@ -175,7 +177,9 @@ export function screenNeighbourhood(program: Program, screenName: string, screen
 /** A screen's related entities in D2's SQL-table grammar. */
 export function neighbourhoodD2(program: Program, graph: Neighbourhood, cardIrs: Set<string>): string {
   const selected = new Set(graph.entities);
-  let source = "direction: right\n";
+  let source = graph.edges.size === 0 && graph.entities.length > 1
+    ? `grid-columns: ${Math.min(3, graph.entities.length)}\ngrid-gap: 16\n`
+    : "direction: right\n";
   for (const name of graph.entities) {
     const entity = program.state.entities[name];
     if (entity === undefined) throw new Error(`neighbourhood names undeclared entity ${name}`);
@@ -327,6 +331,7 @@ function jsonTree(key: string, value: unknown): string {
   const k = `<span class="jk">${esc(key)}</span>`;
   if (value === null || typeof value !== "object") return `<div class="jl">${k}: <span class="jv">${esc(JSON.stringify(value))}</span></div>`;
   const entries = Object.entries(value);
+  if (key === "seed" && Array.isArray(value)) return `<div class="jl">${k}: <span class="jv">[${entries.length}]</span></div>`;
   const named = (value as { name?: unknown }).name;
   const shape = Array.isArray(value) ? `[${entries.length}]` : typeof named === "string" ? esc(named) : `{${entries.length}}`;
   return `<details class="jn"><summary>${k} <span class="jv">${shape}</span></summary>${entries.map(([ck, cv]) => jsonTree(ck, cv)).join("")}</details>`;
@@ -484,10 +489,93 @@ const NEIGHBOURHOOD_OPEN = "<!-- pronto:neighbourhood -->";
 const NEIGHBOURHOOD_CLOSE = "<!-- /pronto:neighbourhood -->";
 const APP_OPEN = "<!-- pronto:app-neighbourhood -->";
 const APP_CLOSE = "<!-- /pronto:app-neighbourhood -->";
+const MERMAID_OPEN = "<!-- pronto:mermaid -->";
+const MERMAID_CLOSE = "<!-- /pronto:mermaid -->";
+const MERMAID_BLOCK = /<(pre|div)\s([^>]*)>([\s\S]*?)<\/\1>/g;
+const MERMAID_CLASS = /(^|\s)class="mermaid"/;
 const ENTITY_TAG = /<([a-z][a-z0-9]*)\s[^>]*data-kind="entity"[^>]*>/g;
 const ENTITY_START = /<[a-z][a-z0-9]*\s[^>]*data-kind="entity"/;
 const SCREEN_TAG = /<([a-z][a-z0-9]*)\s[^>]*data-kind="screen"[^>]*>/g;
 const ID = /\sid="([^"]*)"/;
+
+const decodeHtml = (s: string) =>
+  s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&");
+
+function nodeRole(id: string, body: string, program?: Program): string | null {
+  const labelMatch = /<text\b[^>]*\bclass="pele-label"[^>]*>([\s\S]*?)<\/text>/.exec(body);
+  const label = labelMatch === null ? id : decodeHtml(labelMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+  const parsed = labelledKind(label);
+  if (parsed !== null) {
+    const head = parsed.kind.split(/\s+/)[0];
+    if (REACH.includes(head)) return head;
+    if (head === "external" || head === "machine" || head === "compensable" || head === "replicated" || head === "ephemeral" || head === "local") return "machine";
+    if (head === "ai" || head === "effect" || head === "origin" || head === "bridge") return "effect";
+    if (head === "screen") return "screen";
+    if (head === "handler" || head === "engine" || head === "unit" || head === "hatch" || head === "pipeline" || head === "drain" || head === "duckstream") return "handler";
+    if (head === "crud" && program !== undefined) {
+      const entity = program.state.entities[parsed.name] ?? Object.values(program.state.entities).find((e) => e.ir === parsed.name);
+      if (entity !== undefined) return entity.durability;
+    }
+  }
+  if (/^\S+\s*\(\/[^)]*\)\s*$/.test(label)) return "screen";
+  if (program !== undefined) {
+    const entity = program.state.entities[id] ?? Object.values(program.state.entities).find((e) => e.ir === id);
+    if (entity !== undefined) return entity.durability;
+    if (program.state.machines?.[id] !== undefined) return "machine";
+    if (program.state.effects?.[id] !== undefined) return "effect";
+    const screen = program.surface.screens[id] ?? Object.values(program.surface.screens).find((s) => s.ir === id);
+    if (screen !== undefined) return "screen";
+  }
+  return null;
+}
+
+/** Renders a Mermaid source block to a semantic Pele SVG figure, annotating
+ * nodes with `data-role` and a left accent band so `ir/card.css` themes them. */
+export function peleDiagram(source: string, program?: Program): string {
+  const { svg } = peleRender(source.trim());
+  const annotated = svg.replace(
+    /<g class="(pele-node[^"]*)" data-id="([^"]+)"([^>]*)>([\s\S]*?)<\/g>/g,
+    (full, cls: string, id: string, attrs: string, body: string) => {
+      const role = nodeRole(id, body, program);
+      if (role === null) return full;
+      const withBand = cls.includes("pele-shape-rect") && role !== "effect" && role !== "machine"
+        ? body.replace(
+          /<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)"([^/]*)\/>/,
+          (rect, x: string, y: string, _w: string, h: string) =>
+            `${rect}<rect class="pele-band" x="${x}" y="${y}" width="4.5" height="${h}" rx="2" fill="var(--_b)"/>`,
+        )
+        : body;
+      return `<g class="${cls}" data-id="${id}" data-role="${esc(role)}"${attrs}>${withBand}</g>`;
+    },
+  );
+  return `<figure class="pronto-pele">${annotated}</figure>`;
+}
+
+/** Places or replaces a `<!-- pronto:mermaid -->` Pele SVG figure immediately
+ * after each `<div class="mermaid">` or `<pre class="mermaid">` block while
+ * keeping the authored Mermaid source intact for `diagrams.ts`. */
+export function fillMermaidRegions(html: string, program?: Program): string {
+  let out = "";
+  let at = 0;
+  for (const block of html.matchAll(MERMAID_BLOCK)) {
+    if (!MERMAID_CLASS.test(block[2])) continue;
+    const after = block.index! + block[0].length;
+    out += html.slice(at, after);
+    let resume = after;
+    const marker = /^\s*<!-- pronto:mermaid -->/.exec(html.slice(after));
+    if (marker !== null) {
+      const start = after + marker[0].length - MERMAID_OPEN.length;
+      const end = html.indexOf(MERMAID_CLOSE, start + MERMAID_OPEN.length);
+      if (end === -1) throw new Error("ir.html: a mermaid region opens and never closes");
+      resume = end + MERMAID_CLOSE.length;
+    }
+    const fig = peleDiagram(decodeHtml(block[3]), program);
+    out += `\n${MERMAID_OPEN}${fig}${MERMAID_CLOSE}`;
+    at = resume;
+  }
+  return out + html.slice(at);
+}
 
 /** The generated regions in an ir.html, by the entity id they sit under. */
 export function irRegions(html: string): Map<string, string> {
@@ -578,76 +666,140 @@ export function fillNeighbourhoodRegions(html: string, screens: Map<string, stri
 /** The card's stylesheet, as the ir's head links it (`ir/card.css`). Tokens
  * only, light and dark; the ir's own styles own everything else. */
 export const CARD_CSS = `/* generated by pronto from program.cue — do not edit */
-.card, .pronto-neighbourhood { --card-ink: #1b1f2a; --card-muted: #5f6782; --card-line: #d6dae4; --card-panel: #fff; --card-accent: #2443b8; --card-tip: #fff6bf; --card-tip-edge: #e3cf5a; --band: var(--card-accent); }
+:root { color-scheme: light dark; }
+:where(body) { max-width: 64rem; margin: 2rem auto; padding: 0 1.25rem; font: 15px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
+.card, .pronto-neighbourhood, .pronto-pele { --card-ink: #191714; --card-muted: #5c584e; --card-line: #dfd8c8; --card-panel: #fdfbf7; --card-head: #f6f1e6; --card-sub: #faf7f0; --card-token: #f2ece0; --card-accent: #2443b8; --card-derived-bg: #eef2ff; --card-mach-bg: #f8faff; --card-tip: #fff6bf; --card-tip-edge: #e3cf5a; --pele-dot: #d5cdbe; --band: var(--card-accent); }
+@media (prefers-color-scheme: dark) { .card, .pronto-neighbourhood, .pronto-pele { --card-ink: #e8eaf0; --card-muted: #9aa3bd; --card-line: #2a3040; --card-panel: #161922; --card-head: #1d2230; --card-sub: #1a1e2b; --card-token: #232838; --card-accent: #8ea2ff; --card-derived-bg: #1e243b; --card-mach-bg: #181d2e; --card-tip: #3a3410; --card-tip-edge: #8a7a2a; --pele-dot: #2e3446; } }
 .card {
-  position: relative; background: var(--card-panel); border: 1px solid var(--card-line); color: var(--card-ink); font-size: 14px; line-height: 1.5; margin: 12px 0 20px; }
-@media (prefers-color-scheme: dark) { .card, .pronto-neighbourhood { --card-ink: #e8eaf0; --card-muted: #9aa3bd; --card-line: #2a3040; --card-panel: #1b1f2a; --card-accent: #8ea2ff; --card-tip: #3a3410; --card-tip-edge: #8a7a2a; } }
-.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--band); }
-.card.dur-server { --band: #2443b8; } .card.dur-live { --band: #1a8f5c; } .card.dur-offline { --band: #b8860b; } .card.dur-device { --band: #0e7c86; } .card.dur-tab { --band: #8a8f9c; }
-.card .ehead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; padding: 12px 18px 8px 24px; }
-.card .chips { display: flex; gap: 8px; flex-wrap: wrap; }
-.card .chip { font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 2px 10px; border: 1px solid var(--card-ink); border-radius: 999px; white-space: nowrap; }
-.card .chip b { font-weight: 500; color: var(--card-muted); margin-right: 5px; font-family: inherit; }
+  position: relative; background: var(--card-panel); border: 1px solid var(--card-line); border-radius: 8px; box-shadow: 0 1px 3px rgba(25, 23, 20, 0.05); color: var(--card-ink); font-size: 14px; line-height: 1.5; margin: 14px 0 22px; overflow: hidden; }
+.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--band); z-index: 1; }
+.card.dur-server { --band: #2443b8; } .card.dur-live { --band: #1a8f5c; } .card.dur-offline { --band: #b8860b; } .card.dur-device { --band: #0e7c86; } .card.dur-tab { --band: #64748b; }
+.card .ehead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 18px 10px 22px; background: var(--card-head); border-bottom: 1px solid var(--card-line); }
+.card .chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.card .chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; padding: 2px 10px; background: var(--card-panel); border: 1px solid var(--card-line); border-radius: 999px; white-space: nowrap; }
+.card .chip b { font-weight: 600; color: var(--card-muted); margin-right: 4px; font-family: inherit; }
 .card .chip b::after { content: ":"; }
-.card .chip.derived { border-style: dashed; border-color: var(--card-accent); color: var(--card-accent); }
-.card .chip.derived b { color: var(--card-accent); opacity: 0.8; }
-.card .counts { margin-left: auto; color: var(--card-muted); font-size: 13px; }
+.card .chip.derived { background: var(--card-derived-bg); border-style: dashed; border-color: var(--card-accent); color: var(--card-accent); }
+.card .chip.derived b { color: var(--card-accent); opacity: 0.85; }
+.card .counts { margin-left: auto; color: var(--card-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: var(--card-panel); border: 1px solid var(--card-line); border-radius: 6px; padding: 2px 8px; }
 .card [data-tip] { position: relative; cursor: help; }
-.card [data-tip]:hover::after, .card [data-tip]:focus-visible::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 5; background: var(--card-tip); color: var(--card-ink); border: 1px solid var(--card-tip-edge); padding: 8px 10px; font-size: 13px; line-height: 1.4; width: max-content; max-width: 34ch; white-space: normal; font-family: system-ui, sans-serif; font-weight: 400; text-transform: none; letter-spacing: 0; }
-.card .lbl { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--card-muted); font-weight: 600; margin-right: 6px; }
+.card [data-tip]:hover::after, .card [data-tip]:focus-visible::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 10; background: var(--card-tip); color: var(--card-ink); border: 1px solid var(--card-tip-edge); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); padding: 8px 10px; font-size: 12.5px; line-height: 1.4; width: max-content; max-width: 34ch; white-space: normal; font-family: system-ui, sans-serif; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.card .lbl { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--card-muted); font-weight: 700; margin-right: 6px; }
 .card .lbl.derived { color: var(--card-accent); }
-.card .names { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: baseline; padding: 4px 18px 10px 24px; }
-.card .namelist { font-family: ui-monospace, Menlo, monospace; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
-.card .fname { margin-right: 10px; }
-.card .m { font-style: normal; font-size: 10px; color: var(--card-muted); margin-left: 2px; vertical-align: super; }
-.card .m.mach { color: var(--card-accent); }
-.card .names .more { grid-column: 2; }
-.card .more > summary { list-style: none; cursor: pointer; color: var(--card-accent); font-size: 13px; font-family: ui-monospace, Menlo, monospace; }
+.card .names { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: baseline; padding: 12px 18px 12px 22px; }
+.card .namelist { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.card .fname { display: inline-flex; align-items: baseline; background: var(--card-token); border: 1px solid var(--card-line); border-radius: 4px; padding: 1px 7px; margin: 0; font-weight: 500; }
+.card .m { font-style: normal; font-size: 10px; color: var(--card-muted); margin-left: 3px; }
+.card .m.mach { color: var(--card-accent); font-weight: 700; }
+.card .names .more { grid-column: 1 / -1; background: var(--card-sub); border: 1px solid var(--card-line); border-radius: 6px; padding: 4px 10px; }
+.card .more > summary { list-style: none; cursor: pointer; color: var(--card-ink); font-size: 12px; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; user-select: none; }
 .card .more > summary::-webkit-details-marker { display: none; }
-.card .more > summary::before { content: "▸ "; } .card .more[open] > summary::before { content: "▾ "; }
-.card .more.inline { display: inline; } .card .more.inline[open] > summary { display: inline; margin-right: 6px; }
+.card .more > summary::before { content: "▸ "; color: var(--band); } .card .more[open] > summary::before { content: "▾ "; color: var(--band); }
+.card .more.inline { display: inline; background: none; border: 0; padding: 0; } .card .more.inline[open] > summary { display: inline; margin-right: 6px; }
 .card .more.inline .rels { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-.card .fields { border-collapse: collapse; font-size: 13px; width: 100%; margin-top: 8px; }
-.card .fields td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--card-line); vertical-align: baseline; }
-.card .fields .k { font-family: ui-monospace, Menlo, monospace; } .card .fields .t { color: var(--card-muted); font-family: ui-monospace, Menlo, monospace; }
-.card .fields .o { color: var(--card-muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; width: 2.5ch; text-align: right; }
+.card .fields { border-collapse: collapse; font-size: 12.5px; width: 100%; margin: 8px 0 0; }
+.card .fields td, .card .fields th { padding: 5px 10px 5px 4px; border: 0; border-bottom: 1px solid var(--card-line); vertical-align: baseline; text-align: left; }
+.card .fields th { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--card-muted); }
+.card .fields .k { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; } .card .fields .t { color: var(--card-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.card .fields .o { color: var(--card-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; width: 2.5ch; text-align: right; }
 .card .fields tr.retired td { color: var(--card-muted); text-decoration: line-through; } .card .fields tr.retired td.gl { text-decoration: none; }
-.card .fields .gl { white-space: nowrap; } .card .fields .x { color: var(--card-muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card .g { font-family: ui-monospace, Menlo, monospace; font-size: 11px; margin-right: 6px; color: var(--card-muted); }
-.card .g.pk { font-weight: 600; color: var(--card-ink); } .card .g.fk { color: var(--card-accent); text-decoration: none; }
-.card .g.mach { color: var(--card-accent); border: 1px dashed var(--card-accent); padding: 0 4px; }
+.card .fields .gl { white-space: nowrap; } .card .fields .x { color: var(--card-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .g { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; margin-right: 5px; color: var(--card-muted); padding: 1px 5px; border-radius: 3px; background: var(--card-token); }
+.card .g.pk { font-weight: 700; color: #855f00; background: #fef3c7; border: 1px solid #fcd34d; } .card .g.fk { color: var(--card-accent); text-decoration: none; }
+.card .g.mach { color: var(--card-accent); background: var(--card-derived-bg); border: 1px dashed var(--card-accent); }
 .card .fields .n { color: var(--card-muted); font-size: 12px; }
 [data-kind="entity"]:has(> .card) > table[data-extract="fields"] { display: none; }
 [data-kind="entity"]:has(> .card .authored[open]) > table[data-extract="fields"] { display: table; }
-.card .jt { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin-top: 6px; }
+.card .jt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; margin-top: 6px; }
 .card .jn > summary { cursor: pointer; } .card .jl { padding-left: 1.2em; } .card .jn > :not(summary) { margin-left: 14px; }
 .card .jk { color: var(--card-accent); } .card .jv { color: var(--card-muted); }
-.card .legend { color: var(--card-muted); font-size: 12px; margin: 8px 0 0; }
-.card .strips { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px 24px; padding: 10px 18px 10px 24px; border-top: 1px solid var(--card-line); align-items: baseline; }
-.card .strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
+.card .legend { color: var(--card-muted); font-size: 11.5px; margin: 8px 0 2px; }
+.card .strips { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px 14px; padding: 10px 18px 12px 22px; border-top: 1px solid var(--card-line); align-items: stretch; }
+.card .strip { display: flex; flex-wrap: wrap; align-items: baseline; align-content: flex-start; gap: 6px 8px; background: var(--card-sub); border: 1px solid var(--card-line); border-radius: 6px; padding: 8px 12px; }
 .card .rels { display: flex; flex-wrap: wrap; gap: 6px; }
-.card .rel { font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 2px 8px; border: 1px solid var(--card-line); color: var(--card-ink); text-decoration: none; }
+.card .rel { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; padding: 2px 8px; background: var(--card-panel); border: 1px solid var(--card-line); border-radius: 4px; color: var(--card-ink); text-decoration: none; }
 .card .rel .col { color: var(--card-muted); } .card .rel.in { border-left: 3px solid var(--band); } .card .rel.out { border-right: 3px solid var(--band); }
-.card .vals { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; } .card .note { color: var(--card-muted); font-style: italic; }
-.card .why { color: var(--card-muted); font-size: 13px; margin: 0; }
-.card .dline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; padding: 10px 18px 12px 24px; border-top: 1px dashed var(--card-accent); }
-.card .machine { display: grid; gap: 8px; padding: 10px 18px 14px 24px; border-top: 1px dashed var(--card-accent); }
-.card .mtitle { font-size: 15px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.card .canvas { overflow-x: auto; } .card .canvas svg { display: block; width: auto; height: auto; max-width: 640px; max-height: 260px; }
-.pronto-neighbourhood { max-width: 100%; margin: 12px 0 20px; color: var(--card-ink); }
-.pronto-neighbourhood > summary { cursor: pointer; font-weight: 600; }
-.pronto-neighbourhood .neighbourhood-canvas { max-width: 100%; max-height: min(70vh, 720px); overflow: auto; padding: 8px 0; }
+.card .vals { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; } .card .note { color: var(--card-muted); font-style: italic; }
+.card .why { color: var(--card-muted); font-size: 12.5px; margin: 0; }
+.card .dline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 9px 18px 10px 22px; background: var(--card-head); border-top: 1px solid var(--card-line); }
+.card .machine { display: grid; gap: 10px; padding: 12px 18px 14px 22px; background: var(--card-mach-bg); border-top: 1px dashed var(--card-accent); }
+.card .mtitle { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.card .canvas { overflow-x: auto; background: var(--card-panel); border: 1px solid var(--card-line); border-radius: 6px; padding: 8px; } .card .canvas > svg { display: block; width: 100%; height: auto; max-width: min(100%, 880px); max-height: 360px; }
+.pronto-neighbourhood { max-width: 100%; margin: 12px 0 20px; padding: 10px 14px; background: var(--card-sub); border: 1px solid var(--card-line); border-radius: 8px; color: var(--card-ink); }
+.pronto-neighbourhood > summary { cursor: pointer; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.pronto-neighbourhood .neighbourhood-canvas { max-width: 100%; max-height: min(70vh, 720px); overflow: auto; padding: 10px; margin-top: 6px; background-color: var(--card-panel); background-image: radial-gradient(var(--pele-dot) 0.85px, transparent 0.85px); background-size: 16px 16px; border: 1px solid var(--card-line); border-radius: 6px; }
 .pronto-neighbourhood .neighbourhood-canvas:focus-visible { outline: 2px solid var(--card-accent); outline-offset: 2px; }
 .pronto-neighbourhood .neighbourhood-canvas > img { display: block; max-width: none; }
-.pronto-neighbourhood figcaption, .pronto-neighbourhood > p { margin-top: 6px; color: var(--card-muted); font-size: 13px; }
-.pronto-neighbourhood figcaption a, .pronto-neighbourhood > p a { color: inherit; }
+.pronto-neighbourhood figcaption, .pronto-neighbourhood > p { margin: 8px 0 2px; max-width: none; opacity: 1; color: var(--card-muted); font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pronto-neighbourhood figcaption a, .pronto-neighbourhood > p a { color: var(--card-accent); text-decoration: none; font-weight: 500; }
+.mermaid:has(+ .pronto-pele) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.pronto-pele { margin: 14px 0 22px; padding: 20px 22px; background-color: var(--card-sub); background-image: radial-gradient(var(--pele-dot) 0.85px, transparent 0.85px); background-size: 16px 16px; border: 1px solid var(--card-line); border-radius: 10px; box-shadow: 0 1px 3px rgba(25, 23, 20, 0.04); overflow-x: auto; }
+.pronto-pele > svg.pele { display: block; margin: 0 auto; border: 0; border-radius: 0; --pele-bg: var(--card-panel); --pele-fg: var(--card-ink); --pele-muted: var(--card-muted); --pele-line: #8492a6; --pele-surface: var(--card-panel); --pele-surface-alt: var(--card-head); --pele-border: #b8c2d1; --pele-accent: var(--card-accent); --pele-radius: 8px; --pele-font: -apple-system, "Segoe UI", system-ui, sans-serif; --pele-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pronto-pele .pele-edge > path:not(.pele-marker) { stroke-width: 1.5px; }
+.pronto-pele .pele-edge-label > rect { fill: var(--card-panel); stroke: var(--card-line); stroke-width: 1px; rx: 4px; }
+.pronto-pele .pele-edge-label > text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; fill: var(--card-muted); }
+.pronto-pele .pele-node { fill: var(--_fg); filter: drop-shadow(0 1px 2px rgba(25, 23, 20, 0.06)); }
+.pronto-pele .pele-node > rect:not(.pele-band), .pronto-pele .pele-node > path, .pronto-pele .pele-node > polygon, .pronto-pele .pele-node > circle, .pronto-pele .pele-node > ellipse { stroke-width: 1.5px; }
+.pronto-pele .pele-node > text.pele-label { font-size: 13px; font-weight: 600; fill: var(--_fg); }
+.pronto-pele .pele-node[data-role="offline"] { --_s: #fef9ee; --_b: #b8860b; --_fg: #3b2806; }
+.pronto-pele .pele-node[data-role="live"] { --_s: #f0fdf4; --_b: #1a8f5c; --_fg: #064e3b; }
+.pronto-pele .pele-node[data-role="server"] { --_s: #eef2ff; --_b: #2443b8; --_fg: #1e1b4b; }
+.pronto-pele .pele-node[data-role="device"] { --_s: #f0fdfa; --_b: #0e7c86; --_fg: #134e4a; }
+.pronto-pele .pele-node[data-role="tab"] { --_s: #f8fafc; --_b: #64748b; --_fg: #1e293b; }
+.pronto-pele .pele-node[data-role="screen"] { --_s: #ffffff; --_b: #8c8270; --_fg: #1c1917; }
+.pronto-pele .pele-node[data-role="handler"] { --_s: #faf5ff; --_b: #7e22ce; --_fg: #3b0764; }
+.pronto-pele .pele-node[data-role="machine"], .pronto-pele .pele-node[data-role="effect"] { --_s: #f5f7ff; --_b: #4338ca; --_fg: #1e1b4b; }
+.pronto-pele .pele-node[data-role="machine"] > rect:not(.pele-band), .pronto-pele .pele-node[data-role="effect"] > rect:not(.pele-band) { stroke-dasharray: 5 3; }
+@media (prefers-color-scheme: dark) {
+  .pronto-pele .pele-node[data-role="offline"] { --_s: #2b2108; --_b: #d99b16; --_fg: #fef3c7; }
+  .pronto-pele .pele-node[data-role="live"] { --_s: #09261b; --_b: #2bb578; --_fg: #d1fae5; }
+  .pronto-pele .pele-node[data-role="server"] { --_s: #171d38; --_b: #6b85ff; --_fg: #e0e7ff; }
+  .pronto-pele .pele-node[data-role="device"] { --_s: #0b292c; --_b: #22aab6; --_fg: #ccfbf1; }
+  .pronto-pele .pele-node[data-role="tab"] { --_s: #1e2430; --_b: #8a99ad; --_fg: #e2e8f0; }
+  .pronto-pele .pele-node[data-role="screen"] { --_s: #22201c; --_b: #a89d89; --_fg: #f5f1e8; }
+  .pronto-pele .pele-node[data-role="handler"] { --_s: #27123c; --_b: #a855f7; --_fg: #f3e8ff; }
+  .pronto-pele .pele-node[data-role="machine"], .pronto-pele .pele-node[data-role="effect"] { --_s: #191d36; --_b: #818cf8; --_fg: #e0e7ff; }
+}
 `;
 
 const LINK = '<link rel="stylesheet" href="ir/card.css">';
+const IR_IMPORT = /<link\b[^>]*?\brel="import"[^>]*?\bhref="(ir\/[^"]+)"[^>]*>|!\[\[(ir\/[^\]|]+)\]\]/g;
+const unsafeIrPath = (p: string) => !p.startsWith("ir/") || p.split("/").some((s) => s === "" || s === "." || s === "..");
 
-/** Draws every card ir.html has an element for, and writes ir/card.css. Answers
- * whether ir.html changed. `facts` is .pronto/facts.json, whose `chart` rows
- * carry the terminal's charts as derive read them off the screens. */
+/** The ir/*.html fragment paths referenced by an ir.html document, in order. */
+export function irFragments(html: string): string[] {
+  const seen = new Set<string>();
+  for (const m of html.matchAll(IR_IMPORT)) {
+    const p = (m[1] ?? m[2]).trim();
+    if (unsafeIrPath(p)) throw new Error(`ir.html: unsafe fragment path ${p}`);
+    seen.add(p);
+  }
+  return [...seen];
+}
+
+/** Reads ir.html and expands any referenced ir/*.html fragments in place. */
+export async function composeIr(appDir: string, irPath: string): Promise<{ html: string; fragments: string[] } | null> {
+  const root = await Deno.readTextFile(`${appDir}/${irPath}`).catch(missingIsNull);
+  if (root === null) return null;
+  const fragments = irFragments(root);
+  if (fragments.length === 0) return { html: root, fragments: [] };
+  const bodies = new Map<string, string>();
+  for (const frag of fragments) {
+    const text = await Deno.readTextFile(`${appDir}/${frag}`).catch(missingIsNull);
+    if (text === null) throw new Error(`${irPath}: missing fragment ${frag}`);
+    bodies.set(frag, text);
+  }
+  const html = root.replace(IR_IMPORT, (_full, linkHref?: string, wikiPath?: string) => {
+    const p = (linkHref ?? wikiPath ?? "").trim();
+    return bodies.get(p) ?? "";
+  });
+  return { html, fragments };
+}
+
+/** Draws every card ir.html (and its ir/*.html fragments) has an element for,
+ * and writes ir/card.css. Answers whether any file changed. `facts` is
+ * .pronto/facts.json, whose `chart` rows carry the terminal's charts as derive
+ * read them off the screens. */
 export async function renderIr(
   appDir: string,
   irPath: string,
@@ -727,7 +879,10 @@ export async function renderIr(
   }
   const readMode = new Map((facts.read_mode ?? []).map((r) => [r.entity, r.mode]));
   const ctx: Context = { program, charts, readMode, d2: draw };
-  const html = await Deno.readTextFile(`${appDir}/${irPath}`);
+  const rootHtml = await Deno.readTextFile(`${appDir}/${irPath}`);
+  const sources = [irPath, ...irFragments(rootHtml)];
+  const texts = await Promise.all(sources.map((p) => p === irPath ? Promise.resolve(rootHtml) : Deno.readTextFile(`${appDir}/${p}`)));
+  const html = texts.join("\n");
   const byIr = new Map(Object.entries(entities).map(([name, e]) => [e.ir, { name, e }]));
   if (byIr.size !== Object.keys(entities).length) throw new Error("two declared entities have the same ir id");
   const cardIrs = new Set<string>();
@@ -744,11 +899,13 @@ export async function renderIr(
     const next = rest.search(ENTITY_START);
     cards.set(id!, await cardHtml(hit.name, hit.e, ctx, authoredNotes(next === -1 ? rest : rest.slice(0, next))));
   }
-  let next = fillRegions(html, cards);
+  const filled = texts.map((t) => fillRegions(t, cards));
   const screenTags = new Set<string>();
-  for (const tag of next.matchAll(SCREEN_TAG)) {
-    const id = ID.exec(tag[0])?.[1];
-    if (id !== undefined) screenTags.add(id);
+  for (const part of filled) {
+    for (const tag of part.matchAll(SCREEN_TAG)) {
+      const id = ID.exec(tag[0])?.[1];
+      if (id !== undefined) screenTags.add(id);
+    }
   }
   const mechaFields = new Map<string, Set<string>>();
   for (const machine of Object.values(program.state.machines ?? {})) {
@@ -789,15 +946,34 @@ export async function renderIr(
     const img = await placeNeighbourhood("neighbourhood-app.svg", neighbourhoodD2(program, appGraph, cardIrs), "App entity diagram");
     appHtml = `<details class="pronto-neighbourhood app-neighbourhood"><summary>App entity neighbourhood · ${appGraph.entities.length} entities</summary><div class="neighbourhood-canvas" role="region" tabindex="0" aria-label="App entity diagram">${img}</div><p><b>entities:</b> ${entitySummary(program, appGraph, cardIrs)}</p></details>`;
   }
-  next = fillNeighbourhoodRegions(next, screenHtml, appHtml);
-  if ((cards.size > 0 || screenHtml.size > 0 || appGraph.entities.length > 0) && !next.includes(LINK)) next = next.replace(/<\/head>/, `${LINK}\n</head>`);
+  let appPlaced = false;
+  let hasMermaid = false;
+  const nextParts: string[] = [];
+  for (let i = 0; i < sources.length; i++) {
+    const hasScreen = SCREEN_TAG.test(filled[i]);
+    SCREEN_TAG.lastIndex = 0;
+    const withNeighbourhoods = fillNeighbourhoodRegions(filled[i], screenHtml, !appPlaced && hasScreen ? appHtml : null);
+    if (hasScreen) appPlaced = true;
+    const next = fillMermaidRegions(withNeighbourhoods, program);
+    if (next.includes(MERMAID_OPEN)) hasMermaid = true;
+    nextParts.push(next);
+  }
+  let changed = false;
+  for (let i = 0; i < sources.length; i++) {
+    let next = nextParts[i];
+    if (i === 0 && (cards.size > 0 || screenHtml.size > 0 || appGraph.entities.length > 0 || hasMermaid) && !next.includes(LINK)) {
+      next = next.replace(/<\/head>/, `${LINK}\n</head>`);
+    }
+    if (next !== texts[i]) {
+      await Deno.writeTextFile(`${appDir}/${sources[i]}`, next);
+      changed = true;
+    }
+  }
   await writeIrStylesheet(appDir);
   for await (const entry of Deno.readDir(`${appDir}/ir`)) {
     if (/^neighbourhood-.*\.svg$/.test(entry.name) && !placed.has(entry.name)) await Deno.remove(`${appDir}/ir/${entry.name}`);
   }
-  if (next === html) return false;
-  await Deno.writeTextFile(`${appDir}/${irPath}`, next);
-  return true;
+  return changed;
 }
 
 function missingIsNull(error: unknown): null {

@@ -140,7 +140,7 @@ async function exportEmission(): Promise<Emission> {
   for (const s of emission.cluster?.meta?.statics ?? []) {
     if (emission.files[s.file] !== undefined) continue;
     if ((await ifMissing(Deno.stat(`${appDir}/${s.file}`), null)) === null) {
-      fail(`${s.file}: no such file — the cluster serves it from the build context, so it must exist in the app (most often the review ladder's brief.html, authored per SPEC's brief.html section)`);
+      fail(`${s.file}: no such file — the cluster serves it from the build context, so it must exist in the app (most often the review ladder's journal.html, authored per SPEC's journal.html section)`);
     }
   }
   return emission;
@@ -249,7 +249,7 @@ async function renderDocuments(emission: Emission): Promise<Map<string, string>>
   if (wanted.length === 0) return contents;
   // Inside the app, the one tree this writer may write, and removed before it
   // returns.
-  const out = await Deno.makeTempDir({ dir: `${appDir}/.pronto`, prefix: "documents-" });
+  const out = resolve(await Deno.makeTempDir({ dir: `${appDir}/.pronto`, prefix: "documents-" }));
   try {
     const surface = emission.terminal.surface;
     const renderer = await terminalPath(surface.documentRenderer, appDir);

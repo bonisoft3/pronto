@@ -50,6 +50,7 @@ import { renderValidations, resolveEdges, type VEntity, validationLint, validati
 import { oneHome, parseHeld, seedKey, vetHeld } from "./seed.ts";
 import type { TypeEntity } from "./type-check.ts";
 import { claims, irAccepts, irPaths, LEDGER } from "./acceptance.ts";
+import { composeIr } from "./ir-render.ts";
 import { chartDeclarations, type ChartSite, declarations, handlersOwed, irIds, irRoutes, KINDS } from "./objects.ts";
 import { irDiagrams } from "./diagrams.ts";
 import {
@@ -205,6 +206,7 @@ export function renderDerived(
   available: Set<string>,
   decisions: { id: string; note: string }[],
   tests: { id: string; accepts: string[] }[],
+  ladder: string[] = [],
 ): string {
   const blocks = screens.map(({ name, reads, writes, charts, handlers, adapters }) => {
     const mods = handlers.map((h) => `"shell/handlers/${h}.js"`).join(", ");
@@ -223,6 +225,7 @@ export function renderDerived(
   // after a backslash JSON.stringify would have doubled.
   const notes = decisions.map(({ id, note }) => `\t${quoteKey(id)}: ${JSON.stringify(note)}`);
   const accepts = tests.map(({ id, accepts }) => `\t${quoteKey(id)}: ${JSON.stringify(accepts)}`);
+  const ladderBlock = ladder.length === 0 ? "" : `\ncode: meta: ladder: ${JSON.stringify(ladder)}\n`;
   // Pattern constraints, not concrete fields: this file supplies notes and
   // citations to the decisions and tests program.cue declares and declares
   // none of its own. Derive's own export sets `derive`, the one read for which
@@ -231,7 +234,7 @@ export function renderDerived(
     blocks.join("\n")
   }\n}\n\n_irNotes: {\n${notes.join("\n")}\n}\n\n_deriving: *false | bool @tag(derive,type=bool)\n\nif !_deriving {\n\tcode: meta: decisions: [Id=string]: note: _irNotes[Id]\n}\n\n_irAccepts: {\n${
     accepts.join("\n")
-  }\n}\n\nif !_deriving {\n\tcode: meta: tests: [Id=string]: accepts: _irAccepts[Id]\n}\n`;
+  }\n}\n\nif !_deriving {\n\tcode: meta: tests: [Id=string]: accepts: _irAccepts[Id]\n}\n${ladderBlock}`;
 }
 
 /**
@@ -838,7 +841,14 @@ export async function derive(appDir: string): Promise<void> {
     problems.push(`${exp.ir}: ${(e as Error).message}`);
   }
 
-  const irHtml = await ifMissing(Deno.readTextFile(`${appDir}/${exp.ir}`), null);
+  let composedIr: { html: string; fragments: string[] } | null = null;
+  try {
+    composedIr = await composeIr(appDir, exp.ir);
+  } catch (e) {
+    problems.push((e as Error).message);
+  }
+  const irHtml = composedIr?.html ?? null;
+  const irFragments = composedIr?.fragments ?? [];
   let notes: { id: string; note: string }[] = [];
   let diagrams: { nodes: Parameters<typeof diagramFacts>[0]; edges: Parameters<typeof diagramFacts>[1] } = { nodes: [], edges: [] };
   let accepts: ReturnType<typeof acceptsFor> = [];
@@ -919,9 +929,9 @@ export async function derive(appDir: string): Promise<void> {
   if (!(await exists(`${appDir}/DESIGN.md`))) {
     problems.push('DESIGN.md: no such file — author DESIGN.md (with YAML frontmatter `---\\npreset: "press"\\n---`)');
   }
-  if (exp.statics.some((s) => s.file === "brief.html") && !(await exists(`${appDir}/brief.html`))) {
+  if (exp.statics.some((s) => s.file === "journal.html") && !(await exists(`${appDir}/journal.html`))) {
     problems.push(
-      "brief.html: no such file — the cluster serves it from the build context, so it must exist in the app (most often the review ladder's brief.html, authored per SPEC's brief.html section)",
+      "journal.html: no such file — the cluster serves it from the build context, so it must exist in the app (most often the review ladder's journal.html, authored per SPEC's journal.html section)",
     );
   }
 
@@ -954,7 +964,20 @@ export async function derive(appDir: string): Promise<void> {
 
   if (problems.length > 0 || irHtml === null) fail(problems.join("\n"));
 
-  await Deno.writeTextFile(`${appDir}/program_derived.cue`, renderDerived(pkg, screens, available, notes, accepts));
+  const journalFiles: string[] = [];
+  const walkJournal = async (rel: string) => {
+    for (const entry of await entries(`${appDir}/${rel}`, [])) {
+      if (entry.name.startsWith(".")) continue;
+      const child = `${rel}/${entry.name}`;
+      if (entry.isDirectory) await walkJournal(child);
+      else if (entry.isFile) journalFiles.push(child);
+    }
+  };
+  await walkJournal("journal");
+  journalFiles.sort();
+  const ladder = [...new Set([...irFragments, ...journalFiles])].sort();
+
+  await Deno.writeTextFile(`${appDir}/program_derived.cue`, renderDerived(pkg, screens, available, notes, accepts, ladder));
   const scanned = appCss.map(({ path, css }) => ({ path, ...scanStylesheet(css) }));
   const appTokens = scanned.map(({ path, tokens }) => ({ path, tokens }));
   const literals = scanned.map(({ path, literals, exceptions }) => ({ path, literals, exceptions }));
@@ -970,7 +993,11 @@ export async function derive(appDir: string): Promise<void> {
   const servedAt = new Map(exp.statics.map((s) => [s.file, s.target]));
   const servedDir = (file: string): string => {
     const target = servedAt.get(file) ??
-      fail(`${file} is read as a stylesheet and served nowhere, so nothing can reach it`);
+      fail(
+        file === exp.entry
+          ? `${file} is served nowhere — pass statics: terminal.surface.statics to pronto.#DefaultCluster in program.cue`
+          : `${file} is read as a stylesheet and served nowhere, so nothing can reach it`,
+      );
     return target.slice(0, target.lastIndexOf("/"));
   };
   const documentDir = servedDir(exp.entry);
@@ -1014,8 +1041,10 @@ export async function derive(appDir: string): Promise<void> {
   const artifacts: { path: string; sha256: string; derived: boolean }[] = [];
   for (const [path, derived] of [
     ["program.cue", false],
+    ...((await exists(`${appDir}/seed.cue`)) ? [["seed.cue", false]] : []),
     ["DESIGN.md", false],
     [exp.ir, false],
+    ...irFragments.map((f): [string, boolean] => [f, false]),
     [LEDGER, false],
     [".pronto/cel.json", true],
     ["program_cel.cue", true],

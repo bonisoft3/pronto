@@ -1778,6 +1778,7 @@ import (
 		themeColor?:  string
 		sitemap?:     #Sitemap
 		ir: {source: *"ir.html" | string, sha256: *"" | string} // the pinned IR this program was compiled from
+		ladder: *[] | [...string] // composed journal/ and ir/ files served under /srv/docs/
 		domain?: string
 		ssrOrigin?: string
 		// A frozen archive retains its schedules and runs none, at the edge or

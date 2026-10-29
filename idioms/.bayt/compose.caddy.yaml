@@ -93,8 +93,8 @@ services:
         path: ../messages/pt-BR.json
         target: /srv/messages/pt-BR.json
       - action: rebuild
-        path: ../brief.html
-        target: /srv/docs/brief.html
+        path: ../journal.html
+        target: /srv/docs/journal.html
       - action: rebuild
         path: ../ir.html
         target: /srv/docs/ir.html

@@ -2100,7 +2100,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	statics: [...mecha.#Static]
 
 	// The review ladder's artifacts, served beside the app by caddy's catch-all
-	// /srv root. One directory is load-bearing, not tidiness: brief.html links
+	// /srv root. One directory is load-bearing, not tidiness: journal.html links
 	// `ir.html`, its wikilinks render as `ir.html#Id`, and its transclusions
 	// `fetch` their target by bare relative path — all three resolve only if the
 	// four files are siblings. Served, the transclusion inlines instead of
@@ -2110,7 +2110,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// construction. Intended: reviewing a design doc is not using the app, and
 	// requiring a sign-in to read one would put the ladder behind the thing it
 	// exists to review.
-	_ladder: [for f in ["brief.html", "ir.html", "ir/card.css", "acceptance.md", "DESIGN.md"] {
+	_ladderExtra: [if D.code.meta.ladder != _|_ for f in D.code.meta.ladder {f}]
+	_ladder: [for f in list.Concat([["journal.html", "ir.html", "ir/card.css", "acceptance.md", "DESIGN.md"], _ladderExtra]) {
 		file:   f
 		target: "/srv/docs/\(f)"
 		watch:  true

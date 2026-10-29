@@ -148,12 +148,13 @@ state: entities: {
 
 *Portable Field Types (15 closed types):* `string`, `bool`, `int32`, `int64`, `double`, `bytes`, `uuid`, `timestamp`, `date`, `time`, `timezone`, `duration`, `decimal`, `json`, `geojson`.
 
-#### The 5 Durability Rungs:
+#### The 5 Durability Rungs & Seed Guidance:
 1. `tab`: In-memory in the single browser tab. Never reaches disk or server. Omit `access`. Ideal for UI view state, game boards, modal toggles, ephemeral filters. Supports `seed: [...]` in `program.cue`.
 2. `device`: Stored in IndexedDB in the browser. Persists across page reloads on that device, never leaves the browser. Omit `access`. **Cannot declare non-empty `seed:` in `program.cue`** (`schema.cue` enforces `if durability == "device" { seed: [] }`); for `device` singleton slots, use `data-empty-row='{...}'` in markup and `op: "put"` in handlers.
 3. `offline`: Client-first sync. Writes succeed locally immediately, background-reconcile to the cluster when online.
 4. `server`: Canonical PostgreSQL table on the server/edge. Replicated to clients matching authorized sync shapes.
 5. `live`: Server-authoritative table with high-frequency live subscriptions.
+*Seed Data Placement:* Never bloat `program.cue` with large inline `seed:` arrays. When a database exists and the data is user-generated content (UGC) or operational state, favor SQL migrations (`services/database/sql/*.sql`) or runtime writes; when static CUE seed rows are needed, split them into a sibling `seed.cue` in the same package (or hold large server archives in `seed.json` via `state: seed: src: "seed.json"`).
 
 #### CEL Validation Cheat-Sheet (`cel:`):
 `plugins/pronto/cel.ts` parses each `cel:` once into `.pronto/cel.json` and derives CUE constraints (`program_cel.cue`), SQL `CHECK` bodies, enum value sets, and fuzz bounds:
@@ -230,18 +231,18 @@ terminal: (pronto.#DefaultTerminal & {
 
 Before the first compiler run on a new app, prepare these **7 prerequisite groups** (do not hand-create `.say.yaml` or `program_derived.cue`; `write.ts` emits them):
 1. `.mise.toml`, `mise.lock`, `saytw`, `saytw.ps1`: Bootstrap the app’s pinned toolchain using Pronto’s `skills/pronto-turn/references/bootstrap.md`. Configure checkout source overrides in `mise.local.toml` during checkout setup. Keep tool locations in mise configuration; the command examples below work from any app directory.
-2. `brief.md` & `brief.html`: Problem statement and HTML brief.
+2. `brief.md` & `journal.html` (plus optional dated `journal/YYYY-MM-DD-*`): `brief.md` is the product-altitude problem statement. `journal.html` is a reverse-chronological HTML log for people: its `<header>` always opens with a **product-centric `<h1>` title** (never a turn or mechanism headline) and a `brief.html`-style product summary paragraph ending with an anchor link (`<a href="#initial-brief">Latest product brief ↓</a>` or `<a href="#brief-YYYY-MM-DD">Latest product brief ↓</a>`) to the most recent brief update in the journal log. Below `<header>`, reverse-chronological `<article>` entries start from `<article id="initial-brief">` at the bottom; each subsequent turn prepends its product and technical achievements with before/after evidence (`journal/YYYY-MM-DD-*`), and periodically it emits an updated brief entry (`id="brief-YYYY-MM-DD"`) at the top (updating the `<header>` anchor link) while garbage-collecting superseded entries and `journal/` files from `HEAD` (git preserves full history).
 3. `acceptance.md`: Acceptance ledger where every claim line ends with a `{#accept-<slug>}` anchor (parsed via `/\{#(accept-[a-z0-9-]+)\}/g`, e.g., `- First click is guaranteed safe. {#accept-start}`). Every ID in `paths.<p>.accepts` must appear here.
-4. `DESIGN.md` & `shell/screens/<screen>.css`: `DESIGN.md` starts with YAML frontmatter (`preset: "press"`). Pre-create `shell/screens/<screen>.css` before the first `write.ts` run; scope selectors under `[data-screen="<screen>"]`, keep interactive cell/button dimensions on the 4px baseline (e.g. `32px`), use `var(--fg)` for text contrast across light/dark themes (enforced by `ci-visual` under `mise x -- ./saytw integrate`), and use enforced design tokens instead of raw literals (`var(--surface)`, `var(--surface-muted)`, `var(--fg)`, `var(--primary)`, `var(--accent)`, `var(--danger)`, `var(--border)`, `var(--border-size-1)`, `var(--border-size-2)`, `var(--size-1)`, `var(--sp-sm|md|lg)`, `var(--r-sm|md)`, `var(--type-label|caption|body|subtitle)`). Avoid `font:` shorthand when consuming font-size tokens; use `font-size: var(--type-...)` longhand.
-5. `ir.html`: Must contain:
-   - `<section id="<EntityName>" data-kind="entity" data-durability="tab">` with `<table data-extract="fields">`.
-   - `<section id="<screen>" data-kind="screen" data-route="/">` with `<p data-extract="reads">`, `<p data-extract="mutations">`, `<figure id="<screen>-<state>" data-kind="state" data-of="<screen>" data-state="<state>"></figure>`, and `<script type="application/json" data-kind="paths" data-of="<screen>">{"start":{"states":["ready","playing"],"accepts":["accept-start"]}}</script>`.
-   - `<section id="<flow_id>" data-kind="flow" data-of="<screen">`: Every flow key in `program.cue` `surface.flows` must have a matching section.
-   - `<p id="decision-01" data-kind="decision">`: Every decision key in `program.cue` `meta.decisions` must match an `id="decision-XX"` tag.
-6. `shell/handlers/<name>.js`: Pure Jessie fold ending with a bare `(state, event) => { ... }` arrow expression.
-7. `program.cue`: App contract (`#App` + `cluster`, `terminal`, `loop`, `build`, `out`).
+4. `DESIGN.md` & `shell/screens/<screen>.css`: `DESIGN.md` starts with YAML frontmatter (`preset: "press"`; custom semantic color tokens may be declared under `colors: { gold: "#B7791F" }` with a matching `dark: { gold: "#D69E2E" }` twin, emitted as `var(--gold)`). Pre-create `shell/screens/<screen>.css` before the first `write.ts` run; scope selectors under `[data-screen="<screen>"]`, keep interactive cell/button dimensions on the 4px baseline (e.g. `32px`), use `var(--fg)` for text contrast across light/dark themes (enforced by `ci-visual` under `mise x -- ./saytw integrate`), and use enforced design tokens instead of raw literals (`var(--surface)`, `var(--surface-muted)`, `var(--fg)`, `var(--primary)`, `var(--accent)`, `var(--danger)`, `var(--border)`, `var(--border-size-1)`, `var(--border-size-2)`, `var(--size-1)`, `var(--sp-sm|md|lg)`, `var(--r-sm|md)`, `var(--type-label|caption|body|subtitle)`). Avoid `font:` shorthand when consuming font-size tokens; use `font-size: var(--type-...)` longhand.
+5. `ir.html` (optionally split into `ir/*.html` fragments included via `<link rel="import" href="ir/...">` or `![[ir/...]]`): Must contain:
+   - `<section id="<EntityName>" data-kind="entity" data-durability="tab">` with `<table data-extract="fields">` (one `<tr><td>col</td><td>type</td><td>note</td></tr>` per field).
+   - `<article id="<screen>" data-kind="screen" data-route="/">`, `<article id="<screen>-<state>" data-kind="state">`, and `<script type="application/json" data-kind="paths" data-of="<screen>">{"start":{"states":["ready","playing"],"accepts":["accept-start"]}}</script>`.
+   - `<article id="<flow_id>" data-kind="flow">`: Every flow key in `program.cue` `surface.flows` must have a matching element.
+   - `<article id="decision-01" data-kind="decision"><p>...</p></article>`: Every decision key in `program.cue` `meta.decisions` must match an `id="decision-XX"` tag with a single-sentence `<p>` summary.
+6. `shell/handlers/<name>.js`: Pure Jessie fold ending with a bare `(state, event) => { ... }` arrow expression. Guard `(state.items ?? [])[0]` and `state.rows?.<table> ?? []` because `omnishell check battery` fuzz-invokes handlers with partial/empty state.
+7. `program.cue` (optionally split across sibling `.cue` files in the root package such as `screens.cue` or `seed.cue`): App contract (`#App` + `cluster`, `terminal`, `loop`, `build`, `out`). Always pass `statics: terminal.surface.statics` to `pronto.#DefaultCluster`.
 
-`mise x -- ./saytw generate` parses `ir.html`, mints missing entity/field IDs into `.pronto/identity.json`, emits `program_derived.cue` + `.say.yaml` + `shell/screens/<screen>.html`, and renders SVG diagrams through the pinned D2 tool. **Guided Cold-Start Tip:** `meta.ir.sha256` defaults to `""`, and running the resolved compiler command below as soon as `program.cue` is written reports every missing companion file (`ir.html`, `acceptance.md`, `DESIGN.md`, `brief.html`, `shell/screens/<screen>.css`, `shell/handlers/<name>.js`) along with the exact `<article id="..." data-kind="...">` tags, `paths` blocks, and `#accept-...` claim IDs your `program.cue` owes in one pass.
+`mise x -- ./saytw generate` parses `ir.html`, mints missing entity/field IDs into `.pronto/identity.json`, emits `program_derived.cue` + `.say.yaml` + `shell/screens/<screen>.html`, and renders SVG diagrams through the pinned D2 tool. **Guided Cold-Start Tip:** `meta.ir.sha256` defaults to `""`, and running the resolved compiler command below as soon as `program.cue` is written reports every missing companion file (`ir.html`, `acceptance.md`, `DESIGN.md`, `journal.html`, `shell/screens/<screen>.css`, `shell/handlers/<name>.js`) along with the exact `<article id="..." data-kind="...">` tags, `paths` blocks, and `#accept-...` claim IDs your `program.cue` owes in one pass.
 
 ---
 
@@ -475,11 +476,9 @@ In multiplayer and turn-based games (`truco`, `apexrun`), multi-player coordinat
 +     fields: [{name: "id", type: "string", pk: true}]
 + }
 + <!-- In ir.html: -->
-+ <section id="arena" data-kind="screen" data-route="/">
++ <article id="arena" data-kind="screen" data-route="/">
 +     <h3>arena — 9x9 board</h3>
-+     <p data-extract="reads">Reads: <a href="#Game">Game</a>, <a href="#Cell">Cell</a>.</p>
-+     <p data-extract="mutations">Mutations: click bindings to <code>board</code> fold.</p>
-+ </section>
++ </article>
 ```
 
 ---
@@ -496,7 +495,8 @@ pronto_root="$(mise where github:bonisoft3/pronto)"
 omnishell_root="$(mise where github:bonisoft3/omnishell)"
 mecha_root="$(mise where github:bonisoft3/mecha)"
 
-# First emission / cold-start preflight, before the app's generated gates exist:
+# First emission / cold-start preflight (`omnishell mode .` emits program_terminal.cue, or run `./saytw generate` which runs both):
+mise x -- omnishell mode . > program_terminal.cue
 mise x -- deno run -A --config "$pronto_root/deno.json" "$pronto_root/write.ts" .
 
 # Canonical Sayt ladder: run each verb in the foreground until exit 0.

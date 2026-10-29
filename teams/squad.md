@@ -1,19 +1,22 @@
 ---
 name: squad
-description: The classical squad — product, design, eng, qa. Pronto's default virtual team.
+description: Pronto's default virtual team — product, architect, engineer, and qa balanced across user journeys, data invariants, code craft, and live evidence.
 ---
 
 # Squad
 
-The default virtual team: four archetypes, each with a charter and a gate
-on the ir. A brief selects it with `team: squad`.
+Product: Journeys with named moments over feature checklists — first run, core loop, empty states, and recovery roads. Establish the visual oracle before compilation starts.
 
-Roles (the ir carries one review section per role listed here):
+Architect: Minimal entity schemas, explicit access policies, live queries before materialized pipelines, and zero undeclared escapes.
 
-![[squad/product.md]]
+Engineer: Idiomatic binding markup, token-only stylesheets shared cleanly across screens, pure Jessie reducers, and HEAD-only comments where mechanism is non-obvious.
 
-![[squad/design.md]]
+QA: Bidirectional acceptance coverage, genuinely falsifiable assertions, and live browser walkthroughs captured in `journal.html`.
 
-![[squad/eng.md]]
+![[seats/product.md]]
 
-![[squad/qa.md]]
+![[seats/architect.md]]
+
+![[seats/engineer.md]]
+
+![[seats/qa.md]]

@@ -250,12 +250,12 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       }
       // A static the cluster serves but nothing holds fails at generate,
       // not minutes later in a docker build.
-      const briefPath = join(app, "brief.html");
-      const brief = await Deno.readTextFile(briefPath);
-      await Deno.remove(briefPath);
+      const journalPath = join(app, "journal.html");
+      const journal = await Deno.readTextFile(journalPath);
+      await Deno.remove(journalPath);
       const missing = await deno(join(scratch, "pronto/write.ts"), ["."], false);
-      assert(missing.includes("brief.html: no such file"), "the writer did not refuse the missing static");
-      await Deno.writeTextFile(briefPath, brief);
+      assert(missing.includes("journal.html: no such file"), "the writer did not refuse the missing static");
+      await Deno.writeTextFile(journalPath, journal);
     } finally {
       if (previousRegistry === undefined) Deno.env.delete("CUE_REGISTRY"); else Deno.env.set("CUE_REGISTRY", previousRegistry);
       if (previousCache === undefined) Deno.env.delete("CUE_CACHE_DIR"); else Deno.env.set("CUE_CACHE_DIR", previousCache);

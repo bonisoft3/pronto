@@ -582,7 +582,7 @@
           "shell/handlers/tick.js",
           "messages/en.json",
           "messages/pt-BR.json",
-          "brief.html",
+          "journal.html",
           "ir.html",
           "ir/card.css",
           "acceptance.md",

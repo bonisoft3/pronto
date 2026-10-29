@@ -11,7 +11,7 @@
   "artifact": [
     {"path":"program.cue","sha256":"fce66a85c5041a756bc11f6c5e1d0934220e956f324db333aeed62e959ee19c4","derived":false},
     {"path":"DESIGN.md","sha256":"86f1d07b3752cfa91711c28d2e08b914e7352ea352c75f1f06dd127dc56abaf8","derived":false},
-    {"path":"ir.html","sha256":"78fe1479e2ea70de4ecae1d278e9ba8e14282fe189d34dfbfa4f2ee49be53bd7","derived":false},
+    {"path":"ir.html","sha256":"4ca474522006fd7c71f0bdad845a3884a0c0c1bf5c3bfeb36cacebd548cecc2f","derived":false},
     {"path":"acceptance.md","sha256":"37c3de8f47e18855d72001b9f14668952600b341a84277d41fc5fce0278c9bae","derived":false},
     {"path":".pronto/cel.json","sha256":"8e3f3ea654983cbd7d3ec0db953d0d17db3a71de0b32cd7ed7eda582c8198d85","derived":true},
     {"path":"program_cel.cue","sha256":"0564e862d3446d73b2bc29a2f301b427dfb8d786d7352ec20589d600c60b8c4e","derived":true},
@@ -1112,7 +1112,7 @@
     {"file":"shell/handlers/tick.js","target":"/srv/shell/handlers/tick.js"},
     {"file":"messages/en.json","target":"/srv/messages/en.json"},
     {"file":"messages/pt-BR.json","target":"/srv/messages/pt-BR.json"},
-    {"file":"brief.html","target":"/srv/docs/brief.html"},
+    {"file":"journal.html","target":"/srv/docs/journal.html"},
     {"file":"ir.html","target":"/srv/docs/ir.html"},
     {"file":"ir/card.css","target":"/srv/docs/ir/card.css"},
     {"file":"acceptance.md","target":"/srv/docs/acceptance.md"},

@@ -41,8 +41,8 @@ brief.md ──LLM──▶ ir.html ──LLM (narrow)──▶ program.cue ─�
 
 | Artifact | Audience | Contents | Mutability |
 |----------|----------|----------|------------|
-| `brief.md` | Product / business | What the app should do, in prose; `brief.html` is its browser presentation | Mutable |
-| `ir.html` | Engineer | Architecture diagram (boxes and how they communicate), SVG screen sketches, contracts, test pairs — a design doc that renders in any browser | Pinned per compile |
+| `brief.md` | Product / business | What the app should do, in prose; `journal.html` (and `journal/*`) is its living browser presentation and reverse-chronological turn log | Mutable |
+| `ir.html` | Engineer | Architecture diagram (boxes and how they communicate), SVG screen sketches, contracts, test pairs — a design doc that renders in any browser (optionally composed from `ir/*.html`) | Pinned per compile |
 | `program.cue` | Machine | The program. Everything downstream is `cue export` | Pinned per compile |
 
 Only the two LLM hops are probabilistic, and the second is narrow: the structured parts of ir.html (entity tables, flow topology, data-path assignments) extract into CUE deterministically. Every box, arrow, and sketch in ir.html carries a machine-readable id; the generated CUE back-references those ids; a deterministic checker enforces the bijection. IR↔CUE drift is a checkable property, not a hope.
@@ -167,4 +167,4 @@ What you give up in expressiveness (real-time collaboration, GPU compute, sub-10
 
 ## License
 
-LGPL-3.0
+[GPL-3.0](LICENSE)

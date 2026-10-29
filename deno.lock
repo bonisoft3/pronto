@@ -40,6 +40,7 @@
     "npm:fast-check@3.23.2": "3.23.2",
     "npm:linkedom@0.18.4": "0.18.4",
     "npm:mermaid@11.9.0": "11.9.0_cytoscape@3.34.2",
+    "npm:pele@1.12.0": "1.12.0",
     "npm:playwright@1.61.1": "1.61.1",
     "npm:xstate@5.32.6": "5.32.6"
   },
@@ -244,14 +245,14 @@
       "dependencies": [
         "@chevrotain/gast",
         "@chevrotain/types",
-        "lodash-es@4.17.21"
+        "lodash-es"
       ]
     },
     "@chevrotain/gast@11.0.3": {
       "integrity": "sha512-+qNfcoNk70PyS/uxmj3li5NiECO+2YKZZQMbmjTqRI3Qchu8Hig/Q9vgkHpI3alNjr7M+a2St5pw5w5F6NL5/Q==",
       "dependencies": [
         "@chevrotain/types",
-        "lodash-es@4.17.21"
+        "lodash-es"
       ]
     },
     "@chevrotain/regexp-to-ast@11.0.3": {
@@ -346,7 +347,8 @@
         "@protobufjs/utf8",
         "@types/node",
         "long"
-      ]
+      ],
+      "scripts": true
     },
     "@libpg-query/parser@17.6.10": {
       "integrity": "sha512-AT/IM9H24/u70HvBhzkYlSBlYQWhJK3Z4CTmTnd3PnMqHU7Ib3o5pk2TEik6IblWsU64D+4GGURn94v2iSRe1A==",
@@ -593,7 +595,7 @@
       "integrity": "sha512-b7g+y9A0v4mxCW1qUhf3BSVPg+/NvGErk/dOkrDaHA0nQIQGAtrOjlX//9OQtRlSCy+x9rfB5N8yC71lH1nvMw==",
       "dependencies": [
         "chevrotain",
-        "lodash-es@4.18.1"
+        "lodash-es"
       ]
     },
     "chevrotain@11.0.3": {
@@ -604,7 +606,7 @@
         "@chevrotain/regexp-to-ast",
         "@chevrotain/types",
         "@chevrotain/utils",
-        "lodash-es@4.17.21"
+        "lodash-es"
       ]
     },
     "commander@7.2.0": {
@@ -674,13 +676,13 @@
     "d3-array@2.12.1": {
       "integrity": "sha512-B0ErZK/66mHtEsR1TkPEEkwdy+WDesimkM5gpZr5Dsg54BiTA5RXtYW5qTLIAcekaS9xfZrzBLF/OAkB3Qn1YQ==",
       "dependencies": [
-        "internmap@1.0.1"
+        "internmap"
       ]
     },
     "d3-array@3.2.4": {
       "integrity": "sha512-tdQAmyA18i4J7wprpYq8ClcxZy3SC31QMeByyCFyRt7BVHdREQZ5lpzoe5mFEYZUWe+oq8HBvk9JjpibyEV4Jg==",
       "dependencies": [
-        "internmap@2.0.3"
+        "internmap"
       ]
     },
     "d3-axis@3.0.0": {
@@ -900,7 +902,7 @@
       "integrity": "sha512-tvlJLyQf834SylNKax8Wkzco/1ias1OPw8DcUMDE7oUIoSEW25riQVuiu/0OWEFqT0cxHT3Pa9/D82Jr47IONw==",
       "dependencies": [
         "d3",
-        "lodash-es@4.18.1"
+        "lodash-es"
       ]
     },
     "dayjs@1.11.23": {
@@ -966,7 +968,8 @@
     },
     "fsevents@2.3.2": {
       "integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==",
-      "os": ["darwin"]
+      "os": ["darwin"],
+      "scripts": true
     },
     "globals@15.15.0": {
       "integrity": "sha512-7ACyT3wmyp3I61S4fG682L0VA2RGD9otkqGJIwNUMF1SWUombIIk+af1unuDYgMm082aHYwD+mzJvv9Iu8dsgg=="
@@ -994,9 +997,6 @@
     },
     "internmap@1.0.1": {
       "integrity": "sha512-lDB5YccMydFBtasVtxnZ3MRBHuaoE8GKsppq+EchKL2U4nK/DmEpPHNH8MZe5HkMtpSiTSOZwfN0tzYjO/lJEw=="
-    },
-    "internmap@2.0.3": {
-      "integrity": "sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg=="
     },
     "js-tokens@4.0.0": {
       "integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="
@@ -1055,9 +1055,6 @@
     "lodash-es@4.17.21": {
       "integrity": "sha512-mKnC+QJ9pWVzv+C4/U3rRsHapFfHvQFoFB92e52xeyGMcX6/OlIl78je1u8vePzYZSkkogMPJ2yjxxsb89cxyw=="
     },
-    "lodash-es@4.18.1": {
-      "integrity": "sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A=="
-    },
     "long@5.3.2": {
       "integrity": "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="
     },
@@ -1085,7 +1082,7 @@
         "dompurify",
         "katex",
         "khroma",
-        "lodash-es@4.18.1",
+        "lodash-es",
         "marked",
         "roughjs",
         "stylis",
@@ -1119,6 +1116,9 @@
     },
     "pathe@2.0.3": {
       "integrity": "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="
+    },
+    "pele@1.12.0": {
+      "integrity": "sha512-3OdOK6rvkaTB569R4/I8U0H82MqPRxj7vfkbowa2rRhgSBPFhvWlfFy5eae0jP+2A6hE8abE17nsdyxJz2VBiQ=="
     },
     "picocolors@1.1.1": {
       "integrity": "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="

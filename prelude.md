@@ -156,12 +156,14 @@ linked at build time and imported by the cage, endowed with nothing
 
 ## The virtual team
 
-Compilation itself is staffed: the brief's `team:` (default squad —
-product, design, eng, qa) names the roles that author and sign the
-compile. Each role holds a gate over the surface it owns, wherever the
-ladder produces it: the seats that shape the ir sign the ir, and the
-seats whose surface is the assembly — screen markup and stylesheets, the
-shell, the emitted SQL — sign that, before the program ships. A hop
+Compilation itself is staffed: the brief's `team:` (default `squad`, or domain
+teams `studio`, `arcade`, `ops`) sets the business posture for the four review
+seats (`product`, `architect`, `engineer`, `qa`) that author and sign the
+compile. Each seat holds a gate over the surface it owns, wherever the
+ladder produces it: `product` and `architect` sign the ir and program,
+`engineer` signs the authored assembly (screen markup, stylesheets, Jessie
+handlers, units/hatches), and `qa` signs falsifiable coverage and live browser
+playtest evidence before the program ships. A hop
 nobody signs loses things quietly. Translation is where a multi-arm
 assertion becomes a single one, because the program's shape admits one;
 assembly is where one design system becomes a copy per screen, and the

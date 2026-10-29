@@ -32,11 +32,12 @@ An app is one directory. What you author:
 
 | File | What it is |
 |---|---|
-| `brief.md`, `brief.html` | the product-altitude source and its browser presentation |
-| `ir.html` | the engineering design doc, pinned per compile |
+| `brief.md` | the product-altitude source |
+| `journal.html`, `journal/*` | the living browser presentation and reverse-chronological turn log (starting with the initial brief entry; dated entries and assets in `journal/`, periodically refreshed with a new brief snapshot and garbage-collected) |
+| `ir.html`, `ir/*.html` | the engineering design doc, pinned per compile (optionally composed from `ir/*.html` fragments) |
 | `acceptance.md` | the flat checklist whose `{#accept-…}` ids every test and path cites |
 | `DESIGN.md` | the design block in its frontmatter, the argument in its body |
-| `program.cue` and the `.cue` files of its package | the program: entities, pipelines, screens, flows, tests, decisions |
+| `program.cue` and the `.cue` files of its package | the program: entities, pipelines, screens, flows, tests, decisions (split into sibling files like `screens.cue` or `seed.cue` when large) |
 | `shell/screens/<name>.html` + `.css`, or `markup:` in CUE | a screen: HTML at `files.html`, or a `markup` string for a component-bearing screen, which the writer emits there |
 | `shell/handlers/*.js`, `shell/validations/*.js` | Jessie modules, one arrow function each |
 | `pipelines/*.blobl`, `pipelines/*.browser.js` | a pipeline's transform and its browser twin |
@@ -188,12 +189,16 @@ can tell is [access](docs/access.md#a-count-the-reader-is-inside-of).
 
 An entity's `seed` states the rows its store holds before anyone writes one: a
 cluster durability renders them into `900_seed.sql`, a `tab` one into
-`shell.yaml`. CUE unifies each with its entity's constraints, at every
-evaluation of the program — which is right for the rows a program means, and a
-tax on every export, vet and check for an archive a crawler produced.
-
-Such an archive is held as data instead: a JSON file beside the program,
-outside its package, named by `state: seed: src`.
+`shell.yaml`. Keep `program.cue` free of bulky inline `seed:` lists:
+- When a database exists and the data is user-generated content (UGC) or
+  operational state, favor SQL migrations (`services/database/sql/*.sql`) or
+  runtime writes over static `seed:` declarations.
+- When the rows are static CUE declarations, split them into a sibling
+  `seed.cue` in the app's root package so reading `program.cue` does not pull
+  the dataset into context.
+- When the rows are a large archive a tool or crawler produced, hold them as
+  data outside CUE evaluation in `seed.json` (`state: seed: src: "seed.json"`),
+  since CUE otherwise unifies every stated row on every export, vet and check.
 
 ```cue
 state: seed: src: "seed.json" // {"<Entity>": [row, ...]}
