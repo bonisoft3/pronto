@@ -32,7 +32,7 @@ say:
           - do: 'if ($env.SAY_RELEASE_ARGS_SNAPSHOT? | is-empty) { use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: "no release tag on HEAD to push"} }; git push origin $tag }'
         platform: pages
   self:
-    version: v0.45.1
+    version: v0.45.2
   doctor:
     do: 'use tools.nu [run-mise]; run-mise exec -- cue version; run-mise exec -- deno --version; run-mise where github:bonisoft3/pronto'
   build:
