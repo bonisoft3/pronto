@@ -15,6 +15,17 @@ Bootstrap is the agent's to run, first, in the app's directory: everything it
 installs lands there and in mise's cache. A checkout of pronto on disk does not
 replace it; copy from the checkout's idioms and bootstrap from the release.
 
+On bsoneca's fork (`0.24.1-gcp.N`, published by `prerelease.sh`), the module
+and its mecha live in the fork's registry: say so before step 2, and use the
+fork's version there. The `.mise.toml` bootstrap writes names that registry
+itself, and its `mise.lock` the fork's pronto and mecha releases, so a repo it
+starts runs on the fork from its first install:
+
+```sh
+export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,registry.cue.works'
+./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v0.24.1-gcp.28
+```
+
 1. Download both project wrappers from the same pinned Sayt tag:
 
    ```sh
