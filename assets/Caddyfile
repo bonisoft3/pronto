@@ -1,4 +1,4 @@
-# The cluster's one door, h2 over TLS: libraries/mecha/docs/proxy.md.
+# The cluster's one door, h2 and h3 over TLS: libraries/mecha/docs/proxy.md.
 
 # Every file the door serves, answered with its validator: mecha's caddy
 # writes each file's content hash beside it as `<file>.etag` (cluster.cue),
@@ -276,7 +276,7 @@
 # (CADDY_TLS, set as the container starts), Caddy's own CA otherwise.
 https://localhost:8443 {
   tls {$CADDY_TLS:internal}
-  header Alt-Svc `h3=":{$CADDY_TLS_HOST_PORT:20879}"; ma=2592000`
+  header Alt-Svc `h3=":{$CADDY_TLS_HOST_PORT:8443}"; ma=2592000`
   import app
 }
 

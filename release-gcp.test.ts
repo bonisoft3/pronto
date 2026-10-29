@@ -316,6 +316,78 @@ Deno.test("a preview name Cloud Run, Cloud SQL or a secret would refuse is refus
   }
 });
 
+Deno.test("an app with SSR render and airlock+bifrost AI gateway wires localhost ports and GEMINI_API_KEY secret", async () => {
+  const aiPushed = `{${["caddy", "crud", "auth", "electric", "database", "render", "airlock", "bifrost"].map((s, i) => `${s}: {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+  const spec = `{
+    name: "snapcards",
+    service: "snapcards",
+    project: "trash-362115",
+    domain: "snapcards.fun",
+    image: pushed: ${aiPushed},
+    database: tokenRoles: ["anon", "app_user", "service"],
+    render: enabled: true,
+    airlock: {
+      enabled: true,
+      bifrost: true,
+      aiModels: "{\\"text\\":[\\"browser\\",\\"cheap\\",\\"heavy\\"]}",
+      secrets: GEMINI_API_KEY: "snapcards-gemini-api-key"
+    }
+  }`;
+  const svcRes = await built(spec, "service");
+  assertEquals(svcRes.success, true, svcRes.stderr);
+  const containers = svcRes.value.spec.template.spec.containers;
+  const byName = Object.fromEntries(containers.map((c: { name: string }) => [c.name, c]));
+  const envOf = (c: { env: { name: string; value?: string; valueFrom?: { secretKeyRef: { name: string } } }[] }) =>
+    Object.fromEntries(c.env.map((e) => [e.name, e.value ?? e.valueFrom?.secretKeyRef.name]));
+
+  // Caddy routes SSR requests to render on 127.0.0.1:8091 (avoiding bifrost on 8090)
+  assertEquals(envOf(byName.caddy).PRONTO_UPSTREAM_RENDER, "127.0.0.1:8091");
+  assertEquals(envOf(byName.render).PORT, "8091");
+  assertEquals(envOf(byName.render).DOOR, "http://127.0.0.1:8080");
+
+  // Bifrost runs on 8090 with AI_TARGET=gcp and GEMINI_API_KEY from Secret Manager
+  assertEquals(envOf(byName.bifrost).BIFROST_PORT, "8090");
+  assertEquals(envOf(byName.bifrost).AI_TARGET, "gcp");
+  assertEquals(envOf(byName.bifrost).GEMINI_API_KEY, "snapcards-gemini-api-key");
+
+  // Airlock connects to Cloud SQL proxy on 127.0.0.1:5432 and bifrost on 127.0.0.1:8090
+  assertEquals(envOf(byName.airlock).MESH_URL, "http://127.0.0.1:8090");
+  assertEquals(envOf(byName.airlock).DATABASE_URL, "snapcards-auth-database-url");
+
+  const deps = JSON.parse(svcRes.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy, ["crud", "auth", "electric", "render"]);
+  assertEquals(deps.airlock, ["cloud-sql-proxy", "bifrost"]);
+
+  const planRes = await built(spec, "plan");
+  assertEquals(planRes.success, true, planRes.stderr);
+  assert(planRes.value.oidcSecretKeys.includes("snapcards-gemini-api-key"));
+});
+
+Deno.test("AI, SSR, the scheduler and a generic sidecar share the instance without port or capacity collisions", async () => {
+  const services = ["caddy", "crud", "auth", "electric", "database", "render", "airlock", "bifrost", "ticker", "billing"];
+  const images = `{${services.map((s, i) => `${s}: {tag: "latest", digest: "${digest(String(i))}"}`).join(", ")}}`;
+  const spec = `{name: "snapcards", project: "trash-362115", image: pushed: ${images},
+    render: enabled: true, airlock: {enabled: true, bifrost: true},
+    ticker: env: WAKE_URLS: "http://airlock:9997/healthz", sidecars: billing: {port: 8688}}`;
+  const plan = await built(spec);
+  assertEquals(plan.success, true, plan.stderr);
+  assertEquals(plan.value.sidecars, ["billing"]);
+  assertEquals(plan.value.peers.billing["render:8090"], "127.0.0.1:8091");
+  assertEquals(plan.value.peers.billing["bifrost:8090"], "127.0.0.1:8090");
+  const svc = await built(spec, "service");
+  assertEquals(svc.success, true, svc.stderr);
+  const containers = svc.value.spec.template.spec.containers;
+  assertEquals(containers.length, 10);
+  const ticker = containers.find((c: { name: string }) => c.name === "ticker");
+  assertEquals(ticker.env.find((e: { name: string }) => e.name === "WAKE_URLS").value, "http://127.0.0.1:9997/healthz");
+  const deps = JSON.parse(svc.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy, ["crud", "auth", "electric", "ticker", "render"]);
+  assertEquals(deps.airlock, ["cloud-sql-proxy", "bifrost"]);
+  const collided = await built(spec.replace("port: 8688", "port: 8090"));
+  assertEquals(collided.success, false);
+  assertStringIncludes(collided.stderr, "which the cluster holds");
+});
+
 // An app's own containers (a plugin's collector): built and pushed as the
 // cluster's images, dialed by the door, and, where one exports Prometheus
 // metrics, scraped into Managed Service for Prometheus by its sidecar.

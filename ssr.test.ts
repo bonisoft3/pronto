@@ -143,6 +143,17 @@ Deno.test("every file the door serves is answered with its validator", () => {
   if (servers.length !== 1 || !/\(files\) \{\n\s*file_server \{\n\s*etag_file_extensions \.etag\n\s*hide \*\.etag\n/.test(caddyfile.out)) throw new Error(`a file_server reads no validator:\n${caddyfile.out}`);
 });
 
+Deno.test("the door advertises h3 on its published host port over both TCP and UDP", () => {
+  const caddyfile = exported("#ssgCase.caddyfile", true);
+  if (!caddyfile.ok) throw new Error(caddyfile.out);
+  if (/20879/.test(caddyfile.out)) {
+    throw new Error(`the Caddyfile hardcodes an app port in Alt-Svc:\n${caddyfile.out}`);
+  }
+  if (!/https:\/\/localhost:8443 \{\n\s*tls \{\$CADDY_TLS:internal\}\n\s*header Alt-Svc `h3=":\{\$CADDY_TLS_HOST_PORT:8443\}"; ma=2592000`\n/.test(caddyfile.out)) {
+    throw new Error(`https://localhost:8443 does not advertise h3 on CADDY_TLS_HOST_PORT:\n${caddyfile.out}`);
+  }
+});
+
 // A prerendered document is drawn before any read lands, so rows the server
 // holds fill its empty lists once the shell takes it over and push down what
 // follows them: golaberto's /campeonatos measured a layout shift of 0.12 so.

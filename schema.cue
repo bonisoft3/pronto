@@ -1075,8 +1075,8 @@ import (
 	// record's residual. No userinfo: the sink's credential, where it takes
 	// one, is a header the airlock adds to every call from a declared secret,
 	// which the handler never holds. Or a declared bridge, for a sink that
-	// does not speak HTTP.
-	sink: {origin: mecha.#Origin, credential?: #Credential} | {bridge: string}
+	// does not speak HTTP, or mecha's AI gateway (`ai: "text" | "image"`).
+	sink: {origin: mecha.#Origin, credential?: #Credential} | {bridge: string} | {ai: mecha.#AiModality, tier: *"cheap" | mecha.#AiBackendTier}
 	// What a handler does when the ledger shows an earlier entry that may have
 	// reached the sink. An idempotent sink is simply called again; a repeat
 	// is called again too, and `note` says why a duplicate is acceptable.
@@ -1467,6 +1467,8 @@ import (
 		// Three digits no other startup file holds, then `_`: mecha's cluster
 		// refuses any other name. The app owns 000-799 and its seed at 900;
 		// 800-899 are the framework's steps (mecha's cluster.cue).
+		// Naming 016_mecha_actors.sql pins its applied bytes; subsequent actor
+		// code changes belong in state.migrations, preserving live instances.
 		rawMigrations?: [...{name: string & !~"^8", src: string}]
 		cortex?: [string]: #CortexMachine
 		// A Mecha machine as XState writes it, its Jessie rules, and the
@@ -1588,6 +1590,11 @@ import (
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
 		blobs: *false | bool
+		// A public read-only edge image plane backed by an R2 bucket.
+		edgeImages?: {
+			bucket:       =~"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+			sourceBucket: =~"^[a-z0-9][a-z0-9.-]*[a-z0-9]$"
+		}
 		// A static set the blob plane carries from the start: every
 		// { file, sha256 } the app-relative manifest names, fetched from the
 		// public origin and refused unless its bytes hash to its sha256. The
@@ -1597,6 +1604,16 @@ import (
 			origin:   =~"^https://[^/]+(/.*[^/])?$"
 		}
 		if blobSeed != _|_ {blobs: true}
+		// First-class 3-tier AI model architecture (`browser`, `cheap`, `heavy`)
+		// with per-tier and per-release-target model overrides. Backend tiers
+		// (`cheap`, `heavy`) route through mecha's bifrost AI gateway; the
+		// `browser` tier runs in an `agent` worker unit via `capabilities.vendored`.
+		ai?: {
+			text?:    *["browser", "cheap", "heavy"] | ([...mecha.#AiTier] & list.UniqueItems())
+			image?:   *["browser", "cheap", "heavy"] | ([...mecha.#AiTier] & list.UniqueItems())
+			models?:  mecha.#AiTierOverrides
+			targets?: [("browser" | "pages" | "docker" | "local" | "cloudflare" | "gcp" | "k8s" | "aws")]: mecha.#AiTierOverrides
+		}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
 		// inside. A `container` hatch withholds a service, whose definition is
 		// the program's cluster unification beside it. A `sql` or `proto` hatch
@@ -2253,6 +2270,18 @@ import (
 		}],
 	])
 	_bridgeRefusal: [if len(_bridgeViolations) == 0 {true}, _bridgeViolations[0]][0] & true
+
+	_aiViolations: list.Concat([
+		[for n, x in _effects if x.sink.ai != _|_ if A.capabilities.ai == _|_ {
+			"effect \(n) reaches AI modality \(x.sink.ai) without capabilities.ai declared"
+		}],
+		[for n, x in _effects if x.sink.ai != _|_ if A.capabilities.ai != _|_
+			let tiers = [if x.sink.ai == "text" && A.capabilities.ai.text != _|_ {A.capabilities.ai.text}, if x.sink.ai == "image" && A.capabilities.ai.image != _|_ {A.capabilities.ai.image}, []][0]
+			if !list.Contains(tiers, x.sink.tier) {
+			"effect \(n) reaches AI \(x.sink.ai) tier \(x.sink.tier), which is not declared in capabilities.ai.\(x.sink.ai)"
+		}],
+	])
+	_aiRefusal: [if len(_aiViolations) == 0 {true}, _aiViolations[0]][0] & true
 
 	_declaredStreams: [for dsName, _ in [if A.state.duckstreams != _|_ {A.state.duckstreams}, {}][0] {dsName}]
 	_undeclaredStreams: [

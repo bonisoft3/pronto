@@ -19,19 +19,48 @@ const SCHEDULE_SEED = '801_schedule_seed.sql'
 
 const scripts = (mecha: string) => import(String(pathToFileURL(path.join(mecha, 'packages/pglite-workerd/scripts.ts')))) as Promise<{
   pgrollScripts: (set: unknown) => Script[]
+  AIRLOCK_SCRIPT: string
+  GRAPHILE_SCRIPT: string
   SCHEDULE_SCRIPT: string
   TENANCY_SCRIPT: string
 }>
 
+export async function hasEffects(app: string): Promise<boolean> {
+  try {
+    const { effects } = JSON.parse(await Deno.readTextFile(path.join(app, 'services/airlock/effects.json'))) as { effects?: Record<string, unknown> }
+    return effects !== undefined && Object.keys(effects).length > 0
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return false
+    throw e
+  }
+}
+
 export async function releaseFiles(app: string, mecha: string, migrations: string[]): Promise<ReleaseScripts['files']> {
-  const { SCHEDULE_SCRIPT, TENANCY_SCRIPT } = await scripts(mecha)
-  const files = [{ name: TENANCY_SCRIPT, file: path.join(mecha, 'services/database/rls/rls.sql') }]
+  const { AIRLOCK_SCRIPT, GRAPHILE_SCRIPT, SCHEDULE_SCRIPT, TENANCY_SCRIPT } = await scripts(mecha)
+  const effects = await hasEffects(app)
+  const files: { name: string; read: () => Promise<string> }[] = [
+    { name: TENANCY_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/database/rls/rls.sql')) },
+  ]
+  let placedAirlock = !effects
+  const pushAirlock = () => {
+    placedAirlock = true
+    files.push(
+      { name: GRAPHILE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/airlock/graphile.sql')) },
+      {
+        name: AIRLOCK_SCRIPT,
+        read: async () =>
+          `${await Deno.readTextFile(path.join(mecha, 'services/ticker/schedule.sql'))}\n${await Deno.readTextFile(path.join(mecha, 'services/airlock/airlock.sql'))}`,
+      },
+    )
+  }
   for (const m of migrations) {
     const name = path.basename(m)
-    if (name === SCHEDULE_SEED) files.push({ name: SCHEDULE_SCRIPT, file: path.join(mecha, 'services/ticker/schedule.sql') })
-    files.push({ name, file: path.join(app, m) })
+    if (!placedAirlock && name > AIRLOCK_SCRIPT) pushAirlock()
+    if (name === SCHEDULE_SEED) files.push({ name: SCHEDULE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/ticker/schedule.sql')) })
+    files.push({ name, read: () => Deno.readTextFile(path.join(app, m)) })
   }
-  return await Promise.all(files.map(async ({ name, file }) => ({ name, sql: await Deno.readTextFile(file) })))
+  if (!placedAirlock) pushAirlock()
+  return await Promise.all(files.map(async ({ name, read }) => ({ name, sql: await read() })))
 }
 
 export async function releaseScripts(app: string, mecha: string, migrations: string[], pgroll: Record<string, { operations: Record<string, unknown>[] }>): Promise<ReleaseScripts> {

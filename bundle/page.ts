@@ -49,6 +49,23 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
   return origFetch(input as RequestInfo, init)
 }
 
+const OrigWorker = globalThis.Worker
+if (typeof OrigWorker === 'function') {
+  globalThis.Worker = class BundledWorker extends OrigWorker {
+    constructor(scriptURL: string | URL, options?: WorkerOptions) {
+      const url = new URL(String(scriptURL), location.href)
+      if (url.origin === location.origin) {
+        const text = served.get(url.pathname)
+        if (text !== undefined) {
+          super(URL.createObjectURL(new Blob([text], { type: 'text/javascript' })), options)
+          return
+        }
+      }
+      super(scriptURL, options)
+    }
+  }
+}
+
 ;(async () => {
   if (payload.cluster) {
     const { sql, tables, drains, clock, assets: a } = payload.cluster

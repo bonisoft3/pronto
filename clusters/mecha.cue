@@ -33,6 +33,17 @@ import (
 #Bridge:     impl.#Bridge
 #MailContainer: impl.#MailContainer
 
+// Mecha's AI gateway (services/airlock/bifrost.ts) and the tiered AI model schema.
+#BifrostPort:     impl.#BifrostPort
+#AiModality:      impl.#AiModality
+#AiTier:          impl.#AiTier
+#AiBackendTier:   impl.#AiBackendTier
+#AiTarget:        impl.#AiTarget
+#AiProvider:      impl.#AiProvider
+#AiModelSpec:     impl.#AiModelSpec
+#AiTierOverrides: impl.#AiTierOverrides
+#AiCapability:    impl.#AiCapability
+
 #ConduitSlot:      impl.#ConduitSlot
 #MachineTimersSql: impl.#MachineTimersSql
 

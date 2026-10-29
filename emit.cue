@@ -1736,6 +1736,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if S.code.surface.endowments != _|_ {
 			endowments: S.code.surface.endowments
 		}
+		if S.code.capabilities.ai != _|_ {
+			ai: S.code.capabilities.ai
+		}
 		"migrations": S.migrations
 		pipelines: [for _, p in S.code.state.pipelines {
 			if p.trigger == "cdc" if p.raw == _|_ {
@@ -1820,7 +1823,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
-		if M.code.state.hybrids != _|_ {"services/database/migrations/016_mecha_actors.sql"},
+		if M.code.state.hybrids != _|_ if len([for r in M.raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {"services/database/migrations/016_mecha_actors.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/801_schedule_seed.sql"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
@@ -2166,6 +2169,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				signIn: (#signIn & {auth: D.code.capabilities.auth}).out
 			}
 			blobs: D.code.capabilities.blobs
+			if D.code.capabilities.ai != _|_ {
+				ai: D.code.capabilities.ai
+			}
 			server: (#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out
 		}
 		state: {
@@ -2188,6 +2194,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				name: n
 				if x.sink.origin != _|_ {origin: x.sink.origin}
 				if x.sink.bridge != _|_ {bridge: x.sink.bridge}
+				if x.sink.ai != _|_ {
+					ai:   x.sink.ai
+					tier: x.sink.tier
+				}
 				// The credential's variable is required of the environment with
 				// the handler's secrets, and handed to the airlock alone.
 				_secrets: [for s, _ in {for s in list.Concat([[if x.secrets != _|_ {x.secrets}, []][0], [if x.sink.credential != _|_ {[x.sink.credential.secret]}, []][0]]) {(s): true}} {s}]
@@ -2425,7 +2435,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// The pages target is refused rather than released broken.
 	_pagesBundle: {
 		if list.Contains(E.code.meta.targets, "pages") {
-			units: true & (len(E.code.capabilities.vendored) == 0)
+			units: true & (len([for _, v in E.code.capabilities.vendored if v.isolation != "agent" {v}]) == 0)
 			shared: true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
 			providers: true & (E.code.capabilities.auth == _|_ || E.code.capabilities.auth.providers == _|_ || len(E.code.capabilities.auth.providers) == 0)
@@ -2742,6 +2752,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		cluster: capabilities: signIn: (#signIn & {auth: E.code.capabilities.auth}).out
 	}
 	cluster: capabilities: blobs: E.code.capabilities.blobs
+	if E.code.capabilities.ai != _|_ {
+		cluster: capabilities: ai: E.code.capabilities.ai
+	}
 	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
@@ -3212,7 +3225,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			for path, local in E._composedHandlers {
 				"\(path)": {format: "local-handler", data: local}
 			}
-			if E.code.state.hybrids != _|_ {
+			if E.code.state.hybrids != _|_ if len([for r in E._raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {
 				// Each machine's surface is entities the app declares; the writer
 				// checks them against the machine before compiling.
 				"services/database/migrations/016_mecha_actors.sql": {format: "hybrid-sql", data: {
@@ -3280,9 +3293,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							type:    "bindings.http"
 							version: "v1"
 							metadata: [
-								// A bridge is the cluster's own, reached in plain HTTP on the
-								// airlock's outbound network.
-								{name: "url", value: [if i.effect.sink.bridge != _|_ {"http://\(E.code.state.bridges[i.effect.sink.bridge].container):\(E.code.state.bridges[i.effect.sink.bridge].port)"}, i.effect.sink.origin][0]},
+								// Cluster-owned bridges and the AI gateway use plain HTTP.
+								{name: "url", value: [
+									if i.effect.sink.bridge != _|_ {"http://\(E.code.state.bridges[i.effect.sink.bridge].container):\(E.code.state.bridges[i.effect.sink.bridge].port)"},
+									if i.effect.sink.ai != _|_ {"http://bifrost:\(mecha.#BifrostPort)"},
+									i.effect.sink.origin,
+								][0]},
 								// The sink's own status comes back to the handler, a refusal
 								// being an answer rather than a binding error.
 								{name: "errorIfNot2XX", value: "false"},

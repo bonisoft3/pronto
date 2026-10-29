@@ -16,11 +16,57 @@
 // starts now rather than at its first visitor.
 //
 //   deno run -A --config bundle/deno.json bundle/publish-edge.ts <out> --mecha <dir> [--reset] [--temporary]
+import { Buffer } from 'node:buffer'
+import https from 'node:https'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
 import { releaseJwtSecret } from './edge-jwt.ts'
+
+async function edgeFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init)
+  } catch (err) {
+    const u = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    if (u.protocol !== 'https:') throw err
+    const ips = await Deno.resolveDns(u.hostname, 'A', { nameServer: { ipAddr: '1.1.1.1', port: 53 } }).catch(() => [] as string[])
+    const ip = ips[0]
+    if (!ip) throw err
+    const reqHeaders: Record<string, string> = { host: u.hostname }
+    new Headers(init?.headers).forEach((v, k) => { reqHeaders[k] = v })
+    return await new Promise<Response>((resolve, reject) => {
+      const req = https.request({
+        hostname: ip,
+        port: u.port ? Number(u.port) : 443,
+        path: u.pathname + u.search,
+        method: init?.method ?? 'GET',
+        servername: u.hostname,
+        headers: reqHeaders,
+      }, (res) => {
+        const chunks: Uint8Array[] = []
+        res.on('data', (c: Uint8Array) => chunks.push(c))
+        res.on('end', () => {
+          const status = res.statusCode ?? 500
+          if ((status === 301 || status === 302 || status === 307 || status === 308) && res.headers.location && init?.redirect !== 'manual') {
+            resolve(edgeFetch(new URL(res.headers.location, u), init))
+            return
+          }
+          const body = (status === 204 || status === 304) ? null : Buffer.concat(chunks)
+          const headers = new Headers()
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (Array.isArray(v)) v.forEach((item) => headers.append(k, item))
+            else if (typeof v === 'string') headers.set(k, v)
+          }
+          resolve(new Response(body, { status, headers }))
+        })
+      })
+      req.on('error', reject)
+      if (init?.body instanceof Uint8Array || typeof init?.body === 'string') req.write(init.body)
+      req.end()
+    })
+  }
+}
 
 function fail(msg: string): never {
   console.error(`publish-edge: ${msg}`)
@@ -149,6 +195,16 @@ const ghEnv = Deno.env.get('GITHUB_ENV')
 if (ghEnv) {
   await Deno.writeTextFile(ghEnv, `PRONTO_DEPLOYED_URL=${origin}\n`, { append: true })
 }
+// Wait for Cloudflare's public DNS (1.1.1.1) to publish the A record before
+// querying the OS resolver, preventing local routers from caching NXDOMAIN.
+{
+  const host = new URL(origin).hostname
+  for (let t0 = Date.now(); Date.now() - t0 < 60_000; ) {
+    const ips = await Deno.resolveDns(host, 'A', { nameServer: { ipAddr: '1.1.1.1', port: 53 } }).catch(() => [] as string[])
+    if (ips.length > 0) break
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+}
 const send = (route: string, init?: RequestInit) => {
   const headers = new Headers(init?.headers)
   headers.set('authorization', `Bearer ${token}`)
@@ -157,7 +213,7 @@ const send = (route: string, init?: RequestInit) => {
     body = new Uint8Array(gzipSync(body, { level: 1 }))
     headers.set('content-encoding', 'gzip')
   }
-  return fetch(`${origin}/import/${route}`, { ...init, body, headers })
+  return edgeFetch(`${origin}/import/${route}`, { ...init, body, headers })
 }
 
 /** The object answers three times in a row: the version just deployed is
@@ -183,7 +239,9 @@ const loaded = await load(path.join(out, 'pgdata'), send, { reset })
 if ('skipped' in loaded) {
   let migrationsBody: string
   try {
-    migrationsBody = await Deno.readTextFile(path.join(out, 'migrations.json'))
+    const scripts = (JSON.parse(await Deno.readTextFile(path.join(out, 'migrations.json'))) as { name: string; sql: string | null }[])
+      .filter((s) => !s.name.includes('seed'))
+    migrationsBody = JSON.stringify(scripts)
   } catch (e) {
     if (e instanceof Deno.errors.NotFound) migrationsBody = '[]'
     else throw e
@@ -211,20 +269,26 @@ if ('skipped' in loaded) {
   if ((JSON.parse(answer) as { applied: string[] }).applied.length) await settled('the migration')
 }
 if (ssr) {
-  const warm = await fetch(`${origin}/`, { headers: { accept: 'text/html' } })
+  const warm = await edgeFetch(`${origin}/`, { headers: { accept: 'text/html' } })
   await warm.text()
   if (!warm.ok) fail(`warming ${origin}/ answered ${warm.status}`)
 }
 // What a page reads at the deployment's door is what the build wrote: its
 // terminal config carries the target's ICE servers (edge-ice.ts).
-await holdIceServers(deployedRelease(origin), await releasedIceServers(builtRelease(path.join(out, 'public'))), origin)
+await holdIceServers(deployedRelease(origin, edgeFetch), await releasedIceServers(builtRelease(path.join(out, 'public'))), origin)
 // The Cron Trigger is the object's Worker's: database.jsonc where there is one.
 let triggers = deployedSettings.triggers
 try { triggers ??= (JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))) as { triggers?: { crons: string[] } }).triggers }
 catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (triggers) {
-  const poked = await fetch(`${origin}/poke?caller=publish`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })
-  const report = await poked.text()
+  let poked!: Response
+  let report = ''
+  for (let attempt = 0; attempt < 10; attempt++) {
+    poked = await edgeFetch(`${origin}/poke?caller=publish`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })
+    report = await poked.text()
+    if (poked.status !== 401) break
+    await new Promise((r) => setTimeout(r, 2000))
+  }
   if (!poked.ok) fail(`deployed and loaded, and the poke answered ${poked.status}: ${report}`)
   console.log(report)
 }

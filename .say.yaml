@@ -77,7 +77,7 @@ say:
       machines:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts"
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts"
           - do: 'mise exec -- deno test --config deno.json --allow-read --allow-run=cue --filter "server timers refuse" machine-timers.integration.test.ts'
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
       # What each Jessie role may be granted, held against both cages and the schema.

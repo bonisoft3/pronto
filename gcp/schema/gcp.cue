@@ -11,10 +11,10 @@ import (
 )
 
 // #Release is an app on GCP: Cloud SQL for its database, and caddy, crud, auth
-// and electric as containers of one Cloud Run service, sharing localhost the way
-// mecha's bundled unit does (docs/deployment.md#the-bundled-unit), beside the
-// Cloud SQL Auth Proxy. One instance at most, since electric is one; none while
-// nobody plays.
+// and electric (plus optional render, airlock, and bifrost) as containers of
+// one Cloud Run service, sharing localhost the way mecha's bundled unit does
+// (docs/deployment.md#the-bundled-unit), beside the Cloud SQL Auth Proxy. One
+// instance at most, since electric is one; none while nobody plays.
 #Release: R={
 	// The app's compose project name, which names its database, secrets and images.
 	name: =~"^[a-z]([-a-z0-9]{0,28}[a-z0-9])?$"
@@ -87,6 +87,23 @@ import (
 		command: *["/migrate.sh", "/pgroll", "00_initdb"] | [...string]
 	}
 
+	// Present where the app's compose project builds the SSR render sidecar.
+	render: {
+		enabled: *false | bool
+	}
+
+	// Present where the app's compose project declares external effects (airlock)
+	// and optional tiered AI routing through bifrost (proxying to Gemini / Imagen
+	// on GCP via GEMINI_API_KEY in Secret Manager).
+	airlock: {
+		enabled:  *false | bool
+		bifrost:  *false | bool
+		aiModels: *"" | string
+		// Provider API keys (e.g. GEMINI_API_KEY) mounted into bifrost/airlock
+		// from Secret Manager, keyed by environment variable name.
+		secrets: *{} | {[=~"^[A-Z][A-Z0-9_]*$"]: string}
+	}
+
 	// The roles the app's schema grants PostgREST's login, as generate wrote them
 	// (.pronto/cluster.json, the k8s release's source too): what the job grants
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
@@ -152,6 +169,9 @@ import (
 		"auth:9999":      "127.0.0.1:\(#Ports.auth)"
 		"electric:3000":  "127.0.0.1:\(#Ports.electric)"
 		"ticker:9998":    "127.0.0.1:\(#Ports.ticker)"
+		"render:8090":    "127.0.0.1:\(#Ports.render)"
+		"bifrost:8090":   "127.0.0.1:\(#Ports.bifrost)"
+		"airlock:9997":   "127.0.0.1:\(#Ports.airlock)"
 		"database:5432":  "127.0.0.1:\(#Ports.database)"
 		for n, c in R._inside {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
 	}
@@ -244,9 +264,21 @@ import (
 	}
 }
 
-// Ports inside the shared instance: compose's own, but for electric, whose 3000
-// is crud's.
-#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, ticker: 9998, database: 5432, proxyHealth: 9090}
+// Ports inside the shared instance: compose's own, except electric (whose 3000
+// is crud's) and render (8091, so bifrost keeps 8090).
+#Ports: {
+	caddy:       8080
+	crud:        3000
+	crudAdmin:   3001
+	auth:        9999
+	electric:    3002
+	render:      8091
+	ticker:      9998
+	bifrost:     8090
+	airlock:     9997
+	database:    5432
+	proxyHealth: 9090
+}
 
 // The smallest tier admits about 25 connections, fewer than the pools'
 // defaults together; the instance is raised to 50 and the pools capped.
@@ -283,6 +315,7 @@ import (
 	}
 	let sq = R.names.secrets
 	let bounds = resilience.resilience.timeouts
+	let meshPort = [if R.airlock.bifrost {P.bifrost}, 3500][0]
 
 	service: {
 		apiVersion: "serving.knative.dev/v1"
@@ -309,12 +342,18 @@ import (
 				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
 				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
-					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}]])
+					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.render.enabled {"render"}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
 					if len(R._scraped) > 0 {"gmp-collector": R._scraped}
 					crud: ["cloud-sql-proxy"]
 					auth: ["cloud-sql-proxy"]
 					electric: ["cloud-sql-proxy"]
+					if R.render.enabled {
+						render: ["crud", "auth", "electric"]
+					}
+					if R.airlock.enabled {
+						airlock: list.Concat([["cloud-sql-proxy"], [if R.airlock.bifrost {"bifrost"}]])
+					}
 				})
 			}
 			spec: {
@@ -337,6 +376,7 @@ import (
 						{name: "PRONTO_UPSTREAM_CRUD", value: "127.0.0.1:\(P.crud)"},
 						{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
 						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
+						if R.render.enabled {{name: "PRONTO_UPSTREAM_RENDER", value: "127.0.0.1:\(P.render)"}},
 						if R.ticker != _|_ {{name: "PRONTO_UPSTREAM_TICKER", value: "127.0.0.1:\(P.ticker)"}},
 						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
 					], [for n, c in R._inside {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "127.0.0.1:\(c.port)"}],
@@ -390,14 +430,60 @@ import (
 					]
 					resources: limits: {cpu: "\(R.electric.cpu)m", memory: R.electric.memory}
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
-				}, if R.ticker != _|_ {
+				}], [
+					if R.render.enabled {{
+						name:  "render"
+						image: (imageOf & {svc: "render"}).out
+						env: [
+							{name: "DOOR", value: "http://127.0.0.1:\(P.caddy)"},
+							{name: "DOOR_TIMEOUT_MS", value: "\(bounds.renderDoor*1000)"},
+							{name: "ENTRY", value: "/render/entry.html"},
+							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
+							{name: "PORT", value: "\(P.render)"},
+						]
+						startupProbe: {httpGet: {path: "/health", port: P.render}, periodSeconds: 2, failureThreshold: 60}
+					}},
+					if R.airlock.enabled && R.airlock.bifrost {{
+						name:  "bifrost"
+						image: (imageOf & {svc: "bifrost"}).out
+						env: list.Concat([[
+							{name: "BIFROST_PORT", value: "\(P.bifrost)"},
+							{name: "AI_TARGET", value: "gcp"},
+							if R.airlock.aiModels != "" {{name: "AI_MODELS", value: R.airlock.aiModels}},
+						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
+						startupProbe: {httpGet: {path: "/healthz", port: P.bifrost}, periodSeconds: 2, failureThreshold: 60}
+					}},
+					if R.airlock.enabled {{
+						name:  "airlock"
+						image: (imageOf & {svc: "airlock"}).out
+						args: [
+							"run",
+							"--frozen",
+							"--unstable-worker-options",
+							"--allow-net=127.0.0.1:\(P.database),127.0.0.1:\(meshPort),0.0.0.0:\(P.airlock)",
+							"--allow-read",
+							"--allow-env",
+							"--allow-sys",
+							"main.ts",
+						]
+						env: list.Concat([[
+							(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
+							{name: "MESH_URL", value: "http://127.0.0.1:\(meshPort)"},
+							{name: "AIRLOCK_DIR", value: "/airlock"},
+						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
+						startupProbe: {tcpSocket: port: P.airlock, periodSeconds: 2, failureThreshold: 60}
+					}},
+				], [if R.ticker != _|_ {
 					name: "ticker"
 					image: (imageOf & {svc: "ticker"}).out
 					env: list.Concat([[
 						{name: "CRUD_URL", value: "http://127.0.0.1:\(P.crud)"},
 						{name: "PORT", value: "\(P.ticker)"},
 						(secretOf & {env: "SERVICE_JWT", secret: sq.SERVICE_JWT}).out,
-					], [for k, v in R.ticker.env {name: k, value: v}]])
+						], [for k, v in R.ticker.env {
+							name: k
+							value: [if k == "WAKE_URLS" {strings.Replace(v, "airlock:9997", R._loopback["airlock:9997"], -1)}, v][0]
+						} ]])
 					startupProbe: {tcpSocket: port: P.ticker, periodSeconds: 2, failureThreshold: 60}
 					resources: limits: cpu: "250m"
 				}, {
@@ -613,7 +699,7 @@ import (
 			schedule: "* * * * *"
 			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
 		}}
-		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
+		oidcSecretKeys: list.Concat([[for _, v in R.auth.oidcSecrets {v}], [for _, v in R.airlock.secrets {v}]])
 		// The compose services built and run beside the cluster's.
 		sidecars: [for n, _ in R.sidecars {n}]
 		// Where each peer compose names is in the instance, which the release

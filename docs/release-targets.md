@@ -264,6 +264,19 @@ in the page fills `MonthStat` or `CategoryMonthStat`.
 
 ## cloudflare
 
+`code.capabilities.edgeImages` binds a dedicated public-image R2 `bucket` and
+Cloudflare Images. Its `sourceBucket` preserves existing image paths:
+`/img/insecure/plain/s3://<sourceBucket>/<key>` reads `<key>` from R2 and returns
+WebP. All objects in this bucket are public through that route; it must not
+contain private uploads. Provision the bucket and copy originals before
+switching stored image URLs. The release does not copy external objects.
+
+The adapter accepts GET and HEAD, rejects transformation parameters and other
+source buckets, and caches transformed responses by object ETag for one hour.
+This covers plain imgproxy URLs, not the full imgproxy transformation language.
+The scoped Cache API leaves dynamic page and authentication caching unchanged.
+
+
 `sayt release@cloudflare` runs [`edge.ts`](../bundle/edge.ts), which writes
 `dist/cloudflare/`. The terminal modules and declared public files live in
 `public/`, so each route loads only its own screen and required catalogues.

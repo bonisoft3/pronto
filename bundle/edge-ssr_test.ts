@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeEdgeSsr } from './edge-ssr.ts'
+import { edgeImage } from './edge-images.ts'
+import { originAssets } from './edge-templates.ts'
 
 const policy = "script-src 'self'; frame-ancestors 'none'"
 
@@ -470,4 +472,65 @@ Deno.test('renderObject folds version into ETag, serves 304 on streaming GET, re
   } finally {
     await Deno.remove(out, { recursive: true })
   }
+})
+
+Deno.test('SSR retains native images and origin-bound assets in both database modes', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    const bindings = {
+      images: { binding: 'IMAGES' },
+      r2_buckets: [{ binding: 'IMAGE_OBJECTS', bucket_name: 'public-images' }],
+      vars: { IMAGE_SOURCE_BUCKET: 'original-bucket' },
+    }
+    for (const mode of ['existing', 'separate'] as const) {
+      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, ...bindings }))
+      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
+      const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+      for (const key of Object.keys(bindings)) assert.deepEqual(config[key], bindings[key as keyof typeof bindings])
+      const source = await Deno.readTextFile(path.join(out, 'src/index.ts'))
+      const imageImport = source.match(/^import \{ edgeImage \} from '([^']+)'$/m)
+      assert.ok(imageImport)
+      assert.ok((await Deno.stat(path.resolve(out, 'src', imageImport[1]))).isFile)
+      const worker = new Function('edgeImage', 'originAssets', 'edgeWorker', 'acceptedLanguages', 'routeAt', 'hints', 'edgeHints', 'caches', source
+        .replace(/^import .+$/gm, '').replace(/^export \{.+$/gm, '').replace('export default', 'return'))(
+          edgeImage, originAssets, { fetch: () => new Response('api') }, () => [], () => null, {}, () => null,
+          { default: { match: () => Promise.resolve(undefined), put: () => Promise.resolve() } },
+        )
+      let transforms = 0
+      const env = {
+        ...bindings.vars,
+        ASSETS: { fetch: () => Promise.resolve(new Response('{{- $o := placeholder "http.vars.origin" -}}\n<url>https://pronto-origin.invalid/en</url>', { headers: { 'content-type': 'application/xml' } })) },
+        IMAGE_OBJECTS: {
+          get: async (key: string) => { assert.equal(key, 'card.png'); return { etag: 'source', body: new Blob(['png']).stream() } },
+          head: async () => ({ etag: 'source' }),
+        },
+        IMAGES: { input: () => ({ transform: () => ({ output: async () => {
+          transforms++
+          return { response: ({ headers }: { headers: HeadersInit }) => new Response('webp', { headers }) }
+        } }) }) },
+      }
+      const pending: Promise<unknown>[] = []
+      const ctx = { waitUntil: (promise: Promise<unknown>) => pending.push(promise) }
+      const url = 'https://app.example/img/insecure/plain/s3://original-bucket/card.png'
+      const image = await worker.fetch(new Request(url), env, ctx)
+      assert.equal(await image.text(), 'webp')
+      const etag = image.headers.get('etag')!
+      const head = await worker.fetch(new Request(url, { method: 'HEAD' }), env, ctx)
+      assert.equal(head.status, 200)
+      assert.equal(await head.text(), '')
+      assert.equal(head.headers.get('etag'), etag)
+      assert.equal((await worker.fetch(new Request(url, { headers: { 'If-None-Match': etag } }), env, ctx)).status, 304)
+      assert.equal(transforms, 1)
+      const sitemap = await worker.fetch(new Request('https://app.example/sitemap.xml'), env, ctx)
+      assert.equal(await sitemap.text(), '<url>https://app.example/en</url>')
+      assert.equal(await (await worker.fetch(new Request('https://app.example/crud/card'), env, ctx)).text(), 'api')
+      await Promise.all(pending)
+    }
+  } finally { await Deno.remove(out, { recursive: true }) }
 })

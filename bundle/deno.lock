@@ -2,8 +2,10 @@
   "version": "5",
   "specifiers": {
     "jsr:@std/assert@1.0.11": "1.0.11",
+    "jsr:@std/assert@1.0.13": "1.0.13",
     "jsr:@std/encoding@1.0.7": "1.0.7",
     "jsr:@std/internal@^1.0.5": "1.0.14",
+    "jsr:@std/internal@^1.0.6": "1.0.14",
     "npm:@bufbuild/cel-spec@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/cel@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/protobuf@2.14.1": "2.14.1",
@@ -18,7 +20,13 @@
     "@std/assert@1.0.11": {
       "integrity": "2461ef3c368fe88bc60e186e7744a93112f16fd110022e113a0849e94d1c83c1",
       "dependencies": [
-        "jsr:@std/internal"
+        "jsr:@std/internal@^1.0.5"
+      ]
+    },
+    "@std/assert@1.0.13": {
+      "integrity": "ae0d31e41919b12c656c742b22522c32fb26ed0cba32975cb0de2a273cb68b29",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.6"
       ]
     },
     "@std/encoding@1.0.7": {

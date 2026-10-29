@@ -196,4 +196,11 @@ out: terminal.#Terminal.capabilities.hatch.agent.detail
   assert(parseDetail(detailOf(offer.keys, offer.value)) !== undefined, "exactly the offer is admitted");
   assertEquals(parseDetail(detailOf(offer.keys + 1, 1)), undefined, "one key more is refused");
   assertEquals(parseDetail(detailOf(1, offer.value + 1)), undefined, "one character more is refused");
+  assertEquals(
+    parseDetail({ topic: "Orquestra Sinfônica", w0: "Violão", w1: "פסנתר", w2: "交响乐" }),
+    { topic: "Orquestra Sinfônica", w0: "Violão", w1: "פסנתר", w2: "交响乐" },
+    "printable Unicode strings across locales are admitted",
+  );
+  assertEquals(parseDetail({ topic: "bad\nline" }), undefined, "control characters are refused");
+  assertEquals(parseDetail({ topic: "bad\x00null" }), undefined, "NUL control character is refused");
 });

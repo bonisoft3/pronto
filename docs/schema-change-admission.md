@@ -16,6 +16,14 @@ cluster notices one is mecha's [schema](https://github.com/bonisoft3/mecha/blob/
 and what an already-served page does is omnishell's
 [data](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/data.md#skew).
 
+An app whose deployed `016_mecha_actors.sql` predates the current actor
+compiler can preserve that exact script with a `state.rawMigrations` entry
+named `016_mecha_actors.sql`. Only that name replaces its automatic emission.
+Keep the applied bytes in the entry's source and carry the actor function
+updates in a forward `state.migrations` pgroll migration; the instance,
+member and receipt tables remain in place. Apps without the explicit entry
+continue to emit the current compiler's actor script.
+
 ## Who cannot be migrated
 
 Three kinds of holder carry an app's data, and only the first can be altered.

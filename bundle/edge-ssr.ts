@@ -13,10 +13,17 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   const separate = databaseMode === 'separate'
   const database = separate ? name + '-database' : name
   const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+  const images = (config.images as { binding?: string } | undefined)?.binding === 'IMAGES'
   const generated = path.join(out, 'renderer')
   const server = path.join(omnishell, 'server')
   const { prepareWorker } = await import(pathToFileURL(path.join(server, 'prepare-worker.ts')).href)
   const cfg = await prepareWorker(path.join(out, 'public'), generated)
+  try {
+    const rawShell = JSON.parse(await Deno.readTextFile(path.join(out, 'public/shell.json')))
+    if (rawShell?.ai && !cfg.ai) cfg.ai = rawShell.ai
+  } catch {
+    // Optional shell.json ai block
+  }
   // Keep the old renderer callable until its entry Worker has been replaced.
   // Its HTML must keep naming assets from the same release during deployment.
   const sources: [string, string][] = []
@@ -42,6 +49,12 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   const fromSrc = (file: string) => specifier(path.join(out, 'src'), file)
   const rel = (file: string) => specifier(out, file)
   const edge = path.join(mecha, 'packages/mecha-edge/src')
+  const fileExists = async (p: string) => {
+    try { return (await Deno.stat(p)).isFile }
+    catch (e) { if (e instanceof Deno.errors.NotFound) return false; throw e }
+  }
+  const hasMachines = await fileExists(path.join(out, 'src/machines.js'))
+  const hasEffects = await fileExists(path.join(out, 'src/effects.js'))
   await Deno.writeTextFile(path.join(out, 'src/render.ts'), `
 import '${fromSrc(path.join(server, 'worker-roles.ts'))}'
 import { appRenderer } from '${fromSrc(path.join(server, 'worker-document.ts'))}'
@@ -54,7 +67,7 @@ export default { fetch() { return new Response(null, { status: 404 }) } }
 import { RpcTarget } from 'cloudflare:workers'
 import { edgeObject, DataDirectoryLoading } from '${fromSrc(path.join(edge, 'object.ts'))}'
 ${separate ? `import { pokeCluster } from '${fromSrc(path.join(edge, 'clock.ts'))}'\n` : ''}import { PublicSnapshotCapacity } from '${fromSrc(path.join(edge, 'public-snapshot.ts'))}'
-import pgliteWasm from '../pglite/pglite.wasm'
+${hasMachines ? "import machines from './machines.js'\n" : ''}${hasEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
@@ -67,7 +80,7 @@ const Base = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(cfg.tables)},
   schema: ${JSON.stringify(cfg.schema ?? {})},
-  drains: ${JSON.stringify(drains)},
+  drains: ${JSON.stringify(drains)},${hasMachines ? '\n  machines,' : ''}${hasEffects ? '\n  effects,' : ''}${cfg.ai ? `\n  ai: ${JSON.stringify(cfg.ai)},` : ''}
   ${separate ? "storageFormat: { version: 1, blockSize: 131072, codec: 'deflate' }," : ''}
 })
 export class Cluster extends Base {
@@ -112,7 +125,7 @@ ${separate ? "// The Cron Trigger pokes the object from the Worker that holds it
 import { edgeWorker } from '${fromSrc(path.join(edge, 'worker.ts'))}'
 import { edgeHints } from '${fromSrc(fileURLToPath(new URL('edge-hints.ts', import.meta.url)))}'
 import { originAssets } from '${fromSrc(fileURLToPath(new URL('edge-templates.ts', import.meta.url)))}'
-import { acceptedLanguages, routeAt, stripProgressiveReads } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
+${images ? `import { edgeImage } from '${fromSrc(fileURLToPath(new URL('edge-images.ts', import.meta.url)))}'\n` : ''}import { acceptedLanguages, routeAt, stripProgressiveReads } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json' with { type: 'json' }
 ${separate ? '' : "export { Cluster } from './database.ts'"}
 const DOCUMENT_POLICY = ${JSON.stringify(policy)}
@@ -125,7 +138,7 @@ const inFlight = new Map()
 export default {
 ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, env, ctx) {
     if (env.ASSETS) env = { ...env, ASSETS: originAssets(env.ASSETS) }
-    const url = new URL(request.url)
+${images ? '    const image = await edgeImage(request, env, caches.default, ctx)\n    if (image) return image\n' : ''}    const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
     const isAsset = /^\\/(?:_immutable-|(?:shell|omnishell|messages)\\/)/.test(url.pathname)
     const found = (!isAsset && (request.method === 'GET' || request.method === 'HEAD')) ? routeAt(hints, url.pathname, url.search, preferred) : null
@@ -299,12 +312,14 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
       linkedom: rel(path.join(server, 'worker/node_modules/linkedom/esm/index.js')),
     },
   }, null, 2) + '\n')
-  // The Cron Trigger (edge.ts) belongs to the Worker holding the object.
+  // The Cron Trigger (edge.ts) and AI binding belong to the Worker holding the object.
   const triggers = config.triggers
   delete config.triggers
+  const ai = config.ai
   const databaseConfig = {
     ...common, name: database, main: 'src/database.ts', workers_dev: false,
     ...(separate && triggers ? { triggers } : {}),
+    ...(separate && ai ? { ai } : {}),
     version_metadata: { binding: 'CF_VERSION_METADATA' },
     durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
@@ -329,11 +344,13 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
   config.assets.run_worker_first = await edgeRoutingRules(path.join(out, 'public'))
   config.assets.html_handling = 'drop-trailing-slash'
   if (separate) {
+    delete config.ai
     delete config.migrations
     delete config.rules
     delete config.alias
   } else {
     if (triggers) config.triggers = triggers
+    if (ai) config.ai = ai
     config.migrations ??= databaseConfig.migrations
     config.rules = databaseConfig.rules
     config.alias = databaseConfig.alias

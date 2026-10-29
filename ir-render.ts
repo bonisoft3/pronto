@@ -58,7 +58,7 @@ export type MechaMachine = {
   on?: Partial<Record<"insert" | "update" | "delete", Record<string, unknown> | Record<string, unknown>[]>>;
 };
 // `reentry` is declared exactly when the sink is not idempotent (#ExternalEffect).
-export type Effect = { ir: string; sink: { origin?: string; bridge?: string; idempotent: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note: string };
+export type Effect = { ir: string; sink: { origin?: string; bridge?: string; ai?: string; tier?: string; idempotent: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note: string };
 /** A vendored unit: its boundary, its ports and, for an agent, its memo. */
 export type Unit = { isolation: string; ports: { reads: string[]; raises: string[] }; memo?: { entity: string; key: string[] } };
 export type Screen = { ir: string; title: string; hatches?: string[]; reads: { table: string; embeds?: string[] }[] };
@@ -450,7 +450,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context, notes: Rea
 <span class="mtitle">${esc(m.title)} ${chip("level", m.level, true, LEVEL_TIP[m.level])}${chip("delivery", m.deliveries.join(" · "), true)}</span>
 ${diagram}${lifecycle === "" ? "" : `<table class="fields"><thead><tr><th>event</th><th>guards</th><th>actions</th></tr></thead><tbody>${lifecycle}</tbody></table>`}${
       m.effects.map(({ src, effect, delivery }) => `
-<p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", src, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? `bridge ${effect.sink.bridge}`)} · ${peer(effect)}${m.effects.length > 1 ? ` ${chip("delivery", delivery, true)}` : ""} · <span class="note">${esc(effect.note)}</span></p>`).join("")
+<p class="why" data-kind="effect" id="${esc(effect.ir)}" data-of="${esc(m.id)}">${chip("effect", src, true, "an act outside the cluster, performed by the airlock; the ledger claims it before the call")} → ${esc(effect.sink.origin ?? (effect.sink.ai ? `ai ${effect.sink.ai} (${effect.sink.tier ?? "cheap"})` : `bridge ${effect.sink.bridge}`))} · ${peer(effect)}${m.effects.length > 1 ? ` ${chip("delivery", delivery, true)}` : ""} · <span class="note">${esc(effect.note)}</span></p>`).join("")
     }${m.hatches.map((h) => `\n<p class="why">SQL hatch <a href="#${esc(h.ir)}">${esc(h.ir)}</a> · ${chip("delivery", "unspecified", true)} · <span class="note">${esc(h.note)}</span></p>`).join("")}
 </section>`;
   }));

@@ -61,19 +61,23 @@ const shell = JSON.parse(await read('shell/shell.json')) as {
   i18n?: { locales: Record<string, unknown> }
   migrations: string[]
   tables: string[]
-  units?: Record<string, unknown>
+  units?: Record<string, { isolation?: string; src?: string; files?: string[] }>
   prefix?: string
 }
-// A unit is a worker the browser fetches on its own, past the document's shim.
-const units = Object.keys(shell.units ?? {})
-if (units.length) fail(`units are not bundled yet: ${units.join(', ')}`)
+// Non-agent units cannot be bundled through the Worker Blob shim.
+const unsupportedUnits = Object.entries(shell.units ?? {}).filter(([, u]) => u.isolation !== 'agent').map(([k]) => k)
+if (unsupportedUnits.length) fail(`units are not bundled yet: ${unsupportedUnits.join(', ')}`)
 
 // The served set is shell.json's: what its routes name, the catalogues its
-// locales name, and the shell's own three files. A file the terminal serves
+// locales name, agent worker units, and the shell's own three files. A file the terminal serves
 // from its own tree is named from the root, `/omnishell/...`, and read there.
 const served = new Set<string>(['shell/shell.json', 'shell/shell.css', 'shell/design.css'])
 for (const route of shell.routes) {
   for (const v of Object.values(route.files)) for (const f of typeof v === 'string' ? [v] : v) served.add(f)
+}
+for (const u of Object.values(shell.units ?? {})) {
+  if (u.src) served.add(u.src)
+  for (const f of u.files ?? []) served.add(f)
 }
 for (const loc of Object.keys(shell.i18n?.locales ?? {})) served.add(`messages/${loc}.json`)
 const files: Record<string, string> = {}

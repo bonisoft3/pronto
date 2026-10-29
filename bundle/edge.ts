@@ -26,7 +26,8 @@ import { builtRelease, holdIceServers } from './edge-ice.ts'
 import { BLOB_CACHE_RULE, writeEdgeBlobs } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
-import { clusterDrains, releaseScripts } from './edge-scripts.ts'
+import { renderEffects } from './edge-effects.ts'
+import { clusterDrains, hasEffects, releaseScripts } from './edge-scripts.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -67,6 +68,7 @@ async function run(cmd: string, args: string[], cwd?: string) {
 
 const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.json'))) as {
   app?: string
+  ai?: Record<string, unknown>
   tables: string[]
   schema?: Record<string, { durability?: string }>
   migrations: string[]
@@ -77,8 +79,9 @@ const clustered = shell.migrations.length > 0
 if (!clustered && (flags['--derived'] || flags['--from'] || flags['--ssr-origin'])) fail('a release without a cluster cannot use --derived, --from, or --ssr-origin')
 // A unit also needs the terminal door's per-unit security headers. A
 // presenter's are its worker script's own, which _headers carries
-// (edge-addresses.ts), and the refusal of its scripted fetches below.
-const unpackaged = Object.entries(shell.units ?? {}).filter(([, unit]) => unit.role !== 'presenter' && unit.isolation !== 'compartment').map(([unit]) => unit)
+// (edge-addresses.ts), and the refusal of its scripted fetches below; agent
+// and compartment units run in their own isolated runtimes.
+const unpackaged = Object.entries(shell.units ?? {}).filter(([, unit]) => unit.role !== 'presenter' && unit.isolation !== 'agent' && unit.isolation !== 'compartment').map(([unit]) => unit)
 if (unpackaged.length) fail(`units are not packaged yet: ${unpackaged.join(', ')}`)
 const name = shell.app ?? path.basename(app)
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
@@ -118,9 +121,14 @@ await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints)
 
 // The blob plane's seed rides as static assets, after addressing: its files
 // are already named by their content and keep the URLs the page asks for.
-const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{seed: *code.capabilities.blobSeed | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
+const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{seed: *code.capabilities.blobSeed | null, images: *code.capabilities.edgeImages | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
 if (!seedOut.success) fail('cue export of code.capabilities.blobSeed failed')
-const { seed } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { seed: { manifest: string; origin: string } | null }
+const { seed, images } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { seed: { manifest: string; origin: string } | null; images: { bucket: string; sourceBucket: string } | null }
+const imageBindings = images ? {
+  images: { binding: 'IMAGES' },
+  r2_buckets: [{ binding: 'IMAGE_OBJECTS', bucket_name: images.bucket }],
+  vars: { IMAGE_SOURCE_BUCKET: images.sourceBucket },
+} : {}
 if (seed) {
   const count = await writeEdgeBlobs(publicDir, JSON.parse(await Deno.readTextFile(path.join(app, seed.manifest))), seed.origin)
   await Deno.writeTextFile(path.join(publicDir, '_headers'), '\n' + BLOB_CACHE_RULE, { append: true })
@@ -129,11 +137,16 @@ if (seed) {
 
 if (!clustered) {
   const worker = path.relative(path.join(out, 'src'), path.join(here, 'edge-static.ts')).replaceAll('\\', '/')
-  await Deno.writeTextFile(path.join(out, 'src/index.ts'), `export { default } from '${worker.startsWith('.') ? worker : `./${worker}`}'\n`)
+  const staticWorker = worker.startsWith('.') ? worker : `./${worker}`
+  const imageWorker = path.relative(path.join(out, 'src'), path.join(here, 'edge-images.ts')).replaceAll('\\', '/')
+  await Deno.writeTextFile(path.join(out, 'src/index.ts'), images
+    ? `import staticWorker from '${staticWorker}'\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx) ?? staticWorker.fetch(req, env) } }\n`
+    : `export { default } from '${staticWorker}'\n`)
   await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
     name, main: 'src/index.ts', compatibility_date: '2026-09-01',
     assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash', not_found_handling: 'none' },
     observability: { enabled: true },
+    ...imageBindings,
     ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   }, null, 2) + '\n')
   console.error(`edge: ${out}`)
@@ -178,18 +191,21 @@ const stateOut = await new Deno.Command('cue', {
 if (!stateOut.success) fail('cue export of the machines and schedules failed')
 const { hybrids, crons } = JSON.parse(new TextDecoder().decode(stateOut.stdout)) as { hybrids: Hybrids; crons: string[] }
 if (Object.keys(hybrids).length) await Deno.writeTextFile(path.join(out, 'src/machines.js'), await renderMachines(name, app, omnishell, hybrids))
+const withEffects = await hasEffects(app)
+if (withEffects) await Deno.writeTextFile(path.join(out, 'src/effects.js'), await renderEffects(name, app, mecha, out))
 
 // The object's clock is the ticker's own sweep (mecha-edge's clock.ts), whose
 // cron reader croner reaches wrangler's bundler through node_modules beside
 // the ticker, installed from its lock; mecha-edge's node_modules provides the
 // pinned WebAuthn server dependency.
 await run(Deno.execPath(), ['install', '--frozen'], path.join(mecha, 'services/ticker'))
+await run(Deno.execPath(), ['install', '--frozen', '--config', path.join(mecha, 'services/airlock/deno.json')], path.join(mecha, 'services/airlock'))
 await run(Deno.execPath(), ['install', '--frozen', '--node-modules-dir=auto'], path.join(mecha, 'packages/mecha-edge'))
 // The clock outside the object: a Cron Trigger poking hourly where anything
 // can owe a tick, so the free plan pays a day of object wakes for an alarm
 // the platform lost rather than a minute's; the alarm is the exact one.
 const armed = Object.values(hybrids).some((h) => (h.reducer as { ports?: { wake?: unknown } }).ports?.wake !== undefined)
-const pokes = clock !== 'disabled' && (crons.length > 0 || armed)
+const pokes = clock !== 'disabled' && (crons.length > 0 || armed || withEffects)
 const POKE_CRON = '0 * * * *'
 
 const rel = (p: string) => {
@@ -206,9 +222,9 @@ import { edgeObject } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/
 import { edgeWorker } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/worker.ts'))}'
 import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
 import { originAssets } from '${fromSrc(path.join(here, 'edge-templates.ts'))}'
-import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
+${images ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
-${Object.keys(hybrids).length ? "import machines from './machines.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
+${Object.keys(hybrids).length ? "import machines from './machines.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
@@ -218,12 +234,13 @@ export const Cluster = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(shell.tables)},
   schema: ${JSON.stringify(shell.schema ?? {})},
-  drains: ${JSON.stringify(drains)},${Object.keys(hybrids).length ? '\n  machines,' : ''}
+  drains: ${JSON.stringify(drains)},${Object.keys(hybrids).length ? '\n  machines,' : ''}${withEffects ? '\n  effects,' : ''}${shell.ai ? `\n  ai: ${JSON.stringify(shell.ai)},` : ''}
 })
 export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
     env = { ...env, ASSETS: originAssets(env.ASSETS) }
+${images ? '    const image = await edgeImage(req, env, caches.default, ctx)\n    if (image) return image\n' : ''}
 ${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
     // asset, which never reaches upstream dynamic handlers, or not at all: the cluster's
     // GET may act (omnishell's terminal.cue \`presenter.scripted\`).
@@ -299,9 +316,11 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   // while 404 responses are served with Cache-Control: no-store.
   assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash' },
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
+  ...(shell.ai || withEffects ? { ai: { binding: 'AI' } } : {}),
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
   observability: { enabled: true },
+  ...imageBindings,
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
   ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   rules: [

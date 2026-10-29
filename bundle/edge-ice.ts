@@ -14,9 +14,9 @@ export const builtRelease = (publicDir: string): Read => (url) =>
   Deno.readTextFile(path.join(publicDir, url === '/' ? 'index.html' : decodeURIComponent(url)))
 
 /** A deployed release, read through its origin. */
-export const deployedRelease = (origin: string): Read => async (url) => {
+export const deployedRelease = (origin: string, fetcher?: typeof fetch): Read => async (url) => {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(new URL(url, origin), { headers: url === '/' ? { accept: 'text/html' } : {} })
+    const res = await (fetcher ?? fetch)(new URL(url, origin), { headers: url === '/' ? { accept: 'text/html' } : {} })
     const text = await res.text()
     if (res.ok) return text
     if (![404, 502, 503, 504].includes(res.status) || attempt === 11) {
