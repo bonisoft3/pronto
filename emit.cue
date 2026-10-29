@@ -1855,6 +1855,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/801_schedule_seed.sql"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
+		if M.code.state.fixture != _|_ {"services/database/migrations/950_fixture.sql"},
 	]
 }
 
@@ -3462,6 +3463,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					format: "seed-sql"
 					data:   (#seedData & {code: E.code}).out
 				}
+			}
+			// Tests' rows (#App.state.fixture), which a release's initdb skips.
+			if E.code.state.fixture != _|_ {
+				"services/database/migrations/950_fixture.sql": {format: "sql", src: E.code.state.fixture.src}
 			}
 
 			// Only a cluster whose change feed runs has a conduit to configure.

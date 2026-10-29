@@ -101,6 +101,19 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertEquals(c.env.find((e: { name: string }) => e.name === "PGHOST").value, "/cloudsql/brawl-chess:us-central1:battlechess-db");
 });
 
+Deno.test("a preview's initdb applies the tests' rows, and a release's never does", async () => {
+  const run = async (extra: string) => {
+    const r = await built(release(extra), "job");
+    assertEquals(r.success, true, r.stderr);
+    return r.value.spec.template.spec.template.spec.containers[0].command[2] as string;
+  };
+  const released = await run("");
+  assertStringIncludes(released, "shopt -s extglob\n");
+  assertStringIncludes(released, "docker_process_init_files /docker-entrypoint-initdb.d/!(950_fixture.sql)\n");
+  const preview = await run(`, preview: "pr-32", runHost: "bonk-chess-pr-32-504479523278.us-central1.run.app"`);
+  assertStringIncludes(preview, "docker_process_init_files /docker-entrypoint-initdb.d/*\n");
+});
+
 Deno.test("the job grants the roles the schema has, and auth gets its statement bound", async () => {
   // An app without auth has no app_user; a literal grant would die on it.
   const job = (await built(release().replace('["anon", "app_user", "service"]', '["anon", "service"]'), "job")).value;

@@ -231,6 +231,7 @@ import (
 				}]])
 				command: ["bash", "-c", """
 					set -euo pipefail
+					shopt -s extglob
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 					if [ "$marker" = "pronto initdb" ]; then
 					  echo "initdb: already built"
@@ -245,7 +246,8 @@ import (
 					fi
 					source /usr/local/bin/docker-entrypoint.sh
 					docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
-					docker_process_init_files /docker-entrypoint-initdb.d/*
+					# A test's rows (#App.state.fixture) are never a release's.
+					docker_process_init_files /docker-entrypoint-initdb.d/!(950_fixture.sql)
 					psql -XqAc "COMMENT ON DATABASE \\"$POSTGRES_DB\\" IS 'pronto initdb'"
 					"""]
 			}).out

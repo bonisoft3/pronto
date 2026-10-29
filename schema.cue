@@ -1514,6 +1514,16 @@ import (
 		// 900_seed.sql beside the stated ones. An entity's rows have one home:
 		// stated or held, never both.
 		seed?: {src: string}
+		// Rows for tests alone: SQL beside the program (by convention
+		// tests/fixtures/visual.sql) that a test database holds and a released
+		// one never does. The writer copies it into
+		// services/database/migrations/950_fixture.sql, so it is the last step
+		// of a fresh database's initdb wherever the app runs it for a test (the
+		// local stack, compose's integrate, a gcp preview); a gcp release and a
+		// k8s release skip it. What it is for: a route with a `:param` the
+		// visual lint fills from a row the running cluster serves, which a
+		// test database holds only when something wrote one.
+		fixture?: {src: string}
 	}
 
 	// What state.seed.src must satisfy, for `cue vet -d`: a server entity's
