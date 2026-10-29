@@ -48,6 +48,21 @@ Deno.test("every upstream the door dials is its own variable's when set, naming 
   }
 });
 
+Deno.test("a host launch runs the renderer and the program's peers beside the door, one list of them", () => {
+  const peers = (c: string) => exported(`(#peersCase & ${c}).hostPeers`, false);
+  const both = peers("{peers: {billing: 8688, flagd: 8016}}");
+  if (!both.ok) throw new Error(both.out);
+  const listed = JSON.parse(both.out) as string[];
+  if (JSON.stringify([...listed].sort()) !== JSON.stringify(["billing=8688", "flagd=8016", "render=8090"])) throw new Error(`peers: ${both.out}`);
+  const alone = peers("{ssr: false}");
+  if (!alone.ok || JSON.parse(alone.out).length !== 0) throw new Error(`an app with no peers: ${alone.out}`);
+  // A plugin that still states the list itself, on an app that renders nothing.
+  const stated = peers('{ssr: false, stated: ["billing=8688"]}');
+  if (!stated.ok || JSON.parse(stated.out)[0] !== "billing=8688") throw new Error(`a stated list: ${stated.out}`);
+  const bad = peers('{peers: {"Billing!": 8688}}');
+  if (bad.ok) throw new Error("a peer named as no service can be was admitted");
+});
+
 Deno.test("the renderer reads through the door, as a guest would", () => {
   // Through caddy's /electric, under the shape gate, and never electric:3000
   // with a service token: what makes a document cacheable by anyone is that
