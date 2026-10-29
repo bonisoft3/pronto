@@ -177,48 +177,48 @@ url = "https://github.com/bonisoft3/omnishell/releases/download/v0.21.1/omnishel
 url_api = "https://api.github.com/repos/bonisoft3/omnishell/releases/assets/687278251"
 
 [[tools."github:bonisoft3/pronto"]]
-version = "0.26.4"
+version = "1.0.0"
 backend = "github:bonisoft3/pronto"
 
 [tools."github:bonisoft3/pronto"."platforms.linux-arm64"]
-checksum = "sha256:5cdfec3e96918cd2f43f26d59e6d87ffe6f01fd4070843e9fc843e88394b39de"
-url = "https://github.com/bonisoft3/pronto/releases/download/v0.26.4/pronto-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/686665992"
+checksum = "sha256:d37f4e5356da9aa082b4e4b1531d33b139a5becbed1b095bfbc44247758140e9"
+url = "https://github.com/bonisoft3/pronto/releases/download/v1.0.0/pronto-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/687352072"
 
 [tools."github:bonisoft3/pronto"."platforms.linux-arm64-musl"]
-checksum = "sha256:5cdfec3e96918cd2f43f26d59e6d87ffe6f01fd4070843e9fc843e88394b39de"
-url = "https://github.com/bonisoft3/pronto/releases/download/v0.26.4/pronto-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/686665992"
+checksum = "sha256:d37f4e5356da9aa082b4e4b1531d33b139a5becbed1b095bfbc44247758140e9"
+url = "https://github.com/bonisoft3/pronto/releases/download/v1.0.0/pronto-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/687352072"
 
 [tools."github:bonisoft3/pronto"."platforms.linux-x64"]
-checksum = "sha256:5cdfec3e96918cd2f43f26d59e6d87ffe6f01fd4070843e9fc843e88394b39de"
-url = "https://github.com/bonisoft3/pronto/releases/download/v0.26.4/pronto-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/686665989"
+checksum = "sha256:d37f4e5356da9aa082b4e4b1531d33b139a5becbed1b095bfbc44247758140e9"
+url = "https://github.com/bonisoft3/pronto/releases/download/v1.0.0/pronto-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/687352073"
 
 [tools."github:bonisoft3/pronto"."platforms.linux-x64-musl"]
-checksum = "sha256:5cdfec3e96918cd2f43f26d59e6d87ffe6f01fd4070843e9fc843e88394b39de"
-url = "https://github.com/bonisoft3/pronto/releases/download/v0.26.4/pronto-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/686665989"
+checksum = "sha256:d37f4e5356da9aa082b4e4b1531d33b139a5becbed1b095bfbc44247758140e9"
+url = "https://github.com/bonisoft3/pronto/releases/download/v1.0.0/pronto-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/687352073"
 
 [tools."github:bonisoft3/pronto"."platforms.macos-arm64"]
-checksum = "sha256:5cdfec3e96918cd2f43f26d59e6d87ffe6f01fd4070843e9fc843e88394b39de"
-url = "https://github.com/bonisoft3/pronto/releases/download/v0.26.4/pronto-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/686665995"
+checksum = "sha256:d37f4e5356da9aa082b4e4b1531d33b139a5becbed1b095bfbc44247758140e9"
+url = "https://github.com/bonisoft3/pronto/releases/download/v1.0.0/pronto-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/687352077"
 
 [tools."github:bonisoft3/pronto"."platforms.macos-x64"]
-checksum = "sha256:5cdfec3e96918cd2f43f26d59e6d87ffe6f01fd4070843e9fc843e88394b39de"
-url = "https://github.com/bonisoft3/pronto/releases/download/v0.26.4/pronto-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/686666002"
+checksum = "sha256:d37f4e5356da9aa082b4e4b1531d33b139a5becbed1b095bfbc44247758140e9"
+url = "https://github.com/bonisoft3/pronto/releases/download/v1.0.0/pronto-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/687352076"
 
 [tools."github:bonisoft3/pronto"."platforms.windows-arm64"]
-checksum = "sha256:5cdfec3e96918cd2f43f26d59e6d87ffe6f01fd4070843e9fc843e88394b39de"
-url = "https://github.com/bonisoft3/pronto/releases/download/v0.26.4/pronto-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/686665991"
+checksum = "sha256:d37f4e5356da9aa082b4e4b1531d33b139a5becbed1b095bfbc44247758140e9"
+url = "https://github.com/bonisoft3/pronto/releases/download/v1.0.0/pronto-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/687352074"
 
 [tools."github:bonisoft3/pronto"."platforms.windows-x64"]
-checksum = "sha256:5cdfec3e96918cd2f43f26d59e6d87ffe6f01fd4070843e9fc843e88394b39de"
-url = "https://github.com/bonisoft3/pronto/releases/download/v0.26.4/pronto-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/686665990"
+checksum = "sha256:d37f4e5356da9aa082b4e4b1531d33b139a5becbed1b095bfbc44247758140e9"
+url = "https://github.com/bonisoft3/pronto/releases/download/v1.0.0/pronto-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/687352078"
 
 [[tools."github:bonisoft3/sayt"]]
 version = "0.45.1"

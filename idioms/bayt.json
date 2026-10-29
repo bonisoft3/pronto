@@ -1242,7 +1242,7 @@
         "manual": true,
         "build": {
           "additional_contexts": {
-            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.20.2@sha256:0f7d84358244c875a76bf97f13974bf6336e15f639a2f01fa31ad3eb0ce0d8a7}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
+            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.21.1@sha256:73a3852c018765e6a2a87ada8e8246927e377feeb806d0125677f2ace2892a29}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
           },
           "secrets": [],
           "args": {}
@@ -2998,7 +2998,7 @@
         "manual": false,
         "build": {
           "additional_contexts": {
-            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.20.2@sha256:0f7d84358244c875a76bf97f13974bf6336e15f639a2f01fa31ad3eb0ce0d8a7}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
+            "plugins_omnishell-runtime-image": "${MONOREPO_COMPOSE_MODE:-docker-image://bonitao/omnishell:0.21.1@sha256:73a3852c018765e6a2a87ada8e8246927e377feeb806d0125677f2ace2892a29}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image}"
           },
           "secrets": [],
           "args": {}
@@ -3489,7 +3489,7 @@
       },
       "entrypoint": {
         "name": "entrypoint",
-        "do": "case \"${ORIGIN#http://}\" in \"$ORIGIN\") h=${ORIGIN#https://};; *) h=${ORIGIN#http://};; esac; case \"$h\" in \"$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; set -e -o pipefail; roots=$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$roots\" ]; then find $roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$1; shift; for f do h=$(sha256sum < \"$f\"); printf \"$q%s$q\" \"${h%% *}\" > \"$f.etag\"; done' sh '\"' {} +; fi; PRONTO_RELEASE_SCRIPTS=$(cat /etc/caddy/release-scripts 2>/dev/null || true); export PRONTO_RELEASE_SCRIPTS; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; fi; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
+        "do": "case \"${ORIGIN#http://}\" in \"$ORIGIN\") h=${ORIGIN#https://};; *) h=${ORIGIN#http://};; esac; case \"$h\" in \"$ORIGIN\"|\"\"|*[!A-Za-z0-9.:-]*) echo \"ORIGIN '$ORIGIN' is no origin: set it to the scheme and host readers reach the door at, as https://app.example\" >&2; exit 1;; esac; : > /etc/caddy/env; case \"$h\" in *:*) _p=${h##*:};; *) _p=8443;; esac; export CADDY_TLS_HOST_PORT=\"${CADDY_TLS_HOST_PORT:-$_p}\"; printf 'CADDY_TLS_HOST_PORT=%s\\n' \"$CADDY_TLS_HOST_PORT\" >> /etc/caddy/env; if [ -f /certs/localhost.pem ]; then export CADDY_TLS='/certs/localhost.pem /certs/localhost-key.pem'; printf 'CADDY_TLS=%s\\n' \"$CADDY_TLS\" >> /etc/caddy/env; fi; PRONTO_RELEASE_SCRIPTS=$(cat /etc/caddy/release-scripts 2>/dev/null || true); export PRONTO_RELEASE_SCRIPTS; printf 'PRONTO_RELEASE_SCRIPTS=%s\\n' \"$PRONTO_RELEASE_SCRIPTS\" >> /etc/caddy/env; set -e -o pipefail; roots=$(caddy adapt --envfile /etc/caddy/env --config /etc/caddy/Caddyfile --adapter caddyfile | tr , '\\n' | grep -o '\"root\":\"[^\"]*\"' | cut -d'\"' -f4 | sort -u); if [ -n \"$roots\" ]; then find $roots -type f ! -name '*.etag' -exec sh -c 'set -e; q=$1; shift; for f do h=$(sha256sum < \"$f\"); printf \"$q%s$q\" \"${h%% *}\" > \"$f.etag\"; done' sh '\"' {} +; fi; exec caddy run --envfile /etc/caddy/env --config /etc/caddy/Caddyfile --adapter caddyfile",
         "priority": 0,
         "shell": "sh",
         "stop": false,
@@ -3509,6 +3509,7 @@
       "expose": {
         "door": {
           "port": 8443,
+          "udp": true,
           "publish": {
             "environment": "CADDY_TLS_HOST_PORT"
           }
