@@ -586,6 +586,8 @@ import (
 						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
 						command: ["bash", "-c", """
 							set -euo pipefail
+							# On before bash reads the if below, whose glob it is.
+							shopt -s extglob
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
@@ -607,7 +609,8 @@ import (
 							else
 							  source /usr/local/bin/docker-entrypoint.sh
 							  docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
-							  docker_process_init_files /docker-entrypoint-initdb.d/*
+							  # A test's rows (#App.state.fixture) are a preview's alone.
+							  docker_process_init_files /docker-entrypoint-initdb.d/\([if R.preview != _|_ {"*"}, "!(950_fixture.sql)"][0])
 							  psql -XqAc "COMMENT ON DATABASE \\"$POSTGRES_DB\\" IS 'pronto initdb'"
 							fi
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
