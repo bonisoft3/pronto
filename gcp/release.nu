@@ -7,7 +7,7 @@
 # images push the same digests and roll nothing, and initdb finds its marker.
 
 use ../k8s/release.nu [resolve-app]
-use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of]
+use verify.nu [start-drivers go-drivers finish-drivers drivers-log cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images]
 
 # The services this target runs; anything else in the app's compose project
@@ -217,7 +217,7 @@ def finish-copy [copy: record]: nothing -> record {
 		let log = (do { ^gcloud --quiet logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($copy.build)\"" --project $p --order desc --limit 20 --format "value(textPayload)" } | complete | get stdout | lines | reverse | str join (char nl))
 		error make {msg: $"the preview's images were not copied \(($status); its repository may not let ($builds) read it: gcloud artifacts repositories add-iam-policy-binding ($copy.registry | split row '/' | last) --project ($copy.registry | split row '/' | get 1) --location ($copy.registry | split row '-docker' | first) --member serviceAccount:($builds) --role roles/artifactregistry.reader\):\n($log)"}
 	}
-	$copy.refs | each {|r|
+	$copy.refs | par-each --keep-order {|r|
 		gc artifacts docker tags add $"($r.repo)@($r.digest)" $"($r.repo):release" | ignore
 		let digest = (gc artifacts docker images describe $"($r.repo):release" --format "value(image_summary.digest)" | str trim)
 		if $digest != $r.digest { error make {msg: $"($r.repo):release is ($digest), not the tested ($r.digest)"} }
@@ -526,7 +526,7 @@ export def main [
 	# The tests' own images build in Cloud Build while the preview deploys, and
 	# run once it is up; while they run, the release's project copies the
 	# preview's images, which it tags the release's only once they passed.
-	let failure = (try {
+	let outcome = (try {
 		empty-preview $rc_plan
 		let drivers = (start-drivers $app_info.dir $rc_plan)
 		let failed = (try {
@@ -535,15 +535,21 @@ export def main [
 			let from = {registry: $rc_plan.registry, pushed: $tested}
 			let copy = (start-early-copy $app_info.cue_path $from)
 			finish-drivers $drivers
-			deploy $app_info "" false false ($from | merge {copy: $copy}) | ignore
+			try { deploy $app_info "" false false ($from | merge {copy: $copy}) | ignore } catch {|e|
+				drivers-log $drivers
+				error make {msg: $e.msg}
+			}
 			null
 		} catch {|e| $e.msg })
 		if $failed != null {
 			cancel-drivers $drivers
 			error make {msg: $failed}
 		}
-		null
-	} catch {|e| $e.msg })
+		{drivers: $drivers}
+	} catch {|e| {msg: $e.msg} })
 	stop-preview $rc_plan
-	if $failure != null { error make {msg: $failure} }
+	if "msg" in $outcome { error make {msg: $outcome.msg} }
+	# The tests' log, read once the release is live rather than before it.
+	print $"gcp: (stamp) ($app_info.name) is released; what the tests printed:"
+	drivers-log $outcome.drivers
 }

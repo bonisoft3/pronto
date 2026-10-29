@@ -163,23 +163,31 @@ export def cancel-drivers [run: record] {
 	if $status in ["QUEUED" "PENDING" "WORKING"] { gc builds cancel $run.build --project $run.project | ignore }
 }
 
-# The drivers' build to its end, its log printed; an error when one failed,
-# after all have run.
+# The drivers' build to its end. A failure prints the drivers' log before it
+# stops the release; a pass goes on at once, the release printing the log once
+# it is done (drivers-log), since reading it is most of a minute.
 export def finish-drivers [run: record] {
-	let p = $run.project
-	let build = $run.build
 	print $"gcp: (stamp) waiting for the tests to end"
 	mut status = "QUEUED"
 	while $status in ["QUEUED" "PENDING" "WORKING"] {
-		sleep 5sec
-		$status = (gc builds describe $build --project $p --format "value(status)" | str trim)
+		sleep 2sec
+		$status = (gc builds describe $run.build --project $run.project --format "value(status)" | str trim)
 	}
-	# Cloud Logging takes the last lines a moment after the build ends.
-	sleep 10sec
-	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($build)\"" --project $p --order asc --limit 100000 --format "value(textPayload)"
-		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
-	if $status != "SUCCESS" { error make {msg: $"the tests failed against ($run.url) \(($status)\): each driver's verdict is in the log above"} }
+	if $status != "SUCCESS" {
+		drivers-log $run --just-ended
+		error make {msg: $"the tests failed against ($run.url) \(($status)\): each driver's verdict is in the log above"}
+	}
 	print $"gcp: (stamp) every test passed against ($run.url)"
+}
+
+# What the drivers printed, from the build's log.
+export def drivers-log [
+	run: record
+	--just-ended # Cloud Logging takes the last lines a moment after the build ends
+] {
+	if $just_ended { sleep 10sec }
+	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($run.build)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
+		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
 }
 
 # Every driver of the app against the service the plan names, up already; an
@@ -188,6 +196,7 @@ export def run-drivers [app_dir: string, plan: record] {
 	let run = (start-drivers $app_dir $plan)
 	go-drivers $run
 	finish-drivers $run
+	drivers-log $run --just-ended
 }
 
 export def main [

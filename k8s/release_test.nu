@@ -40,6 +40,7 @@ def run-tests [] {
 	test_render_manifests_eks
 	test_render_manifests_aks
 	test_dapr_annotations
+	test_pods_hand_over
 	test_timeout_budget_nests
 	test_external_secrets_manifests
 	test_observability_manifests
@@ -321,6 +322,17 @@ def test_render_manifests_aks [] {
 	assert ($yaml | str contains "kind: HTTPRoute")
 	assert ($yaml | str contains "gatewayClassName: azure-alb-external")
 	assert ($yaml | str contains "- sample.aks.internal.net")
+}
+
+def test_pods_hand_over [] {
+	print "test a replaced pod keeps serving while the mesh learns of its successor..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let docs = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Deployment")
+	for c in ["crud" "electric" "auth" "caddy" "render"] {
+		let d = ($docs | where metadata.name == $"sample-($c)" | first)
+		assert equal ($d.spec.template.spec.containers | where name == $c | first | get lifecycle.preStop.sleep.seconds) 15 $"($c) pauses before it stops"
+		assert equal ($d.spec.template.metadata.annotations | get "dapr.io/block-shutdown-duration") "20s" $"($c)'s sidecar outlasts the pause"
+	}
 }
 
 def test_dapr_annotations [] {
