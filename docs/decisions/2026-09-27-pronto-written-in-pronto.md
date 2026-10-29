@@ -16,7 +16,7 @@ The entire development loop runs in a browser tab:
   the version the loop pins, so an export in the tab is byte-identical to one
   on a laptop or in CI — which is what makes a commit of generated files made
   in the tab safe to review
-- **Running**: mecha's [browser platform](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/browser.md),
+- **Running**: mecha's [browser platform](https://github.com/bonisoft3/mecha/blob/v0.20.1/docs/browser.md),
   the cluster `release@pages` already ships
 - **Version control**: a real git repository in OPFS, pushed through the
   GitHub REST API (blobs, tree, commit, ref), which answers CORS where

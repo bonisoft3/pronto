@@ -6,7 +6,7 @@
 // github.com/bonisoft3/pronto → github.com/bonisoft3/pronto during
 // sync, and the sibling modules pronto's adapters import along with
 // them, so the mirror is a self-contained CUE module.
-module: "github.com/bonisoft3/pronto@v0"
+module: "github.com/bonisoft3/pronto@v1"
 
 language: {
 	version: "v0.16.1"
@@ -26,11 +26,11 @@ source: {
 // fails when one of these versions falls behind.
 deps: {
 	"github.com/bonisoft3/bayt@v0": {
-		v:       "v0.67.0"
+		v:       "v0.68.0"
 		default: true
 	}
 	"github.com/bonisoft3/mecha@v0": {
-		v:       "v0.19.2"
+		v:       "v0.20.1"
 		default: true
 	}
 	"github.com/bonisoft3/omnishell@v0": {

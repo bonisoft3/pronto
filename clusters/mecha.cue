@@ -61,12 +61,12 @@ import (
 #Sourced: impl.#Sourced
 
 published: impl.#Published & {
-	airlock:  "bonitao/mecha-airlock:0.19.1@sha256:840c9ccaaf4716c4eb0899f8a8be346c53dfa706f9f452670263787687457df1"
-	auth:     "bonitao/mecha-auth:0.19.1@sha256:92e796be2e47481f9e5163dba469833501b4b4695eb335253845c145fa6c7252"
-	clock:    "bonitao/mecha-clock:0.19.1@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
-	compute:  "bonitao/mecha-compute:0.19.1@sha256:a37671c38bd5e77f496512974fef1ec878328e7a07ccd00e42bb4406194ac829"
-	conduit:  "bonitao/mecha-conduit:0.19.1@sha256:da40c0acf0897cf86da293135f6daad3f02609710b91cb6efc28dc5e6d93841a"
-	database: "bonitao/mecha-database:0.19.1@sha256:38ab2c098b58f2224fe1a54cb6e27638f039987666a8e97701d8fbf3800b53ad"
-	mesh:     "bonitao/mecha-mesh:0.19.1@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
-	ticker:   "bonitao/mecha-ticker:0.19.1@sha256:f3410acc27b70754be64a7b0bce1d7a7067c1ef7412482ff05e5bf48b073b4e0"
+	airlock:  "bonitao/mecha-airlock:0.20.0@sha256:b487e99c8dd0577e00154764dc8ade7b840ecb4197e86d94922561e29a091dc4"
+	auth:     "bonitao/mecha-auth:0.20.0@sha256:046e718f9449e844ab90b918031f1c06ec7e567fb0c57d6f80f4d11075d5a954"
+	clock:    "bonitao/mecha-clock:0.20.0@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
+	compute:  "bonitao/mecha-compute:0.20.0@sha256:6fee03b27acb718b605df0bea893541b24e7e5565106d0892562238d1feb0ede"
+	conduit:  "bonitao/mecha-conduit:0.20.0@sha256:04f6134767668a1843cbd3a0844278db9eb0c88997988a0a9a25c4a9bd0cfcd5"
+	database: "bonitao/mecha-database:0.20.0@sha256:ff037e4f3a68f3ae4a1bf7e8df8d0f441c165529c9596e38667cde001e70a69f"
+	mesh:     "bonitao/mecha-mesh:0.20.0@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
+	ticker:   "bonitao/mecha-ticker:0.20.0@sha256:fd2f0a45faca3234f74e33ccda29bb3fd8a74c954b96bb1c0c14f087d0b22f8c"
 }

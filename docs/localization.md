@@ -123,7 +123,7 @@ rendered](screens.md#how-a-routes-first-document-is-rendered)), renders one
 document per locale, and a route rendered on request (`ssr: "ssr"`) one per
 request; each carries `lang`, `dir`, its title in that language, an absolute
 canonical, its `hreflang` siblings and `x-default`, absolute against the
-deployment's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/proxy.md#the-origin))
+deployment's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.20.1/docs/proxy.md#the-origin))
 — a prerendered one through the door, as the sitemap is. Only a param-less route can be prerendered, because the rows an
 `/article/:slug` needs do not exist at build. The choice is per route since
 the split falls inside apps: shadcnui's documentation routes are content,

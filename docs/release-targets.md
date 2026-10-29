@@ -28,14 +28,14 @@ and [not built](../PENDING.md#release-targets). How an author releases an app is
   `docker`, `gcp` and `aws`, and not `azure` or `k8s`.
 - A mecha **tier** is what the cluster is made of there. The ladder is
   mecha's: browser, CLI, single machine, k8s, cloud and edge
-  ([invariant 4](https://github.com/bonisoft3/mecha/blob/v0.19.2/README.md#4-vertical-scalability-down-and-up)).
+  ([invariant 4](https://github.com/bonisoft3/mecha/blob/v0.20.1/README.md#4-vertical-scalability-down-and-up)).
   pronto's `#Tier` names five of its rungs — `browser`, `edge`, `container`,
   which is mecha's single machine, `k8s`, and `cloud` — and the browser, the
   edge, and the container are built. `container` is where every app develops,
   and for release it is the `docker` target: the SQL fence `-- tier:
   container` … `-- tier: any` around the publication and the replica identity,
   the statements that need a WAL reader
-  ([the fence](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/browser.md#the-fence)).
+  ([the fence](https://github.com/bonisoft3/mecha/blob/v0.20.1/docs/browser.md#the-fence)).
 
 | target | tier | the artifact | the door |
 |---|---|---|---|
@@ -146,7 +146,7 @@ applying migrations, so declared collations retain case and accent semantics
 offline. ICU and PGlite versions are pinned together in the browser runtime;
 this is part of the database contract and requires no application setting. The
 page's fetch shim serves the table by path and hands `/crud`, `/auth` and
-`/electric` to [the one-user cluster](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/browser.md#the-one-user-cluster),
+`/electric` to [the one-user cluster](https://github.com/bonisoft3/mecha/blob/v0.20.1/docs/browser.md#the-one-user-cluster),
 which mints its user at boot, so the tenancy floor runs against a real subject
 and there is no door. A program begins as one HTML file, `ir.html`, and ships
 as one.
@@ -200,7 +200,7 @@ a broken release, for a program with:
 - a validation, which runs in plv8, and PGlite has none.
 
 **The page runs its drains and its clock**
-([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/browser.md#drains-and-the-clock)):
+([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.20.1/docs/browser.md#drains-and-the-clock)):
 the bundler carries the drains from `.pronto/cluster.json` and places mecha's
 `schedule` table before the seed, as the edge's data directory does
 ([`edge-scripts.ts`](../bundle/edge-scripts.ts)). The clock runs while the
@@ -349,9 +349,9 @@ immutable. Blobs written at run time, such as uploads, have no store at the
 edge yet; a seed is the set known at release.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
-([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.19.2/packages/pglite-workerd/README.md));
+([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.20.1/packages/pglite-workerd/README.md));
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
-[mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.19.2/packages/mecha-edge/README.md)
+[mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.20.1/packages/mecha-edge/README.md)
 as its one Durable Object, over the shell's tables. `publish` runs
 [`publish-edge.ts`](../bundle/publish-edge.ts): `wrangler deploy` at the
 version pglite-workerd's `mise.toml` pins, with `JWT_SECRET` (once) and a new
@@ -403,9 +403,9 @@ What fixes its shape, as built:
   `schedule` table, the container image's 800 step, before the 801 seed.
   `--from=<dir>` starts it from a directory built elsewhere
   instead, an archive restored from its database with its pgroll ledger
-  ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.19.2/packages/pglite-workerd/restore.ts)),
+  ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.20.1/packages/pglite-workerd/restore.ts)),
   applies the cluster's pgroll migrations the ledger lacks, as its migrate step
-  would ([`migrate.ts`](https://github.com/bonisoft3/mecha/blob/v0.19.2/packages/pglite-workerd/migrate.ts)),
+  would ([`migrate.ts`](https://github.com/bonisoft3/mecha/blob/v0.20.1/packages/pglite-workerd/migrate.ts)),
   and skips the derivation.
 - **Loading is once, and a later release migrates.** The object opens only
   a directory whose load verified every chunk; a load resumes where it
@@ -426,7 +426,7 @@ What fixes its shape, as built:
   deployed back to the version it replaced, so the site keeps serving the
   schema it has, and `--reset` loads a directory built for this release.
 - **One object, every user behind one writer.** PGlite is one connection.
-  [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.19.2/packages/postgrest-js/src/rest-handler.ts)
+  [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.20.1/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and
   `request.jwt.claims`, so a shared connection never leaks a subject, and row
   policy is Postgres's own here as on a single machine. Guests only:
@@ -442,7 +442,7 @@ What fixes its shape, as built:
   by the object's epoch; a public table's chunks are every guest's.
 - **The drains run in the object**, called as their tables change and once
   after every boot that serves, a failed one's retry at the alarm
-  ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.19.2/packages/mecha-edge/README.md#drains)).
+  ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.20.1/packages/mecha-edge/README.md#drains)).
   A drain's writes reach a guest's cached `/crud` read once its 5 seconds pass,
   and a cached render once its minute does, as every write the object makes
   itself; the shape stream carries them at once.
@@ -503,10 +503,10 @@ container on any tier.
 An app's machines step in the object: the migration declares each step over
 an engine the tier supplies, and the object's is PGlite for workerd's host
 import, handed the machines `edge.ts` renders from the app's rules
-([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.19.2/packages/mecha-edge/README.md#machines)).
+([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.20.1/packages/mecha-edge/README.md#machines)).
 A deadline a machine arms and a cron schedule the program declares are the
 object's alarm, swept as the ticker sweeps them
-([the clock](https://github.com/bonisoft3/mecha/blob/v0.19.2/packages/mecha-edge/README.md#the-clock)).
+([the clock](https://github.com/bonisoft3/mecha/blob/v0.20.1/packages/mecha-edge/README.md#the-clock)).
 For a frozen archive, `code.meta.edgeClock: "disabled"` emits `--clock disabled`:
 the object preserves schedule rows, clears alarms at boot and delivery, and no
 Cron Trigger is written. The default, `"ticker"`, runs them.
@@ -867,7 +867,7 @@ highest, since Aurora does not pause while logical replication is on. Project,
 account, region and domain are declarations on the cluster; credentials are
 each cloud's own and never in the session. Region is the first of the axes a
 system shards along, before time and user. mecha's
-[clouds as built](https://github.com/bonisoft3/mecha/blob/v0.19.2/docs/deployment.md#clouds-as-built)
+[clouds as built](https://github.com/bonisoft3/mecha/blob/v0.20.1/docs/deployment.md#clouds-as-built)
 is the mapping these start from.
 
 A sign-in provider (`auth.providers`) is registered with the provider, told
@@ -879,7 +879,7 @@ The deployment overrides each as `OIDC_<NAME>_<SETTING>`, and gives what the
 program must not hold, Google's client secret as `OIDC_GOOGLE_CLIENT_SECRET`.
 Another OpenID issuer may stand in the provider's place, such as a broker an
 operator runs, by its issuer and the client `origin`
-(mecha's [provider sign-in](https://github.com/bonisoft3/mecha/blob/v0.19.2/services/auth/README.md#provider-sign-in)).
+(mecha's [provider sign-in](https://github.com/bonisoft3/mecha/blob/v0.20.1/services/auth/README.md#provider-sign-in)).
 Compose refuses to render the stack when neither gives a client id, and the
 k8s release copies the public `OIDC_*` settings onto the auth service. Nonempty
 client secrets go to a separate Kubernetes Secret through stdin; the Deployment

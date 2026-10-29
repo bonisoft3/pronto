@@ -35,7 +35,10 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       ["plugins/pronto", "pronto"],
     ].map(([local, name]) => [local, name, name === "sayt" ? Deno.env.get("PRONTO_SAYT_SOURCE") ?? join(repo, local) : join(repo, local)]);
     // Fixture module identity stays independent of the published tool self-pin.
-    const prontoVersion = "v0.0.0";
+    const prontoModule = JSON.parse(await cue(repo, ["export", join(repo, "plugins/pronto/.mirror/cue.mod/module.cue"), "--out", "json"])).module as string;
+    const prontoMajor = prontoModule.match(/^github\.com\/bonisoft3\/pronto@(v\d+)$/)?.[1];
+    assert(prontoMajor, `invalid Pronto module identity: ${prontoModule}`);
+    const prontoVersion = `${prontoMajor}.0.0`;
     const versions = new Map<string, Set<string>>();
     // Transitive pins may intentionally lag the direct ones. Publish this
     // fixture's sources at every declared version into the isolated registry.
@@ -69,9 +72,9 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
       await cue(mirror, ["mod", "edit", "--source=self"]);
       await cue(mirror, ["mod", "tidy"]);
       if (name === "pronto") {
-        versions.set("github.com/bonisoft3/pronto@v0", new Set([prontoVersion]));
+        versions.set(prontoModule, new Set([prontoVersion]));
       }
-      const required = versions.get(`github.com/bonisoft3/${name}@v0`);
+      const required = versions.get(name === "pronto" ? prontoModule : `github.com/bonisoft3/${name}@v0`);
       assert(required?.size, `no fixture version declared for ${name}`);
       for (const version of required) await cue(mirror, ["mod", "publish", version]);
     }
@@ -79,7 +82,7 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     await Deno.mkdir(app);
     await cue(app, ["mod", "init", "example.com/consumer@v0"]);
     await cue(app, ["mod", "get", `github.com/bonisoft3/pronto@${prontoVersion}`]);
-    await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"]);
+    await cue(app, ["cmd", "bootstrap", `github.com/bonisoft3/pronto/bootstrap@${prontoMajor}`]);
     const mise = await Deno.readTextFile(join(app, ".mise.toml"));
     const say = await Deno.readTextFile(join(app, ".say.yaml"));
     const tools = JSON.parse(await cue(app, ["export", ".mise.toml", "--out", "json"])).tools;
@@ -154,7 +157,7 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     await cue(app, ["cmd", "generate", "./pronto"]);
     assert(sayNorm === JSON.stringify(norm(await sayJson(join(app, ".say.yaml")))), "Sayt generation drifted");
     const saySettled = await Deno.readTextFile(join(app, ".say.yaml"));
-    await cue(app, ["cmd", "bootstrap", "github.com/bonisoft3/pronto/bootstrap@v0"], false);
+    await cue(app, ["cmd", "bootstrap", `github.com/bonisoft3/pronto/bootstrap@${prontoMajor}`], false);
     assert(saySettled === await Deno.readTextFile(join(app, ".say.yaml")), "bootstrap overwrote existing configuration");
     await Deno.writeTextFile(join(app, "pronto/terminal.cue"), 'package prontoproject\nimport terminal "github.com/bonisoft3/pronto/terminals:omnishell"\npronto: terminal.#Project\n');
     await cue(app, ["cmd", "generate", "./pronto"]);
