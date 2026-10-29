@@ -577,7 +577,13 @@ not built again. The drivers' images build in Cloud Build while the preview
 deploys, and the build waits for the release's go, a marker in the project's
 Cloud Build bucket, to run them; while they run, the release's project copies
 the preview's images as `candidate`, and tags them `release` only once every
-driver passed. The preview is stopped whatever happened (its service, jobs
+driver passed. While they run the release also stages production: the
+project, the plan rendered with the tested digests, the bucket and the
+grants, none of it running the app; when they pass only the schema job and
+the deploy are left, the first of the release's code production runs
+([staged release](decisions/2026-10-29-staged-release.md)). `--rollback`
+sends the traffic back to the revision before, where its schema is the
+same. The preview is stopped whatever happened (its service, jobs
 and clock), and its Cloud SQL instance stays for the next release, which
 starts it on an empty database: making an instance is most of ten minutes.
 One release at a time, then; `--preview rc --delete` removes it all. A failing driver, or a

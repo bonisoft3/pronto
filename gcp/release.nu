@@ -220,9 +220,9 @@ def start-copy [plan: record, name: string, services: list<string>, from: record
 	{build: $build, project: $p, registry: $from.registry, refs: $refs}
 }
 
-# The copy to its end, and each image tagged the release's once its digest is
-# the tested one.
-def finish-copy [copy: record]: nothing -> record {
+# The copy to its end: the tested images are in the release's repository, as
+# `candidate`, tagged nothing production runs.
+def await-copy [copy: record] {
 	let p = $copy.project
 	mut status = "QUEUED"
 	while $status in ["QUEUED" "PENDING" "WORKING"] {
@@ -234,6 +234,11 @@ def finish-copy [copy: record]: nothing -> record {
 		let log = (do { ^gcloud --quiet logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($copy.build)\"" --project $p --order desc --limit 20 --format "value(textPayload)" } | complete | get stdout | lines | reverse | str join (char nl))
 		error make {msg: $"the preview's images were not copied \(($status); its repository may not let ($builds) read it: gcloud artifacts repositories add-iam-policy-binding ($copy.registry | split row '/' | last) --project ($copy.registry | split row '/' | get 1) --location ($copy.registry | split row '-docker' | first) --member serviceAccount:($builds) --role roles/artifactregistry.reader\):\n($log)"}
 	}
+}
+
+# Each copied image tagged the release's, once its digest is the tested one.
+def tag-release [copy: record]: nothing -> record {
+	print $"gcp: (stamp) tagging the tested images the release's"
 	# Each image at once: one after another, its two calls apiece were a minute.
 	$copy.refs | par-each --keep-order {|r|
 		gc artifacts docker tags add $"($r.repo)@($r.digest)" $"($r.repo):release" | ignore
@@ -368,7 +373,12 @@ def delete-preview [plan: record] {
 # What a release or a preview deploys, from the plan release.cue renders for
 # it, ending once its address answers; the images it ran, by digest. A
 # release given a tested preview's (`from`) runs those, copied, not rebuilt.
-def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record]: nothing -> record {
+# A release staged: everything up to the first code of the release production runs. The
+# project, the images (pushed, or the tested ones copied in as `candidate`), the plan
+# rendered with their digests and written to dist/gcp, the bucket, the scrape configs and
+# the secret grants: declarative, each restated by the next release, none running the app.
+# A gated release stages production while its tests run (docs/decisions/2026-10-29-staged-release.md).
+def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record]: nothing -> record {
 	# The roles the app's schema grants PostgREST's login, as generate wrote them.
 	let facts_path = ($app_info.cue_path | path dirname | path join .pronto cluster.json)
 	if not ($facts_path | path exists) { error make {msg: $"($facts_path) is missing: generate the app before releasing it"} }
@@ -384,7 +394,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	if $dry_run {
 		print $plan0.jobYaml; print "---"; print $plan0.serviceYaml
 		for y in ($plan0.sidecarServicesYaml | values) { print "---"; print $y }
-		return {}
+		return {done: true}
 	}
 
 	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
@@ -400,15 +410,21 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 		error make {msg: $"GCP.sidecars names ($missing | str join ', '), which the app's compose project does not define"}
 	}
 	let images = ($runtime | append (if $has_migrate { ["migrate" "schema"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars)
-	let pushed = if $snapshot { {} } else {
+	if not $snapshot {
 		print $"gcp: (stamp) setting up ($plan0.service)'s project"
 		ensure-infrastructure $plan0
-		if $from == null { push-images $app_info.dir $plan0 $name $images } else {
-			# The copy the gate started while it tested, when it copied these images.
-			let started = ($from.copy? | default null)
-			let copy = if $started != null and (($started.refs | get svc | sort) == ($images | sort)) { $started } else { start-copy $plan0 $name $images $from }
-			finish-copy $copy
-		}
+	}
+	# The tested images, copied in as `candidate`: the copy the gate started while it tested,
+	# when it copied these images, else one started now. Tagged the release's in go-live.
+	let copy = if $from == null or $snapshot { null } else {
+		let started = ($from.copy? | default null)
+		let c = if $started != null and (($started.refs | get svc | sort) == ($images | sort)) { $started } else { start-copy $plan0 $name $images $from }
+		await-copy $c
+		$c
+	}
+	let pushed = if $snapshot { {} } else if $copy == null { push-images $app_info.dir $plan0 $name $images } else {
+		# The plan names an image by its digest, the tested one; the tag is only its name.
+		$copy.refs | reduce -f {} {|r, acc| $acc | insert $r.svc {tag: "release", digest: $r.digest} }
 	}
 
 	# The providers compose gives the auth service, under what release.cue sets.
@@ -444,7 +460,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	$plan.jobYaml | save -f dist/gcp/job.yaml
 	$plan.serviceYaml | save -f dist/gcp/service.yaml
 	for s in ($plan.sidecarServicesYaml | transpose name yaml) { $s.yaml | save -f $"dist/gcp/sidecar-($s.name).yaml" }
-	if $snapshot { print $"gcp: (stamp) rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {} }
+	if $snapshot { print $"gcp: (stamp) rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {done: true} }
 
 	let p = $plan.project
 	let r = $plan.region
@@ -458,6 +474,20 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
 	for c in ($plan.sidecarScrapeConfigs | transpose secret config) { ensure-secret $c.secret $p $c.config | ignore }
 	grant-secrets $plan
+	print $"gcp: (stamp) ($plan.service) staged"
+	{plan: $plan, pushed: $pushed, has_migrate: $has_migrate, copy: $copy, gated: ($from != null), number: $number}
+}
+
+# A staged release made live: its images tagged the release's (a gated one's, now that its
+# tests passed), the schema job run, the service and its sidecars replaced, the clock, the
+# domains, and the address answering. The first code of the release production runs.
+def go-live [staged: record]: nothing -> record {
+	let plan = $staged.plan
+	let p = $plan.project
+	let r = $plan.region
+	let has_migrate = $staged.has_migrate
+	let number = $staged.number
+	let pushed = if $staged.gated and $staged.copy != null { tag-release $staged.copy } else { $staged.pushed }
 	run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
 	# The migrate job an earlier release ran apart, which this one's job does.
 	if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) { gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore }
@@ -504,6 +534,14 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	$pushed
 }
 
+# A release from start to end, staged and made live at once: a preview's, a dry run, a
+# snapshot, `--no-gate`'s.
+def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record]: nothing -> record {
+	let staged = (stage $app_info $preview $dry_run $snapshot $from)
+	if ($staged.done? | default false) { return {} }
+	go-live $staged
+}
+
 # The release's copy of a tested preview's images, started before its tests
 # end, where the release's repository is there already; null where it is not,
 # for the release to copy them once it made it.
@@ -514,6 +552,35 @@ def start-early-copy [cue_path: string, from: record]: nothing -> any {
 	start-copy $plan $name ($from.pushed | columns) $from
 }
 
+# A service's traffic back to the revision before the one serving it, by Cloud Run's
+# revisions, newest first. The service's own goes back only where that revision was released
+# with the same schema (its pronto-schema label): past a migration it would read a schema that
+# is gone, and going back there is a release of the older commit, which its gate tests.
+def back-one [service: string, project: string, region: string, --schema] {
+	let revisions = (gc run revisions list --service $service --region $region --project $project --format json | from json
+		| sort-by {|v| $v.metadata.creationTimestamp } --reverse)
+	let serving = (gc run services describe $service --region $region --project $project --format json | from json
+		| get status.traffic | where {|t| ($t.percent? | default 0) == 100 } | first | get revisionName)
+	let at = ($revisions | enumerate | where {|e| $e.item.metadata.name == $serving } | first | get index)
+	let before = ($revisions | skip ($at + 1) | where {|v| $v.status.conditions | any {|c| $c.type == "Ready" and $c.status == "True" } } | first)
+	if $before == null { error make {msg: $"($service) has no revision before ($serving) to go back to"} }
+	if $schema {
+		let now = ($revisions | get $at | get -o metadata.labels.pronto-schema)
+		let then = ($before | get -o metadata.labels.pronto-schema)
+		if $now == null or $now != $then {
+			error make {msg: $"($before.metadata.name) was released with another schema than ($serving) \(($then | default 'none') / ($now | default 'none')\): going back past a migration is a release of that older commit"}
+		}
+	}
+	gc run services update-traffic $service --to-revisions $"($before.metadata.name)=100" --region $region --project $project | ignore
+	print $"gcp: (stamp) ($service) serves ($before.metadata.name) again, not ($serving)"
+}
+
+# The release's service and its sidecars apart, each back one revision.
+def roll-back [plan: record] {
+	back-one $plan.service $plan.project $plan.region --schema
+	for svc in ($plan.names.sidecarServices? | default {} | values) { back-one $svc $plan.project $plan.region }
+}
+
 export def main [
 	--snapshot      # Build and render only, change nothing in the project
 	--dry-run       # Print what would be applied and exit
@@ -521,6 +588,7 @@ export def main [
 	--preview: string # A pull request's own copy beside the release, such as pr-32
 	--delete        # Remove the preview, when its pull request closes
 	--no-gate       # Release without testing a preview of it first
+	--rollback      # Send the release's traffic back to the revision before, where the schema is the same
 ] {
 	$env.GCP_T0 = (date now)
 	let app_info = (resolve-app $app)
@@ -533,6 +601,8 @@ export def main [
 	let dry_run = ($dry_run or (do $given DRY_RUN))
 	let snapshot = ($snapshot or (do $given SNAPSHOT))
 	let no_gate = ($no_gate or (do $given NO_GATE))
+	let rollback = ($rollback or (do $given ROLLBACK))
+	if $rollback { roll-back (plan-of $app_info.cue_path ""); return }
 	if $delete {
 		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }
 		delete-preview (plan-of $app_info.cue_path $preview)
@@ -564,8 +634,18 @@ export def main [
 		go-drivers $drivers
 		let from = {registry: $rc_plan.registry, pushed: $tested}
 		let copy = (start-early-copy $app_info.cue_path $from)
-		finish-drivers $drivers
-		deploy $app_info "" false false ($from | merge {copy: $copy}) | ignore
+		# Production staged while the tests run, none of it the app's code, and made live
+		# only once they passed (docs/decisions/2026-10-29-staged-release.md).
+		let both = (["stage" "tests"] | par-each {|t|
+			if $t == "stage" {
+				try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}))} } catch {|e| {staging: $e.msg} }
+			} else {
+				try { finish-drivers $drivers; {} } catch {|e| {tests: $e.msg} }
+			}
+		} | reduce -f {} {|it, acc| $acc | merge $it })
+		if ($both.tests? | is-not-empty) { error make {msg: $both.tests} }
+		if ($both.staging? | is-not-empty) { error make {msg: $"the tests passed, but production was not staged: ($both.staging)"} }
+		go-live $both.staged | ignore
 		# The tests' log, read once the release is live rather than before it.
 		print $"gcp: (stamp) what the tests printed:"
 		try { drivers-log $drivers } catch {|e| print $"gcp: (stamp) the tests' log was not read: ($e.msg)" }

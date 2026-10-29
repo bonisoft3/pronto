@@ -73,6 +73,17 @@ Deno.test("the service is one instance at most and none at rest", async () => {
   assertEquals(JSON.parse(a["run.googleapis.com/container-dependencies"]).caddy, ["crud", "auth", "electric"]);
 });
 
+// A rollback (release.nu --rollback) pins traffic to a revision; the next release sends it
+// all to its own again, and labels it with the schema it was released with, which a
+// rollback compares.
+Deno.test("every release sends all traffic to its revision, labelled with its schema", async () => {
+  const r = await built(release(), "service");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.spec.traffic, [{ percent: 100, latestRevision: true }]);
+  // No migrations here: the schema is the database image's.
+  assertEquals(r.value.spec.template.metadata.labels["pronto-schema"], "4".repeat(40));
+});
+
 Deno.test("initdb builds the schema once, and its re-runnable steps every release, over the Cloud SQL socket", async () => {
   const r = await built(release(), "job");
   assertEquals(r.success, true, r.stderr);
