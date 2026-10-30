@@ -218,7 +218,7 @@ _sqlType: {
 
 #tableSql: T={
 	e: #Entity
-	columns: *{} | {[string]: [string]: _}
+	columns: [string]: [string]: _
 	_lines: list.Concat([
 		[for fld in T.e.fields {
 			let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
