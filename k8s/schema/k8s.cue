@@ -232,6 +232,11 @@ import (
 				command: ["bash", "-c", """
 					set -euo pipefail
 					shopt -s extglob
+					# pgroll records any DDL run outside it as an "inferred" migration, a link
+					# in the chain its previous_migration walks; every release replaying these
+					# steps added hundreds, and at 8,353 that walk ran past the job's timeout
+					# (Bonk Chess, 2026-10-29). These steps are no migrations: psql tells it so.
+					export PGOPTIONS="-c pgroll.no_inferred_migrations=true"
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 					if [ "$marker" = "pronto initdb" ]; then
 					  echo "initdb: already built"

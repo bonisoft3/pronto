@@ -588,6 +588,11 @@ import (
 							set -euo pipefail
 							# On before bash reads the if below, whose glob it is.
 							shopt -s extglob
+							# pgroll records any DDL run outside it as an "inferred" migration, a link
+							# in the chain its previous_migration walks; every release replaying these
+							# steps added hundreds, and at 8,353 that walk ran past the job's timeout
+							# (Bonk Chess, 2026-10-29). These steps are no migrations: psql tells it so.
+							export PGOPTIONS="-c pgroll.no_inferred_migrations=true"
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
@@ -621,7 +626,7 @@ import (
 							# bypasses; BYPASSRLS gives it that back. Sessions that switch
 							# roles still meet every policy.
 							psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
-							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
+							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks, which pgroll records itself.\nunset PGOPTIONS\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
 						env: list.Concat([initdbEnv, [if R.migrate != _|_ for e in list.Concat([
 							[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out],
 							[for k, v in R.migrate.env {name: k, value: v}],

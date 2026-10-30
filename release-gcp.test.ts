@@ -236,6 +236,11 @@ Deno.test("an app with migrations carries its schema forward in the schema job, 
   assertEquals(more.length, 0);
   assert(/battlechess-schema@sha256:9{64}$/.test(c.image), c.image);
   assert(c.command[2].trimEnd().endsWith('exec "/migrate.sh" "/pgroll" "00_initdb"'), c.command[2]);
+  // The replays are no migrations: pgroll recorded each of their statements as an inferred one,
+  // 8,353 in Bonk Chess's ledger, until its previous_migration ran past the job's timeout. pgroll,
+  // which records its own, runs without the option.
+  assertStringIncludes(c.command[2], 'export PGOPTIONS="-c pgroll.no_inferred_migrations=true"\n');
+  assertStringIncludes(c.command[2], '\nunset PGOPTIONS\nexec "/migrate.sh"');
   assertEquals(c.env.find((e: { name: string }) => e.name === "DATABASE_URL").valueFrom.secretKeyRef.name, "battlechess-migrate-database-url");
   assertEquals(c.env.find((e: { name: string }) => e.name === "REQUIRED_TABLES").value, "schedule");
   // initdb's own socket wins over a compose host that names its database service.
