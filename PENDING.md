@@ -402,6 +402,39 @@ affordance is never compared.
 
 **`just generate` fails in the shadcnui gallery** (last checked 2026-09-20).
 
+**The read coalescer gives up when a key repeats with a non-equality
+operator**, so every picture read (`photo_url=not.is.null&photo_url=neq.`)
+is its own request, one per row on every screen that draws faces; keeping
+repeated keys in a batch removes the app author's N+1. Checked 2026-10-29.
+
+**An enum word is written in its CEL, a form's options and every equality
+filter, with only the CHECK to agree them**; a lint deriving the set from the
+field's `in [...]` and checking options and `eq.` filters against it removes
+the drift reviewers now catch by hand. Checked 2026-10-29.
+
+**Nothing checks that `entityOrder` names every entity and each `ref` target
+before its referrer**; `#emit` takes the list as given and silently drops an
+unlisted table, which a `cue vet` constraint would refuse for every app that
+declares an order. Checked 2026-10-29.
+
+**A select with a `!fk` hint or a filter through an embed is routed to
+PostgREST**, so its rows never enter the live collection, a row-scoped write
+against them finds nothing, and the region re-reads on every change in the
+network; parsing the hint locally removes the "my rows, each with a person
+probe" detour from every app that names a person beside a face. Checked
+2026-10-29.
+
+**A `server` region re-reads only after this client's own write to the same
+entity, a rule no document states**, so a row a raw-migration trigger writes
+to another table is invisible to the writer until a reload; declaring a
+trigger's write set would let the terminal re-read those tables and spare
+authors a forced move to `live`. Checked 2026-10-29.
+
+**An item's root element is never searched for nested regions, a rule no
+document or lint states**; a probe placed as a template's root never hydrates
+and fails silently, and searching the root or linting it removes that trap
+for every author who nests a probe. Checked 2026-10-29.
+
 ## Visual lint
 
 **A perpetual animation reads as a screen still moving.** `settle()`

@@ -135,11 +135,13 @@ log for people (most recent entry first), never markdown:
   dated filenames (`journal/YYYY-MM-DD-<slug>.html`,
   `journal/YYYY-MM-DD-<slug>.png`), which the cluster serves under
   `/docs/journal/`.
-- **Periodic brief refresh & garbage collection:** From time to time, emit an
-  updated brief / state-of-the-app entry (`<article id="brief-YYYY-MM-DD">`) at
-  the top of the log, update `<header>`'s anchor link to point to it, and delete
-  superseded older entries and their `journal/` files from `HEAD` (git holds the
-  full history; `HEAD` keeps the curated subset you choose to keep).
+- **Brief refresh & garbage collection, once a sprint:** Every four turns the
+  sprint wrap (`/pronto:sprint`, `commands/sprint.md`) emits an updated brief /
+  state-of-the-app entry (`<article id="brief-YYYY-MM-DD">`) at the top of the
+  log with the next four turns planned, updates `<header>`'s anchor link to
+  point to it, and deletes superseded older entries and their `journal/` files
+  from `HEAD` (git holds the full history; `HEAD` keeps the curated subset). A
+  turn does not do this on its own.
 
 When acceptance IDs, test spans/drivers, user-visible behavior, or `journal.html`
 changed, run the **`qa` seat** ([review seats](references/studio-seats.md)) to

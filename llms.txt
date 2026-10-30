@@ -83,9 +83,11 @@ code: pronto.#App & {
         blobs: false
         hatches: {}
         vendored: {}
-        auth?: { required: bool, service: string, promote?: bool }
+        auth?: { required: bool, service: string, promote?: bool, self?: { route: string, name: string } }
+        resources?: { "<name>": { kind: "img", source: "https:" } } // external image hosts the CSP admits
         blobSeed?: { manifest: string, origin: string }
     }
+    state: rawMigrations?: [{ name: "011_owner_writes", src: "services/database/sql/011_owner_writes.sql" }]
     surface: {
         screens: { ... }
         handlers: {}
@@ -103,6 +105,8 @@ code: pronto.#App & {
         tests: {}
     }
 }
+
+*Auth seams:* a guest gets no strip (no name, no sign-out) unless `auth.promote: true` or a provider exists; `auth.self` names the route and the column the strip links the reader's own name to. `state.rawMigrations` is the declared seam for checked-in SQL the compiler cannot derive (additive policies, SECURITY DEFINER triggers, demo data); each file is a reviewed migration, not an escape hatch.
 
 cluster:  (pronto.#DefaultCluster & {"code": code, statics: terminal.surface.statics}).out
 terminal: (pronto.#DefaultTerminal & {"code": code}).out
@@ -123,7 +127,7 @@ out:      pronto.#emit & {"code": code, "cluster": cluster, "terminal": terminal
 
 ### B. Entity Declaration, Identity Minting, Durability Lattice & CEL Cheat-Sheet (`#Entity`)
 
-Entities are declared under `state.entities.<EntityName>`. **No model mints identity:** author new entities without `id:` and new fields without `ordinal:` (each field as a single-line `{name: "col", type: "..."}` literal inside `fields: [...]`). When `mise x -- ./saytw generate` (or `identity.ts mint`) runs, it automatically stamps `id` and `ordinal` into `program.cue`, stamps `data-type-id` and `data-ordinal` into `ir.html`, and records them in `.pronto/identity.json` (`identity.ts check` refuses hand-invented IDs or ordinals not recorded in `.pronto/identity.json`):
+Entities are declared under `state.entities.<EntityName>`. **No model mints identity:** author new entities without `id:` and new fields without `ordinal:` (each field as a single-line `{name: "col", type: "..."}` literal inside `fields: [...]`). When `mise x -- ./saytw generate` (or `identity.ts mint`) runs, it automatically stamps `id` and `ordinal` into `program.cue`, stamps `data-type-id` and `data-ordinal` into `ir.html`, and records them in `.pronto/identity.json` (`identity.ts check` refuses hand-invented IDs or ordinals not recorded in `.pronto/identity.json`). The ledger also refuses removing an entity it knows: a remodel of an app that has shipped keeps the entity; an app that has never shipped may delete `.pronto/identity.json` and every `id:`/`ordinal:` and re-mint once.
 
 ```cue
 state: entities: {
@@ -152,8 +156,9 @@ state: entities: {
 1. `tab`: In-memory in the single browser tab. Never reaches disk or server. Omit `access`. Ideal for UI view state, game boards, modal toggles, ephemeral filters. Supports `seed: [...]` in `program.cue`.
 2. `device`: Stored in IndexedDB in the browser. Persists across page reloads on that device, never leaves the browser. Omit `access`. **Cannot declare non-empty `seed:` in `program.cue`** (`schema.cue` enforces `if durability == "device" { seed: [] }`); for `device` singleton slots, use `data-empty-row='{...}'` in markup and `op: "put"` in handlers.
 3. `offline`: Client-first sync. Writes succeed locally immediately, background-reconcile to the cluster when online.
-4. `server`: Canonical PostgreSQL table on the server/edge. Replicated to clients matching authorized sync shapes.
-5. `live`: Server-authoritative table with high-frequency live subscriptions.
+4. `server`: Canonical PostgreSQL table on the server/edge, read through PostgREST per region mount and re-read after **this client's own write to that entity** only. A row born on the server (a trigger, another client) is not seen until the region re-mounts or the page reloads; a page that must see rows it did not write declares the entity `live` instead.
+5. `live`: Server-authoritative table pushed through a sync shape. **The sync layer applies no RLS**: every row in the shape reaches every client in its scope. State only two parties may see is therefore never one row: declare two `private` rows, one in each party's scope, kept equal by SECURITY DEFINER triggers in a raw migration, and let the public table hold the settled result alone.
+*Diagram labels are read:* `check-facts` reads the `(word)` in an architecture-diagram node label (`Karma (server)`) as the entity's durability; write the durability there, never a remark.
 *Seed Data Placement:* Never bloat `program.cue` with large inline `seed:` arrays. When a database exists and the data is user-generated content (UGC) or operational state, favor SQL migrations (`services/database/sql/*.sql`) or runtime writes; when static CUE seed rows are needed, split them into a sibling `seed.cue` in the same package (or hold large server archives in `seed.json` via `state: seed: src: "seed.json"`).
 
 #### CEL Validation Cheat-Sheet (`cel:`):
@@ -168,7 +173,7 @@ state: entities: {
 | **Integer enum / bool text** | `this in [1, 2, 3]` or `this in ['true', 'false']` | Closed value set validated at compile & runtime |
 | **Numeric range** | `this >= 0 && this <= 99` | `col >= 0 AND col <= 99` / `>=0 & <=99` |
 | **Regex pattern** | `this.matches('^[A-Z]{3}$')` | `col ~ '^[A-Z]{3}$'` / `=~ "^[A-Z]{3}$"` |
-| **Prefix check** | `this.matches('^https://')` | SQL regex check and CUE pattern constraint |
+| **Prefix check** | `this.matches('^https://')` | SQL regex check and CUE pattern constraint. `startsWith()` derives no SQL; spell prefixes as a regex |
 | **Row invariant** | `invariant: { cel: "this.a != this.b" }` | Cross-column SQL `CHECK (a <> b)` (`this` = row) |
 | **Null-pair invariant** | `invariant: { cel: "has(this.a) == has(this.b)" }` | `CHECK ((a IS NOT NULL) = (b IS NOT NULL))` |
 
@@ -182,6 +187,8 @@ Access modes map mechanically to PostgreSQL RLS policies:
 | `private` | `access: { scope: "private", owner: "user_id" }` | Row is strictly accessible by the subject matching `auth_uid() == owner`. | Private user profile, account settings, drafts. |
 | `folder` | `access: { scope: "folder", parent: "ParentEntity", on: "parent_id" }` | Inherits tenant access from parent row joined on foreign key `on`. | Child comments, order line items, game turns within a match. |
 | `internal` | `access: { scope: "internal" }` | Inaccessible from browser PostgREST APIs; accessible strictly to backend workers and pipelines. | Secret tokens, encryption keys, background queue jobs. |
+
+*Public tables that people write to* (a scrapbook, a friends list, a fan count): keep `scope: "public"` for the read and add the write arms as a raw migration: `CREATE POLICY ... FOR INSERT TO app_user WITH CHECK (author_id = auth_uid())`, `FOR DELETE ... USING (author_id = auth_uid() OR owner_id = auth_uid())` when two parties may, and `REVOKE INSERT ... ; GRANT INSERT (id, owner_id, author_id, body)` per column so defaults such as `created_at` are never the client's to set. `#Access` expresses one owner; "writer or page owner" is this OR, declared where a reviewer reads it.
 
 ### D. Screen Contract (`#Screen`)
 
@@ -205,6 +212,9 @@ surface: screens: arena: {
         </section>
         """
     forms:  []
+    slug?:  "slug_arena" // a messages key: only the route's FIRST segment is localized; the rest, literal or `:param`, is verbatim
+    keep?:  2            // screens kept on the back stack
+    files?: shared: ["shell/shared/system.css"] // stylesheets every screen of the app imports
     states: ["ready", "playing", "won", "lost"]
     paths: {
         start: { states: ["ready", "playing"], accepts: ["accept-start"] }
@@ -233,7 +243,7 @@ Before the first compiler run on a new app, prepare these **7 prerequisite group
 1. `.mise.toml`, `mise.lock`, `saytw`, `saytw.ps1`: Bootstrap the app’s pinned toolchain using Pronto’s `skills/pronto-turn/references/bootstrap.md`. Configure checkout source overrides in `mise.local.toml` during checkout setup. Keep tool locations in mise configuration; the command examples below work from any app directory.
 2. `brief.md` & `journal.html` (plus optional dated `journal/YYYY-MM-DD-*`): `brief.md` is the product-altitude problem statement. `journal.html` is a reverse-chronological HTML log for people: its `<header>` always opens with a **product-centric `<h1>` title** (never a turn or mechanism headline) and a `brief.html`-style product summary paragraph ending with an anchor link (`<a href="#initial-brief">Latest product brief ↓</a>` or `<a href="#brief-YYYY-MM-DD">Latest product brief ↓</a>`) to the most recent brief update in the journal log. Below `<header>`, reverse-chronological `<article>` entries start from `<article id="initial-brief">` at the bottom; each subsequent turn prepends its product and technical achievements with before/after evidence (`journal/YYYY-MM-DD-*`), and periodically it emits an updated brief entry (`id="brief-YYYY-MM-DD"`) at the top (updating the `<header>` anchor link) while garbage-collecting superseded entries and `journal/` files from `HEAD` (git preserves full history).
 3. `acceptance.md`: Acceptance ledger where every claim line ends with a `{#accept-<slug>}` anchor (parsed via `/\{#(accept-[a-z0-9-]+)\}/g`, e.g., `- First click is guaranteed safe. {#accept-start}`). Every ID in `paths.<p>.accepts` must appear here.
-4. `DESIGN.md` & `shell/screens/<screen>.css`: `DESIGN.md` starts with YAML frontmatter (`preset: "press"`; custom semantic color tokens may be declared under `colors: { gold: "#B7791F" }` with a matching `dark: { gold: "#D69E2E" }` twin, emitted as `var(--gold)`). Pre-create `shell/screens/<screen>.css` before the first `write.ts` run; scope selectors under `[data-screen="<screen>"]`, keep interactive cell/button dimensions on the 4px baseline (e.g. `32px`), use `var(--fg)` for text contrast across light/dark themes (enforced by `ci-visual` under `mise x -- ./saytw integrate`), and use enforced design tokens instead of raw literals (`var(--surface)`, `var(--surface-muted)`, `var(--fg)`, `var(--primary)`, `var(--accent)`, `var(--danger)`, `var(--border)`, `var(--border-size-1)`, `var(--border-size-2)`, `var(--size-1)`, `var(--sp-sm|md|lg)`, `var(--r-sm|md)`, `var(--type-label|caption|body|subtitle)`). Avoid `font:` shorthand when consuming font-size tokens; use `font-size: var(--type-...)` longhand.
+4. `DESIGN.md` & `shell/screens/<screen>.css`: `DESIGN.md` starts with YAML frontmatter (`preset: "press"`; custom semantic color tokens may be declared under `colors: { gold: "#B7791F" }` with a matching `dark: { gold: "#D69E2E" }` twin, emitted as `var(--gold)`). Pre-create `shell/screens/<screen>.css` before the first `write.ts` run; scope selectors under `[data-screen="<screen>"]`, keep interactive cell/button dimensions on the 4px baseline (e.g. `32px`), use `var(--fg)` for text contrast across light/dark themes (enforced by `ci-visual` under `mise x -- ./saytw integrate`), and use enforced design tokens instead of raw literals (`var(--surface)`, `var(--surface-muted)`, `var(--fg)`, `var(--primary)`, `var(--accent)`, `var(--danger)`, `var(--border)`, `var(--border-size-1)`, `var(--border-size-2)`, `var(--size-1)`, `var(--sp-sm|md|lg)`, `var(--r-sm|md)`, `var(--type-label|caption|body|subtitle)`). Avoid `font:` shorthand when consuming font-size tokens; use `font-size: var(--type-...)` longhand. Page-level widths are `measures: { page: "980px", column: "720px" }` in the frontmatter, emitted as `var(--measure-page)`; a bare `px` width in a screen is a literal the lint flags. `shell: { bg, fg, rule }` paints the page **and** the terminal's strip (`body > nav`): a coloured strip over a pale page is `shell.bg: neutral` plus a shared stylesheet on `body > nav`, not a shell colour. Screens adapt with container queries (`[data-screen] { container-type: inline-size }`); `@media` is admissible only on the whole-page gate, which has no container. A letter avatar is `font-size: 0` with `::first-letter` sized on a `display: block` element, never `overflow: hidden` on a name (the visual lint reads clipped text as a defect). Every colour is declared once with its dark twin, so a frame in the storyboard uses the appearance's own tokens, not the light hex on a dark ground.
 5. `ir.html` (optionally split into `ir/*.html` fragments included via `<link rel="import" href="ir/...">` or `![[ir/...]]`): Must contain:
    - `<section id="<EntityName>" data-kind="entity" data-durability="tab">` with `<table data-extract="fields">` (one `<tr><td>col</td><td>type</td><td>note</td></tr>` per field).
    - `<article id="<screen>" data-kind="screen" data-route="/">`, `<article id="<screen>-<state>" data-kind="state">`, and `<script type="application/json" data-kind="paths" data-of="<screen>">{"start":{"states":["ready","playing"],"accepts":["accept-start"]}}</script>`.
@@ -260,6 +270,8 @@ Before the first compiler run on a new app, prepare these **7 prerequisite group
 | `data-order="<col>.<asc\|desc>"` | Ordering | Column and sort direction (e.g. `ord.asc`, `created_at.desc`). | Orders instantiated template children. |
 | `data-reads="a,b,c"` | Context Injection | Comma-separated list of tables to provide in `state.rows`. | Passive read: does NOT wake the fold on change, but supplies `state.rows.<table>` on wake. **Always include the region's own `data-live` table in `data-reads` if the handler reads `state.rows.<own_table>`** (otherwise only `state.items` holds the region's own rows). |
 | `data-empty="<text>"` | Empty Copy | Fallback text (or `""` for blank) when a list or nested slot returns 0 rows. | Use `data-empty=""` on pre-seeded singleton slots or lists without `data-empty-row`. |
+| `data-select="*,alias:table!fk_col(cols)"` | Embed | A PostgREST resource embed named by its foreign-key column; `!inner` filters the parent by the child. | `{alias.col}` binds in `data-text`; a table with two keys to one parent names each embed by its column. `{msg[col]}` resolves only on the bound row's own column, never through an embed — nest a one-row region on the parent to translate its column. A filter through an embed path (`alias.col=eq.x`) is untranslatable to the live store, so that region reads through PostgREST and does not update live. |
+| `data-project='{"n":"count"}'` | Projection | A region whose one row is a tally over the filter. | `<b data-live="fan" data-filter="idol_id=eq.{id}" data-project='{"n":"count"}' data-empty="0"><template data-item><i data-text="{n}"></i></template></b>` |
 | `data-empty-row='{...}'` | Fallback Prototype | Valid JSON object string (e.g. `'{"id":"the"}'`) rendered on a **slot** when 0 rows match. | Must be valid JSON (`JSON.parse`); non-JSON values throw at runtime in `hydrateRegion`. |
 | `data-handler="<name>"` | Fold Binding | Names the handler module `shell/handlers/<name>.js` for the region. | Paired with `data-on-click` or `data-on-mutation`. |
 | `data-on-mutation="<handler>"` | Reactive Fold | Wakes `shell/handlers/<handler>.js` with `{ type: "mutation" }`. | Fires on first paint and every change to the region's *own* `data-live` table. |
@@ -271,7 +283,24 @@ Before the first compiler run on a new app, prepare these **7 prerequisite group
 1. **Equality & Inequality:** `id=eq.the`, `status=neq.closed`, `turn=gt.0`, `rank=lte.10` — joined with `&` (`&amp;` in HTML attributes, e.g. `current=eq.yes&amp;seat=eq.a`).
 2. **Nulls, Booleans & Caps:** `cover_url=not.is.null`, `graded=eq.false`, `active=is.true`, `limit=20` (row cap applied after `data-order`).
 3. **Parent Row Interpolation (`{col}`):** Nested regions resolve `{col}` against the enclosing row (e.g. `<ul data-live="play" data-filter="round_id=eq.{id}">`).
-4. **Route Param Interpolation (`{param.x}`):** Regions on parameterized routes (`/board/:game`) pin route params via `data-filter="id=eq.{param.game}"`.
+4. **Route Param Interpolation (`{param.x}`):** Regions on parameterized routes (`/board/:game`) pin route params via `data-filter="id=eq.{param.game}"`; any attribute may carry it, a static back link included.
+
+#### Probes: a region's `:empty` is a fact
+A **probe** is a nested one-row region with `data-empty=""` whose only job is to be empty or not: `<span class="me-probe" data-live="me" data-filter="id=eq.{id}"><template data-item><i></i></template></span>`. Rules that hold for every probe:
+- It carries **no whitespace** outside its `<template>`; a text node keeps it non-empty forever.
+- It is never the **root** of an item template: an item's root element is not searched for nested regions, so `<template data-item><span data-live=…>` silently never hydrates and keeps its template. Wrap it in a plain element (`display: contents`).
+- Key the rules that read it on its **stamped child** (`.probe > .arm { display: flex }`), not on `:empty`/`:not(:empty)`: before the first sweep the template makes it non-empty, and a stamped child exists exactly when a row does.
+- Before its first sweep it still holds the `<template>`, so `:not(:empty)` reads true for a beat: hold the box that depends on it with `.box:has(.probe > template) { visibility: hidden }`.
+- **The ownership primitive** is a `live`, `private` one-row-per-subject table (`me`, provisioned by a trigger inside the auth insert) read as a probe filtered on the row in question: empty means not mine. A probe on a **public** table filtered on another person's id answers "does anyone", not "do I"; read the reader's relation through the reader's own `me` row — nest the relation probes inside a `me` region, filter on my id and the other party's key through an inner embed.
+- `:has()` on a box over its probes chooses which sibling control is drawn. Every control starts hidden at one specificity and is shown by a more specific rule; a base rule such as `.box form { display: flex }` outranks `.ask { display: none }` and draws every control at once. The storybook's own per-frame rules are more specific still and mask this; only the live page shows it.
+- The storybook fixture fills every region with three rows and never draws a region's empty item: a frame that shows an empty panel needs a stand-in note revealed under `.storybook .frame [data-screen=x][data-state=y]`, and a probe-driven control is kept to the first row there.
+
+#### Forms over rows
+- `data-action="update"` patches the **enclosing** row; `data-action="delete"` with no `data-filter` deletes it. With `data-filter`, the client first reads the rows under the filter and then deletes by id: on a public table the first row may be someone else's, the policy deletes nothing, and the control reports a refusal. A form that undoes the reader's own row lives **inside the probe row it undoes**, row-scoped.
+- A hidden input submits a string; a boolean column takes `<input type="checkbox" name="accepted" checked hidden aria-hidden="true">`. A hidden `data-value="{col}"` is read at submit, so the reset after a successful create does not blank it.
+- An undo that cannot be undone (unfriend, leave, delete) takes two taps with no script: a `<details>` whose `<summary>` is the arm ("apagar…") and whose body is the form with the red button; `details[open] summary { display: none }`. The armed state is ephemeral by construction.
+- A search box is a row: a `tab` entity, one row per browser tab, read as a slot (`data-live="community_search" data-filter="id=eq.the" data-empty-row='{"id":"the","q":""}'`, no `<template>`), written by an `upsert` form (hidden `id`, a text `q`) and read by a nested list `data-filter="name=ilike.*{q}*"`; an attribute bound on the slot itself (`data-q="{q}"`) lets CSS hide the results while `q` is blank. A `like`/`ilike` read is a snapshot through PostgREST, re-run when the row changes; the value is URL-encoded, so nothing injects, but `%`, `_` and `*` are wildcards.
+- `required` and `maxlength` on the control stop a request before it is made (and give it its own `.invalid` sentence); `required` lets spaces through, which the CEL `trim()` CHECK refuses with the `.store-error` sentence. `maxlength` counts UTF-16 units, `size()` code points: the control is only ever stricter.
 
 ### B. Jessie Handler / Cortex Execution Contract
 
@@ -460,7 +489,27 @@ In multiplayer and turn-based games (`truco`, `apexrun`), multi-player coordinat
 + </form>
 ```
 
-### 8. Authoring Architecture Contracts, Identity Minting & Tooling Assumptions
+### 8. Undoing a Relation on a Public Table
+```diff
+- <!-- WRONG: a filtered delete resolves rows against the public table first; the policy then deletes someone else's row, i.e. nothing -->
+- <form data-form="unfan" data-entity="fan" data-action="delete" data-filter="idol_id=eq.{id}">
+
++ <!-- RIGHT: the form lives in the reader's own probe row and deletes that row -->
++ <span class="fan-probe" data-live="fan" data-select="*,idol:app_user!idol_id!inner(handle)" data-filter="fan_id=eq.{id}&amp;idol.handle=eq.{param.handle}" data-empty=""><template data-item><form data-form="unfan" data-entity="fan" data-action="delete"><button type="submit">deixar de ser fã</button></form></template></span>
+```
+
+### 9. Pending State Two Parties May See
+```diff
+- // WRONG: one public row narrowed by a policy; the sync shape ships it to everyone
+- FriendRequest: { durability: "live", access: { scope: "public" } }
+
++ // RIGHT: two private halves, one per party, mirrored by a SECURITY DEFINER trigger in a raw migration; the public table holds the accepted result alone
++ FriendRequestSent: { durability: "server", access: { scope: "private", owner: "from_id" } }
++ FriendRequest:     { durability: "server", access: { scope: "private", owner: "to_id" } }
++ Friendship:        { durability: "server", access: { scope: "public" } } // two rows, one per direction, minted on accept
+```
+
+### 10. Authoring Architecture Contracts, Identity Minting & Tooling Assumptions
 ```diff
 - // WRONG: Pre-inventing `id: "0x..."` / `ordinal:` in program.cue or omitting `data-kind="screen"` assuming `which d2` must succeed
 - Game: {
@@ -533,6 +582,12 @@ mise x -- deno run -A --config "$pronto_root/bundle/deno.json" \
   "$pronto_root/bundle/publish-edge.ts" dist/cloudflare --mecha "$mecha_root"
 ```
 
+*Units of work:* a **turn** (`/pronto:turn`) is one slice end to end — one screen or one relation with its oracle, gates, seats and live walk — and costs one engineer-week; plans are written in turns and convert one to one. A **sprint** (`/pronto:sprint`) is four turns and a half-turn wrap that refreshes the brief, collects the journal, walks the whole acceptance ledger, cuts a snapshot release, reviews across the four turns and harvests mechanisms into this file. A four-person team's two weeks is about one sprint.
+
+*What `integrate visual` refuses and why:* a layout shift over 0.25 after first paint is critical — a page whose panels fill after a row lands (início's own card and the panels under it) shifts everything below, so reserve the panels' usual heights (`min-height` in control-height tokens); a control under 24px tall is major (links and summaries become `inline-flex` with a `min-height` token). Three failures are the host, not the tree: `frontend grpc server closed unexpectedly` (the builder crashed; retry), `could not be linted — Timeout` with an Electric "held the pause lock" warning (a starved sync service; stop other stacks, retry), and `container is marked for removal and cannot be started` (the check's transient stack raced its own cleanup; retry).
+
+*What the ladder costs, measured on a three-screen app:* `lint` ≈ 2 s (each check under a second), `test` ≈ 1 s, `generate` ≈ 7 s, `integrate` ≈ 30 s replay + 60 s visual plus the image bake, `launch` ≈ 20 s after a rebuild. Every check takes the app directory alone — there is no per-screen or per-test selection; `check-visual` selects viewports (`--viewports=phone,laptop`) and nothing finer. Run a check directly when one gate is the question; the stack rung is the slow one. `./saytw launch --watch` watches every served source but rebuilds the served image on each edit, because files are content-addressed at build time; `launch` also resets the database, so a scenario is rebuilt after every relaunch. A new file (a screen, a handler) needs `generate` before the proxy serves it: the route list is emitted from `program.cue`.
+
 Sayt’s generated gates resolve the component roots internally. The direct commands expose `mise where` only for preflight and focused diagnostics. `./saytw` is the app’s pinned Sayt launcher, so this works even when a source override supplies no standalone `sayt` binary. Never hand-edit `.say.yaml`; the compiler emits it from `loop` and `build`.
 
 #### Containerized `build: checks` (`tests/acceptance.ts`), Custom `verify.ts` Journeys & Runtime Seams:
@@ -556,7 +611,8 @@ export const journeys = [{
 
 ## 9. QUICK GLOSSARY FOR AGENTS
 
-- **Bijection:** The mathematical 1:1 mapping between design requirements in `ir.html`, CUE schemas in `program.cue`, acceptance checks in `acceptance.md`, and test assertions.
+- **Bijection:** The mathematical 1:1 mapping between design requirements in `ir.html`, CUE schemas in `program.cue`, acceptance checks in `acceptance.md`, and test assertions. Seat reviews (`data-kind="review"`) sit outside it.
+- **Probe:** A nested one-row region whose `:empty` state is the fact a stylesheet reads; the `me` row read this way is the ownership primitive.
 - **Cortex:** The deterministic state machine execution engine running pure transition rules inside SES sandboxes.
 - **Durability:** The storage level of an entity (`tab`, `device`, `offline`, `server`, `live`).
 - **Mecha:** The PostgreSQL-backed edge/cluster runtime managing RLS floors, change data capture (CDC), and actor state machines.
