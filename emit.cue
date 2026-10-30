@@ -208,22 +208,20 @@ _sqlType: {
 
 // The column contract owned by a cluster chart; reducers have no state field.
 #machineColumn: C={
-	machines: [...#MechaMachine]
+	columns: [string]: [string]: _
 	entityName: string
 	entityTable: string
 	fieldName: string
-	for m in C.machines if m.entity == C.entityName || m.entity == C.entityTable if m.field != _|_ if m.field == C.fieldName if m.initial != _|_ {
-		initial: m.initial
-		states: [for n, _ in m.states {n}]
-	}
+	if C.columns[C.entityName][C.fieldName] != _|_ {C.columns[C.entityName][C.fieldName]}
+	if C.entityTable != C.entityName if C.columns[C.entityTable][C.fieldName] != _|_ {C.columns[C.entityTable][C.fieldName]}
 }
 
 #tableSql: T={
 	e: #Entity
-	machines: *[] | [...#MechaMachine]
+	columns: *{} | {[string]: [string]: _}
 	_lines: list.Concat([
 		[for fld in T.e.fields {
-			let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+			let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
 			"  " + (#colSql & {
 				f: fld
 				if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
@@ -281,7 +279,7 @@ _sqlType: {
 	// database to the program's columns. A required field with no default
 	// cannot be added to a table holding rows, and says so then.
 	_added: [for fld in T.e.fields if !fld.pk {
-		let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
 		"ALTER TABLE \(T.e.table) ADD COLUMN IF NOT EXISTS " + (#colSql & {
 			f: fld
 			if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
@@ -299,7 +297,7 @@ _sqlType: {
 	// again as the program says it, under the name Postgres gives a column's
 	// own (<table>_<field>_check), NOT VALID so rows written before are kept.
 	_reasserted: [for fld in T.e.fields if !fld.pk
-		let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
 		for check in [
 			if T.e.cel.checks[fld.name] != _|_ {T.e.cel.checks[fld.name]},
 			if fld.cel == _|_ if column.states != _|_ {"\"\(fld.name)\" IN (" + strings.Join([for n in column.states {(#sqlLit & {v: n}).out}], ", ") + ")"},
@@ -1467,7 +1465,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if f.pk {pk: true}
 				if f.ref != _|_ {ref: f.ref}
 				if f.unique != _|_ {unique: f.unique}
-				let column = #machineColumn & {entityName: e.name, entityTable: e.table, fieldName: f.name, machines: [if S.code.state.machines != _|_ for _, m in S.code.state.machines {m}]}
+				let column = #machineColumn & {entityName: e.name, entityTable: e.table, fieldName: f.name, columns: S.code._machineColumns}
 				if f.default != _|_ {
 					defaulted: true
 					let literal = #literalDefault & {sql: f.default, type: f.type}
@@ -3297,7 +3295,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				format: "sql"
 				_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 				text: strings.Join(list.Concat([
-					[for ent in E._serverEntities {(#tableSql & {e: ent, machines: [if E.code.state.machines != _|_ for _, m in E.code.state.machines {m}]}).out}],
+					[for ent in E._serverEntities {(#tableSql & {e: ent, columns: E.code._machineColumns}).out}],
 					[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
 					[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
 				]), "\n\n") + "\n"
