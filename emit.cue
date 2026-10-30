@@ -216,6 +216,47 @@ _sqlType: {
 	if C.entityTable != C.entityName if C.columns[C.entityTable][C.fieldName] != _|_ {C.columns[C.entityTable][C.fieldName]}
 }
 
+// The server entities in the order 005 creates their tables: each after
+// every table its fields reference, the declared order kept wherever it
+// already is one. A table is keyed by the latest declared position among it
+// and what it reaches, then by how much it reaches, then by its own
+// position, which puts a referenced table first and leaves a declared order
+// that is already valid as it is. A cycle across tables is refused: no CREATE
+// order satisfies it. ume-rental's request table was declared before the
+// app_user it references, and its database refused the file.
+#tableOrder: O={
+	entities: [...]
+	_index: {for i, e in O.entities {(e.table): i}}
+	// What each table references directly; a reference to itself or to a
+	// table no server entity holds asks nothing of the order.
+	_r0: {for e in O.entities {(e.table): {for f in e.fields if f.ref != _|_ if f.ref != e.table if O._index[f.ref] != _|_ {(f.ref): true}}}}
+	// Squared seven times, so a chain of up to 128 references is closed: a
+	// path through 128 tables, or a ring of 128, has at most 128.
+	_r1: {for t, ds in O._r0 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r0[d] {(d2): true}}}}
+	_r2: {for t, ds in O._r1 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r1[d] {(d2): true}}}}
+	_r3: {for t, ds in O._r2 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r2[d] {(d2): true}}}}
+	_r4: {for t, ds in O._r3 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r3[d] {(d2): true}}}}
+	_r5: {for t, ds in O._r4 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r4[d] {(d2): true}}}}
+	_r6: {for t, ds in O._r5 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r5[d] {(d2): true}}}}
+	_r7: {for t, ds in O._r6 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r6[d] {(d2): true}}}}
+	_reach: O._r7
+	_cycles: [for t, ds in O._reach if ds[t] != _|_ {t}]
+	_keyed: [for t, i in O._index {
+		index: i
+		key:   list.Max(list.Concat([[i], [for d, _ in O._reach[t] {O._index[d]}]]))
+		reach: len([for d, _ in O._reach[t] {d}])
+	}]
+	_sorted: list.Sort(O._keyed, {x: _, y: _, less: x.key < y.key || (x.key == y.key && (x.reach < y.reach || (x.reach == y.reach && x.index < y.index)))})
+	// The refusals are `out` itself, so every reader of the order fails with
+	// them: a guard on a sibling field is dropped where a caller selects
+	// `out` from the helper inline, as 005 does.
+	out: [
+		if len(O.entities) > 128 {error("#tableOrder closes chains of at most 128 tables, and this program has \(len(O.entities)) server tables")},
+		if len(O._cycles) > 0 {error("the references among \(strings.Join(O._cycles, ", ")) form a cycle: no table can be created before the others")},
+		[for k in O._sorted {O.entities[k.index]}],
+	][0]
+}
+
 #tableSql: T={
 	e: #Entity
 	columns: [string]: [string]: _
@@ -3295,7 +3336,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				format: "sql"
 				_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 				text: strings.Join(list.Concat([
-					[for ent in E._serverEntities {(#tableSql & {e: ent, columns: E.code._machineColumns}).out}],
+					[for ent in (#tableOrder & {entities: E._serverEntities}).out {(#tableSql & {e: ent, columns: E.code._machineColumns}).out}],
 					[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
 					[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
 				]), "\n\n") + "\n"
