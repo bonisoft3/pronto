@@ -2,10 +2,13 @@
 // the program declares them in: a visit declared before the guest it
 // references, and the guest before its zone, as ume-rental's request was
 // declared before its app_user. A declared order that is already valid is
-// kept as it is, and a cycle across tables is refused.
+// kept as it is. What must be refused cannot sit in the package `cue vet`
+// holds, so table-order.test.ts asks cue for the cases at the end: a cycle through
+// the emitted 005, and the 128-table bound both ways.
 package emit
 
 import (
+	"list"
 	"strings"
 	pronto "github.com/bonisoft3/pronto"
 )
@@ -80,7 +83,30 @@ orderKeptWhereValid: (_tablesOf & {in: [
 	_entity & {#t: "guest", #refs: ["zone"]},
 	_entity & {#t: "visit", #refs: ["guest", "zone"]},
 ]}).out & ["zone", "note", "guest", "visit"]
-cycleRefused: ((_tablesOf & {in: [
-	_entity & {#t: "egg", #refs: ["hen"]},
-	_entity & {#t: "hen", #refs: ["egg"]},
-]}).out == _|_) & true
+// A cycle, through the emitter as 005 reads the order, once the test tags
+// the hen as referencing the egg: untagged, `cue vet` sees no refusal.
+_back: *"none" | string @tag(back)
+_cyclic: _code & {state: entities: {
+	Egg: {table: "egg", durability: "live", fields: [{name: "id", type: "uuid", pk: true}, {name: "hen_id", type: "uuid", ref: "hen"}]}
+	Hen: {table: "hen", durability: "live", fields: [{name: "id", type: "uuid", pk: true}, {name: "egg_id", type: "uuid", ref: _back}]}
+}}
+_cyclicTerminal: (pronto.#DefaultTerminal & {code: _cyclic}).out
+_cyclicCluster: (pronto.#DefaultCluster & {code: _cyclic, statics: []}).out
+_cyclicLoop: (pronto.#DefaultLoop & {code: _cyclic, terminal: _cyclicTerminal, cluster: _cyclicCluster}).out
+_cyclicBuild: (pronto.#DefaultBuild & {code: _cyclic, loop: _cyclicLoop, cluster: _cyclicCluster, terminal: _cyclicTerminal}).out
+_cyclicTables: (pronto.#emit & {
+	code:     _cyclic
+	cluster:  _cyclicCluster
+	terminal: _cyclicTerminal
+	loop:     _cyclicLoop
+	build:    _cyclicBuild
+}).files["services/database/migrations/005_create_tables.sql"].text
+// n tables, each referencing the next; the last references the first in a
+// ring, and nothing in a chain.
+#linked: {
+	n:    int
+	ring: bool
+	out: (_tablesOf & {in: [for i in list.Range(0, n, 1) {
+		_entity & {#t: "t\(i)", #refs: [if ring || i < n-1 {"t\(mod(i+1, n))"}]}
+	}]}).out
+}

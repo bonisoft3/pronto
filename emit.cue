@@ -230,7 +230,8 @@ _sqlType: {
 	// What each table references directly; a reference to itself or to a
 	// table no server entity holds asks nothing of the order.
 	_r0: {for e in O.entities {(e.table): {for f in e.fields if f.ref != _|_ if f.ref != e.table if O._index[f.ref] != _|_ {(f.ref): true}}}}
-	// Squared seven times, so a chain of up to 128 references is closed.
+	// Squared seven times, so a chain of up to 128 references is closed: a
+	// path through 128 tables, or a ring of 128, has at most 128.
 	_r1: {for t, ds in O._r0 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r0[d] {(d2): true}}}}
 	_r2: {for t, ds in O._r1 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r1[d] {(d2): true}}}}
 	_r3: {for t, ds in O._r2 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r2[d] {(d2): true}}}}
@@ -239,16 +240,21 @@ _sqlType: {
 	_r6: {for t, ds in O._r5 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r5[d] {(d2): true}}}}
 	_r7: {for t, ds in O._r6 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r6[d] {(d2): true}}}}
 	_reach: O._r7
-	_closed: [if len(O.entities) <= 129 {true}, error("#tableOrder closes chains of at most 128 references, and this program has \(len(O.entities)) server tables")][0] & true
 	_cycles: [for t, ds in O._reach if ds[t] != _|_ {t}]
-	_acyclic: [if len(O._cycles) == 0 {true}, error("the references among \(strings.Join(O._cycles, ", ")) form a cycle: no table can be created before the others")][0] & true
 	_keyed: [for t, i in O._index {
 		index: i
 		key:   list.Max(list.Concat([[i], [for d, _ in O._reach[t] {O._index[d]}]]))
 		reach: len([for d, _ in O._reach[t] {d}])
 	}]
 	_sorted: list.Sort(O._keyed, {x: _, y: _, less: x.key < y.key || (x.key == y.key && (x.reach < y.reach || (x.reach == y.reach && x.index < y.index)))})
-	out: [if O._closed && O._acyclic for k in O._sorted {O.entities[k.index]}]
+	// The refusals are `out` itself, so every reader of the order fails with
+	// them: a guard on a sibling field is dropped where a caller selects
+	// `out` from the helper inline, as 005 does.
+	out: [
+		if len(O.entities) > 128 {error("#tableOrder closes chains of at most 128 tables, and this program has \(len(O.entities)) server tables")},
+		if len(O._cycles) > 0 {error("the references among \(strings.Join(O._cycles, ", ")) form a cycle: no table can be created before the others")},
+		[for k in O._sorted {O.entities[k.index]}],
+	][0]
 }
 
 #tableSql: T={
