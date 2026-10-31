@@ -1877,6 +1877,14 @@ import (
 			}
 		})
 	}}
+	// The column each chart owns, by the entity it names (its name or its
+	// table) and then the field: its initial state and its states, read once
+	// here for every column's lookup (#machineColumn). A column that walked
+	// the machines itself handed each column a copy of all of them, which took
+	// an app of 25 entities past 40G at export.
+	_machineColumns: {if A.state.machines != _|_ for _, m in A.state.machines if m.field != _|_ if m.initial != _|_ {
+		(m.entity): (m.field): {initial: m.initial, states: [for n, _ in m.states {n}]}
+	}}
 	state: machines: [mn=string]: {
 		let m = A.state.machines[mn]
 		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
