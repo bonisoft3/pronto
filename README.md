@@ -9,11 +9,15 @@ cannot exist. The same way Rust constrains C to gain memory safety, Pronto
 constrains AI-generated code to gain architectural safety.
 
 The source code is markdown and the compiler itself is an LLM. It targets
-[mecha](https://github.com/bonisoft3/mecha) for the backend,
 [omnishell](https://github.com/bonisoft3/omnishell) for UI,
-[sayt](https://github.com/bonisoft3/sayt) for the SDLC, and
-[bayt](https://github.com/bonisoft3/bayt) for build — producing applications
+[mecha](https://github.com/bonisoft3/mecha) for the backend,
+[bayt](https://github.com/bonisoft3/bayt) for build, and
+[sayt](https://github.com/bonisoft3/sayt) for the SDLC — producing applications
 that run identically from a single browser tab to a cloud cluster.
+
+Pronto needs no human supervision and no human code review. It runs unattended
+for the equivalent of several human sprints and ships world-class software at
+the end of them.
 
 For LLM agents generating or modifying Pronto applications, see
 [`llms.txt`](llms.txt) for the machine-readable specification, contract
@@ -31,7 +35,16 @@ apps. No human has ever looked at their source code during development.
 
 Generate flashcards to teach toddlers to read. Leverages modern image generations models, fully reactive UI, gorgeous in your phone and your desktop. Supports multiple languages, extremelly fast. And it is free :-).
 
-<img src="docs/showcase/snapcards-home.png" width="49%" alt="Snapcards home"> <img src="docs/showcase/snapcards-ir.png" width="49%" alt="Snapcards IR: entity diagram"> <img src="docs/showcase/snapcards-journal.png" width="49%" alt="Snapcards engineering journal">
+<table>
+  <tr>
+    <td align="center" rowspan="2" width="22%"><img src="docs/showcase/snapcards-home-phone.png" alt="Snapcards on a phone"><br><sub>The library on a phone, the featured deck first</sub></td>
+    <td align="center" width="39%"><img src="docs/showcase/snapcards-home.png" alt="Snapcards library"><br><sub>The library on a laptop: curated and reader-made decks</sub></td>
+    <td align="center" width="39%"><img src="docs/showcase/snapcards-ir.png" alt="Snapcards IR"><br><sub>ir.html: an entity card and the machine that drives it</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/showcase/snapcards-journal.png" alt="Snapcards journal"><br><sub>journal.html: a turn, before and after</sub></td>
+  </tr>
+</table>
 
 ### Truco
 
@@ -39,7 +52,16 @@ Generate flashcards to teach toddlers to read. Leverages modern image generation
 
 The latino game that crossed continents. Turn based card game supporting country and regional variations of truco, including the six players Dourada, played a few families in the Itaguara region, a small city in the southeast of Brazil. Play against bots or against your pals. 
 
-<img src="docs/showcase/truco-table.png" width="49%" alt="Truco table"> <img src="docs/showcase/truco-brief.png" width="49%" alt="Truco brief, rendered from brief.md"> <img src="docs/showcase/truco-ir.png" width="49%" alt="Truco IR: engineering design"> <img src="docs/showcase/truco-journal.png" width="49%" alt="Truco engineering journal">
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/showcase/truco-table.png" alt="Truco table"><br><sub>A hand in play against the boteco regulars</sub></td>
+    <td align="center" width="50%"><img src="docs/showcase/truco-lobby.png" alt="Truco lobby"><br><sub>An open online table, one seat waiting for a friend</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/showcase/truco-ir.png" alt="Truco IR"><br><sub>ir.html: the engineering design, compiled from the brief</sub></td>
+    <td align="center"><img src="docs/showcase/truco-journal.png" alt="Truco journal"><br><sub>journal.html: a turn with its before and after</sub></td>
+  </tr>
+</table>
 
 ### Apex Run
 
@@ -47,7 +69,16 @@ The latino game that crossed continents. Turn based card game supporting country
 
 A homage to the OutRun arcade game, llm-dreamed from super tux kart source code. Leverages webgpu with adaptive load, art fully AI generated. Great offline support, and when online allows for realtime duels. Uses pronto time travel magic to give you a nice scenic ride on game end, replaying your game from multiple angles, Mario Kart style.
 
-<img src="docs/showcase/apexrun-title.png" width="49%" alt="Apex Run title screen"> <img src="docs/showcase/apexrun-race.png" width="49%" alt="Apex Run race"> <img src="docs/showcase/apexrun-brief.png" width="49%" alt="Apex Run brief, rendered from brief.md"> <img src="docs/showcase/apexrun-ir.png" width="49%" alt="Apex Run IR: architecture and contracts"> <img src="docs/showcase/apexrun-journal.png" width="49%" alt="Apex Run project journal">
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/showcase/apexrun-title.png" alt="Apex Run title"><br><sub>The title card, where a run starts</sub></td>
+    <td align="center" width="50%"><img src="docs/showcase/apexrun-race.png" alt="Apex Run race"><br><sub>The highway at 60 Hz, nitro and traffic</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/showcase/apexrun-journal-early.png" alt="Apex Run journal, an early turn"><br><sub>journal.html at turn 2: the wedge car, before each stage became a place</sub></td>
+    <td align="center"><img src="docs/showcase/apexrun-journal-first.png" alt="Apex Run journal, the oracle"><br><sub>journal.html, the first brief and the Stitch frame it aimed at</sub></td>
+  </tr>
+</table>
 
 ### Bonkchess
 
@@ -62,7 +93,7 @@ The battle chess of the AI era. Built by a third party with no prior knowledge o
 
 Pronto does not need to be installed, just ask your LLM to write code using the bonisoft3/pronto programming language. For example, "Create a minesweeper clone using bonisoft3/pronto as a programming language". Nonetheless, it gets more powerful if you install the pronto plugin as shown below.
 
-The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill, specialist studio seats, and project bootstrap knowledge.
+The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill and the [`pronto-sprint`](commands/sprint.md) command that runs four turns and a wrap, with specialist studio seats and project bootstrap knowledge.
 
 **Antigravity (`agy`):**
 ```bash
@@ -194,15 +225,6 @@ Programming languages exist on a spectrum from "express anything" to "express sa
 - **Runtime surprises** — most errors fail at `cue vet` time, not runtime ([the joins checked later, or not yet](docs/lattice.md#which-joins-the-code-enforces)); the constraint cascade catches them before anything runs
 
 What you give up in expressiveness (GPU compute, arbitrary code outside the pure languages) you gain in correctness for the large class of applications that don't need it: CRUD apps, SaaS tools, dashboards, content management, workflow automation, internal tools, admin panels, and, below the row ladder, frame-rate games on the kinetic plane. [`PHILOSOPHY.md`](PHILOSOPHY.md) argues where each of these constraints comes from.
-
-## Related work
-
-| Project | Similarity | Key difference |
-|---------|-----------|----------------|
-| [Darklang](https://darklang.com) | Deployless, bugs eliminated by construction | Custom language, not natural language |
-| [Wing](https://www.winglang.io) | Preflight/inflight distinction, cloud-safety | Infra-only scope; Pronto covers data + UI + deploy |
-| [Encore](https://encore.dev) | Correctness by construction, infra-from-code | Backend-only; closest production system to Pronto's philosophy |
-| [Lovable](https://lovable.dev) / [v0](https://v0.dev) / Bolt | Prompt-to-app UX | Unconstrained generation into a wide substrate; correctness by iteration instead of by construction |
 
 ## Design documents
 
