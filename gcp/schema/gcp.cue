@@ -58,6 +58,9 @@ import (
 	// The instance's CPU unthrottled between requests, for work that runs while
 	// nobody is asking (a sidecar's long task).
 	alwaysOn: *false | bool
+	// Instances kept at rest, so a visit after a quiet spell does not wait for a
+	// cold start; with maxScale 1, no more than one. A preview keeps none.
+	minScale: *0 | int & >=0 & <=1
 
 	// Electric's share of the instance. Its memory holds every shape it keeps
 	// (its storage is the instance's /tmp, which Cloud Run keeps in memory), so
@@ -322,14 +325,14 @@ import (
 				metadata: labels: "pronto-schema": strings.SliceRunes(strings.TrimPrefix(R.image.pushed[schemaImage].digest, "sha256:"), 0, 40)
 			}
 			metadata: annotations: {
-				"autoscaling.knative.dev/minScale": "0"
+				"autoscaling.knative.dev/minScale": [if R.preview != _|_ {"0"}, "\(R.minScale)"][0]
 				// electric is one instance (mecha's docs/deployment.md#clouds-as-built).
 				"autoscaling.knative.dev/maxScale":         "1"
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
 				// A preview keeps its CPU between requests too: electric reads the replication
 				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
-				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
+				if R.alwaysOn || R.minScale > 0 || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
 					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
 					if R.ticker != _|_ {ticker: ["crud"]}

@@ -563,6 +563,17 @@ Deno.test("an app always on keeps its CPU between requests; by default it is thr
   assertEquals(off.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], undefined);
 });
 
+Deno.test("a kept instance serves without a cold start and keeps its CPU; by default none is kept, and a preview keeps none", async () => {
+  const annotations = async (extra: string) => (await built(release(extra), "service")).value.spec.template.metadata.annotations;
+  const kept = await annotations(", minScale: 1");
+  assertEquals([kept["autoscaling.knative.dev/minScale"], kept["run.googleapis.com/cpu-throttling"]], ["1", "false"]);
+  const rest = await annotations("");
+  assertEquals([rest["autoscaling.knative.dev/minScale"], rest["run.googleapis.com/cpu-throttling"]], ["0", undefined]);
+  const preview = await annotations(", minScale: 1, preview: \"rc\"");
+  assertEquals(preview["autoscaling.knative.dev/minScale"], "0");
+  assertEquals((await built(release(", minScale: 2"), "release.minScale")).success, false);
+});
+
 Deno.test("a sidecar's memory is its container's, inside the instance or apart", async () => {
   const s = await built(withSidecar(`{port: 8687, memory: "4Gi"}`), "service");
   assertEquals(s.success, true, s.stderr);
