@@ -934,6 +934,9 @@ export async function derive(appDir: string): Promise<void> {
       "journal.html: no such file — the cluster serves it from the build context, so it must exist in the app (most often the review ladder's journal.html, authored per SPEC's journal.html section)",
     );
   }
+  if (exp.statics.some((s) => s.file === "brief.md") && !(await exists(`${appDir}/brief.md`))) {
+    problems.push("brief.md: no such file — author brief.md per SPEC's brief.md section; the emitted brief.html renders it");
+  }
 
   // The palette's one declaration: the shared layer owns a token, a screen may
   // only consume it. Read here rather than at lint so the rule is a join.

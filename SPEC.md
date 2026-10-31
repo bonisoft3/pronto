@@ -14,8 +14,8 @@ Scope: all three artifacts of the review ladder.
 An app directory holds `brief.md` → `ir.html` → `program.cue`, per the
 review ladder in [`README.md`](README.md). This spec defines the first two,
 plus their satellites: `acceptance.md` (transcluded checklist), `DESIGN.md`
-(visual identity), `journal.html` and `journal/` (the app's living presentation
-and turn log), and agent cards under `plugins/pronto/agents/`.
+(visual identity), `journal.html` and `journal/` (the turn log), and agent
+cards under `plugins/pronto/agents/`.
 
 ### DESIGN.md
 
@@ -33,37 +33,44 @@ verdicts, and what each token means — in prose.
 
 ## brief.md
 
-The product-altitude source: a plain markdown file. The compiler reads
-brief.md; every other rendering of it is presentation.
+The product-altitude source: a plain markdown file saying what the app is
+today and what the next sprint's turns deliver, in the product's words. The
+compiler reads brief.md; every other rendering of it is presentation. People
+edit it at any time; the sprint wrap rewrites it; a turn never does. The
+journal carries no requirements: a new requirement is an edit here.
 
-### journal.html and journal/: the living presentation and log
+`brief.html` is that presentation: a fixed page the compiler emits beside
+`journal.html` and the cluster serves at `/docs/brief.html` with brief.md
+itself. It fetches brief.md and renders it in the browser (frontmatter
+dropped, `![[path.md]]` inlined from a sibling served file, `[[Id]]` linked to
+`ir.html#Id`, the first heading as title) with marked from a pinned CDN URL
+under Subresource Integrity, the admission ir.html's mermaid has. The ladder's
+pages answer with a Content-Security-Policy of their own, not the terminal's.
+An edit goes to brief.md and is current on reload.
 
-`journal.html` is the app's rich HTML log for people, served at `/docs/journal.html`
-beside `ir.html`. It is never read as state to resume a turn:
+### journal.html and journal/: the turn log
 
-- **Product-centric `<header>` & brief anchor:** `<header>` always opens with a
+`journal.html` is the app's rich HTML log, served at `/docs/journal.html`
+beside `ir.html`. Turns author it; people and models read it for what
+happened, never as state to resume a turn:
+
+- **Product-centric `<header>`:** `<header>` always opens with a
   product-centric `<h1>` title (naming the product and what it does for people,
-  never an internal turn or mechanism headline) followed by a `brief.html`-style
-  product overview paragraph that ends with an anchor link
-  (`<a href="#initial-brief">Latest product brief ↓</a>` or
-  `<a href="#brief-YYYY-MM-DD">Latest product brief ↓</a>`) pointing to the most
-  recent brief update in the journal log.
+  never an internal turn or mechanism headline) followed by one paragraph
+  saying what the product is, so a reader knows the product before scanning
+  the log.
 - **Most recent first:** Below `<header>`, `<article>` entries appear in reverse
   chronological order (newest at the top), recording both product and technical
   achievements.
-- **Initial brief entry:** Its oldest entry at the bottom (`<article id="initial-brief">`)
-  is the browser presentation of `brief.md` and the initial target oracle.
 - **Dated composition (`journal/`):** Each turn prepends an `<article>` entry
   showing what changed (before/after screenshots, recordings, diagrams, or gate
   output) and what the product and engineering achieved. Compose larger entries
   and assets from `journal/` using dated filenames (`journal/YYYY-MM-DD-<slug>.html`,
   `journal/YYYY-MM-DD-<slug>.png`), which the cluster serves automatically under
   `/docs/journal/`.
-- **Periodic brief refresh and garbage collection:** From time to time, emit an
-  updated brief / state-of-the-app entry (`id="brief-YYYY-MM-DD"`) at the top of
-  the log, point `<header>`'s anchor link to it, and delete superseded older
-  entries and their `journal/` files from `HEAD`. Git holds the full history;
-  `HEAD` keeps only the subset of history the agent chooses to keep.
+- **Collection, once a sprint:** The sprint wrap deletes superseded entries and
+  their `journal/` files from `HEAD`. Git holds the full history; `HEAD` keeps
+  the subset worth a reader's time. A turn does not collect on its own.
 
 ### Format
 

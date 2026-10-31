@@ -24,13 +24,13 @@ without becoming ceremony.
 
 The three rules of a turn hold here unchanged: a verb adjudicates what a verb
 can adjudicate; every step ends in a verdict; write no state. The sprint has no
-file of its own. Its opening line is the brief entry the wrap writes in
-`journal.html` and its closing line is the harvest, so a reader finds a sprint
-by its brief entry and nothing new is introduced.
+file of its own. Its opening line is the rewrite of `brief.md` and its closing
+line is the wrap's entry in `journal.html`, so a reader finds a sprint by that
+entry and nothing new is introduced.
 
 ## When to run it
 
-After the fourth feature turn since the last brief entry, or sooner when the
+After the fourth feature turn since `brief.md` was last rewritten, or sooner when the
 plan's next item no longer describes what the app needs. Not after every turn:
 a wrap after one turn is the turn's own Rung 4 done twice.
 
@@ -38,11 +38,13 @@ a wrap after one turn is the turn's own Rung 4 done twice.
 
 ### 1. Refresh the brief
 
-Prepend `<article id="brief-YYYY-MM-DD">` to `journal.html` and move the
-`<header>` anchor to it. It says what the product is today, in the product's
-words, and carries the plan: the next sprint's four turns made concrete, one
-slice each, and the rest left coarse. Mark the turns this sprint finished. A
-plan item that no turn will take is deleted here, not carried.
+Rewrite `brief.md` in place; `brief.html` beside the journal renders it, and
+the journal never carries a copy. It says what the product is today, in the
+product's words, and carries the plan: the next sprint's four turns made
+concrete, one slice each, and the rest left coarse. Mark the turns this sprint
+finished. A plan item that no turn will take is deleted here, not carried. A
+person may have edited the brief mid-sprint; the rewrite keeps what they wrote
+and plans from it.
 
 ### 2. Collect the journal
 
@@ -70,7 +72,7 @@ that cannot cut a release is not done; name the gate that refused.
 ### 5. Review the sprint, not the turns
 
 Launch the `product` and `architect` seats **in the background** over the four
-turns as a whole: the brief entry, the four journal articles, the decisions the
+turns as a whole: `brief.md`, the four journal articles, the decisions the
 sprint added, and the dispositions it declined. The per-turn seats look at a
 slice; this pass looks at the seams between slices — a control named three ways
 on three screens, a decision one turn made that a later turn quietly undid, a
@@ -88,9 +90,11 @@ toward whatever broke last.
 
 ### 7. Record what it cost
 
-One line in the brief entry: turns, wall time, defects found by seats against
-defects found by the live walk, dispositions declined. The next plan is
-estimated from this line, in engineer-weeks, one per turn.
+Prepend the wrap's entry (`<article id="sprint-YYYY-MM-DD">`) to
+`journal.html`: one line of cost — turns, wall time, defects found by seats
+against defects found by the live walk, dispositions declined — and the
+harvest's pointers. The next plan is estimated from the cost line, in
+engineer-weeks, one per turn.
 
 ## Hand back
 
@@ -102,7 +106,7 @@ turn starts as `/pronto:turn` with the plan's first concrete item.
 
 | Not here | Because |
 |---|---|
-| A sprint file or board | The brief entry is the sprint; the tree is the state |
+| A sprint file or board | `brief.md` opens the sprint and the wrap's journal entry closes it; the tree is the state |
 | A retrospective document | The harvest and the cost line are the retrospective, in the places the next reader looks |
 | A turn's rungs again | Each turn already ran its gates and seats; the wrap reads across them |
 | A velocity metric | One turn is one engineer-week by definition; the cost line records the variance |

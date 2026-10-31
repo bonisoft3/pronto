@@ -15,7 +15,7 @@ function exported(expr: string, text: boolean): { ok: boolean; out: string } {
   return { ok: out.success, out: new TextDecoder().decode(out.success ? out.stdout : out.stderr) };
 }
 
-const ask = (reads: string, field: string) => exported(`(#ssrCase & {reads: [${reads}]}).${field}`, field === "caddyfile");
+const ask = (reads: string, field: string) => exported(`(#ssrCase & {reads: [${reads}]}).${field}`, field === "caddyfile" || field === "brief");
 
 const note = (extra = "") => `#view & {table: "note", clauses: [{col: "id", op: "eq"}]${extra}}`;
 
@@ -173,11 +173,36 @@ Deno.test("a route prerendered over the browser's rows is left to the terminal's
   if (!ok || !out.includes("@document path /regras /regras/")) throw new Error(out);
 });
 
-Deno.test("the deployed review page carries its relative IR stylesheet", () => {
+// The ladder's pages answer with their own policy: the terminal's Trusted Types
+// and eval are its runtime's, and the brief's page needs the pinned library and
+// its one inline script admitted. Regression guard: a policy on the whole site
+// blocked every script on /docs/, and a hash computed over anything but the
+// exact script text blocks the page it means to admit.
+Deno.test("the ladder answers with its own policy, and brief.html's library and script are what it admits", async () => {
+  const caddy = ask("_view", "caddyfile");
+  if (!caddy.ok) throw new Error(caddy.out);
+  if (!caddy.out.includes("@terminal not path /docs/*")) throw new Error(`the terminal's policy reaches the ladder:\n${caddy.out}`);
+  const ladder = /@ladder path \/docs\/\*\n\s*header @ladder Content-Security-Policy "([^"]*)"/.exec(caddy.out);
+  if (ladder === null) throw new Error(`no ladder policy:\n${caddy.out}`);
+  if (ladder[1].includes("trusted-types") || ladder[1].includes("unsafe-eval")) throw new Error(`the ladder inherits the terminal's runtime rules: ${ladder[1]}`);
+  const brief = ask("_view", "brief");
+  if (!brief.ok) throw new Error(brief.out);
+  const library = /<script src="(https:\/\/cdn\.jsdelivr\.net\/npm\/marked@[^/]+\/lib\/marked\.umd\.js)" integrity="(sha384-[^"]+)" crossorigin="anonymous" defer>/.exec(brief.out);
+  if (library === null) throw new Error(`brief.html names no pinned library:\n${brief.out}`);
+  if (!ladder[1].includes(`script-src 'self' ${library[1]} `)) throw new Error(`the ladder policy does not admit ${library[1]}: ${ladder[1]}`);
+  const inline = /<script type="module">([\s\S]*?)<\/script>/.exec(brief.out);
+  if (inline === null) throw new Error("brief.html carries no renderer script");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(inline[1]));
+  const hash = `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`;
+  if (!ladder[1].includes(hash)) throw new Error(`the ladder policy admits a different inline script than brief.html carries: ${ladder[1]}`);
+  if (!inline[1].includes('read("brief.md")')) throw new Error("the renderer does not read brief.md");
+});
+
+Deno.test("the deployed review pages carry the brief, its page, and the IR's relative stylesheet", () => {
   const r = ask("_view", "statics");
   if (!r.ok) throw new Error(r.out);
   const statics = JSON.parse(r.out) as { file: string; target: string }[];
-  for (const file of ["ir.html", "ir/card.css"]) {
+  for (const file of ["brief.md", "brief.html", "ir.html", "ir/card.css"]) {
     if (!statics.some((s) => s.file === file && s.target === `/srv/docs/${file}`)) {
       throw new Error(`missing deployed review asset ${file}`);
     }

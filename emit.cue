@@ -18,6 +18,7 @@ package pronto
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"list"
@@ -2100,18 +2101,19 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	statics: [...mecha.#Static]
 
 	// The review ladder's artifacts, served beside the app by caddy's catch-all
-	// /srv root. One directory is load-bearing, not tidiness: journal.html links
-	// `ir.html`, its wikilinks render as `ir.html#Id`, and its transclusions
-	// `fetch` their target by bare relative path — all three resolve only if the
-	// four files are siblings. Served, the transclusion inlines instead of
-	// degrading to the boxed link it shows on file://.
+	// /srv root. One directory is load-bearing, not tidiness: journal.html and
+	// brief.html link `ir.html`, wikilinks render as `ir.html#Id`, brief.html
+	// `fetch`es brief.md and the ir its transclusions, each by bare relative
+	// path — all of it resolves only if the files are siblings. Served, the
+	// transclusion inlines instead of degrading to the boxed link it shows on
+	// file://.
 	//
 	// These are caddy statics, so they sit outside the terminal's auth gate by
 	// construction. Intended: reviewing a design doc is not using the app, and
 	// requiring a sign-in to read one would put the ladder behind the thing it
 	// exists to review.
 	_ladderExtra: [if D.code.meta.ladder != _|_ for f in D.code.meta.ladder {f}]
-	_ladder: [for f in list.Concat([["journal.html", "ir.html", "ir/card.css", "acceptance.md", "DESIGN.md"], _ladderExtra]) {
+	_ladder: [for f in list.Concat([["brief.md", "brief.html", "journal.html", "ir.html", "ir/card.css", "acceptance.md", "DESIGN.md"], _ladderExtra]) {
 		file:   f
 		target: "/srv/docs/\(f)"
 		watch:  true
@@ -2846,6 +2848,117 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			}], "; ")
 			}][0]
 	}, ""][0]
+	// The ladder's pages run no app code and sit outside the terminal as they
+	// sit outside the auth gate, so they answer with a policy of their own:
+	// no Trusted Types, no eval, 'self' plus the pinned libraries below and
+	// the one inline script brief.html carries, admitted by its hash.
+	// brief.html is a fixed page: it fetches brief.md and renders it in the
+	// browser with marked, pinned by Subresource Integrity against the file
+	// the lock holds (deno.lock's marked@16.4.2) — the admission SPEC gives
+	// ir.html's mermaid — so no app carries the library and a brief edited
+	// by hand is current on reload.
+	_ladderScripts: {
+		"https://cdn.jsdelivr.net/npm/marked@16.4.2/lib/marked.umd.js": "sha384-SIgPzdreGEWG7eadwygSU+kb05fTwy7pw+JvOJ2VwHUqxs9fwzuRzHol8lzPDkRl"
+	}
+	_ladderPolicy: strings.Join([
+		"default-src 'self'",
+		"base-uri 'self'",
+		"object-src 'none'",
+		"script-src 'self' \(strings.Join(list.SortStrings([for u, _ in _ladderScripts {u}]), " ")) 'sha256-\(base64.Encode(null, sha256.Sum256(_briefScript)))'",
+		"script-src-attr 'none'",
+		"style-src 'self' 'unsafe-inline'",
+		"img-src 'self' data: blob:",
+		"font-src 'self' data:",
+		"connect-src 'self'",
+		"form-action 'self'",
+		"frame-ancestors 'self'",
+	], "; ")
+	// SPEC's brief.md: the frontmatter is the harness and is dropped,
+	// `![[path.md]]` inlines the fragment it names (served beside the brief,
+	// or declared in meta.ladder), `[[Id]]` is the link to ir.html#Id, and the
+	// first heading titles the page. A fetch that fails is shown, not hidden.
+	_briefScript: #"""
+		const article = document.getElementById("brief");
+		const fail = (message) => { article.textContent = message; throw new Error(message); };
+		const read = async (rel) => {
+		  const r = await fetch(rel, { cache: "no-cache" });
+		  if (!r.ok) fail(`${rel}: ${r.status} ${r.statusText}`);
+		  return r.text();
+		};
+		const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+		const TRANSCLUSION = /^!\[\[([^\]\n]+)\]\][ \t]*$/gm;
+		const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+		async function transclude(source, stack) {
+		  const parts = [];
+		  let last = 0;
+		  for (const m of source.matchAll(TRANSCLUSION)) {
+		    const rel = m[1];
+		    if (stack.includes(rel)) fail(`${rel}: transcludes itself through ${stack.join(" → ")}`);
+		    parts.push(source.slice(last, m.index), await transclude((await read(rel)).replace(FRONTMATTER, ""), [...stack, rel]));
+		    last = m.index + m[0].length;
+		  }
+		  parts.push(source.slice(last));
+		  return parts.join("");
+		}
+		const parser = new marked.Marked({
+		  extensions: [{
+		    name: "wikilink",
+		    level: "inline",
+		    start: (src) => src.indexOf("[["),
+		    tokenizer(src) {
+		      const m = /^\[\[([^\]\n|]+)\]\]/.exec(src);
+		      return m === null ? undefined : { type: "wikilink", raw: m[0], id: m[1] };
+		    },
+		    renderer: (token) => `<a href="ir.html#${escape(token.id)}">${escape(token.id)}</a>`,
+		  }],
+		});
+		const prose = await transclude((await read("brief.md")).replace(FRONTMATTER, ""), ["brief.md"]);
+		article.innerHTML = parser.parse(prose);
+		const heading = article.querySelector("h1");
+		if (heading !== null) document.title = heading.textContent;
+		"""#
+	_briefHtml: """
+		<!-- generated by pronto — do not edit; it renders brief.md, edit that -->
+		<!doctype html>
+		<html>
+		<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width,initial-scale=1">
+		<title>Brief</title>
+		<style>
+		  :root { color-scheme: light dark; --bg: #faf9f6; --ink: #202422; --muted: #565e59; --accent: #1d6a50; --line: #dedbd2; }
+		  @media (prefers-color-scheme: dark) { :root { --bg: #16181a; --ink: #e6e4df; --muted: #a3a8a4; --accent: #7fd1b0; --line: #2d3134; } }
+		  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 system-ui, sans-serif; }
+		  main { max-width: 760px; margin: auto; padding: 48px 24px; }
+		  nav { display: flex; gap: 16px; font-size: 12px; text-transform: uppercase; letter-spacing: .14em; font-weight: 700; margin-bottom: 32px; }
+		  nav span { color: var(--accent); }
+		  nav a { color: var(--muted); margin-left: auto; }
+		  nav a + a { margin-left: 0; }
+		  h1, h2, h3 { font-family: Georgia, serif; line-height: 1.15; margin: 1.2em 0 .4em; }
+		  h1 { font-size: 40px; margin-top: 0; }
+		  h2 { font-size: 26px; }
+		  h3 { font-size: 19px; }
+		  a { color: var(--accent); }
+		  code { font-size: .92em; }
+		  pre { overflow-x: auto; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; }
+		  img { max-width: 100%; height: auto; }
+		  table { border-collapse: collapse; }
+		  th, td { border-bottom: 1px solid var(--line); padding: 6px 12px; text-align: left; vertical-align: top; }
+		  blockquote { margin: 0; padding-left: 16px; border-left: 3px solid var(--line); color: var(--muted); }
+		  @media (max-width: 700px) { h1 { font-size: 30px; } }
+		</style>
+		\(strings.Join([for u, sri in _ladderScripts {"<script src=\"\(u)\" integrity=\"\(sri)\" crossorigin=\"anonymous\" defer></script>"}], "\n"))
+		</head>
+		<body>
+		<main>
+		<nav><span>Brief</span><a href="journal.html">Journal</a><a href="ir.html">IR</a></nav>
+		<article id="brief"></article>
+		</main>
+		<script type="module">\(_briefScript)</script>
+		</body>
+		</html>
+
+		"""
 	_envelope: #envelopePlan & {
 		meta:         E.code.meta
 		surface:      E.code.surface
@@ -3777,7 +3890,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
 			_fenced: list.Concat([_unitPaths, _presenterAt])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
-				let matcher = [if len(_fenced) > 0 {"  @terminal not path \(strings.Join(_fenced, " "))\n  header @terminal"}, "  header"][0]
+				// The ladder's pages answer with their own policy (E._ladderPolicy),
+				// so the terminal's names every path but theirs.
+				let matcher = "  @terminal not path \(strings.Join(list.Concat([["/docs/*"], _fenced]), " "))\n  header @terminal"
+				let ladder = "  @ladder path /docs/*\n  header @ladder Content-Security-Policy \(json.Marshal(E._ladderPolicy))\n"
 				let presenter = [for p in _presenterAt {"  @presenter path \(p)\n  header @presenter Content-Security-Policy \(json.Marshal(E._shell.presenter.policy))\n"}]
 				// What the presenter's script-src 'self' admits is answered
 				// from a file the door holds, never by an upstream.
@@ -3787,7 +3903,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
 			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}
@@ -3798,6 +3914,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// unread variable.
 		_origin: "{{- $o := placeholder \"http.vars.origin\" -}}"
 		_o:      "{{$o}}"
+		// The brief's page (E._briefHtml): a constant, so it rides as an
+		// emission rather than an authored file and the sweep owns it.
+		"brief.html": {format: "text", text: E._briefHtml}
 		"robots.txt": {
 			format: "text"
 			// An app behind a session is not a site: every address answers with

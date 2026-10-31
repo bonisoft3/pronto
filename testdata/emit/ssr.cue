@@ -15,8 +15,9 @@ import pronto "github.com/bonisoft3/pronto"
 	_loop: (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out
 	_build: (pronto.#DefaultBuild & {code: _app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
 	caddyfile: (pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files["docker/Caddyfile"].text
-	render:  _cluster.surface.targets.render
-	statics: _cluster.meta.statics
+	brief:     (pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files["brief.html"].text
+	render:    _cluster.surface.targets.render
+	statics:   _cluster.meta.statics
 }
 
 // A route rendered before any request (#Screen.prerender): a document per

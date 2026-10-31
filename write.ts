@@ -137,10 +137,14 @@ async function exportEmission(): Promise<Emission> {
   // emission output (written by this run: screens, manifests, documents)
   // or the app's own file: one naming a path nothing holds fails here, at
   // generate, rather than minutes later in a docker build.
+  const owed: Record<string, string> = {
+    "journal.html": "author journal.html per SPEC's journal.html section",
+    "brief.md": "author brief.md per SPEC's brief.md section; the emitted brief.html renders it",
+  };
   for (const s of emission.cluster?.meta?.statics ?? []) {
     if (emission.files[s.file] !== undefined) continue;
     if ((await ifMissing(Deno.stat(`${appDir}/${s.file}`), null)) === null) {
-      fail(`${s.file}: no such file — the cluster serves it from the build context, so it must exist in the app (most often the review ladder's journal.html, authored per SPEC's journal.html section)`);
+      fail(`${s.file}: no such file — the cluster serves it from the build context, so it must exist in the app (${owed[s.file] ?? "most often a review ladder file"})`);
     }
   }
   return emission;

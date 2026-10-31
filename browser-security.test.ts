@@ -31,13 +31,13 @@ Deno.test("resource declarations cannot relax scripts, omit a reason or broaden 
   }
 });
 
-Deno.test("the terminal fence excludes only a declared realm's served files", async () => {
+Deno.test("the terminal fence excludes the ladder and a declared realm's served files", async () => {
   const files = await emitFiles(paymentProgram({ vendored: `map: {
     isolation: "realm", ports: {reads: [], raises: []}, note: "a sandboxed presenter",
     src: "shell/units/map/index.html", files: ["shell/units/map/index.html", "shell/units/map/map.js"]
   }` }));
   assertStringIncludes(files["docker/Caddyfile"].text,
-    "@terminal not path /shell/units/map/index.html /shell/units/map/map.js\n  header @terminal Content-Security-Policy");
+    "@terminal not path /docs/* /shell/units/map/index.html /shell/units/map/map.js\n  header @terminal Content-Security-Policy");
 });
 
 Deno.test("a presenter's worker script answers with the presenter's policy, and the page connects to its pinned scripts", async () => {
@@ -47,7 +47,7 @@ Deno.test("a presenter's worker script answers with the presenter's policy, and 
     src: "shell/units/painter/unit.js", files: ["shell/units/painter/unit.js"]
   }` }));
   const caddy = files["docker/Caddyfile"].text;
-  assertStringIncludes(caddy, "@terminal not path /shell/units/painter/unit.js /omnishell/interpreter/presenter.js\n  header @terminal Content-Security-Policy");
+  assertStringIncludes(caddy, "@terminal not path /docs/* /shell/units/painter/unit.js /omnishell/interpreter/presenter.js\n  header @terminal Content-Security-Policy");
   assertStringIncludes(caddy, `@presenter path /omnishell/interpreter/presenter.js\n  header @presenter Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-eval'; connect-src blob:; worker-src 'self'"`);
   assertStringIncludes(caddy, `connect-src 'self' ${babylon};`);
   // The worker's script-src 'self' admits a module import of any path here,

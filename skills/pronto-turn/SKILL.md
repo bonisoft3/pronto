@@ -118,16 +118,12 @@ rounds; escalate on a third flat round).
 
 Write `journal.html` from what you captured: it cites only screenshots that
 exist and gates whose exit you saw. Maintain it as a reverse-chronological HTML
-log for people (most recent entry first), never markdown:
-- **Product-centric `<header>` & brief anchor:** `<header>` always opens with a
+log (most recent entry first), never markdown, read by people and models for
+what happened:
+- **Product-centric `<header>`:** `<header>` always opens with a
   product-centric `<h1>` title (what the product is, never a single turn or
-  mechanism headline) and a `brief.html`-style product summary paragraph ending
-  with an anchor link (`<a href="#initial-brief">Latest product brief ↓</a>` or
-  `<a href="#brief-YYYY-MM-DD">Latest product brief ↓</a>`) to the most recent
-  brief update in the journal log, so a reader opening `journal.html` immediately
-  knows what the product is about before scanning the log.
-- **Initial entry:** Starts at cold start with `<article id="initial-brief">` at
-  the bottom of the log (what the app is, who it is for, and its target oracle).
+  mechanism headline) and one paragraph saying what the product is, so a reader
+  opening `journal.html` knows the product before scanning the log.
 - **Turn entries & dated composition (`journal/`):** Prepend this turn's
   `<article>` entry at the top of the log showing the product and technical
   achievements with embedded before/after evidence (screenshots, recordings,
@@ -135,13 +131,11 @@ log for people (most recent entry first), never markdown:
   dated filenames (`journal/YYYY-MM-DD-<slug>.html`,
   `journal/YYYY-MM-DD-<slug>.png`), which the cluster serves under
   `/docs/journal/`.
-- **Brief refresh & garbage collection, once a sprint:** Every four turns the
-  sprint wrap (`/pronto:sprint`, `commands/sprint.md`) emits an updated brief /
-  state-of-the-app entry (`<article id="brief-YYYY-MM-DD">`) at the top of the
-  log with the next four turns planned, updates `<header>`'s anchor link to
-  point to it, and deletes superseded older entries and their `journal/` files
-  from `HEAD` (git holds the full history; `HEAD` keeps the curated subset). A
-  turn does not do this on its own.
+- **No requirements, no collection:** The journal records what happened; a new
+  requirement is an edit to `brief.md`, which the sprint wrap (`/pronto:sprint`,
+  `commands/sprint.md`) rewrites every four turns and a turn never does. The
+  wrap also deletes superseded entries and their `journal/` files from `HEAD`
+  (git holds the full history); a turn leaves earlier entries alone.
 
 When acceptance IDs, test spans/drivers, user-visible behavior, or `journal.html`
 changed, run the **`qa` seat** ([review seats](references/studio-seats.md)) to

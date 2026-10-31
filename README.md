@@ -1,14 +1,68 @@
 # Pronto
 
-Pronto is a programming language where the source code is markdown and the compiler is an LLM. It compiles to a constrained target architecture — [mecha](https://github.com/bonisoft3/mecha) for data, [omnishell](https://github.com/bonisoft3/omnishell) for UI, and [sayt](https://github.com/bonisoft3/sayt)/[bayt](https://github.com/bonisoft3/bayt) for build/deploy — producing applications that run identically from a single browser tab to a cloud cluster.
+Pronto is a new breed of programming language. It is built for LLMs and relies
+on different techniques to dispense code reviews, making coding fully agentic. 
+The insight: AI can generate anything, but "anything" is where bugs live.
+Pronto constrains generation to an architecture where entire categories of bugs
+— deployment drift, data inconsistency, infrastructure misconfiguration —
+cannot exist. The same way Rust constrains C to gain memory safety, Pronto
+constrains AI-generated code to gain architectural safety.
 
-The insight: AI can generate anything, but "anything" is where bugs live. Pronto constrains generation to an architecture where entire categories of bugs — deployment drift, data inconsistency, infrastructure misconfiguration — cannot exist. The same way Rust constrains C to gain memory safety, Pronto constrains AI-generated code to gain architectural safety.
+The source code is markdown and the compiler itself is an LLM. It targets
+[mecha](https://github.com/bonisoft3/mecha) for the backend,
+[omnishell](https://github.com/bonisoft3/omnishell) for UI,
+[sayt](https://github.com/bonisoft3/sayt) for the SDLC, and
+[bayt](https://github.com/bonisoft3/bayt) for build — producing applications
+that run identically from a single browser tab to a cloud cluster.
 
-For LLM agents generating or modifying Pronto applications, see [`llms.txt`](llms.txt) for the machine-readable specification, contract grammar, and DOM truth tables.
+For LLM agents generating or modifying Pronto applications, see
+[`llms.txt`](llms.txt) for the machine-readable specification, contract
+grammar, and truth tables.
+
+## Showcase
+
+Pronto creates production-grade applications that scale in many dimensions. It
+goes well beyond the typical the MVP with a single user. Here are some example
+apps. No human has ever looked at their source code during development.
+
+### Snapcards
+
+[snapcards.bonisoft3.com](https://snapcards.bonisoft3.com) ([source](https://github.com/bonisoft3/snapcards))
+
+Generate flashcards to teach toddlers to read. Leverages modern image generations models, fully reactive UI, gorgeous in your phone and your desktop. Supports multiple languages, extremelly fast. And it is free :-).
+
+<img src="docs/showcase/snapcards-home.png" width="49%" alt="Snapcards home"> <img src="docs/showcase/snapcards-ir.png" width="49%" alt="Snapcards IR: entity diagram"> <img src="docs/showcase/snapcards-journal.png" width="49%" alt="Snapcards engineering journal">
+
+### Truco
+
+[truco.bonisoft3.com](https://truco.bonisoft3.com) ([source](https://github.com/bonisoft3/truco))
+
+The latino game that crossed continents. Turn based card game supporting country and regional variations of truco, including the six players Dourada, played a few families in the Itaguara region, a small city in the southeast of Brazil. Play against bots or against your pals. 
+
+<img src="docs/showcase/truco-table.png" width="49%" alt="Truco table"> <img src="docs/showcase/truco-ir.png" width="49%" alt="Truco IR: engineering design"> <img src="docs/showcase/truco-journal.png" width="49%" alt="Truco engineering journal">
+
+### Apex Run
+
+[apexrun.bonisoft3.com](https://apexrun.bonisoft3.com)
+
+A homage to the OutRun arcade game, llm-dreamed from super tux kart source code. Leverages webgpu with adaptive load, art fully AI generated. Great offline support, and when online allows for realtime duels. Uses pronto time travel magic to give you a nice scenic ride on game end, replaying your game from multiple angles, Mario Kart style.
+
+<img src="docs/showcase/apexrun-title.png" width="49%" alt="Apex Run title screen"> <img src="docs/showcase/apexrun-race.png" width="49%" alt="Apex Run race"> <img src="docs/showcase/apexrun-ir.png" width="49%" alt="Apex Run IR: architecture and contracts"> <img src="docs/showcase/apexrun-journal.png" width="49%" alt="Apex Run project journal">
+
+### Bonkchess
+
+[bonkchess.com](https://bonkchess.com)
+
+The battle chess of the AI era. Built by a third party with no prior knowledge of pronto. Development fully ai-driven.
+
+<img src="docs/showcase/bonkchess-home.png" width="49%" alt="Bonk Chess title screen"> <img src="docs/showcase/bonkchess-board.png" width="49%" alt="Bonk Chess army selection">
+
 
 ## Installation
 
-Install the Pronto plugin for your agent. The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill, specialist studio seats, and project bootstrap knowledge.
+Pronto does not need to be installed, just ask your LLM to write code using the bonisoft3/pronto programming language. For example, "Create a minesweeper clone using bonisoft3/pronto as a programming language". Nonetheless, it gets more powerful if you install the pronto plugin as shown below.
+
+The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill, specialist studio seats, and project bootstrap knowledge.
 
 **Antigravity (`agy`):**
 ```bash
@@ -41,9 +95,11 @@ brief.md ──LLM──▶ ir.html ──LLM (narrow)──▶ program.cue ─�
 
 | Artifact | Audience | Contents | Mutability |
 |----------|----------|----------|------------|
-| `brief.md` | Product / business | What the app should do, in prose; `journal.html` (and `journal/*`) is its living browser presentation and reverse-chronological turn log | Mutable |
+| `brief.md` | Product / business | What the app is today and the next sprint's turns, in prose. People edit it at any time; the sprint wrap rewrites it; a turn never does. `brief.html`, a fixed emitted page, renders it in the browser | Mutable |
 | `ir.html` | Engineer | Architecture diagram (boxes and how they communicate), SVG screen sketches, contracts, test pairs — a design doc that renders in any browser (optionally composed from `ir/*.html`) | Pinned per compile |
 | `program.cue` | Machine | The program. Everything downstream is `cue export` | Pinned per compile |
+
+The brief is the spec; the journal is the evidence. `brief.md` says what the app is today and what the next sprint's turns deliver, in the product's words; `brief.html`, a fixed page pronto emits, renders it in the browser. `journal.html` is the log beside it, authored by the turns and read by people and models alike for what happened: a product-centric header saying what the app is, then `<article>` entries newest first, each turn's before/after screenshots, recordings, diagrams and gate output, composed from dated files under `journal/YYYY-MM-DD-<slug>.*` and served beside it under `/docs/`. The journal carries no requirements: a new requirement is an edit to the brief. A sprint is four turns and a wrap; the wrap rewrites the brief with the next four turns and collects the journal, deleting superseded entries and their assets from `HEAD`. Git holds the full history, the journal holds the part worth a reader's time. Neither is state a turn resumes from; the tree is.
 
 Only the two LLM hops are probabilistic, and the second is narrow: the structured parts of ir.html (entity tables, flow topology, data-path assignments) extract into CUE deterministically. Every box, arrow, and sketch in ir.html carries a machine-readable id; the generated CUE back-references those ids; a deterministic checker enforces the bijection. IR↔CUE drift is a checkable property, not a hope.
 
@@ -137,7 +193,7 @@ Programming languages exist on a spectrum from "express anything" to "express sa
 - **State management bugs** — omnishell enforces a single data path and forms-only mutations; handlers cannot perform effects
 - **Runtime surprises** — most errors fail at `cue vet` time, not runtime ([the joins checked later, or not yet](docs/lattice.md#which-joins-the-code-enforces)); the constraint cascade catches them before anything runs
 
-What you give up in expressiveness (real-time collaboration, GPU compute, sub-100ms distributed state) you gain in correctness for the large class of applications that don't need those things: CRUD apps, SaaS tools, dashboards, content management, workflow automation, internal tools, admin panels.
+What you give up in expressiveness (GPU compute, arbitrary code outside the pure languages) you gain in correctness for the large class of applications that don't need it: CRUD apps, SaaS tools, dashboards, content management, workflow automation, internal tools, admin panels, and, below the row ladder, frame-rate games on the kinetic plane. [`PHILOSOPHY.md`](PHILOSOPHY.md) argues where each of these constraints comes from.
 
 ## Related work
 
@@ -151,6 +207,7 @@ What you give up in expressiveness (real-time collaboration, GPU compute, sub-10
 ## Design documents
 
 - [`SPEC.md`](SPEC.md) — the artifact spec: brief, ir, program
+- [`PHILOSOPHY.md`](PHILOSOPHY.md) — the thesis (move data, transform data, update invariants) and the classical works each part stands on
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how the pieces fit, and where to change each one
 - [`prelude.md`](prelude.md) — shared component knowledge, implicit context of every compile
 - [`docs/component-contracts.md`](docs/component-contracts.md) — component contracts: each part's state, capabilities, and surface, and how data flows between them

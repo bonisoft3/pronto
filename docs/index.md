@@ -15,6 +15,7 @@ Writing an app needs these entries; the rest of this index is for when a gate or
 Open one when a gate or a lint names it; the idioms already show what each describes.
 
 * [Pronto](../README.md) - concept: A programming language whose source is markdown and whose compiler is an LLM, targeting an architecture in which whole classes of bugs cannot exist.
+* [Philosophy](../PHILOSOPHY.md) - concept: The thesis that software is a loop of moving data, transforming data and updating invariants, and the classical works each part of pronto stands on.
 * [Writing a pronto app](../GUIDE.md) - howto: The app author's tour — starting an app and running a turn, the layout, the build loop, data modelling, screens, i18n, the capability bar, testing and release.
 * [Pronto artifact spec](../SPEC.md) - reference: What a conforming brief.md, ir.html and program.cue contain, and the lints that enforce it.
 * [The pronto prelude](../prelude.md) - reference: The component knowledge implicit in every brief-to-ir compilation — entities, durability, pipelines, screens, capability, identity, hatches, the team, the loop, tiers and tests.
