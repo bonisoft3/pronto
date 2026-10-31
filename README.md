@@ -39,7 +39,7 @@ Generate flashcards to teach toddlers to read. Leverages modern image generation
 
 The latino game that crossed continents. Turn based card game supporting country and regional variations of truco, including the six players Dourada, played a few families in the Itaguara region, a small city in the southeast of Brazil. Play against bots or against your pals. 
 
-<img src="docs/showcase/truco-table.png" width="49%" alt="Truco table"> <img src="docs/showcase/truco-ir.png" width="49%" alt="Truco IR: engineering design"> <img src="docs/showcase/truco-journal.png" width="49%" alt="Truco engineering journal">
+<img src="docs/showcase/truco-table.png" width="49%" alt="Truco table"> <img src="docs/showcase/truco-brief.png" width="49%" alt="Truco brief, rendered from brief.md"> <img src="docs/showcase/truco-ir.png" width="49%" alt="Truco IR: engineering design"> <img src="docs/showcase/truco-journal.png" width="49%" alt="Truco engineering journal">
 
 ### Apex Run
 
@@ -47,7 +47,7 @@ The latino game that crossed continents. Turn based card game supporting country
 
 A homage to the OutRun arcade game, llm-dreamed from super tux kart source code. Leverages webgpu with adaptive load, art fully AI generated. Great offline support, and when online allows for realtime duels. Uses pronto time travel magic to give you a nice scenic ride on game end, replaying your game from multiple angles, Mario Kart style.
 
-<img src="docs/showcase/apexrun-title.png" width="49%" alt="Apex Run title screen"> <img src="docs/showcase/apexrun-race.png" width="49%" alt="Apex Run race"> <img src="docs/showcase/apexrun-ir.png" width="49%" alt="Apex Run IR: architecture and contracts"> <img src="docs/showcase/apexrun-journal.png" width="49%" alt="Apex Run project journal">
+<img src="docs/showcase/apexrun-title.png" width="49%" alt="Apex Run title screen"> <img src="docs/showcase/apexrun-race.png" width="49%" alt="Apex Run race"> <img src="docs/showcase/apexrun-brief.png" width="49%" alt="Apex Run brief, rendered from brief.md"> <img src="docs/showcase/apexrun-ir.png" width="49%" alt="Apex Run IR: architecture and contracts"> <img src="docs/showcase/apexrun-journal.png" width="49%" alt="Apex Run project journal">
 
 ### Bonkchess
 
