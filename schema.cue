@@ -1877,6 +1877,15 @@ import (
 			}
 		})
 	}}
+	// The column each chart owns, by entity name (a chart names its entity by
+	// name or by table) and then field: its initial state and its states, read
+	// once here for every column's lookup (#machineColumn). A machine reads the
+	// App, so a lookup handed the machines themselves copies the App each time.
+	_machineColumns: {if A.state.machines != _|_ for _, m in A.state.machines if m.field != _|_ if m.initial != _|_
+		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
+			(en): (m.field): {initial: m.initial, states: [for n, _ in m.states {n}]}
+		}
+	}
 	state: machines: [mn=string]: {
 		let m = A.state.machines[mn]
 		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
