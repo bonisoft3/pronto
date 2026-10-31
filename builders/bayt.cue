@@ -580,7 +580,7 @@ import (
 								{from: {name: core.lock.images.microcheck}, srcs: ["/bin/httpcheck"], dst: "/usr/local/bin/httpcheck"},
 								{from: {name: core.lock.images.microcheck}, srcs: ["/bin/portcheck"], dst: "/usr/local/bin/portcheck"},
 								{from: {ref: ":database"}, srcs: ["/docker-entrypoint-initdb.d"], dst: "/docker-entrypoint-initdb.d"},
-								{from: {ref: ":crud"}, srcs: ["/usr/bin/postgrest"], dst: "/usr/local/bin/postgrest"},
+								{from: {ref: ":crud"}, srcs: ["/bin/postgrest"], dst: "/usr/local/bin/postgrest"},
 								{from: {ref: ":caddy"}, srcs: ["/usr/bin/caddy"], dst: "/usr/bin/caddy"},
 								{from: {ref: ":caddy"}, srcs: ["/etc/caddy/Caddyfile"], dst: "/etc/caddy/Caddyfile"},
 								{srcs: [".bayt/process-compose.yaml"], dst: "/.bayt/process-compose.yaml"},

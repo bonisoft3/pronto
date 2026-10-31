@@ -978,7 +978,13 @@ export async function derive(appDir: string): Promise<void> {
   };
   await walkJournal("journal");
   journalFiles.sort();
-  const ladder = [...new Set([...irFragments, ...journalFiles])].sort();
+  // The screen images ir-render writes beside the ir and the ir embeds; a
+  // release serves the ladder alone, so a page that embeds them owes them here.
+  const irImages: string[] = [];
+  for (const entry of await entries(`${appDir}/ir`, [])) {
+    if (entry.isFile && entry.name.endsWith(".svg")) irImages.push(`ir/${entry.name}`);
+  }
+  const ladder = [...new Set([...irFragments, ...irImages, ...journalFiles])].sort();
 
   await Deno.writeTextFile(`${appDir}/program_derived.cue`, renderDerived(pkg, screens, available, notes, accepts, ladder));
   const scanned = appCss.map(({ path, css }) => ({ path, ...scanStylesheet(css) }));

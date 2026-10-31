@@ -435,6 +435,14 @@ document or lint states**; a probe placed as a template's root never hydrates
 and fails silently, and searching the root or linting it removes that trap
 for every author who nests a probe. Checked 2026-10-29.
 
+**The ladder serves no image.** The seven files `_ladder` names carry
+`ir.html` and `journal.html` but not the `ir/neighbourhood-*.svg` the ir
+embeds for every screen nor the captures under `journal/`, so every live
+ir shows broken screens and every live journal broken pictures (truco's and
+yogurt's, 2026-10-31); an app lists them by hand in `meta.ladder` today
+(yogurt, fifty-nine names). The emitter knows the screens and writes the
+svgs; it should serve them, and the journal's directory with it.
+
 ## Visual lint
 
 **A perpetual animation reads as a screen still moving.** `settle()`
@@ -492,6 +500,16 @@ contract wants a poke-specific credential.
 **No container TURN relay is built** ([ICE servers](docs/release-targets.md#ice-servers)):
 `release@cloudflare` mints ephemeral credentials from Cloudflare Calls TURN
 when opted in; container targets (`docker`, `gcp`, `k8s`) configure STUN alone.
+
+**The appliance does not build from a scratch dependency**
+([docker](docs/release-targets.md#docker)): `release@docker` copies every
+dependency's tree, `COPY --from=<app>-<dep> --link /monorepo/${BAYT_DIR}`,
+and `served-release`, `served` and `auth` are `FROM scratch` stages with no
+`/monorepo` in them, so the bake fails on "/monorepo": not found at the
+served-release copy, in every app that declares the target (measured on
+yogurt, 2026-10-31; the generated truco, golaberto and esocial Dockerfiles
+carry the same lines). The copy belongs to the dependencies that carry a
+tree, or the scratch stages owe an empty one.
 
 **`aws` has no rule** ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 
