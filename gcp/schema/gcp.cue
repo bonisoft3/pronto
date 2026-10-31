@@ -132,6 +132,11 @@ import (
 		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
 		// development value, and ORIGIN is where readers are.
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		// The path its server answers 2xx on once it can serve, in place of the
+		// bare port a TCP probe checks. In the instance the door then waits for
+		// it too (container-dependencies), so a sidecar whose own dependency is
+		// not up yet never takes a reader.
+		probe?: =~"^/"
 		metrics?: {
 			port!:    int & >1024 & <65536
 			path:     *"/metrics" | =~"^/"
@@ -334,7 +339,7 @@ import (
 				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
 				if R.alwaysOn || R.minScale > 0 || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
-					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
+					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}], [for n, c in R._inside if c.probe != _|_ {n}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
 					if R.blobs != _|_ {imgproxy: ["rclone-s3"]}
 					if len(R._scraped) > 0 {"gmp-collector": R._scraped}
@@ -497,7 +502,10 @@ import (
 					{name: k, value: v},
 				][0]}]
 			}
-			startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+			startupProbe: [
+				if c.probe != _|_ {httpGet: {path: c.probe, port: c.port}, periodSeconds: 2, failureThreshold: 60},
+				{tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60},
+			][0]
 		}
 	}
 	let gmpCollector = {

@@ -574,6 +574,17 @@ Deno.test("a kept instance serves without a cold start and keeps its CPU; by def
   assertEquals((await built(release(", minScale: 2"), "release.minScale")).success, false);
 });
 
+Deno.test("a sidecar with a probe path is started by an HTTP probe and the door waits for it", async () => {
+  const s = await built(withSidecar(`{port: 8687, probe: "/health"}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const own = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(own.startupProbe.httpGet, { path: "/health", port: 8687 });
+  assertEquals(own.startupProbe.tcpSocket, undefined);
+  const deps = JSON.parse(s.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy.includes("perf-collector"), true);
+  assertEquals((await built(withSidecar(`{port: 8687, probe: "health"}`), "plan")).success, false);
+});
+
 Deno.test("a sidecar's memory is its container's, inside the instance or apart", async () => {
   const s = await built(withSidecar(`{port: 8687, memory: "4Gi"}`), "service");
   assertEquals(s.success, true, s.stderr);
