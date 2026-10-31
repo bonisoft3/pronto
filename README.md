@@ -15,9 +15,8 @@ The source code is markdown and the compiler itself is an LLM. It targets
 [sayt](https://github.com/bonisoft3/sayt) for the SDLC — producing applications
 that run identically from a single browser tab to a cloud cluster.
 
-Pronto needs no human supervision and no human code review. It runs unattended
-for the equivalent of several human sprints and ships world-class software at
-the end of them.
+Pronto needs no supervision and no humans ever look at the code it generates. It runs unattended
+for the equivalent of several agile sprints and ships world-class software.
 
 For LLM agents generating or modifying Pronto applications, see
 [`llms.txt`](llms.txt) for the machine-readable specification, contract
@@ -37,12 +36,12 @@ Generate flashcards to teach toddlers to read. Leverages modern image generation
 
 <table>
   <tr>
-    <td align="center" rowspan="2" width="22%"><img src="docs/showcase/snapcards-home-phone.png" alt="Snapcards on a phone"><br><sub>The library on a phone, the featured deck first</sub></td>
-    <td align="center" width="39%"><img src="docs/showcase/snapcards-home.png" alt="Snapcards library"><br><sub>The library on a laptop: curated and reader-made decks</sub></td>
-    <td align="center" width="39%"><img src="docs/showcase/snapcards-ir.png" alt="Snapcards IR"><br><sub>ir.html: an entity card and the machine that drives it</sub></td>
+    <td align="center" rowspan="2" width="22%"><img src="docs/showcase/snapcards-home-phone.png" alt="Snapcards on a phone"><br><sub>The opening page on a phone, the featured deck first.</sub></td>
+    <td align="center" width="39%"><img src="docs/showcase/snapcards-home.png" alt="Snapcards library"><br><sub>The deck library on a laptop: curated and reader-made decks.</sub></td>
+    <td align="center" width="39%"><img src="docs/showcase/snapcards-ir.png" alt="Snapcards IR"><br><sub>The LLM-produced intermediate representation of the code: an entity card and the state machine that drives it.</sub></td>
   </tr>
   <tr>
-    <td align="center" colspan="2"><img src="docs/showcase/snapcards-journal.png" alt="Snapcards journal"><br><sub>journal.html: a turn, before and after</sub></td>
+    <td align="center" colspan="2"><img src="docs/showcase/snapcards-journal.png" alt="Snapcards journal"><br><sub>The LLM-produced journal of the development: a turn, before and after.</sub></td>
   </tr>
 </table>
 
@@ -54,29 +53,29 @@ The latino game that crossed continents. Turn based card game supporting country
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/showcase/truco-table.png" alt="Truco table"><br><sub>A hand in play against the boteco regulars</sub></td>
-    <td align="center" width="50%"><img src="docs/showcase/truco-lobby.png" alt="Truco lobby"><br><sub>An open online table, one seat waiting for a friend</sub></td>
+    <td align="center" width="50%"><img src="docs/showcase/truco-table.png" alt="Truco table"><br><sub>A hand in play against the boteco regulars.</sub></td>
+    <td align="center" width="50%"><img src="docs/showcase/truco-lobby.png" alt="Truco lobby"><br><sub>An open online table, one seat waiting for a friend.</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/showcase/truco-ir.png" alt="Truco IR"><br><sub>ir.html: the engineering design, compiled from the brief</sub></td>
+    <td align="center"><img src="docs/showcase/truco-ir.png" alt="Truco IR"><br><sub>The llm-generated engineering design, part of intermediate representation from the user product brief.</sub></td>
     <td align="center"><img src="docs/showcase/truco-journal.png" alt="Truco journal"><br><sub>journal.html: a turn with its before and after</sub></td>
   </tr>
 </table>
 
 ### Apex Run
 
-[apexrun.bonisoft3.com](https://apexrun.bonisoft3.com)
+[apexrun.bonisoft3.com](https://apexrun.bonisoft3.com) ([source](https://github.com/bonisoft3/apexrun))
 
 A homage to the OutRun arcade game, llm-dreamed from super tux kart source code. Leverages webgpu with adaptive load, art fully AI generated. Great offline support, and when online allows for realtime duels. Uses pronto time travel magic to give you a nice scenic ride on game end, replaying your game from multiple angles, Mario Kart style.
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/showcase/apexrun-title.png" alt="Apex Run title"><br><sub>The title card, where a run starts</sub></td>
-    <td align="center" width="50%"><img src="docs/showcase/apexrun-race.png" alt="Apex Run race"><br><sub>The highway at 60 Hz, nitro and traffic</sub></td>
+    <td align="center" width="50%"><img src="docs/showcase/apexrun-title.png" alt="Apex Run title"><br><sub>The title card, where a run starts.</sub></td>
+    <td align="center" width="50%"><img src="docs/showcase/apexrun-race.png" alt="Apex Run race"><br><sub>The highway at 60 Hz, nitro and traffic.</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/showcase/apexrun-journal-early.png" alt="Apex Run journal, an early turn"><br><sub>journal.html at turn 2: the wedge car, before each stage became a place</sub></td>
-    <td align="center"><img src="docs/showcase/apexrun-journal-first.png" alt="Apex Run journal, the oracle"><br><sub>journal.html, the first brief and the Stitch frame it aimed at</sub></td>
+    <td align="center"><img src="docs/showcase/apexrun-journal-early.png" alt="Apex Run journal, an early turn"><br><sub>The second entry of the development journal kept by the LLM: the wedge car, before each stage became a place.</sub></td>
+    <td align="center"><img src="docs/showcase/apexrun-journal-first.png" alt="Apex Run journal, the oracle"><br><sub>The product brief and the llm-generated frame it aimed at.</sub></td>
   </tr>
 </table>
 
@@ -93,7 +92,7 @@ The battle chess of the AI era. Built by a third party with no prior knowledge o
 
 Pronto does not need to be installed, just ask your LLM to write code using the bonisoft3/pronto programming language. For example, "Create a minesweeper clone using bonisoft3/pronto as a programming language". Nonetheless, it gets more powerful if you install the pronto plugin as shown below.
 
-The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill and the [`pronto-sprint`](commands/sprint.md) command that runs four turns and a wrap, with specialist studio seats and project bootstrap knowledge.
+The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill and the [`pronto-sprint`](commands/sprint.md) command that runs four turns and a wrap, with a specialized harness and project bootstrap knowledge.
 
 **Antigravity (`agy`):**
 ```bash
@@ -112,29 +111,25 @@ codex plugin marketplace add bonisoft3/pronto
 codex plugin add pronto@bonisoft3-pronto
 ```
 
-## The review ladder
+## The specification ladder
 
-Pronto has three artifacts, one per audience. Each audience reviews at its own altitude; nobody reviews below their rung.
+Pronto needs no human code review, but it lets people review what exists before code. It writes three artifacts, one per audience; each reviews at its own rung and nobody reviews below it.
 
+```mermaid
+flowchart LR
+  brief["<b>brief.md</b><br/>product · prose<br/><i>edited any time</i>"]
+  ir["<b>ir.html</b><br/>engineer · design doc<br/><i>pinned per compile</i>"]
+  cue["<b>program.cue</b><br/>machine · no reviewer<br/><i>pinned per compile</i>"]
+  out(["mecha YAML<br/>omnishell config<br/>HTML/CSS · JS handlers"])
+  brief -. LLM .-> ir
+  ir -. "LLM, narrow" .-> cue
+  cue == cue export ==> out
+  ir <-- "ids, checked both ways" --> cue
 ```
-brief.md ──LLM──▶ ir.html ──LLM (narrow)──▶ program.cue ──cue export──▶ everything
-(product           (engineering              (machine                    (mecha YAML,
- altitude,          design doc:               altitude,                   omnishell config,
- natural            architecture boxes,       reviewed by                 HTML/CSS screens,
- language)          SVG screen sketches)      no one)                     JS handlers)
-```
 
-| Artifact | Audience | Contents | Mutability |
-|----------|----------|----------|------------|
-| `brief.md` | Product / business | What the app is today and the next sprint's turns, in prose. People edit it at any time; the sprint wrap rewrites it; a turn never does. `brief.html`, a fixed emitted page, renders it in the browser | Mutable |
-| `ir.html` | Engineer | Architecture diagram (boxes and how they communicate), SVG screen sketches, contracts, test pairs — a design doc that renders in any browser (optionally composed from `ir/*.html`) | Pinned per compile |
-| `program.cue` | Machine | The program. Everything downstream is `cue export` | Pinned per compile |
+Only the dotted hops are probabilistic, and the second is narrow: the structured parts of `ir.html` (entities, flows, data paths) extract into CUE deterministically. Every box, arrow and sketch in `ir.html` carries an id the CUE points back at, and a checker enforces the bijection. These ids are pronto's sourcemaps: they map design objects rather than lines, survive into the running DOM as `data-*` attributes, and are checked rather than trusted.
 
-The brief is the spec; the journal is the evidence. `brief.md` says what the app is today and what the next sprint's turns deliver, in the product's words; `brief.html`, a fixed page pronto emits, renders it in the browser. `journal.html` is the log beside it, authored by the turns and read by people and models alike for what happened: a product-centric header saying what the app is, then `<article>` entries newest first, each turn's before/after screenshots, recordings, diagrams and gate output, composed from dated files under `journal/YYYY-MM-DD-<slug>.*` and served beside it under `/docs/`. The journal carries no requirements: a new requirement is an edit to the brief. A sprint is four turns and a wrap; the wrap rewrites the brief with the next four turns and collects the journal, deleting superseded entries and their assets from `HEAD`. Git holds the full history, the journal holds the part worth a reader's time. Neither is state a turn resumes from; the tree is.
-
-Only the two LLM hops are probabilistic, and the second is narrow: the structured parts of ir.html (entity tables, flow topology, data-path assignments) extract into CUE deterministically. Every box, arrow, and sketch in ir.html carries a machine-readable id; the generated CUE back-references those ids; a deterministic checker enforces the bijection. IR↔CUE drift is a checkable property, not a hope.
-
-The ids are pronto's sourcemaps: as in TS/JS, every compiled artifact points back at its source — but they map design objects rather than line numbers, they survive into the running DOM as `data-*` attributes, and the mapping is enforced by a checker rather than emitted on faith.
+The brief is the spec, the journal the evidence. `brief.md` says what the app is and what the next sprint delivers; people edit it any time, a turn never does. `journal.html` holds each turn's before/after screenshots, recordings and gate output, newest first, and carries no requirements. A sprint is four turns and a wrap that rewrites the brief and prunes the journal; git keeps the rest, and the tree, not either document, is the state a turn resumes from.
 
 ## The target surface
 
