@@ -165,6 +165,16 @@
         },
         {
           "action": "rebuild",
+          "path": "../brief.md",
+          "target": "/srv/docs/brief.md"
+        },
+        {
+          "action": "rebuild",
+          "path": "../brief.html",
+          "target": "/srv/docs/brief.html"
+        },
+        {
+          "action": "rebuild",
           "path": "../journal.html",
           "target": "/srv/docs/journal.html"
         },
@@ -187,6 +197,31 @@
           "action": "rebuild",
           "path": "../DESIGN.md",
           "target": "/srv/docs/DESIGN.md"
+        },
+        {
+          "action": "rebuild",
+          "path": "../ir/neighbourhood-app.svg",
+          "target": "/srv/docs/ir/neighbourhood-app.svg"
+        },
+        {
+          "action": "rebuild",
+          "path": "../ir/neighbourhood-counter.svg",
+          "target": "/srv/docs/ir/neighbourhood-counter.svg"
+        },
+        {
+          "action": "rebuild",
+          "path": "../ir/neighbourhood-grid.svg",
+          "target": "/srv/docs/ir/neighbourhood-grid.svg"
+        },
+        {
+          "action": "rebuild",
+          "path": "../ir/neighbourhood-timer.svg",
+          "target": "/srv/docs/ir/neighbourhood-timer.svg"
+        },
+        {
+          "action": "rebuild",
+          "path": "../ir/neighbourhood-todo.svg",
+          "target": "/srv/docs/ir/neighbourhood-todo.svg"
         },
         {
           "action": "rebuild",
