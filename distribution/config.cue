@@ -6,7 +6,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "1.0.5"
+#Version:     "1.0.7"
 #SaytVersion: "0.45.3"
 
 // Test-only modules: an app's tests import the hybrid oracle harnesses by URL,
