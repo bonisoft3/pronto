@@ -1,11 +1,11 @@
 // Renders an edge release's src/effects.js: the app's external effects from
 // services/airlock/effects.json, each bound to its handler module and target
-// (bifrost or declared HTTPS origin) for mecha-edge's airlock.ts.
+// (tsbifrost or declared HTTPS origin) for mecha-edge's airlock.ts.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export interface EffectTarget {
-  kind: 'bifrost' | 'origin'
+  kind: 'tsbifrost' | 'origin'
   url?: string
 }
 
@@ -14,12 +14,12 @@ async function resolveEffectTarget(appDir: string, name: string): Promise<Effect
     const yaml = await Deno.readTextFile(path.join(appDir, 'services/airlock/dapr', `${name}.yaml`))
     const match = yaml.match(/-\s*name:\s*url\s*\r?\n\s*value:\s*['"]?([^'"\r\n]+)['"]?/)
     const url = match?.[1]?.trim()
-    if (!url || /^https?:\/\/(bifrost|127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) {
-      return { kind: 'bifrost' }
+    if (!url || /^https?:\/\/(tsbifrost|127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) {
+      return { kind: 'tsbifrost' }
     }
     return { kind: 'origin', url }
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return { kind: 'bifrost' }
+    if (e instanceof Deno.errors.NotFound) return { kind: 'tsbifrost' }
     throw e
   }
 }

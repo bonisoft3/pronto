@@ -345,8 +345,10 @@ and the public origin the files come from) ships that set as static assets
 under `public/blobs/mecha-objects/`, the URLs the blob plane answers in compose:
 each file is fetched from the origin and refused unless it hashes to its sha256
 ([`edge-blobs.ts`](../bundle/edge-blobs.ts)), and `_headers` marks `/blobs/*`
-immutable. Blobs written at run time, such as uploads, have no store at the
-edge yet; a seed is the set known at release.
+immutable. An effect's answered bytes are written at run time to the
+`edgeImages` bucket and served by its route, as an imported picture is
+([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.3/services/airlock/README.md#a-handler));
+uploads have no store at the edge yet.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
 ([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.20.3/packages/pglite-workerd/README.md));

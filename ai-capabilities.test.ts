@@ -65,7 +65,7 @@ app: pronto.#App & {
     effects: draft: {
       input: {topic: "NEW.topic"}
       sink: ${sink}
-      note: "bifrost AI gateway is idempotent for deterministic prompt generation"
+      note: "tsbifrost AI gateway is idempotent for deterministic prompt generation"
     }
   }
   capabilities: {
@@ -102,7 +102,7 @@ out: (pronto.#emit & {
 `;
 }
 
-Deno.test("capabilities.ai with model overrides and agent browser unit compiles and emits bifrost Dapr binding", async () => {
+Deno.test("capabilities.ai with model overrides and agent browser unit compiles and emits tsbifrost Dapr binding", async () => {
   const code = aiProgram({
     ai: `{
       text: ["browser", "cheap", "heavy"]
@@ -127,7 +127,7 @@ Deno.test("capabilities.ai with model overrides and agent browser unit compiles 
   const dapr = files["services/airlock/dapr/draft.yaml"].data as {
     spec: { metadata: { name: string; value: string }[] };
   };
-  assertEquals(dapr.spec.metadata[0], { name: "url", value: "http://bifrost:8090" });
+  assertEquals(dapr.spec.metadata[0], { name: "url", value: "http://tsbifrost:8090" });
   const shell = files["shell/shell.yaml"].data as { ai: { text: string[]; models: { text: { heavy: { model: string } } } } };
   assertEquals(shell.ai.text, ["browser", "cheap", "heavy"]);
   assertEquals(shell.ai.models.text.heavy.model, "gemma4:26b-custom");

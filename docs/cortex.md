@@ -30,6 +30,12 @@ the terminal's navigation; nested states track multi-machine coordination.
 machine without a lease, a sync child over a machine without a join, and a sync
 child whose screen's route does not carry its `instance`.
 
+A signal names where a Mecha machine went: `signal:<table>.<state>` is a state
+of the machine on that table's entity, and `#App` refuses one naming no such
+state, an arrow nothing would ever fire. `.pronto/check-inputs.json` carries
+each chart and the machines, so a test can replay a machine's paths as the
+signals they send and hold the chart to hearing each one.
+
 ## Affordances, Commands, and Intents
 
 To prevent overlap with [Omnishell machines](https://github.com/bonisoft3/omnishell/blob/v0.21.4/docs/machines.md#omnishell-machines),

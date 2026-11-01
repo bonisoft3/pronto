@@ -1855,10 +1855,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					ssrOrigin: D.code.meta.ssrOrigin
 				}
 				// What only the cluster's streams and computations write lands in
-				// live tables, which the page ships as they stood at bundling.
+				// live tables, which the page ships as they stood at bundling. A
+				// private table's rows are a person's, and no person ships with a
+				// release: the bundling cluster's own guest would name an app_user
+				// the page never has.
 				if len(D.code.state.pipelines)+len(D.code.state.drains)+len(D.code.state.computations) > 0 {
 					derived: {
-						tables: list.SortStrings([for _, e in D.code.state.entities if e.durability == "live" {e.table}])
+						tables: list.SortStrings([for _, e in D.code.state.entities if e.durability == "live" let private = [if e.access != _|_ if e.access.scope == "private" {true}] if len(private) == 0 {e.table}])
 						streams: list.SortStrings([for n, _ in (#streams & {code: D.code}).out {"\(D.code.meta.name)-\(n)"}])
 					}
 				}
@@ -3102,6 +3105,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				hatches: E.code.capabilities.hatches
 				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
 				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
+				// Each Cortex chart, and the Mecha machines its signals name, for a walk
+				// to cover its intents and signals.
+				if E.code.state.cortex != _|_ {
+					cortex: {for n, c in E.code.state.cortex {(n): c.config}}
+					machines: {if E.code.state.machines != _|_ for n, m in E.code.state.machines {(n): {entity: m.entity, field: m.field, initial: m.initial, states: m.states}}}
+				}
 			}
 		}
 		"schema/entities.proto": {
@@ -3409,7 +3418,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 								// Cluster-owned bridges and the AI gateway use plain HTTP.
 								{name: "url", value: [
 									if i.effect.sink.bridge != _|_ {"http://\(E.code.state.bridges[i.effect.sink.bridge].container):\(E.code.state.bridges[i.effect.sink.bridge].port)"},
-									if i.effect.sink.ai != _|_ {"http://bifrost:\(mecha.#BifrostPort)"},
+									if i.effect.sink.ai != _|_ {"http://tsbifrost:\(mecha.#TsBifrostPort)"},
 									i.effect.sink.origin,
 								][0]},
 								// The sink's own status comes back to the handler, a refusal

@@ -1606,7 +1606,7 @@ import (
 		if blobSeed != _|_ {blobs: true}
 		// First-class 3-tier AI model architecture (`browser`, `cheap`, `heavy`)
 		// with per-tier and per-release-target model overrides. Backend tiers
-		// (`cheap`, `heavy`) route through mecha's bifrost AI gateway; the
+		// (`cheap`, `heavy`) route through mecha's tsbifrost AI gateway; the
 		// `browser` tier runs in an `agent` worker unit via `capabilities.vendored`.
 		ai?: {
 			text?:    *["browser", "cheap", "heavy"] | ([...mecha.#AiTier] & list.UniqueItems())
@@ -1984,6 +1984,25 @@ import (
 		},
 	]) {v}]
 	_cortexRefusal: [if len(_cortexViolations) == 0 {true}, _cortexViolations[0]][0] & true
+	// A signal names where a Mecha machine went: `signal:<table>.<state>`, a
+	// state of the machine on that table's entity. One naming no such state is
+	// an arrow nothing ever fires, which a walk of the chart would still cover.
+	_cortexNodes: [if A.state.cortex != _|_ for cName, c in A.state.cortex for sName, st in c.config.states
+		for at, node in {
+			(sName): st
+			if st.states != _|_ for n1, s1 in st.states {
+				"\(sName).\(n1)": s1
+				if s1.states != _|_ for n2, s2 in s1.states {"\(sName).\(n1).\(n2)": s2}
+			}
+		} {chart: cName, state: at, on: [if node.on != _|_ {node.on}, {}][0]}]
+	_cortexSignalViolations: [for n in _cortexNodes for k, _ in n.on if strings.HasPrefix(k, "signal:")
+		let parts = strings.SplitN(strings.TrimPrefix(k, "signal:"), ".", 2)
+		let entity = [if len(parts) == 2 if A._entityByTable[parts[0]] != _|_ {A._entityByTable[parts[0]]}, ""][0]
+		let states = [if A.state.machines != _|_ for _, m in A.state.machines if m.entity == entity {m.states}]
+		if len(parts) != 2 || entity == "" || len(states) == 0 || states[0][parts[len(parts)-1]] == _|_ {
+			"\(n.chart).\(n.state): \(k) names no state of a Mecha machine on its table"
+		}]
+	_cortexSignalRefusal: [if len(_cortexSignalViolations) == 0 {true}, _cortexSignalViolations[0]][0] & true
 	// The XState a Mecha machine cannot run is refused rather than read as
 	// something else: its step is its reducer's, so it invokes nothing, and an
 	// event names one transition.

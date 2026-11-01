@@ -363,7 +363,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let has_migrate = ("migrate" in $services)
 	let has_render = ("render" in $services)
 	let has_airlock = ("airlock" in $services)
-	let has_bifrost = ("bifrost" in $services)
+	let has_bifrost = ("tsbifrost" in $services)
 	# The ticker, where the app declares a schedule or a machine's timer.
 	let has_ticker = ("ticker" in $services)
 	# The app's own containers beside them (GCP.sidecars), each one of its compose services.
@@ -371,7 +371,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	if ($missing | is-not-empty) {
 		error make {msg: $"GCP.sidecars names ($missing | str join ', '), which the app's compose project does not define"}
 	}
-	let images = ($runtime | append (if $has_migrate { ["migrate" "schema"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append (if $has_airlock { ["airlock"] } else { [] }) | append (if $has_bifrost { ["bifrost"] } else { [] }) | append $plan0.sidecars | uniq)
+	let images = ($runtime | append (if $has_migrate { ["migrate" "schema"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append (if $has_airlock { ["airlock"] } else { [] }) | append (if $has_bifrost { ["tsbifrost"] } else { [] }) | append $plan0.sidecars | uniq)
 	let pushed = if $snapshot { {} } else {
 		print $"gcp: (stamp) setting up ($plan0.service)'s project"
 		ensure-infrastructure $plan0
@@ -394,7 +394,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
 	let render_cfg = if $has_render { {render: {enabled: true}} } else { {} }
-	let airlock_cfg = if $has_airlock { {airlock: {enabled: true, bifrost: $has_bifrost, aiModels: ($compose.services.bifrost?.environment?.AI_MODELS? | default "")}} } else { {} }
+	let airlock_cfg = if $has_airlock { {airlock: {enabled: true, tsbifrost: $has_bifrost, aiModels: ($compose.services.tsbifrost?.environment?.AI_MODELS? | default "")}} } else { {} }
 	let ticker = if $has_ticker { {ticker: {env: ($compose.services.ticker.environment? | default {} | reject -o CRUD_URL SERVICE_JWT PORT)}} } else { {} }
 	# Each sidecar's compose environment, its peers where it finds them: at their
 	# loopback ports in the cluster's instance, through the door and at the

@@ -11,7 +11,7 @@ import (
 )
 
 // #Release is an app on GCP: Cloud SQL for its database, and caddy, crud, auth
-// and electric (plus optional render, airlock, and bifrost) as containers of
+// and electric (plus optional render, airlock, and tsbifrost) as containers of
 // one Cloud Run service, sharing localhost the way mecha's bundled unit does
 // (docs/deployment.md#the-bundled-unit), beside the Cloud SQL Auth Proxy. One
 // instance at most, since electric is one; none while nobody plays.
@@ -93,13 +93,13 @@ import (
 	}
 
 	// Present where the app's compose project declares external effects (airlock)
-	// and optional tiered AI routing through bifrost (proxying to Gemini / Imagen
+	// and optional tiered AI routing through tsbifrost (proxying to Gemini / Imagen
 	// on GCP via GEMINI_API_KEY in Secret Manager).
 	airlock: {
-		enabled:  *false | bool
-		bifrost:  *false | bool
-		aiModels: *"" | string
-		// Provider API keys (e.g. GEMINI_API_KEY) mounted into bifrost/airlock
+		enabled:   *false | bool
+		tsbifrost: *false | bool
+		aiModels:  *"" | string
+		// Provider API keys (e.g. GEMINI_API_KEY) mounted into tsbifrost/airlock
 		// from Secret Manager, keyed by environment variable name.
 		secrets: *{} | {[=~"^[A-Z][A-Z0-9_]*$"]: string}
 	}
@@ -170,7 +170,7 @@ import (
 		"electric:3000":  "127.0.0.1:\(#Ports.electric)"
 		"ticker:9998":    "127.0.0.1:\(#Ports.ticker)"
 		"render:8090":    "127.0.0.1:\(#Ports.render)"
-		"bifrost:8090":   "127.0.0.1:\(#Ports.bifrost)"
+		"tsbifrost:8090": "127.0.0.1:\(#Ports.tsbifrost)"
 		"airlock:9997":   "127.0.0.1:\(#Ports.airlock)"
 		"database:5432":  "127.0.0.1:\(#Ports.database)"
 		for n, c in R._inside {"\(n):\(c.port)": "127.0.0.1:\(c.port)"}
@@ -265,7 +265,7 @@ import (
 }
 
 // Ports inside the shared instance: compose's own, except electric (whose 3000
-// is crud's) and render (8091, so bifrost keeps 8090).
+// is crud's) and render (8091, so tsbifrost keeps 8090).
 #Ports: {
 	caddy:       8080
 	crud:        3000
@@ -274,7 +274,7 @@ import (
 	electric:    3002
 	render:      8091
 	ticker:      9998
-	bifrost:     8090
+	tsbifrost:   8090
 	airlock:     9997
 	database:    5432
 	proxyHealth: 9090
@@ -315,7 +315,7 @@ import (
 	}
 	let sq = R.names.secrets
 	let bounds = resilience.resilience.timeouts
-	let meshPort = [if R.airlock.bifrost {P.bifrost}, 3500][0]
+	let meshPort = [if R.airlock.tsbifrost {P.tsbifrost}, 3500][0]
 
 	service: {
 		apiVersion: "serving.knative.dev/v1"
@@ -352,7 +352,7 @@ import (
 						render: ["crud", "auth", "electric"]
 					}
 					if R.airlock.enabled {
-						airlock: list.Concat([["cloud-sql-proxy"], [if R.airlock.bifrost {"bifrost"}]])
+						airlock: list.Concat([["cloud-sql-proxy"], [if R.airlock.tsbifrost {"tsbifrost"}]])
 					}
 				})
 			}
@@ -443,15 +443,15 @@ import (
 						]
 						startupProbe: {httpGet: {path: "/health", port: P.render}, periodSeconds: 2, failureThreshold: 60}
 					}},
-					if R.airlock.enabled && R.airlock.bifrost {{
-						name:  "bifrost"
-						image: (imageOf & {svc: "bifrost"}).out
+					if R.airlock.enabled && R.airlock.tsbifrost {{
+						name:  "tsbifrost"
+						image: (imageOf & {svc: "tsbifrost"}).out
 						env: list.Concat([[
-							{name: "BIFROST_PORT", value: "\(P.bifrost)"},
+							{name: "TSBIFROST_PORT", value: "\(P.tsbifrost)"},
 							{name: "AI_TARGET", value: "gcp"},
 							if R.airlock.aiModels != "" {{name: "AI_MODELS", value: R.airlock.aiModels}},
 						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
-						startupProbe: {httpGet: {path: "/healthz", port: P.bifrost}, periodSeconds: 2, failureThreshold: 60}
+						startupProbe: {httpGet: {path: "/healthz", port: P.tsbifrost}, periodSeconds: 2, failureThreshold: 60}
 					}},
 					if R.airlock.enabled {{
 						name:  "airlock"

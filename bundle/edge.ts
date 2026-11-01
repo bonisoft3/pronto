@@ -311,6 +311,8 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   name,
   main: 'src/index.ts',
   compatibility_date: '2026-09-01',
+  // The object's airlock runs Graphile Worker, which needs Node's built-ins.
+  compatibility_flags: ['nodejs_compat'],
   // run_worker_first routes /* to the Worker so immutable assets attach
   // Cache-Control: public, max-age=31536000, immutable strictly on 200 responses,
   // while 404 responses are served with Cache-Control: no-store.
@@ -332,6 +334,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
     '@electric-sql/pglite': './pglite/index.js',
     '@electric-sql/pglite/basefs': './pglite/fs/base.js',
     '@mecha/postgrest-js': rel(path.join(mecha, 'packages/postgrest-js/src/index.ts')),
+    typescript: rel(path.join(mecha, 'packages/mecha-edge/src/typescript-absent.js')),
   },
 }, null, 2) + '\n')
 if (flags['--ssr-origin']) {
