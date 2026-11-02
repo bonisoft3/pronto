@@ -28,6 +28,30 @@ case "$args" in
   grep -m1 'pronto-job' "$f" | sed -E 's/.*pronto-job"?:[[:space:]]*"?([^",]*)"?.*/\1/' > "$FAKE_STATE/job-$sn"
   echo "  replace $f is $(grep -m1 -E '^[[:space:]]*"?name"?:' "$f" | sed -E 's/.*name"?:[[:space:]]*"?([^",]*).*/\1/')" >> "$FAKE_LOG" ;;
 esac
+# Cloud Storage objects (the release lock), each with a generation, kept in $FAKE_STATE; a write or
+# a removal with --if-generation-match holds only where the generation is that (0: no object).
+case "$args" in
+*"storage cp "*gs://*|*"storage cat "*|*"storage objects describe "*|*"storage rm "*)
+  obj=$(echo "$args" | grep -oE 'gs://[^ ]+' | head -1)
+  k="$FAKE_STATE/gcs-$(hex "$obj")"
+  cur=$(cat "$k.gen" 2>/dev/null || echo 0)
+  want=$(echo "$args" | sed -nE 's/.*--if-generation-match=([0-9]+).*/\1/p')
+  if [ -n "$want" ] && [ "$want" != "$cur" ]; then echo "ERROR: HTTPError 412: At least one of the pre-conditions you specified did not hold." >&2; exit 1; fi
+  case "$args" in
+  *"storage cp "*)
+    src=$(echo "$args" | sed -E 's/.*storage cp ([^ ]+) .*/\1/')
+    n=$(( $(cat "$FAKE_STATE/gcs-counter" 2>/dev/null || echo 0) + 1 )); echo $n > "$FAKE_STATE/gcs-counter"
+    cp "$src" "$k.body"; echo "$n" > "$k.gen"; echo "  wrote $obj" >> "$FAKE_LOG" ;;
+  *)
+    if [ "$cur" = 0 ]; then echo "ERROR: $obj not found: 404" >&2; exit 1; fi
+    case "$args" in
+    *"storage cat "*) cat "$k.body" ;;
+    *"objects describe "*) echo "$cur" ;;
+    *"storage rm "*) rm -f "$k.body" "$k.gen"; echo "  removed $obj" >> "$FAKE_LOG" ;;
+    esac ;;
+  esac
+  exit 0 ;;
+esac
 case "$args" in
 *"builds submit"*)
   cfg=$(echo "$args" | sed -nE 's/.*--config ([^ ]+).*/\1/p')

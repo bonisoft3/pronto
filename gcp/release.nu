@@ -669,6 +669,62 @@ def local-gate [app_dir: string] {
 	}
 }
 
+# One release of an app at a time, wherever it starts: two would race on its service, its
+# traffic, its rc preview and its IAM policy (AGENTS.md). The lock is an object in the project's
+# own bucket, made only where none is (--if-generation-match=0, which GCS decides atomically), that
+# says who holds it and until when. A release that died leaves it until then; PRONTO_RELEASE_BREAK_LOCK=1
+# takes it at once. Releases of other apps, and an app's previews (pr-32), hold locks of their own.
+const LOCK_FOR = 45min
+
+def lock-of [cue_path: string, preview: string]: nothing -> record {
+	let g = (^cue export --expression "{p: GCP.project, n: GCP.name, r: GCP.region}" --out json $cue_path | from json)
+	let key = if ($preview | is-empty) { $g.n } else { $"($g.n)-($preview)" }
+	let bucket = $"gs://($g.p)-release-locks"
+	{bucket: $bucket, object: $"($bucket)/($key)", key: $key, project: $g.p, region: $g.r}
+}
+
+def take-lock [lock: record]: nothing -> any {
+	if not (exists storage buckets describe $lock.bucket --project $lock.project) {
+		gc storage buckets create $lock.bucket --project $lock.project --location $lock.region --uniform-bucket-level-access --public-access-prevention | ignore
+	}
+	let now = (date now)
+	let holder = {by: $"(whoami | str trim)@(sys host | get hostname)", dir: (pwd), pid: $nu.pid, since: ($now | format date "%+"), until: ($now + $LOCK_FOR | format date "%+")}
+	let file = (mktemp -t pronto-release-lock.XXXXXX)
+	$holder | to json | save -f $file
+	let broken = ($env.PRONTO_RELEASE_BREAK_LOCK? | default "") not-in ["" "0" "false"]
+	for attempt in [1 2] {
+		let made = (do { ^gcloud --quiet storage cp $file $lock.object "--if-generation-match=0" --project $lock.project } | complete)
+		if $made.exit_code == 0 {
+			rm -f $file
+			let generation = (gc storage objects describe $lock.object --project $lock.project --format "value(generation)" | str trim)
+			print $"gcp: (stamp) ($lock.key)'s release lock taken \(($lock.object), until ($holder.until)\)"
+			return ($lock | insert generation $generation)
+		}
+		if not ($made.stderr =~ '(?i)412|pre-?condition') {
+			rm -f $file
+			error make {msg: $"($lock.key)'s release lock \(($lock.object)\) was not taken: ($made.stderr | str trim)"}
+		}
+		let held = (try { gc storage cat $lock.object --project $lock.project | from json } catch { {} })
+		let generation = (try { gc storage objects describe $lock.object --project $lock.project --format "value(generation)" | str trim } catch { "" })
+		let expired = (try { ($held.until | into datetime) < (date now) } catch { true })
+		if $attempt == 2 or not ($expired or $broken) {
+			rm -f $file
+			error make {msg: $"another release of ($lock.key) is running: ($held.by? | default 'someone') in ($held.dir? | default '?') \(pid ($held.pid? | default '?')\) since ($held.since? | default '?'), holding it until ($held.until? | default '?'). One release of an app at a time: run again once it ends. A release that died holds it until then; PRONTO_RELEASE_BREAK_LOCK=1 takes it now."}
+		}
+		print $"gcp: (stamp) ($lock.key)'s release lock taken over from ($held.by? | default 'someone') \((if $broken { 'PRONTO_RELEASE_BREAK_LOCK' } else { $"it expired at ($held.until? | default '?')" })\)"
+		if ($generation | is-not-empty) {
+			do { ^gcloud --quiet storage rm $lock.object $"--if-generation-match=($generation)" --project $lock.project } | complete | ignore
+		}
+	}
+	error make {msg: $"($lock.key)'s release lock was not taken"}
+}
+
+# The lock let go, only if it is still this release's (its generation): one taken over since stays.
+def drop-lock [lock: record] {
+	let r = (do { ^gcloud --quiet storage rm $lock.object $"--if-generation-match=($lock.generation)" --project $lock.project } | complete)
+	if $r.exit_code == 0 { print $"gcp: (stamp) ($lock.key)'s release lock let go" } else { print $"gcp: (stamp) ($lock.key)'s release lock was not let go: ($r.stderr | str trim | lines | last)" }
+}
+
 export def main [
 	--snapshot      # Build and render only, change nothing in the project
 	--dry-run       # Print what would be applied and exit
@@ -694,6 +750,18 @@ export def main [
 	let rollback = ($rollback or (do $given ROLLBACK))
 	let force_rc = ($rc or (do $given RC))
 	let no_local_gate = ($no_local_gate or (do $given NO_LOCAL_GATE) or (($env.PRONTO_RELEASE_NO_LOCAL_GATE? | default "") not-in ["" "0" "false"]))
+	# Nothing a dry run or a snapshot does reaches the project, so neither waits for the lock.
+	let lock = if $dry_run or $snapshot { null } else { take-lock (lock-of $app_info.cue_path $preview) }
+	let failure = (try {
+		release-body $app_info $preview $delete $dry_run $snapshot $no_gate $rollback $force_rc $no_local_gate
+		null
+	} catch {|e| $e.msg })
+	if $lock != null { drop-lock $lock }
+	if $failure != null { error make {msg: $failure} }
+}
+
+# The release main parsed its flags for, once it holds the app's lock.
+def release-body [app_info: record, preview: string, delete: bool, dry_run: bool, snapshot: bool, no_gate: bool, rollback: bool, force_rc: bool, no_local_gate: bool] {
 	if $rollback { roll-back (plan-of $app_info.cue_path ""); return }
 	if $delete {
 		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }

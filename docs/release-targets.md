@@ -634,6 +634,15 @@ after a gated release succeeds. `--rc` runs the rc gate anyway, and so does
 ([decision](decisions/2026-11-01-local-gate-replaces-rc.md)). An app's own
 rehearsal records a local pass with `nu gcp/local-gate-key.nu stamp <app dir>`.
 
+One release of an app runs at a time, wherever it starts: before anything else a release
+takes the app's lock, `gs://<project>-release-locks/<app>` (a preview's is `<app>-<preview>`),
+an object made only where none is (`--if-generation-match=0`), saying who holds it and until
+when (45 minutes on). A second release of the app stops at once and names the holder; releases of
+other apps take locks of their own and run beside it. The lock is let go when the release ends,
+however it ends; a release that died holds it until it expires, and `PRONTO_RELEASE_BREAK_LOCK=1`
+takes it at once. A dry run and a snapshot take none. Two releases of ume-rental had gone live four
+seconds apart, their IAM bindings racing.
+
 `sayt verify@gcp` ([`gcp/verify.nu`](../gcp/verify.nu)) runs the drivers of
 `verify@<target>` against the release's address, or a preview's with
 `--preview`: every service of the app's compose project that reads `APP_URL`,
