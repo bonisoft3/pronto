@@ -330,7 +330,20 @@ async function cueJson(cwd: string, args: string[]): Promise<unknown> {
 
 /** What the app's package states at `expression`, over `app` (the app imported). Importing the
  * app leaves unreferenced deployment roots unevaluated, where `cue export . -e` evaluates them all. */
-export async function readApp(appDir: string, pkg: string, lifting: boolean, expression: string): Promise<unknown> {
+// One cue read of an app's directory at a time. readApp's bootstrap sits in the app's package while it
+// reads, so any read beside it (a `cue export .`, another readApp, lifted or not) would unify with it.
+const reading = new Map<string, Promise<unknown>>();
+export function exclusive<T>(appDir: string, read: () => Promise<T>): Promise<T> {
+  const turn = (reading.get(appDir) ?? Promise.resolve()).then(read);
+  reading.set(appDir, turn.catch(() => {}));
+  return turn;
+}
+
+export function readApp(appDir: string, pkg: string, lifting: boolean, expression: string): Promise<unknown> {
+  return exclusive(appDir, () => readAppNow(appDir, pkg, lifting, expression));
+}
+
+async function readAppNow(appDir: string, pkg: string, lifting: boolean, expression: string): Promise<unknown> {
   const app = await Deno.realPath(appDir);
   let root = app;
   while (await ifMissing(Deno.stat(join(root, "cue.mod/module.cue")), null) === null) {
