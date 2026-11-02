@@ -446,7 +446,8 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 	let plan0 = if $rendered == null { plan-of $app_info.cue_path $preview } else { $rendered }
 	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
 	let services = ($compose.services | columns)
-	let refused = ($services | where {|s| $s in $unbuilt })
+	# A service the release does not run itself, but the app names in GCP.sidecars (the renderer, say), is run as that sidecar.
+	let refused = ($services | where {|s| $s in $unbuilt and $s not-in $plan0.sidecars })
 	if ($refused | is-not-empty) {
 		error make {msg: $"release@gcp does not run ($refused | str join ', ') yet \(PENDING.md#release-targets\)"}
 	}

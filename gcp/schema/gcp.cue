@@ -177,6 +177,8 @@ import (
 	// Nothing else of the cluster's is reachable from outside its instance.
 	_remote: {
 		"http://crud:3000": "https://\(R.runHost)/crud"
+		// The door itself, which the terminal's renderer reads the app through.
+		"http://caddy:8080": "https://\(R.runHost)"
 		for n, c in R._apart {"http://\(n):\(c.port)": "https://\(R._apartHost[n])"}
 	}
 	_sidecarPorts: [for _, c in R._inside for p in [c.port, if c.metrics != _|_ {c.metrics.port}] {p}]

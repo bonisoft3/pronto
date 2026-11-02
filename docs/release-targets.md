@@ -738,7 +738,7 @@ What bit on a real instance:
   container at the instance's address, so crud binds `*`.
 
 The release refuses an app whose compose project runs anything else: the
-change-feed unit, the airlock, compute, blobs, images or render. A provider's settings come from compose as
+change-feed unit, the airlock or compute, and a renderer the app does not name in `GCP.sidecars` (below). A provider's settings come from compose as
 the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
 secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
 release maps it onto the service and prints the DNS records it needs; each of
@@ -795,6 +795,16 @@ address>/crud`, another sidecar apart is its own address, and nothing else of
 the cluster's is reachable (the plan's `peers`). It scales on its own
 requests, none at rest; one that serves none, a worker polling the gateway,
 keeps `apart: minScale` instances, its CPU unthrottled between requests.
+
+The terminal's renderer (`ssr: "ssr"` routes) is one such sidecar: name `render` in
+`GCP.sidecars`, `apart: {}`, with `probe: "/health"` (it is ready once its
+eager tables are warm), and `ORIGIN` in its `env` so the release writes the
+deployment's origin there. It reads the app as a reader does, so compose's
+`http://caddy:8080` is `https://<the service's run.app address>` (the plan's
+`peers`), and the door's route to it sets the Host as above. A renderer at
+`minScale: 0` answers a crawler's first request after a rest in the time it takes
+to start, which a link preview does not wait for; `minScale: 1` keeps it warm.
+
 
 ```cue
 GCP: schema.#Release & {

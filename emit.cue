@@ -3869,6 +3869,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				    handle @rendered {
 				      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:\(omnishell.#Render.port)} {
 				        header_up dapr-app-id render
+				        header_up Host {upstream_hostport}
 				        import bounded-render
 				      }
 				    }

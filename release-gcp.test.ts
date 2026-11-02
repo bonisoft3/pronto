@@ -497,6 +497,7 @@ Deno.test("a sidecar apart reaches the gateway through the door, one inside at l
   assertEquals(r.success, true, r.stderr);
   assertEquals(r.value.peers["perf-collector"]["http://crud:3000"], "https://bonk-chess-123.us-central1.run.app/crud");
   assertEquals(r.value.peers["perf-collector"]["http://perf-collector:8687"], "https://bonk-chess-perf-collector-123.us-central1.run.app");
+  assertEquals(r.value.peers["perf-collector"]["http://caddy:8080"], "https://bonk-chess-123.us-central1.run.app", "the door, which the terminal's renderer reads the app through");
   assertEquals(r.value.peers.billing["crud:3000"], "127.0.0.1:3000");
   assertEquals(r.value.peers.billing["perf-collector:8687"], undefined, "one apart is no peer at loopback");
 });
