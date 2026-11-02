@@ -585,7 +585,13 @@ import (
 			labels: "cloud.googleapis.com/location": R.region
 		}
 		spec: template: {
-			metadata: annotations: "run.googleapis.com/cloudsql-instances": R.names.connection
+			// First generation: a job defaults to the second, whose sandbox took 50 to 110 s to
+			// start the container once the image was in (executions' "Started deployed execution
+			// in 1m51s", with the image imported in 2 s), where a job needs nothing it adds.
+			metadata: annotations: {
+				"run.googleapis.com/cloudsql-instances":    R.names.connection
+				"run.googleapis.com/execution-environment": "gen1"
+			}
 			spec: {
 				taskCount: 1
 				template: spec: {
