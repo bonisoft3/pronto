@@ -774,7 +774,12 @@ compose names is the port that container holds there: `http://crud:3000` is
 sidecar is its own port (the plan's `loopback`). A key naming one of the
 cluster's secrets (`SERVICE_JWT`, `PGRST_JWT_SECRET`, …) is mounted from Secret
 Manager, never compose's development value, and `ORIGIN` is where readers are.
-`sidecars: <name>: env` adds to what compose gives.
+`sidecars: <name>: env` adds to what compose gives, and `sidecars: <name>:
+secrets` reads a variable from a Secret Manager secret of the app's own (a key
+it must keep, or one it shares with another app), in place of any value env or
+compose gives: the release grants the service's account each one, and refuses
+to start while one is missing, since such a secret is made where the project's
+infrastructure is, never by the release.
 
 ```cue
 GCP: schema.#Release & {
