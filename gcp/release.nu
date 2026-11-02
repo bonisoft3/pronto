@@ -10,6 +10,7 @@ use ../k8s/release.nu [resolve-app]
 use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images service-jwt]
 use local-gate-key.nu
+use release-record.nu
 
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
@@ -455,6 +456,7 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 		for y in ($plan0.sidecarServicesYaml | values) { print "---"; print $y }
 		return {done: true}
 	}
+	release-record mark stage start --preview $preview
 
 	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
 	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
@@ -544,6 +546,7 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 	for c in ($plan.sidecarScrapeConfigs | transpose secret config) { ensure-secret $c.secret $p $c.config | ignore }
 	grant-secrets $plan
 	print $"gcp: (stamp) ($plan.service) staged"
+	release-record mark stage end --preview $preview
 	{plan: $plan, pushed: $pushed, has_migrate: $has_migrate, copy: $copy, gated: ($from != null), number: $number}
 }
 
@@ -607,14 +610,19 @@ export def go-live [staged: record]: nothing -> record {
 	let r = $plan.region
 	let has_migrate = $staged.has_migrate
 	let number = $staged.number
+	let own = ($plan.preview? | default "")
+	release-record mark deploy start --preview $own
 	let pushed = if $staged.gated and $staged.copy != null { tag-release $staged.copy } else { $staged.pushed }
 	# A release's own service only: a preview's database is emptied for each, whatever its label says.
 	# PRONTO_RELEASE_FORCE_SCHEMA=1 runs the job all the same (a rotated role password, say).
 	let wanted = (job-hash (open --raw dist/gcp/job.yaml))
 	if ($plan.preview? | is-empty) and ($env.PRONTO_RELEASE_FORCE_SCHEMA? | is-empty) and (live-job-hash $plan) == $wanted {
 		print $"gcp: (stamp) the schema job skipped: ($plan.service) is live with the schema it applies \(PRONTO_RELEASE_FORCE_SCHEMA=1 runs it\)"
+		release-record note {schema: "skipped"} --preview $own
 	} else {
+		release-record mark schema start --preview $own
 		run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
+		release-record mark schema end --preview $own
 	}
 	# The new revision takes no traffic until its own address answers: Cloud Run can keep
 	# routing to the revision it just shut down, and a service left broken that way is
@@ -704,6 +712,8 @@ export def go-live [staged: record]: nothing -> record {
 		error make {msg: $"($plan.service) did not go live: ($failed)"}
 	}
 	print $"gcp: (stamp) ($plan.service) is live at ($address)"
+	release-record note {revision: $candidate.revision} --preview $own
+	release-record mark deploy end --preview $own
 	$pushed
 }
 
@@ -745,6 +755,7 @@ def back-one [service: string, project: string, region: string, --schema] {
 	}
 	gc run services update-traffic $service --to-revisions $"($before.metadata.name)=100" --region $region --project $project | ignore
 	print $"gcp: (stamp) ($service) serves ($before.metadata.name) again, not ($serving)"
+	if $schema { release-record note {revision: $before.metadata.name} }
 }
 
 # The release's service and its sidecars apart, each back one revision.
@@ -769,15 +780,19 @@ def local-gate [app_dir: string] {
 	let key = (local-gate-key key $app_dir)
 	if $key != null and (local-gate-key passed $app_dir $key) {
 		print $"gcp: (stamp) the local pre-gate skipped: this tree passed it on this machine already \(~/.cache/pronto/local-gate\)"
+		release-record note {localGate: "reused"}
 		return
 	}
 	print $"gcp: (stamp) the rc gate's drivers on a local stack first \(integrate@local; --no-local-gate skips it\)"
+	release-record note {localGate: "ran"}
+	release-record mark gate start
 	# The verdict is the exit the shell prints as the stream's last line, not what the pipe
 	# raises: a gate with no `gate-exit 0` line failed, whatever else happened.
 	let out = (try {
 		^sh -c '( cd "$1" && INTEGRATE_LOCAL_DRIVERS=all ./saytw integrate@local ); echo "@@gate-exit $?"' sh $app_dir o+e>| lines | each {|l| if not ($l starts-with "@@gate-exit ") { print $"local-gate| ($l)" }; $l }
 	} catch {|e| [$"@@gate-exit pipe: ($e.msg)"] })
 	let verdict = ($out | where {|l| $l starts-with "@@gate-exit " } | last 1 | get -o 0 | default "@@gate-exit none")
+	release-record mark gate end
 	if $verdict != "@@gate-exit 0" {
 		error make {msg: $"the local pre-gate failed \(($verdict | str replace '@@gate-exit ' 'exit ')\): nothing reached production"}
 	}
@@ -873,19 +888,38 @@ export def main [
 	let rollback = ($rollback or (do $given ROLLBACK))
 	let force_rc = ($rc or (do $given RC))
 	let no_local_gate = ($no_local_gate or (do $given NO_LOCAL_GATE) or (($env.PRONTO_RELEASE_NO_LOCAL_GATE? | default "") not-in ["" "0" "false"]))
+	# Every run that can change the project is recorded (gcp/release-record.nu): neither a dry run
+	# nor a snapshot changes anything, and a preview's --delete is no release.
+	let recorded = not ($dry_run or $snapshot or $delete)
+	let at = if $recorded { release-record checkout $app_info.dir } else { {} }
+	if $recorded {
+		$env.PRONTO_RELEASE_MARKS = (mktemp -t pronto-release-marks.XXXXXX | str trim)
+		$env.PRONTO_RELEASE_PREVIEW = $preview
+	}
+	let record = {|outcome: string, failure: any|
+		if $recorded { release-record write $app_info.cue_path $preview $env.GCP_T0 $outcome $failure $at }
+	}
 	# Nothing a dry run or a snapshot does reaches the project, so neither waits for the lock.
-	let lock = if $dry_run or $snapshot { null } else { take-lock (lock-of $app_info.cue_path $preview) }
+	release-record mark lock start
+	let lock = if $dry_run or $snapshot { null } else {
+		try { take-lock (lock-of $app_info.cue_path $preview) } catch {|e|
+			do $record (if ($e.msg | str starts-with "another release") { "refused" } else { "failed" }) $e.msg
+			error make {msg: $e.msg}
+		}
+	}
+	release-record mark lock end
 	let failure = (try {
 		release-body $app_info $preview $delete $dry_run $snapshot $no_gate $rollback $force_rc $no_local_gate
 		null
 	} catch {|e| $e.msg })
 	if $lock != null { drop-lock $lock }
+	do $record (if $failure != null { "failed" } else if $rollback { "rolled-back" } else { "live" }) $failure
 	if $failure != null { error make {msg: $failure} }
 }
 
 # The release main parsed its flags for, once it holds the app's lock.
 def release-body [app_info: record, preview: string, delete: bool, dry_run: bool, snapshot: bool, no_gate: bool, rollback: bool, force_rc: bool, no_local_gate: bool] {
-	if $rollback { roll-back (plan-of $app_info.cue_path ""); return }
+	if $rollback { release-record note {rc: "skipped: --rollback"}; roll-back (plan-of $app_info.cue_path ""); return }
 	if $delete {
 		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }
 		delete-preview (plan-of $app_info.cue_path $preview)
@@ -898,6 +932,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	# snapshot deploys as asked.
 	let local = ($preview | is-empty) and not $dry_run and not $snapshot and not $no_local_gate
 	if ($preview | is-not-empty) or $dry_run or $snapshot or $no_gate {
+		release-record note {rc: $"skipped: (if ($preview | is-not-empty) { 'a preview' } else { '--no-gate' })"}
 		# Nothing runs beside it here: the gate first.
 		if $local { local-gate $app_info.dir }
 		deploy $app_info $preview $dry_run $snapshot | ignore
@@ -913,11 +948,14 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	let rc_why = if $force_rc { "--rc" } else if $no_local_gate { "--no-local-gate: no local pass stands in for it" } else if $deploy_key == null { "the deploy-shaped files cannot be read" } else if not (local-gate-key rc-passed $app_info.dir $deploy_key) { "the deploy-shaped files (release.cue, compose, infra, program.cue, mise) changed since a release passed it" } else { "" }
 	if ($rc_why | is-empty) {
 		print $"gcp: (stamp) no rc preview: the deploy-shaped files are those of a release that passed it, so the local gate stands in for it \(--rc runs it\)"
+		release-record note {rc: "skipped: the deploy-shaped files are those of a release that passed it"}
 		local-gate $app_info.dir
 		deploy $app_info "" false false | ignore
 		return
 	}
 	print $"gcp: (stamp) the rc preview runs: ($rc_why)"
+	release-record note {rc: "ran"}
+	release-record mark rc start
 	# The preview's plan and production's, rendered together; the staging below reuses them.
 	let plans = (["rc" ""] | par-each --keep-order {|v| plan-of $app_info.cue_path (if $v == "rc" { $rc } else { "" }) })
 	let rc_plan = ($plans | first)
@@ -987,7 +1025,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 			if $t == "stage" {
 				try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}) --rendered $prod_plan)} } catch {|e| {staging: $e.msg} }
 			} else {
-				try { finish-drivers $drivers; {} } catch {|e| {tests: $e.msg} }
+				try { finish-drivers $drivers; release-record mark rc end; {} } catch {|e| {tests: $e.msg} }
 			}
 		} | reduce -f {} {|it, acc| $acc | merge $it })
 		if ($both.tests? | is-not-empty) { error make {msg: $both.tests} }

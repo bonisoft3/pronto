@@ -657,6 +657,29 @@ however it ends; a release that died holds it until it expires, and `PRONTO_RELE
 takes it at once. A dry run and a snapshot take none. Two releases of ume-rental had gone live four
 seconds apart, their IAM bindings racing.
 
+Every run is recorded, however it ends, once its lock is let go: one JSON line appended to
+`~/.cache/pronto/releases/<app>.jsonl` (`<app>` is `GCP.name`), which a local DORA dashboard reads
+([`gcp/release-record.nu`](../gcp/release-record.nu)). A dry run, a snapshot and a preview's
+`--delete` record nothing; failing to write the record prints a warning and never fails the release.
+
+| field | value |
+|---|---|
+| `app`, `service`, `project` | `GCP.name`, the service released (a preview's `<service>-<preview>`) and its project |
+| `preview` | the preview released, `""` for production |
+| `commit`, `dirty` | `git rev-parse HEAD` of the app's checkout before the release (`null` without one), and whether the app's directory differs from it |
+| `pronto` | the pronto version releasing (`distribution/config.cue`'s `#Version`) |
+| `started`, `ended` | ISO 8601, UTC |
+| `outcome` | `live`, `failed`, `refused` (another release holds the lock) or `rolled-back` (`--rollback`) |
+| `failure` | the failure's first line, `null` otherwise |
+| `rc` | `ran`, or `skipped: <why>` |
+| `localGate` | `ran`, `reused` (the ledger's pass) or `skipped` |
+| `revision` | the revision serving once live (or the one `--rollback` went back to), `null` otherwise |
+| `phases` | seconds, `null` where the phase never started: `lock` (taking it), `gate` (the local gate), `rc` (the rc preview through its tests), `stage`, `schema` (the job, or `"skipped"`), `deploy` (go-live but the schema job), `total`. A phase the run failed in is timed to the run's end; the gate and rc run beside the stage, so phases overlap |
+
+```json
+{"app":"guestbook","service":"guestbook","project":"brawl-chess","preview":"","commit":"4f1c2e0…","dirty":false,"pronto":"0.25.2","started":"2026-11-02T14:03:11Z","ended":"2026-11-02T14:19:40Z","outcome":"live","failure":null,"rc":"ran","localGate":"ran","revision":"guestbook-00042-xaz","phases":{"lock":1.4,"gate":71.2,"rc":702.5,"stage":188.9,"schema":41.7,"deploy":96.3,"total":989.1}}
+```
+
 `sayt verify@gcp` ([`gcp/verify.nu`](../gcp/verify.nu)) runs the drivers of
 `verify@<target>` against the release's address, or a preview's with
 `--preview`: every service of the app's compose project that reads `APP_URL`,
