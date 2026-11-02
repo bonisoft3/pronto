@@ -198,6 +198,10 @@ Pronto does not coordinate cross-cutting concerns (durabilities, effect safety s
 
 Pronto brings some truly novel ideas to the field, but a lot of it is a careful combination of ideas that have been around for a few years or a few decades. Check [`PHILOSOPHY.md`](PHILOSOPHY.md) to understand where the magic comes from and where we are headed.
 
+## Documents
+
+[`docs/index.md`](docs/index.md) lists every document, with its type and status.
+
 ## License
 
 [GPL-3.0](LICENSE)
