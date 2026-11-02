@@ -116,7 +116,15 @@ const down = async (failed: boolean) => {
     const text = await Deno.readTextFile(log).catch(() => "")
     console.error(`integrate@local: process-compose's log, last lines:\n${text.split("\n").slice(-60).join("\n")}`)
   }
-  await new Deno.Command("process-compose", { args: pc(["down"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "null", stderr: "null" }).output()
+  // `down` itself can hang on a stack whose process failed (seen on reclaim-clone, 25 minutes):
+  // given a minute, then dropped for the stop below, so a failed run fails rather than waits.
+  const asked = new Deno.Command("process-compose", { args: pc(["down"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "null", stderr: "null" }).spawn()
+  const answered = await Promise.race([asked.status.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 60_000))])
+  if (!answered) {
+    console.error("integrate@local: process-compose down did not return in a minute; stopping the stack")
+    asked.kill("SIGKILL")
+    await asked.status
+  }
   // A stack that does not stop when asked is stopped, never waited on.
   if (!await settled(60_000)) {
     console.error("integrate@local: process-compose did not stop in a minute; terminating it")
