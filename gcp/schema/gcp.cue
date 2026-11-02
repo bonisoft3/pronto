@@ -156,8 +156,21 @@ import (
 		// none (a worker polling the gateway) keeps minScale instances.
 		apart?: {
 			minScale: *0 | int & >=0
+			// Its service's CPU, in millicpu; absent, Cloud Run's whole one.
+			// Below 1000 Cloud Run takes it only on request-based billing, one
+			// request at a time, in the first generation environment: the
+			// service is so, and its CPU throttled outside requests even with
+			// minScale instances kept (they are billed at the idle rate). Its
+			// memory is then at most 512Mi below 500, and 1Gi below 1000.
+			cpu?: int & >=80 & <=8000
 		}
 	}
+	// The sidecars apart on less than a whole CPU, and those refused for
+	// asking more memory than that CPU takes.
+	_fractional: {for n, c in R._apart if c.apart.cpu != _|_ if c.apart.cpu < 1000 {(n): c}}
+	_overMemory: [for n, c in R._fractional if c.memory != _|_
+		let mi = [if strings.HasSuffix(c.memory, "Gi") {1024 * strconv.Atoi(strings.TrimSuffix(c.memory, "Gi"))}, strconv.Atoi(strings.TrimSuffix(c.memory, "Mi"))][0]
+		if mi > [if c.apart.cpu < 500 {512}, 1024][0] {n}]
 	// The sidecars in the cluster's instance, and those running apart.
 	_inside: {for n, c in R.sidecars if c.apart == _|_ {(n): c}}
 	_apart: {for n, c in R.sidecars if c.apart != _|_ {(n): c}}
@@ -541,14 +554,17 @@ import (
 				metadata: annotations: {
 					"autoscaling.knative.dev/minScale":         "\(c.apart.minScale)"
 					"autoscaling.knative.dev/maxScale":         "1"
-					"run.googleapis.com/execution-environment": "gen2"
+					"run.googleapis.com/execution-environment": [if R._fractional[n] != _|_ {"gen1"}, "gen2"][0]
 					// One kept at rest works between requests: its CPU is not
-					// throttled outside them.
-					if c.apart.minScale > 0 {"run.googleapis.com/cpu-throttling": "false"}
+					// throttled outside them, unless it is less than a whole one,
+					// which Cloud Run gives only to requests.
+					if R._fractional[n] != _|_ {"run.googleapis.com/cpu-throttling": "true"}
+					if R._fractional[n] == _|_ if c.apart.minScale > 0 {"run.googleapis.com/cpu-throttling": "false"}
 					if scraped {"run.googleapis.com/container-dependencies": json.Marshal({"gmp-collector": [n]})}
 				}
 				spec: {
 					serviceAccountName: R.names.serviceAccount
+					if R._fractional[n] != _|_ {containerConcurrency: 1}
 					if scraped {
 						volumes: [{name: "gmp-config", secret: {secretName: R.names.sidecarScrapeConfigs[n], items: [{key: "latest", path: "config.yaml"}]}}]
 					}
@@ -556,6 +572,7 @@ import (
 						(sidecarOf & {"n": n, "c": c}).out
 						ports: [{name: "http1", containerPort: c.port}]
 						if c.memory != _|_ {resources: limits: memory: c.memory}
+						if c.apart.cpu != _|_ {resources: limits: cpu: "\(c.apart.cpu)m"}
 					}], [if scraped {gmpCollector}]])
 				}
 			}
@@ -762,6 +779,7 @@ import (
 		if len(R._sidecarClashes) > 0 {sidecarPorts: error("GCP.sidecars listen on \(strings.Join(R._sidecarClashes, ", "))")}
 		if len(B.service.spec.template.spec.containers) > 10 {containers: error("the service has \(len(B.service.spec.template.spec.containers)) containers, over Cloud Run's 10 a revision: run some of GCP.sidecars apart (apart: {})")}
 		if B._millicpu > 8000 {cpu: error("the service's containers ask for \(B._millicpu) millicpu, over Cloud Run's 8000: lower GCP.sidecars' cpu")}
+		if len(R._overMemory) > 0 {memory: error("\(strings.Join(R._overMemory, ", ")) apart ask more memory than Cloud Run gives their CPU: at most 512Mi below 500 millicpu, 1Gi below 1000")}
 		scrapeConfig: [if len(R._scraped) > 0 {B.scrapeConfig}, ""][0]
 	}
 	// A container with no limit is given a whole CPU.

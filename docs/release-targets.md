@@ -829,6 +829,11 @@ address>/crud`, another sidecar apart is its own address, and nothing else of
 the cluster's is reachable (the plan's `peers`). It scales on its own
 requests, none at rest; one that serves none, a worker polling the gateway,
 keeps `apart: minScale` instances, its CPU unthrottled between requests.
+`apart: cpu` sets its service's CPU in millicpu (absent, a whole one). Below
+1000 Cloud Run takes it only billed by request, one request at a time, in the
+first generation environment, so the service is so and its CPU is throttled
+between requests even with instances kept (billed at the idle rate). Its `memory` is then at most 512Mi below 500,
+and 1Gi below 1000; the release refuses more.
 
 The terminal's renderer (`ssr: "ssr"` routes) is one such sidecar: name `render` in
 `GCP.sidecars`, `apart: {}`, with `probe: "/health"` (it is ready once its
