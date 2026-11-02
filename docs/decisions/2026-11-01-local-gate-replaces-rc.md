@@ -56,3 +56,24 @@ for the tree as it stands (what an app's rehearsal calls after a full pass);
 `rc-stamp` records an rc pass.
 
 Both keys also hash the tool pins (mise.lock, .mise.toml: sayt, omnishell and its visual lint) of the app and of the repository above it.
+
+## Pronto's own version is not deploy-shaped
+
+The first deploy key hashed pronto's `gcp/*.nu` and the mise pins, so every pronto prerelease sent
+every app's next release through the 13-minute rc preview. The scripts were in the set because rc
+was the only run that exercised the release engine against a real project. That purpose is now served
+earlier: a change to the engine runs its own fork tests (`release-flow.test.ts`, `release-gcp.test.ts`,
+`local-gate-key.test.ts`, over `testdata/fake-cloud.sh`) before it is published, and an app's rc
+preview of the next release adds nothing those did not.
+
+So `deploy-key` hashes the pinned pronto runtime's content (what mise installed, found from the script's
+own path) minus the engine's files (`gcp/*.nu`, those three tests, `testdata/`, `docs/`), and minus the
+`#Version` line of `distribution/config.cue`; and it reads `.mise.toml`, `mise.lock` and
+`cue.mod/module.cue` without pronto's own pin (the version, checksums and URLs of its tool block, its
+dependency in the module). A pronto version whose only differences are in the engine keeps the key;
+any other changed runtime file (`write.ts`, `distribution/`, `builders/`...) or any other tool's pin
+(mecha, sayt, omnishell) moves it. The local gate's `key` is unchanged and still hashes the pins whole.
+
+The risk taken: an engine change that works against the fakes and misbehaves against a real project is
+no longer found by the next app's rc. `--rc` remains for it, and the release's own run still
+fails loudly where a cloud call does.
