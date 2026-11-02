@@ -328,8 +328,22 @@ async function cueJson(cwd: string, args: string[]): Promise<unknown> {
   return JSON.parse(new TextDecoder().decode(result.stdout));
 }
 
-/** Importing the app leaves unreferenced deployment roots unevaluated. */
-export async function readDerivation(appDir: string, pkg: string, lifting: boolean): Promise<unknown> {
+/** What the app's package states at `expression`, over `app` (the app imported). Importing the
+ * app leaves unreferenced deployment roots unevaluated, where `cue export . -e` evaluates them all. */
+// One cue read of an app's directory at a time. readApp's bootstrap sits in the app's package while it
+// reads, so any read beside it (a `cue export .`, another readApp, lifted or not) would unify with it.
+const reading = new Map<string, Promise<unknown>>();
+export function exclusive<T>(appDir: string, read: () => Promise<T>): Promise<T> {
+  const turn = (reading.get(appDir) ?? Promise.resolve()).then(read);
+  reading.set(appDir, turn.catch(() => {}));
+  return turn;
+}
+
+export function readApp(appDir: string, pkg: string, lifting: boolean, expression: string): Promise<unknown> {
+  return exclusive(appDir, () => readAppNow(appDir, pkg, lifting, expression));
+}
+
+async function readAppNow(appDir: string, pkg: string, lifting: boolean, expression: string): Promise<unknown> {
   const app = await Deno.realPath(appDir);
   let root = app;
   while (await ifMissing(Deno.stat(join(root, "cue.mod/module.cue")), null) === null) {
@@ -355,7 +369,30 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
         bootstrap,
         `package ${pkg}\ncode: surface: screens: [string]: {reads: *[] | [..._], writes: *[] | [..._], charts: *[] | [..._], files: handlers: *[] | [..._]}\n${lifting ? "_deriving: true\n" : ""}`,
       );
-      const expression =
+      await Deno.writeTextFile(join(observer, "input.cue"), `package ${pkg === "pronto_derivation" ? "pronto_derivation_reader" : "pronto_derivation"}\nimport app ${JSON.stringify(importPath)}\nreading: ${expression}\n`);
+      return await cueJson(observer, ["export", ".", "-e", "reading", "--out", "json"]);
+    } finally {
+      await Deno.remove(bootstrap);
+    }
+  } finally {
+    await Deno.remove(observer, { recursive: true });
+  }
+}
+
+/** The package program.cue declares. */
+export async function programPackage(appDir: string): Promise<string> {
+  const program = await ifMissing(Deno.readTextFile(`${appDir}/program.cue`), null);
+  if (program === null) {
+    fail(`${appDir}/program.cue: no such file — author program.cue unifying \`code: pronto.#App & { ... }\``);
+  }
+  return /^package (\w+)$/m.exec(program)?.[1] ?? fail(`${appDir}/program.cue names no package`);
+}
+
+export const readDerivation = (appDir: string, pkg: string, lifting: boolean): Promise<unknown> =>
+  readApp(
+    appDir,
+    pkg,
+    lifting,
         "{entities: app.code.state.entities, ir: app.code.meta.ir.source, " +
         "decisions: {for k, v in app.code.meta.decisions {(k): v.ir}}, " +
         "tests: {for k, t in app.code.meta.tests {(k): t.ir}}, " +
@@ -385,23 +422,11 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
         // Which tables the terminal reads lazily and why, as the program
         // decides it from the reads and writes the last derivation projected.
         "read: app.code.#read, " +
-        "program: app.code}";
-      await Deno.writeTextFile(join(observer, "input.cue"), `package ${pkg === "pronto_derivation" ? "pronto_derivation_reader" : "pronto_derivation"}\nimport app ${JSON.stringify(importPath)}\nreading: ${expression}\n`);
-      return await cueJson(observer, ["export", ".", "-e", "reading", "--out", "json"]);
-    } finally {
-      await Deno.remove(bootstrap);
-    }
-  } finally {
-    await Deno.remove(observer, { recursive: true });
-  }
-}
+        "program: app.code}",
+  );
 
 export async function derive(appDir: string): Promise<void> {
-  const program = await ifMissing(Deno.readTextFile(`${appDir}/program.cue`), null);
-  if (program === null) {
-    fail(`${appDir}/program.cue: no such file — author program.cue unifying \`code: pronto.#App & { ... }\``);
-  }
-  const pkg = /^package (\w+)$/m.exec(program)?.[1] ?? fail(`${appDir}/program.cue names no package`);
+  const pkg = await programPackage(appDir);
 
   // Both derivations unify back into the entities this export reads, so a
   // constraint the previous run derived would judge a row the current run's

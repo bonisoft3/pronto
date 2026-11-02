@@ -15,7 +15,7 @@
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { stringify } from "jsr:@std/yaml@1.0.5";
-import { derive, GENERATED_HTML_HEADER, terminalPath } from "./derive.ts";
+import { derive, exclusive, GENERATED_HTML_HEADER, programPackage, readApp, terminalPath } from "./derive.ts";
 import { mint } from "./identity.ts";
 import { entries, exists, ifMissing } from "./missing.ts";
 import { projectSay, projectGates } from "./project-config.ts";
@@ -106,12 +106,12 @@ function render(rel: string, f: EmitFile): string {
 
 /** `cue export -e out`, parsed; null when cue refused, with `quiet` its complaint held back. */
 async function exportOut(quiet = false): Promise<Emission | null> {
-  const exported = await new Deno.Command("cue", {
+  const exported = await exclusive(appDir, () => new Deno.Command("cue", {
     args: ["export", ".", "-e", "out", "--out", "json"],
     cwd: appDir,
     stdout: "piped",
     stderr: quiet ? "piped" : "inherit",
-  }).output();
+  }).output());
   if (!exported.success) return null;
   return JSON.parse(new TextDecoder().decode(exported.stdout));
 }
@@ -454,8 +454,9 @@ await writeIrStylesheet(appDir);
 const before = await derivedText();
 await derive(appDir);
 // Three reads of the same tree, none writing: the identities mint checks, the emission and the
-// program the ir is drawn from. They run together; the last two are taken on the supposition that
-// mint writes nothing and the emission moves nothing, and are taken again where it did.
+// program the ir is drawn from. They are queued together and run one at a time (exclusive); the
+// last two are taken on the supposition that mint writes nothing and the emission moves nothing,
+// and are taken again where it did.
 const minting = mint(appDir);
 const liftAfterDerive = (await derivedText()).includes("@tag(derive,");
 const speculation = Promise.all([exportOut(true).catch(() => null), exportProgram(liftAfterDerive).catch(() => null)]);
@@ -487,19 +488,14 @@ if (await drawIr(standing ? heldProgram : null)) {
 console.error(`pronto write: ${emission.written.length} files emitted → ${appDir} (${derivations} derivation${derivations === 1 ? "" : "s"})`);
 
 type IrExport = { program: Program; ir: string };
-/** The program and its ir source, exported; null when cue refused. */
+/** The program and its ir source, read through an import of the app; null when cue refused. */
 async function exportProgram(lifted: boolean): Promise<IrExport | null> {
-  const out = await new Deno.Command("cue", {
-    args: ["export", ...(lifted ? ["-t", "derive=true"] : []), ".", "-e", "{program: code, ir: code.meta.ir.source}", "--out", "json"],
-    cwd: appDir,
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  if (!out.success) {
-    heldError = new TextDecoder().decode(out.stderr);
+  try {
+    return await readApp(appDir, await programPackage(appDir), lifted, "{program: app.code, ir: app.code.meta.ir.source}") as IrExport;
+  } catch (e) {
+    heldError = e instanceof Error ? e.message : String(e);
     return null;
   }
-  return JSON.parse(new TextDecoder().decode(out.stdout));
 }
 async function drawIr(held: IrExport | null): Promise<boolean> {
   const { program, ir } = held ?? await exportProgram((await derivedText()).includes("@tag(derive,")) ?? fail(heldError);
