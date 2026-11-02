@@ -515,6 +515,7 @@ Deno.test("a sidecar apart reaches the gateway through the door, one inside at l
   assertEquals(r.success, true, r.stderr);
   assertEquals(r.value.peers["perf-collector"]["http://crud:3000"], "https://bonk-chess-123.us-central1.run.app/crud");
   assertEquals(r.value.peers["perf-collector"]["http://perf-collector:8687"], "https://bonk-chess-perf-collector-123.us-central1.run.app");
+  assertEquals(r.value.peers["perf-collector"]["http://caddy:8080"], "https://bonk-chess-123.us-central1.run.app", "the door, which the terminal's renderer reads the app through");
   assertEquals(r.value.peers.billing["crud:3000"], "127.0.0.1:3000");
   assertEquals(r.value.peers.billing["perf-collector:8687"], undefined, "one apart is no peer at loopback");
 });
@@ -523,6 +524,22 @@ Deno.test("a worker apart keeps an instance, its CPU unthrottled between request
   const own = (await built(withApart(`{port: 8687, apart: minScale: 1}`), "sidecarServices")).value["perf-collector"];
   assertEquals(own.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"], "1");
   assertEquals(own.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+});
+
+Deno.test("a sidecar apart on less than a whole CPU runs one request at a time, its CPU only theirs", async () => {
+  const own = (await built(withApart(`{port: 8687, memory: "512Mi", apart: {minScale: 1, cpu: 250}}`), "sidecarServices")).value["perf-collector"];
+  const a = own.spec.template.metadata.annotations;
+  assertEquals(a["autoscaling.knative.dev/minScale"], "1");
+  assertEquals(a["run.googleapis.com/cpu-throttling"], "true", "below one CPU, Cloud Run bills by request");
+  assertEquals(a["run.googleapis.com/execution-environment"], "gen1");
+  assertEquals(own.spec.template.spec.containerConcurrency, 1);
+  assertEquals(own.spec.template.spec.containers[0].resources.limits, { cpu: "250m", memory: "512Mi" });
+  const whole = (await built(withApart(`{port: 8687, apart: {minScale: 1, cpu: 2000}}`), "sidecarServices")).value["perf-collector"];
+  assertEquals(whole.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+  assertEquals(whole.spec.template.metadata.annotations["run.googleapis.com/execution-environment"], "gen2");
+  assertEquals(whole.spec.template.spec.containerConcurrency, undefined);
+  const heavy = await built(withApart(`{port: 8687, memory: "1Gi", apart: {cpu: 250}}`), "plan");
+  assertEquals(heavy.success, false, "250 millicpu takes at most 512Mi");
 });
 
 Deno.test("a sidecar apart's metrics are scraped by a collector in its own service", async () => {
