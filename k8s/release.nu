@@ -16,6 +16,10 @@ use ../gcp/build.nu [push-images service-jwt]
 const cloudflared = "cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c"
 # The gateway's Service behind a tunnel, named so the tunnel can dial it.
 const tunnel_gateway = "pronto-gateway"
+# The registry on a node whose releases build by "node" (node-registry-manifests),
+# and the loopback port it listens on, which #Environment.registry names.
+const node_registry = "registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e"
+const node_registry_port = 5000
 
 export const OPERATORS = [
 	{
@@ -305,6 +309,58 @@ export def open-api-tunnel [target: string, port: int, socket: string] {
 
 export def close-api-tunnel [target: string, socket: string] {
 	do { ^ssh -S $socket -O exit $target } | complete | ignore
+}
+
+# The registry a node's releases push to (#Environment.build.by "node"): on the
+# node's own network, listening on its loopback alone, its blobs a directory on
+# the node. Nothing outside the node reaches it but a release's SSH tunnel.
+export def node-registry-manifests []: nothing -> string {
+	[
+		{apiVersion: "v1", kind: "Namespace", metadata: {name: "pronto-registry"}}
+		{
+			apiVersion: "apps/v1"
+			kind: "Deployment"
+			metadata: {name: "registry", namespace: "pronto-registry"}
+			spec: {
+				replicas: 1
+				strategy: {type: "Recreate"}
+				selector: {matchLabels: {app: "registry"}}
+				template: {
+					metadata: {labels: {app: "registry"}}
+					spec: {
+						hostNetwork: true
+						containers: [{
+							name: "registry"
+							image: $node_registry
+							env: [
+								{name: "REGISTRY_HTTP_ADDR", value: $"127.0.0.1:($node_registry_port)"}
+								{name: "REGISTRY_STORAGE_DELETE_ENABLED", value: "true"}
+							]
+							volumeMounts: [{name: "data", mountPath: "/var/lib/registry"}]
+						}]
+						volumes: [{name: "data", hostPath: {path: "/var/lib/pronto-registry", type: "DirectoryOrCreate"}}]
+					}
+				}
+			}
+		}
+	] | each { to yaml } | str join "---\n"
+}
+
+export def ensure-node-registry [--timeout: string = "120s"] {
+	node-registry-manifests | kubectl apply -f -
+	kubectl rollout status deployment/registry -n pronto-registry $"--timeout=($timeout)"
+}
+
+# The node's registry through the release's SSH connection, on a free local
+# port: Docker pushes to localhost without TLS, as Kind's own registry has it.
+export def forward-node-registry [target: string, socket: string] {
+	let local = (port)
+	^ssh -S $socket -O forward -L $"($local):127.0.0.1:($node_registry_port)" $target
+	for _ in 1..30 {
+		if (do { ^curl -fsS $"http://localhost:($local)/v2/" } | complete).exit_code == 0 { return $local }
+		sleep 1sec
+	}
+	error make {msg: $"the node's registry does not answer through the tunnel to ($target)"}
 }
 
 export def ensure-tunnel [id: string, --timeout: string = "90s"] {
@@ -681,6 +737,12 @@ export def main [
 	let has_migrate = ("migrate" in $compose_services)
 	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append $services
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
+	# A node's registry is pushed to through this release's tunnel, on a local
+	# port, while the manifests name it as the node sees it (registry).
+	let push_registry = if $target_env.build.by == "node" {
+		ensure-node-registry
+		$"localhost:(forward-node-registry $tunnel.target $tunnel.socket)"
+	} else { $registry }
 	let pushed = if $target_env.build.by == "cloudbuild" {
 		cloud-build-images $app_source_dir $app_info.name $build_svcs $target_env $app_meta.image.tag
 	} else {
@@ -692,9 +754,9 @@ export def main [
 			let tag = if $svc == "database" {
 				docker image inspect --format '{{json .Config.Env}}' $local | from json | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last
 			} else { $app_meta.image.tag }
-			let repo = if ($registry | is-not-empty) { $"($registry)/($app_info.name)-($svc)" } else { $"($app_info.name)-($svc)" }
+			let repo = if ($push_registry | is-not-empty) { $"($push_registry)/($app_info.name)-($svc)" } else { $"($app_info.name)-($svc)" }
 			docker tag $local $"($repo):($tag)"
-			if ($registry | is-not-empty) {
+			if ($push_registry | is-not-empty) {
 				print $"Pushing ($repo):($tag)..."
 				docker push $"($repo):($tag)"
 			}

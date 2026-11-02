@@ -8,6 +8,7 @@ const fixtures_dir = path self testdata
 use std/assert
 
 use release.nu [
+	node-registry-manifests
 	OPERATORS
 	get-operator-cache-dir
 	fetch-verified
@@ -53,6 +54,7 @@ def run-tests [] {
 	test_schema_jobs_wait_for_database
 	test_release_override
 	test_tunnel_manifests
+	test_node_registry_manifests
 	test_envoy_proxy
 	test_render_manifests_aks
 	test_dapr_annotations
@@ -241,6 +243,18 @@ def test_read_environment [] {
 	assert equal (default-environment $sample.cue_path) "metal"
 	assert equal (default-environment $minimal.cue_path) "kind"
 	assert not (defines $minimal.cue_path "Metal")
+}
+
+# A node's registry listens on its loopback alone: only a release's SSH tunnel
+# reaches it, never the network the node is on.
+def test_node_registry_manifests [] {
+	print "test node-registry-manifests listens on the node's loopback..."
+	let deployment = (node-registry-manifests | from yaml | where kind == "Deployment" | first)
+	let spec = $deployment.spec.template.spec
+	assert $spec.hostNetwork
+	let addr = ($spec.containers.0.env | where name == "REGISTRY_HTTP_ADDR" | first | get value)
+	assert equal $addr "127.0.0.1:5000"
+	assert ($spec.containers.0.image =~ "@sha256:[0-9a-f]{64}$")
 }
 
 def test_render_manifests_kind [] {

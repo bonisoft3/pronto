@@ -22,8 +22,15 @@ package schema
 	// What builds the images: Docker on the machine releasing, or Cloud Build
 	// in a project of the operator's, which pushes them to `registry` (an
 	// Artifact Registry repository the cluster pulls from), so the machine
-	// releasing needs no Docker daemon.
-	build: *{by: "docker"} | {by: "cloudbuild", project: string}
+	// releasing needs no Docker daemon. `node` builds with Docker on the machine
+	// releasing too, but pushes through the release's SSH tunnel (`access`) to a
+	// registry on the node itself, listening on its loopback alone, which the
+	// node pulls from: no cloud between the build and the cluster.
+	build: *{by: "docker"} | {by: "cloudbuild", project: string} | {by: "node"}
+	if build.by == "node" {
+		access: ssh: _
+		registry: "127.0.0.1:5000"
+	}
 	// How requests reach the gateway: the node's host ports 80 and 443 (Kind),
 	// or a Cloudflare Tunnel the cluster dials out through, for a cluster
 	// behind NAT. Cloudflare terminates TLS there, so the gateway listens on

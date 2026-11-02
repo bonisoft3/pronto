@@ -209,22 +209,31 @@ gives stand in from elsewhere:
 | A cloud's | Metal's |
 | :--- | :--- |
 | A load balancer with a public address | A [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/): `cloudflared` in the cluster dials out, and Cloudflare serves each app's host and terminates its TLS. The gateway listens on HTTP alone. |
-| A registry beside the nodes | Artifact Registry, which the node pulls from with a reader's key (k3s's `registries.yaml`) |
-| Building where it deploys | Cloud Build, as `release@gcp` builds (`gcp/build.nu`), so the machine releasing needs no Docker daemon |
+| A registry beside the nodes | A registry on the node, which the release runs there and which listens on the node's loopback alone (`build: {by: "node"}`, the default); or Artifact Registry, which the node pulls from with a reader's key (k3s's `registries.yaml`) |
+| Building where it deploys | Docker on the machine releasing, which pushes through the release's SSH tunnel to the node's registry; or Cloud Build, as `release@gcp` builds (`gcp/build.nu`), so the machine releasing needs no Docker daemon |
 
 The cluster, its tunnel and its registry are the operator's, made once and
 shared by every app released there. An app's `release.cue` names them:
 
 ```cue
 Metal: envs.Metal & {
-	context:  "home"                                      // the kube context
-	registry: "us-central1-docker.pkg.dev/<project>/pronto"
-	build: project: "<project>"                           // where Cloud Build runs
+	context: "home"                                       // the kube context
+	access: ssh: "<user>@<node>"                          // the release's tunnel, to the API and the registry
 	ingress: id: "<tunnel id>"
 	domainSuffix: "<zone>"                                // <app>.<zone>, or App.gateway.host
 	// platform: "linux/arm64"                            // for an ARM node
 }
 metalManifests: (schema.#BuildManifests & {release: App, env: Metal}).manifests
+```
+
+To build in Cloud Build instead, give its project and Artifact Registry
+repository (and the node the reader's key below):
+
+```cue
+Metal: envs.Metal & {
+	registry: "us-central1-docker.pkg.dev/<project>/pronto"
+	build: {by: "cloudbuild", project: "<project>"}
+}
 ```
 
 `sayt release@k8s` releases there when the app gives a `Metal` (`-e kind`
@@ -236,7 +245,19 @@ still releases to Kind), and installs the operators, observability and
 ```sh
 # k3s, without its own ingress and load balancer: Envoy Gateway is the door.
 curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.34.12+k3s1 sh -s - --disable traefik --disable servicelb
-# Artifact Registry's reader, as the node's credentials for its host.
+# The node's own registry, which the first release starts: plain HTTP on its loopback.
+sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<YAML
+mirrors:
+  "127.0.0.1:5000":
+    endpoint: ["http://127.0.0.1:5000"]
+YAML
+sudo systemctl restart k3s
+```
+
+Building in Cloud Build instead, the node reads Artifact Registry with a
+reader's key in place of the mirror above:
+
+```sh
 sudo tee /etc/rancher/k3s/registries.yaml >/dev/null <<YAML
 configs:
   us-central1-docker.pkg.dev:
@@ -250,7 +271,7 @@ sudo systemctl restart k3s
 Copy `/etc/rancher/k3s/k3s.yaml` to the machine releasing, with `127.0.0.1`
 replaced by the node's address, as the context the environment names.
 
-### Once, for the project the images build in
+### Once, for the project the images build in (Cloud Build only)
 
 ```sh
 gcloud services enable cloudbuild.googleapis.com artifactregistry.googleapis.com --project <project>
