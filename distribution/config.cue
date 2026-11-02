@@ -110,7 +110,10 @@ import (
 	settleMs:  *((_door.auth + _door.crud) * 1000) | (int & >0)
 	omnishell: *"(run-mise where \(#Runtimes.omnishell) | str trim)" | string
 	let _l = #LaunchLocal & {prepare: I.prepare}
-	out: (#Run & {args: "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell) --settle \(I.settleMs)"}).out
+	// An app with a slot guard (tests/slot.ts) runs it on a slot of its own, so another stack of the
+	// machine, on the app's ports or any, never meets it; inside a slot (STACK_SLOT) it runs plain.
+	let _direct = "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell) --settle \(I.settleMs)"
+	out: (#Run & {args: "if ('tests/slot.ts' | path exists) and ($env.STACK_SLOT? | is-empty) { run-mise exec -- deno run -A tests/slot.ts ./saytw integrate@local } else { \(_direct) }"}).out
 }
 
 #Writer: {
