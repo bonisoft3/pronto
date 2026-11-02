@@ -62,9 +62,49 @@ jobs:
           t = re.sub(r'("github:bonisoft3/mecha":\s+)"[^"]+"', lambda m: m.group(1) + f'"{v}"', s, count=1)
           assert t != s, p
           open(p, 'w').write(t)
+          # Upstream admits only its own Docker Hub images as pins; the
+          # prerelease admits the fork's too (forks/publish.sh's admit), so a
+          # pronto prerelease can pin the auth image built below.
+          p = 'published.cue'
+          s = open(p).read()
+          for old, new in [
+              ('import "strings"\n\n', ''),
+              ('#Pin: =~"^bonitao/mecha-', '#Pin: =~"^(bonitao|ghcr\\\\.io/bsoneca)/mecha-'),
+              ('#Pin & strings.HasPrefix("bonitao/mecha-\\(s):")', '#Pin & =~"^(bonitao|ghcr\\\\.io/bsoneca)/mecha-\\(s):"'),
+          ]:
+              assert old in s, (p, old)
+              s = s.replace(old, new)
+          open(p, 'w').write(s)
           PY
           grep -n '"github:bonisoft3/mecha"' toolchain/tools.cue
+          grep -n '#Pin\|#Published' published.cue
           grep -n 'module:' cue.mod/module.cue
+      # The auth image: the upstream release mecha-fork branches from, with
+      # the fork's auth sources over it (forks/publish.sh), for both
+      # architectures. A pronto prerelease pins it by the digest printed here.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: auth image
+        env:
+          AUTH_BASE: bonitao/mecha-auth:0.18.0@sha256:fc880aa71831b5bdcaa8bc6181bddd161f2bf4af24833afb14a94b402094133c
+          AUTH: ghcr.io/bsoneca/mecha-auth
+        run: |
+          if ! crane digest "$AUTH:$MECHA_V" >/dev/null 2>&1; then
+            mkdir "$RUNNER_TEMP/auth"
+            cp mecha/services/auth/deno.json mecha/services/auth/deno.lock mecha/services/auth/*.ts "$RUNNER_TEMP/auth/"
+            rm -f "$RUNNER_TEMP"/auth/*_test.ts
+            printf 'FROM %s\nWORKDIR /app\nCOPY . /app/\nRUN deno cache main.ts\n' "$AUTH_BASE" > "$RUNNER_TEMP/auth/Dockerfile"
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              --label org.opencontainers.image.source=https://github.com/bsoneca/mecha-fork \
+              --annotation index:org.opencontainers.image.source=https://github.com/bsoneca/mecha-fork \
+              -t "$AUTH:$MECHA_V" --push "$RUNNER_TEMP/auth"
+          fi
+          echo "auth: $AUTH:$MECHA_V@$(crane digest "$AUTH:$MECHA_V")" | tee -a "$GITHUB_STEP_SUMMARY"
       # ghcr takes no single upload over 4MiB and `cue mod publish` sends a
       # module in one: publish to a local registry and let crane copy it up.
       - name: module

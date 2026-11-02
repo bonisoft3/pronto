@@ -581,16 +581,75 @@ driver passed. While they run the release also stages production: the
 project, the plan rendered with the tested digests, the bucket and the
 grants, none of it running the app; when they pass only the schema job and
 the deploy are left, the first of the release's code production runs
-([staged release](decisions/2026-10-29-staged-release.md)). `--rollback`
+([staged release](decisions/2026-10-29-staged-release.md)). A release skips the schema job when the live service already carries the hash of the
+job it would run (the `pronto-job` label of its revision, the hash of the rendered job: its
+image, so every migration, seed, policy, publication and hybrid machine, and its commands,
+roles and secrets); a missing label, a revision not ready or a failed read runs it, as do
+previews and `PRONTO_RELEASE_FORCE_SCHEMA=1` (a rotated role password, say).
+`--rollback`
 sends the traffic back to the revision before, where its schema is the
-same. The preview is stopped whatever happened (its service, jobs
-and clock), and its Cloud SQL instance stays for the next release, which
-starts it on an empty database: making an instance is most of ten minutes.
+same. A release that fails stops the preview (its service, jobs and clock); one that
+is live reports so at once and deletes only the preview's clock, the one part that acts alone:
+the rest stays idle (Cloud Run scales to zero) and the next release, which takes the
+app's lock first, stops it as it empties the database. The tests' log is read beside going
+live and saved to `dist/gcp/tests-log.txt`. The preview's Cloud SQL instance stays for the next
+release, which starts it on an empty database: making an instance is most of ten minutes.
+A project's setup (APIs, repository, account, secrets, instance) is skipped when what it reads
+(the plan's project, names, region, repository and database settings, and the setup's code in
+release.nu) hashes as it did for the last release that set it up, kept in a `-setup` secret;
+an unreadable marker sets it up, and `PRONTO_SETUP=always` forces it.
 One release at a time, then; `--preview rc --delete` removes it all. A failing driver, or a
 preview that does not come up, stops the release there. `--preview`,
 `--dry-run` and `--snapshot` deploy as asked, untested, and `--no-gate`
-releases without the preview. A local stack (`sayt integrate@local`) is for
-development and CI.
+releases without the preview.
+
+Before any of that, a release (gated or `--no-gate`, not a preview, a dry run
+or a snapshot) runs the same drivers on the machine releasing: `release.nu`
+runs `sayt integrate@local` with `INTEGRATE_LOCAL_DRIVERS=all`, which brings the
+app up as host processes, runs the visual lint and then every other driver
+the rc gate runs (the same selection, [`local-drivers.ts`](../local-drivers.ts)),
+each from the app's directory with `APP_URL` at the local door, and fails if
+any failed. A failing scenario stops the release in about a minute with
+nothing built, pushed or deployed, where the rc gate would find it half an
+hour in. A scenario a driver skips away from localhost (a stand-in's) runs
+here, where its stand-in is. The rc gate stays after it, since a preview finds
+what only the cloud has. An app without `integrate@local` is refused;
+`--no-local-gate`, or `PRONTO_RELEASE_NO_LOCAL_GATE=1`, skips the pre-gate,
+only when asked.
+
+The pre-gate runs beside the preview's emptying, the tests' build and the
+preview's deploy, its output prefixed `local-gate|`; the tests are told to run,
+and production staged, only once it passed, and a failing gate stops the deploy
+and the preview. A tree that already passed it on this machine, whether by a
+release or by `integrate@local` with `INTEGRATE_LOCAL_DRIVERS=all` run by hand,
+is not run again: the stamp is `~/.cache/pronto/local-gate/<app>/<key>`, the key
+a hash of the app's files as git lists them and of the pronto files the gate
+runs ([`gcp/local-gate-key.nu`](../gcp/local-gate-key.nu)), so any change to
+either runs it. `go-live` runs what does not depend on the rest together: the
+retired migrate job's removal beside the service's replacement, then the door's grant, the sidecars, the clock
+and the domains
+([decision](decisions/2026-11-01-release-concurrency.md)).
+
+Where the local gate passed for the tree, and the deploy-shaped files (release.cue,
+program.cue, compose files, Dockerfiles and `docker/`, web server, entrypoint and sidecar files,
+`.say.yaml`, `.pronto/cluster.json`, `infra/`, cue.mod/module.cue, `.mise.toml`, mise.lock, and the content of the pronto runtime but its
+release engine (`gcp/*.nu`, the release tests, `testdata/`, `docs/`) and its version number, so a pronto
+prerelease that changes only the engine does not run rc; not database migrations, which the local gate runs) are those of a release that passed the rc gate, the release skips rc:
+no preview, no copy, its images built and staged for production as `--no-gate` does,
+and live. `~/.cache/pronto/rc-passed/<app>/<key>` records the last such pass, written
+after a gated release succeeds. `--rc` runs the rc gate anyway, and so does
+`--no-local-gate`; the log says which path and why
+([decision](decisions/2026-11-01-local-gate-replaces-rc.md)). An app's own
+rehearsal records a local pass with `nu gcp/local-gate-key.nu stamp <app dir>`.
+
+One release of an app runs at a time, wherever it starts: before anything else a release
+takes the app's lock, `gs://<project>-release-locks/<app>` (a preview's is `<app>-<preview>`),
+an object made only where none is (`--if-generation-match=0`), saying who holds it and until
+when (45 minutes on). A second release of the app stops at once and names the holder; releases of
+other apps take locks of their own and run beside it. The lock is let go when the release ends,
+however it ends; a release that died holds it until it expires, and `PRONTO_RELEASE_BREAK_LOCK=1`
+takes it at once. A dry run and a snapshot take none. Two releases of ume-rental had gone live four
+seconds apart, their IAM bindings racing.
 
 `sayt verify@gcp` ([`gcp/verify.nu`](../gcp/verify.nu)) runs the drivers of
 `verify@<target>` against the release's address, or a preview's with
@@ -611,6 +670,19 @@ app's images is its own directory or an image by digest, so nothing else is
 sent. The build runs as the project's default Cloud Build account, which the
 release lets push to the repository and write its log; the release reads each
 digest back from the registry and names it in the service and jobs.
+
+Each image has its own key, so an edit to one service's files builds that
+image and the ones built from it, and no others. The key hashes the image's
+build record from the compose project, its Dockerfile, the files of its
+context that the Dockerfile `COPY`s (a source that is a build argument, or a
+bound mount, counts as the whole app), and, through its `service:` contexts,
+the keys of the images it is built from; it is left on the pushed image as the
+tag `src-<key>`, and a release builds only the images without one (an
+`--override`, release@k8s's release tree, keys each image by the whole app, as
+a `.dockerignore` is not read: both only ever build more). The drivers of
+`verify@gcp` are cached the same way, as `<service>-verify-<driver>:src-<key>`:
+one whose key is in the registry is pulled by digest instead of built, and the
+others are pushed once built. `PRONTO_VERIFY_NO_DRIVER_CACHE=1` builds them all.
 
 | compose | on GCP |
 |---|---|

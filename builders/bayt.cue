@@ -67,6 +67,11 @@ import (
 	// with bare names, lowered into this project by mecha's own #Runtime.
 	cluster: mecha.#Cluster
 
+	// The omnishell runtime image the app's served image copies: pronto's pin,
+	// unless the app runs another omnishell (a fork's prerelease, whose copy
+	// the pinned runtime lacks) and names that one's image here.
+	omnishellRuntime: *omnishell.published.runtime | omnishell.#RuntimePin
+
 	// A stage that runs cue over the app: it starts from the image the program
 	// evaluates in and reads the app's whole tree, since its subpackages, embeds
 	// and derived sources are its own to add. The set sits in the
@@ -152,7 +157,7 @@ import (
 	}}
 	// omnishell's runtime tree, as one image.
 	_omnishell:        omnishell.#RuntimeImage
-	_omnishellContext: (_switch & {service: _omnishell, pin: omnishell.published.runtime}).out
+	_omnishellContext: (_switch & {service: _omnishell, pin: B.omnishellRuntime}).out
 	_omnishellCopy:    "COPY --from=\(B._omnishell) / /omnishell"
 	// Monorepo trees a stage carries in the monorepo: views of the siblings'
 	// targets, which in a mirror switch to an image with no /monorepo, and

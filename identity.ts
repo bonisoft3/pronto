@@ -195,11 +195,12 @@ async function cueFiles(appDir: string): Promise<string[]> {
 
 /** Stamps an id on every entity and an ordinal on every field that has none,
  * and records them in the snapshot. write.ts calls it first, so an author
- * never writes one; it writes nothing when everything is already minted. */
-export async function mint(appDir: string): Promise<void> {
+ * never writes one; it writes nothing when everything is already minted, and says
+ * whether it wrote. */
+export async function mint(appDir: string): Promise<boolean> {
   const before = await exportEntities(appDir);
-  if (before.length === 0) return;
-  if (before.every((e) => e.id !== undefined && e.fields.every((f) => f.ordinal !== undefined)) && (await readSnapshot(appDir)) !== undefined) return;
+  if (before.length === 0) return false;
+  if (before.every((e) => e.id !== undefined && e.fields.every((f) => f.ordinal !== undefined)) && (await readSnapshot(appDir)) !== undefined) return false;
   // Every stamp is computed before any is written: a refusal halfway would
   // otherwise leave a program that is part minted and a snapshot that is not.
   const sources = new Map<string, string>();
@@ -228,6 +229,7 @@ export async function mint(appDir: string): Promise<void> {
   if (findings.length > 0) throw new Error(`refusing to grow the snapshot over a loss:\n${findings.map((f) => f.message).join("\n")}`);
   await Deno.writeTextFile(`${appDir}/${SNAPSHOT}`, JSON.stringify(program, null, 2) + "\n");
   console.log(`minted: ${after.length} entities, ${after.reduce((n, e) => n + e.fields.length, 0)} fields`);
+  return true;
 }
 
 async function check(appDir: string): Promise<void> {

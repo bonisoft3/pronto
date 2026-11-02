@@ -14,7 +14,7 @@
 # renders in software, and a 2-CPU runner timed a 3D page out.
 
 use ../k8s/release.nu [resolve-app]
-use build.nu [builder stamp]
+use build.nu [builder stamp exists key-tag file-hashes image-keys]
 
 # What uploads the drivers' screenshots: Google's own gsutil builder.
 const uploader = "gcr.io/cloud-builders/gsutil"
@@ -60,6 +60,27 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 	# The app's own files, as git sees them, as its images are built from.
 	do { cd $app_dir; ^git ls-files -co --exclude-standard } | lines | where {|f| not ($f starts-with ".certs/") } | str join "\n" | save -f $"($work)/files"
 	with-env {COPYFILE_DISABLE: "1"} { ^tar -czf $"($work)/source.tgz" -C $app_dir -T $"($work)/files" }
+	# A driver whose inputs did not change since its image was last pushed is
+	# pulled by that image's digest, not built again (image-keys, as the
+	# release's own images): its bases alone were four minutes of every release.
+	# The registry is asked after here, where the drivers are read as the build
+	# reads them; any doubt builds them all.
+	let compose = (try { do { cd $app_dir; ^docker compose --profile "*" config --format json } | from json } catch { null })
+	let names = if $compose == null { [] } else {
+		$compose.services | transpose name svc | where {|s| ($s.svc.environment?.APP_URL? != null) and (($s.svc.scale? | default 1) != 0) } | get name | sort
+	}
+	let keys = if ($names | is-empty) { {} } else { image-keys $app_dir $compose (file-hashes $app_dir $"($work)/files") $"($builder) verify linux/amd64" $names }
+	# PRONTO_VERIFY_NO_DRIVER_CACHE=1 builds them all, as before.
+	let found = if ($env.PRONTO_VERIFY_NO_DRIVER_CACHE? | is-not-empty) { [] } else { (try {
+		$names | par-each --keep-order {|d|
+			let at = $"($cache_repo)-($d):(key-tag ($keys | get $d))"
+			if (exists artifacts docker images describe $at) {
+				$"($d)=($cache_repo)-($d)@(gc artifacts docker images describe $at --format "value(image_summary.digest)" | str trim)"
+			}
+		} | compact
+	} catch { [] }) }
+	let pushed = ($names | each {|d| $"($d)=($cache_repo)-($d):(key-tag ($keys | get $d))" })
+	if ($found | is-not-empty) { print $"gcp: (stamp) the drivers ($found | each {|f| $f | split row '=' | first } | str join ', ') are unchanged since they were last built: pulling them" }
 	let script = ([
 		"set -eu"
 		"apk add --no-cache jq >/dev/null"
@@ -71,21 +92,41 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		# are (release.nu push-images): a browser and its packages are pulled,
 		# not installed again, while the drivers' own files are unchanged.
 		$"echo \"$\(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\\\"access_token\\\":\\\"\\\([^\\\"]*\\\)\\\".*/\\1/p'\)\" | docker login --username oauth2accesstoken --password-stdin https://($registry_host) >/dev/null"
+		# The drivers whose image the registry has for their inputs are pulled
+		# and named as compose names them, so `compose run` finds them built.
+		$"cached='($found | str join ' ')'"
+		$"pushed='($pushed | str join ' ')'"
+		"image_of() { docker compose --profile '*' config --format json | jq -r --arg d \"$1\" '.services[$d].image // (.name + \"-\" + $d)'; }"
+		"tobuild=''"
+		"for d in $drivers; do"
+		"  ref=''; for c in $cached; do [ \"${c%%=*}\" != \"$d\" ] || ref=\"${c#*=}\"; done"
+		"  if [ -n \"$ref\" ] && docker pull -q \"$ref\" >/dev/null && docker tag \"$ref\" \"$(image_of \"$d\")\"; then echo \"verify: $d pulled from $ref\"; else tobuild=\"$tobuild $d\"; fi"
+		"done"
 		"caches=''"
-		$"for d in $drivers; do c=\"($cache_repo)-$d:buildcache\"; caches=\"$caches --set $d.cache-from=type=registry,ref=$c --set $d.cache-to=type=registry,ref=$c,mode=max,image-manifest=true,oci-mediatypes=true\"; done"
+		$"for d in $tobuild; do c=\"($cache_repo)-$d:buildcache\"; caches=\"$caches --set $d.cache-from=type=registry,ref=$c --set $d.cache-to=type=registry,ref=$c,mode=max,image-manifest=true,oci-mediatypes=true\"; done"
 		# Loaded with their layers uncompressed: gzip of a browser's image is a
 		# minute and more, for a tarball that only crosses a socket.
-		"docker compose --profile '*' config | docker buildx bake -f - --set '*.output=type=docker,compression=uncompressed' --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $caches $drivers"
+		"if [ -n \"$tobuild\" ]; then"
+		"  docker compose --profile '*' config | docker buildx bake -f - --set '*.output=type=docker,compression=uncompressed' --provenance=false --allow=fs.read=/workspace --set '*.platform=linux/amd64' $caches $tobuild"
 		# What `compose run` would build first, the images the drivers' own are
 		# made from, built and loaded now: from the bake's cache, before the wait.
-		"docker compose --profile '*' build --with-dependencies $drivers"
+		"  docker compose --profile '*' build --with-dependencies $tobuild"
+		# What was built is pushed under its inputs' key, for the next release
+		# to pull: while the release deploys, and should the push fail the
+		# tests still run.
+		"  for d in $tobuild; do"
+		"    for c in $pushed; do [ \"${c%%=*}\" != \"$d\" ] || { docker tag \"$(image_of \"$d\")\" \"${c#*=}\" && docker push -q \"${c#*=}\" >/dev/null || echo \"verify: $d not cached\" >&2; }; done"
+		"  done"
+		"fi"
 		# The release says go once the service is up: a marker in the bucket,
 		# read with the build account's token from the worker's metadata.
 		"echo 'verify: waiting for the service to be up'"
 		# Forty minutes at most, should the release that says it be gone.
-		"waited=0"
+		"waited=0; step=1"
 		"until token=$(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\"access_token\":\"\\([^\"]*\\)\".*/\\1/p') && wget -qO /dev/null --header \"Authorization: Bearer $token\" \"https://storage.googleapis.com/storage/v1/b/${PROJECT_ID}_cloudbuild/o/verify%2F${BUILD_ID}%2Fgo\" 2>/dev/null; do"
-		"  waited=$((waited + 2)); [ \"$waited\" -lt 2400 ] || { echo 'verify: the release never said go' >&2; exit 1; }; sleep 2"
+		# A second apart for ten minutes, then three.
+		"  [ \"$waited\" -lt 600 ] || step=3"
+		"  waited=$((waited + step)); [ \"$waited\" -lt 2400 ] || { echo 'verify: the release never said go' >&2; exit 1; }; sleep $step"
 		"done"
 		"echo \"verify: $(echo $drivers) against $APP_URL\""
 		# The drivers run together, each to its end whatever the others answer,
@@ -170,8 +211,11 @@ export def cancel-drivers [run: record] {
 export def finish-drivers [run: record] {
 	print $"gcp: (stamp) waiting for the tests to end"
 	mut status = "QUEUED"
+	mut polls = 0
 	while $status in ["QUEUED" "PENDING" "WORKING"] {
-		sleep 2sec
+		# A second apart (the gcloud call is most of it) for 300 polls, then three.
+		if $polls > 300 { sleep 3sec } else { sleep 1sec }
+		$polls += 1
 		$status = (gc builds describe $run.build --project $run.project --format "value(status)" | str trim)
 	}
 	if $status != "SUCCESS" {
