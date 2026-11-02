@@ -285,6 +285,22 @@ def map-domain [domain: string, service: string, project: string, region: string
 	}
 }
 
+# What the schema job applies, as one hash: the job as rendered, which names its image (the
+# schema's, or the database's: every migration, policy, seed, publication and hybrid machine
+# the initdb directory holds), the commands it runs over them and the roles and secrets it is
+# given. Never less than the job, so what differs in any of them differs here.
+def job-hash [job_yaml: string]: nothing -> string { $job_yaml | hash sha256 | str substring 0..39 }
+
+# The job hash the live service was released with; null when there is none, the service is not
+# ready on its latest revision, or the read fails: then the job runs.
+def live-job-hash [plan: record]: nothing -> any {
+	try {
+		let live = (gc run services describe $plan.service --region $plan.region --project $plan.project --format json | from json)
+		if ($live.status?.latestReadyRevisionName? | is-empty) or $live.status.latestReadyRevisionName != $live.status.latestCreatedRevisionName { return null }
+		$live.spec?.template?.metadata?.labels?.pronto-job?
+	} catch { null }
+}
+
 # A job applied and run to its end; its logs are where a failure says why.
 def run-job [file: string, name: string, what: string, project: string, region: string] {
 	gc run jobs replace $file --region $region --project $project | ignore
@@ -461,7 +477,10 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 	rm $data_file
 	mkdir dist/gcp
 	$plan.jobYaml | save -f dist/gcp/job.yaml
-	$plan.serviceYaml | save -f dist/gcp/service.yaml
+	# The service carries the hash of the job it was released with (job-hash), which the next
+	# release reads off the live revision to skip a schema job that would change nothing.
+	let service = ($plan.serviceYaml | from yaml)
+	$service | upsert spec.template.metadata.labels ($service.spec.template.metadata.labels? | default {} | insert pronto-job (job-hash $plan.jobYaml)) | to yaml | save -f dist/gcp/service.yaml
 	for s in ($plan.sidecarServicesYaml | transpose name yaml) { $s.yaml | save -f $"dist/gcp/sidecar-($s.name).yaml" }
 	if $snapshot { print $"gcp: (stamp) rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {done: true} }
 
@@ -491,7 +510,14 @@ def go-live [staged: record]: nothing -> record {
 	let has_migrate = $staged.has_migrate
 	let number = $staged.number
 	let pushed = if $staged.gated and $staged.copy != null { tag-release $staged.copy } else { $staged.pushed }
-	run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
+	# A release's own service only: a preview's database is emptied for each, whatever its label says.
+	# PRONTO_RELEASE_FORCE_SCHEMA=1 runs the job all the same (a rotated role password, say).
+	let wanted = (job-hash (open --raw dist/gcp/job.yaml))
+	if ($plan.preview? | is-empty) and ($env.PRONTO_RELEASE_FORCE_SCHEMA? | is-empty) and (live-job-hash $plan) == $wanted {
+		print $"gcp: (stamp) the schema job skipped: ($plan.service) is live with the schema it applies \(PRONTO_RELEASE_FORCE_SCHEMA=1 runs it\)"
+	} else {
+		run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
+	}
 	# The service replaced beside the retired migrate job's removal (an earlier release ran it apart, this one's job does).
 	let failed = (["service" "migrate"] | par-each {|t|
 		try {

@@ -581,7 +581,12 @@ driver passed. While they run the release also stages production: the
 project, the plan rendered with the tested digests, the bucket and the
 grants, none of it running the app; when they pass only the schema job and
 the deploy are left, the first of the release's code production runs
-([staged release](decisions/2026-10-29-staged-release.md)). `--rollback`
+([staged release](decisions/2026-10-29-staged-release.md)). A release skips the schema job when the live service already carries the hash of the
+job it would run (the `pronto-job` label of its revision, the hash of the rendered job: its
+image, so every migration, seed, policy, publication and hybrid machine, and its commands,
+roles and secrets); a missing label, a revision not ready or a failed read runs it, as do
+previews and `PRONTO_RELEASE_FORCE_SCHEMA=1` (a rotated role password, say).
+`--rollback`
 sends the traffic back to the revision before, where its schema is the
 same. The preview is stopped whatever happened (its service, jobs
 and clock), and its Cloud SQL instance stays for the next release, which
