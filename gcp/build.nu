@@ -230,7 +230,16 @@ export def push-images [
 	let hashes = (file-hashes $app_dir $"($work)/files")
 	let told = ([$builder $platform] | append (if ($override | is-empty) { [] } else { [$override] }) | str join " ")
 	# An override changes what the images are built from: each is keyed by the whole app then.
-	let compose = if ($override | is-not-empty) { null } else { (try { do { cd $app_dir; ^docker compose --profile "*" config --format json } | from json } catch { null }) }
+	# Compose is asked from the app's resolved directory, so a symlink (/tmp) cannot change the
+	# paths it prints and with them every key.
+	let compose = if ($override | is-not-empty) { null } else {
+		let r = (do { cd ($app_dir | path expand); ^docker compose --profile "*" config --format json } | complete)
+		if $r.exit_code == 0 { try { $r.stdout | from json } catch { null } } else {
+			print $"gcp: (stamp) image reuse is coarse: docker compose config failed, so each image is keyed by the whole app \(($r.stderr | lines | last | default '' | str trim)\)"
+			null
+		}
+	}
+	if ($override | is-not-empty) { print $"gcp: (stamp) image reuse is coarse: an override is given, so each image is keyed by the whole app" }
 	let keys = (image-keys $app_dir $compose $hashes $told $services)
 	let before = (pushed-for $refs $keys)
 	let reused = ($before | par-each --keep-order {|b|
