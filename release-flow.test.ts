@@ -398,3 +398,51 @@ Deno.test("a release that fails lets its lock go all the same", async () => {
     assertEquals(await lockHeld(w), false, "and its lock is let go")
   } finally { await clean(w) }
 })
+
+Deno.test("a release that is live does not wait for the rc preview's cleanup: its clock goes, the rest stays for the next release", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    const r = await release(w)
+    assert(r.success, r.stderr + r.stdout)
+    assertStringIncludes(r.stdout, "what the tests printed")
+    assertStringIncludes(r.stdout, "tests-log.txt")
+    const lines = await log(w)
+    const live = at(lines, /replace .*dist\/gcp\/service.yaml is guestbook$/)
+    assert(live >= 0)
+    assertEquals(lines.slice(live).filter((l) => /run (services|jobs) delete/.test(l)), [], "no preview service or job is deleted after production is live")
+    assert(at(lines, /scheduler jobs delete/, live) > live, "the preview's clock is deleted")
+    assertEquals((await ledger(w, "rc-passed")).stdout.trim(), "true")
+    // A failed release stops the preview whole.
+    await Deno.writeTextFile(w.log, "")
+    await Deno.writeTextFile(`${w.app}/crud/file.txt`, "again")
+    const bad = await nu(w, [`${fork}/gcp/release.nu`, "--app", w.app, "--rc"], { FAKE_FAIL: "run services replace .*--project brawl-chess( |$)" })
+    assert(!bad.success)
+    assert(at(await log(w), /run services delete guestbook-rc/) >= 0, "a failure stops the preview")
+  } finally { await clean(w) }
+})
+
+Deno.test("a project set up the same way is not set up again; a changed input sets it up", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    const first = await release(w)
+    assert(first.success, first.stderr + first.stdout)
+    assert(at(await log(w), /sql instances describe/) >= 0, "the first release sets the project up")
+    await Deno.writeTextFile(w.log, "")
+    const same = await release(w)
+    assert(same.success, same.stderr + same.stdout)
+    assertStringIncludes(same.stdout, "as the last release set it up")
+    assertEquals((await log(w)).filter((l) => /sql instances describe|iam service-accounts describe|artifacts repositories describe/.test(l)), [], "no setup call")
+    // An input of the setup changed: it runs.
+    await Deno.writeTextFile(w.log, "")
+    const cue = await Deno.readTextFile(`${w.app}/release.cue`)
+    await Deno.writeTextFile(`${w.app}/release.cue`, cue.replace('region: "us-central1"', 'region: "us-central1", sqlTier: "db-g1-small"'))
+    const changed = await release(w)
+    assert(changed.success, changed.stderr + changed.stdout)
+    assert(!changed.stdout.includes("as the last release set it up"))
+    assert(at(await log(w), /sql instances describe/) >= 0, "a changed tier sets the project up")
+  } finally { await clean(w) }
+})

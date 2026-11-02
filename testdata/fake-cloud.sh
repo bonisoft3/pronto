@@ -87,7 +87,13 @@ case "$args" in
   dst=$(echo "$args" | sed -E 's/.*tags add ([^ ]+) ([^ ]+).*/\2/')
   case "$src" in *@*) d=${src#*@} ;; *) d="sha256:$(hex "digest $src")" ;; esac
   echo "$d" > "$FAKE_STATE/tag-$(hex "$dst")" ;;
-*"secrets versions access"*) echo fake-secret ;;
+*"secrets versions access"*)
+  sec=$(echo "$args" | sed -E 's/.*--secret ([^ ]+).*/\1/')
+  if [ -f "$FAKE_STATE/secret-$(hex "$sec")" ]; then cat "$FAKE_STATE/secret-$(hex "$sec")"; else echo fake-secret; fi ;;
+*"secrets create "*|*"secrets versions add "*)
+  # The value a secret is given on stdin is kept, so the next access reads it back.
+  sec=$(echo "$args" | sed -E 's/.*secrets (create|versions add) ([^ ]+).*/\2/')
+  cat > "$FAKE_STATE/secret-$(hex "$sec")" ;;
 *"auth print-access-token"*) echo fake-token ;;
 *"--format json"*) echo '{"settings":{"databaseFlags":[]}}' ;;
 esac

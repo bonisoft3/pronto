@@ -588,9 +588,16 @@ roles and secrets); a missing label, a revision not ready or a failed read runs 
 previews and `PRONTO_RELEASE_FORCE_SCHEMA=1` (a rotated role password, say).
 `--rollback`
 sends the traffic back to the revision before, where its schema is the
-same. The preview is stopped whatever happened (its service, jobs
-and clock), and its Cloud SQL instance stays for the next release, which
-starts it on an empty database: making an instance is most of ten minutes.
+same. A release that fails stops the preview (its service, jobs and clock); one that
+is live reports so at once and deletes only the preview's clock, the one part that acts alone:
+the rest stays idle (Cloud Run scales to zero) and the next release, which takes the
+app's lock first, stops it as it empties the database. The tests' log is read beside going
+live and saved to `dist/gcp/tests-log.txt`. The preview's Cloud SQL instance stays for the next
+release, which starts it on an empty database: making an instance is most of ten minutes.
+A project's setup (APIs, repository, account, secrets, instance) is skipped when what it reads
+(the plan's project, names, region, repository and database settings, and the setup's code in
+release.nu) hashes as it did for the last release that set it up, kept in a `-setup` secret;
+an unreadable marker sets it up, and `PRONTO_SETUP=always` forces it.
 One release at a time, then; `--preview rc --delete` removes it all. A failing driver, or a
 preview that does not come up, stops the release there. `--preview`,
 `--dry-run` and `--snapshot` deploy as asked, untested, and `--no-gate`

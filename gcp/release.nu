@@ -7,7 +7,7 @@
 # images push the same digests and roll nothing, and initdb finds its marker.
 
 use ../k8s/release.nu [resolve-app]
-use verify.nu [start-drivers go-drivers finish-drivers drivers-log cancel-drivers plan-of]
+use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images service-jwt]
 use local-gate-key.nu
 
@@ -92,8 +92,17 @@ def scraped [plan: record]: nothing -> bool {
 	($plan.scrapeConfig | is-not-empty) or ($plan.sidecarScrapeConfigs? | default {} | is-not-empty)
 }
 
-# This script, so a change to how a project is set up sets it up again.
 const SELF = path self
+
+# How a project is set up: this script from ensure-secret to set-up-project's end, so a change
+# to it sets the projects up again, and an edit to the rest of the script (the gate, go-live)
+# does not: it made every release's setup run again, two minutes each for a preview and a project.
+def setup-source []: nothing -> string {
+	let src = (open --raw $SELF)
+	let from = ($src | str index-of "def ensure-secret")
+	let to = ($src | str index-of "# What copies a tested")
+	if $from < 0 or $to <= $from { $src } else { $src | str substring $from..<$to }
+}
 
 # The project as a release leaves it, set up once for what it depends on: the
 # plan's project, names, region, repository and database settings, and this
@@ -106,7 +115,7 @@ def ensure-infrastructure [plan: record] {
 	let key = ([
 		($plan | select -o project region repository preview names sqlTier sqlFlags | to json --raw)
 		(scraped $plan | into string)
-		(open --raw $SELF)
+		(setup-source)
 	] | str join (char nl) | hash sha256 | str substring 0..23)
 	if ($env.PRONTO_SETUP? | default "") != "always" {
 		let last = (^gcloud --quiet secrets versions access latest --secret $marker --project $plan.project | complete)
@@ -119,15 +128,8 @@ def ensure-infrastructure [plan: record] {
 	ensure-secret $marker $plan.project $key | ignore
 }
 
-def set-up-project [plan: record] {
+def set-up-repository [plan: record] {
 	let p = $plan.project
-	let n = $plan.names
-	# A preview's release may not enable APIs: the project's first release did.
-	if ($plan.preview? | is-empty) {
-		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com cloudbuild.googleapis.com cloudscheduler.googleapis.com --project $p | ignore
-		# Where a sidecar's metrics are scraped to: Managed Service for Prometheus.
-		if (scraped $plan) { gc services enable monitoring.googleapis.com --project $p | ignore }
-	}
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $p) {
 		# Nor make the repository its images go to, in a project of previews.
 		if ($plan.preview? | is-not-empty) {
@@ -140,8 +142,13 @@ def set-up-project [plan: record] {
 	if ($plan.preview? | is-empty) {
 		let builds = (build-account $p)
 		gc artifacts repositories add-iam-policy-binding $plan.repository --location $plan.region --project $p --member $"serviceAccount:($builds)" --role roles/artifactregistry.writer | ignore
-		gc projects add-iam-policy-binding $p --member $"serviceAccount:($builds)" --role roles/logging.logWriter --condition None --quiet | ignore
+		gc-fresh projects add-iam-policy-binding $p --member $"serviceAccount:($builds)" --role roles/logging.logWriter --condition None --quiet | ignore
 	}
+}
+
+def set-up-account [plan: record] {
+	let p = $plan.project
+	let n = $plan.names
 	let sa = ($n.serviceAccount | split row "@" | first)
 	if ($plan.preview? | is-not-empty) {
 		# A preview's release runs from a pull request: it may not grant roles in
@@ -161,22 +168,47 @@ def set-up-project [plan: record] {
 			gc-fresh projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role roles/monitoring.metricWriter --condition None --quiet | ignore
 		}
 	}
+}
 
-	let pg = (ensure-secret $n.secrets.POSTGRES_PASSWORD $p)
-	let electric = (ensure-secret $n.secrets.ELECTRIC_PASSWORD $p)
-	let authenticator = (ensure-secret $n.secrets.AUTHENTICATOR_PASSWORD $p)
-	let jwt_secret = (ensure-secret $n.secrets.PGRST_JWT_SECRET $p)
-	ensure-secret $n.secrets.SERVICE_JWT $p (service-jwt $jwt_secret) | ignore
-	ensure-secret $n.secrets.ELECTRIC_SECRET $p | ignore
+def set-up-secrets [plan: record] {
+	let p = $plan.project
+	let n = $plan.names
+	let base = (["POSTGRES_PASSWORD" "ELECTRIC_PASSWORD" "AUTHENTICATOR_PASSWORD" "PGRST_JWT_SECRET" "ELECTRIC_SECRET"] | par-each {|k| {key: $k, value: (ensure-secret ($n.secrets | get $k) $p)} } | reduce -f {} {|it, acc| $acc | insert $it.key $it.value })
+	let pg = $base.POSTGRES_PASSWORD
 	# Through the Auth Proxy on localhost, which carries TLS itself.
 	let at = $"@127.0.0.1:5432/($n.database)"
-	# PostgREST logs in as the authenticator role, as compose's crud does.
-	ensure-secret $n.secrets.CRUD_DB_URI $p $"postgres://authenticator:($authenticator)($at)?sslmode=disable" | ignore
-	ensure-secret $n.secrets.AUTH_DATABASE_URL $p $"postgres://postgres:($pg)($at)?sslmode=disable" | ignore
-	ensure-secret $n.secrets.ELECTRIC_DB_URL $p $"postgresql://electric:($electric)($at)?sslmode=disable" | ignore
-	# A job has no proxy beside it: pgroll's runner reaches the database over the socket.
-	ensure-secret $n.secrets.MIGRATE_DATABASE_URL $p $"postgres://postgres:($pg)@/($n.database)?host=/cloudsql/($n.connection)&sslmode=disable" | ignore
+	# PostgREST logs in as the authenticator role, as compose's crud does; a job has no proxy
+	# beside it: pgroll's runner reaches the database over the socket.
+	let derived = [
+		[$n.secrets.SERVICE_JWT (service-jwt $base.PGRST_JWT_SECRET)]
+		[$n.secrets.CRUD_DB_URI $"postgres://authenticator:($base.AUTHENTICATOR_PASSWORD)($at)?sslmode=disable"]
+		[$n.secrets.AUTH_DATABASE_URL $"postgres://postgres:($pg)($at)?sslmode=disable"]
+		[$n.secrets.ELECTRIC_DB_URL $"postgresql://electric:($base.ELECTRIC_PASSWORD)($at)?sslmode=disable"]
+		[$n.secrets.MIGRATE_DATABASE_URL $"postgres://postgres:($pg)@/($n.database)?host=/cloudsql/($n.connection)&sslmode=disable"]
+	]
+	$derived | par-each {|d| ensure-secret $d.0 $p $d.1 | ignore } | ignore
+}
 
+def set-up-project [plan: record] {
+	let p = $plan.project
+	let n = $plan.names
+	# A preview's release may not enable APIs: the project's first release did.
+	if ($plan.preview? | is-empty) {
+		gc services enable run.googleapis.com artifactregistry.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com iam.googleapis.com cloudbuild.googleapis.com cloudscheduler.googleapis.com --project $p | ignore
+		# Where a sidecar's metrics are scraped to: Managed Service for Prometheus.
+		if (scraped $plan) { gc services enable monitoring.googleapis.com --project $p | ignore }
+	}
+	# The repository, the app's account and its secrets are each other's strangers: made together,
+	# each run to its end, the setup failing after with every error (as go-live's tasks do). The
+	# policy writes on the project that two of them make retry on a concurrent change (gc-fresh).
+	let failed = (["repository" "account" "secrets"] | par-each {|t|
+		try {
+			if $t == "repository" { set-up-repository $plan } else if $t == "account" { set-up-account $plan } else { set-up-secrets $plan }
+			null
+		} catch {|e| $e.msg }
+	} | compact)
+	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
+	let pg = (gc secrets versions access latest --secret $n.secrets.POSTGRES_PASSWORD --project $p)
 	if not (exists sql instances describe $n.instance --project $p) {
 		print $"gcp: (stamp) creating Cloud SQL ($n.instance) \(several minutes\)"
 		gc sql instances create $n.instance --project $p --region $plan.region --database-version POSTGRES_18 --edition enterprise --tier $plan.sqlTier --storage-size 10 --storage-type HDD --database-flags $plan.sqlFlags --root-password $pg | ignore
@@ -355,7 +387,13 @@ def stop-preview [plan: record] {
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
 	}
-	if (exists scheduler jobs describe $n.clock --location $r --project $p) { gc scheduler jobs delete $n.clock --location $r --project $p | ignore }
+	stop-preview-clock $plan
+}
+
+# A preview's clock deleted: the one thing of a preview that acts on its own, with no one calling it.
+def stop-preview-clock [plan: record] {
+	let n = $plan.names
+	if (exists scheduler jobs describe $n.clock --location $plan.region --project $plan.project) { gc scheduler jobs delete $n.clock --location $plan.region --project $plan.project | ignore }
 }
 
 # A preview to deploy afresh on its instance as it stands: stopped, and its
@@ -869,14 +907,31 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 		} | reduce -f {} {|it, acc| $acc | merge $it })
 		if ($both.tests? | is-not-empty) { error make {msg: $both.tests} }
 		if ($both.staging? | is-not-empty) { error make {msg: $"the tests passed, but production was not staged: ($both.staging)"} }
+		# The tests' log is read from Cloud Logging beside go-live, which takes longer, into a file.
+		let log_file = $"(pwd)/dist/gcp/tests-log.txt"
+		job spawn {
+			try {
+				sleep 10sec # Cloud Logging takes the last lines a moment after the build ends
+				gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($drivers.build)\"" --project $drivers.project --order asc --limit 100000 --format "value(textPayload)"
+					| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | str join (char nl) | save -f $log_file
+				{tests_log: $log_file} | job send 0
+			} catch {|e| {tests_log_error: $e.msg} | job send 0 }
+		} | ignore
 		go-live $both.staged | ignore
-		# The tests' log, read once the release is live rather than before it.
-		print $"gcp: (stamp) what the tests printed:"
-		try { drivers-log $drivers } catch {|e| print $"gcp: (stamp) the tests' log was not read: ($e.msg)" }
+		let read = (try { job recv --timeout 60sec } catch { {tests_log_error: "Cloud Logging did not answer in a minute"} })
+		if ($read.tests_log? | is-not-empty) {
+			print $"gcp: (stamp) what the tests printed \(also in ($read.tests_log)\):"
+			print (open --raw $read.tests_log)
+		} else { print $"gcp: (stamp) the tests' log was not read: ($read.tests_log_error?)" }
 		# A release the rc gate passed: the deploy-shaped files it passed with.
 		local-gate-key rc-stamp $app_info.dir $deploy_key
 		null
 	} catch {|e| $e.msg })
-	stop-preview $rc_plan
-	if $failure != null { error make {msg: $failure} }
+	# A failed release stops the preview whole. A release that is live does not wait for that: the
+	# preview's service, jobs and instance stay, idle (Cloud Run scales to zero), and only its clock,
+	# which acts alone, is deleted. Nothing is harmed by what stays, since the next release of the app
+	# takes this lock first and its empty-preview stops the whole preview (stop-preview) before it
+	# drops the database; no background process outlives the lock to meet that release's own preview.
+	if $failure != null { stop-preview $rc_plan; error make {msg: $failure} }
+	stop-preview-clock $rc_plan
 }
