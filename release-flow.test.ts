@@ -221,6 +221,21 @@ Deno.test("a go-live task that fails lets the others finish, then fails the rele
   } finally { await clean(w) }
 })
 
+Deno.test("an IAM binding refused once for a concurrent policy change is asked again, and the release goes live", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    const r = await release(w, { FAKE_RACE: "run services add-iam-policy-binding guestbook .*allUsers" })
+    assert(r.success, r.stderr + r.stdout)
+    const lines = await log(w)
+    const raced = at(lines, /raced .*add-iam-policy-binding guestbook /)
+    assert(raced >= 0, "the binding was refused once")
+    assert(at(lines, /add-iam-policy-binding guestbook .*allUsers/, raced + 1) > raced, "and asked again")
+  } finally { await clean(w) }
+})
+
 Deno.test("a release whose schema job is unchanged skips it; a changed job runs it before the service", async () => {
   const w = await world()
   try {

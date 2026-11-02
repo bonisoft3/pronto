@@ -13,6 +13,8 @@ docker)
   case "$args" in *"config --format json"*) cat "$FAKE_COMPOSE" ;; esac
   exit 0 ;;
 esac
+# A call refused once, as IAM refuses a write that raced another on the same policy, by the pattern in $FAKE_RACE.
+if [ -n "$FAKE_RACE" ] && echo "$args" | grep -Eq "$FAKE_RACE" && [ ! -e "$FAKE_STATE/raced" ]; then touch "$FAKE_STATE/raced"; echo "  raced $args" >> "$FAKE_LOG"; echo "ERROR: (gcloud.run.services.add-iam-policy-binding) ABORTED: There were concurrent policy changes. Please retry the whole read-modify-write with exponential backoff." >&2; exit 1; fi
 # A call made to fail, by the pattern in $FAKE_FAIL.
 if [ -n "$FAKE_FAIL" ] && echo "$args" | grep -Eq "$FAKE_FAIL"; then echo "fake failure: $args" >&2; exit 1; fi
 hex() { printf %s "$1" | shasum -a 256 | cut -d' ' -f1; }

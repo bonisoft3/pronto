@@ -54,16 +54,17 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 	$current
 }
 
-# A gcloud call granting a role to an account made a moment before: IAM does not know a new account
-# for some seconds ("does not exist"), so the call is asked again, a minute at most, a second apart, before it fails;
-# any other refusal fails at once.
+# A gcloud call granting a role: IAM does not know an account made a moment before for some seconds
+# ("does not exist"), and refuses a binding written while another changed the same policy ("concurrent
+# policy changes", as go-live's parallel tasks do), so the call is asked again, a minute at most, a
+# second apart, before it fails; any other refusal fails at once.
 def --wrapped gc-fresh [...args] {
 	let input = $in
 	let until = ((date now) + 1min)
 	loop {
 		let r = ($input | ^gcloud --quiet ...$args | complete)
 		if $r.exit_code == 0 { return $r.stdout }
-		if not ($r.stderr =~ "does not exist") or (date now) > $until { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
+		if not ($r.stderr =~ "does not exist|concurrent policy changes") or (date now) > $until { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
 		sleep 1sec
 	}
 }
@@ -551,10 +552,10 @@ def go-live [staged: record]: nothing -> record {
 					# IAP's service agent, made once a project (gcloud has it only in beta).
 					let token = (gc auth print-access-token | str trim)
 					^curl --silent --fail --show-error --output /dev/null -X POST -H $"Authorization: Bearer ($token)" $"https://serviceusage.googleapis.com/v1beta1/projects/($number)/services/iap.googleapis.com:generateServiceIdentity"
-					gc run services add-iam-policy-binding $plan.service --region $r --project $p --member $"serviceAccount:service-($number)@gcp-sa-iap.iam.gserviceaccount.com" --role roles/run.invoker | ignore
+					gc-fresh run services add-iam-policy-binding $plan.service --region $r --project $p --member $"serviceAccount:service-($number)@gcp-sa-iap.iam.gserviceaccount.com" --role roles/run.invoker | ignore
 					do { ^gcloud --quiet run services remove-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker } | complete | ignore
 				} else {
-					gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+					gc-fresh run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
 				}
 			} else if ($t.domain? | is-not-empty) {
 				map-domain $t.domain $plan.service $p $r
@@ -564,7 +565,7 @@ def go-live [staged: record]: nothing -> record {
 				let svc = ($plan.names.sidecarServices | get $t.sidecar)
 				print $"gcp: (stamp) ($t.sidecar) apart \(($svc)\)"
 				gc run services replace $"dist/gcp/sidecar-($t.sidecar).yaml" --region $r --project $p | ignore
-				gc run services add-iam-policy-binding $svc --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+				gc-fresh run services add-iam-policy-binding $svc --region $r --project $p --member allUsers --role roles/run.invoker | ignore
 			}
 			null
 		} catch {|e| $e.msg }
