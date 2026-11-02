@@ -221,48 +221,48 @@ url = "https://github.com/bonisoft3/pronto/releases/download/v0.25.2/pronto-wind
 url_api = "https://api.github.com/repos/bonisoft3/pronto/releases/assets/684769380"
 
 [[tools."github:bonisoft3/sayt"]]
-version = "0.45.1"
+version = "0.45.3"
 backend = "github:bonisoft3/sayt"
 
 [tools."github:bonisoft3/sayt"."platforms.linux-arm64"]
-checksum = "sha256:cb39b0575138c7ebffbc96d49f28a18a5b6285997cb42b63b41fa16a009fd41c"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.1/sayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/684533833"
+checksum = "sha256:529dfcd2b2049c21a614e04217d43c2e2dd11fdd33cde9ea3258364d9a6e9b73"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.3/sayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/699079066"
 
 [tools."github:bonisoft3/sayt"."platforms.linux-arm64-musl"]
-checksum = "sha256:cb39b0575138c7ebffbc96d49f28a18a5b6285997cb42b63b41fa16a009fd41c"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.1/sayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/684533833"
+checksum = "sha256:529dfcd2b2049c21a614e04217d43c2e2dd11fdd33cde9ea3258364d9a6e9b73"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.3/sayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/699079066"
 
 [tools."github:bonisoft3/sayt"."platforms.linux-x64"]
-checksum = "sha256:cfb1ca48458028447518c4508e8919200e0dd50982e9c3101dc55022aec64664"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.1/sayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/684533811"
+checksum = "sha256:a1f94e6865114694da481357d7b994a98247dc8bd34d46d5c9e57cd615f137c4"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.3/sayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/699079088"
 
 [tools."github:bonisoft3/sayt"."platforms.linux-x64-musl"]
-checksum = "sha256:cfb1ca48458028447518c4508e8919200e0dd50982e9c3101dc55022aec64664"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.1/sayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/684533811"
+checksum = "sha256:a1f94e6865114694da481357d7b994a98247dc8bd34d46d5c9e57cd615f137c4"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.3/sayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/699079088"
 
 [tools."github:bonisoft3/sayt"."platforms.macos-arm64"]
-checksum = "sha256:4bed20f1a43e06616df1cd2a6a49621f5f6ddd08116a695d2947e02189c4429b"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.1/sayt-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/684533728"
+checksum = "sha256:69d8ca972ffb5f1091324bf16e8dad939050cfdd4259df563282bea331e087bc"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.3/sayt-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/699078997"
 
 [tools."github:bonisoft3/sayt"."platforms.macos-x64"]
-checksum = "sha256:524cdcdbcfd75e2efb37ffa5376f2d415bec3608d319d17c799082f50ccf125c"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.1/sayt-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/684533730"
+checksum = "sha256:87da547b8494816875a867064557b95250703c8a315dff7c98b54465fac5d727"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.3/sayt-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/699079082"
 
 [tools."github:bonisoft3/sayt"."platforms.windows-arm64"]
-checksum = "sha256:e53dfca7f4a38a084e63734c34db37f90c3a155ef6236fc4049b9944d0b36f12"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.1/sayt-windows-arm64.zip"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/684533729"
+checksum = "sha256:66aa013df75e60643e7109c9ccb39f7fd8f713de40ad3db9125b5346aec01359"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.3/sayt-windows-arm64.zip"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/699078994"
 
 [tools."github:bonisoft3/sayt"."platforms.windows-x64"]
-checksum = "sha256:5c4afcad2542f82c58ada9b69c832f18e46a7013bb181b42f80c1a39e2ae58c4"
-url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.1/sayt-windows-x64.zip"
-url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/684533727"
+checksum = "sha256:24965edbb96e4b72393ea2d7c79a2b20f9db628f4c091aa8de719f7660fc08ad"
+url = "https://github.com/bonisoft3/sayt/releases/download/v0.45.3/sayt-windows-x64.zip"
+url_api = "https://api.github.com/repos/bonisoft3/sayt/releases/assets/699078999"
 
 [[tools."github:bufbuild/buf"]]
 version = "1.74.0"

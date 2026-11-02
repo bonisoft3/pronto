@@ -36,12 +36,29 @@ Deno.test("an app naming no provider leaves the terminal and the auth service as
 
 Deno.test("a provider the terminal does not offer, a repeated one, and an empty list are refused", async () => {
   // Each refused for its own reason, not for one the program shares with them.
-  // A provider nobody offers meets the cluster's providers before the terminal's.
-  for (const [providers, why] of [[`["myspace"]`, "signIn.myspace: field not allowed"], [`["google", "google"]`, "list.UniqueItems"], [`[]`, "app.capabilities.auth.providers: incompatible list lengths"]]) {
+  // A provider the terminal does not name, with no issuer in its place, is
+  // refused where the auth service would be given none.
+  for (const [providers, why] of [[`["myspace"]`, "OIDC_MYSPACE_ISSUER: required field missing: issuer"], [`["google", "google"]`, "list.UniqueItems"], [`[]`, "app.capabilities.auth.providers: incompatible list lengths"]]) {
     const res = await exported(withAuth(`{required: false, service: "/auth", providers: ${providers}}`), "out");
     assertEquals(res.success, false, providers);
     assertStringIncludes(res.stderr, why, providers);
   }
+});
+
+// A provider the terminal does not name is one an identity broker offers (its
+// phone sign-in): offered where the program names the issuer standing in its
+// place, drawn by the terminal as any other, and refused without one.
+Deno.test("a provider the terminal does not name is offered through the issuer the program names", async () => {
+  const code = withAuth(`{required: false, service: "/auth", providers: ["google", "phone"], provider: phone: {issuer: "http://localhost:28443", client: "origin", params: "provider=phone"}}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals(files.value["shell/shell.json"].data.auth.providers, ["google", "phone"]);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals(env.success, true, env.stderr);
+  assertEquals(env.value.OIDC_PROVIDERS, "google,phone");
+  assertEquals(env.value.OIDC_PHONE_ISSUER, "${OIDC_PHONE_ISSUER:-http://localhost:28443}");
+  const bare = await exported(withAuth(`{required: false, service: "/auth", providers: ["google", "phone"]}`), "out");
+  assertEquals(bare.success, false, "no issuer stands in the phone's place");
 });
 
 // A provider's settings reach the auth service as defaults the deployment's

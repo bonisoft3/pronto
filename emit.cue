@@ -2516,8 +2516,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// offer.
 	if E.code.capabilities.auth != _|_ {
 		_authModeOffered: true & list.Contains(E.terminal.capabilities.auth.modes, E.code.capabilities.auth.mode)
+		// A provider the terminal names is offered as it is. One it does not
+		// name (an identity broker's phone sign-in) is drawn as any other, a
+		// link to the auth service labelled by the app's chrome_signin_<name>,
+		// so it is offered where the program names the issuer that stands in
+		// its place.
+		let issuerNamed = [if E.code.capabilities.auth.provider != _|_ for n, v in E.code.capabilities.auth.provider if v.issuer != _|_ {n}]
 		if E.code.capabilities.auth.providers != _|_ for p in E.code.capabilities.auth.providers {
-			_authProviderOffered: (p): true & list.Contains(E.terminal.capabilities.auth.providers, p)
+			_authProviderOffered: (p): true & (list.Contains(E.terminal.capabilities.auth.providers, p) || list.Contains(issuerNamed, p))
 		}
 	}
 

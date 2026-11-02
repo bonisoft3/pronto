@@ -15,6 +15,11 @@ const signin = (settings = "") => paymentProgram()
   .replace("_cluster: (pronto.#DefaultCluster & {code: app, statics: []}).out", "_cluster: (pronto.#DefaultCluster & {code: app, statics: []}).out & {surface: targets: cluster.surface.targets}") +
   `\napp: code\ncluster: surface: targets: {}\nidentity.#Signin & {signin: {${settings}}}\n`;
 
+// The local broker's port, hashed from the app's name (the fixture's meta.name) as
+// identity/signin.cue's #LocalPort does: one per app.
+const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("pronto-identity/test-effects")));
+const port = 10000 + parseInt(Array.from(digest.slice(0, 4), (b) => b.toString(16).padStart(2, "0")).join(""), 16) % 22768;
+
 async function exported(code: string, expression: string) {
   const res = await cue(["export", "-", "-e", expression, "--out", "json"], code);
   return { ...res, value: res.success ? JSON.parse(res.stdout) : undefined };
@@ -24,7 +29,7 @@ Deno.test("the broker stands in each provider's place, as defaults a deployment 
   const env = await exported(signin(), "_cluster.surface.targets.auth.compose.environment");
   assertEquals(env.success, true, env.stderr);
   assertEquals(env.value.OIDC_PROVIDERS, "google");
-  assertEquals(env.value.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-http://localhost:28443}");
+  assertEquals(env.value.OIDC_GOOGLE_ISSUER, "${OIDC_GOOGLE_ISSUER:-http://localhost:" + port + "}");
   assertEquals(env.value.OIDC_GOOGLE_CLIENT_ID, "${OIDC_GOOGLE_CLIENT_ID:-origin}");
   assertEquals(env.value.OIDC_GOOGLE_AUTHORIZE_PARAMS, "${OIDC_GOOGLE_AUTHORIZE_PARAMS:-provider=google}");
   // A public client: the program gives no secret, only the deployment's slot for one.
@@ -39,9 +44,14 @@ Deno.test("a local launch brings the broker up: Hydra, then the front waiting on
   assertStringIncludes(hydra.dockerfile.from.name, "oryd/hydra:v26.2.0@sha256:");
   assertStringIncludes(front.dockerfile.from.name, "denoland/deno:distroless-2.5.0@sha256:");
   assertEquals(front.entrypoint.after, { "identity-hydra": "healthy" });
+  // Ports of the app's own: the front's hashed from its name, Hydra's moved by bayt as any other.
+  assertEquals(front.expose.http.port, port);
+  assertEquals(front.compose.environment.PORT, String(port));
+  assertEquals(hydra.expose.public.env, "SERVE_PUBLIC_PORT");
+  assertEquals(hydra.expose.admin.env, "SERVE_ADMIN_PORT");
   assertEquals(targets.value.launch.compose.depends_on.identity.condition, "service_healthy");
   // The auth service reaches the front by its service name, which the host projection reads as loopback.
-  assertEquals(targets.value.auth.compose.environment.OIDC_GOOGLE_INTERNAL, "${OIDC_GOOGLE_INTERNAL:-http://identity:28443/}");
+  assertEquals(targets.value.auth.compose.environment.OIDC_GOOGLE_INTERNAL, "${OIDC_GOOGLE_INTERNAL:-http://identity:" + port + "/}");
 });
 
 Deno.test("an operator's broker elsewhere is theirs to run: no local broker", async () => {

@@ -1580,7 +1580,8 @@ import (
 			// secret kept in a file git ignores rather than in any emitted one.
 			envFiles?: [...(string & =~"^[A-Za-z0-9_][A-Za-z0-9._/-]*\\.env$" & !~"\\.\\.")]
 			// The providers a person may sign in through besides a passkey,
-			// each one the terminal offers (#emit): a way in at the gate and in
+			// each one the terminal offers, or one whose issuer the program
+			// names below, labelled chrome_signin_<name> (#emit): a way in at the gate and in
 			// a guest's strip, run by the cluster's auth service. A provider's
 			// person and a passkey's are two.
 			providers?: [string, ...string] & list.UniqueItems()

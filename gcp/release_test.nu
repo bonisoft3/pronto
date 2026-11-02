@@ -26,7 +26,10 @@ case "$*" in
   *"services describe"*)
     [ -f "$d/exists" ] || { echo "NOT_FOUND: not found" >&2; exit 1; }
     s="$(cat "$d/serving")"
-    echo "{\"status\":{\"traffic\":[{\"revisionName\":\"$s\",\"percent\":100},{\"revisionName\":\"svc-00002-new\",\"percent\":0,\"tag\":\"candidate\",\"url\":\"https://candidate---svc-1.r.run.app\"}]}}" ;;
+    echo "{\"status\":{\"traffic\":[{\"revisionName\":\"$s\",\"percent\":100},{\"revisionName\":\"svc-00002-new\",\"percent\":0,\"tag\":\"next\",\"url\":\"https://next---svc-1.r.run.app\"}]}}" ;;
+  *"revisions list"*)
+    s="$(cat "$d/serving")"
+    echo "[{\"metadata\":{\"name\":\"svc-00002-new\",\"creationTimestamp\":\"2\",\"labels\":{\"pronto-schema\":\"a\"}},\"status\":{\"conditions\":[{\"type\":\"Ready\",\"status\":\"True\"}]}},{\"metadata\":{\"name\":\"svc-00001-old\",\"creationTimestamp\":\"1\",\"labels\":{\"pronto-schema\":\"a\"}},\"status\":{\"conditions\":[{\"type\":\"Ready\",\"status\":\"True\"}]}}]" ;;
   *"services replace"*) touch "$d/exists" ;;
   *"update-traffic"*)
     case "$*" in *"--to-revisions "*) echo "$*" | sed "s/.*--to-revisions \([^= ]*\)=.*/\1/" > "$d/serving" ;; esac ;;
@@ -38,7 +41,7 @@ esac
 d="$(dirname "$0")/.."
 for last; do :; done
 case "$last" in
-  *candidate---*) say="$(cat "$d/candidate_says")" ;;
+  *next---*) say="$(cat "$d/candidate_says")" ;;
   *) say="$(cat "$d/public_says")" ;;
 esac
 code=$(echo "$say" | cut -d" " -f1); body=$(echo "$say" | cut -d" " -f2-)
@@ -70,14 +73,14 @@ def main [] {
 def test_hold_traffic_keeps_the_serving_revision [] {
 	print "test hold-traffic keeps traffic on the serving revision..."
 	let held = (hold-traffic "spec:\n  traffic:\n    - percent: 100\n      latestRevision: true\n  template:\n    metadata:\n      annotations:\n        autoscaling.knative.dev/maxScale: '1'\n" "svc-00001-old" | from yaml)
-	assert equal $held.spec.traffic [{revisionName: "svc-00001-old", percent: 100}, {percent: 0, latestRevision: true, tag: "candidate"}]
+	assert equal $held.spec.traffic [{revisionName: "svc-00001-old", percent: 100}, {percent: 0, latestRevision: true, tag: "next"}]
 	assert equal ($held.spec.template.metadata.annotations | get "autoscaling.knative.dev/maxScale") "1"
 }
 
 def test_hold_traffic_first_deploy [] {
 	print "test hold-traffic on a first deploy tags the only revision..."
 	let held = (hold-traffic "spec:\n  traffic:\n    - percent: 100\n      latestRevision: true\n" null | from yaml)
-	assert equal $held.spec.traffic [{percent: 100, latestRevision: true, tag: "candidate"}]
+	assert equal $held.spec.traffic [{percent: 100, latestRevision: true, tag: "next"}]
 }
 
 def test_poll_health_wants_the_revision_by_name [] {
