@@ -40,9 +40,12 @@ if (mode !== "" && mode !== "all") fail(`INTEGRATE_LOCAL_DRIVERS is "${mode}": i
 const lint = `${args.omnishell}/check-visual.ts`
 
 // The release's pass ledger (gcp/local-gate-key.nu): the tree's key, taken before the stack starts.
+// A stack on a slot runs from a copy of the app that is no git tree (tests/slot.ts), which names
+// the checkout it copies in PRONTO_GATE_DIR: that tree is the one keyed and stamped.
+const gateDir = Deno.env.get("PRONTO_GATE_DIR") ? await Deno.realPath(Deno.env.get("PRONTO_GATE_DIR")!) : appDir
 const gateKey = async (verb: string, key?: string) => {
   const script = new URL("./gcp/local-gate-key.nu", import.meta.url).pathname
-  const out = await new Deno.Command("nu", { args: [script, verb, appDir, ...(key ? [key] : [])], stdout: "piped", stderr: "inherit" }).output()
+  const out = await new Deno.Command("nu", { args: [script, verb, gateDir, ...(key ? [key] : [])], stdout: "piped", stderr: "inherit" }).output()
   return { success: out.success, text: new TextDecoder().decode(out.stdout).trim() }
 }
 const treeKey = async () => {
@@ -230,7 +233,7 @@ if (verdict === undefined) {
     const failed: string[] = []
     for (const d of localDrivers(JSON.parse(new TextDecoder().decode(out.stdout)), url, args.omnishell)) {
       console.error(`integrate@local: ${d.name} against ${url}`)
-      const code = await run(d.cmd[0], d.cmd.slice(1), { cwd: appDir, env: { MISE_LOCKED: "0", ...d.env } })
+      const code = await run(d.cmd[0], d.cmd.slice(1), { cwd: appDir, env: { MISE_LOCKED: "0", ...ports, ...d.env } })
       console.error(`integrate@local: ${d.name} ${code === 0 ? "passed" : `FAILED (exit ${code})`}`)
       if (code !== 0) failed.push(d.name)
     }
