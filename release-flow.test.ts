@@ -44,6 +44,9 @@ gcpRelease: schema.#Build & {release: GCP}
   await write(`${app}/saytw`, `#!/bin/sh
 echo "saytw $* drivers=$INTEGRATE_LOCAL_DRIVERS start" >> "$FAKE_LOG"
 sleep "\${FAKE_GATE_SLEEP:-0}"
+# A gate held open until a call shows in the log (FAKE_GATE_UNTIL, a pattern), a minute at most:
+# the ordering a test asserts, whatever the machine's load.
+if [ -n "$FAKE_GATE_UNTIL" ]; then n=0; until grep -Eq "$FAKE_GATE_UNTIL" "$FAKE_LOG" || [ $n -ge 600 ]; do sleep 0.1; n=$((n+1)); done; fi
 [ -z "$FAKE_GATE_TOUCH" ] || echo changed >> "$FAKE_GATE_TOUCH"
 if [ -n "$FAKE_GATE_FAIL" ]; then echo "saytw end FAILED" >> "$FAKE_LOG"; echo "scenario failed" >&2; exit 1; fi
 echo "saytw end" >> "$FAKE_LOG"
@@ -119,7 +122,7 @@ Deno.test("no rc stamp: the rc preview deploys beside the local gate, and produc
   const w = await world()
   try {
     await ready(w)
-    const r = await release(w, { FAKE_GATE_SLEEP: "3" })
+    const r = await release(w, { FAKE_GATE_UNTIL: "service.yaml is guestbook-rc$" })
     assert(r.success, r.stderr + r.stdout)
     assertStringIncludes(r.stdout, "the rc preview runs")
     const lines = await log(w)
