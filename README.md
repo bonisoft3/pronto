@@ -1,22 +1,14 @@
 # Pronto
 
 Pronto is a new breed of programming language. It is built for LLMs and relies
-on different techniques to dispense code reviews, making coding fully agentic. 
+on several techniques to dispense code reviews, making coding fully agentic. 
 The insight: AI can generate anything, but "anything" is where bugs live.
 Pronto constrains generation to an architecture where entire categories of bugs
 — deployment drift, data inconsistency, infrastructure misconfiguration —
 cannot exist. The same way Rust constrains C to gain memory safety, Pronto
 constrains AI-generated code to gain architectural safety.
 
-The source code is markdown and the compiler itself is an LLM. It targets
-[omnishell](https://github.com/bonisoft3/omnishell) for UI,
-[mecha](https://github.com/bonisoft3/mecha) for the backend,
-[bayt](https://github.com/bonisoft3/bayt) for build, and
-[sayt](https://github.com/bonisoft3/sayt) for the SDLC — producing applications
-that run identically from a single browser tab to a cloud cluster.
-
-Pronto needs no supervision and no humans ever look at the code it generates. It runs unattended
-for the equivalent of several agile sprints and ships world-class software.
+The source code is markdown and the compiler itself is an LLM. It targets a virtual machine specification and adapts itself to concrete environments, enabling applications that run identically from a single browser tab to a cloud cluster. Pronto needs no supervision and no humans ever look at the code it generates. It runs unattended for the equivalent of several agile sprints and ships world-class software.
 
 For LLM agents generating or modifying Pronto applications, see
 [`llms.txt`](llms.txt) for the machine-readable specification, contract
@@ -113,23 +105,33 @@ codex plugin add pronto@bonisoft3-pronto
 
 ## The specification ladder
 
-Pronto needs no human code review, but it lets people review what exists before code. It writes three artifacts, one per audience; each reviews at its own rung and nobody reviews below it.
+Pronto needs no human code review, but it follows a methodology and let you contribute and peek on the steps that happen before code comes into life. It starts with the brief.md, containing the product description and requirements, then it authors ir.html, which feels like a design doc, with entities and the diagrams one would drawn in a whiteboard. It is a loose spec in natural language, with the initial invariants sprinkled in, with languages like CEL, mermaid and xstate json.
+
+Those invariants are captured in cuelang and new ones are added. Although cuelang is a configuration language, this is the program from the Pronto perspective. A series of constraints on the universe, not a mini world built from the scratch. The cue code yields yaml, which configures everything, and the missing pieces are glued afterwards to instantiate the closed world a given computing platform requires to run your program.
+
+The last pass is the creation of the target code, sql, html, css, and jessie files, and any other needed files. They are all llm authored and work on the boundaries of program.cue. In this language set there is not imperative unconstrained code, but the results are still familiar (jessie is a pure subset of javascript). The yaml configuration is mostly applied to the backend specification which contains a collection of familiar servers, like caddy and postgres, sql drives the data, html and css the presentation, and jessie defines handlers for data transformation as it moves around. This does not suffice for every program or for interoperability with the rest of the world, and for that we have hatches discussed below. But this is the pronto safe subset where several bug classes do not exist and it covers a lot of ground.
 
 ```mermaid
 flowchart LR
-  brief["<b>brief.md</b><br/>product · prose<br/><i>edited any time</i>"]
-  ir["<b>ir.html</b><br/>engineer · design doc<br/><i>pinned per compile</i>"]
-  cue["<b>program.cue</b><br/>machine · no reviewer<br/><i>pinned per compile</i>"]
-  out(["mecha YAML<br/>omnishell config<br/>HTML/CSS · JS handlers"])
+  brief["<b>brief.md</b><br/>product<br/><i>written by anyone<br/>reviewed by anyone</i>"]
+  ir["<b>ir.html</b><br/>engineering<br/><i>written by LLM<br/>reviewed by human</i>"]
+  cue["<b>program.cue</b><br/>the program<br/><i>written by LLM<br/>reviewed by LLM</i>"]
+  target["<b>sql, jessie, html, css</b><br/>target code<br/><i>written by LLM<br/>enforced by platform</i>"]
+  emitted(["yaml, schema sql"])
   brief -. LLM .-> ir
   ir -. "LLM, narrow" .-> cue
-  cue == cue export ==> out
+  cue -. LLM .-> target
+  cue == cue export ==> emitted
   ir <-- "ids, checked both ways" --> cue
 ```
 
-Only the dotted hops are probabilistic, and the second is narrow: the structured parts of `ir.html` (entities, flows, data paths) extract into CUE deterministically. Every box, arrow and sketch in `ir.html` carries an id the CUE points back at, and a checker enforces the bijection. These ids are pronto's sourcemaps: they map design objects rather than lines, survive into the running DOM as `data-*` attributes, and are checked rather than trusted.
+An LLM can always take the place of a human here, and that is pronto's most common mode: fully unattended, with LLMs in every seat.
 
-The brief is the spec, the journal the evidence. `brief.md` says what the app is and what the next sprint delivers; people edit it any time, a turn never does. `journal.html` holds each turn's before/after screenshots, recordings and gate output, newest first, and carries no requirements. A sprint is four turns and a wrap that rewrites the brief and prunes the journal; git keeps the rest, and the tree, not either document, is the state a turn resumes from.
+As we go down the hops, things become less probabilistic. From fully free form brief.md, we go to fully free content in a specific format for ir.html, and to get to program.cue we interpret ir.html as a loose spec with strict invariants sprinkled in. From program.cue to final application form we are doing deterministic cue unification, handling cross cutting concerns, and leaving a final authoring step for the contents of the files program.cue names. 
+
+Every box, arrow and sketch in `ir.html` carries an id the CUE points back at, and a checker enforces the bijection. These ids are pronto's sourcemaps: they map design objects rather than lines, and they guide code evolution forcing diffs where it matters most.
+
+While the brief is the spec that gets refined into code, the journal collects the evidence of success. Pronto plugins define workflows for the LLMs to code in pronto and communicate its progress. You do not need to use it, your LLM can figure out what flow is best, and the platform will prevent it from writing buggy code. But pronto get more effective following the pre-defined patterns in pronto:sprint, which will yield the journal entries with reports of progress.
 
 ## The target surface
 
@@ -164,32 +166,6 @@ Pronto cannot express every computation. Four escapes, ranked; all appear as box
 
 The browser-tier shim supplies an in-browser implementation behind the same interface. Declaring the shim forces the interface contract to be precise enough to mock — pressure in the right direction. (Live-in-tab containers via container2wasm/v86 exist as an opt-in, at emulation speed; WebContainers-class products require commercial licenses.)
 
-## Drift detection
-
-Deterministic at every rung below the top:
-
-| Rung | Mechanism | Deterministic? |
-|------|-----------|---------------|
-| brief ↔ ir.html | LLM judgment, human-reviewed — this is the design step | No (by nature) |
-| ir.html ↔ program.cue | Id back-reference bijection check | Yes |
-| program.cue ↔ outputs | `cue export` is a pure function of the program | Yes |
-| Behavior | Omnishell's battery and machine walk over the program's modules and charts, and the app's own drivers against the running app | Yes |
-| Visual / flow | Visual lint over the rendered app | Yes |
-
-## The virtual cluster
-
-Pronto programs don't target machines; they target a **virtual cluster**, the way Java targets a virtual machine. The virtual cluster is mecha's contract surface — a Postgres-shaped store, a CRUD gateway, a CDC event bus, pipeline workers, live query shapes — and every tier realizes that contract with different components, from a cloud deployment all the way down to a single browser tab:
-
-```
-Browser ──────── Edge ──────── Container ──────── Cloud
- PGlite         PGlite in a    Docker Compose     managed services
- fetch shim     Durable Object                    controllers
- one user       single writer  full               full
- eventual       consistent     consistent         consistent
-```
-
-No code changes between tiers. Components swap — PGlite for PostgreSQL, a fetch shim for real HTTP, shims for real containers — while the data paths, CDC guarantees, and application logic stay identical.
-
 ### The loop
 
 Development turns **the loop** — the lifecycle contract (the ten verbs, the
@@ -201,6 +177,15 @@ users touch a terminal, developers turn the loop; all four seats are
 published CUE, overridable by unification, versioned and forked by module
 pin.
 
+ It targets
+[omnishell](https://github.com/bonisoft3/omnishell) for UI,
+[mecha](https://github.com/bonisoft3/mecha) for the backend,
+[bayt](https://github.com/bonisoft3/bayt) for build, and
+[sayt](https://github.com/bonisoft3/sayt) for the SDLC — producing applications
+that run identically from a single browser tab to a cloud cluster.
+
+
+
 ### The virtual terminal
 
 The frontend is the cluster's **virtual terminal**. As in the block-mode terminals of mainframe lineage, a screen is rendered from data and the only way back is submitting a form — but this terminal carries its own replica of its slice of the cluster: reads are local and reactive, writes land locally first and travel the same CDC guarantees, so offline is the default condition rather than an error state. What remains of client computation is Elm-shaped — pure `(state, event) → state'` handlers, effects owned entirely by the shell. A 3270 with a database in its pocket, attached to a cluster that can live in the same tab.
@@ -211,33 +196,7 @@ Pronto does not coordinate cross-cutting concerns (durabilities, effect safety s
 
 ## Philosophy
 
-Programming languages exist on a spectrum from "express anything" to "express safely." AI code generation today is at the "assembly" end: infinite output space, probabilistic correctness. Pronto moves it toward the "Rust" end by fixing the target:
-
-- **Deployment drift** — sayt/bayt pin everything; dev and prod run the same code paths
-- **Data inconsistency** — mecha guarantees at-least-once delivery with idempotent sinks
-- **Infrastructure misconfiguration** — the program generates all infrastructure; there is nothing to hand-configure
-- **State management bugs** — omnishell enforces a single data path and forms-only mutations; handlers cannot perform effects
-- **Runtime surprises** — most errors fail at `cue vet` time, not runtime ([the joins checked later, or not yet](docs/lattice.md#which-joins-the-code-enforces)); the constraint cascade catches them before anything runs
-
-What you give up in expressiveness (GPU compute, arbitrary code outside the pure languages) you gain in correctness for the large class of applications that don't need it: CRUD apps, SaaS tools, dashboards, content management, workflow automation, internal tools, admin panels, and, below the row ladder, frame-rate games on the kinetic plane. [`PHILOSOPHY.md`](PHILOSOPHY.md) argues where each of these constraints comes from.
-
-## Design documents
-
-- [`SPEC.md`](SPEC.md) — the artifact spec: brief, ir, program
-- [`PHILOSOPHY.md`](PHILOSOPHY.md) — the thesis (move data, transform data, update invariants) and the classical works each part stands on
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how the pieces fit, and where to change each one
-- [`prelude.md`](prelude.md) — shared component knowledge, implicit context of every compile
-- [`docs/component-contracts.md`](docs/component-contracts.md) — component contracts: each part's state, capabilities, and surface, and how data flows between them
-- [`docs/lattice.md`](docs/lattice.md#views-folds-and-the-dom) — the durability ladder, DOM as bottom rung
-- [`docs/localization.md`](docs/localization.md#catalogues) — i18n as a contract, refused before release rather than falling back
-- [`docs/localization.md`](docs/localization.md#addresses) — localized routing, BCP 47 paths, and Caddy's path matchers
-- [`docs/screens.md`](docs/screens.md#how-a-routes-first-document-is-rendered) — server-side rendering: a route's ssr mode crossed with its read scope, pronto's policy over omnishell's mechanism, and which cells are built
-- [`docs/lattice.md`](docs/lattice.md#which-joins-the-code-enforces) — cross-cutting concerns via CUE unification: durability, effect safety spectrum, interaction lifecycles, and verification budgets, and which joins the code enforces
-- [`docs/release-targets.md`](docs/release-targets.md) — release targets: a program declares them, each is a sayt platform on a tier of mecha's ladder, `release@pages` bundles the app into one HTML file for one user, `release@cloudflare` runs it for every user in one Durable Object over PGlite, `release@docker` packages the app as a single-container standalone appliance, and `release@gcp`, `release@aws`, `release@azure` and `release@k8s` (mecha's images on managed services above a floor of one small database) are designed and not built
-- [`../omnishell/docs/machines.md`](https://github.com/bonisoft3/omnishell/blob/v0.21.6/docs/machines.md) — unbreakable machines, closed effects, DuckDB synthetic seeds, statechart storybook battery, and formal verification
-- `docs/` — one document per subsystem, and the decisions not yet built
-- [`docs/index.md`](docs/index.md) — every document, with its type and status
-- `docs/archive/` — the superseded design whose business analysis still stands ([`2026-06-12-design-constraint-cascade.md`](docs/archive/2026-06-12-design-constraint-cascade.md))
+Pronto brings some truly novel ideas to the field, but a lot of it is a careful combination of ideas that have been around for a few years or a few decades. Check [`PHILOSOPHY.md`](PHILOSOPHY.md) to understand where the magic comes from and where we are headed.
 
 ## License
 

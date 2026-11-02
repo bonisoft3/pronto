@@ -71,7 +71,7 @@ remaining batches. Priority boundaries stay ordered.
 ## The ladder
 
 The rungs, and which of them are deterministic, are
-[the README's](../README.md#drift-detection); the files behind each are
+[the README's](../README.md#the-specification-ladder); the files behind each are
 [below](#where-each-part-lives).
 
 **The ir is a stage, not a projection of the program.** Its job is to hold
