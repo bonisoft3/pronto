@@ -161,6 +161,8 @@ const down = async (failed: boolean) => {
     console.error(`integrate@local: process-compose's log, last lines:\n${text.split("\n").slice(-60).join("\n")}`)
   }
   await watch().catch(() => {})
+  // `down` itself can hang on a stack whose process failed (seen on reclaim-clone, 25 minutes):
+  // given 20 s, then the stack is stopped, so a failed run fails rather than waits.
   await new Deno.Command("process-compose", { args: pc(["down"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "null", stderr: "null", signal: AbortSignal.timeout(20_000) }).output()
     .catch(() => console.error("integrate@local: process-compose's down did not answer in 20 s"))
   if (!await settled(20_000)) {

@@ -16,6 +16,9 @@ export interface ReleaseScripts {
 }
 
 const SCHEDULE_SEED = '801_schedule_seed.sql'
+// A test's rows (#App.state.fixture): a release's initdb skips them on gcp and
+// k8s (gcp/schema/gcp.cue), so an edge release and its page never carry them.
+export const FIXTURE = '950_fixture.sql'
 
 const scripts = (mecha: string) => import(String(pathToFileURL(path.join(mecha, 'packages/pglite-workerd/scripts.ts')))) as Promise<{
   pgrollScripts: (set: unknown) => Script[]
@@ -28,6 +31,7 @@ export async function releaseFiles(app: string, mecha: string, migrations: strin
   const files = [{ name: TENANCY_SCRIPT, file: path.join(mecha, 'services/database/rls/rls.sql') }]
   for (const m of migrations) {
     const name = path.basename(m)
+    if (name === FIXTURE) continue
     if (name === SCHEDULE_SEED) files.push({ name: SCHEDULE_SCRIPT, file: path.join(mecha, 'services/ticker/schedule.sql') })
     files.push({ name, file: path.join(app, m) })
   }
