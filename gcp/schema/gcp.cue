@@ -132,6 +132,12 @@ import (
 		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
 		// development value, and ORIGIN is where readers are.
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		// Secrets of the app's own, none of the cluster's: each key an
+		// environment variable read from the Secret Manager secret named, in the
+		// release's project (a preview's, for a preview), in place of anything env
+		// or compose gives it. The secret is made outside the release (infra), which
+		// refuses to start without it; its account is granted it, secret by secret.
+		secrets: *{} | {[=~"^[A-Z_][A-Z0-9_]*$"]: =~"^[a-zA-Z0-9_-]{1,255}$"}
 		// The path its server answers 2xx on once it can serve, in place of the
 		// bare port a TCP probe checks. In the instance the door then waits for
 		// it too (container-dependencies), so a sidecar whose own dependency is
@@ -495,12 +501,12 @@ import (
 		out: {
 			name: n
 			image: (imageOf & {svc: n}).out
-			if len(c.env) > 0 {
-				env: [for k, v in c.env {[
+			if len(c.env)+len(c.secrets) > 0 {
+				env: list.Concat([[for k, v in c.env if c.secrets[k] == _|_ {[
 					if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
 					if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
 					{name: k, value: v},
-				][0]}]
+				][0]}], [for k, s in c.secrets {(secretOf & {env: k, secret: s}).out}]])
 			}
 			startupProbe: [
 				if c.probe != _|_ {httpGet: {path: c.probe, port: c.port}, periodSeconds: 2, failureThreshold: 60},
@@ -733,6 +739,8 @@ import (
 			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
 		}}
 		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
+		// The sidecars' own secrets, which the release finds made before it starts.
+		sidecarSecretKeys: list.SortStrings([for s, _ in {for _, c in R.sidecars for _, v in c.secrets {(v): true}} {s}])
 		// The secrets its account reads, each granted on the secret alone.
 		readSecrets: list.SortStrings([for s, _ in B._readSecrets {s}])
 		// The compose services built and run beside the cluster's.

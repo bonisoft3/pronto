@@ -532,6 +532,12 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 			error make {msg: $"secret ($key) is missing: create it with `gcloud secrets create ($key) --project ($p) --data-file=-`"}
 		}
 	}
+	# A sidecar's own secrets are the app's infrastructure's, never made here.
+	for key in ($plan.sidecarSecretKeys? | default []) {
+		if not (exists secrets describe $key --project $p) {
+			error make {msg: $"secret ($key), which GCP.sidecars names, is missing in ($p): declare it where the project's infrastructure is"}
+		}
+	}
 	if $has_blobs { ensure-bucket $plan.names.bucket $plan.names.serviceAccount $p $r }
 	# What the Managed Prometheus sidecar scrapes, which it reads as a mounted secret.
 	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
