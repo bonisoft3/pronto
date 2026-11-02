@@ -8,7 +8,10 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.
 
 const fork = new URL(".", import.meta.url).pathname.replace(/\/$/, "")
 const decoder = new TextDecoder()
-const PROD = /--project brawl-chess( |$)/
+// A call against production's project. The release lock lives in that project's bucket, but it is
+// no part of the app: taking it before the gates is what keeps two releases apart.
+const PROD_ANY = /--project brawl-chess( |$)/
+const PROD = { test: (l: string) => PROD_ANY.test(l) && !/release-locks/.test(l) } as RegExp
 const RC = /--project brawl-chess-previews( |$)/
 const services = ["database", "crud", "electric", "auth", "caddy", "billing", "worker", "front"]
 
@@ -283,5 +286,80 @@ Deno.test("a release whose schema job is unchanged skips it; a changed job runs 
     const forced = await release(w, { PRONTO_RELEASE_FORCE_SCHEMA: "1" })
     assert(forced.success, forced.stderr + forced.stdout)
     assert(at(await log(w), /run jobs execute guestbook-initdb/) >= 0)
+  } finally { await clean(w) }
+})
+
+// The release lock, as the fake's Cloud Storage keeps it: gs://<project>-release-locks/<app>.
+const LOCK = "gs://brawl-chess-release-locks/guestbook"
+const lockFile = async (w: World) => {
+  const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(LOCK)))].map((b) => b.toString(16).padStart(2, "0")).join("")
+  return `${w.state}/gcs-${hex}`
+}
+const holdLock = async (w: World, until: Date) => {
+  const f = await lockFile(w)
+  await write(`${f}.body`, JSON.stringify({ by: "other@machine", dir: "/elsewhere", pid: 7, since: new Date().toISOString(), until: until.toISOString() }))
+  await write(`${f}.gen`, "41\n")
+}
+const lockHeld = async (w: World) => Deno.stat(`${await lockFile(w)}.gen`).then(() => true, () => false)
+
+Deno.test("a release holds its app's lock from before anything reaches the project to its end", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    const r = await release(w)
+    assert(r.success, r.stderr + r.stdout)
+    const lines = await log(w)
+    const took = at(lines, new RegExp(`wrote ${LOCK}$`))
+    const first = at(lines, PROD_ANY)
+    const replaced = at(lines, /replace .*dist\/gcp\/service.yaml is guestbook$/)
+    const gone = at(lines, new RegExp(`removed ${LOCK}$`))
+    assert(took >= 0 && took < replaced && replaced < gone, `taken ${took}, the service ${replaced}, let go ${gone}`)
+    assert(at(lines, /storage cp .*--if-generation-match=0/) >= 0, "made only where none is")
+    assert(first >= 0)
+    assertEquals(await lockHeld(w), false, "nothing is left held")
+  } finally { await clean(w) }
+})
+
+Deno.test("another release holding the app's lock: this one stops before production, and leaves the lock", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    await holdLock(w, new Date(Date.now() + 20 * 60_000))
+    const r = await release(w)
+    assert(!r.success, "refused")
+    assertStringIncludes(r.stderr, "another release of guestbook is running: other@machine")
+    const lines = await log(w)
+    assertEquals(lines.filter((l) => /run services replace|run jobs execute|builds submit/.test(l)), [], "nothing deployed")
+    assertEquals(await lockHeld(w), true, "the other release's lock stays")
+  } finally { await clean(w) }
+})
+
+Deno.test("an expired lock, as a release that died leaves, is taken over", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    await holdLock(w, new Date(Date.now() - 60_000))
+    const r = await release(w)
+    assert(r.success, r.stderr + r.stdout)
+    assertStringIncludes(r.stdout, "taken over from other@machine")
+    assertEquals(await lockHeld(w), false)
+  } finally { await clean(w) }
+})
+
+Deno.test("a release that fails lets its lock go all the same", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    const r = await release(w, { FAKE_FAIL: "run services replace dist/gcp/service.yaml" })
+    assert(!r.success, "the release fails")
+    assertEquals(await lockHeld(w), false, "and its lock is let go")
   } finally { await clean(w) }
 })
