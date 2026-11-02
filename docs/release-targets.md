@@ -625,8 +625,9 @@ and the domains
 
 Where the local gate passed for the tree, and the deploy-shaped files (release.cue,
 program.cue, compose files, Dockerfiles and `docker/`, web server, entrypoint and sidecar files,
-`.say.yaml`, `.pronto/cluster.json`, `infra/`, cue.mod/module.cue, `.mise.toml`, mise.lock, pronto's
-`gcp/*.nu`; not database migrations, which the local gate runs) are those of a release that passed the rc gate, the release skips rc:
+`.say.yaml`, `.pronto/cluster.json`, `infra/`, cue.mod/module.cue, `.mise.toml`, mise.lock, and the content of the pronto runtime but its
+release engine (`gcp/*.nu`, the release tests, `testdata/`, `docs/`) and its version number, so a pronto
+prerelease that changes only the engine does not run rc; not database migrations, which the local gate runs) are those of a release that passed the rc gate, the release skips rc:
 no preview, no copy, its images built and staged for production as `--no-gate` does,
 and live. `~/.cache/pronto/rc-passed/<app>/<key>` records the last such pass, written
 after a gated release succeeds. `--rc` runs the rc gate anyway, and so does
