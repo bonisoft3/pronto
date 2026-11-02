@@ -96,9 +96,15 @@ import (
 
 	_sayt:     "(^mise where github:bonisoft3/sayt | str trim)"
 	_prontoNu: "(run-mise where github:bonisoft3/pronto | str trim)"
+	// Generate and lint run cue a dozen times, each a short-lived process that
+	// evaluates the whole program: its garbage collector, left to its default,
+	// is a third of that CPU for a heap that peaks near 4 GiB either way.
+	_cueGC: "GOGC: off, GOMEMLIMIT: 4294967296"
 	_actions: {for verb in ["generate", "build", "lint", "test", "launch", "integrate"] {
 		(verb): [if verb == "lint" {
-			"^nu -I \(B._sayt) -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'"
+			"^nu -I \(B._sayt) -c 'use task-leaf.nu; with-env {\(B._cueGC), PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'"
+		}, if verb == "generate" {
+			"^nu -I \(B._sayt) -c 'use task-leaf.nu; with-env {\(B._cueGC)} { task-leaf generate }'"
 		}, "^nu -I \(B._sayt) -c 'use task-leaf.nu; task-leaf \(verb)'"][0]
 	}}
 
