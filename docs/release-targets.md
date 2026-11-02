@@ -586,6 +586,12 @@ job it would run (the `pronto-job` label of its revision, the hash of the render
 image, so every migration, seed, policy, publication and hybrid machine, and its commands,
 roles and secrets); a missing label, a revision not ready or a failed read runs it, as do
 previews and `PRONTO_RELEASE_FORCE_SCHEMA=1` (a rotated role password, say).
+The deploy takes no traffic at first: the new revision is tagged
+`next` and probed at its own address (`/health`, which answers the
+revision's name), traffic moves to it only once it answers, and the public
+address is then polled, three minutes at most each, until it answers as the
+new revision. If either fails, traffic goes back to the revision that served
+before (by `--rollback`'s own step, so not past a migration) and the release exits non-zero; a first deploy has none to go back to.
 `--rollback`
 sends the traffic back to the revision before, where its schema is the
 same. A release that fails stops the preview (its service, jobs and clock); one that

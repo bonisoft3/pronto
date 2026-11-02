@@ -7,6 +7,9 @@ args="$*"
 echo "$tool $args" >> "$FAKE_LOG"
 case "$tool" in
 curl)
+  # A service answers /health with its revision's name, as its Caddyfile does.
+  out=""; for a in "$@"; do [ "$prev" = "--output" ] && out="$a"; prev="$a"; done
+  case "$args" in */health*) [ -z "$out" ] || printf r1 > "$out" ;; esac
   case "$args" in *write-out*) printf 200 ;; esac
   exit 0 ;;
 docker)
@@ -68,7 +71,7 @@ case "$args" in
   case "$args" in *--async*) echo "build-$$" ;; esac ;;
 *"run services describe"*"--format json"*)
   sn=$(echo "$args" | sed -E 's/.*run services describe ([^ ]+).*/\1/')
-  if [ -s "$FAKE_STATE/job-$sn" ]; then printf '{"status":{"latestReadyRevisionName":"r1","latestCreatedRevisionName":"r1"},"spec":{"template":{"metadata":{"labels":{"pronto-job":"%s"}}}}}\n' "$(cat "$FAKE_STATE/job-$sn")"
+  if [ -s "$FAKE_STATE/job-$sn" ]; then printf '{"status":{"latestReadyRevisionName":"r1","latestCreatedRevisionName":"r1","traffic":[{"revisionName":"r1","percent":100,"tag":"next","url":"https://next---fake.run.app"}]},"spec":{"template":{"metadata":{"labels":{"pronto-job":"%s"}}}}}\n' "$(cat "$FAKE_STATE/job-$sn")"
   else echo '{"status":{}}'; fi ;;
 *"builds describe"*) echo SUCCESS ;;
 *"builds get-default-service-account"*) echo "projects/p/serviceAccounts/1-compute@developer.gserviceaccount.com" ;;

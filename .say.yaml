@@ -45,6 +45,10 @@ say:
         priority: -1
         cmds:
           - do: "nu k8s/release_test.nu"
+      gcp:
+        priority: -1
+        cmds:
+          - do: "nu gcp/release_test.nu"
       # The identity broker and identity.#Signin (docs/identity.md). The front
       # runs against a real Hydra, which mise fetches here and no consumer's
       # toolchain carries.

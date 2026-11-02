@@ -541,10 +541,61 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 	{plan: $plan, pushed: $pushed, has_migrate: $has_migrate, copy: $copy, gated: ($from != null), number: $number}
 }
 
+# The revision serving a service now, null where it has none yet (a first deploy).
+def serving-revision [service: string, project: string, region: string]: nothing -> any {
+	if not (exists run services describe $service --region $region --project $project) { return null }
+	let serving = (gc run services describe $service --region $region --project $project --format json | from json
+		| get -o status.traffic | default [] | where {|t| ($t.percent? | default 0) > 0 and ($t.revisionName? | is-not-empty) })
+	if ($serving | is-empty) { null } else { $serving | sort-by percent --reverse | first | get revisionName }
+}
+
+# The service's yaml with its traffic held: still on the revision serving now, the one it
+# makes only tagged `next` (the traffic tag; `candidate` is the image tag) and answering at its own address. A first deploy has none to
+# hold, so its revision takes the traffic, tagged as well. JSON, as service.yaml is: nushell's
+# `to yaml` leaves a string such as `off` bare, which gcloud reads as a boolean.
+export def hold-traffic [yaml: string, before: any]: nothing -> string {
+	let traffic = if $before == null {
+		[{percent: 100, latestRevision: true, tag: "next"}]
+	} else {
+		[{revisionName: $before, percent: 100}, {percent: 0, latestRevision: true, tag: "next"}]
+	}
+	$yaml | from yaml | upsert spec.traffic $traffic | to json
+}
+
+# The revision the service made and the address its tag gives it.
+def candidate-of [service: string, project: string, region: string]: nothing -> record {
+	let traffic = (gc run services describe $service --region $region --project $project --format json | from json
+		| get -o status.traffic | default [] | where {|t| ($t.tag? | default "") == "next" })
+	if ($traffic | is-empty) { error make {msg: $"($service) has no revision tagged next"} }
+	{revision: ($traffic | first | get revisionName), url: ($traffic | first | get -o url)}
+}
+
+# An address polled until it answers ok (and, where given, with the revision's name, `steady`
+# times in a row), for GCP_GOLIVE_WAIT seconds, 180 unless set.
+export def poll-health [url: string, ok: list<string>, revision: any, --steady: int = 1]: nothing -> record {
+	let wait = ($env.GCP_GOLIVE_WAIT? | default 180 | into int)
+	let every = ($env.GCP_GOLIVE_EVERY? | default 5 | into int)
+	let body = (mktemp -t gcp.XXXXXX | str trim)
+	let t0 = (date now)
+	mut streak = 0
+	mut last = "no answer"
+	loop {
+		let code = (^curl --silent --max-time 10 --output $body --write-out "%{http_code}" $url | complete | get stdout | str trim)
+		let said = (open --raw $body | into string | str trim)
+		$last = $"($code) ($said | str substring 0..60)"
+		if $code in $ok and ($revision == null or $said == $revision) { $streak += 1 } else { $streak = 0 }
+		if $streak >= $steady { rm -f $body; return {ok: true, last: $last, waited: ""} }
+		if ((date now) - $t0) >= ($wait * 1sec) { break }
+		sleep ($every * 1sec)
+	}
+	rm -f $body
+	{ok: false, last: $last, waited: $"($wait)s"}
+}
+
 # A staged release made live: its images tagged the release's (a gated one's, now that its
 # tests passed), the schema job run, the service and its sidecars replaced, the clock, the
 # domains, and the address answering. The first code of the release production runs.
-def go-live [staged: record]: nothing -> record {
+export def go-live [staged: record]: nothing -> record {
 	let plan = $staged.plan
 	let p = $plan.project
 	let r = $plan.region
@@ -559,12 +610,17 @@ def go-live [staged: record]: nothing -> record {
 	} else {
 		run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
 	}
+	# The new revision takes no traffic until its own address answers: Cloud Run can keep
+	# routing to the revision it just shut down, and a service left broken that way is
+	# one the release would have to roll back by hand.
+	let before = (serving-revision $plan.service $p $r)
+	hold-traffic (open --raw dist/gcp/service.yaml) $before | save -f dist/gcp/service.held.yaml
 	# The service replaced beside the retired migrate job's removal (an earlier release ran it apart, this one's job does).
 	let failed = (["service" "migrate"] | par-each {|t|
 		try {
 			if $t == "service" {
 				print $"gcp: (stamp) deploying ($plan.service)"
-				gc run services replace dist/gcp/service.yaml --region $r --project $p | ignore
+				gc run services replace dist/gcp/service.held.yaml --region $r --project $p | ignore
 			} else if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) {
 				gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore
 			}
@@ -611,13 +667,36 @@ def go-live [staged: record]: nothing -> record {
 	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
 
 	let address = $"https://($plan.service)-($number).($r).run.app"
-	# Live means the address answers, not that gcloud returned, which waits for
-	# the revision to be ready: half a minute at most, not curl's backoff,
-	# whose eighth retry comes four minutes in.
-	let health = (^curl --silent --output /dev/null --write-out "%{http_code}" --connect-timeout 5 --retry 30 --retry-delay 1 --retry-max-time 30 --retry-all-errors $"($address)/health")
-	# Behind IAP the address answers with its sign-in, a redirect, to a stranger such as this.
-	let ok = if ($plan.iap? | default false) { ["200", "302"] } else { ["200"] }
-	if $health not-in $ok { error make {msg: $"($address)/health answered ($health)"} }
+	# Behind IAP the address answers with its sign-in, a redirect, to a stranger such as this,
+	# which cannot tell the revisions apart.
+	let iap = ($plan.iap? | default false)
+	let ok = if $iap { ["200" "302"] } else { ["200"] }
+	let candidate = (candidate-of $plan.service $p $r)
+	let url = ($candidate.url? | default $"https://next---($plan.service)-($number).($r).run.app")
+	# Live means the new revision answers at its own address, then the public one answers as
+	# it, not that gcloud returned, which waits for the revision to be ready.
+	mut moved = false
+	let failed = (try {
+		let got = (poll-health $"($url)/health" $ok null)
+		if not $got.ok { error make {msg: $"the new revision ($candidate.revision) did not answer at its own address \(($url)/health\) in ($got.waited): last answer ($got.last)"} }
+		gc run services update-traffic $plan.service --to-revisions $"($candidate.revision)=100" --region $r --project $p | ignore
+		$moved = true
+		let got = (poll-health $"($address)/health" $ok (if $iap { null } else { $candidate.revision }) --steady 3)
+		if not $got.ok { error make {msg: $"the public address ($address)/health did not answer as ($candidate.revision) in ($got.waited): last answer ($got.last)"} }
+		null
+	} catch {|e| $e.msg })
+	if $failed != null {
+		print $"gcp: (stamp) ($plan.service) failed to go live: ($failed)"
+		if $before == null {
+			print $"gcp: (stamp) ($plan.service) had no revision before this one to go back to"
+		} else if $moved {
+			# Traffic moved, so it goes back: back-one's, which refuses past a migration.
+			back-one $plan.service $p $r --schema
+		} else {
+			print $"gcp: (stamp) ($plan.service) still serves ($before), traffic never moved"
+		}
+		error make {msg: $"($plan.service) did not go live: ($failed)"}
+	}
 	print $"gcp: (stamp) ($plan.service) is live at ($address)"
 	$pushed
 }
