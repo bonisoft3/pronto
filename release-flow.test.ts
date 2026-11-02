@@ -10,7 +10,7 @@ const fork = new URL(".", import.meta.url).pathname.replace(/\/$/, "")
 const decoder = new TextDecoder()
 const PROD = /--project brawl-chess( |$)/
 const RC = /--project brawl-chess-previews( |$)/
-const services = ["database", "crud", "electric", "auth", "caddy", "billing", "worker"]
+const services = ["database", "crud", "electric", "auth", "caddy", "billing", "worker", "front"]
 
 type World = { root: string; app: string; home: string; fakes: string; state: string; log: string }
 
@@ -33,7 +33,7 @@ async function world(): Promise<World> {
   await new Deno.Command("cp", { args: ["-R", `${fork}/resilience`, `${root}/resilience`] }).output()
   await write(`${app}/release.cue`, `package app
 import "github.com/bonisoft3/pronto/gcp/schema"
-GCP: schema.#Release & {name: "guestbook", project: "brawl-chess", previewProject: "brawl-chess-previews", region: "us-central1", sidecars: {billing: {port: 8688, apart: {}}, worker: {port: 8689, apart: {}}}}
+GCP: schema.#Release & {name: "guestbook", project: "brawl-chess", previewProject: "brawl-chess-previews", region: "us-central1", sidecars: {billing: {port: 8688, apart: {}}, worker: {port: 8689, apart: {}}, front: {port: 8690, env: {LIVENESS_AMR: "off"}}}}
 gcpRelease: schema.#Build & {release: GCP}
 `)
   await write(`${app}/.pronto/cluster.json`, JSON.stringify({ server: true, tokenRoles: ["anon", "app_user", "service"] }))
