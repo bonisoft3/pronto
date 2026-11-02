@@ -28,11 +28,12 @@ Generate flashcards to teach toddlers to read. Leverages modern image generation
 
 <table>
   <tr>
-    <td align="center" rowspan="2" width="22%"><img src="docs/showcase/snapcards-home-phone.png" alt="Snapcards on a phone"><br><sub>The opening page on a phone, the featured deck first.</sub></td>
-    <td align="center" width="39%"><img src="docs/showcase/snapcards-home.png" alt="Snapcards library"><br><sub>The deck library on a laptop: curated and reader-made decks.</sub></td>
-    <td align="center" width="39%"><img src="docs/showcase/snapcards-ir.png" alt="Snapcards IR"><br><sub>The LLM-produced intermediate representation of the code: an entity card and the state machine that drives it.</sub></td>
+    <td align="center" width="25%"><img src="docs/showcase/snapcards-home-phone.png" alt="Snapcards on a phone"><br><sub>The opening page on a phone, the featured deck first.</sub></td>
+    <td align="center" width="25%"><img src="docs/showcase/snapcards-print-phone.png" alt="Snapcards print studio on a phone"><br><sub>The print studio: cut lines for cards on paper.</sub></td>
+    <td align="center" colspan="2" width="50%"><img src="docs/showcase/snapcards-home.png" alt="Snapcards library"><br><sub>The deck library on a laptop: curated and reader-made decks.</sub></td>
   </tr>
   <tr>
+    <td align="center" colspan="2"><img src="docs/showcase/snapcards-ir.png" alt="Snapcards IR"><br><sub>The LLM-produced intermediate representation of the code: an entity card and the state machine that drives it.</sub></td>
     <td align="center" colspan="2"><img src="docs/showcase/snapcards-journal.png" alt="Snapcards journal"><br><sub>The LLM-produced journal of the development: a turn, before and after.</sub></td>
   </tr>
 </table>
@@ -62,12 +63,13 @@ A homage to the OutRun arcade game, llm-dreamed from super tux kart source code.
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/showcase/apexrun-title.png" alt="Apex Run title"><br><sub>The title card, where a run starts.</sub></td>
-    <td align="center" width="50%"><img src="docs/showcase/apexrun-race.png" alt="Apex Run race"><br><sub>The highway at 60 Hz, nitro and traffic.</sub></td>
+    <td align="center" width="25%"><img src="docs/showcase/apexrun-title-phone.png" alt="Apex Run title on a phone"><br><sub>The title card on a phone, where a run starts.</sub></td>
+    <td align="center" width="25%"><img src="docs/showcase/apexrun-start-phone.png" alt="Apex Run start on a phone"><br><sub>The countdown on Coconut Beach, thumb pad and nitro below.</sub></td>
+    <td align="center" colspan="2" width="50%"><img src="docs/showcase/apexrun-race.png" alt="Apex Run race"><br><sub>Desert Canyons from the hood, closing on traffic past the first fork.</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/showcase/apexrun-journal-early.png" alt="Apex Run journal, an early turn"><br><sub>The second entry of the development journal kept by the LLM: the wedge car, before each stage became a place.</sub></td>
-    <td align="center"><img src="docs/showcase/apexrun-journal-first.png" alt="Apex Run journal, the oracle"><br><sub>The product brief and the llm-generated frame it aimed at.</sub></td>
+    <td align="center" colspan="2"><img src="docs/showcase/apexrun-journal-early.png" alt="Apex Run journal, an early turn"><br><sub>The second entry of the development journal kept by the LLM: the wedge car, before each stage became a place.</sub></td>
+    <td align="center" colspan="2"><img src="docs/showcase/apexrun-journal-first.png" alt="Apex Run journal, the oracle"><br><sub>The product brief and the llm-generated frame it aimed at.</sub></td>
   </tr>
 </table>
 
