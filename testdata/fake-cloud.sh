@@ -19,9 +19,11 @@ hex() { printf %s "$1" | shasum -a 256 | cut -d' ' -f1; }
 case "$args" in
 *"run services replace"*)
   f=$(echo "$args" | sed -E 's/.*replace ([^ ]+).*/\1/')
+  # gcloud reads YAML 1.1: a bare on, off, yes or no is a boolean where Cloud Run wants a string.
+  if grep -Eq ':[[:space:]]+(on|off|yes|no|On|Off|Yes|No|ON|OFF|YES|NO|y|n)[[:space:]]*$' "$f"; then echo "ERROR: (gcloud.run.services.replace) Expected type <class 'str'> for field value, found False" >&2; exit 1; fi
   # The service as replaced keeps its job hash label, which a describe returns.
   sn=$(grep -m1 -E '^[[:space:]]*"?name"?:' "$f" | sed -E 's/.*name"?:[[:space:]]*"?([^",]*).*/\1/')
-  grep -m1 'pronto-job' "$f" | sed -E 's/.*pronto-job:[[:space:]]*"?([^"]*)"?.*/\1/' > "$FAKE_STATE/job-$sn"
+  grep -m1 'pronto-job' "$f" | sed -E 's/.*pronto-job"?:[[:space:]]*"?([^",]*)"?.*/\1/' > "$FAKE_STATE/job-$sn"
   echo "  replace $f is $(grep -m1 -E '^[[:space:]]*"?name"?:' "$f" | sed -E 's/.*name"?:[[:space:]]*"?([^",]*).*/\1/')" >> "$FAKE_LOG" ;;
 esac
 case "$args" in

@@ -478,9 +478,11 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 	mkdir dist/gcp
 	$plan.jobYaml | save -f dist/gcp/job.yaml
 	# The service carries the hash of the job it was released with (job-hash), which the next
-	# release reads off the live revision to skip a schema job that would change nothing.
+	# release reads off the live revision to skip a schema job that would change nothing. Written as
+	# JSON, which is YAML whose every string is quoted: gcloud reads YAML 1.1, where a bare `off`,
+	# `no` or `on` (nushell's `to yaml` leaves them bare) is a boolean, and refuses the service.
 	let service = ($plan.serviceYaml | from yaml)
-	$service | upsert spec.template.metadata.labels ($service.spec.template.metadata.labels? | default {} | insert pronto-job (job-hash $plan.jobYaml)) | to yaml | save -f dist/gcp/service.yaml
+	$service | upsert spec.template.metadata.labels ($service.spec.template.metadata.labels? | default {} | insert pronto-job (job-hash $plan.jobYaml)) | to json | save -f dist/gcp/service.yaml
 	for s in ($plan.sidecarServicesYaml | transpose name yaml) { $s.yaml | save -f $"dist/gcp/sidecar-($s.name).yaml" }
 	if $snapshot { print $"gcp: (stamp) rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {done: true} }
 
