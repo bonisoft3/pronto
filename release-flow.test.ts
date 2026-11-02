@@ -208,6 +208,41 @@ Deno.test("a heredoc opens at a RUN, COPY or ADD only, not at a shell's shift", 
   assertEquals(JSON.parse(decoder.decode(out.stdout)), ["a", "b"])
 })
 
+Deno.test("an image's key follows the files its Dockerfile copies: a pin bump moves none, an edit to one image's file moves that image's alone", async () => {
+  const app = await Deno.makeTempDir()
+  const real = await Deno.realPath(app)
+  const write = async (f: string, text: string) => { await Deno.mkdir(`${app}/${f}`.replace(/\/[^/]*$/, ""), { recursive: true }); await Deno.writeTextFile(`${app}/${f}`, text) }
+  const compose: Record<string, unknown> = {}
+  for (const s of ["one", "two"]) {
+    await write(`${s}/file.txt`, s)
+    await write(`docker/${s}.Dockerfile`, `FROM scratch\nCOPY ${s}/ /app\n`)
+    compose[s] = { build: { context: real, dockerfile: `docker/${s}.Dockerfile` } }
+  }
+  await write(".mise.toml", "[tools]\n'github:bonisoft3/pronto' = '1'\n")
+  await write("mise.lock", "version = '1'\n")
+  await write("cue.mod/module.cue", "v: 1\n")
+  await write("compose.json", JSON.stringify({ services: compose }))
+  await sh(app, "git", "init", "-q")
+  const list = `${await Deno.makeTempDir()}/files`
+  const keys = async () => {
+    const files = await new Deno.Command("git", { args: ["ls-files", "-co", "--exclude-standard"], cwd: real, stdout: "piped" }).output()
+    await Deno.writeTextFile(list, decoder.decode(files.stdout).split("\n").filter((f) => f && f !== "compose.json").join("\n"))
+    const script = `source ${fork}/gcp/build.nu; let h = (file-hashes ${real} ${list}); image-keys ${real} (open ${real}/compose.json) $h "t" [one two] | to json --raw`
+    const out = await new Deno.Command("nu", { args: ["-c", script], cwd: real, stdout: "piped", stderr: "piped" }).output()
+    assert(out.success, decoder.decode(out.stderr))
+    return JSON.parse(decoder.decode(out.stdout)) as Record<string, string>
+  }
+  const before = await keys()
+  await write(".mise.toml", "[tools]\n'github:bonisoft3/pronto' = '2'\n")
+  await write("mise.lock", "version = '2'\n")
+  await write("cue.mod/module.cue", "v: 2\n")
+  assertEquals(await keys(), before, "a pin bump no image copies moves no key")
+  await write("one/file.txt", "changed")
+  const after = await keys()
+  assert(after.one !== before.one, "the image that copies the file")
+  assertEquals(after.two, before.two, "the other image is reused")
+})
+
 Deno.test("a go-live task that fails lets the others finish, then fails the release", async () => {
   const w = await world()
   try {

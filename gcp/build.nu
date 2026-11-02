@@ -118,7 +118,7 @@ def dockerfile-reads [text: string]: nothing -> any {
 # it builds from: its build record from the compose project (machine paths
 # made the app's), its Dockerfile, and the files of its context the Dockerfile
 # copies. An input not known more closely stands for the whole app (`whole`).
-def image-own [app_real: string, b: any, hashes: table, whole: string]: nothing -> record {
+def image-own [app_real: string, app_given: string, b: any, hashes: table, whole: string]: nothing -> record {
 	let all = {own: $whole, deps: []}
 	if $b == null { return $all }
 	let ctx = (try { $b.context | path expand | path relative-to $app_real } catch { null })
@@ -140,7 +140,7 @@ def image-own [app_real: string, b: any, hashes: table, whole: string]: nothing 
 	let deps = ($contexts | where {|c| $c.ref starts-with "service:" } | each {|c| $c.ref | str replace "service:" "" })
 	# A context that is a directory of the machine counts, when the Dockerfile reads from it, as the whole app.
 	let dirs = ($contexts | where {|c| not ($c.ref =~ '^[a-z-]+:') and ($text =~ ('(?i)(from=|FROM )' + ($c.name | str replace -a -r '([.+(){}|^$\\*?\[\]-])' '\$1') + '(\s|$)')) } | each { $whole })
-	let record = ($b | reject -o tags cache_from cache_to | to json | str replace -a $app_real ".")
+	let record = ($b | reject -o tags cache_from cache_to | to json | str replace -a $app_real "." | str replace -a $app_given ".")
 	let own = ([$record ($text | hash sha256) ($files | each {|h| $"($h.path) ($h.hash)" } | str join (char nl))] | append $dirs | str join (char nl) | hash sha256 | str substring 0..23)
 	{own: $own, deps: $deps}
 }
@@ -152,6 +152,8 @@ def image-own [app_real: string, b: any, hashes: table, whole: string]: nothing 
 export def image-keys [app_dir: string, compose: any, hashes: table, told: string, services: list<string>]: nothing -> record {
 	let whole = (source-key $hashes $told)
 	let app_real = ($app_dir | path expand)
+	# Compose names the paths as the app's directory was given, through a symlink or not.
+	let app_given = ($app_dir | path expand --no-symlink)
 	let known = ($compose.services? | default {})
 	mut owns = {}
 	mut todo = ($services | where {|s| $s != "schema" or $s in ($known | columns) })
@@ -164,7 +166,7 @@ export def image-keys [app_dir: string, compose: any, hashes: table, told: strin
 		let s = ($todo | first)
 		$todo = ($todo | skip 1)
 		if $s in ($owns | columns) { continue }
-		let o = if $compose == null { {own: $whole, deps: []} } else { image-own $app_real ($known | get -o $s | default {} | get -o build) $hashes $whole }
+		let o = if $compose == null { {own: $whole, deps: []} } else { image-own $app_real $app_given ($known | get -o $s | default {} | get -o build) $hashes $whole }
 		$owns = ($owns | insert $s $o)
 		$todo = ($todo | append ($o.deps | where {|d| $d not-in ($owns | columns) }))
 	}
