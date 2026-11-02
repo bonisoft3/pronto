@@ -636,6 +636,10 @@ import (
 							else
 							  source /usr/local/bin/docker-entrypoint.sh
 							  docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
+							  # Cloud SQL's postgres is no superuser, and the tables it owns are under FORCE
+							  # ROW LEVEL SECURITY: a seed (900_seed.sql) would meet their policies. It
+							  # bypasses them before the files run, as it does after (below).
+							  psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
 							  # A test's rows (#App.state.fixture) are a preview's alone.
 							  docker_process_init_files /docker-entrypoint-initdb.d/\([if R.preview != _|_ {"*"}, "!(950_fixture.sql)"][0])
 							  psql -XqAc "COMMENT ON DATABASE \\"$POSTGRES_DB\\" IS 'pronto initdb'"
