@@ -44,6 +44,9 @@ gcpRelease: schema.#Build & {release: GCP}
   await write(`${app}/saytw`, `#!/bin/sh
 echo "saytw $* drivers=$INTEGRATE_LOCAL_DRIVERS start" >> "$FAKE_LOG"
 sleep "\${FAKE_GATE_SLEEP:-0}"
+# A gate held open until a call shows in the log (FAKE_GATE_UNTIL, a pattern), a minute at most:
+# the ordering a test asserts, whatever the machine's load.
+if [ -n "$FAKE_GATE_UNTIL" ]; then n=0; until grep -Eq "$FAKE_GATE_UNTIL" "$FAKE_LOG" || [ $n -ge 600 ]; do sleep 0.1; n=$((n+1)); done; fi
 [ -z "$FAKE_GATE_TOUCH" ] || echo changed >> "$FAKE_GATE_TOUCH"
 if [ -n "$FAKE_GATE_FAIL" ]; then echo "saytw end FAILED" >> "$FAKE_LOG"; echo "scenario failed" >&2; exit 1; fi
 echo "saytw end" >> "$FAKE_LOG"
@@ -119,7 +122,7 @@ Deno.test("no rc stamp: the rc preview deploys beside the local gate, and produc
   const w = await world()
   try {
     await ready(w)
-    const r = await release(w, { FAKE_GATE_SLEEP: "3" })
+    const r = await release(w, { FAKE_GATE_UNTIL: "service.yaml is guestbook-rc$" })
     assert(r.success, r.stderr + r.stdout)
     assertStringIncludes(r.stdout, "the rc preview runs")
     const lines = await log(w)
@@ -396,5 +399,53 @@ Deno.test("a release that fails lets its lock go all the same", async () => {
     const r = await release(w, { FAKE_FAIL: "run services replace dist/gcp/service.yaml" })
     assert(!r.success, "the release fails")
     assertEquals(await lockHeld(w), false, "and its lock is let go")
+  } finally { await clean(w) }
+})
+
+Deno.test("a release that is live does not wait for the rc preview's cleanup: its clock goes, the rest stays for the next release", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    const r = await release(w)
+    assert(r.success, r.stderr + r.stdout)
+    assertStringIncludes(r.stdout, "what the tests printed")
+    assertStringIncludes(r.stdout, "tests-log.txt")
+    const lines = await log(w)
+    const live = at(lines, /replace .*dist\/gcp\/service.yaml is guestbook$/)
+    assert(live >= 0)
+    assertEquals(lines.slice(live).filter((l) => /run (services|jobs) delete/.test(l)), [], "no preview service or job is deleted after production is live")
+    assert(at(lines, /scheduler jobs delete/, live) > live, "the preview's clock is deleted")
+    assertEquals((await ledger(w, "rc-passed")).stdout.trim(), "true")
+    // A failed release stops the preview whole.
+    await Deno.writeTextFile(w.log, "")
+    await Deno.writeTextFile(`${w.app}/crud/file.txt`, "again")
+    const bad = await nu(w, [`${fork}/gcp/release.nu`, "--app", w.app, "--rc"], { FAKE_FAIL: "run services replace .*--project brawl-chess( |$)" })
+    assert(!bad.success)
+    assert(at(await log(w), /run services delete guestbook-rc/) >= 0, "a failure stops the preview")
+  } finally { await clean(w) }
+})
+
+Deno.test("a project set up the same way is not set up again; a changed input sets it up", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    const first = await release(w)
+    assert(first.success, first.stderr + first.stdout)
+    assert(at(await log(w), /sql instances describe/) >= 0, "the first release sets the project up")
+    await Deno.writeTextFile(w.log, "")
+    const same = await release(w)
+    assert(same.success, same.stderr + same.stdout)
+    assertStringIncludes(same.stdout, "as the last release set it up")
+    assertEquals((await log(w)).filter((l) => /sql instances describe|iam service-accounts describe|artifacts repositories describe/.test(l)), [], "no setup call")
+    // An input of the setup changed: it runs.
+    await Deno.writeTextFile(w.log, "")
+    const cue = await Deno.readTextFile(`${w.app}/release.cue`)
+    await Deno.writeTextFile(`${w.app}/release.cue`, cue.replace('region: "us-central1"', 'region: "us-central1", sqlTier: "db-g1-small"'))
+    const changed = await release(w)
+    assert(changed.success, changed.stderr + changed.stdout)
+    assert(!changed.stdout.includes("as the last release set it up"))
+    assert(at(await log(w), /sql instances describe/) >= 0, "a changed tier sets the project up")
   } finally { await clean(w) }
 })
