@@ -113,7 +113,7 @@ Deno.test("a tree the local gate and rc passed: no rc preview, no gate run, stag
     assertStringIncludes(r.stdout, "skipped")
     const staged = at(lines, /secrets versions access/)
     const schema = at(lines, /run jobs execute guestbook-initdb/)
-    const deploy = at(lines, /replace .*dist\/gcp\/service.yaml is guestbook$/)
+    const deploy = at(lines, /replace .*dist\/gcp\/service.held.yaml is guestbook$/)
     assert(staged >= 0 && staged < schema && schema < deploy, `stage, the schema job, the service: ${staged} ${schema} ${deploy}`)
   } finally { await clean(w) }
 })
@@ -122,7 +122,7 @@ Deno.test("no rc stamp: the rc preview deploys beside the local gate, and produc
   const w = await world()
   try {
     await ready(w)
-    const r = await release(w, { FAKE_GATE_UNTIL: "service.yaml is guestbook-rc$" })
+    const r = await release(w, { FAKE_GATE_UNTIL: "service.held.yaml is guestbook-rc$" })
     assert(r.success, r.stderr + r.stdout)
     assertStringIncludes(r.stdout, "the rc preview runs")
     const lines = await log(w)
@@ -130,11 +130,11 @@ Deno.test("no rc stamp: the rc preview deploys beside the local gate, and produc
     const end = at(lines, /^saytw end$/)
     assert(start >= 0 && end > start, "the gate ran")
     assertStringIncludes(lines[start], "drivers=all")
-    const rcDeploy = at(lines, /replace .*dist\/gcp\/service.yaml is guestbook-rc$/, start)
+    const rcDeploy = at(lines, /replace .*dist\/gcp\/service.held.yaml is guestbook-rc$/, start)
     assert(rcDeploy > start && rcDeploy < end, `the preview deployed while the gate ran: ${start} ${rcDeploy} ${end}`)
     const prod = at(lines, PROD)
     assert(prod > end, `production first touched at ${prod}, after the gate ended at ${end}`)
-    const live = at(lines, /replace .*dist\/gcp\/service.yaml is guestbook$/)
+    const live = at(lines, /replace .*dist\/gcp\/service.held.yaml is guestbook$/)
     assert(live > prod)
     assertEquals((await ledger(w, "rc-passed")).stdout.trim(), "true", "the release that passed rc is recorded")
   } finally { await clean(w) }
@@ -294,7 +294,7 @@ Deno.test("a release whose schema job is unchanged skips it; a changed job runs 
     assertStringIncludes(same.stdout, "the schema job skipped")
     const lines = await log(w)
     assertEquals(lines.filter((l) => /run jobs (replace|execute)/.test(l)), [], "no job call")
-    assert(at(lines, /replace .*dist\/gcp\/service.yaml is guestbook$/) >= 0, "the service is still replaced")
+    assert(at(lines, /replace .*dist\/gcp\/service.held.yaml is guestbook$/) >= 0, "the service is still replaced")
     // A code-only edit (another service's files): that image is built, the schema's is not, the job skipped.
     await Deno.writeTextFile(w.log, "")
     await Deno.writeTextFile(`${w.app}/crud/file.txt`, "code only")
@@ -309,7 +309,7 @@ Deno.test("a release whose schema job is unchanged skips it; a changed job runs 
     assert(mig.success, mig.stderr + mig.stdout)
     const l1 = await log(w)
     const j1 = at(l1, /run jobs execute guestbook-initdb/)
-    assert(j1 >= 0 && j1 < at(l1, /replace .*dist\/gcp\/service.yaml is guestbook$/), "an edited schema runs the job before the service")
+    assert(j1 >= 0 && j1 < at(l1, /replace .*dist\/gcp\/service.held.yaml is guestbook$/), "an edited schema runs the job before the service")
     // A role added to what the job grants: the job runs, before the service.
     await Deno.writeTextFile(`${w.app}/.pronto/cluster.json`, JSON.stringify({ server: true, tokenRoles: ["anon", "app_user", "service", "auditor"] }))
     await Deno.writeTextFile(w.log, "")
@@ -317,7 +317,7 @@ Deno.test("a release whose schema job is unchanged skips it; a changed job runs 
     assert(changed.success, changed.stderr + changed.stdout)
     const l2 = await log(w)
     const job = at(l2, /run jobs execute guestbook-initdb/)
-    const live = at(l2, /replace .*dist\/gcp\/service.yaml is guestbook$/)
+    const live = at(l2, /replace .*dist\/gcp\/service.held.yaml is guestbook$/)
     assert(job >= 0 && job < live, `the job ran before the service: ${job} ${live}`)
     // Forced, the unchanged job runs too.
     await Deno.writeTextFile(w.log, "")
@@ -351,7 +351,7 @@ Deno.test("a release holds its app's lock from before anything reaches the proje
     const lines = await log(w)
     const took = at(lines, new RegExp(`wrote ${LOCK}$`))
     const first = at(lines, PROD_ANY)
-    const replaced = at(lines, /replace .*dist\/gcp\/service.yaml is guestbook$/)
+    const replaced = at(lines, /replace .*dist\/gcp\/service.held.yaml is guestbook$/)
     const gone = at(lines, new RegExp(`removed ${LOCK}$`))
     assert(took >= 0 && took < replaced && replaced < gone, `taken ${took}, the service ${replaced}, let go ${gone}`)
     assert(at(lines, /storage cp .*--if-generation-match=0/) >= 0, "made only where none is")
@@ -396,7 +396,7 @@ Deno.test("a release that fails lets its lock go all the same", async () => {
     await ready(w)
     await ledger(w, "stamp")
     await ledger(w, "rc-stamp")
-    const r = await release(w, { FAKE_FAIL: "run services replace dist/gcp/service.yaml" })
+    const r = await release(w, { FAKE_FAIL: "run services replace dist/gcp/service.held.yaml" })
     assert(!r.success, "the release fails")
     assertEquals(await lockHeld(w), false, "and its lock is let go")
   } finally { await clean(w) }
@@ -411,7 +411,7 @@ Deno.test("a release that is live does not wait for the rc preview's cleanup: it
     assertStringIncludes(r.stdout, "what the tests printed")
     assertStringIncludes(r.stdout, "tests-log.txt")
     const lines = await log(w)
-    const live = at(lines, /replace .*dist\/gcp\/service.yaml is guestbook$/)
+    const live = at(lines, /replace .*dist\/gcp\/service.held.yaml is guestbook$/)
     assert(live >= 0)
     assertEquals(lines.slice(live).filter((l) => /run (services|jobs) delete/.test(l)), [], "no preview service or job is deleted after production is live")
     assert(at(lines, /scheduler jobs delete/, live) > live, "the preview's clock is deleted")
@@ -447,5 +447,80 @@ Deno.test("a project set up the same way is not set up again; a changed input se
     assert(changed.success, changed.stderr + changed.stdout)
     assert(!changed.stdout.includes("as the last release set it up"))
     assert(at(await log(w), /sql instances describe/) >= 0, "a changed tier sets the project up")
+  } finally { await clean(w) }
+})
+
+// The record of each run (gcp/release-record.nu), which a local DORA dashboard reads.
+const records = async (w: World) =>
+  (await Deno.readTextFile(`${w.home}/.cache/pronto/releases/guestbook.jsonl`).catch(() => "")).split("\n").filter((l) => l !== "").map((l) => JSON.parse(l))
+
+Deno.test("a release gone live through the rc gate records its commit, revision and phases", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    const git = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" }
+    const commit = await new Deno.Command("sh", { args: ["-c", "git add -A && git commit -qm release && git rev-parse HEAD"], cwd: w.root, env: git, stdout: "piped", stderr: "piped" }).output()
+    assert(commit.success, decoder.decode(commit.stderr))
+    const r = await release(w, { FAKE_GATE_UNTIL: "service.held.yaml is guestbook-rc$" })
+    assert(r.success, r.stderr + r.stdout)
+    const [rec, ...more] = await records(w)
+    assertEquals(more, [], "one line a run")
+    const version = (await Deno.readTextFile(`${fork}/distribution/config.cue`)).match(/#Version:\s+"([^"]+)"/)![1]
+    assertEquals({ ...rec, started: undefined, ended: undefined, phases: undefined }, {
+      app: "guestbook", service: "guestbook", project: "brawl-chess", preview: "",
+      commit: decoder.decode(commit.stdout).trim(), dirty: false, pronto: version,
+      started: undefined, ended: undefined, outcome: "live", failure: null,
+      rc: "ran", localGate: "ran", revision: "r1", phases: undefined,
+    })
+    assert(Date.parse(rec.started) <= Date.parse(rec.ended))
+    for (const p of ["lock", "gate", "rc", "stage", "schema", "deploy", "total"]) assertEquals(typeof rec.phases[p], "number", p)
+    assert(rec.phases.total >= rec.phases.stage)
+    // A tree the gates passed: the gate reused, the rc gate skipped and why; released again
+    // unchanged, the schema job skipped.
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    for (const _ of [1, 2]) {
+      const again = await release(w)
+      assert(again.success, again.stderr + again.stdout)
+    }
+    const [, second, third] = await records(w)
+    assertEquals([second.localGate, second.phases.gate, second.phases.rc], ["reused", null, null])
+    assertStringIncludes(second.rc, "skipped: ")
+    assertEquals(third.phases.schema, "skipped")
+  } finally { await clean(w) }
+})
+
+Deno.test("a failed release records its first line of failure, after its lock is let go", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    const r = await release(w, { FAKE_FAIL: "run services replace dist/gcp/service.held.yaml" })
+    assert(!r.success)
+    const [rec] = await records(w)
+    assertEquals([rec.outcome, rec.revision, rec.localGate], ["failed", null, "reused"])
+    assertStringIncludes(rec.failure, "fake failure: --quiet run services replace dist/gcp/service.held.yaml")
+    assert(!rec.failure.includes("\n"))
+    assertEquals(typeof rec.phases.deploy, "number", "a phase never ended is timed to the run's end")
+    assertEquals(await lockHeld(w), false)
+  } finally { await clean(w) }
+})
+
+Deno.test("a release refused by another's lock records refused; a dry run records nothing", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await holdLock(w, new Date(Date.now() + 20 * 60_000))
+    const r = await release(w)
+    assert(!r.success)
+    const [rec, ...more] = await records(w)
+    assertEquals(more, [])
+    assertEquals([rec.outcome, rec.rc, rec.localGate, rec.commit, rec.phases.stage], ["refused", "skipped: the run ended before the rc gate was decided", "skipped", null, null])
+    assertStringIncludes(rec.failure, "another release of guestbook is running")
+    assertEquals(typeof rec.phases.lock, "number")
+    const dry = await nu(w, [`${fork}/gcp/release.nu`, "--app", w.app, "--dry-run"])
+    assert(dry.success, dry.stderr + dry.stdout)
+    assertEquals((await records(w)).length, 1, "a dry run writes nothing")
   } finally { await clean(w) }
 })

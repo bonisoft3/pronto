@@ -132,6 +132,12 @@ import (
 		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
 		// development value, and ORIGIN is where readers are.
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		// Secrets of the app's own, none of the cluster's: each key an
+		// environment variable read from the Secret Manager secret named, in the
+		// release's project (a preview's, for a preview), in place of anything env
+		// or compose gives it. The secret is made outside the release (infra), which
+		// refuses to start without it; its account is granted it, secret by secret.
+		secrets: *{} | {[=~"^[A-Z_][A-Z0-9_]*$"]: =~"^[a-zA-Z0-9_-]{1,255}$"}
 		// The path its server answers 2xx on once it can serve, in place of the
 		// bare port a TCP probe checks. In the instance the door then waits for
 		// it too (container-dependencies), so a sidecar whose own dependency is
@@ -497,12 +503,12 @@ import (
 		out: {
 			name: n
 			image: (imageOf & {svc: n}).out
-			if len(c.env) > 0 {
-				env: [for k, v in c.env {[
+			if len(c.env)+len(c.secrets) > 0 {
+				env: list.Concat([[for k, v in c.env if c.secrets[k] == _|_ {[
 					if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
 					if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
 					{name: k, value: v},
-				][0]}]
+				][0]}], [for k, s in c.secrets {(secretOf & {env: k, secret: s}).out}]])
 			}
 			startupProbe: [
 				if c.probe != _|_ {httpGet: {path: c.probe, port: c.port}, periodSeconds: 2, failureThreshold: 60},
@@ -587,13 +593,9 @@ import (
 			labels: "cloud.googleapis.com/location": R.region
 		}
 		spec: template: {
-			// First generation: a job defaults to the second, whose sandbox took 50 to 110 s to
-			// start the container once the image was in (executions' "Started deployed execution
-			// in 1m51s", with the image imported in 2 s), where a job needs nothing it adds.
-			metadata: annotations: {
-				"run.googleapis.com/cloudsql-instances":    R.names.connection
-				"run.googleapis.com/execution-environment": "gen1"
-			}
+			// No execution environment: a job runs only on the second generation, and Cloud Run
+			// refuses a job that names the first ("not supported on resources of kind Execution").
+			metadata: annotations: "run.googleapis.com/cloudsql-instances": R.names.connection
 			spec: {
 				taskCount: 1
 				template: spec: {
@@ -636,6 +638,10 @@ import (
 							else
 							  source /usr/local/bin/docker-entrypoint.sh
 							  docker_process_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname "$POSTGRES_DB" "$@"; }
+							  # Cloud SQL's postgres is no superuser, and the tables it owns are under FORCE
+							  # ROW LEVEL SECURITY: a seed (900_seed.sql) would meet their policies. It
+							  # bypasses them before the files run, as it does after (below).
+							  psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
 							  # A test's rows (#App.state.fixture) are a preview's alone.
 							  docker_process_init_files /docker-entrypoint-initdb.d/\([if R.preview != _|_ {"*"}, "!(950_fixture.sql)"][0])
 							  psql -XqAc "COMMENT ON DATABASE \\"$POSTGRES_DB\\" IS 'pronto initdb'"
@@ -735,6 +741,8 @@ import (
 			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
 		}}
 		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
+		// The sidecars' own secrets, which the release finds made before it starts.
+		sidecarSecretKeys: list.SortStrings([for s, _ in {for _, c in R.sidecars for _, v in c.secrets {(v): true}} {s}])
 		// The secrets its account reads, each granted on the secret alone.
 		readSecrets: list.SortStrings([for s, _ in B._readSecrets {s}])
 		// The compose services built and run beside the cluster's.

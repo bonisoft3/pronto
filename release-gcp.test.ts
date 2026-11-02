@@ -238,7 +238,7 @@ Deno.test("an app with migrations carries its schema forward in the schema job, 
   const job = (await built(app, "job")).value;
   assertEquals(job.metadata.name, "battlechess-initdb");
   assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/cloudsql-instances"], "brawl-chess:us-central1:battlechess-db");
-  assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/execution-environment"], "gen1", "a job starts on the first generation");
+  assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/execution-environment"], undefined, "Cloud Run runs a job only on the second generation");
   const [c, ...more] = job.spec.template.spec.template.spec.containers;
   assertEquals(more.length, 0);
   assert(/battlechess-schema@sha256:9{64}$/.test(c.image), c.image);
@@ -412,6 +412,24 @@ Deno.test("a sidecar's environment: the cluster's secrets mounted, the origin th
   // A sidecar given none has none.
   const bare = await built(withSidecar(`{port: 8687}`), "service");
   assertEquals(bare.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector").env, undefined);
+});
+
+// A sidecar's own secret (a key the app keeps, not the cluster's): read from Secret Manager in
+// place of compose's value, granted to the account, and found made before the release starts.
+Deno.test("a sidecar's own secrets are mounted in place of compose's values and granted", async () => {
+  const s = await built(withSidecar(`{port: 8687, env: {APP_KEY: "the-development-key", PLAIN: "x"}, secrets: {APP_KEY: "battlechess-app-key", OTHER: "shared-key"}}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const c = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(c.env.filter((e: { name: string }) => e.name === "APP_KEY").length, 1, "one APP_KEY, the secret's");
+  const by = Object.fromEntries(c.env.map((e: { name: string }) => [e.name, e]));
+  assertEquals(by.APP_KEY.valueFrom, { secretKeyRef: { name: "battlechess-app-key", key: "latest" } });
+  assertEquals(by.OTHER.valueFrom, { secretKeyRef: { name: "shared-key", key: "latest" } });
+  assertEquals(by.PLAIN.value, "x");
+  const plan = await built(withSidecar(`{port: 8687, secrets: {APP_KEY: "battlechess-app-key", OTHER: "shared-key"}}`), "plan");
+  assertEquals(plan.value.sidecarSecretKeys, ["battlechess-app-key", "shared-key"]);
+  for (const k of ["battlechess-app-key", "shared-key"]) assert(plan.value.readSecrets.includes(k), k);
+  const bad = await built(withSidecar(`{port: 8687, secrets: {"not-env": "x"}}`), "plan");
+  assertEquals(bad.success, false, "a key that is no environment variable is refused");
 });
 
 Deno.test("a sidecar's metrics are scraped into Managed Prometheus, its config a mounted secret", async () => {

@@ -214,7 +214,7 @@
     }
   }
   handle /health {
-    respond "ok" 200
+    respond "{$K_REVISION:ok}" 200
   }
   # The two files a crawler asks for by name, and neither works anywhere but
   # the origin root. Both name absolute URLs — a sitemap <loc> and the Sitemap:

@@ -586,6 +586,12 @@ job it would run (the `pronto-job` label of its revision, the hash of the render
 image, so every migration, seed, policy, publication and hybrid machine, and its commands,
 roles and secrets); a missing label, a revision not ready or a failed read runs it, as do
 previews and `PRONTO_RELEASE_FORCE_SCHEMA=1` (a rotated role password, say).
+The deploy takes no traffic at first: the new revision is tagged
+`next` and probed at its own address (`/health`, which answers the
+revision's name), traffic moves to it only once it answers, and the public
+address is then polled, three minutes at most each, until it answers as the
+new revision. If either fails, traffic goes back to the revision that served
+before (by `--rollback`'s own step, so not past a migration) and the release exits non-zero; a first deploy has none to go back to.
 `--rollback`
 sends the traffic back to the revision before, where its schema is the
 same. A release that fails stops the preview (its service, jobs and clock); one that
@@ -650,6 +656,29 @@ other apps take locks of their own and run beside it. The lock is let go when th
 however it ends; a release that died holds it until it expires, and `PRONTO_RELEASE_BREAK_LOCK=1`
 takes it at once. A dry run and a snapshot take none. Two releases of ume-rental had gone live four
 seconds apart, their IAM bindings racing.
+
+Every run is recorded, however it ends, once its lock is let go: one JSON line appended to
+`~/.cache/pronto/releases/<app>.jsonl` (`<app>` is `GCP.name`), which a local DORA dashboard reads
+([`gcp/release-record.nu`](../gcp/release-record.nu)). A dry run, a snapshot and a preview's
+`--delete` record nothing; failing to write the record prints a warning and never fails the release.
+
+| field | value |
+|---|---|
+| `app`, `service`, `project` | `GCP.name`, the service released (a preview's `<service>-<preview>`) and its project |
+| `preview` | the preview released, `""` for production |
+| `commit`, `dirty` | `git rev-parse HEAD` of the app's checkout before the release (`null` without one), and whether the app's directory differs from it |
+| `pronto` | the pronto version releasing (`distribution/config.cue`'s `#Version`) |
+| `started`, `ended` | ISO 8601, UTC |
+| `outcome` | `live`, `failed`, `refused` (another release holds the lock) or `rolled-back` (`--rollback`) |
+| `failure` | the failure's first line, `null` otherwise |
+| `rc` | `ran`, or `skipped: <why>` |
+| `localGate` | `ran`, `reused` (the ledger's pass) or `skipped` |
+| `revision` | the revision serving once live (or the one `--rollback` went back to), `null` otherwise |
+| `phases` | seconds, `null` where the phase never started: `lock` (taking it), `gate` (the local gate), `rc` (the rc preview through its tests), `stage`, `schema` (the job, or `"skipped"`), `deploy` (go-live but the schema job), `total`. A phase the run failed in is timed to the run's end; the gate and rc run beside the stage, so phases overlap |
+
+```json
+{"app":"guestbook","service":"guestbook","project":"brawl-chess","preview":"","commit":"4f1c2e0…","dirty":false,"pronto":"0.25.2","started":"2026-11-02T14:03:11Z","ended":"2026-11-02T14:19:40Z","outcome":"live","failure":null,"rc":"ran","localGate":"ran","revision":"guestbook-00042-xaz","phases":{"lock":1.4,"gate":71.2,"rc":702.5,"stage":188.9,"schema":41.7,"deploy":96.3,"total":989.1}}
+```
 
 `sayt verify@gcp` ([`gcp/verify.nu`](../gcp/verify.nu)) runs the drivers of
 `verify@<target>` against the release's address, or a preview's with
@@ -768,7 +797,12 @@ compose names is the port that container holds there: `http://crud:3000` is
 sidecar is its own port (the plan's `loopback`). A key naming one of the
 cluster's secrets (`SERVICE_JWT`, `PGRST_JWT_SECRET`, …) is mounted from Secret
 Manager, never compose's development value, and `ORIGIN` is where readers are.
-`sidecars: <name>: env` adds to what compose gives.
+`sidecars: <name>: env` adds to what compose gives, and `sidecars: <name>:
+secrets` reads a variable from a Secret Manager secret of the app's own (a key
+it must keep, or one it shares with another app), in place of any value env or
+compose gives: the release grants the service's account each one, and refuses
+to start while one is missing, since such a secret is made where the project's
+infrastructure is, never by the release.
 
 ```cue
 GCP: schema.#Release & {
