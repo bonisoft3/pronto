@@ -92,9 +92,15 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"\n`);
   // A guard the app changed reaches a database built before it (a friend's
   // refused seat, found in production), and so does a new entity's table.
-  assertStringIncludes(c.command[2], `for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 016_mecha_actors.sql`);
+  assertStringIncludes(c.command[2], `for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql`);
+  // A status chart the app changed reaches a live database too: 010_machines.sql is in the replay
+  // ("invalid transition on rental_request from accepting to paying", found in production).
+  // 010 drops and recreates triggers and constraints: atomically, or a write slips between them.
+  assertStringIncludes(c.command[2], `if [ "$step" = 010_machines.sql ]; then one=--single-transaction; else one=; fi\n`);
+  assertStringIncludes(c.command[2], `if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi`);
   // Live traffic can deadlock a step (found in production); being idempotent, it runs again.
-  assertStringIncludes(c.command[2], `for try in 1 2 3; do\n        if psql -v ON_ERROR_STOP=1 -Xq -f "$f"; then break; fi\n        if [ "$try" = 3 ]; then exit 1; fi`);
+  assertStringIncludes(c.command[2], `for try in 1 2 3; do`);
+  assertStringIncludes(c.command[2], `if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi\n        if [ "$try" = 3 ]; then exit 1; fi`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
   assertStringIncludes(c.command[2], "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE");
@@ -561,6 +567,28 @@ Deno.test("an app always on keeps its CPU between requests; by default it is thr
   assertEquals(on.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
   const off = await built(release(), "service");
   assertEquals(off.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], undefined);
+});
+
+Deno.test("a kept instance serves without a cold start and keeps its CPU; by default none is kept, and a preview keeps none", async () => {
+  const annotations = async (extra: string) => (await built(release(extra), "service")).value.spec.template.metadata.annotations;
+  const kept = await annotations(", minScale: 1");
+  assertEquals([kept["autoscaling.knative.dev/minScale"], kept["run.googleapis.com/cpu-throttling"]], ["1", "false"]);
+  const rest = await annotations("");
+  assertEquals([rest["autoscaling.knative.dev/minScale"], rest["run.googleapis.com/cpu-throttling"]], ["0", undefined]);
+  const preview = await annotations(", minScale: 1, preview: \"rc\"");
+  assertEquals(preview["autoscaling.knative.dev/minScale"], "0");
+  assertEquals((await built(release(", minScale: 2"), "release.minScale")).success, false);
+});
+
+Deno.test("a sidecar with a probe path is started by an HTTP probe and the door waits for it", async () => {
+  const s = await built(withSidecar(`{port: 8687, probe: "/health"}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const own = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(own.startupProbe.httpGet, { path: "/health", port: 8687 });
+  assertEquals(own.startupProbe.tcpSocket, undefined);
+  const deps = JSON.parse(s.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy.includes("perf-collector"), true);
+  assertEquals((await built(withSidecar(`{port: 8687, probe: "health"}`), "plan")).success, false);
 });
 
 Deno.test("a sidecar's memory is its container's, inside the instance or apart", async () => {

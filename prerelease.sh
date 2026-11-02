@@ -22,7 +22,12 @@ SRC=$(git -C "$here" rev-parse "${2:-HEAD}")
 MODULE=ghcr.io/bsoneca/cue-modules/github.com/bonisoft3/pronto
 MECHA_V=$(sed -n 's/^MECHA_V=\([0-9A-Za-z.-]*\)$/\1/p' "$here/.github/prerelease.env")
 [ -n "$MECHA_V" ] || { echo ".github/prerelease.env names no MECHA_V" >&2; exit 1; }
-mise=${SAYT_MISE_BIN:-$HOME/Library/Caches/sayt/mise-v2026.8.11/mise}
+# sayt's own mise, where sayt caches it: ~/Library/Caches on macOS, the XDG cache elsewhere.
+case $(uname -s) in
+Darwin) cache=$HOME/Library/Caches ;;
+*) cache=${XDG_CACHE_HOME:-$HOME/.cache} ;;
+esac
+mise=${SAYT_MISE_BIN:-$cache/sayt/mise-v2026.8.11/mise}
 crane() { "$mise" exec 'github:google/go-containerregistry[bin=crane]@v0.20.2' -- crane "$@"; }
 cue() { "$mise" exec 'github:cue-lang/cue@0.16.1' -- cue "$@"; }
 
@@ -30,6 +35,10 @@ cue() { "$mise" exec 'github:cue-lang/cue@0.16.1' -- cue "$@"; }
 if ! $runtime_only && crane digest "$MODULE:v$PRONTO_V" >/dev/null 2>&1; then echo "$MODULE:v$PRONTO_V is already published" >&2; exit 1; fi
 
 work=$(mktemp -d)
+# The snapshot carries the repo's .mise.toml, which mise refuses to parse from an untrusted
+# directory, and every tool here (python3 through its shim, crane and cue through mise exec) runs
+# inside it. Nothing here needs that roster, so mise skips the snapshot's config.
+export MISE_IGNORED_CONFIG_PATHS="$work${MISE_IGNORED_CONFIG_PATHS:+:$MISE_IGNORED_CONFIG_PATHS}"
 trap 'kill "${serve:-}" 2>/dev/null || true; rm -rf "$work"' EXIT
 mkdir "$work/pronto"
 git -C "$here" archive "$SRC" | tar x -C "$work/pronto"

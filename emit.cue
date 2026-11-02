@@ -208,22 +208,61 @@ _sqlType: {
 
 // The column contract owned by a cluster chart; reducers have no state field.
 #machineColumn: C={
-	machines: [...#MechaMachine]
+	columns: [string]: [string]: _
 	entityName: string
 	entityTable: string
 	fieldName: string
-	for m in C.machines if m.entity == C.entityName || m.entity == C.entityTable if m.field != _|_ if m.field == C.fieldName if m.initial != _|_ {
-		initial: m.initial
-		states: [for n, _ in m.states {n}]
-	}
+	if C.columns[C.entityName][C.fieldName] != _|_ {C.columns[C.entityName][C.fieldName]}
+	if C.entityTable != C.entityName if C.columns[C.entityTable][C.fieldName] != _|_ {C.columns[C.entityTable][C.fieldName]}
+}
+
+// The server entities in the order 005 creates their tables: each after
+// every table its fields reference, the declared order kept wherever it
+// already is one. A table is keyed by the latest declared position among it
+// and what it reaches, then by how much it reaches, then by its own
+// position, which puts a referenced table first and leaves a declared order
+// that is already valid as it is. A cycle across tables is refused: no CREATE
+// order satisfies it. ume-rental's request table was declared before the
+// app_user it references, and its database refused the file.
+#tableOrder: O={
+	entities: [...]
+	_index: {for i, e in O.entities {(e.table): i}}
+	// What each table references directly; a reference to itself or to a
+	// table no server entity holds asks nothing of the order.
+	_r0: {for e in O.entities {(e.table): {for f in e.fields if f.ref != _|_ if f.ref != e.table if O._index[f.ref] != _|_ {(f.ref): true}}}}
+	// Squared seven times, so a chain of up to 128 references is closed: a
+	// path through 128 tables, or a ring of 128, has at most 128.
+	_r1: {for t, ds in O._r0 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r0[d] {(d2): true}}}}
+	_r2: {for t, ds in O._r1 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r1[d] {(d2): true}}}}
+	_r3: {for t, ds in O._r2 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r2[d] {(d2): true}}}}
+	_r4: {for t, ds in O._r3 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r3[d] {(d2): true}}}}
+	_r5: {for t, ds in O._r4 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r4[d] {(d2): true}}}}
+	_r6: {for t, ds in O._r5 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r5[d] {(d2): true}}}}
+	_r7: {for t, ds in O._r6 {(t): {for d, _ in ds {(d): true}, for d, _ in ds for d2, _ in O._r6[d] {(d2): true}}}}
+	_reach: O._r7
+	_cycles: [for t, ds in O._reach if ds[t] != _|_ {t}]
+	_keyed: [for t, i in O._index {
+		index: i
+		key:   list.Max(list.Concat([[i], [for d, _ in O._reach[t] {O._index[d]}]]))
+		reach: len([for d, _ in O._reach[t] {d}])
+	}]
+	_sorted: list.Sort(O._keyed, {x: _, y: _, less: x.key < y.key || (x.key == y.key && (x.reach < y.reach || (x.reach == y.reach && x.index < y.index)))})
+	// The refusals are `out` itself, so every reader of the order fails with
+	// them: a guard on a sibling field is dropped where a caller selects
+	// `out` from the helper inline, as 005 does.
+	out: [
+		if len(O.entities) > 128 {error("#tableOrder closes chains of at most 128 tables, and this program has \(len(O.entities)) server tables")},
+		if len(O._cycles) > 0 {error("the references among \(strings.Join(O._cycles, ", ")) form a cycle: no table can be created before the others")},
+		[for k in O._sorted {O.entities[k.index]}],
+	][0]
 }
 
 #tableSql: T={
 	e: #Entity
-	machines: *[] | [...#MechaMachine]
+	columns: [string]: [string]: _
 	_lines: list.Concat([
 		[for fld in T.e.fields {
-			let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+			let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
 			"  " + (#colSql & {
 				f: fld
 				if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
@@ -281,7 +320,7 @@ _sqlType: {
 	// database to the program's columns. A required field with no default
 	// cannot be added to a table holding rows, and says so then.
 	_added: [for fld in T.e.fields if !fld.pk {
-		let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
 		"ALTER TABLE \(T.e.table) ADD COLUMN IF NOT EXISTS " + (#colSql & {
 			f: fld
 			if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
@@ -299,7 +338,7 @@ _sqlType: {
 	// again as the program says it, under the name Postgres gives a column's
 	// own (<table>_<field>_check), NOT VALID so rows written before are kept.
 	_reasserted: [for fld in T.e.fields if !fld.pk
-		let column = #machineColumn & {machines: T.machines, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
 		for check in [
 			if T.e.cel.checks[fld.name] != _|_ {T.e.cel.checks[fld.name]},
 			if fld.cel == _|_ if column.states != _|_ {"\"\(fld.name)\" IN (" + strings.Join([for n in column.states {(#sqlLit & {v: n}).out}], ", ") + ")"},
@@ -1467,7 +1506,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if f.pk {pk: true}
 				if f.ref != _|_ {ref: f.ref}
 				if f.unique != _|_ {unique: f.unique}
-				let column = #machineColumn & {entityName: e.name, entityTable: e.table, fieldName: f.name, machines: [if S.code.state.machines != _|_ for _, m in S.code.state.machines {m}]}
+				let column = #machineColumn & {entityName: e.name, entityTable: e.table, fieldName: f.name, columns: S.code._machineColumns}
 				if f.default != _|_ {
 					defaulted: true
 					let literal = #literalDefault & {sql: f.default, type: f.type}
@@ -2477,8 +2516,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// offer.
 	if E.code.capabilities.auth != _|_ {
 		_authModeOffered: true & list.Contains(E.terminal.capabilities.auth.modes, E.code.capabilities.auth.mode)
+		// A provider the terminal names is offered as it is. One it does not
+		// name (an identity broker's phone sign-in) is drawn as any other, a
+		// link to the auth service labelled by the app's chrome_signin_<name>,
+		// so it is offered where the program names the issuer that stands in
+		// its place.
+		let issuerNamed = [if E.code.capabilities.auth.provider != _|_ for n, v in E.code.capabilities.auth.provider if v.issuer != _|_ {n}]
 		if E.code.capabilities.auth.providers != _|_ for p in E.code.capabilities.auth.providers {
-			_authProviderOffered: (p): true & list.Contains(E.terminal.capabilities.auth.providers, p)
+			_authProviderOffered: (p): true & (list.Contains(E.terminal.capabilities.auth.providers, p) || list.Contains(issuerNamed, p))
 		}
 	}
 
@@ -3297,7 +3342,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				format: "sql"
 				_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 				text: strings.Join(list.Concat([
-					[for ent in E._serverEntities {(#tableSql & {e: ent, machines: [if E.code.state.machines != _|_ for _, m in E.code.state.machines {m}]}).out}],
+					[for ent in (#tableOrder & {entities: E._serverEntities}).out {(#tableSql & {e: ent, columns: E.code._machineColumns}).out}],
 					[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
 					[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
 				]), "\n\n") + "\n"

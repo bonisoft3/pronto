@@ -1580,7 +1580,8 @@ import (
 			// secret kept in a file git ignores rather than in any emitted one.
 			envFiles?: [...(string & =~"^[A-Za-z0-9_][A-Za-z0-9._/-]*\\.env$" & !~"\\.\\.")]
 			// The providers a person may sign in through besides a passkey,
-			// each one the terminal offers (#emit): a way in at the gate and in
+			// each one the terminal offers, or one whose issuer the program
+			// names below, labelled chrome_signin_<name> (#emit): a way in at the gate and in
 			// a guest's strip, run by the cluster's auth service. A provider's
 			// person and a passkey's are two.
 			providers?: [string, ...string] & list.UniqueItems()
@@ -1894,6 +1895,14 @@ import (
 				}
 			}
 		})
+	}}
+	// The column each chart owns, by the entity it names (its name or its
+	// table) and then the field: its initial state and its states, read once
+	// here for every column's lookup (#machineColumn). A column that walked
+	// the machines itself handed each column a copy of all of them, which took
+	// an app of 25 entities past 40G at export.
+	_machineColumns: {if A.state.machines != _|_ for _, m in A.state.machines if m.field != _|_ if m.initial != _|_ {
+		(m.entity): (m.field): {initial: m.initial, states: [for n, _ in m.states {n}]}
 	}}
 	state: machines: [mn=string]: {
 		let m = A.state.machines[mn]

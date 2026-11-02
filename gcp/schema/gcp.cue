@@ -58,6 +58,9 @@ import (
 	// The instance's CPU unthrottled between requests, for work that runs while
 	// nobody is asking (a sidecar's long task).
 	alwaysOn: *false | bool
+	// Instances kept at rest, so a visit after a quiet spell does not wait for a
+	// cold start; with maxScale 1, no more than one. A preview keeps none.
+	minScale: *0 | int & >=0 & <=1
 
 	// Electric's share of the instance. Its memory holds every shape it keeps
 	// (its storage is the instance's /tmp, which Cloud Run keeps in memory), so
@@ -129,6 +132,11 @@ import (
 		// cluster's secrets (SERVICE_JWT, say) is that secret, never compose's
 		// development value, and ORIGIN is where readers are.
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		// The path its server answers 2xx on once it can serve, in place of the
+		// bare port a TCP probe checks. In the instance the door then waits for
+		// it too (container-dependencies), so a sidecar whose own dependency is
+		// not up yet never takes a reader.
+		probe?: =~"^/"
 		metrics?: {
 			port!:    int & >1024 & <65536
 			path:     *"/metrics" | =~"^/"
@@ -322,16 +330,16 @@ import (
 				metadata: labels: "pronto-schema": strings.SliceRunes(strings.TrimPrefix(R.image.pushed[schemaImage].digest, "sha256:"), 0, 40)
 			}
 			metadata: annotations: {
-				"autoscaling.knative.dev/minScale": "0"
+				"autoscaling.knative.dev/minScale": [if R.preview != _|_ {"0"}, "\(R.minScale)"][0]
 				// electric is one instance (mecha's docs/deployment.md#clouds-as-built).
 				"autoscaling.knative.dev/maxScale":         "1"
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
 				// A preview keeps its CPU between requests too: electric reads the replication
 				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
-				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
+				if R.alwaysOn || R.minScale > 0 || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
-					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
+					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}], [for n, c in R._inside if c.probe != _|_ {n}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
 					if R.blobs != _|_ {imgproxy: ["rclone-s3"]}
 					if len(R._scraped) > 0 {"gmp-collector": R._scraped}
@@ -494,7 +502,10 @@ import (
 					{name: k, value: v},
 				][0]}]
 			}
-			startupProbe: {tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60}
+			startupProbe: [
+				if c.probe != _|_ {httpGet: {path: c.probe, port: c.port}, periodSeconds: 2, failureThreshold: 60},
+				{tcpSocket: port: c.port, periodSeconds: 2, failureThreshold: 60},
+			][0]
 		}
 	}
 	let gmpCollector = {
@@ -597,15 +608,18 @@ import (
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
 							  # entity's table and a new field's column, every policy, trigger and
-							  # publication, the hybrid machines' code, and the app's own
+							  # publication, the status charts' triggers (010_machines), the hybrid machines' code, and the app's own
 							  # migrations, each idempotent, run again, keeping every row. Live traffic
 							  # can deadlock a step's ALTER (a lease's renewal against ENABLE ROW LEVEL
 							  # SECURITY); being idempotent, the step is run again, up to three times.
-							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 016_mecha_actors.sql \(strings.Join(R.database.replays, " ")); do
+							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql \(strings.Join(R.database.replays, " ")); do
 							    f=/docker-entrypoint-initdb.d/$step
 							    if [ -f "$f" ]; then echo "initdb: replaying $step"
 							      for try in 1 2 3; do
-							        if psql -v ON_ERROR_STOP=1 -Xq -f "$f"; then break; fi
+							        # 010 drops and recreates triggers and constraints: one transaction, so no
+							        # write slips between them and a failure leaves the old ones in force.
+							        if [ "$step" = 010_machines.sql ]; then one=--single-transaction; else one=; fi
+							        if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi
 							        if [ "$try" = 3 ]; then exit 1; fi
 							        echo "initdb: $step failed, again in 10s"; sleep 10
 							      done
