@@ -19,12 +19,12 @@ Deno.test('edge image reads only its configured bucket and transforms its R2 obj
       head: (key: string) => { calls.push(['head', key]); return Promise.resolve(key === 'snapcards/a.png' ? object() : null) },
     },
     IMAGES: { input: (body: ReadableStream<Uint8Array>) => { calls.push(['input', body]); return {
-      transform: (options: Record<string, never>) => { calls.push(['transform', options]); return {
+      transform: (options: unknown) => { calls.push(['transform', options]); return {
         output: (options: { format: string }) => { calls.push(['output', options]); return Promise.resolve({ response: ({ headers }: { headers: HeadersInit }) => new Response('webp', { headers: { ...Object.fromEntries(new Headers(headers)), 'content-type': 'image/webp' } }) }) },
       } },
     } } },
   }
-  const run = (request: Request) => edgeImage(request, env, cache, ctx)
+  const run = (request: Request) => edgeImage(request, env, cache, ctx, [320, 640, 960])
   const url = 'https://example.test/img/insecure/plain/s3://original-bucket/snapcards/a.png'
   const response = (await run(new Request(url)))!
   assertEquals(await response.text(), 'webp')
@@ -47,10 +47,41 @@ Deno.test('edge image reads only its configured bucket and transforms its R2 obj
   for (const path of [
     '/img/insecure/plain/s3://other/snapcards/a.png',
     '/img/insecure/rs:fill:10:10/plain/s3://original-bucket/snapcards/a.png',
+    // An open size would let any caller spend a paid transformation per number.
+    '/img/insecure/rs:fit:500:500/plain/s3://original-bucket/snapcards/a.png',
+    '/img/insecure/rs:fit:640:320/plain/s3://original-bucket/snapcards/a.png',
+    '/img/insecure/rs:fit:640:640/plain/s3://other/snapcards/a.png',
     '/img/insecure/plain/s3://original-bucket/snapcards/a.png?width=10',
     '/img/insecure/plain/s3://original-bucket/snapcards/%2e%2e%2fa.png',
   ]) assertEquals((await run(new Request(`https://example.test${path}`)))!.status, 400)
   assertEquals((await run(new Request(url, { method: 'POST' })))!.status, 405)
   assertEquals((await run(new Request(url.replace('a.png', 'missing.png'))))!.status, 404)
   assertEquals(await run(new Request('https://example.test/cards')), null)
+})
+
+Deno.test('edge image fits a sized request and caches each size apart', async () => {
+  const fits: unknown[] = []
+  const entries = new Map<string, Response>()
+  const cache = {
+    match: (key: Request) => Promise.resolve(entries.get(key.url)?.clone()),
+    put: (key: Request, response: Response) => { entries.set(key.url, response); return Promise.resolve() },
+  } as Pick<Cache, 'match' | 'put'>
+  const pending: Promise<unknown>[] = []
+  const env = {
+    IMAGE_SOURCE_BUCKET: 'original-bucket',
+    IMAGE_OBJECTS: {
+      get: () => Promise.resolve({ etag: 'abc', body: new Blob(['png']).stream() }),
+      head: () => Promise.resolve({ etag: 'abc' }),
+    },
+    IMAGES: { input: () => ({ transform: (options: unknown) => { fits.push(options); return {
+      output: () => Promise.resolve({ response: ({ headers }: { headers: Record<string, string> }) => new Response('webp', { headers }) }),
+    } } }) },
+  }
+  const run = (path: string) => edgeImage(new Request(`https://example.test${path}`), env, cache, { waitUntil: (p) => { pending.push(p) } }, [320, 640, 960])
+  const sized = await run('/img/insecure/rs:fit:640:640/plain/s3://original-bucket/snapcards/a.png')
+  assertEquals(sized!.headers.get('ETag'), '"abc-w640-webp-v1"')
+  await run('/img/insecure/plain/s3://original-bucket/snapcards/a.png')
+  await Promise.all(pending)
+  await run('/img/insecure/rs:fit:640:640/plain/s3://original-bucket/snapcards/a.png')
+  assertEquals(fits, [{ width: 640, height: 640, fit: 'scale-down' }, {}])
 })

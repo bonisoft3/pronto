@@ -1594,6 +1594,9 @@ import (
 		edgeImages?: {
 			bucket:       =~"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
 			sourceBucket: =~"^[a-z0-9][a-z0-9.-]*[a-z0-9]$"
+			// "paid" when this account has a card behind Cloudflare Images: the
+			// release refuses a screen's data-image-src without it.
+			plan: *"free" | "paid"
 		}
 		// A static set the blob plane carries from the start: every
 		// { file, sha256 } the app-relative manifest names, fetched from the

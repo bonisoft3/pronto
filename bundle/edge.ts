@@ -27,6 +27,7 @@ import { BLOB_CACHE_RULE, writeEdgeBlobs } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
 import { renderEffects } from './edge-effects.ts'
+import { imagePlanRefusal } from './edge-image-plan.ts'
 import { clusterDrains, hasEffects, releaseScripts } from './edge-scripts.ts'
 
 function fail(msg: string): never {
@@ -72,6 +73,7 @@ const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.jso
   tables: string[]
   schema?: Record<string, { durability?: string }>
   migrations: string[]
+  routes?: { files: { html: string } }[]
   units?: Record<string, { role?: string; isolation?: string }>
   presenter?: { policy: string; scripted: string[] }
 }
@@ -85,6 +87,15 @@ const unpackaged = Object.entries(shell.units ?? {}).filter(([, unit]) => unit.r
 if (unpackaged.length) fail(`units are not packaged yet: ${unpackaged.join(', ')}`)
 const name = shell.app ?? path.basename(app)
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
+
+// Asked before anything is cleared: a refused release leaves the last one's output standing.
+const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{seed: *code.capabilities.blobSeed | null, images: *code.capabilities.edgeImages | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
+if (!seedOut.success) fail('cue export of code.capabilities.blobSeed failed')
+const { seed, images } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { seed: { manifest: string; origin: string } | null; images: { bucket: string; sourceBucket: string; plan: 'free' | 'paid' } | null }
+const routeScreens: Record<string, string> = {}
+for (const { files } of shell.routes ?? []) routeScreens[files.html] = await Deno.readTextFile(path.join(app, files.html))
+const imagePlan = imagePlanRefusal(routeScreens, images)
+if (imagePlan) fail(imagePlan)
 
 let retainedFrom = previousAssets
 let tempRetained: string | undefined
@@ -121,9 +132,6 @@ await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints)
 
 // The blob plane's seed rides as static assets, after addressing: its files
 // are already named by their content and keep the URLs the page asks for.
-const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{seed: *code.capabilities.blobSeed | null, images: *code.capabilities.edgeImages | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
-if (!seedOut.success) fail('cue export of code.capabilities.blobSeed failed')
-const { seed, images } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { seed: { manifest: string; origin: string } | null; images: { bucket: string; sourceBucket: string } | null }
 const imageBindings = images ? {
   images: { binding: 'IMAGES' },
   r2_buckets: [{ binding: 'IMAGE_OBJECTS', bucket_name: images.bucket }],
@@ -139,8 +147,9 @@ if (!clustered) {
   const worker = path.relative(path.join(out, 'src'), path.join(here, 'edge-static.ts')).replaceAll('\\', '/')
   const staticWorker = worker.startsWith('.') ? worker : `./${worker}`
   const imageWorker = path.relative(path.join(out, 'src'), path.join(here, 'edge-images.ts')).replaceAll('\\', '/')
+  const fragment = path.relative(path.join(out, 'src'), path.join(omnishell, 'interpreter/fragment.js')).replaceAll('\\', '/')
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), images
-    ? `import staticWorker from '${staticWorker}'\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx) ?? staticWorker.fetch(req, env) } }\n`
+    ? `import staticWorker from '${staticWorker}'\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nimport { IMAGE_WIDTHS } from '${fragment.startsWith('.') ? fragment : `./${fragment}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS) ?? staticWorker.fetch(req, env) } }\n`
     : `export { default } from '${staticWorker}'\n`)
   await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
     name, main: 'src/index.ts', compatibility_date: '2026-09-01',
@@ -222,7 +231,7 @@ import { edgeObject } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/
 import { edgeWorker } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/worker.ts'))}'
 import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
 import { originAssets } from '${fromSrc(path.join(here, 'edge-templates.ts'))}'
-${images ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
+${images ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
 ${Object.keys(hybrids).length ? "import machines from './machines.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
@@ -240,7 +249,7 @@ export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
     env = { ...env, ASSETS: originAssets(env.ASSETS) }
-${images ? '    const image = await edgeImage(req, env, caches.default, ctx)\n    if (image) return image\n' : ''}
+${images ? '    const image = await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}
 ${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
     // asset, which never reaches upstream dynamic handlers, or not at all: the cluster's
     // GET may act (omnishell's terminal.cue \`presenter.scripted\`).

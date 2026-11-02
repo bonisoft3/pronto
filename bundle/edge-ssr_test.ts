@@ -497,9 +497,9 @@ Deno.test('SSR retains native images and origin-bound assets in both database mo
       const imageImport = source.match(/^import \{ edgeImage \} from '([^']+)'$/m)
       assert.ok(imageImport)
       assert.ok((await Deno.stat(path.resolve(out, 'src', imageImport[1]))).isFile)
-      const worker = new Function('edgeImage', 'originAssets', 'edgeWorker', 'acceptedLanguages', 'routeAt', 'hints', 'edgeHints', 'caches', source
+      const worker = new Function('edgeImage', 'IMAGE_WIDTHS', 'originAssets', 'edgeWorker', 'acceptedLanguages', 'routeAt', 'hints', 'edgeHints', 'caches', source
         .replace(/^import .+$/gm, '').replace(/^export \{.+$/gm, '').replace('export default', 'return'))(
-          edgeImage, originAssets, { fetch: () => new Response('api') }, () => [], () => null, {}, () => null,
+          edgeImage, [320, 640, 960], originAssets, { fetch: () => new Response('api') }, () => [], () => null, {}, () => null,
           { default: { match: () => Promise.resolve(undefined), put: () => Promise.resolve() } },
         )
       let transforms = 0

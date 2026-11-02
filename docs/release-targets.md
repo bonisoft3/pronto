@@ -271,9 +271,19 @@ WebP. All objects in this bucket are public through that route; it must not
 contain private uploads. Provision the bucket and copy originals before
 switching stored image URLs. The release does not copy external objects.
 
-The adapter accepts GET and HEAD, rejects transformation parameters and other
-source buckets, and caches transformed responses by object ETag for one hour.
-This covers plain imgproxy URLs, not the full imgproxy transformation language.
+The adapter accepts GET and HEAD, rejects other source buckets, and caches
+transformed responses by object ETag and size for one hour. Besides plain
+imgproxy URLs it answers `rs:fit:<w>:<w>` at the widths a screen's
+[`data-image-src`](https://github.com/bonisoft3/omnishell/blob/v0.21.6/REFERENCE.md#responsive-images) offers, and
+refuses every other transformation: each size of each picture is a paid
+transformation.
+
+A screen's `data-image-src` is the only thing that asks for those sizes, and the
+release refuses it unless `edgeImages` declares `plan: "paid"`, so an app that
+never uses the attribute needs no card for it. Free is no card anywhere; paid is at
+least one service needing one. A card alone may not move Cloudflare Images off its
+free allowance, past which a new transformation answers `9422`: subscribe under
+Media → Images → Plans. The plain route needs no plan and has the same allowance.
 The scoped Cache API leaves dynamic page and authentication caching unchanged.
 
 
