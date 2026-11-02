@@ -238,7 +238,7 @@ Deno.test("an app with migrations carries its schema forward in the schema job, 
   const job = (await built(app, "job")).value;
   assertEquals(job.metadata.name, "battlechess-initdb");
   assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/cloudsql-instances"], "brawl-chess:us-central1:battlechess-db");
-  assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/execution-environment"], "gen1", "a job starts on the first generation");
+  assertEquals(job.spec.template.metadata.annotations["run.googleapis.com/execution-environment"], undefined, "Cloud Run runs a job only on the second generation");
   const [c, ...more] = job.spec.template.spec.template.spec.containers;
   assertEquals(more.length, 0);
   assert(/battlechess-schema@sha256:9{64}$/.test(c.image), c.image);
