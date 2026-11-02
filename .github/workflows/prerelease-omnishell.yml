@@ -87,9 +87,36 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir dist
-          for triple in linux-x64 linux-arm64 linux-armv7 macos-x64 macos-arm64 windows-x64 windows-arm64; do
-            tar czf "dist/omnishell-$triple.tar.gz" -C "$RUNNER_TEMP/omnishell" --exclude=.git --exclude=.github --exclude=node_modules .
-          done
-          gh release create "omnishell-v$OMNISHELL_V" dist/*.tar.gz --target "$GITHUB_SHA" --prerelease --title "omnishell v$OMNISHELL_V (fork prerelease)" --notes "omnishell's runtime of the forks' prerelease, from bsoneca/omnishell-fork@$OMNISHELL_REF: see bsoneca/pronto forks/README.md."
+          if gh release view "omnishell-v$OMNISHELL_V" >/dev/null 2>&1; then
+            echo "omnishell-v$OMNISHELL_V is released: its tarballs are kept"
+          else
+            mkdir dist
+            for triple in linux-x64 linux-arm64 linux-armv7 macos-x64 macos-arm64 windows-x64 windows-arm64; do
+              tar czf "dist/omnishell-$triple.tar.gz" -C "$RUNNER_TEMP/omnishell" --exclude=.git --exclude=.github --exclude=node_modules .
+            done
+            gh release create "omnishell-v$OMNISHELL_V" dist/*.tar.gz --target "$GITHUB_SHA" --prerelease --title "omnishell v$OMNISHELL_V (fork prerelease)" --notes "omnishell's runtime of the forks' prerelease, from bsoneca/omnishell-fork@$OMNISHELL_REF: see bsoneca/pronto forks/README.md."
+          fi
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/omnishell-v$OMNISHELL_V" --jq '.assets[]|"\(.name) \(.id) \(.digest)"' | tee -a "$GITHUB_STEP_SUMMARY"
+      # The runtime tree as the image an app's release copies (/omnishell in its
+      # served image), as upstream publishes bonitao/omnishell: omnishell's
+      # runtime-image target, its files on an empty base, for both Linux
+      # architectures. An app names it as its build's omnishellRuntime
+      # (builders/bayt.cue); the pin line is in the summary.
+      - name: runtime image
+        env:
+          IMG: ghcr.io/bsoneca/omnishell
+        run: |
+          if d=$(crane digest "$IMG:$OMNISHELL_V" 2>/dev/null); then
+            echo "$IMG:$OMNISHELL_V is published: kept"
+          else
+            cd "$RUNNER_TEMP/omnishell"
+            ls -d interpreter components src server test/storybook-injector.ts test/canonical.ts check-visual.ts base-url.ts read-markup.ts render-documents.ts machine.cue 2>/dev/null > "$RUNNER_TEMP/runtime-files"
+            tar cf "$RUNNER_TEMP/runtime.tar" --owner=0 --group=0 --exclude=node_modules -T "$RUNNER_TEMP/runtime-files"
+            for a in amd64 arm64; do
+              crane append -f "$RUNNER_TEMP/runtime.tar" -t "$IMG:$OMNISHELL_V-$a-base"
+              crane mutate "$IMG:$OMNISHELL_V-$a-base" --set-platform "linux/$a" --label org.opencontainers.image.source=https://github.com/bsoneca/omnishell-fork --label "org.opencontainers.image.revision=$OMNISHELL_REF" -t "$IMG:$OMNISHELL_V-$a"
+            done
+            crane index append -m "$IMG:$OMNISHELL_V-amd64" -m "$IMG:$OMNISHELL_V-arm64" -t "$IMG:$OMNISHELL_V"
+            d=$(crane digest "$IMG:$OMNISHELL_V")
+          fi
+          echo "omnishellRuntime: \"$IMG:$OMNISHELL_V@$d\"" | tee -a "$GITHUB_STEP_SUMMARY"

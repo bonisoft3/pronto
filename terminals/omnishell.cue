@@ -31,7 +31,12 @@ import (
 // The image of omnishell's runtime tree an app's images copy from,
 // as pronto pins it: the consumer pins what it builds on, as with mecha's
 // images (clusters/mecha.cue). From the pin line an omnishell release prints.
-published: runtime: =~"^bonitao/omnishell:[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
+published: runtime: #RuntimePin
+
+// A pin of omnishell's runtime image: upstream's, or the forks' prerelease
+// (bsoneca/pronto forks/README.md), which an app on the fork's omnishell names
+// as its build's omnishellRuntime (builders/bayt.cue).
+#RuntimePin: =~"^(bonitao/omnishell|ghcr\\.io/bsoneca/omnishell):[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
 published: runtime: "bonitao/omnishell:0.20.2@sha256:0f7d84358244c875a76bf97f13974bf6336e15f639a2f01fa31ad3eb0ce0d8a7"
 
 // The build context an app's images copy omnishell's runtime tree from: that
