@@ -6,7 +6,7 @@ import { Buffer } from 'node:buffer'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotSql } from './derived.ts'
-import { writeEdgeAssets } from './edge-assets.ts'
+import { hostDomAssets, writeEdgeAssets } from './edge-assets.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../../..')
@@ -34,6 +34,21 @@ Deno.test('edge assets preserve lazy module and route delivery without bundling 
     assert.equal(await Deno.readTextFile(path.join(out, 'omnishell/interpreter/shell.js')), 'export const runtime = true;')
     await assert.rejects(() => writeEdgeAssets(app, terminal, out, [{ file: 'shell/index.html', target: '/srv/../escape.html' }]), /invalid static asset target/)
   } finally { await Deno.remove(scratch, { recursive: true }) }
+})
+
+Deno.test("a page carries its host-DOM hatches' files beside it, and nothing else of the terminal's", () => {
+  const held = hostDomAssets([
+    { file: 'shell/index.html', target: '/srv/shell/index.html' },
+    { file: 'shell/hatches/fala/main.js', target: '/srv/shell/hatches/fala/main.js' },
+    { file: 'shell/hatches/fala/voz/a.mp3', target: '/srv/shell/hatches/fala/voz/a.mp3' },
+    { file: 'shell/hatches/falar/main.js', target: '/srv/shell/hatches/falar/main.js' },
+    { file: 'interpreter/shell.js', target: '/omnishell/interpreter/shell.js' },
+  ], ['shell/hatches/fala/main.js'])
+  assert.deepEqual([...held], [
+    ['shell/hatches/fala/main.js', 'shell/hatches/fala/main.js'],
+    ['shell/hatches/fala/voz/a.mp3', 'shell/hatches/fala/voz/a.mp3'],
+  ])
+  assert.throws(() => hostDomAssets([{ file: 'x', target: '/srv/shell/hatches/fala/../../escape.js' }], ['shell/hatches/fala/main.js']), /invalid static asset target/)
 })
 
 Deno.test('a table follows the tables it references, and a cycle is refused', () => {

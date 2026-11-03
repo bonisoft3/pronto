@@ -26,6 +26,7 @@
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { hostDomAssets, type StaticAsset } from './edge-assets.ts'
 import { clusterDrains, releaseFiles } from './edge-scripts.ts'
 
 function fail(msg: string): never {
@@ -61,6 +62,7 @@ const shell = JSON.parse(await read('shell/shell.json')) as {
   i18n?: { locales: Record<string, unknown> }
   migrations: string[]
   tables: string[]
+  hostDom?: Record<string, { src: string }>
   units?: Record<string, unknown>
   prefix?: string
 }
@@ -369,4 +371,18 @@ await Deno.writeTextFile(path.join(out, 'index.html'), html)
 // A host that answers an unknown path with 404.html serves the same document
 // there, and the deep link boots.
 if (base) await Deno.writeTextFile(path.join(out, '404.html'), html)
-console.error(`bundle: ${out}/index.html, ${(html.length / 1024 / 1024).toFixed(2)} MB, ${Object.keys(files).length} files, ${clustered ? `${sql.length} sql${derived ? ', derived rows last' : ''}` : 'no cluster'}`)
+// The host-DOM hatches, as the terminal serves them (hostDomAssets).
+const hatchSrcs = Object.values(shell.hostDom ?? {}).map((h) => h.src)
+let hatchFiles = 0
+if (hatchSrcs.length) {
+  const exported = new Deno.Command('cue', { args: ['export', '.', '-e', 'terminal.surface.statics', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).outputSync()
+  if (!exported.success) fail('cue export of terminal.surface.statics failed')
+  const held = hostDomAssets(JSON.parse(new TextDecoder().decode(exported.stdout)) as StaticAsset[], hatchSrcs)
+  for (const src of hatchSrcs) if (![...held.keys()].includes(src)) fail(`host-DOM hatch ${src} is not among the terminal's statics`)
+  for (const [target, file] of held) {
+    await Deno.mkdir(path.join(out, path.dirname(target)), { recursive: true })
+    await Deno.copyFile(path.join(app, file), path.join(out, target))
+  }
+  hatchFiles = held.size
+}
+console.error(`bundle: ${out}/index.html, ${(html.length / 1024 / 1024).toFixed(2)} MB, ${Object.keys(files).length} files, ${hatchFiles ? `${hatchFiles} hatch files beside it, ` : ''}${clustered ? `${sql.length} sql${derived ? ', derived rows last' : ''}` : 'no cluster'}`)
