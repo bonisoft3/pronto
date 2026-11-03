@@ -70,6 +70,17 @@ def --wrapped gc-fresh [...args] {
 	}
 }
 
+# A service made public once. Cloud Run takes a request carrying a bearer token Google did not
+# sign (every user's session token) for its own to verify until the service's policy has spread,
+# minutes after any SetIamPolicy, one that changes nothing included: re-adding allUsers to a
+# service that holds it opened that window at every release, and a renderer rolled into it died
+# on its door's 401 (bonk-chess-rc-render, five times on 2026-11-03, a minute after each grant).
+def grant-public [service: string, project: string, region: string] {
+	let held = (gc-fresh run services get-iam-policy $service --region $region --project $project --format json | from json
+		| get -o bindings | default [] | any {|b| $b.role == "roles/run.invoker" and ("allUsers" in $b.members) })
+	if not $held { gc-fresh run services add-iam-policy-binding $service --region $region --project $project --member allUsers --role roles/run.invoker | ignore }
+}
+
 # The app's account reads each secret its containers name (the plan's readSecrets), granted on
 # that secret alone, never on the project. A preview's release may grant no role in its project,
 # so where its account is refused it says which secret, and the owner's grant on the project, as
@@ -761,7 +772,7 @@ export def go-live [staged: record]: nothing -> record {
 					gc-fresh run services add-iam-policy-binding $plan.service --region $r --project $p --member $"serviceAccount:service-($number)@gcp-sa-iap.iam.gserviceaccount.com" --role roles/run.invoker | ignore
 					do { ^gcloud --quiet run services remove-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker } | complete | ignore
 				} else {
-					gc-fresh run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+					grant-public $plan.service $p $r
 				}
 			} else if ($t.domain? | is-not-empty) {
 				map-domain $t.domain $plan.service $p $r
@@ -771,7 +782,7 @@ export def go-live [staged: record]: nothing -> record {
 				let svc = ($plan.names.sidecarServices | get $t.sidecar)
 				print $"gcp: (stamp) ($t.sidecar) apart \(($svc)\)"
 				gc run services replace $"dist/gcp/sidecar-($t.sidecar).yaml" --region $r --project $p | ignore
-				gc-fresh run services add-iam-policy-binding $svc --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+				grant-public $svc $p $r
 			}
 			null
 		} catch {|e| $e.msg }
