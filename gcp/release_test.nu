@@ -8,7 +8,7 @@
 const gcp_dir = path self .
 
 use std/assert
-use release.nu [hold-traffic poll-health preflight]
+use release.nu [hold-traffic poll-health preflight invoker_probe]
 
 # A directory holding the fakes and the state they share.
 def fakes [service_exists: bool, serving: string, candidate_says: string, public_says: string]: nothing -> string {
@@ -44,11 +44,21 @@ esac
 	r#'
 #!/bin/sh
 # The last argument is the address; a script file says what each answers, "code body" a line.
+# While a count is left in `refusals`, a request carrying a bearer token gets Cloud Run's own
+# 401, as one does while a fresh allUsers grant spreads.
 d="$(dirname "$0")/.."
+echo "$*" >> "$d/curl.log"
 for last; do :; done
 case "$last" in
   *next---*) say="$(cat "$d/candidate_says")" ;;
   *) say="$(cat "$d/public_says")" ;;
+esac
+case "$*" in *"Authorization: Bearer "*)
+  n="$(cat "$d/refusals" 2>/dev/null || echo 0)"
+  if [ "$n" -gt 0 ]; then
+    echo $((n - 1)) > "$d/refusals"
+    say="401 The request was not authorized to invoke this service. The access token could not be verified."
+  fi ;;
 esac
 code=$(echo "$say" | cut -d" " -f1); body=$(echo "$say" | cut -d" " -f2-)
 out=""; while [ $# -gt 0 ]; do [ "$1" = "--output" ] && out="$2"; shift; done
@@ -69,6 +79,9 @@ def main [] {
 	test_hold_traffic_first_deploy
 	test_poll_health_wants_the_revision_by_name
 	test_poll_health_times_out
+	test_poll_health_waits_for_cloud_run_to_pass_a_bearer
+	test_poll_health_names_cloud_runs_refusal
+	test_golive_waits_for_the_invoker_grant
 	test_golive_switches_after_both_answer
 	test_golive_goes_back_when_the_candidate_never_answers
 	test_golive_goes_back_when_the_public_address_stays_on_the_old_revision
@@ -111,6 +124,50 @@ def test_poll_health_times_out [] {
 		assert (not $got.ok)
 		assert ($got.last | str contains "500 boom")
 	}
+	rm -r $d
+}
+
+def test_poll_health_waits_for_cloud_run_to_pass_a_bearer [] {
+	print "test poll-health with a bearer waits while Cloud Run refuses it itself, past GCP_GOLIVE_WAIT..."
+	let d = (fakes true "svc-00001-old" "200 x" "200 svc-00002-new")
+	"3" | save -f ($d | path join refusals)
+	with-fakes $d {
+		with-env {GCP_GOLIVE_WAIT: "1", GCP_INVOKER_WAIT: "10"} {
+			assert (poll-health "https://svc/health" ["200"] "svc-00002-new" --steady 2 --bearer $invoker_probe).ok
+		}
+	}
+	assert equal (open --raw ($d | path join refusals) | str trim) "0"
+	assert (open --raw ($d | path join curl.log) | lines | all {|l| $l | str contains $"Authorization: Bearer ($invoker_probe)" })
+	rm -r $d
+}
+
+def test_poll_health_names_cloud_runs_refusal [] {
+	print "test poll-health gives up after GCP_INVOKER_WAIT, naming the invoker grant..."
+	let d = (fakes true "svc-00001-old" "200 x" "200 svc-00002-new")
+	"1000" | save -f ($d | path join refusals)
+	with-fakes $d {
+		with-env {GCP_GOLIVE_WAIT: "1", GCP_INVOKER_WAIT: "2"} {
+			let got = (poll-health "https://svc/health" ["200"] null --bearer $invoker_probe)
+			assert (not $got.ok)
+			assert ($got.last | str contains "allUsers is not in force yet")
+			assert equal $got.waited "2s"
+		}
+		# Without a bearer the same refusal is never asked for, and the address answers.
+		assert (poll-health "https://svc/health" ["200"] null).ok
+	}
+	rm -r $d
+}
+
+def test_golive_waits_for_the_invoker_grant [] {
+	print "test go-live moves traffic only once Cloud Run passes a bearer-carrying request on..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	"2" | save -f ($d | path join refusals)
+	let res = (golive $d)
+	assert equal $res.exit_code 0 $res.stderr
+	let curls = (open --raw ($d | path join curl.log) | lines)
+	assert ($curls | all {|l| $l | str contains "Authorization: Bearer " })
+	assert (($curls | where {|l| $l | str contains "next---" } | length) >= 3)
+	assert equal (open --raw ($d | path join serving) | str trim) "svc-00002-new"
 	rm -r $d
 }
 
