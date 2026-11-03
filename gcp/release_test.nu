@@ -30,6 +30,9 @@ case "$*" in
   *"revisions list"*)
     s="$(cat "$d/serving")"
     echo "[{\"metadata\":{\"name\":\"svc-00002-new\",\"creationTimestamp\":\"2\",\"labels\":{\"pronto-schema\":\"a\"}},\"status\":{\"conditions\":[{\"type\":\"Ready\",\"status\":\"True\"}]}},{\"metadata\":{\"name\":\"svc-00001-old\",\"creationTimestamp\":\"1\",\"labels\":{\"pronto-schema\":\"a\"}},\"status\":{\"conditions\":[{\"type\":\"Ready\",\"status\":\"True\"}]}}]" ;;
+  *"get-iam-policy"*)
+    # The policy as Cloud Run holds it: allUsers an invoker once a file says it was granted.
+    if [ -f "$d/granted" ]; then echo '{"bindings":[{"role":"roles/run.invoker","members":["allUsers"]}],"etag":"x"}'; else echo '{"etag":"x"}'; fi ;;
   *"images describe"*) cat "$d/tagged_digest" 2>/dev/null ;;
   *"projects describe"*) echo 123 ;;
   *"services replace"*"--dry-run"*)
@@ -83,6 +86,7 @@ def main [] {
 	test_poll_health_waits_for_cloud_run_to_pass_a_bearer
 	test_poll_health_names_cloud_runs_refusal
 	test_golive_waits_for_the_invoker_grant
+	test_golive_grants_public_once
 	test_golive_switches_after_both_answer
 	test_golive_goes_back_when_the_candidate_never_answers
 	test_golive_goes_back_when_the_public_address_stays_on_the_old_revision
@@ -198,6 +202,27 @@ def golive [d: string, extra: record = {}]: nothing -> record {
 }
 
 def log-of [d: string]: nothing -> string { open --raw ($d | path join gcloud.log) }
+
+# A SetIamPolicy that changes nothing still opens Cloud Run's window of 401s for bearer tokens
+# (bonk-chess-rc-render died of one, 2026-11-03), so a grant already held is left alone.
+def test_golive_grants_public_once [] {
+	print "test go-live sets no policy on a door and sidecar allUsers already invokes, and grants one that lacks it..."
+	let more = {plan: {project: "p", region: "r", service: "svc", iap: false, domain: null, aliases: [], sidecarServicesYaml: {render: "x"}, clock: null, names: {job: "j", migrateJob: "mj", secrets: {}, sidecarServices: {render: "svc-render"}}}}
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	"" | save -f ($d | path join granted)
+	let res = (golive $d $more)
+	assert equal $res.exit_code 0 $res.stderr
+	assert (log-of $d | str contains "get-iam-policy svc ")
+	assert (log-of $d | str contains "get-iam-policy svc-render ")
+	assert (not (log-of $d | str contains "add-iam-policy-binding"))
+	rm -r $d
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	let res = (golive $d $more)
+	assert equal $res.exit_code 0 $res.stderr
+	assert (log-of $d | str contains "add-iam-policy-binding svc --region r --project p --member allUsers --role roles/run.invoker")
+	assert (log-of $d | str contains "add-iam-policy-binding svc-render --region r --project p --member allUsers --role roles/run.invoker")
+	rm -r $d
+}
 
 def test_golive_switches_after_both_answer [] {
 	print "test go-live moves traffic only after the candidate answers, and ends on the new revision..."
