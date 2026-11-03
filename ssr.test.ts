@@ -28,6 +28,21 @@ Deno.test("a public route's addresses reach the renderer, ahead of the entry", (
   if (rendered > out.indexOf("rewrite @route")) throw new Error("the entry's rewrite answers before the renderer does");
 });
 
+// Regression: a renderer down answered every visitor of a table or player link
+// with Cloud Run's 429 page for minutes. The SPA draws the route itself, so the
+// door serves the entry, status 200, when the renderer is rate-limited, failing
+// or unreachable, and passes every other answer, a real 404 included, through.
+Deno.test("a renderer that is down or limiting falls back to the entry at 200", () => {
+  const { ok, out } = ask("_view", "caddyfile");
+  if (!ok) throw new Error(out);
+  const proxy = out.slice(out.indexOf("handle @rendered {"));
+  const response = proxy.slice(proxy.indexOf("@renderdown status 429 502 503 504\n"), proxy.indexOf("    handle {\n"));
+  if (!response.includes("handle_response @renderdown {") || !response.includes("rewrite * /shell/index.html")) throw new Error(`no fallback on the renderer's answer:\n${out}`);
+  if (/\bstatus (404|500)\b/.test(response.split("handle_response")[0])) throw new Error("a real answer is replaced");
+  const errors = out.slice(out.indexOf("handle_errors {"));
+  if (!errors.includes("expression {err.status_code} in [502, 503, 504]") || !errors.includes("path /jogo/* /jogo/*/") || !errors.includes("rewrite * /shell/index.html") || !errors.includes("status 200")) throw new Error(`no fallback when the renderer is unreachable:\n${out}`);
+});
+
 // Each upstream is dialed at its own PRONTO_UPSTREAM_<SERVICE> when set: a k8s
 // release sets every one to the caddy pod's Dapr sidecar, which routes by
 // dapr-app-id, and a gcp release to the service's own localhost port in the
@@ -212,7 +227,7 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
   const privData = JSON.parse(priv.out);
   if (privData.screen.access !== "private" || privData.screen.ssr !== "spa") throw new Error(priv.out);
   if (privData.shellRoute.access !== "private" || privData.shellRoute.ssr !== "spa") throw new Error(priv.out);
-  if (privData.caddyfile.includes("@rendered")) throw new Error(privData.caddyfile);
+  if (privData.caddyfile.includes("@rendered") || privData.caddyfile.includes("renderdown")) throw new Error(privData.caddyfile);
   if (privData.sitemap.includes("/jogos</loc>")) throw new Error(privData.sitemap);
 
   // Explicit access: "private" override on an open or mixed screen -> derives ssr: "spa" and omits from sitemap.xml.
