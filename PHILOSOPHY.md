@@ -1,9 +1,3 @@
----
-type: concept
-title: Philosophy
-description: The thesis that software is a loop of moving data, transforming data and updating invariants, the schools of thought pronto stretches to cover it, and the classical works each part stands on.
----
-
 # Philosophy
 
 Pronto starts from a realization that software is a loop of three things: 1)
@@ -11,64 +5,62 @@ move data, 2) transform data, 3) update invariants. We try to stretch this
 notion everywhere we can, and bring several classical and modern schools of
 thought to support that direction.
 
-Google ignited a revolution in large scale data processing with the MapReduce
-idea. Jeff Dean and Sanjay Ghemawat added the data movement and fault tolerance angle to the ideas
-of data processing that had long been studied by the functional programming
-community. While
-googlers were mapreducing terabytes of protos, haskell academics were using
+Similar ideas have long been floating at different computing heights. Jeff Dean and Sanjay Ghemawat transformed large-scale data processing with MapReduce by adding fault tolerance and data movement to primitives that the functional programming community had long been building upon.
+While Googlers were mapreducing terabytes of protos, Haskell academics were using
 monadic binds to safely map errors and manage side effects on a single core.
-Regardless of scale, the cycle is always there: move data, transform data,
-update invariants.
+And decades earlier, Ivan Sutherland's famous Sketchpad demo had given us the first program where invariants helped shape inputs, hinting at how a mix of freedom and rigidity results in incredibly adaptive systems.
+
+In the new world of LLMs, which have different minds and lots of energy, connecting components that provide strong guarantees where it matters with bubbles of freedom where we reach out to the world seems to be a powerful mix. Let us see how it plays out.
 
 ## Move data
 
-In pronto, our data movement primitive is a more modern technique, dubbed
-Incremental View Maintenance (IVM). Get some data, query it with sql,
+In Pronto, our data movement primitive is the modern incarnation of an old technique, dubbed
+Incremental View Maintenance (IVM). Get some data, query it with SQL,
 eventually see the result somewhere else. It does not allow for arbitrary
-computation, but subsumes most of asynchronous and streaming systems (kafka,
-flink and simpler cqrs designs). It can be stretched and used to synchronize
+computation, but subsumes most asynchronous and streaming systems (Kafka,
+Flink and simpler CQRS designs). It can be stretched and used to synchronize
 your database with your browser, retiring another large class of complex
-systems (graphql apollo, elixir phoenix, or even simple REST). If you stretch
+systems (GraphQL Apollo, Elixir Phoenix, or even simple REST). If you stretch
 it more, it can synchronize your data model with your view, replacing some
-beloved solutions (react/redux). Stretch the ideas further into the low
-latency world and you get to GGPO, not exactly the same thing, but close
-enough: a ledger can decide truth over the present and the past . And now you
-can build a whole system from petabytes in a lake to 120hz physics ticks
-without ever doing something like an rpc or an http call.
+beloved solutions (React/Redux). Stretch the ideas further into the
+low-latency world and you get to GGPO, not exactly the same thing, but close
+enough: a ledger can decide truth over the present and the past. And now you
+can build a whole system from petabytes in a lake to 120 Hz physics ticks
+without ever doing something like an RPC or an HTTP call.
 
 ## Transform data
 
-In the Von Neumann architecture, data transformation is what happens when we
-move the data into the Central Processing Unit (CPU), or through its more
+In the von Neumann architecture, data transformation is what happens when we
+move the data into the central processing unit (CPU), or through its more
 specialized siblings, like GPUs, FPGAs and ASICs. Here the stateless world of
-mathematics is king, and as long as you can achieve functional purity in your
+mathematics is king, and the closer you get to functional purity in your
 code, the fewer bugs there will be. Our industry has pursued this for a long
 time through functional programming, but humans live in an imperative world
-and have imperative minds. LLMs have no such constraints, and in pronto data
-transformation is done by pure languages alone, like Jessie (a javascript
+and have imperative minds. LLMs have no such constraints, and in Pronto data
+transformation is done by pure languages alone, like Jessie (a JavaScript
 subset). Real programs interact with
 the external world, and among the most successful experiments in splitting
 functional boundaries from impure effects was the TEA model, which powers the
-Elm language and inspired redux and react. Pronto adopts it in spirit, and
+Elm language and inspired Redux and React. Pronto adopts it in spirit, and
 besides the natural ledger given by IVM to our data movements, any impure
 effect needs to be serialized before application so it can be replayed. The
-result is the same that surprised the world with redux: time travel
-capabilities, now extended way beyond UI updates in pronto since we apply the
-discipline application wide.
+result is the same that surprised the world with Redux: time travel
+capabilities, now extended way beyond UI updates in Pronto since we apply the
+discipline application-wide.
 
 ## Update invariants
 
 If all you do is move data around and do pure data transformations, this means
 your program is mostly declarative, and feels more like configuration than
-code. In fact, most of a pronto program is a large json config. It declares
+code. In fact, most of a Pronto program is a large JSON config. It declares
 the invariants that define your application domain. Pronto sees a program as a
 constraint over the universe, rather than as a fully specified world built
 from scratch. Because of that, the programs are very malleable, and can be
 instantiated in different environments, like a thin browser client, an
-air-gapped datacenter or screenshots in a whatsapp chat. Invariants are
-types, and pronto's type system is cuelang, a very unique language that LLMs
-are incredibly good at driving. In cue there is no notion of time, things
-cannot come before or after, and this allows connecting far away constraints
+air-gapped data center or screenshots in a WhatsApp chat. Invariants are
+types, and Pronto's type system is CUE, a very unique language that LLMs
+are incredibly good at driving. In CUE there is no notion of time: things
+cannot come before or after, and this allows connecting faraway constraints
 in a very unique way, which keeps your program tied together as it grows,
 instead of becoming a composition of mini programs with their own opinions and
 bugs that need to be refined and fought over time and time again.
@@ -76,10 +68,10 @@ bugs that need to be refined and fought over time and time again.
 Because you have a type system that defines where data lives, what operations
 exist, and what the possible outcomes are, you can model your whole system as
 a state machine. Pronto goes back to David Harel and connects everything with
-statecharts. LLMs are great at writing json that describes them, but there is
-an even more powerful outcome. Because all the states are known, we can bring
-techniques inspired by the formal verification school and generate most of the test coverage for a pronto
-program automatically. Pronto runs the chinese postman tour over every machine
+statecharts. LLMs are great at writing JSON that describes them, but there is
+an even more powerful outcome. Because all the declared states are known, we can bring
+techniques inspired by the formal verification school and generate most of the test coverage for a Pronto
+program automatically. Pronto runs the Chinese Postman tour over every machine
 and uncovers several bugs before even running a line of application code. And
 when it comes to actively exercising the code, we can synthesize the input
 state and start directly from the node in the state machine we want, saving
@@ -87,14 +79,16 @@ an enormous amount of time in running tests. It is time travel popping up
 again, and we even use clock jumps for testing animations faster than they
 can happen.
 
-We tamed time within pronto but outside in the real world the time axis continues to flow, and the move, transform update cycle keeps repeating. Even if we
-have walked every arrow of all code at a point, the program evolves, and
-pronto uses different techniques to make it safe to update your invariants as
+## On Time
+
+We tamed time within Pronto, but outside in the real world the time axis continues to flow, and the move, transform, update cycle keeps repeating. Even if we
+have walked every declared arrow at a point, the program evolves, and
+Pronto uses different techniques to make it safe to update your invariants as
 time passes. The update of invariants is fully aware of the different notions
 of time in the system, and their consequences to performance and parallelism.
-Each part of the system is newtonian, but in a distributed system relativity
+Each part of the system is Newtonian, but in a distributed system relativity
 kicks in. Lamport taught us that order does not need a global clock, and the
-database's cdc lsn is the one we use as the tie break as computations arrive;
+database's CDC LSN is the one we use as the tiebreaker as computations arrive;
 the streaming computations live in their own relative times until observed.
 Data lakes live in their own god-like timeframe, migrations evolve the
 transactional schema by expanding and contracting, and code is fully aware of
@@ -106,7 +100,7 @@ A lot of these ideas are foreign to people writing code on a daily basis. But
 some of them have been around for decades, and even the more recent
 incarnations are incremental developments of research lines established years
 ago. The magic of pronto is making them practical, which only became possible
-with LLMs as code authors. What maybe is the innovation of pronto is bringing
+with LLMs as code authors. What may be Pronto's innovation is bringing
 this full framework together into a harmonious whole and deriving a pragmatic
 system that can deploy production code. To wrap up, here is a quick overview
 of the classical works we build upon, each with the document where pronto
@@ -172,8 +166,28 @@ takes its side.
   Hardened JavaScript. A JavaScript subset in compartments with no ambient
   authority (omnishell's [reference](https://github.com/bonisoft3/omnishell/blob/v0.21.6/REFERENCE.md) and
   [machines](https://github.com/bonisoft3/omnishell/blob/v0.21.6/docs/machines.md)).
+
 ### Update invariants
 
+- **Room to evolve**: Kay,
+  [*The Early History of Smalltalk*](https://doi.org/10.1145/155360.155364)
+  (1993); Sussman and Hanson,
+  [*Building Robust Systems*](https://publications.csail.mit.edu/abstracts/abstracts07/gjs1/gjs1.html)
+  (2007). Late binding and software that can accommodate changes its designers
+  did not anticipate. Pronto constrains the application in `program.cue` while
+  leaving freedom in how different environments realize it
+  ([the lattice](docs/lattice.md)).
+- **Constraints with degrees of freedom**: Sutherland,
+  [*Sketchpad: A Man-Machine Graphical Communication System*](https://dspace.mit.edu/handle/1721.1/14979)
+  (1963). Declare geometric relationships and let the system find positions
+  that satisfy them. A precedent for specifying what must hold without fixing
+  every choice ([the lattice](docs/lattice.md)).
+- **Guarded recursion and productivity**: Atkey and McBride,
+  [*Productive Coprogramming with Guarded Recursion*](https://bentnib.org/productive.html)
+  (ICFP 2013). Infinite processes whose successive outputs can each be produced
+  in finite time. A theoretical relative of pronto's discipline: computations
+  are bounded and continuation belongs to the framework
+  ([escape hatches](README.md#escape-hatches)).
 - **Essential state and logic**: Moseley and Marks,
   [*Out of the Tar Pit*](https://curtclifton.net/papers/MoseleyMarks06a.pdf)
   (2006). State as relations, logic as pure derived queries under declared
@@ -183,7 +197,7 @@ takes its side.
 - **CUE**: van Lohuizen, [*The Logic of CUE*](https://cuelang.org/docs/concept/the-logic-of-cue/)
   (2018), descended from Google's GCL and BCL and from typed feature
   structures. Unification as greatest lower bound, so declaration order cannot
-  matter ([the unified lattice](README.md#the-unified-lattice), [the lattice](docs/lattice.md)).
+  matter ([the unified lattice](README.md#the-unified-lattice-and-program-reasoning), [the lattice](docs/lattice.md)).
 - **A program as constraints, not a world**: Kowalski,
   [*Algorithm = Logic + Control*](https://www.doc.ic.ac.uk/~rak/papers/algorithm%20=%20logic%20+%20control.pdf)
   (CACM 1979); Jaffar and Lassez,
