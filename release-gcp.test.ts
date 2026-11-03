@@ -63,14 +63,70 @@ Deno.test("the account reads exactly the secrets its service and job name", asyn
   for (const s of ["battlechess-postgres-password", "battlechess-crud-db-uri", "battlechess-google-secret"]) assert(r.value.readSecrets.includes(s), s);
 });
 
-// electric is one instance (mecha's docs/deployment.md#clouds-as-built), and so
-// is the service it shares; none while nobody plays.
-Deno.test("the service is one instance at most and none at rest", async () => {
+// electric's slot and the advisory lock behind it are named by the stream id, so a second
+// instance on the default stream waits on the first's lock and serves no shape.
+Deno.test("the service is one instance at most and none at rest, with one electric on the default slot", async () => {
   const r = await built(release(), "service");
   assertEquals(r.success, true, r.stderr);
   const a = r.value.spec.template.metadata.annotations;
   assertEquals([a["autoscaling.knative.dev/minScale"], a["autoscaling.knative.dev/maxScale"]], ["0", "1"]);
+  assertEquals(a["run.googleapis.com/sessionAffinity"], undefined);
   assertEquals(JSON.parse(a["run.googleapis.com/container-dependencies"]).caddy, ["crud", "auth", "electric"]);
+  const electric = r.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "electric");
+  const names = electric.env.map((e: { name: string }) => e.name);
+  assert(!names.some((n: string) => /SLOT|STREAM/.test(n)), names.join(", "));
+  assertEquals(electric.livenessProbe, undefined);
+});
+
+// Each instance's electric is a replica: a temporary slot of its own name (dropped with its
+// connection, retaining no WAL) beside the default stream's publication, and a client's polls
+// stay where its shapes are.
+Deno.test("maxScale above 1 runs a replica per instance with session affinity", async () => {
+  const r = await built(release(`, minScale: 3, maxScale: 3`), "service");
+  assertEquals(r.success, true, r.stderr);
+  const a = r.value.spec.template.metadata.annotations;
+  assertEquals([a["autoscaling.knative.dev/minScale"], a["autoscaling.knative.dev/maxScale"]], ["3", "3"]);
+  assertEquals(a["run.googleapis.com/sessionAffinity"], "true");
+  const electric = r.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "electric");
+  const env = Object.fromEntries(electric.env.filter((e: { value?: string }) => e.value).map((e: { name: string; value: string }) => [e.name, e.value]));
+  assertEquals(env.CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN, "true");
+  assertEquals(env.ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME, "true");
+  assertEquals(env.ELECTRIC_REPLICATION_STREAM_ID, undefined);
+  // A replica hung on a lock or a loop is restarted rather than left to take its share of polls.
+  assertEquals(electric.livenessProbe.httpGet, {path: "/v1/health", port: 3002});
+  assertEquals(electric.livenessProbe.failureThreshold, 6);
+});
+
+// A rollout overlaps the old and new instances, each with a slot, a WAL sender and its pools'
+// connections; the flags are derived from #Pools, and the default's are unchanged.
+Deno.test("maxScale above 1 sizes the database for its replicas, and refuses a shared-core tier", async () => {
+  const plan = await built(release(`, maxScale: 3, sqlTier: "db-custom-1-3840"`), "plan");
+  assertEquals(plan.success, true, plan.stderr);
+  assertEquals(plan.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=130,max_replication_slots=8,max_wal_senders=8,max_slot_wal_keep_size=1024");
+  assertEquals(plan.value.sqlTier, "db-custom-1-3840");
+  for (const tier of ["db-f1-micro", "db-g1-small"]) {
+    const bad = await built(release(`, maxScale: 3, sqlTier: "${tier}"`), "plan");
+    assertEquals(bad.success, false);
+    assertStringIncludes(bad.stderr, "shared-core");
+  }
+  const small = await built(release(`, sqlTier: "db-f1-micro"`), "plan");
+  assertEquals(small.success, true, small.stderr);
+  assertEquals(small.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=50");
+});
+
+Deno.test("minScale above maxScale is refused, and a preview stays at 0 and 1", async () => {
+  const bad = await built(release(`, minScale: 3, maxScale: 2`), "plan");
+  assertEquals(bad.success, false);
+  const lone = await built(release(`, minScale: 2`), "plan");
+  assertEquals(lone.success, false);
+  const preview = await built(release(`, minScale: 3, maxScale: 3, preview: "pr-32", runHost: "bonk-chess-pr-32-504479523278.us-central1.run.app"`), "service");
+  assertEquals(preview.success, true, preview.stderr);
+  const a = preview.value.spec.template.metadata.annotations;
+  assertEquals([a["autoscaling.knative.dev/minScale"], a["autoscaling.knative.dev/maxScale"]], ["0", "1"]);
+  assertEquals(a["run.googleapis.com/sessionAffinity"], undefined);
+  const electric = preview.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "electric");
+  assertEquals(electric.livenessProbe, undefined);
+  assert(!electric.env.some((e: { name: string }) => e.name === "CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN"));
 });
 
 // A rollback (release.nu --rollback) pins traffic to a revision; the next release sends it

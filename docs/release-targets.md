@@ -725,7 +725,7 @@ others are pushed once built. `PRONTO_VERIFY_NO_DRIVER_CACHE=1` builds them all.
 |---|---|
 | database | Cloud SQL, PostgreSQL 18, `cloudsql.logical_decoding=on`; the app's database image builds the schema once as the Job `<app>-initdb`, over the socket Cloud Run mounts, and reapplies its re-runnable steps every release |
 | migrate | where the app declares pgroll migrations, the cluster's runner in the same Job `<app>-initdb`, after initdb and before the service rolls, as compose runs it on every boot: its image is `<app>-schema`, migrate's with the database image's initdb directory, which the release builds beside compose's, so the Job starts once |
-| caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; at most one instance, since electric is one, and none at rest |
+| caddy, crud, auth, electric | containers of one Cloud Run service sharing localhost, beside the Cloud SQL Auth Proxy, caddy its ingress; one instance at most, none at rest, unless `maxScale` says more ([scaling out](#scaling-out)) |
 | ticker | where the app runs one, one more container of the service, writing through crud with the service role's token (`<app>-service-jwt`, signed with the gateway's secret) |
 | clock | the Cloud Scheduler job `<app>-clock`, POSTing the door's `/poke` at the service's run.app address each minute with that token and no retry, as compose's clock does: the service answers anyone, so Cloud Run has no OIDC token to check |
 | electric's storage | the instance's own: a new instance rebuilds its shapes from Postgres |
@@ -866,6 +866,30 @@ A sidecar's `memory` is its container's (`"4Gi"`), as Cloud Run spells it;
 absent, Cloud Run's default. `alwaysOn: true` keeps the instance's CPU
 unthrottled between requests, for a sidecar inside it whose work runs while
 nobody is asking.
+
+### Scaling out
+
+`maxScale` (default 1) lets the service run more instances, with `minScale`
+(default 0, at most `maxScale`) kept at rest; a preview stays at 0 and 1.
+Electric names its replication slot, and the advisory lock behind it, by its
+stream id, so instances sharing the default one would wait on each other's
+lock and serve no shape. Past 1, each instance's electric runs on a temporary
+slot of a random name (`CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN` and
+`ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME`, electric 1.8.1), which
+Postgres drops with its connection and which retains no WAL, beside the
+default stream's publication. The service sets session affinity, so a
+client's long-polls stay on the instance holding its shapes, and each
+electric gets a liveness probe on `/v1/health` (answered 200 once active, 202
+while waiting or starting, so it restarts a hung electric, not a waiting one).
+
+The database is sized for the replicas, by the plan's `sqlFlags`:
+`max_replication_slots` and `max_wal_senders` at `2*maxScale+2` (a rollout
+overlaps the old and new instances), `max_slot_wal_keep_size` 1024 MB so a hung
+but connected replica cannot fill the disk, and `max_connections` from the
+pools of both instances (`(crud + electric pool + 10) * 2*maxScale + 10`). A
+`sqlTier` of `db-f1-micro` or `db-g1-small` is refused, since the WAL senders
+and connections do not fit in their memory; the release patches the tier and
+flags of an existing instance when they differ, which restarts it once.
 
 An app that acts for its owner alone sets `iap: true`: Identity-Aware Proxy
 stands in front of the service, the release grants `roles/run.invoker` to IAP's
