@@ -394,7 +394,12 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       const html = await Deno.readTextFile(Deno.args[0])
       const b64 = /<script type="application\\/octet-stream" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1]
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))))
-      globalThis.fetch = () => { throw new Error('the bundled database must boot offline') }
+      // PGlite's files come from beside the page, and nothing from elsewhere.
+      const dir = Deno.args[0].replace(/index\\.html$/, '')
+      globalThis.fetch = async (href) => {
+        if (!String(href).startsWith('/pronto/')) throw new Error('the bundled database must boot from its own files')
+        return new Response(await Deno.readFile(dir + String(href).slice(1)))
+      }
       const db = await createPageDatabase(payload.cluster.assets)
       const cluster = await createCluster({ db, sql: payload.cluster.sql, tables: payload.cluster.tables, drains: payload.cluster.drains, schema: JSON.parse(payload.files['shell/shell.json']).schema, log: console.error, fail: (e) => { throw e } })
       await cluster.drains.idle()
