@@ -262,6 +262,33 @@ Deno.test("a go-live task that fails lets the others finish, then fails the rele
   } finally { await clean(w) }
 })
 
+Deno.test("each sidecar apart is rolled once the new revision serves, and a roll that fails leaves the release live", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await ledger(w, "stamp")
+    await ledger(w, "rc-stamp")
+    const r = await release(w)
+    assert(r.success, r.stderr + r.stdout)
+    const lines = await log(w)
+    const moved = at(lines, /update-traffic guestbook --to-revisions r1=100/)
+    for (const s of ["billing", "worker"]) {
+      const made = at(lines, new RegExp(`replace .*sidecar-${s}.yaml is `))
+      const rolled = at(lines, new RegExp(`services update guestbook-${s} --update-labels pronto-door=r1`))
+      assert(made >= 0 && made < moved && moved < rolled, `${s}: made ${made}, traffic ${moved}, rolled ${rolled}`)
+    }
+    await clean(w)
+    const v = await world()
+    await ready(v)
+    await ledger(v, "stamp")
+    await ledger(v, "rc-stamp")
+    const kept = await release(v, { FAKE_FAIL: "services update guestbook-billing --update-labels" })
+    assert(kept.success, kept.stderr + kept.stdout)
+    assertStringIncludes(kept.stdout, "billing apart kept its instance")
+    await clean(v)
+  } finally { await clean(w) }
+})
+
 Deno.test("an IAM binding refused once for a concurrent policy change is asked again, and the release goes live", async () => {
   const w = await world()
   try {

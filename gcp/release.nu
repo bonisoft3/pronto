@@ -773,6 +773,17 @@ export def go-live [staged: record]: nothing -> record {
 		}
 		error make {msg: $"($plan.service) did not go live: ($failed)"}
 	}
+	# A sidecar apart made before the switch read the door that served then, the release before:
+	# what it reads at start (a renderer's catalogues of messages) it keeps for its life, and a
+	# key new in this release is unknown to it (Bonk Chess's player pages, 2026-11-03). Each is
+	# rolled once this revision serves, a fresh instance reading this release's door. A roll
+	# that fails leaves the sidecar as it was, and the release live.
+	$plan.sidecarServicesYaml | columns | par-each {|s|
+		let svc = ($plan.names.sidecarServices | get $s)
+		try {
+			gc run services update $svc --update-labels $"pronto-door=($candidate.revision)" --region $r --project $p | ignore
+		} catch {|e| print $"gcp: (stamp) ($s) apart kept its instance, started before the switch: ($e.msg)" }
+	} | ignore
 	print $"gcp: (stamp) ($plan.service) is live at ($address)"
 	release-record note {revision: $candidate.revision} --preview $own
 	release-record mark deploy end --preview $own
