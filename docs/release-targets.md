@@ -609,6 +609,14 @@ preview that does not come up, stops the release there. `--preview`,
 `--dry-run` and `--snapshot` deploy as asked, untested, and `--no-gate`
 releases without the preview.
 
+Before even that, release.nu hands Cloud Run every service yaml it will apply (the door and
+each sidecar apart, the rc preview's and production's) to `gcloud run services replace --dry-run`,
+in parallel, so a fault only Cloud Run sees (a reserved env name such as `PORT`) fails the release
+in seconds, naming the file and Cloud Run's message, before the gates, the build or the tests. The
+dry run needs no image to exist, so the yaml is rendered over placeholder digests; it does check the
+service account, so a project not yet set up (a first release) is validated when applied. Jobs are not
+checked: `gcloud run jobs replace` has no `--dry-run`.
+
 Before any of that, a release (gated or `--no-gate`, not a preview, a dry run
 or a snapshot) runs the same drivers on the machine releasing: `release.nu`
 runs `sayt integrate@local` with `INTEGRATE_LOCAL_DRIVERS=all`, which brings the
