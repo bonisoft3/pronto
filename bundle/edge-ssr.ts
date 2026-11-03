@@ -149,8 +149,13 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
       const version = env.CF_VERSION_METADATA?.id ?? ''
       const reset = cache ? ((await (await cache.match(keyOf(version, 'reset')))?.text()) ?? '0') : '0'
       const lastWrite = cache ? ((await (await cache.match(keyOf(version, reset, 'writes', 'public')))?.text()) ?? '0') : '0'
-      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(version)}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
+      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(version)}/\${encodeURIComponent(reset)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
+      // A write moved this key once, so every visitor's write cost the next reader of every page a
+      // render of seconds. It now makes a document stale, which paints at once and renders behind.
+      const sharedRender = cacheKey.url + '|' + lastWrite
       const renderFresh = async (speculative = false) => {
+        // When it began: a write landing during the render may not be in it.
+        const startedAt = Date.now()
         const reqHeaders = new Headers(request.headers)
         if (speculative) reqHeaders.set('x-pronto-speculative', '1')
         const getReq = request.method === 'HEAD' || speculative ? new Request(request.url, { headers: reqHeaders }) : request
@@ -210,7 +215,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
               storedHeaders.delete('vary')
               storedHeaders.delete('link')
               storedHeaders.set('cache-control', \`public, max-age=\${RENDER_SWR_S}\`)
-              storedHeaders.set('x-rendered-at', String(Date.now()))
+              storedHeaders.set('x-rendered-at', String(startedAt))
               // Keep downstream writers open until cache.put settles so the isolate stays alive without waitUntil.
               await cache.put(cacheKey, new Response(cleanBody, { status: 200, headers: storedHeaders }))
             }
@@ -227,9 +232,9 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
         return { status: response.status, headers, makeStream, done }
       }
       const renderShared = (speculative = false) => {
-        let pending = inFlight.get(cacheKey.url)
+        let pending = inFlight.get(sharedRender)
         if (!pending) {
-          const clear = () => inFlight.delete(cacheKey.url)
+          const clear = () => inFlight.delete(sharedRender)
           pending = renderFresh(speculative).then(res => {
             res.done.then(clear, clear)
             return res
@@ -237,14 +242,15 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
             clear()
             throw err
           })
-          inFlight.set(cacheKey.url, pending)
+          inFlight.set(sharedRender, pending)
         }
         return pending
       }
       if (cache && !request.headers.has('if-none-match')) {
         const cached = await cache.match(cacheKey)
         if (cached) {
-          const age = Date.now() - Number(cached.headers.get('x-rendered-at') ?? 0)
+          const renderedAt = Number(cached.headers.get('x-rendered-at') ?? 0)
+          const age = Date.now() - renderedAt
           const headers = new Headers(cached.headers)
           headers.delete('x-rendered-at')
           headers.set('cache-control', RENDER_CACHE_CONTROL)
@@ -252,7 +258,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
           if (linkHeader) headers.set('Link', linkHeader)
           else headers.delete('Link')
           headers.set('Content-Security-Policy', DOCUMENT_POLICY)
-          if (age <= RENDER_FRESH_MS) {
+          if (age <= RENDER_FRESH_MS && renderedAt >= Number(lastWrite)) {
             headers.set('x-edge-cache', 'hit')
             return new Response(request.method === 'HEAD' ? null : cached.body, { status: cached.status, headers })
           }

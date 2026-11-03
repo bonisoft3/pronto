@@ -333,11 +333,19 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     assert.match(refreshedHtml, /Render 3/)
     assert.match(refreshedHtml, /id="pronto-reads"/)
 
-    // A public write marker in caches.default invalidates the cached SSR HTML.
-    store.set('https://edge-cache.invalid/v1/0/writes/public', new Response('1700000000000'))
+    // A write makes a document stale rather than absent: it moved the key once, so one visitor's
+    // write cost the next reader of every page a render of seconds, with nothing on screen.
+    await new Promise(resolve => setTimeout(resolve, 2))
+    store.set('https://edge-cache.invalid/v1/0/writes/public', new Response(String(Date.now())))
+    await new Promise(resolve => setTimeout(resolve, 2))
     const afterWrite = await worker.fetch(new Request('https://app.example/'), env, ctx)
-    assert.equal(afterWrite.headers.get('x-edge-cache'), 'miss')
+    assert.equal(afterWrite.headers.get('x-edge-cache'), 'stale')
+    assert.doesNotMatch(await afterWrite.text(), /id="pronto-reads"/)
+    await Promise.all(background.splice(0))
     assert.equal(renders, 4)
+    const afterRender = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    assert.equal(afterRender.headers.get('x-edge-cache'), 'hit')
+    await afterRender.text()
 
     // A private / SPA route skips RENDERER + CLUSTER.render and serves the SPA entry with Link hints on GET and HEAD.
     const spa = await worker.fetch(new Request('https://app.example/gerenciar', { headers: { accept: 'text/html' } }), env, ctx)
