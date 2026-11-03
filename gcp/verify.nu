@@ -218,9 +218,12 @@ export def run-rehearsal [run: record, r: record]: nothing -> record {
 		$waited += 5
 	}
 	gc run jobs update $r.job --image $image --region $run.region --project $run.project | ignore
-	let vars = ($r.env | merge {APP_URL: $run.url} | items {|k, v| $"($k)=($v)" } | str join "@")
+	# gcloud's own escaping of a list: `~` between the pairs, so no pair may hold one.
+	let pairs = ($r.env | merge {APP_URL: $run.url} | items {|k, v| $"($k)=($v)" })
+	if ($pairs | any {|p| $p | str contains "~" }) { error make {msg: "GCP.rehearsal.env holds a ~, which separates the job's variables"} }
+	let vars = ($pairs | str join "~")
 	print $"gcp: (stamp) the rehearsal: job ($r.job) on ($image) against ($run.url)"
-	let execution = (gc run jobs execute $r.job --region $run.region --project $run.project $"--update-env-vars=^@^($vars)" --async --format "value(metadata.name)" | str trim)
+	let execution = (gc run jobs execute $r.job --region $run.region --project $run.project $"--update-env-vars=^~^($vars)" --async --format "value(metadata.name)" | str trim)
 	print $"gcp: (stamp) rehearsal execution ($execution): https://console.cloud.google.com/run/jobs/executions/details/($run.region)/($execution)?project=($run.project)"
 	mut done = {}
 	loop {
@@ -233,7 +236,8 @@ export def run-rehearsal [run: record, r: record]: nothing -> record {
 	let vcpu = (if ($limits.cpu | str ends-with "m") { ($limits.cpu | str replace "m" "" | into float) / 1000 } else { $limits.cpu | into float })
 	let memory_gi = (if ($limits.memory | str ends-with "Gi") { $limits.memory | str replace "Gi" "" | into float } else if ($limits.memory | str ends-with "Mi") { ($limits.memory | str replace "Mi" "" | into float) / 1024 } else { error make {msg: $"the job's memory ($limits.memory) is not in Gi or Mi"} })
 	let usd = ($seconds * ($vcpu * $r.price.vcpu + $memory_gi * $r.price.gib) | math round --precision 4)
-	let ok = (($done.status.succeededCount? | default 0) > 0)
+	# The execution's Completed condition, not a count of tasks: one task that failed fails it.
+	let ok = ($done.status.conditions? | default [] | any {|c| $c.type == "Completed" and $c.status == "True" })
 	sleep 10sec # Cloud Logging takes the last lines a moment after the run ends
 	gc logging read $"resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"($execution)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
 		| lines | where {|l| $l | str trim | is-not-empty } | each {|l| print $"rehearsal| ($l)" } | ignore
