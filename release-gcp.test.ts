@@ -510,6 +510,18 @@ Deno.test("a sidecar apart runs as its own service, dialed by the door at its ad
   assertEquals(preview.value.names.sidecarServices, { "perf-collector": "bonk-chess-rc-perf-collector" });
 });
 
+// Cloud Run refused bonk-chess-rc-render: "reserved env names were provided: PORT", which
+// compose's renderer sets. Apart, Cloud Run sets PORT to the containerPort; inside, it stays.
+Deno.test("a sidecar apart leaves PORT to Cloud Run, one inside keeps it", async () => {
+  const env = `, env: {PORT: "8687", PERF_HTTP_PORT: "8687"}`;
+  const own = (await built(withApart(`{port: 8687${env}, apart: {}}`), "sidecarServices")).value["perf-collector"];
+  const names = own.spec.template.spec.containers[0].env.map((e: { name: string }) => e.name);
+  assertEquals(names, ["PERF_HTTP_PORT"]);
+  const s = await built(withApart(`{port: 8687${env}}`), "service");
+  const inside = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assert(inside.env.some((e: { name: string }) => e.name === "PORT"), "inside, nothing sets it for the sidecar");
+});
+
 Deno.test("a sidecar apart reaches the gateway through the door, one inside at loopback", async () => {
   const r = await built(withApart(`{port: 8687, apart: {}}`), "plan");
   assertEquals(r.success, true, r.stderr);
