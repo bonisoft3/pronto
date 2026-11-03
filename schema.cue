@@ -1590,23 +1590,31 @@ import (
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
 		blobs: *false | bool
-		// A public read-only edge image plane backed by an R2 bucket.
+		// The edge's image service, the layer above blob storage (R2 there,
+		// docs/release-targets.md#cloudflare): /img transforms what the bucket holds.
 		edgeImages?: {
-			bucket:       =~"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
-			sourceBucket: =~"^[a-z0-9][a-z0-9.-]*[a-z0-9]$"
+			// A bucket name rows written before mecha-objects still spell.
+			sourceBucket?: =~"^[a-z0-9][a-z0-9.-]*[a-z0-9]$"
 			// "paid" when this account has a card behind Cloudflare Images: the
 			// release refuses a screen's data-image-src without it.
 			plan: *"free" | "paid"
 		}
-		// A static set the blob plane carries from the start: every
+		if edgeImages != _|_ {blobs: true}
+		// Files that are part of the app, as its code is: named by their sha256,
+		// served at /seed-assets/<file> and read by code, never by a row. Every
 		// { file, sha256 } the app-relative manifest names, fetched from the
-		// public origin and refused unless its bytes hash to its sha256. The
-		// edge release ships it as immutable assets under /blobs/mecha-objects.
-		blobSeed?: {
+		// public origin and refused unless its bytes hash to its sha256. In a
+		// cluster the door routes them to the app's own target `assets` on 8787.
+		seedAssets?: {
 			manifest: string
 			origin:   =~"^https://[^/]+(/.*[^/])?$"
 		}
-		if blobSeed != _|_ {blobs: true}
+		// Objects that are part of the data, as seed rows are: the files in this
+		// app-relative directory, named by their sha256, go to blob storage at
+		// seed/<file> on every target, where a row names them as it names any
+		// other object. Pages has no blob storage, and inlines them.
+		seedBlobs?: dir: string
+		if seedBlobs != _|_ {blobs: true}
 		// First-class 3-tier AI model architecture (`browser`, `cheap`, `heavy`)
 		// with per-tier and per-release-target model overrides. Backend tiers
 		// (`cheap`, `heavy`) route through mecha's tsbifrost AI gateway; the

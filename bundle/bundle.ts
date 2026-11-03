@@ -23,6 +23,7 @@
 // derived.ts writes them, run after the migrations: the page runs neither, its
 // drains and its clock aside, so what they derive ships as it stood when the
 // page was bundled.
+import { seedBlobInliner } from './edge-blobs.ts'
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -57,6 +58,7 @@ if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or 
 
 const read = (p: string) => Deno.readTextFile(path.join(app, p))
 const shell = JSON.parse(await read('shell/shell.json')) as {
+  seedBlobs?: { dir: string }
   routes: { files: Record<string, string | string[]>; ssr?: string }[]
   i18n?: { locales: Record<string, unknown> }
   migrations: string[]
@@ -162,7 +164,9 @@ if (derived && !clustered) fail('--derived names rows for a cluster, and this ap
 // database is the same: mecha's schedule table before the seed among them.
 const scripts = clustered ? await releaseFiles(app, mecha, shell.migrations) : []
 const steps = [...scripts.map((f) => f.name), ...(derived ? [derived] : [])]
-const sql = [...scripts.map((f) => f.sql), ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : [])]
+// The page is one file with no blob storage behind it, so a seed object's URL is its bytes here.
+const seedInlined = shell.seedBlobs && scripts.length > 0 ? await seedBlobInliner(path.join(app, shell.seedBlobs.dir)) : (text: string) => text
+const sql = [...scripts.map((f) => f.sql), ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : [])].map(seedInlined)
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 // A publication and a replica identity are a WAL reader's, which the page has
 // none of: the cluster skips them by the fence the emitter and an author write,

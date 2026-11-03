@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
 import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, holdIceServers } from './edge-ice.ts'
-import { BLOB_CACHE_RULE, writeEdgeBlobs } from './edge-blobs.ts'
+import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
 import { renderEffects } from './edge-effects.ts'
@@ -89,9 +89,9 @@ const name = shell.app ?? path.basename(app)
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 
 // Asked before anything is cleared: a refused release leaves the last one's output standing.
-const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{seed: *code.capabilities.blobSeed | null, images: *code.capabilities.edgeImages | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
-if (!seedOut.success) fail('cue export of code.capabilities.blobSeed failed')
-const { seed, images } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { seed: { manifest: string; origin: string } | null; images: { bucket: string; sourceBucket: string; plan: 'free' | 'paid' } | null }
+const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{assets: *code.capabilities.seedAssets | null, seedBlobs: *code.capabilities.seedBlobs | null, blobs: *code.capabilities.blobs | false, images: *code.capabilities.edgeImages | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
+if (!seedOut.success) fail('cue export of code.capabilities failed')
+const { assets, seedBlobs, blobs, images } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null }
 const routeScreens: Record<string, string> = {}
 for (const { files } of shell.routes ?? []) routeScreens[files.html] = await Deno.readTextFile(path.join(app, files.html))
 const imagePlan = imagePlanRefusal(routeScreens, images)
@@ -130,17 +130,27 @@ if (tempRetained) await Deno.remove(tempRetained, { recursive: true }).catch(() 
 await holdIceServers(builtRelease(publicDir), iceServers, publicDir)
 await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints))
 
-// The blob plane's seed rides as static assets, after addressing: its files
-// are already named by their content and keep the URLs the page asks for.
-const imageBindings = images ? {
-  images: { binding: 'IMAGES' },
-  r2_buckets: [{ binding: 'IMAGE_OBJECTS', bucket_name: images.bucket }],
-  vars: { IMAGE_SOURCE_BUCKET: images.sourceBucket },
+// Blob storage is R2 here, one bucket per app, and the image service a layer above it.
+const blobBindings = blobs ? {
+  r2_buckets: [{ binding: 'BLOB_OBJECTS', bucket_name: `${name}-mecha-objects` }],
+  vars: {
+    BLOB_URL: images ? '/img/insecure/plain/s3://mecha-objects/' : '/blobs/mecha-objects/',
+    ...(images?.sourceBucket ? { IMAGE_SOURCE_BUCKET: images.sourceBucket } : {}),
+  },
+  ...(images ? { images: { binding: 'IMAGES' } } : {}),
 } : {}
-if (seed) {
-  const count = await writeEdgeBlobs(publicDir, JSON.parse(await Deno.readTextFile(path.join(app, seed.manifest))), seed.origin)
-  await Deno.writeTextFile(path.join(publicDir, '_headers'), '\n' + BLOB_CACHE_RULE, { append: true })
-  console.error(`edge: ${count} seeded blobs`)
+// The app's own files ride with its release, after addressing: they are already
+// named by their content.
+if (assets) {
+  const count = await writeSeedAssets(publicDir, JSON.parse(await Deno.readTextFile(path.join(app, assets.manifest))), assets.origin)
+  await Deno.writeTextFile(path.join(publicDir, '_headers'), '\n' + ASSET_CACHE_RULE, { append: true })
+  console.error(`edge: ${count} seed assets`)
+}
+// What the publish puts in blob storage, outside what the release serves.
+if (seedBlobs) {
+  if (!clustered) fail('seedBlobs names objects for a cluster, and this app has no migration')
+  const count = await seedBlobFiles(path.join(app, seedBlobs.dir), path.join(out, 'seed-blobs'))
+  console.error(`edge: ${count} seed blobs`)
 }
 
 if (!clustered) {
@@ -148,14 +158,14 @@ if (!clustered) {
   const staticWorker = worker.startsWith('.') ? worker : `./${worker}`
   const imageWorker = path.relative(path.join(out, 'src'), path.join(here, 'edge-images.ts')).replaceAll('\\', '/')
   const fragment = path.relative(path.join(out, 'src'), path.join(omnishell, 'interpreter/fragment.js')).replaceAll('\\', '/')
-  await Deno.writeTextFile(path.join(out, 'src/index.ts'), images
+  await Deno.writeTextFile(path.join(out, 'src/index.ts'), blobs
     ? `import staticWorker from '${staticWorker}'\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nimport { IMAGE_WIDTHS } from '${fragment.startsWith('.') ? fragment : `./${fragment}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS) ?? staticWorker.fetch(req, env) } }\n`
     : `export { default } from '${staticWorker}'\n`)
   await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
     name, main: 'src/index.ts', compatibility_date: '2026-09-01',
     assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash', not_found_handling: 'none' },
     observability: { enabled: true },
-    ...imageBindings,
+    ...blobBindings,
     ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   }, null, 2) + '\n')
   console.error(`edge: ${out}`)
@@ -231,7 +241,7 @@ import { edgeObject } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/
 import { edgeWorker } from '${fromSrc(path.join(mecha, 'packages/mecha-edge/src/worker.ts'))}'
 import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
 import { originAssets } from '${fromSrc(path.join(here, 'edge-templates.ts'))}'
-${images ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
+${blobs ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
 ${Object.keys(hybrids).length ? "import machines from './machines.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
@@ -249,7 +259,7 @@ export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
     env = { ...env, ASSETS: originAssets(env.ASSETS) }
-${images ? '    const image = await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}
+${blobs ? '    const image = await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}
 ${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
     // asset, which never reaches upstream dynamic handlers, or not at all: the cluster's
     // GET may act (omnishell's terminal.cue \`presenter.scripted\`).
@@ -331,7 +341,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
   observability: { enabled: true },
-  ...imageBindings,
+  ...blobBindings,
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
   ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   rules: [

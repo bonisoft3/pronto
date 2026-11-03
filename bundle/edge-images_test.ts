@@ -14,7 +14,7 @@ Deno.test('edge image reads only its configured bucket and transforms its R2 obj
   const ctx = { waitUntil: (promise: Promise<unknown>) => { pending.push(promise) } }
   const env = {
     IMAGE_SOURCE_BUCKET: 'original-bucket',
-    IMAGE_OBJECTS: {
+    BLOB_OBJECTS: {
       get: (key: string) => { calls.push(['get', key]); return Promise.resolve(key === 'snapcards/a.png' ? object() : null) },
       head: (key: string) => { calls.push(['head', key]); return Promise.resolve(key === 'snapcards/a.png' ? object() : null) },
     },
@@ -59,6 +59,28 @@ Deno.test('edge image reads only its configured bucket and transforms its R2 obj
   assertEquals(await run(new Request('https://example.test/cards')), null)
 })
 
+// A row names the plane the same on every target, and one written earlier still reads.
+Deno.test('edge image answers the logical bucket, an older bucket name, and raw blobs without an image service', async () => {
+  const object = () => ({ etag: 'abc', body: new Blob(['png']).stream(), httpMetadata: { contentType: 'image/webp' } })
+  const storage = { get: (key: string) => Promise.resolve(key === 'seed/a.webp' ? object() : null), head: (key: string) => Promise.resolve(key === 'seed/a.webp' ? object() : null) }
+  const images = { input: () => ({ transform: () => ({ output: () => Promise.resolve({ response: ({ headers }: { headers: Record<string, string> }) => new Response('webp', { headers }) }) }) }) }
+  const cache = { match: () => Promise.resolve(undefined), put: () => Promise.resolve() } as unknown as Pick<Cache, 'match' | 'put'>
+  const ctx = { waitUntil: () => {} }
+  const widths = [320, 640, 960]
+  const full = { IMAGE_SOURCE_BUCKET: 'old', BLOB_OBJECTS: storage, IMAGES: images }
+  const at = (p: string, env: Parameters<typeof edgeImage>[1]) => edgeImage(new Request(`https://example.test${p}`), env, cache, ctx, widths)
+  assertEquals((await at('/img/insecure/plain/s3://mecha-objects/seed/a.webp', full))!.status, 200)
+  assertEquals((await at('/img/insecure/rs:fit:320:320/plain/s3://mecha-objects/seed/a.webp', full))!.status, 200)
+  assertEquals((await at('/img/insecure/plain/s3://old/seed/a.webp', full))!.status, 200)
+  assertEquals((await at('/img/insecure/plain/s3://other/seed/a.webp', full))!.status, 400)
+  const bare = { BLOB_OBJECTS: storage }
+  const raw = (await at('/blobs/mecha-objects/seed/a.webp', bare))!
+  assertEquals([raw.status, raw.headers.get('Content-Type'), raw.headers.get('X-Content-Type-Options')], [200, 'image/webp', 'nosniff'])
+  assertEquals(raw.headers.get('Content-Security-Policy'), 'sandbox')
+  assertEquals((await at('/blobs/mecha-objects/seed/missing.webp', bare))!.status, 404)
+  assertEquals(await at('/img/insecure/plain/s3://mecha-objects/seed/a.webp', bare), null)
+})
+
 Deno.test('edge image fits a sized request and caches each size apart', async () => {
   const fits: unknown[] = []
   const entries = new Map<string, Response>()
@@ -69,7 +91,7 @@ Deno.test('edge image fits a sized request and caches each size apart', async ()
   const pending: Promise<unknown>[] = []
   const env = {
     IMAGE_SOURCE_BUCKET: 'original-bucket',
-    IMAGE_OBJECTS: {
+    BLOB_OBJECTS: {
       get: () => Promise.resolve({ etag: 'abc', body: new Blob(['png']).stream() }),
       head: () => Promise.resolve({ etag: 'abc' }),
     },

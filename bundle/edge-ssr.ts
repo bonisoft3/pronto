@@ -13,7 +13,7 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   const separate = databaseMode === 'separate'
   const database = separate ? name + '-database' : name
   const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
-  const images = (config.images as { binding?: string } | undefined)?.binding === 'IMAGES'
+  const images = (config.r2_buckets as { binding?: string }[] | undefined)?.some((b) => b.binding === 'BLOB_OBJECTS') ?? false
   const generated = path.join(out, 'renderer')
   const server = path.join(omnishell, 'server')
   const { prepareWorker } = await import(pathToFileURL(path.join(server, 'prepare-worker.ts')).href)
@@ -320,6 +320,8 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
     ...common, name: database, main: 'src/database.ts', workers_dev: false,
     ...(separate && triggers ? { triggers } : {}),
     ...(separate && ai ? { ai } : {}),
+    // An effect's bytes are written by the object, wherever it runs.
+    ...(separate && config.r2_buckets ? { r2_buckets: config.r2_buckets, vars: config.vars } : {}),
     version_metadata: { binding: 'CF_VERSION_METADATA' },
     durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
     migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],

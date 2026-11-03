@@ -133,7 +133,7 @@ replays like any other screen:
 
 - its state is a row the module writes, at the durability the app declares;
 - a pause is a `then` delay on the terminal's clock;
-- entropy is the terminal's draw (`then: {seed: true}`), recorded on a row and
+- entropy is the terminal's draw (`then: {seed: true}` or `{uuid: true}`), recorded on a row and
   expanded purely — never ambient randomness or the wall clock, which the cage
   refuses anyway;
 - a gesture writes an intent row, and the fold the app seats with

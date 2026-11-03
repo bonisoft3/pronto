@@ -21,6 +21,7 @@ import https from 'node:https'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
+import { SEED_TYPES } from './edge-blobs.ts'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
 import { releaseJwtSecret } from './edge-jwt.ts'
 
@@ -234,13 +235,32 @@ async function settled(after: string) {
 }
 await settled('the deploy')
 
+// Before a migration can name them.
+const seedDir = path.join(out, 'seed-blobs')
+let seedStored = 0
+try {
+  for await (const e of Deno.readDir(seedDir)) {
+    const held = await send(`blob/seed/${e.name}`, { method: 'HEAD' })
+    await held.body?.cancel()
+    if (held.ok) continue
+    if (held.status !== 404) fail(`seed blob ${e.name}: ${held.status}`)
+    const res = await send(`blob/seed/${e.name}`, { method: 'PUT', headers: { 'content-type': SEED_TYPES[path.extname(e.name)] }, body: await Deno.readFile(path.join(seedDir, e.name)) })
+    if (!res.ok) fail(`seed blob ${e.name}: ${res.status} ${await res.text()}`)
+    if ((await res.json() as { stored: boolean }).stored) seedStored++
+  }
+  console.log(`publish-edge: ${seedStored} seed blobs stored`)
+} catch (e) {
+  if (!(e instanceof Deno.errors.NotFound)) throw e
+}
+
 const { load } = await import(String(pathToFileURL(path.join(workerd, 'load.ts'))))
+const { isSeedScript } = await import(String(pathToFileURL(path.join(workerd, 'scripts.ts')))) as { isSeedScript: (name: string) => boolean }
 const loaded = await load(path.join(out, 'pgdata'), send, { reset })
 if ('skipped' in loaded) {
   let migrationsBody: string
   try {
     const scripts = (JSON.parse(await Deno.readTextFile(path.join(out, 'migrations.json'))) as { name: string; sql: string | null }[])
-      .filter((s) => !s.name.includes('seed'))
+      .filter((s) => !isSeedScript(s.name))
     migrationsBody = JSON.stringify(scripts)
   } catch (e) {
     if (e instanceof Deno.errors.NotFound) migrationsBody = '[]'
@@ -252,21 +272,32 @@ if ('skipped' in loaded) {
     migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
   }
   let answer = await migrated.text()
-  if (!migrated.ok && (answer.includes('Durable Object was reset') || answer.includes('reset') || migrated.status === 503)) {
-    console.log(`Durable Object reset during migration (${migrated.status}); waiting for settled state on new code...`)
-    await settled('the reset')
+  let lost = false
+  // Only a 409 says nothing moved. Any other failure may have lost the answer to migrations that
+  // landed, and old code over migrated rows is worse than either: the ledger says which it was.
+  for (let attempt = 0; attempt < 5 && !migrated.ok && migrated.status !== 409; attempt++) {
+    console.log(`the migration answered ${migrated.status}; asking the ledger again once the object settles`)
+    lost = true
+    await settled('the migration')
     migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
     answer = await migrated.text()
   }
-  if (!migrated.ok) {
+  if (migrated.status === 409) {
     for (const { config: configPath, previous } of deployed.reverse()) {
       if (previous === null) continue
       console.log(await wrangler(['rollback', previous, '--config', configPath, '--yes', '--message', 'the data directory refused this release\'s migrations']))
     }
-    fail(`the data directory the object kept refused this release's migrations, and the Workers are rolled back: ${migrated.status} ${answer}`)
+    fail(`the data directory the object kept refused this release's migrations, and the Workers are rolled back: ${answer}`)
   }
+  if (!migrated.ok) fail(`the migrations' outcome is unknown, so the Workers stay on this release: ${migrated.status} ${answer}`)
   console.log(answer)
-  if ((JSON.parse(answer) as { applied: string[] }).applied.length) await settled('the migration')
+  // A lost answer may have been migrations that landed, which the ledger now answers as nothing owed.
+  if (lost) {
+    const restarted = await send('restart', { method: 'POST' })
+    await restarted.body?.cancel()
+    if (!restarted.ok) fail(`the restart after a lost migration answer failed: ${restarted.status}`)
+  }
+  if (lost || (JSON.parse(answer) as { applied: string[] }).applied.length) await settled('the migration')
 }
 if (ssr) {
   const warm = await edgeFetch(`${origin}/`, { headers: { accept: 'text/html' } })

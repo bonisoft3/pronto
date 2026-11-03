@@ -186,6 +186,9 @@
   # without the blobs services the upstreams never resolve and these
   # unused routes just 502.
   handle /blobs/* {
+    # A stored object can claim any type, and on this origin an SVG's or an HTML file's script would run.
+    header X-Content-Type-Options nosniff
+    header Content-Security-Policy sandbox
     uri strip_prefix /blobs
     reverse_proxy {$PRONTO_UPSTREAM_RCLONE_S3:rclone-s3:3900} {
       header_up dapr-app-id rclone-s3

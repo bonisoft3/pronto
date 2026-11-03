@@ -1654,6 +1654,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			seed: S._localSeeds
 		}
 
+		// What a page's bundle inlines.
+		if S.code.capabilities.seedBlobs != _|_ {seedBlobs: S.code.capabilities.seedBlobs}
 		if len([for h in S.code.capabilities.hatches if h.kind == "host-dom" {h}]) > 0 {
 			hostDom: {for hn, h in S.code.capabilities.hatches if h.kind == "host-dom" {(hn): {src: h.src, note: h.note}}}
 		}
@@ -1699,9 +1701,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							role: "presenter"
 							scripts: [for u in v.scripts {url: u, integrity: S.presenter.scripts[u]}]
 							// What it may read through the seat: its own files, and
-							// the objects a blob seed ships by content address.
+							// the app's content-addressed assets.
 							files: v.files
-							seed:  S.code.capabilities.blobSeed != _|_
+							seed:  S.code.capabilities.seedAssets != _|_
 						}
 						src: v.src
 					}
@@ -2257,6 +2259,29 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				compose: {}
 			}
 			surface: targets: served: _served
+			// The seed's objects, into the blob storage a row names them in.
+			if D.code.capabilities.seedBlobs != _|_ {
+				let dir = D.code.capabilities.seedBlobs.dir
+				let load = "for f in /seed/*; do case \"$f\" in *.webp) t=image/webp;; *.png) t=image/png;; *.jpg) t=image/jpeg;; *) echo \"no type for $f\"; exit 1;; esac; curl -fsS -o /dev/null -X PUT -H \"content-type: $t\" --data-binary \"@$f\" \"http://rclone-s3:3900/mecha-objects/seed/${f##*/}\" || exit 1; done"
+				surface: targets: {
+					"seed-blobs": {
+						visibility: "internal"
+						activate:   ""
+						cmd: "builtin": null
+						srcs: globs: ["\(dir)/*"]
+						dockerfile: {
+							from: name: "alpine/curl@sha256:5bd4985f3daa6d1ca87619802190afc24c0ccd410b1f123de5afc8e891b5fc71"
+							copy: [{srcs: ["\(dir)/"], dst: "/seed/"}]
+							epilogue: ["ENTRYPOINT \(json.Marshal(["/bin/sh", "-c", load]))"]
+						}
+						compose: {
+							depends_on: "rclone-s3": {condition: "service_healthy"}
+							restart: "no"
+						}
+					}
+					launch: compose: depends_on: "seed-blobs": {condition: "service_completed_successfully"}
+				}
+			}
 			meta: served: {ref: ":served", tree: omnishell.#Address.tree, scripts: omnishell.#Address.scripts}
 			// The tree a container target's door serves: the door's, with the
 			// target's ICE servers. release@docker's image copies it
@@ -3886,7 +3911,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				"""
 			// An asset the anchor is absent from indexes out of range here, rather
 			// than emitting a proxy that silently 404s every deep link.
-			_split: strings.SplitN(_caddyfileAsset, _anchor, 2)
+			// An app's seed assets are its own server's, in a cluster: not the blob plane's.
+			if E.code.capabilities.seedAssets != _|_ {_doorAnchored: true & strings.Contains(_caddyfileAsset, "  handle /blobs/* {")}
+			_door: [
+				if E.code.capabilities.seedAssets != _|_ {strings.Replace(_caddyfileAsset, "  handle /blobs/* {", "  handle /seed-assets/* {\n    reverse_proxy assets:8787\n  }\n  handle /blobs/* {", 1)},
+				_caddyfileAsset,
+			][0]
+			_split: strings.SplitN(_door, _anchor, 2)
 			// Units execute in their declared realm or agent; the terminal's
 			// Trusted Types policies belong only to its own runtime.
 			_unitPaths: list.SortStrings([for f, _ in {

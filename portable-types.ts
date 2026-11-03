@@ -27,6 +27,8 @@ export type TypeField = {
   required?: boolean
   precision?: number
   scale?: number
+  /** The column's declared default: a stored row older than the column takes it. */
+  default?: JsonValue
 }
 export type CarrierField = TypeField
 

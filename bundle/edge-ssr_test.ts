@@ -82,12 +82,19 @@ Deno.test('the Cron Trigger follows the Worker that holds the object', async () 
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
     await securityHeaders(out)
     const triggers = { crons: ['0 * * * *'] }
+    const r2_buckets = [{ binding: 'BLOB_OBJECTS', bucket_name: 'objects' }]
+    const vars = { BLOB_URL: 'https://app.example/blobs/mecha-objects' }
     for (const mode of ['existing', 'separate'] as const) {
-      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, triggers }))
+      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, triggers, r2_buckets, vars }))
       await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
       const entry = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
       assert.deepEqual(entry.triggers, mode === 'existing' ? triggers : undefined)
-      if (mode === 'separate') assert.deepEqual(JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))).triggers, triggers)
+      if (mode === 'separate') {
+        const database = JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc')))
+        assert.deepEqual(database.triggers, triggers)
+        // The object writes an effect's bytes, and without these only production would notice.
+        assert.deepEqual([database.r2_buckets, database.vars], [r2_buckets, vars])
+      }
       const entrySource = await Deno.readTextFile(path.join(out, 'src/index.ts'))
       const databaseSource = await Deno.readTextFile(path.join(out, 'src/database.ts'))
       if (mode === 'existing') {
@@ -485,7 +492,7 @@ Deno.test('SSR retains native images and origin-bound assets in both database mo
     await securityHeaders(out)
     const bindings = {
       images: { binding: 'IMAGES' },
-      r2_buckets: [{ binding: 'IMAGE_OBJECTS', bucket_name: 'public-images' }],
+      r2_buckets: [{ binding: 'BLOB_OBJECTS', bucket_name: 'public-images' }],
       vars: { IMAGE_SOURCE_BUCKET: 'original-bucket' },
     }
     for (const mode of ['existing', 'separate'] as const) {
@@ -506,7 +513,7 @@ Deno.test('SSR retains native images and origin-bound assets in both database mo
       const env = {
         ...bindings.vars,
         ASSETS: { fetch: () => Promise.resolve(new Response('{{- $o := placeholder "http.vars.origin" -}}\n<url>https://pronto-origin.invalid/en</url>', { headers: { 'content-type': 'application/xml' } })) },
-        IMAGE_OBJECTS: {
+        BLOB_OBJECTS: {
           get: async (key: string) => { assert.equal(key, 'card.png'); return { etag: 'source', body: new Blob(['png']).stream() } },
           head: async () => ({ etag: 'source' }),
         },

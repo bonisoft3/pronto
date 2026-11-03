@@ -281,7 +281,7 @@ An entity is a durable identity — a Cap'n Proto type id, with ordinals for its
 fields — and no model mints it:
 
 ```bash
-deno run --allow-read --allow-write plugins/pronto/identity.ts mint apps/<name>
+deno run --allow-read --allow-write --allow-run plugins/pronto/identity.ts mint apps/<name>
 ```
 
 stamps every entity and field that has none and grows `.pronto/identity.json`;
