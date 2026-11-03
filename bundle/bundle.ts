@@ -1,8 +1,11 @@
 // Bundles a pronto app into one HTML document: the interpreter and the cluster
 // as one module written inline, the files shell.json serves in a base64 table,
 // the migrations and RLS for the cluster the page boots with the drains it
-// calls (.pronto/cluster.json), and PGlite's wasm and data as base64 of gzip
-// inflated at boot. The module is `deno bundle`'s, so
+// calls (.pronto/cluster.json). PGlite's wasm, data and ICU archive are files
+// beside it, under pronto/ and named by their content, which the page fetches
+// from its own origin at boot: inline, they made the document larger than a
+// static host serves (25 MiB a file), and a visit after the first fetches them
+// from the cache. The module is `deno bundle`'s, so
 // the page resolves through the same map and lock `deno run` would, and it is
 // written inline so `import.meta.url` is the page's own, which PGlite's
 // relative asset URLs resolve against. Inline script data cannot carry `<!--`
@@ -26,6 +29,7 @@
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { hostDomAssets, type StaticAsset } from './edge-assets.ts'
 import { clusterDrains, releaseFiles } from './edge-scripts.ts'
 
 function fail(msg: string): never {
@@ -61,6 +65,7 @@ const shell = JSON.parse(await read('shell/shell.json')) as {
   i18n?: { locales: Record<string, unknown> }
   migrations: string[]
   tables: string[]
+  hostDom?: Record<string, { src: string }>
   units?: Record<string, unknown>
   prefix?: string
 }
@@ -206,6 +211,7 @@ try {
 }
 
 let assets = {}
+const assetFiles = new Map<string, Uint8Array>()
 if (clustered) {
   const pglite = /^npm:(@electric-sql\/pglite)@(.+)$/.exec(map.imports['@electric-sql/pglite']) ?? fail(`${clusterPins} pins no @electric-sql/pglite`)
   const icu = /^npm:(@electric-sql\/pglite-icu-full)@(.+)$/.exec(map.imports['@electric-sql/pglite-icu-full']) ?? fail(`${clusterPins} pins no @electric-sql/pglite-icu-full`)
@@ -214,11 +220,15 @@ if (clustered) {
   const denoDir = (JSON.parse(new TextDecoder().decode(info.stdout)) as { denoDir: string }).denoDir
   const dist = path.join(denoDir, 'npm/registry.npmjs.org', pglite[1], pglite[2], 'dist')
   const icuArchive = path.join(denoDir, 'npm/registry.npmjs.org', icu[1], icu[2], 'dist/icu.76.tgz')
-  const gz64 = async (f: string) => {
-    const bytes = (await Deno.readFile(path.join(dist, f))) as Uint8Array<ArrayBuffer>
-    return encodeBase64(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).bytes())
+  const beside = async (file: string) => {
+    const bytes = await Deno.readFile(file)
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)).slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('')
+    const ext = path.extname(file)
+    const name = `pronto/${path.basename(file, ext)}.${hash}${ext}`
+    assetFiles.set(name, bytes)
+    return `${base}/${name}`
   }
-  assets = { wasm: await gz64('pglite.wasm'), data: await gz64('pglite.data'), initdb: await gz64('initdb.wasm'), icu: encodeBase64(await Deno.readFile(icuArchive)) }
+  assets = { wasm: await beside(path.join(dist, 'pglite.wasm')), data: await beside(path.join(dist, 'pglite.data')), initdb: await beside(path.join(dist, 'initdb.wasm')), icu: await beside(icuArchive) }
 }
 const payload = {
   files,
@@ -364,9 +374,25 @@ html = replace(
     `<script type="module">${module}</script>`,
 )
 
-await Deno.mkdir(out, { recursive: true })
+await Deno.remove(path.join(out, 'pronto'), { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
+if (assetFiles.size) await Deno.mkdir(path.join(out, 'pronto'), { recursive: true })
+for (const [name, bytes] of assetFiles) await Deno.writeFile(path.join(out, name), bytes)
 await Deno.writeTextFile(path.join(out, 'index.html'), html)
 // A host that answers an unknown path with 404.html serves the same document
 // there, and the deep link boots.
 if (base) await Deno.writeTextFile(path.join(out, '404.html'), html)
-console.error(`bundle: ${out}/index.html, ${(html.length / 1024 / 1024).toFixed(2)} MB, ${Object.keys(files).length} files, ${clustered ? `${sql.length} sql${derived ? ', derived rows last' : ''}` : 'no cluster'}`)
+// The host-DOM hatches, as the terminal serves them (hostDomAssets).
+const hatchSrcs = Object.values(shell.hostDom ?? {}).map((h) => h.src)
+let hatchFiles = 0
+if (hatchSrcs.length) {
+  const exported = new Deno.Command('cue', { args: ['export', '.', '-e', 'terminal.surface.statics', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).outputSync()
+  if (!exported.success) fail('cue export of terminal.surface.statics failed')
+  const held = hostDomAssets(JSON.parse(new TextDecoder().decode(exported.stdout)) as StaticAsset[], hatchSrcs)
+  for (const src of hatchSrcs) if (![...held.keys()].includes(src)) fail(`host-DOM hatch ${src} is not among the terminal's statics`)
+  for (const [target, file] of held) {
+    await Deno.mkdir(path.join(out, path.dirname(target)), { recursive: true })
+    await Deno.copyFile(path.join(app, file), path.join(out, target))
+  }
+  hatchFiles = held.size
+}
+console.error(`bundle: ${out}/index.html, ${(html.length / 1024 / 1024).toFixed(2)} MB, ${Object.keys(files).length} files, ${hatchFiles ? `${hatchFiles} hatch files beside it, ` : ''}${clustered ? `${sql.length} sql${derived ? ', derived rows last' : ''}` : 'no cluster'}`)
