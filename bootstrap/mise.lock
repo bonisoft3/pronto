@@ -45,48 +45,48 @@ url = "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.
 url_api = "https://api.github.com/repos/FiloSottile/mkcert/releases/assets/63709958"
 
 [[tools."github:bonisoft3/bayt"]]
-version = "0.66.1"
+version = "0.68.2"
 backend = "github:bonisoft3/bayt"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-arm64"]
-checksum = "sha256:30ffbe6754d3b90312b87bf54c2006ff2e5842c41734409cf960d044842252a0"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.1/bayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/684532636"
+checksum = "sha256:a5d45fd6c6b1d9fb88de516b14c23e11502f4ebf90313a8d6cd63b149e1986ca"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.68.2/bayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/699062194"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-arm64-musl"]
-checksum = "sha256:30ffbe6754d3b90312b87bf54c2006ff2e5842c41734409cf960d044842252a0"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.1/bayt-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/684532636"
+checksum = "sha256:a5d45fd6c6b1d9fb88de516b14c23e11502f4ebf90313a8d6cd63b149e1986ca"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.68.2/bayt-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/699062194"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-x64"]
-checksum = "sha256:30ffbe6754d3b90312b87bf54c2006ff2e5842c41734409cf960d044842252a0"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.1/bayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/684532640"
+checksum = "sha256:a5d45fd6c6b1d9fb88de516b14c23e11502f4ebf90313a8d6cd63b149e1986ca"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.68.2/bayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/699062199"
 
 [tools."github:bonisoft3/bayt"."platforms.linux-x64-musl"]
-checksum = "sha256:30ffbe6754d3b90312b87bf54c2006ff2e5842c41734409cf960d044842252a0"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.1/bayt-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/684532640"
+checksum = "sha256:a5d45fd6c6b1d9fb88de516b14c23e11502f4ebf90313a8d6cd63b149e1986ca"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.68.2/bayt-linux-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/699062199"
 
 [tools."github:bonisoft3/bayt"."platforms.macos-arm64"]
-checksum = "sha256:30ffbe6754d3b90312b87bf54c2006ff2e5842c41734409cf960d044842252a0"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.1/bayt-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/684532637"
+checksum = "sha256:a5d45fd6c6b1d9fb88de516b14c23e11502f4ebf90313a8d6cd63b149e1986ca"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.68.2/bayt-macos-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/699062200"
 
 [tools."github:bonisoft3/bayt"."platforms.macos-x64"]
-checksum = "sha256:30ffbe6754d3b90312b87bf54c2006ff2e5842c41734409cf960d044842252a0"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.1/bayt-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/684532633"
+checksum = "sha256:a5d45fd6c6b1d9fb88de516b14c23e11502f4ebf90313a8d6cd63b149e1986ca"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.68.2/bayt-macos-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/699062191"
 
 [tools."github:bonisoft3/bayt"."platforms.windows-arm64"]
-checksum = "sha256:30ffbe6754d3b90312b87bf54c2006ff2e5842c41734409cf960d044842252a0"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.1/bayt-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/684532639"
+checksum = "sha256:a5d45fd6c6b1d9fb88de516b14c23e11502f4ebf90313a8d6cd63b149e1986ca"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.68.2/bayt-windows-arm64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/699062188"
 
 [tools."github:bonisoft3/bayt"."platforms.windows-x64"]
-checksum = "sha256:30ffbe6754d3b90312b87bf54c2006ff2e5842c41734409cf960d044842252a0"
-url = "https://github.com/bonisoft3/bayt/releases/download/v0.66.1/bayt-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/684532638"
+checksum = "sha256:a5d45fd6c6b1d9fb88de516b14c23e11502f4ebf90313a8d6cd63b149e1986ca"
+url = "https://github.com/bonisoft3/bayt/releases/download/v0.68.2/bayt-windows-x64.tar.gz"
+url_api = "https://api.github.com/repos/bonisoft3/bayt/releases/assets/699062182"
 
 [[tools."github:bonisoft3/mecha"]]
 version = "0.18.0"
