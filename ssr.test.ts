@@ -46,7 +46,7 @@ Deno.test("a public route's addresses reach the renderer, ahead of the entry", a
   if (!r.ok) throw new Error(r.out);
   const { caddyfile: out } = JSON.parse(r.out) as { caddyfile: string };
   const rendered = out.indexOf("@rendered {\n      expression");
-  if (out.indexOf("handle @rendered {\n      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
+  if (out.indexOf("handle @rendered {\n      vars renderer true\n      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered > out.indexOf("rewrite @route")) throw new Error("the entry's rewrite answers before the renderer does");
 });
