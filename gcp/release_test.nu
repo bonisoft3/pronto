@@ -8,7 +8,7 @@
 const gcp_dir = path self .
 
 use std/assert
-use release.nu [hold-traffic poll-health preflight invoker_probe]
+use release.nu [hold-traffic poll-health preflight invoker_probe sql-drift]
 
 # A directory holding the fakes and the state they share.
 def fakes [service_exists: bool, serving: string, candidate_says: string, public_says: string]: nothing -> string {
@@ -77,6 +77,7 @@ def main [] {
 	print "Running release-gcp tests...\n"
 	test_hold_traffic_keeps_the_serving_revision
 	test_hold_traffic_first_deploy
+	test_sql_drift_sees_a_tier_and_flags_apart
 	test_poll_health_wants_the_revision_by_name
 	test_poll_health_times_out
 	test_poll_health_waits_for_cloud_run_to_pass_a_bearer
@@ -91,6 +92,15 @@ def main [] {
 	test_preflight_names_the_file_and_clouds_run_message
 	test_preflight_passes_a_sidecar_apart_whose_compose_sets_port
 	print "\nAll release-gcp tests passed."
+}
+
+def test_sql_drift_sees_a_tier_and_flags_apart [] {
+	let plan = {sqlTier: "db-custom-1-3840", sqlFlags: "cloudsql.logical_decoding=on,max_connections=130"}
+	let live = {settings: {tier: "db-f1-micro", databaseFlags: [{name: "max_connections", value: "130"}, {name: "cloudsql.logical_decoding", value: "on"}]}}
+	assert equal (sql-drift $live $plan) {tier: true, flags: false}
+	assert equal (sql-drift ($live | upsert settings.tier "db-custom-1-3840") $plan) {tier: false, flags: false}
+	assert equal (sql-drift ($live | upsert settings.databaseFlags [{name: "max_connections", value: "50"}]) $plan) {tier: true, flags: true}
+	assert equal (sql-drift {settings: {tier: "db-custom-1-3840"}} $plan) {tier: false, flags: true}
 }
 
 def test_hold_traffic_keeps_the_serving_revision [] {

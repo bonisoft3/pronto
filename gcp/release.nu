@@ -105,6 +105,16 @@ def setup-source []: nothing -> string {
 	if $from < 0 or $to <= $from { $src } else { $src | str substring $from..<$to }
 }
 
+# What of a live Cloud SQL instance (gcloud's describe) differs from the plan: its tier, and
+# its flags, compared whatever their order.
+export def sql-drift [live: record, plan: record]: nothing -> record {
+	let flags = ($live | get -o settings.databaseFlags | default [] | each {|f| $"($f.name)=($f.value)" } | sort | str join ",")
+	{
+		tier: (($live | get settings.tier) != $plan.sqlTier)
+		flags: ($flags != ($plan.sqlFlags | split row "," | sort | str join ","))
+	}
+}
+
 # The project as a release leaves it, set up once for what it depends on: the
 # plan's project, names, region, repository and database settings, and this
 # script. A release since which none changed reads one secret and goes on; the
@@ -214,9 +224,14 @@ def set-up-project [plan: record] {
 		print $"gcp: (stamp) creating Cloud SQL ($n.instance) \(several minutes\)"
 		gc sql instances create $n.instance --project $p --region $plan.region --database-version POSTGRES_18 --edition enterprise --tier $plan.sqlTier --storage-size 10 --storage-type HDD --database-flags $plan.sqlFlags --root-password $pg | ignore
 	}
-	# Flags an earlier release set differently are patched, which restarts it.
-	let flags = (gc sql instances describe $n.instance --project $p --format json | from json | get settings.databaseFlags? | default [] | each {|f| $"($f.name)=($f.value)" } | sort | str join ",")
-	if $flags != ($plan.sqlFlags | split row "," | sort | str join ",") {
+	# A tier or flags an earlier release set differently are patched, which restarts it.
+	let live = (gc sql instances describe $n.instance --project $p --format json | from json)
+	let drift = (sql-drift $live $plan)
+	if $drift.tier {
+		print $"gcp: (stamp) setting tier ($plan.sqlTier) on ($n.instance) \(it restarts\)"
+		gc sql instances patch $n.instance --project $p --tier $plan.sqlTier --quiet | ignore
+	}
+	if $drift.flags {
 		print $"gcp: (stamp) setting ($plan.sqlFlags) on ($n.instance) \(it restarts\)"
 		gc sql instances patch $n.instance --project $p --database-flags $plan.sqlFlags --quiet | ignore
 	}
