@@ -428,67 +428,73 @@ def delete-preview [plan: record] {
 	print $"gcp: (stamp) preview ($plan.preview) removed"
 }
 
-# What a release or a preview deploys, from the plan release.cue renders for
-# it, ending once its address answers; the images it ran, by digest. A
-# release given a tested preview's (`from`) runs those, copied, not rebuilt.
-# A release staged: everything up to the first code of the release production runs. The
-# project, the images (pushed, or the tested ones copied in as `candidate`), the plan
-# rendered with their digests and written to dist/gcp, the bucket, the scrape configs and
-# the secret grants: declarative, each restated by the next release, none running the app.
-# A gated release stages production while its tests run (docs/decisions/2026-10-29-staged-release.md).
-# `rendered` is the preview's plan when the caller rendered it already.
-def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record, --rendered: record]: nothing -> record {
-	# The roles the app's schema grants PostgREST's login, as generate wrote them.
+# The roles the app's schema grants PostgREST's login, as generate wrote them, over the preview's name.
+def base-of [app_info: record, preview: string]: nothing -> record {
 	let facts_path = ($app_info.cue_path | path dirname | path join .pronto cluster.json)
 	if not ($facts_path | path exists) { error make {msg: $"($facts_path) is missing: generate the app before releasing it"} }
 	let facts = (open $facts_path)
 	if not $facts.server { error make {msg: $"($facts_path): this app has no server tier to release to GCP"} }
-	let base = {GCP: ({database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}} | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }))}
-	let plan0 = if $rendered == null { plan-of $app_info.cue_path $preview } else { $rendered }
+	{GCP: ({database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}} | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }))}
+}
+
+# The images a release builds or copies: the runtime's, the cluster's migrate step, the ticker, the
+# blob plane, and the app's own sidecars (GCP.sidecars).
+def images-of [services: list<string>, plan0: record]: nothing -> list<string> {
+	$runtime | append (if "migrate" in $services { ["migrate" "schema"] } else { [] }) | append (if "ticker" in $services { ["ticker"] } else { [] }) | append (if "rclone-s3" in $services { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars
+}
+
+# The service's yaml as it is applied, carrying the hash of the job it was released with (job-hash),
+# which the next release reads off the live revision to skip a schema job that would change nothing.
+# Written as JSON, which is YAML whose every string is quoted: gcloud reads YAML 1.1, where a bare `off`,
+# `no` or `on` (nushell's `to yaml` leaves them bare) is a boolean, and refuses the service.
+def service-file [plan: record]: nothing -> string {
+	let service = ($plan.serviceYaml | from yaml)
+	$service | upsert spec.template.metadata.labels ($service.spec.template.metadata.labels? | default {} | insert pronto-job (job-hash $plan.jobYaml)) | to json
+}
+
+# Cloud Run's own validation of every service yaml the release will apply (the door and each sidecar
+# apart, for each of `previews`, "" being the release), before any work that holds the lock or costs
+# minutes: `gcloud run services replace --dry-run` changes nothing and costs nothing. Found
+# empirically: it needs no image to exist (a digest nobody pushed passes), so it renders each plan over
+# placeholder digests and runs at the start; it does check the service account, so a project not set
+# up yet (no account, the first release) is skipped, as there is nothing in it to refuse. It refused
+# "reserved env names were provided: PORT" for a sidecar apart, which no local check sees.
+# Jobs are left out: `gcloud run jobs replace` has no --dry-run.
+export def preflight [app_info: record, previews: list<string>] {
+	print $"gcp: (stamp) validating the Cloud Run services with Cloud Run \(--dry-run\)"
 	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
 	let services = ($compose.services | columns)
-	# A service the release does not run itself, but the app names in GCP.sidecars (the renderer, say), is run as that sidecar.
-	let refused = ($services | where {|s| $s in $unbuilt and $s not-in $plan0.sidecars })
-	if ($refused | is-not-empty) {
-		error make {msg: $"release@gcp does not run ($refused | str join ', ') yet \(PENDING.md#release-targets\)"}
-	}
-	if $dry_run {
-		print $plan0.jobYaml; print "---"; print $plan0.serviceYaml
-		for y in ($plan0.sidecarServicesYaml | values) { print "---"; print $y }
-		return {done: true}
-	}
-	release-record mark stage start --preview $preview
+	let work = (mktemp -d -t gcp-preflight.XXXXXX | str trim)
+	let failed = ($previews | par-each --keep-order {|v|
+		let plan0 = (plan-of $app_info.cue_path $v)
+		if not (exists iam service-accounts describe $plan0.names.serviceAccount --project $plan0.project) {
+			print $"gcp: (stamp) ($plan0.service)'s project is not set up yet: its services are validated when applied"
+			return []
+		}
+		let zeros = (0..<64 | each { "0" } | str join)
+		let pushed = (images-of $services $plan0 | reduce -f {} {|i, acc| $acc | insert $i {tag: "release", digest: $"sha256:($zeros)"} })
+		let plan = (render-staged $app_info $compose $plan0 (base-of $app_info $v) $pushed).plan
+		let label = if ($v | is-empty) { "release" } else { $v }
+		let files = ([{name: $"($label)-service.yaml", body: (service-file $plan)}]
+			| append ($plan.sidecarServicesYaml | transpose name yaml | each {|s| {name: $"($label)-sidecar-($s.name).yaml", body: $s.yaml} }))
+		$files | par-each --keep-order {|f|
+			let file = $"($work)/($f.name)"
+			$f.body | save -f $file
+			let run = (^gcloud --quiet run services replace $file --dry-run --region $plan.region --project $plan.project | complete)
+			if $run.exit_code == 0 { null } else { $"($file): ($run.stderr | str trim)" }
+		} | compact
+	} | flatten)
+	if ($failed | is-not-empty) { error make {msg: $"Cloud Run refuses what this release would apply:\n($failed | str join "\n")"} }
+	rm -rf $work
+}
 
-	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
-	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
+# The plan rendered over what staging knows: the compose project's environment, the providers
+# it gives auth, the service's address, and the images' digests (`pushed`).
+def render-staged [app_info: record, compose: record, plan0: record, base: record, pushed: record]: nothing -> record {
+	let services = ($compose.services | columns)
 	let has_migrate = ("migrate" in $services)
-	# The ticker, where the app declares a schedule or a machine's timer.
 	let has_ticker = ("ticker" in $services)
-	# The blob plane, where the app turns it on: two more containers over a bucket.
 	let has_blobs = ("rclone-s3" in $services)
-	# The app's own containers beside them (GCP.sidecars), each one of its compose services.
-	let missing = ($plan0.sidecars | where {|s| $s not-in $services })
-	if ($missing | is-not-empty) {
-		error make {msg: $"GCP.sidecars names ($missing | str join ', '), which the app's compose project does not define"}
-	}
-	let images = ($runtime | append (if $has_migrate { ["migrate" "schema"] } else { [] }) | append (if $has_ticker { ["ticker"] } else { [] }) | append (if $has_blobs { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars)
-	if not $snapshot {
-		print $"gcp: (stamp) setting up ($plan0.service)'s project"
-		ensure-infrastructure $plan0
-	}
-	# The tested images, copied in as `candidate`: the copy the gate started while it tested,
-	# when it copied these images, else one started now. Tagged the release's in go-live.
-	let copy = if $from == null or $snapshot { null } else {
-		let started = ($from.copy? | default null)
-		let c = if $started != null and (($started.refs | get svc | sort) == ($images | sort)) { $started } else { start-copy $plan0 $name $images $from }
-		await-copy $c
-		$c
-	}
-	let pushed = if $snapshot { {} } else if $copy == null { push-images $app_info.dir $plan0 $name $images } else {
-		# The plan names an image by its digest, the tested one; the tag is only its name.
-		$copy.refs | reduce -f {} {|r, acc| $acc | insert $r.svc {tag: "release", digest: $r.digest} }
-	}
-
 	# The providers compose gives the auth service, under what release.cue sets.
 	let auth_env = $compose.services.auth.environment
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
@@ -517,14 +523,69 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
+	{plan: $plan, number: $number}
+}
+
+# What a release or a preview deploys, from the plan release.cue renders for
+# it, ending once its address answers; the images it ran, by digest. A
+# release given a tested preview's (`from`) runs those, copied, not rebuilt.
+# A release staged: everything up to the first code of the release production runs. The
+# project, the images (pushed, or the tested ones copied in as `candidate`), the plan
+# rendered with their digests and written to dist/gcp, the bucket, the scrape configs and
+# the secret grants: declarative, each restated by the next release, none running the app.
+# A gated release stages production while its tests run (docs/decisions/2026-10-29-staged-release.md).
+# `rendered` is the preview's plan when the caller rendered it already.
+def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record, --rendered: record]: nothing -> record {
+	let base = (base-of $app_info $preview)
+	let plan0 = if $rendered == null { plan-of $app_info.cue_path $preview } else { $rendered }
+	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
+	let services = ($compose.services | columns)
+	# A service the release does not run itself, but the app names in GCP.sidecars (the renderer, say), is run as that sidecar.
+	let refused = ($services | where {|s| $s in $unbuilt and $s not-in $plan0.sidecars })
+	if ($refused | is-not-empty) {
+		error make {msg: $"release@gcp does not run ($refused | str join ', ') yet \(PENDING.md#release-targets\)"}
+	}
+	if $dry_run {
+		print $plan0.jobYaml; print "---"; print $plan0.serviceYaml
+		for y in ($plan0.sidecarServicesYaml | values) { print "---"; print $y }
+		return {done: true}
+	}
+	release-record mark stage start --preview $preview
+
+	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
+	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
+	let has_migrate = ("migrate" in $services)
+	# The blob plane, where the app turns it on: two more containers over a bucket.
+	let has_blobs = ("rclone-s3" in $services)
+	# The app's own containers beside them (GCP.sidecars), each one of its compose services.
+	let missing = ($plan0.sidecars | where {|s| $s not-in $services })
+	if ($missing | is-not-empty) {
+		error make {msg: $"GCP.sidecars names ($missing | str join ', '), which the app's compose project does not define"}
+	}
+	let images = (images-of $services $plan0)
+	if not $snapshot {
+		print $"gcp: (stamp) setting up ($plan0.service)'s project"
+		ensure-infrastructure $plan0
+	}
+	# The tested images, copied in as `candidate`: the copy the gate started while it tested,
+	# when it copied these images, else one started now. Tagged the release's in go-live.
+	let copy = if $from == null or $snapshot { null } else {
+		let started = ($from.copy? | default null)
+		let c = if $started != null and (($started.refs | get svc | sort) == ($images | sort)) { $started } else { start-copy $plan0 $name $images $from }
+		await-copy $c
+		$c
+	}
+	let pushed = if $snapshot { {} } else if $copy == null { push-images $app_info.dir $plan0 $name $images } else {
+		# The plan names an image by its digest, the tested one; the tag is only its name.
+		$copy.refs | reduce -f {} {|r, acc| $acc | insert $r.svc {tag: "release", digest: $r.digest} }
+	}
+
+	let rendered_plan = (render-staged $app_info $compose $plan0 $base $pushed)
+	let plan = $rendered_plan.plan
+	let number = $rendered_plan.number
 	mkdir dist/gcp
 	$plan.jobYaml | save -f dist/gcp/job.yaml
-	# The service carries the hash of the job it was released with (job-hash), which the next
-	# release reads off the live revision to skip a schema job that would change nothing. Written as
-	# JSON, which is YAML whose every string is quoted: gcloud reads YAML 1.1, where a bare `off`,
-	# `no` or `on` (nushell's `to yaml` leaves them bare) is a boolean, and refuses the service.
-	let service = ($plan.serviceYaml | from yaml)
-	$service | upsert spec.template.metadata.labels ($service.spec.template.metadata.labels? | default {} | insert pronto-job (job-hash $plan.jobYaml)) | to json | save -f dist/gcp/service.yaml
+	service-file $plan | save -f dist/gcp/service.yaml
 	for s in ($plan.sidecarServicesYaml | transpose name yaml) { $s.yaml | save -f $"dist/gcp/sidecar-($s.name).yaml" }
 	if $snapshot { print $"gcp: (stamp) rendered dist/gcp/job.yaml and dist/gcp/service.yaml; nothing applied"; return {done: true} }
 
@@ -584,7 +645,7 @@ def candidate-of [service: string, project: string, region: string]: nothing -> 
 # times in a row), for GCP_GOLIVE_WAIT seconds, 180 unless set.
 export def poll-health [url: string, ok: list<string>, revision: any, --steady: int = 1]: nothing -> record {
 	let wait = ($env.GCP_GOLIVE_WAIT? | default 180 | into int)
-	let every = ($env.GCP_GOLIVE_EVERY? | default 5 | into int)
+	let every = ($env.GCP_GOLIVE_EVERY? | default 2 | into int)
 	let body = (mktemp -t gcp.XXXXXX | str trim)
 	let t0 = (date now)
 	mut streak = 0
@@ -613,18 +674,27 @@ export def go-live [staged: record]: nothing -> record {
 	let number = $staged.number
 	let own = ($plan.preview? | default "")
 	release-record mark deploy start --preview $own
-	let pushed = if $staged.gated and $staged.copy != null { tag-release $staged.copy } else { $staged.pushed }
 	# A release's own service only: a preview's database is emptied for each, whatever its label says.
 	# PRONTO_RELEASE_FORCE_SCHEMA=1 runs the job all the same (a rotated role password, say).
 	let wanted = (job-hash (open --raw dist/gcp/job.yaml))
-	if ($plan.preview? | is-empty) and ($env.PRONTO_RELEASE_FORCE_SCHEMA? | is-empty) and (live-job-hash $plan) == $wanted {
-		print $"gcp: (stamp) the schema job skipped: ($plan.service) is live with the schema it applies \(PRONTO_RELEASE_FORCE_SCHEMA=1 runs it\)"
-		release-record note {schema: "skipped"} --preview $own
-	} else {
-		release-record mark schema start --preview $own
-		run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
-		release-record mark schema end --preview $own
-	}
+	# The images tagged the release's (a gated one's, now that its tests passed) beside the schema job:
+	# the service names every image by digest, so the tag is only the next release's name for them.
+	let done = (["schema" "tag"] | par-each --keep-order {|t|
+		if $t == "tag" {
+			{pushed: (if $staged.gated and $staged.copy != null { tag-release $staged.copy } else { $staged.pushed })}
+		} else {
+			if ($plan.preview? | is-empty) and ($env.PRONTO_RELEASE_FORCE_SCHEMA? | is-empty) and (live-job-hash $plan) == $wanted {
+				print $"gcp: (stamp) the schema job skipped: ($plan.service) is live with the schema it applies \(PRONTO_RELEASE_FORCE_SCHEMA=1 runs it\)"
+				release-record note {schema: "skipped"} --preview $own
+			} else {
+				release-record mark schema start --preview $own
+				run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
+				release-record mark schema end --preview $own
+			}
+			{}
+		}
+	} | reduce -f {} {|it, acc| $acc | merge $it })
+	let pushed = $done.pushed
 	# The new revision takes no traffic until its own address answers: Cloud Run can keep
 	# routing to the revision it just shut down, and a service left broken that way is
 	# one the release would have to roll back by hand.
@@ -934,6 +1004,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	let local = ($preview | is-empty) and not $dry_run and not $snapshot and not $no_local_gate
 	if ($preview | is-not-empty) or $dry_run or $snapshot or $no_gate {
 		release-record note {rc: $"skipped: (if ($preview | is-not-empty) { 'a preview' } else { '--no-gate' })"}
+		if not $dry_run and not $snapshot { preflight $app_info [$preview] }
 		# Nothing runs beside it here: the gate first.
 		if $local { local-gate $app_info.dir }
 		deploy $app_info $preview $dry_run $snapshot | ignore
@@ -950,11 +1021,13 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	if ($rc_why | is-empty) {
 		print $"gcp: (stamp) no rc preview: the deploy-shaped files are those of a release that passed it, so the local gate stands in for it \(--rc runs it\)"
 		release-record note {rc: "skipped: the deploy-shaped files are those of a release that passed it"}
+		preflight $app_info [""]
 		local-gate $app_info.dir
 		deploy $app_info "" false false | ignore
 		return
 	}
 	print $"gcp: (stamp) the rc preview runs: ($rc_why)"
+	preflight $app_info [$rc ""]
 	release-record note {rc: "ran"}
 	release-record mark rc start
 	# The preview's plan and production's, rendered together; the staging below reuses them.
