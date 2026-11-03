@@ -3867,6 +3867,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				      }
 				    }
 				    handle @rendered {
+				      vars renderer true
 				      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:\(omnishell.#Render.port)} {
 				        header_up dapr-app-id render
 				        header_up Host {upstream_hostport}
@@ -3894,7 +3895,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				for w in [if bare == "" {"/"}, if bare != "" {bare}, if bare != "" {bare + "/"}] {w},
 			])
 			// A renderer the door cannot reach never answers, so caddy's own 502
-			// or 504 stands in for it; handle_response above sees only answers.
+			// or 504 stands in for it; handle_response above sees only answers. Only a
+			// request `handle @rendered` took is the renderer's: another upstream's
+			// failure under a widened address stays a failure.
 			// Both serve the entry, which draws the route itself. This one is
 			// `files` with the 200 the error would otherwise keep.
 			_unreachable: [
@@ -3904,11 +3907,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				  handle_errors {
 				    @renderdown {
 				      expression {err.status_code} in [502, 503, 504]
-				      path \(strings.Join(_renderedAt, " "))
-				      not file {
-				        root /srv
-				        try_files {path} {path}/index.html
-				      }
+				      vars {http.vars.renderer} true
 				    }
 				    handle @renderdown {
 				      root * /srv

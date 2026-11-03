@@ -40,7 +40,7 @@ Deno.test("a renderer that is down or limiting falls back to the entry at 200", 
   if (!response.includes("handle_response @renderdown {") || !response.includes("rewrite * /shell/index.html")) throw new Error(`no fallback on the renderer's answer:\n${out}`);
   if (/\bstatus (404|500)\b/.test(response.split("handle_response")[0])) throw new Error("a real answer is replaced");
   const errors = out.slice(out.indexOf("handle_errors {"));
-  if (!errors.includes("expression {err.status_code} in [502, 503, 504]") || !errors.includes("path /jogo/* /jogo/*/") || !errors.includes("rewrite * /shell/index.html") || !errors.includes("status 200")) throw new Error(`no fallback when the renderer is unreachable:\n${out}`);
+  if (!errors.includes("expression {err.status_code} in [502, 503, 504]") || !errors.includes("vars {http.vars.renderer} true") || !out.includes("vars renderer true") || !errors.includes("rewrite * /shell/index.html") || !errors.includes("status 200")) throw new Error(`no fallback when the renderer is unreachable:\n${out}`);
 });
 
 // Each upstream is dialed at its own PRONTO_UPSTREAM_<SERVICE> when set: a k8s
