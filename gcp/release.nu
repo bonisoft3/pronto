@@ -677,24 +677,15 @@ export def go-live [staged: record]: nothing -> record {
 	# A release's own service only: a preview's database is emptied for each, whatever its label says.
 	# PRONTO_RELEASE_FORCE_SCHEMA=1 runs the job all the same (a rotated role password, say).
 	let wanted = (job-hash (open --raw dist/gcp/job.yaml))
-	# The images tagged the release's (a gated one's, now that its tests passed) beside the schema job:
-	# the service names every image by digest, so the tag is only the next release's name for them.
-	let done = (["schema" "tag"] | par-each --keep-order {|t|
-		if $t == "tag" {
-			{pushed: (if $staged.gated and $staged.copy != null { tag-release $staged.copy } else { $staged.pushed })}
-		} else {
-			if ($plan.preview? | is-empty) and ($env.PRONTO_RELEASE_FORCE_SCHEMA? | is-empty) and (live-job-hash $plan) == $wanted {
-				print $"gcp: (stamp) the schema job skipped: ($plan.service) is live with the schema it applies \(PRONTO_RELEASE_FORCE_SCHEMA=1 runs it\)"
-				release-record note {schema: "skipped"} --preview $own
-			} else {
-				release-record mark schema start --preview $own
-				run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
-				release-record mark schema end --preview $own
-			}
-			{}
-		}
-	} | reduce -f {} {|it, acc| $acc | merge $it })
-	let pushed = $done.pushed
+	let pushed = if $staged.gated and $staged.copy != null { tag-release $staged.copy } else { $staged.pushed }
+	if ($plan.preview? | is-empty) and ($env.PRONTO_RELEASE_FORCE_SCHEMA? | is-empty) and (live-job-hash $plan) == $wanted {
+		print $"gcp: (stamp) the schema job skipped: ($plan.service) is live with the schema it applies \(PRONTO_RELEASE_FORCE_SCHEMA=1 runs it\)"
+		release-record note {schema: "skipped"} --preview $own
+	} else {
+		release-record mark schema start --preview $own
+		run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
+		release-record mark schema end --preview $own
+	}
 	# The new revision takes no traffic until its own address answers: Cloud Run can keep
 	# routing to the revision it just shut down, and a service left broken that way is
 	# one the release would have to roll back by hand.

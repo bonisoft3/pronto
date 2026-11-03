@@ -73,7 +73,7 @@ def main [] {
 	test_golive_goes_back_when_the_candidate_never_answers
 	test_golive_goes_back_when_the_public_address_stays_on_the_old_revision
 	test_golive_first_deploy
-	test_golive_tags_the_tested_images_beside_the_schema_job
+	test_golive_tags_the_tested_images_before_the_schema_job
 	test_preflight_dry_runs_every_service_over_placeholder_digests
 	test_preflight_names_the_file_and_clouds_run_message
 	test_preflight_passes_a_sidecar_apart_whose_compose_sets_port
@@ -174,8 +174,8 @@ def test_golive_first_deploy [] {
 	rm -r $d
 }
 
-def test_golive_tags_the_tested_images_beside_the_schema_job [] {
-	print "test go-live tags the tested images the release's while the schema job runs, and returns them..."
+def test_golive_tags_the_tested_images_before_the_schema_job [] {
+	print "test go-live tags the tested images the release's before the schema job changes production, and returns them..."
 	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
 	"sha256:aa" | save -f ($d | path join tagged_digest)
 	let res = (golive $d {gated: true, copy: {refs: [{svc: "crud", repo: "reg/app-crud", digest: "sha256:aa"}]}})
@@ -183,6 +183,11 @@ def test_golive_tags_the_tested_images_beside_the_schema_job [] {
 	let log = (log-of $d)
 	assert ($log | str contains "tags add reg/app-crud@sha256:aa reg/app-crud:release")
 	assert ($log | str contains "run jobs replace dist/gcp/job.yaml")
+	# A tag that fails stops the release before the schema job changes production's database.
+	let lines = ($log | lines)
+	let tagged = ($lines | enumerate | where {|l| $l.item | str contains "tags add" } | first | get index)
+	let job = ($lines | enumerate | where {|l| $l.item | str contains "run jobs replace" } | first | get index)
+	assert ($tagged < $job) "the tag comes before the schema job"
 	assert ($res.stdout | str contains "release")
 	rm -r $d
 }
