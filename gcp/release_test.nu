@@ -77,7 +77,7 @@ def main [] {
 	print "Running release-gcp tests...\n"
 	test_hold_traffic_keeps_the_serving_revision
 	test_hold_traffic_first_deploy
-	test_sql_drift_sees_a_tier_and_flags_apart
+	test_sql_drift_patches_tier_and_flags_at_once
 	test_poll_health_wants_the_revision_by_name
 	test_poll_health_times_out
 	test_poll_health_waits_for_cloud_run_to_pass_a_bearer
@@ -94,13 +94,15 @@ def main [] {
 	print "\nAll release-gcp tests passed."
 }
 
-def test_sql_drift_sees_a_tier_and_flags_apart [] {
+def test_sql_drift_patches_tier_and_flags_at_once [] {
 	let plan = {sqlTier: "db-custom-1-3840", sqlFlags: "cloudsql.logical_decoding=on,max_connections=130"}
 	let live = {settings: {tier: "db-f1-micro", databaseFlags: [{name: "max_connections", value: "130"}, {name: "cloudsql.logical_decoding", value: "on"}]}}
-	assert equal (sql-drift $live $plan) {tier: true, flags: false}
-	assert equal (sql-drift ($live | upsert settings.tier "db-custom-1-3840") $plan) {tier: false, flags: false}
-	assert equal (sql-drift ($live | upsert settings.databaseFlags [{name: "max_connections", value: "50"}]) $plan) {tier: true, flags: true}
-	assert equal (sql-drift {settings: {tier: "db-custom-1-3840"}} $plan) {tier: false, flags: true}
+	let flags = [--database-flags $plan.sqlFlags]
+	assert equal (sql-drift $live $plan) [--tier db-custom-1-3840]
+	assert equal (sql-drift ($live | upsert settings.tier "db-custom-1-3840") $plan) []
+	# Both in one patch: two would restart the database twice.
+	assert equal (sql-drift ($live | upsert settings.databaseFlags [{name: "max_connections", value: "50"}]) $plan) [--tier db-custom-1-3840 ...$flags]
+	assert equal (sql-drift {settings: {tier: "db-custom-1-3840"}} $plan) $flags
 }
 
 def test_hold_traffic_keeps_the_serving_revision [] {

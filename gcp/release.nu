@@ -105,14 +105,15 @@ def setup-source []: nothing -> string {
 	if $from < 0 or $to <= $from { $src } else { $src | str substring $from..<$to }
 }
 
-# What of a live Cloud SQL instance (gcloud's describe) differs from the plan: its tier, and
-# its flags, compared whatever their order.
-export def sql-drift [live: record, plan: record]: nothing -> record {
+# The patch that brings a live Cloud SQL instance (gcloud's describe) to the plan: its tier
+# and its flags (compared whatever their order) where they differ, in one patch, so the
+# database restarts once.
+export def sql-drift [live: record, plan: record]: nothing -> list<string> {
 	let flags = ($live | get -o settings.databaseFlags | default [] | each {|f| $"($f.name)=($f.value)" } | sort | str join ",")
-	{
-		tier: (($live | get settings.tier) != $plan.sqlTier)
-		flags: ($flags != ($plan.sqlFlags | split row "," | sort | str join ","))
-	}
+	[
+		(if ($live | get settings.tier) != $plan.sqlTier { [--tier $plan.sqlTier] } else { [] })
+		(if $flags != ($plan.sqlFlags | split row "," | sort | str join ",") { [--database-flags $plan.sqlFlags] } else { [] })
+	] | flatten
 }
 
 # The project as a release leaves it, set up once for what it depends on: the
@@ -226,14 +227,10 @@ def set-up-project [plan: record] {
 	}
 	# A tier or flags an earlier release set differently are patched, which restarts it.
 	let live = (gc sql instances describe $n.instance --project $p --format json | from json)
-	let drift = (sql-drift $live $plan)
-	if $drift.tier {
-		print $"gcp: (stamp) setting tier ($plan.sqlTier) on ($n.instance) \(it restarts\)"
-		gc sql instances patch $n.instance --project $p --tier $plan.sqlTier --quiet | ignore
-	}
-	if $drift.flags {
-		print $"gcp: (stamp) setting ($plan.sqlFlags) on ($n.instance) \(it restarts\)"
-		gc sql instances patch $n.instance --project $p --database-flags $plan.sqlFlags --quiet | ignore
+	let patch = (sql-drift $live $plan)
+	if ($patch | is-not-empty) {
+		print $"gcp: (stamp) setting ($patch | str join ' ') on ($n.instance) \(it restarts\)"
+		gc sql instances patch $n.instance --project $p ...$patch --quiet | ignore
 	}
 	# The password the URLs carry is the user's, whichever came first.
 	gc sql users set-password postgres --instance $n.instance --project $p --password $pg | ignore
