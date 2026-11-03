@@ -3899,18 +3899,27 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// request `handle @rendered` took is the renderer's: another upstream's
 			// failure under a widened address stays a failure.
 			// Both serve the entry, which draws the route itself. This one is
-			// `files` with the 200 the error would otherwise keep.
+			// `files` with the 200 the error would otherwise keep, so a
+			// conditional or range request is answered whole, and only for the
+			// methods a document is read by.
 			_unreachable: [
 				if len(E._onRequest) == 0 {""},
 				"""
 
 				  handle_errors {
 				    @renderdown {
+				      method GET HEAD
 				      expression {err.status_code} in [502, 503, 504]
 				      vars {http.vars.renderer} true
 				    }
 				    handle @renderdown {
 				      root * /srv
+				      request_header -If-Match
+				      request_header -If-Unmodified-Since
+				      request_header -If-None-Match
+				      request_header -If-Modified-Since
+				      request_header -If-Range
+				      request_header -Range
 				      header Cache-Control "no-cache"
 				      rewrite * /\(E.terminal.surface.entry)
 				      file_server {

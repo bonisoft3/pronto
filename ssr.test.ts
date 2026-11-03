@@ -41,6 +41,13 @@ Deno.test("a renderer that is down or limiting falls back to the entry at 200", 
   if (/\bstatus (404|500)\b/.test(response.split("handle_response")[0])) throw new Error("a real answer is replaced");
   const errors = out.slice(out.indexOf("handle_errors {"));
   if (!errors.includes("expression {err.status_code} in [502, 503, 504]") || !errors.includes("vars {http.vars.renderer} true") || !out.includes("vars renderer true") || !errors.includes("rewrite * /shell/index.html") || !errors.includes("status 200")) throw new Error(`no fallback when the renderer is unreachable:\n${out}`);
+  // The shell is answered whole and only to a read: a conditional or range request
+  // would turn status 200 into an empty or partial 200, and a write is no read.
+  const handler = errors.slice(errors.indexOf("@renderdown {"), errors.indexOf("file_server {"));
+  if (!handler.includes("method GET HEAD")) throw new Error(`the fallback answers a write:\n${out}`);
+  for (const h of ["If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range", "Range"]) {
+    if (!handler.includes(`request_header -${h}\n`)) throw new Error(`the fallback keeps ${h}:\n${out}`);
+  }
 });
 
 // Each upstream is dialed at its own PRONTO_UPSTREAM_<SERVICE> when set: a k8s
