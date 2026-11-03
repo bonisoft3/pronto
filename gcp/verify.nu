@@ -287,8 +287,11 @@ export def drivers-log [
 export def run-drivers [app_dir: string, plan: record] {
 	let run = (start-drivers $app_dir $plan)
 	go-drivers $run
+	# The drivers GCP.rehearsal replaces run in its job, beside the others in Cloud Build.
+	let rehearsal = if ($plan.rehearsal? | is-empty) { null } else { run-rehearsal $run $plan.rehearsal }
 	finish-drivers $run
 	drivers-log $run --just-ended
+	if $rehearsal != null and not $rehearsal.ok { error make {msg: $"the rehearsal failed \(execution ($rehearsal.execution)\): its log is above"} }
 }
 
 export def main [
