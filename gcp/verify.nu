@@ -80,6 +80,11 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		} | compact
 	} catch { [] }) }
 	let pushed = ($names | each {|d| $"($d)=($cache_repo)-($d):(key-tag ($keys | get $d))" })
+	# The drivers a rehearsal job runs (GCP.rehearsal) are built and pushed here, but run in the job.
+	let rehearsal = ($plan.rehearsal? | default null)
+	let replaced = if $rehearsal == null { [] } else { $rehearsal.replaces }
+	if $rehearsal != null and ($rehearsal.driver not-in $names) { error make {msg: $"GCP.rehearsal.driver ($rehearsal.driver) is no driver of the app: ($names | str join ', ')"} }
+	let rehearsal_image = if $rehearsal == null { null } else { $"($cache_repo)-($rehearsal.driver):(key-tag ($keys | get $rehearsal.driver))" }
 	if ($found | is-not-empty) { print $"gcp: (stamp) the drivers ($found | each {|f| $f | split row '=' | first } | str join ', ') are unchanged since they were last built: pulling them" }
 	let script = ([
 		"set -eu"
@@ -87,6 +92,8 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		"drivers=$(docker compose --profile '*' config --format json | jq -r '.services | to_entries[] | select(.value.environment.APP_URL != null and (.value.scale // 1) != 0) | .key' | sort)"
 		"[ -n \"$drivers\" ] || { echo 'verify: no service of the app reads APP_URL' >&2; exit 1; }"
 		"echo \"verify: building $(echo $drivers)\""
+		$"replaced='($replaced | str join ' ')'"
+		"tested=''; for d in $drivers; do case \" $replaced \" in *\" $d \"*) ;; *) tested=\"$tested $d\" ;; esac; done"
 		"docker buildx create --use --driver docker-container >/dev/null"
 		# Each driver's layers cached in the registry, as the runtime images'
 		# are (release.nu push-images): a browser and its packages are pulled,
@@ -128,7 +135,7 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		"  [ \"$waited\" -lt 600 ] || step=3"
 		"  waited=$((waited + step)); [ \"$waited\" -lt 2400 ] || { echo 'verify: the release never said go' >&2; exit 1; }; sleep $step"
 		"done"
-		"echo \"verify: $(echo $drivers) against $APP_URL\""
+		"echo \"verify: $(echo $tested) against $APP_URL\""
 		# The drivers run together, each to its end whatever the others answer,
 		# with SHOTS naming where it may leave screenshots, copied out of its
 		# container; each one's log is printed whole once all are done. The
@@ -141,13 +148,13 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		"  docker rm -f \"verify-$1\" >/dev/null 2>&1 || true"
 		"}"
 		"first=1"
-		"for d in $drivers; do"
+		"for d in $tested; do"
 		"  drive \"$d\" &"
 		"  if [ \"$first\" = 1 ]; then first=0; until docker inspect \"verify-$d\" >/dev/null 2>&1 || [ -s \"/workspace/verdicts/$d\" ]; do sleep 1; done; fi"
 		"done"
 		"wait"
 		"failed=''"
-		"for d in $drivers; do"
+		"for d in $tested; do"
 		"  echo \"verify: $d\""
 		"  cat \"/workspace/logs/$d\""
 		"  if [ \"$(cat \"/workspace/verdicts/$d\")\" = 0 ]; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\" >&2; failed=\"$failed $d\"; fi"
@@ -185,7 +192,7 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 	let build = (gc builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
 	rm -rf $work
 	print $"gcp: (stamp) build ($build): https://console.cloud.google.com/cloud-build/builds/($build)?project=($p)"
-	{build: $build, project: $p, url: $url, service: $plan.service, region: $plan.region}
+	{build: $build, project: $p, url: $url, service: $plan.service, region: $plan.region, rehearsalImage: $rehearsal_image}
 }
 
 # The drivers' build told to run them, now that the service is up.
@@ -196,6 +203,46 @@ export def go-drivers [run: record] {
 	gc storage cp $f $"gs://($run.project)_cloudbuild/verify/($run.build)/go" | ignore
 	rm $f
 	print $"gcp: (stamp) testing ($run.url)"
+}
+
+# GCP.rehearsal run: the job of the previews project, on the driver image the tests' build pushes,
+# against the preview's address. Always returns the record of the run (ok, execution, seconds, usd);
+# its log is printed whole. The cost is the job's seconds at the vCPU and GiB prices GCP.rehearsal names.
+export def run-rehearsal [run: record, r: record]: nothing -> record {
+	let image = $run.rehearsalImage
+	# The image is pushed by the tests' build, which has gone on to wait for the preview.
+	mut waited = 0
+	while not (exists artifacts docker images describe $image) {
+		if $waited >= 1800 { error make {msg: $"the rehearsal's image ($image) was not pushed in 30 minutes: see the tests' build ($run.build)"} }
+		sleep 5sec
+		$waited += 5
+	}
+	gc run jobs update $r.job --image $image --region $run.region --project $run.project | ignore
+	# gcloud's own escaping of a list: `~` between the pairs, so no pair may hold one.
+	let pairs = ($r.env | merge {APP_URL: $run.url} | items {|k, v| $"($k)=($v)" })
+	if ($pairs | any {|p| $p | str contains "~" }) { error make {msg: "GCP.rehearsal.env holds a ~, which separates the job's variables"} }
+	let vars = ($pairs | str join "~")
+	print $"gcp: (stamp) the rehearsal: job ($r.job) on ($image) against ($run.url)"
+	let execution = (gc run jobs execute $r.job --region $run.region --project $run.project $"--update-env-vars=^~^($vars)" --async --format "value(metadata.name)" | str trim)
+	print $"gcp: (stamp) rehearsal execution ($execution): https://console.cloud.google.com/run/jobs/executions/details/($run.region)/($execution)?project=($run.project)"
+	mut done = {}
+	loop {
+		sleep 5sec
+		$done = (gc run jobs executions describe $execution --region $run.region --project $run.project --format json | from json)
+		if ($done.status?.completionTime? | is-not-empty) { break }
+	}
+	let seconds = (($done.status.completionTime | into datetime) - ($done.status.startTime | into datetime)) / 1sec | math round --precision 1
+	let limits = (gc run jobs describe $r.job --region $run.region --project $run.project --format json | from json | get spec.template.spec.template.spec.containers.0.resources.limits)
+	let vcpu = (if ($limits.cpu | str ends-with "m") { ($limits.cpu | str replace "m" "" | into float) / 1000 } else { $limits.cpu | into float })
+	let memory_gi = (if ($limits.memory | str ends-with "Gi") { $limits.memory | str replace "Gi" "" | into float } else if ($limits.memory | str ends-with "Mi") { ($limits.memory | str replace "Mi" "" | into float) / 1024 } else { error make {msg: $"the job's memory ($limits.memory) is not in Gi or Mi"} })
+	let usd = ($seconds * ($vcpu * $r.price.vcpu + $memory_gi * $r.price.gib) | math round --precision 4)
+	# The execution's Completed condition, not a count of tasks: one task that failed fails it.
+	let ok = ($done.status.conditions? | default [] | any {|c| $c.type == "Completed" and $c.status == "True" })
+	sleep 10sec # Cloud Logging takes the last lines a moment after the run ends
+	gc logging read $"resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"($execution)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
+		| lines | where {|l| $l | str trim | is-not-empty } | each {|l| print $"rehearsal| ($l)" } | ignore
+	print $"gcp: (stamp) the rehearsal (if $ok { 'passed' } else { 'FAILED' }) in ($seconds)s: $($usd) \(($vcpu) vCPU, ($memory_gi) GiB\)"
+	{ok: $ok, job: $r.job, execution: $execution, seconds: $seconds, vcpu: $vcpu, memoryGi: $memory_gi, usd: $usd}
 }
 
 # The drivers' build stopped, when the service it waits for never came up.
@@ -240,8 +287,11 @@ export def drivers-log [
 export def run-drivers [app_dir: string, plan: record] {
 	let run = (start-drivers $app_dir $plan)
 	go-drivers $run
+	# The drivers GCP.rehearsal replaces run in its job, beside the others in Cloud Build.
+	let rehearsal = if ($plan.rehearsal? | is-empty) { null } else { run-rehearsal $run $plan.rehearsal }
 	finish-drivers $run
 	drivers-log $run --just-ended
+	if $rehearsal != null and not $rehearsal.ok { error make {msg: $"the rehearsal failed \(execution ($rehearsal.execution)\): its log is above"} }
 }
 
 export def main [

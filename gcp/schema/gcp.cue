@@ -50,6 +50,24 @@ import (
 	// run beside the release.
 	previewProject?: =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
 
+	// The gate's checks run in a Cloud Run job of the previews project against the rc preview, in
+	// Cloud Build's place for the drivers `replaces` names, and none runs on the machine
+	// releasing: no integrate@local, and no earlier pass skips the preview. The infrastructure
+	// makes the job (runJobs: its size and command, and its image to be replaced at each run);
+	// each run swaps in the image of the compose driver `driver`, sets `env` beside APP_URL, and
+	// is timed and priced into the release's record at `price`, Cloud Run's instance-based
+	// tier 1 rates in USD a second.
+	rehearsal?: {
+		job:    =~"^[a-z][a-z0-9-]{0,48}[a-z0-9]$"
+		driver: string & !=""
+		replaces: [string, ...string]
+		env: [string]: string
+		price: {
+			vcpu: *0.000018 | number
+			gib:  *0.000002 | number
+		}
+	}
+
 	// Identity-Aware Proxy in front of the service: only the people the project's
 	// owner admits (roles/iap.httpsResourceAccessor on it) reach the app, for an
 	// app that acts for its owner alone. A preview has none, so the gate's
@@ -773,6 +791,7 @@ import (
 		}
 		if R._domain != "" {domain: R._domain}
 		aliases: R._aliases
+		if R.rehearsal != _|_ {rehearsal: R.rehearsal}
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}
 		if len(unserved) > 0 {providers: error("the terminal offers \(strings.Join(unserved, ", ")), which production does not serve, so its way in would answer 404: give GCP.auth.oidc the provider's production settings")}
 

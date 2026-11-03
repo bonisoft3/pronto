@@ -75,6 +75,7 @@ def fold [cue_path: string, preview: string, started: datetime, ended: datetime,
 		rc: $facts.rc
 		localGate: $facts.localGate
 		revision: $facts.revision
+		rehearsal: ($facts.rehearsal? | default null)
 		phases: {
 			lock: (do $span lock)
 			gate: (do $span gate)
