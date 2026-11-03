@@ -509,15 +509,19 @@ import (
 		}
 	}
 
-	// A sidecar's container, in the cluster's instance or its own service.
+	// A sidecar's container, in the cluster's instance or its own service. Apart, it is
+	// its service's ingress, whose PORT and K_* Cloud Run sets itself and refuses from
+	// the spec ("reserved env names"): PORT is its containerPort, the sidecar's port.
 	let sidecarOf = {
-		n: string
-		c: _
+		n:     string
+		c:     _
+		apart: bool | *false
+		let reserved = [if apart for k in ["PORT", "K_SERVICE", "K_REVISION", "K_CONFIGURATION"] {k}]
 		out: {
 			name: n
 			image: (imageOf & {svc: n}).out
 			if len(c.env)+len(c.secrets) > 0 {
-				env: list.Concat([[for k, v in c.env if c.secrets[k] == _|_ {[
+				env: list.Concat([[for k, v in c.env if c.secrets[k] == _|_ if !list.Contains(reserved, k) {[
 					if sq[k] != _|_ {(secretOf & {env: k, secret: sq[k]}).out},
 					if k == "ORIGIN" && R._origin != "" {{name: k, value: R._origin}},
 					{name: k, value: v},
@@ -569,7 +573,7 @@ import (
 						volumes: [{name: "gmp-config", secret: {secretName: R.names.sidecarScrapeConfigs[n], items: [{key: "latest", path: "config.yaml"}]}}]
 					}
 					containers: list.Concat([[{
-						(sidecarOf & {"n": n, "c": c}).out
+						(sidecarOf & {"n": n, "c": c, apart: true}).out
 						ports: [{name: "http1", containerPort: c.port}]
 						if c.memory != _|_ {resources: limits: memory: c.memory}
 						if c.apart.cpu != _|_ {resources: limits: cpu: "\(c.apart.cpu)m"}
