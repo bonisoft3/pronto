@@ -705,3 +705,17 @@ Deno.test("a sidecar's memory is its container's, inside the instance or apart",
   const bad = await built(withSidecar(`{port: 8687, memory: "lots"}`), "service");
   assertEquals(bad.success, false);
 });
+
+// The gate in the cloud: the plan carries the rehearsal with Cloud Run's prices, and an app that
+// names none has none (release.nu then keeps its local gate and its rc skip).
+Deno.test("a rehearsal is in the plan with its prices; absent, the plan has none", async () => {
+  const named = await built(release(`, rehearsal: {job: "bonk-chess-rehearsal", driver: "check-online", replaces: ["check-online", "check-premium"], env: SLOW: "1"}`), "plan");
+  assertEquals(named.success, true, named.stderr);
+  assertEquals(named.value.rehearsal, {
+    job: "bonk-chess-rehearsal", driver: "check-online", replaces: ["check-online", "check-premium"], env: { SLOW: "1" },
+    price: { vcpu: 0.000018, gib: 0.000002 },
+  });
+  assertEquals((await built(release(), "plan")).value.rehearsal, undefined);
+  assertEquals((await built(release(`, rehearsal: {job: "Rehearsal", driver: "check-online", replaces: ["check-online"], env: {}}`), "release.rehearsal")).success, false);
+  assertEquals((await built(release(`, rehearsal: {job: "r", driver: "check-online", replaces: [], env: {}}`), "release.rehearsal")).success, false);
+});

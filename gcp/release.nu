@@ -7,7 +7,7 @@
 # images push the same digests and roll nothing, and initdb finds its marker.
 
 use ../k8s/release.nu [resolve-app]
-use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers plan-of]
+use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers run-rehearsal plan-of]
 use build.nu [builder stamp gc exists build-account push-images service-jwt]
 use local-gate-key.nu
 use release-record.nu
@@ -1054,7 +1054,11 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	# the preview, then the tests, then the release of the very images tested,
 	# and the preview stopped whatever happened. A preview, a dry run or a
 	# snapshot deploys as asked.
-	let local = ($preview | is-empty) and not $dry_run and not $snapshot and not $no_local_gate
+	# GCP.rehearsal names the gate: slowed checks in a Cloud Run job against the rc preview, so this
+	# machine runs none of them, nor integrate@local, and no earlier pass stands in for the preview.
+	let rehearsal_out = (^cue export --expression "GCP.rehearsal" --out json $app_info.cue_path | complete)
+	let rehearsal = if $rehearsal_out.exit_code == 0 { $rehearsal_out.stdout | from json } else { null }
+	let local = ($preview | is-empty) and not $dry_run and not $snapshot and not $no_local_gate and $rehearsal == null
 	if ($preview | is-not-empty) or $dry_run or $snapshot or $no_gate {
 		release-record note {rc: $"skipped: (if ($preview | is-not-empty) { 'a preview' } else { '--no-gate' })"}
 		if not $dry_run and not $snapshot { preflight $app_info [$preview] }
@@ -1070,7 +1074,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	# The rc gate is skipped where the local gate passes, and nothing a deploy is shaped by
 	# changed since a release passed rc (docs/decisions/2026-11-01-local-gate-replaces-rc.md).
 	let deploy_key = (local-gate-key deploy-key $app_info.dir)
-	let rc_why = if $force_rc { "--rc" } else if $no_local_gate { "--no-local-gate: no local pass stands in for it" } else if $deploy_key == null { "the deploy-shaped files cannot be read" } else if not (local-gate-key rc-passed $app_info.dir $deploy_key) { "the deploy-shaped files (release.cue, compose, infra, program.cue, mise) changed since a release passed it" } else { "" }
+	let rc_why = if $force_rc { "--rc" } else if $rehearsal != null { "GCP.rehearsal: the cloud rehearsal is the gate" } else if $no_local_gate { "--no-local-gate: no local pass stands in for it" } else if $deploy_key == null { "the deploy-shaped files cannot be read" } else if not (local-gate-key rc-passed $app_info.dir $deploy_key) { "the deploy-shaped files (release.cue, compose, infra, program.cue, mise) changed since a release passed it" } else { "" }
 	if ($rc_why | is-empty) {
 		print $"gcp: (stamp) no rc preview: the deploy-shaped files are those of a release that passed it, so the local gate stands in for it \(--rc runs it\)"
 		release-record note {rc: "skipped: the deploy-shaped files are those of a release that passed it"}
@@ -1144,18 +1148,28 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 		let drivers = $drivers
 		let tested = $tested
 		go-drivers $drivers
+		let rehearsal_run = $rehearsal
 		let from = {registry: $rc_plan.registry, pushed: $tested}
 		let copy = (start-early-copy $app_info.cue_path $prod_plan $from)
 		# Production staged while the tests run, none of it the app's code, and made live
 		# only once they passed (docs/decisions/2026-10-29-staged-release.md).
-		let both = (["stage" "tests"] | par-each {|t|
-			if $t == "stage" {
+		let both = (["stage" "tests" "rehearsal"] | par-each {|t|
+			if $t == "rehearsal" {
+				if $rehearsal_run == null { {} } else {
+					try {
+						let r = (run-rehearsal $drivers $rehearsal_run)
+						release-record note {rehearsal: $r}
+						if $r.ok { {} } else { {rehearsal: $"the rehearsal failed \(execution ($r.execution)\): its log is above"} }
+					} catch {|e| {rehearsal: $e.msg} }
+				}
+			} else if $t == "stage" {
 				try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}) --rendered $prod_plan)} } catch {|e| {staging: $e.msg} }
 			} else {
 				try { finish-drivers $drivers; release-record mark rc end; {} } catch {|e| {tests: $e.msg} }
 			}
 		} | reduce -f {} {|it, acc| $acc | merge $it })
 		if ($both.tests? | is-not-empty) { error make {msg: $both.tests} }
+		if ($both.rehearsal? | is-not-empty) { error make {msg: $both.rehearsal} }
 		if ($both.staging? | is-not-empty) { error make {msg: $"the tests passed, but production was not staged: ($both.staging)"} }
 		# The tests' log is read from Cloud Logging beside go-live, which takes longer, into a file.
 		let log_file = $"(pwd)/dist/gcp/tests-log.txt"

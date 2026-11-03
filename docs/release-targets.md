@@ -656,6 +656,16 @@ after a gated release succeeds. `--rc` runs the rc gate anyway, and so does
 ([decision](decisions/2026-11-01-local-gate-replaces-rc.md)). An app's own
 rehearsal records a local pass with `nu gcp/local-gate-key.nu stamp <app dir>`.
 
+`GCP.rehearsal` moves the gate into the cloud: the app's checks (slowed, repeated) run in a Cloud
+Run job of the previews project against the rc preview, beside the drivers Cloud Build still
+runs, and the release waits for both. The rc always runs, as nothing local stands in for it, and
+neither the local gate nor its ledger runs on the releasing machine. The job (its size, command and
+account) is the infrastructure's (`runJobs`); each run points it at the image the tests' build
+pushed for `rehearsal.driver`, sets `rehearsal.env` and APP_URL, prints its log with the prefix
+`rehearsal|`, and records `rehearsal: {ok, job, execution, seconds, vcpu, memoryGi, usd}` in the
+release's record, `usd` being the job's seconds at its vCPU and GiB at `rehearsal.price`.
+`rehearsal.replaces` names the drivers the job runs in Cloud Build's stead.
+
 One release of an app runs at a time, wherever it starts: before anything else a release
 takes the app's lock, `gs://<project>-release-locks/<app>` (a preview's is `<app>-<preview>`),
 an object made only where none is (`--if-generation-match=0`), saying who holds it and until
@@ -681,6 +691,7 @@ Every run is recorded, however it ends, once its lock is let go: one JSON line a
 | `failure` | the failure's first line, `null` otherwise |
 | `rc` | `ran`, or `skipped: <why>` |
 | `localGate` | `ran`, `reused` (the ledger's pass) or `skipped` |
+| `rehearsal` | `GCP.rehearsal`'s run: `ok`, `job`, `execution`, `seconds`, `vcpu`, `memoryGi`, `usd`; `null` without one |
 | `revision` | the revision serving once live (or the one `--rollback` went back to), `null` otherwise |
 | `phases` | seconds, `null` where the phase never started: `lock` (taking it), `gate` (the local gate), `rc` (the rc preview through its tests), `stage`, `schema` (the job, or `"skipped"`), `deploy` (go-live but the schema job), `total`. A phase the run failed in is timed to the run's end; the gate and rc run beside the stage, so phases overlap |
 
