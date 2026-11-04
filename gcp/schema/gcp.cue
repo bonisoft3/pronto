@@ -672,7 +672,10 @@ import (
 				template: spec: {
 					serviceAccountName: R.names.serviceAccount
 					maxRetries:         0
-					timeoutSeconds:     600
+					// 30 minutes: a pgroll start walks its history, and at 6,180 rows each walk took
+					// minutes, so 10 killed Bonk Chess's job mid-start and left a migration in progress
+					// (2026-11-04). The release waits on the job however long it takes.
+					timeoutSeconds:     1800
 					containers: [{
 						name: "initdb"
 						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
