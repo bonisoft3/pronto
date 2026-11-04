@@ -7,7 +7,7 @@
 const gcp_dir = path self .
 
 use std/assert
-use verify.nu [scenario-names failed-scenarios failed-sections classify-failures new-feature-excuse]
+use verify.nu [scenario-names failed-scenarios failed-sections classify-failures new-feature-excuse live-verdict]
 use release-record.nu
 use build.nu [failure-message tag-action]
 
@@ -92,6 +92,21 @@ def test_the_excuse_reads_the_live_release_s_tree [] {
 		assert equal (new-feature-excuse $run [["✗ seek_notify (1s) at step 1"]]) []
 	}
 	assert equal (new-feature-excuse {app: "none-such", appDir: $c.app} [["✗ seek_notify (1s) at step 1"]]) []
+	rm -r $c.dir
+}
+
+def test_classify_names_regressions_and_new_features [] {
+	let c = (checkout)
+	let verify = ($gcp_dir | path join verify.nu)
+	with-record $c false {
+		let run = {|names| ^$nu.current-exe --no-config-file $verify classify $c.app --app t ...$names | from json }
+		assert equal (do $run [seek_notify]) {commit: $c.commit, new: [seek_notify], regressions: []}
+		assert equal (do $run [seek_notify seek]) {commit: $c.commit, new: [], regressions: [seek]}
+		assert equal (do $run [nonesuch]) {commit: $c.commit, new: [], regressions: [nonesuch]}
+	}
+	with-record $c true {
+		assert equal (live-verdict "t" $c.app [["✗ seek_notify (1s) at step 1"]]).verdict "unknown"
+	}
 	rm -r $c.dir
 }
 
