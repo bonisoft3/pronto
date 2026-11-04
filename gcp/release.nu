@@ -57,15 +57,18 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 
 # A gcloud call granting a role: IAM does not know an account made a moment before for some seconds
 # ("does not exist"), and refuses a binding written while another changed the same policy ("concurrent
-# policy changes", as go-live's parallel tasks do), so the call is asked again, a minute at most, a
-# second apart, before it fails; any other refusal fails at once.
+# policy changes", as go-live's parallel tasks do), so the call is asked again, a second apart,
+# as long as IAM gives only those answers (no limit; each minute says so); any other refusal fails at once.
 def --wrapped gc-fresh [...args] {
 	let input = $in
-	let until = ((date now) + 1min)
+	let t0 = (date now)
+	mut tries = 0
 	loop {
 		let r = ($input | ^gcloud --quiet ...$args | complete)
 		if $r.exit_code == 0 { return $r.stdout }
-		if not ($r.stderr =~ "does not exist|concurrent policy changes") or (date now) > $until { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
+		if not ($r.stderr =~ "does not exist|concurrent policy changes") { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
+		$tries += 1
+		if $tries mod 60 == 0 { print $"gcp: (stamp) gcloud ($args | first 3 | str join ' ') still refused after ((date now) - $t0 | format duration sec): ($r.stderr | str trim | lines | last)" }
 		sleep 1sec
 	}
 }
@@ -283,7 +286,7 @@ def start-copy [plan: record, name: string, services: list<string>, from: record
 	{
 		steps: ($refs | each {|r| {name: $copier, args: ["cp" $r.src $"($r.repo):candidate"]} })
 		options: {logging: "CLOUD_LOGGING_ONLY"}
-		timeout: "1200s"
+		timeout: "86400s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
 	print $"gcp: (stamp) copying the tested ($services | str join ', ') from the preview"
 	let build = (gc builds submit --no-source --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
@@ -463,13 +466,12 @@ def empty-preview [plan: record] {
 	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
 		print $"gcp: (stamp) emptying the preview ($plan.preview): dropping its database on ($n.instance)"
 		# A service at no instance still finishes the requests it had, so a connection of one may
-		# outlive stop-preview: the drop is asked again, about two minutes in all, until none is left.
-		mut left = 6
+		# outlive stop-preview: the drop is asked again, twenty seconds apart, until none is left
+		# (no limit; each ask that fails says so).
 		loop {
 			let r = (do { ^gcloud --quiet sql databases delete $n.database --instance $n.instance --project $plan.project } | complete)
 			if $r.exit_code == 0 or not (exists sql databases describe $n.database --instance $n.instance --project $plan.project) { break }
-			if $left == 0 { error make {msg: $"gcloud sql databases delete ($n.database): ($r.stderr | str trim)"} }
-			$left -= 1
+			print $"gcp: (stamp) the preview's database ($n.database) is still in use, asked again in 20s: ($r.stderr | str trim | lines | last)"
 			sleep 20sec
 		}
 		gc sql databases create $n.database --instance $n.instance --project $plan.project | ignore
@@ -713,39 +715,35 @@ export const invoker_probe = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJwc
 const cloud_run_refusal = "not authorized to invoke this service"
 
 # An address polled until it answers ok (and, where given, with the revision's name, `steady`
-# times in a row), for GCP_GOLIVE_WAIT seconds, 180 unless set. With `bearer` each request
-# carries it, and while Cloud Run refuses it itself the poll waits on, for
-# GCP_INVOKER_WAIT seconds in all, 420 unless set: Cloud Run's IAM changes take up to
-# seven minutes; once it has refused one, the poll keeps that wait while its answers come
-# steady. Where the grant was in force already the first answers pass, and the
-# poll costs nothing more.
-export def poll-health [url: string, ok: list<string>, revision: any, --steady: int = 1, --bearer: string]: nothing -> record {
-	let wait = ($env.GCP_GOLIVE_WAIT? | default 180 | into int)
-	let invoker_wait = ($env.GCP_INVOKER_WAIT? | default 420 | into int)
+# times in a row). No limit: a poll that gets no such answer goes on, and says so about every
+# minute (elapsed, last answer), so a stuck go-live shows in the log instead of failing or
+# rolling back on a clock. With `bearer` each request carries it, and a Cloud Run refusal of it
+# (its grant of roles/run.invoker to allUsers not in force yet, which can take minutes) is
+# named in that line. The result keeps its shape (ok, last, waited) for its callers; ok is
+# always true, as the poll returns only on the answer it wants.
+export def poll-health [url: string, ok: list<string>, revision: any, --steady: int = 1, --bearer: string]: nothing -> any {
 	let every = ($env.GCP_GOLIVE_EVERY? | default 2 | into int)
 	let headers = if $bearer == null { [] } else { ["--header" $"Authorization: Bearer ($bearer)"] }
 	let body = (mktemp -t gcp.XXXXXX | str trim)
 	let t0 = (date now)
+	mut next_note = 1min
 	mut streak = 0
 	mut last = "no answer"
-	mut refused = false
-	mut spreading = false
 	loop {
 		let code = (^curl --silent --max-time 10 --output $body --write-out "%{http_code}" ...$headers $url | complete | get stdout | str trim)
 		let said = (open --raw $body | into string | str trim)
 		$last = $"($code) ($said | str substring 0..60)"
-		$refused = ($bearer != null and $code == "401" and ($said | str contains $cloud_run_refusal))
-		$spreading = ($spreading or $refused)
+		let refused = ($bearer != null and $code == "401" and ($said | str contains $cloud_run_refusal))
 		if $code in $ok and ($revision == null or $said == $revision) { $streak += 1 } else { $streak = 0 }
 		if $streak >= $steady { rm -f $body; return {ok: true, last: $last, waited: ""} }
-		let limit = if $spreading { [$wait $invoker_wait] | math max } else { $wait }
-		if ((date now) - $t0) >= ($limit * 1sec) { break }
+		let elapsed = ((date now) - $t0)
+		if $elapsed >= $next_note {
+			let why = if $refused { " (Cloud Run itself still refuses a bearer token not signed by Google: its grant of roles/run.invoker to allUsers is not in force yet)" } else { "" }
+			print $"gcp: (stamp) still waiting for ($url) to answer ($ok | str join '/')(if $revision != null { $" as ($revision)" } else { '' }), ($elapsed | format duration sec): last answer ($last)($why)"
+			$next_note = $next_note + 1min
+		}
 		sleep ($every * 1sec)
 	}
-	rm -f $body
-	let waited = if $spreading { [$wait $invoker_wait] | math max } else { $wait }
-	let why = if $refused { "Cloud Run itself still refuses a request that carries a bearer token not signed by Google: its grant of roles/run.invoker to allUsers is not in force yet (GCP_INVOKER_WAIT waits longer); " } else { "" }
-	{ok: false, last: $"($why)($last)", waited: $"($waited)s"}
 }
 
 # A staged release made live: its images tagged the release's (a gated one's, now that its
@@ -993,9 +991,12 @@ def local-gate [app_dir: string] {
 # One release of an app at a time, wherever it starts: two would race on its service, its
 # traffic, its rc preview and its IAM policy (AGENTS.md). The lock is an object in the project's
 # own bucket, made only where none is (--if-generation-match=0, which GCS decides atomically), that
-# says who holds it and until when. A release that died leaves it until then; PRONTO_RELEASE_BREAK_LOCK=1
-# takes it at once. Releases of other apps, and an app's previews (pr-32), hold locks of their own.
-const LOCK_FOR = 45min
+# says who holds it. It is a lease with no end of its own: while the release runs, a background job
+# touches the object (its `beat` metadata, so its generation stays) every minute, and the lock is
+# taken over only once nothing touched it for LOCK_STALE, so a release of any length keeps it. A release
+# that died leaves it for LOCK_STALE; PRONTO_RELEASE_BREAK_LOCK=1 takes it at once. Releases of other
+# apps, and an app's previews (pr-32), hold locks of their own.
+const LOCK_STALE = 10min
 
 def lock-of [cue_path: string, preview: string]: nothing -> record {
 	let g = (^cue export --expression "{p: GCP.project, n: GCP.name, r: GCP.region}" --out json $cue_path | from json)
@@ -1009,7 +1010,7 @@ def take-lock [lock: record]: nothing -> any {
 		gc storage buckets create $lock.bucket --project $lock.project --location $lock.region --uniform-bucket-level-access --public-access-prevention | ignore
 	}
 	let now = (date now)
-	let holder = {by: $"(whoami | str trim)@(sys host | get hostname)", dir: (pwd), pid: $nu.pid, since: ($now | format date "%+"), until: ($now + $LOCK_FOR | format date "%+")}
+	let holder = {by: $"(whoami | str trim)@(sys host | get hostname)", dir: (pwd), pid: $nu.pid, since: ($now | format date "%+")}
 	let file = (mktemp -t pronto-release-lock.XXXXXX)
 	$holder | to json | save -f $file
 	let broken = ($env.PRONTO_RELEASE_BREAK_LOCK? | default "") not-in ["" "0" "false"]
@@ -1018,23 +1019,34 @@ def take-lock [lock: record]: nothing -> any {
 		if $made.exit_code == 0 {
 			rm -f $file
 			let generation = (gc storage objects describe $lock.object --project $lock.project --format "value(generation)" | str trim)
-			print $"gcp: (stamp) ($lock.key)'s release lock taken \(($lock.object), until ($holder.until)\)"
-			return ($lock | insert generation $generation)
+			print $"gcp: (stamp) ($lock.key)'s release lock taken \(($lock.object), kept while this release runs\)"
+			let beat = job spawn {
+				loop {
+					sleep 1min
+					let r = (do { ^gcloud --quiet storage objects update $lock.object $"--custom-metadata=beat=(date now | format date '%+')" $"--if-generation-match=($generation)" --project $lock.project } | complete)
+					if $r.exit_code != 0 { print -e $"gcp: (stamp) ($lock.key)'s release lock was not renewed \(another release may take it after ($LOCK_STALE)\): ($r.stderr | str trim | lines | last)" }
+				}
+			}
+			return ($lock | insert generation $generation | insert beat $beat)
 		}
 		if not ($made.stderr =~ '(?i)412|pre-?condition') {
 			rm -f $file
 			error make {msg: $"($lock.key)'s release lock \(($lock.object)\) was not taken: ($made.stderr | str trim)"}
 		}
 		let held = (try { gc storage cat $lock.object --project $lock.project | from json } catch { {} })
-		let generation = (try { gc storage objects describe $lock.object --project $lock.project --format "value(generation)" | str trim } catch { "" })
-		let expired = (try { ($held.until | into datetime) < (date now) } catch { true })
-		if $attempt == 2 or not ($expired or $broken) {
+		let seen = (try { gc storage objects describe $lock.object --project $lock.project --format json | from json } catch { {} })
+		let generation = ($seen.generation? | default "" | into string)
+		let metageneration = ($seen.metageneration? | default "" | into string)
+		# Not touched for LOCK_STALE: its release is gone. Unreadable counts as touched (BREAK_LOCK takes it).
+		let silent = (try { ((date now) - ($seen.update_time | into datetime)) > $LOCK_STALE } catch { false })
+		if $attempt == 2 or not ($silent or $broken) {
 			rm -f $file
-			error make {msg: $"another release of ($lock.key) is running: ($held.by? | default 'someone') in ($held.dir? | default '?') \(pid ($held.pid? | default '?')\) since ($held.since? | default '?'), holding it until ($held.until? | default '?'). One release of an app at a time: run again once it ends. A release that died holds it until then; PRONTO_RELEASE_BREAK_LOCK=1 takes it now."}
+			error make {msg: $"another release of ($lock.key) is running: ($held.by? | default 'someone') in ($held.dir? | default '?') \(pid ($held.pid? | default '?')\) since ($held.since? | default '?'). One release of an app at a time: run again once it ends. A release that died holds it until nothing has touched it for ($LOCK_STALE); PRONTO_RELEASE_BREAK_LOCK=1 takes it now."}
 		}
-		print $"gcp: (stamp) ($lock.key)'s release lock taken over from ($held.by? | default 'someone') \((if $broken { 'PRONTO_RELEASE_BREAK_LOCK' } else { $"it expired at ($held.until? | default '?')" })\)"
+		print $"gcp: (stamp) ($lock.key)'s release lock taken over from ($held.by? | default 'someone') \((if $broken { 'PRONTO_RELEASE_BREAK_LOCK' } else { $"nothing touched it for ($LOCK_STALE)" })\)"
 		if ($generation | is-not-empty) {
-			do { ^gcloud --quiet storage rm $lock.object $"--if-generation-match=($generation)" --project $lock.project } | complete | ignore
+			# Both numbers, so a heartbeat that landed since the look above (a new metageneration) keeps the lock.
+			do { ^gcloud --quiet storage rm $lock.object $"--if-generation-match=($generation)" $"--if-metageneration-match=($metageneration)" --project $lock.project } | complete | ignore
 		}
 	}
 	error make {msg: $"($lock.key)'s release lock was not taken"}
@@ -1042,6 +1054,7 @@ def take-lock [lock: record]: nothing -> any {
 
 # The lock let go, only if it is still this release's (its generation): one taken over since stays.
 def drop-lock [lock: record] {
+	if ($lock.beat? | is-not-empty) { try { job kill $lock.beat } }
 	let r = (do { ^gcloud --quiet storage rm $lock.object $"--if-generation-match=($lock.generation)" --project $lock.project } | complete)
 	if $r.exit_code == 0 { print $"gcp: (stamp) ($lock.key)'s release lock let go" } else { print $"gcp: (stamp) ($lock.key)'s release lock was not let go: ($r.stderr | str trim | lines | last)" }
 }
@@ -1241,7 +1254,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 			} catch {|e| {tests_log_error: $e.msg} | job send 0 }
 		} | ignore
 		go-live $both.staged | ignore
-		let read = (try { job recv --timeout 60sec } catch { {tests_log_error: "Cloud Logging did not answer in a minute"} })
+		let read = (job recv)
 		if ($read.tests_log? | is-not-empty) {
 			print $"gcp: (stamp) what the tests printed \(also in ($read.tests_log)\):"
 			print (open --raw $read.tests_log)

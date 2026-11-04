@@ -128,12 +128,12 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		# The release says go once the service is up: a marker in the bucket,
 		# read with the build account's token from the worker's metadata.
 		"echo 'verify: waiting for the service to be up'"
-		# Forty minutes at most, should the release that says it be gone.
+		# As long as the release takes: no limit, a stuck wait shows in the log's progress line.
 		"waited=0; step=1"
 		"until token=$(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\"access_token\":\"\\([^\"]*\\)\".*/\\1/p') && wget -qO /dev/null --header \"Authorization: Bearer $token\" \"https://storage.googleapis.com/storage/v1/b/${PROJECT_ID}_cloudbuild/o/verify%2F${BUILD_ID}%2Fgo\" 2>/dev/null; do"
 		# A second apart for ten minutes, then three.
 		"  [ \"$waited\" -lt 600 ] || step=3"
-		"  waited=$((waited + step)); [ \"$waited\" -lt 2400 ] || { echo 'verify: the release never said go' >&2; exit 1; }; sleep $step"
+		"  waited=$((waited + step)); [ $((waited % 300)) -ge $step ] || echo \"verify: still waiting for the release to say go ($waited s)\"; sleep $step"
 		"done"
 		"echo \"verify: $(echo $tested) against $APP_URL\""
 		# The drivers run together, each to its end whatever the others answer,
@@ -184,7 +184,7 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 			{name: $builder, entrypoint: "sh", args: ["-c" (do $shell $verdict)]}
 		]
 		options: {machineType: "E2_HIGHCPU_32", logging: "CLOUD_LOGGING_ONLY"}
-		timeout: "3600s"
+		timeout: "86400s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
 	print $"gcp: (stamp) building the tests of ($url) in Cloud Build"
 	# The build logs to Cloud Logging alone, which `builds submit` does not
@@ -213,7 +213,13 @@ export def run-rehearsal [run: record, r: record]: nothing -> record {
 	# The image is pushed by the tests' build, which has gone on to wait for the preview.
 	mut waited = 0
 	while not (exists artifacts docker images describe $image) {
-		if $waited >= 1800 { error make {msg: $"the rehearsal's image ($image) was not pushed in 30 minutes: see the tests' build ($run.build)"} }
+		# No limit: a stuck push shows in this line, every five minutes.
+		if $waited > 0 and ($waited mod 300) == 0 { print $"gcp: (stamp) still waiting for the rehearsal's image ($image) to be pushed, ($waited)s: see the tests' build ($run.build)" }
+		# The build ended without pushing it: it never will be.
+		if ($waited mod 30) == 0 {
+			let status = (gc builds describe $run.build --project $run.project --format "value(status)" | str trim)
+			if $status not-in ["QUEUED" "PENDING" "WORKING"] and not (exists artifacts docker images describe $image) { error make {msg: $"the tests' build ($run.build) ended ($status) without pushing the rehearsal's image ($image)"} }
+		}
 		sleep 5sec
 		$waited += 5
 	}

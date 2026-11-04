@@ -73,7 +73,7 @@ printf "%s" "$code"
 }
 
 def with-fakes [d: string, body: closure] {
-	with-env {PATH: ([($d | path join bin)] | append $env.PATH), GCP_GOLIVE_WAIT: "2", GCP_GOLIVE_EVERY: "1"} { do $body }
+	with-env {PATH: ([($d | path join bin)] | append $env.PATH), GCP_GOLIVE_EVERY: "1"} { do $body }
 }
 
 def main [] {
@@ -82,9 +82,7 @@ def main [] {
 	test_hold_traffic_first_deploy
 	test_sql_drift_patches_tier_and_flags_at_once
 	test_poll_health_wants_the_revision_by_name
-	test_poll_health_times_out
 	test_poll_health_waits_for_cloud_run_to_pass_a_bearer
-	test_poll_health_names_cloud_runs_refusal
 	test_golive_waits_for_the_invoker_grant
 	test_golive_grants_public_once
 	test_golive_switches_after_both_answer
@@ -127,50 +125,21 @@ def test_poll_health_wants_the_revision_by_name [] {
 	let d = (fakes true "svc-00001-old" "200 x" "200 svc-00002-new")
 	with-fakes $d {
 		assert (poll-health "https://svc/health" ["200"] "svc-00002-new" --steady 2).ok
-		assert (not ((poll-health "https://svc/health" ["200"] "svc-00009-other").ok))
-	}
-	rm -r $d
-}
-
-def test_poll_health_times_out [] {
-	print "test poll-health gives up with the last answer..."
-	let d = (fakes true "svc-00001-old" "200 x" "500 boom")
-	with-fakes $d {
-		let got = (poll-health "https://svc/health" ["200"] null)
-		assert (not $got.ok)
-		assert ($got.last | str contains "500 boom")
 	}
 	rm -r $d
 }
 
 def test_poll_health_waits_for_cloud_run_to_pass_a_bearer [] {
-	print "test poll-health with a bearer waits while Cloud Run refuses it itself, past GCP_GOLIVE_WAIT..."
+	print "test poll-health with a bearer waits while Cloud Run refuses it itself, however long that takes..."
 	let d = (fakes true "svc-00001-old" "200 x" "200 svc-00002-new")
 	"3" | save -f ($d | path join refusals)
 	with-fakes $d {
-		with-env {GCP_GOLIVE_WAIT: "1", GCP_INVOKER_WAIT: "10"} {
+		with-env {GCP_GOLIVE_EVERY: "1"} {
 			assert (poll-health "https://svc/health" ["200"] "svc-00002-new" --steady 2 --bearer $invoker_probe).ok
 		}
 	}
 	assert equal (open --raw ($d | path join refusals) | str trim) "0"
 	assert (open --raw ($d | path join curl.log) | lines | all {|l| $l | str contains $"Authorization: Bearer ($invoker_probe)" })
-	rm -r $d
-}
-
-def test_poll_health_names_cloud_runs_refusal [] {
-	print "test poll-health gives up after GCP_INVOKER_WAIT, naming the invoker grant..."
-	let d = (fakes true "svc-00001-old" "200 x" "200 svc-00002-new")
-	"1000" | save -f ($d | path join refusals)
-	with-fakes $d {
-		with-env {GCP_GOLIVE_WAIT: "1", GCP_INVOKER_WAIT: "2"} {
-			let got = (poll-health "https://svc/health" ["200"] null --bearer $invoker_probe)
-			assert (not $got.ok)
-			assert ($got.last | str contains "allUsers is not in force yet")
-			assert equal $got.waited "2s"
-		}
-		# Without a bearer the same refusal is never asked for, and the address answers.
-		assert (poll-health "https://svc/health" ["200"] null).ok
-	}
 	rm -r $d
 }
 

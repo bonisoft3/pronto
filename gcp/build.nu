@@ -30,11 +30,14 @@ def read-again [args: list, input: any, r: record]: nothing -> record {
 	let verb = ($words | where {|w| $w in ($reads ++ $writes) } | first 1)
 	if $verb == [] or $verb.0 not-in $reads { return $r }
 	mut r = $r
-	# Six times over about two minutes; any other failure is the answer.
-	for wait in [2sec 4sec 8sec 16sec 32sec 60sec] {
+	# Asked again while Google is not reached, waiting 2s, doubling to 60s (no limit; each ask
+	# says so); any other failure is the answer.
+	mut wait = 2sec
+	loop {
 		if $r.exit_code == 0 or not ($r.stderr =~ $offline) { break }
 		print -e $"gcp: (stamp) gcloud ($args | first 3 | each {|a| $a | into string } | str join ' ') did not reach Google; again in ($wait)"
 		sleep $wait
+		$wait = ([($wait * 2) 60sec] | math min)
 		$r = ($input | ^gcloud --quiet ...$args | complete)
 	}
 	$r
@@ -327,7 +330,7 @@ export def push-images [
 		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
 		steps: [{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: ["SOURCE_DATE_EPOCH=0"]}]
 		options: {machineType: "E2_HIGHCPU_8", logging: "CLOUD_LOGGING_ONLY"}
-		timeout: "1800s"
+		timeout: "86400s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
 	print $"gcp: (stamp) building ($services | str join ', ') in Cloud Build"
 	let r = (^gcloud --quiet builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p | complete)
