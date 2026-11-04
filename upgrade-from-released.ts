@@ -106,6 +106,8 @@ export function upgradeScript(o: {
 }): string {
   return `set -euo pipefail
 # The stack's database, from the address it gives this process (a libpq URL).
+# An app with no pgroll migrations has no migrate step, so no address: the database process's own.
+: "\${DATABASE_URL:=postgres://\${POSTGRES_USER:-postgres}:\${POSTGRES_PASSWORD:-postgres}@127.0.0.1:\${PGPORT:-0}/\${POSTGRES_DB:-postgres}?sslmode=disable}"
 url=\${DATABASE_URL#postgres://}; cred=\${url%%@*}; rest=\${url#*@}; hostport=\${rest%%/*}; db=\${rest#*/}
 export PGUSER=\${cred%%:*} PGPASSWORD=\${cred#*:} PGHOST=\${hostport%%:*} PGPORT=\${hostport##*:} PGDATABASE=\${db%%\\?*}
 export POSTGRES_USER=$PGUSER POSTGRES_DB=$PGDATABASE
@@ -120,7 +122,9 @@ echo "upgrade-from-released: the released commit's pgroll migrations"
 psql -X -v ON_ERROR_STOP=1 -qAc "COMMENT ON DATABASE \\"$PGDATABASE\\" IS 'pronto initdb'"
 # 3. This tree, as the release applies it.
 echo "upgrade-from-released: this tree's schema job over the released commit's database"
-exec bash ${q(o.jobFile)}
+bash ${q(o.jobFile)}
+# PostgREST reads its schema once (migrate.sh tells it too, where there are pgroll migrations).
+psql -X -qAc "NOTIFY pgrst, 'reload schema'"
 `
 }
 
@@ -208,7 +212,7 @@ export async function prepare(appDir: string, gateDir: string, dir: string, rele
   await Deno.writeTextFile(upgradeFile, upgradeScript({ oldDir, oldBaseline: oldMig?.baseline ?? "", oldMigrationsDir: oldMig ? oldMigDir : undefined, jobFile, mecha }))
 
   // The tree's own stack, but its database is the released commit's, and its migrate step the upgrade.
-  const migrate = procs.migrate ?? { depends_on: { database: { condition: "process_healthy" } }, availability: { exit_on_skipped: true } }
+  const migrate = procs.migrate ?? { depends_on: { database: { condition: "process_healthy" } }, availability: { exit_on_skipped: true }, environment: procs.database.environment }
   procs.database = { ...oldCompose.processes.database, working_dir: oldDir }
   procs.migrate = { ...migrate, entrypoint: ["mise", "x", "--", "bash", upgradeFile] }
   const file = `${dir}/process-compose.upgrade.yaml`

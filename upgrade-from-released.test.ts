@@ -51,5 +51,5 @@ Deno.test("the upgrade carries the released commit's migrations, marks the datab
   const s = upgradeScript({ oldDir: "/old", oldBaseline: "00_initdb", oldMigrationsDir: "/om", jobFile: "/j.sh", mecha: "/mecha" });
   const at = (x: string) => s.indexOf(x);
   assertStringIncludes(s, "'/om' '00_initdb'");
-  assertEquals(at("migrate.sh") < at("pronto initdb") && at("pronto initdb") < at("exec bash '/j.sh'"), true);
+  assertEquals(at("migrate.sh") < at("pronto initdb") && at("pronto initdb") < at("bash '/j.sh'"), true);
 });
