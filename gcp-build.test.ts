@@ -171,3 +171,56 @@ Deno.test("a grant to an account made a moment before is asked again until IAM k
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+// A bucket of objects on disk behind a gcloud that does what the release lock asks of storage: an
+// object made only where none is (a 412 where one is), described, read and removed.
+async function storageGcloud(dir: string) {
+  await Deno.writeTextFile(`${dir}/gcloud`, `#!/bin/sh
+[ "$1" = "--quiet" ] && shift
+obj() { echo "${dir}/objects/$(echo "$1" | tr '/:' '__')"; }
+case "$1 $2 $3" in
+  "storage buckets describe") exit 0 ;;
+  "storage cp "*) if [ -e "$(obj "$4")" ]; then echo "HTTPError 412: At least one of the pre-conditions you specified did not hold." >&2; exit 1; fi
+    mkdir -p "${dir}/objects"; cp "$3" "$(obj "$4")" ;;
+  "storage objects describe") echo 7 ;;
+  "storage cat "*) cat "$(obj "$3")" ;;
+  "storage rm "*) rm -f "$(obj "$3")" ;;
+  *) echo "unexpected gcloud call: $*" >&2; exit 1 ;;
+esac
+`, { mode: 0o755 });
+}
+
+Deno.test("an app's release holds a lock: another is refused until it ends or expires", { ignore: Deno.build.os === "windows" }, async () => {
+  const dir = await Deno.makeTempDir({ prefix: "pronto-gcp-lock-" });
+  const release = JSON.stringify(fileURLToPath(new URL("./gcp/release.nu", import.meta.url)));
+  const lock = `{bucket: "gs://p-release-locks", object: "gs://p-release-locks/app", key: "app", project: "p", region: "us-central1"}`;
+  const nu = async (script: string, env: Record<string, string> = {}) => {
+    const r = await new Deno.Command("nu", {
+      args: ["-c", `source ${release}; ${script}`],
+      env: { PATH: `${dir}${delimiter}${Deno.env.get("PATH")}`, ...env }, stdout: "piped", stderr: "piped",
+    }).output();
+    return { ok: r.success, out: new TextDecoder().decode(r.stdout), err: new TextDecoder().decode(r.stderr) };
+  };
+  try {
+    await storageGcloud(dir);
+    const first = await nu(`take-lock ${lock} | ignore`);
+    assertEquals(first.ok, true, first.err);
+    assertStringIncludes(first.out, "release lock taken");
+    const held = await nu(`take-lock ${lock} | ignore`);
+    assertEquals(held.ok, false);
+    assertStringIncludes(held.err, "another release of app is running");
+    const broken = await nu(`take-lock ${lock} | ignore`, { PRONTO_RELEASE_BREAK_LOCK: "1" });
+    assertEquals(broken.ok, true, broken.err);
+    assertStringIncludes(broken.out, "taken over");
+    const dropped = await nu(`drop-lock (${lock} | insert generation "7")`);
+    assertStringIncludes(dropped.out, "release lock let go");
+    // The lock lasts PRONTO_RELEASE_LOCK_MINUTES: made to last none, the next release takes it.
+    const brief = await nu(`take-lock ${lock} | ignore`, { PRONTO_RELEASE_LOCK_MINUTES: "0" });
+    assertEquals(brief.ok, true, brief.err);
+    const expired = await nu(`take-lock ${lock} | ignore`);
+    assertEquals(expired.ok, true, expired.err);
+    assertStringIncludes(expired.out, "it expired at");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
