@@ -23,7 +23,7 @@
 # for (the tree as it stands only where none is given). A tree whose key cannot be read is not stamped.
 
 const pronto = (path self ..)
-const gate_files = ["integrate-local.ts" "local-drivers.ts" "plugin.json"]
+const gate_files = ["integrate-local.ts" "local-drivers.ts" "upgrade-from-released.ts" "plugin.json"]
 # What the local gate never exercises, because it runs host processes and not the images, the
 # service as Cloud Run renders it or the project: the release's and the compose files, how an
 # image is built (Dockerfiles, docker/, the web server's, entrypoints' and sidecars' files), the
