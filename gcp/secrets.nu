@@ -56,7 +56,9 @@ export def check-secrets [app_dir: string, --if-gcp, --preview: string = "", --n
 		error make {msg: $"($cue_path) does not exist: check-secrets is for an app with a GCP release"}
 	}
 	if $if_gcp and ((^cue export --expression GCP.project --out text $cue_path | complete).exit_code != 0) { return }
-	let who = (^gcloud auth list --filter "status:ACTIVE" --format "value(account)" | complete)
+	# A token, not `gcloud auth list`: in CI the credentials come from workload identity
+	# (CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE, a fresh CLOUDSDK_CONFIG), which lists no account.
+	let who = (^gcloud auth print-access-token --quiet | complete)
 	if $who.exit_code != 0 or ($who.stdout | str trim | is-empty) {
 		error make {msg: "check-secrets: gcloud is not signed in (run `gcloud auth login`); the secrets a GCP release reads cannot be checked"}
 	}
