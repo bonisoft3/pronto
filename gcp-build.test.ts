@@ -34,6 +34,9 @@ if (Deno.env.get("MOCK_CALLS")) {
   Deno.exit(1);
 }
 `);
+  // The app's compose project, as `docker compose config` prints it: no services, so every image is
+  // keyed by the whole app. Never the real docker.
+  if (Deno.build.os !== "windows") await Deno.writeTextFile(`${bin}/docker`, `#!/bin/sh\necho '{"services": {}}'\n`, { mode: 0o755 });
   const deno = Deno.execPath();
   if (Deno.build.os === "windows") {
     await Deno.writeTextFile(`${bin}/gcloud.cmd`, `@"${deno}" run --no-config -A "${script}" %*\r\n`);
@@ -246,4 +249,52 @@ Deno.test("a live Cloud SQL instance is patched to the plan's tier and flags in 
     ["--tier", "db-custom-1-3840", ...flags],
     flags,
   ]);
+});
+
+Deno.test("a heredoc opens at a RUN, COPY or ADD only, not at a shell's shift", async () => {
+  const build = fileURLToPath(new URL("./gcp/build.nu", import.meta.url));
+  const dockerfile = "FROM x\nENV A=$((1<<2))\nCOPY a /a\nRUN <<EOF\nCOPY inside /x\nEOF\nCOPY b /b\n";
+  const out = await new Deno.Command("nu", { args: ["-c", `source ${build}; dockerfile-reads ${JSON.stringify(dockerfile)} | to json --raw`], stdout: "piped", stderr: "piped" }).output();
+  assertEquals(out.success, true, new TextDecoder().decode(out.stderr));
+  assertEquals(JSON.parse(new TextDecoder().decode(out.stdout)), ["a", "b"]);
+});
+
+Deno.test("an image's key follows the files its Dockerfile copies: an edit to one image's file moves that image's alone", async () => {
+  const app = await Deno.makeTempDir({ prefix: "pronto-gcp-keys-" });
+  const real = await Deno.realPath(app);
+  const build = fileURLToPath(new URL("./gcp/build.nu", import.meta.url));
+  const write = async (f: string, text: string) => { await Deno.mkdir(`${real}/${f}`.replace(/\/[^/]*$/, ""), { recursive: true }); await Deno.writeTextFile(`${real}/${f}`, text); };
+  const run = async (cmd: string, args: string[]) => {
+    const out = await new Deno.Command(cmd, { args, cwd: real, stdout: "piped", stderr: "piped" }).output();
+    assertEquals(out.success, true, new TextDecoder().decode(out.stderr));
+    return new TextDecoder().decode(out.stdout);
+  };
+  try {
+    const compose: Record<string, unknown> = {};
+    for (const s of ["one", "two"]) {
+      await write(`${s}/file.txt`, s);
+      await write(`docker/${s}.Dockerfile`, `FROM scratch\nCOPY ${s}/ /app\n`);
+      compose[s] = { build: { context: real, dockerfile: `docker/${s}.Dockerfile` } };
+    }
+    await write("unrelated.txt", "1");
+    await write("compose.json", JSON.stringify({ services: compose }));
+    await run("git", ["init", "-q"]);
+    const list = `${real}-files`;
+    const keys = async () => {
+      const files = await run("git", ["ls-files", "-co", "--exclude-standard"]);
+      await Deno.writeTextFile(list, files.split("\n").filter((f) => f && f !== "compose.json").join("\n"));
+      const script = `source ${build}; let h = (file-hashes ${real} ${list}); image-keys ${real} (open ${real}/compose.json) $h "t" [one two] | to json --raw`;
+      return JSON.parse(await run("nu", ["-c", script])) as Record<string, string>;
+    };
+    const before = await keys();
+    await write("unrelated.txt", "2");
+    assertEquals(await keys(), before, "a file no image copies moves no key");
+    await write("one/file.txt", "changed");
+    const after = await keys();
+    assertEquals(after.one !== before.one, true, "the image that copies the file");
+    assertEquals(after.two, before.two, "the other image is reused");
+  } finally {
+    await Deno.remove(app, { recursive: true });
+    await Deno.remove(`${real}-files`).catch(() => {});
+  }
 });
