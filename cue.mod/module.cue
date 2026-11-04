@@ -30,11 +30,11 @@ deps: {
 		default: true
 	}
 	"github.com/bonisoft3/mecha@v0": {
-		v:       "v0.20.5"
+		v:       "v0.20.6"
 		default: true
 	}
 	"github.com/bonisoft3/omnishell@v0": {
-		v:       "v0.21.6"
+		v:       "v0.21.7"
 		default: true
 	}
 	"github.com/bonisoft3/sayt@v0": {
