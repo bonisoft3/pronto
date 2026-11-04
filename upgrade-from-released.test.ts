@@ -52,4 +52,6 @@ Deno.test("the upgrade carries the released commit's migrations, marks the datab
   const at = (x: string) => s.indexOf(x);
   assertStringIncludes(s, "'/om' '00_initdb'");
   assertEquals(at("migrate.sh") < at("pronto initdb") && at("pronto initdb") < at("bash '/j.sh'"), true);
+  // The job's replays add no inferred migration to pgroll's ledger: counted on either side of it.
+  assertEquals(at("before=$(inferred)") < at("bash '/j.sh'") && at("bash '/j.sh'") < at("after=$(inferred)"), true);
 });

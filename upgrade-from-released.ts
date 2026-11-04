@@ -121,9 +121,21 @@ echo "upgrade-from-released: the released commit's pgroll migrations"
   }
 # 2. The cluster's initdb finds this marker on a database it built (gcp/schema/gcp.cue's job).
 psql -X -v ON_ERROR_STOP=1 -qAc "COMMENT ON DATABASE \\"$PGDATABASE\\" IS 'pronto initdb'"
-# 3. This tree, as the release applies it.
+# 3. This tree, as the release applies it. Its replays are no migrations: pgroll's ledger gains
+# no inferred one from them, or every release lengthens the chain pgroll walks (2026-11-04).
+inferred() {
+  if [ "$(psql -XtAc "SELECT to_regclass('pgroll.migrations') IS NOT NULL")" = t ]; then
+    psql -XtAc "SELECT count(*) FROM pgroll.migrations WHERE migration_type = 'inferred'"
+  else echo 0; fi
+}
+before=$(inferred)
 echo "upgrade-from-released: this tree's schema job over the released commit's database"
 bash ${q(o.jobFile)}
+after=$(inferred)
+if [ "$after" != "$before" ]; then
+  echo "upgrade-from-released: the schema job left $((after - before)) inferred pgroll migrations: its replays ran with pgroll's capture on (it skips only pgroll.no_inferred_migrations = 'TRUE')" >&2
+  exit 1
+fi
 # PostgREST reads its schema once (migrate.sh tells it too, where there are pgroll migrations).
 psql -X -qAc "NOTIFY pgrst, 'reload schema'"
 `
