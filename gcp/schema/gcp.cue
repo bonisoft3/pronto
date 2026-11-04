@@ -87,6 +87,12 @@ import (
 		command: *["/migrate.sh", "/pgroll", "00_initdb"] | [...string]
 	}
 
+	// How long the schema job may run, in seconds. A pgroll start walks the
+	// migration history, which takes minutes on a long one, and a job killed
+	// mid-start leaves a migration in progress. The release waits on the job
+	// however long it takes.
+	schemaJobTimeout: *1800 | int & >=60 & <=86400
+
 	// Present where the app's compose project builds the SSR render sidecar.
 	render: {
 		enabled: *false | bool
@@ -602,12 +608,18 @@ import (
 				template: spec: {
 					serviceAccountName: R.names.serviceAccount
 					maxRetries:         0
-					timeoutSeconds:     600
+					timeoutSeconds:     R.schemaJobTimeout
 					containers: [{
 						name: "initdb"
 						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
 						command: ["bash", "-c", """
 							set -euo pipefail
+							# pgroll records any DDL run outside it as an "inferred" migration, a link
+							# in the chain its previous_migration walks; every release replaying these
+							# steps added hundreds, and on a long history that walk ran past the job's
+							# timeout. These steps are no migrations: psql tells it so, in the one
+							# spelling pgroll's trigger takes (= 'TRUE': `true` is ignored).
+							export PGOPTIONS="-c pgroll.no_inferred_migrations=TRUE"
 							# Validation migrations and machine writers run as this owner
 							# under forced RLS; switched roles still meet every policy.
 							psql -v ON_ERROR_STOP=1 -XqAc "ALTER ROLE postgres BYPASSRLS"
@@ -629,7 +641,7 @@ import (
 							# Cloud SQL's postgres is no superuser: crud and auth connect as it
 							# and switch into these, which it created but holds no SET on.
 							psql -v ON_ERROR_STOP=1 -XqAc "GRANT \(strings.Join(R.database.tokenRoles, ", ")) TO postgres WITH INHERIT FALSE, SET TRUE"
-							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks.\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
+							""" + [if R.migrate != _|_ {"\n# Then the pgroll migrations the schema initdb built lacks, which pgroll records itself.\nunset PGOPTIONS\nexec \(strings.Join([for a in R.migrate.command {strconv.Quote(a)}], " "))\n"}, ""][0]]
 						env: list.Concat([initdbEnv, [if R.migrate != _|_ for e in list.Concat([
 							[(secretOf & {env: "DATABASE_URL", secret: sq.MIGRATE_DATABASE_URL}).out],
 							[for k, v in R.migrate.env {name: k, value: v}],

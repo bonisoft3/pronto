@@ -222,6 +222,16 @@ Deno.test("an app with migrations carries its schema forward in the schema job, 
   assertEquals(more.length, 0);
   assert(/battlechess-schema@sha256:9{64}$/.test(c.image), c.image);
   assert(c.command[2].trimEnd().endsWith('exec "/migrate.sh" "/pgroll" "00_initdb"'), c.command[2]);
+  // The replays are no migrations: pgroll records each of their statements as an inferred one,
+  // and its previous_migration walks that chain until it runs past the job's timeout. pgroll,
+  // which records its own, runs without the option. Its trigger skips only on = 'TRUE': `true`
+  // is ignored and records them all.
+  assertStringIncludes(c.command[2], 'export PGOPTIONS="-c pgroll.no_inferred_migrations=TRUE"\n');
+  assertStringIncludes(c.command[2], '\nunset PGOPTIONS\nexec "/migrate.sh"');
+  assert(!/no_inferred_migrations=true/.test(c.command[2]));
+  assertEquals(job.spec.template.spec.template.spec.timeoutSeconds, 1800);
+  const slow = (await built(app.replace("migrate: env", "schemaJobTimeout: 3600, migrate: env"), "job")).value;
+  assertEquals(slow.spec.template.spec.template.spec.timeoutSeconds, 3600);
   assertEquals(c.env.find((e: { name: string }) => e.name === "DATABASE_URL").valueFrom.secretKeyRef.name, "battlechess-migrate-database-url");
   assertEquals(c.env.find((e: { name: string }) => e.name === "REQUIRED_TABLES").value, "schedule");
   // initdb's own socket wins over a compose host that names its database service.
