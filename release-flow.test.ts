@@ -448,7 +448,8 @@ Deno.test("a release that is live does not wait for the rc preview's cleanup: it
     await Deno.writeTextFile(`${w.app}/crud/file.txt`, "again")
     const bad = await nu(w, [`${fork}/gcp/release.nu`, "--app", w.app, "--rc"], { FAKE_FAIL: "run services replace .*--project brawl-chess( |$)" })
     assert(!bad.success)
-    assert(at(await log(w), /run services delete guestbook-rc/) >= 0, "a failure stops the preview")
+    assert(at(await log(w), /run services update guestbook-rc --scaling 0/) >= 0, "a failure stops the preview")
+    assertEquals((await log(w)).filter((l) => /run services delete guestbook-rc/.test(l)), [], "a stopped preview keeps its services, and so their allUsers grant")
   } finally { await clean(w) }
 })
 

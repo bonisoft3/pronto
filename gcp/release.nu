@@ -399,14 +399,22 @@ def ensure-bucket [bucket: string, account: string, project: string, region: str
 }
 
 # A preview stopped: what runs against its database (its service, jobs and
-# clock), so the database is no one's.
-def stop-preview [plan: record] {
+# clock), so the database is no one's. Its services are kept at no instance, not deleted
+# (--remove deletes them): a service made again is granted allUsers again, and for minutes
+# after that grant Cloud Run refuses a request with a bearer token Google did not sign at
+# random, so the rc's renderer and players were refused while its tests ran (2026-11-03,
+# 22:26 and 23:30 BRT). Kept, the grant spread long ago; the next deploy's replace sets
+# scaling back to automatic, as its YAML says nothing of manual scaling.
+def stop-preview [plan: record, --remove] {
 	let p = $plan.project
 	let r = $plan.region
 	let n = $plan.names
-	if (exists run services describe $plan.service --region $r --project $p) { gc run services delete $plan.service --region $r --project $p | ignore }
-	for svc in ($n.sidecarServices? | default {} | values) {
-		if (exists run services describe $svc --region $r --project $p) { gc run services delete $svc --region $r --project $p | ignore }
+	for svc in ([$plan.service] | append ($n.sidecarServices? | default {} | values)) {
+		if not (exists run services describe $svc --region $r --project $p) { continue }
+		if $remove { gc run services delete $svc --region $r --project $p | ignore; continue }
+		# A revision a tag alone reaches (the `next` a failed go-live leaves) runs on at no instance.
+		gc run services update-traffic $svc --clear-tags --region $r --project $p | ignore
+		gc run services update $svc --scaling 0 --region $r --project $p | ignore
 	}
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
@@ -433,7 +441,16 @@ def empty-preview [plan: record] {
 	if not (exists sql instances describe $n.instance --project $plan.project) { return }
 	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
 		print $"gcp: (stamp) emptying the preview ($plan.preview): dropping its database on ($n.instance)"
-		gc sql databases delete $n.database --instance $n.instance --project $plan.project | ignore
+		# A service at no instance still finishes the requests it had, so a connection of one may
+		# outlive stop-preview: the drop is asked again, about two minutes in all, until none is left.
+		mut left = 6
+		loop {
+			let r = (do { ^gcloud --quiet sql databases delete $n.database --instance $n.instance --project $plan.project } | complete)
+			if $r.exit_code == 0 or not (exists sql databases describe $n.database --instance $n.instance --project $plan.project) { break }
+			if $left == 0 { error make {msg: $"gcloud sql databases delete ($n.database): ($r.stderr | str trim)"} }
+			$left -= 1
+			sleep 20sec
+		}
 		gc sql databases create $n.database --instance $n.instance --project $plan.project | ignore
 	}
 }
@@ -443,7 +460,7 @@ def empty-preview [plan: record] {
 def delete-preview [plan: record] {
 	let p = $plan.project
 	let n = $plan.names
-	stop-preview $plan
+	stop-preview $plan --remove
 	if (exists sql instances describe $n.instance --project $p) { gc sql instances delete $n.instance --project $p | ignore }
 	for secret in ($n.secrets | values) {
 		if (exists secrets describe $secret --project $p) { gc secrets delete $secret --project $p | ignore }
