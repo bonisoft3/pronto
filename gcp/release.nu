@@ -791,6 +791,15 @@ export def go-live [staged: record]: nothing -> record {
 		} catch {|e| $e.msg }
 	} | compact)
 	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
+	# The door answers, as the revision it serves, before a sidecar that reads through it at start
+	# is made: a preview's door just back on automatic scaling had no instance for a minute, Cloud
+	# Run answered its address with a 500 meanwhile, and the renderer made then exited on it until
+	# its revision was given up (Bonk Chess, 2026-11-04 02:48 and 03:10 BRT). Waited for, not
+	# required: the go-live below holds the release to its own address.
+	if not ($plan.iap? | default false) {
+		let got = (poll-health $"https://($plan.service)-($number).($r).run.app/health" ["200"] null --bearer $invoker_probe)
+		if not $got.ok { print -e $"gcp: (stamp) ($plan.service) did not answer before its sidecars were made: ($got.last)" }
+	}
 	# What follows the door being up is independent: its invoker grant, each sidecar, the
 	# ticker's clock and the domains, all at once. Each sidecar apart, once the door it reaches
 	# the gateway through is up; public as the door is, which dials it. They and the ticker's
