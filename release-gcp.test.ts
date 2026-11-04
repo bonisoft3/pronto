@@ -603,6 +603,47 @@ Deno.test("a worker apart keeps an instance, its CPU unthrottled between request
   assertEquals(own.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
 });
 
+// An instance Cloud Run retires and one that replaces it run together for a moment, so a
+// sidecar apart that is stateless may say 2; the default stays at one instance.
+Deno.test("a sidecar apart on less than a whole CPU runs one request at a time, its CPU only theirs", async () => {
+  const own = (await built(withApart(`{port: 8687, memory: "512Mi", apart: {minScale: 1, cpu: 250}}`), "sidecarServices")).value["perf-collector"];
+  const a = own.spec.template.metadata.annotations;
+  assertEquals(a["autoscaling.knative.dev/minScale"], "1");
+  assertEquals(a["run.googleapis.com/cpu-throttling"], "true", "below one CPU, Cloud Run bills by request");
+  assertEquals(a["run.googleapis.com/execution-environment"], "gen1");
+  assertEquals(own.spec.template.spec.containerConcurrency, 1);
+  assertEquals(own.spec.template.spec.containers[0].resources.limits, { cpu: "250m", memory: "512Mi" });
+  const whole = (await built(withApart(`{port: 8687, apart: {minScale: 1, cpu: 2000}}`), "sidecarServices")).value["perf-collector"];
+  assertEquals(whole.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+  assertEquals(whole.spec.template.metadata.annotations["run.googleapis.com/execution-environment"], "gen2");
+  assertEquals(whole.spec.template.spec.containerConcurrency, undefined);
+  const heavy = await built(withApart(`{port: 8687, memory: "1Gi", apart: {cpu: 250}}`), "plan");
+  assertEquals(heavy.success, false, "250 millicpu takes at most 512Mi");
+});
+
+Deno.test("a sidecar apart runs one instance unless it says more", async () => {
+  const at = async (perf: string) => (await built(withApart(perf), "sidecarServices")).value["perf-collector"].spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"];
+  assertEquals(await at(`{port: 8687, apart: {}}`), "1");
+  assertEquals(await at(`{port: 8687, apart: maxScale: 2}`), "2");
+  assertEquals(await at(`{port: 8687, apart: minScale: 1}`), "1");
+  assertEquals(await at(`{port: 8687, apart: {minScale: 1, maxScale: 3}}`), "3");
+  const bad = await cue(["export", "-", "-e", "r.sidecars.perf.apart", "--out", "json"],
+    `package probe\nimport "bonisoft.org/plugins/pronto/gcp/schema"\nr: schema.#Release & {name: "app", project: "pronto-test", sidecars: perf: {port: 8687, apart: {minScale: 2, maxScale: 1}}}\n`);
+  assertEquals(bad.success, false, "never fewer instances at most than kept at rest");
+});
+
+// Apart, a sidecar is its service's ingress: Cloud Run sets PORT to the containerPort and
+// refuses it in the spec ("reserved env names"). Inside, nothing sets it for the sidecar.
+Deno.test("a sidecar apart leaves PORT to Cloud Run, one inside keeps it", async () => {
+  const env = `, env: {PORT: "8687", PERF_HTTP_PORT: "8687"}`;
+  const own = (await built(withApart(`{port: 8687${env}, apart: {}}`), "sidecarServices")).value["perf-collector"];
+  const names = own.spec.template.spec.containers[0].env.map((e: { name: string }) => e.name);
+  assertEquals(names, ["PERF_HTTP_PORT"]);
+  const s = await built(withApart(`{port: 8687${env}}`), "service");
+  const inside = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assert(inside.env.some((e: { name: string }) => e.name === "PORT"), "inside, nothing sets it for the sidecar");
+});
+
 Deno.test("a sidecar apart's metrics are scraped by a collector in its own service", async () => {
   const r = await built(withApart(`{port: 8687, metrics: port: 9599, apart: {}}`), "plan");
   assertEquals(r.success, true, r.stderr);
@@ -664,6 +705,34 @@ Deno.test("an app always on keeps its CPU between requests; by default it is thr
   assertEquals(on.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
   const off = await built(release(), "service");
   assertEquals(off.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], undefined);
+});
+
+// A sidecar's own secret (a key the app keeps, not the cluster's): read from Secret Manager in
+// place of compose's value, and found made before the release starts.
+Deno.test("a sidecar's own secrets are mounted in place of compose's values", async () => {
+  const s = await built(withSidecar(`{port: 8687, env: {APP_KEY: "the-development-key", PLAIN: "x"}, secrets: {APP_KEY: "battlechess-app-key", OTHER: "shared-key"}}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const c = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(c.env.filter((e: { name: string }) => e.name === "APP_KEY").length, 1, "one APP_KEY, the secret's");
+  const by = Object.fromEntries(c.env.map((e: { name: string }) => [e.name, e]));
+  assertEquals(by.APP_KEY.valueFrom, { secretKeyRef: { name: "battlechess-app-key", key: "latest" } });
+  assertEquals(by.OTHER.valueFrom, { secretKeyRef: { name: "shared-key", key: "latest" } });
+  assertEquals(by.PLAIN.value, "x");
+  const plan = await built(withSidecar(`{port: 8687, secrets: {APP_KEY: "battlechess-app-key", OTHER: "shared-key"}}`), "plan");
+  assertEquals(plan.value.sidecarSecretKeys, ["battlechess-app-key", "shared-key"]);
+  const bad = await built(withSidecar(`{port: 8687, secrets: {"not-env": "x"}}`), "plan");
+  assertEquals(bad.success, false, "a key that is no environment variable is refused");
+});
+
+Deno.test("a sidecar with a probe path is started by an HTTP probe and the door waits for it", async () => {
+  const s = await built(withSidecar(`{port: 8687, probe: "/health"}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const own = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(own.startupProbe.httpGet, { path: "/health", port: 8687 });
+  assertEquals(own.startupProbe.tcpSocket, undefined);
+  const deps = JSON.parse(s.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy.includes("perf-collector"), true);
+  assertEquals((await built(withSidecar(`{port: 8687, probe: "health"}`), "plan")).success, false);
 });
 
 Deno.test("a sidecar's memory is its container's, inside the instance or apart", async () => {
