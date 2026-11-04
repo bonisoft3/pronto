@@ -57,6 +57,7 @@ const env = (w: World, extra: Record<string, string> = {}) => ({
   // The fakes before everything: no real gcloud, docker or curl is ever found first.
   PATH: `${w.fakes}:${Deno.env.get("PATH")}`,
   HOME: w.home,
+  PRONTO_STATE_DIR: `${w.home}/state`,
   CLOUDSDK_CONFIG: `${w.root}-gcloud`,
   FAKE_LOG: w.log,
   FAKE_STATE: w.state,
@@ -295,5 +296,75 @@ Deno.test("a release that fails lets its lock go all the same", async () => {
     const r = await release(w, { FAKE_FAIL: "run services replace dist/gcp/service.held.yaml" }, "--no-gate")
     assert(!r.success, "the release fails")
     assertEquals(await lockHeld(w), false, "and its lock is let go")
+  } finally { await clean(w) }
+})
+
+// The record of each run (gcp/release-record.nu), under PRONTO_STATE_DIR.
+const records = async (w: World) =>
+  (await Deno.readTextFile(`${w.home}/state/releases/guestbook.jsonl`).catch(() => "")).split("\n").filter((l) => l !== "").map((l) => JSON.parse(l))
+
+Deno.test("a release gone live through the rc gate records its commit, revision and phases", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    const git = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" }
+    const commit = await new Deno.Command("sh", { args: ["-c", "git add -A && git commit -qm release && git rev-parse HEAD"], cwd: w.root, env: git, stdout: "piped", stderr: "piped" }).output()
+    assert(commit.success, decoder.decode(commit.stderr))
+    const r = await release(w)
+    assert(r.success, r.stderr + r.stdout)
+    const [rec, ...more] = await records(w)
+    assertEquals(more, [], "one line a run")
+    const version = (await Deno.readTextFile(`${root_dir}/distribution/config.cue`)).match(/#Version:\s+"([^"]+)"/)![1]
+    assertEquals({ ...rec, started: undefined, ended: undefined, phases: undefined }, {
+      app: "guestbook", service: "guestbook", project: "pronto-test", preview: "",
+      commit: decoder.decode(commit.stdout).trim(), dirty: false, pronto: version,
+      started: undefined, ended: undefined, outcome: "live", failure: null,
+      rc: "ran", revision: "r1", phases: undefined,
+    })
+    assert(Date.parse(rec.started) <= Date.parse(rec.ended))
+    for (const p of ["lock", "rc", "stage", "schema", "deploy", "total"]) assertEquals(typeof rec.phases[p], "number", p)
+    assert(rec.phases.total >= rec.phases.stage)
+    // Released again straight to production (its images built here, so the schema job differs once),
+    // and again unchanged: the rc gate skipped and why, the schema job skipped.
+    for (const _ of [1, 2]) {
+      const again = await release(w, {}, "--no-gate")
+      assert(again.success, again.stderr + again.stdout)
+    }
+    const [, second, third] = await records(w)
+    assertEquals(second.rc, "skipped: --no-gate")
+    assertEquals(third.phases.schema, "skipped")
+  } finally { await clean(w) }
+})
+
+Deno.test("a failed release records its first line of failure, after its lock is let go", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    const r = await release(w, { FAKE_FAIL: "run services replace dist/gcp/service.held.yaml" }, "--no-gate")
+    assert(!r.success)
+    const [rec] = await records(w)
+    assertEquals([rec.outcome, rec.revision], ["failed", null])
+    assertStringIncludes(rec.failure, "fake failure: --quiet run services replace dist/gcp/service.held.yaml")
+    assert(!rec.failure.includes("\n"))
+    assertEquals(typeof rec.phases.deploy, "number", "a phase never ended is timed to the run's end")
+    assertEquals(await lockHeld(w), false)
+  } finally { await clean(w) }
+})
+
+Deno.test("a release refused by another's lock records refused; a dry run records nothing", async () => {
+  const w = await world()
+  try {
+    await ready(w)
+    await holdLock(w, new Date(Date.now() + 20 * 60_000))
+    const r = await release(w, {}, "--no-gate")
+    assert(!r.success)
+    const [rec, ...more] = await records(w)
+    assertEquals(more, [])
+    assertEquals([rec.outcome, rec.rc, rec.commit, rec.phases.stage], ["refused", "skipped: the run ended before the rc gate was decided", null, null])
+    assertStringIncludes(rec.failure, "another release of guestbook is running")
+    assertEquals(typeof rec.phases.lock, "number")
+    const dry = await release(w, {}, "--dry-run")
+    assert(dry.success, dry.stderr + dry.stdout)
+    assertEquals((await records(w)).length, 1, "a dry run writes nothing")
   } finally { await clean(w) }
 })

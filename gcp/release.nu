@@ -9,6 +9,7 @@
 use ../k8s/release.nu [resolve-app]
 use verify.nu [start-drivers go-drivers finish-drivers drivers-log cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images]
+use release-record.nu
 
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
@@ -563,6 +564,7 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 		return {done: true}
 	}
 
+	release-record mark stage start --preview $preview
 	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
 	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
 	let has_migrate = ("migrate" in $services)
@@ -613,6 +615,7 @@ def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, fro
 	if ($plan.scrapeConfig | is-not-empty) { ensure-secret $plan.names.scrapeConfig $p $plan.scrapeConfig | ignore }
 	for c in ($plan.sidecarScrapeConfigs | transpose secret config) { ensure-secret $c.secret $p $c.config | ignore }
 	print $"gcp: (stamp) ($plan.service) staged"
+	release-record mark stage end --preview $preview
 	{plan: $plan, pushed: $pushed, has_migrate: $has_migrate, copy: $copy, gated: ($from != null), number: $number}
 }
 
@@ -699,6 +702,8 @@ export def go-live [staged: record]: nothing -> record {
 	let r = $plan.region
 	let has_migrate = $staged.has_migrate
 	let number = $staged.number
+	let own = ($plan.preview? | default "")
+	release-record mark deploy start --preview $own
 	# The tested images tagged the release's before anything changes production: a tag that
 	# fails stops the release with production untouched.
 	let wanted = (job-hash (open --raw dist/gcp/job.yaml))
@@ -707,8 +712,11 @@ export def go-live [staged: record]: nothing -> record {
 	# PRONTO_RELEASE_FORCE_SCHEMA=1 runs the job all the same (a rotated role password, say).
 	if ($plan.preview? | is-empty) and ($env.PRONTO_RELEASE_FORCE_SCHEMA? | is-empty) and (live-job-hash $plan) == $wanted {
 		print $"gcp: (stamp) the schema job skipped: ($plan.service) is live with the schema it applies \(PRONTO_RELEASE_FORCE_SCHEMA=1 runs it\)"
+		release-record note {schema: "skipped"} --preview $own
 	} else {
+		release-record mark schema start --preview $own
 		run-job dist/gcp/job.yaml $plan.names.job (if $has_migrate { "building the schema and carrying it forward" } else { "building the schema" }) $p $r
+		release-record mark schema end --preview $own
 	}
 	# The new revision takes no traffic until its own address answers: Cloud Run can keep
 	# routing to the revision it just shut down, and a service left broken that way is
@@ -836,6 +844,8 @@ export def go-live [staged: record]: nothing -> record {
 		} catch {|e| print $"gcp: (stamp) ($s) apart kept its instance, started before the switch: ($e.msg)" }
 	} | ignore
 	print $"gcp: (stamp) ($plan.service) is live at ($address)"
+	release-record note {revision: $candidate.revision} --preview $own
+	release-record mark deploy end --preview $own
 	$pushed
 }
 
@@ -860,6 +870,7 @@ def back-one [service: string, project: string, region: string, --schema] {
 	}
 	gc run services update-traffic $service --to-revisions $"($before.metadata.name)=100" --region $region --project $project | ignore
 	print $"gcp: (stamp) ($service) serves ($before.metadata.name) again, not ($serving)"
+	if $schema { release-record note {revision: $before.metadata.name} }
 }
 
 # The release's service and its sidecars apart, each back one revision. The service goes back only
@@ -970,19 +981,38 @@ export def main [
 	let snapshot = ($snapshot or (do $given SNAPSHOT))
 	let no_gate = ($no_gate or (do $given NO_GATE))
 	let rollback = ($rollback or (do $given ROLLBACK))
+	# Every run that can change the project is recorded (gcp/release-record.nu): neither a dry run
+	# nor a snapshot changes anything, and a preview's --delete is no release.
+	let recorded = not ($dry_run or $snapshot or $delete)
+	let at = if $recorded { release-record checkout $app_info.dir } else { {} }
+	if $recorded {
+		$env.PRONTO_RELEASE_MARKS = (mktemp -t pronto-release-marks.XXXXXX | str trim)
+		$env.PRONTO_RELEASE_PREVIEW = $preview
+	}
+	let record = {|outcome: string, failure: any|
+		if $recorded { release-record write $app_info.cue_path $preview $env.GCP_T0 $outcome $failure $at }
+	}
 	# Nothing a dry run or a snapshot does reaches the project, so neither waits for the lock.
-	let lock = if $dry_run or $snapshot { null } else { take-lock (lock-of $app_info.cue_path $preview) }
+	release-record mark lock start
+	let lock = if $dry_run or $snapshot { null } else {
+		try { take-lock (lock-of $app_info.cue_path $preview) } catch {|e|
+			do $record (if ($e.msg | str starts-with "another release") { "refused" } else { "failed" }) $e.msg
+			error make {msg: $e.msg}
+		}
+	}
+	release-record mark lock end
 	let failure = (try {
 		release-body $app_info $preview $delete $dry_run $snapshot $no_gate $rollback
 		null
 	} catch {|e| $e.msg })
 	if $lock != null { drop-lock $lock }
+	do $record (if $failure != null { "failed" } else if $rollback { "rolled-back" } else { "live" }) $failure
 	if $failure != null { error make {msg: $failure} }
 }
 
 # The release main parsed its flags for, once it holds the app's lock.
 def release-body [app_info: record, preview: string, delete: bool, dry_run: bool, snapshot: bool, no_gate: bool, rollback: bool] {
-	if $rollback { roll-back (plan-of $app_info.cue_path ""); return }
+	if $rollback { release-record note {rc: "skipped: --rollback"}; roll-back (plan-of $app_info.cue_path ""); return }
 	if $delete {
 		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }
 		delete-preview (plan-of $app_info.cue_path $preview)
@@ -994,6 +1024,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	# and the preview stopped whatever happened. A preview, a dry run or a
 	# snapshot deploys as asked.
 	if ($preview | is-not-empty) or $dry_run or $snapshot or $no_gate {
+		release-record note {rc: $"skipped: (if ($preview | is-not-empty) { 'a preview' } else { '--no-gate' })"}
 		if not $dry_run and not $snapshot { preflight $app_info [$preview] }
 		deploy $app_info $preview $dry_run $snapshot | ignore
 		return
@@ -1003,6 +1034,8 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	# so one release at a time; `--preview rc --delete` removes it all.
 	let rc = "rc"
 	preflight $app_info [$rc ""]
+	release-record note {rc: "ran"}
+	release-record mark rc start
 	# The preview's plan and production's, rendered together; the staging below reuses them.
 	let plans = (["rc" ""] | par-each --keep-order {|v| plan-of $app_info.cue_path (if $v == "rc" { $rc } else { "" }) })
 	let rc_plan = ($plans | first)
@@ -1026,7 +1059,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 				if $t == "stage" {
 					try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}) --rendered $prod_plan)} } catch {|e| {staging: $e.msg} }
 				} else {
-					try { finish-drivers $drivers; {} } catch {|e| {tests: $e.msg} }
+					try { finish-drivers $drivers; release-record mark rc end; {} } catch {|e| {tests: $e.msg} }
 				}
 			} | reduce -f {} {|it, acc| $acc | merge $it })
 			if ($both.tests? | is-not-empty) { error make {msg: $both.tests} }
