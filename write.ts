@@ -87,6 +87,15 @@ async function terminal(): Promise<Terminal> {
   return { instrument, ses: await Deno.readTextFile(await terminalPath("interpreter/vendor/ses.umd.min.js", appDir)) };
 }
 
+/** bayt.json with its targets by name: cue orders the targets a comprehension adds by where their
+ * files sit, so a checkout whose path sorts before the module cache's (~/.cache/… beside
+ * ~/Library/Caches/cue) wrote the same project in another order. */
+function targetsSorted(data: unknown): unknown {
+  const d = data as { targets?: Record<string, unknown> };
+  if (d.targets === undefined) return data;
+  return { ...d, targets: Object.fromEntries(Object.entries(d.targets).sort(([a], [b]) => a < b ? -1 : 1)) };
+}
+
 function render(rel: string, f: EmitFile): string {
   if (f.format === "type-sql" || f.format === "carrier-sql") return sqlFile(rel, generateTypeSQL(f.data as { precision: number; scale: number }[]));
   if (f.format === "seed-sql") {
@@ -97,7 +106,7 @@ function render(rel: string, f: EmitFile): string {
     return sqlFile(rel, seedSql(data, held));
   }
   if (f.format === "proto") return generateProto(f.data as Record<string, ProtoEntity>);
-  if (f.format === "json") return JSON.stringify(f.data, null, 2) + "\n"; // no comment syntax, no header
+  if (f.format === "json") return JSON.stringify(rel === "bayt.json" ? targetsSorted(f.data) : f.data, null, 2) + "\n"; // no comment syntax, no header
   const header = HEADER[f.format] ?? fail(`${rel}: unknown format ${f.format}`);
   if (f.text !== undefined) return f.format === "sql" ? sqlFile(rel, f.text) : header + f.text;
   if (f.format === "yaml") return header + stringify(f.data, { lineWidth: -1 });
