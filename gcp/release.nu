@@ -776,6 +776,14 @@ def back-one [service: string, project: string, region: string, --schema] {
 	print $"gcp: (stamp) ($service) serves ($before.metadata.name) again, not ($serving)"
 }
 
+# The release's service and its sidecars apart, each back one revision. The service goes back only
+# where the revision before was released with the same schema: past a migration it would read a
+# schema that is gone.
+export def roll-back [plan: record] {
+	back-one $plan.service $plan.project $plan.region --schema
+	for svc in ($plan.names.sidecarServices? | default {} | values) { back-one $svc $plan.project $plan.region }
+}
+
 # What a release or a preview deploys, from the plan release.cue renders for it, staged and
 # then made live; the images it ran, by digest. A release given a tested preview's (`from`) runs
 # those, copied, not rebuilt.
@@ -863,6 +871,7 @@ export def main [
 	--preview: string # A pull request's own copy beside the release, such as pr-32
 	--delete        # Remove the preview, when its pull request closes
 	--no-gate       # Release without testing a preview of it first
+	--rollback      # Send the release's traffic back to the revision before, where the schema is the same
 ] {
 	$env.GCP_T0 = (date now)
 	let app_info = (resolve-app $app)
@@ -875,10 +884,11 @@ export def main [
 	let dry_run = ($dry_run or (do $given DRY_RUN))
 	let snapshot = ($snapshot or (do $given SNAPSHOT))
 	let no_gate = ($no_gate or (do $given NO_GATE))
+	let rollback = ($rollback or (do $given ROLLBACK))
 	# Nothing a dry run or a snapshot does reaches the project, so neither waits for the lock.
 	let lock = if $dry_run or $snapshot { null } else { take-lock (lock-of $app_info.cue_path $preview) }
 	let failure = (try {
-		release-body $app_info $preview $delete $dry_run $snapshot $no_gate
+		release-body $app_info $preview $delete $dry_run $snapshot $no_gate $rollback
 		null
 	} catch {|e| $e.msg })
 	if $lock != null { drop-lock $lock }
@@ -886,7 +896,8 @@ export def main [
 }
 
 # The release main parsed its flags for, once it holds the app's lock.
-def release-body [app_info: record, preview: string, delete: bool, dry_run: bool, snapshot: bool, no_gate: bool] {
+def release-body [app_info: record, preview: string, delete: bool, dry_run: bool, snapshot: bool, no_gate: bool, rollback: bool] {
+	if $rollback { roll-back (plan-of $app_info.cue_path ""); return }
 	if $delete {
 		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }
 		delete-preview (plan-of $app_info.cue_path $preview)

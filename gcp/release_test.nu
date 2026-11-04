@@ -8,7 +8,7 @@
 const gcp_dir = path self .
 
 use std/assert
-use release.nu [hold-traffic poll-health preflight]
+use release.nu [hold-traffic poll-health preflight roll-back]
 
 # A directory holding the fakes and the state they share.
 def fakes [service_exists: bool, serving: string, candidate_says: string, public_says: string]: nothing -> string {
@@ -26,7 +26,8 @@ echo "gcloud $*" >> "$d/calls.log"
 case "$*" in
   *"services describe"*)
     [ -f "$d/exists" ] || { echo "NOT_FOUND: not found" >&2; exit 1; }
-    s="$(cat "$d/serving")"
+    # The door's own traffic is kept in a file; a sidecar apart serves its newest revision.
+    case "$*" in *"describe svc "*) s="$(cat "$d/serving")" ;; *) s=svc-00002-new ;; esac
     # A live revision ready on its latest, released with the job hash a file holds.
     live=""; [ -f "$d/live_job" ] && live=",\"latestReadyRevisionName\":\"$s\",\"latestCreatedRevisionName\":\"$s\""
     labels=""; [ -f "$d/live_job" ] && labels="\"spec\":{\"template\":{\"metadata\":{\"labels\":{\"pronto-job\":\"$(cat "$d/live_job")\"}}}},"
@@ -43,7 +44,8 @@ case "$*" in
     if grep -Eq "name: (PORT|BAD_RESERVED)$" "$f"; then echo "ERROR: (gcloud.run.services.replace) spec.template.spec.containers[0].env: The following reserved env names were provided: PORT, BAD_RESERVED." >&2; exit 1; fi ;;
   *"services replace"*) touch "$d/exists" ;;
   *"update-traffic"*)
-    case "$*" in *"--to-revisions "*) echo "$*" | sed "s/.*--to-revisions \([^= ]*\)=.*/\1/" > "$d/serving" ;; esac ;;
+    # Only the door's own traffic is kept; a sidecar's is logged.
+    case "$*" in *"update-traffic svc "*"--to-revisions "*) echo "$*" | sed "s/.*--to-revisions \([^= ]*\)=.*/\1/" > "$d/serving" ;; esac ;;
 esac
 '# | str trim --left | save -f ($d | path join bin gcloud)
 	r#'
@@ -86,6 +88,8 @@ def main [] {
 	test_golive_waits_for_the_door_before_the_sidecars
 	test_golive_rolls_each_sidecar_once_the_revision_serves
 	test_golive_does_not_go_back_past_a_migration
+	test_rollback_sends_the_service_and_its_sidecars_back_one_revision
+	test_rollback_refuses_past_a_migration
 	test_preflight_dry_runs_every_service_over_placeholder_digests
 	test_preflight_names_the_file_and_clouds_run_message
 	test_preflight_passes_a_sidecar_apart_whose_compose_sets_port
@@ -293,6 +297,33 @@ def test_golive_rolls_each_sidecar_once_the_revision_serves [] {
 	let moved = ($lines | enumerate | where {|l| $l.item | str contains "update-traffic svc " } | first | get index)
 	let rolled = ($lines | enumerate | where {|l| $l.item | str contains "services update svc-render --update-labels pronto-door=svc-00002-new" } | first | get index)
 	assert ($moved < $rolled) "rolled after the traffic moved"
+	rm -r $d
+}
+
+def rollback-run [d: string, plan: record]: nothing -> record {
+	let script = $"$env.GCP_T0 = \(date now\); use ($gcp_dir | path join release.nu) [roll-back]; roll-back ($plan | to nuon)"
+	with-fakes $d { do { ^$nu.current-exe --no-config-file -c $script } | complete }
+}
+
+def test_rollback_sends_the_service_and_its_sidecars_back_one_revision [] {
+	print "test --rollback sends the service and each sidecar apart back one revision..."
+	let d = (fakes true "svc-00002-new" "200 ok" "200 ok")
+	let res = (rollback-run $d (plan-of-golive {names: {sidecarServices: {render: "svc-render"}}}))
+	assert equal $res.exit_code 0 $res.stderr
+	let log = (log-of $d)
+	assert ($log | str contains "update-traffic svc --to-revisions svc-00001-old=100")
+	assert ($log | str contains "update-traffic svc-render --to-revisions svc-00001-old=100")
+	rm -r $d
+}
+
+def test_rollback_refuses_past_a_migration [] {
+	print "test --rollback refuses to go back past a schema change, and moves nothing..."
+	let d = (fakes true "svc-00002-new" "200 ok" "200 ok")
+	"b" | save -f ($d | path join old_schema)
+	let res = (rollback-run $d (plan-of-golive))
+	assert ($res.exit_code != 0)
+	assert ($res.stderr | str contains "another schema")
+	assert (not (log-of $d | str contains "update-traffic"))
 	rm -r $d
 }
 
