@@ -66,6 +66,21 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 	$current
 }
 
+# A gcloud call granting a role: IAM does not know an account made a moment before for some seconds
+# ("does not exist"), and refuses a binding written while another changed the same policy ("concurrent
+# policy changes", as parallel tasks that grant on one project do), so the call is asked again, a
+# minute at most, a second apart, before it fails; any other refusal fails at once.
+def --wrapped gc-fresh [...args] {
+	let input = $in
+	let until = ((date now) + 1min)
+	loop {
+		let r = ($input | ^gcloud --quiet ...$args | complete)
+		if $r.exit_code == 0 { return $r.stdout }
+		if not ($r.stderr =~ "does not exist|concurrent policy changes") or (date now) > $until { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
+		sleep 1sec
+	}
+}
+
 # Whether any sidecar's metrics are scraped, in the cluster's instance or apart.
 def scraped [plan: record]: nothing -> bool {
 	($plan.scrapeConfig | is-not-empty) or ($plan.sidecarScrapeConfigs? | default {} | is-not-empty)
@@ -123,7 +138,7 @@ def set-up-project [plan: record] {
 	if ($plan.preview? | is-empty) {
 		let builds = (build-account $p)
 		gc artifacts repositories add-iam-policy-binding $plan.repository --location $plan.region --project $p --member $"serviceAccount:($builds)" --role roles/artifactregistry.writer | ignore
-		gc projects add-iam-policy-binding $p --member $"serviceAccount:($builds)" --role roles/logging.logWriter --condition None --quiet | ignore
+		gc-fresh projects add-iam-policy-binding $p --member $"serviceAccount:($builds)" --role roles/logging.logWriter --condition None --quiet | ignore
 	}
 	let sa = ($n.serviceAccount | split row "@" | first)
 	if ($plan.preview? | is-not-empty) {
@@ -138,7 +153,7 @@ def set-up-project [plan: record] {
 		}
 		let roles = ["roles/cloudsql.client" "roles/secretmanager.secretAccessor"] | append (if (scraped $plan) { ["roles/monitoring.metricWriter"] } else { [] })
 		for role in $roles {
-			gc projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role $role --condition None --quiet | ignore
+			gc-fresh projects add-iam-policy-binding $p --member $"serviceAccount:($n.serviceAccount)" --role $role --condition None --quiet | ignore
 		}
 	}
 
@@ -441,7 +456,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 		# IAP's service agent, made once a project (gcloud has it only in beta).
 		let token = (gc auth print-access-token | str trim)
 		^curl --silent --fail --show-error --output /dev/null -X POST -H $"Authorization: Bearer ($token)" $"https://serviceusage.googleapis.com/v1beta1/projects/($number)/services/iap.googleapis.com:generateServiceIdentity"
-		gc run services add-iam-policy-binding $plan.service --region $r --project $p --member $"serviceAccount:service-($number)@gcp-sa-iap.iam.gserviceaccount.com" --role roles/run.invoker | ignore
+		gc-fresh run services add-iam-policy-binding $plan.service --region $r --project $p --member $"serviceAccount:service-($number)@gcp-sa-iap.iam.gserviceaccount.com" --role roles/run.invoker | ignore
 		let policy = (gc run services get-iam-policy $plan.service --region $r --project $p --format json | from json)
 		if ($policy.bindings? | default [] | any {|b| $b.role == "roles/run.invoker" and "allUsers" in $b.members }) {
 			gc run services remove-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker --condition None | ignore

@@ -114,3 +114,60 @@ Deno.test("deleting a preview invalidates its infrastructure setup cache", async
     await Deno.remove(root, { recursive: true });
   }
 });
+
+// A gcloud that fails `fails` times with `error`, then answers: the calls it saw are counted.
+async function flakyGcloud(dir: string, error: string, fails: number) {
+  await Deno.writeTextFile(`${dir}/gcloud`, `#!/bin/sh
+n=$(cat "${dir}/count" 2>/dev/null || echo 0)
+echo $((n + 1)) > "${dir}/count"
+if [ "$n" -lt ${fails} ]; then echo "${error}" >&2; exit 1; fi
+echo answered
+`, { mode: 0o755 });
+}
+
+async function nuWith(dir: string, script: string, fails: number, error: string) {
+  await Deno.remove(`${dir}/count`).catch(() => {});
+  await flakyGcloud(dir, error, fails);
+  const result = await new Deno.Command("nu", {
+    args: ["-c", script],
+    env: { PATH: `${dir}${delimiter}${Deno.env.get("PATH")}` },
+    stdout: "piped", stderr: "piped",
+  }).output();
+  const calls = Number(await Deno.readTextFile(`${dir}/count`));
+  return { ok: result.success, out: new TextDecoder().decode(result.stdout).trim(), err: new TextDecoder().decode(result.stderr), calls };
+}
+
+Deno.test("a gcloud read that did not reach Google is asked again; a write never is", { ignore: Deno.build.os === "windows" }, async () => {
+  const dir = await Deno.makeTempDir({ prefix: "pronto-gcp-again-" });
+  const build = JSON.stringify(fileURLToPath(new URL("./gcp/build.nu", import.meta.url)));
+  const dns = "NameResolutionError: Failed to resolve 'cloudbuild.googleapis.com'";
+  try {
+    const read = await nuWith(dir, `use ${build} [gc]; gc builds describe abc`, 1, dns);
+    assertEquals(read.ok, true, read.err);
+    assertEquals(read.out, "answered");
+    assertEquals(read.calls, 2);
+    const write = await nuWith(dir, `use ${build} [gc]; gc secrets create s`, 1, dns);
+    assertEquals(write.ok, false);
+    assertEquals(write.calls, 1);
+    const other = await nuWith(dir, `use ${build} [gc]; gc builds describe abc`, 1, "PERMISSION_DENIED");
+    assertEquals(other.ok, false);
+    assertEquals(other.calls, 1);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a grant to an account made a moment before is asked again until IAM knows it", { ignore: Deno.build.os === "windows" }, async () => {
+  const dir = await Deno.makeTempDir({ prefix: "pronto-gcp-fresh-" });
+  const release = JSON.stringify(fileURLToPath(new URL("./gcp/release.nu", import.meta.url)));
+  try {
+    const late = await nuWith(dir, `source ${release}; gc-fresh projects add-iam-policy-binding p`, 1, "Service account x does not exist");
+    assertEquals(late.ok, true, late.err);
+    assertEquals(late.calls, 2);
+    const refused = await nuWith(dir, `source ${release}; gc-fresh projects add-iam-policy-binding p`, 1, "PERMISSION_DENIED");
+    assertEquals(refused.ok, false);
+    assertEquals(refused.calls, 1);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
