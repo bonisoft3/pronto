@@ -546,10 +546,11 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 # project, the images (pushed, or the tested ones copied in as `candidate`), the plan
 # rendered with their digests and written to dist/gcp, the scrape configs and the secrets
 # checked: declarative, each restated by the next release, none running the app. Nothing
-# here changes what production serves; go-live does.
-def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record]: nothing -> record {
+# here changes what production serves; go-live does. `rendered` is the plan of the preview when
+# the caller rendered it already.
+def stage [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record, --rendered: record]: nothing -> record {
 	let base = (base-of $app_info $preview)
-	let plan0 = (plan-of $app_info.cue_path $preview)
+	let plan0 = if $rendered == null { plan-of $app_info.cue_path $preview } else { $rendered }
 	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
 	let services = ($compose.services | columns)
 	let refused = ($services | where {|s| $s in $unbuilt })
@@ -872,8 +873,8 @@ export def roll-back [plan: record] {
 # What a release or a preview deploys, from the plan release.cue renders for it, staged and
 # then made live; the images it ran, by digest. A release given a tested preview's (`from`) runs
 # those, copied, not rebuilt.
-def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record]: nothing -> record {
-	let staged = (stage $app_info $preview $dry_run $snapshot $from)
+def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, from?: record, --rendered: record]: nothing -> record {
+	let staged = if $rendered == null { stage $app_info $preview $dry_run $snapshot $from } else { stage $app_info $preview $dry_run $snapshot $from --rendered $rendered }
 	if ($staged.done? | default false) { return {} }
 	go-live $staged
 }
@@ -881,8 +882,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 # The release's copy of a tested preview's images, started before its tests
 # end, where the release's repository is there already; null where it is not,
 # for the release to copy them once it made it.
-def start-early-copy [cue_path: string, from: record]: nothing -> any {
-	let plan = (plan-of $cue_path "")
+def start-early-copy [cue_path: string, plan: record, from: record]: nothing -> any {
 	if not (exists artifacts repositories describe $plan.repository --location $plan.region --project $plan.project) { return null }
 	let name = (^cue export --expression GCP.name --out text $cue_path | str trim)
 	start-copy $plan $name ($from.pushed | columns) $from
@@ -1003,36 +1003,69 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	# so one release at a time; `--preview rc --delete` removes it all.
 	let rc = "rc"
 	preflight $app_info [$rc ""]
-	let rc_plan = (plan-of $app_info.cue_path $rc)
+	# The preview's plan and production's, rendered together; the staging below reuses them.
+	let plans = (["rc" ""] | par-each --keep-order {|v| plan-of $app_info.cue_path (if $v == "rc" { $rc } else { "" }) })
+	let rc_plan = ($plans | first)
+	let prod_plan = ($plans | last)
 	print $"gcp: (stamp) testing a preview \(($rc)\) before the release"
 	#
 	# The tests' own images build in Cloud Build while the preview deploys, and
 	# run once it is up; while they run, the release's project copies the
-	# preview's images, which it tags the release's only once they passed.
+	# preview's images, which it tags the release's only once they passed, and
+	# production is staged (stage: none of it runs the app) so that going live
+	# is all that is left of the release when they pass.
 	let outcome = (try {
 		empty-preview $rc_plan
 		let drivers = (start-drivers $app_info.dir $rc_plan)
 		let failed = (try {
-			let tested = (deploy $app_info $rc false false)
+			let tested = (deploy $app_info $rc false false --rendered $rc_plan)
 			go-drivers $drivers
 			let from = {registry: $rc_plan.registry, pushed: $tested}
-			let copy = (start-early-copy $app_info.cue_path $from)
-			finish-drivers $drivers
-			try { deploy $app_info "" false false ($from | merge {copy: $copy}) | ignore } catch {|e|
+			let copy = (start-early-copy $app_info.cue_path $prod_plan $from)
+			let both = (["stage" "tests"] | par-each {|t|
+				if $t == "stage" {
+					try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}) --rendered $prod_plan)} } catch {|e| {staging: $e.msg} }
+				} else {
+					try { finish-drivers $drivers; {} } catch {|e| {tests: $e.msg} }
+				}
+			} | reduce -f {} {|it, acc| $acc | merge $it })
+			if ($both.tests? | is-not-empty) { error make {msg: $both.tests} }
+			if ($both.staging? | is-not-empty) { error make {msg: $"the tests passed, but production was not staged: ($both.staging)"} }
+			# The tests' log is read from Cloud Logging beside go-live, which takes longer, into a file.
+			let log_file = $"(pwd)/dist/gcp/tests-log.txt"
+			job spawn {
+				try {
+					sleep 10sec # Cloud Logging takes the last lines a moment after the build ends
+					gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($drivers.build)\"" --project $drivers.project --order asc --limit 100000 --format "value(textPayload)"
+						| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | str join (char nl) | save -f $log_file
+					{tests_log: $log_file} | job send 0
+				} catch {|e| {tests_log_error: $e.msg} | job send 0 }
+			} | ignore
+			try { go-live $both.staged | ignore } catch {|e|
 				drivers-log $drivers
 				error make {msg: $e.msg}
 			}
-			null
-		} catch {|e| $e.msg })
-		if $failed != null {
+			let read = (try { job recv --timeout 60sec } catch { {tests_log_error: "Cloud Logging did not answer in a minute"} })
+			{drivers: $drivers, tests_log: ($read.tests_log? | default null), tests_log_error: ($read.tests_log_error? | default null)}
+		} catch {|e| {msg: $e.msg} })
+		if "msg" in $failed {
 			cancel-drivers $drivers
-			error make {msg: $failed}
+			error make {msg: $failed.msg}
 		}
-		{drivers: $drivers}
+		$failed
 	} catch {|e| {msg: $e.msg} })
-	stop-preview $rc_plan
-	if "msg" in $outcome { error make {msg: $outcome.msg} }
+	# A failed release stops the preview whole. A release that is live does not wait for that: the
+	# preview's services and instance stay, idle (Cloud Run scales to zero), and only its clock,
+	# which acts alone, is deleted. Nothing is harmed by what stays, since the next release of the
+	# app takes the lock first and its empty-preview stops the whole preview (stop-preview) before
+	# it drops the database.
+	if "msg" in $outcome { stop-preview $rc_plan; error make {msg: $outcome.msg} }
+	stop-preview-clock $rc_plan
 	# The tests' log, read once the release is live rather than before it.
-	print $"gcp: (stamp) ($app_info.name) is released; what the tests printed:"
-	drivers-log $outcome.drivers
+	if ($outcome.tests_log? | is-not-empty) {
+		print $"gcp: (stamp) ($app_info.name) is released; what the tests printed \(also in ($outcome.tests_log)\):"
+		print (open --raw $outcome.tests_log)
+	} else {
+		print $"gcp: (stamp) ($app_info.name) is released, but the tests' log was not read: ($outcome.tests_log_error?)"
+	}
 }
