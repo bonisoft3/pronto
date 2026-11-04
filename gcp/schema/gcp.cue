@@ -788,6 +788,8 @@ import (
 
 	// What the release needs besides the two documents, as JSON.
 	plan: {
+		// The app's name, which names its release records.
+		app:        R.name
 		project:    R._project
 		region:     R.region
 		repository: R.repository

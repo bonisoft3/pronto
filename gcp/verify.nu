@@ -14,6 +14,7 @@
 # renders in software, and a 2-CPU runner timed a 3D page out.
 
 use ../k8s/release.nu [resolve-app]
+use release-record.nu
 use build.nu [builder stamp exists key-tag file-hashes image-keys]
 
 # What uploads the drivers' screenshots: Google's own gsutil builder.
@@ -192,7 +193,7 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 	let build = (gc builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
 	rm -rf $work
 	print $"gcp: (stamp) build ($build): https://console.cloud.google.com/cloud-build/builds/($build)?project=($p)"
-	{build: $build, project: $p, url: $url, service: $plan.service, region: $plan.region, rehearsalImage: $rehearsal_image}
+	{app: ($plan.app? | default null), appDir: $app_dir, build: $build, project: $p, url: $url, service: $plan.service, region: $plan.region, rehearsalImage: $rehearsal_image}
 }
 
 # The drivers' build told to run them, now that the service is up.
@@ -203,6 +204,72 @@ export def go-drivers [run: record] {
 	gc storage cp $f $"gs://($run.project)_cloudbuild/verify/($run.build)/go" | ignore
 	rm $f
 	print $"gcp: (stamp) testing ($run.url)"
+}
+
+# The scenarios a cue file text defines: the keys of `scenarios:` at the start of a line (tests/scenarios/*.cue).
+export def scenario-names [text: string]: nothing -> list<string> {
+	$text | parse -r '(?m)^scenarios:\s+"?(?<n>[A-Za-z0-9_.-]+)"?:' | each {|r| $r.n } | uniq
+}
+
+# The scenarios a log marks failed, as a scenario prints it (`✗ <name> (12s) at step`): the format
+# release-cron's bisect reads too (pronto-plugins release-cron/cron.js signature()).
+export def failed-scenarios [lines: list<string>]: nothing -> list<string> {
+	$lines | each {|l| $l | parse -r '✗ (?<n>\S+) \(\d+s\) at step' | each {|r| $r.n } } | flatten | uniq
+}
+
+# The log of each driver that failed, from the drivers' build log: what a driver printed lies between
+# its `verify: <driver>` line and its `verify: <driver> FAILED` one.
+export def failed-sections [lines: list<string>]: nothing -> list<list<string>> {
+	mut buffer = []
+	mut sections = []
+	for l in $lines {
+		if ($l | parse -r '^verify: \S+ FAILED$' | is-not-empty) { $sections = ($sections | append [$buffer]) ; $buffer = [] } else if ($l | parse -r '^verify: \S+$' | is-not-empty) { $buffer = [] } else { $buffer = ($buffer | append $l) }
+	}
+	$sections
+}
+
+# new when every failure is a scenario absent from the last live release's tree; regression when one
+# was in it; unknown for anything else (a failure naming no scenario, a name the current tree does not
+# define, or one the live tree mentions in a way the keys do not show). `sections` is the log of each
+# failed unit. When in doubt, not new.
+export def classify-failures [sections: list<list<string>>, live_names: list<string>, live_text: string, current_names: list<string>]: nothing -> record {
+	let named = ($sections | each {|s| failed-scenarios $s })
+	if ($sections | is-empty) or ($named | any {|n| $n | is-empty }) { return {verdict: "unknown", new: [], why: "a failure names no scenario"} }
+	let all = ($named | flatten | uniq)
+	let regressed = ($all | where {|n| $n in $live_names })
+	if ($regressed | is-not-empty) { return {verdict: "regression", new: [], why: $"already in the live release: ($regressed | str join ', ')"} }
+	let odd = ($all | where {|n| $n not-in $current_names or ($live_text | str contains $n) })
+	if ($odd | is-not-empty) { return {verdict: "unknown", new: [], why: $"cannot be classified: ($odd | str join ', ')"} }
+	{verdict: "new", new: $all, why: ""}
+}
+
+# The scenarios of a failed run that are a new feature's, as a list: empty unless every failure is one
+# (classify-failures), against the tree of the app's last live release. One rule for every place a
+# scenario failure fails the release. Prints the line the caller greps and notes it in the release record.
+export def new-feature-excuse [run: record, sections: list<list<string>>]: nothing -> list<string> {
+	let app = ($run.app? | default null)
+	let dir = ($run.appDir? | default null)
+	if $app == null or $dir == null { return [] }
+	let verdict = (try {
+		let commit = (release-record live-commit $app)
+		if $commit == null { error make {msg: "no known live release"} }
+		let have = (do { ^git -C $dir cat-file -e $"($commit)^{commit}" } | complete)
+		if $have.exit_code != 0 {
+			do { ^git -C $dir fetch --quiet origin $commit } | complete | ignore
+			if (do { ^git -C $dir cat-file -e $"($commit)^{commit}" } | complete).exit_code != 0 { error make {msg: $"commit ($commit) is not in the checkout"} }
+		}
+		let files = (^git -C $dir ls-tree -r --name-only $commit -- tests/scenarios/ | lines | where {|f| $f | str ends-with ".cue" })
+		let live_text = ($files | each {|f| ^git -C $dir show $"($commit):./($f)" } | str join "\n")
+		let current_text = (glob $"($dir)/tests/scenarios/*.cue" | each {|f| open --raw $f } | str join "\n")
+		classify-failures $sections (scenario-names $live_text) $live_text (scenario-names $current_text) | insert commit $commit
+	} catch {|e| {verdict: "unknown", new: [], why: $e.msg, commit: null} })
+	if $verdict.verdict != "new" {
+		print $"gcp: (stamp) the failure is not a new feature's scenario alone \(($verdict.verdict): ($verdict.why)\): the release fails"
+		return []
+	}
+	print $"gcp: (stamp) new-feature scenarios failed, released anyway: ($verdict.new | str join ', ') \(absent from ($verdict.commit | str substring 0..<8), live release\)"
+	release-record note {newFeatureScenarios: $verdict.new}
+	$verdict.new
 }
 
 # GCP.rehearsal run: the job of the previews project, on the driver image the tests' build pushes,
@@ -245,10 +312,14 @@ export def run-rehearsal [run: record, r: record]: nothing -> record {
 	# The execution's Completed condition, not a count of tasks: one task that failed fails it.
 	let ok = ($done.status.conditions? | default [] | any {|c| $c.type == "Completed" and $c.status == "True" })
 	sleep 10sec # Cloud Logging takes the last lines a moment after the run ends
-	gc logging read $"resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"($execution)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
-		| lines | where {|l| $l | str trim | is-not-empty } | each {|l| print $"rehearsal| ($l)" } | ignore
+	let log = (gc logging read $"resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"($execution)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
+		| lines | where {|l| $l | str trim | is-not-empty })
+	$log | each {|l| print $"rehearsal| ($l)" } | ignore
+	# Failing scenarios that are all a new feature's do not fail the release.
+	let new_feature = if $ok { [] } else { new-feature-excuse $run [$log] }
+	let ok = ($ok or ($new_feature | is-not-empty))
 	print $"gcp: (stamp) the rehearsal (if $ok { 'passed' } else { 'FAILED' }) in ($seconds)s: $($usd) \(($vcpu) vCPU, ($memory_gi) GiB\)"
-	{ok: $ok, job: $r.job, execution: $execution, seconds: $seconds, vcpu: $vcpu, memoryGi: $memory_gi, usd: $usd}
+	{ok: $ok, newFeature: $new_feature, job: $r.job, execution: $execution, seconds: $seconds, vcpu: $vcpu, memoryGi: $memory_gi, usd: $usd}
 }
 
 # The drivers' build stopped, when the service it waits for never came up.
@@ -272,10 +343,22 @@ export def finish-drivers [run: record] {
 		$status = (gc builds describe $run.build --project $run.project --format "value(status)" | str trim)
 	}
 	if $status != "SUCCESS" {
-		drivers-log $run --just-ended
+		let lines = (driver-lines $run --just-ended)
+		$lines | each {|l| print $l } | ignore
+		if $status == "FAILURE" and (new-feature-excuse $run (failed-sections $lines) | is-not-empty) { return }
 		error make {msg: $"the tests failed against ($run.url) \(($status)\): each driver's verdict is in the log above"}
 	}
 	print $"gcp: (stamp) every test passed against ($run.url)"
+}
+
+# What the drivers printed, from the build's log, as lines.
+export def driver-lines [
+	run: record
+	--just-ended # Cloud Logging takes the last lines a moment after the build ends
+]: nothing -> list<string> {
+	if $just_ended { sleep 10sec }
+	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($run.build)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
+		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) }
 }
 
 # What the drivers printed, from the build's log.
@@ -283,9 +366,7 @@ export def drivers-log [
 	run: record
 	--just-ended # Cloud Logging takes the last lines a moment after the build ends
 ] {
-	if $just_ended { sleep 10sec }
-	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($run.build)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
-		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
+	driver-lines $run --just-ended=$just_ended | each {|l| print $l } | ignore
 }
 
 # Every driver of the app against the service the plan names, up already; an
