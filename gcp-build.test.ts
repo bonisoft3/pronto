@@ -34,6 +34,9 @@ if (Deno.env.get("MOCK_CALLS")) {
   Deno.exit(1);
 }
 `);
+  // The app's compose project, as `docker compose config` prints it: no services, so every image is
+  // keyed by the whole app. Never the real docker.
+  if (Deno.build.os !== "windows") await Deno.writeTextFile(`${bin}/docker`, `#!/bin/sh\necho '{"services": {}}'\n`, { mode: 0o755 });
   const deno = Deno.execPath();
   if (Deno.build.os === "windows") {
     await Deno.writeTextFile(`${bin}/gcloud.cmd`, `@"${deno}" run --no-config -A "${script}" %*\r\n`);
@@ -112,5 +115,186 @@ Deno.test("deleting a preview invalidates its infrastructure setup cache", async
     assertStringIncludes(calls, "secrets delete app-rc-setup --project fixture");
   } finally {
     await Deno.remove(root, { recursive: true });
+  }
+});
+
+// A gcloud that fails `fails` times with `error`, then answers: the calls it saw are counted.
+async function flakyGcloud(dir: string, error: string, fails: number) {
+  await Deno.writeTextFile(`${dir}/gcloud`, `#!/bin/sh
+n=$(cat "${dir}/count" 2>/dev/null || echo 0)
+echo $((n + 1)) > "${dir}/count"
+if [ "$n" -lt ${fails} ]; then echo "${error}" >&2; exit 1; fi
+echo answered
+`, { mode: 0o755 });
+}
+
+async function nuWith(dir: string, script: string, fails: number, error: string) {
+  await Deno.remove(`${dir}/count`).catch(() => {});
+  await flakyGcloud(dir, error, fails);
+  const result = await new Deno.Command("nu", {
+    args: ["-c", script],
+    env: { PATH: `${dir}${delimiter}${Deno.env.get("PATH")}` },
+    stdout: "piped", stderr: "piped",
+  }).output();
+  const calls = Number(await Deno.readTextFile(`${dir}/count`));
+  return { ok: result.success, out: new TextDecoder().decode(result.stdout).trim(), err: new TextDecoder().decode(result.stderr), calls };
+}
+
+Deno.test("a gcloud read that did not reach Google is asked again; a write never is", { ignore: Deno.build.os === "windows" }, async () => {
+  const dir = await Deno.makeTempDir({ prefix: "pronto-gcp-again-" });
+  const build = JSON.stringify(fileURLToPath(new URL("./gcp/build.nu", import.meta.url)));
+  const dns = "NameResolutionError: Failed to resolve 'cloudbuild.googleapis.com'";
+  try {
+    const read = await nuWith(dir, `use ${build} [gc]; gc builds describe abc`, 1, dns);
+    assertEquals(read.ok, true, read.err);
+    assertEquals(read.out, "answered");
+    assertEquals(read.calls, 2);
+    const write = await nuWith(dir, `use ${build} [gc]; gc secrets create s`, 1, dns);
+    assertEquals(write.ok, false);
+    assertEquals(write.calls, 1);
+    const other = await nuWith(dir, `use ${build} [gc]; gc builds describe abc`, 1, "PERMISSION_DENIED");
+    assertEquals(other.ok, false);
+    assertEquals(other.calls, 1);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a grant to an account made a moment before is asked again until IAM knows it", { ignore: Deno.build.os === "windows" }, async () => {
+  const dir = await Deno.makeTempDir({ prefix: "pronto-gcp-fresh-" });
+  const release = JSON.stringify(fileURLToPath(new URL("./gcp/release.nu", import.meta.url)));
+  try {
+    const late = await nuWith(dir, `source ${release}; gc-fresh projects add-iam-policy-binding p`, 1, "Service account x does not exist");
+    assertEquals(late.ok, true, late.err);
+    assertEquals(late.calls, 2);
+    const refused = await nuWith(dir, `source ${release}; gc-fresh projects add-iam-policy-binding p`, 1, "PERMISSION_DENIED");
+    assertEquals(refused.ok, false);
+    assertEquals(refused.calls, 1);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+// A bucket of objects on disk behind a gcloud that does what the release lock asks of storage: an
+// object made only where none is (a 412 where one is), described, read and removed.
+async function storageGcloud(dir: string) {
+  await Deno.writeTextFile(`${dir}/gcloud`, `#!/bin/sh
+[ "$1" = "--quiet" ] && shift
+obj() { echo "${dir}/objects/$(echo "$1" | tr '/:' '__')"; }
+case "$1 $2 $3" in
+  "storage buckets describe") exit 0 ;;
+  "storage cp "*) if [ -e "$(obj "$4")" ]; then echo "HTTPError 412: At least one of the pre-conditions you specified did not hold." >&2; exit 1; fi
+    mkdir -p "${dir}/objects"; cp "$3" "$(obj "$4")" ;;
+  "storage objects describe") echo 7 ;;
+  "storage cat "*) cat "$(obj "$3")" ;;
+  "storage rm "*) rm -f "$(obj "$3")" ;;
+  *) echo "unexpected gcloud call: $*" >&2; exit 1 ;;
+esac
+`, { mode: 0o755 });
+}
+
+Deno.test("an app's release holds a lock: another is refused until it ends or expires", { ignore: Deno.build.os === "windows" }, async () => {
+  const dir = await Deno.makeTempDir({ prefix: "pronto-gcp-lock-" });
+  const release = JSON.stringify(fileURLToPath(new URL("./gcp/release.nu", import.meta.url)));
+  const lock = `{bucket: "gs://p-release-locks", object: "gs://p-release-locks/app", key: "app", project: "p", region: "us-central1"}`;
+  const nu = async (script: string, env: Record<string, string> = {}) => {
+    const r = await new Deno.Command("nu", {
+      args: ["-c", `source ${release}; ${script}`],
+      env: { PATH: `${dir}${delimiter}${Deno.env.get("PATH")}`, ...env }, stdout: "piped", stderr: "piped",
+    }).output();
+    return { ok: r.success, out: new TextDecoder().decode(r.stdout), err: new TextDecoder().decode(r.stderr) };
+  };
+  try {
+    await storageGcloud(dir);
+    const first = await nu(`take-lock ${lock} | ignore`);
+    assertEquals(first.ok, true, first.err);
+    assertStringIncludes(first.out, "release lock taken");
+    const held = await nu(`take-lock ${lock} | ignore`);
+    assertEquals(held.ok, false);
+    assertStringIncludes(held.err, "another release of app is running");
+    const broken = await nu(`take-lock ${lock} | ignore`, { PRONTO_RELEASE_BREAK_LOCK: "1" });
+    assertEquals(broken.ok, true, broken.err);
+    assertStringIncludes(broken.out, "taken over");
+    const dropped = await nu(`drop-lock (${lock} | insert generation "7")`);
+    assertStringIncludes(dropped.out, "release lock let go");
+    // The lock lasts PRONTO_RELEASE_LOCK_MINUTES: made to last none, the next release takes it.
+    const brief = await nu(`take-lock ${lock} | ignore`, { PRONTO_RELEASE_LOCK_MINUTES: "0" });
+    assertEquals(brief.ok, true, brief.err);
+    const expired = await nu(`take-lock ${lock} | ignore`);
+    assertEquals(expired.ok, true, expired.err);
+    assertStringIncludes(expired.out, "it expired at");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a live Cloud SQL instance is patched to the plan's tier and flags in one call", async () => {
+  const release = JSON.stringify(fileURLToPath(new URL("./gcp/release.nu", import.meta.url)));
+  const script = `source ${release}
+    let plan = {sqlTier: "db-custom-1-3840", sqlFlags: "cloudsql.logical_decoding=on,max_connections=130"}
+    let live = {settings: {tier: "db-f1-micro", databaseFlags: [{name: "max_connections", value: "130"}, {name: "cloudsql.logical_decoding", value: "on"}]}}
+    [
+      (sql-drift $live $plan)
+      (sql-drift ($live | upsert settings.tier "db-custom-1-3840") $plan)
+      (sql-drift ($live | upsert settings.databaseFlags [{name: "max_connections", value: "50"}]) $plan)
+      (sql-drift {settings: {tier: "db-custom-1-3840"}} $plan)
+    ] | to json --raw`;
+  const result = await new Deno.Command("nu", { args: ["-c", script], stdout: "piped", stderr: "piped" }).output();
+  assertEquals(result.success, true, new TextDecoder().decode(result.stderr));
+  const flags = "--database-flags cloudsql.logical_decoding=on,max_connections=130".split(" ");
+  assertEquals(JSON.parse(new TextDecoder().decode(result.stdout)), [
+    ["--tier", "db-custom-1-3840"],
+    [],
+    // Both in one patch: two would restart the database twice.
+    ["--tier", "db-custom-1-3840", ...flags],
+    flags,
+  ]);
+});
+
+Deno.test("a heredoc opens at a RUN, COPY or ADD only, not at a shell's shift", async () => {
+  const build = fileURLToPath(new URL("./gcp/build.nu", import.meta.url));
+  const dockerfile = "FROM x\nENV A=$((1<<2))\nCOPY a /a\nRUN <<EOF\nCOPY inside /x\nEOF\nCOPY b /b\n";
+  const out = await new Deno.Command("nu", { args: ["-c", `source ${build}; dockerfile-reads ${JSON.stringify(dockerfile)} | to json --raw`], stdout: "piped", stderr: "piped" }).output();
+  assertEquals(out.success, true, new TextDecoder().decode(out.stderr));
+  assertEquals(JSON.parse(new TextDecoder().decode(out.stdout)), ["a", "b"]);
+});
+
+Deno.test("an image's key follows the files its Dockerfile copies: an edit to one image's file moves that image's alone", async () => {
+  const app = await Deno.makeTempDir({ prefix: "pronto-gcp-keys-" });
+  const real = await Deno.realPath(app);
+  const build = fileURLToPath(new URL("./gcp/build.nu", import.meta.url));
+  const write = async (f: string, text: string) => { await Deno.mkdir(`${real}/${f}`.replace(/\/[^/]*$/, ""), { recursive: true }); await Deno.writeTextFile(`${real}/${f}`, text); };
+  const run = async (cmd: string, args: string[]) => {
+    const out = await new Deno.Command(cmd, { args, cwd: real, stdout: "piped", stderr: "piped" }).output();
+    assertEquals(out.success, true, new TextDecoder().decode(out.stderr));
+    return new TextDecoder().decode(out.stdout);
+  };
+  try {
+    const compose: Record<string, unknown> = {};
+    for (const s of ["one", "two"]) {
+      await write(`${s}/file.txt`, s);
+      await write(`docker/${s}.Dockerfile`, `FROM scratch\nCOPY ${s}/ /app\n`);
+      compose[s] = { build: { context: real, dockerfile: `docker/${s}.Dockerfile` } };
+    }
+    await write("unrelated.txt", "1");
+    await write("compose.json", JSON.stringify({ services: compose }));
+    await run("git", ["init", "-q"]);
+    const list = `${real}-files`;
+    const keys = async () => {
+      const files = await run("git", ["ls-files", "-co", "--exclude-standard"]);
+      await Deno.writeTextFile(list, files.split("\n").filter((f) => f && f !== "compose.json").join("\n"));
+      const script = `source ${build}; let h = (file-hashes ${real} ${list}); image-keys ${real} (open ${real}/compose.json) $h "t" [one two] | to json --raw`;
+      return JSON.parse(await run("nu", ["-c", script])) as Record<string, string>;
+    };
+    const before = await keys();
+    await write("unrelated.txt", "2");
+    assertEquals(await keys(), before, "a file no image copies moves no key");
+    await write("one/file.txt", "changed");
+    const after = await keys();
+    assertEquals(after.one !== before.one, true, "the image that copies the file");
+    assertEquals(after.two, before.two, "the other image is reused");
+  } finally {
+    await Deno.remove(app, { recursive: true });
+    await Deno.remove(`${real}-files`).catch(() => {});
   }
 });

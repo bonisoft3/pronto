@@ -291,7 +291,7 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
       if (!out.ok) throw new Error(`${what}: ${out.stderr || out.stdout}`);
       return out.stdout;
     };
-    const sql = (db: string, query: string) => must(psql(db, `SET pgroll.no_inferred_migrations = 'true'; ${query}`, ["-X", "-t", "-A"]), `query ${db}`);
+    const sql = (db: string, query: string) => must(psql(db, `SET pgroll.no_inferred_migrations = 'TRUE'; ${query}`, ["-X", "-t", "-A"]), `query ${db}`);
     const catalog = async (db: string): Promise<Column[]> => JSON.parse(await sql(db, `SELECT coalesce(json_agg(t), '[]') FROM (${CATALOG}) t`));
     const bootstrap = async (db: string, omitted: string[] = []) => {
       for (const name of omitted) {

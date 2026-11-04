@@ -72,14 +72,84 @@ Deno.test("no secret is a literal: each comes from Secret Manager", async () => 
   assertStringIncludes(r.value.jobYaml, "name: battlechess-postgres-password");
 });
 
-// electric is one instance (mecha's docs/deployment.md#clouds-as-built), and so
-// is the service it shares; none while nobody plays.
-Deno.test("the service is one instance at most and none at rest", async () => {
+// electric's slot and the advisory lock behind it are named by the stream id, so a second
+// instance on the default stream waits on the first's lock and serves no shape.
+Deno.test("the service is one instance at most and none at rest, with one electric on the default slot", async () => {
   const r = await built(release(), "service");
   assertEquals(r.success, true, r.stderr);
   const a = r.value.spec.template.metadata.annotations;
   assertEquals([a["autoscaling.knative.dev/minScale"], a["autoscaling.knative.dev/maxScale"]], ["0", "1"]);
+  assertEquals(a["run.googleapis.com/sessionAffinity"], undefined);
   assertEquals(JSON.parse(a["run.googleapis.com/container-dependencies"]).caddy, ["crud", "auth", "electric"]);
+  const electric = r.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "electric");
+  const names = electric.env.map((e: { name: string }) => e.name);
+  assert(!names.some((n: string) => /SLOT|STREAM/.test(n)), names.join(", "));
+  assertEquals(electric.livenessProbe, undefined);
+});
+
+// Each instance's electric is a replica: a temporary slot of its own name (dropped with its
+// connection, retaining no WAL) beside the default stream's publication, and a client's polls
+// stay where its shapes are.
+Deno.test("maxScale above 1 runs a replica per instance with session affinity", async () => {
+  const r = await built(release(`, minScale: 3, maxScale: 3`), "service");
+  assertEquals(r.success, true, r.stderr);
+  const a = r.value.spec.template.metadata.annotations;
+  assertEquals([a["autoscaling.knative.dev/minScale"], a["autoscaling.knative.dev/maxScale"]], ["3", "3"]);
+  assertEquals(a["run.googleapis.com/sessionAffinity"], "true");
+  assertEquals(a["run.googleapis.com/cpu-throttling"], "false");
+  const electric = r.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "electric");
+  const env = Object.fromEntries(electric.env.filter((e: { value?: string }) => e.value).map((e: { name: string; value: string }) => [e.name, e.value]));
+  assertEquals(env.CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN, "true");
+  assertEquals(env.ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME, "true");
+  assertEquals(env.ELECTRIC_REPLICATION_STREAM_ID, undefined);
+  // A replica hung on a lock or a loop is restarted rather than left to take its share of polls.
+  assertEquals(electric.livenessProbe.httpGet, {path: "/v1/health", port: 3002});
+  assertEquals(electric.livenessProbe.failureThreshold, 6);
+});
+
+// A rollout overlaps the old and new instances, each with a slot, a WAL sender and its pools'
+// connections; the flags are derived from #Pools, and the default's are unchanged.
+Deno.test("maxScale above 1 sizes the database for its replicas, and refuses a shared-core tier", async () => {
+  const plan = await built(release(`, maxScale: 3, sqlTier: "db-custom-1-3840"`), "plan");
+  assertEquals(plan.success, true, plan.stderr);
+  assertEquals(plan.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=130,max_replication_slots=8,max_wal_senders=8,max_slot_wal_keep_size=1024");
+  assertEquals(plan.value.sqlTier, "db-custom-1-3840");
+  for (const tier of ["db-f1-micro", "db-g1-small"]) {
+    const bad = await built(release(`, maxScale: 3, sqlTier: "${tier}"`), "plan");
+    assertEquals(bad.success, false);
+    assertStringIncludes(bad.stderr, "shared-core");
+  }
+  const small = await built(release(`, sqlTier: "db-f1-micro"`), "plan");
+  assertEquals(small.success, true, small.stderr);
+  assertEquals(small.value.sqlFlags, "cloudsql.logical_decoding=on,max_connections=50");
+});
+
+Deno.test("minScale above maxScale is refused, and a preview stays at 0 and 1", async () => {
+  const bad = await built(release(`, minScale: 3, maxScale: 2`), "plan");
+  assertEquals(bad.success, false);
+  const lone = await built(release(`, minScale: 2`), "plan");
+  assertEquals(lone.success, false);
+  const preview = await built(release(`, minScale: 3, maxScale: 3, preview: "pr-32", runHost: "battlechess-pr-32-504479523278.us-central1.run.app"`), "service");
+  assertEquals(preview.success, true, preview.stderr);
+  const a = preview.value.spec.template.metadata.annotations;
+  assertEquals([a["autoscaling.knative.dev/minScale"], a["autoscaling.knative.dev/maxScale"]], ["0", "1"]);
+  assertEquals(a["run.googleapis.com/sessionAffinity"], undefined);
+  const electric = preview.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "electric");
+  assertEquals(electric.livenessProbe, undefined);
+  assert(!electric.env.some((e: { name: string }) => e.name === "CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN"));
+});
+
+// Going back one revision (release.nu) compares the schema each was released with; a pinned
+// traffic is sent all to the new revision by the next release.
+Deno.test("every release sends all traffic to its revision, labelled with its schema", async () => {
+  const r = await built(release(), "service");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.spec.traffic, [{ percent: 100, latestRevision: true }]);
+  // No migrations here: the schema is the database image's.
+  assertEquals(r.value.spec.template.metadata.labels["pronto-schema"], "4".repeat(40));
+  const withSchema = await built(release().replace("image: pushed: ", "image: pushed: {schema: {tag: \"latest\", digest: \"" + digest("9") + "\"}} & ").replace("database: tokenRoles", "migrate: env: {}, database: tokenRoles"), "service");
+  assertEquals(withSchema.success, true, withSchema.stderr);
+  assertEquals(withSchema.value.spec.template.metadata.labels["pronto-schema"], "9".repeat(40), "an app with migrations is labelled with its schema image");
 });
 
 Deno.test("initdb builds the schema once, and its re-runnable steps every release, over the Cloud SQL socket", async () => {
@@ -92,8 +162,8 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"\n`);
   // A guard the app changed reaches a database built before it (a friend's
   // refused seat, found in production), and so does a new entity's table.
-  assertStringIncludes(c.command[2], `for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do`);
-  assertStringIncludes(c.command[2], `if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi\n  done\nelse`);
+  assertStringIncludes(c.command[2], `for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql; do`);
+  assertStringIncludes(c.command[2], `  done\nelse`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
   assertStringIncludes(c.command[2], "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE");
@@ -222,6 +292,22 @@ Deno.test("an app with migrations carries its schema forward in the schema job, 
   assertEquals(more.length, 0);
   assert(/battlechess-schema@sha256:9{64}$/.test(c.image), c.image);
   assert(c.command[2].trimEnd().endsWith('exec "/migrate.sh" "/pgroll" "00_initdb"'), c.command[2]);
+  // The replays are no migrations: pgroll records each of their statements as an inferred one,
+  // and its previous_migration walks that chain until it runs past the job's timeout. pgroll,
+  // which records its own, runs without the option. Its trigger skips only on = 'TRUE': `true`
+  // is ignored and records them all.
+  assertStringIncludes(c.command[2], 'export PGOPTIONS="-c pgroll.no_inferred_migrations=TRUE"\n');
+  assertStringIncludes(c.command[2], '\nunset PGOPTIONS\nexec "/migrate.sh"');
+  assert(!/no_inferred_migrations=true/.test(c.command[2]));
+  assertEquals(job.spec.template.spec.template.spec.timeoutSeconds, 1800);
+  // A built database catches up: the steps and the app's own migrations replay, each tried up to three
+  // times against live traffic, and 010 whole in one transaction.
+  assertStringIncludes(c.command[2], 'if [ "$step" = 010_machines.sql ]; then one=--single-transaction');
+  assertStringIncludes(c.command[2], "for try in 1 2 3");
+  const replayed = (await built(app.replace("migrate: env", 'database: replays: ["020_mine.sql"], migrate: env'), "job")).value;
+  assertStringIncludes(replayed.spec.template.spec.template.spec.containers[0].command[2], "016_mecha_actors.sql 020_mine.sql; do");
+  const slow = (await built(app.replace("migrate: env", "schemaJobTimeout: 3600, migrate: env"), "job")).value;
+  assertEquals(slow.spec.template.spec.template.spec.timeoutSeconds, 3600);
   assertEquals(c.env.find((e: { name: string }) => e.name === "DATABASE_URL").valueFrom.secretKeyRef.name, "battlechess-migrate-database-url");
   assertEquals(c.env.find((e: { name: string }) => e.name === "REQUIRED_TABLES").value, "schedule");
   // initdb's own socket wins over a compose host that names its database service.
@@ -530,6 +616,47 @@ Deno.test("a worker apart keeps an instance, its CPU unthrottled between request
   assertEquals(own.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
 });
 
+// An instance Cloud Run retires and one that replaces it run together for a moment, so a
+// sidecar apart that is stateless may say 2; the default stays at one instance.
+Deno.test("a sidecar apart on less than a whole CPU runs one request at a time, its CPU only theirs", async () => {
+  const own = (await built(withApart(`{port: 8687, memory: "512Mi", apart: {minScale: 1, cpu: 250}}`), "sidecarServices")).value["perf-collector"];
+  const a = own.spec.template.metadata.annotations;
+  assertEquals(a["autoscaling.knative.dev/minScale"], "1");
+  assertEquals(a["run.googleapis.com/cpu-throttling"], "true", "below one CPU, Cloud Run bills by request");
+  assertEquals(a["run.googleapis.com/execution-environment"], "gen1");
+  assertEquals(own.spec.template.spec.containerConcurrency, 1);
+  assertEquals(own.spec.template.spec.containers[0].resources.limits, { cpu: "250m", memory: "512Mi" });
+  const whole = (await built(withApart(`{port: 8687, apart: {minScale: 1, cpu: 2000}}`), "sidecarServices")).value["perf-collector"];
+  assertEquals(whole.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
+  assertEquals(whole.spec.template.metadata.annotations["run.googleapis.com/execution-environment"], "gen2");
+  assertEquals(whole.spec.template.spec.containerConcurrency, undefined);
+  const heavy = await built(withApart(`{port: 8687, memory: "1Gi", apart: {cpu: 250}}`), "plan");
+  assertEquals(heavy.success, false, "250 millicpu takes at most 512Mi");
+});
+
+Deno.test("a sidecar apart runs one instance unless it says more", async () => {
+  const at = async (perf: string) => (await built(withApart(perf), "sidecarServices")).value["perf-collector"].spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"];
+  assertEquals(await at(`{port: 8687, apart: {}}`), "1");
+  assertEquals(await at(`{port: 8687, apart: maxScale: 2}`), "2");
+  assertEquals(await at(`{port: 8687, apart: minScale: 1}`), "1");
+  assertEquals(await at(`{port: 8687, apart: {minScale: 1, maxScale: 3}}`), "3");
+  const bad = await cue(["export", "-", "-e", "r.sidecars.perf.apart", "--out", "json"],
+    `package probe\nimport "bonisoft.org/plugins/pronto/gcp/schema"\nr: schema.#Release & {name: "app", project: "pronto-test", sidecars: perf: {port: 8687, apart: {minScale: 2, maxScale: 1}}}\n`);
+  assertEquals(bad.success, false, "never fewer instances at most than kept at rest");
+});
+
+// Apart, a sidecar is its service's ingress: Cloud Run sets PORT to the containerPort and
+// refuses it in the spec ("reserved env names"). Inside, nothing sets it for the sidecar.
+Deno.test("a sidecar apart leaves PORT to Cloud Run, one inside keeps it", async () => {
+  const env = `, env: {PORT: "8687", PERF_HTTP_PORT: "8687"}`;
+  const own = (await built(withApart(`{port: 8687${env}, apart: {}}`), "sidecarServices")).value["perf-collector"];
+  const names = own.spec.template.spec.containers[0].env.map((e: { name: string }) => e.name);
+  assertEquals(names, ["PERF_HTTP_PORT"]);
+  const s = await built(withApart(`{port: 8687${env}}`), "service");
+  const inside = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assert(inside.env.some((e: { name: string }) => e.name === "PORT"), "inside, nothing sets it for the sidecar");
+});
+
 Deno.test("a sidecar apart's metrics are scraped by a collector in its own service", async () => {
   const r = await built(withApart(`{port: 8687, metrics: port: 9599, apart: {}}`), "plan");
   assertEquals(r.success, true, r.stderr);
@@ -591,6 +718,34 @@ Deno.test("an app always on keeps its CPU between requests; by default it is thr
   assertEquals(on.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], "false");
   const off = await built(release(), "service");
   assertEquals(off.value.spec.template.metadata.annotations["run.googleapis.com/cpu-throttling"], undefined);
+});
+
+// A sidecar's own secret (a key the app keeps, not the cluster's): read from Secret Manager in
+// place of compose's value, and found made before the release starts.
+Deno.test("a sidecar's own secrets are mounted in place of compose's values", async () => {
+  const s = await built(withSidecar(`{port: 8687, env: {APP_KEY: "the-development-key", PLAIN: "x"}, secrets: {APP_KEY: "battlechess-app-key", OTHER: "shared-key"}}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const c = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(c.env.filter((e: { name: string }) => e.name === "APP_KEY").length, 1, "one APP_KEY, the secret's");
+  const by = Object.fromEntries(c.env.map((e: { name: string }) => [e.name, e]));
+  assertEquals(by.APP_KEY.valueFrom, { secretKeyRef: { name: "battlechess-app-key", key: "latest" } });
+  assertEquals(by.OTHER.valueFrom, { secretKeyRef: { name: "shared-key", key: "latest" } });
+  assertEquals(by.PLAIN.value, "x");
+  const plan = await built(withSidecar(`{port: 8687, secrets: {APP_KEY: "battlechess-app-key", OTHER: "shared-key"}}`), "plan");
+  assertEquals(plan.value.sidecarSecretKeys, ["battlechess-app-key", "shared-key"]);
+  const bad = await built(withSidecar(`{port: 8687, secrets: {"not-env": "x"}}`), "plan");
+  assertEquals(bad.success, false, "a key that is no environment variable is refused");
+});
+
+Deno.test("a sidecar with a probe path is started by an HTTP probe and the door waits for it", async () => {
+  const s = await built(withSidecar(`{port: 8687, probe: "/health"}`), "service");
+  assertEquals(s.success, true, s.stderr);
+  const own = s.value.spec.template.spec.containers.find((c: { name: string }) => c.name === "perf-collector");
+  assertEquals(own.startupProbe.httpGet, { path: "/health", port: 8687 });
+  assertEquals(own.startupProbe.tcpSocket, undefined);
+  const deps = JSON.parse(s.value.spec.template.metadata.annotations["run.googleapis.com/container-dependencies"]);
+  assertEquals(deps.caddy.includes("perf-collector"), true);
+  assertEquals((await built(withSidecar(`{port: 8687, probe: "health"}`), "plan")).success, false);
 });
 
 Deno.test("a sidecar's memory is its container's, inside the instance or apart", async () => {
