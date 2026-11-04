@@ -1099,7 +1099,7 @@ export def main [
 	# The secrets the release reads by name, in every project it touches, before the lock, the rc
 	# preview or any build: a missing one fails here in seconds, not in the rc minutes in (gcp/secrets.nu).
 	if $recorded and not $rollback {
-		try { check-secrets $app_info.dir } catch {|e|
+		try { check-secrets $app_info.dir --preview $preview --no-gate=$no_gate } catch {|e|
 			do $record "failed" $e.msg
 			error make {msg: $e.msg}
 		}
