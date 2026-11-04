@@ -301,8 +301,9 @@ Deno.test("an app with migrations carries its schema forward in the schema job, 
   assert(c.command[2].trimEnd().endsWith('exec "/migrate.sh" "/pgroll" "00_initdb"'), c.command[2]);
   // The replays are no migrations: pgroll recorded each of their statements as an inferred one,
   // 8,353 in Bonk Chess's ledger, until its previous_migration ran past the job's timeout. pgroll,
-  // which records its own, runs without the option.
-  assertStringIncludes(c.command[2], 'export PGOPTIONS="-c pgroll.no_inferred_migrations=true"\n');
+  // which records its own, runs without the option. Its trigger skips only on = 'TRUE': `true`
+  // passed this test and recorded 6,149 more (2026-11-04); integrate@local measures it too.
+  assertStringIncludes(c.command[2], 'export PGOPTIONS="-c pgroll.no_inferred_migrations=TRUE"\n');
   assertStringIncludes(c.command[2], '\nunset PGOPTIONS\nexec "/migrate.sh"');
   assertEquals(c.env.find((e: { name: string }) => e.name === "DATABASE_URL").valueFrom.secretKeyRef.name, "battlechess-migrate-database-url");
   assertEquals(c.env.find((e: { name: string }) => e.name === "REQUIRED_TABLES").value, "schedule");
