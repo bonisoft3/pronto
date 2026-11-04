@@ -3116,6 +3116,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if E.cluster.capabilities.server {
 					schema:     E.cluster.surface.schema
 					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+					// The app's own migration files, which a release replays on a database it
+					// already built (gcp's schema job); the job names 016_mecha_actors itself.
+					replays: [if E.code.state.rawMigrations != _|_ for r in E.code.state.rawMigrations if r.name != "016_mecha_actors.sql" {r.name}]
 					drains: [for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}]
 				}
 			}

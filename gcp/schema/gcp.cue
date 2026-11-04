@@ -115,6 +115,9 @@ import (
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
 	// Filled by the release.
 	database: tokenRoles: [...string]
+	// The app's own migrations (rawMigrations, as generate lists them), replayed
+	// on a database already built.
+	database: replays: *[] | [...string]
 
 
 	// Present where the app's compose project runs mecha's ticker: the
@@ -626,11 +629,24 @@ import (
 							marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
-							  # entity's table, every policy, trigger and publication, and the hybrid
-							  # machines' code run again, keeping every row.
-							  for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do
-							    f=/docker-entrypoint-initdb.d/$step.sql
-							    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+							  # entity's table and a new field's column, every policy, trigger and
+							  # publication, the status charts' triggers (010_machines), the hybrid
+							  # machines' code and the app's own migrations, each idempotent, run again,
+							  # keeping every row. Live traffic can deadlock a step's ALTER (a lease's
+							  # renewal against ENABLE ROW LEVEL SECURITY); being idempotent, the step
+							  # is run again, up to three times.
+							  for step in \(strings.Join(list.Concat([["005_create_tables.sql", "006_policies.sql", "007_txid.sql", "008_publication.sql", "010_machines.sql", "016_mecha_actors.sql"], R.database.replays]), " ")); do
+							    f=/docker-entrypoint-initdb.d/$step
+							    if [ -f "$f" ]; then echo "initdb: replaying $step"
+							      for try in 1 2 3; do
+							        # 010 drops and recreates triggers and constraints: one transaction, so no
+							        # write slips between them and a failure leaves the old ones in force.
+							        if [ "$step" = 010_machines.sql ]; then one=--single-transaction; else one=; fi
+							        if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi
+							        if [ "$try" = 3 ]; then exit 1; fi
+							        echo "initdb: $step failed, again in 10s"; sleep 10
+							      done
+							    fi
 							  done
 							else
 							  source /usr/local/bin/docker-entrypoint.sh

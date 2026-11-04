@@ -92,8 +92,8 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"\n`);
   // A guard the app changed reaches a database built before it (a friend's
   // refused seat, found in production), and so does a new entity's table.
-  assertStringIncludes(c.command[2], `for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do`);
-  assertStringIncludes(c.command[2], `if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi\n  done\nelse`);
+  assertStringIncludes(c.command[2], `for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql; do`);
+  assertStringIncludes(c.command[2], `  done\nelse`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).
   assertStringIncludes(c.command[2], "GRANT anon, app_user, service TO postgres WITH INHERIT FALSE, SET TRUE");
@@ -230,6 +230,12 @@ Deno.test("an app with migrations carries its schema forward in the schema job, 
   assertStringIncludes(c.command[2], '\nunset PGOPTIONS\nexec "/migrate.sh"');
   assert(!/no_inferred_migrations=true/.test(c.command[2]));
   assertEquals(job.spec.template.spec.template.spec.timeoutSeconds, 1800);
+  // A built database catches up: the steps and the app's own migrations replay, each tried up to three
+  // times against live traffic, and 010 whole in one transaction.
+  assertStringIncludes(c.command[2], 'if [ "$step" = 010_machines.sql ]; then one=--single-transaction');
+  assertStringIncludes(c.command[2], "for try in 1 2 3");
+  const replayed = (await built(app.replace("migrate: env", 'database: replays: ["020_mine.sql"], migrate: env'), "job")).value;
+  assertStringIncludes(replayed.spec.template.spec.template.spec.containers[0].command[2], "016_mecha_actors.sql 020_mine.sql; do");
   const slow = (await built(app.replace("migrate: env", "schemaJobTimeout: 3600, migrate: env"), "job")).value;
   assertEquals(slow.spec.template.spec.template.spec.timeoutSeconds, 3600);
   assertEquals(c.env.find((e: { name: string }) => e.name === "DATABASE_URL").valueFrom.secretKeyRef.name, "battlechess-migrate-database-url");
