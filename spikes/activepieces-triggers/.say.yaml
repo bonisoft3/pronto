@@ -1,0 +1,27 @@
+say:
+  self: {}
+  build:
+    rulemap:
+      triggers:
+        platform: local
+        priority: -1
+        stop: true
+        cmds:
+          - do: "mise exec github:denoland/deno@v2.9.7 -- deno check --frozen host.ts registry.ts host_test.ts"
+  lint:
+    rulemap:
+      triggers:
+        platform: local
+        priority: -1
+        stop: true
+        cmds:
+          - do: "mise exec github:denoland/deno@v2.9.7 -- deno fmt --check host.ts registry.ts host_test.ts deno.json"
+          - do: "mise exec github:denoland/deno@v2.9.7 -- deno lint host.ts registry.ts host_test.ts"
+  test:
+    rulemap:
+      triggers:
+        platform: local
+        priority: -1
+        stop: true
+        cmds:
+          - do: "mise exec github:denoland/deno@v2.9.7 -- deno test --frozen --allow-read=. --allow-write=. --allow-env host_test.ts"

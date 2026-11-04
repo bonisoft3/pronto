@@ -11,6 +11,8 @@ import { createShell } from 'omnishell/shell.js'
 // @ts-ignore untyped interpreter module
 import { ensureSes } from 'omnishell/jessie.js'
 import { installSes } from 'pronto-bundle-ses'
+// @ts-ignore written by the bundler beside the page
+import { hostDomModules } from 'pronto-bundle-hatches'
 
 interface Payload {
   files: Record<string, string>
@@ -83,7 +85,7 @@ if (typeof OrigWorker === 'function') {
   }
   // The shim answers every file a preload would ask the network for.
   await ensureSes(installSes)
-  createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false })
+  createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false, hostDomModules })
 })().catch((e) => {
   document.body.textContent = `boot failed: ${e instanceof Error ? e.message : String(e)}`
   throw e

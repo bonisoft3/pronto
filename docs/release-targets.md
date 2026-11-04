@@ -170,6 +170,23 @@ What the bundler holds to:
   URL, which PGlite's relative asset URLs resolve against.
 - **A publication or replica identity outside a container fence fails the
   bundle**, read by mecha's own fence grammar.
+- **A host-DOM hatch is compiled into the module.** The terminal imports one by
+  path, which no shim answers, so the bundler imports each declared hatch
+  into the page and the shell mounts it from there (`hostDomModules`).
+- **A unit rides with the page.** An agent is a worker the terminal starts
+  from a `blob:` of bytes it fetched, so the shim answers it like any served
+  file. A realm is a document of its own, behind an opaque origin and under no
+  policy of the app's, and every way to put a document into one file —
+  `srcdoc`, `blob:`, `data:` — inherits the creator's policy. So the page
+  serves the realm from itself: the unit's declared scripts and sheets are
+  inlined into its document, which rides as inert base64 before the
+  document's first script, and the frame's `src` is the page's own URL with
+  `#pronto-unit=<name>` (omnishell `hatch.js` `selfSrc`), one cache entry for
+  both loads. That first script is the boot: in a sandboxed frame whose
+  fragment names a unit it writes the unit and an unclosed `<plaintext>`,
+  which ends parsing of the rest of the file as markup; anywhere else it
+  installs the CSP `<meta>` before anything after it is parsed. The policy is
+  therefore not in the static markup, and only inert data precedes it.
 - **`--base` mounts the page under a path prefix**, as a GitHub Pages project
   site needs: the shell takes the prefix off every address it matches and puts
   it on every address it composes, and the document is also written as
@@ -197,7 +214,8 @@ that made it, as a check of every pull request against the pins would.
 **The refusals.** `emit.cue` refuses the target, a `cue vet` error rather than
 a broken release, for a program with:
 
-- a vendored unit, a worker the browser fetches past the document's shim;
+- an agent presenter, which reads its pinned scripts and files through its own
+  seat, past the document's shim;
 - a shared entity, since one user shares with nobody and the client opens a
   keyed shape per grant, which the page's cluster does not serve;
 - a validation, which runs in plv8, and PGlite has none.
@@ -473,10 +491,11 @@ What fixes its shape, as built:
 - **The clock is two, and sleeps.** The object's alarm stands at the next
   instant any schedule owes a runnable tick and sweeps as mecha's ticker
   does; a Cron Trigger (`triggers.crons`, written where the program declares
-  an unsuspended cron schedule or a machine that arms a deadline, and the
-  clock is not disabled) pokes the object hourly from outside it, re-arming
-  an alarm the platform dropped and recording the occurrences a lost span
-  left behind; a publish pokes once.
+  an unsuspended cron schedule, a machine that arms a deadline, an effect or a
+  hatch, and the clock is not disabled) pokes the object hourly from outside it,
+  re-arming an alarm the platform dropped, recording the occurrences a lost span
+  left behind, calling each [[edge-hatches|hatch's]] sweep and checkpointing, which
+  nothing else does here; a publish pokes once, and sweeps nothing.
   Each wake of the object is a request and a boot, so the alarm, not the
   trigger, is the resolution: an app with a daily schedule idles inside the
   Free plan's day (100,000 requests, 13,000 GB-s of object duration, five Cron
@@ -532,6 +551,20 @@ object's alarm, swept as the ticker sweeps them
 For a frozen archive, `code.meta.edgeClock: "disabled"` emits `--clock disabled`:
 the object preserves schedule rows, clears alarms at boot and delivery, and no
 Cron Trigger is written. The default, `"ticker"`, runs them.
+
+
+## Keys
+
+Where a key lives follows what it can spend:
+
+| Tier | Keys | Where |
+| --- | --- | --- |
+| Dev | Simulators' fakes | Plain, inline in the program's CUE |
+| Sandbox | Providers' test accounts | SOPS-encrypted in `secrets.enc.yaml`, read with `sops exec-env`; only a `kind` release decrypts it into a cluster |
+| Production | Real accounts | Only the target cloud's own secret service: on Cloudflare, Worker secrets. Never in the repo, SOPS or GitHub secrets, and never through a publisher's environment |
+
+A hatch declares production keys in [`edge.secrets`](edge-hatches.md); a deploy
+credential such as `CLOUDFLARE_API_TOKEN` is the release's own, not the app's.
 
 ## docker
 

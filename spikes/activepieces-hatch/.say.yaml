@@ -1,0 +1,30 @@
+say:
+  self: {}
+  build:
+    rulemap:
+      spike:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "./gate.sh build"
+  lint:
+    rulemap:
+      spike:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "./gate.sh lint"
+  test:
+    rulemap:
+      spike:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "./gate.sh test"
+  integrate:
+    rulemap:
+      spike:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "./gate.sh integrate"

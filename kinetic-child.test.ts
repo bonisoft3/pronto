@@ -50,7 +50,7 @@ app: pronto.#App & {
   }
   capabilities: {hatches: {}, vendored: painter: {
     isolation: "agent"
-    ports: {reads: [], raises: []}
+    ports: {reads: [], raises: {}}
     scripts: []
     src: "shell/engine/present.js"
     files: ["shell/engine/present.js"]

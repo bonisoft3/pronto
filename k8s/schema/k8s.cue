@@ -407,8 +407,11 @@ import (
 				timeouts: {for id, s in bounds.mesh {(id): "\(s)s"}}
 			}
 			targets: apps: {
-				for id, _ in bounds.mesh {
+				for id, _ in bounds.mesh if id != "hatch" {
 					(id): timeout: id
+				}
+				for id in release.doors {
+					(id): timeout: "hatch"
 				}
 			}
 		}
@@ -772,7 +775,7 @@ import (
 								name:  "ORIGIN"
 								value: originValue
 							},
-							for up in ["CRUD", "AUTH", "ELECTRIC", "TICKER", "RCLONE_S3", "IMGPROXY", "RENDER"] {name: "PRONTO_UPSTREAM_\(up)", value: "localhost:3500"},
+							for up in list.Concat([["CRUD", "AUTH", "ELECTRIC", "TICKER", "RCLONE_S3", "IMGPROXY", "RENDER"], [for id in release.doors {strings.ToUpper(strings.Replace(id, "-", "_", -1))}]]) {name: "PRONTO_UPSTREAM_\(up)", value: "localhost:3500"},
 							{name: "PRONTO_TRACING", value: "on"},
 							for e in (#otelExport & {service: "caddy", port: 4317}).env {e},
 							{

@@ -13,11 +13,29 @@ export function prepareEdgeTemplate(text: string): string {
 
 type Assets = { fetch(request: Request): Promise<Response> }
 
+/** The address `html_handling: 'drop-trailing-slash'` serves a document at. */
+export function extensionless(file: string): string {
+  return file.replace(/(?:\/index)?\.html$/, '')
+}
+
+/** A realm's document, served at its own address (originAssets). */
+export function realmDocumentsOf(shell: { units?: Record<string, { isolation?: string; src?: string }> }): string[] {
+  return Object.values(shell.units ?? {}).filter((unit) => unit.isolation === 'realm').map((unit) => `/${unit.src}`)
+}
+
 /** These templates vary only with the deployment's origin, so their file
  * validators remain valid, as they do behind the container's Caddy door. */
-export function originAssets(assets: Assets): Assets {
+export function originAssets(assets: Assets, realmDocuments: string[] = []): Assets {
   return {
     async fetch(request) {
+      // Assets' html_handling redirects a document's .html address to its bare
+      // one. A realm's frame must stay at its own address, or its relative
+      // scripts resolve a directory too high.
+      const url = new URL(request.url)
+      if (realmDocuments.includes(url.pathname)) {
+        url.pathname = `/${extensionless(url.pathname.slice(1))}`
+        request = new Request(url, request)
+      }
       const response = await assets.fetch(request)
       if (response.status !== 200 || !/^(text\/(html|plain|xml)|application\/xml)(;|$)/i.test(response.headers.get('content-type') ?? '')) return response
       if (request.method === 'HEAD') {

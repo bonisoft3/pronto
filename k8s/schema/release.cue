@@ -43,6 +43,11 @@ package schema
 		tokenRoles: [...string]
 	}
 
+	// The container hatches caddy's door routes to, by app id (the app's
+	// .pronto/cluster.json; the release fills it). Their own workloads are not
+	// deployed here.
+	doors: *[] | [...=~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"]
+
 	// Present where the app's compose project has a migrate service: the
 	// environment compose gives it beyond its DATABASE_URL (REQUIRED_TABLES),
 	// filled by the release from that project.

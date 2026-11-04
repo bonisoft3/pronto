@@ -211,12 +211,14 @@ export def ensure-observability [
 	kubectl rollout status deployment/vector -n observability $"--timeout=($timeout)"
 }
 
-# Decrypt and apply SOPS-encrypted secrets if present
-export def apply-sops-secrets [app_dir: string, namespace: string] {
+# The file is flat key/value pairs, so `sops exec-env` can feed the same file to local runs and publishes.
+export def apply-sops-secrets [app_name: string, app_dir: string, namespace: string] {
 	let enc_file = ($app_dir | path join "secrets.enc.yaml")
 	if not ($enc_file | path exists) { return }
-	print $"Decrypting and applying SOPS secrets from ($enc_file) to ($namespace)..."
-	^sops -d $enc_file | kubectl apply -n $namespace -f -
+	print $"Decrypting ($enc_file) into Secret ($app_name)-secrets in ($namespace)..."
+	^sops -d --output-type dotenv $enc_file
+		| ^kubectl create secret generic $"($app_name)-secrets" -n $namespace --from-env-file=/dev/stdin --dry-run=client -o yaml
+		| ^kubectl apply -f -
 }
 
 # Resolve application to release
@@ -282,7 +284,8 @@ export def render-manifests [
 	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
-	{App: {database: {tokenRoles: $facts.tokenRoles}}} | to json | save -f $roles_file
+	# An app with no door hatch writes no `doors`.
+	{App: {database: {tokenRoles: $facts.tokenRoles}, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file
@@ -490,8 +493,10 @@ export def main [
 		ensure-tls-secret $app_info.name $app_source_dir $target_ns $gateway_host
 	}
 
-	# Decrypt and apply SOPS secrets if present
-	apply-sops-secrets $app_source_dir $target_ns
+	# secrets.enc.yaml holds sandbox keys, which a production cluster must never get.
+	if $cluster_env == "kind" {
+		apply-sops-secrets $app_info.name $app_source_dir $target_ns
+	}
 	if ($oidc.secretValues | is-not-empty) {
 		auth-provider-secret $workload_name $target_ns $oidc.secretValues
 			| to json | kubectl apply --server-side --field-manager=pronto-oidc -f -

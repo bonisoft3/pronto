@@ -18,6 +18,7 @@
 //                among them: what a publish hands a data directory the object
 //                kept (publish-edge.ts)
 // <out>/src/index.ts, <out>/wrangler.jsonc
+import { readEdgeHatches, applyHatchAttributes } from './edge-hatches.ts'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
@@ -25,6 +26,7 @@ import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-ad
 import { builtRelease, holdIceServers } from './edge-ice.ts'
 import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
+import { realmDocumentsOf } from './edge-templates.ts'
 import { type Hybrids, renderMachines } from './edge-machines.ts'
 import { renderEffects } from './edge-effects.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
@@ -74,18 +76,19 @@ const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.jso
   schema?: Record<string, { durability?: string }>
   migrations: string[]
   routes?: { files: { html: string } }[]
-  units?: Record<string, { role?: string; isolation?: string }>
+  units?: Record<string, { role?: string; isolation?: string; src?: string }>
   presenter?: { policy: string; scripted: string[] }
 }
 const clustered = shell.migrations.length > 0
 if (!clustered && (flags['--derived'] || flags['--from'] || flags['--ssr-origin'])) fail('a release without a cluster cannot use --derived, --from, or --ssr-origin')
-// A unit also needs the terminal door's per-unit security headers. A
-// presenter's are its worker script's own, which _headers carries
-// (edge-addresses.ts), and the refusal of its scripted fetches below; agent
-// and compartment units run in their own isolated runtimes.
-const unpackaged = Object.entries(shell.units ?? {}).filter(([, unit]) => unit.role !== 'presenter' && unit.isolation !== 'agent' && unit.isolation !== 'compartment').map(([unit]) => unit)
-if (unpackaged.length) fail(`units are not packaged yet: ${unpackaged.join(', ')}`)
+// A unit's per-unit security headers ride in _headers (edge-addresses.ts): a
+// realm's document carries the seat's sandbox, a presenter's worker script its
+// own policy, with the refusal of its scripted fetches below; an agent is a
+// static file the seat starts from a blob: under the document's policy.
 const name = shell.app ?? path.basename(app)
+const hatches = await readEdgeHatches(app)
+if (hatches.length && flags['--ssr-origin']) fail('edge hatches are not packaged for SSR releases')
+if (hatches.length && !clustered) fail('edge hatches run in the cluster, which an app with no migration does not have')
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 
 // Asked before anything is cleared: a refused release leaves the last one's output standing.
@@ -115,6 +118,8 @@ if (!retainedFrom) {
 
 await Deno.remove(out, { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
 await Deno.mkdir(path.join(out, 'src'), { recursive: true })
+await Deno.writeTextFile(path.join(out, 'edge-environment.json'), JSON.stringify([...new Set(hatches.flatMap(h => h.edge.environment ?? []))]))
+await Deno.writeTextFile(path.join(out, 'edge-secrets.json'), JSON.stringify([...new Set(hatches.flatMap(h => h.edge.secrets ?? []))]))
 
 // Use the same public files as the container door; the cluster stays remote.
 const publicDir = path.join(out, 'public')
@@ -125,6 +130,7 @@ const statics = await new Deno.Command('cue', {
 if (!statics.success) fail('cue export of public assets failed')
 const { statics: terminalStatics, clusterStatics } = JSON.parse(new TextDecoder().decode(statics.stdout)) as { statics: StaticAsset[]; clusterStatics: StaticAsset[] }
 await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
+await applyHatchAttributes(publicDir, hatches)
 const hints = await addressEdgeAssets(addresses, publicDir, { previous: retainedFrom, iceServers })
 if (tempRetained) await Deno.remove(tempRetained, { recursive: true }).catch(() => {})
 await holdIceServers(builtRelease(publicDir), iceServers, publicDir)
@@ -153,14 +159,16 @@ if (seedBlobs) {
   console.error(`edge: ${count} seed blobs`)
 }
 
+// A realm's document, served at its own address ([[edge-templates.ts]]).
+const realmDocuments = realmDocumentsOf(shell)
 if (!clustered) {
   const worker = path.relative(path.join(out, 'src'), path.join(here, 'edge-static.ts')).replaceAll('\\', '/')
   const staticWorker = worker.startsWith('.') ? worker : `./${worker}`
   const imageWorker = path.relative(path.join(out, 'src'), path.join(here, 'edge-images.ts')).replaceAll('\\', '/')
   const fragment = path.relative(path.join(out, 'src'), path.join(omnishell, 'interpreter/fragment.js')).replaceAll('\\', '/')
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), blobs
-    ? `import staticWorker from '${staticWorker}'\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nimport { IMAGE_WIDTHS } from '${fragment.startsWith('.') ? fragment : `./${fragment}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS) ?? staticWorker.fetch(req, env) } }\n`
-    : `export { default } from '${staticWorker}'\n`)
+    ? `import { staticWorker as serveStatic } from '${staticWorker}'\nconst staticWorker = serveStatic(${JSON.stringify(realmDocuments)})\nimport { edgeImage } from '${imageWorker.startsWith('.') ? imageWorker : `./${imageWorker}`}'\nimport { IMAGE_WIDTHS } from '${fragment.startsWith('.') ? fragment : `./${fragment}`}'\nexport default { async fetch(req, env, ctx) { return await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS) ?? staticWorker.fetch(req, env) } }\n`
+    : `import { staticWorker } from '${staticWorker}'\nexport default staticWorker(${JSON.stringify(realmDocuments)})\n`)
   await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
     name, main: 'src/index.ts', compatibility_date: '2026-09-01',
     assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash', not_found_handling: 'none' },
@@ -224,7 +232,7 @@ await run(Deno.execPath(), ['install', '--frozen', '--node-modules-dir=auto'], p
 // can owe a tick, so the free plan pays a day of object wakes for an alarm
 // the platform lost rather than a minute's; the alarm is the exact one.
 const armed = Object.values(hybrids).some((h) => (h.reducer as { ports?: { wake?: unknown } }).ports?.wake !== undefined)
-const pokes = clock !== 'disabled' && (crons.length > 0 || armed || withEffects)
+const pokes = clock !== 'disabled' && (crons.length > 0 || armed || withEffects || hatches.length > 0)
 const POKE_CRON = '0 * * * *'
 
 const rel = (p: string) => {
@@ -243,6 +251,7 @@ import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
 import { originAssets } from '${fromSrc(path.join(here, 'edge-templates.ts'))}'
 ${blobs ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
+${hatches.map((h, i) => `import { createHatch as hatch${i} } from '${fromSrc(path.join(app, h.edge.src))}'`).join('\n')}
 ${Object.keys(hybrids).length ? "import machines from './machines.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
@@ -250,6 +259,7 @@ import icu from '../pglite/icu-root.tgz'
 
 export const Cluster = edgeObject({
   clock: ${JSON.stringify(clock)},
+  hatches: [${hatches.map((h, i) => `{ route: ${JSON.stringify(h.edge.route)}, create: hatch${i} }`).join(',')}],
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(shell.tables)},
   schema: ${JSON.stringify(shell.schema ?? {})},
@@ -258,7 +268,8 @@ export const Cluster = edgeObject({
 export default {
   scheduled: edgeWorker.scheduled,
   async fetch(req, env, ctx) {
-    env = { ...env, ASSETS: originAssets(env.ASSETS) }
+    env = { ...env, ASSETS: originAssets(env.ASSETS, ${JSON.stringify(realmDocuments)}) }
+    if (${JSON.stringify(hatches.map(h => h.edge.route))}.some(route => new URL(req.url).pathname === route || new URL(req.url).pathname.startsWith(route + '/'))) return env.CLUSTER.get(env.CLUSTER.idFromName('cluster')).fetch(req)
 ${blobs ? '    const image = await edgeImage(req, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}
 ${shell.presenter ? `    // A presenter's module import of this origin is answered by a static
     // asset, which never reaches upstream dynamic handlers, or not at all: the cluster's
@@ -339,6 +350,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
   ...(shell.ai || withEffects ? { ai: { binding: 'AI' } } : {}),
   version_metadata: { binding: 'CF_VERSION_METADATA' },
+  ...(hatches.some(h => h.edge.email) ? { send_email: hatches.flatMap(h => h.edge.email ? [{name: h.edge.email.name, allowed_destination_addresses: h.edge.email.recipients}] : []) } : {}),
   migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
   observability: { enabled: true },
   ...blobBindings,

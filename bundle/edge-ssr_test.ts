@@ -35,6 +35,24 @@ Deno.test('SSR database generation preserves the clock policy in both database m
   } finally { await Deno.remove(out, { recursive: true }) }
 })
 
+Deno.test('an SSR Worker serves a realm document at its own address, as the static Worker does', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {}, units: {
+      map: { isolation: 'realm', src: 'shell/units/map/frame.html' },
+      geocoder: { isolation: 'agent', src: 'shell/units/geocoder/unit.js' },
+    } }))
+    await securityHeaders(out)
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
+    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [])
+    assert.match(await Deno.readTextFile(path.join(out, 'src/index.ts')), /originAssets\(env\.ASSETS, \["\/shell\/units\/map\/frame\.html"\]\)/)
+  } finally { await Deno.remove(out, { recursive: true }) }
+})
+
 Deno.test('installed edge helpers load the supplied runtime without a monorepo sibling', async () => {
   const tmp = await Deno.makeTempDir({ prefix: 'edge installed ' })
   try {

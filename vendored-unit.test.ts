@@ -4,7 +4,7 @@
 // pass as the refusal under test; the well-formed program pins what shell.yaml
 // carries to the terminal.
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
-import { DETAIL, parseDetail } from "../omnishell/interpreter/hatch.js";
+import { DETAIL_BYTES, REALM_GRANTS } from "../omnishell/interpreter/hatch.js";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
 const answer = ({ fields = `{name: "uci", type: "string"}`, uniques = `[{name: "uq_answer_question", cols: ["fen", "nodes"]}]`, cel = "", durability = "device" } = {}) => `
@@ -21,7 +21,7 @@ const answer = ({ fields = `{name: "uci", type: "string"}`, uniques = `[{name: "
         ]
       }`;
 
-const engine = ({ isolation = `"agent"`, reads = `["Payment"]`, raises = `["answer"]`, memo = `{entity: "Answer", key: ["fen", "nodes"]}` } = {}) => `
+const engine = ({ isolation = `"agent"`, reads = `["Payment"]`, raises = `{answer: {}}`, memo = `{entity: "Answer", key: ["fen", "nodes"]}` } = {}) => `
     engine: {
       isolation: ${isolation}
       ports: {reads: ${reads}, raises: ${raises}}
@@ -30,6 +30,8 @@ const engine = ({ isolation = `"agent"`, reads = `["Payment"]`, raises = `["answ
       files: ["shell/units/engine/unit.js"]
       note: "an oracle"
     }`;
+
+const STRING = { type: "string", maxLength: 65536 };
 
 const program = (unit = engine(), entity = answer()) => paymentProgram({ entity, vendored: unit });
 
@@ -46,8 +48,9 @@ Deno.test("an agent with a memo passes, and shell.yaml carries its ports as tabl
   assertEquals(files["shell/shell.yaml"].data.units, {
     engine: {
       isolation: "agent",
-      ports: { reads: ["payment"], raises: ["answer"] },
+      ports: { reads: ["payment"], raises: { answer: { type: "object", fields: { fen: STRING, nodes: STRING, uci: STRING } } } },
       memo: { table: "answer", key: ["fen", "nodes"], columns: ["fen", "nodes", "uci"] },
+      files: ["shell/units/engine/unit.js"],
       src: "shell/units/engine/unit.js",
     },
   });
@@ -85,7 +88,7 @@ Deno.test("a read naming no entity is refused", async () => {
 });
 
 const BABYLON = "https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/babylon.js";
-const presenter = ({ raises = "[]", scripts = `["${BABYLON}"]` } = {}) => `
+const presenter = ({ raises = "{}", scripts = `["${BABYLON}"]` } = {}) => `
     painter: {
       isolation: "agent"
       ports: {reads: [], raises: ${raises}}
@@ -102,7 +105,7 @@ Deno.test("an agent without a memo is a presenter, and shell.yaml carries its sc
   assertEquals(files["shell/shell.yaml"].data.units, {
     painter: {
       isolation: "agent",
-      ports: { reads: [], raises: [] },
+      ports: { reads: [], raises: {} },
       role: "presenter",
       scripts: [{ url: BABYLON, integrity: "sha384-GbwOam+gaf7GWvN708CvUiGqRFPFMS/lpYod2JfIip04KMa4TIJ8HXRjhwvT9DMC" }],
       files: ["shell/units/painter/unit.js", "assets/manifest.json"],
@@ -117,11 +120,11 @@ Deno.test("an agent without a memo is a presenter, and shell.yaml carries its sc
 // A presenter's worker is unsealed: what it computes depends on its thread's
 // timing, so an event from it would land a nondeterministic source in a chart.
 Deno.test("a presenter that raises is refused: it paints and raises nothing", async () => {
-  await refused(program(presenter({ raises: `["drawn"]` })), "unit painter is an agent presenter and raises drawn: what it computes is a function of its thread's timing, not of anything a person did, so it paints and raises nothing");
+  await refused(program(presenter({ raises: `{drawn: {type: "object", fields: {}}}` })), "unit painter is an agent presenter and raises drawn: what it computes is a function of its thread's timing, not of anything a person did, so it paints and raises nothing");
 });
 
 Deno.test("scripts on a unit that is no agent presenter are refused", async () => {
-  await refused(program(engine({ isolation: `"realm"`, memo: "", raises: "[]" }).replace("note:", `scripts: ["${BABYLON}"]\n      note:`)), "unit engine names scripts and is no agent presenter: only a presenter's worker runs the terminal's pinned scripts");
+  await refused(program(engine({ isolation: `"realm"`, memo: "", raises: "{}" }).replace("note:", `scripts: ["${BABYLON}"]\n      note:`)), "unit engine names scripts and is no agent presenter: only a presenter's worker runs the terminal's pinned scripts");
 });
 
 Deno.test("a script the terminal does not offer is refused", async () => {
@@ -157,50 +160,56 @@ Deno.test("a memo column that is not text is refused: an answer crosses the seat
 });
 
 Deno.test("a memo unit raising other than one event is refused: a question has one answer", async () => {
-  await refused(program(engine({ raises: `["answer", "verdict"]` })), "unit engine has a memo and raises 2 events: a question has one answer");
+  await refused(program(engine({ raises: `{answer: {}, verdict: {}}` })), "unit engine has a memo and raises 2 events: a question has one answer");
 });
 
-Deno.test("a memo wider than the seat's detail is refused by #emit: an answer carries every column in one event", async () => {
-  const wide = Array.from({ length: 7 }, (_, i) => `{name: "c${i}", type: "string"}`).join(", ");
-  await refused(program(engine(), answer({ fields: wide })), "unit engine memo on Answer has 9 columns, and the agent seat carries an answer of at most 8");
+Deno.test("a memo's answer is shaped by its entity: each column text bounded by its declared size", async () => {
+  const files = await emitFiles(program(engine(), answer({ cel: `cel: bounds: {uci: {sizeMax: 5}}` }))) as unknown as Record<string, { data: { units: { engine: { ports: { raises: unknown } } } } }>;
+  assertEquals(files["shell/shell.yaml"].data.units.engine.ports.raises, {
+    answer: { type: "object", fields: { fen: STRING, nodes: STRING, uci: { type: "string", maxLength: 5 } } },
+  });
 });
 
-Deno.test("a memo column named outside the seat's detail grammar is refused by #emit", async () => {
+Deno.test("a memo declaring its answer's fields is refused: the shape is derived from what it lands in", async () => {
   await refused(
-    program(engine(), answer({ fields: `{name: "bestMove", type: "string"}` })),
-    "unit engine memo on Answer: column bestMove is not a name the agent seat's detail carries (^[a-z][a-z0-9_]{0,23}$)",
+    program(engine({ raises: `{answer: {type: "object", fields: {uci: {type: "string", maxLength: 4}}}}` })),
+    "unit engine has a memo and declares fields for answer: an answer's shape is the memo's key and columns, derived",
   );
 });
 
-Deno.test("a memo column whose declared size bound exceeds the seat's value is refused by #emit", async () => {
+Deno.test("a realm unit carries each raise's declared shape to the terminal", async () => {
+  const raises = `{pin: {type: "object", fields: {latitude: {type: "string", maxLength: 32}, zoom: {type: "integer", min: 0, max: 22}}}}`;
+  const files = await emitFiles(program(engine({ isolation: `"realm"`, memo: "", raises }))) as unknown as Record<string, { data: { units: { engine: { ports: { raises: unknown } } } } }>;
+  assertEquals(files["shell/shell.yaml"].data.units.engine.ports.raises, {
+    pin: { type: "object", fields: { latitude: { type: "string", maxLength: 32 }, zoom: { type: "integer", min: 0, max: 22 } } },
+  });
+});
+
+Deno.test("a realm's declared grant reaches the terminal, and a grant on any other seat is refused", async () => {
+  const realm = engine({ isolation: `"realm"`, memo: "", raises: "{}" }).replace("note:", `grants: ["geolocation"]\n      note:`);
+  const files = await emitFiles(program(realm)) as unknown as Record<string, { data: { units: { engine: { grants: unknown } } } }>;
+  assertEquals(files["shell/shell.yaml"].data.units.engine.grants, ["geolocation"]);
+  // Loaded outside the seat's frame, a realm's document would run at this
+  // origin under no policy: the door sends it the seat's sandbox.
+  const caddy = (files as unknown as Record<string, { text: string }>)["docker/Caddyfile"].text;
+  assertStringIncludes(caddy, `@realm path /shell/units/engine/unit.js`);
+  assertStringIncludes(caddy, `header @realm Content-Security-Policy "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self'"`);
   await refused(
-    program(engine(), answer({ cel: `cel: bounds: {uci: {sizeMax: 129}}` })),
-    "unit engine memo on Answer: column uci admits 129 characters, and the agent seat carries a value of at most 128",
+    program(engine().replace("note:", `grants: ["geolocation"]\n      note:`)),
+    "unit engine is seated as agent and asks for geolocation: only a realm's frame is delegated a permission",
   );
 });
 
-// The grammar is published once, as the terminal's offer; the seat's parser
-// is a second statement of it, and this is what holds the two equal.
-Deno.test("the agent seat's detail grammar is the terminal's published offer", async () => {
+// The seat's one bound is published once, as the terminal's offer; hatch.js
+// states it again, and this is what holds the two equal.
+Deno.test("the seat's size bound is the terminal's published offer", async () => {
   const res = await cue(["export", "-", "-e", "out", "--out", "json"], `
 package test
 
 import terminal "bonisoft.org/plugins/omnishell:terminal"
 
-out: terminal.#Terminal.capabilities.hatch.agent.detail
+out: [terminal.#Terminal.capabilities.hatch.agent.detail, terminal.#Terminal.capabilities.hatch.realm.detail, terminal.#Terminal.capabilities.hatch.realm.grants]
 `);
   assert(res.success, res.stderr);
-  const offer = JSON.parse(res.stdout);
-  assertEquals({ keys: DETAIL.keys, key: DETAIL.key.source, value: DETAIL.value }, offer);
-  const detailOf = (n: number, length: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, "x".repeat(length)]));
-  assert(parseDetail(detailOf(offer.keys, offer.value)) !== undefined, "exactly the offer is admitted");
-  assertEquals(parseDetail(detailOf(offer.keys + 1, 1)), undefined, "one key more is refused");
-  assertEquals(parseDetail(detailOf(1, offer.value + 1)), undefined, "one character more is refused");
-  assertEquals(
-    parseDetail({ topic: "Orquestra Sinfônica", w0: "Violão", w1: "פסנתר", w2: "交响乐" }),
-    { topic: "Orquestra Sinfônica", w0: "Violão", w1: "פסנתר", w2: "交响乐" },
-    "printable Unicode strings across locales are admitted",
-  );
-  assertEquals(parseDetail({ topic: "bad\nline" }), undefined, "control characters are refused");
-  assertEquals(parseDetail({ topic: "bad\x00null" }), undefined, "NUL control character is refused");
+  assertEquals(JSON.parse(res.stdout), [{ bytes: DETAIL_BYTES }, { bytes: DETAIL_BYTES }, [...REALM_GRANTS]]);
 });

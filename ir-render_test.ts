@@ -182,8 +182,8 @@ Deno.test("the derived line names the units handed an entity's row, and the unit
     ...program,
     capabilities: {
       vendored: {
-        stockfish: { isolation: "agent", ports: { reads: ["Game"], raises: ["answer"] }, memo: { entity: "Tick", key: ["fen", "nodes"] } },
-        embed: { isolation: "realm", ports: { reads: ["Game"], raises: [] } },
+        stockfish: { isolation: "agent", ports: { reads: ["Game"], raises: { answer: {} } }, memo: { entity: "Tick", key: ["fen", "nodes"] } },
+        embed: { isolation: "realm", ports: { reads: ["Game"], raises: {} } },
       },
     },
   };

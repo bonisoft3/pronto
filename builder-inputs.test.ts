@@ -6,8 +6,8 @@
 
 const dir = new URL("./testdata/emit", import.meta.url);
 
-function statics(seats: string): { ok: boolean; out: string } {
-  const expr = `(#installedBuild & {seats: {${seats}}}).out.terminalStatics`;
+function built(seats: string, field = "terminalStatics"): { ok: boolean; out: string } {
+  const expr = `(#installedBuild & {seats: {${seats}}}).out.${field}`;
   const out = new Deno.Command("cue", {
     args: ["export", "builder.cue", "installed-surface.cue", "optional.cue", "installed.cue", "distribution.cue", "read.cue", "-e", expr],
     cwd: dir,
@@ -18,11 +18,23 @@ function statics(seats: string): { ok: boolean; out: string } {
 }
 
 Deno.test("a build without its terminal names the missing seat", () => {
-  const got = statics("");
+  const got = built("");
   if (got.ok || !/required field missing: terminal/.test(got.out)) throw new Error(`exported or refused elsewhere: ${got.out}`);
 });
 
 Deno.test("a build with its terminal serves the terminal's statics", () => {
-  const got = statics("terminal: _installedTerm");
+  const got = built("terminal: _installedTerm");
   if (!got.ok || !/"\/omnishell\//.test(got.out)) throw new Error(`refused or no omnishell statics: ${got.out}`);
+});
+
+Deno.test("a checkout runner carries Activepieces image and source views", () => {
+  const got = built("terminal: _installedTerm", 'project.targets["ci"].compose.build.additional_contexts');
+  if (!got.ok) throw new Error(got.out);
+  const contexts = JSON.parse(got.out);
+  for (const target of ["activepieces-image"]) {
+    for (const view of ["bayt", "srcs"]) {
+      const name = `libraries_mecha-${target}_${view}`;
+      if (!contexts[name]?.includes(`:${name}`)) throw new Error(`runner lacks ${name}`);
+    }
+  }
 });

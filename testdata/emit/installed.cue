@@ -50,7 +50,8 @@ installedService:      list.Contains(_service, "../../../libraries/mecha/.bayt/c
 installedAirlock:      list.Contains(_service, "../../../libraries/mecha/.bayt/compose.airlock-image.yaml") & true
 installedOmnishellService: list.Contains(_service, "../../../plugins/omnishell/.bayt/compose.runtime-image.yaml") & true
 installedToolchainService: list.Contains(_service, "../../../.bayt/compose.pronto-sources.yaml") & true
-installedServiceCount: len(_service) & 10
+installedServiceCount: len(_service) & 11
+installedActivepieces: list.Contains(_service, "../../../libraries/mecha/.bayt/compose.activepieces-image.yaml") & true
 installedPulled:       _installedFiles["monorepo/docker-image.yaml"].data & {}
 installedRoot:         _installedProject.targets.caddy.compose.build.additional_contexts.root & ".."
 installedRootCompose: _installedFiles["compose.yaml"].data.include & [{path: "./.bayt/compose.yaml"}, {path: "monorepo/${MONOREPO_COMPOSE_MODE:-docker-image}.yaml"}]

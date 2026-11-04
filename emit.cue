@@ -1670,40 +1670,37 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				for n, v in S.code.capabilities.vendored {
 					(n): {
 						isolation: v.isolation
+						// A memo's answer is shaped by what it lands in: the key and every
+						// active column, each text no longer than the column's declared
+						// size bound, or #Shape's own ceiling where it states none.
+						let _memo = {if v.memo != _|_ {
+							let _me = S.code.state.entities[v.memo.entity]
+							let _columns = [for f in _me.fields if !f.pk if !f.retired {f.name}]
+							table:   _me.table
+							key:     v.memo.key
+							columns: _columns
+							shape: {type: "object", fields: {for c in _columns {
+								(c): {type: "string", maxLength: [if _me.cel.bounds[c].sizeMax != _|_ {_me.cel.bounds[c].sizeMax}, 65536][0]}
+							}}}
+						}}
 						ports: {
 							reads: [for r in v.ports.reads {S.code.state.entities[r].table}]
-							raises: v.ports.raises
+							raises: [if v.memo != _|_ {{for r, _ in v.ports.raises {(r): _memo.shape}}}, v.ports.raises][0]
 						}
-						// The memo as the terminal performs it: the table, the key
-						// and every column an answer fills — in one event, whose
-						// detail is the seat's offer: at most `keys` columns, each
-						// named by `key`, each value at most `value` characters,
-						// held here as far as the program states it (a column's
-						// declared size bound); the alphabet, and the length of a
-						// column the program leaves unbounded, are the seat's
-						// refusal at runtime.
+						// The memo as the terminal performs it: the table, the key and
+						// every column an answer fills.
 						if v.memo != _|_ {
-							memo: {
-								let _me = S.code.state.entities[v.memo.entity]
-								table: _me.table
-								key:   v.memo.key
-								let _columns = [for f in _me.fields if !f.pk if !f.retired {f.name}]
-								let _detail = S.hatch[v.isolation].detail
-								let _unfit = list.Concat([
-									[if len(_columns) > _detail.keys {"unit \(n) memo on \(v.memo.entity) has \(len(_columns)) columns, and the \(v.isolation) seat carries an answer of at most \(_detail.keys)"}],
-									[for c in _columns if c !~ _detail.key {"unit \(n) memo on \(v.memo.entity): column \(c) is not a name the \(v.isolation) seat's detail carries (\(_detail.key))"}],
-									[for c in _columns if _me.cel.bounds[c].sizeMax != _|_ if _me.cel.bounds[c].sizeMax > _detail.value {"unit \(n) memo on \(v.memo.entity): column \(c) admits \(_me.cel.bounds[c].sizeMax) characters, and the \(v.isolation) seat carries a value of at most \(_detail.value)"}],
-								])
-								columns: [if len(_unfit) == 0 {_columns}, _unfit[0]][0] & [...string]
-							}
+							memo: {table: _memo.table, key: _memo.key, columns: _memo.columns}
 						}
+						if len(v.grants) > 0 {grants: v.grants}
+						// What a single-file page inlines for the unit.
+						files: v.files
 						if v.role == "presenter" && v.isolation == "agent" {
 							role: "presenter"
 							scripts: [for u in v.scripts {url: u, integrity: S.presenter.scripts[u]}]
-							// What it may read through the seat: its own files, and
-							// the app's content-addressed assets.
-							files: v.files
-							seed:  S.code.capabilities.seedAssets != _|_
+							// The app's content-addressed assets are read through the seat beside
+							// its own files.
+							seed: S.code.capabilities.seedAssets != _|_
 						}
 						src: v.src
 					}
@@ -2222,6 +2219,18 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
 			}]
 		}
+		// A door hatch's service is part of every launch: the door's route
+		// answers nothing without it.
+		for hn, h in D.code.capabilities.hatches if h.door != _|_ {
+			surface: targets: launch: compose: depends_on: (hn): condition: "service_healthy"
+		}
+		for hn, h in D.code.capabilities.hatches if h.activepieces != _|_ {
+			surface: targets: (hn): (mecha.#ActivepiecesContainer & {
+				image: {ref: "libraries_mecha:activepieces-image"}
+				source: "activepieces/\(hn)"
+				secrets: list.SortStrings([for secret, _ in {for _, a in h.activepieces.actions if a.auth != _|_ {(a.auth.jsonSecret): true}} {secret}])
+			}).target
+		}
 		// The door's tree as a release (omnishell.#Address): omnishell's tree
 		// from its runtime image, which the monorepo's switch builds from the
 		// checkout, every static placed at its URL's path, then addressed in
@@ -2253,8 +2262,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						"install -D -m 644 '\(source)' '\(omnishell.#Address.tree)\(url)'"
 					}]
 					let ice = [if _iceServers != null {" --ice-servers '\(json.Marshal(_iceServers))'"}, ""][0]
+					// The tree a container door serves carries each door hatch's
+					// public attributes, rewritten before it is addressed; one no
+					// document carries stops the build.
+					let doors = [for hn, h in D.code.capabilities.hatches if h.door != _|_ for k, v in h.door.publicAttributes {
+						"find '\(omnishell.#Address.tree)' -name '*.html' -exec sed -i -E 's/([[:space:]])\(k)=\"[^\"]*\"/\\1\(k)=\"\(v)\"/g' {} +; grep -rqE '[[:space:]]\(k)=\"\(v)\"' '\(omnishell.#Address.tree)' --include='*.html' || { echo 'no document carries \(k) for door hatch \(hn)' >&2; exit 1; }; "
+					}]
 					let separator = [if len(strings.Join(place, "; ")) > 60000 {"; \\\n  "}, "; "][0]
-					epilogue: ["RUN set -e; \(strings.Join(place, separator)); \(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)"]
+					epilogue: ["RUN set -e; \(strings.Join(place, separator)); \(strings.Join(doors, ""))\(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)"]
 				}
 				compose: {}
 			}
@@ -2458,14 +2473,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 	}
 
-	// A unit is a worker the browser fetches past the bundled document's shim,
-	// so a program with one cannot be bundled yet; one user shares with nobody,
-	// while the client opens a keyed shape per grant that the page's cluster
-	// does not serve; and a validation runs in plv8, which PGlite has none of.
+	// A presenter reads its pinned scripts and files through its own seat, past
+	// the bundled document's shim, so a program with one cannot be bundled yet;
+	// one user shares with nobody, while the client opens a keyed shape per
+	// grant that the page's cluster does not serve; and a validation runs in plv8, which PGlite has none of.
 	// The pages target is refused rather than released broken.
 	_pagesBundle: {
 		if list.Contains(E.code.meta.targets, "pages") {
-			units: true & (len([for _, v in E.code.capabilities.vendored if v.isolation != "agent" {v}]) == 0)
+			units: true & (len([for _, v in E.code.capabilities.vendored if v.isolation == "agent" if v.role == "presenter" {v}]) == 0)
 			shared: true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
 			providers: true & (E.code.capabilities.auth == _|_ || E.code.capabilities.auth.providers == _|_ || len(E.code.capabilities.auth.providers) == 0)
@@ -3077,6 +3092,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	files: [string]: #File
 	checkout: [string]: #File
 	files: {
+		for _, h in E.code.capabilities.hatches if h.activepieces != _|_ {if h.activepieces._refusal {}}
 		if E.code._timerRefusal {}
 		if E.code._hostDomRefusal {}
 		if E.code._lifecycleRefusal {}
@@ -3094,6 +3110,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		format: "yaml"
 		data: include: list.Concat([
 			[for s, _ in mecha.published {"\(up)libraries/mecha/.bayt/compose.\(s)-image.yaml"}],
+			[for s in mecha.#Sourced if mecha.published[s] == _|_ {"\(up)libraries/mecha/.bayt/compose.\(s)-image.yaml"}],
 			["\(up)plugins/omnishell/.bayt/compose.runtime-image.yaml", "\(up).bayt/compose.pronto-sources.yaml"],
 		])
 	}
@@ -3102,6 +3119,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		data: {}
 	}
 	files: {
+		for hn, h in E.code.capabilities.hatches if h.activepieces != _|_ {
+			"activepieces/\(hn)/declaration.json": {
+				format: "json"
+				data: {version: 1, lock: h.activepieces.lock, pieces: h.activepieces.pieces, actions: h.activepieces.actions, limits: h.activepieces.limits}
+			}
+		}
+
 		// What tools outside CUE read of the cluster, evaluated here once:
 		// evaluating a program takes gigabytes, too much to repeat in
 		// ci-replay or in a release. The
@@ -3118,6 +3142,37 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
 					drains: [for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}]
 				}
+				// The container hatches the door routes to, by app id: a release
+				// dials and bounds each as it does the cluster's own services.
+				let doors = list.SortStrings([for hn, h in E.code.capabilities.hatches if h.door != _|_ {hn}])
+				if len(doors) > 0 {"doors": doors}
+			}
+		}
+		".pronto/edge-hatches.json": {
+			format: "json"
+			data: [for hn, h in E.code.capabilities.hatches if h.edge != _|_ {name: hn, edge: h.edge}]
+		}
+		".pronto/mail.json": {
+			format: "json"
+			data: {
+				version: 1
+				bridges: {if E.code.state.bridges != _|_ for bn, b in E.code.state.bridges
+					let h = E.code.capabilities.hatches[b.container]
+					if h.activepieces != _|_ if b.action != _|_
+					let a = h.activepieces.actions[b.action]
+					if a.mail != _|_ {
+						(bn): {
+							action: b.action
+							messageIdDomain: a.fixedProps.messageIdDomain
+							if a.mail.pages != _|_ {pages: a.mail.pages}
+							cloudflare: {
+								workersPaid: E.code.meta.cloudflare.workersPaid
+								if a.mail.cloudflare != _|_ {recipients: a.mail.cloudflare.recipients}
+							}
+						}
+					}
+				}
+				effects: {if E.code.state.effects != _|_ for en, e in E.code.state.effects if e.sink.bridge != _|_ {(en): e.sink.bridge}}
 			}
 		}
 		".pronto/check-inputs.json": {
@@ -3442,7 +3497,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							metadata: [
 								// Cluster-owned bridges and the AI gateway use plain HTTP.
 								{name: "url", value: [
-									if i.effect.sink.bridge != _|_ {"http://\(E.code.state.bridges[i.effect.sink.bridge].container):\(E.code.state.bridges[i.effect.sink.bridge].port)"},
+									if i.effect.sink.bridge != _|_ {"http://\(E.code.state.bridges[i.effect.sink.bridge].container):\(E.code.state.bridges[i.effect.sink.bridge].port)\([if E.code.state.bridges[i.effect.sink.bridge].action != _|_ {"/actions/\(E.code.state.bridges[i.effect.sink.bridge].action)"}, ""][0])"},
 									if i.effect.sink.ai != _|_ {"http://tsbifrost:\(mecha.#TsBifrostPort)"},
 									i.effect.sink.origin,
 								][0]},
@@ -3918,10 +3973,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				_caddyfileAsset,
 			][0]
 			_split: strings.SplitN(_door, _anchor, 2)
-			// Units execute in their declared realm or agent; the terminal's
-			// Trusted Types policies belong only to its own runtime.
+			// A realm's document is its own protection domain behind an opaque
+			// origin, under whatever policy it states; the terminal's policy is
+			// the app's. An agent shares this origin, so it runs under the
+			// app's policy, started from a blob: of its bytes.
 			_unitPaths: list.SortStrings([for f, _ in {
-				for _, v in E.code.capabilities.vendored if v.isolation != "compartment"
+				for _, v in E.code.capabilities.vendored if v.isolation == "realm"
 				for f in v.files {(f): true}
 			} {"/\(f)"}])
 			// A presenter's worker script answers with the presenter's own
@@ -3941,10 +3998,34 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// A door built as a release names the inline scripts its documents
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
+				// A realm's document is isolated by the seat's sandbox; loaded any
+				// other way it would run at this origin under no policy. So it
+				// carries the same sandbox itself (omnishell hatch.js SANDBOX), and
+				// only this app may frame it.
+				let realms = [if len(_unitPaths) > 0 {"  @realm path \(strings.Join(_unitPaths, " "))\n  header @realm Content-Security-Policy \"sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self'\"\n"}, ""][0]
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(realms)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
-			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
+			// A container hatch's door route, ahead of the platform's own
+			// routes' tail: dialed like every upstream, at its
+			// PRONTO_UPSTREAM_<HATCH> when set, under the `hatch` hop's bound.
+			_doorAnchor: "  handle /health {\n"
+			_doors: strings.Join([for hn, h in E.code.capabilities.hatches if h.door != _|_ {
+				let matcher = "door_\(strings.Replace(hn, "-", "_", -1))"
+				let upstream = "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(hn, "-", "_", -1)))"
+				"""
+				  @\(matcher) path \(h.door.route) \(h.door.route)/*
+				  handle @\(matcher) {
+				    reverse_proxy {$\(upstream):\(hn):\(h.door.port)} {
+				      header_up dapr-app-id \(hn)
+				      import bounded-hatch
+				    }
+				  }
+
+				"""
+			}], "")
+			_doorAnchored: true & strings.Contains(_caddyfileAsset, _doorAnchor)
+			text: resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1)
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why
@@ -4264,13 +4345,15 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				      - run: sayt verify@pages --target="${{ steps.deploy.outputs.page_url }}"\(pagesDir)
 				"""
 
+			let edgeEnvironment = {for _, h in E.code.capabilities.hatches if h.edge != _|_ for binding in h.edge.environment {(binding): binding}}
+			let edgeSecrets = strings.Join([for binding, _ in edgeEnvironment {"\n      \(binding): ${{ secrets.\(binding) }}"}], "")
 			let cloudflareJob = """
 				  cloudflare:
 				    runs-on: ubuntu-24.04
 				    env:
 				      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 				      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-				      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+				      JWT_SECRET: ${{ secrets.JWT_SECRET }}\(edgeSecrets)
 				    steps:
 				      - uses: actions/checkout@v7
 				      # The released sayt at the version the toolchain pins, its mise cached.

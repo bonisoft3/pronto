@@ -29,9 +29,8 @@ import (
 // What a computation's or an effect's module may be endowed with.
 #CageEndowment: impl.#CageEndowment
 
-// A bridge role and the reusable SMTP container implementation.
-#Bridge:     impl.#Bridge
-#MailContainer: impl.#MailContainer
+// A bridge role.
+#Bridge: impl.#Bridge
 
 // Mecha's AI gateway (services/airlock/tsbifrost.ts) and the tiered AI model schema.
 #TsBifrostPort:   impl.#TsBifrostPort
@@ -70,3 +69,5 @@ published: impl.#Published & {
 	mesh:     "bonitao/mecha-mesh:0.20.6@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
 	ticker:   "bonitao/mecha-ticker:0.20.6@sha256:ddb62e40bb03ac5b77a797c597ca8c088d72edc60154ac4f3ac57e0c8ebc7ce3"
 }
+
+#ActivepiecesContainer: impl.#ActivepiecesContainer

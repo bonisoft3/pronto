@@ -13,6 +13,7 @@
 // cannot reach it.
 
 import { dirname, resolve } from "node:path";
+import { packageHatch, type Declaration } from "./activepieces-package.ts";
 import { pathToFileURL } from "node:url";
 import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive, GENERATED_HTML_HEADER, terminalPath } from "./derive.ts";
@@ -175,8 +176,8 @@ async function recorded(manifestPath: string): Promise<string[]> {
 /** Everything the run will write, rendered, so nothing on disk moves for an
  * emission the writer refuses. Documents are the one exception, rendered by
  * renderDocuments once the files they are rendered from are on disk. */
-async function rendered(emission: Emission): Promise<Map<string, string>> {
-  const contents = new Map<string, string>();
+async function rendered(emission: Emission): Promise<Map<string, string | Uint8Array>> {
+  const contents = new Map<string, string | Uint8Array>();
   for (const rel of [...emission.manifest].sort()) {
     if (unsafe(rel)) fail(`unsafe path: ${rel}`);
     const f = emission.files[rel];
@@ -220,6 +221,14 @@ async function rendered(emission: Emission): Promise<Map<string, string>> {
       continue;
     }
     if (f.src === undefined) {
+      if (/^activepieces\/.+\/declaration\.json$/.test(rel)) {
+        const prefix = parent(rel);
+        for (const [path, bytes] of await packageHatch(appDir, f.data as Declaration)) {
+          const output = `${prefix}/${path}`;
+          if (unsafe(output) || emission.files[output] !== undefined || contents.has(output)) fail(`${rel}: conflicting package output ${output}`);
+          contents.set(output, bytes);
+        }
+      }
       contents.set(rel, render(rel, f));
       continue;
     }
@@ -311,7 +320,7 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
   // run that dies midway leaves nothing the next one cannot find.
   const stale: string[] = [];
   for (const rel of await recorded(manifestPath)) {
-    if (emission.files[rel]) continue;
+    if (emission.files[rel] || contents.has(rel)) continue;
     const info = await ifMissing(Deno.lstat(`${appDir}/${rel}`), null);
     if (info === null) continue;
     if (info.isDirectory) fail(`${rel}: recorded as written, but is now a directory`);
@@ -328,13 +337,15 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
     await Deno.writeTextFile(manifestPath, manifest);
     changed = true;
   }
-  const put = async (rel: string, text: string) => {
+  const put = async (rel: string, value: string | Uint8Array) => {
     const path = `${appDir}/${rel}`;
-    if (await ifMissing(Deno.readTextFile(path), null) === text) return;
+    const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
+    const previous = await ifMissing(Deno.readFile(path), null);
+    if (previous !== null && previous.length === bytes.length && previous.every((byte, i) => byte === bytes[i])) return;
     changed = true;
     const dir = parent(path);
     if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
-    await Deno.writeTextFile(path, text);
+    await Deno.writeFile(path, bytes);
   };
   for (const [rel, text] of contents) await put(rel, text);
   for (const [rel, text] of await renderDocuments(emission)) await put(rel, text);

@@ -282,18 +282,16 @@ ledger and same re-entry, and it walls the bridge's own reach.
 The implemented declaration and container recipe are documented in
 [[../container-bridges|container bridges]]. A bridge is a role of a declared
 container hatch; it does not introduce a second container definition. Mail is one
-reusable implementation. Its Deno network permissions and connected-address check
-belong to that implementation, not to arbitrary bridge containers.
+reusable implementation. Its current contract is [Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.20.6/pieces/mail/README.md); bridge containers grant no protocol-specific confinement.
 
 - **Re-entry follows the protocol.** SMTP carries no idempotency key, so a mail bridge is
   a sink that is not idempotent: the server's `250` is the done answer, and a crash
   between that answer and the ledger's outcome is decided by the effect's `reentry`. The
-  bridge sets `Message-ID` from the ledger key, so a duplicate that does go out collapses
-  in the recipient's mail client.
+  bridge sets `Message-ID` from the ledger key, for correlation; duplicate suppression by recipients is not guaranteed.
 - **A Dapr binding is a bridge with no code.** The daprd calls bindings directly, so any
   binding type whose features a sink needs is one, declared as configuration. Dapr's SMTP
   binding has no attachments, no multipart body and no custom headers, so it can neither
-  carry a calendar invite nor set `Message-ID`; mecha's `mail` bridge, on nodemailer, is a
+  carry a calendar invite nor set `Message-ID`; mecha's `mail` bridge is a
   reference image for that case, swappable for any HTTP-to-SMTP relay.
 - **A provider with an HTTP API needs no bridge.** Postmark, SendGrid and SES are HTTPS
   origins.
@@ -536,7 +534,7 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 | B9 | over gRPC, `InvokeService` to `https://example.com`, `GetMetadata`, `Shutdown`; with an HTTP-only list, then with the gRPC rule | — | with HTTP only, the page's HTML and the metadata came back; with the rule, UNIMPLEMENTED for each, `InvokeBinding` still served |
 | B10 | from a container on the default network, the daprd's port and the bridge's | 0 | neither name resolves there |
 | B11 | an effect declaring `credential: {scheme: Bearer, secret: VAULT_KEY}`, the sink recording its headers | 1 | `Authorization: Bearer <value>` arrives; the ledger's input and outcome hold no trace of the value; an effect without one sends no such header |
-| R1 | the mail bridge against Mailpit | 1 | 200 with the key's `Message-ID` and the invite; 422 for a 5xx refusal and for a refused STARTTLS, nothing sent in the clear; 503 with no server; 403 for an inward server |
+| R1 | the mail bridge against Mailpit | 1 | 200 with the key's `Message-ID` and the invite; 422 for a 5xx refusal and for a refused STARTTLS, nothing sent in the clear; 503 with no server; the former inward-address refusal is retired |
 | S1 | Graphile's `runMigrations` after `graphile.sql` | — | `pg_dump -s -n graphile_worker` unchanged: nothing to migrate |
 | S2 | `graphile.sql` against Graphile's own install | — | the same schema and the same `migrations` rows |
 | W1 | commit into the invoking state to `settled`, nothing poking, in the plane bayt lowers | 1 | 155 ms; one call carrying `Idempotency-Key: probe:settles` |
@@ -666,10 +664,10 @@ One PR. These are its commits, in order, each green:
    `tests/airlock_test.ts` the plane bayt lowers, end to end.
 4. **Bridges, Crypto and the bindings wall** (built). `state.bridges` in pronto and the
    cluster through declared container hatches, and mecha's
-   mail bridge on nodemailer; `Crypto` in the realm and `secrets` as the handler's third
+   [mail bridge](https://github.com/bonisoft3/mecha/blob/v0.20.6/pieces/mail/README.md); `Crypto` in the realm and `secrets` as the handler's third
    argument; the airlock calling a Dapr output binding per effect, its daprd allowed the
    bindings API alone, in place of HTTPEndpoints and the CONNECT proxy.
-   `mail_docker_test.ts` holds the bridge's answers against Mailpit, `crypto_test.ts`
+   The mail service integration suite holds the bridge's answers against SMTP, `crypto_test.ts`
    Crypto's against FIPS 180-2 and RFC 4231 and each refusal, and `tests/airlock_test.ts`
    sends a signed confirmation through the bridge and fails without the allowlist.
 5. **The oracle app** (started). `apps/calcom`, a

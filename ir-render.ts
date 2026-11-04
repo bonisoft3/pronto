@@ -62,7 +62,7 @@ export type MechaMachine = {
 // `reentry` is declared exactly when the sink is not idempotent (#ExternalEffect).
 export type Effect = { ir: string; sink: { origin?: string; bridge?: string; ai?: string; tier?: string; idempotent: boolean }; reentry?: "reconcile" | "unknown" | "repeat"; note: string };
 /** A vendored unit: its boundary, its ports and, for an agent, its memo. */
-export type Unit = { isolation: string; ports: { reads: string[]; raises: string[] }; memo?: { entity: string; key: string[] } };
+export type Unit = { isolation: string; ports: { reads: string[]; raises: Record<string, unknown> }; memo?: { entity: string; key: string[] } };
 export type Screen = { ir: string; title: string; hatches?: string[]; reads: { table: string; embeds?: string[] }[] };
 export type Program = {
   state: {

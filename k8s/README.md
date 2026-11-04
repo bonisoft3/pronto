@@ -142,7 +142,7 @@ Load is shed at the gateway, by Envoy's concurrency limits on caddy's pool: past
 
 ## 10. Secrets Management Architecture
 
-- **Authoring**: Encrypted via [SOPS](https://github.com/getsops/sops) + Age in Git (`apps/<app>/secrets.enc.yaml`).
+- **Authoring**: Flat key/value pairs encrypted with [SOPS](https://github.com/getsops/sops) under the Cloud KMS key its `.sops.yaml` names, in Git (`apps/<app>/secrets.enc.yaml`). Local runs read the same file through `sops exec-env`; a `kind` release decrypts it into the Secret `<app>-secrets`. It holds sandbox keys, so no other cluster gets it: production keys live in the cloud's own secret service ([keys](../docs/release-targets.md#keys)).
 - **Operator Bridge**: External Secrets Operator (ESO) bridges encrypted or external secrets into native Kubernetes `v1/Secret` objects. Without a `ClusterSecretStore`, ESO `Password` generators make each secret once in-cluster; no secret is a literal in a spec.
 - **Database roles**: CloudNativePG sets `postgres`'s, `electric`'s and `authenticator`'s passwords from basic-auth secrets (`<app>-db-postgres`, `<app>-electric-db`, `<app>-authenticator-db`); the schema never sets a password. Compose sets both from `ELECTRIC_PASSWORD` and `AUTHENTICATOR_PASSWORD`, through mecha's initdb step.
 - **Runtime Access**: Workloads and Dapr sidecars consume native Kubernetes secrets (`type: secretstores.kubernetes`).

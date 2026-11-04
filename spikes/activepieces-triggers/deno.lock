@@ -1,0 +1,75 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:@activepieces/piece-github@0.11.0": "0.11.0",
+    "npm:@activepieces/piece-rss@0.7.2": "0.7.2",
+    "npm:@activepieces/piece-stripe@0.9.0": "0.9.0",
+    "npm:nock@14.0.10": "14.0.10"
+  },
+  "npm": {
+    "@activepieces/piece-github@0.11.0": {
+      "integrity": "sha512-fpp3p3BLjJtRkNMK3CDstIitGIrF1Na5hlqfRHo5EiL7e8XXxO6rPorkFTxCNw+zMu71WhZp8AagCYvuXUD3sw=="
+    },
+    "@activepieces/piece-rss@0.7.2": {
+      "integrity": "sha512-ohbj6CHsavLVa+k2AXH4vGEpmdnPAo7m5UeeLa2LTPVAdQd8pguZZcDFJhtMaF27B9IhfdNzeRHUVObFiTcHKw=="
+    },
+    "@activepieces/piece-stripe@0.9.0": {
+      "integrity": "sha512-3yFxkd7PJD/0PunlHteA+U4Rn9oXcCG1v+5qHEKdco3PGoI2rKFqtleJPqCPGoRRwjPOvbStNe8wN692jlZTGA=="
+    },
+    "@mswjs/interceptors@0.39.8": {
+      "integrity": "sha512-2+BzZbjRO7Ct61k8fMNHEtoKjeWI9pIlHFTqBwZ5icHpqszIgEZbjb1MW5Z0+bITTCTl3gk4PDBxs9tA/csXvA==",
+      "dependencies": [
+        "@open-draft/deferred-promise",
+        "@open-draft/logger",
+        "@open-draft/until",
+        "is-node-process",
+        "outvariant",
+        "strict-event-emitter"
+      ]
+    },
+    "@open-draft/deferred-promise@2.2.0": {
+      "integrity": "sha512-CecwLWx3rhxVQF6V4bAgPS5t+So2sTbPgAzafKkVizyi7tlwpcFpdFqq+wqF2OwNBmqFuu6tOyouTuxgpMfzmA=="
+    },
+    "@open-draft/logger@0.3.0": {
+      "integrity": "sha512-X2g45fzhxH238HKO4xbSr7+wBS8Fvw6ixhTDuvLd5mqh6bJJCFAPwU9mPDxbcrRtfxv4u5IHCEH77BmxvXmmxQ==",
+      "dependencies": [
+        "is-node-process",
+        "outvariant"
+      ]
+    },
+    "@open-draft/until@2.1.0": {
+      "integrity": "sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg=="
+    },
+    "is-node-process@1.2.0": {
+      "integrity": "sha512-Vg4o6/fqPxIjtxgUH5QLJhwZ7gW5diGCVlXpuUfELC62CuxM1iHcRe51f2W1FDy04Ai4KJkagKjx3XaqyfRKXw=="
+    },
+    "json-stringify-safe@5.0.1": {
+      "integrity": "sha512-ZClg6AaYvamvYEE82d3Iyd3vSSIjQ+odgjaTzRuO3s7toCdFKczob2i0zCh7JE8kWn17yvAWhUVxvqGwUalsRA=="
+    },
+    "nock@14.0.10": {
+      "integrity": "sha512-Q7HjkpyPeLa0ZVZC5qpxBt5EyLczFJ91MEewQiIi9taWuA0KB/MDJlUWtON+7dGouVdADTQsf9RA7TZk6D8VMw==",
+      "dependencies": [
+        "@mswjs/interceptors",
+        "json-stringify-safe",
+        "propagate"
+      ]
+    },
+    "outvariant@1.4.3": {
+      "integrity": "sha512-+Sl2UErvtsoajRDKCE5/dBz4DIvHXQQnAxtQTF04OJxY0+DyZXSo5P5Bb7XYWOh81syohlYL24hbDwxedPUJCA=="
+    },
+    "propagate@2.0.1": {
+      "integrity": "sha512-vGrhOavPSTz4QVNuBNdcNXePNdNMaO1xj9yBeH1ScQPjk/rhg9sSlCXPhMkFuaNNW/syTvYqsnbIJxMBfRbbag=="
+    },
+    "strict-event-emitter@0.5.1": {
+      "integrity": "sha512-vMgjE/GGEPEFnhFub6pa4FmJBRBVOLpIII2hvCZ8Kzb7K0hlHo7mQv6xYrBvCL2LtAIBwFUK8wvuJgTVSQ5MFQ=="
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "npm:@activepieces/piece-github@0.11.0",
+      "npm:@activepieces/piece-rss@0.7.2",
+      "npm:@activepieces/piece-stripe@0.9.0",
+      "npm:nock@14.0.10"
+    ]
+  }
+}

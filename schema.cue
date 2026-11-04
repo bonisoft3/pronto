@@ -1114,6 +1114,54 @@ import (
 // services read.
 #SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS)$"
 
+#ActivepiecesAlias:      string & =~"^[a-zA-Z][a-zA-Z0-9_]*$"
+#ActivepiecesPath:       string & =~"^\\./pieces/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$"
+#ActivepiecesSchemaPath: string & =~"^\\./pieces/([a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+\\.(input|output|auth)\\.schema\\.json$"
+#ActivepiecesJSON: null | bool | number | string | [...#ActivepiecesJSON] | {[string]: #ActivepiecesJSON}
+#MailAddress: string & =~"^[^\\s@<>\",;]+@[^\\s@<>\",;]+\\.[^\\s@<>\",;]+$"
+#MailTargets: {
+	pages?: {
+		publicKey:  string & !=""
+		serviceId:  string & !=""
+		templateId: string & !=""
+	}
+	cloudflare?: {recipients: [#MailAddress, ...#MailAddress]}
+}
+#Activepieces: AP={
+	lock: string & =~"^\\./pieces/([a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+\\.lock$"
+	limits: {
+		timeoutMs:       *8000 | int & >0 & <=8000
+		maxConcurrent:   *4 | int & >=1
+		maxRequestBytes: *1048576 | int & >0
+		maxResultBytes:  *1048576 | int & >0
+	}
+	pieces: [#ActivepiecesAlias]: {
+		{local: #ActivepiecesPath, export: #ActivepiecesAlias} | {
+			npm: {package: string & =~"^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$", version: string & =~"^[0-9]+\\.[0-9]+\\.[0-9]+$", export: #ActivepiecesAlias}
+		}
+	}
+	actions: [#ActivepiecesAlias]: {
+		piece:        #ActivepiecesAlias
+		action:       string & =~"^[a-zA-Z][a-zA-Z0-9_-]*$"
+		inputSchema:  #ActivepiecesSchemaPath
+		outputSchema: #ActivepiecesSchemaPath
+		auth?: {jsonSecret: #SecretName, schema: #ActivepiecesSchemaPath}
+		fixedProps: *{} | {[string]: #ActivepiecesJSON}
+		idempotencyKeyProp?: #ActivepiecesAlias
+		mail?:               #MailTargets
+		if mail != _|_ {
+			idempotencyKeyProp: "requestKey"
+			fixedProps: messageIdDomain: string & =~"^[a-zA-Z0-9][a-zA-Z0-9.-]*$"
+		}
+	}
+	_violations: list.Concat([
+		[for n, a in AP.actions if AP.pieces[a.piece] == _|_ {"action \(n) needs a declared piece"}],
+		[for n, a in AP.actions if a.idempotencyKeyProp != _|_ if a.fixedProps[a.idempotencyKeyProp] != _|_ {"action \(n) fixes its idempotency key property"}],
+		[for n, a in AP.actions if a.mail != _|_ if a.fixedProps.message != _|_ {"mail action \(n) fixes its message property"}],
+	])
+	_refusal: [if len(_violations) == 0 {true}, _violations[0]][0] & true
+}
+
 // A DuckStream streaming IVM pipeline executed via Feldera on the server
 // and emulated reactively via DuckDB-WASM in the client browser.
 #DuckStreamPipeline: {
@@ -1641,6 +1689,35 @@ import (
 			ir:   *Name | string
 			kind: "container" | "sql" | "proto" | "host-dom"
 			note: string
+			edge?: {
+				kind:  *"worker" | "worker"
+				src:   string & =~"^[A-Za-z0-9_-]+(/[A-Za-z0-9_.-]+)*\\.js$"
+				route: string & =~"^/[A-Za-z][A-Za-z0-9_-]*$" & !~"^/(auth|crud|electric|import|poke|blobs|img|rtc-ice)$"
+				// Plain settings, which the release supplies and uploads.
+				environment: *[] | [...(string & =~"^[A-Z][A-Z0-9_]*$")]
+				// Names only: the values live in the Worker's secret store, and no release
+				// reads or uploads them ([[docs/release-targets#Keys]]).
+				secrets: *[] | [...(string & =~"^[A-Z][A-Z0-9_]*$")]
+				publicAttributes: *{} | {[string & =~"^data-[a-z][a-z0-9-]*$"]: string}
+				email?: {name: string & =~"^[A-Z][A-Z0-9_]*$", recipients: [string & =~"^[^@ ]+@[^@ ]+\\.[^@ ]+$", ...string]}
+			}
+			if H.edge != _|_ {kind: "container"}
+			// The container tier's counterpart of `edge`: caddy proxies `route`,
+			// path kept, to the cluster target of the hatch's name on `port`,
+			// which the program defines beside it. That service is part of every
+			// launch, and the tree every container door serves carries
+			// `publicAttributes` ([[docs/edge-hatches#The cluster's door]]).
+			door?: {
+				route: string & =~"^/[A-Za-z][A-Za-z0-9_-]*$" & !~"^/(auth|crud|electric|import|poke|blobs|img|rtc-ice|health|omnishell|shell)$"
+				port:  int & >0 & <65536
+				publicAttributes: *{} | {[string & =~"^data-[a-z][a-z0-9-]*$"]: string & =~"^[A-Za-z0-9_.:-]*$"}
+			}
+			if H.door != _|_ {kind: "container"}
+			activepieces?: #Activepieces
+			if H.activepieces != _|_ {
+				kind: "container"
+				note: !=""
+			}
 			if H.kind == "host-dom" {
 				note: !=""
 				src!: string & =~"^shell/hatches/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(m?js)$"
@@ -1672,6 +1749,10 @@ import (
 			// with a memo is a question, and one without is a presenter, whose
 			// worker the terminal strips to painting (`role`).
 			isolation: "compartment" | "realm" | "agent"
+			// Browser permissions the unit asks its seat to delegate, from the
+			// terminal's `hatch.realm.grants` offer; only a realm's frame carries
+			// them, and the reader is asked in the app's name.
+			grants: *[] | [...("geolocation")]
 			// Derived, never authored: a question asks and its answer lands in
 			// the memo; a presenter shows. An agent presenter paints the frames
 			// the terminal hands it on a canvas the terminal transfers, in a
@@ -1690,9 +1771,14 @@ import (
 			// a read's row, the mount's data-on-* listener on a raise — and it
 			// refuses a row or an event outside them; its markup lint holds every
 			// mount to the same lists and asks that every raise be handled.
+			// Each raise names its payload shape, the grammar machine events
+			// use: the seat rebuilds a detail from it and holds every detail to
+			// one size bound, so what an event may carry is the program's to say
+			// (docs/archive/2026-10-28-unit-event-types.md). A memo's one raise is
+			// written `{}`: its shape is the memo's key and columns, derived.
 			ports: {
-				reads:  [...string]
-				raises: [...string]
+				reads: [...string]
+				raises: [string]: #HybridShape & {type: "object"}
 			}
 			// An agent is a question whose answer lands in a memo (Michie's memo
 			// table, 1968: answers addressed by what was asked); a unit that
@@ -1795,6 +1881,7 @@ import (
 		// A frozen archive retains its schedules and runs none, at the edge or
 		// in a page.
 		edgeClock?: "ticker" | "disabled"
+		cloudflare: workersPaid: *false | bool
 		targets: *["docker"] | [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
 		// compose clock is emitted by cluster.cue and the edge's Cron Trigger
@@ -2153,7 +2240,7 @@ import (
 			"unit \(un) reads \(r), which is no declared entity"
 		}],
 		[for un, u in A.capabilities.vendored if u.isolation == "agent" if u.memo == _|_ if len(u.ports.raises) > 0 {
-			"unit \(un) is an agent presenter and raises \(strings.Join(u.ports.raises, ", ")): what it computes is a function of its thread's timing, not of anything a person did, so it paints and raises nothing"
+			"unit \(un) is an agent presenter and raises \(strings.Join([for r, _ in u.ports.raises {r}], ", ")): what it computes is a function of its thread's timing, not of anything a person did, so it paints and raises nothing"
 		}],
 		[for un, u in A.capabilities.vendored if len(u.scripts) > 0 if !(u.isolation == "agent" && u.memo == _|_) {
 			"unit \(un) names scripts and is no agent presenter: only a presenter's worker runs the terminal's pinned scripts"
@@ -2164,8 +2251,14 @@ import (
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] == _|_ {
 			"unit \(un) memo names \(u.memo.entity), which is no declared entity"
 		}],
+		[for un, u in A.capabilities.vendored if u.isolation != "realm" if len(u.grants) > 0 {
+			"unit \(un) is seated as \(u.isolation) and asks for \(strings.Join(u.grants, ", ")): only a realm's frame is delegated a permission"
+		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if len(u.ports.raises) != 1 {
 			"unit \(un) has a memo and raises \(len(u.ports.raises)) events: a question has one answer"
+		}],
+		[for un, u in A.capabilities.vendored if u.memo != _|_ for r, sh in u.ports.raises if len(sh.fields) > 0 {
+			"unit \(un) has a memo and declares fields for \(r): an answer's shape is the memo's key and columns, derived"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if A.state.entities[u.memo.entity] != _|_
 			let me = A.state.entities[u.memo.entity]
@@ -2292,6 +2385,27 @@ import (
 		}],
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].kind != "container" {
 			"bridge \(n) names hatch \(b.container), which is not a container"
+		}],
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.port != 8080 {
+			"bridge \(n) must use the Activepieces port 8080"
+		}],
+		[for hn, h in A.capabilities.hatches if h.activepieces != _|_ for an, action in h.activepieces.actions for target in A.meta.targets if target == "pages" || target == "cloudflare" if action.mail == _|_ {
+			"Activepieces action \(hn).\(an) has no \(target) implementation"
+		}],
+		[for hn, h in A.capabilities.hatches if h.activepieces != _|_ for an, action in h.activepieces.actions if action.mail != _|_ if list.Contains(A.meta.targets, "pages") if action.mail.pages == _|_ {
+			"mail action \(hn).\(an) requires EmailJS publicKey, serviceId and templateId for pages"
+		}],
+		[for hn, h in A.capabilities.hatches if h.activepieces != _|_ for an, action in h.activepieces.actions if action.mail != _|_ if list.Contains(A.meta.targets, "cloudflare") if !A.meta.cloudflare.workersPaid if action.mail.cloudflare == _|_ {
+			"mail action \(hn).\(an) requires meta.cloudflare.workersPaid or explicit Cloudflare recipients"
+		}],
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.action == _|_ {
+			"bridge \(n) needs an Activepieces action"
+		}],
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces == _|_ if b.action != _|_ {
+			"bridge \(n) selects an action on a non-Activepieces hatch"
+		}],
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.action != _|_ if A.capabilities.hatches[b.container].activepieces.actions[b.action] == _|_ {
+			"bridge \(n) needs an opted-in action"
 		}],
 		[for n, x in _effects if x.sink.bridge != _|_ if _declaredBridges[x.sink.bridge] == _|_ {
 			"effect \(n) reaches undeclared bridge: \(x.sink.bridge)"

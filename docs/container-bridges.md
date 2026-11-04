@@ -31,33 +31,26 @@ for the ledger and transport contract.
 
 This wiring is implemented by the Compose runtime. Declaring a bridge does not
 add support for missing services in the Cloudflare, Kubernetes or Cloud Run
-release targets.
+release targets. An explicitly declared [[edge-hatches|edge hatch implementation]]
+can instead provide a trusted Worker route; that route is separate from the
+Compose bridge transport and grants its own privileged execution boundary.
 
-## Mail
+## Activepieces
 
-The SMTP implementation is a reusable container recipe. An app imports
-`github.com/bonisoft3/pronto/clusters:mecha` and instantiates it as an ordinary hatch:
+A container hatch may declare an `activepieces` specialization containing both
+local and pinned catalogue pieces, selected action aliases, fixed inputs, contracts
+and operator credential references. Pronto generates the container target and
+immutable registry; the app authors no separate integration registry. A bridge
+selects one action alias from that hatch. See [[activepieces-hatches|the contract]]
+for CUE, packaging, lock updates and delivery semantics. The
+[[decisions/2026-10-28-integrations|integration decision]] explains why this host
+replaces Camel by default and which trigger/target capabilities remain planned.
 
-```cue
-code: capabilities: hatches: smtp: {
-    kind: "container"
-    note: "SMTP transport with STARTTLS and connected-address validation"
-}
-code: state: bridges: mail: {container: "smtp"}
-cluster: surface: targets: smtp: (mecha.#MailContainer & {
-    image: cluster.meta.images.airlock
-    server: "smtp.provider.example:587"
-    domain: "mail.example"
-    user: "SMTP_USER"
-    password: "SMTP_PASSWORD"
-}).target
-```
-
-Effects continue selecting `sink.bridge: "mail"`. The recipe preserves the mail
-implementation's narrow Deno permissions, required credential variables and default
-STARTTLS policy. Credentials must be supplied together. A custom bridge does not
-inherit these SMTP-specific restrictions: its own implementation and container
-capabilities determine its reach.
+The optional standard mail piece uses the same path as application-authored pieces;
+there is no dedicated mail service or image. The framework runner image is built
+from `libraries_mecha:activepieces-image` in a checkout. It has no published release
+digest yet; release distribution must publish and pin that image before a mirror
+can use the recipe. No digest is inferred from a source build.
 
 ## Asynchronous acquisition
 

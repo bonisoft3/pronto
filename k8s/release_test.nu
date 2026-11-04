@@ -346,7 +346,8 @@ def test_dapr_annotations [] {
 		assert ($yaml | str contains $"dapr.io/app-id: ($id)\n")
 	}
 	assert ($yaml | str contains "dapr.io/config: sample-dapr-config")
-	for up in ["CRUD" "AUTH" "ELECTRIC" "TICKER" "RCLONE_S3" "IMGPROXY" "RENDER"] {
+	# A door hatch is dialed like the cluster's own services.
+	for up in ["CRUD" "AUTH" "ELECTRIC" "TICKER" "RCLONE_S3" "IMGPROXY" "RENDER" "PRINT_COMMERCE"] {
 		assert ($yaml | str contains $"name: PRONTO_UPSTREAM_($up)\n              value: localhost:3500")
 	}
 	assert ($yaml | str contains "value: http://localhost:3500/v1.0/invoke/caddy/method")
@@ -372,6 +373,10 @@ def test_timeout_budget_nests [] {
 	# Timeouts alone. Dapr 1.14 counts every answer outside 200-399 as a
 	# failure, so a breaker opened on clients' 401s and shapes' 409s; and no
 	# retry policy, so a write is never replayed.
+	# The door hatch takes the `hatch` hop's bound under its own app id; the
+	# hop is a policy, not an app.
+	assert equal $resiliency.targets.apps.print-commerce {timeout: "hatch"}
+	assert ($resiliency.targets.apps.hatch? == null)
 	assert equal ($resiliency.targets.apps | values | where {|t| $t.circuitBreaker? != null } | length) 0
 	assert ($resiliency.policies.circuitBreakers? == null)
 	assert ($resiliency.policies.retries? == null)
@@ -380,7 +385,8 @@ def test_timeout_budget_nests [] {
 	# Caddy names hops; the numbers are the budget's alone.
 	let caddyfile = (open ($pronto_dir | path join "assets" "Caddyfile"))
 	assert not ($caddyfile | str contains "_timeout ")
-	assert equal ($caddyfile | parse --regex '(?m)^\s*import bounded-(?<hop>[a-z]+)$' | get hop | uniq | sort) ($budget.door | columns | where $it != "render" | sort)
+	# The render and hatch hops are emitted per app (emit.cue), not in the asset.
+	assert equal ($caddyfile | parse --regex '(?m)^\s*import bounded-(?<hop>[a-z]+)$' | get hop | uniq | sort) ($budget.door | columns | where $it not-in ["render" "hatch"] | sort)
 	# A budget that does not nest is refused, not deployed: a sidecar bound past
 	# caddy's in front of it, and a gateway bound under Electric's gate plus
 	# Electric, which run one after the other on the same request.

@@ -539,7 +539,20 @@ finds its reads unchanged, so a release cannot see that one has looked.
 **The page serves no blob, and `pages` does not refuse one**
 ([pages](docs/release-targets.md#pages)).
 
-**A unit cannot be bundled** ([pages](docs/release-targets.md#pages)). Bundling
-it needs three changes the terminal owns: `hatch.js` admitting `blob:`, the
-hatch worker resolving its siblings from its own `location.hash`, and the glue
-starting at `glueBlobUrl#<wasmBlobUrl>`.
+**A memo's answer is text** ([vendored units](schema.cue)). `#emit` derives
+every memo column as a string, so an answer carrying a list rides as joined
+text that the unit and each reading handler decode alike (Snapcards' place
+rows, `FIELDS` in three files); deriving a column's shape from a `json`
+column's declared shape would make the answer a typed list.
+
+**A key guard is every app's to write.** A chart's guard is a module, so
+"was this keydown Enter" is an app handler (`is_key` in Snapcards and
+shadcnui); the terminal's vocabulary could carry it.
+
+**A host-DOM hatch cannot write rows.** It mounts beside the store, so
+Snapcards' checkout keeps its order receipt in session storage, outside the
+entities the screen binds.
+
+**An agent presenter cannot be bundled** ([pages](docs/release-targets.md#pages)).
+Its seat reads the pinned scripts and its files past the document's shim;
+bundling it needs that seat to read them from the page.

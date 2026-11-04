@@ -1,0 +1,7 @@
+{
+	"type": "object",
+	"properties": {
+		"query_parameters": { "type": "object" }
+	},
+	"required": ["query_parameters"]
+}

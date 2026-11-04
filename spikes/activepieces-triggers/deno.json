@@ -1,0 +1,9 @@
+{
+	"nodeModulesDir": "auto",
+	"imports": {
+		"stripe-piece": "npm:@activepieces/piece-stripe@0.9.0",
+		"github-piece": "npm:@activepieces/piece-github@0.11.0",
+		"rss-piece": "npm:@activepieces/piece-rss@0.7.2",
+		"nock": "npm:nock@14.0.10"
+	}
+}

@@ -1,0 +1,11 @@
+{
+	"nodeModulesDir": "auto",
+	"imports": {
+		"http-piece": "npm:@activepieces/piece-http@0.13.0"
+	},
+	"tasks": {
+		"test": "deno test --frozen --allow-net=127.0.0.1 --allow-env=NODE_TLS_REJECT_UNAUTHORIZED test.ts",
+		"check": "deno fmt --check *.ts deno.json && deno lint *.ts && deno check --frozen *.ts",
+		"test:isolation": "deno check --frozen worker.ts && deno test --frozen --allow-read=. --allow-env=HATCH_SPIKE_MARKER --allow-net=127.0.0.1 --allow-run isolation_test.ts"
+	}
+}

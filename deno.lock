@@ -1260,7 +1260,8 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@david/dax@0.50.0"
+      "jsr:@david/dax@0.50.0",
+      "jsr:@std/assert@1.0.11"
     ]
   }
 }

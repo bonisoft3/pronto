@@ -23,10 +23,15 @@ say:
           - do: "cue vet -c ./testdata/emit"
           - do: "deno test --no-config --allow-read --allow-run=cue,nu read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts"
           - do: "deno test --no-config --allow-read --allow-write --allow-env --allow-run=git,nu,tar,sh gcp-build.test.ts"
+      activepieces:
+        priority: -1
+        cmds:
+          - do: "mise exec github:denoland/deno@v2.9.7 -- deno test --config deno.json --frozen --allow-read --allow-write --allow-run=cue activepieces-compiler.test.ts edge-hatches-compiler.test.ts activepieces-package.test.ts"
+          - do: "mise exec github:denoland/deno@v2.9.7 -- deno test --config deno.json --frozen --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 activepieces-package.integration.test.ts"
       distribution:
         priority: -1
         cmds:
-          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
       types:
         priority: -1
         cmds:
@@ -98,7 +103,7 @@ say:
       bundle:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-addresses_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts bundle/edge-static_test.ts mecha-reducer.test.ts"
+          - do: "mise exec -- deno test --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-addresses_test.ts bundle/edge-hatches_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts bundle/edge-static_test.ts mecha-reducer.test.ts"
       # The door's language rule against the terminal's, over an emitted
       # Caddyfile: two runtimes that cannot share code and must not disagree.
       negotiation:

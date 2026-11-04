@@ -1,3 +1,4 @@
+import { hatchEnvironment, refuseMissingHatchSecrets } from './edge-hatches.ts'
 // Makes an edge release live: deploys <out> (edge.ts's) with the wrangler
 // mecha's pglite-workerd pins, its secrets in the same version, and loads the
 // data directory into its object. JWT_SECRET is set once, since every session
@@ -133,7 +134,7 @@ const jwtSecret = await releaseJwtSecret({
   secret: Deno.env.get('JWT_SECRET'), secretPath, ci: !!Deno.env.get('CI'), temporary: !!temporary.length,
   configs: database ? [database, config] : [config], wrangler, random,
 })
-const secrets: Record<string, string> = { IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}) }
+const secrets: Record<string, string> = { ...await hatchEnvironment(out, name => Deno.env.get(name)), IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}) }
 const turnId = Deno.env.get('CLOUDFLARE_TURN_KEY_ID')
 const turnToken = Deno.env.get('CLOUDFLARE_TURN_KEY_TOKEN')
 if (turnId && turnToken) {
@@ -172,6 +173,13 @@ async function deploy(configPath: string, ...flags: string[]): Promise<string> {
   deployed.push({ config: configPath, previous })
   return text
 }
+await refuseMissingHatchSecrets({
+  directory: out,
+  configs: database ? [database, config] : [config],
+  temporary: !!temporary.length,
+  deployedBefore: async configPath => await previousVersion(configPath) !== null,
+  wrangler,
+})
 const secretsDir = await Deno.makeTempDir({ prefix: 'publish-edge-' })
 const secretsFile = path.join(secretsDir, 'secrets.json')
 let deployedText: string

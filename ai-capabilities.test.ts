@@ -113,7 +113,7 @@ Deno.test("capabilities.ai with model overrides and agent browser unit compiles 
     vendored: `
       "ai-browser": {
         isolation: "agent"
-        ports: {reads: ["Draft"], raises: ["draft_ready"]}
+        ports: {reads: ["Draft"], raises: {draft_ready: {}}}
         memo: {entity: "BrowserDraft", key: ["topic"]}
         src: "shell/units/ai-browser/unit.js"
         files: ["shell/units/ai-browser/unit.js"]

@@ -46,6 +46,12 @@ How pronto works inside, what it decided and what it superseded.
 
 ## Decisions
 
+* [[decisions/2026-10-28-integrations|Integrations through standard pieces and Pronto state]] — partially built: shared action/trigger host, target-specific live/demo behavior, and the responsibilities retained by Pronto.
+
+* [[activepieces-hatches|Activepieces application hatches]] — app-owned standard pieces and CUE opt-in, generated package closure and isolated action runner.
+* [[edge-hatches|Edge hatch routes]] — trusted app-specific Worker routes, cluster database authority and public target configuration.
+* [[../spikes/activepieces-triggers/README|Activepieces trigger spike]] — shared lifecycle execution across Stripe, GitHub and RSS; authentication and checkpoint failure experiments.
+
 * [Review by consequence](decisions/2026-08-27-review-by-consequence.md) - decision, partially built: Levies ir coverage by what a write reaches — an update to a `tab` entity machine-checked only, one reaching `device` or above owing an ir element — with handler reach derived from the charts naming it, and an explicit write capability deferred.
 * [Owner stamping](decisions/2026-08-31-owner-stamping.md) - decision, unbuilt: Moves a row's owner stamp from the apps' `default: "auth_uid()"` column defaults to an emitted per-table BEFORE INSERT trigger beside the policies, and narrows `#Field.default` to what a bare Postgres has, so the data-holding steps need nothing from the rules.
 * [The next vocabulary](decisions/2026-09-08-the-next-vocabulary.md) - decision, accepted: Chooses the platform's next token layer — DTCG as the format, Tailwind's namespaces as the grammar, shadcn's names as the roles — for the names a model will write, of which only the contrast grading is built.
@@ -62,6 +68,8 @@ How pronto works inside, what it decided and what it superseded.
 
 ## Archive
 
+* [[archive/2026-10-28-activepieces-hatch|Activepieces hatch decision]] — built for local Docker/Compose; standard piece ownership, invocation isolation and supporting spikes.
+
 * [Design: Pronto — AI App Builder With Constraint-Cascade Architecture](archive/2026-06-12-design-constraint-cascade.md) - decision, superseded: The startup-mode design — constraint-cascade generation and a scale-to-zero runtime against the prompt-to-app category — whose business analysis still stands.
 * [A numeric stage](archive/2026-09-30-numeric-stage.md) - decision, built: A pronto rung for computation bloblang and Jessie cannot carry — a compute service fed by the lake, writing back through CRUD; proposed on JAX, revised to Jessie planning Wasm jobs on Deno.
 * [DuckStream tempo and derivation invariants](archive/2026-10-01-duckstream-tempo-and-derivation.md) - decision, built: Replaces physical pipeline flags with application-level tempo (hot vs cold) and operator endowments, proving screen-mutation feedback loops statically in CUE and verifying SQL algebra via DuckDB AST serialization. Contract moved to [pipelines and schedules](pipelines-and-schedules.md#the-shapes).
@@ -72,3 +80,5 @@ How pronto works inside, what it decided and what it superseded.
 * [[archive/2026-10-10-hatches|Hatches]] — built decision: derive effect levels and delivery, declare escape hatches, and review entities and machines by consequence. Contracts live in [[../SPEC|the artifact spec]], [[../GUIDE|the guide]] and [the terminal](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/terminal.md).
 * [[archive/2026-10-12-lifecycle-guards|Predicates belong to lifecycle transitions]] — built decision: guarded writes share the machine interpreter; access remains RLS.
 * [[archive/2026-10-22-edge-drains|Drains where no stream runs]] — built decision: the page's and the edge's clusters call the drains and sweep the schedules themselves, bloblang left to the release's snapshot. Contract moved to [pipelines and schedules](pipelines-and-schedules.md#drains) and mecha's [drains and the clock](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/browser.md#drains-and-the-clock).
+* [[archive/2026-10-28-unit-event-types|A unit's events are typed by the program]] — built: a 10 MiB size floor at the realm and agent seats; every other constraint comes from the payload `#Shape` each raised event declares.
+* [[archive/2026-10-28-camel-bridges|Camel routes as container bridges]] — superseded: native Camel integration proposal; replacement rationale in [[decisions/2026-10-28-integrations|the integration decision]].

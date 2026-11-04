@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
+import { extensionless } from './edge-templates.ts'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseHTML } from 'npm:linkedom@0.18.4'
@@ -13,6 +14,7 @@ interface Release {
     i18n?: { locales?: Record<string, unknown> }
     prefix?: string
     presenter?: { policy: string }
+    units?: Record<string, { isolation: string; files: string[] }>
   }
 }
 /** An RTCIceServer, as omnishell's release addressing writes it. */
@@ -44,6 +46,8 @@ export interface EdgeHints {
   prefix?: string
 }
 
+const REALM_POLICY = "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self'"
+
 /** Cloudflare's assets answer `.html` by their own routing rules, take cache
  * rules from `_headers`, and serve `/` from `index.html`; the Worker reads the
  * hints to send each route's preloads as early hints. The terminal config
@@ -63,9 +67,18 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
   // Cache-Control headers are omitted here because Cloudflare's _headers applies
   // to 404 responses unconditionally; immutable caching is attached on 200 responses
   // only by the worker.
+  // A realm's document is isolated by the seat's sandbox; loaded any other way
+  // it would run at this origin under no policy, so it carries the sandbox
+  // itself (omnishell hatch.js SANDBOX) and only this app may frame it, as the
+  // container door sends it.
+  const realms = Object.values(cfg.units ?? {})
+    .filter((unit) => unit.isolation === 'realm').flatMap((unit) => unit.files)
   await Deno.writeTextFile(path.join(out, '_headers'), [
     `/\n  Content-Security-Policy: ${policy}\n`,
     ...(cfg.presenter ? [`/omnishell/interpreter/presenter.js\n  Content-Security-Policy: ${cfg.presenter.policy}\n`] : []),
+    // Both a document's addresses: the Worker serves its .html one from the bare.
+    ...realms.flatMap((file) => [...new Set([file, extensionless(file)])])
+      .map((file) => `/${file}\n  Content-Security-Policy: ${REALM_POLICY}\n`),
   ].join('\n'))
 
   const link = (name: string, as: string) => {

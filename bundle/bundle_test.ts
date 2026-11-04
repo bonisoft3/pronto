@@ -523,14 +523,17 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
     const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))))
     assert.deepEqual(JSON.parse(payload.files['shell/shell.json']).routes.map((route: { ssr: string }) => route.ssr), ['spa', 'spa'])
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
-    const scripts = [...html.matchAll(/<script(?: type="module")?>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+    // The boot runs first and installs the policy; only the module runs under it.
+    const [boot, ...scripts] = [...html.matchAll(/<script(?: type="module")?>([\s\S]*?)<\/script>/g)].map((m) => m[1])
     assert.equal(scripts.length, 1, 'SES must initialize through the interpreter inside the application module')
     assert.ok(!scripts[0].includes('\0'), 'HTML replaces literal NULs before checking script hashes')
+    assert.ok(!/http-equiv="Content-Security-Policy"/.test(html), 'the policy is the boot\'s to install, not markup')
+    assert.ok(html.indexOf(boot) < html.indexOf('<style>'), 'nothing but inert data precedes the boot')
     const hashes = await Promise.all(scripts.map(async (source) => {
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
       return `'sha256-${Buffer.from(digest).toString('base64')}'`
     }))
-    const bundledPolicy = /http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)![1]
+    const bundledPolicy = JSON.parse(/m\.content=("(?:[^"\\]|\\.)*")/.exec(boot)![1])
     assert.equal(bundledPolicy, policy.replace(/script-src ([^;]+)/, `$& ${hashes.join(' ')}`))
     assert.ok(!/<script src="data:/.test(html), 'data: would authorize scripts beyond this release')
   } finally {
@@ -572,6 +575,71 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
     const preloads = [...html.matchAll(/<link rel="preload" href="([^"]+)"/g)].map((m) => m[1])
     assert.deepEqual(preloads, ['https://fonts.example/a.woff2'])
     assert.match(html, /preload: false/)
+  } finally {
+    await Deno.remove(app, { recursive: true })
+  }
+})
+
+// A realm unit is a document of its own, so a single-file page serves it from
+// itself (omnishell hatch.js selfSrc): inlined, inert beside the boot, and
+// marked `self` in the shell's units. An agent is fetched through the shim.
+Deno.test('a bundled page carries its realm units inlined beside the boot, its agents behind the shim and its host-DOM hatches compiled in', async () => {
+  const app = await Deno.makeTempDir({ prefix: 'unit-bundle-test-' })
+  try {
+    const write = async (p: string, text: string) => {
+      await Deno.mkdir(path.dirname(path.join(app, p)), { recursive: true })
+      await Deno.writeTextFile(path.join(app, p), text)
+    }
+    const units = {
+      map: { isolation: 'realm', src: 'shell/units/map/index.html', files: ['shell/units/map/index.html', 'shell/units/map/vendor/lib.js', 'shell/units/map/vendor/lib.css'], ports: { reads: [], raises: {} } },
+      geocoder: { isolation: 'agent', src: 'shell/units/geocoder/unit.js', files: ['shell/units/geocoder/unit.js'], ports: { reads: [], raises: {} } },
+    }
+    const shellJson = (u: unknown) => JSON.stringify({ routes: [{ files: { css: 'shell/screens/home.css' } }], migrations: [], tables: [], units: u, hostDom: { press: { src: 'shell/hatches/press.js', note: 'prints' } } })
+    await write('shell/hatches/press.js', 'export default () => () => "press-hatch-compiled-in"')
+    await write('shell/shell.json', shellJson(units))
+    await write('shell/shell.css', '')
+    await write('shell/design.css', '')
+    await write('shell/screens/home.css', '')
+    await write('shell/index.html', '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src \'self\'"><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>')
+    await write('shell/units/map/index.html', '<!doctype html><html><head><link rel="stylesheet" href="vendor/lib.css"><script src="vendor/lib.js"></script></head><body>São Paulo</body></html>')
+    await write('shell/units/map/vendor/lib.js', 'window.lib = "</script><!--"')
+    await write('shell/units/map/vendor/lib.css', 'body{color:red}')
+    await write('shell/units/geocoder/unit.js', 'postMessage({type:"pronto:ready"})')
+    const bundle = () => new Deno.Command(Deno.execPath(), {
+      args: [
+        'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app, '--no-cluster',
+        '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
+      ],
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output()
+    const done = await bundle()
+    assert.equal(done.success, true, new TextDecoder().decode(done.stderr))
+    const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
+    const data = /<script type="application\/octet-stream" id="pronto-unit-map">([^<]*)<\/script>/.exec(html)
+    assert.ok(data, 'the realm rides inert beside the boot')
+    assert.ok(html.indexOf(data![0]) < html.indexOf('<script>'), 'and before it, so the boot can read it')
+    const doc = new TextDecoder().decode(Buffer.from(data![1], 'base64'))
+    assert.match(doc, /<style>body\{color:red\}<\/style>/)
+    assert.match(doc, /<script>window\.lib = "<\\\/script><\\!--"<\/script>/)
+    assert.match(doc, /São Paulo/)
+    const payload = JSON.parse(new TextDecoder().decode(Buffer.from(/id="pronto-payload">([^<]*)</.exec(html)![1], 'base64')))
+    assert.equal(payload.files['shell/units/geocoder/unit.js'], 'postMessage({type:"pronto:ready"})')
+    assert.equal(JSON.parse(payload.files['shell/shell.json']).units.map.self, true)
+    assert.equal(JSON.parse(payload.files['shell/shell.json']).units.geocoder.self, undefined)
+    // A host-DOM hatch is imported by path, which no shim answers: it rides
+    // compiled into the page's module.
+    assert.ok(html.includes('press-hatch-compiled-in'), 'the hatch is compiled into the page')
+
+    await write('shell/units/map/index.html', '<!doctype html><html><head><script src="vendor/other.js"></script></head></html>')
+    const undeclared = await bundle()
+    assert.equal(undeclared.success, false)
+    assert.match(new TextDecoder().decode(undeclared.stderr), /unit map loads vendor\/other\.js, which its files do not declare/)
+
+    await write('shell/shell.json', shellJson({ painter: { ...units.geocoder, role: 'presenter' } }))
+    const presenter = await bundle()
+    assert.equal(presenter.success, false)
+    assert.match(new TextDecoder().decode(presenter.stderr), /presenter units are not bundled yet: painter/)
   } finally {
     await Deno.remove(app, { recursive: true })
   }

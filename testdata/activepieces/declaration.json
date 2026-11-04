@@ -1,0 +1,28 @@
+{
+	"version": 1,
+	"lock": "./pieces/npm.lock",
+	"pieces": {
+		"http": {
+			"npm": {
+				"package": "@activepieces/piece-http",
+				"version": "0.13.0",
+				"export": "http"
+			}
+		}
+	},
+	"actions": {
+		"parse": {
+			"piece": "http",
+			"action": "parse_url",
+			"inputSchema": "./pieces/http/parse.input.schema.json",
+			"outputSchema": "./pieces/http/parse.output.schema.json",
+			"fixedProps": { "returnArrays": true }
+		}
+	},
+	"limits": {
+		"timeoutMs": 8000,
+		"maxConcurrent": 4,
+		"maxRequestBytes": 1048576,
+		"maxResultBytes": 1048576
+	}
+}
