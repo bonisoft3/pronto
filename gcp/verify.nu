@@ -246,14 +246,11 @@ export def classify-failures [sections: list<list<string>>, live_names: list<str
 	{verdict: "new", new: $all, why: ""}
 }
 
-# The scenarios of a failed run that are a new feature's, as a list: empty unless every failure is one
-# (classify-failures), against the tree of the app's last live release. One rule for every place a
-# scenario failure fails the release. Prints the line the caller greps and notes it in the release record.
-export def new-feature-excuse [run: record, sections: list<list<string>>]: nothing -> list<string> {
-	let app = ($run.app? | default null)
-	let dir = ($run.appDir? | default null)
-	if $app == null or $dir == null { return [] }
-	let verdict = (try {
+# classify-failures against the tree of the app's last live release (the commit of its release record),
+# read from the checkout at `dir`; unknown when there is no such release or its commit is not in the checkout.
+# Carries the commit and the scenarios the live tree defines.
+export def live-verdict [app: string, dir: string, sections: list<list<string>>]: nothing -> record {
+	try {
 		let commit = (release-record live-commit $app)
 		if $commit == null { error make {msg: "no known live release"} }
 		let have = (do { ^git -C $dir cat-file -e $"($commit)^{commit}" } | complete)
@@ -264,8 +261,19 @@ export def new-feature-excuse [run: record, sections: list<list<string>>]: nothi
 		let files = (^git -C $dir ls-tree -r --name-only $commit -- tests/scenarios/ | lines | where {|f| $f | str ends-with ".cue" })
 		let live_text = ($files | each {|f| ^git -C $dir show $"($commit):./($f)" } | str join "\n")
 		let current_text = (glob $"($dir)/tests/scenarios/*.cue" | each {|f| open --raw $f } | str join "\n")
-		classify-failures $sections (scenario-names $live_text) $live_text (scenario-names $current_text) | insert commit $commit
-	} catch {|e| {verdict: "unknown", new: [], why: $e.msg, commit: null} })
+		let live_names = (scenario-names $live_text)
+		classify-failures $sections $live_names $live_text (scenario-names $current_text) | insert commit $commit | insert live_names $live_names
+	} catch {|e| {verdict: "unknown", new: [], why: $e.msg, commit: null, live_names: []} }
+}
+
+# The scenarios of a failed run that are a new feature's, as a list: empty unless every failure is one
+# (classify-failures), against the tree of the app's last live release. One rule for every place a
+# scenario failure fails the release. Prints the line the caller greps and notes it in the release record.
+export def new-feature-excuse [run: record, sections: list<list<string>>]: nothing -> list<string> {
+	let app = ($run.app? | default null)
+	let dir = ($run.appDir? | default null)
+	if $app == null or $dir == null { return [] }
+	let verdict = (live-verdict $app $dir $sections)
 	if $verdict.verdict != "new" {
 		print $"gcp: (stamp) the failure is not a new feature's scenario alone \(($verdict.verdict): ($verdict.why)\): the release fails"
 		return []
@@ -398,4 +406,20 @@ export def main [
 	let app_info = (resolve-app $app)
 	let preview = ($preview | default ($env.SAY_VERIFY_ARGS_PREVIEW? | default ""))
 	run-drivers $app_info.dir (plan-of $app_info.cue_path $preview)
+}
+
+# The failing scenarios named on the command line, classified against the tree of the app's last live
+# release: a failure absent from it is a new feature's, one that was in it (or that cannot be classified)
+# a regression. Prints JSON {commit, new, regressions}; `rehearse.ts` of an app fails on regressions alone.
+export def "main classify" [
+	app_dir: string        # The app's directory (its release.cue); its name is the release record's
+	...scenarios: string   # The names of the scenarios that failed
+	--app: string          # The release record's app name; the directory's name when absent
+] {
+	let dir = ($app_dir | path expand)
+	let name = ($app | default ($dir | path basename))
+	let sections = [($scenarios | each {|n| $"✗ ($n) \(0s\) at step 0" })]
+	let v = (live-verdict $name $dir $sections)
+	let regressions = if $v.verdict == "new" { [] } else if $v.verdict == "regression" { $scenarios | where {|n| $n in $v.live_names } } else { $scenarios }
+	{commit: $v.commit, new: $v.new, regressions: $regressions} | to json --raw
 }
