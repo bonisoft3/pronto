@@ -70,6 +70,15 @@ def --wrapped gc-fresh [...args] {
 	}
 }
 
+# A service back on automatic scaling. A stopped preview's services are kept at no instance
+# (stop-preview), and `services replace` does not always undo that: the rc's door and two sidecars
+# stayed manual at 0 under their new YAML, so the door had no instance, its renderer never synced
+# and timed out its startup probe (2026-11-04, 02:17 BRT).
+def scale-automatic [service: string, project: string, region: string] {
+	let mode = (gc run services describe $service --region $region --project $project --format "value(metadata.annotations['run.googleapis.com/scalingMode'])" | str trim)
+	if $mode == "manual" { gc run services update $service --scaling auto --region $region --project $project | ignore }
+}
+
 # A service made public once. Cloud Run takes a request carrying a bearer token Google did not
 # sign (every user's session token) for its own to verify until the service's policy has spread,
 # minutes after any SetIamPolicy, one that changes nothing included: re-adding allUsers to a
@@ -403,8 +412,8 @@ def ensure-bucket [bucket: string, account: string, project: string, region: str
 # (--remove deletes them): a service made again is granted allUsers again, and for minutes
 # after that grant Cloud Run refuses a request with a bearer token Google did not sign at
 # random, so the rc's renderer and players were refused while its tests ran (2026-11-03,
-# 22:26 and 23:30 BRT). Kept, the grant spread long ago; the next deploy's replace sets
-# scaling back to automatic, as its YAML says nothing of manual scaling.
+# 22:26 and 23:30 BRT). Kept, the grant spread long ago; the next deploy sets each back to
+# automatic scaling after its replace (scale-automatic).
 def stop-preview [plan: record, --remove] {
 	let p = $plan.project
 	let r = $plan.region
@@ -413,7 +422,11 @@ def stop-preview [plan: record, --remove] {
 		if not (exists run services describe $svc --region $r --project $p) { continue }
 		if $remove { gc run services delete $svc --region $r --project $p | ignore; continue }
 		# A revision a tag alone reaches (the `next` a failed go-live leaves) runs on at no instance.
-		gc run services update-traffic $svc --clear-tags --region $r --project $p | ignore
+		# Clearing them is said and passed when it fails: on a service whose latest revision never
+		# became healthy it routes there again and fails the same way, which stopped the release
+		# before it could deploy that service afresh (bonk-chess-rc-render, 2026-11-04 02:21 BRT).
+		# No instance is what frees the database, so that stop must hold.
+		try { gc run services update-traffic $svc --clear-tags --region $r --project $p | ignore } catch {|e| print -e $"gcp: (stamp) ($svc)'s tags stay: ($e.msg | lines | last)" }
 		gc run services update $svc --scaling 0 --region $r --project $p | ignore
 	}
 	for job in [$n.job $n.migrateJob] {
@@ -761,6 +774,7 @@ export def go-live [staged: record]: nothing -> record {
 			if $t == "service" {
 				print $"gcp: (stamp) deploying ($plan.service)"
 				gc run services replace dist/gcp/service.held.yaml --region $r --project $p | ignore
+				scale-automatic $plan.service $p $r
 			} else if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) {
 				gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore
 			}
@@ -799,6 +813,7 @@ export def go-live [staged: record]: nothing -> record {
 				let svc = ($plan.names.sidecarServices | get $t.sidecar)
 				print $"gcp: (stamp) ($t.sidecar) apart \(($svc)\)"
 				gc run services replace $"dist/gcp/sidecar-($t.sidecar).yaml" --region $r --project $p | ignore
+				scale-automatic $svc $p $r
 				grant-public $svc $p $r
 			}
 			null
