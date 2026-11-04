@@ -8,7 +8,7 @@
 
 use ../k8s/release.nu [resolve-app]
 use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers run-rehearsal plan-of]
-use build.nu [builder stamp gc exists build-account push-images service-jwt]
+use build.nu [builder stamp gc exists build-account push-images service-jwt failure-message]
 use local-gate-key.nu
 use release-record.nu
 use secrets.nu [check-secrets]
@@ -244,7 +244,7 @@ def set-up-project [plan: record] {
 		try {
 			if $t == "repository" { set-up-repository $plan } else if $t == "account" { set-up-account $plan } else { set-up-secrets $plan }
 			null
-		} catch {|e| $e.msg }
+		} catch {|e| (failure-message $e) }
 	} | compact)
 	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
 	let pg = (gc secrets versions access latest --secret $n.secrets.POSTGRES_PASSWORD --project $p)
@@ -792,7 +792,7 @@ export def go-live [staged: record]: nothing -> record {
 				gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore
 			}
 			null
-		} catch {|e| $e.msg }
+		} catch {|e| (failure-message $e) }
 	} | compact)
 	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
 	# The door answers, as the revision it serves, before a sidecar that reads through it at start
@@ -841,7 +841,7 @@ export def go-live [staged: record]: nothing -> record {
 				grant-public $svc $p $r
 			}
 			null
-		} catch {|e| $e.msg }
+		} catch {|e| (failure-message $e) }
 	} | compact)
 	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
 
@@ -867,7 +867,7 @@ export def go-live [staged: record]: nothing -> record {
 		let got = (poll-health $"($address)/health" $ok (if $iap { null } else { $candidate.revision }) --steady 3 --bearer $bearer)
 		if not $got.ok { error make {msg: $"the public address ($address)/health did not answer as ($candidate.revision) in ($got.waited): last answer ($got.last)"} }
 		null
-	} catch {|e| $e.msg })
+	} catch {|e| (failure-message $e) })
 	if $failed != null {
 		print $"gcp: (stamp) ($plan.service) failed to go live: ($failed)"
 		if $before == null {
@@ -1100,23 +1100,23 @@ export def main [
 	# preview or any build: a missing one fails here in seconds, not in the rc minutes in (gcp/secrets.nu).
 	if $recorded and not $rollback {
 		try { check-secrets $app_info.dir --preview $preview --no-gate=$no_gate } catch {|e|
-			do $record "failed" $e.msg
-			error make {msg: $e.msg}
+			do $record "failed" (failure-message $e)
+			error make {msg: (failure-message $e)}
 		}
 	}
 	# Nothing a dry run or a snapshot does reaches the project, so neither waits for the lock.
 	release-record mark lock start
 	let lock = if $dry_run or $snapshot { null } else {
 		try { take-lock (lock-of $app_info.cue_path $preview) } catch {|e|
-			do $record (if ($e.msg | str starts-with "another release") { "refused" } else { "failed" }) $e.msg
-			error make {msg: $e.msg}
+			do $record (if ((failure-message $e) | str starts-with "another release") { "refused" } else { "failed" }) (failure-message $e)
+			error make {msg: (failure-message $e)}
 		}
 	}
 	release-record mark lock end
 	let failure = (try {
 		release-body $app_info $preview $delete $dry_run $snapshot $no_gate $rollback $force_rc $no_local_gate
 		null
-	} catch {|e| $e.msg })
+	} catch {|e| (failure-message $e) })
 	if $lock != null { drop-lock $lock }
 	do $record (if $failure != null { "failed" } else if $rollback { "rolled-back" } else { "live" }) $failure
 	if $failure != null { error make {msg: $failure} }
@@ -1182,16 +1182,16 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	# moment it started), `tested` (the preview deployed) or `built` (why it did not).
 	let dir = $app_info.dir
 	let gate_job = if $local { job spawn {
-		try { local-gate $dir; {gate: null} | job send 0 } catch {|e| {gate: $e.msg} | job send 0 }
+		try { local-gate $dir; {gate: null} | job send 0 } catch {|e| {gate: (failure-message $e)} | job send 0 }
 	} }
 	let deploy_job = job spawn {
 		try {
 			empty-preview $rc_plan
 			let drivers = (start-drivers $dir $rc_plan)
 			{drivers: $drivers} | job send 0
-			let tested = (try { deploy $app_info $rc false false --rendered $rc_plan } catch {|e| cancel-drivers $drivers; error make {msg: $e.msg} })
+			let tested = (try { deploy $app_info $rc false false --rendered $rc_plan } catch {|e| cancel-drivers $drivers; error make {msg: (failure-message $e)} })
 			{tested: $tested} | job send 0
-		} catch {|e| {built: $e.msg} | job send 0 }
+		} catch {|e| {built: (failure-message $e)} | job send 0 }
 	}
 	#
 	# The tests' own images build in Cloud Build while the preview deploys, and
@@ -1241,12 +1241,12 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 						let r = (run-rehearsal $drivers $rehearsal_run)
 						release-record note {rehearsal: $r}
 						if $r.ok { {} } else { {rehearsal: $"the rehearsal failed \(execution ($r.execution)\): its log is above"} }
-					} catch {|e| {rehearsal: $e.msg} }
+					} catch {|e| {rehearsal: (failure-message $e)} }
 				}
 			} else if $t == "stage" {
-				try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}) --rendered $prod_plan)} } catch {|e| {staging: $e.msg} }
+				try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}) --rendered $prod_plan)} } catch {|e| {staging: (failure-message $e)} }
 			} else {
-				try { finish-drivers $drivers; release-record mark rc end; {} } catch {|e| {tests: $e.msg} }
+				try { finish-drivers $drivers; release-record mark rc end; {} } catch {|e| {tests: (failure-message $e)} }
 			}
 		} | reduce -f {} {|it, acc| $acc | merge $it })
 		if ($both.tests? | is-not-empty) { error make {msg: $both.tests} }
@@ -1260,7 +1260,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 				gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($drivers.build)\"" --project $drivers.project --order asc --limit 100000 --format "value(textPayload)"
 					| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | str join (char nl) | save -f $log_file
 				{tests_log: $log_file} | job send 0
-			} catch {|e| {tests_log_error: $e.msg} | job send 0 }
+			} catch {|e| {tests_log_error: (failure-message $e)} | job send 0 }
 		} | ignore
 		go-live $both.staged | ignore
 		let read = (job recv)
@@ -1271,7 +1271,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 		# A release the rc gate passed: the deploy-shaped files it passed with.
 		local-gate-key rc-stamp $app_info.dir $deploy_key
 		null
-	} catch {|e| $e.msg })
+	} catch {|e| (failure-message $e) })
 	# A failed release stops the preview whole. A release that is live does not wait for that: the
 	# preview's service, jobs and instance stay, idle (Cloud Run scales to zero), and only its clock,
 	# which acts alone, is deleted. Nothing is harmed by what stays, since the next release of the app

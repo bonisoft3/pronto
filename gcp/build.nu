@@ -62,6 +62,46 @@ export def --wrapped exists [...args]: nothing -> bool {
 }
 
 
+# The message of a failure, down to its cause. A closure of each or par-each fails with nu's
+# wrapper ("Eval block failed with pipeline input", code nu::shell::eval_block*), the cause
+# nested in `details.inner`: `$e.msg` alone is the wrapper and the run log and release record
+# said nothing (2026-11-04). Any other error keeps its own message.
+export def failure-message [e: record]: nothing -> string {
+	let own = ($e.details? | default {msg: $e.msg})
+	messages-of $own | uniq | str join "\n"
+}
+
+def messages-of [d: record]: nothing -> list<string> {
+	let inner = ($d.inner? | default [])
+	if (($d.code? | default "") | str starts-with "nu::shell::eval_block") and ($inner | is-not-empty) {
+		$inner | each {|i| messages-of $i } | flatten
+	} else { [$d.msg] }
+}
+
+# What `tags add` does to a tag: leave it (it names the digest), make it (none yet), or move it.
+export def tag-action [current: any, digest: string]: nothing -> string {
+	if $current == null { "create" } else if $current == $digest { "keep" } else { "move" }
+}
+
+# The tag `tag` on the image at `digest` of `repo` (host/project/repository/package). gcloud's
+# `tags add` deletes a tag that exists and makes it again, and the release's account may not
+# delete tags in the previews project (artifactregistry.tags.delete denied, 2026-11-04: every
+# reused image of the rc preview failed so). A tag already there is left, and one that moves
+# is updated, which that account may.
+export def tag-image [repo: string, digest: string, tag: string] {
+	let at = $"($repo):($tag)"
+	let current = if (exists artifacts docker images describe $at) { gc artifacts docker images describe $at --format "value(image_summary.digest)" | str trim } else { null }
+	match (tag-action $current $digest) {
+		"keep" => {}
+		"create" => { gc artifacts docker tags add $"($repo)@($digest)" $at | ignore }
+		_ => {
+			let parts = ($repo | split row "/")
+			gc artifacts tags update $tag --location ($parts.0 | str replace "-docker.pkg.dev" "") --project $parts.1 --repository $parts.2 --package ($parts | skip 3 | str join "/") --version $digest | ignore
+		}
+	}
+}
+
+
 # The account Cloud Build runs a build as in the project: the project's
 # default, which pushes the images and writes the build's log.
 export def build-account [project: string]: nothing -> string {
@@ -270,7 +310,7 @@ export def push-images [
 	let keys = (image-keys $app_dir $compose $hashes $told $services)
 	let before = (pushed-for $refs $keys)
 	let reused = ($before | par-each --keep-order {|b|
-		gc artifacts docker tags add $"($b.repo)@($b.digest)" $"($b.repo):($tag)" | ignore
+		tag-image $b.repo $b.digest $tag
 		{svc: $b.svc, ref: {tag: $tag, digest: $b.digest}}
 	})
 	let all = $services
