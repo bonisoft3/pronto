@@ -73,8 +73,11 @@ def --wrapped gc-fresh [...args] {
 # A service back on automatic scaling. A stopped preview's services are kept at no instance
 # (stop-preview), and `services replace` does not always undo that: the rc's door and two sidecars
 # stayed manual at 0 under their new YAML, so the door had no instance, its renderer never synced
-# and timed out its startup probe (2026-11-04, 02:17 BRT).
+# and timed out its startup probe (2026-11-04, 02:17 BRT). It runs before the replace as well as
+# after: set only after, the door took some 40 s to get an instance, and the renderer, made
+# meanwhile, read the shell through it, met a 500 and exited until Cloud Run gave it up (02:48 BRT).
 def scale-automatic [service: string, project: string, region: string] {
+	if not (exists run services describe $service --region $region --project $project) { return }
 	let mode = (gc run services describe $service --region $region --project $project --format "value(metadata.annotations['run.googleapis.com/scalingMode'])" | str trim)
 	if $mode == "manual" { gc run services update $service --scaling auto --region $region --project $project | ignore }
 }
@@ -778,6 +781,7 @@ export def go-live [staged: record]: nothing -> record {
 		try {
 			if $t == "service" {
 				print $"gcp: (stamp) deploying ($plan.service)"
+				scale-automatic $plan.service $p $r
 				gc run services replace dist/gcp/service.held.yaml --region $r --project $p | ignore
 				scale-automatic $plan.service $p $r
 			} else if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) {
@@ -817,6 +821,7 @@ export def go-live [staged: record]: nothing -> record {
 			} else {
 				let svc = ($plan.names.sidecarServices | get $t.sidecar)
 				print $"gcp: (stamp) ($t.sidecar) apart \(($svc)\)"
+				scale-automatic $svc $p $r
 				gc run services replace $"dist/gcp/sidecar-($t.sidecar).yaml" --region $r --project $p | ignore
 				scale-automatic $svc $p $r
 				grant-public $svc $p $r
