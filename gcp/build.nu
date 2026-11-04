@@ -23,16 +23,17 @@ export def stamp []: nothing -> string {
 const reads = [describe list read get-iam-policy get-default-service-account]
 const writes = [add add-iam-policy-binding apply cancel create delete deploy execute import remove remove-iam-policy-binding replace set set-iam-policy submit update]
 const offline = "NameResolutionError|Failed to resolve|nodename nor servname|NewConnectionError|Failed to establish a new connection|ConnectionError|ReadTimeout|timed out|Connection reset|Connection aborted|RemoteDisconnected|UNAVAILABLE|HTTPError 503"
-def read-again [args: list<string>, input: any, r: record]: nothing -> record {
+def read-again [args: list, input: any, r: record]: nothing -> record {
 	# The verb: the first command word that is one (a resource named "read" after "add" is no read).
-	let words = ($args | take while {|a| not ($a | str starts-with "-") })
+	# An argument may be a number or another value a caller passed as it is (`--max-instances $n`).
+	let words = ($args | each {|a| $a | into string } | take while {|a| not ($a | str starts-with "-") })
 	let verb = ($words | where {|w| $w in ($reads ++ $writes) } | first 1)
 	if $verb == [] or $verb.0 not-in $reads { return $r }
 	mut r = $r
 	# Six times over about two minutes; any other failure is the answer.
 	for wait in [2sec 4sec 8sec 16sec 32sec 60sec] {
 		if $r.exit_code == 0 or not ($r.stderr =~ $offline) { break }
-		print -e $"gcp: (stamp) gcloud ($args | first 3 | str join ' ') did not reach Google; again in ($wait)"
+		print -e $"gcp: (stamp) gcloud ($args | first 3 | each {|a| $a | into string } | str join ' ') did not reach Google; again in ($wait)"
 		sleep $wait
 		$r = ($input | ^gcloud --quiet ...$args | complete)
 	}
