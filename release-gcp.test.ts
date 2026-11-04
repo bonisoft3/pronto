@@ -139,6 +139,19 @@ Deno.test("minScale above maxScale is refused, and a preview stays at 0 and 1", 
   assert(!electric.env.some((e: { name: string }) => e.name === "CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN"));
 });
 
+// Going back one revision (release.nu) compares the schema each was released with; a pinned
+// traffic is sent all to the new revision by the next release.
+Deno.test("every release sends all traffic to its revision, labelled with its schema", async () => {
+  const r = await built(release(), "service");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.spec.traffic, [{ percent: 100, latestRevision: true }]);
+  // No migrations here: the schema is the database image's.
+  assertEquals(r.value.spec.template.metadata.labels["pronto-schema"], "4".repeat(40));
+  const withSchema = await built(release().replace("image: pushed: ", "image: pushed: {schema: {tag: \"latest\", digest: \"" + digest("9") + "\"}} & ").replace("database: tokenRoles", "migrate: env: {}, database: tokenRoles"), "service");
+  assertEquals(withSchema.success, true, withSchema.stderr);
+  assertEquals(withSchema.value.spec.template.metadata.labels["pronto-schema"], "9".repeat(40), "an app with migrations is labelled with its schema image");
+});
+
 Deno.test("initdb builds the schema once, and its re-runnable steps every release, over the Cloud SQL socket", async () => {
   const r = await built(release(), "job");
   assertEquals(r.success, true, r.stderr);

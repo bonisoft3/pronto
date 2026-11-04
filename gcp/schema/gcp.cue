@@ -394,7 +394,17 @@ import (
 				}
 			}
 		}
+		// Every release sends all traffic to the revision it deploys, back from wherever a
+		// rollback pinned it.
+		spec: traffic: [{percent: 100, latestRevision: true}]
 		spec: template: {
+			// The schema a revision was released with, its schema image's digest (the
+			// database's, where the app has no migrations): going back one revision
+			// goes only to one with the same schema.
+			let schemaImage = [if R.migrate != _|_ {"schema"}, "database"][0]
+			if R.image.pushed[schemaImage] != _|_ {
+				metadata: labels: "pronto-schema": strings.SliceRunes(strings.TrimPrefix(R.image.pushed[schemaImage].digest, "sha256:"), 0, 40)
+			}
 			metadata: annotations: {
 				"autoscaling.knative.dev/minScale": [if R.preview != _|_ {"0"}, "\(R.minScale)"][0]
 				// electric is one instance unless maxScale says more, each then with a replica
@@ -619,6 +629,7 @@ import (
 				labels: "cloud.googleapis.com/location":   R.region
 				annotations: "run.googleapis.com/ingress": "all"
 			}
+			spec: traffic: [{percent: 100, latestRevision: true}]
 			spec: template: {
 				metadata: annotations: {
 					"autoscaling.knative.dev/minScale": "\(c.apart.minScale)"
