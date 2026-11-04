@@ -108,6 +108,7 @@ export function upgradeScript(o: {
 # The stack's database, from the address it gives this process (a libpq URL).
 # An app with no pgroll migrations has no migrate step, so no address: the database process's own.
 : "\${DATABASE_URL:=postgres://\${POSTGRES_USER:-postgres}:\${POSTGRES_PASSWORD:-postgres}@127.0.0.1:\${PGPORT:-0}/\${POSTGRES_DB:-postgres}?sslmode=disable}"
+export DATABASE_URL
 url=\${DATABASE_URL#postgres://}; cred=\${url%%@*}; rest=\${url#*@}; hostport=\${rest%%/*}; db=\${rest#*/}
 export PGUSER=\${cred%%:*} PGPASSWORD=\${cred#*:} PGHOST=\${hostport%%:*} PGPORT=\${hostport##*:} PGDATABASE=\${db%%\\?*}
 export POSTGRES_USER=$PGUSER POSTGRES_DB=$PGDATABASE
