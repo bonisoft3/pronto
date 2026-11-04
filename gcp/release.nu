@@ -333,19 +333,54 @@ def ensure-clock [clock: record, token: string, project: string, region: string]
 }
 
 # A preview stopped: what runs against its database (its service, jobs and
-# clock), so the database is no one's.
-def stop-preview [plan: record] {
+# clock), so the database is no one's. Its services are kept at no instance, not deleted
+# (--remove deletes them): a service made again is granted allUsers again, and for minutes
+# after that grant Cloud Run refuses a request with a bearer token Google did not sign at
+# random, so a preview's renderer and players were refused while its tests ran. Kept, the
+# grant spread long ago; the next deploy sets each back to automatic scaling after its
+# replace (scale-automatic).
+export def stop-preview [plan: record, --remove] {
 	let p = $plan.project
 	let r = $plan.region
 	let n = $plan.names
-	if (exists run services describe $plan.service --region $r --project $p) { gc run services delete $plan.service --region $r --project $p | ignore }
-	for svc in ($n.sidecarServices? | default {} | values) {
-		if (exists run services describe $svc --region $r --project $p) { gc run services delete $svc --region $r --project $p | ignore }
+	for svc in ([$plan.service] | append ($n.sidecarServices? | default {} | values)) {
+		if not (exists run services describe $svc --region $r --project $p) { continue }
+		if $remove { gc run services delete $svc --region $r --project $p | ignore; continue }
+		# A revision a tag alone reaches (the `next` a failed go-live leaves) runs on at no instance.
+		# Clearing them is said and passed when it fails: on a service whose latest revision never
+		# became healthy it routes there again and fails the same way, which stopped the release
+		# before it could deploy that service afresh. No instance is what frees the database, so
+		# that stop must hold: a service it fails on (an update waits for a revision that never
+		# became healthy, as clearing the tags does) is deleted instead, and made again by the next
+		# deploy.
+		try { gc run services update-traffic $svc --clear-tags --region $r --project $p | ignore } catch {|e| print -e $"gcp: (stamp) ($svc)'s tags stay: ($e.msg | lines | last)" }
+		try { gc run services update $svc --scaling 0 --region $r --project $p | ignore } catch {|e|
+			print -e $"gcp: (stamp) ($svc) deleted, as it could not be stopped: ($e.msg | lines | last)"
+			gc run services delete $svc --region $r --project $p | ignore
+		}
 	}
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
 	}
-	if (exists scheduler jobs describe $n.clock --location $r --project $p) { gc scheduler jobs delete $n.clock --location $r --project $p | ignore }
+	stop-preview-clock $plan
+}
+
+# A preview's clock deleted: the one thing of a preview that acts on its own, with no one calling it.
+def stop-preview-clock [plan: record] {
+	let n = $plan.names
+	if (exists scheduler jobs describe $n.clock --location $plan.region --project $plan.project) { gc scheduler jobs delete $n.clock --location $plan.region --project $plan.project | ignore }
+}
+
+# A service back on automatic scaling. A stopped preview's services are kept at no instance
+# (stop-preview), and `services replace` does not always undo that: a door and two sidecars stayed
+# manual at 0 under their new YAML, so the door had no instance, its renderer never synced and
+# timed out its startup probe. It runs before the replace as well as after: set only after, the
+# door took some 40 s to get an instance, and the renderer, made meanwhile, read the shell through
+# it, met a 500 and exited until Cloud Run gave it up.
+def scale-automatic [service: string, project: string, region: string] {
+	if not (exists run services describe $service --region $region --project $project) { return }
+	let mode = (gc run services describe $service --region $region --project $project --format "value(metadata.annotations['run.googleapis.com/scalingMode'])" | str trim)
+	if $mode == "manual" { gc run services update $service --scaling auto --region $region --project $project | ignore }
 }
 
 # A preview to deploy afresh on its instance as it stands: stopped, and its
@@ -361,7 +396,16 @@ def empty-preview [plan: record] {
 	if not (exists sql instances describe $n.instance --project $plan.project) { return }
 	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
 		print $"gcp: (stamp) emptying the preview ($plan.preview): dropping its database on ($n.instance)"
-		gc sql databases delete $n.database --instance $n.instance --project $plan.project | ignore
+		# A service at no instance still finishes the requests it had, so a connection of one may
+		# outlive stop-preview: the drop is asked again, about two minutes in all, until none is left.
+		mut left = 6
+		loop {
+			let r = (do { ^gcloud --quiet sql databases delete $n.database --instance $n.instance --project $plan.project } | complete)
+			if $r.exit_code == 0 or not (exists sql databases describe $n.database --instance $n.instance --project $plan.project) { break }
+			if $left == 0 { error make {msg: $"gcloud sql databases delete ($n.database): ($r.stderr | str trim)"} }
+			$left -= 1
+			sleep 20sec
+		}
 		gc sql databases create $n.database --instance $n.instance --project $plan.project | ignore
 	}
 }
@@ -371,7 +415,7 @@ def empty-preview [plan: record] {
 def delete-preview [plan: record] {
 	let p = $plan.project
 	let n = $plan.names
-	stop-preview $plan
+	stop-preview $plan --remove
 	if (exists sql instances describe $n.instance --project $p) { gc sql instances delete $n.instance --project $p | ignore }
 	for secret in ($n.secrets | values | append (setup-marker $plan)) {
 		if (exists secrets describe $secret --project $p) { gc secrets delete $secret --project $p | ignore }
@@ -680,7 +724,9 @@ export def go-live [staged: record]: nothing -> record {
 		try {
 			if $t == "service" {
 				print $"gcp: (stamp) deploying ($plan.service)"
+				scale-automatic $plan.service $p $r
 				gc run services replace dist/gcp/service.held.yaml --region $r --project $p | ignore
+				scale-automatic $plan.service $p $r
 			} else if (exists run jobs describe $plan.names.migrateJob --region $r --project $p) {
 				gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore
 			}
@@ -730,7 +776,9 @@ export def go-live [staged: record]: nothing -> record {
 			} else {
 				let svc = ($plan.names.sidecarServices | get $t.sidecar)
 				print $"gcp: (stamp) ($t.sidecar) apart \(($svc)\)"
+				scale-automatic $svc $p $r
 				gc run services replace $"dist/gcp/sidecar-($t.sidecar).yaml" --region $r --project $p | ignore
+				scale-automatic $svc $p $r
 				grant-public $svc $p $r
 			}
 			null

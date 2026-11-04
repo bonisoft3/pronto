@@ -8,7 +8,7 @@
 const gcp_dir = path self .
 
 use std/assert
-use release.nu [hold-traffic poll-health preflight roll-back invoker_probe]
+use release.nu [hold-traffic poll-health preflight roll-back invoker_probe stop-preview]
 
 # A directory holding the fakes and the state they share.
 def fakes [service_exists: bool, serving: string, candidate_says: string, public_says: string]: nothing -> string {
@@ -24,6 +24,7 @@ d="$(dirname "$0")/.."
 echo "$*" >> "$d/gcloud.log"
 echo "gcloud $*" >> "$d/calls.log"
 case "$*" in
+  *"scalingMode"*) [ -f "$d/manual" ] && cat "$d/manual"; true ;;
   *"services describe"*)
     [ -f "$d/exists" ] || { echo "NOT_FOUND: not found" >&2; exit 1; }
     # The door's own traffic is kept in a file; a sidecar apart serves its newest revision.
@@ -46,6 +47,8 @@ case "$*" in
     f="$(echo "$*" | sed 's/.*replace \([^ ]*\) .*/\1/')"
     if grep -Eq "name: (PORT|BAD_RESERVED)$" "$f"; then echo "ERROR: (gcloud.run.services.replace) spec.template.spec.containers[0].env: The following reserved env names were provided: PORT, BAD_RESERVED." >&2; exit 1; fi ;;
   *"services replace"*) touch "$d/exists" ;;
+  *"--clear-tags"*) if [ -f "$d/tags_fail" ]; then echo "ERROR: latest revision never became healthy" >&2; exit 1; fi ;;
+  *"--scaling 0"*) if [ -f "$d/stop_fails" ]; then echo "ERROR: cannot update svc" >&2; exit 1; fi ;;
   *"update-traffic"*)
     # Only the door's own traffic is kept; a sidecar's is logged.
     case "$*" in *"update-traffic svc "*"--to-revisions "*) echo "$*" | sed "s/.*--to-revisions \([^= ]*\)=.*/\1/" > "$d/serving" ;; esac ;;
@@ -107,6 +110,10 @@ def main [] {
 	test_golive_does_not_go_back_past_a_migration
 	test_rollback_sends_the_service_and_its_sidecars_back_one_revision
 	test_rollback_refuses_past_a_migration
+	test_golive_sets_a_stopped_services_scaling_back_to_automatic_around_the_replace
+	test_stop_preview_keeps_its_services_at_no_instance
+	test_stop_preview_says_when_tags_stay_and_deletes_a_service_it_cannot_stop
+	test_stop_preview_remove_deletes
 	test_preflight_dry_runs_every_service_over_placeholder_digests
 	test_preflight_names_the_file_and_clouds_run_message
 	test_preflight_passes_a_sidecar_apart_whose_compose_sets_port
@@ -406,6 +413,76 @@ def test_rollback_refuses_past_a_migration [] {
 	assert ($res.exit_code != 0)
 	assert ($res.stderr | str contains "another schema")
 	assert (not (log-of $d | str contains "update-traffic"))
+	rm -r $d
+}
+
+# A stopped preview's services are manual at 0; a replace does not always undo that.
+def test_golive_sets_a_stopped_services_scaling_back_to_automatic_around_the_replace [] {
+	print "test go-live sets manual scaling back to automatic before and after each replace..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	"manual" | save -f ($d | path join manual)
+	let side = {sidecarServicesYaml: {render: "x"}, names: {job: "j", migrateJob: "mj", secrets: {}, sidecarServices: {render: "svc-render"}}}
+	let res = (golive $d {} $side)
+	assert equal $res.exit_code 0 $res.stderr
+	let lines = (log-of $d | lines)
+	for s in [{svc: "svc", file: "dist/gcp/service.held.yaml"}, {svc: "svc-render", file: "dist/gcp/sidecar-render.yaml"}] {
+		let autos = ($lines | enumerate | where {|l| $l.item | str contains $"services update ($s.svc) --scaling auto" } | get index)
+		let replace = ($lines | enumerate | where {|l| $l.item | str contains $"services replace ($s.file)" } | first | get index)
+		assert equal ($autos | length) 2
+		assert ($autos.0 < $replace and $replace < $autos.1) $"($s.svc): automatic before and after the replace"
+	}
+	rm -r $d
+}
+
+def stop-run [d: string, flags: list<string> = []]: nothing -> record {
+	let plan = {project: "p", region: "r", service: "svc", names: {job: "j", migrateJob: "mj", clock: "clk", sidecarServices: {render: "svc-render"}}}
+	let script = $"$env.GCP_T0 = \(date now\); use ($gcp_dir | path join release.nu) [stop-preview]; stop-preview ($plan | to nuon) ($flags | str join ' ')"
+	with-fakes $d { do { ^$nu.current-exe --no-config-file -c $script } | complete }
+}
+
+# Deleted and made again, a service is granted allUsers again and Cloud Run refuses bearer
+# tokens at random for minutes after: a stopped preview keeps its services, at no instance.
+def test_stop_preview_keeps_its_services_at_no_instance [] {
+	print "test stop-preview scales a preview's services to no instance and deletes none..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 ok")
+	let res = (stop-run $d)
+	assert equal $res.exit_code 0 $res.stderr
+	let log = (log-of $d)
+	assert ($log | str contains "services update svc --scaling 0")
+	assert ($log | str contains "services update svc-render --scaling 0")
+	assert (not ($log | str contains "services delete"))
+	assert ($log | str contains "jobs delete j")
+	assert ($log | str contains "scheduler jobs delete clk")
+	rm -r $d
+}
+
+def test_stop_preview_says_when_tags_stay_and_deletes_a_service_it_cannot_stop [] {
+	print "test stop-preview passes tags it cannot clear, and deletes a service it cannot stop..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 ok")
+	"" | save -f ($d | path join tags_fail)
+	let res = (stop-run $d)
+	assert equal $res.exit_code 0 $res.stderr
+	assert ($res.stderr | str contains "svc's tags stay")
+	assert (log-of $d | str contains "services update svc --scaling 0")
+	rm -r $d
+	let d = (fakes true "svc-00001-old" "200 ok" "200 ok")
+	"" | save -f ($d | path join stop_fails)
+	let res = (stop-run $d)
+	assert equal $res.exit_code 0 $res.stderr
+	assert ($res.stderr | str contains "svc deleted, as it could not be stopped")
+	assert (log-of $d | str contains "services delete svc --region r --project p")
+	rm -r $d
+}
+
+def test_stop_preview_remove_deletes [] {
+	print "test stop-preview --remove deletes the services..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 ok")
+	let res = (stop-run $d ["--remove"])
+	assert equal $res.exit_code 0 $res.stderr
+	let log = (log-of $d)
+	assert ($log | str contains "services delete svc --region r --project p")
+	assert ($log | str contains "services delete svc-render --region r --project p")
+	assert (not ($log | str contains "--scaling 0"))
 	rm -r $d
 }
 
