@@ -795,8 +795,9 @@ export def go-live [staged: record]: nothing -> record {
 	# is made: a preview's door just back on automatic scaling had no instance for a minute, Cloud
 	# Run answered its address with a 500 meanwhile, and the renderer made then exited on it until
 	# its revision was given up (Bonk Chess, 2026-11-04 02:48 and 03:10 BRT). Waited for, not
-	# required: the go-live below holds the release to its own address.
-	if not ($plan.iap? | default false) {
+	# required: the go-live below holds the release to its own address. Only a door that served
+	# before: a new one has no grant to allUsers until the block below makes it.
+	if $before != null and not ($plan.iap? | default false) {
 		let got = (poll-health $"https://($plan.service)-($number).($r).run.app/health" ["200"] null --bearer $invoker_probe)
 		if not $got.ok { print -e $"gcp: (stamp) ($plan.service) did not answer before its sidecars were made: ($got.last)" }
 	}
