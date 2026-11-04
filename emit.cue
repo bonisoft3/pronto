@@ -18,6 +18,7 @@ package pronto
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"list"
@@ -208,12 +209,10 @@ _sqlType: {
 
 // The column contract owned by a cluster chart; reducers have no state field.
 #machineColumn: C={
-	columns: [string]: [string]: _
+	columns!: #machineColumns
 	entityName: string
-	entityTable: string
 	fieldName: string
 	if C.columns[C.entityName][C.fieldName] != _|_ {C.columns[C.entityName][C.fieldName]}
-	if C.entityTable != C.entityName if C.columns[C.entityTable][C.fieldName] != _|_ {C.columns[C.entityTable][C.fieldName]}
 }
 
 // The server entities in the order 005 creates their tables: each after
@@ -257,12 +256,15 @@ _sqlType: {
 	][0]
 }
 
+// #App._machineColumns: entity name, then field, then the chart's column.
+#machineColumns: [string]: [string]: {initial: string, states: [...string]}
+
 #tableSql: T={
 	e: #Entity
-	columns: [string]: [string]: _
+	columns!: #machineColumns
 	_lines: list.Concat([
 		[for fld in T.e.fields {
-			let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+			let column = #machineColumn & {columns: T.columns, entityName: T.e.name, fieldName: fld.name}
 			"  " + (#colSql & {
 				f: fld
 				if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
@@ -320,7 +322,7 @@ _sqlType: {
 	// database to the program's columns. A required field with no default
 	// cannot be added to a table holding rows, and says so then.
 	_added: [for fld in T.e.fields if !fld.pk {
-		let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		let column = #machineColumn & {columns: T.columns, entityName: T.e.name, fieldName: fld.name}
 		"ALTER TABLE \(T.e.table) ADD COLUMN IF NOT EXISTS " + (#colSql & {
 			f: fld
 			if fld.default == _|_ if column.initial != _|_ {f: default: (#sqlLit & {v: column.initial}).out}
@@ -338,7 +340,7 @@ _sqlType: {
 	// again as the program says it, under the name Postgres gives a column's
 	// own (<table>_<field>_check), NOT VALID so rows written before are kept.
 	_reasserted: [for fld in T.e.fields if !fld.pk
-		let column = #machineColumn & {columns: T.columns, entityName: T.e.name, entityTable: T.e.table, fieldName: fld.name}
+		let column = #machineColumn & {columns: T.columns, entityName: T.e.name, fieldName: fld.name}
 		for check in [
 			if T.e.cel.checks[fld.name] != _|_ {T.e.cel.checks[fld.name]},
 			if fld.cel == _|_ if column.states != _|_ {"\"\(fld.name)\" IN (" + strings.Join([for n in column.states {(#sqlLit & {v: n}).out}], ", ") + ")"},
@@ -1427,7 +1429,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	code: _
 	out: {
 		for n, _ in S.code.state.pipelines {(n): "pipeline"}
-		for n, _ in S.code.state.drains {(n): "drain"}
+		for n, d in S.code.state.drains if d.stream {(n): "drain"}
 	}
 }
 
@@ -1506,7 +1508,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if f.pk {pk: true}
 				if f.ref != _|_ {ref: f.ref}
 				if f.unique != _|_ {unique: f.unique}
-				let column = #machineColumn & {entityName: e.name, entityTable: e.table, fieldName: f.name, columns: S.code._machineColumns}
+				let column = #machineColumn & {entityName: e.name, fieldName: f.name, columns: S.code._machineColumns}
 				if f.default != _|_ {
 					defaulted: true
 					let literal = #literalDefault & {sql: f.default, type: f.type}
@@ -1724,6 +1726,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			seed: S._localSeeds
 		}
 
+		// What a page's bundle inlines.
+		if S.code.capabilities.seedBlobs != _|_ {seedBlobs: S.code.capabilities.seedBlobs}
 		if len([for h in S.code.capabilities.hatches if h.kind == "host-dom" {h}]) > 0 {
 			hostDom: {for hn, h in S.code.capabilities.hatches if h.kind == "host-dom" {(hn): {src: h.src, note: h.note}}}
 		}
@@ -1769,9 +1773,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							role: "presenter"
 							scripts: [for u in v.scripts {url: u, integrity: S.presenter.scripts[u]}]
 							// What it may read through the seat: its own files, and
-							// the objects a blob seed ships by content address.
+							// the app's content-addressed assets.
 							files: v.files
-							seed:  S.code.capabilities.blobSeed != _|_
+							seed:  S.code.capabilities.seedAssets != _|_
 						}
 						src: v.src
 					}
@@ -1805,6 +1809,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 		if S.code.surface.endowments != _|_ {
 			endowments: S.code.surface.endowments
+		}
+		if S.code.capabilities.ai != _|_ {
+			ai: S.code.capabilities.ai
 		}
 		"migrations": S.migrations
 		pipelines: [for _, p in S.code.state.pipelines {
@@ -1890,7 +1897,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
-		if M.code.state.hybrids != _|_ {"services/database/migrations/016_mecha_actors.sql"},
+		if M.code.state.hybrids != _|_ if len([for r in M.raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {"services/database/migrations/016_mecha_actors.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/801_schedule_seed.sql"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
@@ -1952,10 +1959,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					ssrOrigin: D.code.meta.ssrOrigin
 				}
 				// What only the cluster's streams and computations write lands in
-				// live tables, which the page ships as they stood at bundling.
+				// live tables, which the page ships as they stood at bundling. A
+				// private table's rows are a person's, and no person ships with a
+				// release: the bundling cluster's own guest would name an app_user
+				// the page never has.
 				if len(D.code.state.pipelines)+len(D.code.state.drains)+len(D.code.state.computations) > 0 {
 					derived: {
-						tables: list.SortStrings([for _, e in D.code.state.entities if e.durability == "live" {e.table}])
+						tables: list.SortStrings([for _, e in D.code.state.entities if e.durability == "live" let private = [if e.access != _|_ if e.access.scope == "private" {true}] if len(private) == 0 {e.table}])
 						streams: list.SortStrings([for n, _ in (#streams & {code: D.code}).out {"\(D.code.meta.name)-\(n)"}])
 					}
 				}
@@ -2205,17 +2215,19 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	statics: [...mecha.#Static]
 
 	// The review ladder's artifacts, served beside the app by caddy's catch-all
-	// /srv root. One directory is load-bearing, not tidiness: brief.html links
-	// `ir.html`, its wikilinks render as `ir.html#Id`, and its transclusions
-	// `fetch` their target by bare relative path — all three resolve only if the
-	// four files are siblings. Served, the transclusion inlines instead of
-	// degrading to the boxed link it shows on file://.
+	// /srv root. One directory is load-bearing, not tidiness: journal.html and
+	// brief.html link `ir.html`, wikilinks render as `ir.html#Id`, brief.html
+	// `fetch`es brief.md and the ir its transclusions, each by bare relative
+	// path — all of it resolves only if the files are siblings. Served, the
+	// transclusion inlines instead of degrading to the boxed link it shows on
+	// file://.
 	//
 	// These are caddy statics, so they sit outside the terminal's auth gate by
 	// construction. Intended: reviewing a design doc is not using the app, and
 	// requiring a sign-in to read one would put the ladder behind the thing it
 	// exists to review.
-	_ladder: [for f in ["brief.html", "ir.html", "ir/card.css", "acceptance.md", "DESIGN.md"] {
+	_ladderExtra: [if D.code.meta.ladder != _|_ for f in D.code.meta.ladder {f}]
+	_ladder: [for f in list.Concat([["brief.md", "brief.html", "journal.html", "ir.html", "ir/card.css", "acceptance.md", "DESIGN.md"], _ladderExtra]) {
 		file:   f
 		target: "/srv/docs/\(f)"
 		watch:  true
@@ -2290,6 +2302,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				signIn: (#signIn & {auth: D.code.capabilities.auth}).out
 			}
 			blobs: D.code.capabilities.blobs
+			if D.code.capabilities.ai != _|_ {
+				ai: D.code.capabilities.ai
+			}
 			server: (#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out
 		}
 		state: {
@@ -2312,6 +2327,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				name: n
 				if x.sink.origin != _|_ {origin: x.sink.origin}
 				if x.sink.bridge != _|_ {bridge: x.sink.bridge}
+				if x.sink.ai != _|_ {
+					ai:   x.sink.ai
+					tier: x.sink.tier
+				}
 				// The credential's variable is required of the environment with
 				// the handler's secrets, and handed to the airlock alone.
 				_secrets: [for s, _ in {for s in list.Concat([[if x.secrets != _|_ {x.secrets}, []][0], [if x.sink.credential != _|_ {[x.sink.credential.secret]}, []][0]]) {(s): true}} {s}]
@@ -2346,6 +2365,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					from: name: omnishell.#Address.image
 					// Where bayt copies the srcs, each at its path in the app.
 					workdir: "/app"
+					finalCopy: [omnishell.#Address.tree, omnishell.#Address.scripts]
 					copy: [{from: {name: omnishell.#RuntimeImage}, srcs: ["/"], dst: omnishell.#Address.home}]
 					let place = [for s in list.Concat([runtime, own]) {
 						let source = [
@@ -2359,11 +2379,35 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						"install -D -m 644 '\(source)' '\(omnishell.#Address.tree)\(url)'"
 					}]
 					let ice = [if _iceServers != null {" --ice-servers '\(json.Marshal(_iceServers))'"}, ""][0]
-					epilogue: ["RUN set -e; \(strings.Join(place, "; ")); \(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)"]
+					let separator = [if len(strings.Join(place, "; ")) > 60000 {"; \\\n  "}, "; "][0]
+					epilogue: ["RUN set -e; \(strings.Join(place, separator)); \(omnishell.#Address.cache) && \(omnishell.#Address.run)\(ice)"]
 				}
 				compose: {}
 			}
 			surface: targets: served: _served
+			// The seed's objects, into the blob storage a row names them in.
+			if D.code.capabilities.seedBlobs != _|_ {
+				let dir = D.code.capabilities.seedBlobs.dir
+				let load = "for f in /seed/*; do case \"$f\" in *.webp) t=image/webp;; *.png) t=image/png;; *.jpg) t=image/jpeg;; *) echo \"no type for $f\"; exit 1;; esac; curl -fsS -o /dev/null -X PUT -H \"content-type: $t\" --data-binary \"@$f\" \"http://rclone-s3:3900/mecha-objects/seed/${f##*/}\" || exit 1; done"
+				surface: targets: {
+					"seed-blobs": {
+						visibility: "internal"
+						activate:   ""
+						cmd: "builtin": null
+						srcs: globs: ["\(dir)/*"]
+						dockerfile: {
+							from: name: "alpine/curl@sha256:5bd4985f3daa6d1ca87619802190afc24c0ccd410b1f123de5afc8e891b5fc71"
+							copy: [{srcs: ["\(dir)/"], dst: "/seed/"}]
+							epilogue: ["ENTRYPOINT \(json.Marshal(["/bin/sh", "-c", load]))"]
+						}
+						compose: {
+							depends_on: "rclone-s3": {condition: "service_healthy"}
+							restart: "no"
+						}
+					}
+					launch: compose: depends_on: "seed-blobs": {condition: "service_completed_successfully"}
+				}
+			}
 			meta: served: {ref: ":served", tree: omnishell.#Address.tree, scripts: omnishell.#Address.scripts}
 			// The tree a container target's door serves: the door's, with the
 			// target's ICE servers. release@docker's image copies it
@@ -2580,7 +2624,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// The pages target is refused rather than released broken.
 	_pagesBundle: {
 		if list.Contains(E.code.meta.targets, "pages") {
-			units: true & (len(E.code.capabilities.vendored) == 0)
+			units: true & (len([for _, v in E.code.capabilities.vendored if v.isolation != "agent" {v}]) == 0)
 			shared: true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
 			providers: true & (E.code.capabilities.auth == _|_ || E.code.capabilities.auth.providers == _|_ || len(E.code.capabilities.auth.providers) == 0)
@@ -2897,6 +2941,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		cluster: capabilities: signIn: (#signIn & {auth: E.code.capabilities.auth}).out
 	}
 	cluster: capabilities: blobs: E.code.capabilities.blobs
+	if E.code.capabilities.ai != _|_ {
+		cluster: capabilities: ai: E.code.capabilities.ai
+	}
 	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
@@ -2984,8 +3031,120 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				let kind = strings.TrimSuffix(strings.Split(part, " ")[0], "-src")
 				let sources = list.SortStrings([if _resourceSources[kind] != _|_ for src, _ in _resourceSources[kind] {src}])
 				strings.Join(list.Concat([[part], sources]), " ")
-			}], "; ")}][0]
+			}], "; ")
+			}][0]
 	}, ""][0]
+	// The ladder's pages run no app code and sit outside the terminal as they
+	// sit outside the auth gate, so they answer with a policy of their own:
+	// no Trusted Types, no eval, 'self' plus the pinned libraries below and
+	// the one inline script brief.html carries, admitted by its hash.
+	// brief.html is a fixed page: it fetches brief.md and renders it in the
+	// browser with marked, pinned by Subresource Integrity against the file
+	// the lock holds (deno.lock's marked@16.4.2) — the admission SPEC gives
+	// ir.html's mermaid — so no app carries the library and a brief edited
+	// by hand is current on reload.
+	_ladderScripts: {
+		"https://cdn.jsdelivr.net/npm/marked@16.4.2/lib/marked.umd.js": "sha384-SIgPzdreGEWG7eadwygSU+kb05fTwy7pw+JvOJ2VwHUqxs9fwzuRzHol8lzPDkRl"
+	}
+	_ladderPolicy: strings.Join([
+		"default-src 'self'",
+		"base-uri 'self'",
+		"object-src 'none'",
+		"script-src 'self' \(strings.Join(list.SortStrings([for u, _ in _ladderScripts {u}]), " ")) 'sha256-\(base64.Encode(null, sha256.Sum256(_briefScript)))'",
+		"script-src-attr 'none'",
+		"style-src 'self' 'unsafe-inline'",
+		"img-src 'self' data: blob:",
+		"font-src 'self' data:",
+		"connect-src 'self'",
+		"form-action 'self'",
+		"frame-ancestors 'self'",
+	], "; ")
+	// SPEC's brief.md: the frontmatter is the harness and is dropped,
+	// `![[path.md]]` inlines the fragment it names (served beside the brief,
+	// or declared in meta.ladder), `[[Id]]` is the link to ir.html#Id, and the
+	// first heading titles the page. A fetch that fails is shown, not hidden.
+	_briefScript: #"""
+		const article = document.getElementById("brief");
+		const fail = (message) => { article.textContent = message; throw new Error(message); };
+		const read = async (rel) => {
+		  const r = await fetch(rel, { cache: "no-cache" });
+		  if (!r.ok) fail(`${rel}: ${r.status} ${r.statusText}`);
+		  return r.text();
+		};
+		const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+		const TRANSCLUSION = /^!\[\[([^\]\n]+)\]\][ \t]*$/gm;
+		const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+		async function transclude(source, stack) {
+		  const parts = [];
+		  let last = 0;
+		  for (const m of source.matchAll(TRANSCLUSION)) {
+		    const rel = m[1];
+		    if (stack.includes(rel)) fail(`${rel}: transcludes itself through ${stack.join(" → ")}`);
+		    parts.push(source.slice(last, m.index), await transclude((await read(rel)).replace(FRONTMATTER, ""), [...stack, rel]));
+		    last = m.index + m[0].length;
+		  }
+		  parts.push(source.slice(last));
+		  return parts.join("");
+		}
+		const parser = new marked.Marked({
+		  extensions: [{
+		    name: "wikilink",
+		    level: "inline",
+		    start: (src) => src.indexOf("[["),
+		    tokenizer(src) {
+		      const m = /^\[\[([^\]\n|]+)\]\]/.exec(src);
+		      return m === null ? undefined : { type: "wikilink", raw: m[0], id: m[1] };
+		    },
+		    renderer: (token) => `<a href="ir.html#${escape(token.id)}">${escape(token.id)}</a>`,
+		  }],
+		});
+		const prose = await transclude((await read("brief.md")).replace(FRONTMATTER, ""), ["brief.md"]);
+		article.innerHTML = parser.parse(prose);
+		const heading = article.querySelector("h1");
+		if (heading !== null) document.title = heading.textContent;
+		"""#
+	_briefHtml: """
+		<!-- generated by pronto — do not edit; it renders brief.md, edit that -->
+		<!doctype html>
+		<html>
+		<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width,initial-scale=1">
+		<title>Brief</title>
+		<style>
+		  :root { color-scheme: light dark; --bg: #faf9f6; --ink: #202422; --muted: #565e59; --accent: #1d6a50; --line: #dedbd2; }
+		  @media (prefers-color-scheme: dark) { :root { --bg: #16181a; --ink: #e6e4df; --muted: #a3a8a4; --accent: #7fd1b0; --line: #2d3134; } }
+		  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 system-ui, sans-serif; }
+		  main { max-width: 760px; margin: auto; padding: 48px 24px; }
+		  nav { display: flex; gap: 16px; font-size: 12px; text-transform: uppercase; letter-spacing: .14em; font-weight: 700; margin-bottom: 32px; }
+		  nav span { color: var(--accent); }
+		  nav a { color: var(--muted); margin-left: auto; }
+		  nav a + a { margin-left: 0; }
+		  h1, h2, h3 { font-family: Georgia, serif; line-height: 1.15; margin: 1.2em 0 .4em; }
+		  h1 { font-size: 40px; margin-top: 0; }
+		  h2 { font-size: 26px; }
+		  h3 { font-size: 19px; }
+		  a { color: var(--accent); }
+		  code { font-size: .92em; }
+		  pre { overflow-x: auto; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; }
+		  img { max-width: 100%; height: auto; }
+		  table { border-collapse: collapse; }
+		  th, td { border-bottom: 1px solid var(--line); padding: 6px 12px; text-align: left; vertical-align: top; }
+		  blockquote { margin: 0; padding-left: 16px; border-left: 3px solid var(--line); color: var(--muted); }
+		  @media (max-width: 700px) { h1 { font-size: 30px; } }
+		</style>
+		\(strings.Join([for u, sri in _ladderScripts {"<script src=\"\(u)\" integrity=\"\(sri)\" crossorigin=\"anonymous\" defer></script>"}], "\n"))
+		</head>
+		<body>
+		<main>
+		<nav><span>Brief</span><a href="journal.html">Journal</a><a href="ir.html">IR</a></nav>
+		<article id="brief"></article>
+		</main>
+		<script type="module">\(_briefScript)</script>
+		</body>
+		</html>
+
+		"""
 	_envelope: #envelopePlan & {
 		meta:         E.code.meta
 		surface:      E.code.surface
@@ -2998,8 +3157,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			let route = [if scr != _|_ if scr.route != _|_ { scr.route }, (r.screen)][0]
 			(r.screen): len([
 				for ex in _envelope.sitemap.exclude
-				if route == ex || (ex != "/" && strings.HasPrefix(route, strings.TrimSuffix(ex, "/") + "/"))
-				{ ex }
+				if route == ex || (ex != "/" && strings.HasPrefix(route, strings.TrimSuffix(ex, "/")+"/")) {ex},
 			]) > 0
 		}
 	}
@@ -3014,10 +3172,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					[
 						if "\(scr.priority)" == "1" { "1.0" },
 						if "\(scr.priority)" == "0" { "0.0" },
-						"\(scr.priority)"
+						"\(scr.priority)",
 					][0]
 				},
-				""
+				"",
 			][0]
 			let inferredPriority = [if isRoot { "1.0" }, if hasReads { "0.8" }, "0.6"][0]
 			let priority = [if authoredPriority != "" { authoredPriority }, inferredPriority][0]
@@ -3135,6 +3293,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				hatches: E.code.capabilities.hatches
 				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
 				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
+				// Each Cortex chart, and the Mecha machines its signals name, for a walk
+				// to cover its intents and signals.
+				if E.code.state.cortex != _|_ {
+					cortex: {for n, c in E.code.state.cortex {(n): c.config}}
+					machines: {if E.code.state.machines != _|_ for n, m in E.code.state.machines {(n): {entity: m.entity, field: m.field, initial: m.initial, states: m.states}}}
+				}
 			}
 		}
 		"schema/entities.proto": {
@@ -3371,7 +3535,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			for path, local in E._composedHandlers {
 				"\(path)": {format: "local-handler", data: local}
 			}
-			if E.code.state.hybrids != _|_ {
+			if E.code.state.hybrids != _|_ if len([for r in E._raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {
 				// Each machine's surface is entities the app declares; the writer
 				// checks them against the machine before compiling.
 				"services/database/migrations/016_mecha_actors.sql": {format: "hybrid-sql", data: {
@@ -3439,9 +3603,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							type:    "bindings.http"
 							version: "v1"
 							metadata: [
-								// A bridge is the cluster's own, reached in plain HTTP on the
-								// airlock's outbound network.
-								{name: "url", value: [if i.effect.sink.bridge != _|_ {"http://bridge-\(i.effect.sink.bridge):\(mecha.#BridgePort)"}, i.effect.sink.origin][0]},
+								// Cluster-owned bridges and the AI gateway use plain HTTP.
+								{name: "url", value: [
+									if i.effect.sink.bridge != _|_ {"http://\(E.code.state.bridges[i.effect.sink.bridge].container):\(E.code.state.bridges[i.effect.sink.bridge].port)"},
+									if i.effect.sink.ai != _|_ {"http://tsbifrost:\(mecha.#TsBifrostPort)"},
+									i.effect.sink.origin,
+								][0]},
 								// The sink's own status comes back to the handler, a refusal
 								// being an answer rather than a binding error.
 								{name: "errorIfNot2XX", value: "false"},
@@ -3650,7 +3817,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				}
 			}
 
-			for _, dr in E.code.state.drains {
+			for _, dr in E.code.state.drains if dr.stream {
 				"docker/\(E.code.meta.name)-\(dr.name).yaml": {
 					format: "yaml"
 					data: (#rpkDrain & {d: dr, app: E.code.meta.name, authOn: E._authOn}).out
@@ -3957,7 +4124,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				"""
 			// An asset the anchor is absent from indexes out of range here, rather
 			// than emitting a proxy that silently 404s every deep link.
-			_split: strings.SplitN(_caddyfileAsset, _anchor, 2)
+			// An app's seed assets are its own server's, in a cluster: not the blob plane's.
+			if E.code.capabilities.seedAssets != _|_ {_doorAnchored: true & strings.Contains(_caddyfileAsset, "  handle /blobs/* {")}
+			_door: [
+				if E.code.capabilities.seedAssets != _|_ {strings.Replace(_caddyfileAsset, "  handle /blobs/* {", "  handle /seed-assets/* {\n    reverse_proxy assets:8787\n  }\n  handle /blobs/* {", 1)},
+				_caddyfileAsset,
+			][0]
+			_split: strings.SplitN(_door, _anchor, 2)
 			// Units execute in their declared realm or agent; the terminal's
 			// Trusted Types policies belong only to its own runtime.
 			_unitPaths: list.SortStrings([for f, _ in {
@@ -3973,7 +4146,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			_forms: [for _, h in E.code.capabilities.hatches if h.forms != _|_ for p, origins in h.forms {path: p, to: origins}]
 			_fenced: list.Concat([_unitPaths, _presenterAt, [for f in _forms {f.path}]])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
-				let matcher = [if len(_fenced) > 0 {"  @terminal not path \(strings.Join(_fenced, " "))\n  header @terminal"}, "  header"][0]
+				// The ladder's pages answer with their own policy (E._ladderPolicy),
+				// so the terminal's names every path but theirs.
+				let matcher = "  @terminal not path \(strings.Join(list.Concat([["/docs/*"], _fenced]), " "))\n  header @terminal"
+				let ladder = "  @ladder path /docs/*\n  header @ladder Content-Security-Policy \(json.Marshal(E._ladderPolicy))\n"
 				let presenter = [for p in _presenterAt {"  @presenter path \(p)\n  header @presenter Content-Security-Policy \(json.Marshal(E._shell.presenter.policy))\n"}]
 				// What the presenter's script-src 'self' admits is answered
 				// from a file the door holds, never by an upstream.
@@ -3984,7 +4160,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
 				let forms = [for i, f in _forms {"  @form\(i) path \(f.path)\n  header @form\(i) Content-Security-Policy \(json.Marshal(strings.Replace(policy, "form-action 'self'", strings.Join(list.Concat([["form-action 'self'"], f.to]), " "), 1)))\n"}]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(forms, ""))\(strings.Join(scripted, ""))\(immutable)"
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(strings.Join(presenter, ""))\(strings.Join(forms, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
 			text: resilience.caddySnippets + strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1)
 		}
@@ -3995,6 +4171,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// unread variable.
 		_origin: "{{- $o := placeholder \"http.vars.origin\" -}}"
 		_o:      "{{$o}}"
+		// The brief's page (E._briefHtml): a constant, so it rides as an
+		// emission rather than an authored file and the sweep owns it.
+		"brief.html": {format: "text", text: E._briefHtml}
 		"robots.txt": {
 			format: "text"
 			// An app behind a session is not a site: every address answers with
@@ -4072,7 +4251,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					if _isAdvanced for ext in E._envelope.sitemap.extra {
 						let loc = [
 							if strings.HasPrefix(ext, "http://") || strings.HasPrefix(ext, "https://") { ext },
-							"\(_o)\(ext)"
+							"\(_o)\(ext)",
 						][0]
 						let locEsc = strings.Replace(
 							strings.Replace(
@@ -4279,7 +4458,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
 			// The app's tools, the runtime among them, are its pinned releases,
 			// which setup installs.
-			let pagesSetup = "\n      - run: sayt setup"
+			let pagesSetup = "\n      - run: sayt setup\(pagesDir)"
 
 			let pagesJob = """
 				  pages:
@@ -4316,16 +4495,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				      - uses: bonisoft3/sayt/.github/actions/sayt/install@v\(distribution.#SaytVersion)
 				        with:
 				          version: v\(distribution.#SaytVersion)\(pagesSetup)
-				      - if: "${{ env.CLOUDFLARE_API_TOKEN != '' }}"
-				        run: sayt release@cloudflare\(pagesDir)
-				      - if: "${{ env.CLOUDFLARE_API_TOKEN != '' }}"
+				      - name: Check deployment credentials
 				        run: |
-				          TARGET=$(cat \(pagesPrefix)dist/cloudflare/origin.txt 2>/dev/null || cat dist/cloudflare/origin.txt 2>/dev/null || echo "$PRONTO_DEPLOYED_URL")
-				          if [ -n "$TARGET" ]; then
-				            sayt verify@cloudflare --target="$TARGET"
-				          else
-				            sayt verify@cloudflare
-				          fi\(pagesDir)
+				          : "${CLOUDFLARE_API_TOKEN:?Set CLOUDFLARE_API_TOKEN}"
+				          : "${CLOUDFLARE_ACCOUNT_ID:?Set CLOUDFLARE_ACCOUNT_ID}"
+				      - run: sayt release@cloudflare\(pagesDir)
+				      - run: sayt verify@cloudflare --target="$(cat dist/cloudflare/origin.txt)"\(pagesDir)
 				"""
 
 			let jobsList = [
@@ -4337,7 +4512,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			".github/workflows/cd.yml": {
 				format: "yaml"
 				text:   """
-					# Release the app: bundle it into one document and deploy it.
+					# Release the app to its declared hosting targets.
 					#
 					# GitHub reads workflows only from a repository's root .github/, so this
 					# file is inert in the monorepo and active in the mirror, where copybara
@@ -4345,10 +4520,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					# cd.yml creates here once the mirror holds the tagged commit; nothing
 					# publishes from a branch, and a dispatch redeploys what main holds.
 					#
-					# The release verb builds the document as a developer would, a snapshot
-					# since the tag is the release already. The site is a project site, so
-					# the document is bundled for the repository's path prefix and doubles
-					# as the site's 404.html, which is what makes a deep link boot.
+					# Pages bundles use the repository's path prefix and a 404 document
+					# for deep links. Cloudflare publishes its Worker and verifies the
+					# deployed origin.
 
 					name: cd
 

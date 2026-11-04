@@ -2,9 +2,9 @@
 // links runs as the same modules would as one file, and every way out of the
 // graph is refused at the link, naming the module that tried.
 
-import { assertEquals, assertRejects } from "jsr:@std/assert@1.0.11";
+import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
 import { join } from "node:path";
-import { LinkError, linkEngine } from "./engine-link.ts";
+import { LinkError, linkEngine, resolveSpecifier } from "./engine-link.ts";
 
 // The vendored SES, installed the way a host that pre-installs Compartment
 // does, so evaluateEngine skips the browser's script injection.
@@ -104,4 +104,9 @@ Deno.test("an engine reaching an endowment at runtime is told it is endowed with
     thrown = (e as Error).message;
   }
   assertEquals(thrown, "engine: Intl is not endowed; an engine is endowed with nothing");
+});
+
+Deno.test("module keys use URL separators and refuse native backslash traversal", () => {
+  assertEquals(resolveSpecifier("sim/engine.js", "../shared/prng.js"), "shared/prng.js");
+  assertThrows(() => resolveSpecifier("sim/engine.js", "./..\\..\\outside.js"), LinkError, "no Jessie module path");
 });

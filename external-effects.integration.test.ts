@@ -138,6 +138,23 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
         SELECT input->>'amount' FROM airlock.external_effect_ledger WHERE key = 'charge:${four}';`);
       if (!resumed.ok) throw new Error(resumed.err);
       assertEquals(resumed.out.split("\n"), ["settled", "23.50"]);
+
+      const migrated = await psql(`DO $migration$
+        BEGIN
+          EXECUTE replace(pg_get_functiondef('public.trg_payment_status_machine()'::regprocedure),
+            'external_effect''', 'migrated_external_effect''');
+        END $migration$;`);
+      if (!migrated.ok) throw new Error(migrated.err);
+      for (let i = 0; i < 2; i++) {
+        const restarted = await psql(`BEGIN; ${upgrade} COMMIT;`);
+        if (!restarted.ok) throw new Error(restarted.err);
+      }
+      const five = "00000000-0000-0000-0000-000000000005";
+      const claimed = await psql(`INSERT INTO payment VALUES ('${five}', 'pending', 31.00, NULL);
+        UPDATE payment SET status = 'charging' WHERE id = '${five}';
+        SELECT identifier FROM graphile_worker.added WHERE job_key = 'charge:${five}';`);
+      if (!claimed.ok) throw new Error(claimed.err);
+      assertEquals(claimed.out, "migrated_external_effect", "startup preserves the app migration's trigger behavior");
     });
 
     await t.step("Airlock startup cannot adopt changed timers before their explicit migration", async () => {

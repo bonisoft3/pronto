@@ -26,6 +26,7 @@
 // derived.ts writes them, run after the migrations: the page runs neither, its
 // drains and its clock aside, so what they derive ships as it stood when the
 // page was bundled.
+import { seedBlobInliner } from './edge-blobs.ts'
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -61,24 +62,29 @@ if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or 
 
 const read = (p: string) => Deno.readTextFile(path.join(app, p))
 const shell = JSON.parse(await read('shell/shell.json')) as {
-  routes: { files: Record<string, string | string[]> }[]
+  seedBlobs?: { dir: string }
+  routes: { files: Record<string, string | string[]>; ssr?: string }[]
   i18n?: { locales: Record<string, unknown> }
   migrations: string[]
   tables: string[]
   hostDom?: Record<string, { src: string }>
-  units?: Record<string, unknown>
+  units?: Record<string, { isolation?: string; src?: string; files?: string[] }>
   prefix?: string
 }
-// A unit is a worker the browser fetches on its own, past the document's shim.
-const units = Object.keys(shell.units ?? {})
-if (units.length) fail(`units are not bundled yet: ${units.join(', ')}`)
+// Non-agent units cannot be bundled through the Worker Blob shim.
+const unsupportedUnits = Object.entries(shell.units ?? {}).filter(([, u]) => u.isolation !== 'agent').map(([k]) => k)
+if (unsupportedUnits.length) fail(`units are not bundled yet: ${unsupportedUnits.join(', ')}`)
 
 // The served set is shell.json's: what its routes name, the catalogues its
-// locales name, and the shell's own three files. A file the terminal serves
+// locales name, agent worker units, and the shell's own three files. A file the terminal serves
 // from its own tree is named from the root, `/omnishell/...`, and read there.
 const served = new Set<string>(['shell/shell.json', 'shell/shell.css', 'shell/design.css'])
 for (const route of shell.routes) {
   for (const v of Object.values(route.files)) for (const f of typeof v === 'string' ? [v] : v) served.add(f)
+}
+for (const u of Object.values(shell.units ?? {})) {
+  if (u.src) served.add(u.src)
+  for (const f of u.files ?? []) served.add(f)
 }
 for (const loc of Object.keys(shell.i18n?.locales ?? {})) served.add(`messages/${loc}.json`)
 const files: Record<string, string> = {}
@@ -87,10 +93,9 @@ for (const p of [...served].sort()) {
   else if (p.startsWith('/')) fail(`${p} is served from neither the app nor the terminal`)
   else files[p] = await read(p)
 }
-if (base) {
-  shell.prefix = base
-  files['shell/shell.json'] = JSON.stringify(shell)
-}
+if (base) shell.prefix = base
+for (const route of shell.routes) route.ssr = 'spa'
+files['shell/shell.json'] = JSON.stringify(shell)
 
 // A stylesheet's @import is fetched by the browser, not by the shim, so each
 // import is inlined into the sheet that asks for it, imports of imports too. A
@@ -102,6 +107,24 @@ const IMPORT = /@import\s+(?:url\(\s*["']?([^"')]+?)["']?\s*\)|["']([^"']+)["'])
 const inHead = new Set(['shell/shell.css', 'shell/design.css', ...shell.routes.map((r) => r.files.css as string)])
 const baseOf = (p: string) => (inHead.has(p) ? 'file:///shell/' : `file:///${path.posix.dirname(p)}/`)
 const inlined = new Map<string, string>()
+const cssAssets = new Map<string, string>()
+const CSS_TOKEN = /@import\s+(?:url\(\s*["']?[^"')]+?["']?\s*\)|["'][^"']+["'])\s*;|\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|url\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\[\s\S]|[^\s)\\])+))\s*\)/gi
+function rebaseAssets(sheet: string, p: string): string {
+  return sheet.replace(CSS_TOKEN, (token, double, single, bare) => {
+    const value = double ?? single ?? bare
+    if (value === undefined) return token
+    if (value.includes('\\')) fail(`${p} names a CSS asset with escapes: ${value}`)
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(value)) return token
+    const resolved = new URL(value, baseOf(p))
+    const target = decodeURIComponent(resolved.pathname).slice(1)
+    if (target.split('/').includes('..') || target.includes('\\')) fail(`${p} names an invalid CSS asset: ${value}`)
+    const source = target.startsWith('omnishell/')
+      ? path.join(omnishell, target.slice('omnishell/'.length))
+      : path.join(app, target)
+    cssAssets.set(target, source)
+    return `url("${base}${resolved.pathname}${resolved.search}${resolved.hash}")`
+  })
+}
 // A comment is prose: an @import in one is neither inlined nor refused. A
 // string is code, and a `/*` inside one opens no comment.
 const TOKEN = /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\/\*[\s\S]*?\*\//g
@@ -125,7 +148,7 @@ function inline(p: string, asking: string[]): string {
   if (asking.includes(p)) fail(`${asking.join(' imports ')} imports ${p} again`)
   let sheet = inlined.get(p)
   if (sheet === undefined) {
-    sheet = outsideComments(files[p], (code) => code.replace(IMPORT, (_m, a, b) => {
+    sheet = outsideComments(rebaseAssets(files[p], p), (code) => code.replace(IMPORT, (_m, a, b) => {
       const target = new URL(a ?? b, baseOf(p)).pathname.slice(1)
       if (!(target in files)) fail(`${p} imports ${target}, which shell.json does not serve`)
       return inline(target, [...asking, p])
@@ -146,7 +169,9 @@ if (derived && !clustered) fail('--derived names rows for a cluster, and this ap
 // database is the same: mecha's schedule table before the seed among them.
 const scripts = clustered ? await releaseFiles(app, mecha, shell.migrations) : []
 const steps = [...scripts.map((f) => f.name), ...(derived ? [derived] : [])]
-const sql = [...scripts.map((f) => f.sql), ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : [])]
+// The page is one file with no blob storage behind it, so a seed object's URL is its bytes here.
+const seedInlined = shell.seedBlobs && scripts.length > 0 ? await seedBlobInliner(path.join(app, shell.seedBlobs.dir)) : (text: string) => text
+const sql = [...scripts.map((f) => f.sql), ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : [])].map(seedInlined)
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 // A publication and a replica identity are a WAL reader's, which the page has
 // none of: the cluster skips them by the fence the emitter and an author write,
@@ -375,8 +400,14 @@ html = replace(
 )
 
 await Deno.remove(path.join(out, 'pronto'), { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
+await Deno.mkdir(out, { recursive: true })
 if (assetFiles.size) await Deno.mkdir(path.join(out, 'pronto'), { recursive: true })
 for (const [name, bytes] of assetFiles) await Deno.writeFile(path.join(out, name), bytes)
+for (const [target, source] of cssAssets) {
+  const destination = path.join(out, target)
+  await Deno.mkdir(path.dirname(destination), { recursive: true })
+  await Deno.copyFile(source, destination)
+}
 await Deno.writeTextFile(path.join(out, 'index.html'), html)
 // A host that answers an unknown path with 404.html serves the same document
 // there, and the deep link boots.

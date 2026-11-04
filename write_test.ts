@@ -30,6 +30,7 @@ Deno.test("a settled build preserves outputs and still follows new template read
         ".",
       ],
       cwd: app,
+      env: { ...Deno.env.toObject(), MISE_TRUSTED_CONFIG_PATHS: repo },
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -192,7 +193,7 @@ Deno.test("cold-start preflight reports all missing authored files and owed ids 
         .replace(/^\t\tir: \{sha256: "[^"]*"\}\n/m, "") +
         '\ncode: surface: handlers: bench: {of: "main", src: "shell/handlers/bench.js", note: "benchmark fold"}\n',
     );
-    for (const rel of ["ir.html", "acceptance.md", "DESIGN.md", "brief.html", "shell/screens", "shell/handlers"]) {
+    for (const rel of ["ir.html", "acceptance.md", "DESIGN.md", "journal.html", "shell/screens", "shell/handlers"]) {
       await Deno.remove(join(app, rel), { recursive: true });
     }
     const result = await new Deno.Command(Deno.execPath(), {
@@ -219,7 +220,7 @@ Deno.test("cold-start preflight reports all missing authored files and owed ids 
     assertStringIncludes(text, '<article id="main" data-kind="screen" data-route="/">');
     assertStringIncludes(text, "acceptance.md: no such file — author acceptance.md");
     assertStringIncludes(text, "DESIGN.md: no such file");
-    assertStringIncludes(text, "brief.html: no such file");
+    assertStringIncludes(text, "journal.html: no such file");
     assertStringIncludes(text, "shell/screens/main.html: no such file");
     assertStringIncludes(text, "shell/screens/main.css does not open");
     assertStringIncludes(text, "shell/handlers/bench.js: missing assembly source");
@@ -317,6 +318,7 @@ pronto: say: say: {
         ".",
       ],
       cwd: app,
+      env: { ...Deno.env.toObject(), MISE_TRUSTED_CONFIG_PATHS: repo },
       stdout: "piped",
       stderr: "piped",
     }).output();

@@ -888,6 +888,7 @@ import (
 	// Unqualified, as a change names its table: `public.x` would never match.
 	on: [=~"^[a-z_][a-z0-9_]{0,62}$", ...=~"^[a-z_][a-z0-9_]{0,62}$"]
 	call: string & =~"^[a-z_][a-z0-9_]{0,62}$"
+	stream: *true | bool
 	// The JSON arguments of every call, each named as a function's argument
 	// is: the page's and the edge's clusters call `call(key => value, …)`.
 	body: *{} | {[=~"^[a-z_][a-z0-9_]{0,62}$"]: bool | int | string}
@@ -1074,8 +1075,8 @@ import (
 	// record's residual. No userinfo: the sink's credential, where it takes
 	// one, is a header the airlock adds to every call from a declared secret,
 	// which the handler never holds. Or a declared bridge, for a sink that
-	// does not speak HTTP.
-	sink: {origin: mecha.#Origin, credential?: #Credential} | {bridge: string}
+	// does not speak HTTP, or mecha's AI gateway (`ai: "text" | "image"`).
+	sink: {origin: mecha.#Origin, credential?: #Credential} | {bridge: string} | {ai: mecha.#AiModality, tier: *"cheap" | mecha.#AiBackendTier}
 	// What a handler does when the ledger shows an earlier entry that may have
 	// reached the sink. An idempotent sink is simply called again; a repeat
 	// is called again too, and `note` says why a duplicate is acceptable.
@@ -1466,6 +1467,8 @@ import (
 		// Three digits no other startup file holds, then `_`: mecha's cluster
 		// refuses any other name. The app owns 000-799 and its seed at 900;
 		// 800-899 are the framework's steps (mecha's cluster.cue).
+		// Naming 016_mecha_actors.sql pins its applied bytes; subsequent actor
+		// code changes belong in state.migrations, preserving live instances.
 		rawMigrations?: [...{name: string & !~"^8", src: string}]
 		cortex?: [string]: #CortexMachine
 		// A Mecha machine as XState writes it, its Jessie rules, and the
@@ -1500,9 +1503,7 @@ import (
 		// Each also a Dapr output binding of the airlock's, and a handler the
 		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
 		effects?: [Name=string]: #ExternalEffect & {name: Name}
-		// What an effect's sink reaches through when it does not speak HTTP:
-		// a container on the airlock's outbound network speaking the other
-		// protocol to one declared server (mecha's #Bridge).
+		// An Airlock-facing endpoint of a declared container hatch.
 		bridges?: [Name=string]: mecha.#Bridge & {name: Name}
 		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
 		// Seed rows held as data rather than stated: a JSON file beside the
@@ -1611,15 +1612,41 @@ import (
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
 		blobs: *false | bool
-		// A static set the blob plane carries from the start: every
+		// The edge's image service, the layer above blob storage (R2 there,
+		// docs/release-targets.md#cloudflare): /img transforms what the bucket holds.
+		edgeImages?: {
+			// A bucket name rows written before mecha-objects still spell.
+			sourceBucket?: =~"^[a-z0-9][a-z0-9.-]*[a-z0-9]$"
+			// "paid" when this account has a card behind Cloudflare Images: the
+			// release refuses a screen's data-image-src without it.
+			plan: *"free" | "paid"
+		}
+		if edgeImages != _|_ {blobs: true}
+		// Files that are part of the app, as its code is: named by their sha256,
+		// served at /seed-assets/<file> and read by code, never by a row. Every
 		// { file, sha256 } the app-relative manifest names, fetched from the
-		// public origin and refused unless its bytes hash to its sha256. The
-		// edge release ships it as immutable assets under /blobs/mecha-objects.
-		blobSeed?: {
+		// public origin and refused unless its bytes hash to its sha256. In a
+		// cluster the door routes them to the app's own target `assets` on 8787.
+		seedAssets?: {
 			manifest: string
 			origin:   =~"^https://[^/]+(/.*[^/])?$"
 		}
-		if blobSeed != _|_ {blobs: true}
+		// Objects that are part of the data, as seed rows are: the files in this
+		// app-relative directory, named by their sha256, go to blob storage at
+		// seed/<file> on every target, where a row names them as it names any
+		// other object. Pages has no blob storage, and inlines them.
+		seedBlobs?: dir: string
+		if seedBlobs != _|_ {blobs: true}
+		// First-class 3-tier AI model architecture (`browser`, `cheap`, `heavy`)
+		// with per-tier and per-release-target model overrides. Backend tiers
+		// (`cheap`, `heavy`) route through mecha's tsbifrost AI gateway; the
+		// `browser` tier runs in an `agent` worker unit via `capabilities.vendored`.
+		ai?: {
+			text?:    *["browser", "cheap", "heavy"] | ([...mecha.#AiTier] & list.UniqueItems())
+			image?:   *["browser", "cheap", "heavy"] | ([...mecha.#AiTier] & list.UniqueItems())
+			models?:  mecha.#AiTierOverrides
+			targets?: [("browser" | "pages" | "docker" | "local" | "cloudflare" | "gcp" | "k8s" | "aws")]: mecha.#AiTierOverrides
+		}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
 		// inside. A `container` hatch withholds a service, whose definition is
 		// the program's cluster unification beside it. A `sql` or `proto` hatch
@@ -1793,6 +1820,7 @@ import (
 		themeColor?:  string
 		sitemap?:     #Sitemap
 		ir: {source: *"ir.html" | string, sha256: *"" | string} // the pinned IR this program was compiled from
+		ladder: *[] | [...string] // composed journal/ and ir/ files served under /srv/docs/
 		domain?: string
 		ssrOrigin?: string
 		// Services beside the door that a host launch runs too and the door
@@ -1896,14 +1924,15 @@ import (
 			}
 		})
 	}}
-	// The column each chart owns, by the entity it names (its name or its
-	// table) and then the field: its initial state and its states, read once
-	// here for every column's lookup (#machineColumn). A column that walked
-	// the machines itself handed each column a copy of all of them, which took
-	// an app of 25 entities past 40G at export.
-	_machineColumns: {if A.state.machines != _|_ for _, m in A.state.machines if m.field != _|_ if m.initial != _|_ {
-		(m.entity): (m.field): {initial: m.initial, states: [for n, _ in m.states {n}]}
-	}}
+	// The column each chart owns, by entity name (a chart names its entity by
+	// name or by table) and then field: its initial state and its states, read
+	// once here for every column's lookup (#machineColumn). A machine reads the
+	// App, so a lookup handed the machines themselves copies the App each time.
+	_machineColumns: {if A.state.machines != _|_ for _, m in A.state.machines if m.field != _|_ if m.initial != _|_
+		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
+			(en): (m.field): {initial: m.initial, states: [for n, _ in m.states {n}]}
+		}
+	}
 	state: machines: [mn=string]: {
 		let m = A.state.machines[mn]
 		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
@@ -2002,6 +2031,25 @@ import (
 		},
 	]) {v}]
 	_cortexRefusal: [if len(_cortexViolations) == 0 {true}, _cortexViolations[0]][0] & true
+	// A signal names where a Mecha machine went: `signal:<table>.<state>`, a
+	// state of the machine on that table's entity. One naming no such state is
+	// an arrow nothing ever fires, which a walk of the chart would still cover.
+	_cortexNodes: [if A.state.cortex != _|_ for cName, c in A.state.cortex for sName, st in c.config.states
+		for at, node in {
+			(sName): st
+			if st.states != _|_ for n1, s1 in st.states {
+				"\(sName).\(n1)": s1
+				if s1.states != _|_ for n2, s2 in s1.states {"\(sName).\(n1).\(n2)": s2}
+			}
+		} {chart: cName, state: at, on: [if node.on != _|_ {node.on}, {}][0]}]
+	_cortexSignalViolations: [for n in _cortexNodes for k, _ in n.on if strings.HasPrefix(k, "signal:")
+		let parts = strings.SplitN(strings.TrimPrefix(k, "signal:"), ".", 2)
+		let entity = [if len(parts) == 2 if A._entityByTable[parts[0]] != _|_ {A._entityByTable[parts[0]]}, ""][0]
+		let states = [if A.state.machines != _|_ for _, m in A.state.machines if m.entity == entity {m.states}]
+		if len(parts) != 2 || entity == "" || len(states) == 0 || states[0][parts[len(parts)-1]] == _|_ {
+			"\(n.chart).\(n.state): \(k) names no state of a Mecha machine on its table"
+		}]
+	_cortexSignalRefusal: [if len(_cortexSignalViolations) == 0 {true}, _cortexSignalViolations[0]][0] & true
 	// The XState a Mecha machine cannot run is refused rather than read as
 	// something else: its step is its reducer's, so it invokes nothing, and an
 	// event names one transition.
@@ -2272,6 +2320,12 @@ import (
 
 	_declaredBridges: [if A.state.bridges != _|_ {A.state.bridges}, {}][0]
 	_bridgeViolations: list.Concat([
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] == _|_ {
+			"bridge \(n) names undeclared container hatch: \(b.container)"
+		}],
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].kind != "container" {
+			"bridge \(n) names hatch \(b.container), which is not a container"
+		}],
 		[for n, x in _effects if x.sink.bridge != _|_ if _declaredBridges[x.sink.bridge] == _|_ {
 			"effect \(n) reaches undeclared bridge: \(x.sink.bridge)"
 		}],
@@ -2289,6 +2343,18 @@ import (
 		}],
 	])
 	_bridgeRefusal: [if len(_bridgeViolations) == 0 {true}, _bridgeViolations[0]][0] & true
+
+	_aiViolations: list.Concat([
+		[for n, x in _effects if x.sink.ai != _|_ if A.capabilities.ai == _|_ {
+			"effect \(n) reaches AI modality \(x.sink.ai) without capabilities.ai declared"
+		}],
+		[for n, x in _effects if x.sink.ai != _|_ if A.capabilities.ai != _|_
+			let tiers = [if x.sink.ai == "text" && A.capabilities.ai.text != _|_ {A.capabilities.ai.text}, if x.sink.ai == "image" && A.capabilities.ai.image != _|_ {A.capabilities.ai.image}, []][0]
+			if !list.Contains(tiers, x.sink.tier) {
+			"effect \(n) reaches AI \(x.sink.ai) tier \(x.sink.tier), which is not declared in capabilities.ai.\(x.sink.ai)"
+		}],
+	])
+	_aiRefusal: [if len(_aiViolations) == 0 {true}, _aiViolations[0]][0] & true
 
 	_declaredStreams: [for dsName, _ in [if A.state.duckstreams != _|_ {A.state.duckstreams}, {}][0] {dsName}]
 	_undeclaredStreams: [

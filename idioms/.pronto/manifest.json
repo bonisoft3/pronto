@@ -8,6 +8,7 @@
     ".vscode/tasks.json",
     "bayt.cue",
     "bayt.json",
+    "brief.html",
     "buf.yaml",
     "compose.yaml",
     "docker/Caddyfile",

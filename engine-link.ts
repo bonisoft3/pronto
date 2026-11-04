@@ -4,7 +4,7 @@
 // the browser links real ES modules with no parser of its own. Why Endo's
 // precompile and not a runtime parser or a linker of ours is pronto's
 // docs/decisions/2026-10-23-jessie-import.md.
-import { dirname, join, normalize, relative } from "node:path";
+import { join, posix } from "node:path";
 import { DENIED, jessieFacts } from "./jessie.ts";
 
 /** The pin: the module-source release cut beside the SES the terminal vendors
@@ -77,8 +77,8 @@ export function resolveSpecifier(referrer: string, specifier: string): string {
   if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
     throw new LinkError(`${referrer} imports "${specifier}": an engine imports its own modules by relative path, never a package or a URL`);
   }
-  const path = normalize(join(dirname(referrer), specifier));
-  if (path.startsWith("..") || relative(".", path).startsWith("..")) {
+  const path = posix.normalize(posix.join(posix.dirname(referrer), specifier));
+  if (path.startsWith("..") || posix.relative(".", path).startsWith("..")) {
     throw new LinkError(`${referrer} imports "${specifier}", which leaves the app`);
   }
   if (!JESSIE_PATH.test(path)) throw new LinkError(`${referrer} imports "${specifier}", which is no Jessie module path (${path})`);

@@ -139,4 +139,4 @@ _pagesInstalled: (pronto.#emit & {
 	loop:     _loop
 	build:    _installedBuild
 }).files[".github/workflows/cd.yml"].text
-installedPagesSetup: _pagesInstalled & =~"\n      - run: sayt setup\n      - run: sayt release@pages"
+installedPagesSetup: _pagesInstalled & =~"\n      - run: sayt setup\n        working-directory: [.]\n      - run: sayt release@pages"

@@ -69,3 +69,5 @@ _irAccepts: {
 if !_deriving {
 	code: meta: tests: [Id=string]: accepts: _irAccepts[Id]
 }
+
+code: meta: ladder: ["ir/neighbourhood-app.svg","ir/neighbourhood-counter.svg","ir/neighbourhood-grid.svg","ir/neighbourhood-timer.svg","ir/neighbourhood-todo.svg"]

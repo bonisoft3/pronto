@@ -16,7 +16,10 @@ use release-record.nu
 # needs what it does not build yet (PENDING.md#release-targets).
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
 # compose's clock is not one of them: Cloud Scheduler is the ticker's clock here.
-const unbuilt = ["mesh-events" "conduit" "transform" "airlock" "compute" "render"]
+# The renderer, the airlock and tsbifrost are built when the app does not name them in
+# GCP.sidecars (then they run as those sidecars, as before): `render` becomes a container of the
+# service, `airlock` too, with `tsbifrost` its AI gateway.
+const unbuilt = ["mesh-events" "conduit" "transform" "compute"]
 
 def render [cue_path: string, data?: string]: nothing -> record {
 	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
@@ -501,7 +504,7 @@ def base-of [app_info: record, preview: string]: nothing -> record {
 # The images a release builds or copies: the runtime's, the cluster's migrate step, the ticker, the
 # blob plane, and the app's own sidecars (GCP.sidecars).
 def images-of [services: list<string>, plan0: record]: nothing -> list<string> {
-	$runtime | append (if "migrate" in $services { ["migrate" "schema"] } else { [] }) | append (if "ticker" in $services { ["ticker"] } else { [] }) | append (if "rclone-s3" in $services { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars
+	$runtime | append (if "migrate" in $services { ["migrate" "schema"] } else { [] }) | append (if "ticker" in $services { ["ticker"] } else { [] }) | append (if "rclone-s3" in $services { ["rclone-s3" "imgproxy"] } else { [] }) | append (["render" "airlock" "tsbifrost"] | where {|s| $s in $services and $s not-in $plan0.sidecars }) | append $plan0.sidecars | uniq
 }
 
 # The service's yaml as it is applied, carrying the hash of the job it was released with (job-hash),
@@ -556,6 +559,9 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 	let has_migrate = ("migrate" in $services)
 	let has_ticker = ("ticker" in $services)
 	let has_blobs = ("rclone-s3" in $services)
+	let has_render = ("render" in $services and "render" not-in $plan0.sidecars)
+	let has_airlock = ("airlock" in $services and "airlock" not-in $plan0.sidecars)
+	let has_tsbifrost = ("tsbifrost" in $services and "tsbifrost" not-in $plan0.sidecars)
 	# The providers compose gives the auth service, under what release.cue sets.
 	let auth_env = $compose.services.auth.environment
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
@@ -565,6 +571,8 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 	let number = (gc projects describe $plan0.project --format "value(projectNumber)" | str trim)
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
+	let render_cfg = if $has_render { {render: {enabled: true}} } else { {} }
+	let airlock_cfg = if $has_airlock { {airlock: {enabled: true, tsbifrost: $has_tsbifrost, aiModels: ($compose.services.tsbifrost?.environment?.AI_MODELS? | default "")}} } else { {} }
 	let ticker = if $has_ticker { {ticker: {env: ($compose.services.ticker.environment? | default {} | reject -o CRUD_URL SERVICE_JWT PORT)}} } else { {} }
 	let blobs = if $has_blobs { {blobs: {}} } else { {} }
 	# Each sidecar's compose environment, its peers where it finds them: at their
@@ -581,7 +589,7 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $render_cfg | merge $airlock_cfg | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	{plan: $plan, number: $number}

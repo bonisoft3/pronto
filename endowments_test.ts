@@ -3,7 +3,7 @@
 // and fail in the cage, or be refused by the schema and allowed by the scan.
 
 import { assertEquals } from "jsr:@std/assert@1.0.11";
-import { ENDOWABLE } from "./jessie.ts";
+import { ENDOWABLE, jessieFacts } from "./jessie.ts";
 import { SAFE_ENDOWMENTS } from "../omnishell/interpreter/jessie.js";
 import { ENDOWABLE as MECHA } from "../../libraries/mecha/services/compute/language.ts";
 
@@ -37,4 +37,15 @@ Deno.test("a mecha module may be granted what mecha's cages endow and the schema
   assertEquals(await admitted("([n] & #Computation.endowments) != _|_"), mecha);
   const effect = `{name: "x", sink: {origin: "https://api.example.com", idempotent: true}, note: "x", endowments: [n]}`;
   assertEquals(await admitted(`(#ExternalEffect & ${effect}) != _|_`), mecha);
+});
+
+Deno.test("Cheerio requires opt-in in each Mecha seat and is unavailable in terminal seats", () => {
+  const source = '(input) => Cheerio.load(input.html)("a").text()';
+  for (const role of ["computation", "effect"]) {
+    assertEquals(jessieFacts(source, role).references, ["Cheerio"], role);
+    assertEquals(jessieFacts(source, role, ["Cheerio"]).references, [], role);
+  }
+  for (const role of ["handler", "adapter", "renderer", "validation", "fold", "engine"]) {
+    assertEquals(jessieFacts(source, role, ["Cheerio"]).references, ["Cheerio"], role);
+  }
 });

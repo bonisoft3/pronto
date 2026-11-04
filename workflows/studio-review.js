@@ -1,22 +1,19 @@
 export const meta = {
   name: 'studio-review',
-  description: 'Five studio seats review one turn in parallel; each finding is adversarially verified before it becomes work',
+  description: 'Run one rung seat (product, architect, engineer, qa) or a subset/all four seats in parallel; each blocking finding is adversarially verified before it becomes work',
   phases: [
-    { title: 'Seats', detail: 'one seat per surface, each reading its own card as its charter' },
+    { title: 'Seats', detail: 'one seat per rung surface, flavored by the team posture' },
     { title: 'Verify', detail: 'refute each blocking finding before it costs an inner-loop pass' },
-    { title: 'Advisory', detail: 'the platform advisor reads across what the seats signed' },
   ],
 }
 
-// The reviewable budget of one turn. The seats own a surface each and gate it;
-// the advisor owns none and never gates. Step 3 of the turn owns the checkable
-// budget and stays serial — verbs contend on one tree, one compose stack and one
-// docker daemon, so fanning out the build buys collisions, not wall-clock.
-//
-// Scripts get no filesystem, so a seat reads its own card: teams/studio.md calls
-// the card the agent's charter, verbatim, and that is how it arrives here.
+// The reviewable budget of one turn. Each of the four seats owns a distinct
+// rung surface and gates it right after that rung's mechanical verb pair turns
+// green; the brief's team (squad, studio, arcade, ops) sets the business bar.
+// Callers pass args.seat (e.g. 'architect' at Rung 2) or args.seats, or omit
+// both to audit all four seats in parallel over a completed tree.
 
-const SEATS = ['backend', 'frontend', 'designer', 'ux', 'qa']
+const SEATS = ['product', 'architect', 'engineer', 'qa']
 
 const FINDINGS = {
   type: 'object',
@@ -57,7 +54,7 @@ const VERDICT = {
 
 // Every seat reports the same shape however its review ended: a reader that
 // meets a missing bucket cannot tell an empty one from a seat that never got
-// that far, and the buckets are read after all five have been paid for.
+// that far, and the buckets are read after all four have been paid for.
 const seatResult = (seat, outcome, reason, parts = {}) => ({
   seat,
   outcome,
@@ -69,15 +66,25 @@ const seatResult = (seat, outcome, reason, parts = {}) => ({
   ...parts,
 })
 
-// Substituting prose for a missing argument gives five seats a placeholder to
+// Substituting prose for a missing argument gives four seats a placeholder to
 // review and lets every one of them report that it reviewed something.
 if (!args?.context || !args?.ir) {
   throw new Error("studio-review needs args {context, ir}: what to review, and the ir to review it against")
 }
 const context = args.context
 const ir = args.ir
+const team = typeof args.team === 'string' && args.team.trim() ? args.team.trim() : 'squad'
+const requestedSeats = Array.isArray(args.seats)
+  ? args.seats
+  : typeof args.seat === 'string' && args.seat.trim()
+    ? [args.seat.trim()]
+    : SEATS
+if (requestedSeats.length === 0 || requestedSeats.some((s) => !SEATS.includes(s))) {
+  throw new Error(`studio-review seat(s) must be chosen from ${SEATS.join(', ')}`)
+}
+const requiredRoutes = new Set(requestedSeats.map((s) => (s === 'architect' ? 'risk' : 'review')))
 const routes = args.routes
-for (const name of ['review', 'risk', 'advisor']) {
+for (const name of requiredRoutes) {
   const route = routes?.[name]
   if (typeof route?.model !== 'string' || !route.model.trim() ||
       !['low', 'medium', 'high', 'xhigh', 'max'].includes(route.effort)) {
@@ -85,16 +92,16 @@ for (const name of ['review', 'risk', 'advisor']) {
   }
 }
 const routeOptions = (name) => ({ model: routes[name].model, effort: routes[name].effort })
-const seatRoute = (seat) => routeOptions(seat === 'backend' ? 'risk' : 'review')
+const seatRoute = (seat) => routeOptions(seat === 'architect' ? 'risk' : 'review')
 
 // pipeline, not parallel: a seat's findings start verifying while the slower
 // seats are still reading. The barrier would cost the fast seats their lead.
 const reviewed = await pipeline(
-  SEATS,
+  requestedSeats,
   (seat) =>
     agent(
-      `You are pronto's ${seat} seat. Your charter names the one surface you own ` +
-        `and the section you sign; report on that surface only.\n\n` +
+      `You are pronto's ${seat} seat on the ${team} team. Your charter names the surface you own ` +
+        `and the section you sign; the ${team} team sets your business bar. Report on your surface only.\n\n` +
         `Review ${context} against ${ir}. Report only on your own surface; another seat ` +
         `owns the rest and will say so itself.\n\n` +
         `A finding is BLOCKING only when you can name the invariant that must hold and the ` +
@@ -153,7 +160,7 @@ const reviewed = await pipeline(
 
 // pipeline drops an item to null when its stage throws, taking the seat's name
 // down with the result.
-const seats = reviewed.map((r, i) => r ?? seatResult(SEATS[i], 'died', 'stage threw'))
+const seats = reviewed.map((r, i) => r ?? seatResult(requestedSeats[i], 'died', 'stage threw'))
 const confirmed = seats.flatMap((r) => r.blocking.map((f) => ({ ...f, seat: r.seat })))
 const unverified = seats.flatMap((r) => r.unverified.map((f) => ({ ...f, seat: r.seat })))
 const advisories = seats.flatMap((r) => r.advisory.map((f) => ({ ...f, seat: r.seat })))
@@ -173,16 +180,4 @@ log(
     `quiet: ${silent.join(', ') || 'none'}; could not look: ${unseen.join(', ') || 'none'}`
 )
 
-phase('Advisory')
-const advisory = await agent(
-  `You are pronto's platform advisor. You own no surface: read across what the ` +
-    `five seats signed over ${context} ` +
-    `and report on how the work is written and how it is joined — seams used or worked around, ` +
-    `couplings that earn their place, ideas tested outside the constraint.\n\n` +
-    `The seats reported these confirmed blocking findings:\n` +
-    (confirmed.map((f) => `- [${f.seat}] ${f.required_property}`).join('\n') || '- none') +
-    `\n\nYou are advisory forever. Nothing you write gates this turn; say what you see.`,
-  { label: 'advisor', phase: 'Advisory', agentType: 'pronto:platform-advisor', ...routeOptions('advisor') },
-)
-
-return { confirmed, unverified, advisories, silent, unseen, advisory }
+return { confirmed, unverified, advisories, silent, unseen }

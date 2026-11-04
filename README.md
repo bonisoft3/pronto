@@ -1,170 +1,192 @@
 # Pronto
 
-Pronto is a programming language where the source code is markdown and the compiler is an LLM. It compiles to a constrained target architecture — [mecha](https://github.com/bonisoft3/mecha) for data, [omnishell](https://github.com/bonisoft3/omnishell) for UI, and [sayt](https://github.com/bonisoft3/sayt)/[bayt](https://github.com/bonisoft3/bayt) for build/deploy — producing applications that run identically from a single browser tab to a cloud cluster.
+Pronto is a new breed of programming language. It is built for LLMs and relies
+on several techniques to dispense with code reviews, making coding fully agentic.
+The insight: AI can generate anything, but "anything" is where bugs live.
+Pronto constrains generation to an architecture where entire categories of bugs
+— deployment drift, data inconsistency, infrastructure misconfiguration —
+cannot exist. The same way Rust constrains C to gain memory safety, Pronto
+constrains AI-generated code to gain architectural safety.
 
-The insight: AI can generate anything, but "anything" is where bugs live. Pronto constrains generation to an architecture where entire categories of bugs — deployment drift, data inconsistency, infrastructure misconfiguration — cannot exist. The same way Rust constrains C to gain memory safety, Pronto constrains AI-generated code to gain architectural safety.
+The source code is Markdown and the compiler itself is an LLM. It targets a virtual machine specification and adapts itself to concrete environments, enabling applications that run identically from a single browser tab to a cloud cluster. Pronto needs no supervision and no humans ever look at the code it generates. It runs unattended for the equivalent of several agile sprints and ships world-class software.
 
-For LLM agents generating or modifying Pronto applications, see [`llms.txt`](llms.txt) for the machine-readable specification, contract grammar, and DOM truth tables.
+For LLM agents generating or modifying Pronto applications, see
+[`llms.txt`](llms.txt) for the machine-readable specification, contract
+grammar, and truth tables.
+
+## Showcase
+
+Pronto creates production-grade applications that scale in many dimensions. It
+goes well beyond the typical MVP with a single user. Here are some example
+apps. No human has ever looked at their source code during development.
+
+### Snapcards
+
+[snapcards.bonisoft3.com](https://snapcards.bonisoft3.com) ([source](https://github.com/bonisoft3/snapcards))
+
+Generate flashcards to teach toddlers to read. Leverages modern image generation models, with a fully reactive UI, gorgeous on your phone and your desktop. Supports multiple languages, extremely fast. And it is free :-).
+
+<table>
+  <tr>
+    <td align="center" width="25%"><img src="docs/showcase/snapcards-home-phone.png" alt="Snapcards on a phone"><br><sub>The opening page on a phone, the featured deck first.</sub></td>
+    <td align="center" width="25%"><img src="docs/showcase/snapcards-print-phone.png" alt="Snapcards print studio on a phone"><br><sub>The print studio: cut lines for cards on paper.</sub></td>
+    <td align="center" colspan="2" width="50%"><img src="docs/showcase/snapcards-home.png" alt="Snapcards library"><br><sub>The deck library on a laptop: curated and reader-made decks.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/showcase/snapcards-ir.png" alt="Snapcards IR"><br><sub>The LLM-produced intermediate representation of the code: an entity card and the state machine that drives it.</sub></td>
+    <td align="center" colspan="2"><img src="docs/showcase/snapcards-journal.png" alt="Snapcards journal"><br><sub>The LLM-produced journal of the development: a turn, before and after.</sub></td>
+  </tr>
+</table>
+
+### Truco
+
+[truco.bonisoft3.com](https://truco.bonisoft3.com) ([source](https://github.com/bonisoft3/truco))
+
+The Latino game that crossed continents. Turn-based card game supporting national and regional variations of truco, including the six-player Dourada, played by a few families around Itaguara, a small city in the southeast of Brazil. Play against bots or against your pals.
+
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/showcase/truco-table.png" alt="Truco table"><br><sub>A hand in play against the boteco regulars.</sub></td>
+    <td align="center" width="50%"><img src="docs/showcase/truco-lobby.png" alt="Truco lobby"><br><sub>An open online table, one seat waiting for a friend.</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/showcase/truco-ir.png" alt="Truco IR"><br><sub>The LLM-generated engineering design, part of the intermediate representation from the user's product brief.</sub></td>
+    <td align="center"><img src="docs/showcase/truco-journal.png" alt="Truco journal"><br><sub>journal.html: a turn with its before and after</sub></td>
+  </tr>
+</table>
+
+### Apex Run
+
+[apexrun.bonisoft3.com](https://apexrun.bonisoft3.com) ([source](https://github.com/bonisoft3/apexrun))
+
+An homage to the OutRun arcade game, LLM-dreamed from SuperTuxKart source code. Leverages WebGPU with adaptive load, with fully AI-generated art. Great offline support, and when online allows for real-time duels. Uses Pronto time travel magic to give you a nice scenic ride at the end of the game, replaying your game from multiple angles, Mario Kart style.
+
+<table>
+  <tr>
+    <td align="center" width="25%"><img src="docs/showcase/apexrun-title-phone.png" alt="Apex Run title on a phone"><br><sub>The title card on a phone, where a run starts.</sub></td>
+    <td align="center" width="25%"><img src="docs/showcase/apexrun-start-phone.png" alt="Apex Run start on a phone"><br><sub>The countdown on Coconut Beach, thumb pad and nitro below.</sub></td>
+    <td align="center" colspan="2" width="50%"><img src="docs/showcase/apexrun-race.png" alt="Apex Run race"><br><sub>Desert Canyons from the hood, closing on traffic past the first fork.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/showcase/apexrun-journal-early.png" alt="Apex Run journal, an early turn"><br><sub>The second entry of the development journal kept by the LLM: the wedge car, before each stage became a place.</sub></td>
+    <td align="center" colspan="2"><img src="docs/showcase/apexrun-journal-first.png" alt="Apex Run journal, the oracle"><br><sub>The product brief and the LLM-generated frame it aimed at.</sub></td>
+  </tr>
+</table>
+
+### Bonkchess
+
+[bonkchess.com](https://bonkchess.com)
+
+The battle chess of the AI era. Built by a third party with no prior knowledge of Pronto. Development fully AI-driven.
+
+<img src="docs/showcase/bonkchess-home.png" width="49%" alt="Bonk Chess title screen"> <img src="docs/showcase/bonkchess-board.png" width="49%" alt="Bonk Chess army selection">
 
 ## Installation
 
-Install the Pronto plugin for your agent. The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill, specialist studio seats, and project bootstrap knowledge.
+Pronto does not need to be installed; just ask your LLM to write code using the bonisoft3/pronto programming language. For example, "Create a minesweeper clone using bonisoft3/pronto as a programming language". Nonetheless, it gets more powerful if you install the Pronto plugin as shown below.
+
+The plugin packages the [`pronto-turn`](skills/pronto-turn/SKILL.md) outer-loop skill and the [`pronto-sprint`](commands/sprint.md) command that runs four turns and a wrap, with a specialized harness and project bootstrap knowledge.
 
 **Antigravity (`agy`):**
+
 ```bash
 agy plugin install https://github.com/bonisoft3/pronto.git
 ```
 
 **Claude Code (`claude`):**
+
 ```bash
 claude plugin marketplace add bonisoft3/pronto
 claude plugin install pronto@bonisoft3-pronto
 ```
 
 **Codex (`codex`):**
+
 ```bash
 codex plugin marketplace add bonisoft3/pronto
 codex plugin add pronto@bonisoft3-pronto
 ```
 
-## The review ladder
+## The specification ladder
 
-Pronto has three artifacts, one per audience. Each audience reviews at its own altitude; nobody reviews below their rung.
+Pronto needs no human code review, but it follows a methodology and lets you contribute and peek at the steps before code comes to life. It starts with `brief.md`, containing the product description and requirements, then it authors `ir.html`, which feels like a design doc, with entities and diagrams one would draw on a whiteboard. It is a loose spec in natural language, with the initial invariants sprinkled in using languages like CEL, Mermaid and XState JSON.
 
+Those invariants are captured in CUE and new ones are added. Although CUE is a configuration language, this is the program from the Pronto perspective. A series of constraints on the universe, not a mini world built from scratch. The CUE code yields YAML, which configures everything, and the missing pieces are glued afterwards to instantiate the closed world a given computing platform requires to run your program.
+
+The last pass is the creation of the target code: SQL, HTML, CSS, Jessie and any other needed files. They are all LLM-authored and work within the boundaries of `program.cue`. In this language set there is no unconstrained imperative code, but the results are still familiar (Jessie is a pure subset of JavaScript). The YAML configuration is mostly applied to the backend specification, which contains familiar servers like Caddy and Postgres. SQL drives the data, HTML and CSS the presentation, and Jessie defines handlers for events in the program. This does not suffice for every program or for interoperability with the rest of the world; for that we have hatches, discussed below. But this is the Pronto safe subset where several bug classes do not exist, and it covers a lot of ground.
+
+```mermaid
+flowchart LR
+  brief["<b>brief.md</b><br/>product<br/><i>written by anyone<br/>reviewed by anyone</i>"]
+  ir["<b>ir.html</b><br/>engineering<br/><i>written by LLM<br/>reviewed by human</i>"]
+  cue["<b>program.cue</b><br/>the program<br/><i>written by LLM<br/>reviewed by LLM</i>"]
+  target["<b>sql, jessie, html, css</b><br/>target code<br/><i>written by LLM<br/>enforced by platform</i>"]
+  emitted(["yaml, schema sql"])
+  brief -. LLM .-> ir
+  ir -. "LLM, narrow" .-> cue
+  cue -. LLM .-> target
+  cue == cue export ==> emitted
+  ir <-- "ids, checked both ways" --> cue
 ```
-brief.md ──LLM──▶ ir.html ──LLM (narrow)──▶ program.cue ──cue export──▶ everything
-(product           (engineering              (machine                    (mecha YAML,
- altitude,          design doc:               altitude,                   omnishell config,
- natural            architecture boxes,       reviewed by                 HTML/CSS screens,
- language)          SVG screen sketches)      no one)                     JS handlers)
-```
 
-| Artifact | Audience | Contents | Mutability |
-|----------|----------|----------|------------|
-| `brief.md` | Product / business | What the app should do, in prose; `brief.html` is its browser presentation | Mutable |
-| `ir.html` | Engineer | Architecture diagram (boxes and how they communicate), SVG screen sketches, contracts, test pairs — a design doc that renders in any browser | Pinned per compile |
-| `program.cue` | Machine | The program. Everything downstream is `cue export` | Pinned per compile |
+An LLM can always take the place of a human here, and that is Pronto's most common mode: fully unattended, with LLMs in every seat.
 
-Only the two LLM hops are probabilistic, and the second is narrow: the structured parts of ir.html (entity tables, flow topology, data-path assignments) extract into CUE deterministically. Every box, arrow, and sketch in ir.html carries a machine-readable id; the generated CUE back-references those ids; a deterministic checker enforces the bijection. IR↔CUE drift is a checkable property, not a hope.
+As we go down the hops, things become less probabilistic. LLM interpretation gives way to deterministic CUE unification, handling cross-cutting concerns and leaving a final authoring step for the contents of the files `program.cue` names.
 
-The ids are pronto's sourcemaps: as in TS/JS, every compiled artifact points back at its source — but they map design objects rather than line numbers, they survive into the running DOM as `data-*` attributes, and the mapping is enforced by a checker rather than emitted on faith.
+Every box, arrow and sketch in `ir.html` carries an ID the CUE points back at, and a checker enforces the bijection. These IDs are Pronto's sourcemaps: they map design objects rather than lines, and they guide code evolution, forcing diffs where it matters most.
+
+While the brief is the spec that gets refined into code, the journal collects the evidence of success. Pronto plugins define workflows for LLMs to code in Pronto and communicate their progress. You do not need to use them; your LLM can figure out what flow is best. But Pronto gets more effective following the predefined patterns in `pronto:sprint`, which yield journal entries with reports of progress.
+
+## The unified lattice and program reasoning
+
+The use of CUE is one of Pronto's superpowers. Solving cross-cutting concerns, such as authorization, schema evolution and timeouts, is notoriously hard in regular languages as those need to be solved multiple times in multiple places. Uplifting them to framework level requires coordination that is not easy to pursue. There is always a spooky action at a distance that breaks your guarantees. But in CUE there is no time and there is no space. It does a global, order-free evaluation of your configuration and rejects contradictions or incompleteness at lint time. By adopting configuration everywhere and forbidding these concerns outside framework code, we make cross-cutting concerns in some sense more robust than application code in Pronto.
+
+And the skeleton provided by CUE may be the strongest reason Pronto gets away with no code review. Besides entities, `program.cue` also contains statecharts that describe how these entities flow in our system. Statecharts are an almost 40-year-old formalism by David Harel that allows us to describe programs much like we do on a whiteboard. Pronto uses the XState JavaScript library with its JSON representation for defining the boxes and arrows in our program. Since the arrows and boxes in Pronto have well-defined properties (and in fact participate in a formal algebra), this gives unprecedented introspection into Pronto programs.
+
+With the statechart representation of our computations, we can automatically generate tests for every declared state and transition. We use the Chinese Postman algorithm to generate test cases directly, and we even create an automatically derived storyboard for every declared screen. We can also build very cheap representations of our program, like a LinkeDOM-centric test suite, or use graph walks to look for unreachable states. More sophisticated checks can use the Z3 SMT solver to reason about declared constraints. This is all provided by the framework; neither humans nor LLMs need to author those tests.
+
+What you get in practice is that every Pronto program is born with a great battery of unit tests, integration tests and even visual checks for things like buttons covering each other or text without enough contrast, all application-independent. The LLM can use the same machinery to author fast integration tests and post-release verification checks. So, no one is looking inside the function bodies, but their contracts are well defined and their effects are well understood. We feed the framework with knowledge of what is undesirable, turning it into constraints and checks.
+
+## Build and development loop
+
+We build Pronto programs with [bayt](http://github.com/bonisoft3/bayt), which borrows Bazel's explicit specification idea and drives it with CUE to generate configuration for the best tools of each ecosystem. In particular, we leverage the strong dev-cycle support from the language-specific tools and combine it with different caching layers and techniques, for great iteration speed at any altitude, from your laptop's inner loop to managed CI with ephemeral runners.
+
+The development loop is driven by [sayt](http://github.com/bonisoft3/sayt), which encodes a set of conventions for how software should be developed. These conventions are mapped to the actual practices of a codebase through configuration, so the LLM has a single vocabulary to drive everything, from pure Pronto code to the hatches we add. It pays special attention to concerns like portability (it runs natively on Windows, Linux and macOS), relocatability (deploy stuff just by moving a directory) and its ability to bootstrap (it can build your code in a scratch image or on your remote co-worker's random laptop).
 
 ## The target surface
 
-The compiled program is data, not code. `cue export` emits:
+A Pronto program is configuration for a virtual target: the JSON resulting from the unification of `program.cue`. The virtual target can be anything that can be configured by a simple transformation of that JSON. It has two pieces: a virtual cluster, which can be seen as the backend, and a virtual terminal, which can be seen as the frontend.
 
-- **YAML configs** for mecha — schema DDL, PostgREST routes, CDC pipeline definitions (bloblang/jq), ElectricSQL shapes
-- **Omnishell config** — layout, routes, auth, forms; the shell interprets it at runtime, there is no build step
-- **HTML/CSS** for the screens
-- **JS handlers** for the residue of state handling that config cannot express
+The virtual cluster is defined by [mecha](http://github.com/bonisoft3/mecha). It provides a few primitives: a relational database, a gateway, an executor for external effects, event processing pipelines, an incremental query engine, a data lake and workers for arbitrary pure computations. On a Kubernetes cluster, these are ordinary servers: Postgres, Caddy, Graphile, Conduit/Redis, Feldera, DuckDB and Deno+SES+WASM. However, Mecha defines the contract, not the implementation, and it can scale from a single HTML file of dozens of megabytes, running your application standalone with an embedded Postgres and all these other services, to a deployment on GCP managed services. One particularly interesting Mecha deployment is Cloudflare's free tier, which allows you to deploy fully functional programs that scale to hundreds of users with a GitHub account alone, no credit card needed.
 
-### JS handlers
-
-Omnishell's doctrine — single data path, forms-only mutations, reactive live queries — already removes effects, fetching, and imperative DOM from application code. What remains is pure derivation and event handling, and it is confined in layers:
-
-1. **CUE absorbs pure derivations.** Computed fields, filters, and validation live in the program itself. CUE is total: every expression terminates.
-2. **Remaining handlers are authored in [Jessie](https://github.com/endojs/Jessie)** — the defined safe subset of JavaScript (strict functional core; no `this`, no classes, no ambient authority). Still JS syntax, so LLM fluency is untouched.
-3. **Enforced twice**: statically by a gate on the names Jessie denies at compile time, dynamically by running each handler inside an SES Compartment (the mechanism behind MetaMask Snaps).
-4. **Deterministic by construction**: time and randomness arrive as inputs injected by the runtime, never ambient — the same discipline Temporal enforces on workflow code.
-
-Net property: nothing in a Pronto application runs with ambient authority. For fixed-step simulation time travel, see [kinetic.md](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/kinetic.md).
+The virtual terminal is what the user interacts with, and is provided by [omnishell](http://github.com/bonisoft3/omnishell). Omnishell is also a contract, with its most mature implementation based on web technologies, but a Pronto program can also be deployed on other platforms, from native (using DivKit) to conversational (Omnishell will take screenshots and send them through WhatsApp for you to control). Because a Pronto program is mostly its JSON structure and pure transformations, the code that defines how it gets presented can be safely adapted and kept in sync for different runtimes by an LLM.
 
 ## Escape hatches
 
-Pronto cannot express every computation. Four escapes, ranked; all appear as boxes in ir.html so every hole in the guarantees is visible in the design doc:
+Pronto does not make every computation easy to express. Part of this is deliberate: computations are bounded, and continuation belongs to the framework, so code must cooperate with an event loop, much as servers built around `select()` do. Pronto must also interact with code outside the framework, where its guarantees do not necessarily hold. We make those boundaries explicit through the first-class concept of escape hatches.
 
-| Escape | Guarantee | Runs where |
-|--------|-----------|-----------|
-| **Pre-compiled WASM** (preferred) | Sandboxed; touches Pronto state only through its CUE-contracted interface | Every tier — the same `.wasm` runs in the tab, in CDC pipelines, and server-side |
-| **Vendored unit** (terminal-tier hatch) | Trusted, audited component or worker mounted by the terminal at a declared point; CUE-contracted props-in/events-out with declared isolation (compartment, realm, or agent) and ports (the entities it reads, the events it raises) | Browser surface, every tier |
-| **Container** | Full escape | Real container at the container and cloud tiers; at the browser tier it binds to a **declared shim** (mock or degraded WASM stand-in), consistent with mecha's best-effort browser consistency model |
-| **External API endpoint** | Clean trust boundary: the Pronto database is only touched by Pronto; beyond HTTP is the external world | Every tier |
+All non-framework code that participates in a Pronto application needs to declare an effect level. Anything at Level 0 is pure Pronto code and safe from most common programming bugs. Everything at Level 1 or above is a hatch and needs to be quarantined somehow.
 
-The browser-tier shim supplies an in-browser implementation behind the same interface. Declaring the shim forces the interface contract to be precise enough to mock — pressure in the right direction. (Live-in-tab containers via container2wasm/v86 exist as an opt-in, at emulation speed; WebContainers-class products require commercial licenses.)
+| Level | Effect | Familiar model | What it means |
+| :---: | --- | --- | --- |
+| **0** | **Projection** | Pure functions | Derive a result from inputs without changing authoritative state. Repeating the computation with the same inputs gives the same result. |
+| **1** | **Ephemeral** | Local state under one writer | Change state owned by one client, such as a selected tab or a local preference. Its history can be replayed without coordinating with another writer. |
+| **2** | **Compensable** | Optimistic updates | Show a tentative change before the authority accepts it. If rejected, withdraw the speculative change and restore the authoritative view. |
+| **3** | **Replicated** | Transactions and convergent updates | Change shared, authoritative state. Transactions protect atomic changes; across asynchronous delivery, idempotent and commutative updates tolerate duplicates and reordering, as in a join-semilattice. |
+| **4** | **External** | Durable workflows and side effects | Act on another system: send an email, charge a card or call a service. Record attempts and outcomes; safe retries require the recipient's cooperation, and compensation is a separate action. |
 
-## Drift detection
-
-Deterministic at every rung below the top:
-
-| Rung | Mechanism | Deterministic? |
-|------|-----------|---------------|
-| brief ↔ ir.html | LLM judgment, human-reviewed — this is the design step | No (by nature) |
-| ir.html ↔ program.cue | Id back-reference bijection check | Yes |
-| program.cue ↔ outputs | `cue export` is a pure function of the program | Yes |
-| Behavior | Omnishell's battery and machine walk over the program's modules and charts, and the app's own drivers against the running app | Yes |
-| Visual / flow | Visual lint over the rendered app | Yes |
-
-## The virtual cluster
-
-Pronto programs don't target machines; they target a **virtual cluster**, the way Java targets a virtual machine. The virtual cluster is mecha's contract surface — a Postgres-shaped store, a CRUD gateway, a CDC event bus, pipeline workers, live query shapes — and every tier realizes that contract with different components, from a cloud deployment all the way down to a single browser tab:
-
-```
-Browser ──────── Edge ──────── Container ──────── Cloud
- PGlite         PGlite in a    Docker Compose     managed services
- fetch shim     Durable Object                    controllers
- one user       single writer  full               full
- eventual       consistent     consistent         consistent
-```
-
-No code changes between tiers. Components swap — PGlite for PostgreSQL, a fetch shim for real HTTP, shims for real containers — while the data paths, CDC guarantees, and application logic stay identical.
-
-### The loop
-
-Development turns **the loop** — the lifecycle contract (the ten verbs, the
-TDD cascade, CI), default implementation [sayt](https://github.com/bonisoft3/sayt) (`sayt:loop`,
-rostered as `pronto/loops:sayt`) — and the loop drives **the build graph**,
-default [bayt](https://github.com/bonisoft3/bayt) (rostered as `pronto/builders:bayt`, handed the
-program's build seat as concrete `bayt.json`). Programs target a cluster,
-users touch a terminal, developers turn the loop; all four seats are
-published CUE, overridable by unification, versioned and forked by module
-pin.
-
-### The virtual terminal
-
-The frontend is the cluster's **virtual terminal**. As in the block-mode terminals of mainframe lineage, a screen is rendered from data and the only way back is submitting a form — but this terminal carries its own replica of its slice of the cluster: reads are local and reactive, writes land locally first and travel the same CDC guarantees, so offline is the default condition rather than an error state. What remains of client computation is Elm-shaped — pure `(state, event) → state'` handlers, effects owned entirely by the shell. A 3270 with a database in its pocket, attached to a cluster that can live in the same tab.
-
-### The unified lattice
-
-Pronto does not coordinate cross-cutting concerns (durabilities, effect safety spectrum, RLS authorization, offline queueing, and test fuel budgets) through procedural pipelines or middleware stacks. Instead, every concern is an orthogonal dimension of a **bounded join-semilattice**. CUE unification (`&`) is the mathematical Greatest Lower Bound ($\sqcap$): database schema, interaction lifecycles, and verification tiers intersect into a single deterministic fixed point. Most contradictions fail closed at compile time (`cue vet`) before code runs; [the lattice](docs/lattice.md#which-joins-the-code-enforces) lists the joins checked later, at lint or when the writer runs, and those not checked yet.
+This discipline allows Pronto applications to time travel, similar to what Redux offers. For Level 0 and Level 1 this is trivial, and the applications can leverage it. For Level 2 it gets harder and for 3 it is feasible. Because we do not control the external world, time travel can no longer be guaranteed when a Level 4 effect is involved.
 
 ## Philosophy
 
-Programming languages exist on a spectrum from "express anything" to "express safely." AI code generation today is at the "assembly" end: infinite output space, probabilistic correctness. Pronto moves it toward the "Rust" end by fixing the target:
+Pronto brings some truly novel ideas to the field, but a lot of it is a careful combination of ideas that have been around for a few years or a few decades. Check [`PHILOSOPHY.md`](PHILOSOPHY.md) to understand where the magic comes from and where we are headed.
 
-- **Deployment drift** — sayt/bayt pin everything; dev and prod run the same code paths
-- **Data inconsistency** — mecha guarantees at-least-once delivery with idempotent sinks
-- **Infrastructure misconfiguration** — the program generates all infrastructure; there is nothing to hand-configure
-- **State management bugs** — omnishell enforces a single data path and forms-only mutations; handlers cannot perform effects
-- **Runtime surprises** — most errors fail at `cue vet` time, not runtime ([the joins checked later, or not yet](docs/lattice.md#which-joins-the-code-enforces)); the constraint cascade catches them before anything runs
+These pieces are an implementation of the ideas in the book [Scaling Your Artifacts with Your Team](https://www.amazon.com.br/Scaling-Your-Artifacts-Team-Microservices/dp/B0CXY8V3TB).
 
-What you give up in expressiveness (real-time collaboration, GPU compute, sub-100ms distributed state) you gain in correctness for the large class of applications that don't need those things: CRUD apps, SaaS tools, dashboards, content management, workflow automation, internal tools, admin panels.
+## Documents
 
-## Related work
-
-| Project | Similarity | Key difference |
-|---------|-----------|----------------|
-| [Darklang](https://darklang.com) | Deployless, bugs eliminated by construction | Custom language, not natural language |
-| [Wing](https://www.winglang.io) | Preflight/inflight distinction, cloud-safety | Infra-only scope; Pronto covers data + UI + deploy |
-| [Encore](https://encore.dev) | Correctness by construction, infra-from-code | Backend-only; closest production system to Pronto's philosophy |
-| [Lovable](https://lovable.dev) / [v0](https://v0.dev) / Bolt | Prompt-to-app UX | Unconstrained generation into a wide substrate; correctness by iteration instead of by construction |
-
-## Design documents
-
-- [`SPEC.md`](SPEC.md) — the artifact spec: brief, ir, program
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how the pieces fit, and where to change each one
-- [`prelude.md`](prelude.md) — shared component knowledge, implicit context of every compile
-- [`docs/component-contracts.md`](docs/component-contracts.md) — component contracts: each part's state, capabilities, and surface, and how data flows between them
-- [`docs/lattice.md`](docs/lattice.md#views-folds-and-the-dom) — the durability ladder, DOM as bottom rung
-- [`docs/localization.md`](docs/localization.md#catalogues) — i18n as a contract, refused before release rather than falling back
-- [`docs/localization.md`](docs/localization.md#addresses) — localized routing, BCP 47 paths, and Caddy's path matchers
-- [`docs/screens.md`](docs/screens.md#how-a-routes-first-document-is-rendered) — server-side rendering: a route's ssr mode crossed with its read scope, pronto's policy over omnishell's mechanism, and which cells are built
-- [`docs/lattice.md`](docs/lattice.md#which-joins-the-code-enforces) — cross-cutting concerns via CUE unification: durability, effect safety spectrum, interaction lifecycles, and verification budgets, and which joins the code enforces
-- [`docs/release-targets.md`](docs/release-targets.md) — release targets: a program declares them, each is a sayt platform on a tier of mecha's ladder, `release@pages` bundles the app into one HTML file for one user, `release@cloudflare` runs it for every user in one Durable Object over PGlite, `release@docker` packages the app as a single-container standalone appliance, and `release@gcp`, `release@aws`, `release@azure` and `release@k8s` (mecha's images on managed services above a floor of one small database) are designed and not built
-- [`../omnishell/docs/machines.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/machines.md) — unbreakable machines, closed effects, DuckDB synthetic seeds, statechart storybook battery, and formal verification
-- `docs/` — one document per subsystem, and the decisions not yet built
-- [`docs/index.md`](docs/index.md) — every document, with its type and status
-- `docs/archive/` — the superseded design whose business analysis still stands ([`2026-06-12-design-constraint-cascade.md`](docs/archive/2026-06-12-design-constraint-cascade.md))
+[`docs/index.md`](docs/index.md) lists every document, with its type and status.
 
 ## License
 
-LGPL-3.0
+[GPL-3.0](LICENSE)

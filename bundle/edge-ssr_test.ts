@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { writeEdgeSsr } from './edge-ssr.ts'
+import { edgeImage } from './edge-images.ts'
+import { originAssets } from './edge-templates.ts'
 
 const policy = "script-src 'self'; frame-ancestors 'none'"
 
@@ -38,7 +40,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
   try {
     const bundle = path.join(tmp, 'pronto/bundle'), runtime = path.join(tmp, 'selected runtime'), out = path.join(tmp, 'release')
     for (const dir of [bundle, path.join(runtime, 'server'), path.join(runtime, 'interpreter'), path.join(out, 'src'), path.join(out, 'public/shell')]) await Deno.mkdir(dir, { recursive: true })
-    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts', 'edge-addresses.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
+    for (const file of ['edge-ssr.ts', 'edge-hints.ts', 'edge-scripts.ts', 'edge-addresses.ts', 'edge-templates.ts']) await Deno.copyFile(new URL(file, import.meta.url), path.join(bundle, file))
     await Deno.copyFile(new URL('../../omnishell/server/prepare-worker.ts', import.meta.url), path.join(runtime, 'server/prepare-worker.ts'))
     const jessie = await Deno.readTextFile(new URL('../../omnishell/interpreter/jessie.js', import.meta.url))
     await Deno.writeTextFile(path.join(runtime, 'interpreter/jessie.js'), jessie + '\n// selected runtime witness\n')
@@ -49,6 +51,7 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
     await installed.writeEdgeSsr(out, runtime, path.join(tmp, 'mecha'), 'app', 'https://app.example', [])
     const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
     assert.deepEqual(config.assets.run_worker_first, ['/*'])
+    assert.equal(config.assets.html_handling, 'drop-trailing-slash')
     assert.match(await Deno.readTextFile(path.join(out, 'renderer/jessie-startup.js')), /selected runtime witness/)
     const entry = await Deno.readTextFile(path.join(out, 'src/index.ts'))
     const hintsImport = entry.match(/^import \{ edgeHints \} from '([^']+)'$/m)
@@ -79,12 +82,19 @@ Deno.test('the Cron Trigger follows the Worker that holds the object', async () 
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
     await securityHeaders(out)
     const triggers = { crons: ['0 * * * *'] }
+    const r2_buckets = [{ binding: 'BLOB_OBJECTS', bucket_name: 'objects' }]
+    const vars = { BLOB_URL: 'https://app.example/blobs/mecha-objects' }
     for (const mode of ['existing', 'separate'] as const) {
-      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, triggers }))
+      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, triggers, r2_buckets, vars }))
       await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
       const entry = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
       assert.deepEqual(entry.triggers, mode === 'existing' ? triggers : undefined)
-      if (mode === 'separate') assert.deepEqual(JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))).triggers, triggers)
+      if (mode === 'separate') {
+        const database = JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc')))
+        assert.deepEqual(database.triggers, triggers)
+        // The object writes an effect's bytes, and without these only production would notice.
+        assert.deepEqual([database.r2_buckets, database.vars], [r2_buckets, vars])
+      }
       const entrySource = await Deno.readTextFile(path.join(out, 'src/index.ts'))
       const databaseSource = await Deno.readTextFile(path.join(out, 'src/database.ts'))
       if (mode === 'existing') {
@@ -323,11 +333,19 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     assert.match(refreshedHtml, /Render 3/)
     assert.match(refreshedHtml, /id="pronto-reads"/)
 
-    // A public write marker in caches.default invalidates the cached SSR HTML.
-    store.set('https://edge-cache.invalid/v1/0/writes/public', new Response('1700000000000'))
+    // A write makes a document stale rather than absent: it moved the key once, so one visitor's
+    // write cost the next reader of every page a render of seconds, with nothing on screen.
+    await new Promise(resolve => setTimeout(resolve, 2))
+    store.set('https://edge-cache.invalid/v1/0/writes/public', new Response(String(Date.now())))
+    await new Promise(resolve => setTimeout(resolve, 2))
     const afterWrite = await worker.fetch(new Request('https://app.example/'), env, ctx)
-    assert.equal(afterWrite.headers.get('x-edge-cache'), 'miss')
+    assert.equal(afterWrite.headers.get('x-edge-cache'), 'stale')
+    assert.doesNotMatch(await afterWrite.text(), /id="pronto-reads"/)
+    await Promise.all(background.splice(0))
     assert.equal(renders, 4)
+    const afterRender = await worker.fetch(new Request('https://app.example/'), env, ctx)
+    assert.equal(afterRender.headers.get('x-edge-cache'), 'hit')
+    await afterRender.text()
 
     // A private / SPA route skips RENDERER + CLUSTER.render and serves the SPA entry with Link hints on GET and HEAD.
     const spa = await worker.fetch(new Request('https://app.example/gerenciar', { headers: { accept: 'text/html' } }), env, ctx)
@@ -469,4 +487,65 @@ Deno.test('renderObject folds version into ETag, serves 304 on streaming GET, re
   } finally {
     await Deno.remove(out, { recursive: true })
   }
+})
+
+Deno.test('SSR retains native images and origin-bound assets in both database modes', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    const bindings = {
+      images: { binding: 'IMAGES' },
+      r2_buckets: [{ binding: 'BLOB_OBJECTS', bucket_name: 'public-images' }],
+      vars: { IMAGE_SOURCE_BUCKET: 'original-bucket' },
+    }
+    for (const mode of ['existing', 'separate'] as const) {
+      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, ...bindings }))
+      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
+      const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+      for (const key of Object.keys(bindings)) assert.deepEqual(config[key], bindings[key as keyof typeof bindings])
+      const source = await Deno.readTextFile(path.join(out, 'src/index.ts'))
+      const imageImport = source.match(/^import \{ edgeImage \} from '([^']+)'$/m)
+      assert.ok(imageImport)
+      assert.ok((await Deno.stat(path.resolve(out, 'src', imageImport[1]))).isFile)
+      const worker = new Function('edgeImage', 'IMAGE_WIDTHS', 'originAssets', 'edgeWorker', 'acceptedLanguages', 'routeAt', 'hints', 'edgeHints', 'caches', source
+        .replace(/^import .+$/gm, '').replace(/^export \{.+$/gm, '').replace('export default', 'return'))(
+          edgeImage, [320, 640, 960], originAssets, { fetch: () => new Response('api') }, () => [], () => null, {}, () => null,
+          { default: { match: () => Promise.resolve(undefined), put: () => Promise.resolve() } },
+        )
+      let transforms = 0
+      const env = {
+        ...bindings.vars,
+        ASSETS: { fetch: () => Promise.resolve(new Response('{{- $o := placeholder "http.vars.origin" -}}\n<url>https://pronto-origin.invalid/en</url>', { headers: { 'content-type': 'application/xml' } })) },
+        BLOB_OBJECTS: {
+          get: async (key: string) => { assert.equal(key, 'card.png'); return { etag: 'source', body: new Blob(['png']).stream() } },
+          head: async () => ({ etag: 'source' }),
+        },
+        IMAGES: { input: () => ({ transform: () => ({ output: async () => {
+          transforms++
+          return { response: ({ headers }: { headers: HeadersInit }) => new Response('webp', { headers }) }
+        } }) }) },
+      }
+      const pending: Promise<unknown>[] = []
+      const ctx = { waitUntil: (promise: Promise<unknown>) => pending.push(promise) }
+      const url = 'https://app.example/img/insecure/plain/s3://original-bucket/card.png'
+      const image = await worker.fetch(new Request(url), env, ctx)
+      assert.equal(await image.text(), 'webp')
+      const etag = image.headers.get('etag')!
+      const head = await worker.fetch(new Request(url, { method: 'HEAD' }), env, ctx)
+      assert.equal(head.status, 200)
+      assert.equal(await head.text(), '')
+      assert.equal(head.headers.get('etag'), etag)
+      assert.equal((await worker.fetch(new Request(url, { headers: { 'If-None-Match': etag } }), env, ctx)).status, 304)
+      assert.equal(transforms, 1)
+      const sitemap = await worker.fetch(new Request('https://app.example/sitemap.xml'), env, ctx)
+      assert.equal(await sitemap.text(), '<url>https://app.example/en</url>')
+      assert.equal(await (await worker.fetch(new Request('https://app.example/crud/card'), env, ctx)).text(), 'api')
+      await Promise.all(pending)
+    }
+  } finally { await Deno.remove(out, { recursive: true }) }
 })

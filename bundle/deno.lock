@@ -2,8 +2,10 @@
   "version": "5",
   "specifiers": {
     "jsr:@std/assert@1.0.11": "1.0.11",
+    "jsr:@std/assert@1.0.13": "1.0.13",
     "jsr:@std/encoding@1.0.7": "1.0.7",
     "jsr:@std/internal@^1.0.5": "1.0.14",
+    "jsr:@std/internal@^1.0.6": "1.0.14",
     "npm:@bufbuild/cel-spec@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/cel@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/protobuf@2.14.1": "2.14.1",
@@ -18,7 +20,13 @@
     "@std/assert@1.0.11": {
       "integrity": "2461ef3c368fe88bc60e186e7744a93112f16fd110022e113a0849e94d1c83c1",
       "dependencies": [
-        "jsr:@std/internal"
+        "jsr:@std/internal@^1.0.5"
+      ]
+    },
+    "@std/assert@1.0.13": {
+      "integrity": "ae0d31e41919b12c656c742b22522c32fb26ed0cba32975cb0de2a273cb68b29",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.6"
       ]
     },
     "@std/encoding@1.0.7": {
@@ -163,7 +171,9 @@
     "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
     "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.19.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7",
     "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.1/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
-    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7"
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.20.1/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7",
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.21.7/instrument.ts": "f9ffe792d229fa6b9f31d11322d034f1f6c9aadf71b8b8e18900f06b65baf33e",
+    "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.21.7/interpreter/jessie.js": "7e860525d029b320ac7a00e1f8898c470c7a649a044c54a4ed1beb0e4e18b4a7"
   },
   "workspace": {
     "dependencies": [

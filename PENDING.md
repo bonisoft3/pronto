@@ -60,7 +60,7 @@ relationship.
 **No shape fingerprint.** It would be sha256 over the RFC 8785 form of the
 identity projection — the type id, then each ordinal's type, `required` and
 `retired`, with no label — so a rename leaves it unchanged. A versioned device
-collection needs it ([omnishell's pending](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#data)), and
+collection needs it ([omnishell's pending](https://github.com/bonisoft3/omnishell/blob/v0.21.7/PENDING.md#data)), and
 a message on the bus would carry it in its metadata to say which shape wrote
 it. Nothing computes it, and nothing in the tree implements RFC 8785.
 
@@ -101,7 +101,7 @@ certain over `ParsedExpr`; a type checker would also refuse a string compared
 with an integer.
 
 **A server row's transitions cannot be stated.** A machine governs a `tab` or
-`device` row only ([omnishell's chart](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/machines.md#the-chart)),
+`device` row only ([omnishell's chart](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/machines.md#the-chart)),
 and nothing else speaks of transitions. Either machines govern cluster rows
 too, or CEL gains a binding for the previous row.
 
@@ -133,7 +133,7 @@ drop retires. Those are in GUIDE and SPEC, which a compile does not read.
 **A statement is declared inside its entity.** The argued rule is that a
 reference goes from what cannot stand alone to what can, so a validation or an
 access rule would name its entity rather than be declared inside it. The
-machine case is [omnishell's](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#data).
+machine case is [omnishell's](https://github.com/bonisoft3/omnishell/blob/v0.21.7/PENDING.md#data).
 
 **An enum value cannot be renamed.** A value in `this in [...]` and a chart's
 state names are data every holder keeps in rows, so renaming one has a field
@@ -167,7 +167,7 @@ or `device` collection, and none of the four readers sees it.
 durability, so an ephemeral effect on a `server` entity passes `cue vet`, lint
 and every test. Unifying each effect's level against its entity's row — at
 `cue vet`, where the program holds both, or in `machineLint`, which already
-reads the level ([omnishell's half](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#machines)) — makes
+reads the level ([omnishell's half](https://github.com/bonisoft3/omnishell/blob/v0.21.7/PENDING.md#machines)) — makes
 the lattice's first join a refusal, and lets one copy of the table import the
 other.
 
@@ -213,7 +213,7 @@ would make "a sink is written by its pipeline alone" a rule.
 **A `tab` or `device` write is judged by its validations alone**
 ([the lattice](docs/lattice.md#the-validation-ladder)); a judge beside
 `validate.js`, where every write passes, would hold type, field CEL and row CEL
-at every rung ([omnishell's `cel:` line](https://github.com/bonisoft3/omnishell/blob/v0.20.3/PENDING.md#data)).
+at every rung ([omnishell's `cel:` line](https://github.com/bonisoft3/omnishell/blob/v0.21.7/PENDING.md#data)).
 
 ## Access
 
@@ -402,6 +402,47 @@ affordance is never compared.
 
 **`just generate` fails in the shadcnui gallery** (last checked 2026-09-20).
 
+**The read coalescer gives up when a key repeats with a non-equality
+operator**, so every picture read (`photo_url=not.is.null&photo_url=neq.`)
+is its own request, one per row on every screen that draws faces; keeping
+repeated keys in a batch removes the app author's N+1. Checked 2026-10-29.
+
+**An enum word is written in its CEL, a form's options and every equality
+filter, with only the CHECK to agree them**; a lint deriving the set from the
+field's `in [...]` and checking options and `eq.` filters against it removes
+the drift reviewers now catch by hand. Checked 2026-10-29.
+
+**Nothing checks that `entityOrder` names every entity and each `ref` target
+before its referrer**; `#emit` takes the list as given and silently drops an
+unlisted table, which a `cue vet` constraint would refuse for every app that
+declares an order. Checked 2026-10-29.
+
+**A select with a `!fk` hint or a filter through an embed is routed to
+PostgREST**, so its rows never enter the live collection, a row-scoped write
+against them finds nothing, and the region re-reads on every change in the
+network; parsing the hint locally removes the "my rows, each with a person
+probe" detour from every app that names a person beside a face. Checked
+2026-10-29.
+
+**A `server` region re-reads only after this client's own write to the same
+entity, a rule no document states**, so a row a raw-migration trigger writes
+to another table is invisible to the writer until a reload; declaring a
+trigger's write set would let the terminal re-read those tables and spare
+authors a forced move to `live`. Checked 2026-10-29.
+
+**An item's root element is never searched for nested regions, a rule no
+document or lint states**; a probe placed as a template's root never hydrates
+and fails silently, and searching the root or linting it removes that trap
+for every author who nests a probe. Checked 2026-10-29.
+
+**The ladder serves no image.** The seven files `_ladder` names carry
+`ir.html` and `journal.html` but not the `ir/neighbourhood-*.svg` the ir
+embeds for every screen nor the captures under `journal/`, so every live
+ir shows broken screens and every live journal broken pictures (truco's and
+yogurt's, 2026-10-31); an app lists them by hand in `meta.ladder` today
+(yogurt, fifty-nine names). The emitter knows the screens and writes the
+svgs; it should serve them, and the journal's directory with it.
+
 ## Visual lint
 
 **A perpetual animation reads as a screen still moving.** `settle()`
@@ -459,6 +500,16 @@ contract wants a poke-specific credential.
 **No container TURN relay is built** ([ICE servers](docs/release-targets.md#ice-servers)):
 `release@cloudflare` mints ephemeral credentials from Cloudflare Calls TURN
 when opted in; container targets (`docker`, `gcp`, `k8s`) configure STUN alone.
+
+**The appliance does not build from a scratch dependency**
+([docker](docs/release-targets.md#docker)): `release@docker` copies every
+dependency's tree, `COPY --from=<app>-<dep> --link /monorepo/${BAYT_DIR}`,
+and `served-release`, `served` and `auth` are `FROM scratch` stages with no
+`/monorepo` in them, so the bake fails on "/monorepo": not found at the
+served-release copy, in every app that declares the target (measured on
+yogurt, 2026-10-31; the generated truco, golaberto and esocial Dockerfiles
+carry the same lines). The copy belongs to the dependencies that carry a
+tree, or the scratch stages owe an empty one.
 
 **`aws` has no rule** ([the design](docs/release-targets.md#the-clouds-and-k8s)).
 

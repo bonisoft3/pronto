@@ -29,9 +29,20 @@ import (
 // What a computation's or an effect's module may be endowed with.
 #CageEndowment: impl.#CageEndowment
 
-// A bridge (state.bridges) and the port its daprd reaches it on.
+// A bridge role and the reusable SMTP container implementation.
 #Bridge:     impl.#Bridge
-#BridgePort: impl.#BridgePort
+#MailContainer: impl.#MailContainer
+
+// Mecha's AI gateway (services/airlock/tsbifrost.ts) and the tiered AI model schema.
+#TsBifrostPort:   impl.#TsBifrostPort
+#AiModality:      impl.#AiModality
+#AiTier:          impl.#AiTier
+#AiBackendTier:   impl.#AiBackendTier
+#AiTarget:        impl.#AiTarget
+#AiProvider:      impl.#AiProvider
+#AiModelSpec:     impl.#AiModelSpec
+#AiTierOverrides: impl.#AiTierOverrides
+#AiCapability:    impl.#AiCapability
 
 #ConduitSlot:      impl.#ConduitSlot
 #MachineTimersSql: impl.#MachineTimersSql
@@ -50,12 +61,12 @@ import (
 #Sourced: impl.#Sourced
 
 published: impl.#Published & {
-	airlock:  "bonitao/mecha-airlock:0.18.0@sha256:f5a2785c77738d46efd51da42839e443ddf98a598dc01e4a4f27a62ee16714d2"
+	airlock:  "bonitao/mecha-airlock:0.20.6@sha256:b999fe8ff8e7e349f5fc5ed827584567c1c98f16c774884839a854b98ee28b50"
 	auth:     "ghcr.io/bsoneca/mecha-auth:0.18.1-host.9@sha256:6d74c2603bb24a05cb4d1649406762285e7ef035d555105fc64878a9b57b7058"
-	clock:    "bonitao/mecha-clock:0.18.0@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
-	compute:  "bonitao/mecha-compute:0.18.0@sha256:a3826e7388929beeb220a8bf46075e5bbe4e355bb0118b59b4ad0ec9d630e2a5"
-	conduit:  "bonitao/mecha-conduit:0.18.0@sha256:a9e01015f31e369b10268025d097ab39ad02493e9b256640b92321f2cd2c20c3"
-	database: "bonitao/mecha-database:0.18.0@sha256:b44f283f271dfefd5c6453874f81b8626ac2e9dac755123e21e3e9eeb8eca18a"
-	mesh:     "bonitao/mecha-mesh:0.18.0@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
-	ticker:   "bonitao/mecha-ticker:0.18.0@sha256:1d6a5b250ca28669f7a840685ccfc26bfedd411dab2ae347f18416ebbfe1519c"
+	clock:    "bonitao/mecha-clock:0.20.6@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
+	compute:  "bonitao/mecha-compute:0.20.6@sha256:ead90c13996630d80ab26ae42f5c36d88d8481753848b31899cf63faab91af28"
+	conduit:  "bonitao/mecha-conduit:0.20.6@sha256:c18a81780ff1c066c2dc2f7ed1115ac0333b28b2f6c9fe4c9390708c8f7810a1"
+	database: "bonitao/mecha-database:0.20.6@sha256:d3eb729237d5bcdead34c500e4f482b86f4cfce00994b98a7c5a27745880b624"
+	mesh:     "bonitao/mecha-mesh:0.20.6@sha256:04ad88869e10f421813db7af7f32102ec233095205f37ae5f2103587e669aeb3"
+	ticker:   "bonitao/mecha-ticker:0.20.6@sha256:ddb62e40bb03ac5b77a797c597ca8c088d72edc60154ac4f3ac57e0c8ebc7ce3"
 }

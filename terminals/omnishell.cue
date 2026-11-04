@@ -37,7 +37,7 @@ published: runtime: #RuntimePin
 // (bsoneca/pronto forks/README.md), which an app on the fork's omnishell names
 // as its build's omnishellRuntime (builders/bayt.cue).
 #RuntimePin: =~"^(bonitao/omnishell|ghcr\\.io/bsoneca/omnishell):[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?@sha256:[0-9a-f]{64}$"
-published: runtime: "bonitao/omnishell:0.20.2@sha256:0f7d84358244c875a76bf97f13974bf6336e15f639a2f01fa31ad3eb0ce0d8a7"
+published: runtime: "bonitao/omnishell:0.21.7@sha256:300583571c8a5434d59c7ada9a3b5c2f6319d5768b3950a9f06504d96237d1a8"
 
 // The build context an app's images copy omnishell's runtime tree from: that
 // image, or in the monorepo the target building it.

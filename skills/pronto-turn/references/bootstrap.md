@@ -3,7 +3,7 @@
 Pronto is a CUE module and a source distribution, not a CLI. The agent plugin
 carries installation knowledge; it is not the compiler installation.
 
-Use Pronto **0.25.2** through CUE module **0.25.3**, and Sayt **0.45.1**.
+Use Pronto **1.0.9** through CUE module **1.0.10**, and Sayt **0.45.3**.
 Verify both Pronto releases and the Sayt release exist before installation; do
 not substitute `main` or `latest` for a missing release.
 
@@ -29,8 +29,8 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
 1. Download both project wrappers from the same pinned Sayt tag:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.45.1/saytw -o saytw
-   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.45.1/saytw.ps1 -o saytw.ps1
+   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.45.3/saytw -o saytw
+   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.45.3/saytw.ps1 -o saytw.ps1
    chmod +x saytw
    ```
 
@@ -42,8 +42,8 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
 
    ```sh
    ./saytw --script tools.nu cue mod init example.com/my-app@v0
-   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v0.25.3
-   ./saytw --script tools.nu cue cmd bootstrap github.com/bonisoft3/pronto/bootstrap@v0
+   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.0.10
+   ./saytw --script tools.nu cue cmd bootstrap github.com/bonisoft3/pronto/bootstrap@v1
    ```
 
    CUE comes from Sayt's independent `cue.toml` stub. No project Mise config or
@@ -59,14 +59,19 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
    URL and checksum. With the attestation checks `.mise.toml` turns off,
    installing from it asks GitHub's API nothing.
 
-4. Inspect and trust `.mise.toml`, then install and check the toolchain:
+4. Inspect and trust `.mise.toml`, then install and check the toolchain (prefix `./saytw` with `mise x --` when `nu` is not on the host `PATH`):
 
    ```sh
    ./saytw --script tools.nu mise trust .mise.toml
-   ./saytw setup
-   ./saytw doctor
-   ./saytw generate
-   ./saytw lint
+   mise x -- ./saytw setup
+   mise x -- ./saytw doctor
+   ```
+
+5. Author `program.cue` first, then run `mise x -- ./saytw generate` once: the compiler emits a single cold-start preflight checklist of every owed file (`journal.html`, `ir.html`, `acceptance.md`, `DESIGN.md`, `shell/*`, `tests/*`) and every owed `data-kind` / `id` tag for `ir.html` and `acceptance.md`. Create those files and run:
+
+   ```sh
+   mise x -- ./saytw generate
+   mise x -- ./saytw lint
    ```
 
    Every step stays locked. The checksums pin the downloaded bytes, not an

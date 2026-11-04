@@ -36,7 +36,7 @@
     response_header_timeout 40s
   }
 }
-# The cluster's one door, h2 over TLS: libraries/mecha/docs/proxy.md.
+# The cluster's one door, h2 and h3 over TLS: libraries/mecha/docs/proxy.md.
 
 # Every file the door serves, answered with its validator: mecha's caddy
 # writes each file's content hash beside it as `<file>.etag` (cluster.cue),
@@ -89,7 +89,10 @@
 # Each upstream's bound is `import bounded-<hop>`, a snippet emitted ahead of
 # this file from plugins/pronto/resilience.
 (app) {
-  header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' {$PRONTO_RELEASE_SCRIPTS} 'unsafe-eval' 'inline-speculation-rules' https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/ https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/ https://cdn.jsdelivr.net/npm/babylonjs-loaders@9.31.0/; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; require-trusted-types-for 'script'; trusted-types omnishell-markup omnishell-url default"
+  @terminal not path /docs/*
+  header @terminal Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' {$PRONTO_RELEASE_SCRIPTS} 'unsafe-eval' 'inline-speculation-rules' https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/ https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/ https://cdn.jsdelivr.net/npm/babylonjs-loaders@9.31.0/; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; require-trusted-types-for 'script'; trusted-types omnishell-markup omnishell-url default"
+  @ladder path /docs/*
+  header @ladder Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' https://cdn.jsdelivr.net/npm/marked@16.4.2/lib/marked.umd.js 'sha256-6ZoE2MzsuJRzSNxFVn9sEGmwr4upjZH423uYzEEtajk='; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'self'"
   @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$
   header @immutable >Cache-Control "public, max-age=31536000, immutable"
   # Every request is a span, the child of the traceparent it arrived with (the
@@ -227,6 +230,9 @@
   # without the blobs services the upstreams never resolve and these
   # unused routes just 502.
   handle /blobs/* {
+    # A stored object can claim any type, and on this origin an SVG's or an HTML file's script would run.
+    header X-Content-Type-Options nosniff
+    header Content-Security-Policy sandbox
     # The store authorizes nothing, so the gate decides (emit.cue's
     # #blobGateSql, asked through the REST gateway, which verifies the
     # session): an account's PUT of a picture under its own id, at most 5 MB,
@@ -375,7 +381,7 @@
 # (CADDY_TLS, set as the container starts), Caddy's own CA otherwise.
 https://localhost:8443 {
   tls {$CADDY_TLS:internal}
-  header Alt-Svc `h3=":{$CADDY_TLS_HOST_PORT:20879}"; ma=2592000`
+  header Alt-Svc `h3=":{$CADDY_TLS_HOST_PORT:8443}"; ma=2592000`
   import app
 }
 

@@ -13,10 +13,17 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   const separate = databaseMode === 'separate'
   const database = separate ? name + '-database' : name
   const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+  const images = (config.r2_buckets as { binding?: string }[] | undefined)?.some((b) => b.binding === 'BLOB_OBJECTS') ?? false
   const generated = path.join(out, 'renderer')
   const server = path.join(omnishell, 'server')
   const { prepareWorker } = await import(pathToFileURL(path.join(server, 'prepare-worker.ts')).href)
   const cfg = await prepareWorker(path.join(out, 'public'), generated)
+  try {
+    const rawShell = JSON.parse(await Deno.readTextFile(path.join(out, 'public/shell.json')))
+    if (rawShell?.ai && !cfg.ai) cfg.ai = rawShell.ai
+  } catch {
+    // Optional shell.json ai block
+  }
   // Keep the old renderer callable until its entry Worker has been replaced.
   // Its HTML must keep naming assets from the same release during deployment.
   const sources: [string, string][] = []
@@ -42,6 +49,12 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   const fromSrc = (file: string) => specifier(path.join(out, 'src'), file)
   const rel = (file: string) => specifier(out, file)
   const edge = path.join(mecha, 'packages/mecha-edge/src')
+  const fileExists = async (p: string) => {
+    try { return (await Deno.stat(p)).isFile }
+    catch (e) { if (e instanceof Deno.errors.NotFound) return false; throw e }
+  }
+  const hasMachines = await fileExists(path.join(out, 'src/machines.js'))
+  const hasEffects = await fileExists(path.join(out, 'src/effects.js'))
   await Deno.writeTextFile(path.join(out, 'src/render.ts'), `
 import '${fromSrc(path.join(server, 'worker-roles.ts'))}'
 import { appRenderer } from '${fromSrc(path.join(server, 'worker-document.ts'))}'
@@ -54,7 +67,7 @@ export default { fetch() { return new Response(null, { status: 404 }) } }
 import { RpcTarget } from 'cloudflare:workers'
 import { edgeObject, DataDirectoryLoading } from '${fromSrc(path.join(edge, 'object.ts'))}'
 ${separate ? `import { pokeCluster } from '${fromSrc(path.join(edge, 'clock.ts'))}'\n` : ''}import { PublicSnapshotCapacity } from '${fromSrc(path.join(edge, 'public-snapshot.ts'))}'
-import pgliteWasm from '../pglite/pglite.wasm'
+${hasMachines ? "import machines from './machines.js'\n" : ''}${hasEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
@@ -67,7 +80,7 @@ const Base = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(cfg.tables)},
   schema: ${JSON.stringify(cfg.schema ?? {})},
-  drains: ${JSON.stringify(drains)},
+  drains: ${JSON.stringify(drains)},${hasMachines ? '\n  machines,' : ''}${hasEffects ? '\n  effects,' : ''}${cfg.ai ? `\n  ai: ${JSON.stringify(cfg.ai)},` : ''}
   ${separate ? "storageFormat: { version: 1, blockSize: 131072, codec: 'deflate' }," : ''}
 })
 export class Cluster extends Base {
@@ -111,7 +124,8 @@ ${separate ? "// The Cron Trigger pokes the object from the Worker that holds it
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), `
 import { edgeWorker } from '${fromSrc(path.join(edge, 'worker.ts'))}'
 import { edgeHints } from '${fromSrc(fileURLToPath(new URL('edge-hints.ts', import.meta.url)))}'
-import { acceptedLanguages, routeAt, stripProgressiveReads } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
+import { originAssets } from '${fromSrc(fileURLToPath(new URL('edge-templates.ts', import.meta.url)))}'
+${images ? `import { edgeImage } from '${fromSrc(fileURLToPath(new URL('edge-images.ts', import.meta.url)))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt, stripProgressiveReads } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json' with { type: 'json' }
 ${separate ? '' : "export { Cluster } from './database.ts'"}
 const DOCUMENT_POLICY = ${JSON.stringify(policy)}
@@ -123,7 +137,8 @@ const keyOf = (...parts) => new Request(\`https://edge-cache.invalid/\${parts.fi
 const inFlight = new Map()
 export default {
 ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, env, ctx) {
-    const url = new URL(request.url)
+    if (env.ASSETS) env = { ...env, ASSETS: originAssets(env.ASSETS) }
+${images ? '    const image = await edgeImage(request, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}    const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
     const isAsset = /^\\/(?:_immutable-|(?:shell|omnishell|messages)\\/)/.test(url.pathname)
     const found = (!isAsset && (request.method === 'GET' || request.method === 'HEAD')) ? routeAt(hints, url.pathname, url.search, preferred) : null
@@ -134,8 +149,13 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
       const version = env.CF_VERSION_METADATA?.id ?? ''
       const reset = cache ? ((await (await cache.match(keyOf(version, 'reset')))?.text()) ?? '0') : '0'
       const lastWrite = cache ? ((await (await cache.match(keyOf(version, reset, 'writes', 'public')))?.text()) ?? '0') : '0'
-      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(version)}/\${encodeURIComponent(reset)}/\${encodeURIComponent(lastWrite)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
+      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(version)}/\${encodeURIComponent(reset)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
+      // A write moved this key once, so every visitor's write cost the next reader of every page a
+      // render of seconds. It now makes a document stale, which paints at once and renders behind.
+      const sharedRender = cacheKey.url + '|' + lastWrite
       const renderFresh = async (speculative = false) => {
+        // When it began: a write landing during the render may not be in it.
+        const startedAt = Date.now()
         const reqHeaders = new Headers(request.headers)
         if (speculative) reqHeaders.set('x-pronto-speculative', '1')
         const getReq = request.method === 'HEAD' || speculative ? new Request(request.url, { headers: reqHeaders }) : request
@@ -195,7 +215,7 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
               storedHeaders.delete('vary')
               storedHeaders.delete('link')
               storedHeaders.set('cache-control', \`public, max-age=\${RENDER_SWR_S}\`)
-              storedHeaders.set('x-rendered-at', String(Date.now()))
+              storedHeaders.set('x-rendered-at', String(startedAt))
               // Keep downstream writers open until cache.put settles so the isolate stays alive without waitUntil.
               await cache.put(cacheKey, new Response(cleanBody, { status: 200, headers: storedHeaders }))
             }
@@ -212,9 +232,9 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
         return { status: response.status, headers, makeStream, done }
       }
       const renderShared = (speculative = false) => {
-        let pending = inFlight.get(cacheKey.url)
+        let pending = inFlight.get(sharedRender)
         if (!pending) {
-          const clear = () => inFlight.delete(cacheKey.url)
+          const clear = () => inFlight.delete(sharedRender)
           pending = renderFresh(speculative).then(res => {
             res.done.then(clear, clear)
             return res
@@ -222,14 +242,15 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
             clear()
             throw err
           })
-          inFlight.set(cacheKey.url, pending)
+          inFlight.set(sharedRender, pending)
         }
         return pending
       }
       if (cache && !request.headers.has('if-none-match')) {
         const cached = await cache.match(cacheKey)
         if (cached) {
-          const age = Date.now() - Number(cached.headers.get('x-rendered-at') ?? 0)
+          const renderedAt = Number(cached.headers.get('x-rendered-at') ?? 0)
+          const age = Date.now() - renderedAt
           const headers = new Headers(cached.headers)
           headers.delete('x-rendered-at')
           headers.set('cache-control', RENDER_CACHE_CONTROL)
@@ -237,7 +258,7 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
           if (linkHeader) headers.set('Link', linkHeader)
           else headers.delete('Link')
           headers.set('Content-Security-Policy', DOCUMENT_POLICY)
-          if (age <= RENDER_FRESH_MS) {
+          if (age <= RENDER_FRESH_MS && renderedAt >= Number(lastWrite)) {
             headers.set('x-edge-cache', 'hit')
             return new Response(request.method === 'HEAD' ? null : cached.body, { status: cached.status, headers })
           }
@@ -297,12 +318,16 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
       linkedom: rel(path.join(server, 'worker/node_modules/linkedom/esm/index.js')),
     },
   }, null, 2) + '\n')
-  // The Cron Trigger (edge.ts) belongs to the Worker holding the object.
+  // The Cron Trigger (edge.ts) and AI binding belong to the Worker holding the object.
   const triggers = config.triggers
   delete config.triggers
+  const ai = config.ai
   const databaseConfig = {
     ...common, name: database, main: 'src/database.ts', workers_dev: false,
     ...(separate && triggers ? { triggers } : {}),
+    ...(separate && ai ? { ai } : {}),
+    // An effect's bytes are written by the object, wherever it runs.
+    ...(separate && config.r2_buckets ? { r2_buckets: config.r2_buckets } : {}),
     // The object reads the providers it signs in through (edge-signin.ts).
     ...(separate && config.vars ? { vars: config.vars } : {}),
     version_metadata: { binding: 'CF_VERSION_METADATA' },
@@ -327,12 +352,15 @@ ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, 
   config.version_metadata = { binding: 'CF_VERSION_METADATA' }
   config.durable_objects = { bindings: [{ name: 'CLUSTER', class_name: 'Cluster', ...(separate ? { script_name: database } : {}) }, { name: 'RENDERER', class_name: 'DocumentRenderer', script_name: renderer }] }
   config.assets.run_worker_first = await edgeRoutingRules(path.join(out, 'public'))
+  config.assets.html_handling = 'drop-trailing-slash'
   if (separate) {
+    delete config.ai
     delete config.migrations
     delete config.rules
     delete config.alias
   } else {
     if (triggers) config.triggers = triggers
+    if (ai) config.ai = ai
     config.migrations ??= databaseConfig.migrations
     config.rules = databaseConfig.rules
     config.alias = databaseConfig.alias

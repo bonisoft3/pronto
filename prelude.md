@@ -11,7 +11,7 @@ these components; it only speaks up where it deviates from or extends them.
 
 ## Entities
 
-An entity is a typed table managed by [mecha](https://github.com/bonisoft3/mecha/tree/v0.18.1). Fields
+An entity is a typed table managed by [mecha](https://github.com/bonisoft3/mecha/tree/v0.20.6). Fields
 carry CEL constraints (`this` bound to the field value); rows may carry a
 row-level CEL invariant. Schema DDL, migrations, and API routes are generated
 from the program — there is nothing to hand-configure.
@@ -57,14 +57,14 @@ statistics lake. See [[docs/lattice#The durability ladder]].
 
 ## Screens and the shell
 
-Screens are interpreted [omnishell](https://github.com/bonisoft3/omnishell/tree/v0.20.3) config plus emitted HTML/CSS:
+Screens are interpreted [omnishell](https://github.com/bonisoft3/omnishell/tree/v0.21.7) config plus emitted HTML/CSS:
 single data path, forms-only mutations, reactive live queries. There is no
 build step and no application-owned effects. Residual computation lives in
 Jessie handlers running in SES Compartments, each receiving its arguments and
 nothing else — no DOM, no store, no ambient authority; time and randomness
 are injected. A handler returns a description of an effect for the shell to
 perform (Elm's `Cmd`, not `update` — a handler never receives the whole
-model); see [`plugins/omnishell/docs/terminal.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/terminal.md) for the full comparison
+model); see [`plugins/omnishell/docs/terminal.md`](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/terminal.md) for the full comparison
 and [component contracts](docs/component-contracts.md#rejected) for why
 "handler," not "island" or "update."
 
@@ -152,16 +152,18 @@ An agent unit without a memo is a presenter: its worker paints and raises
 nothing, under a policy that refuses every connection but blob: and data:.
 A kinetic engine is Jessie too: a module graph of relative static imports,
 linked at build time and imported by the cage, endowed with nothing
-([the kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/kinetic.md#a-jessie-engine)).
+([the kinetic host](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/kinetic.md#a-jessie-engine)).
 
 ## The virtual team
 
-Compilation itself is staffed: the brief's `team:` (default squad —
-product, design, eng, qa) names the roles that author and sign the
-compile. Each role holds a gate over the surface it owns, wherever the
-ladder produces it: the seats that shape the ir sign the ir, and the
-seats whose surface is the assembly — screen markup and stylesheets, the
-shell, the emitted SQL — sign that, before the program ships. A hop
+Compilation itself is staffed: the brief's `team:` (default `squad`, or domain
+teams `studio`, `arcade`, `ops`) sets the business posture for the four review
+seats (`product`, `architect`, `engineer`, `qa`) that author and sign the
+compile. Each seat holds a gate over the surface it owns, wherever the
+ladder produces it: `product` and `architect` sign the ir and program,
+`engineer` signs the authored assembly (screen markup, stylesheets, Jessie
+handlers, units/hatches), and `qa` signs falsifiable coverage and live browser
+playtest evidence before the program ships. A hop
 nobody signs loses things quietly. Translation is where a multi-arm
 assertion becomes a single one, because the program's shape admits one;
 assembly is where one design system becomes a copy per screen, and the
@@ -202,7 +204,7 @@ layer, not grounds for demoting a check to a slower one.
 ## Tiers
 
 Pronto names four rungs of
-[mecha's ladder](https://github.com/bonisoft3/mecha/blob/v0.18.1/README.md#4-vertical-scalability-down-and-up)
+[mecha's ladder](https://github.com/bonisoft3/mecha/blob/v0.20.6/README.md#4-vertical-scalability-down-and-up)
 — `browser`, `edge`, `container`, which is mecha's single machine, and `cloud`
 — of which the browser and the container are built; where an app is released,
 and what each target refuses, is [release targets](docs/release-targets.md).

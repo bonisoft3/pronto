@@ -1,0 +1,26 @@
+@@ -355,14 +362,17 @@
+ including the documented per-object storage limit discrepancy, requires
+ verification on a Free account before claiming a free deployment.
+ 
+-A program that declares `capabilities.blobSeed` (a manifest of `{file, sha256}`
+-and the public origin the files come from) ships that set as static assets
+-under `public/blobs/mecha-objects/`, the URLs the blob plane answers in compose:
+-each file is fetched from the origin and refused unless it hashes to its sha256
+-([`edge-blobs.ts`](../bundle/edge-blobs.ts)), and `_headers` marks `/blobs/*`
+-immutable. An effect's answered bytes are written at run time to the
+-`edgeImages` bucket and served by its route, as an imported picture is
+-([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.5/services/airlock/README.md#a-handler));
++Two kinds of seeded file, by who refers to them. `capabilities.seedAssets` (a manifest
++of `{file, sha256}` and the public origin they come from) is part of the app, read by
++its code: the release ships it as static files under `public/seed-assets/`, each fetched
++from the origin and refused unless it hashes to its sha256
++([`edge-blobs.ts`](../bundle/edge-blobs.ts)), and `_headers` marks `/seed-assets/*`
++immutable. `capabilities.seedBlobs` (a directory in the app) is part of the data, what
++a row names: each file, named by its sha256, goes to blob storage at `seed/<file>`, by
++the publish here and by a one-shot `seed-blobs` target in a cluster, and is then an
++object like any other. Pages has no blob storage, and inlines them
++([pages](#pages)). An effect's answered bytes are written at run time to the same
++bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.5/services/airlock/README.md#a-handler));
+ uploads have no store at the edge yet.
+ 
+ The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
