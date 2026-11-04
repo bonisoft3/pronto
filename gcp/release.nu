@@ -425,9 +425,14 @@ def stop-preview [plan: record, --remove] {
 		# Clearing them is said and passed when it fails: on a service whose latest revision never
 		# became healthy it routes there again and fails the same way, which stopped the release
 		# before it could deploy that service afresh (bonk-chess-rc-render, 2026-11-04 02:21 BRT).
-		# No instance is what frees the database, so that stop must hold.
+		# No instance is what frees the database, so that stop must hold: a service it fails on (an
+		# update waits for a revision that never became healthy, as clearing the tags does) is
+		# deleted instead, and made again by the next deploy (bonk-chess-rc-render, 02:41 BRT).
 		try { gc run services update-traffic $svc --clear-tags --region $r --project $p | ignore } catch {|e| print -e $"gcp: (stamp) ($svc)'s tags stay: ($e.msg | lines | last)" }
-		gc run services update $svc --scaling 0 --region $r --project $p | ignore
+		try { gc run services update $svc --scaling 0 --region $r --project $p | ignore } catch {|e|
+			print -e $"gcp: (stamp) ($svc) deleted, as it could not be stopped: ($e.msg | lines | last)"
+			gc run services delete $svc --region $r --project $p | ignore
+		}
 	}
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
