@@ -16,10 +16,33 @@ export def stamp []: nothing -> string {
 	$"[+($s // 60 | fill -a r -c '0' -w 2):($s mod 60 | fill -a r -c '0' -w 2)]"
 }
 
+# A read that failed on the network (its name did not resolve, no connection opened, or none
+# answered in time) is asked again: it changes nothing, so asking twice is safe. A write is not
+# repeated, since gcloud may have sent it before the part that failed (a release lost on one failed
+# lookup of cloudbuild.googleapis.com while it polled the rc's tests, 2026-11-03).
+const reads = [describe list read get-iam-policy get-default-service-account]
+const writes = [add add-iam-policy-binding apply cancel create delete deploy execute import remove remove-iam-policy-binding replace set set-iam-policy submit update]
+const offline = "NameResolutionError|Failed to resolve|nodename nor servname|NewConnectionError|Failed to establish a new connection|ConnectionError|ReadTimeout|timed out|Connection reset|Connection aborted|RemoteDisconnected|UNAVAILABLE|HTTPError 503"
+def read-again [args: list<string>, input: any, r: record]: nothing -> record {
+	# The verb: the first command word that is one (a resource named "read" after "add" is no read).
+	let words = ($args | take while {|a| not ($a | str starts-with "-") })
+	let verb = ($words | where {|w| $w in ($reads ++ $writes) } | first 1)
+	if $verb == [] or $verb.0 not-in $reads { return $r }
+	mut r = $r
+	# Six times over about two minutes; any other failure is the answer.
+	for wait in [2sec 4sec 8sec 16sec 32sec 60sec] {
+		if $r.exit_code == 0 or not ($r.stderr =~ $offline) { break }
+		print -e $"gcp: (stamp) gcloud ($args | first 3 | str join ' ') did not reach Google; again in ($wait)"
+		sleep $wait
+		$r = ($input | ^gcloud --quiet ...$args | complete)
+	}
+	$r
+}
+
 export def --wrapped gc [...args] {
 	let input = $in
 	# Never a prompt: a release runs where nobody answers one.
-	let r = ($input | ^gcloud --quiet ...$args | complete)
+	let r = (read-again $args $input ($input | ^gcloud --quiet ...$args | complete))
 	if $r.exit_code != 0 { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
 	$r.stdout
 }
@@ -27,7 +50,7 @@ export def --wrapped gc [...args] {
 # token, a disabled API or a network that dropped would otherwise read as a
 # resource to create, and the creation then dies on one that exists.
 export def --wrapped exists [...args]: nothing -> bool {
-	let r = (^gcloud --quiet ...$args | complete)
+	let r = (read-again $args null (^gcloud --quiet ...$args | complete))
 	if $r.exit_code != 0 and not ($r.stderr =~ "NOT_FOUND|HTTPError 404|Cannot find|does not exist|not found|was not found") {
 		error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"}
 	}
