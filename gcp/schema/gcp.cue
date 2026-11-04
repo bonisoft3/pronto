@@ -14,7 +14,8 @@ import (
 // and electric (plus optional render, airlock, and tsbifrost) as containers of
 // one Cloud Run service, sharing localhost the way mecha's bundled unit does
 // (docs/deployment.md#the-bundled-unit), beside the Cloud SQL Auth Proxy. One
-// instance at most, since electric is one; none while nobody plays.
+// instance at most unless maxScale says more, each then running an electric
+// replica of its own; none while nobody plays.
 #Release: R={
 	// The app's compose project name, which names its database, secrets and images.
 	name: =~"^[a-z]([-a-z0-9]{0,28}[a-z0-9])?$"
@@ -58,6 +59,22 @@ import (
 	// The instance's CPU unthrottled between requests, for work that runs while
 	// nobody is asking (a sidecar's long task).
 	alwaysOn: *false | bool
+	// Instances kept at rest, so a visit after a quiet spell does not wait for a
+	// cold start; at most maxScale. A preview keeps none.
+	minScale: *0 | int & >=0 & <=R.maxScale
+	// Instances at most. Past 1, each runs its own electric on a temporary replication
+	// slot of a random name (so none waits for another's advisory lock, keyed on the
+	// slot name) beside the shared publication, and a client's requests stay on one
+	// instance (session affinity), the one holding its shapes. A preview keeps 1.
+	maxScale: *1 | int & >=1
+	// maxScale as the release runs it.
+	_replicas: [if R.preview != _|_ {1}, R.maxScale][0]
+	// The database of replicas: a slot and a WAL sender for each of a rollout's old and
+	// new instances and the admin's, the connections of every instance of both and of
+	// the schema job, and a bound on the WAL a hung but connected replica retains (MB;
+	// the disk is 10 GB).
+	_connections:     (#Pools.crud+R.electric.pool+#PerInstanceExtra)*2*R.maxScale + 10
+	_replicaSqlFlags: "cloudsql.logical_decoding=on,max_connections=\(_connections),max_replication_slots=\(2*R.maxScale+2),max_wal_senders=\(2*R.maxScale+2),max_slot_wal_keep_size=1024"
 
 	// Electric's share of the instance. Its memory holds every shape it keeps
 	// (its storage is the instance's /tmp, which Cloud Run keeps in memory), so
@@ -292,7 +309,11 @@ import (
 // The smallest tier admits about 25 connections, fewer than the pools'
 // defaults together; the instance is raised to 50 and the pools capped.
 #Pools: {crud: 5, electric: 5}
-#SqlFlags: "cloudsql.logical_decoding=on,max_connections=50"
+
+// An instance's other connections: auth's pool, electric's replication and lock, and
+// the proxy's margin.
+#PerInstanceExtra: 10
+#SqlFlags:         "cloudsql.logical_decoding=on,max_connections=50"
 // A preview's database is the smallest tier and its tests open every shape at once: electric
 // fell behind the replication stream there for over a minute, Postgres's default
 // wal_sender_timeout cut it, and its live requests hung until the tests failed (seen five times
@@ -342,14 +363,16 @@ import (
 		}
 		spec: template: {
 			metadata: annotations: {
-				"autoscaling.knative.dev/minScale": "0"
-				// electric is one instance (mecha's docs/deployment.md#clouds-as-built).
-				"autoscaling.knative.dev/maxScale":         "1"
+				"autoscaling.knative.dev/minScale": [if R.preview != _|_ {"0"}, "\(R.minScale)"][0]
+				// electric is one instance unless maxScale says more, each then with a replica
+				// of its own (mecha's docs/deployment.md#clouds-as-built).
+				"autoscaling.knative.dev/maxScale": "\(R._replicas)"
+				if R._replicas > 1 {"run.googleapis.com/sessionAffinity": "true"}
 				"run.googleapis.com/execution-environment": "gen2"
 				"run.googleapis.com/startup-cpu-boost":     "true"
 				// A preview keeps its CPU between requests too: electric reads the replication
 				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
-				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
+				if R.alwaysOn || R.minScale > 0 || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
 					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.render.enabled {"render"}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
@@ -436,9 +459,16 @@ import (
 						// which a bucket mounted over FUSE cannot lock. A new
 						// instance rebuilds its shapes from Postgres.
 						{name: "ELECTRIC_STORAGE_DIR", value: "/tmp/electric"},
+						// Electric 1.8.1 names the slot and the lock behind it by the stream id, shared
+						// by every instance; a temporary slot of a random name is the instance's own,
+						// dropped with its connection. The publication keeps the default stream's.
+						if R._replicas > 1 {{name: "CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN", value: "true"}},
+						if R._replicas > 1 {{name: "ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME", value: "true"}},
 					]
 					resources: limits: {cpu: "\(R.electric.cpu)m", memory: R.electric.memory}
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
+					// One of several replicas that hangs is restarted; the only one is not.
+					if R._replicas > 1 {livenessProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6}}
 				}], [
 					if R.render.enabled {{
 						name:  "render"
@@ -707,7 +737,11 @@ import (
 		if R.preview != _|_ {preview: R.preview}
 		names:    R.names
 		sqlTier:  R.sqlTier
-		sqlFlags: [if R.preview != _|_ {#PreviewSqlFlags}, #SqlFlags][0]
+		sqlFlags: [if R.preview != _|_ {#PreviewSqlFlags}, if R._replicas > 1 {R._replicaSqlFlags}, #SqlFlags][0]
+		minScale: R.minScale
+		if R._replicas > 1 && (R.sqlTier == "db-f1-micro" || R.sqlTier == "db-g1-small") {
+			sqlTier: error("maxScale \(R.maxScale) needs a database above the shared-core tiers (\(R.sqlTier) has 614 MiB or 1.7 GiB): \(R.maxScale+1) to \(2*R.maxScale+2) WAL senders decoding and about \(R._connections) connections do not fit; give sqlTier such as db-custom-1-3840")
+		}
 		if R._domain != "" {domain: R._domain}
 		aliases: R._aliases
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}

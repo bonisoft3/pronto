@@ -93,6 +93,17 @@ def setup-marker [plan: record]: nothing -> string {
 	$plan.names.job | str replace -r '-initdb$' '-setup'
 }
 
+# The patch that brings a live Cloud SQL instance (gcloud's describe) to the plan: its tier
+# and its flags (compared whatever their order) where they differ, in one patch, so the
+# database restarts once.
+export def sql-drift [live: record, plan: record]: nothing -> list<string> {
+	let flags = ($live | get -o settings.databaseFlags | default [] | each {|f| $"($f.name)=($f.value)" } | sort | str join ",")
+	[
+		(if ($live | get settings.tier) != $plan.sqlTier { [--tier $plan.sqlTier] } else { [] })
+		(if $flags != ($plan.sqlFlags | split row "," | sort | str join ",") { [--database-flags $plan.sqlFlags] } else { [] })
+	] | flatten
+}
+
 # The project as a release leaves it, set up once for what it depends on: the
 # plan's project, names, region, repository and database settings, and this
 # script. A release since which none changed reads one secret and goes on; the
@@ -176,11 +187,12 @@ def set-up-project [plan: record] {
 		print $"gcp: (stamp) creating Cloud SQL ($n.instance) \(several minutes\)"
 		gc sql instances create $n.instance --project $p --region $plan.region --database-version POSTGRES_18 --edition enterprise --tier $plan.sqlTier --storage-size 10 --storage-type HDD --database-flags $plan.sqlFlags --root-password $pg | ignore
 	}
-	# Flags an earlier release set differently are patched, which restarts it.
-	let flags = (gc sql instances describe $n.instance --project $p --format json | from json | get settings.databaseFlags? | default [] | each {|f| $"($f.name)=($f.value)" } | sort | str join ",")
-	if $flags != ($plan.sqlFlags | split row "," | sort | str join ",") {
-		print $"gcp: (stamp) setting ($plan.sqlFlags) on ($n.instance) \(it restarts\)"
-		gc sql instances patch $n.instance --project $p --database-flags $plan.sqlFlags --quiet | ignore
+	# A tier or flags an earlier release set differently are patched, which restarts it.
+	let live = (gc sql instances describe $n.instance --project $p --format json | from json)
+	let patch = (sql-drift $live $plan)
+	if ($patch | is-not-empty) {
+		print $"gcp: (stamp) setting ($patch | str join ' ') on ($n.instance) \(it restarts\)"
+		gc sql instances patch $n.instance --project $p ...$patch --quiet | ignore
 	}
 	# The password the URLs carry is the user's, whichever came first.
 	gc sql users set-password postgres --instance $n.instance --project $p --password $pg | ignore

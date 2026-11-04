@@ -224,3 +224,26 @@ Deno.test("an app's release holds a lock: another is refused until it ends or ex
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+Deno.test("a live Cloud SQL instance is patched to the plan's tier and flags in one call", async () => {
+  const release = JSON.stringify(fileURLToPath(new URL("./gcp/release.nu", import.meta.url)));
+  const script = `source ${release}
+    let plan = {sqlTier: "db-custom-1-3840", sqlFlags: "cloudsql.logical_decoding=on,max_connections=130"}
+    let live = {settings: {tier: "db-f1-micro", databaseFlags: [{name: "max_connections", value: "130"}, {name: "cloudsql.logical_decoding", value: "on"}]}}
+    [
+      (sql-drift $live $plan)
+      (sql-drift ($live | upsert settings.tier "db-custom-1-3840") $plan)
+      (sql-drift ($live | upsert settings.databaseFlags [{name: "max_connections", value: "50"}]) $plan)
+      (sql-drift {settings: {tier: "db-custom-1-3840"}} $plan)
+    ] | to json --raw`;
+  const result = await new Deno.Command("nu", { args: ["-c", script], stdout: "piped", stderr: "piped" }).output();
+  assertEquals(result.success, true, new TextDecoder().decode(result.stderr));
+  const flags = "--database-flags cloudsql.logical_decoding=on,max_connections=130".split(" ");
+  assertEquals(JSON.parse(new TextDecoder().decode(result.stdout)), [
+    ["--tier", "db-custom-1-3840"],
+    [],
+    // Both in one patch: two would restart the database twice.
+    ["--tier", "db-custom-1-3840", ...flags],
+    flags,
+  ]);
+});
