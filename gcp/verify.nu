@@ -270,7 +270,7 @@ export def new-feature-excuse [run: record, sections: list<list<string>>]: nothi
 		print $"gcp: (stamp) the failure is not a new feature's scenario alone \(($verdict.verdict): ($verdict.why)\): the release fails"
 		return []
 	}
-	print $"gcp: (stamp) new-feature scenarios failed, released anyway: ($verdict.new | str join ', ') \(absent from ($verdict.commit | str substring 0..<8), live release\)"
+	print $"gcp: (stamp) released on stable features; new-feature scenarios failed: ($verdict.new | str join ', ') \(absent from ($verdict.commit | str substring 0..<8), live release\)"
 	release-record note {newFeatureScenarios: $verdict.new}
 	$verdict.new
 }

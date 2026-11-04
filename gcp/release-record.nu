@@ -76,7 +76,7 @@ def fold [cue_path: string, preview: string, started: datetime, ended: datetime,
 		localGate: $facts.localGate
 		revision: $facts.revision
 		rehearsal: ($facts.rehearsal? | default null)
-		# The scenarios of a new feature that failed and did not stop the release (verify.nu new-feature-excuse).
+		# The scenarios of a new feature that failed and did not stop the release, which went out on stable features (verify.nu new-feature-excuse).
 		newFeatureScenarios: ($lines | where {|l| "fact" in $l and ($l.fact.newFeatureScenarios? | is-not-empty) } | each {|l| $l.fact.newFeatureScenarios } | flatten | uniq)
 		phases: {
 			lock: (do $span lock)
