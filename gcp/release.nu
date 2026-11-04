@@ -422,8 +422,12 @@ def stop-preview [plan: record, --remove] {
 		if not (exists run services describe $svc --region $r --project $p) { continue }
 		if $remove { gc run services delete $svc --region $r --project $p | ignore; continue }
 		# A revision a tag alone reaches (the `next` a failed go-live leaves) runs on at no instance.
-		gc run services update-traffic $svc --clear-tags --region $r --project $p | ignore
-		gc run services update $svc --scaling 0 --region $r --project $p | ignore
+		# Each is a stop, not a deploy, so one that fails is said and passed: clearing the tags of a
+		# service whose latest revision never became healthy routes to it again and fails the same
+		# way, which stopped the release before it could deploy that service afresh (bonk-chess-rc-render,
+		# 2026-11-04 02:21 BRT).
+		try { gc run services update-traffic $svc --clear-tags --region $r --project $p | ignore } catch {|e| print -e $"gcp: (stamp) ($svc)'s tags stay: ($e.msg | lines | last)" }
+		try { gc run services update $svc --scaling 0 --region $r --project $p | ignore } catch {|e| print -e $"gcp: (stamp) ($svc) keeps its instances: ($e.msg | lines | last)" }
 	}
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
