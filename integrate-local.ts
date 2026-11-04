@@ -223,11 +223,15 @@ for (;;) {
 if (verdict === undefined) {
   const url = `https://localhost:${door}`
   console.error(`integrate@local: the stack is ready at ${url}; running the visual lint`)
-  // node_modules lands where the lint runs, so not in the app.
+  // node_modules lands where the lint runs, so not in the app. The lint measures every page slowed
+  // as the release gate's are (SLOW=1: omnishell's check-visual.ts, the same meaning the apps'
+  // scenario runners give it), since a page that fills in after a late answer (a banner a flag
+  // shows) shifts its layout on the rc preview and never on this stack's fast line. SLOW=0, or
+  // another value, in the environment says otherwise; only the lint is slowed, not the drivers.
   verdict = await run(Deno.execPath(), [
     "run", "--node-modules-dir=auto", "--allow-read", "--allow-write", "--allow-net", "--allow-env", "--allow-run", "--allow-sys",
     "--unsafely-ignore-certificate-errors=localhost", lint, appDir,
-  ], { cwd: dir, env: { APP_URL: url, SETTLE_TIMEOUT_MS: args.settle } })
+  ], { cwd: dir, env: { APP_URL: url, SETTLE_TIMEOUT_MS: args.settle, SLOW: Deno.env.get("SLOW") ?? "1" } })
   if (mode === "all") {
     // The compose project's config, read as verify.nu reads it: no daemon.
     const out = await new Deno.Command("docker", { args: ["compose", "--profile", "*", "config", "--format", "json"], cwd: appDir, stdout: "piped" }).output()
