@@ -22,6 +22,7 @@ def fakes [service_exists: bool, serving: string, candidate_says: string, public
 #!/bin/sh
 d="$(dirname "$0")/.."
 echo "$*" >> "$d/gcloud.log"
+[ -z "$GCLOUD_SLOW" ] || sleep "$GCLOUD_SLOW"
 case "$*" in
   *"services describe"*)
     [ -f "$d/exists" ] || { echo "NOT_FOUND: not found" >&2; exit 1; }
@@ -78,6 +79,8 @@ def with-fakes [d: string, body: closure] {
 
 def main [] {
 	print "Running release-gcp tests...\n"
+	test_stop_preview_stops_every_service_at_once
+	test_grant_secrets_binds_each_secret_at_once
 	test_hold_traffic_keeps_the_serving_revision
 	test_hold_traffic_first_deploy
 	test_sql_drift_patches_tier_and_flags_at_once
@@ -309,5 +312,47 @@ def test_preflight_passes_a_sidecar_apart_whose_compose_sets_port [] {
 	let res = (preflight-run $d $app)
 	rm -r $app
 	assert equal $res.exit_code 0 $res.stderr
+	rm -r $d
+}
+
+# A function of release.nu run over the fakes in a nushell of its own, as go-live is.
+def run-release [d: string, call: string]: nothing -> record {
+	let script = $"$env.GCP_T0 = \(date now\); use ($gcp_dir | path join release.nu) *; ($call)"
+	with-fakes $d { do { ^$nu.current-exe --no-config-file -c $script } | complete }
+}
+
+# A door and two sidecars each take four calls to stop; at half a second a call, one after
+# another they would take 6 s beside the job and clock calls (3 s) and the start: over 9 s.
+def test_stop_preview_stops_every_service_at_once [] {
+	print "test stop-preview stops the door and each sidecar, all at once..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	let plan = {project: "p", region: "r", service: "svc", names: {job: "j", migrateJob: "mj", clock: "c", sidecarServices: {a: "svc-a", b: "svc-b"}}}
+	let t0 = (date now)
+	let res = (with-env {GCLOUD_SLOW: "0.5"} { run-release $d $"stop-preview ($plan | to nuon)" })
+	let took = ((date now) - $t0)
+	assert equal $res.exit_code 0 $res.stderr
+	let log = (log-of $d)
+	for svc in ["svc" "svc-a" "svc-b"] {
+		assert ($log | str contains $"run services update ($svc) --scaling 0") $"($svc) is stopped"
+		assert ($log | str contains $"run services update-traffic ($svc) --clear-tags") $"($svc)'s tags are cleared"
+	}
+	assert ($log | str contains "run jobs delete j") "the schema job goes"
+	assert ($took < 6500ms) $"the services stop at once, not one after another \(($took)\)"
+	rm -r $d
+}
+
+def test_grant_secrets_binds_each_secret_at_once [] {
+	print "test grant-secrets binds the account to each secret, all at once..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	let plan = {project: "p", preview: "rc", readSecrets: ["s1" "s2" "s3" "s4"], names: {serviceAccount: "sa@p.iam.gserviceaccount.com"}}
+	let t0 = (date now)
+	let res = (with-env {GCLOUD_SLOW: "1"} { run-release $d $"grant-secrets ($plan | to nuon)" })
+	let took = ((date now) - $t0)
+	assert equal $res.exit_code 0 $res.stderr
+	let log = (log-of $d)
+	for s in ["s1" "s2" "s3" "s4"] {
+		assert ($log | str contains $"secrets add-iam-policy-binding ($s) --project p --member serviceAccount:sa@p.iam.gserviceaccount.com --role roles/secretmanager.secretAccessor") $"($s) is granted"
+	}
+	assert ($took < 3.5sec) $"the grants run at once \(($took)\)"
 	rm -r $d
 }

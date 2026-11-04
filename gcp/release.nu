@@ -101,18 +101,21 @@ def grant-public [service: string, project: string, region: string] {
 # that secret alone, never on the project. A preview's release may grant no role in its project,
 # so where its account is refused it says which secret, and the owner's grant on the project, as
 # before, still holds.
-def grant-secrets [plan: record] {
+export def grant-secrets [plan: record] {
 	let member = $"serviceAccount:($plan.names.serviceAccount)"
-	for s in $plan.readSecrets {
+	# Each secret at once (its own policy, so no two calls touch the same one): one after another,
+	# the rc's staging spent 23 s on these and its scrape configs (2026-11-04).
+	let failed = ($plan.readSecrets | par-each {|s|
 		let r = (try { gc-fresh secrets add-iam-policy-binding $s --project $plan.project --member $member --role roles/secretmanager.secretAccessor; {exit_code: 0, stderr: ""} } catch {|e| {exit_code: 1, stderr: $e.msg} })
 		if $r.exit_code != 0 {
 			if ($plan.preview? | is-not-empty) {
 				print $"gcp: (stamp) ($s) not granted to ($member) alone: ($r.stderr | str trim | lines | last)"
 			} else {
-				error make {msg: $"gcloud secrets add-iam-policy-binding ($s): ($r.stderr | str trim)"}
+				$"gcloud secrets add-iam-policy-binding ($s): ($r.stderr | str trim)"
 			}
 		}
-	}
+	} | compact)
+	if ($failed | is-not-empty) { error make {msg: ($failed | first)} }
 }
 
 # Whether any sidecar's metrics are scraped, in the cluster's instance or apart.
@@ -421,13 +424,15 @@ def ensure-bucket [bucket: string, account: string, project: string, region: str
 # random, so the rc's renderer and players were refused while its tests ran (2026-11-03,
 # 22:26 and 23:30 BRT). Kept, the grant spread long ago; the next deploy sets each back to
 # automatic scaling after its replace (scale-automatic).
-def stop-preview [plan: record, --remove] {
+export def stop-preview [plan: record, --remove] {
 	let p = $plan.project
 	let r = $plan.region
 	let n = $plan.names
-	for svc in ([$plan.service] | append ($n.sidecarServices? | default {} | values)) {
-		if not (exists run services describe $svc --region $r --project $p) { continue }
-		if $remove { gc run services delete $svc --region $r --project $p | ignore; continue }
+	# Each service at once: one after another, a door and six sidecars were most of a minute of
+	# the rc's critical path (2026-11-04: 45 s from the preview's start to its emptying).
+	[$plan.service] | append ($n.sidecarServices? | default {} | values) | par-each {|svc|
+		if not (exists run services describe $svc --region $r --project $p) { return }
+		if $remove { gc run services delete $svc --region $r --project $p | ignore; return }
 		# A revision a tag alone reaches (the `next` a failed go-live leaves) runs on at no instance.
 		# Clearing them is said and passed when it fails: on a service whose latest revision never
 		# became healthy it routes there again and fails the same way, which stopped the release
@@ -440,7 +445,7 @@ def stop-preview [plan: record, --remove] {
 			print -e $"gcp: (stamp) ($svc) deleted, as it could not be stopped: ($e.msg | lines | last)"
 			gc run services delete $svc --region $r --project $p | ignore
 		}
-	}
+	} | ignore
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
 	}
