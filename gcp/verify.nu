@@ -234,6 +234,9 @@ export def failed-sections [lines: list<string>]: nothing -> list<list<string>> 
 # failed unit. When in doubt, not new.
 export def classify-failures [sections: list<list<string>>, live_names: list<string>, live_text: string, current_names: list<string>]: nothing -> record {
 	let named = ($sections | each {|s| failed-scenarios $s })
+	# A line marked failed that is not a scenario's (a stack, Premium, a summary) is another failure.
+	let marked = ($sections | flatten | where {|l| $l | str trim | str starts-with "✗" })
+	if ($marked | length) != ($sections | flatten | where {|l| (failed-scenarios [$l]) | is-not-empty } | length) { return {verdict: "unknown", new: [], why: "a failure is not a scenario's"} }
 	if ($sections | is-empty) or ($named | any {|n| $n | is-empty }) { return {verdict: "unknown", new: [], why: "a failure names no scenario"} }
 	let all = ($named | flatten | uniq)
 	let regressed = ($all | where {|n| $n in $live_names })
@@ -345,7 +348,9 @@ export def finish-drivers [run: record] {
 	if $status != "SUCCESS" {
 		let lines = (driver-lines $run --just-ended)
 		$lines | each {|l| print $l } | ignore
-		if $status == "FAILURE" and (new-feature-excuse $run (failed-sections $lines) | is-not-empty) { return }
+		# Only the last step, the drivers' verdict, may have failed: not their build, nor the screenshots' upload.
+		let steps = (try { gc builds describe $run.build --project $run.project --format json | from json | get steps | get status } catch { [] })
+		if $status == "FAILURE" and $steps == ["SUCCESS" "SUCCESS" "FAILURE"] and (new-feature-excuse $run (failed-sections $lines) | is-not-empty) { return }
 		error make {msg: $"the tests failed against ($run.url) \(($status)\): each driver's verdict is in the log above"}
 	}
 	print $"gcp: (stamp) every test passed against ($run.url)"

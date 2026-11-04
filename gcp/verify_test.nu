@@ -48,6 +48,11 @@ def test_a_name_the_current_tree_lacks_or_the_live_tree_mentions_is_unknown [] {
 	assert equal (classify-failures [["✗ built (1s) at step 1"]] [seek] "for id in [built]: scenarios: (id): {}" [seek built]).verdict "unknown"
 }
 
+def test_another_failed_line_is_unknown [] {
+	assert equal (classify-failures [["✗ a (1s) at step 1" "  ✗ stack: not ready"]] [] "" [a]).verdict "unknown"
+	assert equal (classify-failures [["✗ a (1s) at step 1" "✗ premium (4s)"]] [] "" [a]).verdict "unknown"
+}
+
 # A git checkout whose first commit holds scenario `seek`, and a working tree adding `seek_notify`.
 def checkout []: nothing -> record {
 	let d = (mktemp -d)
