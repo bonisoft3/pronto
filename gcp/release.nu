@@ -81,6 +81,17 @@ def --wrapped gc-fresh [...args] {
 	}
 }
 
+# A service made public once. Cloud Run takes a request carrying a bearer token Google did not
+# sign (every user's session token) for its own to verify until the service's policy has spread,
+# minutes after any SetIamPolicy, one that changes nothing included: re-adding allUsers to a
+# service that holds it opened that window at every release, and a renderer rolled into it died
+# on its door's 401 a minute after each grant.
+def grant-public [service: string, project: string, region: string] {
+	let held = (gc-fresh run services get-iam-policy $service --region $region --project $project --format json | from json
+		| get -o bindings | default [] | any {|b| $b.role == "roles/run.invoker" and ("allUsers" in $b.members) })
+	if not $held { gc-fresh run services add-iam-policy-binding $service --region $region --project $project --member allUsers --role roles/run.invoker | ignore }
+}
+
 # Whether any sidecar's metrics are scraped, in the cluster's instance or apart.
 def scraped [plan: record]: nothing -> bool {
 	($plan.scrapeConfig | is-not-empty) or ($plan.sidecarScrapeConfigs? | default {} | is-not-empty)
@@ -590,26 +601,48 @@ def candidate-of [service: string, project: string, region: string]: nothing -> 
 	{revision: ($traffic | first | get revisionName), url: ($traffic | first | get -o url)}
 }
 
+# A bearer token no Google account signed: the app's own session token is one such, which
+# Cloud Run must pass on to the app once allUsers may invoke it. While a fresh allUsers
+# grant spreads, Cloud Run answers a request carrying one with its own 401, and a request
+# without one, as a health poll's would be, with the app.
+export const invoker_probe = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJwcm9udG8tcmVsZWFzZSIsInN1YiI6Imludm9rZXItcHJvYmUifQ.cHJvbnRv"
+
+# Cloud Run's own refusal of a request it did not let reach the app.
+const cloud_run_refusal = "not authorized to invoke this service"
+
 # An address polled until it answers ok (and, where given, with the revision's name, `steady`
-# times in a row), for GCP_GOLIVE_WAIT seconds, 180 unless set, every GCP_GOLIVE_EVERY, 2.
-export def poll-health [url: string, ok: list<string>, revision: any, --steady: int = 1]: nothing -> record {
+# times in a row), for GCP_GOLIVE_WAIT seconds, 180 unless set, every GCP_GOLIVE_EVERY, 2. With
+# `bearer` each request carries it, and while Cloud Run refuses it itself the poll waits on, for
+# GCP_INVOKER_WAIT seconds in all, 420 unless set: Cloud Run's IAM changes take up to seven
+# minutes; once it has refused one, the poll keeps that wait while its answers come steady.
+# Where the grant was in force already the first answers pass, and the poll costs nothing more.
+export def poll-health [url: string, ok: list<string>, revision: any, --steady: int = 1, --bearer: string]: nothing -> record {
 	let wait = ($env.GCP_GOLIVE_WAIT? | default 180 | into int)
+	let invoker_wait = ($env.GCP_INVOKER_WAIT? | default 420 | into int)
 	let every = ($env.GCP_GOLIVE_EVERY? | default 2 | into int)
+	let headers = if $bearer == null { [] } else { ["--header" $"Authorization: Bearer ($bearer)"] }
 	let body = (mktemp -t gcp.XXXXXX | str trim)
 	let t0 = (date now)
 	mut streak = 0
 	mut last = "no answer"
+	mut refused = false
+	mut spreading = false
 	loop {
-		let code = (^curl --silent --max-time 10 --output $body --write-out "%{http_code}" $url | complete | get stdout | str trim)
+		let code = (^curl --silent --max-time 10 --output $body --write-out "%{http_code}" ...$headers $url | complete | get stdout | str trim)
 		let said = (open --raw $body | into string | str trim)
 		$last = $"($code) ($said | str substring 0..60)"
+		$refused = ($bearer != null and $code == "401" and ($said | str contains $cloud_run_refusal))
+		$spreading = ($spreading or $refused)
 		if $code in $ok and ($revision == null or $said == $revision) { $streak += 1 } else { $streak = 0 }
 		if $streak >= $steady { rm -f $body; return {ok: true, last: $last, waited: ""} }
-		if ((date now) - $t0) >= ($wait * 1sec) { break }
+		let limit = if $spreading { [$wait $invoker_wait] | math max } else { $wait }
+		if ((date now) - $t0) >= ($limit * 1sec) { break }
 		sleep ($every * 1sec)
 	}
 	rm -f $body
-	{ok: false, last: $last, waited: $"($wait)s"}
+	let waited = if $spreading { [$wait $invoker_wait] | math max } else { $wait }
+	let why = if $refused { "Cloud Run itself still refuses a request that carries a bearer token not signed by Google: its grant of roles/run.invoker to allUsers is not in force yet (GCP_INVOKER_WAIT waits longer); " } else { "" }
+	{ok: false, last: $"($why)($last)", waited: $"($waited)s"}
 }
 
 # A staged release made live: its images tagged the release's (a gated one's, now that its
@@ -661,7 +694,7 @@ export def go-live [staged: record]: nothing -> record {
 	# its own address. Only a door that served before: a new one has no grant to allUsers until
 	# the block below makes it.
 	if $before != null and not ($plan.iap? | default false) {
-		let got = (poll-health $"https://($plan.service)-($number).($r).run.app/health" ["200"] null)
+		let got = (poll-health $"https://($plan.service)-($number).($r).run.app/health" ["200"] null --bearer $invoker_probe)
 		if not $got.ok { print -e $"gcp: (stamp) ($plan.service) did not answer before its sidecars were made: ($got.last)" }
 	}
 	# What follows the door being up is independent: its invoker grant, each sidecar, the
@@ -688,7 +721,7 @@ export def go-live [staged: record]: nothing -> record {
 						gc run services remove-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker --condition None | ignore
 					}
 				} else {
-					gc run services add-iam-policy-binding $plan.service --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+					grant-public $plan.service $p $r
 				}
 			} else if ($t.domain? | is-not-empty) {
 				map-domain $t.domain $plan.service $p $r
@@ -698,7 +731,7 @@ export def go-live [staged: record]: nothing -> record {
 				let svc = ($plan.names.sidecarServices | get $t.sidecar)
 				print $"gcp: (stamp) ($t.sidecar) apart \(($svc)\)"
 				gc run services replace $"dist/gcp/sidecar-($t.sidecar).yaml" --region $r --project $p | ignore
-				gc run services add-iam-policy-binding $svc --region $r --project $p --member allUsers --role roles/run.invoker | ignore
+				grant-public $svc $p $r
 			}
 			null
 		} catch {|e| $e.msg }
@@ -714,13 +747,17 @@ export def go-live [staged: record]: nothing -> record {
 	let url = ($candidate.url? | default $"https://next---($plan.service)-($number).($r).run.app")
 	# Live means the new revision answers at its own address, then the public one answers as
 	# it, not that gcloud returned, which waits for the revision to be ready.
+	# A public service's polls carry a bearer token as its users' requests do, so the address
+	# counts as answering only once Cloud Run passes those on too (invoker_probe); IAP's
+	# sign-in answers before any of that.
+	let bearer = if $iap { null } else { $invoker_probe }
 	mut moved = false
 	let failed = (try {
-		let got = (poll-health $"($url)/health" $ok null)
+		let got = (poll-health $"($url)/health" $ok null --bearer $bearer)
 		if not $got.ok { error make {msg: $"the new revision ($candidate.revision) did not answer at its own address \(($url)/health\) in ($got.waited): last answer ($got.last)"} }
 		gc run services update-traffic $plan.service --to-revisions $"($candidate.revision)=100" --region $r --project $p | ignore
 		$moved = true
-		let got = (poll-health $"($address)/health" $ok (if $iap { null } else { $candidate.revision }) --steady 3)
+		let got = (poll-health $"($address)/health" $ok (if $iap { null } else { $candidate.revision }) --steady 3 --bearer $bearer)
 		if not $got.ok { error make {msg: $"the public address ($address)/health did not answer as ($candidate.revision) in ($got.waited): last answer ($got.last)"} }
 		null
 	} catch {|e| $e.msg })
