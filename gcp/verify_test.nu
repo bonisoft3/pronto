@@ -53,6 +53,11 @@ def test_another_failed_line_is_unknown [] {
 	assert equal (classify-failures [["✗ a (1s) at step 1" "✗ premium (4s)"]] [] "" [a]).verdict "unknown"
 }
 
+def test_a_name_inside_another_is_not_in_the_live_tree [] {
+	assert equal (classify-failures [["✗ seek (1s) at step 1"]] [seek_notify] "scenarios: seek_notify: {}\n// seek" [seek]).verdict "unknown"
+	assert equal (classify-failures [["✗ seek (1s) at step 1"]] [seek_notify] "scenarios: seek_notify: {}" [seek]).verdict "new"
+}
+
 # A git checkout whose first commit holds scenario `seek`, and a working tree adding `seek_notify`.
 def checkout []: nothing -> record {
 	let d = (mktemp -d)

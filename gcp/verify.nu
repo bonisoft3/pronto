@@ -241,7 +241,7 @@ export def classify-failures [sections: list<list<string>>, live_names: list<str
 	let all = ($named | flatten | uniq)
 	let regressed = ($all | where {|n| $n in $live_names })
 	if ($regressed | is-not-empty) { return {verdict: "regression", new: [], why: $"already in the live release: ($regressed | str join ', ')"} }
-	let odd = ($all | where {|n| $n not-in $current_names or ($live_text | str contains $n) })
+	let odd = ($all | where {|n| $n not-in $current_names or ($live_text =~ $"\(?:^|[^A-Za-z0-9_.-]\)($n | str replace -a '.' '\\.')\(?:[^A-Za-z0-9_.-]|$\)") })
 	if ($odd | is-not-empty) { return {verdict: "unknown", new: [], why: $"cannot be classified: ($odd | str join ', ')"} }
 	{verdict: "new", new: $all, why: ""}
 }
@@ -319,7 +319,12 @@ export def run-rehearsal [run: record, r: record]: nothing -> record {
 		| lines | where {|l| $l | str trim | is-not-empty })
 	$log | each {|l| print $"rehearsal| ($l)" } | ignore
 	# Failing scenarios that are all a new feature's do not fail the release.
-	let new_feature = if $ok { [] } else { new-feature-excuse $run [$log] }
+	# Only when the container itself exited 1, as a scenario's failure does: a timeout, an out-of-memory
+	# kill or a task that never ran is the job's, whatever the log shows.
+	let why = ($done.status.conditions? | default [] | where type == "Completed" | each {|c| $c.message? | default "" } | str join " ")
+	let exited_one = ($why =~ 'exit\(1\)|exit status 1\b')
+	if not ($ok or $exited_one) { print $"gcp: (stamp) the rehearsal did not end by its container exiting 1 \(($why)\): the release fails" }
+	let new_feature = if $ok or not $exited_one { [] } else { new-feature-excuse $run [$log] }
 	let ok = ($ok or ($new_feature | is-not-empty))
 	print $"gcp: (stamp) the rehearsal (if $ok { 'passed' } else { 'FAILED' }) in ($seconds)s: $($usd) \(($vcpu) vCPU, ($memory_gi) GiB\)"
 	{ok: $ok, newFeature: $new_feature, job: $r.job, execution: $execution, seconds: $seconds, vcpu: $vcpu, memoryGi: $memory_gi, usd: $usd}
