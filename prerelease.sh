@@ -52,7 +52,7 @@ def edit(p, f):
 edit('cue.mod/module.cue', lambda s: re.sub(r'("github.com/bonisoft3/mecha@v0": \{\n\t\tv:\s+)"[^"]+"', lambda m: m.group(1) + f'"v{mecha_v}"', s))
 edit('distribution/config.cue', lambda s: re.sub(r'#Version:(\s+)"([^"]+)"', lambda m: f'#Version:{m.group(1)}"{pronto_v}" // was "{m.group(2)}"', s, count=1))
 registry = 'github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,registry.cue.works'
-edit('distribution/config.cue', lambda s: s.replace('\tmise: {\n\t\t...\n', f'\tmise: {{\n\t\t...\n\t\t// The fork\'s modules, where the fork publishes them (prerelease.sh).\n\t\tenv: CUE_REGISTRY: "{registry}"\n', 1))
+edit('distribution/config.cue', lambda s: s.replace('\tmise: {\n\t\t...\n', f'\tmise: {{\n\t\t...\n\t\t// The fork\'s modules, where the fork publishes them (prerelease.sh), a default that an app sets again.\n\t\tenv: CUE_REGISTRY: *"{registry}" | string\n', 1))
 # The lock bootstrap ships, its pronto and mecha the fork's: every other tool is upstream's.
 def block(s, tool):
     start = s.index(f'[[tools."{tool}"]]')

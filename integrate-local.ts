@@ -12,12 +12,17 @@
 // Chromium at the version the lint imports, installed once per host, with its
 // system libraries where the host is Linux (a CI runner).
 //
+// The database is the last release's (the app's release record names the commit), the tree's schema
+// job applied to it as release@gcp applies it, and a migration error fails the run: a change a fresh
+// initdb takes and a live database refuses shows up here, not in a release.
+//
 // With INTEGRATE_LOCAL_DRIVERS=all (release@gcp's local pre-gate) the app's
 // other drivers run after the lint, each to its end, the run failing if any
 // failed: the ones its gate runs against the `rc` preview (local-drivers.ts).
 // A pass stamps the app's tree (gcp/local-gate-key.nu), which the release skips its gate for.
 
 import { localDrivers } from "./local-drivers.ts"
+import { prepare } from "./upgrade-from-released.ts"
 
 const args: Record<string, string> = {}
 const rest: string[] = []
@@ -83,7 +88,14 @@ const [, doorVar] = compose.match(/DOOR_PORT=\$\{([A-Z0-9_]+):-[0-9]+\}/) ??
 const door = ports[doorVar]
 
 // process-compose with its API on a socket of its own, which `list` reads.
+const t0 = Date.now()
 const dir = await Deno.makeTempDir({ prefix: "integrate-local." })
+// The stack's database is the last release's, carried forward as the release carries it
+// (upgrade-from-released.ts); an app with nothing released says so here and runs a fresh one.
+const upgrade = await prepare(appDir, gateDir, dir)
+if ("skip" in upgrade) console.error(`integrate@local: NOT TESTING THE UPGRADE FROM THE LAST RELEASE: ${upgrade.skip}; the database is built fresh`)
+else console.error(`integrate@local: upgrade from the last release: ${upgrade.note}`)
+const composeFile = "file" in upgrade ? upgrade.file : ".bayt/process-compose.yaml"
 const socket = `${dir}/pc.sock`
 // Its own account of the processes, which their output does not carry (one
 // it could not start says so only here).
@@ -94,7 +106,7 @@ const pc = (more: string[]) => ["-U", "-u", socket, "-L", log, ...more]
 // the run's output open, is found and stopped (survivors()).
 const tag = `INTEGRATE_LOCAL_RUN=${crypto.randomUUID()}`
 const stack = new Deno.Command("process-compose", {
-  args: pc(["-f", ".bayt/process-compose.yaml", "up", "--tui=false"]),
+  args: pc(["-f", composeFile, "up", "--tui=false"]),
   cwd: appDir,
   env: { MISE_LOCKED: "0", ...ports, [tag.split("=")[0]]: tag.split("=")[1] },
   stdout: "inherit",
@@ -222,7 +234,7 @@ for (;;) {
 
 if (verdict === undefined) {
   const url = `https://localhost:${door}`
-  console.error(`integrate@local: the stack is ready at ${url}; running the visual lint`)
+  console.error(`integrate@local: the stack is ready at ${url} after ${Math.round((Date.now() - t0) / 1000)} s; running the visual lint`)
   // node_modules lands where the lint runs, so not in the app. The lint measures every page slowed
   // as the release gate's are (SLOW=1: omnishell's check-visual.ts, the same meaning the apps'
   // scenario runners give it), since a page that fills in after a late answer (a banner a flag
