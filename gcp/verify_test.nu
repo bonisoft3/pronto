@@ -9,6 +9,7 @@ const gcp_dir = path self .
 use std/assert
 use verify.nu [scenario-names failed-scenarios failed-sections classify-failures new-feature-excuse]
 use release-record.nu
+use build.nu [failure-message tag-action]
 
 const cue_text = "package scenarios\n// scenarios: commented: {}\nscenarios: seek: {\n}\nscenarios: seek_notify: {\n}\nscenarios: \"seek_race\": {}\nx: scenarios: nested: {}\n"
 
@@ -92,6 +93,25 @@ def test_the_excuse_reads_the_live_release_s_tree [] {
 	}
 	assert equal (new-feature-excuse {app: "none-such", appDir: $c.app} [["✗ seek_notify (1s) at step 1"]]) []
 	rm -r $c.dir
+}
+
+def test_a_closure_failure_says_its_cause [] {
+	let e = (try { [1 2] | par-each {|x| error make {msg: $"cause ($x)"} } | ignore; null } catch {|e| $e })
+	assert equal $e.msg "Eval block failed with pipeline input"
+	let m = (failure-message $e)
+	assert ($m | str contains "cause") $m
+	assert (not ($m | str contains "Eval block"))
+}
+
+def test_a_plain_failure_keeps_its_message [] {
+	let e = (try { error make {msg: "plain"} } catch {|e| $e })
+	assert equal (failure-message $e) "plain"
+}
+
+def test_a_tag_is_left_made_or_moved [] {
+	assert equal (tag-action null "sha256:a") "create"
+	assert equal (tag-action "sha256:a" "sha256:a") "keep"
+	assert equal (tag-action "sha256:b" "sha256:a") "move"
 }
 
 def main [] {
