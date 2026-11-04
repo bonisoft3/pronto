@@ -848,6 +848,11 @@ address>/crud`, another sidecar apart is its own address, and nothing else of
 the cluster's is reachable (the plan's `peers`). It scales on its own
 requests, none at rest; one that serves none, a worker polling the gateway,
 keeps `apart: minScale` instances, its CPU unthrottled between requests.
+`apart: maxScale` is the most it runs: 2 by default, so a replacement can start
+beside an instance Cloud Run is retiring (at 1, requests in that gap wait for an
+instance, are aborted with 429, and the door answers 500); a sidecar apart is then
+stateless, its state per instance. One with `minScale` above 0 is a worker whose
+timers must not run twice, and defaults to 1.
 `apart: cpu` sets its service's CPU in millicpu (absent, a whole one). Below
 1000 Cloud Run takes it only billed by request, one request at a time, in the
 first generation environment, so the service is so and its CPU is throttled

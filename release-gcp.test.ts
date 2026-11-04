@@ -588,6 +588,14 @@ Deno.test("a sidecar apart reaches the gateway through the door, one inside at l
   assertEquals(r.value.peers.billing["perf-collector:8687"], undefined, "one apart is no peer at loopback");
 });
 
+Deno.test("a sidecar apart may scale to two so a replacement starts beside a retiring instance, a worker stays at one", async () => {
+  const at = async (perf: string) => (await built(withApart(perf), "sidecarServices")).value["perf-collector"].spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"];
+  assertEquals(await at(`{port: 8687, apart: {}}`), "2");
+  assertEquals(await at(`{port: 8687, apart: maxScale: 3}`), "3");
+  assertEquals(await at(`{port: 8687, apart: minScale: 1}`), "1");
+  assertEquals(await at(`{port: 8687, apart: {minScale: 1, maxScale: 2}}`), "2");
+});
+
 Deno.test("a worker apart keeps an instance, its CPU unthrottled between requests", async () => {
   const own = (await built(withApart(`{port: 8687, apart: minScale: 1}`), "sidecarServices")).value["perf-collector"];
   assertEquals(own.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"], "1");

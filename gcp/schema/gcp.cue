@@ -187,6 +187,13 @@ import (
 		// none (a worker polling the gateway) keeps minScale instances.
 		apart?: {
 			minScale: *0 | int & >=0
+			// The most instances its service runs. Above 1 so that a replacement
+			// can start beside an instance Cloud Run is retiring: with 1, requests
+			// in that gap wait for an instance and are aborted (429), which the
+			// door turns into 500s. A sidecar apart must then be stateless (its
+			// state per instance, lost with it). One kept at rest (minScale > 0) is
+			// a worker whose timers must not run twice, so it defaults to 1.
+			maxScale: *[if minScale > 0 {1}, 2][0] | int & >=1 & >=minScale
 			// Its service's CPU, in millicpu; absent, Cloud Run's whole one.
 			// Below 1000 Cloud Run takes it only on request-based billing, one
 			// request at a time, in the first generation environment: the
@@ -600,7 +607,7 @@ import (
 			spec: template: {
 				metadata: annotations: {
 					"autoscaling.knative.dev/minScale": "\(c.apart.minScale)"
-					"autoscaling.knative.dev/maxScale": "1"
+					"autoscaling.knative.dev/maxScale": "\(c.apart.maxScale)"
 					"run.googleapis.com/execution-environment": [if R._fractional[n] != _|_ {"gen1"}, "gen2"][0]
 					// One kept at rest works between requests: its CPU is not
 					// throttled outside them, unless it is less than a whole one,
