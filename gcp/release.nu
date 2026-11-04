@@ -775,7 +775,12 @@ export def go-live [staged: record]: nothing -> record {
 	# routing to the revision it just shut down, and a service left broken that way is
 	# one the release would have to roll back by hand.
 	let before = (serving-revision $plan.service $p $r)
-	hold-traffic (open --raw dist/gcp/service.yaml) $before | save -f dist/gcp/service.held.yaml
+	# A preview's door takes the traffic at once: its last revision was stopped with the preview,
+	# and held on it, an instance of each started together and the new one's Electric took the
+	# replication slot's lock, so the old one's waited for ever, answered every shape with a 503,
+	# and the renderer reading through it never became healthy (Bonk Chess, 2026-11-04 07:56 BRT).
+	let held = if ($plan.preview? | is-not-empty) { null } else { $before }
+	hold-traffic (open --raw dist/gcp/service.yaml) $held | save -f dist/gcp/service.held.yaml
 	# The service replaced beside the retired migrate job's removal (an earlier release ran it apart, this one's job does).
 	let failed = (["service" "migrate"] | par-each {|t|
 		try {
@@ -868,6 +873,8 @@ export def go-live [staged: record]: nothing -> record {
 		print $"gcp: (stamp) ($plan.service) failed to go live: ($failed)"
 		if $before == null {
 			print $"gcp: (stamp) ($plan.service) had no revision before this one to go back to"
+		} else if $held == null {
+			print $"gcp: (stamp) ($plan.service) is a preview's door, left on ($candidate.revision): its last revision was stopped"
 		} else if $moved {
 			# Traffic moved, so it goes back: back-one's, which refuses past a migration.
 			back-one $plan.service $p $r --schema
