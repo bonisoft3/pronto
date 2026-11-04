@@ -617,6 +617,14 @@ dry run needs no image to exist, so the yaml is rendered over placeholder digest
 service account, so a project not yet set up (a first release) is validated when applied. Jobs are not
 checked: `gcloud run jobs replace` has no `--dry-run`.
 
+Before all of that, first in `release@gcp` and again at the start of `integrate@local`
+(for an app with a GCP release plan), [`gcp/secrets.nu`](../gcp/secrets.nu)'s `check-secrets`
+lists, by metadata alone (`gcloud secrets versions describe latest`, which gives the state, never a
+value), the secrets the release reads by name (the OIDC secrets and every
+`GCP.sidecars.<n>.secrets`) in every project it touches, the release's and the rc
+preview's, and fails naming every pair (project, secret) whose latest version is not enabled, all at once. Declare one in
+the repo's `infra/gcp`, applied by `release@infra`. gcloud not signed in is a failure too.
+
 Before any of that, a release (gated or `--no-gate`, not a preview, a dry run
 or a snapshot) runs the same drivers on the machine releasing: `release.nu`
 runs `sayt integrate@local` with `INTEGRATE_LOCAL_DRIVERS=all`, which brings the
