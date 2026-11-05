@@ -598,6 +598,7 @@ export def cloud-build-images [app_dir: string, name: string, services: list<str
 	let plan = {project: $target_env.build.project, registry: $target_env.registry, preview: $tag}
 	let built = (push-images $app_dir $plan $name $services --platform ($target_env.platform? | default "linux/amd64") --override $override)
 	$built | items {|svc, ref|
+		let ref = ($ref | reject -o key)
 		if $svc != "database" { return {svc: $svc, ref: $ref} }
 		let repo = $"($target_env.registry)/($name)-database"
 		let major = (registry-pg-major $repo $ref.digest)

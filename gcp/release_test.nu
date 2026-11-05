@@ -93,6 +93,7 @@ def main [] {
 	test_golive_goes_back_when_the_public_address_stays_on_the_old_revision
 	test_golive_first_deploy
 	test_golive_tags_the_tested_images_before_the_schema_job
+	test_golive_leaves_the_inputs_key_on_the_copied_images
 	test_preflight_dry_runs_every_service_over_placeholder_digests
 	test_preflight_names_the_file_and_clouds_run_message
 	test_preflight_passes_a_sidecar_apart_whose_compose_sets_port
@@ -249,12 +250,24 @@ def test_golive_tags_the_tested_images_before_the_schema_job [] {
 	let log = (log-of $d)
 	assert ($log | str contains "tags add reg/app-crud@sha256:aa reg/app-crud:release")
 	assert ($log | str contains "run jobs replace dist/gcp/job.yaml")
+	# No key on the record (an older preview's), no inputs tag.
+	assert (not ($log | str contains "src-"))
 	# A tag that fails stops the release before the schema job changes production's database.
 	let lines = ($log | lines)
 	let tagged = ($lines | enumerate | where {|l| $l.item | str contains "tags add" } | first | get index)
 	let job = ($lines | enumerate | where {|l| $l.item | str contains "run jobs replace" } | first | get index)
 	assert ($tagged < $job) "the tag comes before the schema job"
 	assert ($res.stdout | str contains "release")
+	rm -r $d
+}
+
+def test_golive_leaves_the_inputs_key_on_the_copied_images [] {
+	print "test go-live tags a copied image src-<key>, so a release that skips the preview reuses it..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	"sha256:aa" | save -f ($d | path join tagged_digest)
+	let res = (golive $d {gated: true, copy: {refs: [{svc: "crud", repo: "reg/app-crud", digest: "sha256:aa", key: "k123"}]}})
+	assert equal $res.exit_code 0 $res.stderr
+	assert (log-of $d | str contains "tags add reg/app-crud@sha256:aa reg/app-crud:src-k123")
 	rm -r $d
 }
 
