@@ -85,7 +85,8 @@ code: pronto.#App & {
         vendored: {}
         auth?: { required: bool, service: string, promote?: bool, self?: { route: string, name: string } }
         resources?: { "<name>": { kind: "img", source: "https:" } } // external image hosts the CSP admits
-        blobSeed?: { manifest: string, origin: string }
+        seedAssets?: { manifest: string, origin: string }
+        seedBlobs?: { dir: string }
     }
     state: rawMigrations?: [{ name: "011_owner_writes", src: "services/database/sql/011_owner_writes.sql" }]
     surface: {
