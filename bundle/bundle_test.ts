@@ -392,8 +392,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       import { createPageDatabase } from ${JSON.stringify(String(pathToFileURL(path.join(here, 'database.ts'))))}
       import { createCluster } from ${JSON.stringify(String(pathToFileURL(path.join(browser, 'cluster.ts'))))}
       const html = await Deno.readTextFile(Deno.args[0])
-      const b64 = /<script type="application\\/octet-stream" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1]
-      const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))))
+      const payload = JSON.parse(/<script type="application\\/json" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1])
       // PGlite's files come from beside the page, and nothing from elsewhere.
       const dir = Deno.args[0].replace(/index\\.html$/, '')
       globalThis.fetch = async (href) => {
