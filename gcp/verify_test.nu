@@ -27,6 +27,55 @@ def test_sections_of_failed_drivers [] {
 	assert equal (failed-sections $lines) [["✗ x (1s) at step 1"] ["✗ y (1s) at step 2"]]
 }
 
+# The drivers' build log of release-cron's 2026-11-05 10:42 BRT run: Cloud Build interleaved stderr, so
+# check-online's FAILED line came after check-premium's header.
+const interleaved = [
+	"verify: building check-online check-premium integrate"
+	"verify: check-online"
+	" Network workspace_default  Created"
+	"✓ gold (38s): accept-gold-earn, accept-gold-spend"
+	"  ✗ shop_tester (52s) at step 4 (Birosca's Farm is offered): {\"by\":\"tess\"}"
+	"✗ shop_tester (44s) at step 4 (Birosca's Farm is offered): {\"by\":\"tess\"}"
+	"scenarios: 26 passed (0 cached), 1 failed, in 320s"
+	"verify: check-premium"
+	"verify: check-online FAILED"
+	"✓ premium (12s): accept-premium"
+	"verify: check-premium passed"
+	"verify: integrate"
+	"✓ integrate (9s)"
+	"verify: integrate passed"
+	"verify: screenshots in gs://b/verify/1/shots/"
+	"verify: failed: check-online"
+]
+
+def test_a_failed_line_after_the_next_header_keeps_its_section [] {
+	let sections = (failed-sections $interleaved)
+	assert equal ($sections | length) 1
+	assert ($sections.0 | any {|l| $l | str contains "✗ shop_tester" })
+	assert ($sections.0 | all {|l| not ($l | str contains "premium") })
+}
+
+def test_the_interleaved_log_is_a_new_feature_unless_the_live_tree_has_it [] {
+	let sections = (failed-sections $interleaved)
+	let current = [gold shop_tester]
+	let new = (classify-failures $sections [gold] "scenarios: gold: {}" $current)
+	assert equal $new.verdict "new"
+	assert equal $new.new [shop_tester]
+	let regression = (classify-failures $sections [gold shop_tester] "scenarios: gold: {}\nscenarios: shop_tester: {}" $current)
+	assert equal $regression.verdict "regression"
+}
+
+def test_a_failed_driver_with_no_lines_stays_unknown [] {
+	let sections = (failed-sections ["verify: a" "verify: b" "verify: a FAILED" "verify: b passed"])
+	assert equal $sections [[]]
+	assert equal (classify-failures $sections [] "" []).verdict "unknown"
+}
+
+def test_failed_before_the_next_header_and_after_both_work [] {
+	assert equal (failed-sections ["verify: a" "✗ x (1s) at step 1" "verify: a FAILED" "verify: b" "ok"]) [["✗ x (1s) at step 1"]]
+	assert equal (failed-sections ["verify: a" "✗ x (1s) at step 1" "verify: b" "ok" "verify: a FAILED"]) [["✗ x (1s) at step 1"]]
+}
+
 def test_only_new_scenarios_failing_is_new [] {
 	let r = (classify-failures [["✗ seek_notify (5s) at step 3"]] [seek] "scenarios: seek: {}" [seek seek_notify])
 	assert equal $r.verdict "new"

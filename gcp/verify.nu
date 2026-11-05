@@ -158,7 +158,7 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		"for d in $tested; do"
 		"  echo \"verify: $d\""
 		"  cat \"/workspace/logs/$d\""
-		"  if [ \"$(cat \"/workspace/verdicts/$d\")\" = 0 ]; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\" >&2; failed=\"$failed $d\"; fi"
+		"  if [ \"$(cat \"/workspace/verdicts/$d\")\" = 0 ]; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\"; failed=\"$failed $d\"; fi"
 		"done"
 		"echo \"$failed\" > /workspace/failed"
 	] | str join "\n")
@@ -217,15 +217,30 @@ export def failed-scenarios [lines: list<string>]: nothing -> list<string> {
 	$lines | each {|l| $l | parse -r '✗ (?<n>\S+) \(\d+s\) at step' | each {|r| $r.n } } | flatten | uniq
 }
 
-# The log of each driver that failed, from the drivers' build log: what a driver printed lies between
-# its `verify: <driver>` line and its `verify: <driver> FAILED` one.
+# The log of each driver that failed, from the drivers' build log. A line belongs to the driver named by
+# the most recent `verify: <driver>` header (a header resets nothing else); `verify: <driver> FAILED`
+# marks that driver failed wherever it appears, since Cloud Build interleaves stdout and stderr, so it can
+# come after the next driver's header. The sections come in the order the drivers failed.
 export def failed-sections [lines: list<string>]: nothing -> list<list<string>> {
-	mut buffer = []
-	mut sections = []
+	mut logs = {}
+	mut failed = []
+	mut current = ''
 	for l in $lines {
-		if ($l | parse -r '^verify: \S+ FAILED$' | is-not-empty) { $sections = ($sections | append [$buffer]) ; $buffer = [] } else if ($l | parse -r '^verify: \S+$' | is-not-empty) { $buffer = [] } else { $buffer = ($buffer | append $l) }
+		let h = ($l | parse -r '^verify: (?<d>\S+)(?<s> FAILED)?$')
+		if ($h | is-not-empty) {
+			let d = $h.0.d
+			if ($h.0.s | is-not-empty) {
+				if $d not-in $failed { $failed = ($failed | append $d) }
+			} else {
+				$current = $d
+				if ($logs | get -o $d) == null { $logs = ($logs | merge {$d: []}) }
+			}
+		} else if $current != '' {
+			$logs = ($logs | merge {$current: (($logs | get -o $current | default []) | append $l)})
+		}
 	}
-	$sections
+	let all = $logs
+	$failed | each {|d| $all | get -o $d | default [] }
 }
 
 # new when every failure is a scenario absent from the last live release's tree; regression when one
