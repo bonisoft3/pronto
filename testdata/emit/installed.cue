@@ -26,6 +26,9 @@ _installedSeats: {
 _installedFiles: (pronto.#emit & _installedSeats).files
 
 checkerInputVersion: _installedFiles[".pronto/check-inputs.json"].data.version & 1
+checkerInputTerminal: _installedFiles[".pronto/check-inputs.json"].data.terminal & true
+checkerInputMachines: _installedFiles[".pronto/check-inputs.json"].data.machines & {}
+checkerInputEffects: _installedFiles[".pronto/check-inputs.json"].data.effects & {}
 checkerInputEntities: (_installedFiles[".pronto/check-inputs.json"].data.entities == _code.state.entities) & true
 checkerInputHatches: (_installedFiles[".pronto/check-inputs.json"].data.hatches == _code.capabilities.hatches) & true
 checkerInputRawMigrations: _installedFiles[".pronto/check-inputs.json"].data.rawMigrations & []

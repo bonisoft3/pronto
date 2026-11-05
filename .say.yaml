@@ -61,6 +61,10 @@ say:
           - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
           - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker identity/hydra/fake_test.ts"
           - do: "mise x github:ory/hydra@26.2.0 -- sh -c 'HYDRA_BIN=$(command -v hydra) deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
+      outcome-obligations:
+        priority: -1
+        cmds:
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-env check-outcomes.test.ts check-workflows.test.ts workflow-control.test.ts workflow-invocations.test.ts workflow-omnishell-control.test.ts check-verification.test.ts"
       type-system:
         priority: -1
         cmds:

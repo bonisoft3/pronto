@@ -29,6 +29,8 @@ How pronto works inside, what it decided and what it superseded.
 
 ## Subsystems
 
+* [[automatic-verification|Automatic application verification]] — oracle classes, obligation inventory and execution layers.
+
 * [[cortex|Cortex machines]] — the app's screens over its Mecha machines, each a fold that reaches its machine through surface rows or plays it in place.
 
 * [The compiler and its review ladder](compiler.md) - concept: How a brief becomes an app — two model hops above deterministic rungs, what `cue export` emits and where it lands, what the bijection holds a person to sign, and how pronto reaches the parts it configures.

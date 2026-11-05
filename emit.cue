@@ -2091,6 +2091,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					identity: {verb: "lint", cmds: [_distribution.checks.identity], note: "Pronto compiler identity"}
 				}
 
+				outcomes: {verb: "lint", cmds: [_distribution.checks.outcomes], note: "declared presentation, source outcomes and workflow obligations"}
+
 				// What a Mecha machine can do, over its declarations.
 				if D.code.state.hybrids != _|_ {
 					hybrids: {verb: "lint", cmds: [_distribution.checks.hybrids], note: "Pronto Mecha machines"}
@@ -3336,15 +3338,18 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			format: "json"
 			data: {
 				version: 1
+				terminal: true
 				types: {types: #types, aliases: #typeAlias}
 				entities: E.code.state.entities
 				hybrids: {if E.code.state.hybrids != _|_ for n, h in E.code.state.hybrids {(n): h.reducer}}
+				machines: {if E.code.state.machines != _|_ for n, m in E.code.state.machines {(n): m}}
 				hatches: E.code.capabilities.hatches
 				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
 				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
+				effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0]
 				if E.code.state.cortex != _|_ {
-					cortex: {for n, c in E.code.state.cortex {(n): c.config}}
-					machines: {if E.code.state.machines != _|_ for n, m in E.code.state.machines {(n): m}}
+					cortex: {for n, c in E.code.state.cortex if c.config != _|_ {(n): c.config}}
+					cortexImplementations: {for n, c in E.code.state.cortex if c.config != _|_ {(n): c.setup}}
 				}
 			}
 		}

@@ -9,6 +9,7 @@
     "jsr:@david/which@~0.7.3": "0.7.3",
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/assert@1.0.11": "1.0.11",
+    "jsr:@std/assert@1.0.13": "1.0.13",
     "jsr:@std/bytes@^1.0.6": "1.0.6",
     "jsr:@std/encoding@1.0.5": "1.0.5",
     "jsr:@std/encoding@1.0.7": "1.0.7",
@@ -17,6 +18,7 @@
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
     "jsr:@std/internal@^1.0.5": "1.0.14",
+    "jsr:@std/internal@^1.0.6": "1.0.14",
     "jsr:@std/internal@^1.0.9": "1.0.14",
     "jsr:@std/io@0.225": "0.225.3",
     "jsr:@std/path@1": "1.1.6",
@@ -33,10 +35,12 @@
     "npm:@endo/module-source@1.4.0": "1.4.0",
     "npm:@formatjs/icu-messageformat-parser@3.5.20": "3.5.20",
     "npm:@libpg-query/parser@17.6.10": "17.6.10",
+    "npm:@tootallnate/quickjs-emscripten@0.23.0": "0.23.0",
     "npm:@types/css-tree@2.3.10": "2.3.10",
     "npm:@types/node@*": "22.15.15",
     "npm:acorn-walk@8.3.4": "8.3.4",
     "npm:acorn@8.14.0": "8.14.0",
+    "npm:aria-query@5.3.2": "5.3.2",
     "npm:css-tree@3.1.0": "3.1.0",
     "npm:fake-indexeddb@6.2.5": "6.2.5",
     "npm:fast-check@3.23.2": "3.23.2",
@@ -82,6 +86,12 @@
       "integrity": "2461ef3c368fe88bc60e186e7744a93112f16fd110022e113a0849e94d1c83c1",
       "dependencies": [
         "jsr:@std/internal@^1.0.5"
+      ]
+    },
+    "@std/assert@1.0.13": {
+      "integrity": "ae0d31e41919b12c656c742b22522c32fb26ed0cba32975cb0de2a273cb68b29",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.6"
       ]
     },
     "@std/assert@1.0.19": {
@@ -410,6 +420,9 @@
     "@protobufjs/utf8@1.1.2": {
       "integrity": "sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug=="
     },
+    "@tootallnate/quickjs-emscripten@0.23.0": {
+      "integrity": "sha512-C5Mc6rdnsaJDjO3UpGW/CQTHtCKaYlScZTly4JIu97Jxo/odCiH0ITnDXSJPTOrEKk/ycSZ0AOgTmkDtkOsvIA=="
+    },
     "@types/css-tree@2.3.10": {
       "integrity": "sha512-WcaBazJ84RxABvRttQjjFWgTcHvZR9jGr0Y3hccPkHjFyk/a3N8EuxjKr+QfrwjoM5b1yI1Uj1i7EzOAAwBwag=="
     },
@@ -598,6 +611,9 @@
     "acorn@8.18.0": {
       "integrity": "sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==",
       "bin": true
+    },
+    "aria-query@5.3.2": {
+      "integrity": "sha512-COROpnaoap1E2F000S62r6A60uHZnmlvomhfyT2DlTcrY1OrBKn2UhH7qn5wTC9zMvD0AY7csdPSNwKP+7WiQw=="
     },
     "boolbase@1.0.0": {
       "integrity": "sha512-JZOSA7Mo9sNGB8+UjSgzdLtokWAky1zbztM3WRLCbZ70/3cTANmQmOdR7y2g+J0e2WXywy1yS468tY+IruqEww=="
