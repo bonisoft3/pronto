@@ -25,6 +25,7 @@ import { gzipSync } from 'node:zlib'
 import { SEED_TYPES } from './edge-blobs.ts'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
 import { releaseJwtSecret } from './edge-jwt.ts'
+import { requireLocalCluster } from './edge-deployment.ts'
 
 async function edgeFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   try {
@@ -110,7 +111,7 @@ const nodeDir = path.dirname(node)
 const runEnv = { ...Deno.env.toObject(), PATH: `${nodeDir}${path.delimiter}${Deno.env.get('PATH') ?? ''}` }
 const wrangler = (args: string[]) => run(wranglerBin, args, { env: runEnv })
 const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')
-const settings = JSON.parse(await Deno.readTextFile(config)) as { durable_objects?: { bindings: { name: string; script_name?: string }[] }; routes?: { pattern: string }[] }
+const settings = JSON.parse(await Deno.readTextFile(config)) as { name: string; durable_objects?: { bindings: { name: string; script_name?: string }[] }; routes?: { pattern: string }[] }
 if (!settings.durable_objects) {
   if (reset) fail('--reset requires a cluster')
   const deployed = await wrangler(['deploy', '--config', config, ...temporary])
@@ -124,31 +125,19 @@ if (!settings.durable_objects) {
 }
 
 const token = random()
-const secretPath = path.join(path.dirname(out), '.jwt-secret')
-let ssr = false
-try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
-catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
-const database = ssr && settings.durable_objects.bindings.some(binding => binding.name === 'CLUSTER' && binding.script_name)
-  ? path.join(out, 'database.jsonc') : undefined
+if (temporary.length) fail('Cluster releases require a Cloudflare account to preserve deployed secrets')
+const previous = await previousVersion(config)
+await requireLocalCluster({ config, name: settings.name, previous, wrangler })
 const jwtSecret = await releaseJwtSecret({
-  secret: Deno.env.get('JWT_SECRET'), secretPath, ci: !!Deno.env.get('CI'), temporary: !!temporary.length,
-  configs: database ? [database, config] : [config], wrangler, random,
+  secret: Deno.env.get('JWT_SECRET'), config, previous, wrangler, random,
 })
 const secrets: Record<string, string> = { ...await hatchEnvironment(out, name => Deno.env.get(name)), IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}) }
 const turnId = Deno.env.get('CLOUDFLARE_TURN_KEY_ID')
 const turnToken = Deno.env.get('CLOUDFLARE_TURN_KEY_TOKEN')
+if (Boolean(turnId) !== Boolean(turnToken)) fail('Configure both Cloudflare TURN credentials together')
 if (turnId && turnToken) {
   secrets.CLOUDFLARE_TURN_KEY_ID = turnId
   secrets.CLOUDFLARE_TURN_KEY_TOKEN = turnToken
-} else {
-  try {
-    const turnPath = path.join(path.dirname(out), '.turn-secret')
-    const turnConfig = JSON.parse(await Deno.readTextFile(turnPath)) as { id?: string; token?: string }
-    if (turnConfig.id && turnConfig.token) {
-      secrets.CLOUDFLARE_TURN_KEY_ID = turnConfig.id
-      secrets.CLOUDFLARE_TURN_KEY_TOKEN = turnConfig.token
-    }
-  } catch (_) {}
 }
 /** The Workers this publish deploys, each with the version it replaces, for
  * the rollback a refused migration asks for; a first deploy has none. */
@@ -163,19 +152,19 @@ async function previousVersion(configPath: string): Promise<string | null> {
     fail(`wrangler deployments list --config ${configPath} exited ${r.code}:\n${stderr}`)
   }
   const listed = JSON.parse(new TextDecoder().decode(r.stdout)) as { versions: { version_id: string }[] }[]
-  return listed.at(-1)?.versions[0]?.version_id ?? null
+  if (listed.at(-1)?.versions.length !== 1) fail('Release requires one active Worker version; finish the gradual deployment first')
+  const version = listed.at(-1)?.versions[0]?.version_id
+  if (!version) fail('Cloudflare returned no deployed version for an existing Worker')
+  return version
 }
 async function deploy(configPath: string, ...flags: string[]): Promise<string> {
-  // wrangler cannot list a temporary account's deployments, so a temporary
-  // publish records no earlier version and cannot be rolled back.
-  const previous = temporary.length ? null : await previousVersion(configPath)
   const text = await wrangler(['deploy', '--config', configPath, ...flags, ...temporary])
   deployed.push({ config: configPath, previous })
   return text
 }
 await refuseMissingHatchSecrets({
   directory: out,
-  configs: database ? [database, config] : [config],
+  configs: [config],
   temporary: !!temporary.length,
   deployedBefore: async configPath => await previousVersion(configPath) !== null,
   wrangler,
@@ -185,12 +174,6 @@ const secretsFile = path.join(secretsDir, 'secrets.json')
 let deployedText: string
 try {
   await Deno.writeTextFile(secretsFile, JSON.stringify(secrets), { mode: 0o600 })
-  if (ssr) {
-    console.log(await deploy(path.join(out, 'renderer.jsonc'), '--durable-objects-code-update-mode', 'immediate'))
-    if (database) {
-      console.log(await deploy(database, '--secrets-file', secretsFile, '--durable-objects-code-update-mode', 'immediate'))
-    }
-  }
   // The object restarts on the new code rather than at its next idle.
   deployedText = await deploy(config, '--secrets-file', secretsFile, '--durable-objects-code-update-mode', 'immediate')
 } finally {
@@ -307,6 +290,9 @@ if ('skipped' in loaded) {
   }
   if (lost || (JSON.parse(answer) as { applied: string[] }).applied.length) await settled('the migration')
 }
+let ssr = false
+try { ssr = (await Deno.stat(path.join(out, 'renderer/assets.json'))).isFile }
+catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (ssr) {
   const warm = await edgeFetch(`${origin}/`, { headers: { accept: 'text/html' } })
   await warm.text()
@@ -315,10 +301,7 @@ if (ssr) {
 // What a page reads at the deployment's door is what the build wrote: its
 // terminal config carries the target's ICE servers (edge-ice.ts).
 await holdIceServers(deployedRelease(origin, edgeFetch), await releasedIceServers(builtRelease(path.join(out, 'public'))), origin)
-// The Cron Trigger is the object's Worker's: database.jsonc where there is one.
-let triggers = deployedSettings.triggers
-try { triggers ??= (JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))) as { triggers?: { crons: string[] } }).triggers }
-catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+const triggers = deployedSettings.triggers
 if (triggers) {
   let poked!: Response
   let report = ''

@@ -4,7 +4,7 @@
 // the data directory the object loads once (publish-edge.ts).
 //
 //   deno run -A --config bundle/deno.json bundle/edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--domain <host>]
-//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]
+//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--clock ticker|disabled]
 //
 // <out>/public   the terminal and app assets; data requests reach the Worker
 // <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
@@ -39,7 +39,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]'
+const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--clock ticker|disabled]'
 const app = path.resolve(args.shift() ?? fail(usage))
 const flags: Record<string, string> = {}
 while (args.length) {
@@ -47,13 +47,10 @@ while (args.length) {
   flags[flag] = args.shift() ?? fail(`${flag} takes a value`)
 }
 for (const flag of Object.keys(flags)) {
-  if (!['--omnishell', '--mecha', '--ice-servers', '--out', '--domain', '--derived', '--from', '--assets-from', '--ssr-origin', '--ssr-database', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
+  if (!['--omnishell', '--mecha', '--ice-servers', '--out', '--domain', '--derived', '--from', '--assets-from', '--ssr-origin', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
 }
 const clock = flags['--clock'] ?? 'ticker'
 if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or disabled')
-const databaseMode = flags['--ssr-database'] ?? 'existing'
-if (databaseMode !== 'existing' && databaseMode !== 'separate') fail('--ssr-database must be existing or separate')
-if (flags['--ssr-database'] && !flags['--ssr-origin']) fail('--ssr-database requires --ssr-origin')
 const omnishell = path.resolve(flags['--omnishell'] ?? fail('--omnishell names the interpreter root'))
 const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha root'))
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
@@ -351,7 +348,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   ...(shell.ai || withEffects ? { ai: { binding: 'AI' } } : {}),
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   ...(hatches.some(h => h.edge.email) ? { send_email: hatches.flatMap(h => h.edge.email ? [{name: h.edge.email.name, allowed_destination_addresses: h.edge.email.recipients}] : []) } : {}),
-  migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
+  exports: { Cluster: { type: 'durable-object', storage: 'sqlite' } },
   observability: { enabled: true },
   ...blobBindings,
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
@@ -372,6 +369,6 @@ if (flags['--ssr-origin']) {
   const origin = new URL(flags['--ssr-origin'])
   if (origin.origin !== flags['--ssr-origin'] || origin.protocol !== 'https:') fail('--ssr-origin must be an HTTPS origin without a trailing slash')
   await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], path.join(omnishell, 'server/worker'))
-  await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, drains, databaseMode, clock)
+  await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, drains, clock)
 }
 console.error(`edge: ${out}`)

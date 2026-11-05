@@ -127,7 +127,7 @@ symmetric NAT needs a TURN relay as well
 ([RFC 8656](https://www.rfc-editor.org/rfc/rfc8656)), which needs an account and
 short-lived credentials minted by a server-side key. At `release@cloudflare`, the
 Worker serves dynamic ICE servers from `/rtc-ice`: when `CLOUDFLARE_TURN_KEY_ID`
-and `CLOUDFLARE_TURN_KEY_TOKEN` are configured as secrets (or via `.turn-secret`),
+and `CLOUDFLARE_TURN_KEY_TOKEN` are configured as Cloudflare secrets,
 the Worker calls Cloudflare Calls TURN to mint ephemeral credentials. Without
 them, the release defaults to STUN alone, preserving deployment on the free
 card-less tier. Omnishell's kinetic child prefetches `/rtc-ice` to use dynamic
@@ -348,25 +348,19 @@ generated release recipe passes `edge.ts --ssr-origin https://<public-host>`.
 By default,
 the entry keeps its existing `Cluster` namespace and persisted filesystem format,
 so enabling SSR does not replace live data. The builder also writes
-`renderer.jsonc`; `publish-edge.ts` deploys that renderer before updating the
-entry and its database class. Publishing leaves a complete directory intact.
-Keep the existing `.jwt-secret` beside the release directory to preserve sessions.
+Rendering runs in the database's `Cluster` object in the same Worker. Its asset
+fetches are scoped to rendering; authentication, import and database requests
+retain native fetch. The snapshot stays open until all rendering reads finish,
+independently of response consumption. There is no separate renderer service.
 
-A new deployment can opt into `--ssr-database separate`: it writes
-`database.jsonc` for `<app>-database` with compressed 128 KiB filesystem blocks,
-and deploys renderer, database, then entry. That namespace starts empty; this
-option is not an in-place migration of an existing app. The resumable import
-verifies checksums and uses gzip transport. Do not switch database modes on a
-live deployment without migrating its current data and controlling the cutover.
+The Worker declares `exports.Cluster` with SQLite storage. Cloudflare reconciles
+that declaration with the existing namespace; legacy migration tags are not
+carried forward. Existing data stays in place. The switch from legacy migrations
+to exports is one-way for subsequent deployments.
 
-Both modes keep the renderer in a separate isolate. Renderer Worker names include
-a digest of the origin, sources and assets, so an old entry continues to use its
-matching renderer during an upgrade. Retain previous immutable assets with
-`--assets-from`; old renderer Workers can be removed after their entry versions
-are no longer serving or needed for rollback.
-
-Every navigation renders under public RLS from a fresh database transaction,
-without guest login. No HTML cache can bypass that transaction. Language
+Speculative document requests use cached HTML without starting or refreshing a
+render. A cache miss returns `204` with `no-store`. Actual navigation may render
+or revalidate stale HTML under public RLS without guest login. Language
 negotiation matches the browser, and the response varies on `Accept-Language`.
 See [omnishell/docs/native-worker-ssr](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/native-worker-ssr.md) for the freshness and isolation
 contract. Authentication and derivation support remain the edge target's.
@@ -396,14 +390,13 @@ as its one Durable Object, over the shell's tables. `publish` runs
 [`publish-edge.ts`](../bundle/publish-edge.ts): `wrangler deploy` at the
 version pglite-workerd's `mise.toml` pins, with `JWT_SECRET` (once) and a new
 `IMPORT_TOKEN` in the same version, then the data directory loaded into the
-object. CI's first cluster release requires `secrets.JWT_SECRET`. Later
-releases without an explicit key preserve the deployed secret after checking
-that every JWT-bearing Worker has it; they never generate a replacement key.
-`sayt release@cloudflare --temporary` deploys with no login, to a
-throwaway account wrangler creates and reuses; it expires unless claimed at
-the link wrangler prints. wrangler cannot list a temporary account's
-deployments, so such a publish has no version to roll back to when the data
-directory refuses its migrations. The target keeps the compose stack's shape, one Cloudflare piece per
+object. The first cluster deployment provisions `JWT_SECRET` in Cloudflare,
+using an explicit environment value or generating one. Subsequent deployments
+verify the stored secret and leave it unchanged, even if the environment has an
+older key. Local signing-key files are not read or written. An existing Worker
+missing its signing key fails rather than replacing active sessions' authority.
+Cluster deployments require a Cloudflare account so the publisher can inspect
+existing deployments and secrets. The target keeps the compose stack's shape, one Cloudflare piece per
 service, and nothing runs while no one uses the app:
 
 | compose service | at the edge | sleeps | |

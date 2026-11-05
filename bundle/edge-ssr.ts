@@ -6,13 +6,11 @@ import { realmDocumentsOf } from './edge-templates.ts'
 
 /** `drains` is the app's drain table (.pronto/cluster.json), which the
  * database object calls. */
-export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, drains: unknown[], databaseMode: 'existing' | 'separate' = 'existing', clock: 'ticker' | 'disabled' = 'ticker') {
+export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, drains: unknown[], clock: 'ticker' | 'disabled' = 'ticker') {
   out = await Deno.realPath(out)
   const headers = await Deno.readTextFile(path.join(out, 'public/_headers'))
   const policy = headers.match(/^  Content-Security-Policy: (.+)$/m)?.[1]
   if (!policy) throw new Error('the edge assets carry no Content-Security-Policy header')
-  const separate = databaseMode === 'separate'
-  const database = separate ? name + '-database' : name
   const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
   const images = (config.r2_buckets as { binding?: string }[] | undefined)?.some((b) => b.binding === 'BLOB_OBJECTS') ?? false
   const generated = path.join(out, 'renderer')
@@ -25,23 +23,6 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   } catch {
     // Optional shell.json ai block
   }
-  // Keep the old renderer callable until its entry Worker has been replaced.
-  // Its HTML must keep naming assets from the same release during deployment.
-  const sources: [string, string][] = []
-  async function collect(dir: string) {
-    for await (const entry of Deno.readDir(dir)) {
-      if (entry.name === 'node_modules') continue
-      const file = path.join(dir, entry.name)
-      if (entry.isDirectory) await collect(file)
-      else if (/\.(js|ts|json)$/.test(entry.name)) sources.push([path.relative(omnishell, file).replaceAll('\\', '/'), await Deno.readTextFile(file)])
-    }
-  }
-  await collect(server)
-  await collect(path.join(omnishell, 'interpreter'))
-  sources.sort(([a], [b]) => a.localeCompare(b))
-  const identity = JSON.stringify([origin, sources, await Deno.readTextFile(path.join(generated, 'assets.json'))])
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity)))
-  const renderer = name + '-renderer-' + [...digest.slice(0, 6)].map(b => b.toString(16).padStart(2, '0')).join('')
   // Import specifiers, which a Windows path's separators would escape.
   const specifier = (from: string, file: string) => {
     const r = path.relative(from, file).replaceAll('\\', '/')
@@ -56,36 +37,33 @@ export async function writeEdgeSsr(out: string, omnishell: string, mecha: string
   }
   const hasMachines = await fileExists(path.join(out, 'src/machines.js'))
   const hasEffects = await fileExists(path.join(out, 'src/effects.js'))
-  await Deno.writeTextFile(path.join(out, 'src/render.ts'), `
-import '${fromSrc(path.join(server, 'worker-roles.ts'))}'
-import { appRenderer } from '${fromSrc(path.join(server, 'worker-document.ts'))}'
-import { renderObject } from '${fromSrc(path.join(server, 'render-object.ts'))}'
-import assets from '../renderer/assets.json'
-export class DocumentRenderer extends renderObject(appRenderer(assets, ${JSON.stringify(origin)}), ${JSON.stringify(renderer)}) {}
-export default { fetch() { return new Response(null, { status: 404 }) } }
-`)
   await Deno.writeTextFile(path.join(out, 'src/database.ts'), `
-import { RpcTarget } from 'cloudflare:workers'
 import { edgeObject, DataDirectoryLoading } from '${fromSrc(path.join(edge, 'object.ts'))}'
-${separate ? `import { pokeCluster } from '${fromSrc(path.join(edge, 'clock.ts'))}'\n` : ''}import { PublicSnapshotCapacity } from '${fromSrc(path.join(edge, 'public-snapshot.ts'))}'
+import '${fromSrc(path.join(server, 'worker-roles.ts'))}'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { appRenderer } from '${fromSrc(path.join(server, 'worker-document.ts'))}'
+import { renderTask } from '${fromSrc(path.join(server, 'render-object.ts'))}'
+import assets from '../renderer/assets.json'
+import { PublicSnapshotCapacity } from '${fromSrc(path.join(edge, 'public-snapshot.ts'))}'
 ${hasMachines ? "import machines from './machines.js'\n" : ''}${hasEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
-class SnapshotReader extends RpcTarget {
-  constructor(snapshot) { super(); this.snapshot = snapshot }
-  read(path) { return this.snapshot.read(path) }
-}
+const nativeFetch = globalThis.fetch
+const draw = appRenderer(assets, ${JSON.stringify(origin)})
+const assetFetch = globalThis.fetch
+const renderContext = new AsyncLocalStorage()
+globalThis.fetch = (...args) => (renderContext.getStore() ? assetFetch : nativeFetch)(...args)
+const render = (...args) => renderContext.run(true, () => draw(...args))
 const Base = edgeObject({
   clock: ${JSON.stringify(clock)},
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(cfg.tables)},
   schema: ${JSON.stringify(cfg.schema ?? {})},
   drains: ${JSON.stringify(drains)},${hasMachines ? '\n  machines,' : ''}${hasEffects ? '\n  effects,' : ''}${cfg.ai ? `\n  ai: ${JSON.stringify(cfg.ai)},` : ''}
-  ${separate ? "storageFormat: { version: 1, blockSize: 131072, codec: 'deflate' }," : ''}
 })
 export class Cluster extends Base {
-  async render(request, renderer) {
+  async render(request) {
     try {
       const priority = request.headers.get('x-pronto-speculative') === '1' ? 'low' : 'high'
       let resolveResponse
@@ -96,15 +74,10 @@ export class Cluster extends Base {
         rejectResponse = reject
       })
       const snapshotDone = this.readPublic(async snapshot => {
-        const response = await renderer.render(request, snapshot.revision, new SnapshotReader(snapshot))
-        const init = { status: response.status, headers: new Headers(response.headers) }
-        if (!response.body) {
-          resolveResponse(new Response(null, init))
-          return
-        }
-        const { readable, writable } = new TransformStream()
-        resolveResponse(new Response(readable, init))
-        await response.body.pipeTo(writable)
+        const task = renderTask(render, request, snapshot.revision, snapshot, this.env.CF_VERSION_METADATA?.id ?? '')
+        task.response.then(resolveResponse, rejectResponse)
+        this.ctx.waitUntil(task.finished)
+        await task.rendered
       }, priority).catch(error => {
         if (!committed) {
           rejectResponse(error)
@@ -120,7 +93,7 @@ export class Cluster extends Base {
     }
   }
 }
-${separate ? "// The Cron Trigger pokes the object from the Worker that holds it.\nexport default { fetch() { return new Response(null, { status: 404 }) }, scheduled(_controller, env) { return pokeCluster(env) } }" : 'export default { fetch() { return new Response(null, { status: 404 }) } }'}
+export default { fetch() { return new Response(null, { status: 404 }) } }
 `)
   await Deno.writeTextFile(path.join(out, 'src/index.ts'), `
 import { edgeWorker } from '${fromSrc(path.join(edge, 'worker.ts'))}'
@@ -128,7 +101,7 @@ import { edgeHints } from '${fromSrc(fileURLToPath(new URL('edge-hints.ts', impo
 import { originAssets } from '${fromSrc(fileURLToPath(new URL('edge-templates.ts', import.meta.url)))}'
 ${images ? `import { edgeImage } from '${fromSrc(fileURLToPath(new URL('edge-images.ts', import.meta.url)))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt, stripProgressiveReads } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json' with { type: 'json' }
-${separate ? '' : "export { Cluster } from './database.ts'"}
+export { Cluster } from './database.ts'
 const DOCUMENT_POLICY = ${JSON.stringify(policy)}
 const RENDER_FRESH_MS = 60_000
 const RENDER_SWR_S = 86_400
@@ -137,7 +110,8 @@ const stripServedReads = (html) => html.replace(/<script type="application\\/jso
 const keyOf = (...parts) => new Request(\`https://edge-cache.invalid/\${parts.filter(Boolean).map(encodeURIComponent).join('/')}\`)
 const inFlight = new Map()
 export default {
-${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}  async fetch(request, env, ctx) {
+  scheduled: edgeWorker.scheduled,
+  async fetch(request, env, ctx) {
     if (env.ASSETS) env = { ...env, ASSETS: originAssets(env.ASSETS, ${JSON.stringify(realmDocumentsOf(cfg))}) }
 ${images ? '    const image = await edgeImage(request, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}    const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
@@ -150,7 +124,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
       const version = env.CF_VERSION_METADATA?.id ?? ''
       const reset = cache ? ((await (await cache.match(keyOf(version, 'reset')))?.text()) ?? '0') : '0'
       const lastWrite = cache ? ((await (await cache.match(keyOf(version, reset, 'writes', 'public')))?.text()) ?? '0') : '0'
-      const cacheKey = new Request(\`https://edge-cache.invalid/${renderer}/\${encodeURIComponent(version)}/\${encodeURIComponent(reset)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
+      const cacheKey = new Request(\`https://edge-cache.invalid/\${encodeURIComponent(version)}/\${encodeURIComponent(reset)}/\${encodeURIComponent(found.locale || '_')}\${url.pathname}\${url.search}\`)
       // A write moved this key once, so every visitor's write cost the next reader of every page a
       // render of seconds. It now makes a document stale, which paints at once and renders behind.
       const sharedRender = cacheKey.url + '|' + lastWrite
@@ -160,8 +134,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
         const reqHeaders = new Headers(request.headers)
         if (speculative) reqHeaders.set('x-pronto-speculative', '1')
         const getReq = request.method === 'HEAD' || speculative ? new Request(request.url, { headers: reqHeaders }) : request
-        const renderer = env.RENDERER.get(env.RENDERER.idFromName('public'))
-        const response = await env.CLUSTER.get(env.CLUSTER.idFromName('cluster')).render(getReq, renderer)
+        const response = await env.CLUSTER.get(env.CLUSTER.idFromName('cluster')).render(getReq)
         const headers = new Headers(response.headers)
         headers.set('Link', edgeHints(request, hints, routeAt, preferred))
         headers.set('Content-Security-Policy', DOCUMENT_POLICY)
@@ -265,7 +238,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
           }
           headers.delete('etag')
           headers.set('x-edge-cache', 'stale')
-          ctx?.waitUntil?.(renderShared(true).then(r => r.done))
+          if (!prefetch) ctx?.waitUntil?.(renderShared(true).then(r => r.done))
           // Drop carried reads on a stale hit so the browser paints cached HTML
           // immediately and revalidates live rows from /crud after first paint.
           // A prefetch keeps them: the tab holds what it seeds as stale and
@@ -274,6 +247,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
           return new Response(staleBody, { status: cached.status, headers })
         }
       }
+      if (prefetch) return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } })
       const fresh = await (request.headers.has('if-none-match') ? renderFresh() : renderShared())
       const freshHeaders = new Headers(fresh.headers)
       if (!linkHeader) freshHeaders.delete('Link')
@@ -307,71 +281,39 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
   },
 }
 `)
-  const common = { compatibility_date: '2026-09-01', observability: { enabled: true } }
-  await Deno.writeTextFile(path.join(out, 'renderer.jsonc'), JSON.stringify({
-    ...common, name: renderer, main: 'src/render.ts', workers_dev: false,
-    durable_objects: { bindings: [{ name: 'RENDERER', class_name: 'DocumentRenderer' }] },
-    migrations: [{ tag: 'v1', new_sqlite_classes: ['DocumentRenderer'] }],
-    alias: {
-      './jessie.js': rel(path.join(server, 'worker-roles.ts')),
-      '@omnishell/jessie-startup': './renderer/jessie-startup.js',
-      '@omnishell/release-roles': './renderer/roles.json',
-      linkedom: rel(path.join(server, 'worker/node_modules/linkedom/esm/index.js')),
-    },
-  }, null, 2) + '\n')
-  // The Cron Trigger (edge.ts) and AI binding belong to the Worker holding the object.
-  const triggers = config.triggers
-  delete config.triggers
-  const ai = config.ai
-  const databaseConfig = {
-    ...common, name: database, main: 'src/database.ts', workers_dev: false,
-    ...(separate && triggers ? { triggers } : {}),
-    ...(separate && ai ? { ai } : {}),
-    // An effect's bytes are written by the object, wherever it runs.
-    ...(separate && config.r2_buckets ? { r2_buckets: config.r2_buckets, vars: config.vars } : {}),
-    version_metadata: { binding: 'CF_VERSION_METADATA' },
-    durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
-    migrations: [{ tag: 'v1', new_sqlite_classes: ['Cluster'] }],
-    rules: [
-      { type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false },
-      { type: 'Data', globs: ['**/*.data', '**/*.tgz'], fallthrough: false },
-    ],
-    alias: {
-      '@electric-sql/pglite': './pglite/index.js', '@electric-sql/pglite/basefs': './pglite/fs/base.js',
-      '@mecha/postgrest-js': rel(path.join(mecha, 'packages/postgrest-js/src/index.ts')),
-    },
-  }
-  if (separate) await Deno.writeTextFile(path.join(out, 'database.jsonc'), JSON.stringify(databaseConfig, null, 2) + '\n')
-  else {
-    try { await Deno.remove(path.join(out, 'database.jsonc')) }
-    catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
-  }
   config.name = name
   config.main = 'src/index.ts'
   config.version_metadata = { binding: 'CF_VERSION_METADATA' }
-  config.durable_objects = { bindings: [{ name: 'CLUSTER', class_name: 'Cluster', ...(separate ? { script_name: database } : {}) }, { name: 'RENDERER', class_name: 'DocumentRenderer', script_name: renderer }] }
+  config.durable_objects = { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] }
+  delete config.migrations
+  config.exports = { Cluster: { type: 'durable-object', storage: 'sqlite' } }
+  config.compatibility_flags = [...new Set([...(config.compatibility_flags ?? []), 'nodejs_als'])]
   config.assets.run_worker_first = await edgeRoutingRules(path.join(out, 'public'))
   config.assets.html_handling = 'drop-trailing-slash'
-  if (separate) {
-    delete config.ai
-    delete config.migrations
-    delete config.rules
-    delete config.alias
-  } else {
-    if (triggers) config.triggers = triggers
-    if (ai) config.ai = ai
-    config.migrations ??= databaseConfig.migrations
-    config.rules = databaseConfig.rules
-    config.alias = databaseConfig.alias
+  config.rules = [
+    { type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false },
+    { type: 'Data', globs: ['**/*.data', '**/*.tgz'], fallthrough: false },
+  ]
+  config.alias = {
+    ...config.alias,
+    '@electric-sql/pglite': './pglite/index.js', '@electric-sql/pglite/basefs': './pglite/fs/base.js',
+    '@mecha/postgrest-js': rel(path.join(mecha, 'packages/postgrest-js/src/index.ts')),
+    './jessie.js': rel(path.join(server, 'worker-roles.ts')),
+    '@omnishell/jessie-startup': './renderer/jessie-startup.js',
+    '@omnishell/release-roles': './renderer/roles.json',
+    linkedom: rel(path.join(server, 'worker/node_modules/linkedom/esm/index.js')),
+  }
+  for (const obsolete of ['renderer.jsonc', 'database.jsonc', 'src/render.ts']) {
+    try { await Deno.remove(path.join(out, obsolete)) }
+    catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
   }
   await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify(config, null, 2) + '\n')
 }
 
 if (import.meta.main) {
-  const [out, omnishell, mecha, name, origin, clusterJson, mode = 'existing', clock = 'ticker'] = Deno.args
-  if (!clusterJson) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin> <app>/.pronto/cluster.json [existing|separate] [ticker|disabled]')
-  if (mode !== 'existing' && mode !== 'separate') throw new Error('database mode must be existing or separate')
+  const [out, omnishell, mecha, name, origin, clusterJson, clock = 'ticker'] = Deno.args
+  if (!clusterJson) throw new Error('edge-ssr.ts <release-directory> <omnishell> <mecha> <worker-name> <public-origin> <app>/.pronto/cluster.json [ticker|disabled]')
   if (clock !== 'ticker' && clock !== 'disabled') throw new Error('clock must be ticker or disabled')
   const drains = await clusterDrains(clusterJson)
-  await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, drains, mode, clock)
+  await writeEdgeSsr(path.resolve(out), path.resolve(omnishell), path.resolve(mecha), name, origin, drains, clock)
 }
