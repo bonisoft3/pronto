@@ -8,7 +8,7 @@
 
 use ../k8s/release.nu [resolve-app]
 use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers run-rehearsal plan-of]
-use build.nu [builder stamp gc exists build-account push-images service-jwt failure-message]
+use build.nu [builder stamp key-tag gc exists build-account push-images service-jwt failure-message]
 use local-gate-key.nu
 use release-record.nu
 use secrets.nu [check-secrets]
@@ -284,7 +284,7 @@ def start-copy [plan: record, name: string, services: list<string>, from: record
 	let refs = ($services | each {|svc|
 		let src = ($from.pushed | get -o $svc)
 		if $src == null { error make {msg: $"the preview has no ($svc) image to release"} }
-		{svc: $svc, src: $"($from.registry)/($name)-($svc)@($src.digest)", digest: $src.digest, repo: $"($plan.registry)/($name)-($svc)"}
+		{svc: $svc, src: $"($from.registry)/($name)-($svc)@($src.digest)", digest: $src.digest, key: ($src.key? | default null), repo: $"($plan.registry)/($name)-($svc)"}
 	})
 	let work = (mktemp -d -t gcp-copy.XXXXXX | str trim)
 	{
@@ -322,6 +322,9 @@ def tag-release [copy: record]: nothing -> record {
 		gc artifacts docker tags add $"($r.repo)@($r.digest)" $"($r.repo):release" | ignore
 		let digest = (gc artifacts docker images describe $"($r.repo):release" --format "value(image_summary.digest)" | str trim)
 		if $digest != $r.digest { error make {msg: $"($r.repo):release is ($digest), not the tested ($r.digest)"} }
+		# Found by its inputs' key the next time, as `push-images` leaves its own (a release
+		# that skips the preview reuses what it finds); a record without a key adds none.
+		if ($r.key? | is-not-empty) { gc artifacts docker tags add $"($r.repo)@($r.digest)" $"($r.repo):(key-tag $r.key)" | ignore }
 		{svc: $r.svc, ref: {tag: "release", digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
@@ -589,7 +592,7 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	{GCP: ({image: {pushed: ($pushed | items {|svc, ref| {k: $svc, v: ($ref | reject -o key)} } | reduce -f {} {|i, acc| $acc | insert $i.k $i.v })}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	{plan: $plan, number: $number}

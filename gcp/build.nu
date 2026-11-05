@@ -311,7 +311,7 @@ export def push-images [
 	let before = (pushed-for $refs $keys)
 	let reused = ($before | par-each --keep-order {|b|
 		tag-image $b.repo $b.digest $tag
-		{svc: $b.svc, ref: {tag: $tag, digest: $b.digest}}
+		{svc: $b.svc, ref: {tag: $tag, digest: $b.digest, key: ($keys | get $b.svc)}}
 	})
 	let all = $services
 	let refs = ($refs | where {|r| $r.svc not-in ($before | each {|b| $b.svc }) })
@@ -383,7 +383,7 @@ export def push-images [
 		let digest = (gc artifacts docker images describe $r.ref --format "value(image_summary.digest)" | str trim)
 		# Found by its key the next time, should nothing change.
 		gc artifacts docker tags add $"($r.repo)@($digest)" $"($r.repo):(key-tag ($keys | get $r.svc))" | ignore
-		{svc: $r.svc, ref: {tag: $tag, digest: $digest}}
+		{svc: $r.svc, ref: {tag: $tag, digest: $digest, key: ($keys | get $r.svc)}}
 	} | append $reused | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
 
