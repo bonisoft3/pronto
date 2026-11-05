@@ -230,13 +230,15 @@ def test_golive_keeps_traffic_while_the_candidate_never_answers [] {
 }
 
 def test_golive_rolls_the_sidecars_once_traffic_moved [] {
-	print "test go-live rolls each sidecar to the new revision's door only after traffic moved, and before it returns..."
+	print "test go-live rolls each sidecar to the new revision's door only after the public address answers as it, and before it returns..."
 	let more = {plan: {project: "p", region: "r", service: "svc", iap: false, domain: null, aliases: [], sidecarServicesYaml: {render: "x", flagd: "y"}, clock: null, names: {job: "j", migrateJob: "mj", secrets: {}, sidecarServices: {render: "svc-render", flagd: "svc-flagd"}}}}
 	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
 	let res = (golive $d $more)
 	assert equal $res.exit_code 0 $res.stderr
 	let lines = (log-of $d | lines)
 	let moved = ($lines | enumerate | where {|l| $l.item | str contains "update-traffic svc --to-revisions svc-00002-new=100" } | first | get index)
+	# The public address answers as the new revision before any roll starts.
+	assert (($res.stdout | str index-of "/health answers as svc-00002-new") < ($res.stdout | str index-of "apart rolled to svc-00002-new"))
 	for svc in ["svc-render" "svc-flagd"] {
 		let rolled = ($lines | enumerate | where {|l| $l.item | str contains $"run services update ($svc) --update-labels pronto-door=svc-00002-new" })
 		assert equal ($rolled | length) 1 $"($svc) is rolled once"
@@ -246,6 +248,7 @@ def test_golive_rolls_the_sidecars_once_traffic_moved [] {
 	assert ($res.stdout | str contains "answers at its own address, ")
 	assert ($res.stdout | str contains "traffic moved to svc-00002-new, ")
 	assert ($res.stdout | str contains "/health answers as svc-00002-new, ")
+	assert ($res.stdout | str contains "2 sidecars rolled, ")
 	rm -r $d
 }
 
