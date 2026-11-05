@@ -83,6 +83,7 @@ import (
 	field?:    string
 	match: [string]: string
 	event?:   string
+	suffix?:  bool
 	missing?: string
 	require?: [...string]
 	if O.machine != _|_ {event!: string}

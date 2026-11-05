@@ -207,3 +207,35 @@ Named guards contain SQL; named actions lower to Mecha actions. External-effect
 outcomes may use ordered guarded branches with an unguarded fallback. The
 ledger's recorded outcome determines which branches are eligible, including
 when success and failure share a target.
+
+## Hosted composition and observations
+
+`#CortexComposition` projects one root definition into independently hosted
+charts. A `via: "mecha", lifetime: "row"` actor contains a backend chart;
+leaving its browser attachment does not destroy its durable instance. A
+`via: "rows", lifetime: "attachment"` actor names a screen and its row-chart
+families, mounted through `data-cortex-family`. A `via: "navigation"` actor
+resolves and activates the destination. Failed activation restores the last
+committed chart snapshot and its row attachments.
+
+An `observe` actor subscribes to a table while its owning invocation is active.
+`match` maps source keys to fields of the observing row; `require` lists other
+row fields that must be present before attachment. A `machine` reference resolves
+the observed backend chart's table and state field through composition. Pass only
+the entity table mappings these references need, avoiding a dependency on the
+whole derived entity graph.
+
+With `field` and `event`, observations emit the event prefix followed by the
+observed string, also available as `event.value`. `suffix: false` instead emits
+that exact event name with the same value. This supports identifiers and other
+open-ended values without requiring wildcard transitions:
+
+```cue
+{via: "observe", table: "job", field: "revision",
+ match: id: "job_id", event: "revision-observed", suffix: false}
+```
+
+`missing` names the event for confirmed absence; an unconfirmed local cache miss
+is not deletion. Delivery rechecks attachment identity, discards stale reads and
+acknowledges accepted snapshots. Fixed event names retain those same guarantees.
+These bindings are source configuration; the machine remains XState grammar.
