@@ -1732,8 +1732,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			presenter: policy:   S.presenter.policy
 			presenter: scripted: S.presenter.scripted
 		}
-		if S.code.surface.endowments != _|_ {
-			endowments: S.code.surface.endowments
+		let _localStatecharts = {if S.code.state.cortex != _|_ for _, chart in S.code.state.cortex for name, actor in chart.setup.actors if actor.via == "local" if actor.handler != _|_ {"shell/handlers/\(name).js": true}}
+		let _endowments = [if S.code.surface.endowments != _|_ {S.code.surface.endowments}, {}][0]
+		if len(_localStatecharts) + len(_endowments) > 0 {
+			endowments: {for path, _ in {for p, _ in _endowments {(p): true}, for p, _ in _localStatecharts {(p): true}} {
+				let names = [if _endowments[path] != _|_ {_endowments[path]}, []][0]
+				(path): list.Concat([names, [if _localStatecharts[path] != _|_ if !list.Contains(names, "Statechart") {"Statechart"}]])
+			}}
 		}
 		if S.code.capabilities.ai != _|_ {
 			ai: S.code.capabilities.ai

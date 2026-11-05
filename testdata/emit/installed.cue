@@ -109,7 +109,7 @@ installedBuildWrapper: _installedProject.targets.build.srcs.defaultGlobs["pronto
 
 // The app type-checks pronto's own modules, not its checkout-only ones, which
 // import their siblings.
-installedTypes: _loop.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts hybrid-local\\.ts hybrid-battery\\.ts refresh-portable-types\\.ts\\]"
+installedTypes: _loop.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts hybrid-local\\.ts hybrid-battery\\.ts refresh-portable-types\\.ts hybrid-xstate-entry\\.ts hybrid-xstate-bundle\\.ts\\]"
 // The terminal's checks reach omnishell through the app's mise, not PATH:
 // mise makes no shim for a `path:` version.
 _installedTerminal: (pronto.#DefaultTerminal & {code: _code}).out.surface & {runtime: ""}

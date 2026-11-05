@@ -9,11 +9,11 @@ import (
 #Version:     "1.0.9"
 #SaytVersion: "0.45.3"
 
-// Test-only modules: an app's tests import the hybrid oracle harnesses by URL,
+// Development-only modules: an app's tests import the hybrid oracle harnesses by URL,
 // and the portable types are refreshed from the checkout's mecha client. An
 // installed pronto neither type-checks nor runs them (installed_test.ts holds
 // the rest to its own tree).
-#TestModules: ["hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts"]
+#TestModules: ["hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts", "hybrid-xstate-entry.ts", "hybrid-xstate-bundle.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.

@@ -7,6 +7,7 @@ import { contracted } from "./mecha-contracts.ts";
 // by URL); deno.lock records the module import of the same file, not the text.
 import "./hybrid-runtime.js";
 import runtime from "./hybrid-runtime.js" with { type: "text" };
+import { hybridXStateSource } from "./hybrid-xstate.ts";
 
 export type Shape =
   | { type: "string"; maxLength: number; values?: string[] }
@@ -78,11 +79,12 @@ export async function compileMechaReducer(
   if (facts.references.length) throw new Error(`hybrid rules reach ${facts.references.join(", ")}`);
   const script = `(() => {
     const spec = harden(${JSON.stringify(spec, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)});
+    const xstate = (${hybridXStateSource});
     const rules = harden(${terminal.instrument(`(() => { ${source}\n })()`)});
     for (const name of ['project', 'invariant', ...(spec.public ? ['publish'] : []), ...(spec.initialize ? [spec.initialize.reduce] : []), ...Object.values(spec.states).flatMap(s => [...Object.values(s.on), ...(s.always ?? [])].flatMap(t => [...(t.reduce ? [t.reduce] : []), ...(t.guard ? [t.guard] : [])]))]) {
       if (!Object.prototype.hasOwnProperty.call(rules, name) || typeof rules[name] !== 'function') throw new Error('hybrid missing function ' + name);
     }
-    const execute = (${runtime.trim()})(spec, rules);
+    const execute = (${runtime.trim()})(spec, rules, xstate.Statechart);
     return json => {
       const answer = execute(JSON.parse(json));
       __fuel();

@@ -1,4 +1,4 @@
-(spec, rules) => {
+(spec, rules, Statechart) => {
   const own = (o, key) => Object.prototype.hasOwnProperty.call(o, key);
   const fail = (message) => { throw new Error(`hybrid ${spec.name}: ${message}`); };
   // What a caller sent that the machine does not take, told apart from a
@@ -66,6 +66,33 @@
       if (key !== "phase" && !writes.includes(key) && JSON.stringify(previous[key]) !== JSON.stringify(next[key])) fail(`${rule} writes ${key} outside its contract`);
     }
   };
+  const control = ({target, guard, reduce}) => ({target, guard, reduce});
+  const chart = {initial: spec.initial, states: Object.fromEntries(Object.entries(spec.states).map(([name, state]) => [name, {
+    final: state.final, on: Object.fromEntries(Object.entries(state.on).map(([event, arrow]) => [event, control(arrow)])),
+    always: (state.always ?? []).map(control),
+  }]))};
+  const step = Statechart(chart, {
+    guard: (state, name, event, automatic) => {
+      const verdict = rules[name](harden(state), ...handed(name, event.original, event.host));
+      if (automatic) {
+        if (typeof verdict !== "boolean") fail("automatic guard must return a boolean");
+        return verdict;
+      }
+      if (verdict === true) return true;
+      if (verdict === false) event.refusal = "refused";
+      else if (typeof verdict === "string" && verdict.length > 0 && verdict.length <= 64) event.refusal = verdict;
+      else fail("guard must return a boolean or a refusal code");
+      throw new Error(event.refusal);
+    },
+    reduce: (previous, transition, event) => {
+      const reduced = transition.reduce ? rules[transition.reduce](harden(previous), ...handed(transition.reduce, event.original, event.host)) : previous;
+      if (reduced.phase !== previous.phase) fail("a reducer cannot select the target state");
+      if (transition.reduce) kept(transition.reduce, previous, reduced);
+      const next = {...reduced, phase: transition.target ?? previous.phase};
+      validState(next);
+      return next;
+    },
+  });
   return (input) => {
     const { state, event, context, viewers } = harden(input);
     if (input.initialize === true) {
@@ -83,36 +110,14 @@
     if (definition.tier !== context.tier) refuse("event belongs to another tier");
     check(definition.payload, event.payload, "payload", refuse);
     const phase = spec.states[state.phase];
-    const transition = phase.on[event.kind];
     if (phase.final || !own(phase.on, event.kind)) return { kind: "rejected", reason: "illegal_event" };
-    if (transition.guard) {
-      const verdict = rules[transition.guard](state, ...handed(transition.guard, event, context));
-      if (typeof verdict === "string" && verdict.length > 0 && verdict.length <= 64) return { kind: "rejected", reason: verdict };
-      // As in XState, false leaves the transition not taken.
-      if (verdict === false) return { kind: "rejected", reason: "refused" };
-      if (verdict !== true) fail("guard must return a boolean or a refusal code");
-    }
-    const apply = (previous, arrow) => {
-      // An arrow with no action leaves the context as it is.
-      const reduced = arrow.reduce ? rules[arrow.reduce](harden(previous), ...handed(arrow.reduce, event, context)) : previous;
-      if (reduced.phase !== previous.phase) fail("a reducer cannot select the target state");
-      if (arrow.reduce) kept(arrow.reduce, previous, reduced);
-      // A copy: an action may hand back the state it was given, which is frozen.
-      const next = {...reduced, phase: arrow.target ?? previous.phase};
-      validState(next);
-      return next;
-    };
-    let next = apply(state, transition);
-    for (let steps = 0; ; steps++) {
-      const arrow = (spec.states[next.phase].always ?? []).find(t => {
-        if (!t.guard) return true;
-        const verdict = rules[t.guard](harden(next), ...handed(t.guard, event, context));
-        if (typeof verdict !== "boolean") fail("automatic guard must return a boolean");
-        return verdict;
-      });
-      if (!arrow) break;
-      if (steps >= 100) fail("automatic transitions did not settle");
-      next = apply(next, arrow);
+    const message = {kind: event.kind, original: event, host: context, refusal: null};
+    let next;
+    try {
+      next = step(state, message);
+    } catch (error) {
+      if (message.refusal === null) throw error;
+      return {kind: "rejected", reason: message.refusal};
     }
     return { kind: "accepted", state: next, views: project(next, viewers), ...publish(next) };
   };

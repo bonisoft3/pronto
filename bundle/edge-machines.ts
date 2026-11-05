@@ -6,6 +6,7 @@
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { declaredMachine, HYBRID_NAME } from '../hybrid-spec.ts'
+import { hybridXStateSource } from '../hybrid-xstate.ts'
 
 export type Hybrids = Record<string, { reducer: Record<string, unknown> & { name: string; fuel: number }; rules: string }>
 
@@ -31,13 +32,14 @@ const harden = (value, seen = new WeakSet()) => {
   return value
 }
 const runtime = ((harden) => (${runtime}))(harden)
+const xstate = (${hybridXStateSource})
 // A step starts with its whole budget: the fuel is the step's, as in plv8.
 const machine = (spec, fuel, rules) => {
   harden(spec)
   return { execute: (input) => {
     let spent = 0
     const meter = () => { if (++spent > fuel) throw new RangeError('hybrid fuel exhausted') }
-    const execute = runtime(spec, harden(rules(meter)))
+    const execute = runtime(spec, harden(rules(meter)), xstate.Statechart)
     const answer = execute(input)
     meter()
     return answer

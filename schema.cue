@@ -28,7 +28,7 @@ import (
 // terminal's module loader. No scheme and no `..`: the source is read from the
 // app's own tree and embedded in emitted artifacts.
 #Jessie: string & =~"^([a-z0-9_-]+/)*[a-z0-9_-]+\\.js$"
-#SafeEndowment: "Intl" | "TextEncoder" | "TextDecoder" | "URL" | "URLSearchParams"
+#SafeEndowment: "Intl" | "TextEncoder" | "TextDecoder" | "URL" | "URLSearchParams" | "Statechart"
 
 // The seven pre-composed shadow inks. Open Props' elevation carries a real
 // dark story that light-dark() cannot take — --shadow-color is a bare
