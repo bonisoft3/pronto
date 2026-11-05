@@ -755,6 +755,18 @@ export def poll-health [url: string, ok: list<string>, revision: any, --steady: 
 	}
 }
 
+# A sidecar apart rolled to a fresh instance, which reads the door of `revision` at its start:
+# its label pronto-door set to the revision's name. A roll that fails leaves the sidecar as it
+# was, and says so.
+def roll-sidecar [plan: record, s: string, revision: string] {
+	let svc = ($plan.names.sidecarServices | get $s)
+	let t0 = (date now)
+	try {
+		gc run services update $svc --update-labels $"pronto-door=($revision)" --region $plan.region --project $plan.project | ignore
+		print $"gcp: (stamp) ($s) apart rolled to ($revision), ((date now) - $t0 | format duration sec)"
+	} catch {|e| print $"gcp: (stamp) ($s) apart kept its instance, started before the switch: ($e.msg)" }
+}
+
 # A staged release made live: its images tagged the release's (a gated one's, now that its
 # tests passed), the schema job run, the service and its sidecars replaced, the clock, the
 # domains, and the address answering. The first code of the release production runs.
@@ -867,12 +879,18 @@ export def go-live [staged: record]: nothing -> record {
 	# sign-in answers before any of that.
 	let bearer = if $iap { null } else { $invoker_probe }
 	mut moved = false
+	let t_live = (date now)
 	let failed = (try {
 		let got = (poll-health $"($url)/health" $ok null --bearer $bearer)
 		if not $got.ok { error make {msg: $"the new revision ($candidate.revision) did not answer at its own address \(($url)/health\) in ($got.waited): last answer ($got.last)"} }
+		print $"gcp: (stamp) ($candidate.revision) answers at its own address, ((date now) - $t_live | format duration sec) after the services were made"
+		let t_traffic = (date now)
 		gc run services update-traffic $plan.service --to-revisions $"($candidate.revision)=100" --region $r --project $p | ignore
 		$moved = true
+		print $"gcp: (stamp) ($plan.service)'s traffic moved to ($candidate.revision), ((date now) - $t_traffic | format duration sec)"
+		let t_public = (date now)
 		let got = (poll-health $"($address)/health" $ok (if $iap { null } else { $candidate.revision }) --steady 3 --bearer $bearer)
+		print $"gcp: (stamp) ($address)/health answers as ($candidate.revision), ((date now) - $t_public | format duration sec)"
 		if not $got.ok { error make {msg: $"the public address ($address)/health did not answer as ($candidate.revision) in ($got.waited): last answer ($got.last)"} }
 		null
 	} catch {|e| (failure-message $e) })
@@ -893,14 +911,12 @@ export def go-live [staged: record]: nothing -> record {
 	# A sidecar apart made before the switch read the door that served then, the release before:
 	# what it reads at start (a renderer's catalogues of messages) it keeps for its life, and a
 	# key new in this release is unknown to it (Bonk Chess's player pages, 2026-11-03). Each is
-	# rolled once this revision serves, a fresh instance reading this release's door. A roll
-	# that fails leaves the sidecar as it was, and the release live.
-	$plan.sidecarServicesYaml | columns | par-each {|s|
-		let svc = ($plan.names.sidecarServices | get $s)
-		try {
-			gc run services update $svc --update-labels $"pronto-door=($candidate.revision)" --region $r --project $p | ignore
-		} catch {|e| print $"gcp: (stamp) ($s) apart kept its instance, started before the switch: ($e.msg)" }
-	} | ignore
+	# rolled once this revision serves at the public address, which it reads through: not
+	# beside the poll that says so, where a fresh instance could still read the release before
+	# (Codex review). A roll that fails leaves the sidecar as it was, and the release live.
+	let t_rolls = (date now)
+	$plan.sidecarServicesYaml | columns | par-each {|s| roll-sidecar $plan $s $candidate.revision } | ignore
+	print $"gcp: (stamp) ($plan.sidecarServicesYaml | columns | length) sidecars rolled, ((date now) - $t_rolls | format duration sec)"
 	print $"gcp: (stamp) ($plan.service) is live at ($address)"
 	release-record note {revision: $candidate.revision} --preview $own
 	release-record mark deploy end --preview $own

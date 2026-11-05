@@ -40,6 +40,8 @@ case "$*" in
     # Cloud Run's own refusal of a reserved name, as a sidecar apart that sets PORT met.
     f="$(echo "$*" | sed 's/.*replace \([^ ]*\) .*/\1/')"
     if grep -Eq "name: (PORT|BAD_RESERVED)$" "$f"; then echo "ERROR: (gcloud.run.services.replace) spec.template.spec.containers[0].env: The following reserved env names were provided: PORT, BAD_RESERVED." >&2; exit 1; fi ;;
+  *"services update"*"--update-labels"*)
+    if [ -f "$d/roll_fails" ]; then echo "ERROR: the roll failed" >&2; exit 1; fi ;;
   *"services replace"*) touch "$d/exists" ;;
   *"update-traffic"*)
     case "$*" in *"--to-revisions "*) echo "$*" | sed "s/.*--to-revisions \([^= ]*\)=.*/\1/" > "$d/serving" ;; esac ;;
@@ -52,6 +54,7 @@ esac
 # 401, as one does while a fresh allUsers grant spreads.
 d="$(dirname "$0")/.."
 echo "$*" >> "$d/curl.log"
+if [ -f "$d/curl_limit" ] && [ "$(wc -l < "$d/curl.log")" -gt "$(cat "$d/curl_limit")" ]; then kill -9 "$PPID"; fi
 for last; do :; done
 case "$last" in
   *next---*) say="$(cat "$d/candidate_says")" ;;
@@ -89,8 +92,9 @@ def main [] {
 	test_golive_waits_for_the_invoker_grant
 	test_golive_grants_public_once
 	test_golive_switches_after_both_answer
-	test_golive_goes_back_when_the_candidate_never_answers
-	test_golive_goes_back_when_the_public_address_stays_on_the_old_revision
+	test_golive_keeps_traffic_while_the_candidate_never_answers
+	test_golive_rolls_the_sidecars_once_traffic_moved
+	test_golive_warns_of_a_failed_roll_and_goes_live
 	test_golive_first_deploy
 	test_golive_tags_the_tested_images_before_the_schema_job
 	test_golive_leaves_the_inputs_key_on_the_copied_images
@@ -155,7 +159,11 @@ def test_golive_waits_for_the_invoker_grant [] {
 	assert equal $res.exit_code 0 $res.stderr
 	let curls = (open --raw ($d | path join curl.log) | lines)
 	assert ($curls | all {|l| $l | str contains "Authorization: Bearer " })
-	assert (($curls | where {|l| $l | str contains "next---" } | length) >= 3)
+	# The refusals are met by the poll of the door before the sidecars are made, and the candidate
+	# answers at its own address once; the public address then answers three times in a row.
+	assert equal (open --raw ($d | path join refusals) | str trim) "0"
+	assert (($curls | where {|l| $l | str contains "next---" } | length) >= 1)
+	assert (($curls | length) >= 7)
 	assert equal (open --raw ($d | path join serving) | str trim) "svc-00002-new"
 	rm -r $d
 }
@@ -210,25 +218,50 @@ def test_golive_switches_after_both_answer [] {
 	rm -r $d
 }
 
-def test_golive_goes_back_when_the_candidate_never_answers [] {
-	print "test go-live keeps traffic on the old revision when the candidate never answers..."
+def test_golive_keeps_traffic_while_the_candidate_never_answers [] {
+	print "test go-live keeps traffic on the old revision while the candidate never answers (a poll has no limit: the fake curl ends it)..."
 	let d = (fakes true "svc-00001-old" "500 down" "200 svc-00001-old")
+	"6" | save -f ($d | path join curl_limit)
 	let res = (golive $d)
 	assert ($res.exit_code != 0)
-	assert ($res.stdout | str contains "did not answer at its own address")
 	assert equal (open --raw ($d | path join serving) | str trim) "svc-00001-old"
 	assert (not (log-of $d | str contains "--to-revisions svc-00002-new=100"))
 	rm -r $d
 }
 
-def test_golive_goes_back_when_the_public_address_stays_on_the_old_revision [] {
-	print "test go-live shifts back when the public address never answers as the new revision..."
-	let d = (fakes true "svc-00001-old" "200 ok" "500 gone")
-	let res = (golive $d)
-	assert ($res.exit_code != 0)
-	assert ($res.stdout | str contains "did not answer as svc-00002-new")
-	assert ($res.stdout | str contains "serves svc-00001-old again")
-	assert equal (open --raw ($d | path join serving) | str trim) "svc-00001-old"
+def test_golive_rolls_the_sidecars_once_traffic_moved [] {
+	print "test go-live rolls each sidecar to the new revision's door only after the public address answers as it, and before it returns..."
+	let more = {plan: {project: "p", region: "r", service: "svc", iap: false, domain: null, aliases: [], sidecarServicesYaml: {render: "x", flagd: "y"}, clock: null, names: {job: "j", migrateJob: "mj", secrets: {}, sidecarServices: {render: "svc-render", flagd: "svc-flagd"}}}}
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	let res = (golive $d $more)
+	assert equal $res.exit_code 0 $res.stderr
+	let lines = (log-of $d | lines)
+	let moved = ($lines | enumerate | where {|l| $l.item | str contains "update-traffic svc --to-revisions svc-00002-new=100" } | first | get index)
+	# The public address answers as the new revision before any roll starts.
+	assert (($res.stdout | str index-of "/health answers as svc-00002-new") < ($res.stdout | str index-of "apart rolled to svc-00002-new"))
+	for svc in ["svc-render" "svc-flagd"] {
+		let rolled = ($lines | enumerate | where {|l| $l.item | str contains $"run services update ($svc) --update-labels pronto-door=svc-00002-new" })
+		assert equal ($rolled | length) 1 $"($svc) is rolled once"
+		assert (($rolled | first | get index) > $moved) $"($svc) is rolled after traffic moved"
+	}
+	assert ($res.stdout | str contains "render apart rolled to svc-00002-new, ")
+	assert ($res.stdout | str contains "answers at its own address, ")
+	assert ($res.stdout | str contains "traffic moved to svc-00002-new, ")
+	assert ($res.stdout | str contains "/health answers as svc-00002-new, ")
+	assert ($res.stdout | str contains "2 sidecars rolled, ")
+	rm -r $d
+}
+
+def test_golive_warns_of_a_failed_roll_and_goes_live [] {
+	print "test go-live only warns of a sidecar whose roll failed..."
+	let more = {plan: {project: "p", region: "r", service: "svc", iap: false, domain: null, aliases: [], sidecarServicesYaml: {render: "x"}, clock: null, names: {job: "j", migrateJob: "mj", secrets: {}, sidecarServices: {render: "svc-render"}}}}
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	"" | save -f ($d | path join roll_fails)
+	let res = (golive $d $more)
+	assert equal $res.exit_code 0 $res.stderr
+	assert ($res.stdout | str contains "render apart kept its instance")
+	assert ($res.stdout | str contains "is live at")
+	assert equal (open --raw ($d | path join serving) | str trim) "svc-00002-new"
 	rm -r $d
 }
 
