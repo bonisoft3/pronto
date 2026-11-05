@@ -44,6 +44,11 @@ const mode = Deno.env.get("INTEGRATE_LOCAL_DRIVERS") ?? ""
 if (mode !== "" && mode !== "all") fail(`INTEGRATE_LOCAL_DRIVERS is "${mode}": it is unset or "all"`)
 const lint = `${args.omnishell}/check-visual.ts`
 
+// An app with a GCP release plan reads secrets by name in the projects it releases to: a missing one
+// fails here, before a pull request merges, not in release@gcp's rc preview (gcp/secrets.nu).
+const secrets = await new Deno.Command("nu", { args: [new URL("./gcp/secrets.nu", import.meta.url).pathname, "check", appDir, "--if-gcp"], stdout: "inherit", stderr: "inherit" }).output()
+if (!secrets.success) fail("check-secrets failed: the secrets the app's release reads are not all in place")
+
 // The release's pass ledger (gcp/local-gate-key.nu): the tree's key, taken before the stack starts.
 // A stack on a slot runs from a copy of the app that is no git tree (tests/slot.ts), which names
 // the checkout it copies in PRONTO_GATE_DIR: that tree is the one keyed and stamped.

@@ -14,6 +14,7 @@
 # renders in software, and a 2-CPU runner timed a 3D page out.
 
 use ../k8s/release.nu [resolve-app]
+use release-record.nu
 use build.nu [builder stamp exists key-tag file-hashes image-keys]
 
 # What uploads the drivers' screenshots: Google's own gsutil builder.
@@ -128,12 +129,12 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		# The release says go once the service is up: a marker in the bucket,
 		# read with the build account's token from the worker's metadata.
 		"echo 'verify: waiting for the service to be up'"
-		# Forty minutes at most, should the release that says it be gone.
+		# As long as the release takes: no limit, a stuck wait shows in the log's progress line.
 		"waited=0; step=1"
 		"until token=$(wget -qO- --header Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -n 's/.*\"access_token\":\"\\([^\"]*\\)\".*/\\1/p') && wget -qO /dev/null --header \"Authorization: Bearer $token\" \"https://storage.googleapis.com/storage/v1/b/${PROJECT_ID}_cloudbuild/o/verify%2F${BUILD_ID}%2Fgo\" 2>/dev/null; do"
 		# A second apart for ten minutes, then three.
 		"  [ \"$waited\" -lt 600 ] || step=3"
-		"  waited=$((waited + step)); [ \"$waited\" -lt 2400 ] || { echo 'verify: the release never said go' >&2; exit 1; }; sleep $step"
+		"  waited=$((waited + step)); [ $((waited % 300)) -ge $step ] || echo \"verify: still waiting for the release to say go ($waited s)\"; sleep $step"
 		"done"
 		"echo \"verify: $(echo $tested) against $APP_URL\""
 		# The drivers run together, each to its end whatever the others answer,
@@ -157,7 +158,7 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		"for d in $tested; do"
 		"  echo \"verify: $d\""
 		"  cat \"/workspace/logs/$d\""
-		"  if [ \"$(cat \"/workspace/verdicts/$d\")\" = 0 ]; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\" >&2; failed=\"$failed $d\"; fi"
+		"  if [ \"$(cat \"/workspace/verdicts/$d\")\" = 0 ]; then echo \"verify: $d passed\"; else echo \"verify: $d FAILED\"; failed=\"$failed $d\"; fi"
 		"done"
 		"echo \"$failed\" > /workspace/failed"
 	] | str join "\n")
@@ -184,7 +185,7 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 			{name: $builder, entrypoint: "sh", args: ["-c" (do $shell $verdict)]}
 		]
 		options: {machineType: "E2_HIGHCPU_32", logging: "CLOUD_LOGGING_ONLY"}
-		timeout: "3600s"
+		timeout: "86400s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
 	print $"gcp: (stamp) building the tests of ($url) in Cloud Build"
 	# The build logs to Cloud Logging alone, which `builds submit` does not
@@ -192,7 +193,7 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 	let build = (gc builds submit $"($work)/source.tgz" --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
 	rm -rf $work
 	print $"gcp: (stamp) build ($build): https://console.cloud.google.com/cloud-build/builds/($build)?project=($p)"
-	{build: $build, project: $p, url: $url, service: $plan.service, region: $plan.region, rehearsalImage: $rehearsal_image}
+	{app: ($plan.app? | default null), appDir: $app_dir, build: $build, project: $p, url: $url, service: $plan.service, region: $plan.region, rehearsalImage: $rehearsal_image}
 }
 
 # The drivers' build told to run them, now that the service is up.
@@ -205,6 +206,98 @@ export def go-drivers [run: record] {
 	print $"gcp: (stamp) testing ($run.url)"
 }
 
+# The scenarios a cue file text defines: the keys of `scenarios:` at the start of a line (tests/scenarios/*.cue).
+export def scenario-names [text: string]: nothing -> list<string> {
+	$text | parse -r '(?m)^scenarios:\s+"?(?<n>[A-Za-z0-9_.-]+)"?:' | each {|r| $r.n } | uniq
+}
+
+# The scenarios a log marks failed, as a scenario prints it (`✗ <name> (12s) at step`): the format
+# release-cron's bisect reads too (pronto-plugins release-cron/cron.js signature()).
+export def failed-scenarios [lines: list<string>]: nothing -> list<string> {
+	$lines | each {|l| $l | parse -r '✗ (?<n>\S+) \(\d+s\) at step' | each {|r| $r.n } } | flatten | uniq
+}
+
+# The log of each driver that failed, from the drivers' build log. A line belongs to the driver named by
+# the most recent `verify: <driver>` header (a header resets nothing else); `verify: <driver> FAILED`
+# marks that driver failed wherever it appears, since Cloud Build interleaves stdout and stderr, so it can
+# come after the next driver's header. The sections come in the order the drivers failed.
+export def failed-sections [lines: list<string>]: nothing -> list<list<string>> {
+	mut logs = {}
+	mut failed = []
+	mut current = ''
+	for l in $lines {
+		let h = ($l | parse -r '^verify: (?<d>\S+)(?<s> FAILED)?$')
+		if ($h | is-not-empty) {
+			let d = $h.0.d
+			if ($h.0.s | is-not-empty) {
+				if $d not-in $failed { $failed = ($failed | append $d) }
+			} else {
+				$current = $d
+				if ($logs | get -o $d) == null { $logs = ($logs | merge {$d: []}) }
+			}
+		} else if $current != '' {
+			$logs = ($logs | merge {$current: (($logs | get -o $current | default []) | append $l)})
+		}
+	}
+	let all = $logs
+	$failed | each {|d| $all | get -o $d | default [] }
+}
+
+# new when every failure is a scenario absent from the last live release's tree; regression when one
+# was in it; unknown for anything else (a failure naming no scenario, a name the current tree does not
+# define, or one the live tree mentions in a way the keys do not show). `sections` is the log of each
+# failed unit. When in doubt, not new.
+export def classify-failures [sections: list<list<string>>, live_names: list<string>, live_text: string, current_names: list<string>]: nothing -> record {
+	let named = ($sections | each {|s| failed-scenarios $s })
+	# A line marked failed that is not a scenario's (a stack, Premium, a summary) is another failure.
+	let marked = ($sections | flatten | where {|l| $l | str trim | str starts-with "✗" })
+	if ($marked | length) != ($sections | flatten | where {|l| (failed-scenarios [$l]) | is-not-empty } | length) { return {verdict: "unknown", new: [], why: "a failure is not a scenario's"} }
+	if ($sections | is-empty) or ($named | any {|n| $n | is-empty }) { return {verdict: "unknown", new: [], why: "a failure names no scenario"} }
+	let all = ($named | flatten | uniq)
+	let regressed = ($all | where {|n| $n in $live_names })
+	if ($regressed | is-not-empty) { return {verdict: "regression", new: [], why: $"already in the live release: ($regressed | str join ', ')"} }
+	let odd = ($all | where {|n| $n not-in $current_names or ($live_text =~ $"\(?:^|[^A-Za-z0-9_.-]\)($n | str replace -a '.' '\\.')\(?:[^A-Za-z0-9_.-]|$\)") })
+	if ($odd | is-not-empty) { return {verdict: "unknown", new: [], why: $"cannot be classified: ($odd | str join ', ')"} }
+	{verdict: "new", new: $all, why: ""}
+}
+
+# classify-failures against the tree of the app's last live release (the commit of its release record),
+# read from the checkout at `dir`; unknown when there is no such release or its commit is not in the checkout.
+# Carries the commit and the scenarios the live tree defines.
+export def live-verdict [app: string, dir: string, sections: list<list<string>>]: nothing -> record {
+	try {
+		let commit = (release-record live-commit $app)
+		if $commit == null { error make {msg: "no known live release"} }
+		let have = (do { ^git -C $dir cat-file -e $"($commit)^{commit}" } | complete)
+		if $have.exit_code != 0 {
+			do { ^git -C $dir fetch --quiet origin $commit } | complete | ignore
+			if (do { ^git -C $dir cat-file -e $"($commit)^{commit}" } | complete).exit_code != 0 { error make {msg: $"commit ($commit) is not in the checkout"} }
+		}
+		let files = (^git -C $dir ls-tree -r --name-only $commit -- tests/scenarios/ | lines | where {|f| $f | str ends-with ".cue" })
+		let live_text = ($files | each {|f| ^git -C $dir show $"($commit):./($f)" } | str join "\n")
+		let current_text = (glob $"($dir)/tests/scenarios/*.cue" | each {|f| open --raw $f } | str join "\n")
+		let live_names = (scenario-names $live_text)
+		classify-failures $sections $live_names $live_text (scenario-names $current_text) | insert commit $commit | insert live_names $live_names
+	} catch {|e| {verdict: "unknown", new: [], why: $e.msg, commit: null, live_names: []} }
+}
+
+# The scenarios of a failed run that are a new feature's, as a list: empty unless every failure is one
+# (classify-failures), against the tree of the app's last live release. One rule for every place a
+# scenario failure fails the release. Prints the line the caller greps and notes it in the release record.
+export def new-feature-excuse [run: record, sections: list<list<string>>]: nothing -> list<string> {
+	let app = ($run.app? | default null)
+	let dir = ($run.appDir? | default null)
+	if $app == null or $dir == null { return [] }
+	let verdict = (live-verdict $app $dir $sections)
+	if $verdict.verdict != "new" {
+		print $"gcp: (stamp) the failure is not a new feature's scenario alone \(($verdict.verdict): ($verdict.why)\): the release fails"
+		return []
+	}
+	print $"gcp: (stamp) released on stable features; new-feature scenarios failed: ($verdict.new | str join ', ') \(absent from ($verdict.commit | str substring 0..<8), live release\)"
+	release-record note {newFeatureScenarios: $verdict.new}
+	$verdict.new
+}
+
 # GCP.rehearsal run: the job of the previews project, on the driver image the tests' build pushes,
 # against the preview's address. Always returns the record of the run (ok, execution, seconds, usd);
 # its log is printed whole. The cost is the job's seconds at the vCPU and GiB prices GCP.rehearsal names.
@@ -213,7 +306,13 @@ export def run-rehearsal [run: record, r: record]: nothing -> record {
 	# The image is pushed by the tests' build, which has gone on to wait for the preview.
 	mut waited = 0
 	while not (exists artifacts docker images describe $image) {
-		if $waited >= 1800 { error make {msg: $"the rehearsal's image ($image) was not pushed in 30 minutes: see the tests' build ($run.build)"} }
+		# No limit: a stuck push shows in this line, every five minutes.
+		if $waited > 0 and ($waited mod 300) == 0 { print $"gcp: (stamp) still waiting for the rehearsal's image ($image) to be pushed, ($waited)s: see the tests' build ($run.build)" }
+		# The build ended without pushing it: it never will be.
+		if ($waited mod 30) == 0 {
+			let status = (gc builds describe $run.build --project $run.project --format "value(status)" | str trim)
+			if $status not-in ["QUEUED" "PENDING" "WORKING"] and not (exists artifacts docker images describe $image) { error make {msg: $"the tests' build ($run.build) ended ($status) without pushing the rehearsal's image ($image)"} }
+		}
 		sleep 5sec
 		$waited += 5
 	}
@@ -239,10 +338,19 @@ export def run-rehearsal [run: record, r: record]: nothing -> record {
 	# The execution's Completed condition, not a count of tasks: one task that failed fails it.
 	let ok = ($done.status.conditions? | default [] | any {|c| $c.type == "Completed" and $c.status == "True" })
 	sleep 10sec # Cloud Logging takes the last lines a moment after the run ends
-	gc logging read $"resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"($execution)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
-		| lines | where {|l| $l | str trim | is-not-empty } | each {|l| print $"rehearsal| ($l)" } | ignore
+	let log = (gc logging read $"resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"($execution)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
+		| lines | where {|l| $l | str trim | is-not-empty })
+	$log | each {|l| print $"rehearsal| ($l)" } | ignore
+	# Failing scenarios that are all a new feature's do not fail the release.
+	# Only when the container itself exited 1, as a scenario's failure does: a timeout, an out-of-memory
+	# kill or a task that never ran is the job's, whatever the log shows.
+	let why = ($done.status.conditions? | default [] | where type == "Completed" | each {|c| $c.message? | default "" } | str join " ")
+	let exited_one = ($why =~ 'exit\(1\)|exit status 1\b')
+	if not ($ok or $exited_one) { print $"gcp: (stamp) the rehearsal did not end by its container exiting 1 \(($why)\): the release fails" }
+	let new_feature = if $ok or not $exited_one { [] } else { new-feature-excuse $run [$log] }
+	let ok = ($ok or ($new_feature | is-not-empty))
 	print $"gcp: (stamp) the rehearsal (if $ok { 'passed' } else { 'FAILED' }) in ($seconds)s: $($usd) \(($vcpu) vCPU, ($memory_gi) GiB\)"
-	{ok: $ok, job: $r.job, execution: $execution, seconds: $seconds, vcpu: $vcpu, memoryGi: $memory_gi, usd: $usd}
+	{ok: $ok, newFeature: $new_feature, job: $r.job, execution: $execution, seconds: $seconds, vcpu: $vcpu, memoryGi: $memory_gi, usd: $usd}
 }
 
 # The drivers' build stopped, when the service it waits for never came up.
@@ -266,10 +374,24 @@ export def finish-drivers [run: record] {
 		$status = (gc builds describe $run.build --project $run.project --format "value(status)" | str trim)
 	}
 	if $status != "SUCCESS" {
-		drivers-log $run --just-ended
+		let lines = (driver-lines $run --just-ended)
+		$lines | each {|l| print $l } | ignore
+		# Only the last step, the drivers' verdict, may have failed: not their build, nor the screenshots' upload.
+		let steps = (try { gc builds describe $run.build --project $run.project --format json | from json | get steps | get status } catch { [] })
+		if $status == "FAILURE" and $steps == ["SUCCESS" "SUCCESS" "FAILURE"] and (new-feature-excuse $run (failed-sections $lines) | is-not-empty) { return }
 		error make {msg: $"the tests failed against ($run.url) \(($status)\): each driver's verdict is in the log above"}
 	}
 	print $"gcp: (stamp) every test passed against ($run.url)"
+}
+
+# What the drivers printed, from the build's log, as lines.
+export def driver-lines [
+	run: record
+	--just-ended # Cloud Logging takes the last lines a moment after the build ends
+]: nothing -> list<string> {
+	if $just_ended { sleep 10sec }
+	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($run.build)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
+		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) }
 }
 
 # What the drivers printed, from the build's log.
@@ -277,9 +399,7 @@ export def drivers-log [
 	run: record
 	--just-ended # Cloud Logging takes the last lines a moment after the build ends
 ] {
-	if $just_ended { sleep 10sec }
-	gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($run.build)\"" --project $run.project --order asc --limit 100000 --format "value(textPayload)"
-		| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | each {|l| print $l } | ignore
+	driver-lines $run --just-ended=$just_ended | each {|l| print $l } | ignore
 }
 
 # Every driver of the app against the service the plan names, up already; an
@@ -301,4 +421,20 @@ export def main [
 	let app_info = (resolve-app $app)
 	let preview = ($preview | default ($env.SAY_VERIFY_ARGS_PREVIEW? | default ""))
 	run-drivers $app_info.dir (plan-of $app_info.cue_path $preview)
+}
+
+# The failing scenarios named on the command line, classified against the tree of the app's last live
+# release: a failure absent from it is a new feature's, one that was in it (or that cannot be classified)
+# a regression. Prints JSON {commit, new, regressions}; `rehearse.ts` of an app fails on regressions alone.
+export def "main classify" [
+	app_dir: string        # The app's directory (its release.cue); its name is the release record's
+	...scenarios: string   # The names of the scenarios that failed
+	--app: string          # The release record's app name; the directory's name when absent
+] {
+	let dir = ($app_dir | path expand)
+	let name = ($app | default ($dir | path basename))
+	let sections = [($scenarios | each {|n| $"✗ ($n) \(0s\) at step 0" })]
+	let v = (live-verdict $name $dir $sections)
+	let regressions = if $v.verdict == "new" { [] } else if $v.verdict == "regression" { $scenarios | where {|n| $n in $v.live_names } } else { $scenarios }
+	{commit: $v.commit, new: $v.new, regressions: $regressions} | to json --raw
 }

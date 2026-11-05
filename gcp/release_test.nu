@@ -22,6 +22,7 @@ def fakes [service_exists: bool, serving: string, candidate_says: string, public
 #!/bin/sh
 d="$(dirname "$0")/.."
 echo "$*" >> "$d/gcloud.log"
+[ -z "$GCLOUD_SLOW" ] || sleep "$GCLOUD_SLOW"
 case "$*" in
   *"services describe"*)
     [ -f "$d/exists" ] || { echo "NOT_FOUND: not found" >&2; exit 1; }
@@ -39,6 +40,8 @@ case "$*" in
     # Cloud Run's own refusal of a reserved name, as a sidecar apart that sets PORT met.
     f="$(echo "$*" | sed 's/.*replace \([^ ]*\) .*/\1/')"
     if grep -Eq "name: (PORT|BAD_RESERVED)$" "$f"; then echo "ERROR: (gcloud.run.services.replace) spec.template.spec.containers[0].env: The following reserved env names were provided: PORT, BAD_RESERVED." >&2; exit 1; fi ;;
+  *"services update"*"--update-labels"*)
+    if [ -f "$d/roll_fails" ]; then echo "ERROR: the roll failed" >&2; exit 1; fi ;;
   *"services replace"*) touch "$d/exists" ;;
   *"update-traffic"*)
     case "$*" in *"--to-revisions "*) echo "$*" | sed "s/.*--to-revisions \([^= ]*\)=.*/\1/" > "$d/serving" ;; esac ;;
@@ -51,6 +54,7 @@ esac
 # 401, as one does while a fresh allUsers grant spreads.
 d="$(dirname "$0")/.."
 echo "$*" >> "$d/curl.log"
+if [ -f "$d/curl_limit" ] && [ "$(wc -l < "$d/curl.log")" -gt "$(cat "$d/curl_limit")" ]; then kill -9 "$PPID"; fi
 for last; do :; done
 case "$last" in
   *next---*) say="$(cat "$d/candidate_says")" ;;
@@ -73,25 +77,27 @@ printf "%s" "$code"
 }
 
 def with-fakes [d: string, body: closure] {
-	with-env {PATH: ([($d | path join bin)] | append $env.PATH), GCP_GOLIVE_WAIT: "2", GCP_GOLIVE_EVERY: "1"} { do $body }
+	with-env {PATH: ([($d | path join bin)] | append $env.PATH), GCP_GOLIVE_EVERY: "1"} { do $body }
 }
 
 def main [] {
 	print "Running release-gcp tests...\n"
+	test_stop_preview_stops_every_service_at_once
+	test_grant_secrets_binds_each_secret_at_once
 	test_hold_traffic_keeps_the_serving_revision
 	test_hold_traffic_first_deploy
 	test_sql_drift_patches_tier_and_flags_at_once
 	test_poll_health_wants_the_revision_by_name
-	test_poll_health_times_out
 	test_poll_health_waits_for_cloud_run_to_pass_a_bearer
-	test_poll_health_names_cloud_runs_refusal
 	test_golive_waits_for_the_invoker_grant
 	test_golive_grants_public_once
 	test_golive_switches_after_both_answer
-	test_golive_goes_back_when_the_candidate_never_answers
-	test_golive_goes_back_when_the_public_address_stays_on_the_old_revision
+	test_golive_keeps_traffic_while_the_candidate_never_answers
+	test_golive_rolls_the_sidecars_once_traffic_moved
+	test_golive_warns_of_a_failed_roll_and_goes_live
 	test_golive_first_deploy
 	test_golive_tags_the_tested_images_before_the_schema_job
+	test_golive_leaves_the_inputs_key_on_the_copied_images
 	test_preflight_dry_runs_every_service_over_placeholder_digests
 	test_preflight_names_the_file_and_clouds_run_message
 	test_preflight_passes_a_sidecar_apart_whose_compose_sets_port
@@ -127,50 +133,21 @@ def test_poll_health_wants_the_revision_by_name [] {
 	let d = (fakes true "svc-00001-old" "200 x" "200 svc-00002-new")
 	with-fakes $d {
 		assert (poll-health "https://svc/health" ["200"] "svc-00002-new" --steady 2).ok
-		assert (not ((poll-health "https://svc/health" ["200"] "svc-00009-other").ok))
-	}
-	rm -r $d
-}
-
-def test_poll_health_times_out [] {
-	print "test poll-health gives up with the last answer..."
-	let d = (fakes true "svc-00001-old" "200 x" "500 boom")
-	with-fakes $d {
-		let got = (poll-health "https://svc/health" ["200"] null)
-		assert (not $got.ok)
-		assert ($got.last | str contains "500 boom")
 	}
 	rm -r $d
 }
 
 def test_poll_health_waits_for_cloud_run_to_pass_a_bearer [] {
-	print "test poll-health with a bearer waits while Cloud Run refuses it itself, past GCP_GOLIVE_WAIT..."
+	print "test poll-health with a bearer waits while Cloud Run refuses it itself, however long that takes..."
 	let d = (fakes true "svc-00001-old" "200 x" "200 svc-00002-new")
 	"3" | save -f ($d | path join refusals)
 	with-fakes $d {
-		with-env {GCP_GOLIVE_WAIT: "1", GCP_INVOKER_WAIT: "10"} {
+		with-env {GCP_GOLIVE_EVERY: "1"} {
 			assert (poll-health "https://svc/health" ["200"] "svc-00002-new" --steady 2 --bearer $invoker_probe).ok
 		}
 	}
 	assert equal (open --raw ($d | path join refusals) | str trim) "0"
 	assert (open --raw ($d | path join curl.log) | lines | all {|l| $l | str contains $"Authorization: Bearer ($invoker_probe)" })
-	rm -r $d
-}
-
-def test_poll_health_names_cloud_runs_refusal [] {
-	print "test poll-health gives up after GCP_INVOKER_WAIT, naming the invoker grant..."
-	let d = (fakes true "svc-00001-old" "200 x" "200 svc-00002-new")
-	"1000" | save -f ($d | path join refusals)
-	with-fakes $d {
-		with-env {GCP_GOLIVE_WAIT: "1", GCP_INVOKER_WAIT: "2"} {
-			let got = (poll-health "https://svc/health" ["200"] null --bearer $invoker_probe)
-			assert (not $got.ok)
-			assert ($got.last | str contains "allUsers is not in force yet")
-			assert equal $got.waited "2s"
-		}
-		# Without a bearer the same refusal is never asked for, and the address answers.
-		assert (poll-health "https://svc/health" ["200"] null).ok
-	}
 	rm -r $d
 }
 
@@ -182,7 +159,11 @@ def test_golive_waits_for_the_invoker_grant [] {
 	assert equal $res.exit_code 0 $res.stderr
 	let curls = (open --raw ($d | path join curl.log) | lines)
 	assert ($curls | all {|l| $l | str contains "Authorization: Bearer " })
-	assert (($curls | where {|l| $l | str contains "next---" } | length) >= 3)
+	# The refusals are met by the poll of the door before the sidecars are made, and the candidate
+	# answers at its own address once; the public address then answers three times in a row.
+	assert equal (open --raw ($d | path join refusals) | str trim) "0"
+	assert (($curls | where {|l| $l | str contains "next---" } | length) >= 1)
+	assert (($curls | length) >= 7)
 	assert equal (open --raw ($d | path join serving) | str trim) "svc-00002-new"
 	rm -r $d
 }
@@ -237,25 +218,50 @@ def test_golive_switches_after_both_answer [] {
 	rm -r $d
 }
 
-def test_golive_goes_back_when_the_candidate_never_answers [] {
-	print "test go-live keeps traffic on the old revision when the candidate never answers..."
+def test_golive_keeps_traffic_while_the_candidate_never_answers [] {
+	print "test go-live keeps traffic on the old revision while the candidate never answers (a poll has no limit: the fake curl ends it)..."
 	let d = (fakes true "svc-00001-old" "500 down" "200 svc-00001-old")
+	"6" | save -f ($d | path join curl_limit)
 	let res = (golive $d)
 	assert ($res.exit_code != 0)
-	assert ($res.stdout | str contains "did not answer at its own address")
 	assert equal (open --raw ($d | path join serving) | str trim) "svc-00001-old"
 	assert (not (log-of $d | str contains "--to-revisions svc-00002-new=100"))
 	rm -r $d
 }
 
-def test_golive_goes_back_when_the_public_address_stays_on_the_old_revision [] {
-	print "test go-live shifts back when the public address never answers as the new revision..."
-	let d = (fakes true "svc-00001-old" "200 ok" "500 gone")
-	let res = (golive $d)
-	assert ($res.exit_code != 0)
-	assert ($res.stdout | str contains "did not answer as svc-00002-new")
-	assert ($res.stdout | str contains "serves svc-00001-old again")
-	assert equal (open --raw ($d | path join serving) | str trim) "svc-00001-old"
+def test_golive_rolls_the_sidecars_once_traffic_moved [] {
+	print "test go-live rolls each sidecar to the new revision's door only after the public address answers as it, and before it returns..."
+	let more = {plan: {project: "p", region: "r", service: "svc", iap: false, domain: null, aliases: [], sidecarServicesYaml: {render: "x", flagd: "y"}, clock: null, names: {job: "j", migrateJob: "mj", secrets: {}, sidecarServices: {render: "svc-render", flagd: "svc-flagd"}}}}
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	let res = (golive $d $more)
+	assert equal $res.exit_code 0 $res.stderr
+	let lines = (log-of $d | lines)
+	let moved = ($lines | enumerate | where {|l| $l.item | str contains "update-traffic svc --to-revisions svc-00002-new=100" } | first | get index)
+	# The public address answers as the new revision before any roll starts.
+	assert (($res.stdout | str index-of "/health answers as svc-00002-new") < ($res.stdout | str index-of "apart rolled to svc-00002-new"))
+	for svc in ["svc-render" "svc-flagd"] {
+		let rolled = ($lines | enumerate | where {|l| $l.item | str contains $"run services update ($svc) --update-labels pronto-door=svc-00002-new" })
+		assert equal ($rolled | length) 1 $"($svc) is rolled once"
+		assert (($rolled | first | get index) > $moved) $"($svc) is rolled after traffic moved"
+	}
+	assert ($res.stdout | str contains "render apart rolled to svc-00002-new, ")
+	assert ($res.stdout | str contains "answers at its own address, ")
+	assert ($res.stdout | str contains "traffic moved to svc-00002-new, ")
+	assert ($res.stdout | str contains "/health answers as svc-00002-new, ")
+	assert ($res.stdout | str contains "2 sidecars rolled, ")
+	rm -r $d
+}
+
+def test_golive_warns_of_a_failed_roll_and_goes_live [] {
+	print "test go-live only warns of a sidecar whose roll failed..."
+	let more = {plan: {project: "p", region: "r", service: "svc", iap: false, domain: null, aliases: [], sidecarServicesYaml: {render: "x"}, clock: null, names: {job: "j", migrateJob: "mj", secrets: {}, sidecarServices: {render: "svc-render"}}}}
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	"" | save -f ($d | path join roll_fails)
+	let res = (golive $d $more)
+	assert equal $res.exit_code 0 $res.stderr
+	assert ($res.stdout | str contains "render apart kept its instance")
+	assert ($res.stdout | str contains "is live at")
+	assert equal (open --raw ($d | path join serving) | str trim) "svc-00002-new"
 	rm -r $d
 }
 
@@ -277,12 +283,24 @@ def test_golive_tags_the_tested_images_before_the_schema_job [] {
 	let log = (log-of $d)
 	assert ($log | str contains "tags add reg/app-crud@sha256:aa reg/app-crud:release")
 	assert ($log | str contains "run jobs replace dist/gcp/job.yaml")
+	# No key on the record (an older preview's), no inputs tag.
+	assert (not ($log | str contains "src-"))
 	# A tag that fails stops the release before the schema job changes production's database.
 	let lines = ($log | lines)
 	let tagged = ($lines | enumerate | where {|l| $l.item | str contains "tags add" } | first | get index)
 	let job = ($lines | enumerate | where {|l| $l.item | str contains "run jobs replace" } | first | get index)
 	assert ($tagged < $job) "the tag comes before the schema job"
 	assert ($res.stdout | str contains "release")
+	rm -r $d
+}
+
+def test_golive_leaves_the_inputs_key_on_the_copied_images [] {
+	print "test go-live tags a copied image src-<key>, so a release that skips the preview reuses it..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	"sha256:aa" | save -f ($d | path join tagged_digest)
+	let res = (golive $d {gated: true, copy: {refs: [{svc: "crud", repo: "reg/app-crud", digest: "sha256:aa", key: "k123"}]}})
+	assert equal $res.exit_code 0 $res.stderr
+	assert (log-of $d | str contains "tags add reg/app-crud@sha256:aa reg/app-crud:src-k123")
 	rm -r $d
 }
 
@@ -340,5 +358,47 @@ def test_preflight_passes_a_sidecar_apart_whose_compose_sets_port [] {
 	let res = (preflight-run $d $app)
 	rm -r $app
 	assert equal $res.exit_code 0 $res.stderr
+	rm -r $d
+}
+
+# A function of release.nu run over the fakes in a nushell of its own, as go-live is.
+def run-release [d: string, call: string]: nothing -> record {
+	let script = $"$env.GCP_T0 = \(date now\); use ($gcp_dir | path join release.nu) *; ($call)"
+	with-fakes $d { do { ^$nu.current-exe --no-config-file -c $script } | complete }
+}
+
+# A door and two sidecars each take four calls to stop; at half a second a call, one after
+# another they would take 6 s beside the job and clock calls (3 s) and the start: over 9 s.
+def test_stop_preview_stops_every_service_at_once [] {
+	print "test stop-preview stops the door and each sidecar, all at once..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	let plan = {project: "p", region: "r", service: "svc", names: {job: "j", migrateJob: "mj", clock: "c", sidecarServices: {a: "svc-a", b: "svc-b"}}}
+	let t0 = (date now)
+	let res = (with-env {GCLOUD_SLOW: "0.5"} { run-release $d $"stop-preview ($plan | to nuon)" })
+	let took = ((date now) - $t0)
+	assert equal $res.exit_code 0 $res.stderr
+	let log = (log-of $d)
+	for svc in ["svc" "svc-a" "svc-b"] {
+		assert ($log | str contains $"run services update ($svc) --scaling 0") $"($svc) is stopped"
+		assert ($log | str contains $"run services update-traffic ($svc) --clear-tags") $"($svc)'s tags are cleared"
+	}
+	assert ($log | str contains "run jobs delete j") "the schema job goes"
+	assert ($took < 6500ms) $"the services stop at once, not one after another \(($took)\)"
+	rm -r $d
+}
+
+def test_grant_secrets_binds_each_secret_at_once [] {
+	print "test grant-secrets binds the account to each secret, all at once..."
+	let d = (fakes true "svc-00001-old" "200 ok" "200 svc-00002-new")
+	let plan = {project: "p", preview: "rc", readSecrets: ["s1" "s2" "s3" "s4"], names: {serviceAccount: "sa@p.iam.gserviceaccount.com"}}
+	let t0 = (date now)
+	let res = (with-env {GCLOUD_SLOW: "1"} { run-release $d $"grant-secrets ($plan | to nuon)" })
+	let took = ((date now) - $t0)
+	assert equal $res.exit_code 0 $res.stderr
+	let log = (log-of $d)
+	for s in ["s1" "s2" "s3" "s4"] {
+		assert ($log | str contains $"secrets add-iam-policy-binding ($s) --project p --member serviceAccount:sa@p.iam.gserviceaccount.com --role roles/secretmanager.secretAccessor") $"($s) is granted"
+	}
+	assert ($took < 3.5sec) $"the grants run at once \(($took)\)"
 	rm -r $d
 }

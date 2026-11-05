@@ -742,10 +742,11 @@ import (
 				template: spec: {
 					serviceAccountName: R.names.serviceAccount
 					maxRetries:         0
-					// 30 minutes: a pgroll start walks its history, and at 6,180 rows each walk took
-					// minutes, so 10 killed Bonk Chess's job mid-start and left a migration in progress
-					// (2026-11-04). The release waits on the job however long it takes.
-					timeoutSeconds:     1800
+					// No limit of ours: a pgroll start walks its history, and at 6,180 rows each walk took
+					// minutes, so 10 minutes killed Bonk Chess's job mid-start and left a migration in
+					// progress (2026-11-04). 86400 s (24 h) is the longest this file asks of Cloud Run;
+					// the release waits on the job however long it takes.
+					timeoutSeconds:     86400
 					containers: [{
 						name: "initdb"
 						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
@@ -857,6 +858,8 @@ import (
 
 	// What the release needs besides the two documents, as JSON.
 	plan: {
+		// The app's name, which names its release records.
+		app:        R.name
 		project:    R._project
 		region:     R.region
 		repository: R.repository

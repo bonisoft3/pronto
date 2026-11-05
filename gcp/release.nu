@@ -8,9 +8,10 @@
 
 use ../k8s/release.nu [resolve-app]
 use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers run-rehearsal plan-of]
-use build.nu [builder stamp gc exists build-account push-images service-jwt]
+use build.nu [builder stamp key-tag gc exists build-account push-images service-jwt failure-message]
 use local-gate-key.nu
 use release-record.nu
+use secrets.nu [check-secrets]
 
 # The services this target runs; anything else in the app's compose project
 # needs what it does not build yet (PENDING.md#release-targets).
@@ -60,15 +61,18 @@ def ensure-secret [name: string, project: string, value?: string]: nothing -> st
 
 # A gcloud call granting a role: IAM does not know an account made a moment before for some seconds
 # ("does not exist"), and refuses a binding written while another changed the same policy ("concurrent
-# policy changes", as go-live's parallel tasks do), so the call is asked again, a minute at most, a
-# second apart, before it fails; any other refusal fails at once.
+# policy changes", as go-live's parallel tasks do), so the call is asked again, a second apart,
+# as long as IAM gives only those answers (no limit; each minute says so); any other refusal fails at once.
 def --wrapped gc-fresh [...args] {
 	let input = $in
-	let until = ((date now) + 1min)
+	let t0 = (date now)
+	mut tries = 0
 	loop {
 		let r = ($input | ^gcloud --quiet ...$args | complete)
 		if $r.exit_code == 0 { return $r.stdout }
-		if not ($r.stderr =~ "does not exist|concurrent policy changes") or (date now) > $until { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
+		if not ($r.stderr =~ "does not exist|concurrent policy changes") { error make {msg: $"gcloud ($args | str join ' '): ($r.stderr | str trim)"} }
+		$tries += 1
+		if $tries mod 60 == 0 { print $"gcp: (stamp) gcloud ($args | first 3 | str join ' ') still refused after ((date now) - $t0 | format duration sec): ($r.stderr | str trim | lines | last)" }
 		sleep 1sec
 	}
 }
@@ -100,18 +104,21 @@ def grant-public [service: string, project: string, region: string] {
 # that secret alone, never on the project. A preview's release may grant no role in its project,
 # so where its account is refused it says which secret, and the owner's grant on the project, as
 # before, still holds.
-def grant-secrets [plan: record] {
+export def grant-secrets [plan: record] {
 	let member = $"serviceAccount:($plan.names.serviceAccount)"
-	for s in $plan.readSecrets {
+	# Each secret at once (its own policy, so no two calls touch the same one): one after another,
+	# the rc's staging spent 23 s on these and its scrape configs (2026-11-04).
+	let failed = ($plan.readSecrets | par-each {|s|
 		let r = (try { gc-fresh secrets add-iam-policy-binding $s --project $plan.project --member $member --role roles/secretmanager.secretAccessor; {exit_code: 0, stderr: ""} } catch {|e| {exit_code: 1, stderr: $e.msg} })
 		if $r.exit_code != 0 {
 			if ($plan.preview? | is-not-empty) {
 				print $"gcp: (stamp) ($s) not granted to ($member) alone: ($r.stderr | str trim | lines | last)"
 			} else {
-				error make {msg: $"gcloud secrets add-iam-policy-binding ($s): ($r.stderr | str trim)"}
+				$"gcloud secrets add-iam-policy-binding ($s): ($r.stderr | str trim)"
 			}
 		}
-	}
+	} | compact)
+	if ($failed | is-not-empty) { error make {msg: ($failed | first)} }
 }
 
 # Whether any sidecar's metrics are scraped, in the cluster's instance or apart.
@@ -243,7 +250,7 @@ def set-up-project [plan: record] {
 		try {
 			if $t == "repository" { set-up-repository $plan } else if $t == "account" { set-up-account $plan } else { set-up-secrets $plan }
 			null
-		} catch {|e| $e.msg }
+		} catch {|e| (failure-message $e) }
 	} | compact)
 	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
 	let pg = (gc secrets versions access latest --secret $n.secrets.POSTGRES_PASSWORD --project $p)
@@ -280,13 +287,13 @@ def start-copy [plan: record, name: string, services: list<string>, from: record
 	let refs = ($services | each {|svc|
 		let src = ($from.pushed | get -o $svc)
 		if $src == null { error make {msg: $"the preview has no ($svc) image to release"} }
-		{svc: $svc, src: $"($from.registry)/($name)-($svc)@($src.digest)", digest: $src.digest, repo: $"($plan.registry)/($name)-($svc)"}
+		{svc: $svc, src: $"($from.registry)/($name)-($svc)@($src.digest)", digest: $src.digest, key: ($src.key? | default null), repo: $"($plan.registry)/($name)-($svc)"}
 	})
 	let work = (mktemp -d -t gcp-copy.XXXXXX | str trim)
 	{
 		steps: ($refs | each {|r| {name: $copier, args: ["cp" $r.src $"($r.repo):candidate"]} })
 		options: {logging: "CLOUD_LOGGING_ONLY"}
-		timeout: "1200s"
+		timeout: "86400s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
 	print $"gcp: (stamp) copying the tested ($services | str join ', ') from the preview"
 	let build = (gc builds submit --no-source --config $"($work)/cloudbuild.yaml" --project $p --async --format "value(id)" | str trim)
@@ -318,6 +325,9 @@ def tag-release [copy: record]: nothing -> record {
 		gc artifacts docker tags add $"($r.repo)@($r.digest)" $"($r.repo):release" | ignore
 		let digest = (gc artifacts docker images describe $"($r.repo):release" --format "value(image_summary.digest)" | str trim)
 		if $digest != $r.digest { error make {msg: $"($r.repo):release is ($digest), not the tested ($r.digest)"} }
+		# Found by its inputs' key the next time, as `push-images` leaves its own (a release
+		# that skips the preview reuses what it finds); a record without a key adds none.
+		if ($r.key? | is-not-empty) { gc artifacts docker tags add $"($r.repo)@($r.digest)" $"($r.repo):(key-tag $r.key)" | ignore }
 		{svc: $r.svc, ref: {tag: "release", digest: $digest}}
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref }
 }
@@ -420,13 +430,15 @@ def ensure-bucket [bucket: string, account: string, project: string, region: str
 # random, so the rc's renderer and players were refused while its tests ran (2026-11-03,
 # 22:26 and 23:30 BRT). Kept, the grant spread long ago; the next deploy sets each back to
 # automatic scaling after its replace (scale-automatic).
-def stop-preview [plan: record, --remove] {
+export def stop-preview [plan: record, --remove] {
 	let p = $plan.project
 	let r = $plan.region
 	let n = $plan.names
-	for svc in ([$plan.service] | append ($n.sidecarServices? | default {} | values)) {
-		if not (exists run services describe $svc --region $r --project $p) { continue }
-		if $remove { gc run services delete $svc --region $r --project $p | ignore; continue }
+	# Each service at once: one after another, a door and six sidecars were most of a minute of
+	# the rc's critical path (2026-11-04: 45 s from the preview's start to its emptying).
+	[$plan.service] | append ($n.sidecarServices? | default {} | values) | par-each {|svc|
+		if not (exists run services describe $svc --region $r --project $p) { return }
+		if $remove { gc run services delete $svc --region $r --project $p | ignore; return }
 		# A revision a tag alone reaches (the `next` a failed go-live leaves) runs on at no instance.
 		# Clearing them is said and passed when it fails: on a service whose latest revision never
 		# became healthy it routes there again and fails the same way, which stopped the release
@@ -439,7 +451,7 @@ def stop-preview [plan: record, --remove] {
 			print -e $"gcp: (stamp) ($svc) deleted, as it could not be stopped: ($e.msg | lines | last)"
 			gc run services delete $svc --region $r --project $p | ignore
 		}
-	}
+	} | ignore
 	for job in [$n.job $n.migrateJob] {
 		if (exists run jobs describe $job --region $r --project $p) { gc run jobs delete $job --region $r --project $p | ignore }
 	}
@@ -466,13 +478,12 @@ def empty-preview [plan: record] {
 	if (exists sql databases describe $n.database --instance $n.instance --project $plan.project) {
 		print $"gcp: (stamp) emptying the preview ($plan.preview): dropping its database on ($n.instance)"
 		# A service at no instance still finishes the requests it had, so a connection of one may
-		# outlive stop-preview: the drop is asked again, about two minutes in all, until none is left.
-		mut left = 6
+		# outlive stop-preview: the drop is asked again, twenty seconds apart, until none is left
+		# (no limit; each ask that fails says so).
 		loop {
 			let r = (do { ^gcloud --quiet sql databases delete $n.database --instance $n.instance --project $plan.project } | complete)
 			if $r.exit_code == 0 or not (exists sql databases describe $n.database --instance $n.instance --project $plan.project) { break }
-			if $left == 0 { error make {msg: $"gcloud sql databases delete ($n.database): ($r.stderr | str trim)"} }
-			$left -= 1
+			print $"gcp: (stamp) the preview's database ($n.database) is still in use, asked again in 20s: ($r.stderr | str trim | lines | last)"
 			sleep 20sec
 		}
 		gc sql databases create $n.database --instance $n.instance --project $plan.project | ignore
@@ -589,7 +600,7 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
-	{GCP: ({image: {pushed: $pushed}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $render_cfg | merge $airlock_cfg | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	{GCP: ({image: {pushed: ($pushed | items {|svc, ref| {k: $svc, v: ($ref | reject -o key)} } | reduce -f {} {|i, acc| $acc | insert $i.k $i.v })}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $render_cfg | merge $airlock_cfg | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	{plan: $plan, number: $number}
@@ -721,39 +732,47 @@ export const invoker_probe = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJwc
 const cloud_run_refusal = "not authorized to invoke this service"
 
 # An address polled until it answers ok (and, where given, with the revision's name, `steady`
-# times in a row), for GCP_GOLIVE_WAIT seconds, 180 unless set. With `bearer` each request
-# carries it, and while Cloud Run refuses it itself the poll waits on, for
-# GCP_INVOKER_WAIT seconds in all, 420 unless set: Cloud Run's IAM changes take up to
-# seven minutes; once it has refused one, the poll keeps that wait while its answers come
-# steady. Where the grant was in force already the first answers pass, and the
-# poll costs nothing more.
-export def poll-health [url: string, ok: list<string>, revision: any, --steady: int = 1, --bearer: string]: nothing -> record {
-	let wait = ($env.GCP_GOLIVE_WAIT? | default 180 | into int)
-	let invoker_wait = ($env.GCP_INVOKER_WAIT? | default 420 | into int)
+# times in a row). No limit: a poll that gets no such answer goes on, and says so about every
+# minute (elapsed, last answer), so a stuck go-live shows in the log instead of failing or
+# rolling back on a clock. With `bearer` each request carries it, and a Cloud Run refusal of it
+# (its grant of roles/run.invoker to allUsers not in force yet, which can take minutes) is
+# named in that line. The result keeps its shape (ok, last, waited) for its callers; ok is
+# always true, as the poll returns only on the answer it wants.
+export def poll-health [url: string, ok: list<string>, revision: any, --steady: int = 1, --bearer: string]: nothing -> any {
 	let every = ($env.GCP_GOLIVE_EVERY? | default 2 | into int)
 	let headers = if $bearer == null { [] } else { ["--header" $"Authorization: Bearer ($bearer)"] }
 	let body = (mktemp -t gcp.XXXXXX | str trim)
 	let t0 = (date now)
+	mut next_note = 1min
 	mut streak = 0
 	mut last = "no answer"
-	mut refused = false
-	mut spreading = false
 	loop {
 		let code = (^curl --silent --max-time 10 --output $body --write-out "%{http_code}" ...$headers $url | complete | get stdout | str trim)
 		let said = (open --raw $body | into string | str trim)
 		$last = $"($code) ($said | str substring 0..60)"
-		$refused = ($bearer != null and $code == "401" and ($said | str contains $cloud_run_refusal))
-		$spreading = ($spreading or $refused)
+		let refused = ($bearer != null and $code == "401" and ($said | str contains $cloud_run_refusal))
 		if $code in $ok and ($revision == null or $said == $revision) { $streak += 1 } else { $streak = 0 }
 		if $streak >= $steady { rm -f $body; return {ok: true, last: $last, waited: ""} }
-		let limit = if $spreading { [$wait $invoker_wait] | math max } else { $wait }
-		if ((date now) - $t0) >= ($limit * 1sec) { break }
+		let elapsed = ((date now) - $t0)
+		if $elapsed >= $next_note {
+			let why = if $refused { " (Cloud Run itself still refuses a bearer token not signed by Google: its grant of roles/run.invoker to allUsers is not in force yet)" } else { "" }
+			print $"gcp: (stamp) still waiting for ($url) to answer ($ok | str join '/')(if $revision != null { $" as ($revision)" } else { '' }), ($elapsed | format duration sec): last answer ($last)($why)"
+			$next_note = $next_note + 1min
+		}
 		sleep ($every * 1sec)
 	}
-	rm -f $body
-	let waited = if $spreading { [$wait $invoker_wait] | math max } else { $wait }
-	let why = if $refused { "Cloud Run itself still refuses a request that carries a bearer token not signed by Google: its grant of roles/run.invoker to allUsers is not in force yet (GCP_INVOKER_WAIT waits longer); " } else { "" }
-	{ok: false, last: $"($why)($last)", waited: $"($waited)s"}
+}
+
+# A sidecar apart rolled to a fresh instance, which reads the door of `revision` at its start:
+# its label pronto-door set to the revision's name. A roll that fails leaves the sidecar as it
+# was, and says so.
+def roll-sidecar [plan: record, s: string, revision: string] {
+	let svc = ($plan.names.sidecarServices | get $s)
+	let t0 = (date now)
+	try {
+		gc run services update $svc --update-labels $"pronto-door=($revision)" --region $plan.region --project $plan.project | ignore
+		print $"gcp: (stamp) ($s) apart rolled to ($revision), ((date now) - $t0 | format duration sec)"
+	} catch {|e| print $"gcp: (stamp) ($s) apart kept its instance, started before the switch: ($e.msg)" }
 }
 
 # A staged release made live: its images tagged the release's (a gated one's, now that its
@@ -801,7 +820,7 @@ export def go-live [staged: record]: nothing -> record {
 				gc run jobs delete $plan.names.migrateJob --region $r --project $p | ignore
 			}
 			null
-		} catch {|e| $e.msg }
+		} catch {|e| (failure-message $e) }
 	} | compact)
 	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
 	# The door answers, as the revision it serves, before a sidecar that reads through it at start
@@ -850,7 +869,7 @@ export def go-live [staged: record]: nothing -> record {
 				grant-public $svc $p $r
 			}
 			null
-		} catch {|e| $e.msg }
+		} catch {|e| (failure-message $e) }
 	} | compact)
 	if ($failed | is-not-empty) { error make {msg: ($failed | str join "\n") } }
 
@@ -868,15 +887,21 @@ export def go-live [staged: record]: nothing -> record {
 	# sign-in answers before any of that.
 	let bearer = if $iap { null } else { $invoker_probe }
 	mut moved = false
+	let t_live = (date now)
 	let failed = (try {
 		let got = (poll-health $"($url)/health" $ok null --bearer $bearer)
 		if not $got.ok { error make {msg: $"the new revision ($candidate.revision) did not answer at its own address \(($url)/health\) in ($got.waited): last answer ($got.last)"} }
+		print $"gcp: (stamp) ($candidate.revision) answers at its own address, ((date now) - $t_live | format duration sec) after the services were made"
+		let t_traffic = (date now)
 		gc run services update-traffic $plan.service --to-revisions $"($candidate.revision)=100" --region $r --project $p | ignore
 		$moved = true
+		print $"gcp: (stamp) ($plan.service)'s traffic moved to ($candidate.revision), ((date now) - $t_traffic | format duration sec)"
+		let t_public = (date now)
 		let got = (poll-health $"($address)/health" $ok (if $iap { null } else { $candidate.revision }) --steady 3 --bearer $bearer)
+		print $"gcp: (stamp) ($address)/health answers as ($candidate.revision), ((date now) - $t_public | format duration sec)"
 		if not $got.ok { error make {msg: $"the public address ($address)/health did not answer as ($candidate.revision) in ($got.waited): last answer ($got.last)"} }
 		null
-	} catch {|e| $e.msg })
+	} catch {|e| (failure-message $e) })
 	if $failed != null {
 		print $"gcp: (stamp) ($plan.service) failed to go live: ($failed)"
 		if $before == null {
@@ -894,14 +919,12 @@ export def go-live [staged: record]: nothing -> record {
 	# A sidecar apart made before the switch read the door that served then, the release before:
 	# what it reads at start (a renderer's catalogues of messages) it keeps for its life, and a
 	# key new in this release is unknown to it (Bonk Chess's player pages, 2026-11-03). Each is
-	# rolled once this revision serves, a fresh instance reading this release's door. A roll
-	# that fails leaves the sidecar as it was, and the release live.
-	$plan.sidecarServicesYaml | columns | par-each {|s|
-		let svc = ($plan.names.sidecarServices | get $s)
-		try {
-			gc run services update $svc --update-labels $"pronto-door=($candidate.revision)" --region $r --project $p | ignore
-		} catch {|e| print $"gcp: (stamp) ($s) apart kept its instance, started before the switch: ($e.msg)" }
-	} | ignore
+	# rolled once this revision serves at the public address, which it reads through: not
+	# beside the poll that says so, where a fresh instance could still read the release before
+	# (Codex review). A roll that fails leaves the sidecar as it was, and the release live.
+	let t_rolls = (date now)
+	$plan.sidecarServicesYaml | columns | par-each {|s| roll-sidecar $plan $s $candidate.revision } | ignore
+	print $"gcp: (stamp) ($plan.sidecarServicesYaml | columns | length) sidecars rolled, ((date now) - $t_rolls | format duration sec)"
 	print $"gcp: (stamp) ($plan.service) is live at ($address)"
 	release-record note {revision: $candidate.revision} --preview $own
 	release-record mark deploy end --preview $own
@@ -1001,9 +1024,12 @@ def local-gate [app_dir: string] {
 # One release of an app at a time, wherever it starts: two would race on its service, its
 # traffic, its rc preview and its IAM policy (AGENTS.md). The lock is an object in the project's
 # own bucket, made only where none is (--if-generation-match=0, which GCS decides atomically), that
-# says who holds it and until when. A release that died leaves it until then; PRONTO_RELEASE_BREAK_LOCK=1
-# takes it at once. Releases of other apps, and an app's previews (pr-32), hold locks of their own.
-const LOCK_FOR = 45min
+# says who holds it. It is a lease with no end of its own: while the release runs, a background job
+# touches the object (its `beat` metadata, so its generation stays) every minute, and the lock is
+# taken over only once nothing touched it for LOCK_STALE, so a release of any length keeps it. A release
+# that died leaves it for LOCK_STALE; PRONTO_RELEASE_BREAK_LOCK=1 takes it at once. Releases of other
+# apps, and an app's previews (pr-32), hold locks of their own.
+const LOCK_STALE = 10min
 
 def lock-of [cue_path: string, preview: string]: nothing -> record {
 	let g = (^cue export --expression "{p: GCP.project, n: GCP.name, r: GCP.region}" --out json $cue_path | from json)
@@ -1017,7 +1043,7 @@ def take-lock [lock: record]: nothing -> any {
 		gc storage buckets create $lock.bucket --project $lock.project --location $lock.region --uniform-bucket-level-access --public-access-prevention | ignore
 	}
 	let now = (date now)
-	let holder = {by: $"(whoami | str trim)@(sys host | get hostname)", dir: (pwd), pid: $nu.pid, since: ($now | format date "%+"), until: ($now + $LOCK_FOR | format date "%+")}
+	let holder = {by: $"(whoami | str trim)@(sys host | get hostname)", dir: (pwd), pid: $nu.pid, since: ($now | format date "%+")}
 	let file = (mktemp -t pronto-release-lock.XXXXXX)
 	$holder | to json | save -f $file
 	let broken = ($env.PRONTO_RELEASE_BREAK_LOCK? | default "") not-in ["" "0" "false"]
@@ -1026,23 +1052,34 @@ def take-lock [lock: record]: nothing -> any {
 		if $made.exit_code == 0 {
 			rm -f $file
 			let generation = (gc storage objects describe $lock.object --project $lock.project --format "value(generation)" | str trim)
-			print $"gcp: (stamp) ($lock.key)'s release lock taken \(($lock.object), until ($holder.until)\)"
-			return ($lock | insert generation $generation)
+			print $"gcp: (stamp) ($lock.key)'s release lock taken \(($lock.object), kept while this release runs\)"
+			let beat = job spawn {
+				loop {
+					sleep 1min
+					let r = (do { ^gcloud --quiet storage objects update $lock.object $"--custom-metadata=beat=(date now | format date '%+')" $"--if-generation-match=($generation)" --project $lock.project } | complete)
+					if $r.exit_code != 0 { print -e $"gcp: (stamp) ($lock.key)'s release lock was not renewed \(another release may take it after ($LOCK_STALE)\): ($r.stderr | str trim | lines | last)" }
+				}
+			}
+			return ($lock | insert generation $generation | insert beat $beat)
 		}
 		if not ($made.stderr =~ '(?i)412|pre-?condition') {
 			rm -f $file
 			error make {msg: $"($lock.key)'s release lock \(($lock.object)\) was not taken: ($made.stderr | str trim)"}
 		}
 		let held = (try { gc storage cat $lock.object --project $lock.project | from json } catch { {} })
-		let generation = (try { gc storage objects describe $lock.object --project $lock.project --format "value(generation)" | str trim } catch { "" })
-		let expired = (try { ($held.until | into datetime) < (date now) } catch { true })
-		if $attempt == 2 or not ($expired or $broken) {
+		let seen = (try { gc storage objects describe $lock.object --project $lock.project --format json | from json } catch { {} })
+		let generation = ($seen.generation? | default "" | into string)
+		let metageneration = ($seen.metageneration? | default "" | into string)
+		# Not touched for LOCK_STALE: its release is gone. Unreadable counts as touched (BREAK_LOCK takes it).
+		let silent = (try { ((date now) - ($seen.update_time | into datetime)) > $LOCK_STALE } catch { false })
+		if $attempt == 2 or not ($silent or $broken) {
 			rm -f $file
-			error make {msg: $"another release of ($lock.key) is running: ($held.by? | default 'someone') in ($held.dir? | default '?') \(pid ($held.pid? | default '?')\) since ($held.since? | default '?'), holding it until ($held.until? | default '?'). One release of an app at a time: run again once it ends. A release that died holds it until then; PRONTO_RELEASE_BREAK_LOCK=1 takes it now."}
+			error make {msg: $"another release of ($lock.key) is running: ($held.by? | default 'someone') in ($held.dir? | default '?') \(pid ($held.pid? | default '?')\) since ($held.since? | default '?'). One release of an app at a time: run again once it ends. A release that died holds it until nothing has touched it for ($LOCK_STALE); PRONTO_RELEASE_BREAK_LOCK=1 takes it now."}
 		}
-		print $"gcp: (stamp) ($lock.key)'s release lock taken over from ($held.by? | default 'someone') \((if $broken { 'PRONTO_RELEASE_BREAK_LOCK' } else { $"it expired at ($held.until? | default '?')" })\)"
+		print $"gcp: (stamp) ($lock.key)'s release lock taken over from ($held.by? | default 'someone') \((if $broken { 'PRONTO_RELEASE_BREAK_LOCK' } else { $"nothing touched it for ($LOCK_STALE)" })\)"
 		if ($generation | is-not-empty) {
-			do { ^gcloud --quiet storage rm $lock.object $"--if-generation-match=($generation)" --project $lock.project } | complete | ignore
+			# Both numbers, so a heartbeat that landed since the look above (a new metageneration) keeps the lock.
+			do { ^gcloud --quiet storage rm $lock.object $"--if-generation-match=($generation)" $"--if-metageneration-match=($metageneration)" --project $lock.project } | complete | ignore
 		}
 	}
 	error make {msg: $"($lock.key)'s release lock was not taken"}
@@ -1050,6 +1087,7 @@ def take-lock [lock: record]: nothing -> any {
 
 # The lock let go, only if it is still this release's (its generation): one taken over since stays.
 def drop-lock [lock: record] {
+	if ($lock.beat? | is-not-empty) { try { job kill $lock.beat } }
 	let r = (do { ^gcloud --quiet storage rm $lock.object $"--if-generation-match=($lock.generation)" --project $lock.project } | complete)
 	if $r.exit_code == 0 { print $"gcp: (stamp) ($lock.key)'s release lock let go" } else { print $"gcp: (stamp) ($lock.key)'s release lock was not let go: ($r.stderr | str trim | lines | last)" }
 }
@@ -1090,19 +1128,27 @@ export def main [
 	let record = {|outcome: string, failure: any|
 		if $recorded { release-record write $app_info.cue_path $preview $env.GCP_T0 $outcome $failure $at }
 	}
+	# The secrets the release reads by name, in every project it touches, before the lock, the rc
+	# preview or any build: a missing one fails here in seconds, not in the rc minutes in (gcp/secrets.nu).
+	if $recorded and not $rollback {
+		try { check-secrets $app_info.dir --preview $preview --no-gate=$no_gate } catch {|e|
+			do $record "failed" (failure-message $e)
+			error make {msg: (failure-message $e)}
+		}
+	}
 	# Nothing a dry run or a snapshot does reaches the project, so neither waits for the lock.
 	release-record mark lock start
 	let lock = if $dry_run or $snapshot { null } else {
 		try { take-lock (lock-of $app_info.cue_path $preview) } catch {|e|
-			do $record (if ($e.msg | str starts-with "another release") { "refused" } else { "failed" }) $e.msg
-			error make {msg: $e.msg}
+			do $record (if ((failure-message $e) | str starts-with "another release") { "refused" } else { "failed" }) (failure-message $e)
+			error make {msg: (failure-message $e)}
 		}
 	}
 	release-record mark lock end
 	let failure = (try {
 		release-body $app_info $preview $delete $dry_run $snapshot $no_gate $rollback $force_rc $no_local_gate
 		null
-	} catch {|e| $e.msg })
+	} catch {|e| (failure-message $e) })
 	if $lock != null { drop-lock $lock }
 	do $record (if $failure != null { "failed" } else if $rollback { "rolled-back" } else { "live" }) $failure
 	if $failure != null { error make {msg: $failure} }
@@ -1168,16 +1214,16 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 	# moment it started), `tested` (the preview deployed) or `built` (why it did not).
 	let dir = $app_info.dir
 	let gate_job = if $local { job spawn {
-		try { local-gate $dir; {gate: null} | job send 0 } catch {|e| {gate: $e.msg} | job send 0 }
+		try { local-gate $dir; {gate: null} | job send 0 } catch {|e| {gate: (failure-message $e)} | job send 0 }
 	} }
 	let deploy_job = job spawn {
 		try {
 			empty-preview $rc_plan
 			let drivers = (start-drivers $dir $rc_plan)
 			{drivers: $drivers} | job send 0
-			let tested = (try { deploy $app_info $rc false false --rendered $rc_plan } catch {|e| cancel-drivers $drivers; error make {msg: $e.msg} })
+			let tested = (try { deploy $app_info $rc false false --rendered $rc_plan } catch {|e| cancel-drivers $drivers; error make {msg: (failure-message $e)} })
 			{tested: $tested} | job send 0
-		} catch {|e| {built: $e.msg} | job send 0 }
+		} catch {|e| {built: (failure-message $e)} | job send 0 }
 	}
 	#
 	# The tests' own images build in Cloud Build while the preview deploys, and
@@ -1227,12 +1273,12 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 						let r = (run-rehearsal $drivers $rehearsal_run)
 						release-record note {rehearsal: $r}
 						if $r.ok { {} } else { {rehearsal: $"the rehearsal failed \(execution ($r.execution)\): its log is above"} }
-					} catch {|e| {rehearsal: $e.msg} }
+					} catch {|e| {rehearsal: (failure-message $e)} }
 				}
 			} else if $t == "stage" {
-				try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}) --rendered $prod_plan)} } catch {|e| {staging: $e.msg} }
+				try { {staged: (stage $app_info "" false false ($from | merge {copy: $copy}) --rendered $prod_plan)} } catch {|e| {staging: (failure-message $e)} }
 			} else {
-				try { finish-drivers $drivers; release-record mark rc end; {} } catch {|e| {tests: $e.msg} }
+				try { finish-drivers $drivers; release-record mark rc end; {} } catch {|e| {tests: (failure-message $e)} }
 			}
 		} | reduce -f {} {|it, acc| $acc | merge $it })
 		if ($both.tests? | is-not-empty) { error make {msg: $both.tests} }
@@ -1246,10 +1292,10 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 				gc logging read $"resource.type=\"build\" AND resource.labels.build_id=\"($drivers.build)\"" --project $drivers.project --order asc --limit 100000 --format "value(textPayload)"
 					| lines | each {|l| $l | str replace -r '^Step #\d+: ' '' } | where {|l| not ($l starts-with "#") and ($l | str trim | is-not-empty) } | str join (char nl) | save -f $log_file
 				{tests_log: $log_file} | job send 0
-			} catch {|e| {tests_log_error: $e.msg} | job send 0 }
+			} catch {|e| {tests_log_error: (failure-message $e)} | job send 0 }
 		} | ignore
 		go-live $both.staged | ignore
-		let read = (try { job recv --timeout 60sec } catch { {tests_log_error: "Cloud Logging did not answer in a minute"} })
+		let read = (job recv)
 		if ($read.tests_log? | is-not-empty) {
 			print $"gcp: (stamp) what the tests printed \(also in ($read.tests_log)\):"
 			print (open --raw $read.tests_log)
@@ -1257,7 +1303,7 @@ def release-body [app_info: record, preview: string, delete: bool, dry_run: bool
 		# A release the rc gate passed: the deploy-shaped files it passed with.
 		local-gate-key rc-stamp $app_info.dir $deploy_key
 		null
-	} catch {|e| $e.msg })
+	} catch {|e| (failure-message $e) })
 	# A failed release stops the preview whole. A release that is live does not wait for that: the
 	# preview's service, jobs and instance stay, idle (Cloud Run scales to zero), and only its clock,
 	# which acts alone, is deleted. Nothing is harmed by what stays, since the next release of the app

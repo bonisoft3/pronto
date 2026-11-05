@@ -76,6 +76,8 @@ def fold [cue_path: string, preview: string, started: datetime, ended: datetime,
 		localGate: $facts.localGate
 		revision: $facts.revision
 		rehearsal: ($facts.rehearsal? | default null)
+		# The scenarios of a new feature that failed and did not stop the release, which went out on stable features (verify.nu new-feature-excuse).
+		newFeatureScenarios: ($lines | where {|l| "fact" in $l and ($l.fact.newFeatureScenarios? | is-not-empty) } | each {|l| $l.fact.newFeatureScenarios } | flatten | uniq)
 		phases: {
 			lock: (do $span lock)
 			gate: (do $span gate)
@@ -99,4 +101,16 @@ export def write [cue_path: string, preview: string, started: datetime, outcome:
 		$"($r | to json --raw)\n" | save --append ($dir | path join $"($r.app).jsonl")
 		rm -f $env.PRONTO_RELEASE_MARKS
 	} catch {|e| print -e $"gcp: warning: the release's record was not written: ($e.msg)" }
+}
+
+# The commit of the app's last production release that went live and was a clean checkout, from
+# its records; null where there is none (an app never released from here, or a dirty last one).
+export def live-commit [app: string]: nothing -> any {
+	let file = ($env.HOME | path join .cache pronto releases $"($app).jsonl")
+	if not ($file | path exists) { return null }
+	let live = (open --raw $file | lines | where {|l| $l | is-not-empty } | each {|l| try { $l | from json } } | compact
+		| where {|r| ($r.outcome? == "live") and ($r.preview? | default "") == "" })
+	if ($live | is-empty) { return null }
+	let last = ($live | last)
+	if ($last.dirty? | default true) or ($last.commit? | is-empty) { null } else { $last.commit }
 }
