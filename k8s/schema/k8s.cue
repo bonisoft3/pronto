@@ -475,6 +475,8 @@ import (
 						labels: appLabels & {"app.kubernetes.io/component": "crud"}
 						annotations: (#daprSidecar & {id: "crud", port: "3000"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "crud"
 						image:           (#appImage & {svc: "crud"}).out
@@ -581,6 +583,8 @@ import (
 						labels: appLabels & {"app.kubernetes.io/component": "electric"}
 						annotations: (#daprSidecar & {id: "electric", port: "3000"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "electric"
 						image:           (#appImage & {svc: "electric"}).out
@@ -683,6 +687,8 @@ import (
 							annotations: "pronto.dev/oidc-secret-digest": release.auth.oidcSecretDigest
 						}
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "auth"
 						image:           (#appImage & {svc: "auth"}).out
@@ -786,6 +792,8 @@ import (
 						labels: appLabels & {"app.kubernetes.io/component": "caddy"}
 						annotations: (#daprSidecar & {id: "caddy", port: "8080"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "caddy"
 						image:           (#appImage & {svc: "caddy"}).out
@@ -885,6 +893,8 @@ import (
 						labels:      appLabels & {"app.kubernetes.io/component": "render"}
 						annotations: (#daprSidecar & {id: "render", port: "\(release.render.port)"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "render"
 						image:           (#appImage & {svc: "render"}).out
@@ -974,6 +984,8 @@ import (
 						"labels":    labels
 						annotations: (#daprSidecar & {id: n, port: "\(s.port)"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            n
 						image:           (#appImage & {svc: n}).out
@@ -988,6 +1000,7 @@ import (
 								{name: "PORT", value: "\(s.port)"},
 								{name: "ORIGIN", value: originValue},
 								{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}},
+								for k, v in s.secrets {name: k, valueFrom: secretKeyRef: {name: v, key: k}},
 							],
 							(#denoTelemetry & {service: n}).env,
 						])

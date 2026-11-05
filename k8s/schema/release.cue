@@ -101,6 +101,9 @@ package schema
 	services: [=~"^[a-z][a-z0-9-]*$"]: {
 		port!: int & >1024 & <65536
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		// Variables read from a Secret the operator keeps in the app's namespace, each under its
+		// variable's name (a sender's VAPID key): the pod does not start until it is there.
+		secrets: [=~"^[A-Z_][A-Z0-9_]*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	}
 
 
