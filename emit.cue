@@ -1951,6 +1951,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if D.code.meta.ssrOrigin != _|_ {
 					ssrOrigin: D.code.meta.ssrOrigin
 				}
+				if D.code.meta.firstLoad != _|_ {
+					firstLoad: D.code.meta.firstLoad
+				}
 				// What only the cluster's streams and computations write lands in
 				// live tables, which the page ships as they stood at bundling.
 				if len(D.code.state.pipelines)+len(D.code.state.drains)+len(D.code.state.computations) > 0 {
@@ -2044,6 +2047,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						}], " ")]
 						note: "Pronto computations admitted"
 					}
+				}
+				// A pages app's first load within its budget, bundled as the
+				// release bundles it, so the gate fails where the release would.
+				// An app with derived tables is held to it at release only: its
+				// rows come from a settled cluster the gate does not run.
+				if list.Contains(D.code.meta.targets, "pages") && _distribution.firstLoad > 0 && len(_distribution.derived.tables) == 0 {
+					firstLoad: {verb: "test", cmds: [_distribution.checks.firstLoad], note: "Pronto first-load budget"}
 				}
 				if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 					admitEffects: {verb: "lint", cmds: [_distribution.checks.admitEffects], note: "Pronto effect handlers admitted"}
