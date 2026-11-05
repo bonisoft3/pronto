@@ -241,6 +241,15 @@ Deno.test("a chart's D2 draws every arrow by its event, an invoking state dashed
   assertStringIncludes(d2, '"pending" -> "charging": "pay"');
   assertStringIncludes(d2, '"charging" -> "settled": onDone');
   assertStringIncludes(d2, '"failed" -> "pending": "retry"');
+  const attachments = chartD2({ initial: "watching", states: {
+    watching: { invoke: [{ src: "progress" }, { src: "existence" }] },
+    working: { invoke: { src: "work", onError: [{ guard: "uncertain", target: "unknown" }, { target: "failed" }] } },
+    unknown: {}, failed: {},
+  } });
+  assertStringIncludes(attachments, "invoke progress, existence");
+  assertStringIncludes(attachments, '"working" -> "unknown": onError');
+  assertStringIncludes(attachments, '"working" -> "failed": onError');
+  assertEquals(attachments.includes("undefined"), false);
   const timer = chartD2({ initial: "on", states: { on: { after: { "1000": { assign: { n: "bump" }, target: "on" } } } } });
   assertStringIncludes(timer, '"on" -> "on": "after 1000 ms / n = bump"');
   // A root-level transition fires in every state: one arrow from "any".

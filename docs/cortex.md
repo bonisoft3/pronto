@@ -187,3 +187,23 @@ The interactive graph is verified by walking the composition:
 Mounting does not establish browser layout, Electric delivery or full-shell
 acceptance; these are executable safety checks, not an unbounded proof of
 liveness.
+
+## Transactional sources
+
+A chart with `config.meta.host: "mecha"` owns the state field of a server
+entity. Its `meta` names the entity, field, source function, migration, and
+watched entities. Root invocations name `via: "query"` actors whose SQL returns
+`key`, `event`, and `payload`; `event` must match the actor's declared event.
+The compiler rejects unsupported chart constructs and uninvoked sources.
+
+Source reconciliation runs in the database transaction. It dispatches facts
+through the row trigger and repeats when effects change watched data, with a
+finite bound for cycles. The private `cortex_runtime` tables hold only
+transaction-scoped dispatch and drain state. The request-entry gate acquires a
+shared advisory lock before writes take row or incremental-view locks. Direct
+SQL writers can receive a serialization failure and must retry the transaction.
+
+Named guards contain SQL; named actions lower to Mecha actions. External-effect
+outcomes may use ordered guarded branches with an unguarded fallback. The
+ledger's recorded outcome determines which branches are eligible, including
+when success and failure share a target.

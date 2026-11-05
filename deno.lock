@@ -28,6 +28,8 @@
     "npm:@bufbuild/cel-spec@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/cel@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/protobuf@2.14.1": "2.14.1",
+    "npm:@electric-sql/pglite-pg_ivm@0.0.9": "0.0.9_@electric-sql+pglite@0.5.8",
+    "npm:@electric-sql/pglite@0.5.8": "0.5.8",
     "npm:@endo/module-source@1.4.0": "1.4.0",
     "npm:@formatjs/icu-messageformat-parser@3.5.20": "3.5.20",
     "npm:@libpg-query/parser@17.6.10": "17.6.10",
@@ -263,6 +265,15 @@
     },
     "@chevrotain/utils@11.0.3": {
       "integrity": "sha512-YslZMgtJUyuMbZ+aKvfF3x1f5liK4mWNxghFRv7jqRR9C3R3fAOGTTKvxXDa2Y1s9zSbcpuO0cAxDYsc9SrXoQ=="
+    },
+    "@electric-sql/pglite-pg_ivm@0.0.9_@electric-sql+pglite@0.5.8": {
+      "integrity": "sha512-mbTcDLQyzeOG4rX6LLHhWDPJeQUv2xHvayKtf4oE7xujWEGWEDUEJP1+U0pXXELtIoWiUzzPBWjzKY1mRisqkQ==",
+      "dependencies": [
+        "@electric-sql/pglite"
+      ]
+    },
+    "@electric-sql/pglite@0.5.8": {
+      "integrity": "sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q=="
     },
     "@endo/cache-map@1.1.0": {
       "integrity": "sha512-owFGshs/97PDw9oguZqU/px8Lv1d0KjAUtDUiPwKHNXRVUE/jyettEbRoTbNJR1OaI8biMn6bHr9kVJsOh6dXw=="

@@ -37,7 +37,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "local-handler" | "hybrid-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
+	format: "sql" | "cortex-sql" | "local-handler" | "hybrid-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -505,18 +505,19 @@ _sqlType: {
 #mechaActionSql: AC={
 	action: #MechaAction
 	op:     *"INSERT" | "UPDATE" | "DELETE"
+	track:  *false | bool
 	// The time a machine's step runs at, which the machines it spawns or
 	// sends to run at too; outside a step, each reads its own clock().
 	at: *"NULL" | string
 
 	_spawns: [if AC.action.spawn != _|_ {
-        let call = AC.action.spawn
-        "PERFORM hybrid_\(call.machine).spawn(\((#sqlLit & {v: call.id}).out), \((#MechaJsonSql & {fields: call.input}).out), \((#MechaJsonSql & {fields: call.members}).out), \(AC.at));"
-    }]
-    _sends: [if AC.action.send != _|_ {
-        let call = AC.action.send
-        "PERFORM hybrid_\(call.machine).deliver(\((#sqlLit & {v: call.id}).out), jsonb_build_object('kind', \((#sqlLit & {v: call.event}).out), 'payload', \((#MechaJsonSql & {fields: call.payload}).out)), \(AC.at));"
-    }]
+		let call = AC.action.spawn
+		"PERFORM hybrid_\(call.machine).spawn(\((#sqlLit & {v: call.id}).out), \((#MechaJsonSql & {fields: call.input}).out), \((#MechaJsonSql & {fields: call.members}).out), \(AC.at));"
+	}]
+	_sends: [if AC.action.send != _|_ {
+		let call = AC.action.send
+		"PERFORM hybrid_\(call.machine).deliver(\((#sqlLit & {v: call.id}).out), jsonb_build_object('kind', \((#sqlLit & {v: call.event}).out), 'payload', \((#MechaJsonSql & {fields: call.payload}).out)), \(AC.at));"
+	}]
 	_locks: [if AC.action.lock != _|_ {(#mechaLockSql & {lock: AC.action.lock}).out}]
 	_effList: [if AC.action["effect"] != _|_ {
 		[if (AC.action.effect & [...]) != _|_ {AC.action.effect}, [AC.action.effect]][0]
@@ -530,7 +531,7 @@ _sqlType: {
 
 	_effects: [
 		for eff in _effList {
-			(#mechaEffectSql & {effect: eff, op: AC.op}).out
+			(#mechaEffectSql & {effect: eff, op: AC.op}).out + [if AC.track {"\n        GET DIAGNOSTICS cortex_rows = ROW_COUNT;\n        cortex_changed := cortex_changed + cortex_rows;"}, ""][0]
 		},
 	]
 
@@ -557,6 +558,8 @@ _sqlType: {
 	// The effect each invoking state of the machine claims on entry.
 	invokes: [string]: #ExternalEffect
 	pk: [...string]
+	cortex: *false | bool
+	sourceEvents: *[] | [...string]
 
 	_type: [if ST.state["type"] != _|_ {ST.state["type"]}, "normal"][0]
 	_isFinal: _type == "final"
@@ -583,23 +586,27 @@ _sqlType: {
 			if t["target"] != _|_ {target: t.target}
 			event:   "after"
 			delayMs: d
-			branch: idx
+			branch:  idx
 			if t["guard"] != _|_ {guard: t.guard}
 			actions: [if t["actions"] != _|_ {[if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0]}, []][0]
 		},
 	]}, []][0]
 
 	_invoking: ST.state["invoke"] != _|_
-	_invokeTransitions: [if _invoking for tr in [ST.state.invoke.onDone, ST.state.invoke.onError] {
-		[if (tr & string) != _|_ {{target: tr, actions: []}}, {
-			target:  tr.target
-			actions: [if tr["actions"] != _|_ {[if (tr.actions & [...]) != _|_ {tr.actions}, [tr.actions]][0]}, []][0]
-		}][0]
-	}]
+	_invokeTransitions: list.Concat([if _invoking for kind, tr in {done: ST.state.invoke.onDone, failed: ST.state.invoke.onError} {
+		let choices = [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0]
+		[for t in choices {
+			target:      t.target
+			delivery:    choices[len(choices)-1].target
+			outcomeKind: kind
+			if t.guard != _|_ {guard: t.guard}
+			actions: [if t.actions != _|_ {[if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0]}, []][0]
+		}]
+	}])
 
-	_allTransitions: list.Concat([_onTransitions, _afterTransitions, _invokeTransitions])
+	_allTransitions: list.Concat([_onTransitions, _afterTransitions])
 
-	_transitionBranches: [for t in _allTransitions {
+	_transitionBranches: [if !ST.cortex for t in _allTransitions if t.target != _|_ if t.event == _|_ || !list.Contains(ST.sourceEvents, t.event) {
 		_guardLine: [if t["guard"] != _|_ if t.delayMs == _|_ {
 			"""
 			        IF (\(t.guard)) IS NOT TRUE THEN
@@ -626,6 +633,73 @@ _sqlType: {
 		"""
 	}]
 
+	_cortexStates: {for name, state in ST.states {(name): {
+		if state.type != _|_ {type: state.type}
+		entry: list.Concat([
+			[if state.entry != _|_ for a in [if (state.entry & [...]) != _|_ {state.entry}, [state.entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}],
+			[if ST.invokes[name] != _|_ {(#invokeEnterSql & {effect: ST.invokes[name], state: name, pk: ST.pk}).out}],
+		])
+		exit: [if state.exit != _|_ for a in [if (state.exit & [...]) != _|_ {state.exit}, [state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
+	}}}
+	_cortexRecipe: {
+		state:  ST.name
+		field:  ST.field
+		states: _cortexStates
+	}
+	_dispatchRecipe: _cortexRecipe & {
+		mode: "dispatch"
+		transitions: [if !_invoking for t in _onTransitions {
+			event: t.event
+			if t.target != _|_ {target: t.target}
+			if t.guard != _|_ {guard: t.guard}
+			unchanged: strings.Join(list.Concat([["NEW.\"\(ST.field)\" IS NOT DISTINCT FROM OLD.\"\(ST.field)\""], [for col, _ in {for a in t.actions if a.assign != _|_ for c, _ in a.assign {(c): true}} {"NEW.\"\(col)\" IS NOT DISTINCT FROM OLD.\"\(col)\""}]]), " AND ")
+			actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
+		}]
+	}
+	_dispatchBlock: [if ST.cortex {
+		"""
+		    IF OLD."\(ST.field)" = '\(ST.name)' THEN
+		@PRONTO_XSTATE'\(base64.Encode(null, json.Marshal(_dispatchRecipe)))'
+		    END IF;
+		"""
+	}, ""][0]
+	_directRecipe: _cortexRecipe & {
+		mode: "direct"
+		transitions: list.Concat([
+			[for t in _allTransitions if t.target != _|_ if t.event == _|_ || !list.Contains(ST.sourceEvents, t.event) {
+				event: "direct:\(t.target)" + [if t.delayMs != _|_ {":\(t.delayMs):\(t.branch)"}, ""][0]
+				when: "NEW.\"\(ST.field)\" = '\(t.target)'" + [if ST.timed {[if t.delayMs != _|_ {" AND timer_delay = '\(t.delayMs)' AND timer_branch = \(t.branch)"}, " AND timer_delay IS NULL"][0]}, ""][0]
+				target: t.target
+				if t.guard != _|_ if t.delayMs == _|_ {guard: t.guard}
+				actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
+			}],
+			[for t in _invokeTransitions {
+				event: "outcome:\(t.outcomeKind):\(t.delivery)"
+				when: "NEW.\"\(ST.field)\" = '\(t.delivery)' AND " + [if t.outcomeKind == "done" {"outcome->>'kind' = 'done'"}, "outcome->>'kind' <> 'done'"][0]
+				target: t.target
+				if t.guard != _|_ {guard: t.guard}
+				actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
+			}],
+		])
+	}
+
+	_outcomeBranches: [if !ST.cortex for t in _invokeTransitions {
+		_kind: [if t.outcomeKind == "done" {"outcome->>'kind' = 'done'"}, "outcome->>'kind' <> 'done'"][0]
+		_guard: [if t.guard != _|_ {" AND (\(t.guard)) IS TRUE"}, ""][0]
+		_actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
+		_exit: [if ST.state.exit != _|_ for a in [if (ST.state.exit & [...]) != _|_ {ST.state.exit}, [ST.state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
+		_entry: [if ST.states[t.target].entry != _|_ for a in [if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
+		_enter: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
+		"""
+		      IF NEW."\(ST.field)" = '\(t.delivery)' AND \(_kind)\(_guard) THEN
+		\(strings.Join(_exit, "\n"))
+		        NEW."\(ST.field)" := '\(t.target)';
+		\(strings.Join(list.Concat([_actions, _entry, _enter]), "\n"))
+		        RETURN NEW;
+		      END IF;
+		"""
+	}]
+
 	// Only the outcome the airlock recorded leaves an invoking state, so no other
 	// writer can forge one.
 	_outcomeCheck: [if _invoking {
@@ -641,18 +715,68 @@ _sqlType: {
 	_normalBlock: """
 		    IF OLD."\(ST.field)" = '\(ST.name)' THEN
 		\(_outcomeCheck)
+		\([if ST.cortex {"@PRONTO_XSTATE'" + base64.Encode(null, json.Marshal(_directRecipe)) + "'"}, ""][0])
+		\(strings.Join(_outcomeBranches, "\n"))
 		\(strings.Join(_transitionBranches, "\n"))
 		      RAISE EXCEPTION 'invalid transition on % from % to %', '\(ST.table)', OLD."\(ST.field)", NEW."\(ST.field)" USING ERRCODE = 'check_violation';
 		    END IF;
 		"""
 
 	out: [if _isFinal {_finalBlock}, _normalBlock][0]
+	dispatch: _dispatchBlock
 }
+
+#cortexRuntimeSql: """
+	CREATE SCHEMA IF NOT EXISTS cortex_runtime;
+	REVOKE ALL ON SCHEMA cortex_runtime FROM PUBLIC;
+	CREATE TABLE IF NOT EXISTS cortex_runtime.dispatch_frame (
+	  backend integer NOT NULL, xid bigint NOT NULL, relation oid NOT NULL, depth integer NOT NULL,
+	  machine text NOT NULL, row_key text NOT NULL, event text NOT NULL, payload jsonb NOT NULL,
+	  PRIMARY KEY (backend, xid, relation, depth, machine, row_key)
+	);
+	CREATE TABLE IF NOT EXISTS cortex_runtime.draining (
+	  backend integer NOT NULL, xid bigint NOT NULL, name text NOT NULL,
+	  dirty boolean NOT NULL DEFAULT false,
+	  depth integer NOT NULL DEFAULT 0, flushing boolean NOT NULL DEFAULT false,
+	  pending text[] NOT NULL DEFAULT '{}',
+	  PRIMARY KEY (backend, xid, name)
+	);
+	ALTER TABLE cortex_runtime.draining ADD COLUMN IF NOT EXISTS dirty boolean NOT NULL DEFAULT false;
+	ALTER TABLE cortex_runtime.draining ADD COLUMN IF NOT EXISTS depth integer NOT NULL DEFAULT 0;
+	ALTER TABLE cortex_runtime.draining ADD COLUMN IF NOT EXISTS flushing boolean NOT NULL DEFAULT false;
+	ALTER TABLE cortex_runtime.draining ADD COLUMN IF NOT EXISTS pending text[] NOT NULL DEFAULT '{}';
+	ALTER TABLE cortex_runtime.dispatch_frame ENABLE ROW LEVEL SECURITY;
+	ALTER TABLE cortex_runtime.draining ENABLE ROW LEVEL SECURITY;
+	DO $$
+	DECLARE g record;
+	BEGIN
+	  FOR g IN
+	    SELECT DISTINCT 'SCHEMA' AS kind, quote_ident(n.nspname) AS name, a.grantee
+	      FROM pg_namespace n, aclexplode(n.nspacl) a
+	      WHERE n.nspname = 'cortex_runtime' AND a.grantee <> n.nspowner
+	    UNION
+	    SELECT DISTINCT 'TABLE', 'cortex_runtime.' || quote_ident(c.relname), a.grantee
+	      FROM pg_class c, aclexplode(c.relacl) a
+	      WHERE c.oid IN ('cortex_runtime.dispatch_frame'::regclass, 'cortex_runtime.draining'::regclass) AND a.grantee <> c.relowner
+	  LOOP
+	    EXECUTE format('REVOKE ALL ON %s %s FROM %s', g.kind, g.name,
+	      CASE WHEN g.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(g.grantee)) END);
+	  END LOOP;
+	END $$;
+	"""
+
+#cortexRuntimeExemptSql: """
+	INSERT INTO mecha.rls_exempt VALUES
+	  ('cortex_runtime.dispatch_frame', 'private owner-only dispatch state; app roles have no access'),
+	  ('cortex_runtime.draining', 'private owner-only drain state; app roles have no access')
+	ON CONFLICT (table_name) DO UPDATE SET reason = EXCLUDED.reason;
+	"""
 
 #mechaMachineSql: S={
 	machine: #MechaMachine
 	entities: [string]: #Entity
-	effects: [string]: #ExternalEffect
+	effects: [string]:  #ExternalEffect
+	runtime: *true | bool
 
 	_table: [if S.entities[S.machine.entity] != _|_ {S.entities[S.machine.entity].table}, S.machine.entity][0]
 
@@ -670,21 +794,22 @@ _sqlType: {
 		_invokes: {for sName, sBody in S.machine.states if sBody["invoke"] != _|_ {(sName): S.effects[sBody.invoke.src]}}
 		_hasInvoke: len([for _, _ in _invokes {true}]) > 0
 		_hasTimers: S.machine._timed
-		_declare: [if _hasInvoke || _hasTimers {"DECLARE\n" + strings.Join([if _hasInvoke {"  outcome jsonb;\n"}, if _hasTimers {"  timer_delay text;\n  timer_branch integer;\n"}], "")}, ""][0]
+		_cortex:    S.machine.cortex != _|_
+		_declare: [if _hasInvoke || _hasTimers || _cortex {"DECLARE\n" + strings.Join([if _hasInvoke {"  outcome jsonb;\n"}, if _hasTimers {"  timer_delay text;\n  timer_branch integer;\n"}, if _cortex {"  cortex_event text;\n  cortex_payload jsonb;\n  cortex_rows integer;\n  cortex_changed integer := 0;\n"}], "")}, ""][0]
 		_timerContext: [if _hasTimers {"  IF TG_OP = 'UPDATE' THEN\n" + (#TimerContextSql & {machine: S.machine.name, field: _field, pk: _pk, rec: "OLD"}).out + "\n  END IF;\n"}, ""][0]
 		_sameStateGate: [if _hasTimers {" AND timer_delay IS NULL"}, ""][0]
 		_pk: [for e in S.entities if e.table == _table for f in e.fields if f.pk != _|_ if f.pk {f.name}]
 		_initialEnter: [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk}).out + "\n"}, ""][0]
 		_initialActions: [if S.machine.states[S.machine.initial].entry != _|_
 			for a in [if (S.machine.states[S.machine.initial].entry & [...]) != _|_ {S.machine.states[S.machine.initial].entry}, [S.machine.states[S.machine.initial].entry]][0] {
-			(#mechaActionSql & {action: a, op: "INSERT"}).out + "\n"
-		}]
+				(#mechaActionSql & {action: a, op: "INSERT"}).out + "\n"
+			}]
 		// A row in an invoking state is the ledger's instance until its outcome
 		// lands: its key fields and primary key stay as the ledger holds them,
 		// and it is not deleted, or the outcome could never be delivered.
 		_held: [for sName, x in _invokes {
 			_cols: list.SortStrings([for c, _ in {for f in list.Concat([x.key, _pk]) {(f): true}} {c}])
-			_key:  (#ledgerKeySql & {effect: x, rec: "OLD"}).out
+			_key: (#ledgerKeySql & {effect: x, rec: "OLD"}).out
 			"""
 			  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = '\(sName)' AND (\(strings.Join([for c in _cols {"OLD.\"\(c)\" IS DISTINCT FROM NEW.\"\(c)\""}], " OR "))) THEN
 			    RAISE EXCEPTION '% in \(sName) keeps its key until the outcome of %', '\(_table)', \(_key) USING ERRCODE = 'check_violation';
@@ -714,12 +839,30 @@ _sqlType: {
 				field:   _field
 				name:    sName
 				state:   sBody
-				states: S.machine.states
-				timed: _hasTimers
+				states:  S.machine.states
+				timed:   _hasTimers
 				invokes: _invokes
 				pk:      _pk
+				cortex:  _cortex
+				sourceEvents: [if _cortex {S.machine.cortex.sourceEvents}, []][0]
 			}).out
 		}]
+
+		_dispatchBlocks: [if _cortex for sName, sBody in S.machine.states {
+			(#mechaStateSql & {table: _table, field: _field, name: sName, state: sBody, states: S.machine.states, timed: _hasTimers, invokes: _invokes, pk: _pk, cortex: true}).dispatch
+		}]
+		_frameRead: [if _cortex {
+			"""
+			  IF TG_OP = 'UPDATE' THEN
+			    DELETE FROM cortex_runtime.dispatch_frame WHERE backend = pg_backend_pid() AND xid = txid_current() AND relation = TG_RELID AND depth = pg_trigger_depth() AND machine = '\(S.machine.cortex.id)' AND row_key = OLD."\(_pk[0])"::text
+			      RETURNING event, payload INTO cortex_event, cortex_payload;
+			    IF FOUND THEN
+			\(strings.Join(_dispatchBlocks, "\n"))
+			      RETURN NULL;
+			    END IF;
+			  END IF;
+			"""
+		}, ""][0]
 
 		_triggerBody: """
 			CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
@@ -727,7 +870,7 @@ _sqlType: {
 			SECURITY DEFINER
 			SET search_path = public, pg_catalog\(_locale) AS $$
 			\(_declare)BEGIN
-			\(_deleteBlock)\(_timerContext)\(strings.Join([for h in _held {h + "\n"}], ""))  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = NEW."\(_field)"\(_sameStateGate) THEN
+			\(_deleteBlock)\(_timerContext)\(strings.Join([for h in _held {h + "\n"}], ""))\(_frameRead)  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = NEW."\(_field)"\(_sameStateGate) THEN
 			    RETURN NEW;
 			  END IF;
 
@@ -752,7 +895,7 @@ _sqlType: {
 			  EXECUTE FUNCTION "\(_fnName)"();
 			"""
 
-		_checkConstraint + "\n\n" + _triggerBody + [if _hasTimers {"\n\n" + (#MachineTimerSql & {machine: S.machine, table: _table, pk: _pk}).out}, ""][0]
+		[if _cortex && S.runtime {#cortexRuntimeSql + "\n\n"}, ""][0] + _checkConstraint + "\n\n" + _triggerBody + [if _hasTimers {"\n\n" + (#MachineTimerSql & {machine: S.machine, table: _table, pk: _pk}).out}, ""][0]
 	}, ""][0]
 
 	_lifecycleMachineSql: [if S.machine["on"] != _|_ {
@@ -1709,7 +1852,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 		// Each kinetic child the terminal mounts on a data-kinetic, as it
 		// loads them: the linked graphs, the presenter unit, the mappers.
-		let _kinetic = {if S.code.state.cortex != _|_ for _, c in S.code.state.cortex for n, a in c.setup.actors if a.via == "kinetic" {(n): a}}
+		let _kinetic = {if S.code.state.cortex != _|_ for _, c in S.code.state.cortex if c.setup != _|_ for n, a in c.setup.actors if a.via == "kinetic" {(n): a}}
 		if len(_kinetic) > 0 {
 			kinetic: {for n, a in _kinetic {(n): {
 				engine: "shell/engines/\(a.engine).json"
@@ -1829,6 +1972,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
 		if M.code.state.hybrids != _|_ if len([for r in M.raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {"services/database/migrations/016_mecha_actors.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
+		if M.code.state.cortex != _|_ for migration, _ in {
+			for _, c in M.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "mecha" {(c.config.meta.migration): true}
+		} {"services/database/migrations/\(migration)"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/801_schedule_seed.sql"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
 	]
@@ -3085,7 +3231,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// the app's module over the Mecha machine it reaches — run by the terminal
 	// for a local child — and the declarations of every machine it may write to.
 	_composedHandlers: {
-		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex for name, actor in cortexMachine.setup.actors if actor.via != "kinetic" if actor.handler != _|_ {
+		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex if cortexMachine.setup != _|_ for name, actor in cortexMachine.setup.actors if list.Contains(["session", "sync", "local"], actor.via) if actor.handler != _|_ {
 			"shell/handlers/\(name).js": {
 				machine:  {machine: E.code.state.hybrids[actor.machine].reducer, rules: E.code.state.hybrids[actor.machine].rules}
 				local:    actor.via == "local"
@@ -3190,11 +3336,25 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				hatches: E.code.capabilities.hatches
 				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
 				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
-				// Each Cortex chart, and the Mecha machines its signals name, for a walk
-				// to cover its intents and signals.
 				if E.code.state.cortex != _|_ {
 					cortex: {for n, c in E.code.state.cortex {(n): c.config}}
-					machines: {if E.code.state.machines != _|_ for n, m in E.code.state.machines {(n): {entity: m.entity, field: m.field, initial: m.initial, states: m.states}}}
+					machines: {if E.code.state.machines != _|_ for n, m in E.code.state.machines {(n): m}}
+				}
+			}
+		}
+		if E.code.state.cortex != _|_ for _, owner in E.code.state.cortex if owner.config.meta != _|_ if owner.config.meta.host != _|_ if owner.config.meta.host == "mecha" {
+			"services/database/migrations/\(owner.config.meta.migration)": {
+				format: "cortex-sql"
+				data: {
+					entities: E.code.state.entities
+					charts: [for _, c in E.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "mecha" if c.config.meta.migration == owner.config.meta.migration {
+						config: c.config
+						setup: {
+							actors: c.setup.actors
+							guards: c.setup.guards
+							actions: c.setup.actions
+						}
+					}]
 				}
 			}
 		}
@@ -3444,7 +3604,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if len(_machines) > 0 {
 				"services/database/migrations/010_machines.sql": {
 					format: "sql"
-					text: [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0]}).out}], "\n\n") + "\n"
+					text: [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], runtime: false}).out}], "\n\n") + "\n"
 				}
 			}
 
@@ -3462,8 +3622,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					table:  ent.table
 					field:  m.field
 					state:  sName
-					onDone:  [if (st.invoke.onDone & string) != _|_ {st.invoke.onDone}, st.invoke.onDone.target][0]
-					onError: [if (st.invoke.onError & string) != _|_ {st.invoke.onError}, st.invoke.onError.target][0]
+					onDone:  [if (st.invoke.onDone & string) != _|_ {st.invoke.onDone}, if (st.invoke.onDone & [...]) != _|_ {st.invoke.onDone[len(st.invoke.onDone)-1].target}, st.invoke.onDone.target][0]
+					onError: [if (st.invoke.onError & string) != _|_ {st.invoke.onError}, if (st.invoke.onError & [...]) != _|_ {st.invoke.onError[len(st.invoke.onError)-1].target}, st.invoke.onError.target][0]
 					row: [for f in ent.fields if f.pk != _|_ if f.pk {f.name}]
 				},
 			]

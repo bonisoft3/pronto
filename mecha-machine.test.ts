@@ -1,5 +1,6 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
+import { PGlite } from "npm:@electric-sql/pglite@0.5.8";
 
 Deno.test("SQL calls require a named SQL hatch and derive the machine's hatch references", async () => {
   const base = paymentProgram() + `
@@ -637,8 +638,8 @@ Deno.test("an outcome that could never be delivered is refused", async () => {
   assertStringIncludes(await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "setled", onError: "failed"}`) })), "an outcome target that is no state: setled");
   assertStringIncludes(await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: "charging"}`) })), "an outcome targeting itself");
   assertStringIncludes(
-    await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "failed", onError: {target: "failed", actions: [{assign: {failure: "x"}}]}}`) })),
-    "share target failed and carry actions",
+    await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: [{target: "failed", guard: "false"}]}`) })),
+    "each outcome requires an unguarded fallback",
   );
   assertStringIncludes(
     await refusal(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "settled", onError: {target: "failed", actions: [{reject: "no"}]}}`) })),
@@ -647,9 +648,10 @@ Deno.test("an outcome that could never be delivered is refused", async () => {
   for (const action of ['charging: exit: reject: "no"', 'settled: entry: reject: "no"']) {
     assertStringIncludes(await refusal(paymentProgram() + `\napp: state: machines: PaymentMachine: states: ${action}`), "an outcome's entry or exit actions reject");
   }
-  // One target for both arrows, with no actions, is a plain join.
-  const files = await emitFiles(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: "failed", onError: "failed"}`) }));
-  assertEquals(typeof files["services/database/migrations/010_machines.sql"].text, "string");
+  const files = await emitFiles(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: {target: "failed", actions: [{assign: {failure: "done"}}]}, onError: {target: "failed", actions: [{assign: {failure: "failed"}}]}}`) }));
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  assertStringIncludes(sql, "outcome->>'kind' = 'done'");
+  assertStringIncludes(sql, "outcome->>'kind' <> 'done'");
 });
 
 Deno.test("an input reads a field the entity has, quoted", async () => {
@@ -1232,3 +1234,35 @@ Deno.test("declaring a bridge hatch without supplying its container fails emissi
   assertEquals(result.success, false);
   assertStringIncludes(result.stderr, "smtp");
 });
+
+Deno.test({ name: "Cortex runtime is emitted once for all machines and registered with the RLS audit", sanitizeOps: false, sanitizeResources: false, fn: async () => {
+  const program = paymentProgram({ entity: `Other: {table: "other", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "status", type: "string"}]}` }) + `
+app: state: machines: PaymentMachine: cortex: {id: "first", sourceEvents: []}
+app: state: machines: OtherMachine: {
+  name: "OtherMachine", entity: "Other", field: "status", initial: "pending"
+  cortex: {id: "second", sourceEvents: []}
+  states: pending: {}
+}
+`;
+  const files = await emitFiles(program);
+  const sql = files["services/database/migrations/010_machines.sql"].text;
+  assertEquals(sql.match(/CREATE SCHEMA IF NOT EXISTS cortex_runtime/g)?.length, 1);
+  assertEquals(sql.match(/CREATE TABLE IF NOT EXISTS cortex_runtime\.dispatch_frame/g)?.length, 1);
+  assertEquals(sql.match(/CREATE TABLE IF NOT EXISTS cortex_runtime\.draining/g)?.length, 1);
+  assertStringIncludes(sql, "('cortex_runtime.dispatch_frame', 'private owner-only dispatch state; app roles have no access')");
+  assertStringIncludes(sql, "('cortex_runtime.draining', 'private owner-only drain state; app roles have no access')");
+  const start = sql.indexOf("CREATE SCHEMA IF NOT EXISTS cortex_runtime");
+  const exemption = sql.indexOf("INSERT INTO mecha.rls_exempt VALUES", start);
+  const end = sql.indexOf('ALTER TABLE "payment"', exemption);
+  const db = new PGlite();
+  try {
+    await db.exec(await Deno.readTextFile(new URL("../../libraries/mecha/services/database/rls/rls.sql", import.meta.url)));
+    await db.exec(sql.slice(start, exemption));
+    const audit = () => db.query<{ table_name: string }>("SELECT table_name FROM mecha.rls_audit() WHERE table_name LIKE 'cortex_runtime.%' ORDER BY table_name");
+    assertEquals((await audit()).rows.map((row) => row.table_name), ["cortex_runtime.dispatch_frame", "cortex_runtime.draining"]);
+    await db.exec(sql.slice(exemption, end));
+    await db.exec(sql.slice(start, end));
+    assertEquals((await audit()).rows, []);
+    assertEquals((await db.query("SELECT table_name FROM mecha.rls_exempt WHERE table_name LIKE 'cortex_runtime.%' ORDER BY table_name")).rows.length, 2);
+  } finally { await db.close(); }
+}});

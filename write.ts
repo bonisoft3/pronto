@@ -28,6 +28,8 @@ import { type Program, renderIr, writeIrStylesheet } from "./ir-render.ts";
 import { declaredMachine } from "./hybrid-spec.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { compileMechaReducer, type MechaReducerMachine, type Terminal } from "./mecha-reducer.ts";
+import { compileCortexSources, type CortexChart } from "./cortex-sources.ts";
+import { compileCortexSql } from "./cortex-machine.ts";
 import { surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
@@ -88,6 +90,10 @@ async function terminal(): Promise<Terminal> {
 }
 
 function render(rel: string, f: EmitFile): string {
+  if (f.format === "cortex-sql") {
+    const input = f.data as { charts: CortexChart[]; entities: Parameters<typeof compileCortexSources>[1] };
+    return sqlFile(rel, compileCortexSources(input.charts, input.entities));
+  }
   if (f.format === "type-sql" || f.format === "carrier-sql") return sqlFile(rel, generateTypeSQL(f.data as { precision: number; scale: number }[]));
   if (f.format === "seed-sql") {
     const data = f.data as SeedData;
@@ -112,7 +118,8 @@ async function exportEmission(): Promise<Emission> {
     stderr: "inherit",
   }).output();
   if (!exported.success) fail("cue export failed");
-  const emission: Emission = JSON.parse(new TextDecoder().decode(exported.stdout));
+  const emission: Emission = JSON.parse(new TextDecoder().decode(exported.stdout), (_key, value) =>
+    typeof value === "string" && value.includes("@PRONTO_XSTATE") ? compileCortexSql(value) : value);
   checkTypeSeeds(emission.files["schema/entities.proto"].data as Record<string, TypeEntity>);
   const checks = await projectSay(appDir, emission.files[".say.yaml"].data) as { say: Record<string, unknown> };
   const graph = emission.files["bayt.json"].data as { files: Record<string, { say: Record<string, unknown> }> };

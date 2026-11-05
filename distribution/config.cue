@@ -13,7 +13,7 @@ import (
 // and the portable types are refreshed from the checkout's mecha client. An
 // installed pronto neither type-checks nor runs them (installed_test.ts holds
 // the rest to its own tree).
-#TestModules: ["hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts", "hybrid-xstate-entry.ts", "hybrid-xstate-bundle.ts"]
+#TestModules: ["hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts", "hybrid-xstate-entry.ts", "hybrid-xstate-bundle.ts", "cortex-conformance.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.

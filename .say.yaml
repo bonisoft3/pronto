@@ -84,6 +84,7 @@ say:
         cmds:
           - do: "mise exec -- deno test --no-config --unstable-raw-imports --allow-env --allow-read --allow-write --allow-run=deno,docker,cue hybrid-xstate.test.ts xstate-host.integration.test.ts"
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts"
+          - do: "mise exec -- deno test --config deno.json --frozen --allow-read --allow-write --allow-env --allow-run=cue cortex-machine.test.ts cortex-sources.test.ts cortex-conformance.test.ts cortex-validation.test.ts"
           - do: 'mise exec -- deno test --config deno.json --allow-read --allow-run=cue --filter "server timers refuse" machine-timers.integration.test.ts'
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
       # What each Jessie role may be granted, held against both cages and the schema.

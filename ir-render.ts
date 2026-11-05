@@ -98,7 +98,7 @@ const TIP: Record<string, string> = {
 const LEVEL_TIP: Record<string, string> = {
   ephemeral: "1 of 5 — a register this tab or device alone writes",
   compensable: "2 of 5 — a speculative write over the server's row; the server may refuse it, and the chart must hear the no",
-  replicated: "3 of 5 — a write to a row only the cluster holds, inside the transaction; delivered twice it converges, out of order it commutes",
+  replicated: "3 of 5 — a write to a row only the cluster holds, inside the transaction; duplicate and ordering guarantees depend on the sink and effects",
   external: "4 of 5 — a state invokes an effect outside the cluster; the ledger claims before the call",
 };
 const STAMPS = new Set(["created_by", "updated_by", "created_at", "updated_at"]);
@@ -239,7 +239,8 @@ export function chartD2(c: { initial: string; states: Record<string, any>; on?: 
     return a === undefined ? "" : " / " + Object.entries(a).map(([k, v]) => `${k} = ${typeof v === "string" ? v : "…"}`).join(", ");
   };
   for (const [name, st] of Object.entries(c.states)) {
-    if (st.invoke) s += `${q(name)}: {label: "${name}\\ninvoke ${st.invoke.src}"; style.stroke-dash: 3}\n`;
+    const invocations = st.invoke === undefined ? [] : Array.isArray(st.invoke) ? st.invoke : [st.invoke];
+    if (invocations.length) s += `${q(name)}: {label: "${name}\\ninvoke ${invocations.map((actor: { src: string }) => actor.src).join(", ")}"; style.stroke-dash: 3}\n`;
     else if (st.type === "final") s += `${q(name)}: {shape: circle; style.double-border: true}\n`;
     for (const [ev, t] of Object.entries(st.on ?? {})) {
       for (const cand of Array.isArray(t) ? t : [t]) {
@@ -251,9 +252,15 @@ export function chartD2(c: { initial: string; states: Record<string, any>; on?: 
       const to = target(t) ?? name;
       s += `${q(name)} -> ${q(to)}: "after ${ms} ms${assigned(t)}"\n`;
     }
-    if (st.invoke) {
-      s += `${q(name)} -> ${q(target(st.invoke.onDone)!)}: onDone\n`;
-      s += `${q(name)} -> ${q(target(st.invoke.onError)!)}: onError\n`;
+    for (const invocation of invocations) {
+      for (const event of ["onDone", "onError"]) {
+        const outcome = invocation[event];
+        if (outcome === undefined) continue;
+        for (const branch of Array.isArray(outcome) ? outcome : [outcome]) {
+          const to = target(branch);
+          if (to !== undefined) s += `${q(name)} -> ${q(to)}: ${event}\n`;
+        }
+      }
     }
   }
   // A transition at the chart's root fires in every state: drawn once, from a

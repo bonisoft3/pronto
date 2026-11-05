@@ -908,9 +908,9 @@ import (
 //
 // The ops mecha's interpreter performs, narrowed from the terminal's
 // #MutationOp (one grammar, defined where the author-facing chart lives and
-// classified there by what happens twice). Inside the trigger's transaction
-// atomicity absorbs the duplicate, so a strict `create` is admitted here; on
-// the change feed only the joins are (CALM, Hellerstein & Alvaro 2020).
+// classified there by delivery behavior). Atomicity groups effects within
+// one invocation; it does not deduplicate separate deliveries. The sink owns
+// acceptance and retry, and effect composition determines algebraic laws.
 #RelationalOp: omnishell.#MutationOp & ("create" | "ensure" | "upsert" | "accumulate" | "update" | "delete")
 
 #RelationalEffect: {
@@ -977,10 +977,8 @@ import (
 // An arrow out of an invoking state. Its actions read the ledger's outcome as
 // the PL/pgSQL variable `outcome`: {target, kind, data, reconciled}, where kind
 // is done, failed or unknown.
-#OutcomeTransition: string | {
-	target:   string
-	actions?: #MechaAction | [...#MechaAction]
-}
+#OutcomeBranch: {target: string, guard?: string, actions?: #MechaAction | [...#MechaAction]}
+#OutcomeTransition: string | #OutcomeBranch | [#OutcomeBranch, ...#OutcomeBranch]
 
 #MechaState: {
 	type?:    "final" | "normal"
@@ -1005,6 +1003,7 @@ import (
 #LifecycleTransitionValue: #LifecycleTransition | #MechaAction | [...#MechaAction]
 
 #MechaMachine: M={
+	cortex?: {id: string, sourceEvents: [...string]}
 	name:    string
 	ir:      *name | string
 	entity:  string
@@ -1016,7 +1015,7 @@ import (
 		[if M.states != _|_ for _, st in M.states if st.exit != _|_ for a in [if (st.exit & [...]) != _|_ {st.exit}, [st.exit]][0] {a}],
 		[if M.states != _|_ for _, st in M.states if st.on != _|_ for _, tr in st.on for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
 		[if M.states != _|_ for _, st in M.states if st.after != _|_ for _, tr in st.after for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
-		[if M.states != _|_ for _, st in M.states if st.invoke != _|_ for tr in [st.invoke.onDone, st.invoke.onError] for t in [if (tr & string) != _|_ {[]}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
+		[if M.states != _|_ for _, st in M.states if st.invoke != _|_ for tr in [st.invoke.onDone, st.invoke.onError] for t in [if (tr & string) != _|_ {[]}, if (tr & [...]) != _|_ {tr}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}],
 	])
 	hatches: list.SortStrings([for hn, _ in {
 		for a in M._actions if a.hatch != _|_
@@ -1548,6 +1547,40 @@ import (
 		computations: [Name=string]: #Computation & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
 		machines?: [Name=string]: #MechaMachine & {name: Name}
+		if A.state.cortex != _|_ {
+			machines: {for chartName, sourceChart in A.state.cortex if sourceChart.config.meta != _|_ if sourceChart.config.meta.host != _|_ if sourceChart.config.meta.host == "mecha" {
+				(chartName): {
+					name: chartName
+					cortex: {
+						id: sourceChart.config.id
+						sourceEvents: [for _, actor in sourceChart.setup.actors if actor.via == "query" {actor.event}]
+					}
+					entity:  sourceChart.config.meta.entity
+					field:   sourceChart.config.meta.field
+					initial: sourceChart.config.initial
+					guards: {}
+					states: {for stateName, state in sourceChart.config.states {
+						(stateName): {
+							if state.type != _|_ {type: state.type}
+							if state.on != _|_ {
+								on: {for event, transition in state.on {
+									(event): [for branch in [if (transition & string) != _|_ {[transition]}, if (transition & [...]) != _|_ {transition}, [transition]][0] {
+										(#CortexMechaTransition & {transition: branch, guards: sourceChart.setup.guards, actions: sourceChart.setup.actions, event: true}).out
+									}]
+								}}
+							}
+							if state.invoke != _|_ {
+								invoke: {
+									src: state.invoke.src
+									onDone: (#CortexMechaOutcome & {transition: state.invoke.onDone, guards: sourceChart.setup.guards, actions: sourceChart.setup.actions}).out
+									onError: (#CortexMechaOutcome & {transition: state.invoke.onError, guards: sourceChart.setup.guards, actions: sourceChart.setup.actions}).out
+								}
+							}
+						}
+					}}
+				}
+			}}
+		}
 		// Each also a Dapr output binding of the airlock's, and a handler the
 		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
 		effects?: [Name=string]: #ExternalEffect & {name: Name}
@@ -2038,7 +2071,7 @@ import (
 	// A Cortex state names the screen that hosts it and the actor its child
 	// is; what an actor's `via` needs of its Mecha machine is what that
 	// machine's ports carry.
-	_cortexViolations: [if A.state.cortex != _|_ for cName, c in A.state.cortex for sName, st in c.config.states
+	_cortexViolations: [if A.state.cortex != _|_ for cName, c in A.state.cortex if c.config.meta == _|_ || c.config.meta.host == _|_ for sName, st in c.config.states
 		let rootInvokes = [if st.invoke == _|_ {[]}, if (st.invoke & [...]) != _|_ {st.invoke}, {[st.invoke]}][0]
 		let subInvokes = list.Concat([
 			for _, sub in [if st.states != _|_ {st.states}, {}][0] if sub.invoke != _|_ {
@@ -2062,7 +2095,7 @@ import (
 				[if !strings.Contains(markup, "data-kinetic=\"\(inv.src)\"") {"\(cName).\(sName): no data-kinetic=\"\(inv.src)\" mounts the kinetic child on its screen"}],
 			])
 		},
-		for inv in screenInvokes if c.setup.actors[inv.src] != _|_ if c.setup.actors[inv.src].via != "kinetic" {
+		for inv in screenInvokes if c.setup.actors[inv.src] != _|_ if list.Contains(["session", "sync", "local"], c.setup.actors[inv.src].via) {
 			let actor = c.setup.actors[inv.src]
 			list.Concat([
 				[if _callTargets[actor.machine] == _|_ {"\(cName).\(sName): no Mecha machine \(actor.machine)"}],
@@ -2081,11 +2114,25 @@ import (
 			])
 		},
 	]) {v}]
-	_cortexRefusal: [if len(_cortexViolations) == 0 {true}, _cortexViolations[0]][0] & true
+	_cortexBackend: [if A.state.cortex != _|_ for chartName, chart in A.state.cortex if chart.config.meta != _|_ if chart.config.meta.host != _|_ if chart.config.meta.host == "mecha" {
+		name: chartName
+		id: chart.config.id
+		function: chart.config.meta.function
+		migration: chart.config.meta.migration
+		table: [if A.state.entities[chart.config.meta.entity] != _|_ {A.state.entities[chart.config.meta.entity].table}, chart.config.meta.entity][0]
+		field: chart.config.meta.field
+	}]
+	_cortexBackendViolations: [for c in _cortexBackend for other in _cortexBackend if c.name != other.name {
+		if c.id == other.id {"Cortex charts \(c.name) and \(other.name) share id \(c.id)"}
+		if c.function == other.function && c.migration != other.migration {"Cortex function \(c.function) spans migrations \(c.migration) and \(other.migration)"}
+		if c.table == other.table && c.field == other.field {"Cortex charts \(c.name) and \(other.name) both own \(c.table).\(c.field)"}
+	}]
+	_cortexAllViolations: list.Concat([_cortexViolations, _cortexBackendViolations])
+	_cortexRefusal: [if len(_cortexAllViolations) == 0 {true}, _cortexAllViolations[0]][0] & true
 	// A signal names where a Mecha machine went: `signal:<table>.<state>`, a
 	// state of the machine on that table's entity. One naming no such state is
 	// an arrow nothing ever fires, which a walk of the chart would still cover.
-	_cortexNodes: [if A.state.cortex != _|_ for cName, c in A.state.cortex for sName, st in c.config.states
+	_cortexNodes: [if A.state.cortex != _|_ for cName, c in A.state.cortex if c.config != _|_ for sName, st in c.config.states
 		for at, node in {
 			(sName): st
 			if st.states != _|_ for n1, s1 in st.states {
@@ -2297,11 +2344,16 @@ import (
 			others:  st.on != _|_ || st.after != _|_
 			final: [if st.type != _|_ {st.type == "final"}, false][0]
 			states: [for n, _ in m.states {n}]
-			// The outcome arrows, onDone first, each with its target and actions.
-			arrows: [for tr in [st.invoke.onDone, st.invoke.onError] {
-				target: [if (tr & string) != _|_ {tr}, tr.target][0]
-				actions: [for t in [if (tr & string) != _|_ {[]}, [tr]][0] if t.actions != _|_ for a in [if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0] {a}]
+			fallbacks: [for tr in [st.invoke.onDone, st.invoke.onError] {
+				let choices = [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0]
+				guarded: choices[len(choices)-1].guard != _|_
 			}]
+			arrows: [for tr in [st.invoke.onDone, st.invoke.onError]
+				for t in [if (tr & string) != _|_ {[{target: tr}]}, if (tr & [...]) != _|_ {tr}, [tr]][0] {
+				target: t.target
+				actions: [if t.actions != _|_ {[if (t.actions & [...]) != _|_ {t.actions}, [t.actions]][0]}, []][0]
+			}]
+
 		},
 	]
 	// The entities, by name, of the machines invoking each effect, keyed by
@@ -2340,15 +2392,16 @@ import (
 		[for i in _invokes if i.final {
 			"machine \(i.machine) state \(i.state) invokes \(i.src) and is final: no outcome could leave it"
 		}],
+		[for i in _invokes for fb in i.fallbacks if fb.guarded {
+			"machine \(i.machine) state \(i.state): each outcome requires an unguarded fallback"
+		}],
 		[for i in _invokes for ar in i.arrows if !list.Contains(i.states, ar.target) {
 			"machine \(i.machine) state \(i.state) invokes \(i.src) with an outcome target that is no state: \(ar.target)"
 		}],
 		[for i in _invokes for ar in i.arrows if ar.target == i.state {
 			"machine \(i.machine) state \(i.state) invokes \(i.src) with an outcome targeting itself: the row would never leave"
 		}],
-		[for i in _invokes if i.arrows[0].target == i.arrows[1].target if len(i.arrows[0].actions) + len(i.arrows[1].actions) > 0 {
-			"machine \(i.machine) state \(i.state): onDone and onError share target \(i.arrows[0].target) and carry actions, which the interpreter would run for the wrong outcome"
-		}],
+
 		[for i in _invokes for ar in i.arrows for a in ar.actions if a.reject != _|_ {
 			"machine \(i.machine) state \(i.state): an outcome's actions reject, which would refuse the recorded outcome's delivery"
 		}],
