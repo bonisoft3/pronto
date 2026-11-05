@@ -38,8 +38,15 @@ export async function hasEffects(app: string): Promise<boolean> {
 export async function releaseFiles(app: string, mecha: string, migrations: string[]): Promise<ReleaseScripts['files']> {
   const { AIRLOCK_SCRIPT, GRAPHILE_SCRIPT, SCHEDULE_SCRIPT, TENANCY_SCRIPT } = await scripts(mecha)
   const effects = await hasEffects(app)
+  const names = new Set<string>()
+  for (const migration of migrations) {
+    const name = path.basename(migration)
+    if (names.has(name)) throw new Error(`duplicate migration ${name}`)
+    names.add(name)
+  }
+  const tenancy = migrations.find((migration) => path.basename(migration) === TENANCY_SCRIPT)
   const files: { name: string; read: () => Promise<string> }[] = [
-    { name: TENANCY_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/database/rls/rls.sql')) },
+    { name: TENANCY_SCRIPT, read: () => Deno.readTextFile(tenancy ? path.join(app, tenancy) : path.join(mecha, 'services/database/rls/rls.sql')) },
   ]
   let placedAirlock = !effects
   const pushAirlock = () => {
@@ -53,8 +60,9 @@ export async function releaseFiles(app: string, mecha: string, migrations: strin
       },
     )
   }
-  for (const m of migrations) {
+  for (const m of [...migrations].sort((a, b) => path.basename(a) < path.basename(b) ? -1 : path.basename(a) > path.basename(b) ? 1 : 0)) {
     const name = path.basename(m)
+    if (name === TENANCY_SCRIPT) continue
     if (!placedAirlock && name > AIRLOCK_SCRIPT) pushAirlock()
     if (name === SCHEDULE_SEED) files.push({ name: SCHEDULE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/ticker/schedule.sql')) })
     files.push({ name, read: () => Deno.readTextFile(path.join(app, m)) })

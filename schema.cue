@@ -1514,9 +1514,9 @@ import (
 		// Three digits no other startup file holds, then `_`: mecha's cluster
 		// refuses any other name. The app owns 000-799 and its seed at 900;
 		// 800-899 are the framework's steps (mecha's cluster.cue).
-		// Naming 016_mecha_actors.sql pins its applied bytes; subsequent actor
-		// code changes belong in state.migrations, preserving live instances.
+		// A named baseline keeps its applied bytes; later changes go in state.migrations.
 		rawMigrations?: [...{name: string & !~"^8", src: string}]
+		_rawMigrationNames: [if rawMigrations != _|_ for migration in rawMigrations {migration.name}] & list.UniqueItems()
 		cortex?: [string]: #CortexMachine
 		// A Mecha machine as XState writes it, its Jessie rules, and the
 		// internal form the compilers read, derived.

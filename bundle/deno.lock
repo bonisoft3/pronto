@@ -9,6 +9,7 @@
     "npm:@bufbuild/cel-spec@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/cel@0.5.0": "0.5.0_@bufbuild+protobuf@2.14.1",
     "npm:@bufbuild/protobuf@2.14.1": "2.14.1",
+    "npm:@electric-sql/pglite@0.5.8": "0.5.8",
     "npm:@types/css-tree@2.3.10": "2.3.10",
     "npm:@types/node@*": "22.15.15",
     "npm:acorn-walk@8.3.4": "8.3.4",
@@ -52,6 +53,9 @@
     },
     "@bufbuild/protobuf@2.14.1": {
       "integrity": "sha512-agRJn3+EJDUe8AvxTx/LnHA/GErvLE62pSaSk7+MwFOtOv8eWBu/qCq2qoZjBjVZ3C2aiFJCveuSs17KMkYGOw=="
+    },
+    "@electric-sql/pglite@0.5.8": {
+      "integrity": "sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q=="
     },
     "@types/css-tree@2.3.10": {
       "integrity": "sha512-WcaBazJ84RxABvRttQjjFWgTcHvZR9jGr0Y3hccPkHjFyk/a3N8EuxjKr+QfrwjoM5b1yI1Uj1i7EzOAAwBwag=="
@@ -177,7 +181,8 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@std/encoding@1.0.7"
+      "jsr:@std/encoding@1.0.7",
+      "npm:@electric-sql/pglite@0.5.8"
     ]
   }
 }

@@ -41,3 +41,32 @@ app: state: cortex: PaymentFlow: {
   const rejected = await cue(["export", "-", "-e", "app"], program.replace('via: "query", event: "facts", select:', 'via: "observe", event: "facts", select:'));
   assertEquals(rejected.success, false);
 });
+
+Deno.test("raw baselines replace machine and Cortex emissions without duplicating their names", async () => {
+  const { emitFiles } = await import("./effects-fixtures.ts");
+  const program = paymentProgram() + `
+app: state: cortex: PaymentFlow: {
+  config: {id: "payment_flow", initial: "idle", meta: {host: "mecha", entity: "Payment", field: "failure", function: "advance_payment", migration: "019_payment.sql", watch: ["Payment"]}, invoke: {src: "facts"}, states: {idle: {on: {facts: {}}}}}
+  setup: {actors: {facts: {via: "query", event: "facts", select: "SELECT id AS key, 'facts' AS event, '{}'::jsonb AS payload FROM payment"}}, guards: {}, actions: {}}
+}
+app: state: rawMigrations: [
+  {name: "003_rls.sql", src: "baseline/003.sql"},
+  {name: "010_machines.sql", src: "baseline/010.sql"},
+  {name: "019_payment.sql", src: "baseline/019.sql"},
+]
+`;
+  const files = await emitFiles(program) as unknown as Record<string, { src?: string; text?: string; data?: unknown }>;
+  for (const [name, src] of [["003_rls.sql", "baseline/003.sql"], ["010_machines.sql", "baseline/010.sql"], ["019_payment.sql", "baseline/019.sql"]]) {
+    const file = files[`services/database/migrations/${name}`];
+    assertEquals(file.src, src);
+    assertEquals(file.text, undefined);
+    assertEquals(file.data, undefined);
+  }
+  const listed = await cue(["export", "-", "-e", "_cluster.state.migrations", "--out", "json"], program);
+  assertEquals(listed.success, true, listed.stderr);
+  const names = JSON.parse(listed.stdout) as string[];
+  for (const name of ["003_rls.sql", "010_machines.sql", "019_payment.sql"]) assertEquals(names.filter((path) => path.endsWith(`/${name}`)).length, 1);
+  const duplicate = await cue(["export", "-", "-e", "app.state", "--out", "json"], program.replace('{name: "019_payment.sql", src: "baseline/019.sql"}', '{name: "010_machines.sql", src: "baseline/019.sql"}'));
+  assertEquals(duplicate.success, false);
+  assertStringIncludes(duplicate.stderr, "UniqueItems");
+});

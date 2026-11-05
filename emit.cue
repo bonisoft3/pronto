@@ -1975,12 +1975,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"services/database/migrations/007_txid.sql",
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
-		if len(M.machines) > 0 {"services/database/migrations/010_machines.sql"},
+		if len(M.machines) > 0 if len([for r in M.raw if r.name == "010_machines.sql" {r}]) == 0 {"services/database/migrations/010_machines.sql"},
 		if M.code.state.hybrids != _|_ if len([for r in M.raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {"services/database/migrations/016_mecha_actors.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if M.code.state.cortex != _|_ for migration, _ in {
 			for _, c in M.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "mecha" {(c.config.meta.migration): true}
-		} {"services/database/migrations/\(migration)"},
+		} if len([for r in M.raw if r.name == migration {r}]) == 0 {"services/database/migrations/\(migration)"},
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/801_schedule_seed.sql"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
 	]
@@ -3348,7 +3348,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				}
 			}
 		}
-		if E.code.state.cortex != _|_ for _, owner in E.code.state.cortex if owner.config.meta != _|_ if owner.config.meta.host != _|_ if owner.config.meta.host == "mecha" {
+		if E.code.state.cortex != _|_ for _, owner in E.code.state.cortex if owner.config.meta != _|_ if owner.config.meta.host != _|_ if owner.config.meta.host == "mecha" if len([for r in E._raw if r.name == owner.config.meta.migration {r}]) == 0 {
 			"services/database/migrations/\(owner.config.meta.migration)": {
 				format: "cortex-sql"
 				data: {
@@ -3607,7 +3607,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					timers: [if len([for _, h in E.code.state.hybrids if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
 				}}
 			}
-			if len(_machines) > 0 {
+			if len(_machines) > 0 if len([for r in E._raw if r.name == "010_machines.sql" {r}]) == 0 {
 				"services/database/migrations/010_machines.sql": {
 					format: "sql"
 					text: [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], runtime: false}).out}], "\n\n") + "\n"

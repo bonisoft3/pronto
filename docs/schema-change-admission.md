@@ -16,13 +16,14 @@ cluster notices one is mecha's [schema](https://github.com/bonisoft3/mecha/blob/
 and what an already-served page does is omnishell's
 [data](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/data.md#skew).
 
-An app whose deployed `016_mecha_actors.sql` predates the current actor
-compiler can preserve that exact script with a `state.rawMigrations` entry
-named `016_mecha_actors.sql`. Only that name replaces its automatic emission.
-Keep the applied bytes in the entry's source and carry the actor function
-updates in a forward `state.migrations` pgroll migration; the instance,
-member and receipt tables remain in place. Apps without the explicit entry
-continue to emit the current compiler's actor script.
+An app can keep applied bootstrap bytes by naming them in `state.rawMigrations`.
+An entry named `003_rls.sql` replaces mecha's tenancy floor for both the native
+database image and page or edge releases. Entries named `010_machines.sql`,
+`016_mecha_actors.sql`, or a declared Cortex source migration replace those
+generated scripts. Each name may be declared once; its source is copied without
+regenerating it. Omitted entries keep the current generated or mecha-provided
+scripts. Carry changes to an applied baseline in a forward `state.migrations`
+pgroll migration; the ledger still refuses a changed digest.
 
 ## Who cannot be migrated
 
