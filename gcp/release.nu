@@ -755,6 +755,18 @@ export def poll-health [url: string, ok: list<string>, revision: any, --steady: 
 	}
 }
 
+# A sidecar apart rolled to a fresh instance, which reads the door of `revision` at its start:
+# its label pronto-door set to the revision's name. A roll that fails leaves the sidecar as it
+# was, and says so.
+def roll-sidecar [plan: record, s: string, revision: string] {
+	let svc = ($plan.names.sidecarServices | get $s)
+	let t0 = (date now)
+	try {
+		gc run services update $svc --update-labels $"pronto-door=($revision)" --region $plan.region --project $plan.project | ignore
+		print $"gcp: (stamp) ($s) apart rolled to ($revision), ((date now) - $t0 | format duration sec)"
+	} catch {|e| print $"gcp: (stamp) ($s) apart kept its instance, started before the switch: ($e.msg)" }
+}
+
 # A staged release made live: its images tagged the release's (a gated one's, now that its
 # tests passed), the schema job run, the service and its sidecars replaced, the clock, the
 # domains, and the address answering. The first code of the release production runs.
@@ -867,12 +879,30 @@ export def go-live [staged: record]: nothing -> record {
 	# sign-in answers before any of that.
 	let bearer = if $iap { null } else { $invoker_probe }
 	mut moved = false
+	let t_live = (date now)
 	let failed = (try {
 		let got = (poll-health $"($url)/health" $ok null --bearer $bearer)
 		if not $got.ok { error make {msg: $"the new revision ($candidate.revision) did not answer at its own address \(($url)/health\) in ($got.waited): last answer ($got.last)"} }
+		print $"gcp: (stamp) ($candidate.revision) answers at its own address, ((date now) - $t_live | format duration sec) after the services were made"
+		let t_traffic = (date now)
 		gc run services update-traffic $plan.service --to-revisions $"($candidate.revision)=100" --region $r --project $p | ignore
 		$moved = true
-		let got = (poll-health $"($address)/health" $ok (if $iap { null } else { $candidate.revision }) --steady 3 --bearer $bearer)
+		print $"gcp: (stamp) ($plan.service)'s traffic moved to ($candidate.revision), ((date now) - $t_traffic | format duration sec)"
+		# The revision serves now, so the sidecars' rolls need not wait for the public address to
+		# say so: they run beside its steady poll, and both are done before this returns. A roll
+		# that fails only warns; the poll's failure, as before, is the go-live's.
+		let t_public = (date now)
+		let both = ([{poll: true}] | append ($plan.sidecarServicesYaml | columns | each {|s| {sidecar: $s} }) | par-each --keep-order {|t|
+			if ($t.poll? | default false) {
+				let got = (poll-health $"($address)/health" $ok (if $iap { null } else { $candidate.revision }) --steady 3 --bearer $bearer)
+				print $"gcp: (stamp) ($address)/health answers as ($candidate.revision), ((date now) - $t_public | format duration sec)"
+				$got
+			} else {
+				roll-sidecar $plan $t.sidecar $candidate.revision
+				null
+			}
+		})
+		let got = ($both | first)
 		if not $got.ok { error make {msg: $"the public address ($address)/health did not answer as ($candidate.revision) in ($got.waited): last answer ($got.last)"} }
 		null
 	} catch {|e| (failure-message $e) })
@@ -885,6 +915,9 @@ export def go-live [staged: record]: nothing -> record {
 		} else if $moved {
 			# Traffic moved, so it goes back: back-one's, which refuses past a migration.
 			back-one $plan.service $p $r --schema
+			# The sidecars were rolled beside the poll that failed: each started instance read the
+			# candidate's door, so they are rolled again, to the revision serving now.
+			$plan.sidecarServicesYaml | columns | par-each {|s| roll-sidecar $plan $s $before } | ignore
 		} else {
 			print $"gcp: (stamp) ($plan.service) still serves ($before), traffic never moved"
 		}
@@ -892,15 +925,9 @@ export def go-live [staged: record]: nothing -> record {
 	}
 	# A sidecar apart made before the switch read the door that served then, the release before:
 	# what it reads at start (a renderer's catalogues of messages) it keeps for its life, and a
-	# key new in this release is unknown to it (Bonk Chess's player pages, 2026-11-03). Each is
-	# rolled once this revision serves, a fresh instance reading this release's door. A roll
-	# that fails leaves the sidecar as it was, and the release live.
-	$plan.sidecarServicesYaml | columns | par-each {|s|
-		let svc = ($plan.names.sidecarServices | get $s)
-		try {
-			gc run services update $svc --update-labels $"pronto-door=($candidate.revision)" --region $r --project $p | ignore
-		} catch {|e| print $"gcp: (stamp) ($s) apart kept its instance, started before the switch: ($e.msg)" }
-	} | ignore
+	# key new in this release is unknown to it (Bonk Chess's player pages, 2026-11-03). Each was
+	# rolled above once this revision served, a fresh instance reading this release's door, beside
+	# the public address's poll and done before this returns, as the rc's tests read them.
 	print $"gcp: (stamp) ($plan.service) is live at ($address)"
 	release-record note {revision: $candidate.revision} --preview $own
 	release-record mark deploy end --preview $own
