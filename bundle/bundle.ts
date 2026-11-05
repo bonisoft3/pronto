@@ -270,8 +270,22 @@ if (clustered) {
   }
   assets = { wasm: await beside(path.join(dist, 'pglite.wasm')), data: await beside(path.join(dist, 'pglite.data')), initdb: await beside(path.join(dist, 'initdb.wasm')), icu: await beside(icuArchive) }
 }
+// A file whose text another file already holds (an app's screens often share one
+// sheet) rides once: `same` names the file that holds it, and the page's shim
+// answers both from it.
+const byText = new Map<string, string>()
+const unique: Record<string, string> = {}
+const same: Record<string, string> = {}
+for (const [p, text] of Object.entries(files)) {
+  const first = byText.get(text)
+  if (first === undefined) {
+    byText.set(text, p)
+    unique[p] = text
+  } else same[p] = first
+}
 const payload = {
-  files,
+  files: unique,
+  same,
   ...(clustered
     ? { cluster: { sql, tables: shell.tables, drains, clock, assets } }
     : {}),

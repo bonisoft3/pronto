@@ -17,6 +17,8 @@ import 'omnishell/data-sync.js'
 
 export interface Payload {
   files: Record<string, string>
+  /** A file whose text another holds, by the name of the file that holds it. */
+  same: Record<string, string>
   /** Absent for an app with no server entity, which boots no cluster. */
   cluster?: unknown
 }
@@ -38,6 +40,7 @@ export function startPage(bootCluster?: () => Promise<Handle>) {
   // The shell asks for its files from the root, its <base> being /shell/ under
   // any prefix, and the door's routes are root-absolute at every target.
   const served = new Map(Object.entries(payload.files).map(([k, text]) => [`/${k}`, text]))
+  for (const [k, first] of Object.entries(payload.same)) served.set(`/${k}`, payload.files[first])
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const req = input instanceof Request ? input : null
