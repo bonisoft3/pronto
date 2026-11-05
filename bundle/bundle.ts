@@ -1,5 +1,6 @@
 // Bundles a pronto app into one HTML document: the interpreter and the cluster
-// as one module written inline, the files shell.json serves in a base64 table,
+// as one minified module written inline, the files shell.json serves in a JSON
+// table, its large seed tables as files beside it (shell/seed/),
 // the migrations and RLS for the cluster the page boots with the drains it
 // calls (.pronto/cluster.json). PGlite's wasm, data and ICU archive are files
 // beside it, under pronto/ and named by their content, which the page fetches
@@ -9,9 +10,11 @@
 // the page resolves through the same map and lock `deno run` would, and it is
 // written inline so `import.meta.url` is the page's own, which PGlite's
 // relative asset URLs resolve against. Inline script data cannot carry `<!--`
-// or `</script`: the data rides as base64, and executable scripts escape both.
+// or `</script`: the data writes its `<` as \u003c, and executable scripts
+// escape both. An app with no server entity boots no cluster, and its module
+// carries neither the cluster nor PGlite (page-static.ts).
 //
-//   deno run -A --config bundle/deno.json bundle/bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>] [--clock ticker|disabled]
+//   deno run -A --config bundle/deno.json bundle/bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>] [--clock ticker|disabled] [--first-load <bytes>]
 //
 // The interpreter is omnishell's and the cluster is mecha's, so both roots are
 // named by the caller; the module resolves `omnishell/` and `mecha-browser/`
@@ -39,7 +42,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const app = path.resolve(args.shift() ?? fail('usage: bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>] [--clock ticker|disabled]'))
+const app = path.resolve(args.shift() ?? fail('usage: bundle.ts <appDir> --omnishell <dir> --mecha <dir> [--base /prefix] [--derived <file>] [--out <dir>] [--clock ticker|disabled] [--first-load <bytes>]'))
 const flags: Record<string, string> = {}
 while (args.length) {
   const flag = args.shift()!
@@ -54,10 +57,14 @@ const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha roo
 const base = (flags['--base'] ?? '').replace(/\/$/, '')
 if (base && !base.startsWith('/')) fail(`--base is a path from the site root, such as /truco, not ${base}`)
 const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/browser'))
-for (const flag of Object.keys(flags)) if (!['--omnishell', '--mecha', '--base', '--derived', '--out', '--no-cluster', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
+for (const flag of Object.keys(flags)) if (!['--omnishell', '--mecha', '--base', '--derived', '--out', '--no-cluster', '--clock', '--first-load'].includes(flag)) fail(`unknown flag ${flag}`)
 // A frozen archive's page runs no clock over the schedules it keeps.
 const clock = flags['--clock'] ?? 'ticker'
 if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or disabled')
+// The most bytes the document may weigh gzipped, which is what a first visit
+// waits on before anything shows; none when it is not given.
+const firstLoad = flags['--first-load'] === undefined ? undefined : Number(flags['--first-load'])
+if (firstLoad !== undefined && !(Number.isInteger(firstLoad) && firstLoad > 0)) fail(`--first-load is a number of bytes, not ${flags['--first-load']}`)
 
 const read = (p: string) => Deno.readTextFile(path.join(app, p))
 const shell = JSON.parse(await read('shell/shell.json')) as {
@@ -66,6 +73,7 @@ const shell = JSON.parse(await read('shell/shell.json')) as {
   migrations: string[]
   tables: string[]
   hostDom?: Record<string, { src: string }>
+  seed?: Record<string, unknown[] | { href: string }>
   units?: Record<string, unknown>
   prefix?: string
 }
@@ -87,10 +95,25 @@ for (const p of [...served].sort()) {
   else if (p.startsWith('/')) fail(`${p} is served from neither the app nor the terminal`)
   else files[p] = await read(p)
 }
-if (base) {
-  shell.prefix = base
-  files['shell/shell.json'] = JSON.stringify(shell)
+if (base) shell.prefix = base
+// A seed table larger than SEED_INLINE is written beside the page, named by its
+// content, and the config names its file: the shell fetches it the first time
+// the table is read and the rest once the page is idle (omnishell's data-sync),
+// so the config the first screen waits on carries only the small tables. An
+// interpreter that reads only inline seeds gets them all inline.
+const SEED_INLINE = 32 * 1024
+const seedFiles = new Map<string, string>()
+const readsSeedFiles = (await Deno.readTextFile(path.join(omnishell, 'interpreter/data-sync.js'))).includes('seedRows(')
+for (const [table, rows] of readsSeedFiles ? Object.entries(shell.seed ?? {}) : []) {
+  if (!Array.isArray(rows)) continue
+  const text = JSON.stringify(rows)
+  if (text.length <= SEED_INLINE) continue
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
+  const name = `shell/seed/${table}.${[...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('')}.json`
+  seedFiles.set(name, text)
+  shell.seed![table] = { href: name }
 }
+if (base || seedFiles.size) files['shell/shell.json'] = JSON.stringify(shell)
 
 // A stylesheet's @import is fetched by the browser, not by the shim, so each
 // import is inlined into the sheet that asks for it, imports of imports too. A
@@ -139,7 +162,9 @@ for (const p of Object.keys(files)) if (p.endsWith('.css')) files[p] = inline(p,
 
 // An app with no migration has no cluster to boot: its document carries the
 // files alone, and the page runs the shell without PGlite.
-const clustered = !flags['--no-cluster'] && shell.migrations.length > 0
+// An app whose migrations make no table the shell reads (its auth's app_user
+// alone) has nothing for a cluster to serve either.
+const clustered = !flags['--no-cluster'] && shell.migrations.length > 0 && shell.tables.length > 0
 const derived = flags['--derived']
 if (derived && !clustered) fail('--derived names rows for a cluster, and this app has no migration')
 // The scripts the edge's data directory is built from, so the page's
@@ -181,9 +206,23 @@ const map: { imports: Record<string, string> } = {
 }
 const work = await Deno.makeTempDir({ prefix: 'bundle-' })
 const mapFile = path.join(work, 'imports.json')
-const jsFile = path.join(work, 'page.js')
+const outDir = path.join(work, 'out')
+const entry = clustered ? 'page' : 'page-static'
 const sesFile = path.join(work, 'ses.js')
 let js: string
+// A page with no cluster is split where the interpreter imports a module only
+// when it needs it (a game's kinetic host, a YAML config, the storybook): those
+// chunks are files beside the page, under pronto/js/ by their content's name,
+// and the first visit fetches none of them. A clustered page stays one module,
+// whose import.meta.url is the page's own (above).
+const chunks = new Map<string, string>()
+// Browsers cannot resolve bare node:* specifiers. NodeFS in PGlite is never
+// invoked in browser environments, so replace any dangling node:* imports with
+// safe browser shims so that scripts parse and run without network CORS errors.
+const shimNode = (code: string) => code
+  .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:fs["'];?/g, 'const $1 = { existsSync: () => false, mkdirSync: () => {} };')
+  .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:path["'];?/g, 'const $1 = { resolve: (...a) => a.filter(Boolean).join("/"), join: (...a) => a.filter(Boolean).join("/") };')
+  .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:[^"']+["'];?/g, 'const $1 = {};')
 try {
   const ses = await Deno.readTextFile(path.join(omnishell, 'interpreter/vendor/ses.umd.min.js'))
   await Deno.writeTextFile(sesFile, `export function installSes() {\n${ses}\n}\n`)
@@ -191,21 +230,22 @@ try {
   await Deno.writeTextFile(mapFile, JSON.stringify(map))
   const bundled = new Deno.Command(Deno.execPath(), {
     args: [
-      'bundle', '--no-config', '--node-modules-dir=none', '--platform', 'browser', '--format', 'esm', '--packages', 'bundle',
-      '--import-map', mapFile, '--lock', clusterLock, '--frozen', '--output', jsFile, path.join(here, 'page.ts'),
+      'bundle', '--no-config', '--node-modules-dir=none', '--platform', 'browser', '--format', 'esm', '--packages', 'bundle', '--minify',
+      '--import-map', mapFile, '--lock', clusterLock, '--frozen', ...(clustered ? [] : ['--code-splitting']), '--outdir', outDir, path.join(here, `${entry}.ts`),
     ],
     stdout: 'inherit',
     stderr: 'inherit',
   }).outputSync()
   if (!bundled.success) fail('deno bundle failed')
-  js = await Deno.readTextFile(jsFile)
-  // Browsers cannot resolve bare node:* specifiers. NodeFS in PGlite is never
-  // invoked in browser environments, so replace any dangling node:* imports with
-  // safe browser shims so that scripts parse and run without network CORS errors.
-  js = js
-    .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:fs["'];?/g, 'const $1 = { existsSync: () => false, mkdirSync: () => {} };')
-    .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:path["'];?/g, 'const $1 = { resolve: (...a) => a.filter(Boolean).join("/"), join: (...a) => a.filter(Boolean).join("/") };')
-    .replaceAll(/import\s*\*\s*as\s+(\w+)\s+from\s*["']node:[^"']+["'];?/g, 'const $1 = {};')
+  js = shimNode(await Deno.readTextFile(path.join(outDir, `${entry}.js`)))
+  for await (const e of Deno.readDir(outDir)) {
+    if (e.name === `${entry}.js` || !e.name.endsWith('.js')) continue
+    chunks.set(e.name, shimNode(await Deno.readTextFile(path.join(outDir, e.name))))
+  }
+  // The inline module's own imports of its chunks resolve against the
+  // document's <base>, not beside the chunks, so they name them from the root;
+  // a chunk's imports of its siblings resolve beside it.
+  for (const name of chunks.keys()) js = js.replaceAll(`"./${name}"`, () => JSON.stringify(`${base}/pronto/js/${name}`))
 } finally {
   await Deno.remove(work, { recursive: true })
 }
@@ -237,8 +277,8 @@ const payload = {
     : {}),
 }
 
-const b64 = (s: string) => encodeBase64(new TextEncoder().encode(s))
-// A module carries the two sequences only in a string, a regex or a comment,
+// The payload is JSON, which carries `<` only inside a string, written there as
+// \u003c, so neither `</script` nor `<!--` can occur in it. A module carries the two sequences only in a string, a regex or a comment,
 // where `\/` and `\!` read as the character.
 const scriptText = (text: string) => text.replace(/\r\n?/g, '\n').replaceAll('\0', '\\x00').replaceAll('</script', '<\\/script').replaceAll('<!--', '<\\!--')
 const module = scriptText(js)
@@ -370,29 +410,57 @@ html = html.replace(/<meta\b[^>]*>/gi, (tag) => {
 html = replace(
   html,
   '<script type="module" src="./boot.js"></script>',
-  `<script type="application/octet-stream" id="pronto-payload">${b64(JSON.stringify(payload))}</script>\n` +
+  `<script type="application/json" id="pronto-payload">${JSON.stringify(payload).replaceAll('<', '\\u003c')}</script>\n` +
     `<script type="module">${module}</script>`,
 )
 
 await Deno.remove(path.join(out, 'pronto'), { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
 if (assetFiles.size) await Deno.mkdir(path.join(out, 'pronto'), { recursive: true })
 for (const [name, bytes] of assetFiles) await Deno.writeFile(path.join(out, name), bytes)
+if (chunks.size) await Deno.mkdir(path.join(out, 'pronto/js'), { recursive: true })
+for (const [name, code] of chunks) await Deno.writeTextFile(path.join(out, 'pronto/js', name), code)
+await Deno.remove(path.join(out, 'shell/seed'), { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
+if (seedFiles.size) await Deno.mkdir(path.join(out, 'shell/seed'), { recursive: true })
+for (const [name, text] of seedFiles) await Deno.writeTextFile(path.join(out, name), text)
 await Deno.writeTextFile(path.join(out, 'index.html'), html)
 // A host that answers an unknown path with 404.html serves the same document
 // there, and the deep link boots.
 if (base) await Deno.writeTextFile(path.join(out, '404.html'), html)
-// The host-DOM hatches, as the terminal serves them (hostDomAssets).
+// The host-DOM hatches, as the terminal serves them (hostDomAssets), and every
+// file a hatch names, wherever it sits: a hatch may serve files outside its own
+// directory, as aprende's voice hatch serves the exams' figures.
 const hatchSrcs = Object.values(shell.hostDom ?? {}).map((h) => h.src)
 let hatchFiles = 0
 if (hatchSrcs.length) {
-  const exported = new Deno.Command('cue', { args: ['export', '.', '-e', 'terminal.surface.statics', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).outputSync()
-  if (!exported.success) fail('cue export of terminal.surface.statics failed')
-  const held = hostDomAssets(JSON.parse(new TextDecoder().decode(exported.stdout)) as StaticAsset[], hatchSrcs)
+  const surface = (e: string) => {
+    const exported = new Deno.Command('cue', { args: ['export', '.', '-e', e, '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).outputSync()
+    if (!exported.success) fail(`cue export of ${e} failed`)
+    return JSON.parse(new TextDecoder().decode(exported.stdout))
+  }
+  const held = hostDomAssets(surface('terminal.surface.statics') as StaticAsset[], hatchSrcs)
   for (const src of hatchSrcs) if (![...held.keys()].includes(src)) fail(`host-DOM hatch ${src} is not among the terminal's statics`)
+  for (const file of surface('terminal.surface.hostDom') as string[]) {
+    if (file.split(/[\\/]/).some((part) => part === '..' || part === '.')) fail(`invalid hatch file: ${file}`)
+    held.set(file, file)
+  }
   for (const [target, file] of held) {
     await Deno.mkdir(path.join(out, path.dirname(target)), { recursive: true })
     await Deno.copyFile(path.join(app, file), path.join(out, target))
   }
   hatchFiles = held.size
 }
-console.error(`bundle: ${out}/index.html, ${(html.length / 1024 / 1024).toFixed(2)} MB, ${Object.keys(files).length} files, ${hatchFiles ? `${hatchFiles} hatch files beside it, ` : ''}${clustered ? `${sql.length} sql${derived ? ', derived rows last' : ''}` : 'no cluster'}`)
+// What a first visit waits on: the document and the chunks its module imports
+// statically, each gzipped; a chunk imported only when needed is not counted.
+const gzip = async (text: string) => (await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer()).byteLength
+const statically = (code: string) => [...code.matchAll(/(?:\bfrom\s*|\bimport\s*)["']([^"']+\.js)["']/g)].map((m) => path.posix.basename(m[1]))
+const booted = new Set<string>()
+for (const queue = statically(js); queue.length;) {
+  const name = queue.pop()!
+  if (booted.has(name) || !chunks.has(name)) continue
+  booted.add(name)
+  queue.push(...statically(chunks.get(name)!))
+}
+let gzipped = await gzip(html)
+for (const name of booted) gzipped += await gzip(chunks.get(name)!)
+console.error(`bundle: ${out}/index.html, ${(html.length / 1024 / 1024).toFixed(2)} MB (first load ${(gzipped / 1024).toFixed(0)} KB gzipped), ${Object.keys(files).length} files, ${chunks.size ? `${chunks.size} module chunks, ` : ''}${seedFiles.size ? `${seedFiles.size} seed files, ` : ''}${hatchFiles ? `${hatchFiles} hatch files beside it, ` : ''}${clustered ? `${sql.length} sql${derived ? ', derived rows last' : ''}` : 'no cluster'}`)
+if (firstLoad !== undefined && gzipped > firstLoad) fail(`the first load is ${gzipped} bytes gzipped, over the app's budget of ${firstLoad}`)
