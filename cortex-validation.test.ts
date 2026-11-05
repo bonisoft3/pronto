@@ -26,7 +26,7 @@ app: state: cortex: PaymentFlow: {
 }`;
   for (const host of ["mech", "omnishell"]) {
     const invalid = await cue(["export", "-", "-e", "app"], program.replace('host: "mecha"', `host: "${host}"`));
-    assertEquals(invalid.success, false, `unsupported host ${host} must not silently omit its migration`);
+    assertEquals(invalid.success, false, `query chart with host ${host} must not silently omit its migration`);
   }
   const inferred = await emitFiles(program.replace('host: "mecha", ', ""));
   assertEquals("services/database/migrations/019_payment.sql" in inferred, true);

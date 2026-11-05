@@ -2127,7 +2127,14 @@ import (
 		if c.function == other.function && c.migration != other.migration {"Cortex function \(c.function) spans migrations \(c.migration) and \(other.migration)"}
 		if c.table == other.table && c.field == other.field {"Cortex charts \(c.name) and \(other.name) both own \(c.table).\(c.field)"}
 	}]
-	_cortexAllViolations: list.Concat([_cortexViolations, _cortexBackendViolations])
+	_cortexTerminal: [if A.state.cortex != _|_ for _, chart in A.state.cortex if chart.config.meta != _|_ if chart.config.meta.host != _|_ if chart.config.meta.host == "omnishell" {chart}]
+	_cortexTerminalViolations: list.Concat([
+		[if len(_cortexTerminal) > 1 {"one terminal Cortex root may own navigation"}],
+		[for chart in _cortexTerminal for screen, _ in A.surface.screens if chart.config.on["route:" + screen] == _|_ {"terminal Cortex root has no route:\(screen) transition"}],
+		[for chart in _cortexTerminal for name, actor in chart.setup.actors if actor.via == "rows" if A.surface.screens[actor.screen] == _|_ {"terminal Cortex row actor \(name) names undeclared screen \(actor.screen)"}],
+		[if A.state.cortex != _|_ for _, chart in A.state.cortex for name, actor in chart.setup.actors if actor.via == "observe" if actor.machine != _|_ if actor.table == _|_ || actor.field == _|_ {"Cortex observation \(name) requires composition to resolve machine \(actor.machine)"}],
+	])
+	_cortexAllViolations: list.Concat([_cortexViolations, _cortexBackendViolations, _cortexTerminalViolations])
 	_cortexRefusal: [if len(_cortexAllViolations) == 0 {true}, _cortexAllViolations[0]][0] & true
 	// A signal names where a Mecha machine went: `signal:<table>.<state>`, a
 	// state of the machine on that table's entity. One naming no such state is

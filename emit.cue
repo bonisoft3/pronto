@@ -1655,6 +1655,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 	out: {
 		app:    S.code.meta.name
+		if S.code.state.cortex != _|_ {
+			for _, c in S.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "omnishell" {
+				cortex: {config: c.config, actors: {for name, actor in c.setup.actors if actor.via == "navigation" || actor.via == "rows" {(name): actor}}}
+			}
+			actors: {for _, c in S.code.state.cortex for name, actor in c.setup.actors if actor.via == "observe" {(name): actor}}
+		}
 		floors: S.floors
 		server: S.server
 		if S.native {

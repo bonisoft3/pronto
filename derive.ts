@@ -371,6 +371,7 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
         "designCss: app.out.files[\"shell/design.css\"].text, " +
         "shellCss: app.out.files[\"shell/shell.css\"].text, " +
         "entry: app.out.terminal.surface.entry, " +
+        'endowments: [if app.out.files["shell/shell.json"].data.endowments != _|_ {app.out.files["shell/shell.json"].data.endowments}, {}][0], ' +
         // The terminal's own paths: what this pass spawns to read the markup,
         // and the published schema it vets each chart against.
         "markupReader: app.out.terminal.surface.markupReader, " +
@@ -434,6 +435,7 @@ export async function derive(appDir: string): Promise<void> {
     designCss: string;
     shellCss: string;
     entry: string;
+    endowments: Record<string, string[]>;
     markupReader: string;
     machineSchema: string;
     statics: { file: string; target: string }[];
@@ -489,7 +491,7 @@ export async function derive(appDir: string): Promise<void> {
   const TAG = "$validation$";
   const modules: { path: string; references: string[]; completion: string; role: string }[] = [];
   const validated: { entity: string; machine: string; name: string; edges: ReturnType<typeof resolveEdges>; statements: string; completion: string }[] = [];
-  const surfaceEndowments = surface.endowments ?? {};
+  const surfaceEndowments = exp.endowments;
   for (const [ename, e] of Object.entries(entities)) {
     for (const [vname, v] of Object.entries(e.validations ?? {})) {
       const why = validationLint(entities, ename, vname);
