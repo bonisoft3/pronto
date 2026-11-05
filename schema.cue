@@ -1803,6 +1803,10 @@ import (
 		// A frozen archive retains its schedules and runs none, at the edge or
 		// in a page.
 		edgeClock?: "ticker" | "disabled"
+		// The most bytes, gzipped, a pages page's first load may weigh: its
+		// document and the module chunks that document imports. The bundle
+		// fails past it, in the release and in the gate's test.
+		firstLoad?: int & >0
 		targets: *["docker"] | [...#Target]
 		// Targets where something outside the cluster pokes the ticker. The
 		// compose clock is emitted by cluster.cue and the edge's Cron Trigger
