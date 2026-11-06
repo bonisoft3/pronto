@@ -1,6 +1,9 @@
 package schema
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"encoding/yaml"
 	"list"
 	"strings"
@@ -1081,6 +1084,92 @@ import (
 		}
 	}]
 
+	// release.metricsExport: an OpenTelemetry collector scraping each service's metrics port through
+	// its Service and writing to Managed Service for Prometheus, signed in through workload identity.
+	let metricsExportObjs = [if release.metricsExport != _|_ {
+		let x = release.metricsExport
+		let exportName = "\(release.name)-metrics-export"
+		let labels = appLabels & {"app.kubernetes.io/component": "metrics-export"}
+		let config = {
+			receivers: prometheus: config: scrape_configs: [for sn, s in release.services if s.metrics != _|_ {
+				job_name:        sn
+				scrape_interval: x.interval
+				metrics_path:    s.metrics.path
+				static_configs: [{targets: ["\(sn).\(release.namespace).svc.cluster.local:\(s.metrics.port)"]}]
+			}]
+			processors: {
+				resource: attributes: [
+					{key: "cloud.region", value: x.location, action: "upsert"},
+					{key: "k8s.cluster.name", value: x.cluster, action: "upsert"},
+					{key: "k8s.namespace.name", value: release.namespace, action: "upsert"},
+				]
+				batch: {}
+			}
+			exporters: googlemanagedprometheus: project: x.project
+			service: pipelines: metrics: {
+				receivers: ["prometheus"]
+				processors: ["resource", "batch"]
+				exporters: ["googlemanagedprometheus"]
+			}
+		}
+		let credentials = {
+			type:                              "external_account"
+			audience:                          "//iam.googleapis.com/\(x.provider)"
+			subject_token_type:                "urn:ietf:params:oauth:token-type:jwt"
+			token_url:                         "https://sts.googleapis.com/v1/token"
+			credential_source: file:           "/var/run/secrets/gcp/token"
+			service_account_impersonation_url: "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/\(x.serviceAccount):generateAccessToken"
+		}
+		[{
+			apiVersion: "v1"
+			kind:       "ServiceAccount"
+			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+		}, {
+			apiVersion: "v1"
+			kind:       "ConfigMap"
+			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+			data: {
+				"config.yaml":      yaml.Marshal(config)
+				"credentials.json": json.Marshal(credentials)
+			}
+		}, {
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+			spec: {
+				replicas: 1
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "metrics-export"
+				}
+				template: {
+					metadata: "labels": labels
+					// A changed config rolls the collector.
+					metadata: annotations: "pronto.dev/config": hex.Encode(sha256.Sum256(yaml.Marshal(config) + json.Marshal(credentials)))
+					spec: {
+						serviceAccountName: exportName
+						enableServiceLinks: false
+						containers: [{
+							name:  "otelcol"
+							image: "docker.io/otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6"
+							args: ["--config=/etc/otelcol/config.yaml"]
+							env: [{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/etc/otelcol/credentials.json"}]
+							resources: (#resourcesOf & {r: release, n: "metrics-export"}).out
+							volumeMounts: [
+								{name: "config", mountPath: "/etc/otelcol", readOnly: true},
+								{name: "token", mountPath: "/var/run/secrets/gcp", readOnly: true},
+							]
+						}]
+						volumes: [
+							{name: "config", configMap: name: exportName},
+							{name: "token", projected: sources: [{serviceAccountToken: {path: "token", audience: x.audience, expirationSeconds: 3600}}]},
+						]
+					}
+				}
+			}
+		}]
+	}]
+
 	// The app's own services (release.services): a Deployment and a Service each,
 	// in the mesh as render is. Compose's SERVICE_JWT is a development value: the
 	// release's own is minted against the cluster's PGRST_JWT_SECRET (release.nu
@@ -1158,7 +1247,10 @@ import (
 					"app.kubernetes.io/name":      release.name
 					"app.kubernetes.io/component": n
 				}
-				ports: [{name: "http", port: s.port, targetPort: s.port, protocol: "TCP"}]
+				ports: [
+					{name: "http", port: s.port, targetPort: s.port, protocol: "TCP"},
+					if s.metrics != _|_ {{name: "metrics", port: s.metrics.port, targetPort: s.metrics.port, protocol: "TCP"}},
+				]
 			}
 		}]
 	}]
@@ -1193,7 +1285,15 @@ import (
 					},
 					{
 						from: [{namespaceSelector: matchLabels: "kubernetes.io/metadata.name": "observability"}]
-						ports: [{port: 9090, protocol: "TCP"}]
+						ports: [{port: 9090, protocol: "TCP"}, for _, s in release.services if s.metrics != _|_ {port: s.metrics.port, protocol: "TCP"}]
+					},
+					// A service's metrics, which the cluster's VictoriaMetrics and the app's metrics export scrape.
+					if len([for _, s in release.services if s.metrics != _|_ {s}]) > 0 {
+						from: [{podSelector: matchLabels: {
+							"app.kubernetes.io/name":      release.name
+							"app.kubernetes.io/component": "metrics-export"
+						}}]
+						ports: [for _, s in release.services if s.metrics != _|_ {port: s.metrics.port, protocol: "TCP"}]
 					},
 				]
 				egress: [
@@ -1636,6 +1736,7 @@ import (
 			prontoRenderServiceObj,
 			for o in appServiceObjs {o},
 			vmalertObjs,
+			for o in metricsExportObjs {o},
 			gatewayObj,
 			httpRouteObj,
 			backendTrafficPolicyObj,

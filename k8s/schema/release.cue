@@ -150,6 +150,23 @@ package schema
 		notifier?: =~"^https?://[^ ]+$"
 	}
 
+	// The services' metrics (services.<n>.metrics) sent on to Google Cloud Monitoring's Managed Service
+	// for Prometheus, where Cloud Run's sidecars send theirs, so one set of burn-rate policies reads both:
+	// an OpenTelemetry collector of the app's own scrapes them and writes them as `project`'s
+	// prometheus.googleapis.com series, under `location` and `cluster`. It signs in with no key: its
+	// service account's token, which this cluster signs, is traded at a workload identity `provider`
+	// that trusts the cluster's issuer (its JWKS uploaded) for `serviceAccount`'s, which may write
+	// metrics. The token's subject is system:serviceaccount:<namespace>:<name>-metrics-export.
+	metricsExport?: {
+		project!:        =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+		provider!:       =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+		serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
+		audience:        string | *"https://iam.googleapis.com/\(provider)"
+		location:        string | *"europe-west3"
+		cluster:         string | *"metal"
+		interval:        =~"^[0-9]+s$" | *"30s"
+	}
+
 	// A container's own requests and limits over `resources`, by its name: crud, electric, auth,
 	// caddy, render, or one of the app's services. An Electric holding a shape per player and
 	// table needs more memory than a door (Bonk Chess's was OOMKilled at 256Mi, 2026-11-06).
