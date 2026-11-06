@@ -153,31 +153,8 @@ the screen; its neighbourhood is the references the schema declares
 (`via`). Its signature is the reduce's, `(state, event)`, so a reduce, a guard
 and a validation are one grammar in three positions.
 
-**The store is a courtesy; the trigger is the authority.** Both run the same
-file: the store over the reader's visible, possibly unsynced copy before the
-optimistic write, Postgres over the truth through a `SECURITY DEFINER` read in
-plv8 before commit. A disagreement is an ordinary refusal, and which seat is
-stricter is the predicate's polarity: `every` over an empty edge passes where
-`some` refuses.
-
-- **A refusal is a 4xx, or it is retried forever.** PostgREST maps a bare plv8
-  exception to 500, so the predicate answers `"true"`, `"false"` or
-  `"answered <typeof>"` as text, and a PL/pgSQL wrapper raises
-  `check_violation` for a no and `raise_exception` for a program error, both
-  400.
-- **AFTER, not BEFORE.** The trigger runs only for a write the caller's own
-  policies admitted, so the definer's read is no oracle over rows RLS hides,
-  and `event.row` has its generated columns and restamped `txid`. The
-  migration refuses a definer that does not bypass RLS, which would judge one
-  caller's slice.
-- **It states what was true when the write landed.** It judges a READ
-  COMMITTED snapshot, locks nothing an edge reads, and never re-judges when a
-  referenced row changes; a rule that must survive that is a set constraint.
-- **A backward edge costs its fan-in** on every write; a batch pays it once.
-- **One engine per seat.** The database image pins plv8 by URL and sha256, so
-  a cluster lacking it fails at `000_extensions.sql`. PGlite cannot host V8,
-  so the browser tier runs the store seat alone and `pages` refuses a
-  validation.
+Where each seat runs it, and what the trigger guarantees, is
+[Jessie in the database](decisions/2026-11-05-database-jessie.md#validations).
 
 ## Rejected
 

@@ -80,6 +80,8 @@ export const ENDOWABLE: Record<string, readonly string[]> = {
   // A kinetic engine steps at the frame rate on nothing but its own state and
   // the commands it is handed, so its cage endows nothing at all.
   engine: [],
+  // A database function is handed its argument and nothing else.
+  function: [],
   computation: MECHA,
   effect: MECHA,
 };

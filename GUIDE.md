@@ -173,8 +173,9 @@ edge from a server entity to a `tab` or `device` one, two edges to one table,
 an edge to a table no screen reads and no form writes, a name a unique already
 uses and a denied name in the source. A validation is an ir kind
 (`data-kind="validation"`, `data-of` its entity), paired by the bijection like
-a handler. Where it runs, when the server judges it, and the rung it fills are
-[the lattice's](docs/lattice.md#the-validation-ladder).
+a handler. The rung it fills is [the lattice's](docs/lattice.md#the-validation-ladder);
+where it runs and when the server judges it are
+[Jessie in the database](docs/decisions/2026-11-05-database-jessie.md#validations)'s.
 
 ### A count the reader is inside of
 

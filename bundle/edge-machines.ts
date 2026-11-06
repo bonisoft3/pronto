@@ -8,6 +8,17 @@ import { pathToFileURL } from 'node:url'
 import { declaredMachine, MECHA_NAME } from '../mecha-spec.ts'
 import { mechaXStateSource } from '../mecha-xstate.ts'
 
+// What plv8 hardens with SES the object freezes: through the descriptors, as
+// SES walks them, so an accessor the runtime plants to refuse a read is frozen,
+// never read.
+export const HARDEN = `const harden = (value, seen = new WeakSet()) => {
+  if (value === null || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) return value
+  seen.add(value)
+  Object.freeze(value)
+  for (const d of Object.values(Object.getOwnPropertyDescriptors(value))) for (const v of [d.value, d.get, d.set]) harden(v, seen)
+  return value
+}`
+
 export type Reducers = Record<string, { reducer: Record<string, unknown> & { name: string; fuel: number }; rules: string }>
 
 export async function renderMachines(app: string, appDir: string, omnishell: string, reducers: Reducers): Promise<string> {
@@ -22,15 +33,7 @@ export async function renderMachines(app: string, appDir: string, omnishell: str
     machines.push(`  ${name}: machine(${JSON.stringify(declaredMachine(reducer))}, ${reducer.fuel}, (__fuel) => (${instrument(`(() => { ${source}\n })()`)})),`)
   }
   return `// Written by pronto's edge.ts for ${app}: the machines' steps, for the object's host import (mecha-edge's machines.ts).
-// Through the descriptors, as SES walks them: an accessor the runtime plants
-// to refuse a read is frozen, never read.
-const harden = (value, seen = new WeakSet()) => {
-  if (value === null || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) return value
-  seen.add(value)
-  Object.freeze(value)
-  for (const d of Object.values(Object.getOwnPropertyDescriptors(value))) for (const v of [d.value, d.get, d.set]) harden(v, seen)
-  return value
-}
+${HARDEN}
 const runtime = ((harden) => (${runtime}))(harden)
 const xstate = (${mechaXStateSource})
 // A step starts with its whole budget: the fuel is the step's, as in plv8.

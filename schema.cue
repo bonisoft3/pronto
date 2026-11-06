@@ -1542,6 +1542,14 @@ import (
 			rules:   string
 			reducer: (#Reducer & {machine: H.machine}).out
 		}
+		// Pure Jessie the database calls inside a transaction, compiled to
+		// `public.fn_<name>(jsonb) RETURNS jsonb`
+		// ([[docs/decisions/2026-11-05-database-jessie#Functions]]).
+		functions?: [Name=string & =~"^[a-z][a-z0-9_]{0,30}$"]: {
+			rules: string & =~"^[A-Za-z0-9_-]+(/[A-Za-z0-9_.-]+)*\\.js$"
+			fuel:  int & >0 & <=1000000
+			note:  string & !=""
+		}
 		// Changes to a schema that already exists, as pgroll migrations, keyed
 		// by the version they create; the cluster is given them
 		// (#DefaultCluster) and applies them in key order.

@@ -10,6 +10,8 @@
 // <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
 // <out>/src/machines.js   the app's machines, each the step its migration
 //                declares (mecha-reducer.ts), for the object's host import
+// <out>/src/functions.js  the app's database functions (database-functions.ts),
+//                for the same host import
 // <out>/pgdata   rls.sql, the migrations and --derived's rows, applied on disk;
 //                or, with --from, a copy of a directory built elsewhere (an
 //                archive) with the pgroll migrations its ledger lacks applied
@@ -28,6 +30,7 @@ import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } f
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { realmDocumentsOf } from './edge-templates.ts'
 import { type Reducers, renderMachines } from './edge-machines.ts'
+import { type Functions, renderFunctions } from './edge-functions.ts'
 import { renderEffects } from './edge-effects.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
 import { clusterDrains, hasEffects, releaseScripts } from './edge-scripts.ts'
@@ -203,18 +206,19 @@ await run(Deno.execPath(), [
 const release = await releaseScripts(app, mecha, shell.migrations, JSON.parse(new TextDecoder().decode(pgrollOut.stdout)))
 await Deno.writeTextFile(path.join(out, 'migrations.json'), JSON.stringify([...release.files.map(({ name, sql }) => ({ name, sql })), ...release.pgroll]))
 
-// The app's machines: the migration declared each step over an engine this
-// tier supplies (mecha-edge's machines.ts), so the object is handed the same
-// rules PostgreSQL would run in plv8 (edge-machines.ts). And what owes a
+// The app's machines and functions: the migration declared each over an engine
+// this tier supplies (mecha-edge's machines.ts), so the object is handed the
+// same modules PostgreSQL would run in plv8 (edge-machines.ts, edge-functions.ts). And what owes a
 // tick — its cron schedules, its reducers that arm a deadline; a plv8
 // machine's timers never run here — for the clock outside the object below.
 const stateOut = await new Deno.Command('cue', {
-  args: ['export', '.', '-e', '{reducers: *code.state.mecha.reducers | {}, crons: [for n, s in code.state.schedules if !s.suspend {n}]}', '--out', 'json'],
+  args: ['export', '.', '-e', '{reducers: *code.state.mecha.reducers | {}, functions: *code.state.functions | {}, crons: [for n, s in code.state.schedules if !s.suspend {n}]}', '--out', 'json'],
   cwd: app, stdout: 'piped', stderr: 'inherit',
 }).output()
 if (!stateOut.success) fail('cue export of the machines and schedules failed')
-const { reducers, crons } = JSON.parse(new TextDecoder().decode(stateOut.stdout)) as { reducers: Reducers; crons: string[] }
+const { reducers, functions, crons } = JSON.parse(new TextDecoder().decode(stateOut.stdout)) as { reducers: Reducers; functions: Functions; crons: string[] }
 if (Object.keys(reducers).length) await Deno.writeTextFile(path.join(out, 'src/machines.js'), await renderMachines(name, app, omnishell, reducers))
+if (Object.keys(functions).length) await Deno.writeTextFile(path.join(out, 'src/functions.js'), await renderFunctions(name, app, omnishell, functions))
 const withEffects = await hasEffects(app)
 if (withEffects) await Deno.writeTextFile(path.join(out, 'src/effects.js'), await renderEffects(name, app, mecha, out))
 
@@ -249,7 +253,7 @@ import { originAssets } from '${fromSrc(path.join(here, 'edge-templates.ts'))}'
 ${blobs ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
 ${hatches.map((h, i) => `import { createHatch as hatch${i} } from '${fromSrc(path.join(app, h.edge.src))}'`).join('\n')}
-${Object.keys(reducers).length ? "import machines from './machines.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
+${Object.keys(reducers).length ? "import machines from './machines.js'\n" : ''}${Object.keys(functions).length ? "import functions from './functions.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
@@ -260,7 +264,7 @@ export const Cluster = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(shell.tables)},
   schema: ${JSON.stringify(shell.schema ?? {})},
-  drains: ${JSON.stringify(drains)},${Object.keys(reducers).length ? '\n  machines,' : ''}${withEffects ? '\n  effects,' : ''}${shell.ai ? `\n  ai: ${JSON.stringify(shell.ai)},` : ''}
+  drains: ${JSON.stringify(drains)},${Object.keys(reducers).length ? '\n  machines,' : ''}${Object.keys(functions).length ? '\n  functions,' : ''}${withEffects ? '\n  effects,' : ''}${shell.ai ? `\n  ai: ${JSON.stringify(shell.ai)},` : ''}
 })
 export default {
   scheduled: edgeWorker.scheduled,

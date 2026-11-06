@@ -134,6 +134,24 @@ three tiers are mathematically pure, closed over rows, and replayable.
     (`FOR SYSTEM_TIME AS OF`).
   - Watermarks are driven strictly by the **database commit timestamp / LSN**, never wall
     clock. Consumer lag delays output but preserves 100% calculation correctness.
+- **PostgreSQL View Tier (proposed 5 November 2026, not built)**:
+  - Until a streaming runtime exists, a DuckStream with no windowing operator and only
+    aggregates PostgreSQL can express is lowered as a live view over its sources, on
+    every tier including PGlite. Its sink is read, not materialized.
+  - The admitted subset starts at `GROUP BY` with `count`, `sum`, `min`, `max` and
+    `arg_max`/`arg_min`, which becomes `DISTINCT ON (...) ... ORDER BY`. Anything outside
+    it is refused at generate time rather than approximated. PostgreSQL has no
+    `arg_max`, so the emitter owns the translation and its tests.
+  - When a streaming runtime lands, the declaration is materialized instead and the view
+    dropped: the lowering is a target choice, like a pipeline designer's choice between
+    CDC materialization and a live query.
+  - This is how an order-independent decision is declared instead of hand-written. The
+    newest answer per key, `arg_max(answer, seq)` over a version assigned when the
+    question was asked, needs no clock and no arrival order: a late or redriven answer
+    never becomes the maximum. A version guard on writes
+    (`ON CONFLICT ... WHERE target.version < EXCLUDED.version`) decides the same case
+    outside the streaming contract and was not taken; waiting for Feldera would need its
+    own container on Cloudflare.
 
 ---
 

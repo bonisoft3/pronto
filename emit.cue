@@ -37,7 +37,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "cortex-sql" | "local-handler" | "mecha-reducer-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
+	format: "sql" | "cortex-sql" | "local-handler" | "mecha-reducer-sql" | "function-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -1983,6 +1983,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if len(M.accessed) > 0 {"services/database/migrations/006_policies.sql"},
 		"services/database/migrations/007_txid.sql",
 		"services/database/migrations/008_publication.sql",
+		if M.code.state.functions != _|_ if len([for r in M.raw if r.name == "009_functions.sql" {r}]) == 0 {"services/database/migrations/009_functions.sql"},
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 if len([for r in M.raw if r.name == "010_machines.sql" {r}]) == 0 {"services/database/migrations/010_machines.sql"},
 		if len(M.code.state.mecha.reducers) > 0 if len([for r in M.raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {"services/database/migrations/016_mecha_actors.sql"},
@@ -3619,6 +3620,9 @@ _pgrollDir: "services/database/pgroll"
 			// handler composing the app's module over the machine's own rules.
 			for path, local in E._composedHandlers {
 				"\(path)": {format: "local-handler", data: local}
+			}
+			if E.code.state.functions != _|_ if len([for r in E._raw if r.name == "009_functions.sql" {r}]) == 0 {
+				"services/database/migrations/009_functions.sql": {format: "function-sql", data: functions: E.code.state.functions}
 			}
 			if len(E.code.state.mecha.reducers) > 0 if len([for r in E._raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {
 				// Each machine's surface is entities the app declares; the writer
