@@ -1288,7 +1288,14 @@ import (
 								name:  "poke"
 								image: "docker.io/curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
 								env: [{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}}]
-								command: ["sh", "-c", "exec curl -fsS -m 55 -X POST -H \"Authorization: Bearer $SERVICE_JWT\" http://\(n).\(release.namespace).svc.cluster.local:\(s.port)\(s.clock.path)?caller=k8s-cronjob"]
+								// A new pod's address reaches the network policies a few seconds after it starts
+								// (k3s's kube-router refuses it until then): it waits, up to 30s, for the service to
+								// take a connection, then pokes once.
+								command: ["sh", "-c", """
+									u=http://\(n).\(release.namespace).svc.cluster.local:\(s.port)
+									for i in $(seq 15); do [ "$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$u/")" != 000 ] && break; sleep 2; done
+									exec curl -fsS -m 50 -X POST -H "Authorization: Bearer $SERVICE_JWT" "$u\(s.clock.path)?caller=k8s-cronjob"
+									"""]
 								resources: limits: {cpu: "100m", memory: "32Mi"}
 							}]
 						}
