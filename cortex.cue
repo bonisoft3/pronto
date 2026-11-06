@@ -19,7 +19,18 @@ import (
 // A fold Pronto composes from the app's Jessie module `handler` over the
 // Mecha machine `machine`, emitted as the handler named for the actor; or a
 // kinetic child, which hosts a race on its screen.
-#CortexActor: #MachineActor | #KineticActor | #QueryActor | #ObservationActor | #NavigationActor | #HostedRowActor | #RowsActor
+// Chosen by `via`, not a disjunction: CUE unifies an actor with every arm of a
+// disjunction, and #HostedRowActor and #RowsActor each carry whole charts.
+#CortexActor: {
+	via: "session" | "sync" | "local" | "kinetic" | "query" | "observe" | "navigation" | "mecha" | "rows"
+	if via == "session" || via == "sync" || via == "local" {#MachineActor}
+	if via == "kinetic" {#KineticActor}
+	if via == "query" {#QueryActor}
+	if via == "observe" {#ObservationActor}
+	if via == "navigation" {#NavigationActor}
+	if via == "mecha" {#HostedRowActor}
+	if via == "rows" {#RowsActor}
+}
 
 #HostedRowActor: {
 	via:      "mecha"
