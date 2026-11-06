@@ -184,7 +184,7 @@ import (
 						storageClass: targetEnv.storageClass
 					}
 				}
-				if release.database.backup != _|_ {
+				if release.database.backup.provider != _|_ {
 					// The backups' sign-in (backupObjs): the plugin's sidecar shares the postgres
 					// container's mounts, /projected among them.
 					projectedVolumeTemplate: sources: [{
@@ -192,6 +192,8 @@ import (
 					}, {
 						configMap: {name: "\(release.name)-backup", items: [{key: "credentials.json", path: "gcp-credentials.json"}]}
 					}]
+				}
+				if release.database.backup != _|_ {
 					plugins: [{
 						name:          "barman-cloud.cloudnative-pg.io"
 						isWALArchiver: true
@@ -203,12 +205,12 @@ import (
 	]
 
 	// release.database.backup: the bucket the barman-cloud plugin writes to, and the nightly
-	// base backup; WAL goes there as the Cluster's archiver (prontoClusterObj's plugins). The
-	// sidecar signs in with the credential the ConfigMap holds (no key: #workloadCredentials over
-	// the Cluster's projected token), named by GOOGLE_APPLICATION_CREDENTIALS; gkeEnvironment
-	// tells barman-cloud to take Google's default credentials, which that variable names.
+	// base backup; WAL goes there as the Cluster's archiver (prontoClusterObj's plugins). To an
+	// S3 store with the keys Secret the release checks; to Cloud Storage with the credential the
+	// ConfigMap holds (no key: #workloadCredentials over the Cluster's projected token), named by
+	// GOOGLE_APPLICATION_CREDENTIALS, which gkeEnvironment has barman-cloud take as Google's default.
 	let backupObjs = [
-		if release.type == "pronto" && release.database.backup != _|_
+		if release.type == "pronto" && release.database.backup.provider != _|_
 		let b = release.database.backup {
 			apiVersion: "v1"
 			kind:       "ConfigMap"
@@ -230,13 +232,29 @@ import (
 			}
 			spec: {
 				retentionPolicy: b.retention
+				if b.provider != _|_ && b.endpoint == _|_ {
+					configuration: {
+						destinationPath: "gs://\(b.bucket)/\(b.path)"
+						googleCredentials: gkeEnvironment: true
+					}
+					instanceSidecarConfiguration: env: [{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/projected/gcp-credentials.json"}]
+				}
+				if b.endpoint != _|_ && b.provider == _|_ {
+					configuration: {
+						destinationPath: "s3://\(b.bucket)/\(b.path)"
+						endpointURL:     b.endpoint
+						s3Credentials: {
+							accessKeyId: {name: b.secret, key: "ACCESS_KEY_ID"}
+							secretAccessKey: {name: b.secret, key: "ACCESS_SECRET_KEY"}
+						}
+					}
+				}
+				// One store or the other: with both or neither named there is no destination.
 				configuration: {
-					destinationPath: "gs://\(b.bucket)/\(b.path)"
-					googleCredentials: gkeEnvironment: true
+					destinationPath!: string
 					wal: compression:  "gzip"
 					data: compression: "gzip"
 				}
-				instanceSidecarConfiguration: env: [{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/projected/gcp-credentials.json"}]
 			}
 		},
 		if release.type == "pronto" && release.database.backup != _|_ {

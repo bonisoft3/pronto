@@ -70,21 +70,31 @@ package schema
 		// replayed over a database initdb already built, as on Cloud Run (.pronto/cluster.json;
 		// the release fills it).
 		replays: *[] | [...=~"^[0-9A-Za-z_.-]+\\.sql$"]
-		// Where its base backups and WAL go, a Cloud Storage bucket, through CloudNativePG's
-		// barman-cloud plugin: WAL as each segment fills, a base backup on `schedule` (six
-		// fields, UTC) and once when the Cluster first gets it, kept `retention` (CloudNativePG's
-		// form, 30d say). No key: the database pod's projected token (audience `audience`) is
-		// traded at the workload identity `provider` for `serviceAccount`'s, as blobs' and the
-		// metrics export's are; the provider admits the subject
-		// system:serviceaccount:<namespace>:<name>-db, and the account may write the bucket.
+		// Where its base backups and WAL go, through CloudNativePG's barman-cloud plugin: WAL as
+		// each segment fills, a base backup on `schedule` (six fields, UTC) and once when the
+		// Cluster first gets it, kept `retention` (CloudNativePG's form, 30d say). One of two stores:
+		// - An S3-compatible bucket at `endpoint`, whose keys are a Secret the operator keeps in the
+		//   app's namespace, ACCESS_KEY_ID and ACCESS_SECRET_KEY: the release refuses to start without it.
+		// - A Cloud Storage bucket, `provider` set, no key: the database pod's projected token
+		//   (audience `audience`) is traded at that workload identity provider for `serviceAccount`'s,
+		//   as blobs' and the metrics export's are; the provider admits the subject
+		//   system:serviceaccount:<namespace>:<name>-db, and the account may write the bucket.
 		backup?: {
-			bucket!:         =~"^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$"
-			path:            =~"^[a-z0-9][a-z0-9/_.-]*$" | *name
-			provider!:       =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
-			serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
-			audience:        string | *"https://iam.googleapis.com/\(provider)"
-			retention:       =~"^[1-9][0-9]*[dwm]$" | *"30d"
-			schedule:        string | *"0 0 6 * * *"
+			bucket!:   =~"^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$"
+			path:      =~"^[a-z0-9][a-z0-9/_.-]*$" | *name
+			retention: =~"^[1-9][0-9]*[dwm]$" | *"30d"
+			schedule:  string | *"0 0 6 * * *"
+			endpoint?: =~"^https://"
+			provider?: =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+			// Never both: k8s.cue's ObjectStore then has no destination, which the export refuses.
+			if endpoint != _|_ {
+				secret:    =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" | *"\(name)-backup-s3"
+			}
+			if endpoint == _|_ {
+				provider!:       _
+				serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
+				audience:        string | *"https://iam.googleapis.com/\(provider)"
+			}
 		}
 	}
 
