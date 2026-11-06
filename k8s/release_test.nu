@@ -24,6 +24,7 @@ use release.nu [
 	envoy-proxy
 	tunnel-manifests
 	app-services-environment
+	seed-configmaps
 ]
 
 def main [] {
@@ -49,6 +50,7 @@ def run-tests [] {
 	test_render_ready_through_the_door
 	test_app_services
 	test_container_resources_and_files
+	test_seed_configmaps
 	test_app_services_environment
 	test_pods_hand_over
 	test_environment_access
@@ -402,6 +404,26 @@ def test_container_resources_and_files [] {
 	assert equal $flagd.spec.template.spec.volumes [{name: "files-sample-flags", configMap: {name: "sample-flags"}}]
 	let billing = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-caddy" | first)
 	assert ($billing.spec.template.spec.volumes? | default [] | all {|v| not ($v.name | str starts-with "files-") }) "no files, no volumes for them"
+}
+
+def test_seed_configmaps [] {
+	print "test a missing ConfigMap is seeded from the app's file, and one that exists is left alone..."
+	let dir = (mktemp -d)
+	mkdir $"($dir)/bin" $"($dir)/app/flags"
+	'{"flags": {}}' | save $"($dir)/app/flags/flags.json"
+	let log = $"($dir)/kubectl.log"
+	# A stand-in kubectl: `get` finds only kept-flags; every call is logged.
+	$"#!/bin/sh\necho \"$@\" >> ($log)\nif [ \"$1\" = get ]; then [ \"$3\" = kept-flags ]; exit; fi\n" | save $"($dir)/bin/kubectl"
+	^chmod +x $"($dir)/bin/kubectl"
+	with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} {
+		seed-configmaps {flagd: {seed: {sample-flags: "flags/flags.json", kept-flags: "flags/flags.json"}}, billing: {port: 8688}} $"($dir)/app" "sample"
+	}
+	let calls = (open $log | lines)
+	assert ($calls | any {|c| $c == $"create configmap sample-flags -n sample --from-file=flags.json=($dir)/app/flags/flags.json" }) "the missing one is made from the app's file"
+	assert ($calls | all {|c| not ($c | str starts-with "create configmap kept-flags") }) "one that exists is never written over"
+	let bad = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { seed-configmaps {flagd: {seed: {other: "nope.json"}}} $"($dir)/app" "sample" }; false } catch { true })
+	assert $bad "a seed that is not there fails the release"
+	rm -r $dir
 }
 
 def test_app_services [] {
