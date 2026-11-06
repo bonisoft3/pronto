@@ -1539,6 +1539,13 @@ import (
 							{port: 6500, protocol: "TCP"},
 						]
 					},
+					// What the door proxies to outside the cluster, as Cloud Run's door does: a plugin's
+					// upstream on the internet (pronto-analytics' Umami at /a/), on 443 only, and nothing
+					// private.
+					{
+						to: [{ipBlock: {cidr: "0.0.0.0/0", except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}}]
+						ports: [{port: 443, protocol: "TCP"}]
+					},
 				]
 			}
 		},
