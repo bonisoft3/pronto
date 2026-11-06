@@ -108,6 +108,10 @@ package schema
 		// its keys the file names (flagd's live flags, which pronto-flags push writes): the pod does
 		// not start until it is there, and a change reaches the files in about a minute.
 		files: [=~"^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+		// What a ConfigMap of files is made from when it is not there yet, by name: a file of the app,
+		// its key the file's name (flagd's flags as generate wrote them). Once, on the release that
+		// finds it missing; a release never writes over one that exists (pronto-flags push owns it).
+		seed: [=~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"]: =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
 	}
 
 

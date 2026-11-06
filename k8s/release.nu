@@ -416,6 +416,21 @@ export def app-services-environment [compose: record, services: list<string>, ow
 	}
 }
 
+# The ConfigMaps the app's services mount (App.services.<n>.files) that are not there yet, made from
+# the app's files that seed them (App.services.<n>.seed), each keyed by its file's name. Never over
+# one that exists: what is in it then is the operator's (pronto-flags push's), not the release's.
+export def seed-configmaps [services: record, app_dir: string, namespace: string] {
+	for s in ($services | values) {
+		for c in ($s.seed? | default {} | transpose name file) {
+			if (kubectl get configmap $c.name -n $namespace | complete).exit_code == 0 { continue }
+			let file = ($app_dir | path join $c.file)
+			if not ($file | path exists) { error make { msg: $"ConfigMap ($c.name)'s seed ($file) does not exist" } }
+			kubectl create configmap $c.name -n $namespace $"--from-file=($file | path basename)=($file)" | ignore
+			print $"Seeded ConfigMap ($namespace)/($c.name) from ($c.file)"
+		}
+	}
+}
+
 # <name>-service-jwt: the service role's token, signed with <name>-auth-secrets'
 # PGRST_JWT_SECRET, restated each release so it follows the secret. The value
 # goes through stdin, never a command line.
@@ -842,6 +857,7 @@ export def main [
 	# the JWT secret the cluster generated (an ExternalSecret, there by now: crud
 	# logs in with it).
 	if ($services | is-not-empty) { ensure-service-jwt $workload_name $target_ns }
+	seed-configmaps $app_meta.services $app_source_dir $target_ns
 
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
