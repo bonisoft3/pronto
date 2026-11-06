@@ -788,11 +788,11 @@ def test_timeout_budget_nests [] {
 	let route = ($objects | where kind == "HTTPRoute" | first | get spec.rules | each {|r| [($r.matches | first | get path.value) $r.timeouts.request] } | into record)
 	assert equal $route {"/": $"($budget.gateway.default)s", "/electric/": $"($budget.gateway.electric)s"}
 	let resiliency = ($objects | where kind == "Resiliency" | first | get spec)
-	assert equal $resiliency.policies.timeouts ($budget.mesh | items {|id, s| [$id $"($s)s"] } | into record)
-	# Timeouts alone. Dapr 1.14 counts every answer outside 200-399 as a
-	# failure, so a breaker opened on clients' 401s and shapes' 409s; and no
-	# retry policy, so a write is never replayed.
-	assert equal ($resiliency.targets.apps | values | where {|t| $t.circuitBreaker? != null } | length) 0
+	# Nothing in the mesh: a sidecar timeout that fires mid-response panics daprd
+	# (dapr/dapr#10371); a breaker opens on clients' 401s and shapes' 409s; a retry
+	# replays a write. The hops are bounded outside it (gateway, caddy, render, Postgres).
+	assert ($resiliency.policies.timeouts? == null)
+	assert ($resiliency.targets.apps? == null)
 	assert ($resiliency.policies.circuitBreakers? == null)
 	assert ($resiliency.policies.retries? == null)
 	assert equal ($objects | where kind == "BackendTrafficPolicy" | first | get spec.circuitBreaker) $resilience.gateway
