@@ -157,7 +157,7 @@ _sqlType: {
 }
 
 #indexSql: I={
-	e: #Entity
+	e: _
 	out: [for ix in I.e.indexes {
 		"CREATE INDEX IF NOT EXISTS idx_\(I.e.table)_\(ix.on) ON \(I.e.table) USING \(ix.using) (\(ix.on));"
 	}]
@@ -232,7 +232,7 @@ _sqlType: {
 #machineColumns: [string]: [string]: {initial: string, states: [...string]}
 
 #tableSql: T={
-	e: #Entity
+	e: _
 	columns!: #machineColumns
 	_lines: list.Concat([
 		[for fld in T.e.fields {
@@ -348,7 +348,7 @@ _sqlType: {
 // interpreter. Its AFTER trigger receives generated columns and runs only
 // after RLS accepted the write, before making privileged related-row reads.
 #validationSql: V={
-	e: #Entity
+	e: _
 	_fn: {for n, _ in V.e.validations {(n): "\(V.e.table)_validation_\(strings.Replace(n, "-", "_", -1))"}}
 	// The statements carry their own line break, so a module that is a bare
 	// arrow function leaves no blank line above the completion.
@@ -377,7 +377,7 @@ _sqlType: {
 }
 
 #lifecycleGuardSql: G={
-	e: #Entity
+	e: _
 	guards: [...string]
 	row: "NEW" | "OLD"
 	out: strings.Join([for n in G.guards {
@@ -516,7 +516,7 @@ _sqlType: {
 }
 
 #mechaActionSql: AC={
-	action: #MechaAction
+	action: _
 	op:     *"INSERT" | "UPDATE" | "DELETE"
 	track:  *false | bool
 	// The time a machine's step runs at, which the machines it spawns or
@@ -565,13 +565,14 @@ _sqlType: {
 	table: string
 	field: string
 	name:  string
-	state: #MechaState
-	states: [string]: #MechaState
+	state: _
+	states: _
 	timed: *false | bool
 	// The effect each invoking state of the machine claims on entry.
-	invokes: [string]: #ExternalEffect
+	invokes: _
 	pk: [...string]
 	cortex: *false | bool
+	cortexStates: _
 	sourceEvents: *[] | [...string]
 
 	_type: [if ST.state["type"] != _|_ {ST.state["type"]}, "normal"][0]
@@ -646,18 +647,10 @@ _sqlType: {
 		"""
 	}]
 
-	_cortexStates: {for name, state in ST.states {(name): {
-		if state.type != _|_ {type: state.type}
-		entry: list.Concat([
-			[if state.entry != _|_ for a in [if (state.entry & [...]) != _|_ {state.entry}, [state.entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}],
-			[if ST.invokes[name] != _|_ {(#invokeEnterSql & {effect: ST.invokes[name], state: name, pk: ST.pk}).out}],
-		])
-		exit: [if state.exit != _|_ for a in [if (state.exit & [...]) != _|_ {state.exit}, [state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
-	}}}
 	_cortexRecipe: {
 		state:  ST.name
 		field:  ST.field
-		states: _cortexStates
+		states: ST.cortexStates
 	}
 	_dispatchRecipe: _cortexRecipe & {
 		mode: "dispatch"
@@ -787,7 +780,7 @@ _sqlType: {
 
 #mechaMachineSql: S={
 	machine: #MechaMachine
-	entities: [string]: #Entity
+	entities: {[string]: _}
 	effects: [string]:  #ExternalEffect
 	runtime: *true | bool
 
@@ -846,24 +839,31 @@ _sqlType: {
 		// check's are one.
 		_locale: [if _hasInvoke || _hasTimers {"\nSET TimeZone = 'UTC'\nSET DateStyle = 'ISO, YMD'"}, ""][0]
 
-		_stateBlocks: [for sName, sBody in S.machine.states {
-			(#mechaStateSql & {
-				table:   _table
-				field:   _field
-				name:    sName
-				state:   sBody
-				states:  S.machine.states
-				timed:   _hasTimers
-				invokes: _invokes
-				pk:      _pk
-				cortex:  _cortex
+		_cortexStates: {if _cortex for name, state in S.machine.states {(name): {
+			if state.type != _|_ {type: state.type}
+			entry: list.Concat([
+				[if state.entry != _|_ for a in [if (state.entry & [...]) != _|_ {state.entry}, [state.entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}],
+				[if _invokes[name] != _|_ {(#invokeEnterSql & {effect: _invokes[name], state: name, pk: _pk}).out}],
+			])
+			exit: [if state.exit != _|_ for a in [if (state.exit & [...]) != _|_ {state.exit}, [state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
+		}}}
+		_statesSql: [for sName, sBody in S.machine.states {
+			#mechaStateSql & {
+				table:        _table
+				field:        _field
+				name:         sName
+				state:        sBody
+				states:       S.machine.states
+				timed:        _hasTimers
+				invokes:      _invokes
+				pk:           _pk
+				cortex:       _cortex
+				cortexStates: _cortexStates
 				sourceEvents: [if _cortex {S.machine.cortex.sourceEvents}, []][0]
-			}).out
+			}
 		}]
-
-		_dispatchBlocks: [if _cortex for sName, sBody in S.machine.states {
-			(#mechaStateSql & {table: _table, field: _field, name: sName, state: sBody, states: S.machine.states, timed: _hasTimers, invokes: _invokes, pk: _pk, cortex: true}).dispatch
-		}]
+		_stateBlocks: [for s in _statesSql {s.out}]
+		_dispatchBlocks: [if _cortex for s in _statesSql {s.dispatch}]
 		_frameRead: [if _cortex {
 			"""
 			  IF TG_OP = 'UPDATE' THEN
@@ -992,7 +992,7 @@ _sqlType: {
 
 // The ledger key of an effect for the row `rec` (NEW or OLD) names.
 #ledgerKeySql: K={
-	effect: #ExternalEffect
+	effect: _
 	rec:    "NEW" | "OLD"
 	// One field is the key as it is; several are JSON-encoded, so a ':' in a
 	// value cannot make two instances read as one.
@@ -1018,7 +1018,7 @@ _sqlType: {
 #QueueHeadroom: 25
 
 #invokeEnterSql: I={
-	effect: #ExternalEffect
+	effect: _
 	state:  string
 	pk: [...string]
 	_key:   (#ledgerKeySql & {effect: I.effect, rec: "NEW"}).out
@@ -1123,8 +1123,8 @@ _sqlType: {
 		]
 	}
 
-	e: #Entity
-	entities: [string]: #Entity // parent lookup for folder scope
+	e: _
+	entities: _ // parent lookup for folder scope
 	_t: P.e.table
 	if P.e.access.scope == "private" {
 		_using: (#ownedUsing & {a: P.e.access, qual: P._t, table: P._t}).out
@@ -2577,7 +2577,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 	// DDL emits parents first (a `ref` REFERENCES needs its target); the
 	// order comes from #App.entityOrder or declaration order.
-	_entities: [...#Entity]
+	_entities: [...]
 	if E.code.state.entityOrder != _|_ {
 		_entities: [for n in E.code.state.entityOrder {E.code.state.entities[n]}]
 	}

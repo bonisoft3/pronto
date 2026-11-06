@@ -133,9 +133,12 @@ import (
 				setup: {
 					for key, value in chart.setup if key != "actors" {(key): value}
 					actors: {for actorName, actor in chart.setup.actors {
-						(actorName): {
-							for key, value in actor if key != "machine" || actor.via != "mecha" {(key): value}
-							if actor.via == "mecha" {machine: C._resolved[actorName]}
+						if actor.via != "mecha" {(actorName): actor}
+						if actor.via == "mecha" {
+							(actorName): {
+								for key, value in actor if key != "machine" {(key): value}
+								machine: C._resolved[actorName]
+							}
 						}
 					}}
 				}
@@ -145,8 +148,8 @@ import (
 }
 
 #ResolvedCortexMachine: R={
-	machine: #CortexMachine
-	actors: [string]: #CortexActor
+	machine: _
+	actors:  _
 	entities: [string]: {table: string}
 	out: {
 		for key, value in R.machine if key != "setup" {(key): value}
@@ -155,7 +158,7 @@ import (
 			actors: {for name, actor in R.machine.setup.actors {
 				(name): actor
 				if actor.via == "observe" if actor.machine != _|_ {
-					let target = R.actors[actor.machine] & #HostedRowActor
+					let target = R.actors[actor.machine] & {via: "mecha"}
 					let meta = target.machine.config.meta
 					(name): {
 						table: R.entities[meta.entity].table

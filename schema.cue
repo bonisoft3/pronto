@@ -488,18 +488,32 @@ import (
 // Column names (`owner`, `on`, `user`) are of the entity's own table;
 // `via` is a table name, `parent` an entity name whose access is private.
 #Access: {
-	scope:  "private"
-	owner:  string
-	shared?: {via: string, on: string, user: string}
-} | {
-	scope:  "folder"
-	parent: string
-	on:     string
-} | {
-	scope: "public"
-	write?: bool
-} | {
-	scope: "internal"
+	scope: "private" | "folder" | "public" | "internal"
+	if scope == "private" {
+		close({
+			scope:  "private"
+			owner:  string
+			shared?: {via: string, on: string, user: string}
+		})
+	}
+	if scope == "folder" {
+		close({
+			scope:  "folder"
+			parent: string
+			on:     string
+		})
+	}
+	if scope == "public" {
+		close({
+			scope:  "public"
+			write?: bool
+		})
+	}
+	if scope == "internal" {
+		close({
+			scope: "internal"
+		})
+	}
 }
 
 #Durability: "server" | "live" | "offline" | "tab" | "device"
