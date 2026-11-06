@@ -1245,7 +1245,10 @@ import (
 	// Who the route's entry document may be shown to without a session,
 	// in the browser-applicable subset of #Access.scope: #App defaults it to
 	// "private" when capabilities.auth.required is true or when every top-level
-	// live region on the screen is restricted, and "public" otherwise.
+	// live region on the screen is restricted, and "public" otherwise. In an
+	// app behind a sign-in, a screen declared "public" is open to visitors:
+	// the terminal shows it to whoever arrives with a guest session, no
+	// sign-in, and asks for one on the way to any other screen.
 	access: "public" | "private"
 	// Rendering strategy:
 	//   ssg: a document per locale written at generate (prerender: true)
@@ -1760,7 +1763,9 @@ import (
 			access: *defaultAccess | "public" | "private"
 			let defaultSsr = [
 				if S.prerender {"ssg"},
-				if S.access == "public" && authOn && len(S._publicServerReads) > 0 {"ssr"},
+				// An app behind a sign-in renders no document (#emit): a screen it
+				// opens to visitors is drawn by the terminal.
+				if S.access == "public" && authOn && !authRequired && len(S._publicServerReads) > 0 {"ssr"},
 				"spa",
 			][0]
 			ssr: *defaultSsr | "spa" | "ssg" | "ssr"
@@ -1889,9 +1894,6 @@ import (
 	_hostDomRefusal: [if len(_hostDomViolations) == 0 {true}, _hostDomViolations[0]][0] & true
 
 	_screenAccessViolations: list.Concat([
-		[if A.capabilities.auth != _|_ if A.capabilities.auth.required for sn, screen in A.surface.screens if screen.access == "public" {
-			"screen \(sn) declares access: \"public\" in an app behind a sign-in"
-		}],
 		[for sn, screen in A.surface.screens if len(screen._topLive) > 0 && len(screen._topRestricted) == len(screen._topLive) if screen.access == "public" {
 			"screen \(sn) declares access: \"public\" over \(strings.Join(screen._topRestricted, ", ")); every top-level region is restricted"
 		}],
