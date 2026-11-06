@@ -502,11 +502,17 @@ import (
 
 	let bounds = resilience.resilience.timeouts
 
-	// Every call between sidecars to the cluster's own apps is bounded. No
-	// circuit breaker: Dapr 1.14 counts any answer outside 200-399 as a
-	// failure, so a client's 401s, a shape's 409s or a missing row's 404s would
-	// open a target's circuit for everyone. No retry policy either: a write is
-	// not replayed.
+	// No sidecar bounds a call between the cluster's own apps: a Dapr timeout that fires while
+	// a response is still being copied returns its handler and leaves the copy running, whose
+	// next write lands on a recycled buffer and panics the sidecar (dapr/dapr#10371, open in every
+	// release through 1.18). Bonk Chess's door sidecar died that way under its scenarios
+	// (2026-11-06), and every upstream with it, so the door answered 500. Each hop stays bounded
+	// outside the mesh: the gateway's request bound, caddy's per-upstream bound (the door's), render's
+	// own on each read (renderDoor), Postgres's statement bounds, and Electric's hold. The budget's
+	// mesh numbers still nest those (resilience.cue) for compose and Cloud Run. The Resiliency is
+	// still written, empty, so a release replaces a cluster's earlier one. No circuit breaker either:
+	// Dapr counts any answer outside 200-399 as a failure, so a client's 401s, a shape's 409s or a
+	// missing row's 404s would open a target's circuit for everyone. No retry: a write is not replayed.
 	let daprResiliencyObj = [if release.type == "pronto" {
 		apiVersion: "dapr.io/v1alpha1"
 		kind:       "Resiliency"
@@ -516,14 +522,8 @@ import (
 			labels:    appLabels
 		}
 		spec: {
-			policies: {
-				timeouts: {for id, s in bounds.mesh {(id): "\(s)s"}}
-			}
-			targets: apps: {
-				for id, _ in bounds.mesh {
-					(id): timeout: id
-				}
-			}
+			policies: {}
+			targets: {}
 		}
 	}]
 
