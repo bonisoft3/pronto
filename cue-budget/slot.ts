@@ -31,7 +31,11 @@
 // its weight beside it (STACK_POOL, else /tmp/pronto-stacks). A stack on the app's own ports (a
 // plain launch@local) is outside the pool and holds no slot. A slot is taken when its holder is
 // gone and nothing answers on its ports (a stack orphaned by a killed holder keeps its slot until
-// it is down); STACK_SLOT=<n> asks for one by number and waits for it.
+// it is down); STACK_SLOT=<n> asks for one by number and waits for it, unless the holder of that slot is
+// this process or one above it (a command run under tests/slot.ts is given its slot in STACK_SLOT, and a
+// claim of its own for that number would wait for the one thing that cannot give it up): the claim then
+// fails at once, naming the holder, and ahead of any ticket, so it stalls no line. verify@local is run
+// directly, not under tests/slot.ts: it takes the slot of its own.
 //
 // A claim that does not wait (claim(..., false), as a rehearsal's extra lanes take theirs) is
 // asked once, in its place in the line, and gives back no slot when it is not admitted then: what
@@ -78,15 +82,27 @@
 // STACK_MEM_RESERVE, 32 GB, for the stacks, browsers and sessions outside it), and while the
 // memory the machine has available, less what the holders claimed and do not hold yet, leaves
 // STACK_MEM_HEADROOM (8 GB) beside it; the oldest is admitted when no memory is claimed, so a spec
-// larger than the budget still runs, alone. Such a job weighs no cores unless it says so
-// (--weight 0, the default with --mem): it runs inside gates and stacks that hold cores already,
-// and a claim of cores there would wait on its own holder. Nor does it wait for a release: the
-// release's own evaluations are in line ahead of it, and memory counts every holder, the release's
-// and the pull requests' alike. While it runs, its holder records what it holds (rss=, every
-// second) and raises its claim when it holds more, so the next claim sees the truth; --mem-learn
-// <file> writes its peak (GB) there at the end, for the next run's --mem (tools/cue-budget's cue
-// wrapper does that for every cue evaluation). A job the memory watchdog (tools/cue-budget) killed
+// larger than the budget still runs, alone. While it runs, its holder records what it holds (rss=,
+// every second) and raises its claim when it holds more, so the next claim sees the truth;
+// --mem-learn <file> writes its peak (GB) there at the end, for the next run's --mem (tools/cue-budget's
+// cue wrapper does that for every cue evaluation). A job the memory watchdog (tools/cue-budget) killed
 // under pressure, not for its own size, waits its turn again with its peak as its claim, once.
+//
+// Such a job keeps cores busy too (a cue evaluation uses 1.5-6 of them: on 2026-11-06, 13.5 of 15
+// weight held while the load average was 104-187), so it weighs them, and --cores-learn <file>
+// says how much: the cores it kept busy on average (the CPU time of its process tree over the wall
+// time, sampled every second) written there at the end, and read back as the weight of the next run
+// (STACK_UNKNOWN_CORES, 3, the first time; never more than the budget). --weight names another.
+// Where it runs decides whether it waits for them:
+//   - Nested: a process above it, or the environment (STACK_JOB, STACK_SLOT), names a live holder
+//     (a gate, a rehearsal, a stack: `heldByAncestor`). Its cores are the holder's to spend, and a
+//     claim that waited for them would wait for its own holder, which cannot give them up (the
+//     deadlock a weight of 0 once avoided). So it is admitted at once for cores, and for the release
+//     (holders keep their slots), but its weight IS held: a claim that starts after it counts the
+//     machine's true load. Memory rules are unchanged.
+//   - Top level: no holder above it (an agent running cue by hand). It waits for cores in line like
+//     any job. It never waits for a release, as before: its memory counts every holder.
+// A memory job with --weight 0 and no --cores-learn weighs nothing, as before.
 //
 // The queue: a claim that has to wait is in line, first come first served, or a heavy one would
 // never get its room, every plain stack that fits being let in ahead of it. Each claim registers
@@ -304,11 +320,53 @@ const yielding = (by: 1 | -1) => {
 };
 addEventListener("unload", () => { if (holds > 0) { holds = 1; yielding(-1); } });
 
+// A slot asked for by number is not waited for when its holder is the asker or above it.
+export const heldByAncestor = (holder: number, lineage: number[]) => holder > 0 && lineage.includes(holder);
+// A process and its parents, nearest first (ps; stops at init or a loop).
+const lineage = async (pid: number) => {
+  const out = [pid];
+  for (let p = pid; out.length < 64;) {
+    const { stdout } = await new Deno.Command("ps", { args: ["-o", "ppid=", "-p", String(p)], stdout: "piped", stderr: "null" }).output();
+    const up = Number(new TextDecoder().decode(stdout).trim());
+    if (!(up > 1) || out.includes(up)) break;
+    out.push(up); p = up;
+  }
+  return out;
+};
+// The live holder among the processes above a claim (0: none): a claim with one is nested, and its cores are not waited for.
+export const nestedUnder = (holders: number[], above: number[]) => holders.find((h) => heldByAncestor(h, above)) ?? 0;
+// The cores rule: a nested claim is admitted whatever the room, any other by `admits`.
+export const admitsCores = (nested: boolean, used: number, weight: number, ahead: number, budget: number) =>
+  nested || admits(used, weight, ahead, budget);
+// The weight a cores-learn file gives the next run: the first field, else `unknown`, never above the budget.
+export const learnedCores = (text: string, unknown: number, budget: number) => {
+  const f = text.trim().split(" ")[0];
+  return Math.min(f !== "" && Number.isFinite(Number(f)) && Number(f) >= 0 ? Number(f) : unknown, budget);
+};
+// A ps TIME ("1:23.45", "1:02:03.45", "2-01:02:03") in seconds.
+export const cpuSeconds = (t: string) => {
+  const [d, rest] = t.includes("-") ? t.split("-") : ["0", t];
+  return Number(d) * 86400 + rest.split(":").reduce((n, x) => n * 60 + Number(x), 0);
+};
+
 export async function claim(pid?: number, what?: string, weight?: number, wait?: true, job?: boolean, mem?: number): Promise<Slot>;
 export async function claim(pid: number, what: string, weight: number, wait: false, job?: boolean, mem?: number): Promise<Slot | undefined>;
 export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight = Number(Deno.env.get("STACK_WEIGHT") ?? weights.stack), wait = true, job = false, mem = 0): Promise<Slot | undefined> {
   await Deno.mkdir(pool, { recursive: true });
   const isRelease = Deno.env.get("STACK_PRIORITY") === "release";
+  // STACK_SLOT=<n> names the slot of the command this process runs under (tests/slot.ts <command>): a
+  // claim for that number from the command itself would wait for ever, its holder above it. Before the
+  // ticket, so the head of the line is never a claim that cannot be admitted.
+  if (!job && asked) {
+    const held = await holder(`slot-${asked}`);
+    if (heldByAncestor(held, await lineage(pid)) && await alive(held)) {
+      throw new Error(`slot ${asked} (STACK_SLOT) is held by ${held}, this process or one above it: ${what} runs on the slot it was given and takes none of its own, so it is not run under tests/slot.ts (verify@local takes its own slot: run it directly)`);
+    }
+  }
+  // A memory job with cores is nested when a live holder is above it: by the process tree, or by the
+  // environment when the tree was lost (a daemon): STACK_JOB, the job that ran it, STACK_SLOT its slot.
+  const above = job && mem > 0 && weight > 0
+    ? [...await lineage(pid), Number(Deno.env.get("STACK_JOB") ?? 0), asked ? await holder(`slot-${asked}`) : 0] : [];
   // A job (--weight) brings up no stack: no process-compose, no ports, no slot number.
   const compose = job ? "" : await Deno.readTextFile(`${app}/.bayt/process-compose.yaml`);
   let told = "";
@@ -339,11 +397,11 @@ export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight =
       const ahead = older.reduce((n, o) => n + o.weight, 0);
       const memAhead = older.reduce((n, o) => n + o.mem, 0);
       const line = `${ordinal(older.length + 1)} in line${older.length ? ` behind ${older.at(-1)!.what} (weight ${older.at(-1)!.weight})` : ""}`;
-      const holders: { weight: number; release: boolean; job: boolean; mem: number; rss: number }[] = [];
+      const holders: { weight: number; release: boolean; job: boolean; mem: number; rss: number; pid: number }[] = [];
       for await (const e of Deno.readDir(pool)) {
         const m = e.name.match(/^(slot|job)-[0-9]+$/);
         const pid = m ? await holder(e.name) : 0;
-        if (m && await alive(pid)) holders.push({ ...await weighs(e.name, pid), job: m[1] === "job" });
+        if (m && await alive(pid)) holders.push({ ...await weighs(e.name, pid), job: m[1] === "job", pid });
         else if (m?.[1] === "job") await Deno.remove(`${pool}/${e.name}`, { recursive: true }).catch(() => {});
       }
       const { live, used } = counted(holders, isRelease);
@@ -351,9 +409,10 @@ export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight =
       // Memory counts every holder, a release's and a pull request's alike: it is the machine's.
       const memUsed = holders.reduce((n, h) => n + h.mem, 0);
       const why = (s: string) => ({ why: `${line}: ${s}`, ahead: older.length, used, memUsed, release: false });
+      const under = above.length ? nestedUnder(holders.map((h) => h.pid), above) : 0;
       // A release holds the machine: nothing without its priority starts until it is over, but a
-      // job that claims memory and no cores.
-      if (releasePhase && weight > 0 && waitsForRelease(isRelease, true)) return { ...why(`the release of ${releasePhase.app} holds the machine (${releasePhase.phase}, run ${releasePhase.pid}, since ${releasePhase.started})`), release: true };
+      // job that claims memory (a cue evaluation: its memory counts every holder, the release's too).
+      if (releasePhase && weight > 0 && mem === 0 && waitsForRelease(isRelease, true)) return { ...why(`the release of ${releasePhase.app} holds the machine (${releasePhase.phase}, run ${releasePhase.pid}, since ${releasePhase.started})`), release: true };
       // The cap counts those ahead too, so a younger claim never takes the slot a waiter is owed.
       if (!job && live + older.length >= cap) return why(`${live} stacks up${older.length ? `, ${older.length} ahead` : ""}, the cap (STACK_SLOTS=${cap})`);
       if (mem > 0) {
@@ -362,14 +421,14 @@ export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight =
           return why(`memory: ${round(memUsed)} GB of ${round(memBudget())} claimed${memAhead ? `, ${round(memAhead)} reserved by those ahead` : ""}, ${round(available)} GB available, this needs ${round(mem)} (STACK_MEM_BUDGET, STACK_MEM_HEADROOM)`);
         }
       }
-      if (weight > 0 && !admits(used, weight, ahead, budget)) return why(`weight ${used} of ${budget} held${ahead ? `, ${ahead} reserved by those ahead` : ""}, this needs ${weight} (STACK_BUDGET)`);
+      if (weight > 0 && !admitsCores(under > 0, used, weight, ahead, budget)) return why(`weight ${used} of ${budget} held${ahead ? `, ${ahead} reserved by those ahead` : ""}, this needs ${weight} (STACK_BUDGET)`);
       if (job) {
         const dir = `${pool}/job-${pid}`;
         await Deno.mkdir(dir, { recursive: true });
         await Deno.writeTextFile(`${dir}/weight`, `${pid} ${weight}${isRelease ? " release" : ""}${mem > 0 ? ` mem=${round(mem)} rss=0` : ""}`);
         await Deno.writeTextFile(`${dir}/pid`, String(pid));
         await Deno.writeTextFile(`${dir}/owner`, `${pid} ${new Date().toISOString()} ${what} (weight ${weight}${mem > 0 ? `, ${round(mem)} GB` : ""})\n`);
-        return { n: 0, dir, door: 0, ports: {}, text: "" };
+        return { n: 0, dir, door: 0, ports: {}, text: "", under };
       }
       const busy: string[] = [];
       for (const n of asked ? [asked] : Array.from({ length: 160 }, (_, i) => i + 1)) {
@@ -390,7 +449,7 @@ export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight =
     if (!("why" in got)) {
       const { n, dir, door, ports, text } = got;
       if (job) {
-        say(`${what}: weight ${weight} of ${budget}${mem > 0 ? `, ${round(mem)} GB of ${round(memBudget())}` : ""}`);
+        say(`${what}: weight ${weight} of ${budget}${"under" in got && got.under ? ` (nested under ${got.under}: not waited for, but held)` : ""}${mem > 0 ? `, ${round(mem)} GB of ${round(memBudget())}` : ""}`);
         if (isRelease) yielding(1);
         let given = false;
         const release = () => {
@@ -440,7 +499,7 @@ export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight =
     leanest = Math.min(leanest, got.memUsed);
     if (Date.now() > end) throw new Error(`no slot, and the line did not move for ${minutes} minutes: ${got.why}`);
     // A memory job (an evaluation of tens of seconds) looks again sooner than a stack.
-    await new Promise((r) => setTimeout(r, got.release ? 30_000 : weight === 0 ? 2000 : 5000));
+    await new Promise((r) => setTimeout(r, got.release ? 30_000 : weight === 0 || mem > 0 ? 2000 : 5000));
   }
   } finally {
     await Deno.remove(`${queue}/${ticket}`).catch(() => {});
@@ -553,6 +612,20 @@ const residentOf = async (pid: number) => {
   const r = await new Deno.Command("ps", { args: ["-o", "rss=", "-p", String(pid)], stdout: "piped", stderr: "null" }).output().catch(() => undefined);
   return (Number(new TextDecoder().decode(r?.stdout ?? new Uint8Array()).trim()) || 0) / 2 ** 20;
 };
+// The CPU time (s) of a process and every process below it, by pid; a sandbox without ps teaches nothing.
+const cpuOf = async (root: number) => {
+  const times = new Map<number, number>(), kids = new Map<number, number[]>();
+  try {
+    const ps = await new Deno.Command("ps", { args: ["-A", "-o", "pid=,ppid=,time="], stdout: "piped", stderr: "null" }).output();
+    for (const l of new TextDecoder().decode(ps.stdout).split("\n")) {
+      const [, pid, ppid, time] = l.match(/^\s*([0-9]+)\s+([0-9]+)\s+(\S+)$/) ?? [];
+      if (pid) { times.set(Number(pid), cpuSeconds(time)); kids.set(Number(ppid), [...kids.get(Number(ppid)) ?? [], Number(pid)]); }
+    }
+  } catch { /* none */ }
+  const tree = new Map<number, number>();
+  for (const q = [root]; q.length;) { const p = q.pop()!; if (!tree.has(p) && times.has(p)) { tree.set(p, times.get(p)!); q.push(...kids.get(p) ?? []); } }
+  return tree;
+};
 // Why the memory watchdog (tools/cue-budget/watchdog.sh) killed a pid, if it did: "over" (its own
 // size, past the ceiling) or "pressure" (the machine's, it the largest).
 const killedFor = (pid: number) => {
@@ -561,7 +634,7 @@ const killedFor = (pid: number) => {
   try { const why = Deno.readTextFileSync(`${dir}/killed/${pid}`).trim().split(" ")[0]; Deno.removeSync(`${dir}/killed/${pid}`); return why; } catch { return ""; }
 };
 
-if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn"].includes(Deno.args[0] ?? "")) {
+if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn", "--cores-learn"].includes(Deno.args[0] ?? "")) {
   // A job: its weight (and memory) claimed, no stack, the command run where it is.
   const split = Deno.args.indexOf("--");
   const opts = Deno.args.slice(0, split < 0 ? Deno.args.length : split);
@@ -569,9 +642,13 @@ if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn"].includes(
   const opt = (name: string) => opts[opts.indexOf(name) + 1];
   let mem = opts.includes("--mem") ? Number(opt("--mem")) : 0;
   const learn = opts.includes("--mem-learn") ? opt("--mem-learn") : undefined;
-  const weight = Number(opts.includes("--weight") ? opt("--weight") : Deno.env.get("STACK_WEIGHT") ?? (mem > 0 ? 0 : weights.stack));
+  const coresFile = opts.includes("--cores-learn") ? opt("--cores-learn") : undefined;
+  // Learned cores weigh the job when no weight is named; the first time, STACK_UNKNOWN_CORES (3).
+  const learnedWeight = coresFile === undefined ? undefined
+    : learnedCores(await Deno.readTextFile(coresFile).catch(() => ""), Number(Deno.env.get("STACK_UNKNOWN_CORES") ?? 3), budget);
+  const weight = Number(opts.includes("--weight") ? opt("--weight") : Deno.env.get("STACK_WEIGHT") ?? learnedWeight ?? (mem > 0 ? 0 : weights.stack));
   if (!cmd.length || !(mem >= 0) || !(weight > 0 || (weight === 0 && mem > 0))) {
-    console.error('usage: deno run -A tests/slot.ts --weight <n> [--mem <GB>] [--mem-learn <file>] --what "<label>" -- <command...>');
+    console.error('usage: deno run -A tests/slot.ts --weight <n> [--mem <GB>] [--mem-learn <file>] [--cores-learn <file>] --what "<label>" -- <command...>');
     Deno.exit(2);
   }
   const what = opts.includes("--what") ? opt("--what") : cmd.join(" ");
@@ -589,23 +666,32 @@ if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn"].includes(
       Deno.exit(130);
     });
   }
-  let peak = 0, status: Deno.CommandStatus;
+  let peak = 0, cores = 0, status: Deno.CommandStatus;
   for (let attempt = 1; ; attempt++) {
     slot = await claim(Deno.pid, what, weight, true, true, mem);
-    const c = child = new Deno.Command(cmd[0], { args: cmd.slice(1), stdin: "inherit", stdout: "inherit", stderr: "inherit" }).spawn();
+    const started = Date.now();
+    const c = child = new Deno.Command(cmd[0], { args: cmd.slice(1), env: { STACK_JOB: String(Deno.pid) }, stdin: "inherit", stdout: "inherit", stderr: "inherit" }).spawn();
     // What it holds, at once and every second after, and its claim raised to it when it holds more;
-    // a sample still out when it ends writes nothing.
+    // a sample still out when it ends writes nothing. And the CPU time of its process tree (each
+    // process's greatest seen, so one that exits keeps what it was seen to use): its cores are that
+    // over the time of the last sample.
     const s = slot;
-    let running = true;
+    let running = true, sampledAt = started;
+    const cpu = new Map<number, number>();
+    const memory = mem > 0;
     const sample = async () => {
-      const rss = await residentOf(c.pid);
+      const [rss, procs] = await Promise.all([memory ? residentOf(c.pid) : 0, coresFile ? cpuOf(c.pid) : new Map<number, number>()]);
       if (!running) return;
+      for (const [p, t] of procs) cpu.set(p, Math.max(cpu.get(p) ?? 0, t));
+      sampledAt = Date.now();
+      cores = sampledAt - started > 500 ? [...cpu.values()].reduce((n, t) => n + t, 0) / ((sampledAt - started) / 1000) : cores;
+      if (!memory) return;
       peak = Math.max(peak, rss);
       if (rss > mem) mem = rss * 1.1;
       s.hold?.(mem, rss);
     };
-    if (mem > 0) sample();
-    const sampler = mem > 0 ? setInterval(sample, 1000) : undefined;
+    if (memory || coresFile) sample();
+    const sampler = memory || coresFile ? setInterval(sample, 1000) : undefined;
     status = await c.status;
     running = false;
     clearInterval(sampler);
@@ -628,6 +714,14 @@ if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn"].includes(
     const before = status.success ? 0 : Number((await Deno.readTextFile(learn).catch(() => "")).split(" ")[0]) || 0;
     await Deno.mkdir(learn.replace(/\/[^/]*$/, ""), { recursive: true }).catch(() => {});
     await Deno.writeTextFile(learn, `${round(Math.max(peak, before))} ${what}\n`).catch(() => {});
+  }
+  // The cores it kept busy on average, for the next run's weight, learned as the peak is: a run that
+  // failed only raises it. One too short to have been sampled twice teaches nothing.
+  if (coresFile && cores > 0) {
+    const before = status.success ? 0 : Number((await Deno.readTextFile(coresFile).catch(() => "")).split(" ")[0]) || 0;
+    await Deno.mkdir(coresFile.replace(/\/[^/]*$/, ""), { recursive: true }).catch(() => {});
+    await Deno.writeTextFile(coresFile, `${round(Math.max(cores, before, 0.1))} ${what}\n`).catch(() => {});
+    say(`${what}: ${round(cores)} cores on average (weighed ${weight})`);
   }
   Deno.exit(status.code);
 }

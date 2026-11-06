@@ -19,6 +19,12 @@
 # none, and a machine there runs a watchdog for it. cue is one process: what an evaluation holds is
 # its own resident memory. A cue run by a cue is its parent's: it claims nothing. CUE_BUDGET=off
 # runs every cue at once.
+#
+# A claimed evaluation weighs cores too (an evaluation keeps 1.5-6 of them busy, and on 2026-11-06
+# 13.5 of 15 weight held went with a load average of 104-187): the cores it kept busy on average
+# the last time, learned beside its peak (<id>.cores), 3 the first time (STACK_UNKNOWN_CORES), never
+# above the budget. Inside a gate, a rehearsal or a stack (a holder above it) it is admitted at
+# once, its weight added to the load; run by hand it waits for cores in line like any job.
 
 self=$(cd "$(dirname "$0")" && pwd)
 # The real cue: the first on the PATH that is no budget wrapper (this one, a runtime's, a machine's:
@@ -101,4 +107,4 @@ if [ "$(uname)" = Linux ] && systemd-run --user --scope --quiet true 2>/dev/null
   run=systemd-run
 fi
 folder=$(printf '%s\n' "$where" | sed -n 2p)
-exec "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --what "cue ${folder:-.}" -- "$run" "$@"
+exec "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$learned.cores" --what "cue ${folder:-.}" -- "$run" "$@"
