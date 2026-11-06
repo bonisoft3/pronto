@@ -54,6 +54,7 @@ def run-tests [] {
 	test_container_resources_and_files
 	test_seed_configmaps
 	test_alerting
+	test_initdb_replays
 	test_database_backup
 	test_app_services_environment
 	test_pods_hand_over
@@ -480,6 +481,19 @@ def test_database_backup [] {
 	{data: {ACCESS_KEY_ID: "YQ==", ACCESS_SECRET_KEY: "Yg=="}} | to json | save -f $"($dir)/secret.json"
 	do $check
 	rm -r $dir
+}
+
+def test_initdb_replays [] {
+	print "test initdb replays the app's own migrations over a database it already built, as on Cloud Run..."
+	# A copy of sample beside it, so cue finds pronto's schema, whose facts name two migrations.
+	let dir = ($fixtures_dir | path join $".replays-(random uuid)")
+	cp -r ($fixtures_dir | path join "sample") $dir
+	open ($dir | path join .pronto cluster.json) | upsert replays ["700_gold.sql" "780_standin.sql"] | to json | save -f ($dir | path join .pronto cluster.json)
+	let job = (render-manifests ($dir | path join release.cue) "metal" | from yaml | where kind == "Job" and metadata.name == "sample-initdb" | first)
+	rm -r $dir
+	let script = ($job.spec.template.spec.containers.0.command | last)
+	assert ($script | str contains "010_machines.sql 016_mecha_actors.sql 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
+	assert ($script | str contains "--single-transaction") "010_machines in one transaction"
 }
 
 def test_seed_configmaps [] {
