@@ -26,6 +26,7 @@ use release.nu [
 	app-services-environment
 	seed-configmaps
 	apply-alert-rules
+	check-backup-secrets
 ]
 
 def main [] {
@@ -483,6 +484,40 @@ def test_database_backup [] {
 	assert equal [$nightly.spec.cluster.name $nightly.spec.method $nightly.spec.schedule $nightly.spec.immediate] ["sample-db" "plugin" "0 0 6 * * *" true]
 	let at = {|kind| $objs | enumerate | where item.kind == $kind | first | get index }
 	assert ((do $at "ObjectStore") < (do $at "Cluster")) "the store is there before the Cluster names it"
+	assert ((check-backup-secrets [$store] "sample") == null) "a store with no keys needs no Secret"
+
+	print "  ...or to an S3-compatible bucket, its keys a Secret the release checks"
+	let data = (mktemp -t backup.XXXXXX.json | str trim)
+	{App: {database: {backup: {endpoint: "https://usc1.contabostorage.com", bucket: "pronto-backups"}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let store = ($objs | where kind == "ObjectStore" | first)
+	assert equal $store.spec.configuration.destinationPath "s3://pronto-backups/sample"
+	assert equal $store.spec.configuration.endpointURL "https://usc1.contabostorage.com"
+	assert equal $store.spec.configuration.s3Credentials {accessKeyId: {name: "sample-backup-s3", key: "ACCESS_KEY_ID"}, secretAccessKey: {name: "sample-backup-s3", key: "ACCESS_SECRET_KEY"}}
+	assert equal $store.spec.configuration.wal.compression "gzip"
+	assert ($store.spec.instanceSidecarConfiguration? == null) "no Google credential"
+	assert (($objs | where kind == "ConfigMap" and metadata.name == "sample-backup") | is-empty) "no credential ConfigMap"
+	let cluster = ($objs | where kind == "Cluster" | first)
+	assert ($cluster.spec.projectedVolumeTemplate? == null) "no projected token"
+	assert equal $cluster.spec.plugins [{name: "barman-cloud.cloudnative-pg.io", isWALArchiver: true, parameters: {barmanObjectName: "sample-backup"}}]
+	let dir = (mktemp -d)
+	mkdir $"($dir)/bin"
+	$"#!/bin/sh\ncat \"($dir)/secret.json\" 2>/dev/null || exit 1\n" | save $"($dir)/bin/kubectl"
+	^chmod +x $"($dir)/bin/kubectl"
+	let check = {|| with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { check-backup-secrets [$store] "sample" } }
+	assert (try { do $check; false } catch { true }) "a missing Secret is refused"
+	{data: {ACCESS_KEY_ID: "YQ=="}} | to json | save -f $"($dir)/secret.json"
+	assert (try { do $check; false } catch { true }) "a Secret without both keys is refused"
+	{data: {ACCESS_KEY_ID: "YQ==", ACCESS_SECRET_KEY: "Yg=="}} | to json | save -f $"($dir)/secret.json"
+	do $check
+	rm -r $dir
+
+	let data = (mktemp -t backup.XXXXXX.json | str trim)
+	{App: {database: {backup: {endpoint: "https://usc1.contabostorage.com", bucket: "pronto-backups", provider: $provider}}}} | to json | save -f $data
+	let both = (try { let out = (render-manifests $app.cue_path "metal" --data $data); "rendered" } catch { "refused" })
+	rm $data
+	assert equal $both "refused" "an endpoint and a provider at once are refused"
 }
 
 def test_initdb_replays [] {
