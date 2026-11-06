@@ -87,12 +87,13 @@ import (
 	#workloadCredentials: {
 		provider:       string
 		serviceAccount: string
+		tokenFile:      string | *"/var/run/secrets/gcp/token"
 		out: {
 			type:                              "external_account"
 			audience:                          "//iam.googleapis.com/\(provider)"
 			subject_token_type:                "urn:ietf:params:oauth:token-type:jwt"
 			token_url:                         "https://sts.googleapis.com/v1/token"
-			credential_source: file:           "/var/run/secrets/gcp/token"
+			credential_source: file:           tokenFile
 			service_account_impersonation_url: "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/\(serviceAccount):generateAccessToken"
 		}
 	}
@@ -184,6 +185,13 @@ import (
 					}
 				}
 				if release.database.backup != _|_ {
+					// The backups' sign-in (backupObjs): the plugin's sidecar shares the postgres
+					// container's mounts, /projected among them.
+					projectedVolumeTemplate: sources: [{
+						serviceAccountToken: {path: "gcp-token", audience: release.database.backup.audience, expirationSeconds: 3600}
+					}, {
+						configMap: {name: "\(release.name)-backup", items: [{key: "credentials.json", path: "gcp-credentials.json"}]}
+					}]
 					plugins: [{
 						name:          "barman-cloud.cloudnative-pg.io"
 						isWALArchiver: true
@@ -195,8 +203,22 @@ import (
 	]
 
 	// release.database.backup: the bucket the barman-cloud plugin writes to, and the nightly
-	// base backup; WAL goes there as the Cluster's archiver (prontoClusterObj's plugins).
+	// base backup; WAL goes there as the Cluster's archiver (prontoClusterObj's plugins). The
+	// sidecar signs in with the credential the ConfigMap holds (no key: #workloadCredentials over
+	// the Cluster's projected token), named by GOOGLE_APPLICATION_CREDENTIALS; gkeEnvironment
+	// tells barman-cloud to take Google's default credentials, which that variable names.
 	let backupObjs = [
+		if release.type == "pronto" && release.database.backup != _|_
+		let b = release.database.backup {
+			apiVersion: "v1"
+			kind:       "ConfigMap"
+			metadata: {
+				name:      "\(release.name)-backup"
+				namespace: release.namespace
+				labels:    appLabels & {"app.kubernetes.io/component": "database"}
+			}
+			data: "credentials.json": json.Marshal((#workloadCredentials & {provider: b.provider, serviceAccount: b.serviceAccount, tokenFile: "/projected/gcp-token"}).out)
+		},
 		if release.type == "pronto" && release.database.backup != _|_
 		let b = release.database.backup {
 			apiVersion: "barmancloud.cnpg.io/v1"
@@ -209,15 +231,12 @@ import (
 			spec: {
 				retentionPolicy: b.retention
 				configuration: {
-					destinationPath: "s3://\(b.bucket)/\(b.path)"
-					endpointURL:     b.endpoint
-					s3Credentials: {
-						accessKeyId: {name: b.secret, key: "ACCESS_KEY_ID"}
-						secretAccessKey: {name: b.secret, key: "ACCESS_SECRET_KEY"}
-					}
+					destinationPath: "gs://\(b.bucket)/\(b.path)"
+					googleCredentials: gkeEnvironment: true
 					wal: compression:  "gzip"
 					data: compression: "gzip"
 				}
+				instanceSidecarConfiguration: env: [{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/projected/gcp-credentials.json"}]
 			}
 		},
 		if release.type == "pronto" && release.database.backup != _|_ {
