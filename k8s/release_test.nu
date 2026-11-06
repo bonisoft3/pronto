@@ -54,6 +54,7 @@ def run-tests [] {
 	test_container_resources_and_files
 	test_seed_configmaps
 	test_alerting
+	test_metrics_export
 	test_initdb_replays
 	test_database_backup
 	test_app_services_environment
@@ -494,6 +495,39 @@ def test_initdb_replays [] {
 	let script = ($job.spec.template.spec.containers.0.command | last)
 	assert ($script | str contains "010_machines.sql 016_mecha_actors.sql 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
 	assert ($script | str contains "--single-transaction") "010_machines in one transaction"
+}
+
+def test_metrics_export [] {
+	print "test an app's metrics sent on to Managed Service for Prometheus, signed in through workload identity..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t mexport.XXXXXX.json | str trim)
+	{App: {services: {"journeys-collector": {port: 8686, env: {}, metrics: {port: 9598}}}}} | to json | save -f $data
+	let none = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	assert (($none | where metadata.name? == "sample-metrics-export") | is-empty) "no export, no collector"
+	let pol = ($none | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert ($pol.spec.ingress | any {|r| ($r.from.0.namespaceSelector?.matchLabels?."kubernetes.io/metadata.name"? == "observability") and ($r.ports | any {|p| $p.port == 9598 }) }) "the cluster's VictoriaMetrics may scrape a service's metrics"
+	let svc = ($none | where kind == "Service" and metadata.name == "journeys-collector" | first)
+	assert ($svc.spec.ports | any {|p| $p.name == "metrics" and $p.port == 9598 }) "the Service carries the metrics port"
+	{App: {
+		services: {"journeys-collector": {port: 8686, env: {}, metrics: {port: 9598}}}
+		metricsExport: {project: "brawl-chess", provider: "projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/k3s", serviceAccount: "metrics-writer@brawl-chess.iam.gserviceaccount.com", audience: "contabo-k3s"}
+	}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let cm = ($objs | where kind == "ConfigMap" and metadata.name == "sample-metrics-export" | first)
+	let config = ($cm.data."config.yaml" | from yaml)
+	assert equal ($config.receivers.prometheus.config.scrape_configs | first | get static_configs.0.targets) ["journeys-collector.sample.svc.cluster.local:9598"]
+	assert equal $config.exporters.googlemanagedprometheus.project "brawl-chess"
+	let creds = ($cm.data."credentials.json" | from json)
+	assert equal $creds.audience "//iam.googleapis.com/projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/k3s"
+	assert ($creds.service_account_impersonation_url | str ends-with "metrics-writer@brawl-chess.iam.gserviceaccount.com:generateAccessToken")
+	let dep = ($objs | where kind == "Deployment" and metadata.name == "sample-metrics-export" | first)
+	assert equal $dep.spec.template.spec.serviceAccountName "sample-metrics-export"
+	let token = ($dep.spec.template.spec.volumes | where name == "token" | first | get projected.sources.0.serviceAccountToken)
+	assert equal $token.audience "contabo-k3s" "the token is minted for the provider's audience"
+	assert (($objs | where kind == "ServiceAccount" and metadata.name == "sample-metrics-export") | is-not-empty)
+	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert ($pol.spec.ingress | any {|r| ($r.from.0.podSelector?.matchLabels?."app.kubernetes.io/component"? == "metrics-export") and ($r.ports | any {|p| $p.port == 9598 }) }) "the collector may scrape the metrics port"
 }
 
 def test_seed_configmaps [] {
