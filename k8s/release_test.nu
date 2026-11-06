@@ -54,6 +54,7 @@ def run-tests [] {
 	test_container_resources_and_files
 	test_seed_configmaps
 	test_alerting
+	test_door_egress
 	test_service_clock
 	test_metrics_export
 	test_initdb_replays
@@ -546,6 +547,16 @@ def test_service_clock [] {
 	assert ($c.command | last | str contains "-X POST -H \"Authorization: Bearer $SERVICE_JWT\" http://ticker.sample.svc.cluster.local:9998/poke") ($c.command | last)
 	assert equal ($c.env | first | get valueFrom.secretKeyRef) {name: "sample-service-jwt", key: "SERVICE_JWT"}
 	assert equal $cron.spec.jobTemplate.spec.template.metadata.labels."app.kubernetes.io/name" "sample" "the services' network policy admits it"
+}
+
+def test_door_egress [] {
+	print "test the door may reach the internet on 443 alone, for an upstream a plugin names (Umami)..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let pol = (render-manifests $app.cue_path "metal" | from yaml | where kind == "NetworkPolicy" and metadata.name == "sample-caddy-netpol" | first)
+	let out = ($pol.spec.egress | where {|r| ($r.to?.0?.ipBlock? | is-not-empty) })
+	assert equal ($out | length) 1
+	assert equal ($out.0.ports) [{port: 443, protocol: "TCP"}]
+	assert ("10.0.0.0/8" in $out.0.to.0.ipBlock.except) "nothing private"
 }
 
 def test_seed_configmaps [] {
