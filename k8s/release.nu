@@ -68,8 +68,8 @@ export const OPERATORS = [
 	},
 	{
 		name: "dapr"
-		url: "https://dapr.github.io/helm-charts/dapr-1.14.4.tgz"
-		checksum: "sha256:97f64b80b3809356a5dae84b07684d4ed81ce57d371acbe7013bbc157c614795"
+		url: "https://dapr.github.io/helm-charts/dapr-1.16.21.tgz"
+		checksum: "sha256:71233ad45bf72cc095abd718b592c0442a215940c32c7130fff5f775b18bc62c"
 		kind: "helm"
 		namespace: "dapr-system"
 		# The injector admits pods without their sidecar while it is down (failurePolicy Ignore).
