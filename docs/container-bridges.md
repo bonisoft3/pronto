@@ -29,11 +29,51 @@ capabilities. No database credential, host port publication or callback permissi
 is granted by being a bridge. See [Airlock](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md)
 for the ledger and transport contract.
 
-This wiring is implemented by the Compose runtime. Declaring a bridge does not
-add support for missing services in the Cloudflare, Kubernetes or Cloud Run
-release targets. An explicitly declared [[edge-hatches|edge hatch implementation]]
-can instead provide a trusted Worker route; that route is separate from the
-Compose bridge transport and grants its own privileged execution boundary.
+## Where a bridge runs
+
+A bridge's container reaches outside the stack, so the local stack — what
+`sayt launch` and every check bring up — never runs it. It runs the bridge's
+`simulator` instead, under the container's name, port, networks and bridge
+wiring; the simulator's fields replace the container target's of the same
+name:
+
+```cue
+code: state: bridges: crawler: {
+    container: "crawler"
+    simulator: {
+        dockerfile: from: name: "denoland/deno:alpine-2.9.7@sha256:…"
+        srcs: globs: ["simulators/crawler/**"]
+    }
+}
+```
+
+A simulator is the expected local default: it answers the bridge's contract
+from fixtures, so a launched app shows plausible data and a check drives the
+real Airlock path against known answers, one fixture path per case. `{}` runs
+the container itself, for one whose own reach stays inside the stack, such as a
+runner a test points at a local SMTP server. Snapcards wires its checkout,
+Prodigi and Mailpit stand-ins by hand in `program_commerce.cue`; a bridge's
+simulator is that pattern as a declaration.
+
+`targets` names the release targets the real container is deployed on. No
+release target lowers a bridge's container yet — the docker appliance runs no
+airlock and Cloudflare Containers is not built — so `targets` stays empty and
+naming one is refused.
+
+Where a bridge does not run, the program still releases and its effects exist,
+but each fails at once: the airlock settles the claimed effect `failed` with
+`{bridge, target, reason: "not deployed"}` and calls neither handler nor sink,
+so the row takes its `onError` arrow, no run is spent and no dead letter is left
+([Airlock](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-bridge-not-deployed)).
+That is the local stack for a bridge without a simulator, and every release
+target it does not name. The edge never dials a bridge's internal address. An
+explicitly declared [[edge-hatches|edge hatch implementation]] can instead
+provide a trusted Worker route; that route is separate from the bridge transport
+and grants its own privileged execution boundary.
+
+A target with effects still declares its clock where `meta.clocks` asks for one:
+the failure is settled in the airlock's ordinary run, which a cluster scaled to
+zero only reaches when the ticker wakes it.
 
 ## Activepieces
 

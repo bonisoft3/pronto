@@ -3688,6 +3688,10 @@ _pgrollDir: "services/database/pgroll"
 							if i.effect.secrets != _|_ {secrets: i.effect.secrets}
 							if i.effect.sink.credential != _|_ {credential: i.effect.sink.credential}
 							if i.effect.endowments != _|_ {endowments: i.effect.endowments}
+							if i.effect.sink.bridge != _|_ {
+								let b = E.code.state.bridges[i.effect.sink.bridge]
+								bridge: {name: i.effect.sink.bridge, targets: b.targets, simulated: b.simulator != _|_}
+							}
 						}
 					}}
 				}

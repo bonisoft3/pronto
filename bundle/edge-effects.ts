@@ -4,10 +4,7 @@
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-export interface EffectTarget {
-  kind: 'tsbifrost' | 'origin'
-  url?: string
-}
+export type EffectTarget = { kind: 'tsbifrost' | 'origin'; url?: string } | { kind: 'bridge'; bridge: string }
 
 async function resolveEffectTarget(appDir: string, name: string): Promise<EffectTarget> {
   try {
@@ -40,6 +37,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
       secrets?: string[]
       credential?: { header: string; scheme?: string; secret: string }
       endowments?: string[]
+      bridge?: { name: string; targets: string[]; simulated: boolean }
     }>
   }
   const manifestText = await Deno.readTextFile(path.join(appDir, 'services/airlock/effects.json'))
@@ -60,7 +58,9 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     }
     const handlerPath = path.join(appDir, decl.handler)
     await Deno.stat(handlerPath)
-    const target = await resolveEffectTarget(appDir, name)
+    // A bridge's binding is a container's internal address, which the edge
+    // never dials: the object settles its effect failed (mecha-edge's airlock.ts).
+    const target: EffectTarget = decl.bridge === undefined ? await resolveEffectTarget(appDir, name) : { kind: 'bridge', bridge: decl.bridge.name }
     const ident = `handler_${i}`
     imports.push(`import * as ${ident} from ${JSON.stringify(fromSrc(handlerPath))}`)
     entries.push(

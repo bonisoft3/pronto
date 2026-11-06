@@ -1647,7 +1647,12 @@ import (
 		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
 		effects?: [Name=string]: #ExternalEffect & {name: Name}
 		// An Airlock-facing endpoint of a declared container hatch.
-		bridges?: [Name=string]: mechaCluster.#Bridge & {name: Name}
+		// A bridge runs as its simulator in the local stack and as its container
+		// on the release targets it names; elsewhere its effects fail at run time
+		// ([[docs/container-bridges#Where a bridge runs]]). No release target
+		// lowers a bridge's container yet, so naming one is refused here rather
+		// than failing every call there.
+		bridges?: [Name=string]: mechaCluster.#Bridge & {name: Name, targets: []}
 		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
 		// Seed rows held as data rather than stated: a JSON file beside the
 		// program, outside its package, keyed by entity name —

@@ -381,7 +381,8 @@ the publish here and by a one-shot `seed-blobs` target in a cluster, and is then
 object like any other. Pages has no blob storage, and inlines them
 ([pages](#pages)). An effect's answered bytes are written at run time to the same
 bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-handler));
-uploads have no store at the edge yet.
+uploads have no store at the edge yet. A bridge's container is not deployed here,
+so its effects settle failed without a call ([where a bridge runs](container-bridges.md#where-a-bridge-runs)).
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
 ([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/pglite-workerd/README.md));
