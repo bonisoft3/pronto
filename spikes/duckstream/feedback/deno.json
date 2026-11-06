@@ -1,0 +1,15 @@
+{
+  "nodeModulesDir": "auto",
+  "imports": {
+    "@duckdb/node-api": "npm:@duckdb/node-api@1.4.3-r.3"
+  },
+  "tasks": {
+    "doctor": "deno run -A probe.ts doctor",
+    "build": "deno run -A probe.ts build",
+    "lint": "deno fmt --check && deno lint && deno check probe.ts",
+    "test": "deno run -A probe.ts test"
+  },
+  "fmt": {
+    "exclude": ["results/"]
+  }
+}

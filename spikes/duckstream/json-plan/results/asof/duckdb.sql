@@ -1,0 +1,2 @@
+WITH "__duckstream_0" AS (SELECT t.c0 AS c0, t.c5 AS c1 FROM (SELECT l.c0 AS c0, l.c1 AS c1, l.c2 AS c2, r.c0 AS c3, r.c1 AS c4, r.c2 AS c5 FROM (SELECT "id" AS c0, "team" AS c1, "moment" AS c2 FROM "fixtures_game") l ASOF LEFT JOIN (SELECT "team" AS c0, "moment" AS c1, "power" AS c2 FROM "fixtures_rating") r ON (l.c1 = r.c0) AND (l.c2 >= r.c1)) t)
+SELECT CAST(result.c0 AS INTEGER) AS "id", CAST(result.c1 AS DOUBLE) AS "power" FROM (SELECT v.c0 AS c0, v.c1 AS c1 FROM "__duckstream_0" v) result;

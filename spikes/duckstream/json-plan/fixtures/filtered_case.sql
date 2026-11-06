@@ -1,0 +1,2 @@
+CREATE TABLE samples(x BIGINT, keep BOOLEAN);
+CREATE VIEW result AS SELECT MIN(CASE WHEN keep THEN x ELSE NULL END) AS minimum FROM samples;

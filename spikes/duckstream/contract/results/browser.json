@@ -1,0 +1,719 @@
+{
+  "engine": "v1.5.4",
+  "schemas": {
+    "aggregate": [
+      [
+        "n",
+        "BIGINT"
+      ],
+      [
+        "total",
+        "BIGINT"
+      ]
+    ],
+    "join_aggregate": [
+      [
+        "region",
+        "VARCHAR"
+      ],
+      [
+        "n",
+        "BIGINT"
+      ],
+      [
+        "total",
+        "BIGINT"
+      ]
+    ],
+    "tumble": [
+      [
+        "window_start",
+        "TIMESTAMP"
+      ],
+      [
+        "window_end",
+        "TIMESTAMP"
+      ],
+      [
+        "n",
+        "BIGINT"
+      ],
+      [
+        "total",
+        "BIGINT"
+      ]
+    ],
+    "hop": [
+      [
+        "window_start",
+        "TIMESTAMP"
+      ],
+      [
+        "window_end",
+        "TIMESTAMP"
+      ],
+      [
+        "n",
+        "BIGINT"
+      ],
+      [
+        "total",
+        "BIGINT"
+      ]
+    ]
+  },
+  "cases": [
+    {
+      "name": "empty",
+      "queries": {
+        "aggregate": {
+          "arrowSchema": [
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "0",
+              null
+            ]
+          ]
+        },
+        "join_aggregate": {
+          "arrowSchema": [
+            [
+              "region",
+              "Utf8"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": []
+        },
+        "tumble": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": []
+        },
+        "hop": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": []
+        }
+      }
+    },
+    {
+      "name": "boundaries_nulls_and_duplicate_values",
+      "queries": {
+        "aggregate": {
+          "arrowSchema": [
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "8",
+              "147"
+            ]
+          ]
+        },
+        "join_aggregate": {
+          "arrowSchema": [
+            [
+              "region",
+              "Utf8"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "east",
+              "2",
+              "80"
+            ],
+            [
+              "north",
+              "2",
+              "30"
+            ],
+            [
+              "south",
+              "1",
+              "30"
+            ],
+            [
+              "west",
+              "1",
+              "7"
+            ]
+          ]
+        },
+        "tumble": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "1969-12-31T23:59:50.000Z",
+              "1970-01-01T00:00:00.000Z",
+              "1",
+              "7"
+            ],
+            [
+              "1970-01-01T00:00:00.000Z",
+              "1970-01-01T00:00:10.000Z",
+              "4",
+              "60"
+            ],
+            [
+              "1970-01-01T00:00:10.000Z",
+              "1970-01-01T00:00:20.000Z",
+              "2",
+              "80"
+            ],
+            [
+              "1970-01-01T00:00:20.000Z",
+              "1970-01-01T00:00:30.000Z",
+              "1",
+              null
+            ]
+          ]
+        },
+        "hop": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "1969-12-31T23:59:50.000Z",
+              "1970-01-01T00:00:00.000Z",
+              "1",
+              "7"
+            ],
+            [
+              "1969-12-31T23:59:55.000Z",
+              "1970-01-01T00:00:05.000Z",
+              "3",
+              "37"
+            ],
+            [
+              "1970-01-01T00:00:00.000Z",
+              "1970-01-01T00:00:10.000Z",
+              "4",
+              "60"
+            ],
+            [
+              "1970-01-01T00:00:05.000Z",
+              "1970-01-01T00:00:15.000Z",
+              "4",
+              "110"
+            ],
+            [
+              "1970-01-01T00:00:10.000Z",
+              "1970-01-01T00:00:20.000Z",
+              "2",
+              "80"
+            ],
+            [
+              "1970-01-01T00:00:15.000Z",
+              "1970-01-01T00:00:25.000Z",
+              "1",
+              null
+            ],
+            [
+              "1970-01-01T00:00:20.000Z",
+              "1970-01-01T00:00:30.000Z",
+              "1",
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "correction_and_retraction",
+      "queries": {
+        "aggregate": {
+          "arrowSchema": [
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "7",
+              "72"
+            ]
+          ]
+        },
+        "join_aggregate": {
+          "arrowSchema": [
+            [
+              "region",
+              "Utf8"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "south",
+              "1",
+              "30"
+            ],
+            [
+              "west",
+              "1",
+              "7"
+            ]
+          ]
+        },
+        "tumble": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "1969-12-31T23:59:50.000Z",
+              "1970-01-01T00:00:00.000Z",
+              "1",
+              "7"
+            ],
+            [
+              "1970-01-01T00:00:00.000Z",
+              "1970-01-01T00:00:10.000Z",
+              "3",
+              "30"
+            ],
+            [
+              "1970-01-01T00:00:10.000Z",
+              "1970-01-01T00:00:20.000Z",
+              "2",
+              "35"
+            ],
+            [
+              "1970-01-01T00:00:20.000Z",
+              "1970-01-01T00:00:30.000Z",
+              "1",
+              null
+            ]
+          ]
+        },
+        "hop": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "1969-12-31T23:59:50.000Z",
+              "1970-01-01T00:00:00.000Z",
+              "1",
+              "7"
+            ],
+            [
+              "1969-12-31T23:59:55.000Z",
+              "1970-01-01T00:00:05.000Z",
+              "2",
+              "7"
+            ],
+            [
+              "1970-01-01T00:00:00.000Z",
+              "1970-01-01T00:00:10.000Z",
+              "3",
+              "30"
+            ],
+            [
+              "1970-01-01T00:00:05.000Z",
+              "1970-01-01T00:00:15.000Z",
+              "3",
+              "70"
+            ],
+            [
+              "1970-01-01T00:00:10.000Z",
+              "1970-01-01T00:00:20.000Z",
+              "2",
+              "35"
+            ],
+            [
+              "1970-01-01T00:00:15.000Z",
+              "1970-01-01T00:00:25.000Z",
+              "2",
+              "-5"
+            ],
+            [
+              "1970-01-01T00:00:20.000Z",
+              "1970-01-01T00:00:30.000Z",
+              "1",
+              null
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_all_removes_old_results",
+      "queries": {
+        "aggregate": {
+          "arrowSchema": [
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "0",
+              null
+            ]
+          ]
+        },
+        "join_aggregate": {
+          "arrowSchema": [
+            [
+              "region",
+              "Utf8"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": []
+        },
+        "tumble": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": []
+        },
+        "hop": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": []
+        }
+      }
+    },
+    {
+      "name": "bigint_above_javascript_safe_integer",
+      "queries": {
+        "aggregate": {
+          "arrowSchema": [
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "1",
+              "9007199254740993"
+            ]
+          ]
+        },
+        "join_aggregate": {
+          "arrowSchema": [
+            [
+              "region",
+              "Utf8"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "wide",
+              "1",
+              "9007199254740993"
+            ]
+          ]
+        },
+        "tumble": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "1970-01-01T00:00:00.000Z",
+              "1970-01-01T00:00:10.000Z",
+              "1",
+              "9007199254740993"
+            ]
+          ]
+        },
+        "hop": {
+          "arrowSchema": [
+            [
+              "window_start",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "window_end",
+              "Timestamp<MICROSECOND>"
+            ],
+            [
+              "n",
+              "Int64"
+            ],
+            [
+              "total",
+              "Int64"
+            ]
+          ],
+          "rows": [
+            [
+              "1969-12-31T23:59:55.000Z",
+              "1970-01-01T00:00:05.000Z",
+              "1",
+              "9007199254740993"
+            ],
+            [
+              "1970-01-01T00:00:00.000Z",
+              "1970-01-01T00:00:10.000Z",
+              "1",
+              "9007199254740993"
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "versions": {
+    "wasm": "1.33.1-dev57.0",
+    "playwright": "1.59.1",
+    "esbuild": "0.27.2",
+    "chromium": "147.0.7727.15"
+  },
+  "compiler": {
+    "feldera": "SQL to DBSP compiler version 0.367.0",
+    "jar_sha256": "d08430de8b34ae997b72c44eb9a9274b25955a41af35e7c6997e7e459d3283ab"
+  },
+  "generated": {
+    "aggregate": {
+      "sha256": "eadee4ab820b599f07d4a00da33329c9ae887f7e45e37b403f4bf040f0a104b0",
+      "typedPlan": {
+        "backend": "bounded-contract-v1",
+        "rowType": "RecordType(BIGINT NOT NULL n, BIGINT total) NOT NULL",
+        "view": "result"
+      }
+    },
+    "join_aggregate": {
+      "sha256": "ee842ac6dad7d4ff6f75e17e262893a5dd9a2ebea6bd8e4bb7e275b71518b540",
+      "typedPlan": {
+        "backend": "bounded-contract-v1",
+        "rowType": "RecordType(VARCHAR CHARACTER SET \"UTF-8\" NOT NULL region, BIGINT NOT NULL n, BIGINT total) NOT NULL",
+        "view": "result"
+      }
+    },
+    "tumble": {
+      "sha256": "d4c7622c36816f415ec0bb7ae3b085f859b9035189206f918d819dc5ec2db7ac",
+      "typedPlan": {
+        "backend": "bounded-contract-v1",
+        "rowType": "RecordType(TIMESTAMP(6) NOT NULL window_start, TIMESTAMP(6) NOT NULL window_end, BIGINT NOT NULL n, BIGINT total) NOT NULL",
+        "view": "result"
+      }
+    },
+    "hop": {
+      "sha256": "ded0d521f8c695ebaf18f4e6330143d2e83dc2e699b3968630d8dc00bd8af389",
+      "typedPlan": {
+        "backend": "bounded-contract-v1",
+        "rowType": "RecordType(TIMESTAMP(6) NOT NULL window_start, TIMESTAMP(6) NOT NULL window_end, BIGINT NOT NULL n, BIGINT total) NOT NULL",
+        "view": "result"
+      }
+    }
+  },
+  "assertions": {
+    "cases": 5,
+    "querySnapshots": 20
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "backend" : "bounded-contract-v1",
+  "rowType" : "RecordType(TIMESTAMP(6) NOT NULL window_start, TIMESTAMP(6) NOT NULL window_end, BIGINT NOT NULL n, BIGINT total) NOT NULL",
+  "view" : "result"
+}

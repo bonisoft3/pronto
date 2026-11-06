@@ -9,10 +9,11 @@ import { hatchEnvironment, refuseMissingHatchSecrets } from './edge-hatches.ts'
 // 503 from the reset until the new directory is complete. A directory left
 // alone is handed this release's migrations (edge.ts's migrations.json), and
 // the object applies the ones its ledger lacks; one it refuses — built before
-// the ledger existed, or holding a file this release changed — rolls every
-// Worker this publish deployed back to the version it replaced, so the
-// refusal is the publish's and not the site's. The deployment's terminal
-// config is then held to the build's ICE servers. Where the release
+// the ledger existed, or holding a file this release changed — fails the
+// publish and attempts to restore every Worker's previous version. A Durable
+// Object schema migration can prevent rollback; the refusal and every failed
+// rollback are reported. The deployment's terminal config is then held to
+// the build's ICE servers. Where the release
 // carries a Cron Trigger, one poke ends the publish, so the object's clock
 // starts now rather than at its first visitor.
 //
@@ -24,6 +25,9 @@ import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { SEED_TYPES } from './edge-blobs.ts'
 import { builtRelease, deployedRelease, holdIceServers, releasedIceServers } from './edge-ice.ts'
+import { migrateKeptDirectory, previousDeployment, rollbackRefusedMigration } from './publish-edge-state.ts'
+import { keptJwtSecrets, validateJwtMode } from './publish-edge-secrets.ts'
+import { prepareStorage } from './publish-edge-storage.ts'
 import { releaseJwtSecret } from './edge-jwt.ts'
 import { requireLocalCluster } from './edge-deployment.ts'
 
@@ -77,7 +81,7 @@ function fail(msg: string): never {
 }
 
 const args = Deno.args.slice()
-const out = path.resolve(args.shift() ?? fail('usage: publish-edge.ts <out> --mecha <dir> [--reset] [--temporary]'))
+const out = path.resolve(args.shift() ?? fail('usage: publish-edge.ts <out> --mecha <dir> [--reset] [--temporary] [--keep-jwt-secret]'))
 if (args.shift() !== '--mecha') fail('--mecha names the mecha root')
 const mecha = path.resolve(args.shift() ?? fail('--mecha takes a value'))
 const flag = (name: string) => {
@@ -86,35 +90,35 @@ const flag = (name: string) => {
   return i >= 0
 }
 const reset = flag('--reset')
+const keepJwtSecret = flag('--keep-jwt-secret')
 // A throwaway Cloudflare account wrangler makes when none is logged in; it
 // expires unless claimed.
 const temporary = flag('--temporary') ? ['--temporary'] : []
 if (args.length) fail(`unknown arguments ${args.join(' ')}`)
+validateJwtMode(keepJwtSecret, reset, temporary.length > 0)
 const workerd = path.join(mecha, 'packages/pglite-workerd')
 const config = path.join(out, 'wrangler.jsonc')
+const settings = JSON.parse(await Deno.readTextFile(config)) as { name: string; durable_objects?: { bindings: { name: string; script_name?: string }[] }; routes?: { pattern: string }[] }
+let ssr = false
+try { ssr = (await Deno.stat(path.join(out, 'renderer.jsonc'))).isFile }
+catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+const authConfig = ssr && settings.durable_objects?.bindings.some((binding: { name: string; script_name?: string }) => binding.name === 'CLUSTER' && binding.script_name)
+  ? path.join(out, 'database.jsonc') : config
 
 async function run(cmd: string, args: string[], { cwd = out, env }: { cwd?: string; env?: Record<string, string> } = {}): Promise<string> {
   const r = await new Deno.Command(cmd, { args, cwd, env, stdin: 'null', stdout: 'piped', stderr: 'inherit' }).output()
   const text = new TextDecoder().decode(r.stdout)
-  if (!r.success) fail(`${cmd} ${args.join(' ')} exited ${r.code}:\n${text}`)
+  if (!r.success) throw new Error(`${cmd} ${args.join(' ')} exited ${r.code}:\n${text}`)
   return text
 }
 
-// By path: a bare `wrangler` on PATH can resolve to another install, and
-// where the npm backend puts its bin differs between mise versions.
-// The package's pinned node leads PATH for wrangler and its subprocesses.
-await run('mise', ['trust', '--yes', '--all'], { cwd: workerd })
-await run('mise', ['install', 'node', 'npm:wrangler'], { cwd: workerd })
-const wranglerBin = (await run('mise', ['which', 'wrangler'], { cwd: workerd })).trim()
-const node = (await run('mise', ['which', 'node'], { cwd: workerd })).trim()
-const nodeDir = path.dirname(node)
-const runEnv = { ...Deno.env.toObject(), PATH: `${nodeDir}${path.delimiter}${Deno.env.get('PATH') ?? ''}` }
-const wrangler = (args: string[]) => run(wranglerBin, args, { env: runEnv })
+const { wranglerTools } = await import(String(pathToFileURL(path.join(workerd, 'wrangler-tools.ts'))))
+const { wrangler, env } = await wranglerTools()
+const runWrangler = (args: string[]) => run(wrangler, args, { env })
 const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')
-const settings = JSON.parse(await Deno.readTextFile(config)) as { name: string; durable_objects?: { bindings: { name: string; script_name?: string }[] }; routes?: { pattern: string }[] }
 if (!settings.durable_objects) {
   if (reset) fail('--reset requires a cluster')
-  const deployed = await wrangler(['deploy', '--config', config, ...temporary])
+  const deployed = await runWrangler(['deploy', '--config', config, ...temporary])
   console.log(deployed)
   const origin = settings.routes?.length ? `https://${settings.routes[0].pattern}` : /https:\/\/\S+\.workers\.dev/.exec(deployed)?.[0] ?? fail('wrangler deploy named no workers.dev URL')
   await Deno.writeTextFile(path.join(out, 'origin.txt'), origin)
@@ -126,11 +130,12 @@ if (!settings.durable_objects) {
 
 const token = random()
 if (temporary.length) fail('Cluster releases require a Cloudflare account to preserve deployed secrets')
-const previous = await previousVersion(config)
-await requireLocalCluster({ config, name: settings.name, previous, wrangler })
-const jwtSecret = await releaseJwtSecret({
-  secret: Deno.env.get('JWT_SECRET'), config, previous, wrangler, random,
-})
+const previous = await previousVersion(authConfig)
+const authSettings = JSON.parse(await Deno.readTextFile(authConfig))
+await requireLocalCluster({ config: authConfig, name: authSettings.name, previous, wrangler: runWrangler })
+const jwtSecret = keepJwtSecret
+  ? (await keptJwtSecrets(authConfig, token, runWrangler), undefined)
+  : await releaseJwtSecret({ secret: Deno.env.get('JWT_SECRET'), config: authConfig, previous, wrangler: runWrangler, random })
 const secrets: Record<string, string> = { ...await hatchEnvironment(out, name => Deno.env.get(name)), IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}) }
 const turnId = Deno.env.get('CLOUDFLARE_TURN_KEY_ID')
 const turnToken = Deno.env.get('CLOUDFLARE_TURN_KEY_TOKEN')
@@ -142,23 +147,17 @@ if (turnId && turnToken) {
 /** The Workers this publish deploys, each with the version it replaces, for
  * the rollback a refused migration asks for; a first deploy has none. */
 const deployed: { config: string; previous: string | null }[] = []
-/** The version a Worker serves now; null before its first deploy, which
- * Cloudflare answers with error 10007 (no such Worker). */
 async function previousVersion(configPath: string): Promise<string | null> {
-  const r = await new Deno.Command(wranglerBin, { args: ['deployments', 'list', '--config', configPath, '--json'], cwd: out, env: runEnv, stdin: 'null', stdout: 'piped', stderr: 'piped' }).output()
-  const stderr = new TextDecoder().decode(r.stderr)
-  if (!r.success) {
-    if (stderr.includes('[code: 10007]')) return null
-    fail(`wrangler deployments list --config ${configPath} exited ${r.code}:\n${stderr}`)
-  }
-  const listed = JSON.parse(new TextDecoder().decode(r.stdout)) as { versions: { version_id: string }[] }[]
-  if (listed.at(-1)?.versions.length !== 1) fail('Release requires one active Worker version; finish the gradual deployment first')
-  const version = listed.at(-1)?.versions[0]?.version_id
-  if (!version) fail('Cloudflare returned no deployed version for an existing Worker')
-  return version
+  const listing = await new Deno.Command(wrangler, {
+    args: ['deployments', 'list', '--config', configPath, '--json'], cwd: out, env, stdin: 'null', stdout: 'piped', stderr: 'piped',
+  }).output()
+  return previousDeployment(listing)
 }
 async function deploy(configPath: string, ...flags: string[]): Promise<string> {
-  const text = await wrangler(['deploy', '--config', configPath, ...flags, ...temporary])
+  // wrangler cannot list a temporary account's deployments, so a temporary
+  // publish records no earlier version and cannot be rolled back.
+  const previous = temporary.length ? null : await previousVersion(configPath)
+  const text = await runWrangler(['deploy', '--config', configPath, ...flags, ...temporary])
   deployed.push({ config: configPath, previous })
   return text
 }
@@ -167,13 +166,26 @@ await refuseMissingHatchSecrets({
   configs: [config],
   temporary: !!temporary.length,
   deployedBefore: async configPath => await previousVersion(configPath) !== null,
-  wrangler,
+  wrangler: runWrangler,
 })
 const secretsDir = await Deno.makeTempDir({ prefix: 'publish-edge-' })
 const secretsFile = path.join(secretsDir, 'secrets.json')
 let deployedText: string
 try {
   await Deno.writeTextFile(secretsFile, JSON.stringify(secrets), { mode: 0o600 })
+  let compute
+  try { compute = JSON.parse(await Deno.readTextFile(path.join(out, 'src/compute.json'))) }
+  catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+  for (const companion of compute?.deployments ?? []) {
+    if (!/^compute\/(queries|execution|reader)\/wrangler\.jsonc$/.test(companion)) throw new Error(`invalid computation deployment: ${companion}`)
+    console.log(await deploy(path.join(out, companion), '--durable-objects-code-update-mode', 'immediate'))
+  }
+  if (ssr) {
+    console.log(await deploy(path.join(out, 'renderer.jsonc'), '--durable-objects-code-update-mode', 'immediate'))
+    if (authConfig !== config) {
+      console.log(await deploy(authConfig, '--secrets-file', secretsFile, '--durable-objects-code-update-mode', 'immediate'))
+    }
+  }
   // The object restarts on the new code rather than at its next idle.
   deployedText = await deploy(config, '--secrets-file', secretsFile, '--durable-objects-code-update-mode', 'immediate')
 } finally {
@@ -220,7 +232,7 @@ async function settled(after: string) {
     } else {
       streak = 0
     }
-    if (Date.now() - t0 > 120_000) fail(`${origin}/import/status still answers ${res.status} two minutes after ${after}`)
+    if (Date.now() - t0 > 120_000) throw new Error(`${origin}/import/status still answers ${res.status} two minutes after ${after}`)
     await new Promise((r) => setTimeout(r, 2000))
   }
 }
@@ -247,6 +259,7 @@ try {
 const { load } = await import(String(pathToFileURL(path.join(workerd, 'load.ts'))))
 const { isSeedScript } = await import(String(pathToFileURL(path.join(workerd, 'scripts.ts')))) as { isSeedScript: (name: string) => boolean }
 const loaded = await load(path.join(out, 'pgdata'), send, { reset })
+await prepareStorage(send, status => console.log(JSON.stringify({ storage: status })))
 if ('skipped' in loaded) {
   let migrationsBody: string
   try {
@@ -257,28 +270,24 @@ if ('skipped' in loaded) {
     if (e instanceof Deno.errors.NotFound) migrationsBody = '[]'
     else throw e
   }
-  let migrated: Response = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
-  for (let attempt = 0; attempt < 5 && migrated.status === 401; attempt++) {
-    await new Promise((r) => setTimeout(r, 2000))
-    migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
-  }
-  let answer = await migrated.text()
   let lost = false
-  // Only a 409 says nothing moved. Any other failure may have lost the answer to migrations that
-  // landed, and old code over migrated rows is worse than either: the ledger says which it was.
-  for (let attempt = 0; attempt < 5 && !migrated.ok && migrated.status !== 409; attempt++) {
-    console.log(`the migration answered ${migrated.status}; asking the ledger again once the object settles`)
-    lost = true
-    await settled('the migration')
-    migrated = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
-    answer = await migrated.text()
-  }
-  if (migrated.status === 409) {
-    for (const { config: configPath, previous } of deployed.reverse()) {
-      if (previous === null) continue
-      console.log(await wrangler(['rollback', previous, '--config', configPath, '--yes', '--message', 'the data directory refused this release\'s migrations']))
+  const migrated = await migrateKeptDirectory(async () => {
+    let response = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
+    for (let attempt = 0; attempt < 5 && response.status === 401; attempt++) {
+      await response.body?.cancel()
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      response = await send('migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: migrationsBody })
     }
-    fail(`the data directory the object kept refused this release's migrations, and the Workers are rolled back: ${answer}`)
+    return response
+  }, () => settled('the migration'), message => { lost = true; console.error(`publish-edge: ${message}`) })
+  const { answer } = migrated
+  if (migrated.status === 409 || migrated.status === 422) {
+    await rollbackRefusedMigration(
+      `the data directory refused this release's migrations: ${migrated.status} ${answer}`,
+      deployed,
+      (configPath, previous) => runWrangler(['rollback', previous, '--config', configPath, '--yes', '--message', "the data directory refused this release's migrations"]),
+      message => console.error(`publish-edge: ${message}`),
+    )
   }
   if (!migrated.ok) fail(`the migrations' outcome is unknown, so the Workers stay on this release: ${migrated.status} ${answer}`)
   console.log(answer)
@@ -290,9 +299,6 @@ if ('skipped' in loaded) {
   }
   if (lost || (JSON.parse(answer) as { applied: string[] }).applied.length) await settled('the migration')
 }
-let ssr = false
-try { ssr = (await Deno.stat(path.join(out, 'renderer/assets.json'))).isFile }
-catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (ssr) {
   const warm = await edgeFetch(`${origin}/`, { headers: { accept: 'text/html' } })
   await warm.text()
@@ -301,7 +307,7 @@ if (ssr) {
 // What a page reads at the deployment's door is what the build wrote: its
 // terminal config carries the target's ICE servers (edge-ice.ts).
 await holdIceServers(deployedRelease(origin, edgeFetch), await releasedIceServers(builtRelease(path.join(out, 'public'))), origin)
-const triggers = deployedSettings.triggers
+const triggers = authSettings.triggers
 if (triggers) {
   let poked!: Response
   let report = ''

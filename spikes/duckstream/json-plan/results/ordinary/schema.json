@@ -1,0 +1,177 @@
+{
+  "inputs" : [ {
+    "name" : "teams",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "id",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "UUID"
+      },
+      "unused" : false
+    }, {
+      "name" : "day",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "DATE"
+      },
+      "unused" : false
+    }, {
+      "name" : "rating",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "DOUBLE"
+      },
+      "unused" : false
+    }, {
+      "name" : "score",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "price",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "precision" : 18,
+        "scale" : 2,
+        "type" : "DECIMAL"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false,
+    "foreign_keys" : [ ]
+  }, {
+    "name" : "standings",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "id",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "UUID"
+      },
+      "unused" : false
+    }, {
+      "name" : "position",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false,
+    "foreign_keys" : [ ]
+  } ],
+  "outputs" : [ {
+    "name" : "error_view",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "table_or_view_name",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "message",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "metadata",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  }, {
+    "name" : "result",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "id",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "UUID"
+      },
+      "unused" : false
+    }, {
+      "name" : "day",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "DATE"
+      },
+      "unused" : false
+    }, {
+      "name" : "price",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "precision" : 18,
+        "scale" : 2,
+        "type" : "DECIMAL"
+      },
+      "unused" : false
+    }, {
+      "name" : "rating",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "DOUBLE"
+      },
+      "unused" : false
+    }, {
+      "name" : "adjusted",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "BIGINT"
+      },
+      "unused" : false
+    }, {
+      "name" : "doubled",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "DOUBLE"
+      },
+      "unused" : false
+    }, {
+      "name" : "position",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "score",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  } ]
+}

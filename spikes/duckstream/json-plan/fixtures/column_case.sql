@@ -1,0 +1,2 @@
+CREATE TABLE t ("a" INTEGER, "A" INTEGER);
+CREATE VIEW result AS SELECT "a", "A" FROM t;

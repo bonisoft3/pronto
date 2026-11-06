@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "checks": [
+    "CDC commit replay after local reopen is deduplicated before acknowledgement",
+    "publication failure rolls back result, receipt and transactional hook",
+    "post-COMMIT acknowledgement loss and reopen replay reuse receipt without rerunning WASM",
+    "overlapping reversed completions and reordered sink delivery never regress keys",
+    "candidate, publication and output-version conflicts fail; unauthorized writer fails",
+    "versioned tombstone prevents resurrection by delayed old output",
+    "source rollback creates no computation input",
+    "primary-key mutation fails before applying or acknowledging source transaction",
+    "concurrent PostgreSQL sink sessions serialize monotone replacement"
+  ],
+  "source_commits": 3,
+  "retained_snapshots": 3,
+  "completed_jobs": 3,
+  "canonical_candidates": 21,
+  "accepted_output_effects": 16,
+  "refused_primary_key_transactions": 1,
+  "concurrent_sink_fixture": {
+    "newest_version": 101,
+    "accepted_versions": [
+      101
+    ]
+  },
+  "engines": {
+    "source_sink": "PostgreSQL 17.6",
+    "stream": "DuckDB 1.4.3",
+    "compiler": "Feldera 0.367.0",
+    "computation": "pure WASM i32 double"
+  },
+  "fault_model": "deterministic application boundary injections, local-store close/reopen; no OS kill, HA or network partition"
+}

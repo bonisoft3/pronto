@@ -1,0 +1,129 @@
+{
+  "bootstrap": [
+    {
+      "id": 1,
+      "total": 30
+    },
+    {
+      "id": 2,
+      "total": 30
+    }
+  ],
+  "tumble_boundaries": [
+    {
+      "start": "2026-01-01T00:00:00",
+      "stop": "2026-01-01T00:00:05",
+      "n": 2,
+      "total": 30
+    },
+    {
+      "start": "2026-01-01T00:00:05",
+      "stop": "2026-01-01T00:00:10",
+      "n": 1,
+      "total": 30
+    }
+  ],
+  "hop_overlap": [
+    {
+      "start": "2025-12-31T23:59:55",
+      "stop": "2026-01-01T00:00:05",
+      "n": 2,
+      "total": 30
+    },
+    {
+      "start": "2026-01-01T00:00:00",
+      "stop": "2026-01-01T00:00:10",
+      "n": 3,
+      "total": 60
+    },
+    {
+      "start": "2026-01-01T00:00:05",
+      "stop": "2026-01-01T00:00:15",
+      "n": 1,
+      "total": 30
+    }
+  ],
+  "late_insert": [
+    {
+      "id": 1,
+      "total": 37
+    },
+    {
+      "id": 2,
+      "total": 30
+    }
+  ],
+  "update": [
+    {
+      "id": 1,
+      "total": 42
+    },
+    {
+      "id": 2,
+      "total": 30
+    }
+  ],
+  "delete": [
+    {
+      "id": 1,
+      "total": 30
+    },
+    {
+      "id": 2,
+      "total": 30
+    }
+  ],
+  "one_transaction_with_delayed_account_connector": [
+    {
+      "account_revision": 0,
+      "event_revision": 1
+    }
+  ],
+  "connectors_converge": [
+    {
+      "account_revision": 1,
+      "event_revision": 1
+    }
+  ],
+  "idle_six_seconds_does_not_close_event_time_window": [],
+  "event_time_progress_closes_window": [
+    {
+      "n": 1,
+      "total": 10
+    }
+  ],
+  "checkpoint_response": {
+    "status": 501,
+    "body": "{\"message\":\"Cannot use enterprise-only feature (checkpoint) in Feldera community edition.\",\"error_code\":\"EnterpriseFeature\",\"details\":{\"feature\":\"checkpoint\"}}"
+  },
+  "pause_resume": [
+    {
+      "id": 1,
+      "total": 31
+    },
+    {
+      "id": 2,
+      "total": 30
+    }
+  ],
+  "restart_without_checkpoint_only_new_rows": [
+    {
+      "id": 3,
+      "total": 50
+    }
+  ],
+  "source_rows_still_present": [
+    {
+      "id": 1,
+      "total": 31
+    },
+    {
+      "id": 2,
+      "total": 30
+    },
+    {
+      "id": 3,
+      "total": 50
+    }
+  ]
+}

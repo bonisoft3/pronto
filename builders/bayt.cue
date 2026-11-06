@@ -210,6 +210,7 @@ import (
 				"ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
 				"ARG BAYT_RUNTIME",
 				"ENV BAYT_RUNTIME=$BAYT_RUNTIME",
+				"ENV FELDERA_COMPILATION_PROFILE=unoptimized",
 			]
 			copy: [{srcs: ["monorepo/*.yaml"], dst: "./", parents: true}]
 		}

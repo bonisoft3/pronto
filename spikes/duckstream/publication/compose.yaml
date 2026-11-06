@@ -1,0 +1,13 @@
+name: pronto-duckstream-publication
+services:
+  postgres:
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    environment:
+      POSTGRES_PASSWORD: spike
+      POSTGRES_DB: spike
+    command: [postgres, -c, wal_level=logical]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d spike"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

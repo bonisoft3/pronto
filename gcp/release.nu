@@ -1,20 +1,16 @@
-# release.nu: release@gcp, an app on Cloud Run beside Cloud SQL, with gcloud
-# alone (docs/release-targets.md#gcp).
-#
-# The app's release.cue defines `GCP: schema.#Release & {...}` and
-# `gcpRelease: schema.#Build & {release: GCP}` (gcp/schema). Each resource is
-# described before it is made, so a release runs again unchanged: the same
-# images push the same digests and roll nothing, and initdb finds its marker.
+# GCP releases use the native Kubernetes stack when GKE is declared;
+# otherwise they run Cloud Run beside Cloud SQL.
 
 use ../k8s/release.nu [resolve-app]
 use verify.nu [start-drivers go-drivers finish-drivers drivers-log cancel-drivers plan-of]
 use build.nu [builder stamp gc exists build-account push-images]
+use ../k8s/release.nu
+alias release-gke = release
 
-# The services this target runs; anything else in the app's compose project
-# needs what it does not build yet (PENDING.md#release-targets).
+# Cloud Run has no durable filesystem for the native pipeline services.
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
 # compose's clock is not one of them: Cloud Scheduler is the ticker's clock here.
-const unbuilt = ["mesh-events" "conduit" "transform" "compute" "rclone-s3" "imgproxy"]
+const unbuilt = ["feldera" "redis" "mesh-events" "conduit" "transform" "compute" "rclone-s3" "imgproxy"]
 
 def render [cue_path: string, data?: string]: nothing -> record {
 	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
@@ -350,7 +346,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	let services = (do { cd $app_info.dir; ^docker compose --profile "*" config --services } | lines)
 	let refused = ($services | where {|s| $s in $unbuilt })
 	if ($refused | is-not-empty) {
-		error make {msg: $"release@gcp does not run ($refused | str join ', ') yet \(PENDING.md#release-targets\)"}
+		error make {msg: $"Cloud Run does not run ($refused | str join ', '); declare GKE in release.cue for the native Kubernetes stack"}
 	}
 	if $dry_run {
 		print $plan0.jobYaml; print "---"; print $plan0.serviceYaml
@@ -359,7 +355,7 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 	}
 
 	let name = (^cue export --expression GCP.name --out text $app_info.cue_path | str trim)
-	# The cluster's migrate step runs where the app has pgroll migrations to carry, as in compose.
+	# The cluster's migrate step runs where the app has ledger migrations or permissions to reconcile, as in compose.
 	let has_migrate = ("migrate" in $services)
 	let has_render = ("render" in $services)
 	let has_airlock = ("airlock" in $services)
@@ -507,6 +503,17 @@ export def main [
 	let dry_run = ($dry_run or (do $given DRY_RUN))
 	let snapshot = ($snapshot or (do $given SNAPSHOT))
 	let no_gate = ($no_gate or (do $given NO_GATE))
+	let gke = (do { ^cue export --expression GKE --out json $app_info.cue_path } | complete)
+	if $gke.exit_code != 0 and not ($gke.stderr | str contains 'reference "GKE" not found') {
+		error make {msg: $"($app_info.cue_path): ($gke.stderr)"}
+	}
+	if $gke.exit_code == 0 {
+		if $delete or ($preview | is-not-empty) {
+			error make {msg: "GKE releases do not support Cloud Run preview lifecycle flags"}
+		}
+		release-gke --app $app_info.dir --cluster-env gke --snapshot=$snapshot --dry-run=$dry_run
+		return
+	}
 	if $delete {
 		if ($preview | is-empty) { error make {msg: "--delete removes a preview: name it with --preview; a release is never deleted here"} }
 		delete-preview (plan-of $app_info.cue_path $preview)

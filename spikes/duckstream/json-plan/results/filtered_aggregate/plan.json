@@ -1,0 +1,84 @@
+{
+  "error_view": {
+    "rels": [
+      {
+        "id": 0,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "feldera_error_table"
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "result": {
+    "rels": [
+      {
+        "id": 1,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "samples"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 2,
+        "relOp": "LogicalProject",
+        "fields": [
+          "x",
+          "$f1"
+        ],
+        "exprs": [
+          {
+            "input": 0,
+            "name": "$0"
+          },
+          {
+            "op": {
+              "name": "IS TRUE",
+              "kind": "IS_TRUE",
+              "syntax": "POSTFIX"
+            },
+            "operands": [
+              {
+                "input": 1,
+                "name": "$1"
+              }
+            ]
+          }
+        ],
+        "inputs": [
+          1
+        ]
+      },
+      {
+        "id": 3,
+        "relOp": "LogicalAggregate",
+        "group": [],
+        "aggs": [
+          {
+            "agg": {
+              "name": "SUM",
+              "kind": "SUM",
+              "syntax": "FUNCTION"
+            },
+            "type": {
+              "type": "BIGINT",
+              "nullable": true
+            },
+            "distinct": false,
+            "operands": [
+              0
+            ],
+            "name": "total"
+          }
+        ],
+        "inputs": [
+          2
+        ]
+      }
+    ]
+  }
+}

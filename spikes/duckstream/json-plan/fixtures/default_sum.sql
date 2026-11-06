@@ -1,0 +1,2 @@
+CREATE TABLE t (x BIGINT);
+CREATE VIEW result AS SELECT SUM(x) AS total FROM t;

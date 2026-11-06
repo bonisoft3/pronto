@@ -1,0 +1,4 @@
+{
+  "view" : "result",
+  "rowType" : "RecordType:peek_no_expand(VARCHAR CHARACTER SET \"UTF-8\" NOT NULL region, BIGINT NOT NULL order_count, BIGINT NOT NULL total) NOT NULL"
+}

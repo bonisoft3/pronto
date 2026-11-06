@@ -112,6 +112,19 @@ const SQL_CMP: Record<string, string> = {
   "_!=_": "<>",
 };
 
+// PostgreSQL 18 kwlist.h: RESERVED_KEYWORD and TYPE_FUNC_NAME_KEYWORD cannot
+// be bare column references. Keep other lowercase names stable for migration ledgers.
+// https://github.com/postgres/postgres/blob/REL_18_0/src/include/parser/kwlist.h
+const SQL_COLUMN_KEYWORDS = new Set(`all analyse analyze and any array as asc asymmetric authorization binary both
+case cast check collate collation column concurrently constraint create cross current_catalog current_date
+current_role current_schema current_time current_timestamp current_user default deferrable desc distinct do
+else end except false fetch for foreign freeze from full grant group having ilike in initially inner intersect
+into is isnull join lateral leading left like limit localtime localtimestamp natural not notnull null offset on
+only or order outer overlaps placing primary references returning right select session_user similar some
+symmetric system_user table tablesample then to trailing true union unique user using variadic verbose when
+where window with`.split(/\s+/));
+const sqlIdentifier = (name: string) => /^[a-z_][a-z0-9_$]*$/.test(name) && !SQL_COLUMN_KEYWORDS.has(name)
+  ? name : `"${name.replaceAll('"', '""')}"`;
 const sqlString = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
 // CEL's trim() strips Unicode White_Space; Postgres's btrim() and RE2's \s strip
@@ -133,15 +146,15 @@ function sqlConst(c: Const): string {
 function sql(e: Expr, col: string | null): { text: string; prec: number } {
   if (e.constExpr !== undefined) return { text: sqlConst(e.constExpr), prec: 4 };
   if (isThis(e)) {
-    return col === null ? unsupported("bare `this` under the row convention") : { text: col, prec: 4 };
+    return col === null ? unsupported("bare `this` under the row convention") : { text: sqlIdentifier(col), prec: 4 };
   }
   const sel = e.selectExpr;
   if (sel !== undefined) {
     if (!isThis(sel.operand)) return unsupported(`select off ${JSON.stringify(sel.operand)}`);
     if (col !== null) return unsupported(`this.${sel.field} under the field convention`);
     return sel.testOnly === true
-      ? { text: `${sel.field} IS NOT NULL`, prec: 3 }
-      : { text: sel.field, prec: 4 };
+      ? { text: `${sqlIdentifier(sel.field)} IS NOT NULL`, prec: 3 }
+      : { text: sqlIdentifier(sel.field), prec: 4 };
   }
   const c = call(e);
   if (c === undefined) return unsupported(`node ${JSON.stringify(e)}`);
@@ -196,7 +209,7 @@ export function sqlCheck(ir: ParsedExpr, col: string | null, json = false): stri
     if (col === null) return unsupported("a json constraint under the row convention");
     // A CHECK holds no subquery, so a nested value is walked by a function
     // written once (type-sql.ts), handed the shape the constraint states.
-    return `public.portable_shape_valid(${col}, ${sqlString(JSON.stringify(shapeTree(ir)))}::jsonb)`;
+    return `public.portable_shape_valid(${sqlIdentifier(col)}, ${sqlString(JSON.stringify(shapeTree(ir)))}::jsonb)`;
   }
   return sql(ir.expr, col).text;
 }

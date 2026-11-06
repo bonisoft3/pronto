@@ -1,0 +1,187 @@
+{
+  "error_view": {
+    "rels": [
+      {
+        "id": 0,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "feldera_error_table"
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "result": {
+    "rels": [
+      {
+        "id": 1,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "candidates"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 2,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "candidates"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 3,
+        "relOp": "LogicalProject",
+        "fields": [
+          "output_key",
+          "input_version"
+        ],
+        "exprs": [
+          {
+            "input": 0,
+            "name": "$0"
+          },
+          {
+            "input": 1,
+            "name": "$1"
+          }
+        ],
+        "inputs": [
+          2
+        ]
+      },
+      {
+        "id": 4,
+        "relOp": "LogicalAggregate",
+        "group": [
+          0
+        ],
+        "aggs": [
+          {
+            "agg": {
+              "name": "MAX",
+              "kind": "MAX",
+              "syntax": "FUNCTION"
+            },
+            "type": {
+              "type": "BIGINT",
+              "nullable": false
+            },
+            "distinct": false,
+            "operands": [
+              1
+            ],
+            "name": "input_version"
+          }
+        ],
+        "inputs": [
+          3
+        ]
+      },
+      {
+        "id": 5,
+        "relOp": "LogicalJoin",
+        "condition": {
+          "pos": {
+            "line": 15,
+            "column": 4,
+            "end_line": 15,
+            "end_column": 68
+          },
+          "op": {
+            "name": "AND",
+            "kind": "AND",
+            "syntax": "BINARY"
+          },
+          "operands": [
+            {
+              "pos": {
+                "line": 15,
+                "column": 4,
+                "end_line": 15,
+                "end_column": 30
+              },
+              "op": {
+                "name": "=",
+                "kind": "EQUALS",
+                "syntax": "BINARY"
+              },
+              "operands": [
+                {
+                  "input": 0,
+                  "name": "$0"
+                },
+                {
+                  "input": 4,
+                  "name": "$4"
+                }
+              ]
+            },
+            {
+              "pos": {
+                "line": 15,
+                "column": 36,
+                "end_line": 15,
+                "end_column": 68
+              },
+              "op": {
+                "name": "=",
+                "kind": "EQUALS",
+                "syntax": "BINARY"
+              },
+              "operands": [
+                {
+                  "input": 1,
+                  "name": "$1"
+                },
+                {
+                  "input": 5,
+                  "name": "$5"
+                }
+              ]
+            }
+          ]
+        },
+        "joinType": "inner",
+        "inputs": [
+          1,
+          4
+        ]
+      },
+      {
+        "id": 6,
+        "relOp": "LogicalProject",
+        "fields": [
+          "output_key",
+          "input_version",
+          "value",
+          "deleted"
+        ],
+        "exprs": [
+          {
+            "input": 0,
+            "name": "$0"
+          },
+          {
+            "input": 1,
+            "name": "$1"
+          },
+          {
+            "input": 2,
+            "name": "$2"
+          },
+          {
+            "input": 3,
+            "name": "$3"
+          }
+        ],
+        "inputs": [
+          5
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+CREATE TABLE typed_values(i INTEGER);
+CREATE VIEW result AS
+SELECT (CASE WHEN i IS NULL THEN CAST(0 AS BIGINT) ELSE i END) + 1 AS total
+FROM typed_values;

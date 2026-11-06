@@ -1,0 +1,165 @@
+{
+  "error_view": {
+    "rels": [
+      {
+        "id": 0,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "feldera_error_table"
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "result": {
+    "rels": [
+      {
+        "id": 1,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "events"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 2,
+        "relOp": "LogicalFilter",
+        "condition": {
+          "pos": {
+            "line": 6,
+            "column": 7,
+            "end_line": 6,
+            "end_column": 18
+          },
+          "op": {
+            "name": ">",
+            "kind": "GREATER_THAN",
+            "syntax": "BINARY"
+          },
+          "operands": [
+            {
+              "input": 2,
+              "name": "$2"
+            },
+            {
+              "literal": 0,
+              "type": {
+                "type": "BIGINT",
+                "nullable": false
+              }
+            }
+          ]
+        },
+        "inputs": [
+          1
+        ]
+      },
+      {
+        "id": 3,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "accounts"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 4,
+        "relOp": "LogicalJoin",
+        "condition": {
+          "pos": {
+            "line": 5,
+            "column": 34,
+            "end_line": 5,
+            "end_column": 44
+          },
+          "op": {
+            "name": "=",
+            "kind": "EQUALS",
+            "syntax": "BINARY"
+          },
+          "operands": [
+            {
+              "input": 0,
+              "name": "$0"
+            },
+            {
+              "input": 3,
+              "name": "$3"
+            }
+          ]
+        },
+        "joinType": "inner",
+        "inputs": [
+          2,
+          3
+        ]
+      },
+      {
+        "id": 5,
+        "relOp": "LogicalProject",
+        "fields": [
+          "region",
+          "amount"
+        ],
+        "exprs": [
+          {
+            "input": 4,
+            "name": "$4"
+          },
+          {
+            "input": 2,
+            "name": "$2"
+          }
+        ],
+        "inputs": [
+          4
+        ]
+      },
+      {
+        "id": 6,
+        "relOp": "LogicalAggregate",
+        "group": [
+          0
+        ],
+        "aggs": [
+          {
+            "agg": {
+              "name": "COUNT",
+              "kind": "COUNT",
+              "syntax": "FUNCTION_STAR"
+            },
+            "type": {
+              "type": "BIGINT",
+              "nullable": false
+            },
+            "distinct": false,
+            "operands": [],
+            "name": "n"
+          },
+          {
+            "agg": {
+              "name": "SUM",
+              "kind": "SUM",
+              "syntax": "FUNCTION"
+            },
+            "type": {
+              "type": "BIGINT",
+              "nullable": true
+            },
+            "distinct": false,
+            "operands": [
+              1
+            ],
+            "name": "total"
+          }
+        ],
+        "inputs": [
+          5
+        ]
+      }
+    ]
+  }
+}

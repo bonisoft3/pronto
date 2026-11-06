@@ -1,0 +1,189 @@
+{
+  "error_view": {
+    "rels": [
+      {
+        "id": 0,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "feldera_error_table"
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "result": {
+    "rels": [
+      {
+        "id": 1,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "events"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 2,
+        "relOp": "LogicalTableFunctionScan",
+        "invocation": {
+          "pos": {
+            "line": 4,
+            "column": 12,
+            "end_line": 4,
+            "end_column": 87
+          },
+          "op": {
+            "name": "HOP",
+            "kind": "OTHER_FUNCTION",
+            "syntax": "FUNCTION"
+          },
+          "operands": [
+            {
+              "pos": {
+                "line": 4,
+                "column": 30,
+                "end_line": 4,
+                "end_column": 43
+              },
+              "op": {
+                "name": "DESCRIPTOR",
+                "kind": "DESCRIPTOR",
+                "syntax": "FUNCTION"
+              },
+              "operands": [
+                {
+                  "input": 1,
+                  "name": "$1"
+                }
+              ]
+            },
+            {
+              "literal": 5000,
+              "type": {
+                "type": "INTERVAL_SECOND",
+                "nullable": false,
+                "precision": 10,
+                "scale": 6
+              }
+            },
+            {
+              "literal": 10000,
+              "type": {
+                "type": "INTERVAL_SECOND",
+                "nullable": false,
+                "precision": 10,
+                "scale": 6
+              }
+            }
+          ]
+        },
+        "rowType": {
+          "fields": [
+            {
+              "type": "INTEGER",
+              "nullable": false,
+              "name": "id"
+            },
+            {
+              "type": "TIMESTAMP",
+              "nullable": false,
+              "precision": 6,
+              "name": "ts"
+            },
+            {
+              "type": "BIGINT",
+              "nullable": true,
+              "name": "amount"
+            },
+            {
+              "type": "TIMESTAMP",
+              "nullable": false,
+              "precision": 6,
+              "name": "window_start"
+            },
+            {
+              "type": "TIMESTAMP",
+              "nullable": false,
+              "precision": 6,
+              "name": "window_end"
+            }
+          ],
+          "nullable": false
+        },
+        "inputs": [
+          1
+        ]
+      },
+      {
+        "id": 3,
+        "relOp": "LogicalProject",
+        "fields": [
+          "window_start",
+          "window_end",
+          "amount"
+        ],
+        "exprs": [
+          {
+            "input": 3,
+            "name": "$3"
+          },
+          {
+            "input": 4,
+            "name": "$4"
+          },
+          {
+            "input": 2,
+            "name": "$2"
+          }
+        ],
+        "inputs": [
+          2
+        ]
+      },
+      {
+        "id": 4,
+        "relOp": "LogicalAggregate",
+        "group": [
+          0,
+          1
+        ],
+        "aggs": [
+          {
+            "agg": {
+              "name": "COUNT",
+              "kind": "COUNT",
+              "syntax": "FUNCTION_STAR"
+            },
+            "type": {
+              "type": "BIGINT",
+              "nullable": false
+            },
+            "distinct": false,
+            "operands": [],
+            "name": "n"
+          },
+          {
+            "agg": {
+              "name": "SUM",
+              "kind": "SUM",
+              "syntax": "FUNCTION"
+            },
+            "type": {
+              "type": "BIGINT",
+              "nullable": true
+            },
+            "distinct": false,
+            "operands": [
+              2
+            ],
+            "name": "total"
+          }
+        ],
+        "inputs": [
+          3
+        ]
+      }
+    ]
+  }
+}

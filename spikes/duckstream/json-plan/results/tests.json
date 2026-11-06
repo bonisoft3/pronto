@@ -1,0 +1,946 @@
+{
+  "feldera": "SQL to DBSP compiler version 0.367.0",
+  "jar_sha256": "d08430de8b34ae997b72c44eb9a9274b25955a41af35e7c6997e7e459d3283ab",
+  "deno": "2.9.7",
+  "duckdb_package": "@duckdb/node-api@1.4.3-r.3",
+  "engine": "v1.4.3",
+  "comparisons": 39,
+  "rejected": {
+    "lateness": "LATENESS",
+    "append_only": "properties",
+    "emit_final": "LATENESS",
+    "default_value": "default",
+    "large_literal": "unsafe JSON integer",
+    "column_case": "case collision",
+    "output_case": "case collision",
+    "table_case": "case collision",
+    "view_table_case": "case collision",
+    "unused_lateness": "LATENESS",
+    "decimal_arithmetic": "arithmetic INTEGER/BIGINT/DOUBLE",
+    "decimal_narrowing": "lossless DECIMAL cast",
+    "bounded_varchar_numeric": "bounded VARCHAR cast",
+    "bounded_varchar_text": "bounded VARCHAR cast",
+    "live_now": "operator now",
+    "window_offset": "window offset",
+    "nullable_timestamp": "non-null TIMESTAMP",
+    "window_analytic": "node LogicalWindow",
+    "calendar_interval": "fixed interval literal",
+    "timestamp_literal_micros": "TIMESTAMP literal with exact exported milliseconds",
+    "dynamic_divisor": "integer division/modulo by positive literal",
+    "substring_negative": "SUBSTRING positive literal start"
+  },
+  "checks": [
+    "quiet SUM/MIN identical exports; native results differ",
+    "-v 1 restores aggregate calls",
+    "optimized NOW identical to plain source",
+    "unused UDF declaration identical to plain source",
+    "optimized DISTINCT uses supported grouped operators",
+    "emit_final retained and independently refused",
+    "unsafe numeric JSON rejected before rounding",
+    "noninteger numeric tokens retained verbatim for typed DOUBLE literals",
+    "outer joins preserve unmatched rows and duplicate matches",
+    "UUID DATE DOUBLE and DECIMAL native projection with declared types",
+    "MIN MAX AVG DOUBLE groups and all-null groups",
+    "DECIMAL(28,8) exact limits and overflow; invalid precision/scale rejected",
+    "decimal arithmetic and narrowing casts refused",
+    "bounded numeric/text VARCHAR casts refused; native widths do not constrain longer values",
+    "integer arithmetic overflow fails before final projection",
+    "overflow fails",
+    "nonfinite timestamp fails including COUNT-only query",
+    "COUNT/SUM declared nullability retained",
+    "shared local-view CTEs and selected output translation",
+    "timestamp arithmetic uses exact micros and signed truncation, nullable extrema, overflow and nonfinite refusal",
+    "SUM0 preserves empty COUNT DISTINCT rewrite and duplicate bags",
+    "positive literal integer division/modulo, negative epoch floor arithmetic, Unicode POSITION/SUBSTRING and nulls",
+    "dynamic integer SUBSTRING bounds preserve nulls and Unicode; nonpositive starts and negative lengths fail",
+    "sub-millisecond TIMESTAMP literals refused because stock JSON truncates them",
+    "diagnostic-only LogicalWindow and calendar intervals refused",
+    "stock explicit and optimizer-created aggregate FILTER refused through complete final-plan diagnostic guard",
+    "missing and truncated final-plan diagnostics fail closed"
+  ],
+  "evidence": [
+    {
+      "fixture": "hop",
+      "snapshot": "empty",
+      "rows": [],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "tumble",
+      "snapshot": "empty",
+      "rows": [],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "aggregate",
+      "snapshot": "empty",
+      "rows": [
+        [
+          "0",
+          null
+        ]
+      ],
+      "types": [
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "window_count",
+      "snapshot": "empty",
+      "rows": [
+        [
+          "0"
+        ]
+      ],
+      "types": [
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "hop",
+      "snapshot": "boundaries",
+      "rows": [
+        [
+          "0",
+          "10000000",
+          "4",
+          "22"
+        ],
+        [
+          "5000000",
+          "15000000",
+          "3",
+          "17"
+        ],
+        [
+          "-20000000",
+          "-10000000",
+          "1",
+          "3"
+        ],
+        [
+          "-15000000",
+          "-5000000",
+          "2",
+          "3"
+        ],
+        [
+          "-5000000",
+          "5000000",
+          "3",
+          "31"
+        ],
+        [
+          "10000000",
+          "20000000",
+          "1",
+          "19"
+        ],
+        [
+          "-10000000",
+          "0",
+          "2",
+          "7"
+        ]
+      ],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "tumble",
+      "snapshot": "boundaries",
+      "rows": [
+        [
+          "0",
+          "10000000",
+          "4",
+          "22"
+        ],
+        [
+          "-20000000",
+          "-10000000",
+          "1",
+          "3"
+        ],
+        [
+          "-10000000",
+          "0",
+          "2",
+          "7"
+        ],
+        [
+          "10000000",
+          "20000000",
+          "1",
+          "19"
+        ]
+      ],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "aggregate",
+      "snapshot": "boundaries",
+      "rows": [
+        [
+          "8",
+          "51"
+        ]
+      ],
+      "types": [
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "window_count",
+      "snapshot": "boundaries",
+      "rows": [
+        [
+          "8"
+        ]
+      ],
+      "types": [
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "hop",
+      "snapshot": "duplicates",
+      "rows": [
+        [
+          "-5000000",
+          "5000000",
+          "3",
+          "14"
+        ],
+        [
+          "0",
+          "10000000",
+          "3",
+          "14"
+        ]
+      ],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "tumble",
+      "snapshot": "duplicates",
+      "rows": [
+        [
+          "0",
+          "10000000",
+          "3",
+          "14"
+        ]
+      ],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "aggregate",
+      "snapshot": "duplicates",
+      "rows": [
+        [
+          "3",
+          "14"
+        ]
+      ],
+      "types": [
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "window_count",
+      "snapshot": "duplicates",
+      "rows": [
+        [
+          "3"
+        ]
+      ],
+      "types": [
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "hop",
+      "snapshot": "exact_bigint",
+      "rows": [
+        [
+          "-5000000",
+          "5000000",
+          "2",
+          "9007199254740995"
+        ],
+        [
+          "0",
+          "10000000",
+          "2",
+          "9007199254740995"
+        ]
+      ],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "tumble",
+      "snapshot": "exact_bigint",
+      "rows": [
+        [
+          "0",
+          "10000000",
+          "2",
+          "9007199254740995"
+        ]
+      ],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "aggregate",
+      "snapshot": "exact_bigint",
+      "rows": [
+        [
+          "2",
+          "9007199254740995"
+        ]
+      ],
+      "types": [
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "window_count",
+      "snapshot": "exact_bigint",
+      "rows": [
+        [
+          "2"
+        ]
+      ],
+      "types": [
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "hop",
+      "snapshot": "all_null",
+      "rows": [
+        [
+          "-5000000",
+          "5000000",
+          "2",
+          null
+        ],
+        [
+          "0",
+          "10000000",
+          "1",
+          null
+        ],
+        [
+          "-10000000",
+          "0",
+          "1",
+          null
+        ]
+      ],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "tumble",
+      "snapshot": "all_null",
+      "rows": [
+        [
+          "0",
+          "10000000",
+          "1",
+          null
+        ],
+        [
+          "-10000000",
+          "0",
+          "1",
+          null
+        ]
+      ],
+      "types": [
+        "TIMESTAMP",
+        "TIMESTAMP",
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "aggregate",
+      "snapshot": "all_null",
+      "rows": [
+        [
+          "2",
+          null
+        ]
+      ],
+      "types": [
+        "BIGINT",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "window_count",
+      "snapshot": "all_null",
+      "rows": [
+        [
+          "2"
+        ]
+      ],
+      "types": [
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "aliases",
+      "rows": [
+        [
+          "9007199254740993",
+          3,
+          3
+        ],
+        [
+          "9007199254740993",
+          3,
+          3
+        ],
+        [
+          null,
+          null,
+          null
+        ]
+      ],
+      "types": [
+        "BIGINT",
+        "INTEGER",
+        "INTEGER"
+      ]
+    },
+    {
+      "fixture": "aliases_identity",
+      "rows": [
+        [
+          3,
+          "9007199254740993"
+        ],
+        [
+          3,
+          "9007199254740993"
+        ],
+        [
+          null,
+          null
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "BIGINT"
+      ]
+    },
+    {
+      "fixture": "timestamp_math",
+      "rows": [
+        [
+          1,
+          "1860900000",
+          0,
+          "tick1"
+        ],
+        [
+          2,
+          "1861100000",
+          0,
+          "tick2"
+        ],
+        [
+          3,
+          "1858900000",
+          2,
+          "tick3"
+        ],
+        [
+          4,
+          "1861100000",
+          -2,
+          "tick4"
+        ],
+        [
+          5,
+          "1860000000",
+          null,
+          "tick5"
+        ]
+      ]
+    },
+    {
+      "fixture": "timestamp_corpus",
+      "rows": [
+        [
+          "2",
+          "1",
+          "0",
+          null
+        ]
+      ]
+    },
+    {
+      "fixture": "calendar_year",
+      "rows": [
+        [
+          1,
+          "2024-02-01 00:00:00",
+          "2017-02-01 00:00:00",
+          "2023-02-28 23:59:59.999999"
+        ],
+        [
+          2,
+          "2024-03-01 00:00:00",
+          "2017-03-01 00:00:00",
+          "2023-03-01 00:00:00"
+        ],
+        [
+          3,
+          "2027-01-01 00:00:00",
+          "2020-01-01 00:00:00",
+          "2026-01-01 00:00:00"
+        ],
+        [
+          4,
+          "1969-12-01 00:00:00",
+          "1962-12-01 00:00:00",
+          "1968-12-31 23:59:59.999999"
+        ],
+        [
+          5,
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "fixture": "asof",
+      "rows": [
+        [
+          2,
+          2
+        ],
+        [
+          1,
+          null
+        ],
+        [
+          8,
+          null
+        ],
+        [
+          5,
+          9
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          7,
+          null
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          6,
+          null
+        ],
+        [
+          4,
+          3
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "DOUBLE"
+      ]
+    },
+    {
+      "fixture": "dynamic_substring",
+      "rows": [
+        [
+          1,
+          "é😀|tail",
+          "é😀"
+        ],
+        [
+          2,
+          "|tail",
+          ""
+        ],
+        [
+          3,
+          "",
+          ""
+        ],
+        [
+          4,
+          null,
+          null
+        ],
+        [
+          5,
+          null,
+          null
+        ],
+        [
+          6,
+          "abc",
+          null
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "VARCHAR",
+        "VARCHAR"
+      ]
+    },
+    {
+      "fixture": "union_values",
+      "rows": [
+        [
+          1,
+          "one"
+        ],
+        [
+          1,
+          "one"
+        ],
+        [
+          null,
+          null
+        ],
+        [
+          1,
+          "one"
+        ],
+        [
+          0,
+          "zero"
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "VARCHAR"
+      ]
+    },
+    {
+      "fixture": "string_search",
+      "rows": [
+        [
+          "day"
+        ],
+        [
+          "week"
+        ],
+        [
+          "é😀"
+        ]
+      ],
+      "types": [
+        "VARCHAR"
+      ]
+    },
+    {
+      "fixture": "dashboard_scalars",
+      "rows": [
+        [
+          1,
+          "-28800",
+          -1,
+          "-2",
+          4,
+          "abc",
+          "is:",
+          -1
+        ],
+        [
+          2,
+          "0",
+          -1,
+          "-1",
+          5,
+          "é😀z",
+          "is:",
+          0
+        ],
+        [
+          3,
+          "0",
+          0,
+          "0",
+          1,
+          "",
+          "",
+          0
+        ],
+        [
+          4,
+          "28800",
+          1,
+          "1",
+          0,
+          ":x",
+          "not",
+          1
+        ],
+        [
+          5,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "BIGINT",
+        "INTEGER",
+        "BIGINT",
+        "INTEGER",
+        "VARCHAR",
+        "VARCHAR",
+        "INTEGER"
+      ]
+    },
+    {
+      "fixture": "ordinary",
+      "rows": [
+        [
+          "00000000-0000-0000-0000-000000000001",
+          "2024-02-29",
+          "9007199254740991.01",
+          1.25,
+          "5",
+          2.5,
+          2,
+          3
+        ],
+        [
+          "00000000-0000-0000-0000-000000000001",
+          "2024-02-29",
+          "9007199254740991.01",
+          1.25,
+          "5",
+          2.5,
+          2,
+          3
+        ],
+        [
+          "00000000-0000-0000-0000-000000000002",
+          null,
+          null,
+          null,
+          null,
+          null,
+          0,
+          0
+        ]
+      ],
+      "types": [
+        "UUID",
+        "DATE",
+        "DECIMAL(18,2)",
+        "DOUBLE",
+        "BIGINT",
+        "DOUBLE",
+        "INTEGER",
+        "INTEGER"
+      ]
+    },
+    {
+      "fixture": "extrema",
+      "rows": [
+        [
+          1,
+          1.25,
+          2.75,
+          2,
+          "9007199254740991.01",
+          "9007199254740991.02"
+        ],
+        [
+          2,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "DOUBLE",
+        "DOUBLE",
+        "DOUBLE",
+        "DECIMAL(18,2)",
+        "DECIMAL(18,2)"
+      ]
+    },
+    {
+      "fixture": "full_join",
+      "rows": [
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          1,
+          null
+        ],
+        [
+          null,
+          3
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "INTEGER"
+      ]
+    },
+    {
+      "fixture": "right_join",
+      "rows": [
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          null,
+          3
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "INTEGER"
+      ]
+    },
+    {
+      "fixture": "arithmetic",
+      "rows": [
+        [
+          0,
+          -5,
+          -8,
+          "9007199254740994",
+          1.375,
+          -2
+        ],
+        [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ],
+      "types": [
+        "INTEGER",
+        "INTEGER",
+        "INTEGER",
+        "BIGINT",
+        "DOUBLE",
+        "DOUBLE"
+      ]
+    },
+    {
+      "fixture": "decimal_boundary",
+      "rows": [
+        [
+          "99999999999999999999.99999999"
+        ],
+        [
+          "-99999999999999999999.99999999"
+        ],
+        [
+          null
+        ]
+      ],
+      "types": [
+        "DECIMAL(28,8)"
+      ]
+    },
+    {
+      "fixture": "typed_case",
+      "rows": [
+        [
+          "2147483648"
+        ],
+        [
+          "1"
+        ]
+      ],
+      "types": [
+        "BIGINT"
+      ]
+    }
+  ]
+}

@@ -1,11 +1,9 @@
-// The rows an app's streams and computations derive, for a page that runs
-// neither: the app's own container cluster is brought up, left until it has
-// settled, and its live tables are written as SQL the page's PGlite runs after
-// the migrations, each table replaced whole.
+// A settled source and derived snapshot for portable releases. The page and
+// edge runtime continue snapshot computations after this bootstrap.
 //
 //   deno run -A --config bundle/deno.json bundle/derived.ts <appDir> --tables <t,...> --streams <s,...> --out <file> [--timeout <seconds>]
 //
-// --tables are the live tables to export; --streams are the ids the transform runs
+// --tables are the source and derived tables to export; --streams are the ids the transform runs
 // them under. The cluster is the app's compose under a project of its own,
 // built as `sayt launch` builds it, and it is torn down after, settled or not.
 //
@@ -183,7 +181,26 @@ async function run(cmd: string, args: string[], cwd: string): Promise<Run> {
   return { ok: out.success, stdout: new TextDecoder().decode(out.stdout), stderr: new TextDecoder().decode(out.stderr) }
 }
 
-type Service = { environment?: Record<string, string>; build?: { context?: string }; develop?: { watch?: { path: string; target?: string }[] }; networks?: Record<string, { aliases?: string[] } | null> }
+type Service = { depends_on?: Record<string, unknown>; environment?: Record<string, string>; build?: { context?: string; additional_contexts?: Record<string, string> }; develop?: { watch?: { path: string; target?: string }[] }; networks?: Record<string, { aliases?: string[] } | null> }
+
+type Compose = { services: Record<string, Service>; [key: string]: unknown }
+
+export function snapshotCompose(model: Compose): Compose {
+  const snapshot = structuredClone(model)
+  const feldera = Object.keys(snapshot.services).filter((name) => name.endsWith('-feldera'))
+  for (const name of feldera) delete snapshot.services[name]
+  for (const [name, service] of Object.entries(snapshot.services)) {
+    for (const dependency of feldera) if (service.depends_on) delete service.depends_on[dependency]
+    for (const [context, source] of Object.entries(service.build?.additional_contexts ?? {})) {
+      if (feldera.some((name) => source === `service:${name}`)) delete service.build!.additional_contexts![context]
+    }
+    if (name.endsWith('-compute') && service.environment?.COMPUTATIONS) {
+      service.environment.DUCKSTREAM_ENGINE = 'duckdb-snapshot'
+      delete service.environment.FELDERA_URL
+    }
+  }
+  return snapshot
+}
 
 async function main() {
   const args = Deno.args.slice()
@@ -208,7 +225,8 @@ async function main() {
   // without the ports file: the door's host port stays the running launch's.
   const closure = path.join('.bayt', 'compose.launch.closure.yaml')
   await Deno.stat(path.join(app, closure)).catch(() => fail(`${closure} is not emitted; bayt writes it for the launch target`))
-  const composeRun = (...a: string[]) => run('docker', ['compose', '-p', project, '-f', closure, ...a], app)
+  let composeFile = closure
+  const composeRun = (...a: string[]) => run('docker', ['compose', '-p', project, '-f', composeFile, ...a], app)
   const compose = async (...a: string[]) => {
     const r = await composeRun(...a)
     if (!r.ok) throw new Error(`docker compose ${a.join(' ')} failed:\n${r.stderr}`)
@@ -217,7 +235,8 @@ async function main() {
 
   // The cluster's services as compose resolves them, picked by build context:
   // the cluster the app instantiates declares targets of the same names.
-  const services = (JSON.parse(await compose('config', '--format', 'json')) as { services: Record<string, Service> }).services
+  const model = snapshotCompose(JSON.parse(await compose('config', '--format', 'json')) as Compose)
+  const services = model.services
   const service = (target: string) =>
     Object.entries(services).find(([name, s]) => name.endsWith(`-${target}`) && s.build?.context === app)
   const database = service('database') ?? fail('the compose runs no database')
@@ -312,6 +331,9 @@ async function main() {
     return { sql: derivedSql(order, columns, rows), fingerprint }
   }
 
+  composeFile = await Deno.makeTempFile({ dir: path.join(app, '.bayt'), prefix: 'compose.derived-', suffix: '.json' })
+  // Compose interpolates again when it reads this already resolved model.
+  await Deno.writeTextFile(composeFile, JSON.stringify(model).replaceAll('$', () => '$$'))
   let failure: unknown
   try {
     await compose('down', '-v', '--remove-orphans')
@@ -347,6 +369,7 @@ async function main() {
     failure = e
   }
   const down = await composeRun('down', '-v', '--remove-orphans')
+  await Deno.remove(composeFile)
   if (failure) throw failure
   if (!down.ok) fail(`tearing ${project} down failed:\n${down.stderr}`)
 }

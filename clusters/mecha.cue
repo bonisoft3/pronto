@@ -28,6 +28,7 @@ import (
 
 // What a computation's or an effect's module may be endowed with.
 #CageEndowment: impl.#CageEndowment
+#ComputationField: impl.#ComputationField
 
 // A bridge role.
 #Bridge: impl.#Bridge

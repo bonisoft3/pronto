@@ -1,0 +1,5 @@
+{
+  "backend" : "bounded-contract-v1",
+  "rowType" : "RecordType(VARCHAR CHARACTER SET \"UTF-8\" NOT NULL region, BIGINT NOT NULL n, BIGINT total) NOT NULL",
+  "view" : "result"
+}

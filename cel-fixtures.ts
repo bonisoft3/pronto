@@ -35,6 +35,11 @@ const IR: Record<string, ParsedExpr> = {
  * refused; `values` is the closed value set, or null where the field admits
  * an open one. */
 const FIXTURES: { cel: string; col: string | null; sql: string | null; cue: string | null; values: string[] | null; json?: true }[] = [
+  { cel: "this.size() <= 8", col: "column", sql: 'char_length("column") <= 8', cue: "strings.MaxRunes(8)", values: null },
+  { cel: "this.size() <= 8", col: "authorization", sql: 'char_length("authorization") <= 8', cue: "strings.MaxRunes(8)", values: null },
+  { cel: "this.size() <= 8", col: "CamelCase", sql: 'char_length("CamelCase") <= 8', cue: "strings.MaxRunes(8)", values: null },
+  { cel: "this.size() <= 8", col: 'a"b', sql: 'char_length("a""b") <= 8', cue: "strings.MaxRunes(8)", values: null },
+  { cel: "this in ['a', 'b']", col: "on", sql: '"on" IN (\'a\', \'b\')', cue: `("a" | "b")`, values: ["a", "b"] },
   { cel: "this in ['a', 'b']", col: "c", sql: "c IN ('a', 'b')", cue: `("a" | "b")`, values: ["a", "b"] },
   { cel: "this in [1, 2]", col: "c", sql: "c IN (1, 2)", cue: "(1 | 2)", values: ["1", "2"] },
   // A field pinned to one literal is a closed set of one. Answering null here

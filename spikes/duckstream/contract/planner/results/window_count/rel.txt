@@ -1,0 +1,4 @@
+LogicalProject(n=[$0])
+  LogicalAggregate(group=[{}], n=[COUNT()])
+    LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 10000:INTERVAL SECOND)], rowType=[RecordType:peek_no_expand(INTEGER id, TIMESTAMP(6) ts, BIGINT amount, TIMESTAMP(6) window_start, TIMESTAMP(6) window_end)])
+      LogicalTableScan(table=[[schema, events]], hints=[[[alias inheritPath:[] options:[events]]]])

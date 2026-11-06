@@ -26,6 +26,7 @@
 import { seedBlobInliner } from './edge-blobs.ts'
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
+import { computationPackages, computationDefinitions, computationMachine, browserComputations } from './compute.ts'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { clusterDrains, clusterSteps, releaseFiles } from './edge-scripts.ts'
 
@@ -205,6 +206,8 @@ const steps = [...scripts.map((f) => f.name), ...(derived ? [derived] : [])]
 const seedInlined = shell.seedBlobs && scripts.length > 0 ? await seedBlobInliner(path.join(app, shell.seedBlobs.dir)) : (text: string) => text
 const sql = [...scripts.map((f) => f.sql), ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : [])].map(seedInlined)
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
+const programs = clustered ? await computationPackages(app, mecha) : []
+const compute = programs.length ? { ...await browserComputations(programs, mecha), computations: computationDefinitions(programs) } : undefined
 // A publication and a replica identity are a WAL reader's, which the page has
 // none of: the cluster skips them by the fence the emitter and an author write,
 // read here by the cluster's own grammar, so one outside a fence is refused.
@@ -245,6 +248,9 @@ try {
   const ses = await Deno.readTextFile(path.join(omnishell, 'interpreter/vendor/ses.umd.min.js'))
   await Deno.writeTextFile(sesFile, `export function installSes() {\n${ses}\n}\n`)
   map.imports['pronto-bundle-ses'] = String(pathToFileURL(sesFile))
+  const computeMachineFile = path.join(work, 'compute-machine.js')
+  await Deno.writeTextFile(computeMachineFile, programs.length ? await computationMachine(omnishell) : 'export default {}')
+  map.imports['pronto-bundle-compute-machine'] = String(pathToFileURL(computeMachineFile))
   // A host-DOM hatch is a module the terminal imports by path, which no shim
   // can answer, so each is compiled into the page and handed to the shell by
   // its src (omnishell host-dom.js hostDomModules).
@@ -296,7 +302,7 @@ if (clustered) {
 const payload = {
   files,
   ...(clustered
-    ? { cluster: { sql, tables: shell.tables, drains, clock, assets } }
+    ? { cluster: { sql, tables: shell.tables, drains, clock, assets, compute } }
     : {}),
 }
 
@@ -309,6 +315,7 @@ const replace = (html: string, from: string | RegExp, to: string) => {
   return next === html ? fail(`shell/index.html: ${String(from)} not found`) : next
 }
 let html = await read('shell/index.html')
+if (programs.length) html = html.replace(/trusted-types ([^";]+)/g, '$& mecha-compute').replace("connect-src 'self'", "connect-src 'self' blob:")
 html = replace(html, '<link rel="stylesheet" href="./shell.css">', `<style>${files['shell/shell.css']}</style>`)
 html = replace(html, '<link rel="stylesheet" href="./design.css">', `<style>${files['shell/design.css']}</style>`)
 html = html.replace(/<link rel="stylesheet" href="([^"]+)">/g, (_match, href) => {

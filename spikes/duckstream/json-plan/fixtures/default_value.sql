@@ -1,0 +1,2 @@
+CREATE TABLE t (x INTEGER DEFAULT 7, y BIGINT);
+CREATE VIEW result AS SELECT x AS renamed, y AS "Other" FROM t;

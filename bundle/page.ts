@@ -11,13 +11,16 @@ import { createShell } from 'omnishell/shell.js'
 // @ts-ignore untyped interpreter module
 import { ensureSes } from 'omnishell/jessie.js'
 import { installSes } from 'pronto-bundle-ses'
+import { browserCompute, type BrowserCompute } from 'mecha-browser/compute.ts'
+import type { Computation } from 'mecha-browser/../compute-snapshot/src/index.ts'
+import computeMachines from 'pronto-bundle-compute-machine'
 // @ts-ignore written by the bundler beside the page
 import { hostDomModules } from 'pronto-bundle-hatches'
 
 interface Payload {
   files: Record<string, string>
   /** Absent for an app with no server entity, which boots no cluster. */
-  cluster?: { sql: string[]; tables: string[]; drains: Drain[]; clock: 'ticker' | 'disabled'; assets: DatabaseAssets }
+  cluster?: { sql: string[]; tables: string[]; drains: Drain[]; clock: 'ticker' | 'disabled'; assets: DatabaseAssets; compute?: BrowserCompute & { computations: Computation[] } }
 }
 
 const payload: Payload = JSON.parse(new TextDecoder().decode(decodeBase64(document.getElementById('pronto-payload')!.textContent!)))
@@ -70,13 +73,15 @@ if (typeof OrigWorker === 'function') {
 
 ;(async () => {
   if (payload.cluster) {
-    const { sql, tables, drains, clock, assets: a } = payload.cluster
+    const { sql, tables, drains, clock, compute, assets: a } = payload.cluster
     const { schema } = JSON.parse(payload.files['shell/shell.json'])
     const db = await createPageDatabase(a)
+    const executor = compute ? await browserCompute(compute) : undefined
     // A change the cluster lost leaves a table no read can trust again, so
     // the page dies of it where its boot would.
     cluster = await createCluster({
       db, sql, tables, schema, drains, clock, log: console.error,
+      compute: compute ? { computations: compute.computations, machine: computeMachines.compute_batch, execute: executor!.execute } : undefined,
       fail: (e) => {
         document.body.textContent = `page failed: ${e.message}`
         reportError(e)

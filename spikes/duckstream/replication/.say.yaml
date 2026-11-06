@@ -1,0 +1,17 @@
+say:
+  doctor:
+    do: "deno run --no-config --allow-run=docker probe.ts doctor"
+  setup:
+    do: "deno run --no-config --allow-run=docker --allow-write=.cache probe.ts setup"
+  build:
+    do: "deno check --no-config probe.ts"
+  lint:
+    rulemap:
+      replication:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "deno fmt --no-config --check probe.ts"
+          - do: "deno lint --no-config probe.ts"
+  test:
+    do: "deno run --no-config --allow-run=docker --allow-read=.cache --allow-write=results.json probe.ts test"

@@ -12,7 +12,8 @@ the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
 carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare`,
-`docker` and `gcp` are built, `cloudflare` for guests and, of the derivations, with its drains and its clock alone,
+`docker` and `gcp` are built, `cloudflare` for guests with drains, durable snapshot
+computations and its clock,
 `docker` as a single-container standalone appliance, `gcp` for a cluster of the
 database, crud, auth and electric alone, and `k8s` against a named kube context
 ([the clouds and k8s](#the-clouds-and-k8s)). `aws` and `azure` are designed
@@ -40,7 +41,7 @@ and [not built](../PENDING.md#release-targets). How an author releases an app is
 | target | tier | the artifact | the door |
 |---|---|---|---|
 | `pages` | browser | one HTML file | none: the page's fetch shim |
-| `cloudflare` | edge | a Worker, one Durable Object running PGlite, and the data directory it loads | the Worker |
+| `cloudflare` | edge | the app Worker and PGlite Durable Object, its data directory, and private Query/Compute Workers for declared computations | the app Worker |
 | `docker` | container | single-container appliance image running postgres, crud, caddy, auth, and process-compose | caddy on port 8080 |
 | `gcp` | cloud | images by digest in Artifact Registry, one Cloud Run service and the Job that builds its schema | caddy, the service's ingress container |
 | `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
@@ -348,11 +349,30 @@ For native M-SSR, declare `code.meta.ssrOrigin: "https://<public-host>"` so the
 generated release recipe passes `edge.ts --ssr-origin https://<public-host>`.
 By default,
 the entry keeps its existing `Cluster` namespace and persisted filesystem format,
-so enabling SSR does not replace live data. The builder also writes
-Rendering runs in the database's `Cluster` object in the same Worker. Its asset
-fetches are scoped to rendering; authentication, import and database requests
-retain native fetch. The snapshot stays open until all rendering reads finish,
-independently of response consumption. There is no separate renderer service.
+so enabling SSR does not replace live data. The builder writes `renderer.jsonc`
+for a separate content-addressed renderer Worker. Its asset fetches are scoped
+to rendering; authentication, import and database requests retain native fetch.
+The snapshot stays open until rendering reads finish, independently of response
+consumption. The publisher deploys the renderer before the database and entry.
+
+For declared computations, [[../bundle/edge-compute.ts|the build]] also emits
+`compute/queries/` and `compute/execution/`. These private Workers have no public
+routes: the Query Durable Object runs statically packaged DuckDB, and the
+Compute Durable Object runs the admitted computation in a static SES cage with
+the same numerical WASM modules. Their content-derived names bind a release to
+its execution contract. The publisher deploys Query, then Compute, before the
+renderer, database and app entry that use them. The database object retains
+captures, retries and publication receipts. A separate `ComputeCoordinator` object
+owns the computation alarm and dispatch; companion execution owns only scratch
+state. The database object's alarm continues to serve schedules and drains even
+when a computation is slow or exhausted. See [the computation contract](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/compute.md#cloudflare-snapshot-execution).
+
+A new deployment can opt into `--ssr-database separate`: it writes
+`database.jsonc` for `<app>-database` with compressed 128 KiB filesystem blocks,
+and deploys renderer, database, then entry. That namespace starts empty; this
+option is not an in-place migration of an existing app. The resumable import
+verifies checksums and uses gzip transport. Do not switch database modes on a
+live deployment without migrating its current data and controlling the cutover.
 
 The Worker declares `exports.Cluster` with SQLite storage. Cloudflare reconciles
 that declaration with the existing namespace; legacy migration tags are not
@@ -406,18 +426,19 @@ service, and nothing runs while no one uses the app:
 | caddy | the Worker: static files, `/crud`, `/auth`, `/electric`, settled reads from the Cache API | per request | built |
 | database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests only |
 | conduit, mesh-events | for drains, a trigger per table and the object's dispatcher; for streams, an outbox table and a Cloudflare Queue | with the object | drains built, streams designed |
-| transform, compute | a Container each, from the images bayt builds | after an idle timeout | designed |
+| compute | private Query and Compute Workers, each with a Durable Object; a separate coordinator object dispatches through service bindings | when idle | built, snapshot mode |
+| transform | stream mapping through a Queue consumer | between batches | designed |
 | ticker, clock | the object's alarm, and a Cron Trigger poking it | between occurrences | built |
-| render | none: the page renders, as `pages` does | — | built |
+| render | browser rendering, or a separate native M-SSR Worker | per request | built |
 
 ```
-browser ──/crud──▶ Worker ──▶ object (PGlite) ── commit: triggers write the outbox
-   ▲                 │ Cache API                    │
-   │                 ▼                 Queue ◀── outbox, after commit
-   │                                     │
-   │                            consumer Worker ──HTTP──▶ transform ──/invalidate──▶ compute (tables on R2)
-   │                                                          └──── batched writes back through /crud ────┘
-   └──── object ──held-open shape requests──▶ every open tab
+browser ──/crud──▶ app Worker ──▶ database object (PGlite, receipts)
+   ▲                  │                          │ capture / publication RPC
+   │               Cache API                     ▼
+   │                                    Coordinator DO ──▶ Compute Worker/DO ──▶ Query Worker/DO (DuckDB)
+   │                                        static SES + WASM ◀── query results
+   │                                             │ complete sink rows
+   └──── shape requests ◀── database publication ◀┘
 ```
 
 What fixes its shape, as built:
@@ -457,9 +478,15 @@ What fixes its shape, as built:
   release changed is refused by name — a live schema moves only by a pgroll
   migration ([schema change admission](schema-change-admission.md)), never
   by the entity file a directory already ran. A directory built before the
-  ledger existed is refused too. A refusal rolls every Worker the publish
-  deployed back to the version it replaced, so the site keeps serving the
-  schema it has, and `--reset` loads a directory built for this release.
+  ledger existed is refused too. A definitive refusal is reported before the
+  publisher attempts to restore each Worker's previous version. Durable Object
+  schema migrations can prevent rollback; every failure remains visible and
+  the publisher still attempts the other Workers. A lost response or HTTP
+  500/502/503/504 can follow a committed migration and object restart: the
+  publisher waits for the object to settle and resends the same scripts, up to
+  three attempts. Exhausting those attempts fails the publish and retains the
+  deployed Workers because the migration may have committed. `--reset` loads a
+  directory built for this release.
 - **One object, every user behind one writer.** PGlite is one connection.
   [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and
@@ -481,8 +508,20 @@ What fixes its shape, as built:
   A drain's writes reach a guest's cached `/crud` read once its 5 seconds pass,
   and a cached render once its minute does, as every write the object makes
   itself; the shape stream carries them at once.
-- **The derived rows ship as the release found them**: no stream, whose
-  mapping is bloblang, and no computation runs at the edge yet.
+- **Snapshot computations run after invalidation.** The database captures all
+  declared source tables consistently, retains that input across retries and
+  dispatches through a private service binding. Publication checks the exact
+  computation version and claim and commits sink changes with its receipt.
+  Query, pure execution and PGlite use separate Worker isolates. This path
+  requires no Container and does not implement incremental relational state;
+  bloblang streams remain a separate, unbuilt edge path.
+- **Capacity is per isolate.** Each has 128 MB for JavaScript and WASM. A
+  seeded demo does not establish that a full archive's captures, joins or global
+  numerical jobs fit. The current
+  [Worker upload limit](https://developers.cloudflare.com/workers/platform/limits/#worker-size)
+  is 64 MiB uncompressed on both Free and Paid, with no compressed-size limit;
+  the former 3/10 MB comparison is obsolete. Account quotas, CPU time and
+  archive storage still determine which plan and workload are viable.
 - **The clock is two, and sleeps.** The object's alarm stands at the next
   instant any schedule owes a runnable tick and sweeps as mecha's ticker
   does; a Cron Trigger (`triggers.crons`, written where the program declares
@@ -507,17 +546,6 @@ As designed and [not built](../PENDING.md#release-targets):
   idempotent keyed upsert. A long write holds every read behind it, so
   derivations write back in batches of hundreds of rows, and the object
   checkpoints after a burst, since every wake replays what the WAL holds.
-- **The containers are the stack's own images, scaled to zero.** transform and
-  compute run what `./saytw launch` runs, with the Worker in place of
-  `crud:3000` and `compute:9997` and the service token as today. A batch from
-  the Queue wakes transform; its `/invalidate` wakes compute. Their disks are
-  ephemeral, so compute keeps its tables as Parquet on R2 and a cold start
-  reads only what it needs. The container classes are generated from the
-  compose closure bayt emits, so a service added to the app is a container
-  added to the release.
-- **Cost follows use.** Workers Paid at $5 a month, Containers billed for the
-  memory and disk they hold while awake and the CPU they spend, R2 inside its
-  free tier: about $5–10 a month for an idle app.
 
 Measured with GolAberto's full archive deployed (2026-10-10, 11): 7.1 GB in
 the object's SQLite, loaded at 10.2 MiB/s and verified in the object in 70 s;
@@ -525,16 +553,13 @@ a guest's first request reaching an evicted object in about 2 s, a warm one in
 0.25 s; object CPU per request 1–3 ms at the median, under 0.8 s at the
 largest; no memory or CPU kill.
 
-Derivation stays in containers until DuckStream runs. Work that is
-incremental by construction — a stream's mapping, a join or window kept up to
-date — needs memory proportional to a change, not to the data, so it fits an
-object with its state as indexed tables in the object's SQLite, on the free
-plan too. That is [DuckStream](decisions/2026-09-29-cortex-machines.md): the
-SQL parsed at build time as `check-sql.ts` already parses it, lowered to a plan
-an object runs. It is built only together with the Feldera-backed engine that
-runs the same SQL locally, so an edge-only engine never becomes the reference.
-Batch work over the whole history — ratings refit over years — stays in a
-container on any tier.
+These archive measurements cover serving stored rows, not recomputing the full
+history. Edge compute now executes bounded DuckDB snapshots and the unchanged
+numerical algorithm. Native Feldera retains its incremental relations and
+partitioned capture contract; the edge release does not lower those relations
+to an incremental object engine. Large global work must be measured against the
+isolate budget before adoption; splitting execution into Workers does not make
+one oversized numerical job fit.
 
 An app's machines step in the object: the migration declares each step over
 an engine the tier supplies, and the object's is PGlite for workerd's host
@@ -544,8 +569,9 @@ A deadline a machine arms and a cron schedule the program declares are the
 object's alarm, swept as the ticker sweeps them
 ([the clock](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/mecha-edge/README.md#the-clock)).
 For a frozen archive, `code.meta.edgeClock: "disabled"` emits `--clock disabled`:
-the object preserves schedule rows, clears alarms at boot and delivery, and no
-Cron Trigger is written. The default, `"ticker"`, runs them.
+the object preserves schedule rows but runs no schedule ticks, and no schedule
+Cron Trigger is written. Drain retry and computation deadlines still arm the
+durable alarm. The default, `"ticker"`, runs the schedules too.
 
 
 ## Keys
@@ -962,10 +988,6 @@ release metadata.
   them.
 - **Containers kept awake** — about $30 a month for one that does nothing most
   of the day; scaling to zero with state on R2 costs a cold start instead.
-- **DuckDB-wasm as compute in an object** — measured: it gives compute's
-  answers exactly, but needs about 65 MiB before its first query, a single
-  chances group peaks near 172 MiB, ratings over one year near 270 MiB, and
-  with no disk to spill to its memory limit only turns that into failures.
 - **Splitting the archive by age** across a live object and a read-only one —
   the whole archive fits one object's storage, and reads that span seasons
   would merge two sources.

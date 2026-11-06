@@ -1,0 +1,151 @@
+{
+  "status": "passed",
+  "duckdb": "1.4.3",
+  "ducklake": "de813ff",
+  "extension_platform": "osx_arm64",
+  "extension_sha256": "cbc12698896b53bde2abd71d7cdfcf1fe1a49951a1c5e2552a3900e37541fa8c",
+  "postgres": "18.0 (Debian 18.0-1.pgdg13+3)",
+  "postgres_image": "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8",
+  "source": "live PostgreSQL logical slot; fixed-schema test_decoding adapter",
+  "storage": "real DuckLake; local DuckDB metadata and retained data files",
+  "execution": "full relation recompute over pinned snapshot",
+  "publication": "DuckLake transactional test sink; not PostgreSQL Airlock integration",
+  "snapshots": {
+    "initial": 1,
+    "first": 2,
+    "second": 9,
+    "retained_count": 22
+  },
+  "source_transactions": 2,
+  "retained_changes": 10,
+  "receipt_counts": {
+    "coalesced": 3,
+    "eager": 6
+  },
+  "parquet_files": 93,
+  "query_sha256": {
+    "aggregate": "eadee4ab820b599f07d4a00da33329c9ae887f7e45e37b403f4bf040f0a104b0",
+    "tumble": "d4c7622c36816f415ec0bb7ae3b085f859b9035189206f918d819dc5ec2db7ac",
+    "hop": "ded0d521f8c695ebaf18f4e6330143d2e83dc2e699b3968630d8dc00bd8af389"
+  },
+  "first_results": {
+    "aggregate": [
+      [
+        3,
+        37
+      ]
+    ],
+    "tumble": [
+      [
+        "1969-12-31 23:59:50",
+        "1970-01-01 00:00:00",
+        1,
+        7
+      ],
+      [
+        "1970-01-01 00:00:00",
+        "1970-01-01 00:00:10",
+        2,
+        30
+      ]
+    ],
+    "hop": [
+      [
+        "1969-12-31 23:59:50",
+        "1970-01-01 00:00:00",
+        1,
+        7
+      ],
+      [
+        "1969-12-31 23:59:55",
+        "1970-01-01 00:00:05",
+        2,
+        17
+      ],
+      [
+        "1970-01-01 00:00:00",
+        "1970-01-01 00:00:10",
+        2,
+        30
+      ],
+      [
+        "1970-01-01 00:00:05",
+        "1970-01-01 00:00:15",
+        1,
+        20
+      ]
+    ]
+  },
+  "final_results": {
+    "aggregate": [
+      [
+        3,
+        27
+      ]
+    ],
+    "tumble": [
+      [
+        "1969-12-31 23:59:50",
+        "1970-01-01 00:00:00",
+        1,
+        7
+      ],
+      [
+        "1970-01-01 00:00:00",
+        "1970-01-01 00:00:10",
+        1,
+        15
+      ],
+      [
+        "1970-01-01 00:00:10",
+        "1970-01-01 00:00:20",
+        1,
+        5
+      ]
+    ],
+    "hop": [
+      [
+        "1969-12-31 23:59:50",
+        "1970-01-01 00:00:00",
+        1,
+        7
+      ],
+      [
+        "1969-12-31 23:59:55",
+        "1970-01-01 00:00:05",
+        2,
+        22
+      ],
+      [
+        "1970-01-01 00:00:00",
+        "1970-01-01 00:00:10",
+        1,
+        15
+      ],
+      [
+        "1970-01-01 00:00:05",
+        "1970-01-01 00:00:15",
+        1,
+        5
+      ],
+      [
+        "1970-01-01 00:00:10",
+        "1970-01-01 00:00:20",
+        1,
+        5
+      ]
+    ]
+  },
+  "assertions": {
+    "source_cursor_base_history_atomic": true,
+    "source_ack_after_commit": true,
+    "lost_ack_replay_deduplicated": true,
+    "reopen_pinned_snapshot_after_newer_commit": true,
+    "multitable_source_cut": true,
+    "transient_insert_delete_retained": true,
+    "publication_diff_receipt_atomic": true,
+    "lost_publication_ack_deduplicated": true,
+    "refresh_schedules_same_final_relation": true,
+    "independent_expected_relations": true
+  }
+}

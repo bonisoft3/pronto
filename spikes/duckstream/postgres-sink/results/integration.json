@@ -1,0 +1,320 @@
+{
+  "live": {
+    "newer": [
+      {
+        "id": 1,
+        "version": 20,
+        "value": 200,
+        "deleted": false
+      }
+    ],
+    "late_older": [
+      {
+        "id": 1,
+        "version": 20,
+        "value": 200,
+        "deleted": false
+      }
+    ],
+    "duplicate": [
+      {
+        "id": 1,
+        "version": 20,
+        "value": 200,
+        "deleted": false
+      }
+    ],
+    "tombstone": [
+      {
+        "id": 1,
+        "version": 30,
+        "value": null,
+        "deleted": true
+      }
+    ],
+    "late_after_tombstone": [
+      {
+        "id": 1,
+        "version": 30,
+        "value": null,
+        "deleted": true
+      }
+    ]
+  },
+  "live_audit": [
+    {
+      "sequence": 1,
+      "target": "authoritative",
+      "operation": "INSERT",
+      "id": 1,
+      "old_version": null,
+      "new_version": 20,
+      "old_deleted": null,
+      "new_deleted": false
+    },
+    {
+      "sequence": 3,
+      "target": "authoritative",
+      "operation": "UPDATE",
+      "id": 1,
+      "old_version": 20,
+      "new_version": 30,
+      "old_deleted": false,
+      "new_deleted": true
+    }
+  ],
+  "guarded": {
+    "stale_replay": [
+      {
+        "id": 1,
+        "version": 30,
+        "value": null,
+        "deleted": true
+      }
+    ],
+    "final": [
+      {
+        "id": 1,
+        "version": 30,
+        "value": null,
+        "deleted": true
+      }
+    ],
+    "audit": [
+      {
+        "sequence": 2,
+        "target": "guarded",
+        "operation": "INSERT",
+        "id": 1,
+        "old_version": null,
+        "new_version": 20,
+        "old_deleted": null,
+        "new_deleted": false
+      },
+      {
+        "sequence": 4,
+        "target": "guarded",
+        "operation": "UPDATE",
+        "id": 1,
+        "old_version": 20,
+        "new_version": 30,
+        "old_deleted": false,
+        "new_deleted": true
+      }
+    ]
+  },
+  "before_restart": [
+    {
+      "id": 1,
+      "version": 30,
+      "value": null,
+      "deleted": true
+    }
+  ],
+  "after_restart": [
+    {
+      "id": 1,
+      "version": 30,
+      "value": null,
+      "deleted": true
+    }
+  ],
+  "stale_replay": [
+    {
+      "id": 1,
+      "version": 10,
+      "value": 100,
+      "deleted": false
+    }
+  ],
+  "duplicate_audit_before": 4,
+  "duplicate_audit_after": 5,
+  "audit": [
+    {
+      "sequence": 1,
+      "target": "authoritative",
+      "operation": "INSERT",
+      "id": 1,
+      "old_version": null,
+      "new_version": 20,
+      "old_deleted": null,
+      "new_deleted": false
+    },
+    {
+      "sequence": 3,
+      "target": "authoritative",
+      "operation": "UPDATE",
+      "id": 1,
+      "old_version": 20,
+      "new_version": 30,
+      "old_deleted": false,
+      "new_deleted": true
+    },
+    {
+      "sequence": 5,
+      "target": "authoritative",
+      "operation": "UPDATE",
+      "id": 1,
+      "old_version": 30,
+      "new_version": 10,
+      "old_deleted": true,
+      "new_deleted": false
+    },
+    {
+      "sequence": 6,
+      "target": "authoritative",
+      "operation": "UPDATE",
+      "id": 1,
+      "old_version": 10,
+      "new_version": 30,
+      "old_deleted": false,
+      "new_deleted": true
+    },
+    {
+      "sequence": 7,
+      "target": "authoritative",
+      "operation": "UPDATE",
+      "id": 1,
+      "old_version": 30,
+      "new_version": 30,
+      "old_deleted": true,
+      "new_deleted": true
+    }
+  ],
+  "checkpoint": {
+    "status": 501,
+    "body": {
+      "message": "Cannot use enterprise-only feature (checkpoint) in Feldera community edition.",
+      "error_code": "EnterpriseFeature",
+      "details": {
+        "feature": "checkpoint"
+      }
+    }
+  },
+  "stats": {
+    "global_metrics": {
+      "state": "Running",
+      "bootstrap_in_progress": false,
+      "transaction_status": "NoTransaction",
+      "transaction_id": 0,
+      "transaction_msecs": null,
+      "transaction_records": null,
+      "commit_progress": null,
+      "transaction_initiators": {
+        "transaction_id": null,
+        "initiated_by_api": null,
+        "initiated_by_connectors": {}
+      },
+      "concurrent_bootstrap_phase": "Inactive",
+      "concurrent_bootstrap_progress": null,
+      "rss_bytes": 228642816,
+      "memory_pressure": "low",
+      "memory_pressure_epoch": 0,
+      "cpu_msecs": 75,
+      "uptime_msecs": 2184,
+      "start_time": 1792517841,
+      "incarnation_uuid": "01a15a63-a13f-7701-8e57-ec87783965ae",
+      "initial_start_time": 1792517841,
+      "storage_bytes": 0,
+      "storage_mb_secs": 0,
+      "runtime_elapsed_msecs": 15,
+      "buffered_input_records": 0,
+      "buffered_input_bytes": 0,
+      "total_input_records": 1,
+      "total_input_bytes": 49,
+      "total_processed_records": 1,
+      "total_processed_bytes": 49,
+      "total_completed_records": 1,
+      "output_stall_msecs": 0,
+      "total_initiated_steps": 7,
+      "total_completed_steps": 7,
+      "pipeline_complete": true,
+      "platform_version": "0.367.0+3a7edb86ed921c2dead05b627ac16c6f89fbfc36",
+      "runtime_version": "0.367.0+3a7edb86ed921c2dead05b627ac16c6f89fbfc36"
+    },
+    "suspend_error": {
+      "Permanent": [
+        "EnterpriseFeature",
+        "StorageRequired"
+      ]
+    },
+    "checkpoint_activity": {
+      "status": "idle"
+    },
+    "permanent_checkpoint_errors": [
+      "EnterpriseFeature",
+      "StorageRequired"
+    ],
+    "inputs": [
+      {
+        "endpoint_name": "candidate.api-ingress-f653599c4fa97b29",
+        "config": {
+          "stream": "candidate"
+        },
+        "metrics": {
+          "total_bytes": 49,
+          "total_records": 1,
+          "buffered_records": 0,
+          "buffered_bytes": 0,
+          "num_transport_errors": 0,
+          "num_parse_errors": 0,
+          "end_of_input": false,
+          "processing_latency_p99_micros": 1000
+        },
+        "fatal_error": null,
+        "health": null,
+        "paused": false,
+        "barrier": false,
+        "completed_frontier": null
+      }
+    ],
+    "outputs": [
+      {
+        "endpoint_name": "authoritative.guarded_postgres",
+        "config": {
+          "stream": "authoritative"
+        },
+        "metrics": {
+          "transmitted_records": 1,
+          "transmitted_bytes": 51,
+          "queued_records": 0,
+          "queued_batches": 0,
+          "buffered_records": 0,
+          "buffered_batches": 0,
+          "num_encode_errors": 0,
+          "num_transport_errors": 0,
+          "total_processed_input_records": 1,
+          "total_processed_steps": 7,
+          "memory": 0,
+          "batch_records_written": 0
+        },
+        "fatal_error": null,
+        "health": null,
+        "paused": false
+      },
+      {
+        "endpoint_name": "authoritative.postgres",
+        "config": {
+          "stream": "authoritative"
+        },
+        "metrics": {
+          "transmitted_records": 1,
+          "transmitted_bytes": 51,
+          "queued_records": 0,
+          "queued_batches": 0,
+          "buffered_records": 0,
+          "buffered_batches": 0,
+          "num_encode_errors": 0,
+          "num_transport_errors": 0,
+          "total_processed_input_records": 1,
+          "total_processed_steps": 7,
+          "memory": 0,
+          "batch_records_written": 0
+        },
+        "fatal_error": null,
+        "health": null,
+        "paused": false
+      }
+    ]
+  }
+}

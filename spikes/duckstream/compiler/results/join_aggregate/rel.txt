@@ -1,0 +1,6 @@
+LogicalAggregate(group=[{0}], order_count=[COUNT()], total=[SUM($1)])
+  LogicalProject(region=[$4], amount=[$2])
+    LogicalJoin(condition=[=($1, $3)], joinType=[inner])
+      LogicalFilter(condition=[>($2, 0)])
+        LogicalTableScan(table=[[schema, orders]], hints=[[[alias inheritPath:[] options:[o]]]])
+      LogicalTableScan(table=[[schema, customers]], hints=[[[alias inheritPath:[] options:[c]]]])

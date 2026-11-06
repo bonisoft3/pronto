@@ -29,6 +29,11 @@ How pronto works inside, what it decided and what it superseded.
 
 ## Subsystems
 
+* [[../duckstream/docs/index|Feldera SQL compilation for DuckDB]] — pinned stock compilation, bounded typed-plan translation and checked generated-query artifacts.
+
+* [[decisions/2026-10-20-duckstream-backend-contract|Feldera SQL backend contract]] — shared computation semantics, SQL feedback coordination, capability admission and a retained-snapshot DuckDB backend.
+
+* [[decisions/2026-10-19-duckstream-runtime|Duckstream runtime]] — Conduit/Redis retirement design, recovery probes and Golaberto minibatches.
 * [[automatic-verification|Automatic application verification]] — oracle classes, obligation inventory and execution layers.
 
 * [[cortex|Cortex machines]] — the app's screens over its Mecha machines, each a fold that reaches its machine through surface rows or plays it in place.

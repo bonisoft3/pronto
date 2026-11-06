@@ -272,6 +272,26 @@ export def run-job [manifest: string, name: string, namespace: string, --timeout
 	kubectl logs -n $namespace $"job/($name)" --tail=5
 }
 
+export def runtime-services [compose: record]: nothing -> record {
+	let supported = ["compute" "feldera" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy"]
+	if "airlock" in $compose.services {
+		error make {msg: "native release does not yet deploy airlock; refusing to omit a runtime service"}
+	}
+	let names = ($compose.services | columns | where {|s| $s in $supported })
+	$names | reduce -f {} {|name, acc|
+		let vars = ($compose.services | get $name | get -o environment | default {})
+		if $name == "compute" and ($vars.DUCKSTREAM_ENGINE? | default "") != "feldera" {
+			error make {msg: "native release requires DUCKSTREAM_ENGINE=feldera for compute"}
+		}
+		$acc | insert $name {
+			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING)
+			databaseEnvironment: ([DATABASE_URL FELDERA_DATABASE_URL] | where {|key| $key in $vars })
+			serviceToken: ("SERVICE_JWT" in $vars)
+			jwtSecret: ("PGRST_JWT_SECRET" in $vars)
+		}
+	}
+}
+
 export def render-manifests [
 	cue_path: string
 	env_name: string
@@ -284,8 +304,11 @@ export def render-manifests [
 	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
-	# An app with no door hatch writes no `doors`.
-	{App: {database: {tokenRoles: $facts.tokenRoles}, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
+	let app_dir = ($cue_path | path dirname)
+	let runtime = if ($app_dir | path join compose.yaml | path exists) {
+		runtime-services (do { cd $app_dir; docker compose --profile "*" config --format json } | from json)
+	} else { {} }
+	{App: {database: {tokenRoles: $facts.tokenRoles}, runtime: $runtime, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file
@@ -382,7 +405,7 @@ export def main [
 	--snapshot               # Build and render only, do not deploy
 	--dry-run                # Print rendered manifests to stdout and exit
 	--app: string            # Application name or path
-	--cluster-env (-e): string = "kind"  # Target cluster environment (kind, eks, aks)
+	--cluster-env (-e): string = "kind"  # Target cluster environment (kind, eks, aks, gke)
 	--skip-operators = false # Skip operator bootstrap
 	--skip-observability = false # Skip VictoriaMetrics/Jaeger/Vector bootstrap
 ] {
@@ -401,7 +424,7 @@ export def main [
 
 	# A cloud release needs its operators, observability and TLS on the target,
 	# which only the Kind path provisions so far.
-	if $cluster_env != "kind" {
+	if $cluster_env not-in ["kind" "gke"] {
 		error make { msg: $"release to ($cluster_env) is not implemented: only --dry-run and --snapshot render its manifests" }
 	}
 
@@ -428,8 +451,20 @@ export def main [
 		error make { msg: $"($app_info.cue_path): render.enabled is ($has_render) but the app's compose project (if $compose_render { 'defines' } else { 'lacks' }) a render service" }
 	}
 
-	let target_env = (read-environment $cluster_env)
+	let target_env = if $cluster_env == "gke" {
+		let config = (^cue export --expression GKE --out json $app_info.cue_path | from json)
+		let kubeconfig = (mktemp -t kubeconfig.XXXXXX | str trim)
+		kubectl config view --minify --flatten --context $config.context | save -f $kubeconfig
+		$env.KUBECONFIG = $kubeconfig
+		$config.environment
+	} else { read-environment $cluster_env }
 	let registry = $target_env.registry
+	if $cluster_env == "gke" {
+		kubectl get crd clusters.postgresql.cnpg.io externalsecrets.external-secrets.io configurations.dapr.io gateways.gateway.networking.k8s.io backendtrafficpolicies.gateway.envoyproxy.io | ignore
+		kubectl get gatewayclass $target_env.gatewayClassName | ignore
+		let tls = ($manifests | from yaml | where kind == "Gateway" | first | get spec.listeners | where protocol == "HTTPS" | get -o 0.tls.certificateRefs.0.name)
+		if ($tls | is-not-empty) { kubectl get secret $tls -n $target_ns | ignore }
+	}
 
 	# Ensure cluster and operators for local Kind
 	if $cluster_env == "kind" {
@@ -455,9 +490,10 @@ export def main [
 		error make { msg: $"Only Pronto applications are supported for k8s release: ($app_info.name)" }
 	}
 
-	# migrate runs where the app has pgroll migrations to carry, as in compose.
+	# migrate runs where the app has ledger migrations or permissions to reconcile, as in compose.
 	let has_migrate = ("migrate" in $compose_services)
-	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] })
+	let runtime = (runtime-services (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json))
+	let build_svcs = ($runtime | columns) | append ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] })
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
 	let bake_targets = (bake-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs --platform ($target_env.platform? | default ""))
 	let pushed = ($build_svcs | each {|svc|
@@ -543,9 +579,20 @@ export def main [
 		sleep 3sec
 	}
 
+	if ($runtime | values | any {|r| $r.serviceToken }) {
+		kubectl wait --for=condition=Ready $"externalSecret/($workload_name)-auth-secrets" -n $target_ns --timeout=120s
+		let secret = (kubectl get secret $"($workload_name)-auth-secrets" -n $target_ns -o json | from json | get data.PGRST_JWT_SECRET | decode base64)
+		let token = ($secret | deno run --no-config ($k8s_dir | path join service-token.ts) | str trim)
+		{apiVersion: "v1", kind: "Secret", metadata: {name: $"($workload_name)-service-token", namespace: $target_ns}, data: {SERVICE_JWT: ($token | encode base64)}} | to json | kubectl apply --server-side --field-manager=pronto-runtime -f -
+	}
+
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
-	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] })
+	let runtime_names = ($runtime | columns)
+	for name in $runtime_names {
+		kubectl rollout status $"deployment/($app_info.name)-($name)" -n $target_ns --timeout=900s
+	}
+	let components = ["crud" "electric" "auth" "caddy"] | append ($runtime_names | where {|s| $s in ["ticker" "rclone-s3" "imgproxy"] }) | append (if $has_render { ["render"] } else { [] })
 	for d in ($components | each { $"deployment/($app_info.name)-($in)" }) {
 		print $"Waiting for ($d) rollout..."
 		kubectl rollout status $d -n $target_ns --timeout=180s

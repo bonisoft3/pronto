@@ -530,7 +530,7 @@ import (
 	if scope == "public" {
 		close({
 			scope:  "public"
-			write?: bool
+			write?: bool | "update"
 		})
 	}
 	if scope == "internal" {
@@ -725,8 +725,19 @@ import (
 #Computation: {
 	name: string
 	src:  *"computations/\(name).js" | string
-	// The live entities it alone writes, each with its whole output.
+	feldera?: string & !=""
+	steps?: string & !=""
+	// The live entities it alone writes.
 	to: [...string] & [_, ...]
+	sinkWrites?: [string]: "replace" | "upsert"
+	if sinkWrites != _|_ {_sinkWriteTargets: [for sink, _ in sinkWrites {list.Contains(to, sink) & true}]}
+	sinkColumns?: [string]: [...string] & [_, ...] & list.UniqueItems()
+	if sinkColumns != _|_ {
+		typedSinks: true
+		_sinkColumnTargets: [for sink, columns in sinkColumns {
+			list.Contains(to, sink) & list.Contains(columns, "id") & true
+		}]
+	}
 	// App-relative paths of the committed wasm modules its jobs call, each
 	// named in a job by its file's stem.
 	wasm: *[] | [...string]
@@ -734,9 +745,14 @@ import (
 	// declares Intl: Crypto among them. Undeclared, a use is a refusal.
 	endowments: *[] | [...mechaCluster.#CageEndowment]
 	onComplete?: string & =~"^[a-z_][a-z0-9_]{0,62}$"
+	queryTypes?: [string]: [...mechaCluster.#ComputationField & {type: #Type | #LegacyType}]
+	typedSinks: *false | bool
+	declaredReads?: [...string]
 }
 
-#Pipeline: {
+#Pipeline: P={
+	// Equivalent SQL recount for hosts without the CDC pipeline runtime.
+	portableDrain?: #Drain & {name: P.name}
 	name:    string
 	ir:      *name | string
 	trigger: *"cdc" | "schedule"
@@ -1199,16 +1215,42 @@ import (
 	_refusal: [if len(_violations) == 0 {true}, _violations[0]][0] & true
 }
 
-// A DuckStream streaming IVM pipeline executed via Feldera on the server
-// and emulated reactively via DuckDB-WASM in the client browser.
-#DuckStreamPipeline: {
-	name:       string
-	ir:         *name | string
-	sql:        string
-	sources:    [...string]
-	sink:       string
-	tempo:      *"hot" | "cold"
+// The SQL prototype and the admitted native computation stage are separate backends.
+#DuckStreamPipeline: #DuckStreamSQL | #DuckStreamCompute
+
+#DuckStreamSQL: {
+	name: string
+	ir:   *name | string
+	sql:  string
+	sources: [...string]
+	sink:  string
+	tempo: *"hot" | "cold"
 	operators?: [...("tumble" | "hop" | "session" | "distinct" | "interval_join" | "cross_join")]
+}
+
+#DuckStreamCompute: {
+	name:    string
+	ir:      *name | string
+	backend: "compute"
+	src:     string & !=""
+	feldera?: string & !=""
+	steps?: string & !=""
+	sources: [string]: {
+		entities: [...string] & [_, ...]
+		read: "snapshot"
+	}
+	sinks: [string]: {
+		entity:      string
+		columns?:    [...string] & [_, ...] & list.UniqueItems()
+		write:       "replace" | "upsert"
+		version:     "latest"
+		transaction: string & !=""
+	}
+	wasm: *[] | [...string]
+	endowments: *[] | [...mechaCluster.#CageEndowment]
+	onComplete?: string & =~"^[a-z_][a-z0-9_]{0,62}$"
+	queryTypes?: [string]: [...mechaCluster.#ComputationField & {type: #Type | #LegacyType}]
+
 }
 
 #FormField: {
@@ -2008,6 +2050,56 @@ import (
 		design: pendingLiterals: *0 | int & >=0
 	}
 
+	if A.state.duckstreams != _|_ {
+		state: computations: {
+			for streamName, stream in A.state.duckstreams if stream.backend != _|_ {
+				(streamName): {
+					_sourceCount: len([for _, source in stream.sources {source}]) & >0
+					_sinkCount: len([for _, sink in stream.sinks {sink}]) & >0
+					_transactions: [for transaction, _ in {for _, sink in stream.sinks {(sink.transaction): true}} {transaction}]
+					_transactionCount: len(_transactions) & 1
+					_sourceStorage: [for _, source in stream.sources for entity in source.entities {
+						A.state.entities[entity].durability & ("offline" | "live" | "server")
+					}]
+					src: stream.src
+					if stream.feldera != _|_ {feldera: stream.feldera}
+					if stream.steps != _|_ {steps: stream.steps}
+					to: [for _, sink in stream.sinks {sink.entity}]
+					sinkWrites: {for _, sink in stream.sinks {(sink.entity): sink.write}}
+					if len([for _, sink in stream.sinks if sink.columns != _|_ {true}]) > 0 {
+						sinkColumns: {for _, sink in stream.sinks if sink.columns != _|_ {(sink.entity): sink.columns}}
+					}
+					declaredReads: [for table, _ in {
+						for _, source in stream.sources for entity in source.entities {
+							(A.state.entities[entity].table): true
+						}
+					} {table}]
+					typedSinks: true
+					wasm:       stream.wasm
+					endowments: stream.endowments
+					if stream.onComplete != _|_ {onComplete: stream.onComplete}
+					if stream.queryTypes != _|_ {queryTypes: stream.queryTypes}
+				}
+			}
+		}
+	}
+
+	_sinkColumnViolations: list.Concat([for name, computation in A.state.computations
+		if computation.sinkColumns != _|_ for entity, columns in computation.sinkColumns {
+		let fields = A.state.entities[entity].fields
+		let writable = [for f in fields if !f.retired if f.generated == _|_ {f.name}]
+		list.Concat([
+			[for column in columns if !list.Contains(writable, column) {
+				"computation \(name) sink \(entity) column \(column) is not a writable entity field"
+			}],
+			[for f in fields if !f.retired if f.generated == _|_
+				if f.pk || (f.required && f.default == _|_) if !list.Contains(columns, f.name) {
+				"computation \(name) sink \(entity) requires insert column \(f.name)"
+			}],
+		])
+	}])
+	_sinkColumnRefusal: [if len(_sinkColumnViolations) == 0 {true}, error(_sinkColumnViolations[0])][0]
+
 	// Static proof of the mutation loop: a cold pipeline cannot feed an active screen mutation loop D(E)
 	_hotViolations: [
 		if A.state.duckstreams != _|_
@@ -2019,7 +2111,7 @@ import (
 				}
 			}
 		}
-		for plName, pl in A.state.duckstreams if pl.tempo == "cold"
+		for plName, pl in A.state.duckstreams if pl.backend == _|_ if pl.tempo == "cold"
 		let plSinkEntity = [if eLookup[pl.sink] != _|_ {eLookup[pl.sink]}, pl.sink][0]
 		let plSourceEntities = [for s in pl.sources {[if eLookup[s] != _|_ {eLookup[s]}, s][0]}]
 		for sName, s in A.surface.screens

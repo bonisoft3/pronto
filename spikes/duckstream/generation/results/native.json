@@ -1,0 +1,172 @@
+{
+  "tools": {
+    "deno": "2.8.2",
+    "docker": "29.2.1",
+    "postgres_image": "postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3"
+  },
+  "transport": "Feldera 0.367.0 postgres_output materialized mode → generation_ingress AFTER trigger → publish_generation",
+  "custom_delivery_worker": false,
+  "first": {
+    "generation": 100,
+    "accounts": [
+      {
+        "id": 1,
+        "value": 10
+      },
+      {
+        "id": 2,
+        "value": 20
+      }
+    ],
+    "totals": [
+      {
+        "id": 1,
+        "value": 30
+      }
+    ]
+  },
+  "second": {
+    "generation": 200,
+    "accounts": [
+      {
+        "id": 1,
+        "value": 35
+      }
+    ],
+    "totals": [
+      {
+        "id": 1,
+        "value": 35
+      }
+    ]
+  },
+  "after_old_replay": {
+    "generation": 200,
+    "accounts": [
+      {
+        "id": 1,
+        "value": 35
+      }
+    ],
+    "totals": [
+      {
+        "id": 1,
+        "value": 35
+      }
+    ]
+  },
+  "ingress_generation_after_old_replay": "100",
+  "final": {
+    "generation": 300,
+    "accounts": [],
+    "totals": []
+  },
+  "counts": [
+    3,
+    3
+  ],
+  "stats": {
+    "global_metrics": {
+      "state": "Running",
+      "bootstrap_in_progress": false,
+      "transaction_status": "NoTransaction",
+      "transaction_id": 0,
+      "transaction_msecs": null,
+      "transaction_records": null,
+      "commit_progress": null,
+      "transaction_initiators": {
+        "transaction_id": null,
+        "initiated_by_api": null,
+        "initiated_by_connectors": {}
+      },
+      "concurrent_bootstrap_phase": "Inactive",
+      "concurrent_bootstrap_progress": null,
+      "rss_bytes": 192937984,
+      "memory_pressure": "low",
+      "memory_pressure_epoch": 0,
+      "cpu_msecs": 55,
+      "uptime_msecs": 2906,
+      "start_time": 1792518451,
+      "incarnation_uuid": "01a15a6c-f15c-7d50-a5de-73ca7526639a",
+      "initial_start_time": 1792518451,
+      "storage_bytes": 0,
+      "storage_mb_secs": 0,
+      "runtime_elapsed_msecs": 22,
+      "buffered_input_records": 0,
+      "buffered_input_bytes": 0,
+      "total_input_records": 3,
+      "total_input_bytes": 623,
+      "total_processed_records": 3,
+      "total_processed_bytes": 623,
+      "total_completed_records": 3,
+      "output_stall_msecs": 0,
+      "total_initiated_steps": 11,
+      "total_completed_steps": 11,
+      "pipeline_complete": true,
+      "platform_version": "0.367.0+3a7edb86ed921c2dead05b627ac16c6f89fbfc36",
+      "runtime_version": "0.367.0+3a7edb86ed921c2dead05b627ac16c6f89fbfc36"
+    },
+    "suspend_error": {
+      "Permanent": [
+        "EnterpriseFeature",
+        "StorageRequired"
+      ]
+    },
+    "checkpoint_activity": {
+      "status": "idle"
+    },
+    "permanent_checkpoint_errors": [
+      "EnterpriseFeature",
+      "StorageRequired"
+    ],
+    "inputs": [
+      {
+        "endpoint_name": "candidate.api-ingress-f653599c4fa97b29",
+        "config": {
+          "stream": "candidate"
+        },
+        "metrics": {
+          "total_bytes": 623,
+          "total_records": 3,
+          "buffered_records": 0,
+          "buffered_bytes": 0,
+          "num_transport_errors": 0,
+          "num_parse_errors": 0,
+          "end_of_input": false,
+          "processing_latency_p99_micros": 1000
+        },
+        "fatal_error": null,
+        "health": null,
+        "paused": false,
+        "barrier": false,
+        "completed_frontier": null
+      }
+    ],
+    "outputs": [
+      {
+        "endpoint_name": "complete_generation.postgres",
+        "config": {
+          "stream": "complete_generation"
+        },
+        "metrics": {
+          "transmitted_records": 3,
+          "transmitted_bytes": 629,
+          "queued_records": 0,
+          "queued_batches": 0,
+          "buffered_records": 0,
+          "buffered_batches": 0,
+          "num_encode_errors": 0,
+          "num_transport_errors": 0,
+          "total_processed_input_records": 3,
+          "total_processed_steps": 11,
+          "memory": 0,
+          "batch_records_written": 0
+        },
+        "fatal_error": null,
+        "health": null,
+        "paused": false
+      }
+    ]
+  },
+  "restart": "stop/start with storage null; older complete candidate replayed before current candidate"
+}

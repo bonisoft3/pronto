@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"list"
 )
+
 import pronto "github.com/bonisoft3/pronto"
 
 _computed: _code & {
@@ -22,27 +23,41 @@ _computed: _code & {
 }
 
 _computedLoop: (pronto.#DefaultLoop & {
-	code:     _computed
+	code: _computed
 	terminal: (pronto.#DefaultTerminal & {code: _computed}).out
 	cluster: (pronto.#DefaultCluster & {code: _computed, statics: []}).out
 }).out
 _admit: _computedLoop.surface.checks.admit
 
-admitLints:       _admit.verb & "lint"
+admitLints: _admit.verb & "lint"
 // A computation's endowments ride with its module, as the service loads it.
 admitLoadsModule: strings.HasSuffix(_admit.cmds[0], #"admit.ts) "computations/chances.js=Crypto,TextEncoder,Cheerio""#) & true
 admitUnderPins:   strings.Contains(_admit.cmds[0], "services compute deno.json") & true
 // And they reach the service that cages it.
 _computedCluster: (pronto.#DefaultCluster & {code: _computed, statics: []}).out
+_nativeComputedCluster: _computedCluster & {state: duckstreamEngine: "feldera"}
+nativeCompilationDefault: _nativeComputedCluster.surface.targets.compute.compose.environment.FELDERA_COMPILATION_PROFILE & "${FELDERA_COMPILATION_PROFILE:-optimized}"
 computeEndowed: strings.Contains(_computedCluster.surface.targets.compute.compose.environment.COMPUTATIONS, #""endowments":["Crypto","TextEncoder","Cheerio"]"#) & true
 
 _withHook: _computed & {state: computations: chances: onComplete: "capture_team_odds_history"}
 _hookCluster: (pronto.#DefaultCluster & {code: _withHook, statics: []}).out
-_hookConfig: json.Unmarshal(_hookCluster.surface.targets.compute.compose.environment.COMPUTATIONS)
+_hookConfig:                 json.Unmarshal(_hookCluster.surface.targets.compute.compose.environment.COMPUTATIONS)
 completionRPCReachesRuntime: _hookConfig[0].onComplete & "capture_team_odds_history"
 _plainCluster: (pronto.#DefaultCluster & {code: _computed, statics: []}).out
-_plainConfig: json.Unmarshal(_plainCluster.surface.targets.compute.compose.environment.COMPUTATIONS)
+_plainConfig:                  json.Unmarshal(_plainCluster.surface.targets.compute.compose.environment.COMPUTATIONS)
 undeclaredCompletionRPCAbsent: (_plainConfig[0].onComplete == _|_) & true
+_typedComputed: _computed & {state: computations: chances: {
+	typedSinks: true
+	queryTypes: rows: [{name: "sequence", type: "bigint"}, {name: "amount", type: "decimal", precision: 38, scale: 6, required: false}]
+}}
+_typedCluster: (pronto.#DefaultCluster & {code: _typedComputed, statics: []}).out
+_typedConfig:            json.Unmarshal(_typedCluster.surface.targets.compute.compose.environment.COMPUTATIONS)[0]
+queryAliasCanonicalized: _typedConfig.queryTypes.rows[0].type & "int64"
+queryDecimalProfile: _typedConfig.queryTypes.rows[1] & {name: "amount", type: "decimal", precision: 38, scale: 6, required: false}
+sinkSchemaDerived: _typedConfig.sinkTypes.chance & [{name: "id", type: "uuid", required: true}, {name: "odds", type: "int32", required: true}]
+portableTypesReachRuntime: len(_typedConfig.types.types) & 15
+portableInt64RemainsExact: _typedConfig.types.types.int64.json & "string"
+undeclaredTypesAbsent:     (_plainConfig[0].types == _|_) & true
 invalidCompletionRPCsRefused: [for rpc in ["", "Capture", "rpc/capture", "capture-name", strings.Repeat("a", 64)] {
 	((pronto.#Computation & {name: "chances", to: ["Chance"], onComplete: rpc}) == _|_) & true
 }]
@@ -58,7 +73,7 @@ _paged: pronto.#App & {
 	}
 }
 _pages: (pronto.#DefaultLoop & {
-	code:     _paged
+	code: _paged
 	terminal: (pronto.#DefaultTerminal & {code: _paged}).out
 	cluster: (pronto.#DefaultCluster & {code: _paged, statics: []}).out
 }).out.surface.verbs.pages
@@ -90,14 +105,42 @@ _freshFiles: (pronto.#emit & {
 	loop:     _freshLoop
 	build: (pronto.#DefaultBuild & {code: _freshInputs, loop: _freshLoop, cluster: _freshCluster, terminal: _freshTerminal}).out
 }).files
-_freshCDC:                         strings.Split(_freshFiles["services/database/migrations/008_publication.sql"].text, "-- Electric")[0]
-serverInputStillCaptured:          strings.Contains(_freshCDC, "profile") & true
-liveInputStillCaptured:            strings.Contains(_freshCDC, "goal") & true
-offlineInputStillCaptured:         strings.Contains(_freshCDC, "retained") & true
+_freshCDC:                    strings.Split(_freshFiles["services/database/migrations/008_publication.sql"].text, "-- Electric")[0]
+serverInputStillCaptured:     strings.Contains(_freshCDC, "profile") & true
+liveInputStillCaptured:       strings.Contains(_freshCDC, "goal") & true
+offlineInputStillCaptured:    strings.Contains(_freshCDC, "retained") & true
 computedOutputCaptured:       strings.Contains(_freshCDC, "chance") & true
-requestProjectionCaptured:      strings.Contains(_freshCDC, "request_projection") & true
+requestProjectionCaptured:    strings.Contains(_freshCDC, "request_projection") & true
 serverPipelineOutputCaptured: strings.Contains(_freshCDC, "server_pipeline") & true
 cdcSourceTables: json.Marshal(list.SortStrings(strings.Split(
 	_freshFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings.tables, ","))) & json.Marshal(["chance", "goal", "profile", "request_projection", "retained", "server_pipeline"])
 computeWaitsForSourceSlot: _freshCluster.surface.targets.compute.compose.environment.CDC_SLOT &
 	_freshFiles["docker/conduit-pipeline.yaml"].data.pipelines[0].connectors[0].settings["logrepl.slotName"]
+
+_snapshotInputCode: pronto.#App & {
+	meta: {name: "snapshot", targets: ["pages"]}
+	state: {
+		entities: {
+			Source: {table: "source", durability: "offline", fields: [{name: "id", type: "uuid", pk: true}]}
+			Chance: {table: "chance", durability: "offline", fields: [{name: "id", type: "uuid", pk: true}]}
+		}
+		computations: chances: {to: ["Chance"], declaredReads: ["source"]}
+	}
+}
+_snapshotInputLoop: (pronto.#DefaultLoop & {
+	code: _snapshotInputCode
+	terminal: (pronto.#DefaultTerminal & {code: _snapshotInputCode}).out
+	cluster: (pronto.#DefaultCluster & {code: _snapshotInputCode, statics: []}).out
+}).out
+pagesCapturesSources: strings.Contains(_snapshotInputLoop.surface.verbs.pages.cmds[0], "--tables chance,source --out") & true
+
+_privateSnapshotCode: _snapshotInputCode & {state: {
+ entities: Secret: {table: "secret", durability: "live", access: {scope: "private", owner: "id"}, fields: [{name: "id", type: "uuid", pk: true}]}
+ computations: secret: {to: ["Secret"], declaredReads: ["secret"]}
+}}
+_privateSnapshotLoop: (pronto.#DefaultLoop & {
+ code: _privateSnapshotCode
+ terminal: (pronto.#DefaultTerminal & {code: _privateSnapshotCode}).out
+ cluster: (pronto.#DefaultCluster & {code: _privateSnapshotCode, statics: []}).out
+}).out
+privateComputationRowsNeverShip: strings.Contains(_privateSnapshotLoop.surface.verbs.pages.cmds[0], "--tables chance,source --out") & true

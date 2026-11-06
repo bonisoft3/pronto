@@ -1,0 +1,73 @@
+{
+  "before": [
+    {
+      "count": 1200,
+      "memory": 34930688,
+      "requestMs": 705,
+      "runs": 1,
+      "groups": 100,
+      "exactRowsVerified": true
+    },
+    {
+      "count": 100000,
+      "memory": 34930688,
+      "requestMs": 27,
+      "runs": 2,
+      "groups": 100,
+      "exactRowsVerified": true
+    },
+    {
+      "count": 1000000,
+      "memory": 60424192,
+      "requestMs": 91,
+      "runs": 3,
+      "groups": 100,
+      "exactRowsVerified": true
+    },
+    {
+      "count": 1200,
+      "memory": 60424192,
+      "requestMs": 13,
+      "runs": 4,
+      "groups": 100,
+      "exactRowsVerified": true
+    }
+  ],
+  "after": [
+    {
+      "count": 1200,
+      "memory": 34930688,
+      "requestMs": 695,
+      "runs": 5,
+      "groups": 100,
+      "exactRowsVerified": true
+    },
+    {
+      "count": 100000,
+      "memory": 34930688,
+      "requestMs": 25,
+      "runs": 6,
+      "groups": 100,
+      "exactRowsVerified": true
+    },
+    {
+      "count": 1000000,
+      "memory": 60424192,
+      "requestMs": 90,
+      "runs": 7,
+      "groups": 100,
+      "exactRowsVerified": true
+    },
+    {
+      "count": 1200,
+      "memory": 60424192,
+      "requestMs": 13,
+      "runs": 8,
+      "groups": 100,
+      "exactRowsVerified": true
+    }
+  ],
+  "restartPreservedCounter": true,
+  "exactRowsVerified": true,
+  "invalidFixtureRejected": true
+}

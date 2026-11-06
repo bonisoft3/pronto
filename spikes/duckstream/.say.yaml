@@ -1,0 +1,14 @@
+say:
+  build:
+    do: "deno check --no-config machine/machine.test.ts"
+  lint:
+    rulemap:
+      spike:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "deno lint --no-config machine/*.ts"
+  test:
+    do: "deno test --no-config --allow-read --allow-env machine/machine.test.ts"
+  integrate:
+    do: "bash runtime/run.sh"

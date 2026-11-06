@@ -1,0 +1,16 @@
+say:
+  doctor:
+    do: "deno task doctor"
+  build:
+    do: "deno task build"
+  lint:
+    rulemap:
+      bootstrap:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "deno task lint"
+  test:
+    do: "deno task test"
+  integrate:
+    do: "deno task test"

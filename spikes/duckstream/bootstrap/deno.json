@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "doctor": "deno run --allow-run=docker probe.ts doctor",
+    "build": "deno check probe.ts",
+    "lint": "deno fmt --check && deno lint",
+    "test": "deno run --allow-run=docker --allow-write=results.json probe.ts test"
+  }
+}

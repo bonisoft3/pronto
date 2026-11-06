@@ -1,0 +1,348 @@
+{
+  "error_view": {
+    "rels": [
+      {
+        "id": 0,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "feldera_error_table"
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "result": {
+    "rels": [
+      {
+        "id": 1,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "scalar_inputs"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 2,
+        "relOp": "LogicalProject",
+        "fields": [
+          "id",
+          "quotient",
+          "remainder",
+          "day_index",
+          "position",
+          "suffix",
+          "prefix",
+          "seconds"
+        ],
+        "exprs": [
+          {
+            "input": 0,
+            "name": "$0"
+          },
+          {
+            "pos": {
+              "line": 6,
+              "column": 12,
+              "end_line": 6,
+              "end_column": 21
+            },
+            "op": {
+              "name": "/",
+              "kind": "CHECKED_DIVIDE",
+              "syntax": "BINARY"
+            },
+            "operands": [
+              {
+                "input": 1,
+                "name": "$1"
+              },
+              {
+                "literal": 3,
+                "type": {
+                  "type": "INTEGER",
+                  "nullable": false
+                }
+              }
+            ]
+          },
+          {
+            "pos": {
+              "line": 6,
+              "column": 36,
+              "end_line": 6,
+              "end_column": 49
+            },
+            "op": {
+              "name": "MOD",
+              "kind": "MOD",
+              "syntax": "FUNCTION"
+            },
+            "operands": [
+              {
+                "input": 1,
+                "name": "$1"
+              },
+              {
+                "literal": 3,
+                "type": {
+                  "type": "INTEGER",
+                  "nullable": false
+                }
+              }
+            ]
+          },
+          {
+            "pos": {
+              "line": 7,
+              "column": 8,
+              "end_line": 7,
+              "end_column": 64
+            },
+            "op": {
+              "name": "/",
+              "kind": "CHECKED_DIVIDE",
+              "syntax": "BINARY"
+            },
+            "operands": [
+              {
+                "pos": {
+                  "line": 7,
+                  "column": 8,
+                  "end_line": 7,
+                  "end_column": 56
+                },
+                "op": {
+                  "name": "-",
+                  "kind": "CHECKED_MINUS",
+                  "syntax": "BINARY"
+                },
+                "operands": [
+                  {
+                    "input": 1,
+                    "name": "$1"
+                  },
+                  {
+                    "pos": {
+                      "line": 7,
+                      "column": 18,
+                      "end_line": 7,
+                      "end_column": 55
+                    },
+                    "op": {
+                      "name": "MOD",
+                      "kind": "MOD",
+                      "syntax": "FUNCTION"
+                    },
+                    "operands": [
+                      {
+                        "pos": {
+                          "line": 7,
+                          "column": 22,
+                          "end_line": 7,
+                          "end_column": 47
+                        },
+                        "op": {
+                          "name": "+",
+                          "kind": "CHECKED_PLUS",
+                          "syntax": "BINARY"
+                        },
+                        "operands": [
+                          {
+                            "pos": {
+                              "line": 7,
+                              "column": 22,
+                              "end_line": 7,
+                              "end_column": 39
+                            },
+                            "op": {
+                              "name": "MOD",
+                              "kind": "MOD",
+                              "syntax": "FUNCTION"
+                            },
+                            "operands": [
+                              {
+                                "input": 1,
+                                "name": "$1"
+                              },
+                              {
+                                "literal": 86400,
+                                "type": {
+                                  "type": "INTEGER",
+                                  "nullable": false
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "literal": 86400,
+                            "type": {
+                              "type": "INTEGER",
+                              "nullable": false
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "literal": 86400,
+                        "type": {
+                          "type": "INTEGER",
+                          "nullable": false
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "literal": 86400,
+                "type": {
+                  "type": "INTEGER",
+                  "nullable": false
+                }
+              }
+            ]
+          },
+          {
+            "pos": {
+              "line": 8,
+              "column": 8,
+              "end_line": 8,
+              "end_column": 35
+            },
+            "op": {
+              "name": "POSITION",
+              "kind": "POSITION",
+              "syntax": "FUNCTION"
+            },
+            "operands": [
+              {
+                "input": 3,
+                "name": "$3"
+              },
+              {
+                "input": 2,
+                "name": "$2"
+              }
+            ]
+          },
+          {
+            "pos": {
+              "line": 9,
+              "column": 8,
+              "end_line": 9,
+              "end_column": 33
+            },
+            "op": {
+              "name": "SUBSTRING",
+              "kind": "OTHER_FUNCTION",
+              "syntax": "FUNCTION"
+            },
+            "operands": [
+              {
+                "input": 2,
+                "name": "$2"
+              },
+              {
+                "literal": 4,
+                "type": {
+                  "type": "INTEGER",
+                  "nullable": false
+                }
+              }
+            ]
+          },
+          {
+            "pos": {
+              "line": 10,
+              "column": 8,
+              "end_line": 10,
+              "end_column": 39
+            },
+            "op": {
+              "name": "SUBSTRING",
+              "kind": "OTHER_FUNCTION",
+              "syntax": "FUNCTION"
+            },
+            "operands": [
+              {
+                "input": 2,
+                "name": "$2"
+              },
+              {
+                "literal": 1,
+                "type": {
+                  "type": "INTEGER",
+                  "nullable": false
+                }
+              },
+              {
+                "literal": 3,
+                "type": {
+                  "type": "INTEGER",
+                  "nullable": false
+                }
+              }
+            ]
+          },
+          {
+            "pos": {
+              "line": 11,
+              "column": 8,
+              "end_line": 11,
+              "end_column": 65
+            },
+            "op": {
+              "name": "CAST",
+              "kind": "CAST",
+              "syntax": "SPECIAL"
+            },
+            "operands": [
+              {
+                "pos": {
+                  "line": 11,
+                  "column": 8,
+                  "end_line": 11,
+                  "end_column": 65
+                },
+                "op": {
+                  "name": "-",
+                  "kind": "MINUS",
+                  "syntax": "SPECIAL"
+                },
+                "operands": [
+                  {
+                    "input": 4,
+                    "name": "$4"
+                  },
+                  {
+                    "literal": 0,
+                    "type": {
+                      "type": "TIMESTAMP",
+                      "nullable": false,
+                      "precision": 0
+                    }
+                  }
+                ],
+                "type": {
+                  "type": "INTERVAL_SECOND",
+                  "nullable": true,
+                  "precision": 10,
+                  "scale": 6
+                }
+              }
+            ],
+            "type": {
+              "type": "INTEGER",
+              "nullable": true
+            }
+          }
+        ],
+        "inputs": [
+          1
+        ]
+      }
+    ]
+  }
+}

@@ -25,6 +25,7 @@ _besideRules: (pronto.#emit & {
 
 besideRule: _besideRules["pronto-integrate-2"].cmds[0].do & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-plain"
 besideRunner: _besideTargets["ci-plain"] & {#closure: "check-plain", #check: "plain"}
+besideCompilesForTests: list.Contains(_besideTargets["ci-plain"].dockerfile.preamble, "ENV FELDERA_COMPILATION_PROFILE=unoptimized") & true
 besidePriority: _besideRules["pronto-integrate-2"].priority & 2
 besideWaits:    _besideTargets["check-plain"].compose.depends_on["\(_code.meta.name)-launch"].condition & "service_healthy"
 besideDoor:     _besideTargets["check-plain"].compose.environment.APP_URL & "https://caddy:8443"

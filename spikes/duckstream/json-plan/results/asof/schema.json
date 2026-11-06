@@ -1,0 +1,121 @@
+{
+  "inputs" : [ {
+    "name" : "fixtures_game",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "id",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "team",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "moment",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "precision" : 6,
+        "type" : "TIMESTAMP"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false,
+    "foreign_keys" : [ ]
+  }, {
+    "name" : "fixtures_rating",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "team",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "moment",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : 6,
+        "type" : "TIMESTAMP"
+      },
+      "unused" : false
+    }, {
+      "name" : "power",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "DOUBLE"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false,
+    "foreign_keys" : [ ]
+  } ],
+  "outputs" : [ {
+    "name" : "error_view",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "table_or_view_name",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "message",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "metadata",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  }, {
+    "name" : "result",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "id",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "power",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "DOUBLE"
+      },
+      "unused" : false
+    } ],
+    "materialized" : true
+  } ]
+}

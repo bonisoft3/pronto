@@ -1,0 +1,63 @@
+{
+  "inputs" : [ {
+    "name" : "typed_values",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "i",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false,
+    "foreign_keys" : [ ]
+  } ],
+  "outputs" : [ {
+    "name" : "error_view",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "table_or_view_name",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "message",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "metadata",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  }, {
+    "name" : "result",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "total",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "BIGINT"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  } ]
+}

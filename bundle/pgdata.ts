@@ -19,7 +19,7 @@
 // pgroll migrations (--pgroll, the cluster's state.pgroll as JSON) its ledger
 // lacks, as the cluster's migrate step would (pglite-workerd's migrate.ts).
 //
-//   deno run -A --config <mecha>/packages/mecha-browser/cluster.deno.json --lock <mecha>/packages/mecha-browser/deno.lock --frozen \
+//   DENO_NO_PACKAGE_JSON=1 deno run -A --no-config --import-map <mecha>/packages/mecha-browser/cluster.deno.json --lock <mecha>/packages/mecha-browser/deno.lock --frozen \
 //     bundle/pgdata.ts <appDir> --mecha <dir> --out <dir> --pgroll <file> [--derived <file>] [--from <dir>]
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'

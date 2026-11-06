@@ -1,0 +1,16 @@
+say:
+  setup:
+    do: "bash setup.sh"
+  doctor:
+    do: "bash check-tools.sh"
+  build:
+    do: "python3 planner/generate.py"
+  lint:
+    rulemap:
+      contract:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "bash lint.sh"
+  test:
+    do: "bash run.sh"

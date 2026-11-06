@@ -1,0 +1,8 @@
+{
+  "tools": {
+    "deno": "2.8.2",
+    "docker": "29.2.1",
+    "postgres_image": "postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3"
+  },
+  "sink_sha256": "c9d375ce17e3df4221176768dd23a417a7e8c567bb3e8136297677921a4ae451"
+}

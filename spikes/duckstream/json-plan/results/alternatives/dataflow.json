@@ -1,0 +1,180 @@
+{
+  "calcite_plan": {
+    "error_view": {
+      "rels": [
+        {
+          "id": 0,
+          "relOp": "LogicalTableScan",
+          "table": [
+            "schema",
+            "feldera_error_table"
+          ],
+          "inputs": []
+        }
+      ]
+    },
+    "result": {
+      "rels": [
+        {
+          "id": 1,
+          "relOp": "LogicalTableScan",
+          "table": [
+            "schema",
+            "t"
+          ],
+          "inputs": []
+        },
+        {
+          "id": 2,
+          "relOp": "LogicalAggregate",
+          "group": [],
+          "inputs": [
+            1
+          ]
+        }
+      ]
+    }
+  },
+  "mir": {
+    "s0": {
+      "operation": "source_multiset",
+      "inputs": [],
+      "table": "t",
+      "calcite": {
+        "final": 1
+      },
+      "positions": [
+        {"start_line_number":1,"start_column":14,"end_line_number":1,"end_column":14}
+      ],
+      "persistent_id": "936d6980ce2b5bab570f741112288faa8c55e074a5eb8910d036cac97ff35926"
+    }, "s1": {
+      "operation": "map_index",
+      "inputs": [
+        { "node": "s0", "output": 0 }
+      ],
+      "calcite": {
+        "partial": 2
+      },
+      "positions": [],
+      "persistent_id": "67ef10099922176aafd21d5f92cf7b5dec59b2f66ce740e04f38154d2407e8d0"
+    }, "s2": {
+      "operation": "aggregate_linear_postprocess",
+      "inputs": [
+        { "node": "s1", "output": 0 }
+      ],
+      "calcite": {
+        "partial": 2
+      },
+      "positions": [
+        {"start_line_number":2,"start_column":30,"end_line_number":2,"end_column":35}
+      ],
+      "persistent_id": "eac6043689c18f5f15222d57a3c6af85dc5054363884b4f9c2841ed42311359b"
+    }, "s3": {
+      "operation": "map",
+      "inputs": [
+        { "node": "s2", "output": 0 }
+      ],
+      "calcite": {
+        "partial": 2
+      },
+      "positions": [],
+      "persistent_id": "ecdd48b3860f835f1d4e2a3591a178ebbdc86f26c3a5d2c8bfaa3324493e6237"
+    }, "s4": {
+      "operation": "map",
+      "inputs": [
+        { "node": "s2", "output": 0 }
+      ],
+      "calcite": {
+        "partial": 2
+      },
+      "positions": [],
+      "persistent_id": "e703dd02c6bfafcbd6169fd82d8a3820be65a3bdc0f50eb70c9c229f6d639c9f"
+    }, "s5": {
+      "operation": "neg",
+      "inputs": [
+        { "node": "s4", "output": 0 }
+      ],
+      "calcite": {
+        "partial": 2
+      },
+      "positions": [],
+      "persistent_id": "af113fb0e2d71abb4a49ecb7f796a378cd5509f9e91919065547d1aebd095623"
+    }, "s6": {
+      "operation": "constant",
+      "inputs": [],
+      "calcite": {
+        "partial": 2
+      },
+      "positions": [],
+      "persistent_id": "bf556b31be7661d3bb1a694632323b01db71432a9e84574ee6eadaf6752dd1a0"
+    }, "s7": {
+      "operation": "differentiate",
+      "inputs": [
+        { "node": "s6", "output": 0 }
+      ],
+      "calcite": {
+        "partial": 2
+      },
+      "positions": [],
+      "persistent_id": "9e8f051a94942c40f9a5b23708913c6a4da4af3fd66bce03ccaece9afb385878"
+    }, "s8": {
+      "operation": "atomic_sum",
+      "inputs": [
+        { "node": "s7", "output": 0 },
+        { "node": "s5", "output": 0 },
+        { "node": "s3", "output": 0 }
+      ],
+      "calcite": {
+        "partial": 2
+      },
+      "positions": [],
+      "persistent_id": "5cd2e5f2d1f184df0be725175e0ae05e1cbadb7da31ddb1e41d389e4f4bf9d88"
+    }, "s9": {
+      "operation": "inspect",
+      "inputs": [
+        { "node": "s8", "output": 0 }
+      ],
+      "view": "result",
+      "calcite": {
+        "final": 2
+      },
+      "positions": [
+        {"start_line_number":2,"start_column":1,"end_line_number":2,"end_column":51}
+      ],
+      "persistent_id": "fc27d5e692e30d50e0cde3d1141af86d403b4cb588fa470385ed25f0fd6d88a7"
+    }, "s10": {
+      "operation": "constant",
+      "inputs": [],
+      "calcite": {
+        "partial": 0
+      },
+      "positions": [],
+      "persistent_id": "49e7f59afc3b81729767ec6943e8856d1bc4dfc15320c84878e2965bbed27a98"
+    }, "s11": {
+      "operation": "differentiate",
+      "inputs": [
+        { "node": "s10", "output": 0 }
+      ],
+      "calcite": {
+        "partial": 0
+      },
+      "positions": [],
+      "persistent_id": "4407ad7daf5081bdb140d0cf3fee8380ea6e970365569c5b7c45d99e317f7744"
+    }, "s12": {
+      "operation": "inspect",
+      "inputs": [
+        { "node": "s11", "output": 0 }
+      ],
+      "view": "error_view",
+      "calcite": {
+        "final": 0
+      },
+      "positions": [],
+      "persistent_id": "5ed3a1491a8a5578e71319383990b1ec8a368a0f072000933d5e3b7e375c3afa"
+    }
+  },
+  "sources": [
+    "CREATE TABLE t (x BIGINT);",
+    "CREATE VIEW result AS SELECT SUM(x) AS total FROM t;"
+  ]
+}

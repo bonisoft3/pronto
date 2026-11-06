@@ -52,6 +52,7 @@ export async function compileMechaReducer(
   source: string,
   terminal: Terminal,
   surface: Surface = { seat: [], public: [] },
+  options: { serverOnly?: boolean; beforeTransitionSql?: string; afterTransitionSql?: string } = {},
 ): Promise<{ source: string; sql: string }> {
   if (!MECHA_NAME.test(spec.name)) throw new Error("invalid mecha name");
   if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid mecha version");
@@ -125,8 +126,9 @@ return JSON.parse(run(JSON.stringify(input)));
   const upsert = (columns: string[]) => columns.filter(c => c !== "id").map(c => `"${c}" = EXCLUDED."${c}"`).join(", ");
   // The surface's parts, as the surface check reads them: a trigger on a
   // table the machine has no part in would fail the migration.
-  const parts = partsOf(spec);
+  const parts = options.serverOnly ? [] : partsOf(spec);
   const protocol = literal(`Hybrid ${spec.name} protocol ${spec.version}; no public canonical-state access`);
+  const isolation = options.serverOnly ? "serializable" : "read committed";
   const sql = `
 -- tier: container
 CREATE EXTENSION IF NOT EXISTS plv8;
@@ -142,7 +144,7 @@ DO $protocol$ BEGIN
 END $protocol$;
 CREATE SCHEMA IF NOT EXISTS ${schema};
 REVOKE ALL ON SCHEMA ${schema} FROM PUBLIC;
--- A machine's steps run read committed, ordered by locks rather than by a
+${options.serverOnly ? `-- Durable publication and its receipt share the caller's serializable transaction.` : `-- A machine's steps run read committed, ordered by locks rather than by a
 -- snapshot: a step holds each player of its instance (hold) before it locks
 -- any row, so two steps sharing a player run one after the other, and a check
 -- reading that player's other instances (seated elsewhere, unavailable) reads
@@ -158,11 +160,11 @@ DO $isolation$ BEGIN
   IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service') THEN ALTER ROLE service RESET default_transaction_isolation; ALTER ROLE service RESET enable_seqscan; END IF;
 END $isolation$;
 -- A step that waited for a player must read what that player's last step
--- left, which a snapshot taken before the wait would not show.
+-- left, which a snapshot taken before the wait would not show.`}
 CREATE OR REPLACE FUNCTION ${schema}.serial() RETURNS void LANGUAGE plpgsql AS $serial$
 BEGIN
-  IF current_setting('transaction_isolation') <> 'read committed' THEN
-    RAISE EXCEPTION 'a ${spec.name} step runs read committed, not %', current_setting('transaction_isolation') USING ERRCODE = '25000';
+  IF current_setting('transaction_isolation') <> '${isolation}' THEN
+    RAISE EXCEPTION 'a ${spec.name} step runs ${isolation}, not %', current_setting('transaction_isolation') USING ERRCODE = '25000';
   END IF;
 END;
 $serial$;
@@ -239,7 +241,7 @@ BEGIN RETURN ${schema}.engine(input); END;
 $step$;
 REVOKE ALL ON FUNCTION ${schema}.step(jsonb) FROM PUBLIC;
 
--- What every member and, where declared, everyone reads of the instance: its
+${options.serverOnly ? "" : `-- What every member and, where declared, everyone reads of the instance: its
 -- seats' rows, each column of the surface filled from the view's field of
 -- the same name.
 CREATE OR REPLACE FUNCTION ${schema}.settle(game ${schema}.instance, projected jsonb) RETURNS void
@@ -264,6 +266,7 @@ ${spec.public ? `  IF projected->'public' = 'null'::jsonb THEN
 ` : ""}END;
 $settle$;
 REVOKE ALL ON FUNCTION ${schema}.settle(${schema}.instance, jsonb) FROM PUBLIC;
+`}
 
 CREATE OR REPLACE FUNCTION ${schema}.dispatch(instance_id uuid, actor uuid, command_id text, request jsonb, tier text, at bigint DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -320,12 +323,15 @@ BEGIN
       'viewers', recipients
     ));
     IF reduced->>'kind' = 'accepted' THEN
+      ${options.beforeTransitionSql ?? ""}
       ${branches}
     END IF;
     IF reduced->>'kind' = 'accepted' THEN
       UPDATE ${schema}.instance i SET state = reduced->'state', revision = i.revision + 1 WHERE i.id = game.id
-        RETURNING i.* INTO STRICT game;
-      PERFORM ${schema}.settle(game, reduced);
+        ${options.afterTransitionSql ? `RETURNING i.revision INTO STRICT game.revision;
+      ${options.afterTransitionSql}
+      game.state := reduced->'state';` : `RETURNING i.* INTO STRICT game;`}
+${options.serverOnly ? "" : `      PERFORM ${schema}.settle(game, reduced);`}
       answer := jsonb_build_object('kind', 'accepted');
     ELSIF reduced->>'kind' = 'rejected' THEN
       answer := reduced;
@@ -373,7 +379,7 @@ $command$;
 REVOKE ALL ON FUNCTION ${schema}.command() FROM PUBLIC;
 CREATE OR REPLACE TRIGGER ${spec.name}_command_dispatch AFTER INSERT ON public.${spec.name}_command
   FOR EACH ROW EXECUTE FUNCTION ${schema}.command();` : ""}
--- Readers write only commands; everything else on the surface is the
+${options.serverOnly ? "" : `-- Readers write only commands; everything else on the surface is the
 -- machine's, written from inside its SECURITY DEFINER functions.
 CREATE OR REPLACE FUNCTION ${schema}.sealed() RETURNS trigger LANGUAGE plpgsql AS $sealed$
 BEGIN
@@ -387,6 +393,37 @@ ${parts.includes("seat") ? `CREATE OR REPLACE TRIGGER ${spec.name}_seat_sealed B
   FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
 ${spec.public ? `CREATE OR REPLACE TRIGGER ${spec.name}_public_sealed BEFORE INSERT OR UPDATE OR DELETE ON public.${spec.name}_public
   FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
+`}
+${options.serverOnly ? `DO $private$
+DECLARE relation record; grant_ record;
+BEGIN
+  FOR relation IN
+    SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = ${literal(schema)} AND c.relkind IN ('r', 'p')
+  LOOP
+    EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', ${literal(schema)}, relation.relname);
+  END LOOP;
+  FOR grant_ IN
+    SELECT DISTINCT 'SCHEMA' AS kind, quote_ident(n.nspname) AS name, a.grantee
+      FROM pg_namespace n, aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) a
+      WHERE n.nspname = ${literal(schema)} AND a.grantee <> n.nspowner
+    UNION
+    SELECT DISTINCT 'TABLE', format('%I.%I', n.nspname, c.relname), a.grantee
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
+        aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+      WHERE n.nspname = ${literal(schema)} AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND a.grantee <> c.relowner
+    UNION
+    SELECT DISTINCT 'FUNCTION', p.oid::regprocedure::text, a.grantee
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
+        aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+      WHERE n.nspname = ${literal(schema)} AND a.grantee <> p.proowner
+  LOOP
+    EXECUTE format('REVOKE ALL ON %s %s FROM %s', grant_.kind, grant_.name,
+      CASE WHEN grant_.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(grant_.grantee)) END);
+  END LOOP;
+END;
+$private$;
+` : ""}
 COMMENT ON SCHEMA ${schema} IS ${protocol};
 `;
   return { source: script, sql };

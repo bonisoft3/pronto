@@ -1,0 +1,9 @@
+{
+  "deno": "2.8.2",
+  "feldera": "SQL to DBSP compiler version 0.367.0",
+  "jar_sha256": "d08430de8b34ae997b72c44eb9a9274b25955a41af35e7c6997e7e459d3283ab",
+  "duckdb_package": "@duckdb/node-api@1.4.3-r.3",
+  "docker": "29.2.1",
+  "source_sha256": "d196b80cafc42b27a06d42aebda407bde4aa2b1c63ce83ed56c03cd2692b67b3",
+  "translator_sha256": "8dfd619480dd367b3f11eca750b6fbb05ebaa2e06ab112bb2271b10e61a0b733"
+}

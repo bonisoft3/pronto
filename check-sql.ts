@@ -104,7 +104,7 @@ export function findings(reported: Squawk[], appDir: string): Finding[] {
   return out;
 }
 
-export type DuckStream = {
+export type DuckStream = { backend: "compute" } | {
   name: string;
   ir?: string;
   sql: string;
@@ -157,6 +157,7 @@ export async function checkDuckStreams(
 ): Promise<Finding[]> {
   const out: Finding[] = [];
   for (const [name, ds] of Object.entries(duckstreams)) {
+    if ("backend" in ds) continue;
     const tempo = ds.tempo;
     const declaredOps = new Set(ds.operators ?? []);
     const sql = ds.sql;

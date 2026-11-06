@@ -1,0 +1,79 @@
+{
+  "inputs" : [ {
+    "name" : "t",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "x",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "y",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false,
+    "foreign_keys" : [ ]
+  } ],
+  "outputs" : [ {
+    "name" : "error_view",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "table_or_view_name",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "message",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "metadata",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  }, {
+    "name" : "result",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "a",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "A",
+      "case_sensitive" : true,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  } ]
+}

@@ -1,0 +1,7 @@
+LogicalProject(region=[$0], n=[$1], total=[$2])
+  LogicalAggregate(group=[{0}], n=[COUNT()], total=[SUM($1)])
+    LogicalProject(region=[$4], amount=[$2])
+      LogicalJoin(condition=[=($0, $3)], joinType=[inner])
+        LogicalFilter(condition=[>($2, 0)])
+          LogicalTableScan(table=[[schema, events]], hints=[[[alias inheritPath:[] options:[e]]]])
+        LogicalTableScan(table=[[schema, accounts]], hints=[[[alias inheritPath:[] options:[a]]]])

@@ -52,7 +52,7 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     async function copy(source: string, target: string): Promise<void> {
       await Deno.mkdir(target, { recursive: true });
       for await (const entry of Deno.readDir(source)) {
-        if ([".git", ".github", ".mirror", "node_modules", "dist", "zig-out", ".zig-cache"].includes(entry.name)) continue;
+        if ([".git", ".github", ".mirror", "node_modules", "dist", "zig-out", ".zig-cache", ".build", ".wrangler"].includes(entry.name)) continue;
         const from = join(source, entry.name), to = join(target, entry.name);
         if (entry.isDirectory) await copy(from, to);
         else if (entry.isFile) {

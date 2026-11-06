@@ -1,0 +1,11 @@
+{
+  "name": "duckstream-compiler-spike",
+  "private": true,
+  "type": "module",
+  "scripts": { "browser": "node browser.mjs" },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev57.0",
+    "esbuild": "0.27.2",
+    "playwright": "1.59.1"
+  }
+}

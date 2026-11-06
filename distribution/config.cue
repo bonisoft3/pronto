@@ -13,7 +13,7 @@ import (
 // and the portable types are refreshed from the checkout's mecha client. An
 // installed pronto neither type-checks nor runs them (installed_test.ts holds
 // the rest to its own tree).
-#TestModules: ["mecha-local.ts", "mecha-battery.ts", "hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts", "mecha-xstate-entry.ts", "mecha-xstate-bundle.ts", "cortex-conformance.ts"]
+#TestModules: ["mecha-local.ts", "mecha-battery.ts", "hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts", "mecha-xstate-entry.ts", "mecha-xstate-bundle.ts", "cortex-conformance.ts", "access-test-fixture.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.
@@ -165,7 +165,7 @@ import (
 		mecha: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-mecha.ts) ."}).out
 		// Under the compute service's own pins, as it runs them: queries over
 		// DuckDB, the cage's workers, the wasm.
-		computations: (_run & {args: "run-mise exec -- deno test --config (\(P._mecha) | path join services compute deno.json) --frozen --permit-no-files --unstable-worker-options --allow-read --allow-ffi --allow-env computations"}).out
+		computations: (_run & {args: "if ('computations' | path exists) { run-mise exec -- deno test --config (\(P._mecha) | path join services compute deno.json) --frozen --permit-no-files --unstable-worker-options --allow-read --allow-ffi --allow-env --allow-sys=homedir computations }"}).out
 		// Each module loaded as the service loads it at startup, so one it
 		// would refuse fails here; the emitter appends the modules' paths.
 		admit: (_run & {args: "run-mise exec -- deno run --config (\(P._mecha) | path join services compute deno.json) --frozen --unstable-worker-options --allow-read --allow-env (\(P._mecha) | path join services compute admit.ts)"}).out

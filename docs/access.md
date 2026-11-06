@@ -27,8 +27,27 @@ table:
 | `private` (`owner`) | `'user:' \|\| owner`, generated | `rls_protect` | select, update and delete rows where `owner = auth_uid()`; insert only with that check |
 | `private` with `shared` (`via`, `on`, `user`) | the same | exempt: the floor is restrictive, and a sharee holds no scope the owner's row carries | the above, or a row the `via` table grants them, through a `SECURITY DEFINER` helper so the two tables' policies do not recurse |
 | `folder` (`parent`, `on`) | the parent's, copied by `mecha.scope_from_parent` | as its parent | everything on a row whose `private` parent they may see |
-| `public` | `'public:'`, generated | `rls_protect` | select; no write arm |
+| `public` | `'public:'`, generated | `rls_protect` | select; `write: true` also grants all writes; `write: "update"` permits updates to non-key fields only |
 | `internal` | none; `app_user`'s is its own id | exempt | nothing, except `app_user` reading its own row |
+
+`write: "update"` uses column grants as well as an UPDATE policy: a reader
+cannot create or delete rows, or rename a primary key to replace a seeded row.
+Pronto reserves migration prefix `799` for write permissions, after authored
+schema migrations and before the generated schedule and seed steps. The additive
+`799_write_permissions.sql` drops the previous public write arm and restricts
+grants without changing `006_policies.sql`. Fresh databases and the edge script
+ledger apply this step. Subsequent changes to an edge deployment still require
+an explicit migration: the immutable script ledger refuses changed applied SQL.
+
+Native releases with `write: "update"` also emit `public_access.sql` into the
+existing `migrate` service. After pending pgroll migrations, that runner reapplies
+only those update-only restrictions in a transaction, even on a database whose
+initdb marker is set. Compose readers wait for it; Kubernetes and GCP execute
+its Job before rolling readers. A lock waits at most five seconds and a
+statement sixty seconds; failure rolls back the reconciliation and fails the
+release. Other public tables and their authored policies and grants are untouched.
+Leaving `write: "update"`, changing an access scope or removing a table requires
+an authored migration. Reconciliation does not reverse earlier restrictions.
 
 Every table grants `service` everything. An exempt table gets a row in
 `mecha.rls_exempt` with its reason in words, the short list a reviewer reads.
@@ -58,7 +77,7 @@ from an open screen.
 
 So policies added in raw SQL may widen access only where the mirror already
 allows, and may narrow it freely. `#Access` has no "everyone reads, the owner
-writes" mode, because `public` names no owner and emits a SELECT arm alone:
+writes" mode, because `public` names no owner and its optional write arm applies to everyone:
 realworld's `011_owner_writes.sql` hand-writes owner-gated arms for `article`
 and `comment` and restates their owners, and xpense's `011_ledger_writes.sql`
 opens `category` and `expense` to every signed-in writer

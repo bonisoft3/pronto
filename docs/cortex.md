@@ -11,8 +11,8 @@ writes.
 Where this vocabulary is heading — Cortex spanning the tiers, each tier's own
 `#Machine` — is §4 of [[decisions/2026-09-29-cortex-machines]]. Mecha retains
 the invoked domain charts, authorization, locking, writes, private views,
-receipts and deadlines. Cortex introduces no transaction coordinator, worker,
-pipeline or ledger.
+receipts and deadlines. The browser composition introduces no transaction coordinator, worker,
+pipeline or ledger. Server-side durable work is described below.
 
 ## Machine vocabulary
 
@@ -256,3 +256,34 @@ open-ended values without requiring wildcard transitions:
 is not deletion. Delivery rechecks attachment identity, discards stale reads and
 acknowledges accepted snapshots. Fixed event names retain those same guarantees.
 These bindings are source configuration; the machine remains XState grammar.
+
+## Durable work
+
+`#CortexDurable` and `compileCortexDurable` compose server-only bounded Mecha
+machines with [Durex durable execution](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/durex/docs/index.md). The same reducer compiler checks shapes,
+guards, invariants and fuel, and emits a private PostgreSQL dispatcher. No
+browser admission or command ports are emitted. A stable invoking state names a
+task, immutable key/input expressions, completion events, release time and retry
+budget. Entering it claims a fresh Durex invocation key and enqueues Graphile work
+in the machine transition's transaction. Self-state events may update state but
+cannot change the active invocation identity.
+
+Only an outcome recorded for that task, key and instance authorizes its
+completion event. Durex records the outcome and delivers the event inside the
+caller's transaction, so internal PostgreSQL publication, machine completion and
+the receipt can commit together. Duplicate settlement returns the recorded
+outcome; a different outcome, a forged event or reuse of an old invocation key
+fails. Worker restart releases only pools registered to that worker owner;
+committed receipts dispose of jobs left behind before Graphile acknowledgment.
+Unsettled exhausted work fails visibly.
+
+Durex owns the private `durex` invocation and worker schema. Airlock owns external
+integration, with its separate effect ledger, restricted transport and
+reconciliation contract. Graphile supplies delivery and retry; the machine
+owns lifecycle decisions. Batch dependencies and retained input relations remain
+explicit SQL operations, while DuckDB and numerical workers implement the task.
+
+The first consumer is [[../compute/docs/index|the compute coordinator]]. Its
+compiled SQL ships with Mecha; Pronto is a build-time dependency, not a runtime
+import. Compiler and real-PostgreSQL tests cover atomic entry, outcome authority,
+publication rollback, duplicate settlement and invocation identity.

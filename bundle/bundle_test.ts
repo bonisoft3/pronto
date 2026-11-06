@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotSql } from './derived.ts'
+import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotCompose, snapshotSql } from './derived.ts'
 import { writeEdgeAssets } from './edge-assets.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -243,7 +243,8 @@ Deno.test('an authoritative restore suppresses derivation triggers, retains fore
       await db.close()
     `)
     const ran = await new Deno.Command(Deno.execPath(), {
-      args: ['run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'restore.ts')],
+      env: { DENO_NO_PACKAGE_JSON: '1' },
+      args: ['run', '-A', '--no-config', '--import-map', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'restore.ts')],
       stdout: 'inherit', stderr: 'inherit',
     }).output()
     assert.equal(ran.success, true, 'the authoritative restore regression failed')
@@ -287,7 +288,8 @@ Deno.test('a committed-content snapshot sees changes immediately and preserves n
       await db.close()
     `)
     const ran = await new Deno.Command(Deno.execPath(), {
-      args: ['run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'snapshot.ts')],
+      env: { DENO_NO_PACKAGE_JSON: '1' },
+      args: ['run', '-A', '--no-config', '--import-map', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'snapshot.ts')],
       stdout: 'inherit', stderr: 'inherit',
     }).output()
     assert.equal(ran.success, true, 'the database snapshot regression failed')
@@ -339,7 +341,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       'CREATE TABLE tally_count (n int NOT NULL); GRANT SELECT ON tally TO service; GRANT ALL ON tally_count TO service;',
       'CREATE FUNCTION count_tallies() RETURNS integer LANGUAGE sql AS $$ DELETE FROM tally_count; INSERT INTO tally_count SELECT count(*) FROM tally; SELECT 1 $$;',
     ].join('\n'))
-    await write('.pronto/cluster.json', JSON.stringify({ server: true, drains: [{ name: 'count', on: ['tally'], call: 'count_tallies', body: {} }] }))
+    await write('.pronto/cluster.json', JSON.stringify({ server: true, computations: [], drains: [{ name: 'count', on: ['tally'], call: 'count_tallies', body: {} }] }))
     // A seeded row the derivation no longer produces, which the page must not keep.
     await write('m/900_seed.sql', "INSERT INTO tally VALUES ('gone', 9);")
     const order = dependencyOrder(['tally_note', 'tally'], [['tally_note', 'tally']])
@@ -349,6 +351,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     }))
 
     const bundled = await new Deno.Command(Deno.execPath(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
         'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
         '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
@@ -398,8 +401,9 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       await db.close()
     `)
     const booted = await new Deno.Command(Deno.execPath(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
-        'run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen',
+        'run', '-A', '--no-config', '--lock', path.join(browser, 'deno.lock'), '--frozen',
         '--import-map', path.join(app, 'boot-imports.json'),
         path.join(app, 'boot.ts'), path.join(app, 'dist/browser/index.html'),
       ],
@@ -476,7 +480,8 @@ Deno.test("the page's store behind its cluster raises a refused subset as the pr
       Deno.exit(0)
     `)
     const ran = await new Deno.Command(Deno.execPath(), {
-      args: ['run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'page.ts')],
+      env: { DENO_NO_PACKAGE_JSON: '1' },
+      args: ['run', '-A', '--no-config', '--import-map', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'page.ts')],
       stdout: 'piped',
       stderr: 'inherit',
     }).output()
@@ -507,9 +512,10 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
     const policy = (await Deno.readTextFile(path.join(repo, 'plugins/omnishell/content-security-policy.txt'))).trim()
     await write('shell/index.html', `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>`)
     await write('m/001.sql', 'CREATE TABLE item (id text PRIMARY KEY);')
-    await write('.pronto/cluster.json', JSON.stringify({ server: true, drains: [] }))
+    await write('.pronto/cluster.json', JSON.stringify({ server: true, computations: [], drains: [] }))
 
     const bundled = await new Deno.Command(Deno.execPath(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
         'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
         '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
@@ -563,6 +569,7 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
       '</head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>',
     ].join('\n'))
     const bundled = await new Deno.Command(Deno.execPath(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
         'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
         '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
@@ -578,6 +585,32 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
   } finally {
     await Deno.remove(app, { recursive: true })
   }
+})
+
+Deno.test('Pages precomputation forces snapshots and excludes the Feldera service and startup dependency', () => {
+  const model = {
+    networks: { default: { name: 'derived' } },
+    services: {
+      'plausible-feldera': { environment: { RUST_LOG: 'info' } },
+      'plausible-compute': {
+        build: { additional_contexts: { 'plausible-feldera': 'service:plausible-feldera', 'compute-image': 'docker-image://compute' } },
+        environment: { COMPUTATIONS: '[{"name":"analytics","feldera":"/app/analytics.json"}]', DUCKSTREAM_ENGINE: 'feldera', FELDERA_URL: 'http://feldera:8080' },
+        depends_on: { 'plausible-feldera': { condition: 'service_healthy' }, 'plausible-database': { condition: 'service_healthy' } },
+      },
+      'plausible-database': { environment: { POSTGRES_DB: 'plausible' } },
+    },
+  }
+  const result = snapshotCompose(model)
+  assert.equal(result.services['plausible-feldera'], undefined)
+  assert.deepEqual(result.services['plausible-compute'].environment, {
+    COMPUTATIONS: model.services['plausible-compute'].environment.COMPUTATIONS,
+    DUCKSTREAM_ENGINE: 'duckdb-snapshot',
+  })
+  assert.deepEqual(result.services['plausible-compute'].depends_on, { 'plausible-database': { condition: 'service_healthy' } })
+  assert.deepEqual(result.services['plausible-compute'].build?.additional_contexts, { 'compute-image': 'docker-image://compute' })
+  assert.deepEqual(result.networks, model.networks)
+  assert.equal(model.services['plausible-compute'].environment.DUCKSTREAM_ENGINE, 'feldera')
+  assert.deepEqual(snapshotCompose({ services: {} }), { services: {} })
 })
 
 // A realm unit is a document of its own, so a single-file page serves it from

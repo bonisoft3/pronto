@@ -1,0 +1,10 @@
+{
+  "tasks": {
+    "doctor": "deno run -A probe.ts doctor",
+    "build": "deno check probe.ts",
+    "lint": "deno fmt --check && deno lint",
+    "test": "deno run -A probe.ts test",
+    "integrate": "deno run -A probe.ts integrate"
+  },
+  "fmt": { "exclude": ["results/"] }
+}

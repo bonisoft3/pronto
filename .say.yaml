@@ -103,7 +103,12 @@ say:
       duckstream:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run --allow-env duckstream.test.ts"
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run --allow-env duckstream.test.ts duckstream-columns_test.ts"
+      edge-compute:
+        platform: cloudflare
+        priority: -1
+        cmds:
+          - do: "mise exec -- deno test -A --config bundle/deno.json bundle/edge-compute_test.ts bundle/edge-reader_test.ts bundle/edge-compute.integration.test.ts bundle/edge-ssr-rpc_test.ts bundle/publish-edge-state_test.ts bundle/publish-edge-secrets_test.ts bundle/publish-edge-storage.test.ts"
       # A pages release's derived rows: their SQL, and a bundled page whose
       # PGlite boots holding them; bundling needs the omnishell and mecha trees.
       bundle:

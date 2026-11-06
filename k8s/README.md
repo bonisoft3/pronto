@@ -194,3 +194,5 @@ open http://telemetry.localhost/jaeger/
 ctlptl delete -f plugins/pronto/k8s/cluster.yaml
 ```
 
+
+Native pipeline and GKE release contracts start at [[docs/index]].

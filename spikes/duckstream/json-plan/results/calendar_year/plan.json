@@ -1,0 +1,147 @@
+{
+  "error_view": {
+    "rels": [
+      {
+        "id": 0,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "feldera_error_table"
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "result": {
+    "rels": [
+      {
+        "id": 1,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "calendar_inputs"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 2,
+        "relOp": "LogicalProject",
+        "fields": [
+          "id",
+          "month_start",
+          "history_start",
+          "prior_year"
+        ],
+        "exprs": [
+          {
+            "input": 0,
+            "name": "$0"
+          },
+          {
+            "pos": {
+              "line": 3,
+              "column": 2,
+              "end_line": 3,
+              "end_column": 24
+            },
+            "op": {
+              "name": "FLOOR",
+              "kind": "FLOOR",
+              "syntax": "FUNCTION"
+            },
+            "operands": [
+              {
+                "input": 1,
+                "name": "$1"
+              },
+              {
+                "literal": "MONTH",
+                "type": {
+                  "type": "SYMBOL",
+                  "nullable": false
+                }
+              }
+            ]
+          },
+          {
+            "pos": {
+              "line": 4,
+              "column": 2,
+              "end_line": 4,
+              "end_column": 45
+            },
+            "op": {
+              "name": "+",
+              "kind": "PLUS",
+              "syntax": "SPECIAL"
+            },
+            "operands": [
+              {
+                "pos": {
+                  "line": 4,
+                  "column": 2,
+                  "end_line": 4,
+                  "end_column": 24
+                },
+                "op": {
+                  "name": "FLOOR",
+                  "kind": "FLOOR",
+                  "syntax": "FUNCTION"
+                },
+                "operands": [
+                  {
+                    "input": 1,
+                    "name": "$1"
+                  },
+                  {
+                    "literal": "MONTH",
+                    "type": {
+                      "type": "SYMBOL",
+                      "nullable": false
+                    }
+                  }
+                ]
+              },
+              {
+                "literal": -84,
+                "type": {
+                  "type": "INTERVAL_YEAR",
+                  "nullable": false
+                }
+              }
+            ]
+          },
+          {
+            "pos": {
+              "line": 5,
+              "column": 2,
+              "end_line": 5,
+              "end_column": 29
+            },
+            "op": {
+              "name": "+",
+              "kind": "PLUS",
+              "syntax": "SPECIAL"
+            },
+            "operands": [
+              {
+                "input": 1,
+                "name": "$1"
+              },
+              {
+                "literal": -12,
+                "type": {
+                  "type": "INTERVAL_YEAR",
+                  "nullable": false
+                }
+              }
+            ]
+          }
+        ],
+        "inputs": [
+          1
+        ]
+      }
+    ]
+  }
+}

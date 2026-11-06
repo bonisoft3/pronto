@@ -1,0 +1,14 @@
+say:
+  doctor:
+    do: "deno task doctor"
+  build:
+    do: "deno task build"
+  lint:
+    rulemap:
+      feedback:
+        priority: -1
+        stop: true
+        cmds:
+          - do: "deno task lint"
+  test:
+    do: "deno task test"

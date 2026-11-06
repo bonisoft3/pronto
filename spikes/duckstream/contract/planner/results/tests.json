@@ -1,0 +1,136 @@
+{
+  "duckdb": "1.4.3",
+  "positive": {
+    "declared_aliases_and_projection": {
+      "status": "passed"
+    },
+    "identity_projection_aliases": {
+      "status": "passed"
+    },
+    "empty": {
+      "rows": 0,
+      "queries": 4,
+      "status": "passed"
+    },
+    "epoch_half_open": {
+      "rows": 12,
+      "queries": 4,
+      "status": "passed"
+    },
+    "nulls_and_duplicate_values": {
+      "rows": 4,
+      "queries": 4,
+      "status": "passed"
+    },
+    "calendar_range": {
+      "rows": 2,
+      "queries": 4,
+      "status": "passed"
+    },
+    "deterministic_random": {
+      "rows": 250,
+      "queries": 4,
+      "status": "passed"
+    },
+    "aggregate_overflow": {
+      "status": "failed loudly as required"
+    },
+    "nonfinite_timestamp": {
+      "status": "failed loudly as required"
+    }
+  },
+  "negative": {
+    "lateness": {
+      "status": "rejected before DuckDB execution",
+      "reason": "LATENESS"
+    },
+    "emit_final": {
+      "status": "rejected before DuckDB execution",
+      "reason": "view properties"
+    },
+    "append_only": {
+      "status": "rejected before DuckDB execution",
+      "reason": "table properties"
+    },
+    "now": {
+      "status": "rejected before DuckDB execution",
+      "reason": "SQL call NOW"
+    },
+    "udf_declaration": {
+      "status": "rejected before DuckDB execution",
+      "reason": "SqlCreateFunction"
+    },
+    "udf_call": {
+      "status": "rejected before DuckDB execution",
+      "reason": "SQL call MY_UDF"
+    },
+    "recursion": {
+      "status": "rejected before DuckDB execution",
+      "reason": "statement"
+    },
+    "decimal": {
+      "status": "rejected before DuckDB execution",
+      "reason": "type DECIMAL"
+    },
+    "timestamp_precision": {
+      "status": "rejected before DuckDB execution",
+      "reason": "TIMESTAMP(6)"
+    },
+    "nullable_timestamp": {
+      "status": "rejected before DuckDB execution",
+      "reason": "non-null timestamp"
+    },
+    "hop_nonmultiple": {
+      "status": "rejected before DuckDB execution",
+      "reason": "slide multiple"
+    },
+    "window_offset": {
+      "status": "rejected before DuckDB execution",
+      "reason": "window offsets"
+    },
+    "month_window": {
+      "status": "rejected before DuckDB execution",
+      "reason": "fixed day/hour/minute/second"
+    },
+    "fractional_window": {
+      "status": "rejected before DuckDB execution",
+      "reason": "whole-number"
+    },
+    "zero_window": {
+      "status": "rejected before DuckDB execution",
+      "reason": "positive whole-number"
+    },
+    "window_too_large": {
+      "status": "rejected before DuckDB execution",
+      "reason": "<= one day"
+    },
+    "expression_arithmetic": {
+      "status": "rejected before DuckDB execution",
+      "reason": "SQL call /"
+    },
+    "aggregate_distinct": {
+      "status": "rejected before DuckDB execution",
+      "reason": "aggregate modifiers"
+    },
+    "outer_join": {
+      "status": "rejected before DuckDB execution",
+      "reason": "only inner joins"
+    },
+    "column_case_collision": {
+      "status": "rejected before DuckDB execution",
+      "reason": "collision in table columns"
+    },
+    "table_case_collision": {
+      "status": "rejected before DuckDB execution",
+      "reason": "collision in relations"
+    },
+    "view_table_case_collision": {
+      "status": "rejected before DuckDB execution",
+      "reason": "collision in relations"
+    },
+    "output_case_collision": {
+      "status": "rejected before DuckDB execution",
+      "reason": "collision in view outputs"
+    }
+  }
+}

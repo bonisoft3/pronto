@@ -1,0 +1,54 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:@duckdb/node-api@1.4.3-r.3": "1.4.3-r.3"
+  },
+  "npm": {
+    "@duckdb/node-api@1.4.3-r.3": {
+      "integrity": "sha512-lPHpmYRMoFJkTCZmp76sETTNPly7lT3eJfV69vqsZE3wur+OY9VW/BflMQ41mP1vSucGqw4rY6XCSmMACE7bwQ==",
+      "dependencies": [
+        "@duckdb/node-bindings"
+      ]
+    },
+    "@duckdb/node-bindings-darwin-arm64@1.4.3-r.3": {
+      "integrity": "sha512-iyVZbanRsZKSoK1BHqC61+PExyFUjJ7Ftz+BVN6xsWvB3tfkBBwEcZ5K/cCkHuCqmT7IcUwwDoc89Naz7Tze/A==",
+      "os": ["darwin"],
+      "cpu": ["arm64"]
+    },
+    "@duckdb/node-bindings-darwin-x64@1.4.3-r.3": {
+      "integrity": "sha512-exWYLzYLlKqsTp92iBR8SEcaMJpOWbUjaTmNN48TYCjDzLXPW2r4G2xhbFA67KuxnBJcrGvwNOOFcBje2AhfHg==",
+      "os": ["darwin"],
+      "cpu": ["x64"]
+    },
+    "@duckdb/node-bindings-linux-arm64@1.4.3-r.3": {
+      "integrity": "sha512-Jx3SS6Hy2l3TuHUZ9iJ/b2ZnajfFV7AB1TMEh2gE1mmytoVkqjiMvVRj7487u4pxEANj9ELYXspdspC4/wyOaA==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@duckdb/node-bindings-linux-x64@1.4.3-r.3": {
+      "integrity": "sha512-1ISlvsyQheiJlr8tdtVJ0cfCsjBB2leQZL82KJHFKx4Q5gj4yWRYi4tfaPup9zk5rY0xXSuVuhBxKPkTX1UZqg==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@duckdb/node-bindings-win32-x64@1.4.3-r.3": {
+      "integrity": "sha512-DQBGxcIZ6yatHrcxIevejKsyj1cobu6BwXU17YuxCSA/BxdfEl7QnhBzwEpDJUDj6gUbLbBqsEvwY+K/NWAwEg==",
+      "os": ["win32"],
+      "cpu": ["x64"]
+    },
+    "@duckdb/node-bindings@1.4.3-r.3": {
+      "integrity": "sha512-QrkUgZw4Xwn5lNbvUHXcF3F5OvVexf9uQyJnxrLTzs9P93Be0UB+b4hr1EZwf1OMMocchN9iG1R839aVIfSJBg==",
+      "optionalDependencies": [
+        "@duckdb/node-bindings-darwin-arm64",
+        "@duckdb/node-bindings-darwin-x64",
+        "@duckdb/node-bindings-linux-arm64",
+        "@duckdb/node-bindings-linux-x64",
+        "@duckdb/node-bindings-win32-x64"
+      ]
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "npm:@duckdb/node-api@1.4.3-r.3"
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "contract": "bounded-contract-v1",
+  "compiler": {
+    "version": "0.367.0",
+    "jar_sha256": "d08430de8b34ae997b72c44eb9a9274b25955a41af35e7c6997e7e459d3283ab"
+  },
+  "statements": "Base table declarations and exactly one ordinary view named result; no properties, defaults, generated values, foreign keys or UDF declarations.",
+  "identifiers": "Case-preserving names with no case-insensitive collisions within relations, each base table's columns, or the declared view's outputs.",
+  "types": ["INTEGER", "BIGINT", "BOOLEAN", "VARCHAR", "non-null TIMESTAMP(6)"],
+  "relational_nodes": ["TableScan", "Project", "Filter", "INNER Join", "Aggregate", "TUMBLE/HOP TableFunctionScan"],
+  "expressions": ["column", "integer/string/boolean/null literal", "=", "<>", "<", ">", "<=", ">=", "AND", "OR", "NOT", "IS NULL", "IS NOT NULL"],
+  "aggregates": ["COUNT(*)", "COUNT(column)", "SUM(column)"],
+  "aggregate_modifiers": false,
+  "windows": {
+    "origin": "1970-01-01 00:00:00",
+    "membership": "[window_start, window_end)",
+    "timestamp_resolution": "microsecond",
+    "arithmetic": "signed integer microseconds; negative epoch floor by normalized remainder",
+    "intervals": "Positive whole-number day/hour/minute/second literal, at most one day; no offset, fractional, compound or month/year intervals",
+    "hop": "size is a multiple of slide; at most 100 memberships",
+    "nonfinite_timestamps": "execution error"
+  },
+  "output": {
+    "semantics": "SQL bag; no output ordering guarantee",
+    "schema": "Declared Feldera view column names/types and RelRoot projection mapping",
+    "aggregate_types": "explicit cast to the typed Feldera result; overflow fails",
+    "empty_group_sum": null,
+    "global_empty_count": 0
+  },
+  "rejected_before_execution": ["LATENESS", "emit_final", "append_only", "NOW", "UDF", "recursion", "unsupported declarations/types/operators/relational nodes"]
+}

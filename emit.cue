@@ -1172,7 +1172,7 @@ _sqlType: {
 		_pre: []
 		_appUser: list.Concat([
 			[(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (true)"}).out],
-			[if P.e.access["write"] != _|_ if P.e.access.write == true {
+			[if P.e.access["write"] != _|_ if P.e.access.write == true || P.e.access.write == "update" {
 				(#policy & {name: "\(P._t)_app_user_write", table: P._t, rest: "FOR ALL TO app_user USING (true) WITH CHECK (true)"}).out
 			}],
 		])
@@ -1244,6 +1244,22 @@ _sqlType: {
 		P._appUser,
 		[(#policy & {name: "\(P._t)_service_all", table: P._t, rest: "FOR ALL TO service USING (true) WITH CHECK (true)"}).out],
 	]), "\n")
+}
+
+// Prefix 799 is reserved for write permissions, before schedules and seeds.
+// A separate migration preserves 006's digest when narrowing an existing public
+// writer. The migration ledger can apply the restriction without resetting data.
+#publicUpdateSql: P={
+	e:  #Entity
+	_t: P.e.table
+	_columns: strings.Join([for f in P.e.fields if !f.pk {f.name}], ", ")
+	out: strings.Join([
+		"DROP POLICY IF EXISTS \(P._t)_app_user_write ON \(P._t);",
+		"REVOKE INSERT, UPDATE, DELETE ON \(P._t) FROM app_user;",
+		"REVOKE UPDATE (\(strings.Join([for f in P.e.fields {f.name}], ", "))) ON \(P._t) FROM app_user;",
+		if P._columns != "" {"GRANT UPDATE (\(P._columns)) ON \(P._t) TO app_user;"},
+		(#policy & {name: "\(P._t)_app_user_update", table: P._t, rest: "FOR UPDATE TO app_user USING (true) WITH CHECK (true)"}).out,
+	], "\n")
 }
 
 // A publication over a table list, brought up to the list and its options
@@ -1969,6 +1985,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	_seedFile: len(M.seeded) > 0 || M.code.state.seed != _|_
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
+	updateOnly: [for e in M.accessed if e.access.scope == "public" if e.access["write"] != _|_ if e.access.write == "update" {e}]
 	machines: [if M.code.state.mecha.rows != _|_ {[for _, m in M.code.state.mecha.rows for en, e in M.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	_steps: #steps & {code: M.code}
@@ -1991,6 +2008,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if len(M.machines) > 0 if len([for r in M.raw if r.name == M._steps.machines {r}]) == 0 {"services/database/migrations/\(M._steps.machines)"},
 		if len(M.code.state.mecha.reducers) > 0 if len([for r in M.raw if r.name == M._steps.actors {r}]) == 0 {"services/database/migrations/\(M._steps.actors)"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
+		if len(M.updateOnly) > 0 {"services/database/migrations/799_write_permissions.sql"},
 		if M.code.state.cortex != _|_ for migration, _ in {
 			for _, c in M.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "mecha" {(c.config.meta.migration): true}
 		} if len([for r in M.raw if r.name == migration {r}]) == 0 {"services/database/migrations/\(migration)"},
@@ -2023,14 +2041,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if D.code.meta.ssrOrigin != _|_ {
 					ssrOrigin: D.code.meta.ssrOrigin
 				}
-				// What only the cluster's streams and computations write lands in
-				// live tables, which the page ships as they stood at bundling. A
-				// private table's rows are a person's, and no person ships with a
-				// release: the bundling cluster's own guest would name an app_user
-				// the page never has.
+				// Portable inputs and results share a snapshot; private rows never ship in a release.
 				if len(D.code.state.pipelines)+len(D.code.state.drains)+len(D.code.state.computations) > 0 {
 					derived: {
-						tables: list.SortStrings([for _, e in D.code.state.entities if e.durability == "live" let private = [if e.access != _|_ if e.access.scope == "private" {true}] if len(private) == 0 {e.table}])
+						tables: list.SortStrings([for table, _ in {
+							for _, e in D.code.state.entities if e.durability == "live" {(e.table): true}
+							for _, c in D.code.state.computations for entity in c.to {(D.code.state.entities[entity].table): true}
+							for _, c in D.code.state.computations if c.declaredReads != _|_ for table in c.declaredReads {(table): true}
+						} if len([for _, e in D.code.state.entities if e.table == table if e.access != _|_ if e.access.scope == "private" {true}]) == 0 {table}])
 						streams: list.SortStrings([for n, _ in (#streams & {code: D.code}).out {"\(D.code.meta.name)-\(n)"}])
 					}
 				}
@@ -2358,6 +2376,12 @@ _pgrollDir: "services/database/pgroll"
 				pgroll: D.code.state.migrations
 				if len(D.code.state.migrations) > 0 {pgrollDir: _pgrollDir}
 			}
+			reconcile: {
+				let updateOnly = [for _, e in D.code.state.entities if e.access != _|_ if e.access.scope == "public" if e.access["write"] != _|_ if e.access.write == "update" {e}]
+				if len(updateOnly) > 0 {
+					public_access: strings.Join([for e in updateOnly {(#publicUpdateSql & {"e": e}).out}], "\n\n")
+				}
+			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 				effectInterpreters: strings.Join([for _, m in D.code.state.mecha.rows if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
 					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects, step: (#steps & {code: D.code}).machines})._effectUpgradeSql
@@ -2392,12 +2416,42 @@ _pgrollDir: "services/database/pgroll"
 			computations: [for _, c in D.code.state.computations {
 				name:  "\(D.code.meta.name)-\(c.name)"
 				file:  c.src
+				if c.feldera != _|_ {feldera: c.feldera}
+				if c.steps != _|_ {steps: c.steps}
 				to: [for t in c.to {D.code.state.entities[t].table}]
+				if c.sinkWrites != _|_ {sinkWrites: {for entity, mode in c.sinkWrites {(D.code.state.entities[entity].table): mode}}}
 				wasm: c.wasm
 				endowments: c.endowments
 				if c.onComplete != _|_ {onComplete: c.onComplete}
+				if c.declaredReads != _|_ {declaredReads: c.declaredReads}
+				if c.queryTypes != _|_ || c.typedSinks {
+					types: {types: #types, aliases: #typeAlias}
+				}
+				if c.queryTypes != _|_ {
+					queryTypes: {for n, fields in c.queryTypes {(n): [for f in fields {
+						name: f.name
+						type: [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0]
+						required: f.required
+						if f.precision != _|_ {precision: f.precision}
+						if f.scale != _|_ {scale: f.scale}
+					}]}}
+				}
+				if c.typedSinks {
+					sinkTypes: {for n in c.to
+						let columns = [if c.sinkColumns != _|_ if c.sinkColumns[n] != _|_ {c.sinkColumns[n]},
+							[for f in D.code.state.entities[n].fields {f.name}]][0] {
+						(D.code.state.entities[n].table): [
+						for f in D.code.state.entities[n].fields if !f.retired if f.generated == _|_ if list.Contains(columns, f.name) {
+							name: f.name
+							type: [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0]
+							required: f.required
+							if f.precision != _|_ {precision: f.precision}
+							if f.scale != _|_ {scale: f.scale}
+						},
+					]}}
+				}
 				// A sink in the publication would feed the change it answers.
-				_live: [for t in c.to {D.code.state.entities[t].durability & "live"}]
+				_live: [for t in c.to {D.code.state.entities[t].durability & ("live" | "offline")}]
 			}]
 		}
 		// A door hatch's service is part of every launch: the door's route
@@ -3322,7 +3376,12 @@ _pgrollDir: "services/database/pgroll"
 				if E.cluster.capabilities.server {
 					schema:     E.cluster.surface.schema
 					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
-					drains: [for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}]
+					computations: E.cluster.state.computations
+					drains: list.Concat([
+						[for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}],
+						[for _, p in E.code.state.pipelines if p.portableDrain != _|_ {let d = p.portableDrain
+							name: d.name, on: d.on, call: d.call, body: d.body}],
+					])
 				}
 				// The container hatches the door routes to, by app id: a release
 				// dials and bounds each as it does the cluster's own services.
@@ -3616,6 +3675,15 @@ _pgrollDir: "services/database/pgroll"
 					}], "\n\n") + "\n"
 				}
 			}
+			if len(E._appMigrations.updateOnly) > 0 {
+				"services/database/migrations/799_write_permissions.sql": {
+					format: "sql"
+					text: strings.Join([for ent in E._appMigrations.updateOnly {
+						(#publicUpdateSql & {e: ent}).out
+					}], "\n\n") + "\n"
+				}
+			}
+
 			if len(E._validated) > 0 {
 				"services/database/migrations/009_validations.sql": {
 					format: "sql"
@@ -3933,7 +4001,7 @@ _pgrollDir: "services/database/pgroll"
 			}
 
 			_duckstreams: [if E.code.state.duckstreams != _|_ {[for _, d in E.code.state.duckstreams {d}]}, []][0]
-			for _, ds in _duckstreams {
+			for _, ds in _duckstreams if ds.backend == _|_ {
 				"pipelines/duckstream/\(ds.name).sql": {
 					format: "sql"
 					text:   ds.sql + "\n"

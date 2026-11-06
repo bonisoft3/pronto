@@ -3,8 +3,8 @@
 // (libraries/mecha/packages/mecha-edge), with the page as its static assets and
 // the data directory the object loads once (publish-edge.ts).
 //
-//   deno run -A --config bundle/deno.json bundle/edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--domain <host>]
-//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--clock ticker|disabled]
+//   deno run -A --config bundle/deno.json bundle/edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--name <worker-name>] [--domain <host>]
+//     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]
 //
 // <out>/public   the terminal and app assets; data requests reach the Worker
 // <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
@@ -30,6 +30,9 @@ import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } f
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { realmDocumentsOf } from './edge-templates.ts'
 import { type Reducers, renderMachines } from './edge-machines.ts'
+import { computationPackages } from './compute.ts'
+import { writeEdgeCompute } from './edge-compute.ts'
+import { writeEdgeReader } from './edge-reader.ts'
 import { type Functions, renderFunctions } from './edge-functions.ts'
 import { renderEffects } from './edge-effects.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
@@ -42,7 +45,7 @@ function fail(msg: string): never {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = Deno.args.slice()
-const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--clock ticker|disabled]'
+const usage = 'usage: edge.ts <appDir> --omnishell <dir> --mecha <dir> --ice-servers <json> [--out <dir>] [--name <worker-name>] [--domain <host>] [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]'
 const app = path.resolve(args.shift() ?? fail(usage))
 const flags: Record<string, string> = {}
 while (args.length) {
@@ -50,13 +53,16 @@ while (args.length) {
   flags[flag] = args.shift() ?? fail(`${flag} takes a value`)
 }
 for (const flag of Object.keys(flags)) {
-  if (!['--omnishell', '--mecha', '--ice-servers', '--out', '--domain', '--derived', '--from', '--assets-from', '--ssr-origin', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
+  if (!['--omnishell', '--mecha', '--ice-servers', '--out', '--name', '--domain', '--derived', '--from', '--assets-from', '--ssr-origin', '--ssr-database', '--clock'].includes(flag)) fail(`unknown flag ${flag}`)
 }
 const clock = flags['--clock'] ?? 'ticker'
 if (clock !== 'ticker' && clock !== 'disabled') fail('--clock must be ticker or disabled')
+const databaseMode = flags['--ssr-database'] ?? 'existing'
+if (databaseMode !== 'existing' && databaseMode !== 'separate') fail('--ssr-database must be existing or separate')
+if (flags['--ssr-database'] && !flags['--ssr-origin']) fail('--ssr-database requires --ssr-origin')
 const omnishell = path.resolve(flags['--omnishell'] ?? fail('--omnishell names the interpreter root'))
 const mecha = path.resolve(flags['--mecha'] ?? fail('--mecha names the mecha root'))
-const out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
+let out = path.resolve(flags['--out'] ?? path.join(app, 'dist/cloudflare'))
 const domain = flags['--domain'] ?? ''
 const previousAssets = flags['--assets-from'] ? path.resolve(flags['--assets-from']) : undefined
 const addresses = await releaseAddresses(omnishell)
@@ -64,8 +70,8 @@ const addresses = await releaseAddresses(omnishell)
 const iceServers = addresses.parseIceServers(flags['--ice-servers'] ?? fail('--ice-servers names the target\'s ICE servers'))
 if (previousAssets) addresses.separateAssetDirectories(out, previousAssets)
 
-async function run(cmd: string, args: string[], cwd?: string) {
-  const r = await new Deno.Command(cmd, { args, cwd, stdout: 'inherit', stderr: 'inherit' }).output()
+async function run(cmd: string, args: string[], cwd?: string, env?: Record<string, string>) {
+  const r = await new Deno.Command(cmd, { args, cwd, env, stdout: 'inherit', stderr: 'inherit' }).output()
   if (!r.success) fail(`${cmd} ${args.join(' ')} exited ${r.code}`)
 }
 
@@ -85,7 +91,8 @@ if (!clustered && (flags['--derived'] || flags['--from'] || flags['--ssr-origin'
 // realm's document carries the seat's sandbox, a presenter's worker script its
 // own policy, with the refusal of its scripted fetches below; an agent is a
 // static file the seat starts from a blob: under the document's policy.
-const name = shell.app ?? path.basename(app)
+const name = flags['--name'] ?? shell.app ?? path.basename(app)
+if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) fail('worker name must be lowercase letters, digits and hyphens, at most 63 characters')
 const hatches = await readEdgeHatches(app)
 if (hatches.length && flags['--ssr-origin']) fail('edge hatches are not packaged for SSR releases')
 if (hatches.length && !clustered) fail('edge hatches run in the cluster, which an app with no migration does not have')
@@ -118,6 +125,8 @@ if (!retainedFrom) {
 
 await Deno.remove(out, { recursive: true }).catch((e) => { if (!(e instanceof Deno.errors.NotFound)) throw e })
 await Deno.mkdir(path.join(out, 'src'), { recursive: true })
+out = await Deno.realPath(out)
+const compute = clustered ? await writeEdgeCompute(out, mecha, omnishell, await computationPackages(app, mecha), name) : undefined
 await Deno.writeTextFile(path.join(out, 'edge-environment.json'), JSON.stringify([...new Set(hatches.flatMap(h => h.edge.environment ?? []))]))
 await Deno.writeTextFile(path.join(out, 'edge-secrets.json'), JSON.stringify([...new Set(hatches.flatMap(h => h.edge.secrets ?? []))]))
 
@@ -186,6 +195,11 @@ const pglite = path.join(out, 'pglite')
 const workerd = path.join(mecha, 'packages/pglite-workerd')
 await run('docker', ['buildx', 'bake', `--allow=fs.read=${workerd}`, `--allow=fs.write=${out}`, '-f', 'compose.yaml', '--set', `package.output=type=local,dest=${pglite}`, 'package'], path.join(workerd, '.bayt'))
 await Deno.remove(path.join(pglite, '.bayt'), { recursive: true })
+const reader = compute ? await writeEdgeReader(out, mecha, compute.definitions, name) : undefined
+if (compute) {
+  compute.deployments.push('compute/reader/wrangler.jsonc')
+  await Deno.writeTextFile(path.join(out, 'src/compute.json'), JSON.stringify({ ...compute, reader }))
+}
 
 // The cluster's pgroll set: what carries a database forward, a fresh
 // directory's and an archive's alike (pgdata.ts), and a kept one's at publish.
@@ -194,12 +208,13 @@ const pgrollOut = await new Deno.Command('cue', { args: ['export', '.', '-e', 'c
 if (!pgrollOut.success) fail(`cue export of cluster.state.pgroll exited ${pgrollOut.code}`)
 await Deno.writeFile(pgroll, pgrollOut.stdout)
 const cluster = path.join(mecha, 'packages/mecha-browser')
+// The cluster uses its Deno pins, independently of the surrounding npm workspace.
 await run(Deno.execPath(), [
-  'run', '-A', '--config', path.join(cluster, 'cluster.deno.json'), '--lock', path.join(cluster, 'deno.lock'), '--frozen',
+  'run', '-A', '--no-config', '--import-map', path.join(cluster, 'cluster.deno.json'), '--lock', path.join(cluster, 'deno.lock'), '--frozen',
   path.join(here, 'pgdata.ts'), app, '--mecha', mecha, '--out', path.join(out, 'pgdata'), '--pgroll', pgroll,
   ...(flags['--derived'] ? ['--derived', path.resolve(flags['--derived'])] : []),
   ...(flags['--from'] ? ['--from', path.resolve(flags['--from'])] : []),
-])
+], undefined, { DENO_NO_PACKAGE_JSON: '1' })
 
 // What a publish hands a directory the object kept: the scripts a directory
 // is built from (edge-scripts.ts), the pgroll set among them.
@@ -227,13 +242,13 @@ if (withEffects) await Deno.writeTextFile(path.join(out, 'src/effects.js'), awai
 // the ticker, installed from its lock; mecha-edge's node_modules provides the
 // pinned WebAuthn server dependency.
 await run(Deno.execPath(), ['install', '--frozen'], path.join(mecha, 'services/ticker'))
+await run(Deno.execPath(), ['install', '--frozen', '--node-modules-dir=auto'], path.join(mecha, 'packages/mecha-edge'), { DENO_NO_PACKAGE_JSON: '1' })
 await run(Deno.execPath(), ['install', '--frozen', '--config', path.join(mecha, 'services/airlock/deno.json')], path.join(mecha, 'services/airlock'))
-await run(Deno.execPath(), ['install', '--frozen', '--node-modules-dir=auto'], path.join(mecha, 'packages/mecha-edge'))
 // The clock outside the object: a Cron Trigger poking hourly where anything
 // can owe a tick, so the free plan pays a day of object wakes for an alarm
 // the platform lost rather than a minute's; the alarm is the exact one.
 const armed = Object.values(reducers).some((h) => (h.reducer as { ports?: { wake?: unknown } }).ports?.wake !== undefined)
-const pokes = clock !== 'disabled' && (crons.length > 0 || armed || withEffects || hatches.length > 0)
+const pokes = !!compute || clock !== 'disabled' && (crons.length > 0 || armed || withEffects || hatches.length > 0)
 const POKE_CRON = '0 * * * *'
 
 const rel = (p: string) => {
@@ -252,6 +267,8 @@ import { edgeHints } from '${fromSrc(path.join(here, 'edge-hints.ts'))}'
 import { originAssets } from '${fromSrc(path.join(here, 'edge-templates.ts'))}'
 ${blobs ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
+${compute ? `import { computeCoordinator } from '${fromSrc(path.join(mecha, "packages/mecha-edge/src/compute-coordinator.ts"))}'\nexport class ComputeCoordinator extends computeCoordinator(undefined, ${JSON.stringify(compute.paged ?? [])}, ${JSON.stringify(compute.services[0].service)}) {}\n` : ''}
+${compute ? "import computeMachines from './compute-machine.js'\n" : ''}
 ${hatches.map((h, i) => `import { createHatch as hatch${i} } from '${fromSrc(path.join(app, h.edge.src))}'`).join('\n')}
 ${Object.keys(reducers).length ? "import machines from './machines.js'\n" : ''}${Object.keys(functions).length ? "import functions from './functions.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
@@ -264,6 +281,7 @@ export const Cluster = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(shell.tables)},
   schema: ${JSON.stringify(shell.schema ?? {})},
+  ${compute ? 'compute: { computations: ' + JSON.stringify(compute.definitions) + ', machine: computeMachines.compute_batch, physicalSnapshots: true, reader: ' + JSON.stringify(reader!.script_name) + ' },' : ''}
   drains: ${JSON.stringify(drains)},${Object.keys(reducers).length ? '\n  machines,' : ''}${Object.keys(functions).length ? '\n  functions,' : ''}${withEffects ? '\n  effects,' : ''}${shell.ai ? `\n  ai: ${JSON.stringify(shell.ai)},` : ''}
 })
 export default {
@@ -344,15 +362,16 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   compatibility_date: '2026-09-01',
   // The object's airlock runs Graphile Worker, which needs Node's built-ins.
   compatibility_flags: ['nodejs_compat'],
+  ...(compute ? { services: compute.services } : {}),
   // run_worker_first routes /* to the Worker so immutable assets attach
   // Cache-Control: public, max-age=31536000, immutable strictly on 200 responses,
   // while 404 responses are served with Cache-Control: no-store.
   assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash' },
-  durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }] },
+  durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }, ...(compute ? [{ name: 'COMPUTE_COORDINATOR', class_name: 'ComputeCoordinator' }, reader] : [])] },
   ...(shell.ai || withEffects ? { ai: { binding: 'AI' } } : {}),
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   ...(hatches.some(h => h.edge.email) ? { send_email: hatches.flatMap(h => h.edge.email ? [{name: h.edge.email.name, allowed_destination_addresses: h.edge.email.recipients}] : []) } : {}),
-  exports: { Cluster: { type: 'durable-object', storage: 'sqlite' } },
+  exports: { Cluster: { type: 'durable-object', storage: 'sqlite' }, ...(compute ? { ComputeCoordinator: { type: 'durable-object', storage: 'sqlite' } } : {}) },
   observability: { enabled: true },
   ...blobBindings,
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
@@ -372,7 +391,8 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
 if (flags['--ssr-origin']) {
   const origin = new URL(flags['--ssr-origin'])
   if (origin.origin !== flags['--ssr-origin'] || origin.protocol !== 'https:') fail('--ssr-origin must be an HTTPS origin without a trailing slash')
-  await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], path.join(omnishell, 'server/worker'))
-  await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, drains, clock)
+  const mise = Deno.env.get('SAYT_MISE_BIN') ?? fail('SAYT_MISE_BIN is required to install the renderer with its pinned Node')
+  await run(mise, ['exec', '--', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'], path.join(omnishell, 'server/worker'))
+  await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, drains, databaseMode, clock)
 }
 console.error(`edge: ${out}`)

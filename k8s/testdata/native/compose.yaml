@@ -1,0 +1,25 @@
+services:
+  compute:
+    image: native-compute:test
+    environment:
+      DATABASE_URL: postgres://postgres:dev-password@database/native
+      SERVICE_JWT: dev-token
+      DUCKSTREAM_ENGINE: feldera
+      FELDERA_URL: http://feldera:8080
+      COMPUTATIONS: '[{"name":"metrics","feldera":"/app/metrics.json"}]'
+  feldera:
+    image: native-feldera:test
+    environment:
+      FELDERA_DATABASE_URL: postgres://postgres:dev-password@database/native
+  conduit:
+    image: native-conduit:test
+    environment:
+      DATABASE_URL: postgres://postgres:dev-password@database/native
+      CONDUIT_DB_TYPE: inmemory
+  redis:
+    image: native-redis:test
+  transform:
+    image: native-transform:test
+    environment:
+      SERVICE_JWT: dev-token
+      REDIS_URL: redis://redis:6379

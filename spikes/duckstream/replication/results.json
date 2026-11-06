@@ -1,0 +1,455 @@
+{
+  "status": "passed",
+  "verdict": "useful_mirror_and_append_transport_not_transaction_cut_adapter",
+  "executed_at": "2026-10-20T14:19:03.678Z",
+  "deno": "2.8.2",
+  "identity": {
+    "image": "pgducklake/pgduckpipe@sha256:091236d2acecfec1216817aff6e43dc4c036159cebe44a19c73c95c1fe9be348",
+    "source": "86d5c248d80370fb2e10ddc1abd780fd94c3a52b",
+    "identities": {
+      "linux/amd64": {
+        "revision": "86d5c248d80370fb2e10ddc1abd780fd94c3a52b",
+        "repository": "https://github.com/relytcloud/pg_duckpipe",
+        "pg_ducklake": "20d799e673639fb0c36a3b31db413e45057a10ed"
+      },
+      "linux/arm64": {
+        "revision": "86d5c248d80370fb2e10ddc1abd780fd94c3a52b",
+        "repository": "https://github.com/relytcloud/pg_duckpipe",
+        "pg_ducklake": "20d799e673639fb0c36a3b31db413e45057a10ed"
+      }
+    }
+  },
+  "image_architecture": "arm64",
+  "postgres": "18.4 (Debian 18.4-1.pgdg12+1)",
+  "versions": [
+    [
+      "pg_duckdb",
+      "1.1.0"
+    ],
+    [
+      "pg_ducklake",
+      "0.1.0"
+    ],
+    [
+      "pg_duckpipe",
+      "1.0.0"
+    ],
+    [
+      "plpgsql",
+      "1.0"
+    ]
+  ],
+  "bootstrap": {
+    "populated": true,
+    "append_baseline_lsn": "0",
+    "pre_bootstrap_occurrences": "not available"
+  },
+  "source_transaction_xid": "784",
+  "initial_snapshot": 6,
+  "retained_cuts": [
+    {
+      "snapshot": 6,
+      "events": [
+        [
+          "1",
+          "10"
+        ],
+        [
+          "2",
+          "20"
+        ]
+      ],
+      "accounts": [
+        [
+          "1",
+          "initial"
+        ]
+      ],
+      "torn": false
+    },
+    {
+      "snapshot": 7,
+      "events": [
+        [
+          "1",
+          "15"
+        ]
+      ],
+      "accounts": [
+        [
+          "1",
+          "initial"
+        ]
+      ],
+      "torn": true
+    },
+    {
+      "snapshot": 8,
+      "events": [
+        [
+          "1",
+          "15"
+        ]
+      ],
+      "accounts": [
+        [
+          "1",
+          "initial"
+        ]
+      ],
+      "torn": true
+    },
+    {
+      "snapshot": 9,
+      "events": [
+        [
+          "1",
+          "15"
+        ]
+      ],
+      "accounts": [
+        [
+          "1",
+          "second"
+        ]
+      ],
+      "torn": false
+    }
+  ],
+  "append_history": [
+    [
+      "1",
+      "10",
+      "I",
+      "0"
+    ],
+    [
+      "1",
+      "15",
+      "U",
+      "28812944"
+    ],
+    [
+      "99",
+      "99",
+      "I",
+      "28813032"
+    ],
+    [
+      "99",
+      "",
+      "D",
+      "28813160"
+    ]
+  ],
+  "append_history_after_restart": [
+    [
+      "1",
+      "10",
+      "I",
+      "0"
+    ],
+    [
+      "1",
+      "15",
+      "U",
+      "28812944"
+    ],
+    [
+      "99",
+      "99",
+      "I",
+      "28813032"
+    ],
+    [
+      "99",
+      "",
+      "D",
+      "28813160"
+    ],
+    [
+      "3",
+      "30",
+      "I",
+      "28830432"
+    ]
+  ],
+  "metadata": {
+    "before": {
+      "tables": [
+        {
+          "sync_group": "default",
+          "source_table": "public.accounts",
+          "target_table": "public.accounts_ducklake",
+          "state": "CATCHUP",
+          "enabled": true,
+          "rows_synced": 1,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:18:57.483513+00:00",
+          "error_message": null,
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": null,
+          "snapshot_duration_ms": 202,
+          "snapshot_rows": 1,
+          "source_label": "default/public.accounts",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        },
+        {
+          "sync_group": "default",
+          "source_table": "public.events",
+          "target_table": "public.events_ducklake",
+          "state": "CATCHUP",
+          "enabled": true,
+          "rows_synced": 2,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:18:57.482073+00:00",
+          "error_message": null,
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": null,
+          "snapshot_duration_ms": 109,
+          "snapshot_rows": 2,
+          "source_label": "default/public.events",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        },
+        {
+          "sync_group": "default",
+          "source_table": "public.occurrences",
+          "target_table": "public.occurrences_ducklake",
+          "state": "CATCHUP",
+          "enabled": true,
+          "rows_synced": 1,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:18:57.994171+00:00",
+          "error_message": null,
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": null,
+          "snapshot_duration_ms": 77,
+          "snapshot_rows": 1,
+          "source_label": "default/public.occurrences",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        }
+      ],
+      "group": {
+        "id": 1,
+        "name": "default",
+        "publication": "duckpipe_pub_postgres",
+        "slot_name": "duckpipe_slot_postgres",
+        "conninfo": null,
+        "enabled": true,
+        "mode": "bgworker",
+        "config": {},
+        "confirmed_lsn": "0/1B6F9D8",
+        "last_sync_at": "2026-10-20T14:18:57.988404+00:00",
+        "created_at": "2026-10-20T14:18:56.236734+00:00"
+      },
+      "slot": {
+        "slot_name": "duckpipe_slot_postgres",
+        "confirmed_flush_lsn": "0/1B6F9D8",
+        "restart_lsn": "0/1B6F9A0"
+      }
+    },
+    "acknowledged": {
+      "tables": [
+        {
+          "sync_group": "default",
+          "source_table": "public.accounts",
+          "target_table": "public.accounts_ducklake",
+          "state": "STREAMING",
+          "enabled": true,
+          "rows_synced": 3,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:18:58.798913+00:00",
+          "error_message": "",
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": "0/1B7A630",
+          "snapshot_duration_ms": 202,
+          "snapshot_rows": 1,
+          "source_label": "default/public.accounts",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        },
+        {
+          "sync_group": "default",
+          "source_table": "public.events",
+          "target_table": "public.events_ducklake",
+          "state": "STREAMING",
+          "enabled": true,
+          "rows_synced": 5,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:18:58.722996+00:00",
+          "error_message": "",
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": "0/1B7A5E8",
+          "snapshot_duration_ms": 109,
+          "snapshot_rows": 2,
+          "source_label": "default/public.events",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        },
+        {
+          "sync_group": "default",
+          "source_table": "public.occurrences",
+          "target_table": "public.occurrences_ducklake",
+          "state": "STREAMING",
+          "enabled": true,
+          "rows_synced": 4,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:18:58.791429+00:00",
+          "error_message": "",
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": "0/1B7A768",
+          "snapshot_duration_ms": 77,
+          "snapshot_rows": 1,
+          "source_label": "default/public.occurrences",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        }
+      ],
+      "group": {
+        "id": 1,
+        "name": "default",
+        "publication": "duckpipe_pub_postgres",
+        "slot_name": "duckpipe_slot_postgres",
+        "conninfo": null,
+        "enabled": true,
+        "mode": "bgworker",
+        "config": {},
+        "confirmed_lsn": "0/1B7A5E8",
+        "last_sync_at": "2026-10-20T14:18:59.527294+00:00",
+        "created_at": "2026-10-20T14:18:56.236734+00:00"
+      },
+      "slot": {
+        "slot_name": "duckpipe_slot_postgres",
+        "confirmed_flush_lsn": "0/1B7A5E8",
+        "restart_lsn": "0/1B6F9A0"
+      }
+    },
+    "recovered": {
+      "tables": [
+        {
+          "sync_group": "default",
+          "source_table": "public.accounts",
+          "target_table": "public.accounts_ducklake",
+          "state": "STREAMING",
+          "enabled": true,
+          "rows_synced": 7,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:19:02.523445+00:00",
+          "error_message": "",
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": "0/1B7EA78",
+          "snapshot_duration_ms": 202,
+          "snapshot_rows": 1,
+          "source_label": "default/public.accounts",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        },
+        {
+          "sync_group": "default",
+          "source_table": "public.events",
+          "target_table": "public.events_ducklake",
+          "state": "STREAMING",
+          "enabled": true,
+          "rows_synced": 10,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:19:02.356251+00:00",
+          "error_message": "",
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": "0/1B7EA20",
+          "snapshot_duration_ms": 109,
+          "snapshot_rows": 2,
+          "source_label": "default/public.events",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        },
+        {
+          "sync_group": "default",
+          "source_table": "public.occurrences",
+          "target_table": "public.occurrences_ducklake",
+          "state": "STREAMING",
+          "enabled": true,
+          "rows_synced": 5,
+          "queued_changes": 0,
+          "last_sync": "2026-10-20T14:19:02.263657+00:00",
+          "error_message": "",
+          "consecutive_failures": 0,
+          "retry_at": null,
+          "applied_lsn": "0/1B7EAE0",
+          "snapshot_duration_ms": 77,
+          "snapshot_rows": 1,
+          "source_label": "default/public.occurrences",
+          "flush_lag_bytes": null,
+          "source_lag_bytes": null
+        }
+      ],
+      "group": {
+        "id": 1,
+        "name": "default",
+        "publication": "duckpipe_pub_postgres",
+        "slot_name": "duckpipe_slot_postgres",
+        "conninfo": null,
+        "enabled": true,
+        "mode": "bgworker",
+        "config": {},
+        "confirmed_lsn": "0/1B7EA20",
+        "last_sync_at": "2026-10-20T14:19:02.55642+00:00",
+        "created_at": "2026-10-20T14:18:56.236734+00:00"
+      },
+      "slot": {
+        "slot_name": "duckpipe_slot_postgres",
+        "confirmed_flush_lsn": "0/1B7EA20",
+        "restart_lsn": "0/1B79DB0"
+      }
+    }
+  },
+  "per_table_frontier": [
+    [
+      "accounts",
+      "0/1B7EA78"
+    ],
+    [
+      "events",
+      "0/1B7EA20"
+    ],
+    [
+      "occurrences",
+      "0/1B7EAE0"
+    ]
+  ],
+  "assertions": {
+    "populated_bootstrap": true,
+    "update_delete_current_mirror": true,
+    "append_transient_insert_delete": true,
+    "delete_payload_omits_non_key_even_with_full_identity": true,
+    "torn_cross_table_snapshot_observed": true,
+    "retained_snapshot_after_restart": true,
+    "crash_restart_backlog_delivered": true,
+    "restart_no_duplicate_observed_occurrences": true,
+    "source_ack_equals_minimum_applied_lsn": true,
+    "source_ack_advances_after_restart": true
+  },
+  "unproved": [
+    "concurrent bootstrap global cut",
+    "commit-to-ack exact crash window and WAL redelivery",
+    "source failover epochs",
+    "production load",
+    "multiwriter publication"
+  ],
+  "source_audit": {
+    "revision": "86d5c248d80370fb2e10ddc1abd780fd94c3a52b",
+    "append_metadata": "row WAL position and operation; no xid, commit LSN, transaction ordinal or boundary",
+    "checkpoint": "minimum per-table applied LSN after per-table DuckLake commit; metadata update is a separate PostgreSQL transaction",
+    "bootstrap": "per-table REPEATABLE READ COPY; baseline append rows use LSN zero"
+  }
+}

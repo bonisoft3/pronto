@@ -1,0 +1,106 @@
+{
+  "inputs" : [ {
+    "name" : "substring_source",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "id",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "s",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "first",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "BIGINT"
+      },
+      "unused" : false
+    }, {
+      "name" : "width",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false,
+    "foreign_keys" : [ ]
+  } ],
+  "outputs" : [ {
+    "name" : "error_view",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "table_or_view_name",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "message",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "metadata",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  }, {
+    "name" : "result",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "id",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "suffix",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "part",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  } ]
+}

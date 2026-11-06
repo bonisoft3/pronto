@@ -1,0 +1,2 @@
+CREATE TABLE t (x INTEGER, y INTEGER);
+CREATE VIEW result AS SELECT x AS "a", y AS "A" FROM t;

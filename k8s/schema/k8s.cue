@@ -32,8 +32,6 @@ import (
 		},
 	]
 
-
-
 	// Every service runs the image the app's own compose project builds, pushed
 	// to the environment's registry: what integrate tested is what releases.
 	#appImage: {
@@ -114,6 +112,15 @@ import (
 			}
 			spec: {
 				instances: 1
+				postgresql: parameters: {
+					wal_level:             "logical"
+					max_replication_slots: "128"
+					max_wal_senders:       "128"
+					max_connections:       "200"
+					fsync:                 "on"
+					synchronous_commit:    "on"
+					full_page_writes:      "on"
+				}
 				imageName: (#appImage & {svc: "database"}).out
 				// mecha's database image derives from the official postgres image,
 				// whose postgres user is 999, not CloudNativePG's 26.
@@ -160,8 +167,9 @@ import (
 
 	// The schema, built as compose builds it, by the app's own images: initdb
 	// runs the database image's initdb directory once, on a fresh database, and
-	// migrate carries it forward with pgroll on every release. The image's
-	// docker_process_sql pins the local socket, so the Job restates it against
+	// migrate applies pending pgroll migrations and reconciles permissions on
+	// every release. The image's docker_process_sql pins the local socket,
+	// so the Job restates it against
 	// the cluster's database Service; every step otherwise runs as the image's
 	// entrypoint runs it. A database comment marks initdb done.
 	let schemaEnv = [
@@ -437,7 +445,6 @@ import (
 			metric: enabled: true
 		}
 	}]
-
 
 	let prontoCrudDeploymentObj = [
 		if release.type == "pronto" {
@@ -837,7 +844,6 @@ import (
 			}
 		},
 
-
 	]
 
 	let prontoRenderDeploymentObj = [
@@ -1148,6 +1154,7 @@ import (
 						ports: [
 							{port: 50002, protocol: "TCP"},
 							{port: 3500, protocol: "TCP"},
+							{port: 3000, protocol: "TCP"},
 						]
 					},
 				]
@@ -1304,6 +1311,12 @@ import (
 		},
 	]
 
+	let runtimeObjects = (#Runtime & {
+		app:         release
+		environment: targetEnv
+		images: {for name, _ in release.runtime {(name): (#appImage & {svc: name}).out}}
+	}).objects
+
 	// objects collects all generated Kubernetes API definitions in standard order
 	objects: [
 		for list in [
@@ -1325,6 +1338,7 @@ import (
 			prontoCaddyServiceObj,
 			prontoRenderDeploymentObj,
 			prontoRenderServiceObj,
+			runtimeObjects,
 			gatewayObj,
 			httpRouteObj,
 			backendTrafficPolicyObj,

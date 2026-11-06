@@ -1,0 +1,126 @@
+{
+  "error_view": {
+    "rels": [
+      {
+        "id": 0,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "feldera_error_table"
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "result": {
+    "rels": [
+      {
+        "id": 1,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "typed_values"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 2,
+        "relOp": "LogicalProject",
+        "fields": [
+          "total"
+        ],
+        "exprs": [
+          {
+            "pos": {
+              "line": 3,
+              "column": 8,
+              "end_line": 3,
+              "end_column": 66
+            },
+            "op": {
+              "name": "+",
+              "kind": "CHECKED_PLUS",
+              "syntax": "BINARY"
+            },
+            "operands": [
+              {
+                "pos": {
+                  "line": 3,
+                  "column": 8,
+                  "end_line": 3,
+                  "end_column": 62
+                },
+                "op": {
+                  "name": "CASE",
+                  "kind": "CASE",
+                  "syntax": "SPECIAL"
+                },
+                "operands": [
+                  {
+                    "pos": {
+                      "line": 3,
+                      "column": 19,
+                      "end_line": 3,
+                      "end_column": 27
+                    },
+                    "op": {
+                      "name": "IS NULL",
+                      "kind": "IS_NULL",
+                      "syntax": "POSTFIX"
+                    },
+                    "operands": [
+                      {
+                        "input": 0,
+                        "name": "$0"
+                      }
+                    ]
+                  },
+                  {
+                    "literal": 0,
+                    "type": {
+                      "type": "BIGINT",
+                      "nullable": false
+                    }
+                  },
+                  {
+                    "pos": {
+                      "line": 3,
+                      "column": 8,
+                      "end_line": 3,
+                      "end_column": 62
+                    },
+                    "op": {
+                      "name": "CAST",
+                      "kind": "CAST",
+                      "syntax": "SPECIAL"
+                    },
+                    "operands": [
+                      {
+                        "input": 0,
+                        "name": "$0"
+                      }
+                    ],
+                    "type": {
+                      "type": "BIGINT",
+                      "nullable": true
+                    }
+                  }
+                ]
+              },
+              {
+                "literal": 1,
+                "type": {
+                  "type": "INTEGER",
+                  "nullable": false
+                }
+              }
+            ]
+          }
+        ],
+        "inputs": [
+          1
+        ]
+      }
+    ]
+  }
+}

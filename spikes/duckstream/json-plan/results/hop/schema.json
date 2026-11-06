@@ -1,0 +1,107 @@
+{
+  "inputs" : [ {
+    "name" : "events",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "id",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "INTEGER"
+      },
+      "unused" : false
+    }, {
+      "name" : "ts",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : 6,
+        "type" : "TIMESTAMP"
+      },
+      "unused" : false
+    }, {
+      "name" : "amount",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "BIGINT"
+      },
+      "unused" : false
+    } ],
+    "primary_key" : [ "id" ],
+    "materialized" : false,
+    "foreign_keys" : [ ]
+  } ],
+  "outputs" : [ {
+    "name" : "error_view",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "table_or_view_name",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "message",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    }, {
+      "name" : "metadata",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : -1,
+        "type" : "VARCHAR"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  }, {
+    "name" : "result",
+    "case_sensitive" : false,
+    "fields" : [ {
+      "name" : "window_start",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : 6,
+        "type" : "TIMESTAMP"
+      },
+      "unused" : false
+    }, {
+      "name" : "window_end",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "precision" : 6,
+        "type" : "TIMESTAMP"
+      },
+      "unused" : false
+    }, {
+      "name" : "n",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : false,
+        "type" : "BIGINT"
+      },
+      "unused" : false
+    }, {
+      "name" : "total",
+      "case_sensitive" : false,
+      "columntype" : {
+        "nullable" : true,
+        "type" : "BIGINT"
+      },
+      "unused" : false
+    } ],
+    "materialized" : false
+  } ]
+}

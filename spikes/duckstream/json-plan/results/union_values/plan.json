@@ -1,0 +1,146 @@
+{
+  "distinct_rows": {
+    "rels": [
+      {
+        "id": 0,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "literal_rows"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 1,
+        "relOp": "LogicalAggregate",
+        "group": [
+          0,
+          1
+        ],
+        "aggs": [],
+        "inputs": [
+          0
+        ]
+      }
+    ]
+  },
+  "error_view": {
+    "rels": [
+      {
+        "id": 2,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "feldera_error_table"
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "literal_rows": {
+    "rels": [
+      {
+        "id": 3,
+        "relOp": "LogicalValues",
+        "type": [
+          {
+            "type": "INTEGER",
+            "nullable": false,
+            "name": "id"
+          },
+          {
+            "type": "VARCHAR",
+            "nullable": false,
+            "precision": -1,
+            "name": "label"
+          }
+        ],
+        "tuples": [
+          [
+            {
+              "literal": 0,
+              "type": {
+                "type": "INTEGER",
+                "nullable": false
+              }
+            },
+            {
+              "literal": "zero",
+              "type": {
+                "type": "VARCHAR",
+                "nullable": false,
+                "precision": -1
+              }
+            }
+          ],
+          [
+            {
+              "literal": 1,
+              "type": {
+                "type": "INTEGER",
+                "nullable": false
+              }
+            },
+            {
+              "literal": "one",
+              "type": {
+                "type": "VARCHAR",
+                "nullable": false,
+                "precision": -1
+              }
+            }
+          ],
+          [
+            {
+              "literal": 1,
+              "type": {
+                "type": "INTEGER",
+                "nullable": false
+              }
+            },
+            {
+              "literal": "one",
+              "type": {
+                "type": "VARCHAR",
+                "nullable": false,
+                "precision": -1
+              }
+            }
+          ]
+        ],
+        "inputs": []
+      }
+    ]
+  },
+  "result": {
+    "rels": [
+      {
+        "id": 4,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "union_source"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 5,
+        "relOp": "LogicalTableScan",
+        "table": [
+          "schema",
+          "distinct_rows"
+        ],
+        "inputs": []
+      },
+      {
+        "id": 6,
+        "relOp": "LogicalUnion",
+        "all": true,
+        "inputs": [
+          4,
+          5
+        ]
+      }
+    ]
+  }
+}
