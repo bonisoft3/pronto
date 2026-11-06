@@ -163,6 +163,58 @@ import (
 						storageClass: targetEnv.storageClass
 					}
 				}
+				if release.database.backup != _|_ {
+					plugins: [{
+						name:          "barman-cloud.cloudnative-pg.io"
+						isWALArchiver: true
+						parameters: barmanObjectName: "\(release.name)-backup"
+					}]
+				}
+			}
+		},
+	]
+
+	// release.database.backup: the bucket the barman-cloud plugin writes to, and the nightly
+	// base backup; WAL goes there as the Cluster's archiver (prontoClusterObj's plugins).
+	let backupObjs = [
+		if release.type == "pronto" && release.database.backup != _|_
+		let b = release.database.backup {
+			apiVersion: "barmancloud.cnpg.io/v1"
+			kind:       "ObjectStore"
+			metadata: {
+				name:      "\(release.name)-backup"
+				namespace: release.namespace
+				labels:    appLabels & {"app.kubernetes.io/component": "database"}
+			}
+			spec: {
+				retentionPolicy: b.retention
+				configuration: {
+					destinationPath: "s3://\(b.bucket)/\(b.path)"
+					endpointURL:     b.endpoint
+					s3Credentials: {
+						accessKeyId: {name: b.secret, key: "ACCESS_KEY_ID"}
+						secretAccessKey: {name: b.secret, key: "ACCESS_SECRET_KEY"}
+					}
+					wal: compression:  "gzip"
+					data: compression: "gzip"
+				}
+			}
+		},
+		if release.type == "pronto" && release.database.backup != _|_ {
+			apiVersion: "postgresql.cnpg.io/v1"
+			kind:       "ScheduledBackup"
+			metadata: {
+				name:      "\(release.name)-db-nightly"
+				namespace: release.namespace
+				labels:    appLabels & {"app.kubernetes.io/component": "database"}
+			}
+			spec: {
+				schedule:             release.database.backup.schedule
+				immediate:            true
+				backupOwnerReference: "self"
+				cluster: name: "\(release.name)-db"
+				method: "plugin"
+				pluginConfiguration: name: "barman-cloud.cloudnative-pg.io"
 			}
 		},
 	]
@@ -1555,6 +1607,7 @@ import (
 			prontoExternalSecretObj,
 			daprConfigObj,
 			daprResiliencyObj,
+			backupObjs,
 			prontoClusterObj,
 			schemaJobObj,
 			prontoDatabaseServiceObj,

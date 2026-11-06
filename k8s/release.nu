@@ -36,10 +36,27 @@ export const OPERATORS = [
 	},
 	{
 		name: "cnpg"
-		url: "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.25.0/cnpg-1.25.0.yaml"
-		checksum: "sha256:540325612313f775b624a444c217c4c1851269c043f72ca73dbcf6aff433dcb4"
+		url: "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.1/cnpg-1.30.1.yaml"
+		checksum: "sha256:37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb"
 		namespace: "cnpg-system"
 		check_deployments: ["cnpg-controller-manager"]
+	},
+	# The certificates CloudNativePG's barman-cloud plugin and the operator talk through.
+	{
+		name: "cert-manager"
+		url: "https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml"
+		checksum: "sha256:c04a51295adda2b1a775146751f973e787190778c7f35180861d9678876e5c74"
+		namespace: "cert-manager"
+		check_deployments: ["cert-manager" "cert-manager-cainjector" "cert-manager-webhook"]
+	},
+	# Backups and WAL to an object store (#ReleaseSpec.database.backup): a sidecar beside
+	# postgres, so the database's own image needs no barman-cloud of its own.
+	{
+		name: "barman-cloud"
+		url: "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.15.1/manifest.yaml"
+		checksum: "sha256:8f377ff4a7d0d3f74fc64b0f7ac4f449fc38ca9e83a40107cca2f9315a9bd920"
+		namespace: "cnpg-system"
+		check_deployments: ["barman-cloud"]
 	},
 	{
 		name: "external-secrets"
@@ -152,7 +169,19 @@ def install-operator [entry: record, timeout: string] {
 		# helm template leaves namespace off objects that do not set it; the chart's namespace is theirs.
 		$docs | where {|d| not (do $is_crd $d) } | str join "\n---\n" | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false --request-timeout=120s -f -
 	} else {
-		kubectl apply --server-side --force-conflicts --validate=false --request-timeout=120s -f $file
+		# A manifest whose objects another operator's webhook admits (the barman-cloud plugin's
+		# Certificate, cert-manager's) is refused for the few seconds that webhook takes to serve
+		# once its deployment is ready: applied again, for at most a minute.
+		mut attempt = 1
+		loop {
+			let applied = (do { kubectl apply --server-side --force-conflicts --validate=false --request-timeout=120s -f $file } | complete)
+			print -n $applied.stdout
+			if $applied.exit_code == 0 { break }
+			if $attempt >= 12 { error make { msg: $"($entry.name): kubectl apply failed: ($applied.stderr)" } }
+			print $"($entry.name) not admitted yet \(($applied.stderr | str trim | lines | last)\): again in 5s"
+			$attempt += 1
+			sleep 5sec
+		}
 	}
 
 	for d in ($entry.check_deployments? | default []) {
@@ -444,6 +473,19 @@ export def apply-alert-rules [name: string, rules: list<string>, app_dir: string
 		$"--from-file=($r | path basename)=($file)"
 	})
 	kubectl create configmap $"($name)-alert-rules" -n $namespace ...$from --dry-run=client -o yaml | kubectl apply -f - | ignore
+}
+
+# The database's backups read their keys from a Secret the operator keeps: without it the
+# Cluster could archive no WAL, which piles up on the node until its disk fills.
+export def check-backup-secrets [objects: list, namespace: string] {
+	for store in ($objects | where kind == "ObjectStore") {
+		let secret = $store.spec.configuration.s3Credentials.accessKeyId.name
+		let keys = (do { kubectl get secret $secret -n $namespace -o json } | complete)
+		let data = if $keys.exit_code == 0 { $keys.stdout | from json | get data? | default {} } else { {} }
+		if not ("ACCESS_KEY_ID" in ($data | columns) and "ACCESS_SECRET_KEY" in ($data | columns)) {
+			error make { msg: $"database.backup: Secret ($secret) in ($namespace) needs ACCESS_KEY_ID and ACCESS_SECRET_KEY, the object store's keys \(kubectl create secret generic ($secret) -n ($namespace) --from-literal=ACCESS_KEY_ID=... --from-literal=ACCESS_SECRET_KEY=...\)" }
+		}
+	}
 }
 
 # <name>-service-jwt: the service role's token, signed with <name>-auth-secrets'
@@ -829,6 +871,7 @@ export def main [
 	let of_kind = {|kind| $docs | where {|d| $d =~ $"\(?m\)^kind:\\s*($kind)\\s*$" } }
 	let deployments_yaml = (do $of_kind "Deployment")
 	let jobs_yaml = (do $of_kind "Job")
+	check-backup-secrets ($released | from yaml) $target_ns
 	print $"Applying manifests for ($app_info.name)..."
 	$docs | where {|d| not ($d in $deployments_yaml or $d in $jobs_yaml) } | str join "\n---\n" | kubectl apply -f -
 
