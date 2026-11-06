@@ -136,6 +136,13 @@ package schema
 			port!: int & >1024 & <65536
 			path:  *"/metrics" | =~"^/"
 		}
+		// A clock that pokes the service: a CronJob POSTing to `path` on its port each `schedule`
+		// (five fields, UTC), with the service role's token as its bearer, as Cloud Scheduler pokes
+		// mecha's ticker on Cloud Run (gcp.cue's clock). A missed minute is the next one's: no retry.
+		clock?: {
+			schedule: string | *"* * * * *"
+			path:     =~"^/" | *"/poke"
+		}
 	}
 
 
