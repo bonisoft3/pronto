@@ -395,10 +395,7 @@ region filling an `<svg>` produces elements in the wrong namespace — present,
 carrying every attribute the binding wrote, drawn by no engine, and rendered
 happily by linkedom. Only the browser tier sees it.
 
-**`check parity` runs nowhere.** realworld declares `capabilities: native:
-true` and `check-parity.ts` exists, but omnishell's `terminal.cue` declares no
-`parity` check, so no app's `.say.yaml` carries one and the native peer of a web
-affordance is never compared.
+**`emitNativeRuntimeBundle` in `project-native.ts` still carries `realworld`'s 12-table SQLite DDL and feed/article card layout inline.** `project-native.ts` derives screen inputs, actions, CSS state rules, HUD layers, touch zones and kinetic mounts from `shell/screens/*.{html,css}`, replacing `check-parity.ts`, while deriving the native SQLite DDL from `domain.cue` and generic `data-live` row templates remains unbuilt ([[docs/decisions/2026-11-04-kinetic-native-targets|kinetic native targets]]).
 
 **`just generate` fails in the shadcnui gallery** (last checked 2026-09-20).
 

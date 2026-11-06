@@ -1537,8 +1537,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// Whether the cluster runs an auth and a crud service: #serverOn, the
 	// predicate that emits them, carried into the file visual lint reads.
 	server: bool
-	// Whether the app claims a native host beside the web one, carried into the
-	// file the parity check reads to know a route's affordances are owed a peer.
+	// Whether the app claims a native host beside the web one, carried into
+	// shell.yaml so project-native.ts projects its screens to DivKit and winio.
 	native: bool
 	// The tables the terminal registers, each with the durability it builds
 	// the collection from (#App.#collections says which).

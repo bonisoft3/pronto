@@ -1665,11 +1665,10 @@ import (
 				params?:   string
 			}
 		}
-		// The app ships a native host beside the web one, so every route owes
-		// its web affordances a native peer: check-parity reads this key to
-		// know the pairing is claimed, and reports a field or action that
-		// exists on one side alone. The host itself is the terminal's; this
-		// only says the app asks for it.
+		// The app ships a native host beside the web one, so every route
+		// projects deterministically to DivKit (phone) and winio (desktop) via
+		// project-native.ts. The host itself is the terminal's; this only says
+		// the app asks for it.
 		native: *false | bool
 		// Switches the cluster's blob plane on (#emit): rclone-s3 object store
 		// and imgproxy behind the caddy /blobs and /img routes.
