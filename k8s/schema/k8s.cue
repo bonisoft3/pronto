@@ -1255,6 +1255,49 @@ import (
 		}]
 	}]
 
+	// A service's clock (services.<n>.clock): each minute (its schedule), a pod that POSTs to the
+	// service's path with the service role's token, as Cloud Scheduler pokes the ticker on Cloud Run.
+	// It carries the app's name label, which the services' network policy admits on their ports.
+	let appServiceClockObjs = [for n, s in release.services if s.clock != _|_ {
+		let labels = appLabels & {"app.kubernetes.io/component": "\(n)-clock"}
+		{
+			apiVersion: "batch/v1"
+			kind:       "CronJob"
+			metadata: {
+				name:      "\(release.name)-\(n)-clock"
+				namespace: release.namespace
+				"labels":  labels
+			}
+			spec: {
+				schedule:                   s.clock.schedule
+				timeZone:                   "Etc/UTC"
+				concurrencyPolicy:          "Forbid"
+				startingDeadlineSeconds:    50
+				successfulJobsHistoryLimit: 1
+				failedJobsHistoryLimit:     3
+				jobTemplate: spec: {
+					backoffLimit:            0
+					activeDeadlineSeconds:   60
+					ttlSecondsAfterFinished: 600
+					template: {
+						metadata: "labels": labels
+						spec: {
+							restartPolicy:      "Never"
+							enableServiceLinks: false
+							containers: [{
+								name:  "poke"
+								image: "docker.io/curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
+								env: [{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}}]
+								command: ["sh", "-c", "exec curl -fsS -m 55 -X POST -H \"Authorization: Bearer $SERVICE_JWT\" http://\(n).\(release.namespace).svc.cluster.local:\(s.port)\(s.clock.path)?caller=k8s-cronjob"]
+								resources: limits: {cpu: "100m", memory: "32Mi"}
+							}]
+						}
+					}
+				}
+			}
+		}
+	}]
+
 	// Each of the app's own services takes the door's requests on its port and
 	// the mesh's, and reaches the cluster through the mesh and the internet on
 	// 443 (a broker): the backends' policy holds the cluster's own, which reach
@@ -1735,6 +1778,7 @@ import (
 			prontoRenderDeploymentObj,
 			prontoRenderServiceObj,
 			for o in appServiceObjs {o},
+			appServiceClockObjs,
 			vmalertObjs,
 			for o in metricsExportObjs {o},
 			gatewayObj,

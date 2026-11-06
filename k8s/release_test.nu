@@ -54,6 +54,7 @@ def run-tests [] {
 	test_container_resources_and_files
 	test_seed_configmaps
 	test_alerting
+	test_service_clock
 	test_metrics_export
 	test_initdb_replays
 	test_database_backup
@@ -528,6 +529,23 @@ def test_metrics_export [] {
 	assert (($objs | where kind == "ServiceAccount" and metadata.name == "sample-metrics-export") | is-not-empty)
 	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
 	assert ($pol.spec.ingress | any {|r| ($r.from.0.podSelector?.matchLabels?."app.kubernetes.io/component"? == "metrics-export") and ($r.ports | any {|p| $p.port == 9598 }) }) "the collector may scrape the metrics port"
+}
+
+def test_service_clock [] {
+	print "test a service's clock pokes it each minute with the service token, as Cloud Scheduler pokes the ticker..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t clock.XXXXXX.json | str trim)
+	{App: {services: {ticker: {port: 9998, env: {}, clock: {}}, flagd: {port: 8693, env: {}}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let crons = ($objs | where kind == "CronJob")
+	assert equal ($crons | get metadata.name) ["sample-ticker-clock"] "only the service with a clock gets one"
+	let cron = ($crons | first)
+	assert equal [$cron.spec.schedule $cron.spec.concurrencyPolicy] ["* * * * *" "Forbid"]
+	let c = ($cron.spec.jobTemplate.spec.template.spec.containers | first)
+	assert ($c.command | last | str contains "-X POST -H \"Authorization: Bearer $SERVICE_JWT\" http://ticker.sample.svc.cluster.local:9998/poke") ($c.command | last)
+	assert equal ($c.env | first | get valueFrom.secretKeyRef) {name: "sample-service-jwt", key: "SERVICE_JWT"}
+	assert equal $cron.spec.jobTemplate.spec.template.metadata.labels."app.kubernetes.io/name" "sample" "the services' network policy admits it"
 }
 
 def test_seed_configmaps [] {
