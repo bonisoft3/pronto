@@ -968,6 +968,54 @@ import (
 
 	]
 
+	// The app's alerting (release.alerting): its rules, which the release writes to <name>-alert-rules,
+	// evaluated by a vmalert of its own against the cluster's VictoriaMetrics (observability's vmsingle),
+	// its alerts' state written back there, reloading a changed rule file within a minute.
+	let vmalertObjs = [if len(release.alerting.rules) > 0 {
+		let labels = appLabels & {"app.kubernetes.io/component": "vmalert"}
+		let vm = "http://vmsingle.observability.svc.cluster.local:8428"
+		{
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {
+				name:      "\(release.name)-vmalert"
+				namespace: release.namespace
+				"labels":  labels
+			}
+			spec: {
+				replicas: 1
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "vmalert"
+				}
+				template: {
+					metadata: "labels": labels
+					spec: enableServiceLinks: false
+					spec: containers: [{
+						name:  "vmalert"
+						image: "docker.io/victoriametrics/vmalert:v1.106.1@sha256:b546a4fbd2d382419dcf521caba096a1f09b15c9338c8f89fb009e5b8d0cfbce"
+						args: [
+							"-rule=/etc/vmalert/rules/*.yaml",
+							"-rule=/etc/vmalert/rules/*.yml",
+							"-datasource.url=\(vm)",
+							"-remoteWrite.url=\(vm)",
+							"-remoteRead.url=\(vm)",
+							"-configCheckInterval=1m",
+							"-external.label=app=\(release.name)",
+							if release.alerting.notifier != _|_ {"-notifier.url=\(release.alerting.notifier)"},
+							if release.alerting.notifier == _|_ {"-notifier.blackhole"},
+						]
+						ports: [{name: "http", containerPort: 8880}]
+						readinessProbe: httpGet: {path: "/ready", port: 8880}
+						resources: (#resourcesOf & {r: release, n: "vmalert"}).out
+						volumeMounts: [{name: "rules", mountPath: "/etc/vmalert/rules", readOnly: true}]
+					}]
+					spec: volumes: [{name: "rules", configMap: name: "\(release.name)-alert-rules"}]
+				}
+			}
+		}
+	}]
+
 	// The app's own services (release.services): a Deployment and a Service each,
 	// in the mesh as render is. Compose's SERVICE_JWT is a development value: the
 	// release's own is minted against the cluster's PGRST_JWT_SECRET (release.nu
@@ -993,6 +1041,13 @@ import (
 					metadata: {
 						"labels":    labels
 						annotations: (#daprSidecar & {id: n, port: "\(s.port)"}).out
+						if s.metrics != _|_ {
+							annotations: {
+								"prometheus.io/scrape": "true"
+								"prometheus.io/port":   "\(s.metrics.port)"
+								"prometheus.io/path":   s.metrics.path
+							}
+						}
 					}
 					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
 					spec: enableServiceLinks: false
@@ -1003,7 +1058,7 @@ import (
 						// A pod going away keeps serving while the mesh learns of its
 						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
 						lifecycle: preStop: sleep: seconds: 15
-						ports: [{name: "http", containerPort: s.port}]
+						ports: [{name: "http", containerPort: s.port}, if s.metrics != _|_ {{name: "metrics", containerPort: s.metrics.port}}]
 						env: list.Concat([
 							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" {name: k, value: v}],
 							[
@@ -1514,6 +1569,7 @@ import (
 			prontoRenderDeploymentObj,
 			prontoRenderServiceObj,
 			for o in appServiceObjs {o},
+			vmalertObjs,
 			gatewayObj,
 			httpRouteObj,
 			backendTrafficPolicyObj,

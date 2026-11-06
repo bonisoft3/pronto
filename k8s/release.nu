@@ -431,6 +431,21 @@ export def seed-configmaps [services: record, app_dir: string, namespace: string
 	}
 }
 
+# <name>-alert-rules: the app's alerting rules (App.alerting.rules), each file under its name, written
+# every release so it follows the repository; vmalert reads a change within a minute.
+export def apply-alert-rules [name: string, rules: list<string>, app_dir: string, namespace: string] {
+	if ($rules | is-empty) { return }
+	let names = ($rules | each {|r| $r | path basename })
+	let twice = ($names | uniq -d)
+	if ($twice | is-not-empty) { error make { msg: $"two alerting rule files share a name: ($twice | str join ', ')" } }
+	let from = ($rules | each {|r|
+		let file = ($app_dir | path join $r)
+		if not ($file | path exists) { error make { msg: $"alerting rule file ($file) does not exist" } }
+		$"--from-file=($r | path basename)=($file)"
+	})
+	kubectl create configmap $"($name)-alert-rules" -n $namespace ...$from --dry-run=client -o yaml | kubectl apply -f - | ignore
+}
+
 # <name>-service-jwt: the service role's token, signed with <name>-auth-secrets'
 # PGRST_JWT_SECRET, restated each release so it follows the secret. The value
 # goes through stdin, never a command line.
@@ -689,7 +704,7 @@ export def main [
 	let root = (git rev-parse --show-toplevel | str trim)
 	let app_source_dir = $app_info.dir
 
-	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path } | complete)
+	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, alerting: App.alerting, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path } | complete)
 	if $meta_res.exit_code != 0 {
 		error make { msg: $"Failed to read release metadata from ($app_info.cue_path): ($meta_res.stderr)" }
 	}
@@ -858,6 +873,7 @@ export def main [
 	# logs in with it).
 	if ($services | is-not-empty) { ensure-service-jwt $workload_name $target_ns }
 	seed-configmaps $app_meta.services $app_source_dir $target_ns
+	apply-alert-rules $workload_name ($app_meta.alerting?.rules? | default []) $app_source_dir $target_ns
 
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -

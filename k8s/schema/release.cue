@@ -112,8 +112,25 @@ package schema
 		// its key the file's name (flagd's flags as generate wrote them). Once, on the release that
 		// finds it missing; a release never writes over one that exists (pronto-flags push owns it).
 		seed: [=~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"]: =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+		// Where the service exports Prometheus metrics (a collector's journey_runs_total, which the
+		// alerting rules read), scraped by the cluster's VictoriaMetrics as gcp's gmp-collector does.
+		metrics?: {
+			port!: int & >1024 & <65536
+			path:  *"/metrics" | =~"^/"
+		}
 	}
 
+
+	// The app's alerting rules, each a file of the app in vmalert's (Prometheus's) format: pronto-journeys'
+	// burn rates, pronto-perf's. A vmalert of the app's own evaluates them against the cluster's
+	// VictoriaMetrics, as Cloud Monitoring does on gcp. A firing alert goes to `notifier` (an
+	// Alertmanager) where one is named; without one it is kept as the ALERTS series in VictoriaMetrics,
+	// which a probe or a dashboard reads. The release writes the files to <name>-alert-rules each run,
+	// and vmalert reads a change within a minute.
+	alerting: {
+		rules: [...=~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\\.ya?ml$"]
+		notifier?: =~"^https?://[^ ]+$"
+	}
 
 	// A container's own requests and limits over `resources`, by its name: crud, electric, auth,
 	// caddy, render, or one of the app's services. An Electric holding a shape per player and
