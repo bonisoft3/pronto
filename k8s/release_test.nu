@@ -26,7 +26,6 @@ use release.nu [
 	app-services-environment
 	seed-configmaps
 	apply-alert-rules
-	check-backup-secrets
 ]
 
 def main [] {
@@ -452,39 +451,38 @@ def test_alerting [] {
 }
 
 def test_database_backup [] {
-	print "test a database's backups: the plugin archives its WAL to an object store, nightly base backups, and its keys are checked..."
+	print "test a database's backups: the plugin archives its WAL to a Cloud Storage bucket, nightly base backups, signed in with no key..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let none = (render-manifests $app.cue_path "metal" | from yaml)
 	assert (($none | where kind in ["ObjectStore" "ScheduledBackup"]) | is-empty) "no backup, no object store"
 	assert (($none | where kind == "Cluster" | first | get spec.plugins? | default []) | is-empty) "and no archiver"
 	let data = (mktemp -t backup.XXXXXX.json | str trim)
-	{App: {database: {backup: {endpoint: "https://eu2.contabostorage.com", bucket: "pronto-backups"}}}} | to json | save -f $data
+	let provider = "projects/123/locations/global/workloadIdentityPools/node/providers/k3s"
+	{App: {database: {backup: {bucket: "pronto-backups", provider: $provider, serviceAccount: "backups@p.iam.gserviceaccount.com", audience: "k3s-node"}}}} | to json | save -f $data
 	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
 	rm $data
 	let store = ($objs | where kind == "ObjectStore" | first)
 	assert equal $store.metadata.name "sample-backup"
 	assert equal $store.spec.retentionPolicy "30d"
-	assert equal $store.spec.configuration.destinationPath "s3://pronto-backups/sample"
-	assert equal $store.spec.configuration.endpointURL "https://eu2.contabostorage.com"
-	assert equal $store.spec.configuration.s3Credentials {accessKeyId: {name: "sample-backup-s3", key: "ACCESS_KEY_ID"}, secretAccessKey: {name: "sample-backup-s3", key: "ACCESS_SECRET_KEY"}}
+	assert equal $store.spec.configuration.destinationPath "gs://pronto-backups/sample"
+	assert equal $store.spec.configuration.googleCredentials {gkeEnvironment: true} "Google's default credentials, no key Secret"
+	assert ($store.spec.configuration.s3Credentials? == null) "no S3 keys"
+	assert equal $store.spec.instanceSidecarConfiguration.env [{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/projected/gcp-credentials.json"}]
+	let creds = ($objs | where kind == "ConfigMap" and metadata.name == "sample-backup" | first | get data."credentials.json" | from json)
+	assert equal $creds.type "external_account"
+	assert equal $creds.audience $"//iam.googleapis.com/($provider)"
+	assert equal $creds.credential_source.file "/projected/gcp-token" "the Cluster's projected token"
+	assert ($creds.service_account_impersonation_url | str contains "backups@p.iam.gserviceaccount.com")
 	let cluster = ($objs | where kind == "Cluster" | first)
 	assert equal $cluster.spec.plugins [{name: "barman-cloud.cloudnative-pg.io", isWALArchiver: true, parameters: {barmanObjectName: "sample-backup"}}] "the plugin archives the Cluster's WAL"
+	assert equal $cluster.spec.projectedVolumeTemplate.sources [
+		{serviceAccountToken: {path: "gcp-token", audience: "k3s-node", expirationSeconds: 3600}}
+		{configMap: {name: "sample-backup", items: [{key: "credentials.json", path: "gcp-credentials.json"}]}}
+	] "the token and the credential under /projected, which the sidecar shares"
 	let nightly = ($objs | where kind == "ScheduledBackup" | first)
 	assert equal [$nightly.spec.cluster.name $nightly.spec.method $nightly.spec.schedule $nightly.spec.immediate] ["sample-db" "plugin" "0 0 6 * * *" true]
 	let at = {|kind| $objs | enumerate | where item.kind == $kind | first | get index }
 	assert ((do $at "ObjectStore") < (do $at "Cluster")) "the store is there before the Cluster names it"
-
-	let dir = (mktemp -d)
-	mkdir $"($dir)/bin"
-	$"#!/bin/sh\ncat \"($dir)/secret.json\" 2>/dev/null || exit 1\n" | save $"($dir)/bin/kubectl"
-	^chmod +x $"($dir)/bin/kubectl"
-	let check = {|| with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { check-backup-secrets [$store] "sample" } }
-	assert (try { do $check; false } catch { true }) "a missing Secret is refused"
-	{data: {ACCESS_KEY_ID: "YQ=="}} | to json | save -f $"($dir)/secret.json"
-	assert (try { do $check; false } catch { true }) "a Secret without both keys is refused"
-	{data: {ACCESS_KEY_ID: "YQ==", ACCESS_SECRET_KEY: "Yg=="}} | to json | save -f $"($dir)/secret.json"
-	do $check
-	rm -r $dir
 }
 
 def test_initdb_replays [] {

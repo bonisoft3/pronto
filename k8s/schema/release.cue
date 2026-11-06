@@ -70,19 +70,21 @@ package schema
 		// replayed over a database initdb already built, as on Cloud Run (.pronto/cluster.json;
 		// the release fills it).
 		replays: *[] | [...=~"^[0-9A-Za-z_.-]+\\.sql$"]
-		// Where its base backups and WAL go, an S3-compatible bucket, through CloudNativePG's
+		// Where its base backups and WAL go, a Cloud Storage bucket, through CloudNativePG's
 		// barman-cloud plugin: WAL as each segment fills, a base backup on `schedule` (six
 		// fields, UTC) and once when the Cluster first gets it, kept `retention` (CloudNativePG's
-		// form, 30d say). Its keys are a Secret the operator keeps in the app's namespace,
-		// ACCESS_KEY_ID and ACCESS_SECRET_KEY: the release refuses to start without it.
-		// barman-cloud makes the bucket on its first backup where the keys may.
+		// form, 30d say). No key: the database pod's projected token (audience `audience`) is
+		// traded at the workload identity `provider` for `serviceAccount`'s, as blobs' and the
+		// metrics export's are; the provider admits the subject
+		// system:serviceaccount:<namespace>:<name>-db, and the account may write the bucket.
 		backup?: {
-			endpoint!:  =~"^https://"
-			bucket!:    =~"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
-			path:       =~"^[a-z0-9][a-z0-9/_.-]*$" | *name
-			secret:     =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" | *"\(name)-backup-s3"
-			retention:  =~"^[1-9][0-9]*[dwm]$" | *"30d"
-			schedule:   string | *"0 0 6 * * *"
+			bucket!:         =~"^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$"
+			path:            =~"^[a-z0-9][a-z0-9/_.-]*$" | *name
+			provider!:       =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+			serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
+			audience:        string | *"https://iam.googleapis.com/\(provider)"
+			retention:       =~"^[1-9][0-9]*[dwm]$" | *"30d"
+			schedule:        string | *"0 0 6 * * *"
 		}
 	}
 

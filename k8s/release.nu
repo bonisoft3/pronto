@@ -475,19 +475,6 @@ export def apply-alert-rules [name: string, rules: list<string>, app_dir: string
 	kubectl create configmap $"($name)-alert-rules" -n $namespace ...$from --dry-run=client -o yaml | kubectl apply -f - | ignore
 }
 
-# The database's backups read their keys from a Secret the operator keeps: without it the
-# Cluster could archive no WAL, which piles up on the node until its disk fills.
-export def check-backup-secrets [objects: list, namespace: string] {
-	for store in ($objects | where kind == "ObjectStore") {
-		let secret = $store.spec.configuration.s3Credentials.accessKeyId.name
-		let keys = (do { kubectl get secret $secret -n $namespace -o json } | complete)
-		let data = if $keys.exit_code == 0 { $keys.stdout | from json | get data? | default {} } else { {} }
-		if not ("ACCESS_KEY_ID" in ($data | columns) and "ACCESS_SECRET_KEY" in ($data | columns)) {
-			error make { msg: $"database.backup: Secret ($secret) in ($namespace) needs ACCESS_KEY_ID and ACCESS_SECRET_KEY, the object store's keys \(kubectl create secret generic ($secret) -n ($namespace) --from-literal=ACCESS_KEY_ID=... --from-literal=ACCESS_SECRET_KEY=...\)" }
-		}
-	}
-}
-
 # <name>-service-jwt: the service role's token, signed with <name>-auth-secrets'
 # PGRST_JWT_SECRET, restated each release so it follows the secret. The value
 # goes through stdin, never a command line.
@@ -879,7 +866,6 @@ export def main [
 	let of_kind = {|kind| $docs | where {|d| $d =~ $"\(?m\)^kind:\\s*($kind)\\s*$" } }
 	let deployments_yaml = (do $of_kind "Deployment")
 	let jobs_yaml = (do $of_kind "Job")
-	check-backup-secrets ($released | from yaml) $target_ns
 	print $"Applying manifests for ($app_info.name)..."
 	$docs | where {|d| not ($d in $deployments_yaml or $d in $jobs_yaml) } | str join "\n---\n" | kubectl apply -f -
 
