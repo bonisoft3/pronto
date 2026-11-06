@@ -4437,9 +4437,6 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				project: _\(E._pkg)
 				_\(E._pkg): bayt.#project & _baytData
 
-				depManifestsIn: {[string]: _}
-				_render: (bayt.#render & {project: _\(E._pkg), depManifests: depManifestsIn})
-
 				"""
 		}
 		// Only lint carries rules: the other verbs use their builtins against
