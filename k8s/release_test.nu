@@ -26,6 +26,7 @@ use release.nu [
 	app-services-environment
 	seed-configmaps
 	apply-alert-rules
+	check-backup-secrets
 ]
 
 def main [] {
@@ -53,6 +54,7 @@ def run-tests [] {
 	test_container_resources_and_files
 	test_seed_configmaps
 	test_alerting
+	test_database_backup
 	test_app_services_environment
 	test_pods_hand_over
 	test_environment_access
@@ -441,6 +443,42 @@ def test_alerting [] {
 	assert (($call | str starts-with "create configmap sample-alert-rules -n sample --from-file=journeys.rules.yaml=") and ($call | str ends-with "/app/observability/journeys.rules.yaml --dry-run=client -o yaml")) $"the rules are written under their names: ($call)"
 	let twice = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { apply-alert-rules "sample" ["a/x.yaml" "b/x.yaml"] $"($dir)/app" "sample" }; false } catch { true })
 	assert $twice "two files of one name are refused"
+	rm -r $dir
+}
+
+def test_database_backup [] {
+	print "test a database's backups: the plugin archives its WAL to an object store, nightly base backups, and its keys are checked..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let none = (render-manifests $app.cue_path "metal" | from yaml)
+	assert (($none | where kind in ["ObjectStore" "ScheduledBackup"]) | is-empty) "no backup, no object store"
+	assert (($none | where kind == "Cluster" | first | get spec.plugins? | default []) | is-empty) "and no archiver"
+	let data = (mktemp -t backup.XXXXXX.json | str trim)
+	{App: {database: {backup: {endpoint: "https://eu2.contabostorage.com", bucket: "pronto-backups"}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let store = ($objs | where kind == "ObjectStore" | first)
+	assert equal $store.metadata.name "sample-backup"
+	assert equal $store.spec.retentionPolicy "30d"
+	assert equal $store.spec.configuration.destinationPath "s3://pronto-backups/sample"
+	assert equal $store.spec.configuration.endpointURL "https://eu2.contabostorage.com"
+	assert equal $store.spec.configuration.s3Credentials {accessKeyId: {name: "sample-backup-s3", key: "ACCESS_KEY_ID"}, secretAccessKey: {name: "sample-backup-s3", key: "ACCESS_SECRET_KEY"}}
+	let cluster = ($objs | where kind == "Cluster" | first)
+	assert equal $cluster.spec.plugins [{name: "barman-cloud.cloudnative-pg.io", isWALArchiver: true, parameters: {barmanObjectName: "sample-backup"}}] "the plugin archives the Cluster's WAL"
+	let nightly = ($objs | where kind == "ScheduledBackup" | first)
+	assert equal [$nightly.spec.cluster.name $nightly.spec.method $nightly.spec.schedule $nightly.spec.immediate] ["sample-db" "plugin" "0 0 6 * * *" true]
+	let at = {|kind| $objs | enumerate | where item.kind == $kind | first | get index }
+	assert ((do $at "ObjectStore") < (do $at "Cluster")) "the store is there before the Cluster names it"
+
+	let dir = (mktemp -d)
+	mkdir $"($dir)/bin"
+	$"#!/bin/sh\ncat \"($dir)/secret.json\" 2>/dev/null || exit 1\n" | save $"($dir)/bin/kubectl"
+	^chmod +x $"($dir)/bin/kubectl"
+	let check = {|| with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { check-backup-secrets [$store] "sample" } }
+	assert (try { do $check; false } catch { true }) "a missing Secret is refused"
+	{data: {ACCESS_KEY_ID: "YQ=="}} | to json | save -f $"($dir)/secret.json"
+	assert (try { do $check; false } catch { true }) "a Secret without both keys is refused"
+	{data: {ACCESS_KEY_ID: "YQ==", ACCESS_SECRET_KEY: "Yg=="}} | to json | save -f $"($dir)/secret.json"
+	do $check
 	rm -r $dir
 }
 

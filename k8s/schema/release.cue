@@ -66,6 +66,20 @@ package schema
 		// The roles a token may name, which the schema grants PostgREST's login
 		// (the app's .pronto/cluster.json; the release fills it).
 		tokenRoles: [...string]
+		// Where its base backups and WAL go, an S3-compatible bucket, through CloudNativePG's
+		// barman-cloud plugin: WAL as each segment fills, a base backup on `schedule` (six
+		// fields, UTC) and once when the Cluster first gets it, kept `retention` (CloudNativePG's
+		// form, 30d say). Its keys are a Secret the operator keeps in the app's namespace,
+		// ACCESS_KEY_ID and ACCESS_SECRET_KEY: the release refuses to start without it.
+		// barman-cloud makes the bucket on its first backup where the keys may.
+		backup?: {
+			endpoint!:  =~"^https://"
+			bucket!:    =~"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+			path:       =~"^[a-z0-9][a-z0-9/_.-]*$" | *name
+			secret:     =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" | *"\(name)-backup-s3"
+			retention:  =~"^[1-9][0-9]*[dwm]$" | *"30d"
+			schedule:   string | *"0 0 6 * * *"
+		}
 	}
 
 	// Present where the app's compose project has a migrate service: the
