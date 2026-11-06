@@ -544,7 +544,8 @@ def test_service_clock [] {
 	let cron = ($crons | first)
 	assert equal [$cron.spec.schedule $cron.spec.concurrencyPolicy] ["* * * * *" "Forbid"]
 	let c = ($cron.spec.jobTemplate.spec.template.spec.containers | first)
-	assert ($c.command | last | str contains "-X POST -H \"Authorization: Bearer $SERVICE_JWT\" http://ticker.sample.svc.cluster.local:9998/poke") ($c.command | last)
+	assert ($c.command | last | str contains "u=http://ticker.sample.svc.cluster.local:9998") ($c.command | last)
+	assert ($c.command | last | str contains "-X POST -H \"Authorization: Bearer $SERVICE_JWT\" \"$u/poke?caller=k8s-cronjob\"") ($c.command | last)
 	assert equal ($c.env | first | get valueFrom.secretKeyRef) {name: "sample-service-jwt", key: "SERVICE_JWT"}
 	assert equal $cron.spec.jobTemplate.spec.template.metadata.labels."app.kubernetes.io/name" "sample" "the services' network policy admits it"
 }
