@@ -104,8 +104,20 @@ package schema
 		// Variables read from a Secret the operator keeps in the app's namespace, each under its
 		// variable's name (a sender's VAPID key): the pod does not start until it is there.
 		secrets: [=~"^[A-Z_][A-Z0-9_]*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+		// Files read from a ConfigMap in the app's namespace, mounted read-only at each directory,
+		// its keys the file names (flagd's live flags, which pronto-flags push writes): the pod does
+		// not start until it is there, and a change reaches the files in about a minute.
+		files: [=~"^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	}
 
+
+	// A container's own requests and limits over `resources`, by its name: crud, electric, auth,
+	// caddy, render, or one of the app's services. An Electric holding a shape per player and
+	// table needs more memory than a door (Bonk Chess's was OOMKilled at 256Mi, 2026-11-06).
+	containerResources: [string]: {
+		requests?: {cpu?: string, memory?: string}
+		limits?: {cpu?: string, memory?: string}
+	}
 
 	resources: {
 		requests: {
