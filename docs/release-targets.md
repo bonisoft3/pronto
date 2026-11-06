@@ -699,8 +699,8 @@ What bit on a real instance:
   emit.cue writes re-runnable run again on every release. `005_create_tables`
   creates a new entity's table and leaves every other alone; `006_policies`,
   `007_txid` and `008_publication` restate every policy, trigger and
-  publication; `016_mecha_actors` replaces the mecha machines' functions and
-  triggers, so a changed guard, rule or port reaches games already in play,
+  publication; `016_mecha_actors`, or where `state.steps` places it, found
+  by its suffix, replaces the mecha machines' functions and triggers, so a changed guard, rule or port reaches games already in play,
   keeping their instances, and refuses a new protocol `version`, whose
   instances need a migration. A column added to an existing entity is still
   pgroll's: `CREATE TABLE IF NOT EXISTS` keeps the table's shape. When an app's initdb set changes

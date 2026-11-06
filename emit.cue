@@ -783,6 +783,8 @@ _sqlType: {
 	entities: {[string]: _}
 	effects: [string]:  #ExternalEffect
 	runtime: *true | bool
+	// The step that installs it, which a changed interpreter names.
+	step: *"010_machines.sql" | string
 
 	_table: [if S.entities[S.machine.entity] != _|_ {S.entities[S.machine.entity].table}, S.machine.entity][0]
 
@@ -954,7 +956,7 @@ _sqlType: {
 		"""
 		DO $$ BEGIN
 		  IF obj_description(to_regprocedure('"\(_timerFunction)"()'), 'pg_proc') IS DISTINCT FROM '\(_signature)' THEN
-		    RAISE EXCEPTION 'machine \(S.machine.name) timer interpreter differs from the program: migrate 010_machines.sql and existing state-entry deadlines before starting';
+		    RAISE EXCEPTION 'machine \(S.machine.name) timer interpreter differs from the program: migrate \(S.step) and existing state-entry deadlines before starting';
 		  END IF;
 		END $$;
 		"""
@@ -1969,6 +1971,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
 	machines: [if M.code.state.mecha.rows != _|_ {[for _, m in M.code.state.mecha.rows for en, e in M.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
+	_steps: #steps & {code: M.code}
 	// The cluster copies this list into its database image, so it follows the
 	// predicate that emits the database: a migration named without one would be
 	// a copy into a target that was never emitted.
@@ -1985,8 +1988,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"services/database/migrations/008_publication.sql",
 		if M.code.state.functions != _|_ if len([for r in M.raw if r.name == "009_functions.sql" {r}]) == 0 {"services/database/migrations/009_functions.sql"},
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
-		if len(M.machines) > 0 if len([for r in M.raw if r.name == "010_machines.sql" {r}]) == 0 {"services/database/migrations/010_machines.sql"},
-		if len(M.code.state.mecha.reducers) > 0 if len([for r in M.raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {"services/database/migrations/016_mecha_actors.sql"},
+		if len(M.machines) > 0 if len([for r in M.raw if r.name == M._steps.machines {r}]) == 0 {"services/database/migrations/\(M._steps.machines)"},
+		if len(M.code.state.mecha.reducers) > 0 if len([for r in M.raw if r.name == M._steps.actors {r}]) == 0 {"services/database/migrations/\(M._steps.actors)"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if M.code.state.cortex != _|_ for migration, _ in {
 			for _, c in M.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "mecha" {(c.config.meta.migration): true}
@@ -2357,7 +2360,7 @@ _pgrollDir: "services/database/pgroll"
 			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 				effectInterpreters: strings.Join([for _, m in D.code.state.mecha.rows if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
-					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects})._effectUpgradeSql
+					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects, step: (#steps & {code: D.code}).machines})._effectUpgradeSql
 				}], "\n\n")
 			}
 			pipelines: [for n, _ in (#streams & {code: D.code}).out {
@@ -2382,6 +2385,10 @@ _pgrollDir: "services/database/pgroll"
 				if len(_secrets) > 0 {secrets: _secrets}
 			}]
 			bridges: [if D.code.state.bridges != _|_ for _, b in D.code.state.bridges {b}]
+			if D.code.state.steps != _|_ {
+				let placed = #steps & {code: D.code}
+				steps: {graphile: placed.graphile, airlock: placed.airlock}
+			}
 			computations: [for _, c in D.code.state.computations {
 				name:  "\(D.code.meta.name)-\(c.name)"
 				file:  c.src
@@ -2953,6 +2960,7 @@ _pgrollDir: "services/database/pgroll"
 
 	_accessed: _appMigrations.accessed
 	_raw:      _appMigrations.raw
+	_steps:    _appMigrations._steps
 	// The auth plane switches on as one: declaring #App.auth or any entity
 	// access implies the roles and service-token plumbing — policies without
 	// tokens (or vice versa) is not a supported state. The auth_uid() the
@@ -3320,6 +3328,9 @@ _pgrollDir: "services/database/pgroll"
 				// dials and bounds each as it does the cluster's own services.
 				let doors = list.SortStrings([for hn, h in E.code.capabilities.hatches if h.door != _|_ {hn}])
 				if len(doors) > 0 {"doors": doors}
+				// The effect steps a page or edge release places among the
+				// migrations, where the program places them, and why it may.
+				if E.code.state.steps != _|_ {steps: {graphile: E._steps.graphile, airlock: E._steps.airlock, note: E.code.state.steps.note}}
 			}
 		}
 		".pronto/edge-hatches.json": {
@@ -3624,19 +3635,19 @@ _pgrollDir: "services/database/pgroll"
 			if E.code.state.functions != _|_ if len([for r in E._raw if r.name == "009_functions.sql" {r}]) == 0 {
 				"services/database/migrations/009_functions.sql": {format: "function-sql", data: functions: E.code.state.functions}
 			}
-			if len(E.code.state.mecha.reducers) > 0 if len([for r in E._raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {
+			if len(E.code.state.mecha.reducers) > 0 if len([for r in E._raw if r.name == E._steps.actors {r}]) == 0 {
 				// Each machine's surface is entities the app declares; the writer
 				// checks them against the machine before compiling.
-				"services/database/migrations/016_mecha_actors.sql": {format: "mecha-reducer-sql", data: {
+				"services/database/migrations/\(E._steps.actors)": {format: "mecha-reducer-sql", data: {
 					reducers: {for n, h in E.code.state.mecha.reducers {(n): {machine: h.reducer, rules: h.rules}}}
 					entities: E.code.state.entities
 					timers: [if len([for _, h in E.code.state.mecha.reducers if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
 				}}
 			}
-			if len(_machines) > 0 if len([for r in E._raw if r.name == "010_machines.sql" {r}]) == 0 {
-				"services/database/migrations/010_machines.sql": {
+			if len(_machines) > 0 if len([for r in E._raw if r.name == E._steps.machines {r}]) == 0 {
+				"services/database/migrations/\(E._steps.machines)": {
 					format: "sql"
-					text: [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], runtime: false}).out}], "\n\n") + "\n"
+					text: [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], runtime: false, step: E._steps.machines}).out}], "\n\n") + "\n"
 				}
 			}
 

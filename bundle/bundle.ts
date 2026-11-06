@@ -27,7 +27,7 @@ import { seedBlobInliner } from './edge-blobs.ts'
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { clusterDrains, releaseFiles } from './edge-scripts.ts'
+import { clusterDrains, clusterSteps, releaseFiles } from './edge-scripts.ts'
 
 function fail(msg: string): never {
   console.error(`bundle: ${msg}`)
@@ -199,7 +199,7 @@ const derived = flags['--derived']
 if (derived && !clustered) fail('--derived names rows for a cluster, and this app has no migration')
 // The scripts the edge's data directory is built from, so the page's
 // database is the same: mecha's schedule table before the seed among them.
-const scripts = clustered ? await releaseFiles(app, mecha, shell.migrations) : []
+const scripts = clustered ? await releaseFiles(app, mecha, shell.migrations, await clusterSteps(path.join(app, '.pronto/cluster.json'))) : []
 const steps = [...scripts.map((f) => f.name), ...(derived ? [derived] : [])]
 // The page is one file with no blob storage behind it, so a seed object's URL is its bytes here.
 const seedInlined = shell.seedBlobs && scripts.length > 0 ? await seedBlobInliner(path.join(app, shell.seedBlobs.dir)) : (text: string) => text

@@ -28,6 +28,30 @@ import (
 // terminal's module loader. No scheme and no `..`: the source is read from the
 // app's own tree and embedded in emitted artifacts.
 #Jessie: string & =~"^([a-z0-9_-]+/)*[a-z0-9_-]+\\.js$"
+
+// A framework step's digits an app may place it at: after the schema's own
+// steps through validations (000-009), below the framework's 800s and the
+// seed at 900.
+#StepDigits: string & =~"^(0[1-9][0-9]|[1-7][0-9]{2})$"
+
+// The framework's steps an app's program runs, by name: the defaults unless
+// `state.steps` places them. The effect ledger precedes the airlock's tables,
+// as mecha's cluster.cue orders them.
+#steps: S={
+	code: _
+	_placed: [if S.code.state.steps != _|_ {S.code.state.steps}, {}][0]
+	_digits: {
+		machines: [if _placed.machines != _|_ {_placed.machines}, "010"][0]
+		actors:   [if _placed.actors != _|_ {_placed.actors}, "016"][0]
+		graphile: [if _placed.graphile != _|_ {_placed.graphile}, "011"][0]
+		airlock:  [if _placed.airlock != _|_ {_placed.airlock}, "012"][0]
+	}
+	_ledgerFirst: true & (_digits.graphile < _digits.airlock)
+	machines: "\(_digits.machines)_machines.sql"
+	actors:   "\(_digits.actors)_mecha_actors.sql"
+	graphile: "\(_digits.graphile)_graphile_worker.sql"
+	airlock:  "\(_digits.airlock)_airlock.sql"
+}
 #SafeEndowment: "Intl" | "TextEncoder" | "TextDecoder" | "URL" | "URLSearchParams" | "Statechart"
 
 // The seven pre-composed shadow inks. Open Props' elevation carries a real
@@ -1534,6 +1558,19 @@ import (
 		// A named baseline keeps its applied bytes; later changes go in state.migrations.
 		rawMigrations?: [...{name: string & !~"^8", src: string}]
 		_rawMigrationNames: [if rawMigrations != _|_ for migration in rawMigrations {migration.name}] & list.UniqueItems()
+		// Where the framework's own steps run, for an app whose steps already
+		// hold their default digits (#steps). The program writes each step's
+		// three digits; its name keeps the step's suffix, so a release finds it
+		// by name. `note` states why the app's steps sorting below a placed
+		// machines or airlock step write no row it governs: a row written
+		// before its machine's trigger exists is never judged or claimed.
+		steps?: {
+			machines?: #StepDigits
+			actors?:   #StepDigits
+			graphile?: #StepDigits
+			airlock?:  #StepDigits
+			note!:     string & !=""
+		}
 		cortex?: [string]: #CortexMachine
 		// A Mecha machine as XState writes it, its Jessie rules, and the
 		// internal form the compilers read, derived.

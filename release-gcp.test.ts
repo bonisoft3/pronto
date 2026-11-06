@@ -92,7 +92,7 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"\n`);
   // A guard the app changed reaches a database built before it (a friend's
   // refused seat, found in production), and so does a new entity's table.
-  assertStringIncludes(c.command[2], `for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do`);
+  assertStringIncludes(c.command[2], `for f in /docker-entrypoint-initdb.d/005_create_tables.sql /docker-entrypoint-initdb.d/006_policies.sql /docker-entrypoint-initdb.d/007_txid.sql /docker-entrypoint-initdb.d/008_publication.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_mecha_actors.sql; do`);
   assertStringIncludes(c.command[2], `if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi\n  done\nelse`);
   // Cloud SQL's postgres is no superuser: without the roles granted, PostgREST
   // cannot switch into anon on the first request (found on a real instance).

@@ -33,7 +33,7 @@ import { type Reducers, renderMachines } from './edge-machines.ts'
 import { type Functions, renderFunctions } from './edge-functions.ts'
 import { renderEffects } from './edge-effects.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
-import { clusterDrains, hasEffects, releaseScripts } from './edge-scripts.ts'
+import { clusterDrains, clusterSteps, hasEffects, releaseScripts } from './edge-scripts.ts'
 
 function fail(msg: string): never {
   console.error(`edge: ${msg}`)
@@ -203,7 +203,7 @@ await run(Deno.execPath(), [
 
 // What a publish hands a directory the object kept: the scripts a directory
 // is built from (edge-scripts.ts), the pgroll set among them.
-const release = await releaseScripts(app, mecha, shell.migrations, JSON.parse(new TextDecoder().decode(pgrollOut.stdout)))
+const release = await releaseScripts(app, mecha, shell.migrations, JSON.parse(new TextDecoder().decode(pgrollOut.stdout)), await clusterSteps(path.join(app, '.pronto/cluster.json')))
 await Deno.writeTextFile(path.join(out, 'migrations.json'), JSON.stringify([...release.files.map(({ name, sql }) => ({ name, sql })), ...release.pgroll]))
 
 // The app's machines and functions: the migration declared each over an engine

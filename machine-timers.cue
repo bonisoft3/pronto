@@ -26,7 +26,7 @@ import (
 		timers: list.Concat([[for m in C._timed {m.name}], [for m in C._reducers {m.name}]])
 		if len(timers) > 0 {
 			timerCheck: strings.Join(list.Concat([[for m in C._timed {
-				(#mechaMachineSql & {machine: m, entities: C.code.state.entities, effects: [if C.code.state.effects != _|_ {C.code.state.effects}, {}][0]})._timerCheck
+				(#mechaMachineSql & {machine: m, entities: C.code.state.entities, effects: [if C.code.state.effects != _|_ {C.code.state.effects}, {}][0], step: (#steps & {code: C.code}).machines})._timerCheck
 			}], [for m in C._reducers {
 				let w = m.ports.wake
 				"""

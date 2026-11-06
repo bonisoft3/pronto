@@ -615,9 +615,9 @@ import (
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
 							  # entity's table, every policy, trigger and publication, and the mecha
-							  # machines' code run again, keeping every row.
-							  for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do
-							    f=/docker-entrypoint-initdb.d/$step.sql
+							  # machines' code run again, keeping every row; that step is found by its
+							  # suffix, wherever the program places it.
+							  for f in /docker-entrypoint-initdb.d/005_create_tables.sql /docker-entrypoint-initdb.d/006_policies.sql /docker-entrypoint-initdb.d/007_txid.sql /docker-entrypoint-initdb.d/008_publication.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_mecha_actors.sql; do
 							    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
 							  done
 							else

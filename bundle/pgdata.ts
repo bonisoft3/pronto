@@ -49,8 +49,8 @@ const { createDatabase } = await browser('src/database.ts')
 const { browserTier } = await browser('fence.ts') as { browserTier: (sql: string) => string }
 
 const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.json'))) as { migrations: string[] }
-const { releaseScripts } = await import('./edge-scripts.ts')
-const release = await releaseScripts(app, mecha, shell.migrations, pgrollSet)
+const { clusterSteps, releaseScripts } = await import('./edge-scripts.ts')
+const release = await releaseScripts(app, mecha, shell.migrations, pgrollSet, await clusterSteps(path.join(app, '.pronto/cluster.json')))
 
 async function copy(src: string, dst: string) {
   await Deno.mkdir(dst)

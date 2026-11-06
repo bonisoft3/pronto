@@ -35,7 +35,11 @@ export async function hasEffects(app: string): Promise<boolean> {
   }
 }
 
-export async function releaseFiles(app: string, mecha: string, migrations: string[]): Promise<ReleaseScripts['files']> {
+/** Where the program places the effect steps (.pronto/cluster.json); a
+ * program that places none runs them at mecha's names. */
+export interface Steps { graphile?: string; airlock?: string; note?: string }
+
+export async function releaseFiles(app: string, mecha: string, migrations: string[], steps: Steps = {}): Promise<ReleaseScripts['files']> {
   const { AIRLOCK_SCRIPT, GRAPHILE_SCRIPT, SCHEDULE_SCRIPT, TENANCY_SCRIPT } = await scripts(mecha)
   const effects = await hasEffects(app)
   const names = new Set<string>()
@@ -48,31 +52,30 @@ export async function releaseFiles(app: string, mecha: string, migrations: strin
   const files: { name: string; read: () => Promise<string> }[] = [
     { name: TENANCY_SCRIPT, read: () => Deno.readTextFile(tenancy ? path.join(app, tenancy) : path.join(mecha, 'services/database/rls/rls.sql')) },
   ]
-  let placedAirlock = !effects
-  const pushAirlock = () => {
-    placedAirlock = true
-    files.push(
-      { name: GRAPHILE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/airlock/graphile.sql')) },
+  // Each effect step goes where its name sorts among the app's, as initdb runs them.
+  const framework = effects
+    ? [
+      { name: steps.graphile ?? GRAPHILE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/airlock/graphile.sql')) },
       {
-        name: AIRLOCK_SCRIPT,
+        name: steps.airlock ?? AIRLOCK_SCRIPT,
         read: async () =>
           `${await Deno.readTextFile(path.join(mecha, 'services/ticker/schedule.sql'))}\n${await Deno.readTextFile(path.join(mecha, 'services/airlock/airlock.sql'))}`,
       },
-    )
-  }
+    ]
+    : []
   for (const m of [...migrations].sort((a, b) => path.basename(a) < path.basename(b) ? -1 : path.basename(a) > path.basename(b) ? 1 : 0)) {
     const name = path.basename(m)
     if (name === TENANCY_SCRIPT) continue
-    if (!placedAirlock && name > AIRLOCK_SCRIPT) pushAirlock()
+    while (framework.length > 0 && name > framework[0].name) files.push(framework.shift()!)
     if (name === SCHEDULE_SEED) files.push({ name: SCHEDULE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/ticker/schedule.sql')) })
     files.push({ name, read: () => Deno.readTextFile(path.join(app, m)) })
   }
-  if (!placedAirlock) pushAirlock()
+  files.push(...framework)
   return await Promise.all(files.map(async ({ name, read }) => ({ name, sql: await read() })))
 }
 
-export async function releaseScripts(app: string, mecha: string, migrations: string[], pgroll: Record<string, { operations: Record<string, unknown>[] }>): Promise<ReleaseScripts> {
-  return { files: await releaseFiles(app, mecha, migrations), pgroll: (await scripts(mecha)).pgrollScripts(pgroll) }
+export async function releaseScripts(app: string, mecha: string, migrations: string[], pgroll: Record<string, { operations: Record<string, unknown>[] }>, steps: Steps = {}): Promise<ReleaseScripts> {
+  return { files: await releaseFiles(app, mecha, migrations, steps), pgroll: (await scripts(mecha)).pgrollScripts(pgroll) }
 }
 
 /** The drain table the emitter writes into an app's .pronto/cluster.json,
@@ -82,4 +85,10 @@ export async function clusterDrains(clusterJson: string): Promise<unknown[]> {
   const { drains } = JSON.parse(await Deno.readTextFile(clusterJson)) as { drains?: unknown[] }
   if (drains === undefined) throw new Error(`${clusterJson} lists no drains: generate the app with this pronto`)
   return drains
+}
+
+/** The effect steps the emitter writes into an app's .pronto/cluster.json. */
+export async function clusterSteps(clusterJson: string): Promise<Steps> {
+  const { steps } = JSON.parse(await Deno.readTextFile(clusterJson)) as { steps?: Steps }
+  return steps ?? {}
 }

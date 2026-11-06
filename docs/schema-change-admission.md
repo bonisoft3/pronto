@@ -18,10 +18,11 @@ and what an already-served page does is omnishell's
 
 An app can keep applied bootstrap bytes by naming them in `state.rawMigrations`.
 An entry named `003_rls.sql` replaces mecha's tenancy floor for both the native
-database image and page or edge releases. Entries named `010_machines.sql`,
-`016_mecha_actors.sql`, or a declared Cortex source migration replace those
-generated scripts. Each name may be declared once; its source is copied without
-regenerating it. Omitted entries keep the current generated or mecha-provided
+database image and page or edge releases. Entries named as the row machines'
+or the reducers' step (`010_machines.sql` and `016_mecha_actors.sql`, or where
+`state.steps` places them), or as a declared Cortex source migration, replace
+those generated scripts. Each name may be declared once; its source is copied
+without regenerating it. Omitted entries keep the current generated or mecha-provided
 scripts. Carry changes to an applied baseline in a forward `state.migrations`
 pgroll migration; the ledger still refuses a changed digest.
 
