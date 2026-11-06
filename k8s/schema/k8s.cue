@@ -9,6 +9,15 @@ import (
 )
 
 // #BuildManifests maps a ReleaseSpec and Environment into standard Kubernetes manifests.
+// A container's requests and limits: the release's own, under what its containerResources names
+// for that container (crud, electric, auth, caddy, render, or one of the app's services).
+#resourcesOf: {
+	r:   _
+	n:   string
+	out: r.resources
+	if r.containerResources[n] != _|_ {out: r.containerResources[n]}
+}
+
 #BuildManifests: {
 	release: #ReleaseSpec
 	env:     #Environment
@@ -514,7 +523,7 @@ import (
 							{name: "PGRST_SERVER_PORT", value: "3000"},
 							{name: "PGRST_ADMIN_SERVER_PORT", value: "3001"},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "crud"}).out
 						livenessProbe: {
 							httpGet: {
 								path: "/ready"
@@ -615,7 +624,7 @@ import (
 							},
 							{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "electric"}).out
 						livenessProbe: {
 							httpGet: {
 								path: "/v1/health"
@@ -729,7 +738,7 @@ import (
 									}
 								}},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "auth"}).out
 						livenessProbe: {
 							tcpSocket: port: 9999
 							initialDelaySeconds: 5
@@ -823,7 +832,7 @@ import (
 								value: v
 							},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "caddy"}).out
 						livenessProbe: {
 							httpGet: {
 								path: "/health"
@@ -911,7 +920,7 @@ import (
 							{name: "PORT", value: "\(release.render.port)"},
 							for e in (#denoTelemetry & {service: "render"}).env {e},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "render"}).out
 						livenessProbe: {
 							httpGet: {
 								path: "/health"
@@ -965,6 +974,7 @@ import (
 	// ensure-service-jwt) into <name>-service-jwt.
 	let appServiceObjs = [for n, s in release.services {
 		let labels = appLabels & {"app.kubernetes.io/component": n}
+		let serviceName = n
 		[{
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
@@ -1004,8 +1014,14 @@ import (
 							],
 							(#denoTelemetry & {service: n}).env,
 						])
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: serviceName}).out
+						if len(s.files) > 0 {
+							volumeMounts: [for dir, cm in s.files {name: "files-\(cm)", mountPath: dir, readOnly: true}]
+						}
 					}]
+					if len(s.files) > 0 {
+						spec: volumes: [for _, cm in s.files {name: "files-\(cm)", configMap: name: cm}]
+					}
 				}
 			}
 		}, {

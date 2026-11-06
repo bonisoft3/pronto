@@ -48,6 +48,7 @@ def run-tests [] {
 	test_render_manifests_metal
 	test_render_ready_through_the_door
 	test_app_services
+	test_container_resources_and_files
 	test_app_services_environment
 	test_pods_hand_over
 	test_environment_access
@@ -376,6 +377,31 @@ def test_render_ready_through_the_door [] {
 	assert ($probe | str contains "/shell/shell.json") "readiness reads a page's shell through the door"
 	assert ($probe | str contains "/health") "readiness keeps render's own health"
 	assert equal $render.livenessProbe.httpGet.path "/health"
+}
+
+def test_container_resources_and_files [] {
+	print "test a container's own resources over the release's, and a service's files from a ConfigMap..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t resources.XXXXXX.json | str trim)
+	{App: {
+		containerResources: {electric: {limits: {memory: "1Gi"}}, flagd: {requests: {cpu: "20m"}}}
+		services: {flagd: {port: 8693, env: {}, files: {"/etc/flags-live": "sample-flags"}}}
+	}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let container = {|dep, name| $objs | where kind == "Deployment" and metadata.name == $dep | first | get spec.template.spec.containers | where name == $name | first }
+	let electric = (do $container "sample-electric" "electric")
+	assert equal $electric.resources.limits.memory "1Gi"
+	assert equal $electric.resources.limits.cpu "500m" "the release's own where the container names none"
+	assert equal $electric.resources.requests.memory "64Mi"
+	assert equal (do $container "sample-crud" "crud" | get resources.limits.memory) "256Mi" "another container keeps the release's"
+	let flagd = ($objs | where kind == "Deployment" and metadata.name == "sample-flagd" | first)
+	let c = ($flagd.spec.template.spec.containers | where name == "flagd" | first)
+	assert equal $c.resources.requests.cpu "20m"
+	assert equal $c.volumeMounts [{name: "files-sample-flags", mountPath: "/etc/flags-live", readOnly: true}]
+	assert equal $flagd.spec.template.spec.volumes [{name: "files-sample-flags", configMap: {name: "sample-flags"}}]
+	let billing = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-caddy" | first)
+	assert ($billing.spec.template.spec.volumes? | default [] | all {|v| not ($v.name | str starts-with "files-") }) "no files, no volumes for them"
 }
 
 def test_app_services [] {
