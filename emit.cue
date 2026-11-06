@@ -1624,6 +1624,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if [if S.code.capabilities.auth != _|_ if S.code.capabilities.auth.required {false}, true][0] if s.access == "private" {
 				access: "private"
 			}
+			// A screen an app behind a sign-in opens to visitors (#Screen.access).
+			if [if S.code.capabilities.auth != _|_ if S.code.capabilities.auth.required {true}, false][0] if s.access == "public" {
+				access: "public"
+			}
 			if s.ssr != _|_ {
 				ssr: s.ssr
 			}

@@ -70,12 +70,14 @@ import pronto "github.com/bonisoft3/pronto"
 #accessCase: {
 	reads: [...pronto.#Read]
 	extra?: {...}
+	// An app behind a sign-in, where a public screen is one open to visitors.
+	signIn: *false | bool
 	_base: (#readCase & {
 		"reads": reads
 		route:   "/jogos"
 		goal: {table: "goal", durability: "live", access: {scope: "public"}}
 	}).app & {
-		capabilities: auth: {required: false, service: "/auth"}
+		capabilities: auth: {required: signIn, service: "/auth"}
 		surface: screens: jogo: {files: {handlers: [], adapters: []}, [if extra != _|_ {extra}, {}][0]}
 	}
 	_terminal: (pronto.#DefaultTerminal & {code: _base}).out
