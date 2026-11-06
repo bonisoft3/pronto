@@ -75,8 +75,11 @@ catalogue.
 ## Addresses
 
 A route opts in to a translated address with `slug`, a message key for its
-first segment. The segments after it, `:params` included, are carried verbatim,
-because a pattern is translated and its contents are not. The slug is a message
+first segment. Additional literal segments opt in through `segments`, a map
+from their default spelling to a message key. For example,
+`route: "/campeonato/:slug/arquivo", slug: "route_championship", segments: {arquivo: "route_archive"}`
+can resolve to `/championship/:slug/matches`. Parameters retain their names.
+Each route has one pattern per locale. The slug is a message
 key rather than a per-route map of locale to segment, so it lands in the file a
 translator already works in, and a Spanish route missing its slug is the same
 finding as a Spanish button missing its label. The author transliterates

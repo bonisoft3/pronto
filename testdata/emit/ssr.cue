@@ -5,11 +5,15 @@ package emit
 
 import pronto "github.com/bonisoft3/pronto"
 
-#ssrCase: {
+#ssrCase: S={
 	reads: [...pronto.#Read]
+	child: *false | bool
 	route: *"/jogo/:id" | string
 	// Signed out but known: the renderer mints its guest from the auth plane.
 	_app: (#readCase & {"reads": reads, "route": route}).app & {surface: screens: jogo: {ssr: "ssr", files: {handlers: [], adapters: []}}} & {capabilities: auth: {required: false, service: "/auth"}}
+	if child {
+		_app: surface: screens: editor: {title: "Editor", route: S.route + "/edit", ssr: "spa", access: "private", reads: [], writes: [], charts: [], forms: [], states: [], files: {handlers: [], adapters: []}}
+	}
 	_terminal: (pronto.#DefaultTerminal & {code: _app}).out
 	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _terminal.surface.statics}).out
 	_loop: (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out

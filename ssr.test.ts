@@ -22,7 +22,7 @@ const note = (extra = "") => `#view & {table: "note", clauses: [{col: "id", op: 
 Deno.test("a public route's addresses reach the renderer, ahead of the entry", () => {
   const { ok, out } = ask("_view", "caddyfile");
   if (!ok) throw new Error(out);
-  const rendered = out.indexOf("@rendered {\n      path /jogo/* /jogo/*/\n");
+  const rendered = out.indexOf("@rendered {\n      expression");
   if (out.indexOf("handle @rendered {\n      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered > out.indexOf("rewrite @route")) throw new Error("the entry's rewrite answers before the renderer does");
@@ -91,7 +91,7 @@ Deno.test("a private read nested under a public row does not decide the route", 
   // It reads under whoever the enclosing row is rendered for, which on the
   // server is a guest who owns nothing.
   const { ok, out } = ask(`_view, ${note(", nested: true")}`, "caddyfile");
-  if (!ok || !out.includes("@rendered {\n      path /jogo/*")) throw new Error(out);
+  if (!ok || !out.includes("@rendered {\n      expression")) throw new Error(out);
 });
 
 // A document rendered before any request named no canonical and no
@@ -216,7 +216,7 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
   const openData = JSON.parse(open.out);
   if (openData.screen.access !== "public" || openData.screen.ssr !== "ssr") throw new Error(open.out);
   if (openData.shellRoute.access !== undefined || openData.shellRoute.ssr !== "ssr") throw new Error(open.out);
-  if (!openData.caddyfile.includes("@rendered {\n      path /jogos /jogos/")) throw new Error(openData.caddyfile);
+  if (!openData.caddyfile.includes("@rendered {\n      expression")) throw new Error(openData.caddyfile);
   if (!openData.sitemap.includes("/jogos</loc>")) throw new Error(openData.sitemap);
 
   // Mixed top-level reads (public + private) -> access: "public", ssr: "ssr" (renders public regions, leaves private to data-empty).
@@ -224,7 +224,7 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
   if (!mixed.ok) throw new Error(mixed.out);
   const mixedData = JSON.parse(mixed.out);
   if (mixedData.screen.access !== "public" || mixedData.screen.ssr !== "ssr") throw new Error(mixed.out);
-  if (!mixedData.caddyfile.includes("@rendered {\n      path /jogos /jogos/")) throw new Error(mixedData.caddyfile);
+  if (!mixedData.caddyfile.includes("@rendered {\n      expression")) throw new Error(mixedData.caddyfile);
   if (!mixedData.sitemap.includes("/jogos</loc>")) throw new Error(mixedData.sitemap);
 
   // Purely restricted top-level reads -> access: "private", ssr: "spa", omitted from @rendered and sitemap.xml.

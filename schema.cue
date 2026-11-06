@@ -1263,11 +1263,14 @@ import (
 	route: string // may contain `:param` segments; params reach filters, hidden values, and `{param.x}` interpolation
 	// The message key this route's FIRST segment is drawn from — regras /
 	// reglas / rules. Declaring it makes the route addressable in every
-	// locale; the segments after the first, literal or `:param`, are carried
-	// verbatim. The key lands in the catalogue a translator already works in,
+	// locale; additional literals opt in through segments below. The key
+	// lands in the catalogue a translator already works in,
 	// so a locale missing a slug is the finding a locale missing a button
 	// label already is.
 	slug?: string
+	// Additional literal path segments, keyed by their default spelling and
+	// resolved through the same catalogues as the first segment's slug.
+	segments?: [Segment=string & =~"^[a-z0-9]+(-[a-z0-9]+)*$"]: string
 	// The message key the terminal draws this route's STRIP label from, the
 	// counterpart of `slug` for the word rather than the address. `title`
 	// stays the default-language spelling and is what an app declaring no

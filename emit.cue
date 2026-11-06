@@ -90,10 +90,19 @@ _busConvertible: or(_busTypes)
 	out: [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimPrefix(seg, ":")}]
 }
 
+#routeRegexp: {
+	path: string
+	_base: strings.TrimSuffix(path, "/")
+	out: [if _base == "" {"/"}, strings.Join([
+		for seg in strings.Split(_base, "/") {
+			[if strings.HasPrefix(seg, ":") {"[^/?]+"}, regexp.QuoteMeta(seg)][0]
+		},
+	], "/") + "/?"][0]
+}
+
 // A route's pattern in one locale, WITHOUT the locale prefix — routeHref
-// composes that from i18n.locales[tag].path. Only the first segment
-// translates; the rest, literal or `:param`, are carried verbatim. An
-// unslugged route keeps its authored pattern in every locale.
+// composes that from i18n.locales[tag].path. Parameters retain their names;
+// literal segments resolve only where the screen names a catalogue key.
 //
 // The one place a catalogue's value is held to the URL-safe shape: the
 // authored pattern constrains the default locale's address alone, and a
@@ -103,10 +112,14 @@ _busConvertible: or(_busTypes)
 	i18n:   _
 	tag:    string
 	_segment: [if P.screen.slug != _|_ {P.i18n._msg[P.tag][P.screen.slug] & =~"^[a-z0-9]+(-[a-z0-9]+)*$"}]
-	out: [
-		for seg in P._segment {"/" + strings.Join(list.Concat([[seg], strings.Split(P.screen.route, "/")[2:]]), "/")},
-		P.screen.route,
-	][0]
+	_first: [for seg in P._segment {seg}, strings.Split(P.screen.route, "/")[1]][0]
+	out: "/" + strings.Join([
+		for i, seg in strings.Split(P.screen.route, "/")[1:] {
+			[if i == 0 {P._first}, if P.screen.segments != _|_ if P.screen.segments[seg] != _|_ {
+				P.i18n._msg[P.tag][P.screen.segments[seg]] & =~"^[a-z0-9]+(-[a-z0-9]+)*$"
+			}, seg][0]
+		},
+	], "/")
 }
 
 // A column's PostgreSQL type: its domain where the type keeps one (types.cue
@@ -1622,10 +1635,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}}
 	if S.code.meta.i18n != _|_ {
 		// Every route's pattern in every declared locale, WITHOUT the locale
-		// prefix — routeHref composes that from i18n.locales[tag].path. Only
-		// the first segment translates; the rest, literal or `:param`, are
-		// carried verbatim. An unslugged route keeps its authored pattern in
-		// every locale, which is what the default says.
+		// prefix — routeHref composes that from i18n.locales[tag].path.
 		_pattern: {for n, s in S.code.surface.screens {
 			(n): {for tag, _ in S.code.meta.i18n.locales {
 				(tag): (#localePattern & {screen: s, i18n: S.code.meta.i18n, "tag": tag}).out
@@ -1691,10 +1701,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				path: S._addressOf[n][S.code.meta.i18n.default]
 			}
 
-			// Emitted iff a slug is declared: every declared tag, the default
-			// included, and each pattern WITHOUT the locale prefix.
-			if s.slug != _|_ {
-				slug:  s.slug
+			// Translated patterns omit the locale prefix and include the default.
+			if s.slug != _|_ || s.segments != _|_ {
+				if s.slug != _|_ {slug: s.slug}
 				paths: S._addressOf[n]
 			}
 			if s.prerender {
@@ -4033,23 +4042,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				""",
 			][0]
 			_addressed: E._addressed
-			// The same addresses as caddy path matchers. A `:param` segment widens to
-			// `*`: its value is a row id the door cannot know. The trailing slash is
-			// trimmed so a locale's bare prefix reads `/es` rather than `/es/`; both
-			// spellings are then listed, because a caddy path matcher is exact and a
-			// reader who types the slash is at the same route.
-			_matcher: {for a in _addressed {
-				let widened = strings.TrimSuffix("/"+strings.Join([
-					for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
-						[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
-					},
-				], "/"), "/")
-				([if widened == "" {"/"}, widened][0]): true
-			}}
-			_matchers: list.SortStrings([
-				for a, _ in _matcher {a},
-				for a, _ in _matcher if a != "/" {a + "/"},
-			])
+			_routeRegexp: "^(?:" + strings.Join([for a in list.SortStrings(_addressed) {(#routeRegexp & {path: a}).out}], "|") + ")(?:\\?.*)?$"
 			// `route`, because caddy orders directives by its own table and the
 			// catch-all `handle` sorts ahead of both `handle_path` and `route`:
 			// written outside one, the alias is answered 200 by the file server
@@ -4066,32 +4059,17 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			_rewrite: [
 				if _routeless {""},
 				"""
-					      @route path \(strings.Join(_matchers, " "))
+					      @route expression `{http.request.uri}.matches(\(json.Marshal(_routeRegexp)))`
 					      rewrite @route /\(E.terminal.surface.entry)
 
 					""",
 			][0]
-			// The addresses of the routes rendered on request, widened and in
-			// both slash spellings as `@route` below, and answered by the
-			// terminal's renderer after the door has chosen the language: what
-			// reaches it is always a locale's own address. A file the app serves
-			// is not one, for the reason `@file` precedes `@route`: a route whose
-			// first segment is a :param widens to `/*/*`, which every file under
-			// shell/ and messages/ matches.
-			_renderedAt: list.SortStrings([
-				for n in E._onRequest for a in E._spellings[n]
-				let widened = "/" + strings.Join([
-					for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
-						[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
-					},
-				], "/")
-				for w in [widened, widened + "/"] {w},
-			])
+			_renderedRegexp: "^(?:" + strings.Join([for n in E._onRequest for a in E._spellings[n] {(#routeRegexp & {path: a}).out}], "|") + ")(?:\\?.*)?$"
 			_render: [
 				if len(E._onRequest) == 0 {""},
 				"""
 				    @rendered {
-				      path \(strings.Join(_renderedAt, " "))
+				      expression `{http.request.uri}.matches(\(json.Marshal(_renderedRegexp)))`
 				      not file {
 				        root /srv
 				        try_files {path} {path}/index.html
