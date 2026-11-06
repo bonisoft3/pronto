@@ -48,3 +48,14 @@ Deno.test("docker appliance target emits release-docker with PORT and ORIGIN kno
   assertStringIncludes(epilogue, "WEBAUTHN_ORIGIN");
   assertStringIncludes(epilogue, "process-compose.yaml");
 });
+
+// The appliance runs no airlock: a program with effects used to release an
+// image whose invoking rows claimed their ledger and never ran, with nothing
+// saying so. k8s and gcp refuse such a release; the appliance now does too.
+Deno.test("release-docker refuses a program with effects, which the appliance would never run", async () => {
+  const code = paymentProgram().replace("targets: []", 'targets: ["docker"]');
+  const res = await exportJson('_build.project.targets["release-docker"].dockerfile.preamble', code);
+  assertEquals(res.success, true, res.stderr);
+  assertStringIncludes(res.value[0], "release@docker does not yet deploy airlock");
+  assertStringIncludes(res.value[0], "exit 1");
+});

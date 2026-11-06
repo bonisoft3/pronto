@@ -403,6 +403,16 @@ object like any other. Pages has no blob storage, and inlines them
 bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-handler));
 uploads have no store at the edge yet. A bridge's container is not deployed here,
 so its effects settle failed without a call ([where a bridge runs](container-bridges.md#where-a-bridge-runs)).
+An app with effects runs them in a second Worker, `<object script>-airlock`, the
+consumer of a queue of the same name that the script holding the object produces
+to ([edge-dispatcher.ts](../bundle/edge-dispatcher.ts), mecha-edge's
+[effects](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/mecha-edge/README.md#effects)): the
+object never waits on an effect's network. The publish creates the queue when it
+is missing and deploys the dispatcher after the object's script, which its
+binding names. The dispatcher alone holds the secrets its effects declare and the
+keys their AI providers need (`GEMINI_API_KEY` for Google, `OPENAI_API_KEY` for
+OpenAI): each is set from the publish's environment, or must already be the
+deployed dispatcher's, or the publish is refused.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
 ([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/pglite-workerd/README.md));
@@ -602,6 +612,10 @@ What fixes its shape:
   `setpriv`, PostgREST, Caddy and `process-compose`. When `capabilities.auth` is
   enabled, the Deno binary and cached `/deno-dir` are copied into the image and
   run alongside the other services.
+- **No airlock.** The appliance runs no Airlock, so a program that declares
+  effects is refused at release, its build failing with "release@docker does
+  not yet deploy airlock", as k8s and gcp refuse one, rather than shipping rows
+  whose effects claim their ledger and never run.
 - **Loopback networking.** Internal services communicate over loopback.
   `appliance-entrypoint.sh` appends `127.0.0.1 crud database auth` to
   `/etc/hosts` before launching `process-compose`, so internal HTTP and database

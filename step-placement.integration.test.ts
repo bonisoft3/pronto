@@ -28,7 +28,7 @@ Deno.test({ name: "placed steps build a database whose invoking state claims and
     .filter((c) => c.from !== undefined && c.dst.endsWith(".sql"))
     .map((c) => c.dst.split("/").at(-1)!);
   const source: Record<string, string> = {
-    "060_graphile_worker.sql": await Deno.readTextFile(new URL("services/airlock/graphile.sql", mecha)),
+    "060_graphile_worker.sql": await Deno.readTextFile(new URL("services/durex/graphile.sql", mecha)),
     "061_airlock.sql": `${await Deno.readTextFile(new URL("services/ticker/schedule.sql", mecha))}\n${await Deno.readTextFile(new URL("services/airlock/airlock.sql", mecha))}`,
     "062_machines.sql": files["services/database/migrations/062_machines.sql"].text,
   };

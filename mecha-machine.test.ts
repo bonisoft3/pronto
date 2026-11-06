@@ -462,6 +462,7 @@ Deno.test("the airlock is handed each effect's state, outcome targets, sink and 
         onDone: "settled",
         onError: "failed",
         row: ["id"],
+        key: ["id"],
         idempotent: false,
         reentry: "reconcile",
         attempts: 5,

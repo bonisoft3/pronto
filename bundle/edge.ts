@@ -27,7 +27,7 @@ import { writeEdgeAssets, type StaticAsset } from './edge-assets.ts'
 import { addressEdgeAssets, edgeRoutingRules, releaseAddresses } from './edge-addresses.ts'
 import { builtRelease, holdIceServers } from './edge-ice.ts'
 import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } from './edge-blobs.ts'
-import { writeEdgeSsr } from './edge-ssr.ts'
+import { databaseScript, writeEdgeSsr } from './edge-ssr.ts'
 import { realmDocumentsOf } from './edge-templates.ts'
 import { type Reducers, renderMachines } from './edge-machines.ts'
 import { computationPackages } from './compute.ts'
@@ -35,6 +35,7 @@ import { writeEdgeCompute } from './edge-compute.ts'
 import { writeEdgeReader } from './edge-reader.ts'
 import { type Functions, renderFunctions } from './edge-functions.ts'
 import { renderEffects } from './edge-effects.ts'
+import { dispatcherName, writeEdgeDispatcher } from './edge-dispatcher.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
 import { clusterDrains, clusterSteps, hasEffects, releaseScripts } from './edge-scripts.ts'
 
@@ -235,7 +236,13 @@ const { reducers, functions, crons } = JSON.parse(new TextDecoder().decode(state
 if (Object.keys(reducers).length) await Deno.writeTextFile(path.join(out, 'src/machines.js'), await renderMachines(name, app, omnishell, reducers))
 if (Object.keys(functions).length) await Deno.writeTextFile(path.join(out, 'src/functions.js'), await renderFunctions(name, app, omnishell, functions))
 const withEffects = await hasEffects(app)
-if (withEffects) await Deno.writeTextFile(path.join(out, 'src/effects.js'), await renderEffects(name, app, mecha, out))
+if (withEffects) {
+  // The dispatcher is named after the script that holds the object.
+  dispatcherName(flags['--ssr-origin'] ? databaseScript(name, databaseMode) : name)
+  const { effects, declarations } = await renderEffects(name, app, mecha, out)
+  await Deno.writeTextFile(path.join(out, 'src/effects.js'), effects)
+  await Deno.writeTextFile(path.join(out, 'src/effect-declarations.js'), declarations)
+}
 
 // The object's clock is the ticker's own sweep (mecha-edge's clock.ts), whose
 // cron reader croner reaches wrangler's bundler through node_modules beside
@@ -270,7 +277,7 @@ import hints from './hints.json'
 ${compute ? `import { computeCoordinator } from '${fromSrc(path.join(mecha, "packages/mecha-edge/src/compute-coordinator.ts"))}'\nexport class ComputeCoordinator extends computeCoordinator(undefined, ${JSON.stringify(compute.paged ?? [])}, ${JSON.stringify(compute.services[0].service)}) {}\n` : ''}
 ${compute ? "import computeMachines from './compute-machine.js'\n" : ''}
 ${hatches.map((h, i) => `import { createHatch as hatch${i} } from '${fromSrc(path.join(app, h.edge.src))}'`).join('\n')}
-${Object.keys(reducers).length ? "import machines from './machines.js'\n" : ''}${Object.keys(functions).length ? "import functions from './functions.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
+${Object.keys(reducers).length ? "import machines from './machines.js'\n" : ''}${Object.keys(functions).length ? "import functions from './functions.js'\n" : ''}${withEffects ? "import effects from './effect-declarations.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
@@ -282,7 +289,7 @@ export const Cluster = edgeObject({
   tables: ${JSON.stringify(shell.tables)},
   schema: ${JSON.stringify(shell.schema ?? {})},
   ${compute ? 'compute: { computations: ' + JSON.stringify(compute.definitions) + ', machine: computeMachines.compute_batch, physicalSnapshots: true, reader: ' + JSON.stringify(reader!.script_name) + ' },' : ''}
-  drains: ${JSON.stringify(drains)},${Object.keys(reducers).length ? '\n  machines,' : ''}${Object.keys(functions).length ? '\n  functions,' : ''}${withEffects ? '\n  effects,' : ''}${shell.ai ? `\n  ai: ${JSON.stringify(shell.ai)},` : ''}
+  drains: ${JSON.stringify(drains)},${Object.keys(reducers).length ? '\n  machines,' : ''}${Object.keys(functions).length ? '\n  functions,' : ''}${withEffects ? '\n  effects,' : ''}
 })
 export default {
   scheduled: edgeWorker.scheduled,
@@ -368,7 +375,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   // while 404 responses are served with Cache-Control: no-store.
   assets: { directory: './public', binding: 'ASSETS', run_worker_first: await edgeRoutingRules(publicDir), html_handling: 'drop-trailing-slash' },
   durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }, ...(compute ? [{ name: 'COMPUTE_COORDINATOR', class_name: 'ComputeCoordinator' }, reader] : [])] },
-  ...(shell.ai || withEffects ? { ai: { binding: 'AI' } } : {}),
+  ...(shell.ai ? { ai: { binding: 'AI' } } : {}),
   version_metadata: { binding: 'CF_VERSION_METADATA' },
   ...(hatches.some(h => h.edge.email) ? { send_email: hatches.flatMap(h => h.edge.email ? [{name: h.edge.email.name, allowed_destination_addresses: h.edge.email.recipients}] : []) } : {}),
   exports: { Cluster: { type: 'durable-object', storage: 'sqlite' }, ...(compute ? { ComputeCoordinator: { type: 'durable-object', storage: 'sqlite' } } : {}) },
@@ -394,5 +401,10 @@ if (flags['--ssr-origin']) {
   const mise = Deno.env.get('SAYT_MISE_BIN') ?? fail('SAYT_MISE_BIN is required to install the renderer with its pinned Node')
   await run(mise, ['exec', '--', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'], path.join(omnishell, 'server/worker'))
   await writeEdgeSsr(out, omnishell, mecha, name, origin.origin, drains, databaseMode, clock)
+}
+// Written last: the queue's producer is whichever script holds the object.
+if (withEffects) {
+  const airlock = await writeEdgeDispatcher(out, mecha, app, shell.ai)
+  console.error(`edge: dispatcher ${airlock.queue}`)
 }
 console.error(`edge: ${out}`)

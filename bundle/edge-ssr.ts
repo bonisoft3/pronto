@@ -6,13 +6,18 @@ import { clusterDrains } from './edge-scripts.ts'
 
 /** `drains` is the app's drain table (.pronto/cluster.json), which the
  * database object calls. */
+/** The script that holds the database object: the release's own, or its
+ * separate database Worker's when SSR renders apart from it. */
+export const databaseScript = (name: string, databaseMode: 'existing' | 'separate') =>
+  databaseMode === 'separate' ? `${name}-database` : name
+
 export async function writeEdgeSsr(out: string, omnishell: string, mecha: string, name: string, origin: string, drains: unknown[], databaseMode: 'existing' | 'separate' = 'existing', clock: 'ticker' | 'disabled' = 'ticker') {
   out = await Deno.realPath(out)
   const headers = await Deno.readTextFile(path.join(out, 'public/_headers'))
   const policy = headers.match(/^  Content-Security-Policy: (.+)$/m)?.[1]
   if (!policy) throw new Error('the edge assets carry no Content-Security-Policy header')
   const separate = databaseMode === 'separate'
-  const database = separate ? name + '-database' : name
+  const database = databaseScript(name, databaseMode)
   const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
   let compute
   try { compute = JSON.parse(await Deno.readTextFile(path.join(out, 'src/compute.json'))) }
@@ -66,7 +71,7 @@ export default { fetch() { return new Response(null, { status: 404 }) } }
 import { RpcTarget } from 'cloudflare:workers'
 import { edgeObject, DataDirectoryLoading } from '${fromSrc(path.join(edge, 'object.ts'))}'
 ${separate ? `import { pokeCluster } from '${fromSrc(path.join(edge, 'clock.ts'))}'\n` : ''}import { PublicSnapshotCapacity } from '${fromSrc(path.join(edge, 'public-snapshot.ts'))}'
-${hasMachines ? "import machines from './machines.js'\n" : ''}${hasEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
+${hasMachines ? "import machines from './machines.js'\n" : ''}${hasEffects ? "import effects from './effect-declarations.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
@@ -82,7 +87,7 @@ const Base = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(cfg.tables)},
   schema: ${JSON.stringify(cfg.schema ?? {})},
-  drains: ${JSON.stringify(drains)},${hasMachines ? '\n  machines,' : ''}${hasEffects ? '\n  effects,' : ''}${cfg.ai ? `\n  ai: ${JSON.stringify(cfg.ai)},` : ''}
+  drains: ${JSON.stringify(drains)},${hasMachines ? '\n  machines,' : ''}${hasEffects ? '\n  effects,' : ''}
   ${compute ? 'compute: { computations: ' + JSON.stringify(compute.definitions) + ', machine: computeMachines.compute_batch, physicalSnapshots: true, reader: ' + JSON.stringify(compute.reader.script_name) + ' },' : ''}
   ${separate ? "storageFormat: { version: 1, blockSize: 131072, codec: 'deflate' }," : ''}
 })
@@ -340,7 +345,14 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
       '@mecha/postgrest-js': rel(path.join(mecha, 'packages/postgrest-js/src/index.ts')),
     },
   }
-  if (separate) await Deno.writeTextFile(path.join(out, 'database.jsonc'), JSON.stringify(databaseConfig, null, 2) + '\n')
+  // A release rewritten after its build keeps the airlock queue the
+  // dispatcher's writer gave the script holding the object.
+  if (separate) {
+    let queues: unknown
+    try { queues = JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))).queues }
+    catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+    await Deno.writeTextFile(path.join(out, 'database.jsonc'), JSON.stringify({ ...databaseConfig, ...(queues ? { queues } : {}) }, null, 2) + '\n')
+  }
   else {
     try { await Deno.remove(path.join(out, 'database.jsonc')) }
     catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }

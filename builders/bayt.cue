@@ -605,6 +605,12 @@ import (
 							]},
 						])
 						preamble: list.Concat([
+							// The appliance runs no airlock, so a program's effects would
+							// claim their ledger and never run: the release is refused,
+							// as k8s's and gcp's are, rather than shipped silently inert.
+							if len(B.cluster.state.effects) > 0 {[
+								#"RUN echo "release@docker does not yet deploy airlock; refusing to omit a runtime service" >&2 && exit 1"#,
+							]},
 							[
 								"ENV PATH=/usr/lib/postgresql18/bin:/usr/local/bin:$PATH",
 								"ENV PGDATA=/var/lib/pgsql/data",

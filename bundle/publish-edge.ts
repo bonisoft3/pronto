@@ -168,6 +168,28 @@ await refuseMissingHatchSecrets({
   deployedBefore: async configPath => await previousVersion(configPath) !== null,
   wrangler: runWrangler,
 })
+// The airlock's dispatcher (edge-dispatcher.ts): its queue exists before the
+// object's script names it, and the effects' secrets are the dispatcher's alone.
+let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][] } | undefined
+try { airlock = JSON.parse(await Deno.readTextFile(path.join(out, 'src/airlock.json'))) }
+catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
+if (airlock) {
+  if (airlock.deployment !== 'airlock/wrangler.jsonc') throw new Error(`invalid airlock deployment: ${airlock.deployment}`)
+  // A secret the environment does not carry must already be the deployed
+  // dispatcher's, as an edge hatch's is (edge-hatches.ts): a release never
+  // invents one, and a first deploy without it would run every effect keyless.
+  // A provider's key is any one of the names tsbifrost reads for it.
+  const absent = airlock.secrets.filter(name => !Deno.env.get(name))
+  const unkeyed = airlock.providers.filter(names => !names.some(name => Deno.env.get(name)))
+  if (absent.length || unkeyed.length) {
+    const dispatcher = path.join(out, airlock.deployment)
+    const held = await previousVersion(dispatcher) === null ? [] : (JSON.parse(await runWrangler(['secret', 'list', '--config', dispatcher, '--format', 'json'])) as { name: string }[]).map(b => b.name)
+    const missing = [...absent.filter(name => !held.includes(name)), ...unkeyed.filter(names => !names.some(name => held.includes(name))).map(names => names.join(' or '))]
+    if (missing.length) fail(`the dispatcher needs ${missing.join(', ')}: set them in the environment of this publish, or on the deployed ${airlock.queue} Worker`)
+  }
+  const exists = await new Deno.Command(wrangler, { args: ['queues', 'info', airlock.queue], cwd: out, env, stdin: 'null', stdout: 'null', stderr: 'null' }).output()
+  if (!exists.success) console.log(await runWrangler(['queues', 'create', airlock.queue]))
+}
 const secretsDir = await Deno.makeTempDir({ prefix: 'publish-edge-' })
 const secretsFile = path.join(secretsDir, 'secrets.json')
 let deployedText: string
@@ -298,6 +320,20 @@ if ('skipped' in loaded) {
     if (!restarted.ok) fail(`the restart after a lost migration answer failed: ${restarted.status}`)
   }
   if (lost || (JSON.parse(answer) as { applied: string[] }).applied.length) await settled('the migration')
+}
+// The dispatcher follows the directory's acceptance of this release: a refused
+// migration rolls the object back with no dispatcher of this release left
+// running, and runs the object enqueued meanwhile wait in the queue.
+if (airlock) {
+  const dispatcherDir = await Deno.makeTempDir({ prefix: 'publish-edge-airlock-' })
+  try {
+    const dispatcherSecrets = path.join(dispatcherDir, 'airlock.json')
+    const names = [...airlock.secrets, ...airlock.providers.flat()]
+    await Deno.writeTextFile(dispatcherSecrets, JSON.stringify(Object.fromEntries(names.flatMap(name => Deno.env.get(name) ? [[name, Deno.env.get(name)!]] : []))), { mode: 0o600 })
+    console.log(await deploy(path.join(out, airlock.deployment), '--secrets-file', dispatcherSecrets))
+  } finally {
+    await Deno.remove(dispatcherDir, { recursive: true })
+  }
 }
 if (ssr) {
   const warm = await edgeFetch(`${origin}/`, { headers: { accept: 'text/html' } })

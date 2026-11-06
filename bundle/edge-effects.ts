@@ -21,7 +21,11 @@ async function resolveEffectTarget(appDir: string, name: string): Promise<Effect
   }
 }
 
-export async function renderEffects(app: string, appDir: string, mecha: string, outDir: string): Promise<string> {
+/** The release's effects twice over: `effects`, each declaration and target
+ * bound to its handler module, which only the dispatcher Worker imports, and
+ * `declarations`, the declarations and targets alone, which the object reads
+ * without loading a handler into its isolate. */
+export async function renderEffects(app: string, appDir: string, mecha: string, outDir: string): Promise<{ effects: string; declarations: string }> {
   const { parseManifest } = await import(pathToFileURL(path.join(mecha, 'services/airlock/reentry.ts')).href) as {
     parseManifest: (text: string) => Record<string, {
       table: string
@@ -45,6 +49,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
   const names = Object.keys(effects).sort()
   const imports: string[] = []
   const entries: string[] = []
+  const declared: string[] = []
   const srcDir = path.join(outDir, 'src')
   const fromSrc = (p: string) => {
     const rel = path.relative(srcDir, p).replaceAll('\\', '/')
@@ -66,18 +71,20 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     entries.push(
       `  ${JSON.stringify(name)}: effect(${JSON.stringify(decl)}, ${JSON.stringify(target)}, ${ident}),`,
     )
+    declared.push(`  ${JSON.stringify(name)}: { declaration: ${JSON.stringify(decl)}, target: ${JSON.stringify(target)} },`)
   }
-
-  return `// Written by pronto's edge.ts for ${app}: the airlock effects, for the object's host import (mecha-edge's airlock.ts).
-${imports.join('\n')}
-
-const harden = (value, seen = new WeakSet()) => {
+  const harden = `const harden = (value, seen = new WeakSet()) => {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) return value
   seen.add(value)
   Object.freeze(value)
   for (const d of Object.values(Object.getOwnPropertyDescriptors(value))) for (const v of [d.value, d.get, d.set]) harden(v, seen)
   return value
-}
+}`
+
+  const handlers = `// Written by pronto's edge.ts for ${app}: the airlock effects and their handlers, for the dispatcher Worker (mecha-edge's dispatch.ts).
+${imports.join('\n')}
+
+${harden}
 
 const effect = (declaration, target, mod) => {
   if (typeof mod.issue !== 'function') throw new TypeError(\`effect \${declaration.handler} exports no issue function\`)
@@ -98,4 +105,12 @@ export default {
 ${entries.join('\n')}
 }
 `
+  const declarations = `// Written by pronto's edge.ts for ${app}: the airlock effects' declarations and targets, for the object (mecha-edge's airlock.ts).
+${harden}
+
+export default harden({
+${declared.join('\n')}
+})
+`
+  return { effects: handlers, declarations }
 }

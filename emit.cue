@@ -3749,6 +3749,7 @@ _pgrollDir: "services/database/pgroll"
 							onDone:     i.onDone
 							onError:    i.onError
 							row:        i.row
+							key:        i.effect.key
 							idempotent: i.effect.sink.idempotent
 							if !i.effect.sink.idempotent {reentry: i.effect.reentry}
 							attempts: i.effect.attempts

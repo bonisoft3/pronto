@@ -55,7 +55,7 @@ export async function releaseFiles(app: string, mecha: string, migrations: strin
   // Each effect step goes where its name sorts among the app's, as initdb runs them.
   const framework = effects
     ? [
-      { name: steps.graphile ?? GRAPHILE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/airlock/graphile.sql')) },
+      { name: steps.graphile ?? GRAPHILE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/durex/graphile.sql')) },
       {
         name: steps.airlock ?? AIRLOCK_SCRIPT,
         read: async () =>
