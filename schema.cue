@@ -1109,6 +1109,10 @@ import (
 	secret:  #SecretName
 }
 
+// A frame's host-source with a wildcard (CSP host-source): any name under a
+// domain (https://*.example.com), or any port of a host (https://localhost:*).
+#FrameSource: =~"^https://(\\*\\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)*[a-z]([a-z0-9-]*[a-z0-9])?(:([0-9]{1,5}|\\*))?$"
+
 // An environment variable an effect declares, never one the cluster's own
 // services read.
 #SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS)$"
@@ -1542,11 +1546,18 @@ import (
 
 	capabilities: {
 		// Browser fetches outside the app are authored authority. Script sources
-		// remain the terminal's; only reader-supplied images may name a scheme.
+		// remain the terminal's; only reader-supplied images may name a scheme,
+		// and only a frame a host-source with a wildcard: the pages an app
+		// embeds may live on a name it makes (a preview under its own domain)
+		// or a port it is given (a stack on this machine). A frame is the
+		// browser's alone, so the single-label host mecha refuses to dial
+		// (localhost) is a frame's to name.
 		resources?: [string]: {
 			kind: "img" | "font" | "media" | "frame" | "connect"
-			source: mecha.#Origin | "https:"
-			if kind != "img" {source: mecha.#Origin}
+			source: string
+			if kind == "img" {source: mecha.#Origin | "https:"}
+			if kind == "frame" {source: mecha.#Origin | #FrameSource}
+			if kind != "img" && kind != "frame" {source: mecha.#Origin}
 			note: string & !=""
 		}
 		// Passed through to shell.yaml verbatim: the terminal owns the login
