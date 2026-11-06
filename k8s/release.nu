@@ -746,7 +746,7 @@ export def main [
 	let root = (git rev-parse --show-toplevel | str trim)
 	let app_source_dir = $app_info.dir
 
-	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, alerting: App.alerting, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path } | complete)
+	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, alerting: App.alerting, blobs: len([if App.blobs != _|_ {1}]) > 0, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path } | complete)
 	if $meta_res.exit_code != 0 {
 		error make { msg: $"Failed to read release metadata from ($app_info.cue_path): ($meta_res.stderr)" }
 	}
@@ -771,6 +771,14 @@ export def main [
 	let missing = ($services | where {|s| $s not-in $compose_services })
 	if ($missing | is-not-empty) {
 		error make { msg: $"($app_info.cue_path): App.services names ($missing | str join ', '), which the app's compose project lacks" }
+	}
+
+	# The blob plane (App.blobs) is the app's rclone-s3 and imgproxy compose services, built and pushed
+	# as its own services are.
+	let blob_svcs = if $app_meta.blobs { ["rclone-s3" "imgproxy"] } else { [] }
+	let blobs_missing = ($blob_svcs | where {|s| $s not-in $compose_services })
+	if ($blobs_missing | is-not-empty) {
+		error make { msg: $"($app_info.cue_path): App.blobs needs the app's compose project to define ($blobs_missing | str join ', ')" }
 	}
 
 	let target_env = (read-environment $cluster_env $app_info.cue_path)
@@ -808,7 +816,7 @@ export def main [
 
 	# migrate runs where the app has pgroll migrations to carry, as in compose.
 	let has_migrate = ("migrate" in $compose_services)
-	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append $services
+	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
 	# A node's registry is pushed to through this release's tunnel, on a local
 	# port, while the manifests name it as the node sees it (registry).
@@ -920,7 +928,7 @@ export def main [
 
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
-	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services
+	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
 	for d in ($components | each { $"deployment/($app_info.name)-($in)" }) {
 		print $"Waiting for ($d) rollout..."
 		kubectl rollout status $d -n $target_ns --timeout=180s
