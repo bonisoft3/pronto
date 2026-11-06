@@ -559,7 +559,7 @@ export def render-manifests [
 	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
-	{App: {database: {tokenRoles: $facts.tokenRoles}}} | to json | save -f $roles_file
+	{App: {database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}}} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file

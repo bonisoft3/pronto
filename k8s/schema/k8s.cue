@@ -302,12 +302,25 @@ import (
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 					if [ "$marker" = "pronto initdb" ]; then
 					  echo "initdb: already built"
-					  # Its re-runnable steps are the release's, though (emit.cue's): a new
-					  # entity's table, every policy, trigger and publication, and the hybrid
-					  # machines' code run again, keeping every row.
-					  for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do
-					    f=/docker-entrypoint-initdb.d/$step.sql
-					    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+					  # Its re-runnable steps are the release's, though (emit.cue's), as on Cloud Run
+					  # (gcp.cue's): a new entity's table and a new field's column, every policy,
+					  # trigger and publication, the status charts' triggers (010_machines), the
+					  # hybrid machines' code, and the app's own migrations (database.replays), each
+					  # idempotent, run again, keeping every row, before migrate's pgroll steps call
+					  # what they define. Live traffic can deadlock a step's ALTER: being idempotent,
+					  # the step is run again, up to three times.
+					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql \(strings.Join(release.database.replays, " ")); do
+					    f=/docker-entrypoint-initdb.d/$step
+					    if [ -f "$f" ]; then echo "initdb: replaying $step"
+					      for try in 1 2 3; do
+					        # 010 drops and recreates triggers and constraints: one transaction, so no
+					        # write slips between them and a failure leaves the old ones in force.
+					        if [ "$step" = 010_machines.sql ]; then one=--single-transaction; else one=; fi
+					        if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi
+					        if [ "$try" = 3 ]; then exit 1; fi
+					        echo "initdb: $step failed, again in 10s"; sleep 10
+					      done
+					    fi
 					  done
 					  exit 0
 					fi

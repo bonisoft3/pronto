@@ -66,6 +66,10 @@ package schema
 		// The roles a token may name, which the schema grants PostgREST's login
 		// (the app's .pronto/cluster.json; the release fills it).
 		tokenRoles: [...string]
+		// The app's own migrations (services/database/migrations' raw SQL, each idempotent),
+		// replayed over a database initdb already built, as on Cloud Run (.pronto/cluster.json;
+		// the release fills it).
+		replays: *[] | [...=~"^[0-9A-Za-z_.-]+\\.sql$"]
 		// Where its base backups and WAL go, an S3-compatible bucket, through CloudNativePG's
 		// barman-cloud plugin: WAL as each segment fills, a base backup on `schedule` (six
 		// fields, UTC) and once when the Cluster first gets it, kept `retention` (CloudNativePG's
