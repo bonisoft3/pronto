@@ -1,8 +1,8 @@
-import { compileHybrid, type HybridMachine } from "../hybrid.ts";
+import { compileMechaReducer, type MechaReducerMachine } from "../mecha-reducer.ts";
 import { instrument } from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.21.7/instrument.ts";
 import ses from "https://raw.githubusercontent.com/bonisoft3/omnishell/v0.21.7/interpreter/vendor/ses.umd.min.js" with { type: "text" };
 
-/** The compiler's terminal, from the omnishell hybrid-local.ts runs: what
+/** The compiler's terminal, from the omnishell mecha-local.ts runs: what
  * write.ts reads where mise puts it. */
 export const terminal = { instrument, ses };
 
@@ -37,9 +37,9 @@ export async function run(command: string, args: string[], input?: string) {
 }
 
 export async function fixture() {
-  const result = await run("cue", ["export", "./apps/truco/tests/fixtures/hybrid", "-e", "reducer"]);
+  const result = await run("cue", ["export", "./apps/truco/tests/fixtures/mecha", "-e", "reducer"]);
   if (!result.ok) throw new Error(result.err);
-  const spec: HybridMachine = JSON.parse(result.out);
-  const rules = await Deno.readTextFile(new URL("apps/truco/tests/fixtures/hybrid/turn.js", ROOT));
-  return { spec, rules, compiled: await compileHybrid(spec, rules, terminal) };
+  const spec: MechaReducerMachine = JSON.parse(result.out);
+  const rules = await Deno.readTextFile(new URL("apps/truco/tests/fixtures/mecha/turn.js", ROOT));
+  return { spec, rules, compiled: await compileMechaReducer(spec, rules, terminal) };
 }

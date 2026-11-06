@@ -27,6 +27,7 @@ _installedFiles: (pronto.#emit & _installedSeats).files
 
 checkerInputVersion: _installedFiles[".pronto/check-inputs.json"].data.version & 1
 checkerInputTerminal: _installedFiles[".pronto/check-inputs.json"].data.terminal & true
+checkerInputReducers: _installedFiles[".pronto/check-inputs.json"].data.reducers & {}
 checkerInputMachines: _installedFiles[".pronto/check-inputs.json"].data.machines & {}
 checkerInputEffects: _installedFiles[".pronto/check-inputs.json"].data.effects & {}
 checkerInputEntities: (_installedFiles[".pronto/check-inputs.json"].data.entities == _code.state.entities) & true
@@ -112,7 +113,7 @@ installedBuildWrapper: _installedProject.targets.build.srcs.defaultGlobs["pronto
 
 // The app type-checks pronto's own modules, not its checkout-only ones, which
 // import their siblings.
-installedTypes: _loop.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts hybrid-local\\.ts hybrid-battery\\.ts refresh-portable-types\\.ts hybrid-xstate-entry\\.ts hybrid-xstate-bundle\\.ts cortex-conformance\\.ts\\]"
+installedTypes: _loop.surface.checks.types.cmds[0] & =~"--exclude \\[\\*_test\\.ts \\*\\.test\\.ts mecha-local\\.ts mecha-battery\\.ts hybrid-local\\.ts hybrid-battery\\.ts refresh-portable-types\\.ts mecha-xstate-entry\\.ts mecha-xstate-bundle\\.ts cortex-conformance\\.ts\\]"
 // The terminal's checks reach omnishell through the app's mise, not PATH:
 // mise makes no shim for a `path:` version.
 _installedTerminal: (pronto.#DefaultTerminal & {code: _code}).out.surface & {runtime: ""}

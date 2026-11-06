@@ -1,4 +1,4 @@
-export const HYBRID_NAME = /^[a-z][a-z0-9_]{0,30}$/;
+export const MECHA_NAME = /^[a-z][a-z0-9_]{0,30}$/;
 
 /** The machine declaration carried to browser and edge runtimes. */
 export function declaredMachine(

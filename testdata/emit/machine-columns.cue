@@ -31,7 +31,7 @@ _charted: _code & {
 				]
 			}
 		}
-		machines: {
+		mecha: rows: {
 			parcel: {
 				entity:  "Parcel"
 				field:   "stage"

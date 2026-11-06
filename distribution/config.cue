@@ -9,11 +9,11 @@ import (
 #Version:     "1.0.9"
 #SaytVersion: "0.45.3"
 
-// Development-only modules: an app's tests import the hybrid oracle harnesses by URL,
+// Development-only modules: an app's tests import the mecha oracle harnesses by URL,
 // and the portable types are refreshed from the checkout's mecha client. An
 // installed pronto neither type-checks nor runs them (installed_test.ts holds
 // the rest to its own tree).
-#TestModules: ["hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts", "hybrid-xstate-entry.ts", "hybrid-xstate-bundle.ts", "cortex-conformance.ts"]
+#TestModules: ["mecha-local.ts", "mecha-battery.ts", "hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts", "mecha-xstate-entry.ts", "mecha-xstate-bundle.ts", "cortex-conformance.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.
@@ -162,7 +162,7 @@ import (
 		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
 		proto: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."}).out
 		outcomes: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-verification.ts) . --omnishell \(P._omnishell)"}).out
-		hybrids: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-hybrids.ts) ."}).out
+		mecha: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-mecha.ts) ."}).out
 		// Under the compute service's own pins, as it runs them: queries over
 		// DuckDB, the cage's workers, the wasm.
 		computations: (_run & {args: "run-mise exec -- deno test --config (\(P._mecha) | path join services compute deno.json) --frozen --permit-no-files --unstable-worker-options --allow-read --allow-ffi --allow-env computations"}).out

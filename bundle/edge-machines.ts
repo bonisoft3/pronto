@@ -5,18 +5,18 @@
 // with SES the object freezes, so a rule is handed values it cannot change.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { declaredMachine, HYBRID_NAME } from '../hybrid-spec.ts'
-import { hybridXStateSource } from '../hybrid-xstate.ts'
+import { declaredMachine, MECHA_NAME } from '../mecha-spec.ts'
+import { mechaXStateSource } from '../mecha-xstate.ts'
 
-export type Hybrids = Record<string, { reducer: Record<string, unknown> & { name: string; fuel: number }; rules: string }>
+export type Reducers = Record<string, { reducer: Record<string, unknown> & { name: string; fuel: number }; rules: string }>
 
-export async function renderMachines(app: string, appDir: string, omnishell: string, hybrids: Hybrids): Promise<string> {
+export async function renderMachines(app: string, appDir: string, omnishell: string, reducers: Reducers): Promise<string> {
   const { instrument } = await import(pathToFileURL(path.join(omnishell, 'instrument.ts')).href) as { instrument: (source: string) => string }
-  const runtime = (await Deno.readTextFile(new URL('../hybrid-runtime.js', import.meta.url))).trim()
+  const runtime = (await Deno.readTextFile(new URL('../mecha-runtime.js', import.meta.url))).trim()
   const machines: string[] = []
-  for (const name of Object.keys(hybrids).sort()) {
-    const { reducer, rules } = hybrids[name]
-    if (reducer.name !== name || !HYBRID_NAME.test(name)) throw new Error(`machine ${name} is declared as ${reducer.name}`)
+  for (const name of Object.keys(reducers).sort()) {
+    const { reducer, rules } = reducers[name]
+    if (reducer.name !== name || !MECHA_NAME.test(name)) throw new Error(`machine ${name} is declared as ${reducer.name}`)
     if (path.isAbsolute(rules) || rules.split(/[\\/]/).includes('..')) throw new Error(`machine ${name}: unsafe rules path ${rules}`)
     const source = (await Deno.readTextFile(path.join(appDir, rules))).trim()
     machines.push(`  ${name}: machine(${JSON.stringify(declaredMachine(reducer))}, ${reducer.fuel}, (__fuel) => (${instrument(`(() => { ${source}\n })()`)})),`)
@@ -32,13 +32,13 @@ const harden = (value, seen = new WeakSet()) => {
   return value
 }
 const runtime = ((harden) => (${runtime}))(harden)
-const xstate = (${hybridXStateSource})
+const xstate = (${mechaXStateSource})
 // A step starts with its whole budget: the fuel is the step's, as in plv8.
 const machine = (spec, fuel, rules) => {
   harden(spec)
   return { execute: (input) => {
     let spent = 0
-    const meter = () => { if (++spent > fuel) throw new RangeError('hybrid fuel exhausted') }
+    const meter = () => { if (++spent > fuel) throw new RangeError('mecha fuel exhausted') }
     const execute = runtime(spec, harden(rules(meter)), xstate.Statechart)
     const answer = execute(input)
     meter()

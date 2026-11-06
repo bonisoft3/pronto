@@ -22,7 +22,7 @@ _effecting: _code & {
 				{name: "total", type: "int"},
 			]
 		}
-		machines: PaymentMachine: {
+		mecha: rows: PaymentMachine: {
 			name:    "PaymentMachine"
 			entity:  "Payment"
 			field:   "status"

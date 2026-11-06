@@ -1,14 +1,14 @@
-// The hybrid oracle (hybrid.integration.test.ts) against the edge object: the
+// The mecha oracle (mecha.integration.test.ts) against the edge object: the
 // same machine, its migration applied to a data directory as an edge release
 // applies it (the plv8 engine fenced away), stepping through pgl_step into
 // the machines edge-machines.ts renders, in a Durable Object under wrangler
 // dev. Needs libraries/mecha/packages/pglite-workerd/dist.
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
-import { compileHybrid } from "./hybrid.ts";
+import { compileMechaReducer } from "./mecha-reducer.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
-import { executeHybrid } from "./hybrid-local.ts";
+import { executeMecha } from "./mecha-local.ts";
 import { renderMachines } from "./bundle/edge-machines.ts";
-import { ROOT, fixture, initial, quote, request, run, surface, terminal, uuid } from "./testdata/hybrid-fixtures.ts";
+import { ROOT, fixture, initial, quote, request, run, surface, terminal, uuid } from "./testdata/mecha-fixtures.ts";
 import { startWorker } from "../../libraries/mecha/packages/pglite-workerd/wrangler-dev.ts";
 import { load } from "../../libraries/mecha/packages/pglite-workerd/load.ts";
 import { browserTier } from "../../libraries/mecha/packages/mecha-browser/fence.ts";
@@ -16,16 +16,16 @@ import { browserTier } from "../../libraries/mecha/packages/mecha-browser/fence.
 const root = new URL(ROOT).pathname;
 const mecha = `${root}libraries/mecha`;
 
-Deno.test({ name: "hybrid commands step in the edge object, and its alarm wakes a deadline", sanitizeOps: false, sanitizeResources: false, fn: async t => {
+Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a deadline", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   Deno.statSync(`${mecha}/packages/pglite-workerd/dist/pglite.wasm`);
   const { spec, rules, compiled } = await fixture();
-  const spin = await compileHybrid({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
+  const spin = await compileMechaReducer({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
   const schema = "hybrid_truco_turn";
-  const tmp = await Deno.makeTempDir({ prefix: "pronto-hybrid-edge-" });
+  const tmp = await Deno.makeTempDir({ prefix: "pronto-mecha-edge-" });
 
   // The app's rules, where the release reads them.
   await Deno.mkdir(`${tmp}/app/machines`, { recursive: true });
-  await Deno.copyFile(`${root}apps/truco/tests/fixtures/hybrid/turn.js`, `${tmp}/app/machines/turn.js`);
+  await Deno.copyFile(`${root}apps/truco/tests/fixtures/mecha/turn.js`, `${tmp}/app/machines/turn.js`);
   await Deno.writeTextFile(`${tmp}/app/machines/spin.js`, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"));
 
   // The data directory, as pgdata.ts builds one: PostgreSQL's roles and
@@ -99,7 +99,7 @@ Deno.test({ name: "hybrid commands step in the edge object, and its alarm wakes 
       },
     }`);
   await Deno.writeTextFile(`${tmp}/worker/wrangler.jsonc`, JSON.stringify({
-    name: "pronto-hybrid-edge-test",
+    name: "pronto-mecha-edge-test",
     main: "worker.ts",
     compatibility_date: "2026-09-01",
     durable_objects: { bindings: [{ name: "CLUSTER", class_name: "Cluster" }] },
@@ -173,7 +173,7 @@ Deno.test({ name: "hybrid commands step in the edge object, and its alarm wakes 
       const actual = await snapshot(10);
       const now = Number(await one(`SELECT now FROM ${schema}.receipt WHERE instance_id = '${uuid(10)}' AND command_id = '${uuid(100)}';`));
       const context = { actor: "a", tier: "omnishell", now };
-      const expected = await executeHybrid(compiled.source, spec.fuel, { state: initial(), event: request(0).event, context, viewers: ["a", "b"] }) as { state: unknown; views: unknown };
+      const expected = await executeMecha(compiled.source, spec.fuel, { state: initial(), event: request(0).event, context, viewers: ["a", "b"] }) as { state: unknown; views: unknown };
       assertEquals(actual.state, expected.state);
       const views = await one(`SELECT jsonb_agg(jsonb_build_object('viewer', v.seat, 'value', v.view::jsonb) ORDER BY v.seat)
         FROM public.truco_turn_seat v WHERE instance_id = '${uuid(10)}';`);
@@ -255,7 +255,7 @@ Deno.test({ name: "hybrid commands step in the edge object, and its alarm wakes 
       for (const [i, card] of [0, 3, 1, 4, 2, 5].entries()) {
         assertEquals((await answer(call(16, i % 2 + 1, 120 + i, request(i, "play", { card })))).kind, "accepted");
         const game = await snapshot(16);
-        const expected = await executeHybrid(compiled.source, spec.fuel, {
+        const expected = await executeMecha(compiled.source, spec.fuel, {
           state: previous, event: request(i, "play", { card }).event,
           context: { actor: i % 2 === 0 ? "a" : "b", tier: "omnishell", now: game.state.deadline - 20000 }, viewers: ["a", "b"],
         }) as { state: ReturnType<typeof initial> };

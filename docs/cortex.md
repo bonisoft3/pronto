@@ -1,7 +1,7 @@
 # Cortex machines
 
 `state.cortex` declares `#CortexMachine`s ([[../cortex.cue]]): the app's
-screens over the Mecha machines in `state.hybrids`, and over the races its
+screens over the Mecha machines in `state.mecha`, and over the races its
 screens host. Each state names the screen that hosts it and the child it
 invokes: a fold the terminal runs over a Mecha machine, or a kinetic child. Nothing runs in the browser that the terminal does not record:
 a child's state is rows, its pauses are the terminal's clock, its entropy is
@@ -9,10 +9,27 @@ the terminal's draw, and everything it asks of a Mecha machine is a row it
 writes.
 
 Where this vocabulary is heading — Cortex spanning the tiers, each tier's own
-`#Machine` — is §4 of [[decisions/2026-09-29-hybrid-machines]]. Mecha retains
+`#Machine` — is §4 of [[decisions/2026-09-29-cortex-machines]]. Mecha retains
 the invoked domain charts, authorization, locking, writes, private views,
 receipts and deadlines. Cortex introduces no transaction coordinator, worker,
 pipeline or ledger.
+
+## Machine vocabulary
+
+Mecha machines own domain transitions and transactional effects. Omnishell
+machines own UI-region transitions. Cortex machines coordinate those hosts and
+kinetic actors, whose engines run continuous simulations. Running a Mecha
+reducer in the browser does not make it a different kind of machine.
+
+`state.mecha.reducers` holds bounded reducers declared with `machine` and
+`rules`; `state.mecha.rows` holds transactional row machines bound by `entity`.
+These remain distinct execution bindings; Cortex composition uses their
+existing sources and sinks. Persisted SQL naming is covered by
+[libraries/mecha/docs/machines#Bounded reducer machines](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/machines.md#bounded-reducer-machines).
+
+The `hybrid-local.ts` and `hybrid-battery.ts` entry points only bridge published
+app-test URLs to the Mecha implementations. They introduce no separate machine
+kind or authoring grammar. Consumer pins move with a coordinated Pronto release.
 
 ## The parent
 
@@ -166,7 +183,7 @@ Run's run machine (`shell/handlers/run.js`) is the instance.
 
 ## Evidence
 
-Truco's root machine is its own `machines/root.cue`. `test:hybrid` covers the
+Truco's root machine is its own `machines/root.cue`. `test:mecha` covers the
 reducer's commands, races, receipts, timers and Airlock claim on the surface
 rows, and the surface check's refusals. `test:truco-online` runs Truco's
 machines through their surface in PostgreSQL under the generated policies —

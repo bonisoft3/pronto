@@ -72,7 +72,7 @@ bundle lacks, hand-authored handlers included; omnishell's guide has
 
 The verbs are sayt's, and every check lands under the verb whose layer it
 needs: `lint` for anything that fails in seconds without executing the app
-(`cue vet`, `check-facts`, `check-sql`, `check-hybrids`, `identity.ts check`,
+(`cue vet`, `check-facts`, `check-sql`, `check-mecha`, `identity.ts check`,
 omnishell's `check handlers` and `check markup`), `test` for the app's behaviour against fixtures
 with no live service (`tests/*.test.ts`, `check machines`, `check battery`),
 `integrate` for anything that needs the cluster up (the migration replay, the
@@ -126,7 +126,7 @@ lifecycle guard: a Jessie predicate over the row and the rows its declared
 references reach. The machine names which writes it guards.
 
 ```cue
-state: machines: FavoriteRules: {
+state: mecha: rows: FavoriteRules: {
 	entity: "Favorite"
 	guards: "own-article": {
 		src: "shell/validations/own-article.js"

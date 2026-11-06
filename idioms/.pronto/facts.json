@@ -120,6 +120,7 @@
     {"name":"TextDecoder","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"URL","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"URLSearchParams","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
+    {"name":"Statechart","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"Math.random","reason":"handlers must be deterministic","except_role":""},
     {"name":"eval","reason":"reached indirectly it evaluates arbitrary source inside the compartment; SES rejects only the direct call form","except_role":""},
     {"name":"plv8","reason":"a validation is handed its world; it queries nothing","except_role":""},

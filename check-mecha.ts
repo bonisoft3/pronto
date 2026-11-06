@@ -1,7 +1,7 @@
-// pronto's `hybrids` lint: what the Mecha machines an app declares in
-// `state.hybrids` can do, proved over their declarations.
+// pronto's `mecha` lint: what the Mecha machines an app declares in
+// `state.mecha` can do, proved over their declarations.
 //
-//   deno run --allow-read check-hybrids.ts <appDir>
+//   deno run --allow-read check-mecha.ts <appDir>
 //
 // Generation refuses a machine the runtime could not run as declared: a rule
 // without a contract, a write the context cannot hold. What is left are
@@ -21,8 +21,8 @@ import { fitting, type SurfaceEntity } from "./mecha-surface.ts";
 
 type Finding = { severity: "error" | "advisory"; path: string; message: string };
 
-export function machineFindings(hybrids: Record<string, MechaReducerMachine>, entities: Record<string, SurfaceEntity>): Finding[] {
-  return Object.values(hybrids).flatMap((m) =>
+export function machineFindings(reducers: Record<string, MechaReducerMachine>, entities: Record<string, SurfaceEntity>): Finding[] {
+  return Object.values(reducers).flatMap((m) =>
     [...carries(m), ...moving(m), ...fitting(m, entities)].map((message) => ({
       severity: "error" as const,
       path: "program.cue",
@@ -33,9 +33,9 @@ export function machineFindings(hybrids: Record<string, MechaReducerMachine>, en
 
 if (import.meta.main) {
   const appDir = Deno.args[0];
-  if (appDir === undefined) throw new Error("usage: check-hybrids.ts <appDir>");
+  if (appDir === undefined) throw new Error("usage: check-mecha.ts <appDir>");
   const inputs = await readCheckInputs<SurfaceEntity, unknown, unknown, MechaReducerMachine>(appDir);
-  const found = machineFindings(inputs.hybrids, inputs.entities);
+  const found = machineFindings(inputs.reducers, inputs.entities);
   console.log(JSON.stringify(found, null, 2));
   if (found.some((f) => f.severity === "error")) Deno.exit(1);
 }

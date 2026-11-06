@@ -527,7 +527,7 @@ Derivation stays in containers until DuckStream runs. Work that is
 incremental by construction — a stream's mapping, a join or window kept up to
 date — needs memory proportional to a change, not to the data, so it fits an
 object with its state as indexed tables in the object's SQLite, on the free
-plan too. That is [DuckStream](decisions/2026-09-29-hybrid-machines.md): the
+plan too. That is [DuckStream](decisions/2026-09-29-cortex-machines.md): the
 SQL parsed at build time as `check-sql.ts` already parses it, lowered to a plan
 an object runs. It is built only together with the Feldera-backed engine that
 runs the same SQL locally, so an edge-only engine never becomes the reference.
@@ -684,7 +684,7 @@ What bit on a real instance:
   `<app>-authenticator-password`, as compose's does. It owns the tables
   mecha puts under `FORCE ROW LEVEL SECURITY` and the `SECURITY DEFINER`
   functions that write them, so without a superuser's bypass every
-  hybrid-machine write failed its policies; initdb gives it `BYPASSRLS`.
+  mecha-machine write failed its policies; initdb gives it `BYPASSRLS`.
 - It does grant `BYPASSRLS` and `REPLICATION` to a role it made, so electric's
   role is compose's.
 - **Electric's storage cannot be a bucket.** Its shape metadata is SQLite,
@@ -698,7 +698,7 @@ What bit on a real instance:
   emit.cue writes re-runnable run again on every release. `005_create_tables`
   creates a new entity's table and leaves every other alone; `006_policies`,
   `007_txid` and `008_publication` restate every policy, trigger and
-  publication; `016_mecha_actors` replaces the hybrid machines' functions and
+  publication; `016_mecha_actors` replaces the mecha machines' functions and
   triggers, so a changed guard, rule or port reaches games already in play,
   keeping their instances, and refuses a new protocol `version`, whose
   instances need a migration. A column added to an existing entity is still

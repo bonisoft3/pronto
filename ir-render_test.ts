@@ -68,15 +68,16 @@ const program: Program = {
       Tick: { ir: "Tick", table: "tick", durability: "tab", level: "local", fields: [{ name: "id", type: "uuid", pk: true }], writers: [] },
       Quoted: { ir: 'Quoted "Thing"', table: "quoted thing", durability: "device", level: "local", fields: [{ name: "id", type: "uuid", pk: true }, { name: 'game "id"', type: "uuid", ref: "game" }], writers: [] },
     },
-    machines: {
-      GameMachine: {
+    mecha: {
+      reducers: { reducer: { machine: {}, rules: "rules.js", reducer: {} } },
+      rows: { GameMachine: {
         ir: "GameMachine",
         entity: "Game",
         field: "status",
         initial: "pending",
         level: "external",
         states: { pending: { on: { pay: "charging" } }, charging: { invoke: { src: "charge", onDone: "settled", onError: "failed" } }, settled: { type: "final" }, failed: { on: { retry: "pending" } } },
-      },
+      } },
     },
     effects: { charge: { ir: "charge", sink: { origin: "https://api.acquirer.example", idempotent: false }, reentry: "reconcile", note: "the acquirer answers a charge by key" } },
   },
@@ -234,7 +235,7 @@ Deno.test("delivery follows the sink: the card's chip and the machine's panel sa
 });
 
 Deno.test("a chart's D2 draws every arrow by its event, an invoking state dashed, a final state as a ring", () => {
-  const machine = program.state.machines!.GameMachine;
+  const machine = program.state.mecha!.rows!.GameMachine;
   const d2 = chartD2({ initial: machine.initial!, states: machine.states! });
   assertStringIncludes(d2, '"charging": {label: "charging\\ninvoke charge"; style.stroke-dash: 3}');
   assertStringIncludes(d2, '"settled": {shape: circle; style.double-border: true}');

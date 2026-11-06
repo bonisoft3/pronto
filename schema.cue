@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bonisoft3/pronto/clusters:mecha"
+	mechaCluster "github.com/bonisoft3/pronto/clusters:mecha"
 	"github.com/bonisoft3/pronto/resilience"
 	"github.com/bonisoft3/pronto/scales"
 	"github.com/bonisoft3/pronto/terminals:omnishell"
@@ -708,7 +708,7 @@ import (
 	wasm: *[] | [...string]
 	// What its module may use past the language, as an omnishell module
 	// declares Intl: Crypto among them. Undeclared, a use is a refusal.
-	endowments: *[] | [...mecha.#CageEndowment]
+	endowments: *[] | [...mechaCluster.#CageEndowment]
 	onComplete?: string & =~"^[a-z_][a-z0-9_]{0,62}$"
 }
 
@@ -1089,7 +1089,7 @@ import (
 	// one, is a header the airlock adds to every call from a declared secret,
 	// which the handler never holds. Or a declared bridge, for a sink that
 	// does not speak HTTP, or mecha's AI gateway (`ai: "text" | "image"`).
-	sink: {origin: mecha.#Origin, credential?: #Credential} | {bridge: string} | {ai: mecha.#AiModality, tier: *"cheap" | mecha.#AiBackendTier}
+	sink: {origin: mechaCluster.#Origin, credential?: #Credential} | {bridge: string} | {ai: mechaCluster.#AiModality, tier: *"cheap" | mechaCluster.#AiBackendTier}
 	// What a handler does when the ledger shows an earlier entry that may have
 	// reached the sink. An idempotent sink is simply called again; a repeat
 	// is called again too, and `note` says why a duplicate is acceptable.
@@ -1107,7 +1107,7 @@ import (
 	secrets?: [...#SecretName]
 	// What its handler may use past the language, as an omnishell module
 	// declares Intl: Crypto to sign with, TextEncoder to give it bytes.
-	endowments?: [...mecha.#CageEndowment]
+	endowments?: [...mechaCluster.#CageEndowment]
 }
 
 // What a sink reads a caller's credential from: `Authorization: Bearer <key>`
@@ -1537,8 +1537,8 @@ import (
 		cortex?: [string]: #CortexMachine
 		// A Mecha machine as XState writes it, its Jessie rules, and the
 		// internal form the compilers read, derived.
-		hybrids?: [Name=string]: H={
-			machine: mecha.#Machine & {config: id: Name}
+		mecha: reducers: [Name=string]: H={
+			machine: mechaCluster.#Machine & {config: id: Name}
 			rules:   string
 			reducer: (#Reducer & {machine: H.machine}).out
 		}
@@ -1563,9 +1563,9 @@ import (
 		drains: [Name=string]: #Drain & {name: Name}
 		computations: [Name=string]: #Computation & {name: Name}
 		schedules: [Name=string]: #Schedule & {name: Name}
-		machines?: [Name=string]: #MechaMachine & {name: Name}
+		mecha: rows: [Name=string]: #MechaMachine & {name: Name}
 		if A.state.cortex != _|_ {
-			machines: {for chartName, sourceChart in A.state.cortex if sourceChart.config.meta != _|_ if sourceChart.config.meta.host != _|_ if sourceChart.config.meta.host == "mecha" {
+			mecha: rows: {for chartName, sourceChart in A.state.cortex if sourceChart.config.meta != _|_ if sourceChart.config.meta.host != _|_ if sourceChart.config.meta.host == "mecha" {
 				(chartName): {
 					name: chartName
 					cortex: {
@@ -1602,7 +1602,7 @@ import (
 		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
 		effects?: [Name=string]: #ExternalEffect & {name: Name}
 		// An Airlock-facing endpoint of a declared container hatch.
-		bridges?: [Name=string]: mecha.#Bridge & {name: Name}
+		bridges?: [Name=string]: mechaCluster.#Bridge & {name: Name}
 		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
 		// Seed rows held as data rather than stated: a JSON file beside the
 		// program, outside its package, keyed by entity name —
@@ -1621,8 +1621,8 @@ import (
 	// entity's rows are the program's own and render into shell.yaml.
 	#Seed: {for n, e in A.state.entities if e.server {
 		(n)?: e.seed & [...{
-			if A.state.machines != _|_
-			for _, m in A.state.machines if m.entity == n || m.entity == e.table
+			if A.state.mecha.rows != _|_
+			for _, m in A.state.mecha.rows if m.entity == n || m.entity == e.table
 			if m.field != _|_ if m.initial != _|_ {
 				(m.field)?: or([for state, _ in m.states {state}])
 			}
@@ -1634,8 +1634,8 @@ import (
 		// remain the terminal's; only reader-supplied images may name a scheme.
 		resources?: [string]: {
 			kind: "img" | "font" | "media" | "frame" | "connect"
-			source: mecha.#Origin | "https:"
-			if kind != "img" {source: mecha.#Origin}
+			source: mechaCluster.#Origin | "https:"
+			if kind != "img" {source: mechaCluster.#Origin}
 			note: string & !=""
 		}
 		// Passed through to shell.yaml verbatim: the terminal owns the login
@@ -1717,10 +1717,10 @@ import (
 		// (`cheap`, `heavy`) route through mecha's tsbifrost AI gateway; the
 		// `browser` tier runs in an `agent` worker unit via `capabilities.vendored`.
 		ai?: {
-			text?:    *["browser", "cheap", "heavy"] | ([...mecha.#AiTier] & list.UniqueItems())
-			image?:   *["browser", "cheap", "heavy"] | ([...mecha.#AiTier] & list.UniqueItems())
-			models?:  mecha.#AiTierOverrides
-			targets?: [("browser" | "pages" | "docker" | "local" | "cloudflare" | "gcp" | "k8s" | "aws")]: mecha.#AiTierOverrides
+			text?:    *["browser", "cheap", "heavy"] | ([...mechaCluster.#AiTier] & list.UniqueItems())
+			image?:   *["browser", "cheap", "heavy"] | ([...mechaCluster.#AiTier] & list.UniqueItems())
+			models?:  mechaCluster.#AiTierOverrides
+			targets?: [("browser" | "pages" | "docker" | "local" | "cloudflare" | "gcp" | "k8s" | "aws")]: mechaCluster.#AiTierOverrides
 		}
 		// Escape hatches (ir kind "hatch"): what pronto is told not to look
 		// inside. A `container` hatch withholds a service, whose definition is
@@ -1827,7 +1827,7 @@ import (
 			// written `{}`: its shape is the memo's key and columns, derived.
 			ports: {
 				reads: [...string]
-				raises: [string]: #HybridShape & {type: "object"}
+				raises: [string]: #MechaShape & {type: "object"}
 			}
 			// An agent is a question whose answer lands in a memo (Michie's memo
 			// table, 1968: answers addressed by what was asked); a unit that
@@ -2013,12 +2013,12 @@ import (
 
 	state: entities: {for en, e in A.state.entities {
 		(en): validations: close({
-			if A.state.machines != _|_ for mn, m in A.state.machines if m.entity == en || m.entity == e.table
+			if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m.entity == en || m.entity == e.table
 			for gn, g in m.guards {
 				(gn): g & {
 					machine: mn
 					on: [for op, tr in m._on if list.Contains(tr.guard, gn) {op}]
-					let ordinal = [for i, name in list.SortStrings([for other, om in A.state.machines if om.entity == en || om.entity == e.table {"trg_\(e.table)_\(other)_reducer"}]) if name == "trg_\(e.table)_\(mn)_reducer" {i}][0]
+					let ordinal = [for i, name in list.SortStrings([for other, om in A.state.mecha.rows if om.entity == en || om.entity == e.table {"trg_\(e.table)_\(other)_reducer"}]) if name == "trg_\(e.table)_\(mn)_reducer" {i}][0]
 					order: {for op, tr in m._on for i, name in tr.guard if name == gn {(op): [ordinal, i]}}
 				}
 			}
@@ -2028,55 +2028,55 @@ import (
 	// name or by table) and then field: its initial state and its states, read
 	// once here for every column's lookup (#machineColumn). A machine reads the
 	// App, so a lookup handed the machines themselves copies the App each time.
-	_machineColumns: {if A.state.machines != _|_ for _, m in A.state.machines if m.field != _|_ if m.initial != _|_
+	_machineColumns: {if A.state.mecha.rows != _|_ for _, m in A.state.mecha.rows if m.field != _|_ if m.initial != _|_
 		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
 			(en): (m.field): {initial: m.initial, states: [for n, _ in m.states {n}]}
 		}
 	}
-	state: machines: [mn=string]: {
-		let m = A.state.machines[mn]
+	state: mecha: rows: [mn=string]: {
+		let m = A.state.mecha.rows[mn]
 		for en, e in A.state.entities if m.entity == en || m.entity == e.table {
 			level: [if len([if m.states != _|_ for st in m.states if st.invoke != _|_ {st}]) > 0 {"external"}, if m.states == _|_ if len(m._actions) == 0 {e.level}, "replicated"][0]
 		}
 	}
 
 	_lifecycleViolations: list.Concat([
-		[if A.state.machines != _|_ for mn, m in A.state.machines for op, tr in m._on if len([for name, _ in {for g in tr.guard {(g): true}} {name}]) != len(tr.guard) {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows for op, tr in m._on if len([for name, _ in {for g in tr.guard {(g): true}} {name}]) != len(tr.guard) {
 			"lifecycle machine \(mn).\(op) repeats a guard"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines for op, tr in m._on for gn in tr.guard if m.guards[gn] == _|_ {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows for op, tr in m._on for gn in tr.guard if m.guards[gn] == _|_ {
 			"lifecycle machine \(mn).\(op) names undeclared guard \(gn)"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines for gn, _ in m.guards if len([for op, tr in m._on if list.Contains(tr.guard, gn) {op}]) == 0 {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows for gn, _ in m.guards if len([for op, tr in m._on if list.Contains(tr.guard, gn) {op}]) == 0 {
 			"lifecycle machine \(mn) declares unused guard \(gn)"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 if m.states != _|_ {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if len(m.guards) > 0 if m.states != _|_ {
 			"machine \(mn) puts lifecycle guards on a statechart"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines if m.on != _|_ for en, e in A.state.entities if m.entity == en || m.entity == e.table if len("trg_\(e.table)_\(m.name)_reducer") > 63 {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m.on != _|_ for en, e in A.state.entities if m.entity == en || m.entity == e.table if len("trg_\(e.table)_\(m.name)_reducer") > 63 {
 			"lifecycle interpreter name exceeds Postgres's 63-byte limit: \(mn)"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 for a in m._actions if a.assign != _|_ {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if len(m.guards) > 0 for a in m._actions if a.assign != _|_ {
 			"guarded lifecycle machine \(mn) cannot assign NEW after the write; use a relational action"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines if len(m.guards) > 0 if m.timing != _|_ if m.timing != "AFTER" {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if len(m.guards) > 0 if m.timing != _|_ if m.timing != "AFTER" {
 			"lifecycle guards require AFTER timing: \(mn)"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines for en, e in A.state.entities if m.entity == en || m.entity == e.table if !e.server if m.states != _|_ || len(m._actions) > 0 {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows for en, e in A.state.entities if m.entity == en || m.entity == e.table if !e.server if m.states != _|_ || len(m._actions) > 0 {
 			"machine \(mn) requires a server-held entity for actions or a statechart: \(en)"
 		}],
 	])
 	_lifecycleRefusal: [if len(_lifecycleViolations) == 0 {true}, _lifecycleViolations[0]][0] & true
 
 	_machineActions: list.Concat([
-        [if A.state.machines != _|_ for mName, m in A.state.machines {machine: mName, actions: m._actions}],
-        [if A.state.hybrids != _|_ for mName, m in A.state.hybrids {machine: mName, actions: [for _, phase in m.reducer.states for _, transition in phase.on if transition.actions != _|_ for actionSpec in transition.actions {actionSpec}]}],
+        [if A.state.mecha.rows != _|_ for mName, m in A.state.mecha.rows {machine: mName, actions: m._actions}],
+        [if A.state.mecha.reducers != _|_ for mName, m in A.state.mecha.reducers {machine: mName, actions: [for _, phase in m.reducer.states for _, transition in phase.on if transition.actions != _|_ for actionSpec in transition.actions {actionSpec}]}],
     ])
     _machineCalls: [for caller in _machineActions for actionSpec in caller.actions for call in [
         if actionSpec.spawn != _|_ {{kind: "spawn", target: actionSpec.spawn.machine}},
         if actionSpec.send != _|_ {{kind: "send", target: actionSpec.send.machine, event: actionSpec.send.event}},
     ] {call}]
-    _callTargets: [if A.state.hybrids != _|_ {A.state.hybrids}, {}][0]
+    _callTargets: [if A.state.mecha.reducers != _|_ {A.state.mecha.reducers}, {}][0]
     _machineCallViolations: list.Concat([
         [for call in _machineCalls if _callTargets[call.target] == _|_ {"undeclared Mecha operation target: \(call.target)"}],
         [for call in _machineCalls if _callTargets[call.target] != _|_ if call.kind == "spawn" if _callTargets[call.target].reducer.initialize == _|_ {"Mecha spawn requires an initializer: \(call.target)"}],
@@ -2166,7 +2166,7 @@ import (
 	_cortexSignalViolations: [for n in _cortexNodes for k, _ in n.on if strings.HasPrefix(k, "signal:")
 		let parts = strings.SplitN(strings.TrimPrefix(k, "signal:"), ".", 2)
 		let entity = [if len(parts) == 2 if A._entityByTable[parts[0]] != _|_ {A._entityByTable[parts[0]]}, ""][0]
-		let states = [if A.state.machines != _|_ for _, m in A.state.machines if m.entity == entity {m.states}]
+		let states = [if A.state.mecha.rows != _|_ for _, m in A.state.mecha.rows if m.entity == entity {m.states}]
 		if len(parts) != 2 || entity == "" || len(states) == 0 || states[0][parts[len(parts)-1]] == _|_ {
 			"\(n.chart).\(n.state): \(k) names no state of a Mecha machine on its table"
 		}]
@@ -2174,46 +2174,46 @@ import (
 	// The XState a Mecha machine cannot run is refused rather than read as
 	// something else: its step is its reducer's, so it invokes nothing, and an
 	// event names one transition.
-	_hybridViolations: list.Concat([[if A.state.hybrids != _|_ for hName, h in A.state.hybrids for sName, st in h.machine.config.states for v in list.Concat([
-		[if st.invoke != _|_ {"hybrid \(hName).\(sName): a Mecha machine invokes nothing"}],
-		[if st.on != _|_ for ev, tv in st.on if (tv & [...]) != _|_ if len(tv) != 1 {"hybrid \(hName).\(sName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"}],
+	_mechaViolations: list.Concat([[if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers for sName, st in h.machine.config.states for v in list.Concat([
+		[if st.invoke != _|_ {"mecha \(hName).\(sName): a Mecha machine invokes nothing"}],
+		[if st.on != _|_ for ev, tv in st.on if (tv & [...]) != _|_ if len(tv) != 1 {"mecha \(hName).\(sName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"}],
 		// XState takes the machine's transition when the state's own guard
 		// refuses; one event names one transition here, so it is the state's
 		// or the machine's.
-		[if h.machine.config.on != _|_ if st.on != _|_ for ev, _ in st.on if h.machine.config.on[ev] != _|_ {"hybrid \(hName).\(sName).on.\(ev): the machine takes \(ev) in every state; a state does not take it as well"}],
-	]) {v}], [if A.state.hybrids != _|_ for hName, h in A.state.hybrids if h.machine.config.on != _|_ for ev, tv in h.machine.config.on if (tv & [...]) != _|_ if len(tv) != 1 {
-		"hybrid \(hName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"
+		[if h.machine.config.on != _|_ if st.on != _|_ for ev, _ in st.on if h.machine.config.on[ev] != _|_ {"mecha \(hName).\(sName).on.\(ev): the machine takes \(ev) in every state; a state does not take it as well"}],
+	]) {v}], [if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers if h.machine.config.on != _|_ for ev, tv in h.machine.config.on if (tv & [...]) != _|_ if len(tv) != 1 {
+		"mecha \(hName).on.\(ev): an event names one transition; a guarded alternative belongs in the guard"
 	}]])
-	_hybridRefusal: [if len(_hybridViolations) == 0 {true}, _hybridViolations[0]][0] & true
+	_mechaRefusal: [if len(_mechaViolations) == 0 {true}, _mechaViolations[0]][0] & true
 	// A machine's surface columns hold its own values: a seat's view, a
 	// command's request and an open's input are json columns whose cel is the
 	// one cel-shape.cue renders from the machine, so the value a settle writes
 	// and the value the terminal proposes are judged by one text.
 	_surfaceEntities: {if A.state.entities != _|_ for n, e in A.state.entities {(e.table): e}}
-	_surfaceViolations: list.Concat([if A.state.hybrids != _|_ for hName, h in A.state.hybrids {
+	_surfaceViolations: list.Concat([if A.state.mecha.reducers != _|_ for hName, h in A.state.mecha.reducers {
 		let seat = _surfaceEntities["\(hName)_seat"]
 		let command = _surfaceEntities["\(hName)_command"]
 		let open = _surfaceEntities["\(hName)_open"]
 		list.Concat([
 			[if seat != _|_ for f in seat.fields if f.name == "view" {
 				let want = (#ShapeCel & {shape: h.reducer.view}).out
-				if f.type != "json" {"hybrid \(hName): \(seat.table).view holds the view, so it is json"}
-				if f.type == "json" if f.cel == _|_ {"hybrid \(hName): \(seat.table).view states no cel; #ShapeCel renders the view's"}
-				if f.type == "json" if f.cel != _|_ if f.cel != want {"hybrid \(hName): \(seat.table).view's cel is not the view's as #ShapeCel renders it"}
+				if f.type != "json" {"mecha \(hName): \(seat.table).view holds the view, so it is json"}
+				if f.type == "json" if f.cel == _|_ {"mecha \(hName): \(seat.table).view states no cel; #ShapeCel renders the view's"}
+				if f.type == "json" if f.cel != _|_ if f.cel != want {"mecha \(hName): \(seat.table).view's cel is not the view's as #ShapeCel renders it"}
 			}],
 			[if command != _|_ for f in command.fields if f.name == "request" {
 				let want = (#RequestCel & {events: [for ev, e in h.reducer.events if e.tier == "omnishell" {ev}]}).out
-				if f.type != "json" {"hybrid \(hName): \(command.table).request holds the request, so it is json"}
-				if f.type == "json" if f.cel == _|_ {"hybrid \(hName): \(command.table).request states no cel; #RequestCel renders the envelope's"}
-				if f.type == "json" if f.cel != _|_ if f.cel != want {"hybrid \(hName): \(command.table).request's cel is not the envelope's as #RequestCel renders it"}
+				if f.type != "json" {"mecha \(hName): \(command.table).request holds the request, so it is json"}
+				if f.type == "json" if f.cel == _|_ {"mecha \(hName): \(command.table).request states no cel; #RequestCel renders the envelope's"}
+				if f.type == "json" if f.cel != _|_ if f.cel != want {"mecha \(hName): \(command.table).request's cel is not the envelope's as #RequestCel renders it"}
 			}],
-			[if open != _|_ for f in open.fields if f.name == "input" if f.type != "json" {"hybrid \(hName): \(open.table).input holds the input, so it is json"}],
+			[if open != _|_ for f in open.fields if f.name == "input" if f.type != "json" {"mecha \(hName): \(open.table).input holds the input, so it is json"}],
 		])
 	}])
 	_surfaceRefusal: [if len(_surfaceViolations) == 0 {true}, _surfaceViolations[0]][0] & true
 	_machineHatches: {
-		if A.state.machines != _|_ for mn, m in A.state.machines {(mn): m.hatches}
-		if A.state.hybrids != _|_ for mn, m in A.state.hybrids {("reducer:\(mn)"): m.reducer.hatches}
+		if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows {(mn): m.hatches}
+		if A.state.mecha.reducers != _|_ for mn, m in A.state.mecha.reducers {("reducer:\(mn)"): m.reducer.hatches}
 	}
 
 	_machineHatchViolations: list.Concat([
@@ -2228,8 +2228,8 @@ import (
 
 	// A machine names its entity by name or table, as emit.cue resolves it.
 	_machineEntityViolations: [
-		if A.state.machines != _|_
-		for mName, m in A.state.machines
+		if A.state.mecha.rows != _|_
+		for mName, m in A.state.mecha.rows
 		if len([for en, e in A.state.entities if en == m.entity || e.table == m.entity {en}]) == 0 {
 			"machine \(mName) names undeclared entity: \(m.entity)"
 		},
@@ -2237,10 +2237,10 @@ import (
 	_machineEntityRefusal: [if len(_machineEntityViolations) == 0 {true}, _machineEntityViolations[0]][0] & true
 
 	_machineStateViolations: list.Concat([
-		[if A.state.machines != _|_ for mn, m in A.state.machines if m.states != _|_ if m.on != _|_ {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m.states != _|_ if m.on != _|_ {
 			"machine \(mn) combines states and lifecycle handlers: declare separate machines"
 		}],
-		if A.state.machines != _|_ for mn, m in A.state.machines if m.field != _|_ if m.initial != _|_ for en, e in A.state.entities if en == m.entity || e.table == m.entity {
+		if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m.field != _|_ if m.initial != _|_ for en, e in A.state.entities if en == m.entity || e.table == m.entity {
 			list.Concat([
 				[if m.states[m.initial] == _|_ {"machine \(mn) initial \(m.initial) is not a state"}],
 				[if !list.Contains([for f in e.fields {f.name}], m.field) {"machine \(mn) field \(m.field) is not a column of \(en)"}],
@@ -2264,7 +2264,7 @@ import (
 	])
 	_machineStateRefusal: [if len(_machineStateViolations) == 0 {true}, _machineStateViolations[0]][0] & true
 
-	_timedMachines: [if A.state.machines != _|_ for _, m in A.state.machines if m._timed {m}]
+	_timedMachines: [if A.state.mecha.rows != _|_ for _, m in A.state.mecha.rows if m._timed {m}]
 	_timerViolations: list.Concat([
 
 		[if len(A._timedMachines) > 0 for target in A.meta.targets if target == "pages" {
@@ -2273,16 +2273,16 @@ import (
 		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "pages" if target != "cloudflare" if !list.Contains(A.meta.clocks, target) {
 			"server timers require a declared clock for \(target)"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if !e.server {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if !e.server {
 			"timed machine \(mn) requires a server-held entity"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if len([for f in e.fields if f.pk {f}]) == 0 {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if len([for f in e.fields if f.pk {f}]) == 0 {
 			"timed machine \(mn) requires a primary key"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines for t in m._timers if m.states[t.target] == _|_ {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows for t in m._timers if m.states[t.target] == _|_ {
 			"timed machine \(mn) state \(t.state) targets missing state \(t.target)"
 		}],
-		[if A.state.machines != _|_ for mn, m in A.state.machines if m.states != _|_ for sn, st in m.states if st.type != _|_ if st.type == "final" if st.after != _|_ {
+		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m.states != _|_ for sn, st in m.states if st.type != _|_ if st.type == "final" if st.after != _|_ {
 			"machine \(mn) final state \(sn) cannot declare after"
 		}],
 		[if len(A._timedMachines) > 0 for en, e in A.state.entities if e.table == "schedule" || e.table == "machine_timer_tick" {
@@ -2355,8 +2355,8 @@ import (
 
 	_effects: [if A.state.effects != _|_ {A.state.effects}, {}][0]
 	_invokes: [
-		if A.state.machines != _|_
-		for mName, m in A.state.machines
+		if A.state.mecha.rows != _|_
+		for mName, m in A.state.mecha.rows
 		if m.states != _|_
 		for sName, st in m.states
 		if st.invoke != _|_ {
@@ -2428,7 +2428,7 @@ import (
 		[for i in _invokes for ar in i.arrows for a in ar.actions if a.reject != _|_ {
 			"machine \(i.machine) state \(i.state): an outcome's actions reject, which would refuse the recorded outcome's delivery"
 		}],
-		[for i in _invokes let m = A.state.machines[i.machine]
+		[for i in _invokes let m = A.state.mecha.rows[i.machine]
 		for actions in list.Concat([
 			[if m.states[i.state].exit != _|_ {m.states[i.state].exit}],
 			[for ar in i.arrows if m.states[ar.target] != _|_ if m.states[ar.target].entry != _|_ {m.states[ar.target].entry}],
@@ -2527,8 +2527,8 @@ import (
 	_streamRefusal: [if len(_undeclaredStreams) == 0 {true}, "machine \(_undeclaredStreams[0].machine) references undeclared duckstream: \(_undeclaredStreams[0].stream)"][0] & true
 
 	_deleteActions: [
-		if A.state.machines != _|_
-		for mName, m in A.state.machines {
+		if A.state.mecha.rows != _|_
+		for mName, m in A.state.mecha.rows {
 			machine: mName
 			actions: list.Concat([
 				[if m.on != _|_ if m.on.delete != _|_ for act in [if (m.on.delete & [...]) != _|_ {m.on.delete}, [m.on.delete]][0] {act}],

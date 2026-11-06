@@ -36,6 +36,12 @@
     response_header_timeout 40s
   }
 }
+(bounded-hatch) {
+  transport http {
+    dial_timeout 2s
+    response_header_timeout 30s
+  }
+}
 # The cluster's one door, h2 and h3 over TLS: libraries/mecha/docs/proxy.md.
 
 # Every file the door serves, answered with its validator: mecha's caddy
@@ -348,7 +354,7 @@
       header Cache-Control "no-cache"
       @file file {path} {path}/index.html
       rewrite @file {http.matchers.file.relative}
-      @route path / /grid /grid/ /pt-br /pt-br/ /pt-br/grid /pt-br/grid/ /pt-br/timer /pt-br/timer/ /pt-br/todo /pt-br/todo/ /timer /timer/ /todo /todo/
+      @route expression `{http.request.uri}.matches("^(?:/|/grid/?|/pt-br/?|/pt-br/grid/?|/pt-br/timer/?|/pt-br/todo/?|/timer/?|/todo/?)(?:\\?.*)?$")`
       rewrite @route /shell/index.html
       import files
     }

@@ -7,7 +7,7 @@ status: partially-built
 
 # External effects
 
-[Hybrid machines](2026-09-29-hybrid-machines.md) gives level 4 to cortex, the
+[Cortex machines](2026-09-29-cortex-machines.md) gives level 4 to cortex, the
 coordinator, alone. Until now the door it coordinates through was half built: a `#SagaEffect` inserted a `saga` row and sent a `pg_notify`,
 and nothing read either. This record closes the door. A machine *invokes* an **external
 effect**. Mecha's **airlock** performs it against a declared **sink**. The answer comes back as
@@ -156,8 +156,8 @@ does not. A ledger pronto owns has three uses an engine's private record would n
 
 ## The airlock
 
-Cortex coordinates across tiers ([hybrid
-machines](2026-09-29-hybrid-machines.md#4-cortex-coordination-and-level-4-external-effects));
+Cortex coordinates across tiers ([mecha
+machines](2026-09-29-cortex-machines.md#4-cortex-coordination-and-level-4-external-effects));
 when a coordination must leave the cluster, it does so through the **airlock**. The
 airlock is a mecha service, `libraries/mecha/services/airlock`, on Deno, with Graphile
 Worker as its queue. It is the only place in a cluster where code reaches the world

@@ -464,7 +464,7 @@ export async function derive(appDir: string): Promise<void> {
       pipelines?: Record<string, { fold?: { src: string; pair: { table: string } } }>;
       computations?: Record<string, { src: string; wasm: string[]; endowments: string[] }>;
       effects?: Record<string, { endowments?: string[] }>;
-      machines?: Record<string, unknown>;
+      mecha?: { rows?: Record<string, unknown>; reducers?: Record<string, unknown> };
       seed?: { src: string };
     };
     meta?: { i18n?: { default?: string; locales?: Record<string, { path: string }> } };
@@ -786,7 +786,7 @@ export async function derive(appDir: string): Promise<void> {
   const seed_vetted: { src: string; key: string }[] = [];
   if (seedSrc !== undefined) {
     const bytes = await Deno.readFile(`${appDir}/${seedSrc}`).catch((e) => fail(`${seedSrc}: state.seed names it, and it does not open: ${e.message}`));
-    const key = await seedKey(bytes, entities, await Deno.readTextFile(`${appDir}/program_cel.cue`), state.machines);
+    const key = await seedKey(bytes, entities, await Deno.readTextFile(`${appDir}/program_cel.cue`), state.mecha?.rows);
     const previous = await ifMissing(Deno.readTextFile(`${appDir}/.pronto/facts.json`), null);
     const vetted = previous !== null &&
       ((JSON.parse(previous).seed_vetted ?? []) as { src: string; key: string }[]).some((r) => r.src === seedSrc && r.key === key);

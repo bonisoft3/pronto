@@ -543,7 +543,7 @@ code: state: {
     id: "0xc75ee275aaa2d972", table: "payment", durability: "server"
     fields: [{name: "id", ordinal: 1, type: "uuid", pk: true}, {name: "status", ordinal: 2, type: "string"}]
   }
-  machines: PaymentMachine: {
+  mecha: rows: PaymentMachine: {
     entity: "Payment", field: "status", initial: "pending"
     states: {
       pending: on: start: "running"

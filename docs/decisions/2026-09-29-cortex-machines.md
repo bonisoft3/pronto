@@ -1,11 +1,11 @@
 ---
 type: decision
-title: "Hybrid machines: omnishell, mecha, duckstream and cortex"
+title: "Cortex machines: omnishell, mecha, duckstream and cortex"
 description: Extending unbreakable statecharts to the backend — splitting client UI, relational transactions, streaming IVM / lake compute, and durable Level 4 orchestration into four pure-to-external tiers.
 status: partially-built
 ---
 
-# Hybrid machines: omnishell, mecha, duckstream and cortex
+# Cortex machines: omnishell, mecha, duckstream and cortex
 
 The unbreakable machine of [machines.md](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/machines.md) was designed
 for the browser: a chart closed over one row whose transitions emit typed effects the
@@ -177,7 +177,7 @@ command. Cortex composes existing Mecha ports, transactional actions and
 Airlock effects; it introduces no other lock, transaction, saga or delivery
 implementation.
 
-Today's reducer machine (`#MechaReducerMachine`, alias `#HybridMachine`) glues
+Today's reducer machine (`#MechaReducerMachine`) glues
 both sides. Its tier-tagged events, typed state and per-viewer views, its
 initializer and the choice of running it in PostgreSQL or the browser are
 Cortex's; its locks, ports, `requires.sql`, relational actions and fuel are
@@ -267,14 +267,13 @@ Sequence, one transformation per change:
    one dispatch model; realworld's guard machine and the fixtures migrate.
 5. **The domain chart moves into `#CortexMachine`** with tier-owned states; the
    compiler projects the Mecha part into `mecha.#Machine` and the same chart,
-   projected for the terminal, is the arena's handler. `#MechaReducerMachine`
-   and `#HybridMachine` go.
+   projected for the terminal, is the arena's handler. `#MechaReducerMachine` goes.
 
 ---
 
-## 5. How Hybrid Machines Drive Cortex and DuckStream
+## 5. How Mecha Machines Drive Cortex and DuckStream
 
-Hybrid state machines in Pronto compile transitions that seamlessly trigger across tiers:
+Mecha state machines in Pronto compile transitions that seamlessly trigger across tiers:
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -378,7 +377,7 @@ relational preconditions remain in Mecha declarations.
 
 The stable contracts live in [[../cortex|Cortex machines]] and
 [Mecha machines](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/machines.md). The
-execution proof in `apps/truco/docs/hybrid-machine-proof.md` also checks
+execution proof in `apps/truco/docs/mecha-machine-proof.md` also checks
 shared local/PostgreSQL reductions and private projections. The pinned PLV8
 build's native timeout verification gap remains advisory; adoption assumes the
 timeout contract and retains deterministic fuel.
@@ -388,7 +387,7 @@ two-, four- and six-seat tables, the ticker's timeouts and lease lapses, and two
 readers completing a match through PostgREST with every row resent once. This
 is not full-shell browser acceptance
 or a proof that the application is bug-free. Current behavior and limitations
-belong in Truco's online reference, `apps/truco/docs/online-hybrid.md`.
+belong in Truco's online reference, `apps/truco/docs/online-mecha.md`.
 
 The immediate priority is delivering that multiplayer slice with the primitives
 already built: validate the real two-browser journey, fix concrete usability
@@ -527,7 +526,7 @@ domains:
      scans over raw events byte-for-byte.
 3. **Algolia / Pinecone (Semantic Search over arXiv)**:
    - *Tiers*: DuckLake (100,000 paper abstracts in Parquet) + DuckStream / JAX (zero-copy
-     Arrow scan, TF-IDF + dense embedding projection) + Mecha (hybrid lexical/vector ranking).
+     Arrow scan, TF-IDF + dense embedding projection) + Mecha (mecha lexical/vector ranking).
    - *Invariant*: Sub-second full-corpus re-indexing and scoring entirely in-memory without
      an external search cluster.
 4. **Stripe / Airbnb (Escrow & Reservation Sagas)**:
@@ -567,11 +566,11 @@ domains:
 
 ## Adoption across Repository Flagship Applications (`./apps`)
 
-Every existing application in `./apps` with a PostgreSQL backend (migrations, publications, and RLS policies) derives tangible architectural guarantees from Hybrid Machines, finite statement timeouts, and level-3 relational effects:
+Every existing application in `./apps` with a PostgreSQL backend (migrations, publications, and RLS policies) derives tangible architectural guarantees from Mecha Machines, finite statement timeouts, and level-3 relational effects:
 
-| Application | Existing Mechanism | Hybrid Machine Adoption & Guarantees |
+| Application | Existing Mechanism | Mecha Machine Adoption & Guarantees |
 |---|---|---|
-| **`apps/truco`** | `state.hybrids` owns online games in all supported variant/seating combinations, lobby presence and challenges; the local arena plays the same `truco_match` in the terminal. | **Adopted**: surface rows with generated transactional commands, private views and receipts, under a Cortex root that hosts the arena, the bar and the online table. Its online reference, `apps/truco/docs/online-hybrid.md`, records evidence and limits; general Cortex hierarchy remains unbuilt. |
+| **`apps/truco`** | `state.mecha` owns online games in all supported variant/seating combinations, lobby presence and challenges; the local arena plays the same `truco_match` in the terminal. | **Adopted**: surface rows with generated transactional commands, private views and receipts, under a Cortex root that hosts the arena, the bar and the online table. Its online reference, `apps/truco/docs/online-mecha.md`, records evidence and limits; general Cortex hierarchy remains unbuilt. |
 | **`apps/chess`** | In-browser referee state machine and local time controls. | **Authoritative Turn Clocks**: Match state (`playing` $\rightarrow$ `over`) with strict termination reasons (`checkmate`, `resignation`, `flag`) backed by database-level clock expiration checks, preventing client clock manipulation. |
 
 ---

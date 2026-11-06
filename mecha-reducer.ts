@@ -1,13 +1,13 @@
-import { HYBRID_NAME } from "./hybrid-spec.ts";
+import { MECHA_NAME } from "./mecha-spec.ts";
 import type { MechaPorts, MechaPortSql } from "./mecha-ports.ts";
 import { jessieFacts } from "./jessie.ts";
 import { partsOf } from "./mecha-surface.ts";
 import { contracted } from "./mecha-contracts.ts";
 // Read as text, so it loads wherever this module does (an app's tests take it
 // by URL); deno.lock records the module import of the same file, not the text.
-import "./hybrid-runtime.js";
-import runtime from "./hybrid-runtime.js" with { type: "text" };
-import { hybridXStateSource } from "./hybrid-xstate.ts";
+import "./mecha-runtime.js";
+import runtime from "./mecha-runtime.js" with { type: "text" };
+import { mechaXStateSource } from "./mecha-xstate.ts";
 
 export type Shape =
   | { type: "string"; maxLength: number; values?: string[] }
@@ -53,36 +53,36 @@ export async function compileMechaReducer(
   terminal: Terminal,
   surface: Surface = { seat: [], public: [] },
 ): Promise<{ source: string; sql: string }> {
-  if (!HYBRID_NAME.test(spec.name)) throw new Error("invalid hybrid name");
-  if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid hybrid version");
-  if (!Number.isSafeInteger(spec.fuel) || spec.fuel < 1 || spec.fuel > 1000000) throw new Error("invalid hybrid fuel");
+  if (!MECHA_NAME.test(spec.name)) throw new Error("invalid mecha name");
+  if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid mecha version");
+  if (!Number.isSafeInteger(spec.fuel) || spec.fuel < 1 || spec.fuel > 1000000) throw new Error("invalid mecha fuel");
   const entropy = spec.entropy ?? 0;
-  if (!Number.isInteger(entropy) || entropy < 0 || entropy > 1024) throw new Error("invalid hybrid entropy");
-  if (spec.state.type !== "object" || spec.state.fields.phase?.type !== "string") throw new Error("hybrid state requires a phase string");
-  if (spec.view.type !== "object") throw new Error("hybrid view requires an object");
-  if (!Object.hasOwn(spec.states, spec.initial)) throw new Error("hybrid initial state is missing");
+  if (!Number.isInteger(entropy) || entropy < 0 || entropy > 1024) throw new Error("invalid mecha entropy");
+  if (spec.state.type !== "object" || spec.state.fields.phase?.type !== "string") throw new Error("mecha state requires a phase string");
+  if (spec.view.type !== "object") throw new Error("mecha view requires an object");
+  if (!Object.hasOwn(spec.states, spec.initial)) throw new Error("mecha initial state is missing");
   for (const [name, state] of Object.entries(spec.states)) {
-    if (state.final && (Object.keys(state.on).length || state.always?.length)) throw new Error(`hybrid final state ${name} has transitions`);
+    if (state.final && (Object.keys(state.on).length || state.always?.length)) throw new Error(`mecha final state ${name} has transitions`);
     for (const arrow of state.always ?? []) {
-      if (!Object.hasOwn(spec.states, arrow.target)) throw new Error(`hybrid missing target ${arrow.target}`);
+      if (!Object.hasOwn(spec.states, arrow.target)) throw new Error(`mecha missing target ${arrow.target}`);
     }
     for (const [event, arrow] of Object.entries(state.on)) {
-      if (!Object.hasOwn(spec.events, event)) throw new Error(`hybrid undeclared event ${event}`);
-      if (arrow.target !== undefined && !Object.hasOwn(spec.states, arrow.target)) throw new Error(`hybrid missing target ${arrow.target}`);
+      if (!Object.hasOwn(spec.events, event)) throw new Error(`mecha undeclared event ${event}`);
+      if (arrow.target !== undefined && !Object.hasOwn(spec.states, arrow.target)) throw new Error(`mecha missing target ${arrow.target}`);
     }
   }
   for (const event of Object.values(spec.events)) {
-    if (!["omnishell", "mecha"].includes(event.tier) || event.payload.type !== "object") throw new Error("invalid hybrid event declaration");
+    if (!["omnishell", "mecha"].includes(event.tier) || event.payload.type !== "object") throw new Error("invalid mecha event declaration");
   }
   contracted(spec);
   const facts = jessieFacts(source, "handler");
-  if (facts.references.length) throw new Error(`hybrid rules reach ${facts.references.join(", ")}`);
+  if (facts.references.length) throw new Error(`mecha rules reach ${facts.references.join(", ")}`);
   const script = `(() => {
     const spec = harden(${JSON.stringify(spec, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)});
-    const xstate = (${hybridXStateSource});
+    const xstate = (${mechaXStateSource});
     const rules = harden(${terminal.instrument(`(() => { ${source}\n })()`)});
     for (const name of ['project', 'invariant', ...(spec.public ? ['publish'] : []), ...(spec.initialize ? [spec.initialize.reduce] : []), ...Object.values(spec.states).flatMap(s => [...Object.values(s.on), ...(s.always ?? [])].flatMap(t => [...(t.reduce ? [t.reduce] : []), ...(t.guard ? [t.guard] : [])]))]) {
-      if (!Object.prototype.hasOwnProperty.call(rules, name) || typeof rules[name] !== 'function') throw new Error('hybrid missing function ' + name);
+      if (!Object.prototype.hasOwnProperty.call(rules, name) || typeof rules[name] !== 'function') throw new Error('mecha missing function ' + name);
     }
     const execute = (${runtime.trim()})(spec, rules, xstate.Statechart);
     return json => {
@@ -91,6 +91,7 @@ export async function compileMechaReducer(
       return JSON.stringify(answer);
     };
   })()`;
+  // Schema, protocol marker and SES guard survive function replacement in live databases.
   const schema = `hybrid_${spec.name}`;
   const body = `
 if (!globalThis.__prontoHybridSES) {
@@ -99,14 +100,14 @@ if (!globalThis.__prontoHybridSES) {
   Object.defineProperty(globalThis, '__prontoHybridSES', {value: true});
 }
 let spent = 0;
-const meter = harden(() => { if (++spent > ${spec.fuel}) throw new RangeError('hybrid fuel exhausted'); });
+const meter = harden(() => { if (++spent > ${spec.fuel}) throw new RangeError('mecha fuel exhausted'); });
 const cage = new Compartment();
 Object.defineProperty(cage.globalThis, '__fuel', {value: meter, writable: false, configurable: false});
 const run = cage.evaluate(${JSON.stringify(script)});
 return JSON.parse(run(JSON.stringify(input)));
 `;
   // An app's strings must never terminate either SQL function body.
-  let tag = "$hybrid$";
+  let tag = "$mecha$";
   while (body.includes(tag)) tag = tag.slice(0, -1) + "_$";
   const mecha = spec.mecha ?? {locks: "", transitions: []};
   const branches = mecha.transitions.map(t => {
@@ -329,7 +330,7 @@ BEGIN
     ELSIF reduced->>'kind' = 'rejected' THEN
       answer := reduced;
     ELSE
-      RAISE EXCEPTION 'invalid hybrid result';
+      RAISE EXCEPTION 'invalid mecha result';
     END IF;
   END IF;
   answer := answer || jsonb_build_object('command_id', command_id, 'revision', game.revision::text);

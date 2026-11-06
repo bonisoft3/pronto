@@ -37,7 +37,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "cortex-sql" | "local-handler" | "hybrid-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
+	format: "sql" | "cortex-sql" | "local-handler" | "mecha-reducer-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -1967,7 +1967,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	_seedFile: len(M.seeded) > 0 || M.code.state.seed != _|_
 	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
-	machines: [if M.code.state.machines != _|_ {[for _, m in M.code.state.machines for en, e in M.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
+	machines: [if M.code.state.mecha.rows != _|_ {[for _, m in M.code.state.mecha.rows for en, e in M.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	// The cluster copies this list into its database image, so it follows the
 	// predicate that emits the database: a migration named without one would be
@@ -1985,7 +1985,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"services/database/migrations/008_publication.sql",
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 if len([for r in M.raw if r.name == "010_machines.sql" {r}]) == 0 {"services/database/migrations/010_machines.sql"},
-		if M.code.state.hybrids != _|_ if len([for r in M.raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {"services/database/migrations/016_mecha_actors.sql"},
+		if len(M.code.state.mecha.reducers) > 0 if len([for r in M.raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {"services/database/migrations/016_mecha_actors.sql"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if M.code.state.cortex != _|_ for migration, _ in {
 			for _, c in M.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "mecha" {(c.config.meta.migration): true}
@@ -2103,8 +2103,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				outcomes: {verb: "lint", cmds: [_distribution.checks.outcomes], note: "declared presentation, source outcomes and workflow obligations"}
 
 				// What a Mecha machine can do, over its declarations.
-				if D.code.state.hybrids != _|_ {
-					hybrids: {verb: "lint", cmds: [_distribution.checks.hybrids], note: "Pronto Mecha machines"}
+				if len(D.code.state.mecha.reducers) > 0 {
+					mecha: {verb: "lint", cmds: [_distribution.checks.mecha], note: "Pronto Mecha machines"}
 				}
 
 				// A computation's tests run it as mecha's compute service does.
@@ -2265,6 +2265,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_walled: [if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.required {true}, false][0]
 }
 
+_pgrollDir: "services/database/pgroll"
+
 #DefaultCluster: D={
 	code!: _
 	statics: [...mecha.#Static]
@@ -2348,9 +2350,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 		state: {
 			migrations: (#appMigrations & {"code": D.code}).list
-			if D.code.state.migrations != _|_ {pgroll: D.code.state.migrations}
+			if D.code.state.migrations != _|_ {
+				pgroll: D.code.state.migrations
+				if len(D.code.state.migrations) > 0 {pgrollDir: _pgrollDir}
+			}
 			if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
-				effectInterpreters: strings.Join([for _, m in D.code.state.machines if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
+				effectInterpreters: strings.Join([for _, m in D.code.state.mecha.rows if m.states != _|_ if len([for _, st in m.states if st.invoke != _|_ {true}]) > 0 {
 					(#mechaMachineSql & {machine: m, entities: D.code.state.entities, effects: D.code.state.effects})._effectUpgradeSql
 				}], "\n\n")
 			}
@@ -3250,9 +3255,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_composedHandlers: {
 		if E.code.state.cortex != _|_ for _, cortexMachine in E.code.state.cortex if cortexMachine.setup != _|_ for name, actor in cortexMachine.setup.actors if list.Contains(["session", "sync", "local"], actor.via) if actor.handler != _|_ {
 			"shell/handlers/\(name).js": {
-				machine:  {machine: E.code.state.hybrids[actor.machine].reducer, rules: E.code.state.hybrids[actor.machine].rules}
+				machine:  {machine: E.code.state.mecha.reducers[actor.machine].reducer, rules: E.code.state.mecha.reducers[actor.machine].rules}
 				local:    actor.via == "local"
-				machines: {for n, h in E.code.state.hybrids {(n): h.reducer}}
+				machines: {for n, h in E.code.state.mecha.reducers {(n): h.reducer}}
 				src:      actor.handler
 			}
 		}
@@ -3350,8 +3355,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				terminal: true
 				types: {types: #types, aliases: #typeAlias}
 				entities: E.code.state.entities
-				hybrids: {if E.code.state.hybrids != _|_ for n, h in E.code.state.hybrids {(n): h.reducer}}
-				machines: {if E.code.state.machines != _|_ for n, m in E.code.state.machines {(n): m}}
+				reducers: {if len(E.code.state.mecha.reducers) > 0 for n, h in E.code.state.mecha.reducers {(n): h.reducer}}
+				machines: {if E.code.state.mecha.rows != _|_ for n, m in E.code.state.mecha.rows {(n): m}}
 				hatches: E.code.capabilities.hatches
 				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
 				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
@@ -3410,6 +3415,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		// publication, no bus wiring and no pipeline file, and the cluster it
 		// targets instantiates none of the services these configure.
 		if E._serverOn {
+			if E.code.state.migrations != _|_ for n, m in E.code.state.migrations {
+				"\(_pgrollDir)/\(n).json": {format: "json", data: m}
+			}
 			"services/database/migrations/004_types.sql": {
 				format: "type-sql"
 				data: [for _, e in E.code.state.entities if e.server for f in e.fields if f.type == "decimal" {precision: f.precision, scale: f.scale}]
@@ -3606,19 +3614,19 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				}
 			}
 
-			_machines: [if E.code.state.machines != _|_ {[for _, m in E.code.state.machines for en, e in E.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
+			_machines: [if E.code.state.mecha.rows != _|_ {[for _, m in E.code.state.mecha.rows for en, e in E.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
 			// A Mecha machine a Cortex state runs locally is the terminal's: a
 			// handler composing the app's module over the machine's own rules.
 			for path, local in E._composedHandlers {
 				"\(path)": {format: "local-handler", data: local}
 			}
-			if E.code.state.hybrids != _|_ if len([for r in E._raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {
+			if len(E.code.state.mecha.reducers) > 0 if len([for r in E._raw if r.name == "016_mecha_actors.sql" {r}]) == 0 {
 				// Each machine's surface is entities the app declares; the writer
 				// checks them against the machine before compiling.
-				"services/database/migrations/016_mecha_actors.sql": {format: "hybrid-sql", data: {
-					hybrids: {for n, h in E.code.state.hybrids {(n): {machine: h.reducer, rules: h.rules}}}
+				"services/database/migrations/016_mecha_actors.sql": {format: "mecha-reducer-sql", data: {
+					reducers: {for n, h in E.code.state.mecha.reducers {(n): {machine: h.reducer, rules: h.rules}}}
 					entities: E.code.state.entities
-					timers: [if len([for _, h in E.code.state.hybrids if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
+					timers: [if len([for _, h in E.code.state.mecha.reducers if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
 				}}
 			}
 			if len(_machines) > 0 if len([for r in E._raw if r.name == "010_machines.sql" {r}]) == 0 {
@@ -3633,8 +3641,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// lands; the sink as a Dapr output binding; and the handler the program
 			// authors in place.
 			_invoking: [
-				if E.code.state.machines != _|_
-				for _, m in E.code.state.machines if m.states != _|_
+				if E.code.state.mecha.rows != _|_
+				for _, m in E.code.state.mecha.rows if m.states != _|_
 				for sName, st in m.states if st.invoke != _|_
 				let x = E.code.state.effects[st.invoke.src]
 				let ent = [for en, e in E.code.state.entities if en == m.entity || e.table == m.entity {e}][0] {

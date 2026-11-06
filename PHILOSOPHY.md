@@ -112,7 +112,7 @@ takes its side.
   [*MapReduce: Simplified Data Processing on Large Clusters*](https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf)
   (OSDI 2004). Map and reduce over a cluster with the shuffle in between;
   pronto's pipelines are the same two verbs over rows
-  ([the Cortex machines record](docs/decisions/2026-09-29-hybrid-machines.md)).
+  ([the Cortex machines record](docs/decisions/2026-09-29-cortex-machines.md)).
 - **Incremental view maintenance**: Gupta, Mumick and Subrahmanian,
   [*Maintaining Views Incrementally*](https://doi.org/10.1145/170035.170066)
   (SIGMOD 1993); McSherry, Murray, Isaacs and Isard,
@@ -239,7 +239,7 @@ takes its side.
   [*DBOS: A DBMS-oriented Operating System*](https://www.vldb.org/pvldb/vol15/p21-skiadopoulos.pdf)
   (VLDB 2022), and Temporal. Work that outlives a request, kept as a
   statechart plus a ledger rather than a durable runtime
-  ([cortex](docs/cortex.md), [the Cortex machines record](docs/decisions/2026-09-29-hybrid-machines.md)).
+  ([cortex](docs/cortex.md), [the Cortex machines record](docs/decisions/2026-09-29-cortex-machines.md)).
 - **SMT solvers and proof assistants**: de Moura and Bjørner,
   [*Z3: An Efficient SMT Solver*](https://link.springer.com/chapter/10.1007/978-3-540-78800-3_24)
   (TACAS 2008); de Moura and Ullrich,
@@ -300,7 +300,7 @@ takes its side.
   [*DuckDB: an Embeddable Analytical Database*](https://mytherin.github.io/papers/2019-duckdbdemo.pdf)
   (SIGMOD 2019), and the [DuckLake manifesto](https://ducklake.select/manifesto/).
   Mecha's [lake](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/lake/README.md) and the
-  DuckStream tier of [the Cortex machines record](docs/decisions/2026-09-29-hybrid-machines.md).
+  DuckStream tier of [the Cortex machines record](docs/decisions/2026-09-29-cortex-machines.md).
 
 ## Testimonial
 

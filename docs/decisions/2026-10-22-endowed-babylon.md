@@ -252,9 +252,9 @@ What stays for the cortex machine, to be designed with 1v1 racing:
    declaration. A state hosting the race needs an actor kind that starts a
    host with the machine's seed and stage and turns its events into the
    machine's.
-2. **The run as a Mecha machine.** A `local` actor plays a hybrid's reducer,
+2. **The run as a Mecha machine.** A `local` actor plays a mecha's reducer,
    so title, stage, fork, ending, initials and saved would be a machine
-   declared in `state.hybrids` beside its surface rows, the shape Truco's
+   declared in `state.mecha` beside its surface rows, the shape Truco's
    match has. Today those phases live inside the simulation's own
    `stageState`, which the HUD and the renderer both read.
 3. **A HUD at 60 Hz.** The showcase's HUD is about 300 lines of DOM writes per

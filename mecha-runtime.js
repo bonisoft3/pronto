@@ -1,10 +1,10 @@
 (spec, rules, Statechart) => {
   const own = (o, key) => Object.prototype.hasOwnProperty.call(o, key);
-  const fail = (message) => { throw new Error(`hybrid ${spec.name}: ${message}`); };
+  const fail = (message) => { throw new Error(`mecha ${spec.name}: ${message}`); };
   // What a caller sent that the machine does not take, told apart from a
   // failure of the machine or its rules.
   const refuse = (message) => {
-    throw Object.defineProperty(new Error(`hybrid ${spec.name}: ${message}`), "name", {value: "RefusedError"});
+    throw Object.defineProperty(new Error(`mecha ${spec.name}: ${message}`), "name", {value: "RefusedError"});
   };
   const check = (shape, value, path, fault = fail) => {
     if (shape.type === "string") {

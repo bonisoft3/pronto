@@ -160,14 +160,14 @@ clone.
   never fetches it, so only the lock and the mirror's sync wait for the tag.
   deno.lock records module imports, not `text` or `bytes` ones
   (`--unstable-raw-imports`), so a module also imports as code a file it reads
-  as text (SES in `tests/platform.ts`, `hybrid-runtime.js` in
+  as text (SES in `tests/platform.ts`, `mecha-runtime.js` in
   `mecha-reducer.ts`); GGRS's wasm is the one file only read as bytes. `check`
   fails when a lock lacks a module its app imports by pin.
 - **Platform modules load by URL.** What an app's tests reach in omnishell and
   pronto imports relatively or by full `npm:` and `jsr:` specifiers, reads a
   neighbouring file by import rather than `Deno.readTextFile(new URL(…,
   import.meta.url))`, and reaches the other package by its pinned URL:
-  `hybrid-local.ts` and `testdata/hybrid-fixtures.ts` take omnishell at the tag
+  `mecha-local.ts` and `testdata/mecha-fixtures.ts` take omnishell at the tag
   pronto's CUE module requires. pronto's own tests run that release, not the
   sibling tree: pronto is no member, because its `deno.lock` ships with it and
   a member's lock moves to the workspace.

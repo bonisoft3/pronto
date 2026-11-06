@@ -68,7 +68,7 @@ gets its own rendering of the tree: the Postgres `CHECK` calls
 because a `CHECK` holds no subquery; the CUE constraint closes the record
 (`close({...})`, `list.MaxItems`) for the seed vet; `bounds` carries the tree
 (`kind`, `fields`, `items`, `maxItems`) into shell.yaml, where the battery
-draws values inside it. The step-time check (`hybrid-runtime.js`) walks the
+draws values inside it. The step-time check (`mecha-runtime.js`) walks the
 same shape over the machine's own values, so a settle never writes what the
 column refuses. Electric hands the terminal the value, so a handler reads
 `row.view` as the record it is. A request's payload and an open's input are

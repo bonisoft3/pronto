@@ -46,7 +46,7 @@ app: pronto.#App & {
         ]
       }
     }
-    machines: DraftMachine: {
+    mecha: rows: DraftMachine: {
       name: "DraftMachine"
       entity: "Draft"
       field: "status"

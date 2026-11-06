@@ -424,7 +424,7 @@ A mecha machine declares either a statechart (`states`) or lifecycle handlers
 (`on.insert`, `on.update`, `on.delete`). Combining them is refused; separate
 machines over the same entity keep both triggers explicit in SQL and in the IR.
 
-**Lifecycle guards own predicate validation.** `state.machines.<name>.guards`
+**Lifecycle guards own predicate validation.** `state.mecha.rows.<name>.guards`
 contains named Jessie predicates (`src`, `via`, `note`). Each `on.insert`,
 `on.update` or `on.delete` transition names `guard` (one name or an ordered
 list) and optional `actions`; an action or list alone is the action-only

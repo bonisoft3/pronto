@@ -81,6 +81,8 @@ ARG MONOREPO_COMPOSE_MODE
 ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE
 ARG BAYT_RUNTIME
 ENV BAYT_RUNTIME=$BAYT_RUNTIME
+COPY --from=libraries_mecha-activepieces-image_bayt /monorep[o] /monorepo/
+COPY --from=libraries_mecha-activepieces-image_srcs /monorep[o] /monorepo/
 COPY --from=libraries_mecha-airlock-image_bayt /monorep[o] /monorepo/
 COPY --from=libraries_mecha-airlock-image_srcs /monorep[o] /monorepo/
 COPY --from=libraries_mecha-auth-image_bayt /monorep[o] /monorepo/

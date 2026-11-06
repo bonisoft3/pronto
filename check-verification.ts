@@ -80,7 +80,7 @@ export function declarationInventory(inputs: unknown) {
     visit(chart, path);
     machines.push(item);
   };
-  for (const family of ["cortex", "machines", "hybrids"]) {
+  for (const family of ["cortex", "machines", "reducers"]) {
     for (const [name, raw] of Object.entries(record(data[family]))) {
       const chart = record(raw);
       collect(chart, `.pronto/check-inputs.json#${family}.${name}`, String(record(chart.meta).host ?? (family === "cortex" ? "omnishell" : "mecha")),

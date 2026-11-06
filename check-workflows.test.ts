@@ -116,7 +116,7 @@ Deno.test("real application workflow inventory keeps opaque semantics unchecked"
   const summaries: Record<string, { applicable: number; unchecked: number; violations: number }> = {};
   for (const app of ["snapcards", "truco", "apexrun", "golaberto"]) {
     const input = JSON.parse(await Deno.readTextFile(new URL(`../../apps/${app}/.pronto/check-inputs.json`, import.meta.url)));
-    const report = Object.entries({ ...input.cortex, ...input.hybrids }).flatMap(([name, chart]) => analyzeWorkflow(chart, name, { entry: "persisted" }));
+    const report = Object.entries({ ...input.cortex, ...input.reducers }).flatMap(([name, chart]) => analyzeWorkflow(chart, name, { entry: "persisted" }));
     summaries[app] = {
       applicable: report.filter((o) => o.property === "workflow-option-to-complete").length,
       unchecked: report.filter((o) => o.status === "unchecked").length,
@@ -160,7 +160,7 @@ Deno.test("terminal operations cannot be mistaken for an effect-free workflow", 
 
 Deno.test("removing the real deck operation's completion edge exposes a dead declared final", async () => {
   const input = JSON.parse(await Deno.readTextFile(new URL("../../apps/snapcards/.pronto/check-inputs.json", import.meta.url)));
-  const chart = input.hybrids.deck_press;
+  const chart = input.reducers.deck_press;
   assertEquals(check(chart).filter((o) => o.status === "violation").length, 0);
   delete chart.states.active.on.finish_deck;
   assertEquals(get(chart, "workflow-state-reachability", ":completed")?.status, "violation");

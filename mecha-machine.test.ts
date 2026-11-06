@@ -4,7 +4,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.5.8";
 
 Deno.test("SQL calls require a named SQL hatch and derive the machine's hatch references", async () => {
   const base = paymentProgram() + `
-app: state: machines: PaymentMachine: states: pending: entry: hatch: {name: "billing", call: "bill", args: [{raw: "NEW.id"}]}
+app: state: mecha: rows: PaymentMachine: states: pending: entry: hatch: {name: "billing", call: "bill", args: [{raw: "NEW.id"}]}
 `;
   for (const [declaration, error] of [
     ["", "calls undeclared SQL hatch: billing"],
@@ -14,7 +14,7 @@ app: state: machines: PaymentMachine: states: pending: entry: hatch: {name: "bil
     assertEquals(res.success, false);
     assertStringIncludes(res.stderr, error);
   }
-  const res = await cue(["export", "-", "-e", '{machine: app.state.machines.PaymentMachine, sql: out["services/database/migrations/010_machines.sql"].text}'], base + `
+  const res = await cue(["export", "-", "-e", '{machine: app.state.mecha.rows.PaymentMachine, sql: out["services/database/migrations/010_machines.sql"].text}'], base + `
 app: capabilities: hatches: billing: {kind: "sql", files: ["services/database/migrations/020_billing.sql"], note: "the billing function owns the write"}
 `);
   assertEquals(res.success, true, res.stderr);
@@ -25,7 +25,7 @@ app: capabilities: hatches: billing: {kind: "sql", files: ["services/database/mi
 
 Deno.test("state actions run on entry and in exit-transition-entry order", async () => {
   const files = await emitFiles(paymentProgram().replace('pay: "charging"', 'pay: {target: "charging"}') + `
-app: state: machines: PaymentMachine: states: {
+app: state: mecha: rows: PaymentMachine: states: {
   pending: {entry: raise: {notify: "trace", payload: "initial"}, exit: raise: {notify: "trace", payload: "exit"}}
   pending: on: pay: {target: "charging", actions: raise: {notify: "trace", payload: "transition"}}
   charging: entry: raise: {notify: "trace", payload: "entry"}
@@ -41,7 +41,7 @@ app: state: machines: PaymentMachine: states: {
 
 Deno.test("signals are raises and SQL calls are hatches, never relational effects", async () => {
   for (const effect of ['{notify: "payments", payload: "changed"}', '{stream: "payments"}', '{call: "bill"}']) {
-    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `\napp: state: machines: PaymentMachine: states: pending: entry: effect: ${effect}`);
+    const res = await cue(["export", "-", "-e", "app"], paymentProgram() + `\napp: state: mecha: rows: PaymentMachine: states: pending: entry: effect: ${effect}`);
     assertEquals(res.success, false);
     assertStringIncludes(res.stderr, "effect");
   }
@@ -66,7 +66,7 @@ Deno.test("a raw pipeline requires its own hatch rationale", async () => {
 Deno.test("a machine cannot combine a statechart with lifecycle actions the SQL would discard", async () => {
   for (const event of ["insert", "update", "delete"]) {
     const res = await cue(["export", "-", "-e", "out"], paymentProgram() + `
-app: state: machines: PaymentMachine: on: ${event}: raise: {notify: "payments", payload: "TG_OP"}
+app: state: mecha: rows: PaymentMachine: on: ${event}: raise: {notify: "payments", payload: "TG_OP"}
 `);
     assertEquals(res.success, false);
     assertStringIncludes(res.stderr, "machine PaymentMachine combines states and lifecycle handlers: declare separate machines");
@@ -103,7 +103,7 @@ app: pronto.#App & {
         ]
       }
     }
-    machines: {
+    mecha: rows: {
       ChallengeMachine: {
         name: "ChallengeMachine"
         entity: "challenge"
@@ -237,7 +237,7 @@ app: pronto.#App & {
         ]
       }
     }
-    machines: {
+    mecha: rows: {
       ExpenseReducer: {
         name: "ExpenseReducer"
         entity: "Expense"
@@ -338,7 +338,7 @@ app: pronto.#App & {
         ]
       }
     }
-    machines: {
+    mecha: rows: {
       ExpenseLedger: {
         name: "ExpenseLedger"
         entity: "Expense"
@@ -524,7 +524,7 @@ Deno.test("a sink's credential is a header the airlock adds from a declared secr
 
 Deno.test("the level is derived and never authored: the entity's from its durability, the machine's from its invoke", async () => {
   const program = paymentProgram();
-  const levels = await cue(["export", "-", "-e", "{entity: app.state.entities.Payment.level, machine: app.state.machines.PaymentMachine.level}", "--out", "json"], program);
+  const levels = await cue(["export", "-", "-e", "{entity: app.state.entities.Payment.level, machine: app.state.mecha.rows.PaymentMachine.level}", "--out", "json"], program);
   assertEquals(levels.success, true, levels.stderr);
   assertEquals(JSON.parse(levels.stdout), { entity: "replicated", machine: "external" });
   // An authored level is refused: it is the durability's to say.
@@ -536,7 +536,7 @@ Deno.test("an effect's cluster keeps the wake's names, and the service role the 
   assertStringIncludes(await refusal(paymentProgram({ entity: `Wake: {table: "airlock_wake", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}` })), "entity Wake takes table airlock_wake, which the airlock's wake keeps");
   assertStringIncludes(await refusal(paymentProgram({ entity: `Sched: {table: "schedule", durability: "server", fields: [{name: "id", type: "uuid", pk: true}]}` })), "entity Sched takes table schedule, which the airlock's wake keeps");
   assertStringIncludes(
-    await refusal(program.replace("machines: PaymentMachine:", `schedules: airlock: {cron: "0 3 * * *", emits: {entity: "Payment", values: status: "pending"}}\n    machines: PaymentMachine:`)),
+    await refusal(program.replace("mecha: rows: PaymentMachine:", `schedules: airlock: {cron: "0 3 * * *", emits: {entity: "Payment", values: status: "pending"}}\n    mecha: rows: PaymentMachine:`)),
     "schedule airlock is the airlock's own wake",
   );
   // No auth plane, yet the service role, its bypass and its grants: the
@@ -646,7 +646,7 @@ Deno.test("an outcome that could never be delivered is refused", async () => {
     "an outcome's actions reject",
   );
   for (const action of ['charging: exit: reject: "no"', 'settled: entry: reject: "no"']) {
-    assertStringIncludes(await refusal(paymentProgram() + `\napp: state: machines: PaymentMachine: states: ${action}`), "an outcome's entry or exit actions reject");
+    assertStringIncludes(await refusal(paymentProgram() + `\napp: state: mecha: rows: PaymentMachine: states: ${action}`), "an outcome's entry or exit actions reject");
   }
   const files = await emitFiles(paymentProgram({ machine: machine(`invoke: {src: "charge", onDone: {target: "failed", actions: [{assign: {failure: "done"}}]}, onError: {target: "failed", actions: [{assign: {failure: "failed"}}]}}`) }));
   const sql = files["services/database/migrations/010_machines.sql"].text;
@@ -702,7 +702,7 @@ Deno.test("an effect's entity is the invoking machine's, and an authored one is 
 // One effect reads NEW and keys on fields of one row; two machines over two
 // entities would hand it two shapes under one ledger prefix.
 Deno.test("an effect invoked by machines of two entities is refused", async () => {
-  const order = `machines: OrderMachine: {
+  const order = `mecha: rows: OrderMachine: {
       name: "OrderMachine"
       entity: "Order"
       field: "status"
@@ -716,7 +716,7 @@ Deno.test("an effect invoked by machines of two entities is refused", async () =
     `;
   const err = await refusal(paymentProgram({
     entity: `Order: {table: "orders", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "status", type: "string"}]}`,
-  }).replace("machines: PaymentMachine:", `${order}machines: PaymentMachine:`));
+  }).replace("mecha: rows: PaymentMachine:", `${order}mecha: rows: PaymentMachine:`));
   assertStringIncludes(err, "effect charge is invoked by machines of 2 entities (Order, Payment): its NEW reads and its key need one row");
 });
 
@@ -832,7 +832,7 @@ app: pronto.#App & {
         fields: [{name: "id", type: "uuid", pk: true}]
       }
     }
-    machines: {
+    mecha: rows: {
       OrderLifecycle: {
         name: "OrderLifecycle"
         entity: "Order"
@@ -912,7 +912,7 @@ app: pronto.#App & {
         ]
       }
     }
-    machines: {
+    mecha: rows: {
       ItemMachine: {
         name: "ItemMachine"
         entity: "item"
@@ -1104,7 +1104,7 @@ Deno.test("omitting SQL expression values preserves the markup gate for pending 
 
 Deno.test("Mecha actions qualify private tables and order locks before writes", async () => {
   const files = await emitFiles(paymentProgram() + `
-app: state: machines: PaymentMachine: states: pending: entry: {
+app: state: mecha: rows: PaymentMachine: states: pending: entry: {
   lock: {schema: "private", table: "account", key: "id", values: [{raw: "NEW.id"}]}
   effect: {op: "update", schema: "private", table: "account", values: {active: true}, rawWhere: "id = NEW.id"}
 }
@@ -1119,7 +1119,7 @@ app: state: machines: PaymentMachine: states: pending: entry: {
 
 Deno.test("bounded Mecha machines share SQL hatch admission and refuse trigger-only actions", async () => {
   const machine = `
-app: state: hybrids: bounded: {rules: "bounded.js", machine: {
+app: state: mecha: reducers: bounded: {rules: "bounded.js", machine: {
   config: {id: "bounded", initial: "ready", states: ready: on: run: {actions: "bill"}}
   setup: {
     version: 1
@@ -1150,7 +1150,7 @@ Deno.test("a Mecha machine refuses the XState it cannot run instead of misreadin
   // An event's transition list compiled to an unguarded no-op, and an invoke
   // was dropped: both read as valid machines doing something else.
   const machine = (state: string, root = "") => `
-app: state: hybrids: bounded: {rules: "bounded.js", machine: {
+app: state: mecha: reducers: bounded: {rules: "bounded.js", machine: {
   config: {id: "bounded", initial: "ready", ${root} states: {ready: ${state}, done: type: "final"}}
   setup: {
     version: 1
@@ -1189,7 +1189,7 @@ app: state: hybrids: bounded: {rules: "bounded.js", machine: {
 
 Deno.test("native Mecha spawn and send resolve declared bounded targets and authority", async () => {
   const target = `
-app: state: hybrids: child: {rules: "child.js", machine: {
+app: state: mecha: reducers: child: {rules: "child.js", machine: {
   config: {id: "child", initial: "ready", states: ready: on: tick: {}}
   setup: {
     version: 1
@@ -1202,7 +1202,7 @@ app: state: hybrids: child: {rules: "child.js", machine: {
     }
   }
 }}
-app: state: machines: PaymentMachine: states: pending: entry: [
+app: state: mecha: rows: PaymentMachine: states: pending: entry: [
   {spawn: {machine: "child", id: {raw: "NEW.id"}, input: {}, members: owner: {raw: "NEW.id"}}},
   {send: {machine: "child", id: {raw: "NEW.id"}, event: "tick", payload: {}}},
 ]
@@ -1237,8 +1237,8 @@ Deno.test("declaring a bridge hatch without supplying its container fails emissi
 
 Deno.test({ name: "Cortex runtime is emitted once for all machines and registered with the RLS audit", sanitizeOps: false, sanitizeResources: false, fn: async () => {
   const program = paymentProgram({ entity: `Other: {table: "other", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "status", type: "string"}]}` }) + `
-app: state: machines: PaymentMachine: cortex: {id: "first", sourceEvents: []}
-app: state: machines: OtherMachine: {
+app: state: mecha: rows: PaymentMachine: cortex: {id: "first", sourceEvents: []}
+app: state: mecha: rows: OtherMachine: {
   name: "OtherMachine", entity: "Other", field: "status", initial: "pending"
   cortex: {id: "second", sourceEvents: []}
   states: pending: {}

@@ -35,7 +35,7 @@ app: state: cortex: PaymentFlow: {
   assertEquals(source.format, "cortex-sql");
   assertStringIncludes(compileCortexSources(source.data.charts, source.data.entities), "advance_payment");
   assertStringIncludes(files["services/database/migrations/010_machines.sql"].text, "@PRONTO_XSTATE");
-  const lifecycle = await emitFiles(program + '\napp: state: machines: Audit: {entity: "Payment", on: insert: actions: [{assign: {failure: ""}}]}') as unknown as Record<string, { data: { machines: Record<string, { on?: unknown; states?: unknown }> } }>;
+  const lifecycle = await emitFiles(program + '\napp: state: mecha: rows: Audit: {entity: "Payment", on: insert: actions: [{assign: {failure: ""}}]}') as unknown as Record<string, { data: { machines: Record<string, { on?: unknown; states?: unknown }> } }>;
   assertEquals(lifecycle[".pronto/check-inputs.json"].data.machines.Audit.states, undefined);
   assertEquals(typeof lifecycle[".pronto/check-inputs.json"].data.machines.Audit.on, "object");
   const rejected = await cue(["export", "-", "-e", "app"], program.replace('via: "query", event: "facts", select:', 'via: "observe", event: "facts", select:'));

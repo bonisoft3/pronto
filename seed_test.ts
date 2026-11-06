@@ -98,7 +98,7 @@ code: pronto.#App & {
   state: {
     entities: Payment: {table: "payment", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "status", type: "string"}]}
     seed: src: "seed.json"
-    machines: lifecycle: {entity: "payment", field: "status", initial: "pending", states: {${states}}}
+    mecha: rows: lifecycle: {entity: "payment", field: "status", initial: "pending", states: {${states}}}
   }
   capabilities: {hatches: {}, vendored: {}}
   surface: {screens: {}, handlers: {}, design: {}, flows: {}}

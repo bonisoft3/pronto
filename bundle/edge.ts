@@ -27,7 +27,7 @@ import { builtRelease, holdIceServers } from './edge-ice.ts'
 import { ASSET_CACHE_RULE, seedBlobFiles, writeEdgeAssets as writeSeedAssets } from './edge-blobs.ts'
 import { writeEdgeSsr } from './edge-ssr.ts'
 import { realmDocumentsOf } from './edge-templates.ts'
-import { type Hybrids, renderMachines } from './edge-machines.ts'
+import { type Reducers, renderMachines } from './edge-machines.ts'
 import { renderEffects } from './edge-effects.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
 import { clusterDrains, hasEffects, releaseScripts } from './edge-scripts.ts'
@@ -206,15 +206,15 @@ await Deno.writeTextFile(path.join(out, 'migrations.json'), JSON.stringify([...r
 // The app's machines: the migration declared each step over an engine this
 // tier supplies (mecha-edge's machines.ts), so the object is handed the same
 // rules PostgreSQL would run in plv8 (edge-machines.ts). And what owes a
-// tick — its cron schedules, its hybrids that arm a deadline; a plv8
+// tick — its cron schedules, its reducers that arm a deadline; a plv8
 // machine's timers never run here — for the clock outside the object below.
 const stateOut = await new Deno.Command('cue', {
-  args: ['export', '.', '-e', '{hybrids: *code.state.hybrids | {}, crons: [for n, s in code.state.schedules if !s.suspend {n}]}', '--out', 'json'],
+  args: ['export', '.', '-e', '{reducers: *code.state.mecha.reducers | {}, crons: [for n, s in code.state.schedules if !s.suspend {n}]}', '--out', 'json'],
   cwd: app, stdout: 'piped', stderr: 'inherit',
 }).output()
 if (!stateOut.success) fail('cue export of the machines and schedules failed')
-const { hybrids, crons } = JSON.parse(new TextDecoder().decode(stateOut.stdout)) as { hybrids: Hybrids; crons: string[] }
-if (Object.keys(hybrids).length) await Deno.writeTextFile(path.join(out, 'src/machines.js'), await renderMachines(name, app, omnishell, hybrids))
+const { reducers, crons } = JSON.parse(new TextDecoder().decode(stateOut.stdout)) as { reducers: Reducers; crons: string[] }
+if (Object.keys(reducers).length) await Deno.writeTextFile(path.join(out, 'src/machines.js'), await renderMachines(name, app, omnishell, reducers))
 const withEffects = await hasEffects(app)
 if (withEffects) await Deno.writeTextFile(path.join(out, 'src/effects.js'), await renderEffects(name, app, mecha, out))
 
@@ -228,7 +228,7 @@ await run(Deno.execPath(), ['install', '--frozen', '--node-modules-dir=auto'], p
 // The clock outside the object: a Cron Trigger poking hourly where anything
 // can owe a tick, so the free plan pays a day of object wakes for an alarm
 // the platform lost rather than a minute's; the alarm is the exact one.
-const armed = Object.values(hybrids).some((h) => (h.reducer as { ports?: { wake?: unknown } }).ports?.wake !== undefined)
+const armed = Object.values(reducers).some((h) => (h.reducer as { ports?: { wake?: unknown } }).ports?.wake !== undefined)
 const pokes = clock !== 'disabled' && (crons.length > 0 || armed || withEffects || hatches.length > 0)
 const POKE_CRON = '0 * * * *'
 
@@ -249,7 +249,7 @@ import { originAssets } from '${fromSrc(path.join(here, 'edge-templates.ts'))}'
 ${blobs ? `import { edgeImage } from '${fromSrc(path.join(here, 'edge-images.ts'))}'\n` : ''}import { acceptedLanguages, IMAGE_WIDTHS, routeAt } from '${fromSrc(path.join(omnishell, 'interpreter/fragment.js'))}'
 import hints from './hints.json'
 ${hatches.map((h, i) => `import { createHatch as hatch${i} } from '${fromSrc(path.join(app, h.edge.src))}'`).join('\n')}
-${Object.keys(hybrids).length ? "import machines from './machines.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
+${Object.keys(reducers).length ? "import machines from './machines.js'\n" : ''}${withEffects ? "import effects from './effects.js'\n" : ''}import pgliteWasm from '../pglite/pglite.wasm'
 import initdbWasm from '../pglite/initdb.wasm'
 import pgliteData from '../pglite/pglite.data'
 import icu from '../pglite/icu-root.tgz'
@@ -260,7 +260,7 @@ export const Cluster = edgeObject({
   assets: { pgliteWasm, initdbWasm, pgliteData, icu },
   tables: ${JSON.stringify(shell.tables)},
   schema: ${JSON.stringify(shell.schema ?? {})},
-  drains: ${JSON.stringify(drains)},${Object.keys(hybrids).length ? '\n  machines,' : ''}${withEffects ? '\n  effects,' : ''}${shell.ai ? `\n  ai: ${JSON.stringify(shell.ai)},` : ''}
+  drains: ${JSON.stringify(drains)},${Object.keys(reducers).length ? '\n  machines,' : ''}${withEffects ? '\n  effects,' : ''}${shell.ai ? `\n  ai: ${JSON.stringify(shell.ai)},` : ''}
 })
 export default {
   scheduled: edgeWorker.scheduled,

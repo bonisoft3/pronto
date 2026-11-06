@@ -63,7 +63,7 @@ import "list"
 		[for cn, c in A.state.computations if list.Contains(c.to, n) {by: cn, kind: "computation", ops: ["upsert"]}],
 		// Its own row's field, moved in the write, and every relational effect
 		// landing on this table.
-		[for mn, m in [if A.state.machines != _|_ {A.state.machines}, {}][0]
+		[for mn, m in [if A.state.mecha.rows != _|_ {A.state.mecha.rows}, {}][0]
 			let machineOps = _distinct & {of: list.Concat([
 				[if m.entity == n || m.entity == e.table if m.field != _|_ {"update"}],
 				[for w in _machineEffects[mn] if w.table == e.table {w.op}],

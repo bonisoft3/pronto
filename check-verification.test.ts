@@ -53,7 +53,7 @@ Deno.test("combined gate supports backend-only programs without requiring a term
   try {
     await Deno.mkdir(`${dir}/.pronto`);
     await Deno.writeTextFile(`${dir}/.pronto/check-inputs.json`, JSON.stringify({
-      version: 1, entities: {}, hatches: {}, hybrids: {}, rawMigrations: [], duckstreams: {},
+      version: 1, entities: {}, hatches: {}, reducers: {}, rawMigrations: [], duckstreams: {},
       types: { types: {}, aliases: {} },
       cortex: { job: { meta: { host: "mecha" }, initial: "start", states: { start: { on: { finish: "done" } }, done: { type: "final" } } } },
     }));
@@ -70,7 +70,7 @@ Deno.test("missing declared terminal cannot turn verification into a backend-onl
   const dir = await Deno.makeTempDir();
   try {
     await Deno.mkdir(`${dir}/.pronto`);
-    const base = { version: 1, entities: {}, hatches: {}, hybrids: {}, rawMigrations: [], duckstreams: {}, types: { types: {}, aliases: {} } };
+    const base = { version: 1, entities: {}, hatches: {}, reducers: {}, rawMigrations: [], duckstreams: {}, types: { types: {}, aliases: {} } };
     for (const declaration of [{ terminal: true }, { cortex: { root: { meta: { host: "omnishell" }, states: { idle: {} } } } }]) {
       await Deno.writeTextFile(`${dir}/.pronto/check-inputs.json`, JSON.stringify({ ...base, ...declaration }));
       await assertRejects(() => checkVerification(dir, new URL("../omnishell/", import.meta.url).pathname), Error, "missing declared terminal");

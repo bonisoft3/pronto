@@ -67,7 +67,7 @@ export type Screen = { ir: string; title: string; hatches?: string[]; reads: { t
 export type Program = {
   state: {
     entities: Record<string, Entity>;
-    machines?: Record<string, MechaMachine>;
+    mecha?: { rows?: Record<string, MechaMachine>; reducers?: Record<string, unknown> };
     effects?: Record<string, Effect>;
   };
   surface: { screens: Record<string, Screen> };
@@ -362,7 +362,7 @@ export async function cardHtml(name: string, e: Entity, ctx: Context, notes: Rea
       timing: undefined as MechaMachine["timing"],
       hatches: [] as string[],
     })),
-    ...Object.values(ctx.program.state.machines ?? {}).filter((m) => machineEntity(entities, m) === name).map((m) => ({
+    ...Object.values(ctx.program.state.mecha?.rows ?? {}).filter((m) => machineEntity(entities, m) === name).map((m) => ({
       id: m.ir,
       title: m.field === undefined ? m.ir : `${m.ir} · ${m.field}`,
       level: m.level,
@@ -529,7 +529,7 @@ function nodeRole(id: string, body: string, program?: Program): string | null {
   if (program !== undefined) {
     const entity = program.state.entities[id] ?? Object.values(program.state.entities).find((e) => e.ir === id);
     if (entity !== undefined) return entity.durability;
-    if (program.state.machines?.[id] !== undefined) return "machine";
+    if (program.state.mecha?.rows?.[id] !== undefined) return "machine";
     if (program.state.effects?.[id] !== undefined) return "effect";
     const screen = program.surface.screens[id] ?? Object.values(program.surface.screens).find((s) => s.ir === id);
     if (screen !== undefined) return "screen";
@@ -915,7 +915,7 @@ export async function renderIr(
     }
   }
   const mechaFields = new Map<string, Set<string>>();
-  for (const machine of Object.values(program.state.machines ?? {})) {
+  for (const machine of Object.values(program.state.mecha?.rows ?? {})) {
     const entity = machineEntity(entities, machine);
     if (machine.field === undefined || machine.states === undefined) continue;
     const fields = mechaFields.get(entity) ?? new Set<string>();

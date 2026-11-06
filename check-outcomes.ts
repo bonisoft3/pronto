@@ -17,7 +17,7 @@ export type OutcomeInputs = {
   entities: Record<string, Entity>;
   types: { types: Record<string, unknown>; aliases: Record<string, string> };
   machines?: Record<string, Machine>;
-  hybrids?: Record<string, unknown>;
+  reducers?: Record<string, unknown>;
   cortex?: Record<string, Node>;
   cortexImplementations?: Record<string, { actors?: Record<string, Actor> }>;
   effects?: Record<string, unknown>;
@@ -231,7 +231,7 @@ export function evaluateOutcomes(inputs: OutcomeInputs, runtime: Pick<WorkflowOp
     };
     visit(mount.chart, [], [], false);
   }
-  for (const [family, charts] of Object.entries({ cortex: inputs.cortex, machines: inputs.machines, hybrids: inputs.hybrids })) {
+  for (const [family, charts] of Object.entries({ cortex: inputs.cortex, machines: inputs.machines, reducers: inputs.reducers })) {
     for (const [name, chart] of Object.entries(charts ?? {})) {
       obligations.push(...analyzeWorkflow(chart, `.pronto/check-inputs.json#${family}.${name}`, {
         ...runtime, entry: family === "cortex" && rec(rec(chart)?.meta)?.host !== "mecha" ? "declared" : "persisted",

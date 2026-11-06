@@ -13,7 +13,7 @@ const program = {
       Goal: { ir: "Goal", table: "goal", durability: "live", validations: { "own-goal": { ir: "own-goal" } } },
     },
     pipelines: {},
-    machines: { PaymentMachine: { ir: "PaymentMachine" } },
+    mecha: { rows: { PaymentMachine: { ir: "PaymentMachine", entity: "Game" } }, reducers: { reducer: { machine: {}, rules: "rules.js", reducer: {} } } },
     effects: { charge: { ir: "charge" } },
   },
   surface: {
@@ -25,11 +25,11 @@ const program = {
   capabilities: { hatches: {}, vendored: {} },
 };
 
-Deno.test("machine and effect are compared kinds, read off state.machines and state.effects", () => {
+Deno.test("machine and effect are compared kinds, read off state.mecha.rows and state.effects", () => {
   assertEquals(KINDS.includes("machine" as never), true);
   assertEquals(KINDS.includes("effect" as never), true);
   const decls = declarations(program);
-  assertEquals(decls.find((d) => d.kind === "machine")?.id, "PaymentMachine");
+  assertEquals(decls.filter((d) => d.kind === "machine").map((d) => d.id), ["PaymentMachine"]);
   assertEquals(decls.find((d) => d.kind === "effect")?.id, "charge");
 });
 
@@ -109,11 +109,11 @@ Deno.test("distinct charts of one field keep separate IR claims and their own re
 });
 
 Deno.test("a lifecycle machine confined to a tab is claimed but does not owe an IR element", () => {
-  const p = { ...program, state: { ...program.state, machines: {
-    LocalRules: { ir: "LocalRules", level: "ephemeral" },
-    SavedRules: { ir: "SavedRules", level: "local" },
-    SharedRules: { ir: "SharedRules", level: "replicated" },
-  } } };
+  const p = { ...program, state: { ...program.state, mecha: { rows: {
+    LocalRules: { ir: "LocalRules", entity: "Tick", level: "ephemeral" },
+    SavedRules: { ir: "SavedRules", entity: "Game", level: "local" },
+    SharedRules: { ir: "SharedRules", entity: "Goal", level: "replicated" },
+  } } } };
   assertEquals(declarations(p).filter(d => d.kind === "machine").map(d => [d.id, d.owed]), [
     ["LocalRules", false], ["SavedRules", true], ["SharedRules", true],
   ]);

@@ -37,9 +37,9 @@ import (
 			(A.state.entities[u.memo.entity].table): u.memo.entity
 		}
 		for _, p in A.state.pipelines if p.fold != _|_ {(p.fold.pair.table): A._entityByTable[p.fold.pair.table]}
-		// A Cortex fold is handed every hybrid's declaration and writes the
+		// A Cortex fold is handed every Mecha reducer's declaration and writes the
 		// reader's side of each surface, which no region names.
-		if A.state.cortex != _|_ if A.state.hybrids != _|_ for m, _ in A.state.hybrids for k in ["command", "open", "lease"] if A._entityByTable["\(m)_\(k)"] != _|_ {
+		if A.state.cortex != _|_ if A.state.mecha.reducers != _|_ for m, _ in A.state.mecha.reducers for k in ["command", "open", "lease"] if A._entityByTable["\(m)_\(k)"] != _|_ {
 			("\(m)_\(k)"): A._entityByTable["\(m)_\(k)"]
 		}
 		for _, p in A.state.pipelines if p.fold != _|_ {(A.state.entities[p.from].table): p.from}
