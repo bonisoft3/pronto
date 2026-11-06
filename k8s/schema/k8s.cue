@@ -80,6 +80,23 @@ import (
 		}
 	}
 
+	// What a pod signs in to Google Cloud with, no key held: an external_account credential that
+	// reads the pod's projected token (audience = the provider's), trades it at STS for the
+	// workload identity `provider`'s, and impersonates `serviceAccount`. GOOGLE_APPLICATION_CREDENTIALS
+	// names the file this is written to; the metrics export and the blob plane share it.
+	#workloadCredentials: {
+		provider:       string
+		serviceAccount: string
+		out: {
+			type:                              "external_account"
+			audience:                          "//iam.googleapis.com/\(provider)"
+			subject_token_type:                "urn:ietf:params:oauth:token-type:jwt"
+			token_url:                         "https://sts.googleapis.com/v1/token"
+			credential_source: file:           "/var/run/secrets/gcp/token"
+			service_account_impersonation_url: "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/\(serviceAccount):generateAccessToken"
+		}
+	}
+
 	// Where a service sends its spans: Deno exports OTLP over HTTP (4318),
 	// caddy's `tracing` over gRPC (4317); both read the same variables.
 	#otelExport: {
@@ -1112,14 +1129,7 @@ import (
 				exporters: ["googlemanagedprometheus"]
 			}
 		}
-		let credentials = {
-			type:                              "external_account"
-			audience:                          "//iam.googleapis.com/\(x.provider)"
-			subject_token_type:                "urn:ietf:params:oauth:token-type:jwt"
-			token_url:                         "https://sts.googleapis.com/v1/token"
-			credential_source: file:           "/var/run/secrets/gcp/token"
-			service_account_impersonation_url: "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/\(x.serviceAccount):generateAccessToken"
-		}
+		let credentials = (#workloadCredentials & {provider: x.provider, serviceAccount: x.serviceAccount}).out
 		[{
 			apiVersion: "v1"
 			kind:       "ServiceAccount"
@@ -1166,6 +1176,155 @@ import (
 						]
 					}
 				}
+			}
+		}]
+	}]
+
+	// release.blobs: mecha's blob plane over a Cloud Storage bucket, as gcp.cue's rclone-s3 and
+	// imgproxy sidecars are. rclone serves the bucket as the S3 bucket every app names (mecha-objects),
+	// signed in through workload identity (no key); imgproxy reads it over the cluster network (the
+	// services' network policy admits the app's pods on these ports) rather than through the mesh,
+	// whose invoke path would be part of what the S3 client signs. Both are in the mesh as
+	// app-ids rclone-s3 and imgproxy, where the door's PRONTO_UPSTREAM_RCLONE_S3 and _IMGPROXY reach them.
+	let blobsPorts = {rcloneS3: 3900, imgproxy: 8081}
+	let blobsObjs = [if release.blobs != _|_ {
+		let x = release.blobs
+		let blobsName = "\(release.name)-blobs"
+		let credentials = (#workloadCredentials & {provider: x.provider, serviceAccount: x.serviceAccount}).out
+		let rcloneLabels = appLabels & {"app.kubernetes.io/component": "rclone-s3"}
+		let imgproxyLabels = appLabels & {"app.kubernetes.io/component": "imgproxy"}
+		let rcloneURL = "http://rclone-s3.\(release.namespace).svc.cluster.local:\(blobsPorts.rcloneS3)"
+		[{
+			apiVersion: "v1"
+			kind:       "ServiceAccount"
+			metadata: {name: blobsName, namespace: release.namespace, labels: rcloneLabels}
+		}, {
+			apiVersion: "v1"
+			kind:       "ConfigMap"
+			metadata: {name: blobsName, namespace: release.namespace, labels: rcloneLabels}
+			data: "credentials.json": json.Marshal(credentials)
+		}, {
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {name: "\(release.name)-rclone-s3", namespace: release.namespace, labels: rcloneLabels}
+			spec: {
+				replicas: release.replicas
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "rclone-s3"
+				}
+				template: {
+					metadata: {
+						labels:      rcloneLabels
+						annotations: (#daprSidecar & {id: "rclone-s3", port: "\(blobsPorts.rcloneS3)"}).out
+						// A changed credential rolls the pods.
+						annotations: "pronto.dev/config": hex.Encode(sha256.Sum256(json.Marshal(credentials)))
+					}
+					spec: {
+						serviceAccountName: blobsName
+						enableServiceLinks: false
+						containers: [{
+							name:            "rclone-s3"
+							image:           (#appImage & {svc: "rclone-s3"}).out
+							imagePullPolicy: targetEnv.imagePullPolicy
+							command: ["rclone"]
+							args: ["serve", "s3", "--addr=0.0.0.0:\(blobsPorts.rcloneS3)", "--vfs-cache-mode=off", "objects:"]
+							lifecycle: preStop: sleep: seconds: 15
+							ports: [{name: "http", containerPort: blobsPorts.rcloneS3}]
+							// mecha's blob plane over the bucket: a combine remote names its root
+							// mecha-objects, and the pod's service account reaches it with no key.
+							env: [
+								{name: "RCLONE_CONFIG_OBJECTS_TYPE", value: "combine"},
+								{name: "RCLONE_CONFIG_OBJECTS_UPSTREAMS", value: "mecha-objects=gcs:\(x.bucket)"},
+								{name: "RCLONE_CONFIG_GCS_TYPE", value: "google cloud storage"},
+								{name: "RCLONE_CONFIG_GCS_ENV_AUTH", value: "true"},
+								{name: "RCLONE_CONFIG_GCS_BUCKET_POLICY_ONLY", value: "true"},
+								{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/etc/gcp/credentials.json"},
+							]
+							startupProbe: {tcpSocket: port: blobsPorts.rcloneS3, periodSeconds: 2, failureThreshold: 60}
+							resources: (#resourcesOf & {r: release, n: "rclone-s3"}).out
+							volumeMounts: [
+								{name: "credentials", mountPath: "/etc/gcp", readOnly: true},
+								{name: "token", mountPath: "/var/run/secrets/gcp", readOnly: true},
+							]
+						}]
+						volumes: [
+							{name: "credentials", configMap: name: blobsName},
+							{name: "token", projected: sources: [{serviceAccountToken: {path: "token", audience: x.audience, expirationSeconds: 3600}}]},
+						]
+					}
+				}
+			}
+		}, {
+			apiVersion: "v1"
+			kind:       "Service"
+			metadata: {name: "rclone-s3", namespace: release.namespace, labels: rcloneLabels}
+			spec: {
+				type: "ClusterIP"
+				selector: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "rclone-s3"
+				}
+				ports: [{name: "http", port: blobsPorts.rcloneS3, targetPort: blobsPorts.rcloneS3, protocol: "TCP"}]
+			}
+		}, {
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {name: "\(release.name)-imgproxy", namespace: release.namespace, labels: imgproxyLabels}
+			spec: {
+				replicas: release.replicas
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "imgproxy"
+				}
+				template: {
+					metadata: {
+						labels:      imgproxyLabels
+						annotations: (#daprSidecar & {id: "imgproxy", port: "\(blobsPorts.imgproxy)"}).out
+					}
+					spec: {
+						enableServiceLinks: false
+						containers: [{
+							name:            "imgproxy"
+							image:           (#appImage & {svc: "imgproxy"}).out
+							imagePullPolicy: targetEnv.imagePullPolicy
+							lifecycle: preStop: sleep: seconds: 15
+							ports: [{name: "http", containerPort: blobsPorts.imgproxy}]
+							// As gcp.cue's imgproxy (and the app's compose): mecha's presets alone, no key signs a URL.
+							env: [
+								{name: "IMGPROXY_USE_S3", value: "true"},
+								{name: "IMGPROXY_S3_ENDPOINT", value: rcloneURL},
+								// The store takes any key pair; imgproxy's S3 client insists on one.
+								{name: "AWS_ACCESS_KEY_ID", value: "GK000000000000000000000000"},
+								{name: "AWS_SECRET_ACCESS_KEY", value: "0000000000000000000000000000000000000000000000000000000000000000"},
+								{name: "AWS_REGION", value: "rclone"},
+								{name: "IMGPROXY_BIND", value: ":\(blobsPorts.imgproxy)"},
+								{name: "IMGPROXY_MAX_SRC_RESOLUTION", value: "50"},
+								// The store and Google's photo host, as mecha's #ImgproxySources.
+								{name: "IMGPROXY_ALLOWED_SOURCES", value: "s3://mecha-objects/,https://lh3.googleusercontent.com/"},
+								{name: "IMGPROXY_ONLY_PRESETS", value: "true"},
+								{name: "IMGPROXY_PRESETS", value: "thumb=rs:fill:128:128/f:webp,avatar=rs:fill:256:256/f:webp,picture=rs:fit:1024:1024/f:webp"},
+								{name: "IMGPROXY_MAX_RESULT_DIMENSION", value: "1024"},
+								{name: "IMGPROXY_SET_CANONICAL_HEADER", value: "false"},
+								{name: "IMGPROXY_CACHE_CONTROL_PASSTHROUGH", value: "true"},
+							]
+							startupProbe: {tcpSocket: port: blobsPorts.imgproxy, periodSeconds: 2, failureThreshold: 60}
+							resources: (#resourcesOf & {r: release, n: "imgproxy"}).out
+						}]
+					}
+				}
+			}
+		}, {
+			apiVersion: "v1"
+			kind:       "Service"
+			metadata: {name: "imgproxy", namespace: release.namespace, labels: imgproxyLabels}
+			spec: {
+				type: "ClusterIP"
+				selector: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "imgproxy"
+				}
+				ports: [{name: "http", port: blobsPorts.imgproxy, targetPort: blobsPorts.imgproxy, protocol: "TCP"}]
 			}
 		}]
 	}]
@@ -1310,7 +1469,7 @@ import (
 	// 443 (a broker): the backends' policy holds the cluster's own, which reach
 	// nothing outside.
 	let appServicesNetworkPolicyObj = [
-		if release.networkPolicy.enabled if len(release.services) > 0 {
+		if release.networkPolicy.enabled if len(release.services) > 0 || release.blobs != _|_ {
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
@@ -1322,7 +1481,7 @@ import (
 				podSelector: matchExpressions: [{
 					key:      "app.kubernetes.io/component"
 					operator: "In"
-					values: [for n, _ in release.services {n}]
+					values: list.Concat([[for n, _ in release.services {n}], [if release.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
 				}]
 				policyTypes: ["Ingress", "Egress"]
 				ingress: [
@@ -1330,6 +1489,7 @@ import (
 						from: [{podSelector: matchLabels: "app.kubernetes.io/name": release.name}]
 						ports: list.Concat([
 							[for _, s in release.services {port: s.port, protocol: "TCP"}],
+							[if release.blobs != _|_ for _, p in blobsPorts {port: p, protocol: "TCP"}],
 							[{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}],
 						])
 					},
@@ -1350,7 +1510,7 @@ import (
 					{ports: [{port: 53, protocol: "UDP"}, {port: 53, protocol: "TCP"}]},
 					{
 						to: [{podSelector: matchLabels: "app.kubernetes.io/name": release.name}]
-						ports: [{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}]
+						ports: list.Concat([[{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}], [if release.blobs != _|_ {{port: blobsPorts.rcloneS3, protocol: "TCP"}}]])
 					},
 					{
 						to: [{namespaceSelector: matchLabels: "kubernetes.io/metadata.name": "observability"}]
@@ -1793,6 +1953,7 @@ import (
 			prontoRenderServiceObj,
 			for o in appServiceObjs {o},
 			appServiceClockObjs,
+			for o in blobsObjs {o},
 			vmalertObjs,
 			for o in metricsExportObjs {o},
 			gatewayObj,

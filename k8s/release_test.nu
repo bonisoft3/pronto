@@ -57,6 +57,7 @@ def run-tests [] {
 	test_door_egress
 	test_service_clock
 	test_metrics_export
+	test_blobs
 	test_initdb_replays
 	test_database_backup
 	test_app_services_environment
@@ -530,6 +531,54 @@ def test_metrics_export [] {
 	assert (($objs | where kind == "ServiceAccount" and metadata.name == "sample-metrics-export") | is-not-empty)
 	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
 	assert ($pol.spec.ingress | any {|r| ($r.from.0.podSelector?.matchLabels?."app.kubernetes.io/component"? == "metrics-export") and ($r.ports | any {|p| $p.port == 9598 }) }) "the collector may scrape the metrics port"
+}
+
+def test_blobs [] {
+	print "test the blob plane: rclone over a bucket and imgproxy, in the mesh, signed in through workload identity..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t blobs.XXXXXX.json | str trim)
+	{App: {services: {ticker: {port: 9998, env: {}}}}} | to json | save -f $data
+	let none = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	assert (($none | where metadata.name? in ["sample-rclone-s3" "sample-imgproxy" "sample-blobs" "rclone-s3" "imgproxy"]) | is-empty) "no blobs, no blob plane"
+	{App: {
+		services: {ticker: {port: 9998, env: {}}}
+		blobs: {bucket: "brawl-chess-metal-staging-blobs", provider: "projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/contabo-k3s", serviceAccount: "metal-blobs@brawl-chess.iam.gserviceaccount.com", audience: "contabo-k3s"}
+	}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let rc = ($objs | where kind == "Deployment" and metadata.name == "sample-rclone-s3" | first)
+	let img = ($objs | where kind == "Deployment" and metadata.name == "sample-imgproxy" | first)
+	assert equal $rc.spec.template.metadata.annotations."dapr.io/app-id" "rclone-s3"
+	assert equal $rc.spec.template.metadata.annotations."dapr.io/app-port" "3900"
+	assert equal $img.spec.template.metadata.annotations."dapr.io/app-id" "imgproxy"
+	assert equal $img.spec.template.metadata.annotations."dapr.io/app-port" "8081"
+	assert equal $rc.spec.template.spec.serviceAccountName "sample-blobs"
+	let c = ($rc.spec.template.spec.containers | first)
+	assert equal $c.command ["rclone"]
+	assert equal $c.args ["serve" "s3" "--addr=0.0.0.0:3900" "--vfs-cache-mode=off" "objects:"]
+	let renv = ($c.env | reduce -f {} {|e, acc| $acc | insert $e.name $e.value })
+	assert equal $renv.RCLONE_CONFIG_OBJECTS_UPSTREAMS "mecha-objects=gcs:brawl-chess-metal-staging-blobs"
+	assert equal $renv.RCLONE_CONFIG_GCS_ENV_AUTH "true"
+	assert equal $renv.RCLONE_CONFIG_GCS_BUCKET_POLICY_ONLY "true"
+	assert equal $renv.GOOGLE_APPLICATION_CREDENTIALS "/etc/gcp/credentials.json"
+	assert ($c.image | str contains "sample-rclone-s3") "built from the app's compose service"
+	let cm = ($objs | where kind == "ConfigMap" and metadata.name == "sample-blobs" | first)
+	let creds = ($cm.data."credentials.json" | from json)
+	assert equal $creds.type "external_account"
+	assert equal $creds.audience "//iam.googleapis.com/projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/contabo-k3s"
+	assert ($creds.service_account_impersonation_url | str ends-with "metal-blobs@brawl-chess.iam.gserviceaccount.com:generateAccessToken")
+	let token = ($rc.spec.template.spec.volumes | where name == "token" | first | get projected.sources.0.serviceAccountToken)
+	assert equal $token.audience "contabo-k3s" "the token is minted for the provider's audience"
+	assert (($objs | where kind == "ServiceAccount" and metadata.name == "sample-blobs") | is-not-empty)
+	let ienv = (($img.spec.template.spec.containers | first).env | reduce -f {} {|e, acc| $acc | insert $e.name $e.value })
+	assert equal $ienv.IMGPROXY_S3_ENDPOINT "http://rclone-s3.sample.svc.cluster.local:3900"
+	assert equal $ienv.IMGPROXY_ONLY_PRESETS "true"
+	assert equal ($objs | where kind == "Service" and metadata.name in ["rclone-s3" "imgproxy"] | get metadata.name | sort) ["imgproxy" "rclone-s3"]
+	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert ($pol.spec.podSelector.matchExpressions.0.values | all {|v| $v in ["ticker" "rclone-s3" "imgproxy"] }) "the services' policy covers the blob plane"
+	assert ($pol.spec.egress | any {|r| ($r.ipBlock? | is-empty) and ($r.to?.0?.ipBlock?.cidr? == "0.0.0.0/0") and ($r.ports == [{port: 443, protocol: "TCP"}]) }) "Google's APIs on 443"
+	assert ($pol.spec.egress | any {|r| ($r.to?.0?.podSelector? | is-not-empty) and ($r.ports | any {|p| $p.port == 3900 }) }) "imgproxy reaches rclone"
+	assert ($pol.spec.ingress | any {|r| $r.ports | any {|p| $p.port == 8081 } }) "the mesh reaches imgproxy"
 }
 
 def test_service_clock [] {

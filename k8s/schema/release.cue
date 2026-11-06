@@ -174,6 +174,19 @@ package schema
 		interval:        =~"^[0-9]+s$" | *"30s"
 	}
 
+	// The blob plane mecha's profile pictures live on (the door's /blobs and /img): rclone serving the
+	// Cloud Storage `bucket` as the S3 bucket every app names, and imgproxy over it, in the mesh as
+	// the app-ids rclone-s3 and imgproxy, built from the app's compose services of those names. rclone
+	// signs in with no key, as the metrics export does: the token of the service account
+	// <name>-blobs, whose subject is system:serviceaccount:<namespace>:<name>-blobs, is traded at the
+	// workload identity `provider` for `serviceAccount`'s, which may read and write the bucket.
+	blobs?: {
+		bucket!:         =~"^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$"
+		provider!:       =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+		serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
+		audience:        string | *"https://iam.googleapis.com/\(provider)"
+	}
+
 	// A container's own requests and limits over `resources`, by its name: crud, electric, auth,
 	// caddy, render, or one of the app's services. An Electric holding a shape per player and
 	// table needs more memory than a door (Bonk Chess's was OOMKilled at 256Mi, 2026-11-06).
