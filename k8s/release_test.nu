@@ -25,6 +25,7 @@ use release.nu [
 	tunnel-manifests
 	app-services-environment
 	seed-configmaps
+	apply-alert-rules
 ]
 
 def main [] {
@@ -51,6 +52,7 @@ def run-tests [] {
 	test_app_services
 	test_container_resources_and_files
 	test_seed_configmaps
+	test_alerting
 	test_app_services_environment
 	test_pods_hand_over
 	test_environment_access
@@ -404,6 +406,42 @@ def test_container_resources_and_files [] {
 	assert equal $flagd.spec.template.spec.volumes [{name: "files-sample-flags", configMap: {name: "sample-flags"}}]
 	let billing = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-caddy" | first)
 	assert ($billing.spec.template.spec.volumes? | default [] | all {|v| not ($v.name | str starts-with "files-") }) "no files, no volumes for them"
+}
+
+def test_alerting [] {
+	print "test an app's alerting rules: a vmalert of its own, and the rules written each release..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let none = (render-manifests $app.cue_path "metal" | from yaml)
+	assert (($none | where metadata.name == "sample-vmalert") | is-empty) "no rules, no vmalert"
+	let data = (mktemp -t alerting.XXXXXX.json | str trim)
+	{App: {alerting: {rules: ["observability/journeys.rules.yaml"]}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	let dep = ($objs | where kind == "Deployment" and metadata.name == "sample-vmalert" | first)
+	let c = ($dep.spec.template.spec.containers | first)
+	assert ($c.args | any {|a| $a == "-datasource.url=http://vmsingle.observability.svc.cluster.local:8428" }) "it reads the cluster's VictoriaMetrics"
+	assert ($c.args | any {|a| $a == "-notifier.blackhole" }) "with no notifier, alerts are kept as series"
+	assert equal $dep.spec.template.spec.volumes [{name: "rules", configMap: {name: "sample-alert-rules"}}]
+	{App: {services: {"journeys-collector": {port: 8686, env: {}, metrics: {port: 9598}}}}} | to json | save -f $data
+	let col = (render-manifests $app.cue_path "metal" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-journeys-collector" | first | get spec.template)
+	assert equal [$col.metadata.annotations."prometheus.io/scrape" $col.metadata.annotations."prometheus.io/port" $col.metadata.annotations."prometheus.io/path"] ["true" "9598" "/metrics"] "a service's metrics are scraped"
+	assert ($col.spec.containers.0.ports | any {|p| $p.containerPort == 9598 }) "its metrics port is declared, which pod discovery keeps"
+	{App: {alerting: {rules: ["a.rules.yaml"], notifier: "http://alertmanager.observability:9093"}}} | to json | save -f $data
+	let notified = (render-manifests $app.cue_path "metal" --data $data | from yaml | where metadata.name == "sample-vmalert" | first | get spec.template.spec.containers.0.args)
+	rm $data
+	assert ("-notifier.url=http://alertmanager.observability:9093" in $notified and not ("-notifier.blackhole" in $notified)) "a named notifier gets the alerts"
+
+	let dir = (mktemp -d)
+	mkdir $"($dir)/bin" $"($dir)/app/observability"
+	"groups: []\n" | save $"($dir)/app/observability/journeys.rules.yaml"
+	let log = $"($dir)/kubectl.log"
+	$"#!/bin/sh\necho \"$@\" >> ($log)\n" | save $"($dir)/bin/kubectl"
+	^chmod +x $"($dir)/bin/kubectl"
+	with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { apply-alert-rules "sample" ["observability/journeys.rules.yaml"] $"($dir)/app" "sample" }
+	let call = (open $log | lines | where {|l| $l starts-with "create" } | first)
+	assert (($call | str starts-with "create configmap sample-alert-rules -n sample --from-file=journeys.rules.yaml=") and ($call | str ends-with "/app/observability/journeys.rules.yaml --dry-run=client -o yaml")) $"the rules are written under their names: ($call)"
+	let twice = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { apply-alert-rules "sample" ["a/x.yaml" "b/x.yaml"] $"($dir)/app" "sample" }; false } catch { true })
+	assert $twice "two files of one name are refused"
+	rm -r $dir
 }
 
 def test_seed_configmaps [] {
