@@ -273,45 +273,6 @@ checksum = "sha256:1996c4e8132fc3b0187595a6b8bca507efe7cc83ff2d89e8cf3f44f6007f4
 url = "https://github.com/rclone/rclone/releases/download/v1.71.0/rclone-v1.71.0-windows-amd64.zip"
 url_api = "https://api.github.com/repos/rclone/rclone/releases/assets/285207725"
 
-[[tools."github:theseus-rs/postgresql-binaries"]]
-version = "18.6.1"
-backend = "github:theseus-rs/postgresql-binaries"
-
-[tools."github:theseus-rs/postgresql-binaries"."platforms.linux-arm64"]
-checksum = "sha256:1ab47fa2f06ff70454309ad02e5d89c46488300d43977231481fd6b160b9d556"
-url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654378218"
-
-[tools."github:theseus-rs/postgresql-binaries"."platforms.linux-arm64-musl"]
-checksum = "sha256:d33d7d3249d7cf7ae72f35aaa20e46d30bdc1c17f4d102b2b3a39d618848ea8b"
-url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654430290"
-
-[tools."github:theseus-rs/postgresql-binaries"."platforms.linux-x64"]
-checksum = "sha256:e84b02dd8d0ce5879fb697330a789231c8b8f8d958dae3ad4d90fecc710b1315"
-url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654246574"
-
-[tools."github:theseus-rs/postgresql-binaries"."platforms.linux-x64-musl"]
-checksum = "sha256:80287b4596d427cf8456eb946c44b1607b3d2f0a0ad48ffe26dde0068bee5ff3"
-url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653957730"
-
-[tools."github:theseus-rs/postgresql-binaries"."platforms.macos-arm64"]
-checksum = "sha256:89e91cc80650a43d22c018b95ca356a0c9e15838a1182fed2880bfb5d7d9c9a6"
-url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653610275"
-
-[tools."github:theseus-rs/postgresql-binaries"."platforms.macos-x64"]
-checksum = "sha256:4229812543e19c91864ebdf5d8f78883c5816d51d4cc5d065298260c1f64d37e"
-url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653681678"
-
-[tools."github:theseus-rs/postgresql-binaries"."platforms.windows-x64"]
-checksum = "sha256:d82142f3a9a49be8467f0e87f5a079f627515539f94a070fe1463208fa8eb3c6"
-url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653680782"
-
 [[tools."github:xataio/pgroll"]]
 version = "0.16.3"
 backend = "github:xataio/pgroll"
@@ -414,3 +375,42 @@ url = "https://github.com/redis/redis/archive/refs/tags/8.6.2.tar.gz"
 [tools."http:redis"."platforms.windows-x64"]
 checksum = "sha256:08286eb017217fb18af0e70454099133ae24e3a90d9d837f67d93286f7f441d0"
 url = "https://github.com/redis-windows/redis-windows/releases/download/8.6.7/Redis-8.6.7-Windows-x64-msys2.zip"
+
+[[tools.postgres-3e889cd904bd]]
+version = "18.6.1"
+backend = "github:theseus-rs/postgresql-binaries"
+
+[tools.postgres-3e889cd904bd."platforms.linux-arm64"]
+checksum = "sha256:1ab47fa2f06ff70454309ad02e5d89c46488300d43977231481fd6b160b9d556"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654378218"
+
+[tools.postgres-3e889cd904bd."platforms.linux-arm64-musl"]
+checksum = "sha256:d33d7d3249d7cf7ae72f35aaa20e46d30bdc1c17f4d102b2b3a39d618848ea8b"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654430290"
+
+[tools.postgres-3e889cd904bd."platforms.linux-x64"]
+checksum = "sha256:e84b02dd8d0ce5879fb697330a789231c8b8f8d958dae3ad4d90fecc710b1315"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654246574"
+
+[tools.postgres-3e889cd904bd."platforms.linux-x64-musl"]
+checksum = "sha256:80287b4596d427cf8456eb946c44b1607b3d2f0a0ad48ffe26dde0068bee5ff3"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653957730"
+
+[tools.postgres-3e889cd904bd."platforms.macos-arm64"]
+checksum = "sha256:89e91cc80650a43d22c018b95ca356a0c9e15838a1182fed2880bfb5d7d9c9a6"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653610275"
+
+[tools.postgres-3e889cd904bd."platforms.macos-x64"]
+checksum = "sha256:4229812543e19c91864ebdf5d8f78883c5816d51d4cc5d065298260c1f64d37e"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653681678"
+
+[tools.postgres-3e889cd904bd."platforms.windows-x64"]
+checksum = "sha256:d82142f3a9a49be8467f0e87f5a079f627515539f94a070fe1463208fa8eb3c6"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653680782"

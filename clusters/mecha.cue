@@ -13,7 +13,9 @@
 package mecha
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"strings"
 	impl "github.com/bonisoft3/mecha:cluster"
 	ivm "github.com/bonisoft3/mecha/packages/incremental-views:incremental_views"
@@ -39,8 +41,8 @@ _nuString: {
 _postgrestScript: #"""
 	if $nu.os-info.name == "macos" {
 	  let bin = ($env.MISE_TOOL_INSTALL_PATH | path join "postgrest")
-	  ^install_name_tool -change /opt/homebrew/opt/libpq/lib/libpq.5.dylib "@executable_path/../../github-theseus-rs-postgresql-binaries/18.6.1/lib/libpq.5.dylib" $bin
-	  ^install_name_tool -change /usr/local/opt/libpq/lib/libpq.5.dylib "@executable_path/../../github-theseus-rs-postgresql-binaries/18.6.1/lib/libpq.5.dylib" $bin
+	  ^install_name_tool -change /opt/homebrew/opt/libpq/lib/libpq.5.dylib "@executable_path/../../\#(_postgresTool)/\#(_postgresVersion)/lib/libpq.5.dylib" $bin
+	  ^install_name_tool -change /usr/local/opt/libpq/lib/libpq.5.dylib "@executable_path/../../\#(_postgresTool)/\#(_postgresVersion)/lib/libpq.5.dylib" $bin
 	  ^codesign --force -s - $bin
 	}
 	"""#
@@ -97,8 +99,10 @@ _postgresScript: #"""
 	      open --raw $mk | str replace -a -r '-isysroot [^ \t\r\n]+' $"-isysroot ($sdk)" | save -f $mk
 	    }
 	    do { cd $pljs; \#(strings.Join([for p in pljs.#Patches {"^patch -p1 -i \(p)"}], "; ")) }
-	    ^make -C ($pljs | path join "deps/quickjs") -j4 libquickjs.a
-	    ^make -C $pljs -j4 $"PG_CONFIG=($pg_dir | path join 'bin/pg_config')" with_llvm=no install
+	    let cflags = (if $os == "macos" { [$env.CFLAGS? "\#(pljs.#QuickjsCflags)"] | compact | str join " " } else { $env.CFLAGS? | default "" })
+	    let ldflags = (if $os == "linux" { [$env.PG_LDFLAGS? "\#(pljs.#ElfLdflags)"] | compact | str join " " } else { $env.PG_LDFLAGS? | default "" })
+	    with-env { CFLAGS: $cflags } { ^make -C ($pljs | path join "deps/quickjs") -j4 libquickjs.a }
+	    ^make -C $pljs -j4 $"PG_CONFIG=($pg_dir | path join 'bin/pg_config')" with_llvm=no $"PG_LDFLAGS=($ldflags)" install
 	    ^make -C $ivm_dir -j4 $"PG_CONFIG=($pg_dir | path join 'bin/pg_config')" with_llvm=no install
 	  }
 	  [\#(strings.Join([for l in pljs.#Control {(_nuString & {v: l}).out}], " "))] | str join "\n" | $in + "\n" | save -f ($pg_dir | path join "share/extension/plv8.control")
@@ -118,6 +122,14 @@ _redisScript: #"""
 	}
 	"""#
 
+// The host's PostgreSQL, under a name its build recipe derives: mise runs a
+// postinstall only when it installs, so a changed recipe names another tool
+// and every host builds its extensions again.
+_postgresVersion: "18.6.1"
+_postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_postgresScript)), 0, 12)
+
+#HostToolAliases: {(_postgresTool): "github:theseus-rs/postgresql-binaries"}
+
 #HostTools: {
 	...
 	"github:xataio/pgroll": {
@@ -133,8 +145,8 @@ _redisScript: #"""
 		version:     "v16.5"
 		postinstall: (_nuPostinstall & {name: "postgrest", script: _postgrestScript}).out
 	}
-	"github:theseus-rs/postgresql-binaries": {
-		version:     "18.6.1"
+	(_postgresTool): {
+		version:     _postgresVersion
 		postinstall: (_nuPostinstall & {name: "postgres", script: _postgresScript}).out
 	}
 	"http:redis": {
@@ -149,7 +161,7 @@ _redisScript: #"""
 	}
 }
 
-#Project: {tools: toolchain.#Tools, hostTools: #HostTools, ...}
+#Project: {tools: toolchain.#Tools, hostTools: #HostTools, hostToolAliases: #HostToolAliases, ...}
 
 #Cluster: impl.#Cluster
 #Runtime: impl.#Runtime

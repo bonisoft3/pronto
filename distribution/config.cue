@@ -119,6 +119,8 @@ import (
 	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
 	tools:      #Tools
 	hostTools:  #HostTools
+	// Host tools installed under another name than their backend's.
+	hostToolAliases: *{} | {[string]: string}
 	mise: {
 		...
 		settings: {
@@ -138,7 +140,8 @@ import (
 	miseHost: {
 		...
 		settings: P.mise.settings
-		tools:    P.hostTools
+		if len(P.hostToolAliases) > 0 {tool_alias: P.hostToolAliases}
+		tools: P.hostTools
 	}
 	_run:     #Run
 	compiler: "^\((#Writer & {root: "(^mise where \(#Runtimes.pronto) | str trim)"}).out)"
