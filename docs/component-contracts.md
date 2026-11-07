@@ -153,16 +153,20 @@ clone.
   the workspace and without it. The other deno projects under `apps/` warn that
   they are no members and ignore it.
 - **Integrity.** The monorepo never fetches a pinned URL, so `platform_pins.nu
-  lock <app>` records two graphs in the one `tests/deno.lock`: the checkout's,
-  for HEAD's own `npm:` and `jsr:` imports, and a copy of the app outside the
-  repository, which fetches every pin as its mirror does. That half needs the
-  tags pushed. A pin may name the release its own train tags: the monorepo
-  never fetches it, so only the lock and the mirror's sync wait for the tag.
-  deno.lock records module imports, not `text` or `bytes` ones
-  (`--unstable-raw-imports`), so a module also imports as code a file it reads
-  as text (SES in `tests/platform.ts`, `mecha-runtime.js` in
-  `mecha-reducer.ts`); GGRS's wasm is the one file only read as bytes. `check`
-  fails when a lock lacks a module its app imports by pin.
+  lock <app>` records the checkout's graph in `tests/deno.lock`, for HEAD's own
+  `npm:` and `jsr:` imports, and the app's frozen tests in CI hold the lock to
+  it; `check` compares files alone. `lock <app> --mirror` also records the
+  mirror's: a copy of the app outside the repository fetches every pin from its
+  tag, so that half needs the tags pushed. A mirror may lag the monorepo: an app
+  can import a platform module its pinned release lacks, and only the mirror
+  waits. `sync.yml` builds the tree it will push and refuses to publish it
+  until `check-mirror` passes there (`.github/mirror_pins.sh`): every module the
+  app imports by pin recorded, and a frozen cache resolving each from its tag,
+  with the deno the checkout pins. deno.lock records module
+  imports, not `text` or `bytes` ones (`--unstable-raw-imports`), so a module
+  also imports as code a file it reads as text (SES in `tests/platform.ts`,
+  `mecha-runtime.js` in `mecha-reducer.ts`); GGRS's wasm is the one file only
+  read as bytes.
 - **Platform modules load by URL.** What an app's tests reach in omnishell and
   pronto imports relatively or by full `npm:` and `jsr:` specifiers, reads a
   neighbouring file by import rather than `Deno.readTextFile(new URL(…,
