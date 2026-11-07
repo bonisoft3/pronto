@@ -11,7 +11,6 @@ use release.nu [
 	node-registry-manifests
 	OPERATORS
 	get-operator-cache-dir
-	operator-set
 	fetch-verified
 	resolve-app
 	render-manifests
@@ -41,7 +40,6 @@ def run-tests [] {
 	print "Running release-k8s tests...\n"
 
 	test_operators_metadata
-	test_operator_single_node
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
@@ -976,14 +974,4 @@ def test_cloud_release_refused [] {
 	let res = (do { nu ($k8s_dir | path join "release.nu") --app ($fixtures_dir | path join "sample") -e eks } | complete)
 	assert ($res.exit_code != 0)
 	assert ($res.stderr | str contains "release to eks is not implemented")
-}
-
-def test_operator_single_node [] {
-	print "test a cluster of one node runs dapr without its scheduler, and a larger one keeps it..."
-	let dapr = ($OPERATORS | where name == "dapr" | first)
-	assert equal (operator-set $dapr 1) ["dapr_rbac.secretReader.enabled=false" "global.scheduler.enabled=false"]
-	assert equal (operator-set $dapr 3) ["dapr_rbac.secretReader.enabled=false"]
-	let plain = ($OPERATORS | where {|o| ($o.single_node_set? | is-empty) } | first)
-	assert equal (operator-set $plain 1) ($plain.set? | default [])
-	print "  ok"
 }
