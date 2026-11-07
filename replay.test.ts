@@ -140,6 +140,11 @@ Deno.test("the diagnosis survives the frames pgroll draws after it", () => {
     "\u001b[91mfailed: column \"body\" does not exist\u001b[0m\n" +
     " cleaning up (0s)\r   \r";
   assertEquals(plain(stderr), 'failed: column "body" does not exist');
+  // Under migrate.nu, Nushell appends its own external_command wrapper after
+  // pgroll's stderr; the finding still reports pgroll's diagnosis rather than
+  // Nushell's generic "x External command failed".
+  const wrapped = stderr + "\nError: nu::shell::external_command\n\n  x External command failed\n    ,-[migrate.nu:49:4]\n 49 | ^pgroll start $file --complete\n    : `-- External command had a non-zero exit code\n    `----\n";
+  assertEquals(plain(wrapped), 'failed: column "body" does not exist');
 });
 
 Deno.test("declared migrations are named without their extension, in applied order", () => {

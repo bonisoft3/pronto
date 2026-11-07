@@ -1,0 +1,54 @@
+{
+  "_generated_from": "bayt.cue (do not edit)",
+  "entrypoint": {
+    "do": "if ('tests/visual-fixture.ts' | path exists) { ^deno run --no-lock --allow-env --allow-net --unsafely-ignore-certificate-errors=caddy,localhost,127.0.0.1 tests/visual-fixture.ts }; let omni = (if (($env.OMNISHELL_DIR? | default '') != '') { $env.OMNISHELL_DIR } else { (^mise where github:bonisoft3/omnishell | str trim) }); ^deno run --node-modules-dir=auto --allow-read --allow-write --allow-net --allow-env --allow-run --allow-sys --allow-ffi --unsafely-ignore-certificate-errors=caddy,localhost,127.0.0.1 ($omni | path join 'check-visual.ts') .",
+    "shell": "nu",
+    "env": {
+      "APP_URL": {
+        "peer": "caddy",
+        "port": "door",
+        "part": "addr",
+        "host": "localhost",
+        "prefix": "https://",
+        "suffix": ""
+      },
+      "SETTLE_TIMEOUT_MS": "50000"
+    },
+    "after": {
+      "launch": "healthy"
+    },
+    "host": true
+  },
+  "name": "visual",
+  "process-compose": {
+    "activate": "mise x --"
+  },
+  "project": "idioms",
+  "dir": ".",
+  "activate": "",
+  "srcs": {
+    "globs": [],
+    "exclude": []
+  },
+  "outs": {
+    "globs": [],
+    "exclude": []
+  },
+  "state": {
+    "globs": []
+  },
+  "env": {},
+  "visibility": "internal",
+  "emitsSrcs": false,
+  "deps": [],
+  "sameProjectDeps": [],
+  "transitiveDeps": [],
+  "transitiveCrossDeps": [],
+  "upClosure": [],
+  "chainedDeps": [],
+  "cmds": [],
+  "cache": {
+    "full": false,
+    "similar": false
+  }
+}

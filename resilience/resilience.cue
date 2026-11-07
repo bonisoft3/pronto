@@ -116,7 +116,13 @@ resilience: #Resilience & {
 
 // Caddy's bound on each upstream, `import bounded-<hop>` in the Caddyfile:
 // emitted ahead of it, so the Caddyfile names hops and never a number.
-caddySnippets: strings.Join([for hop, s in resilience.timeouts.door {
+caddySnippets: """
+	{
+	  admin off
+	  auto_https disable_redirects
+	}
+
+	""" + strings.Join([for hop, s in resilience.timeouts.door {
 	"""
 	(bounded-\(hop)) {
 	  transport http {

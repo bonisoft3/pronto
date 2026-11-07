@@ -2,14 +2,14 @@
 FROM idioms-generate AS lint
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --parents --exclude=mise.local.lock --exclude=**/node_modules/** --exclude=.task/** ** .bayt/checks.yaml .pronto/facts.json ./
+COPY --parents --exclude=mise.host.lock --exclude=.mise.host.toml --exclude=mise.local.lock --exclude=**/node_modules/** --exclude=.task/** ** .bayt/checks.yaml .pronto/facts.json ./
 RUN ["nu", "-c", "mise x -- cue vet -c ./..."]
 COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.lint.yaml .bayt/bayt.lint.json ./.bayt/
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS lint_ctxs
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --parents --exclude=mise.local.lock --exclude=**/node_modules/** --exclude=.task/** ** .bayt/checks.yaml .pronto/facts.json ./
+COPY --parents --exclude=mise.host.lock --exclude=.mise.host.toml --exclude=mise.local.lock --exclude=**/node_modules/** --exclude=.task/** ** .bayt/checks.yaml .pronto/facts.json ./
 COPY --from=idioms-generate_srcs /monorepo /monorepo
 COPY --from=idioms-setup_srcs /monorepo /monorepo
 ARG SOURCE_DATE_EPOCH

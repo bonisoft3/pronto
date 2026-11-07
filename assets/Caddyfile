@@ -73,7 +73,7 @@
   # answer 204 to prevent console errors that break Best Practices audits
   # without paying for an asset.
   handle /favicon.ico {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     @favicon file /favicon.ico /shell/favicon.ico /favicon.svg /shell/favicon.svg /favicon.png /shell/favicon.png
     handle @favicon {
       header Cache-Control "no-cache"
@@ -86,7 +86,7 @@
   }
   # Web App Manifest: serve with application/manifest+json; alias /manifest.json.
   handle /manifest.webmanifest {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     @manifest file /manifest.webmanifest /shell/manifest.webmanifest
     handle @manifest {
       header Content-Type "application/manifest+json"
@@ -99,7 +99,7 @@
     }
   }
   handle /shell/manifest.webmanifest {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     header Content-Type "application/manifest+json"
     header Cache-Control "no-cache"
     import files
@@ -211,16 +211,16 @@
   # same image answers on https://localhost:8443 and on the deployed door. So
   # they ship as templates spelling the origin above.
   handle /robots.txt {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     import templated text/plain
   }
   handle /sitemap.xml {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     import templated application/xml text/xml
   }
   # LLM discovery documents. Served from the root with markdown typing.
   handle /llms.txt {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     @llms file /llms.txt
     handle @llms {
       header Content-Type "text/markdown; charset=utf-8"
@@ -232,7 +232,7 @@
     }
   }
   handle /llms-full.txt {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     @llmsfull file /llms-full.txt
     handle @llmsfull {
       header Content-Type "text/markdown; charset=utf-8"
@@ -246,7 +246,7 @@
   # Platform well-knowns (Universal Links, App Links, passkeys).
   # iOS apple-app-site-association has no file extension; set application/json.
   handle /.well-known/* {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     @extensionless path_regexp ^/\.well-known/[^/.]+$
     header @extensionless Content-Type "application/json"
     header Cache-Control "no-cache"
@@ -254,14 +254,14 @@
   }
   handle /omnishell/* {
     uri strip_prefix /omnishell
-    root * /omnishell
+    root * {$PRONTO_OMNISHELL_ROOT:/omnishell}
     # Statics revalidate every load (304s on their validator): dev-loop edits and
     # redeployed bundles must never be pinned by the browser's heuristic cache.
     header Cache-Control "no-cache"
     import files
   }
   handle {
-    root * /srv
+    root * {$PRONTO_SRV_ROOT:/srv}
     header Cache-Control "no-cache"
     import files
   }
@@ -277,7 +277,7 @@
 #
 # localhost, for a person's browser: mkcert's pair when the host issued one
 # (CADDY_TLS, set as the container starts), Caddy's own CA otherwise.
-https://localhost:8443 {
+https://localhost:{$CADDY_DOOR_PORT:8443} {
   tls {$CADDY_TLS:internal}
   header Alt-Svc `h3=":{$CADDY_TLS_HOST_PORT:8443}"; ma=2592000`
   import app
@@ -288,7 +288,7 @@ https://localhost:8443 {
 # and on HTTP/1.1's six connections per host a screen reading more stalls. Its
 # own block, so mkcert's localhost-only pair never leaves this name to a public
 # CA.
-https://caddy:8443 {
-  tls internal
+https://caddy:{$CADDY_DOOR_PORT:8443} {
+  tls {$CADDY_TLS:internal}
   import app
 }

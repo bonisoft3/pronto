@@ -13,11 +13,124 @@
 package mecha
 
 import (
+	"encoding/base64"
 	impl "github.com/bonisoft3/mecha:cluster"
+	ivm "github.com/bonisoft3/mecha/packages/incremental-views:incremental_views"
 	toolchain "github.com/bonisoft3/mecha/toolchain"
 )
 
-#Project: {tools: toolchain.#Tools, ...}
+_nuPostinstall: {
+	name:   string
+	script: string
+	let _b64 = base64.Encode(null, script)
+	let _f = ".postinstall-\(name).nu"
+	out: "nu -c \"'\(_b64)' | decode base64 | decode utf-8 | save -f \(_f); ^nu \(_f); rm -f \(_f)\""
+}
+
+_postgrestScript: #"""
+	if $nu.os-info.name == "macos" {
+	  let bin = ($env.MISE_TOOL_INSTALL_PATH | path join "postgrest")
+	  ^install_name_tool -change /opt/homebrew/opt/libpq/lib/libpq.5.dylib "@executable_path/../../github-theseus-rs-postgresql-binaries/18.6.1/lib/libpq.5.dylib" $bin
+	  ^install_name_tool -change /usr/local/opt/libpq/lib/libpq.5.dylib "@executable_path/../../github-theseus-rs-postgresql-binaries/18.6.1/lib/libpq.5.dylib" $bin
+	  ^codesign --force -s - $bin
+	}
+	"""#
+
+_postgresScript: #"""
+	let os = (match $nu.os-info.name { "macos" => "macos", "windows" => "windows", _ => "linux" })
+	let dlext = (match $os { "macos" => "dylib", "windows" => "dll", _ => "so" })
+	let pg_dir = $env.MISE_TOOL_INSTALL_PATH
+	let tmp = ($nu.temp-dir | path join $"mise-pg-build-($nu.pid)-(random int 1000..9999)")
+	mkdir $tmp
+	try {
+	  let pljs = ($tmp | path join "pljs")
+	  ^git clone --depth 1 --branch v1.0.5 --recurse-submodules https://github.com/plv8/pljs.git $pljs
+	  let pljs_rev = (^git -C $pljs rev-parse HEAD | str trim)
+	  if $pljs_rev != "194c4d5bc8f7e3130f9b310607bc3c51b232cbdc" { error make { msg: $"unexpected pljs commit for v1.0.5: ($pljs_rev)" } }
+	  let fn_c = ($pljs | path join "src/functions.c")
+	  let needle = 'JS_SetPropertyStr(ctx, global_obj, "pljs", pljs);'
+	  let inject = ($needle + "\n  JS_SetPropertyStr(ctx, global_obj, \"plv8\", JS_DupValue(ctx, pljs));\n  JS_SetPropertyStr(ctx, global_obj, \"print\", JS_Eval(ctx, \"(function(){})\", 14, \"<init>\", JS_EVAL_TYPE_GLOBAL));")
+	  open --raw $fn_c | str replace $needle $inject | save -f $fn_c
+	  let ivm_tgz = ($tmp | path join "pg_ivm.tar.gz")
+	  http get --raw "\#(ivm.#Source.url)" | save -f $ivm_tgz
+	  let ivm_got = (open --raw $ivm_tgz | hash sha256)
+	  if $ivm_got != "\#(ivm.#Source.sha256)" { error make { msg: $"sha256 mismatch for pg_ivm: got ($ivm_got)" } }
+	  ^tar -xzf $ivm_tgz -C $tmp
+	  let ivm_dir = ($tmp | path join "pg_ivm-\#(ivm.#Source.commit)")
+	  if $os == "windows" {
+	    let ch = ($pg_dir | path join "include/server/c.h")
+	    open --raw $ch | str replace -a "#ifdef __MINGW64__" "#if 0" | save -f $ch
+	    let tc = ($pljs | path join "src/types.c")
+	    open --raw $tc | str replace -a "(unsigned long)obj" "(Datum)obj" | save -f $tc
+	    with-env { MISE_LOCKED: "0" } {
+	      ^mise x zig@0.14.0 -- zig cc -target x86_64-windows-gnu -shared -O2 -Wno-implicit-function-declaration -D_GNU_SOURCE '-DCONFIG_VERSION="2025-04-26"' '-DPLJS_VERSION="1.0.5"' -DJSONB_DIRECT_CONVERSION -DEXPOSE_GC -Dunicode_to_utf8=qjs_unicode_to_utf8 -Dunicode_from_utf8=qjs_unicode_from_utf8 $"-I($pg_dir | path join 'include/server/port/win32')" $"-I($pg_dir | path join 'include/server')" $"-I($pg_dir | path join 'include')" $"-I($pljs)" $"-I($pljs | path join 'deps/quickjs')" ($pljs | path join "deps/quickjs/cutils.c") ($pljs | path join "deps/quickjs/dtoa.c") ($pljs | path join "deps/quickjs/libregexp.c") ($pljs | path join "deps/quickjs/libunicode.c") ($pljs | path join "deps/quickjs/quickjs.c") ($pljs | path join "src/pljs.c") ($pljs | path join "src/cache.c") ($pljs | path join "src/functions.c") ($pljs | path join "src/types.c") ($pljs | path join "src/params.c") ($pg_dir | path join "lib/postgres.lib") -o ($pg_dir | path join $"lib/pljs.($dlext)")
+	      ^mise x zig@0.14.0 -- zig cc -target x86_64-windows-gnu -shared -O2 -Wno-ignored-attributes $"-I($pg_dir | path join 'include/server/port/win32')" $"-I($pg_dir | path join 'include/server')" $"-I($pg_dir | path join 'include')" $"-I($ivm_dir)" ($ivm_dir | path join "createas.c") ($ivm_dir | path join "matview.c") ($ivm_dir | path join "pg_ivm.c") ($ivm_dir | path join "ruleutils.c") ($ivm_dir | path join "subselect.c") ($pg_dir | path join "lib/postgres.lib") -o ($pg_dir | path join $"lib/pg_ivm.($dlext)")
+	    }
+	    mkdir ($pg_dir | path join "share/extension")
+	    cp -f ($pljs | path join "pljs.control") ($pg_dir | path join "share/extension/pljs.control")
+	    cp -f ($pljs | path join "pljs.sql") ($pg_dir | path join "share/extension/pljs--1.0.5.sql")
+	    cp -f ($ivm_dir | path join "pg_ivm.control") ($pg_dir | path join "share/extension/pg_ivm.control")
+	    glob ($ivm_dir | path join "pg_ivm--*.sql" | str replace -a (char -u 5c) "/") | each {|f| cp -f $f ($pg_dir | path join "share/extension" | path join ($f | path basename)) }
+	  } else {
+	    if $os == "macos" {
+	      let sdk = (^xcrun --show-sdk-path | str trim)
+	      let mk = ($pg_dir | path join "lib/pgxs/src/Makefile.global")
+	      open --raw $mk | str replace -a -r '-isysroot [^ \t\r\n]+' $"-isysroot ($sdk)" | save -f $mk
+	    }
+	    do { cd $pljs; ^patch -p1 -i patches/01-shared-lib-build; ^patch -p1 -i patches/02-unicode-conflict }
+	    ^make -C ($pljs | path join "deps/quickjs") -j4 libquickjs.a
+	    ^make -C $pljs -j4 $"PG_CONFIG=($pg_dir | path join 'bin/pg_config')" with_llvm=no install
+	    ^make -C $ivm_dir -j4 $"PG_CONFIG=($pg_dir | path join 'bin/pg_config')" with_llvm=no install
+	  }
+	  "comment = 'PL/JavaScript (v8 alias backed by QuickJS pljs)'\ndefault_version = '1.0.5'\nmodule_pathname = '$libdir/pljs'\nrelocatable = false\nschema = pg_catalog\nsuperuser = true\ntrusted = true\n" | save -f ($pg_dir | path join "share/extension/plv8.control")
+	  open --raw ($pg_dir | path join "share/extension/pljs--1.0.5.sql") | str replace -a "LANGUAGE pljs" "LANGUAGE plv8" | str replace -a "CREATE TRUSTED LANGUAGE pljs" "CREATE TRUSTED LANGUAGE plv8" | save -f ($pg_dir | path join "share/extension/plv8--1.0.5.sql")
+	} catch {|e|
+	  rm -rf $tmp
+	  error make { msg: ($e.msg? | default ($e | to text)) }
+	}
+	rm -rf $tmp
+	"""#
+
+_redisScript: #"""
+	if $nu.os-info.name != "windows" {
+	  let d = $env.MISE_TOOL_INSTALL_PATH
+	  ^make -C ($d | path join "src") -j4 BUILD_TLS=no USE_SYSTEMD=no MALLOC=libc INSTALL=/usr/bin/install install $"PREFIX=($d)"
+	  ^make -C ($d | path join "src") clean
+	}
+	"""#
+
+#HostTools: {
+	...
+	"github:xataio/pgroll": {
+		version: "v0.16.3"
+		bin:     "pgroll"
+	}
+	"github:dapr/dapr":                             "v1.16.1"
+	"github:ConduitIO/conduit":                     "v0.20.4"
+	"github:conduitio-labs/conduit-connector-http": "v0.4.0"
+	"github:rclone/rclone":                         "v1.71.0"
+	"github:axllent/mailpit":                       "v1.32.0"
+	"github:PostgREST/postgrest": {
+		version:     "v16.5"
+		postinstall: (_nuPostinstall & {name: "postgrest", script: _postgrestScript}).out
+	}
+	"github:theseus-rs/postgresql-binaries": {
+		version:     "18.6.1"
+		postinstall: (_nuPostinstall & {name: "postgres", script: _postgresScript}).out
+	}
+	"http:redis": {
+		version:     "8.6.2"
+		postinstall: (_nuPostinstall & {name: "redis", script: _redisScript}).out
+		platforms: {
+			for p in ["linux-x64", "linux-arm64", "linux-x64-musl", "linux-arm64-musl", "macos-x64", "macos-arm64"] {
+				"\(p)": url: "https://github.com/redis/redis/archive/refs/tags/{{ version }}.tar.gz"
+			}
+			"windows-x64": url: "https://github.com/redis-windows/redis-windows/releases/download/8.6.7/Redis-8.6.7-Windows-x64-msys2.zip"
+		}
+	}
+}
+
+#Project: {tools: toolchain.#Tools, hostTools: #HostTools, ...}
 
 #Cluster: impl.#Cluster
 #Runtime: impl.#Runtime

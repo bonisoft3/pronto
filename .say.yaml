@@ -87,10 +87,10 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno test --no-config --unstable-raw-imports --allow-env --allow-read --allow-write --allow-run=deno,docker,cue mecha-xstate.test.ts xstate-host.integration.test.ts"
-          - do: "mise exec -- deno test --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts"
-          - do: "mise exec -- deno test --config deno.json --frozen --allow-read --allow-write --allow-env --allow-run=cue cortex-machine.test.ts cortex-sources.test.ts cortex-conformance.test.ts cortex-validation.test.ts"
+          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts"
+          - do: "mise exec -- deno test --parallel --config deno.json --frozen --allow-read --allow-write --allow-env --allow-run=cue cortex-machine.test.ts cortex-sources.test.ts cortex-conformance.test.ts cortex-validation.test.ts"
           - do: 'mise exec -- deno test --config deno.json --allow-read --allow-run=cue --filter "server timers refuse" machine-timers.integration.test.ts'
-          - do: "mise exec -- deno test --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
+          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
       # What each Jessie role may be granted, held against both cages and the schema.
       endowments:
         priority: -1
@@ -115,7 +115,7 @@ say:
       bundle:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-scripts_test.ts bundle/edge-addresses_test.ts bundle/edge-deployment_test.ts bundle/edge-jwt_test.ts bundle/edge-hatches_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts bundle/edge-static_test.ts mecha-reducer.test.ts"
+          - do: "mise exec -- deno test --parallel --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-scripts_test.ts bundle/edge-addresses_test.ts bundle/edge-deployment_test.ts bundle/edge-jwt_test.ts bundle/edge-hatches_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts bundle/edge-static_test.ts mecha-reducer.test.ts"
       # The door's language rule against the terminal's, over an emitted
       # Caddyfile: two runtimes that cannot share code and must not disagree.
       negotiation:

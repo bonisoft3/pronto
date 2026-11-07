@@ -49,10 +49,10 @@ import pronto "github.com/bonisoft3/pronto"
 	document:  _files["documents/regras/index.html"]
 	sitemap:   _files["sitemap.xml"].text
 	robots:    _files["robots.txt"].text
-	door:      ["sh", "-c", _cluster.surface.targets.caddy.entrypoint.do]
+	door:      ["sh", "-c", _cluster.surface.targets.caddy.entrypoint.dockerfile.do]
 	// Installed, the terminal's statics are omnishell's image's, not the
 	// cluster's (builders/bayt.cue).
-	installedDoor: ["sh", "-c", (pronto.#DefaultCluster & {code: _app, statics: ((pronto.#DefaultTerminal & {code: _app}).out & {surface: _installedSurface}).surface.statics}).out.surface.targets.caddy.entrypoint.do]
+	installedDoor: ["sh", "-c", (pronto.#DefaultCluster & {code: _app, statics: ((pronto.#DefaultTerminal & {code: _app}).out & {surface: _installedSurface}).surface.statics}).out.surface.targets.caddy.entrypoint.dockerfile.do]
 	doorEnv:   _cluster.surface.targets.caddy.compose.environment
 	origin:    _cluster.surface.origin
 }

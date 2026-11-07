@@ -2457,7 +2457,9 @@ _pgrollDir: "services/database/pgroll"
 		// A door hatch's service is part of every launch: the door's route
 		// answers nothing without it.
 		for hn, h in D.code.capabilities.hatches if h.door != _|_ {
+			surface: targets: (hn): expose: http: port: *h.door.port | int
 			surface: targets: launch: compose: depends_on: (hn): condition: "service_healthy"
+			surface: targets: caddy: entrypoint: env: ("PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(hn, "-", "_", -1)))"): {peer: hn, port: "http"}
 		}
 		for hn, h in D.code.capabilities.hatches if h.activepieces != _|_ {
 			surface: targets: (hn): (mecha.#ActivepiecesContainer & {
@@ -2517,8 +2519,15 @@ _pgrollDir: "services/database/pgroll"
 					"seed-blobs": {
 						visibility: "internal"
 						activate:   ""
+						"process-compose": activate: "mise x --"
 						cmd: "builtin": null
 						srcs: globs: ["\(dir)/*"]
+						entrypoint: {
+							shell: "nu"
+							do:    "for f in (glob '\(dir)/*') { let ext = ($f | path parse | get extension); let t = (match $ext { 'webp' => 'image/webp', 'png' => 'image/png', 'jpg' => 'image/jpeg', _ => { print -e $'no type for ($f)'; exit 1 } }); let name = ($f | path basename); http put --content-type $t $'($env.SEED_BLOBS_URL)/mecha-objects/seed/($name)' (open --raw $f | into binary) | ignore }"
+							env: SEED_BLOBS_URL: {peer: "rclone-s3", port: "http", prefix: "http://"}
+							after: "rclone-s3": "healthy"
+						}
 						dockerfile: {
 							from: name: "alpine/curl@sha256:5bd4985f3daa6d1ca87619802190afc24c0ccd410b1f123de5afc8e891b5fc71"
 							copy: [{srcs: ["\(dir)/"], dst: "/seed/"}]
@@ -2553,12 +2562,30 @@ _pgrollDir: "services/database/pgroll"
 				render: bayt.healthcheck.http & {
 					cmd: "builtin": null
 					activate: ""
+					"process-compose": activate: "mise x --"
 					// The release it takes its entry from (a `from.ref` copy).
 					deps: [":served:outs"]
 					healthcheck: {
-						url: omnishell.#Render.health
+						port: omnishell.#Render.port
+						path: "/health"
 						// Healthy once every table has synced.
 						start_period: "120s"
+					}
+					expose: http: {port: omnishell.#Render.port, env: "PORT"}
+					entrypoint: {
+						shell: "nu"
+						do:    "let omni = (if (($env.OMNISHELL_DIR? | default '') != '') { $env.OMNISHELL_DIR } else { (^mise where github:bonisoft3/omnishell | str trim) }); let served = ($env.BAYT_LOCAL_SERVED_DIR? | default ''); let cfg = ($env.BAYT_LOCAL_RENDER_ENTRY? | default (if $served != '' { ($served | path join 'srv/shell/index.html') } else { 'shell/index.html' })); let entry = (if ($cfg | path exists) { $cfg } else { 'shell/index.html' }); with-env { ENTRY: $entry } { ^deno run --frozen --config ($omni | path join 'server/deno.json') --allow-net --allow-env --allow-read ($omni | path join 'server/render.ts') }"
+						env: {
+							DOOR:            {peer: "caddy", port: "http", prefix: "http://"}
+							DOOR_TIMEOUT_MS: "\(resilience.resilience.timeouts.renderDoor*1000)"
+							ORIGIN:          D.out.surface.origin
+						}
+						after: {
+							caddy:    "healthy"
+							crud:     "healthy"
+							electric: "healthy"
+							auth:     "started"
+						}
 					}
 					// It reads the app once, as it starts: its routes, screens and
 					// catalogues through the door, its entry off this image. The door
@@ -2590,17 +2617,17 @@ _pgrollDir: "services/database/pgroll"
 						// The door, and what answers behind it: a guest is minted
 						// and every table synced before the renderer is ready.
 						depends_on: {
-							caddy:    {condition: "service_healthy"}
-							crud:     {condition: "service_healthy"}
-							electric: {condition: "service_healthy"}
-							auth:     {condition: "service_started"}
+							caddy:    *{condition: "service_healthy"} | {...}
+							crud:     *{condition: "service_healthy"} | {...}
+							electric: *{condition: "service_healthy"} | {...}
+							auth:     *{condition: "service_started"} | {...}
 						}
 						environment: {
-							DOOR:            "http://caddy:8080"
-							DOOR_TIMEOUT_MS: "\(resilience.resilience.timeouts.renderDoor*1000)"
+							DOOR:            *"http://caddy:8080" | string
+							DOOR_TIMEOUT_MS: *"\(resilience.resilience.timeouts.renderDoor*1000)" | string
 							ENTRY:           omnishell.#Render.entry.target
-							ORIGIN:          D.out.surface.origin
-							PORT:            "\(omnishell.#Render.port)"
+							ORIGIN:          *D.out.surface.origin | string
+							PORT:            *"\(omnishell.#Render.port)" | string
 						}
 						restart: "on-failure"
 						// An edit to the entry reaches the door, which the renderer
@@ -2609,6 +2636,7 @@ _pgrollDir: "services/database/pgroll"
 					}
 				}
 				launch: compose: depends_on: render: {condition: "service_healthy"}
+				caddy: entrypoint: env: PRONTO_UPSTREAM_RENDER: {peer: "render", port: "http"}
 			}
 		}
 	}
@@ -3768,6 +3796,11 @@ _pgrollDir: "services/database/pgroll"
 			for i in _invoking {
 				"services/airlock/dapr/\(i.effect.name).yaml": {
 					format: "yaml"
+					_envVar: [
+						if i.effect.sink.bridge != _|_ {"BRIDGE_\(strings.ToUpper(strings.Replace(i.effect.sink.bridge, "-", "_", -1)))_URL"},
+						if i.effect.sink.ai != _|_ {"TSBIFROST_URL"},
+						"",
+					][0]
 					data: {
 						apiVersion: "dapr.io/v1alpha1"
 						kind:       "Component"
@@ -3776,16 +3809,16 @@ _pgrollDir: "services/database/pgroll"
 							type:    "bindings.http"
 							version: "v1"
 							metadata: [
-								// Cluster-owned bridges and the AI gateway use plain HTTP.
-								{name: "url", value: [
-									if i.effect.sink.bridge != _|_ {"http://\(E.code.state.bridges[i.effect.sink.bridge].container):\(E.code.state.bridges[i.effect.sink.bridge].port)\([if E.code.state.bridges[i.effect.sink.bridge].action != _|_ {"/actions/\(E.code.state.bridges[i.effect.sink.bridge].action)"}, ""][0])"},
-									if i.effect.sink.ai != _|_ {"http://tsbifrost:\(mecha.#TsBifrostPort)"},
-									i.effect.sink.origin,
-								][0]},
+								// Cluster-owned bridges and the AI gateway read their upstream URL from the environment.
+								if _envVar != "" {{name: "url", secretKeyRef: {name: _envVar, key: _envVar}}},
+								if _envVar == "" {{name: "url", value: i.effect.sink.origin}},
 								// The sink's own status comes back to the handler, a refusal
 								// being an answer rather than a binding error.
 								{name: "errorIfNot2XX", value: "false"},
 							]
+						}
+						if _envVar != "" {
+							auth: secretStore: "env"
 						}
 					}
 				}
@@ -3879,7 +3912,7 @@ _pgrollDir: "services/database/pgroll"
 								type:   "destination"
 								plugin: "standalone:http"
 								settings: {
-									url: "http://mesh-events:3500/v1.0/publish/redis-streams/cdc-events"
+									url: "${MESH_EVENTS_URL}/v1.0/publish/redis-streams/cdc-events"
 									// The probe is a HEAD, which dapr's publish endpoint 404s.
 									validateConnection: "false"
 								}
@@ -4018,7 +4051,7 @@ _pgrollDir: "services/database/pgroll"
 			// entry otherwise, and a 404 for a path that is neither.
 			_anchor: """
 				  handle {
-				    root * /srv
+				    root * {$PRONTO_SRV_ROOT:/srv}
 				    header Cache-Control "no-cache"
 				    import files
 				  }
@@ -4167,7 +4200,7 @@ _pgrollDir: "services/database/pgroll"
 				    @rendered {
 				      expression `{http.request.uri}.matches(\(json.Marshal(_renderedRegexp)))`
 				      not file {
-				        root /srv
+				        root {$PRONTO_SRV_ROOT:/srv}
 				        try_files {path} {path}/index.html
 				      }
 				    }
@@ -4195,7 +4228,7 @@ _pgrollDir: "services/database/pgroll"
 				"""
 				    @document path \(strings.Join(_documentAt, " "))
 				    handle @document {
-				      root * /srv
+				      root * {$PRONTO_SRV_ROOT:/srv}
 				      header Cache-Control "no-cache"
 				      try_files {path}/index.html
 				      import templated text/html
@@ -4206,7 +4239,7 @@ _pgrollDir: "services/database/pgroll"
 			_served: """
 				  route {
 				\(_entry)\(_alias)\(_negotiate)\(_render)\(_document)    handle {
-				      root * /srv
+				      root * {$PRONTO_SRV_ROOT:/srv}
 				      header Cache-Control "no-cache"
 				      @file file {path} {path}/index.html
 				      rewrite @file {http.matchers.file.relative}
@@ -4219,7 +4252,7 @@ _pgrollDir: "services/database/pgroll"
 			// An app's seed assets are its own server's, in a cluster: not the blob plane's.
 			if E.code.capabilities.seedAssets != _|_ {_doorAnchored: true & strings.Contains(_caddyfileAsset, "  handle /blobs/* {")}
 			_door: [
-				if E.code.capabilities.seedAssets != _|_ {strings.Replace(_caddyfileAsset, "  handle /blobs/* {", "  handle /seed-assets/* {\n    reverse_proxy assets:8787\n  }\n  handle /blobs/* {", 1)},
+				if E.code.capabilities.seedAssets != _|_ {strings.Replace(_caddyfileAsset, "  handle /blobs/* {", "  handle /seed-assets/* {\n    reverse_proxy {$PRONTO_UPSTREAM_ASSETS:assets:8787}\n  }\n  handle /blobs/* {", 1)},
 				_caddyfileAsset,
 			][0]
 			_split: strings.SplitN(_door, _anchor, 2)
@@ -4243,7 +4276,7 @@ _pgrollDir: "services/database/pgroll"
 				let presenter = [for p in _presenterAt {"  @presenter path \(p)\n  header @presenter Content-Security-Policy \(json.Marshal(E._shell.presenter.policy))\n"}]
 				// What the presenter's script-src 'self' admits is answered
 				// from a file the door holds, never by an upstream.
-				let scripted = [for p in _presenterAt {"  @scripted {\n    header_regexp Sec-Fetch-Dest ^(\(strings.Join(E._shell.presenter.scripted, "|")))$\n    not file {\n      root /srv\n    }\n  }\n  handle @scripted {\n    respond \"\" 403\n  }\n"}]
+				let scripted = [for p in _presenterAt {"  @scripted {\n    header_regexp Sec-Fetch-Dest ^(\(strings.Join(E._shell.presenter.scripted, "|")))$\n    not file {\n      root {$PRONTO_SRV_ROOT:/srv}\n    }\n  }\n  handle @scripted {\n    respond \"\" 403\n  }\n"}]
 
 				// A door built as a release names the inline scripts its documents
 				// run; an addressed file never changes, so it is never revalidated.

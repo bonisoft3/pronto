@@ -7,6 +7,12 @@ say:
         cmds:
         - use: ./bayt-task.nu
           do: bayt-task launch-action --generate
+      host:
+        platform: host
+        stop: true
+        cmds:
+        - use: ./bayt-task.nu
+          do: "with-env { MISE_ENV: 'host' } { ^mise install; bayt-task launch --generate }"
   integrate:
     rulemap:
       builtin:
@@ -14,6 +20,12 @@ say:
         cmds:
         - use: ./bayt-task.nu
           do: bayt-task integrate-action --generate
+      host:
+        platform: host
+        stop: true
+        cmds:
+        - use: ./bayt-task.nu
+          do: "with-env { MISE_ENV: 'host' } { ^mise install; bayt-task integrate --generate }"
   lint:
     rulemap:
       auto-cue: null

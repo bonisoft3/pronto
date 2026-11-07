@@ -53,7 +53,7 @@ Deno.test("a presenter's worker script answers with the presenter's policy, and 
   // The worker's script-src 'self' admits a module import of any path here,
   // a credentialed GET; an upstream's may act (a sign-in callback), so the
   // door answers a script's fetch from its own files or not at all.
-  assertStringIncludes(caddy, `  @scripted {\n    header_regexp Sec-Fetch-Dest ^(script|worker|sharedworker|serviceworker)$\n    not file {\n      root /srv\n    }\n  }\n  handle @scripted {\n    respond "" 403\n  }\n`);
+  assertStringIncludes(caddy, `  @scripted {\n    header_regexp Sec-Fetch-Dest ^(script|worker|sharedworker|serviceworker)$\n    not file {\n      root {$PRONTO_SRV_ROOT:/srv}\n    }\n  }\n  handle @scripted {\n    respond "" 403\n  }\n`);
   assert(caddy.indexOf("handle @scripted") < caddy.indexOf("handle /crud/*"), "the refusal precedes every upstream");
 });
 

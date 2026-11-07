@@ -105,6 +105,9 @@ COPY --from=workspaceroot-pronto-sources_bayt /monorep[o] /monorepo/
 COPY --from=workspaceroot-pronto-sources_srcs /monorep[o] /monorepo/
 COPY --parents monorepo/*.yaml ./
 COPY --from=idioms-ci-visual_bayt --link /monorepo /monorepo
+COPY --from=idioms-integrate_srcs --parents /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/shell.yaml /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/** /
+COPY --from=idioms-caddy_srcs --parents /monorepo/${BAYT_DIR:+${BAYT_DIR}/}docker/Caddyfile /
+COPY --from=idioms-served_srcs --parents /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/index.html /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/shell.css /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/boot.js /monorepo/${BAYT_DIR:+${BAYT_DIR}/}offline-first-sw.js /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/shell.yaml /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/shell.json /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/design.css /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/counter.html /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/counter.css /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/todo.html /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/todo.css /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/grid.html /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/grid.css /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/timer.html /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/screens/timer.css /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/handlers/count.js /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/handlers/press.js /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/handlers/remove.js /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/handlers/roll.js /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/handlers/tally.js /monorepo/${BAYT_DIR:+${BAYT_DIR}/}shell/handlers/tick.js /monorepo/${BAYT_DIR:+${BAYT_DIR}/}messages/en.json /monorepo/${BAYT_DIR:+${BAYT_DIR}/}messages/pt-BR.json /monorepo/${BAYT_DIR:+${BAYT_DIR}/}brief.md /monorepo/${BAYT_DIR:+${BAYT_DIR}/}brief.html /monorepo/${BAYT_DIR:+${BAYT_DIR}/}journal.html /monorepo/${BAYT_DIR:+${BAYT_DIR}/}ir.html /monorepo/${BAYT_DIR:+${BAYT_DIR}/}ir/card.css /monorepo/${BAYT_DIR:+${BAYT_DIR}/}acceptance.md /monorepo/${BAYT_DIR:+${BAYT_DIR}/}DESIGN.md /monorepo/${BAYT_DIR:+${BAYT_DIR}/}ir/neighbourhood-app.svg /monorepo/${BAYT_DIR:+${BAYT_DIR}/}ir/neighbourhood-counter.svg /monorepo/${BAYT_DIR:+${BAYT_DIR}/}ir/neighbourhood-grid.svg /monorepo/${BAYT_DIR:+${BAYT_DIR}/}ir/neighbourhood-timer.svg /monorepo/${BAYT_DIR:+${BAYT_DIR}/}ir/neighbourhood-todo.svg /monorepo/${BAYT_DIR:+${BAYT_DIR}/}robots.txt /monorepo/${BAYT_DIR:+${BAYT_DIR}/}sitemap.xml /
 COPY --parents .bayt/** ./
 COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.ci.yaml .bayt/bayt.ci.json ./.bayt/
 ENV BUILDX_BAKE_ENTITLEMENTS_FS=0
@@ -165,6 +168,9 @@ ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
 COPY --parents .bayt/compose.ci.yaml .bayt/Dockerfile.ci .bayt/bayt.ci.json .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.ci.yaml .bayt/process-compose.yaml ./
 COPY --from=idioms-ci-visual_bayt /monorepo /monorepo
+COPY --from=idioms-integrate_bayt /monorepo /monorepo
+COPY --from=idioms-caddy_bayt /monorepo /monorepo
+COPY --from=idioms-served_bayt /monorepo /monorepo
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
 RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi

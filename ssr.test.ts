@@ -149,8 +149,8 @@ Deno.test("the door advertises h3 on its published host port over both TCP and U
   if (/20879/.test(caddyfile.out)) {
     throw new Error(`the Caddyfile hardcodes an app port in Alt-Svc:\n${caddyfile.out}`);
   }
-  if (!/https:\/\/localhost:8443 \{\n\s*tls \{\$CADDY_TLS:internal\}\n\s*header Alt-Svc `h3=":\{\$CADDY_TLS_HOST_PORT:8443\}"; ma=2592000`\n/.test(caddyfile.out)) {
-    throw new Error(`https://localhost:8443 does not advertise h3 on CADDY_TLS_HOST_PORT:\n${caddyfile.out}`);
+  if (!/https:\/\/localhost:\{\$CADDY_DOOR_PORT:8443\} \{\n\s*tls \{\$CADDY_TLS:internal\}\n\s*header Alt-Svc `h3=":\{\$CADDY_TLS_HOST_PORT:8443\}"; ma=2592000`\n/.test(caddyfile.out)) {
+    throw new Error(`https://localhost:{$CADDY_DOOR_PORT:8443} does not advertise h3 on CADDY_TLS_HOST_PORT:\n${caddyfile.out}`);
   }
 });
 

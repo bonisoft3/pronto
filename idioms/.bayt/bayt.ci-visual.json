@@ -461,6 +461,9 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml",
         "./.bayt/compose.caddy.yaml",
         "./.bayt/compose.served.yaml"
       ]
@@ -493,6 +496,9 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml",
         "./.bayt/compose.caddy.yaml",
         "./.bayt/compose.served.yaml"
       ]
@@ -521,15 +527,16 @@
     "integrate_srcs",
     "integrate_bayt",
     "caddy_srcs",
-    "served_srcs",
-    "launch_outs_srcs",
-    "served_outs_srcs"
+    "served_srcs"
   ],
   "transitiveCrossDeps": [],
   "upClosure": [
     "./.bayt/compose.ci-visual.yaml",
     "./.bayt/compose.integrate.yaml",
     "./.bayt/compose.launch.yaml",
+    "./.bayt/compose.build.yaml",
+    "./.bayt/compose.generate.yaml",
+    "./.bayt/compose.setup.yaml",
     "./.bayt/compose.caddy.yaml",
     "./.bayt/compose.served.yaml"
   ],

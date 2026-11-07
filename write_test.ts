@@ -598,7 +598,7 @@ code: capabilities: hatches: integrations: {
     assertEquals(await Deno.readFile(generated), binary);
     assertEquals(JSON.parse(await Deno.readTextFile(join(context, "manifest.json"))).actions.invoke.inputSchema, {type: "object"});
     assertStringIncludes(await Deno.readTextFile(join(context, "registry.ts")), 'from "./pieces/sample/index.js"');
-    assertStringIncludes(await Deno.readTextFile(join(app, "services/airlock/dapr/send.yaml")), "http://integrations:8080/actions/parse");
+    assertStringIncludes(await Deno.readTextFile(join(app, "services/airlock/dapr/send.yaml")), "BRIDGE_INTEGRATION_URL");
     const manifestPath = join(app, ".pronto/manifest.json");
     const recorded = JSON.parse(await Deno.readTextFile(manifestPath));
     assert(recorded.written.includes("activepieces/integrations/pieces/sample/asset.bin"));

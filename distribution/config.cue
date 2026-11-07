@@ -76,6 +76,26 @@ import (
 	}
 }
 
+#HostTools: {
+	...
+	"http:hydra": {
+		version: "26.2.0"
+		platforms: {
+			for platform, asset in {
+				"linux-x64":        "linux_sqlite_64bit.tar.gz"
+				"linux-arm64":      "linux_sqlite_arm64.tar.gz"
+				"linux-x64-musl":   "linux_sqlite_64bit.tar.gz"
+				"linux-arm64-musl": "linux_sqlite_arm64.tar.gz"
+				"macos-x64":        "macOS_sqlite_64bit.tar.gz"
+				"macos-arm64":      "macOS_sqlite_arm64.tar.gz"
+				"windows-x64":      "windows_sqlite_64bit.zip"
+			} {
+				"\(platform)": url: "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-\(asset)"
+			}
+		}
+	}
+}
+
 // Commands resolve an installation at execution time, never into generated
 // files: where mise puts it, the pinned release or, under a checkout's
 // mise.local.toml, its tree.
@@ -98,6 +118,7 @@ import (
 	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
 	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
 	tools:      #Tools
+	hostTools:  #HostTools
 	mise: {
 		...
 		settings: {
@@ -113,6 +134,11 @@ import (
 			aqua: {github_attestations: false, cosign: false, slsa: false, minisign: false}
 		}
 		tools: P.tools
+	}
+	miseHost: {
+		...
+		settings: P.mise.settings
+		tools:    P.hostTools
 	}
 	_run:     #Run
 	compiler: "^\((#Writer & {root: "(^mise where \(#Runtimes.pronto) | str trim)"}).out)"

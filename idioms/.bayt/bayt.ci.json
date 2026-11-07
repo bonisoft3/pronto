@@ -464,6 +464,9 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml",
         "./.bayt/compose.caddy.yaml",
         "./.bayt/compose.served.yaml"
       ]
@@ -497,6 +500,9 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml",
         "./.bayt/compose.caddy.yaml",
         "./.bayt/compose.served.yaml"
       ]
@@ -520,16 +526,83 @@
       "visibility": "internal",
       "deps": [],
       "transitiveDeps": [
-        "ci-visual_srcs_srcs",
-        "ci-visual_bayt_srcs",
-        "integrate_srcs_srcs_srcs",
-        "integrate_bayt_srcs_srcs",
-        "caddy_srcs_srcs_srcs",
-        "served_srcs_srcs_srcs",
-        "launch_outs_srcs_srcs_srcs",
-        "served_outs_srcs_srcs_srcs"
+        "ci-visual_srcs",
+        "integrate_srcs",
+        "caddy_srcs",
+        "served_srcs"
       ],
-      "transitiveCrossDeps": [],
+      "transitiveCrossDeps": [
+        {
+          "project": "idioms",
+          "name": "integrate_srcs",
+          "dir": ".",
+          "outs": {
+            "globs": [
+              "shell/shell.yaml",
+              "shell/screens/**"
+            ],
+            "exclude": []
+          }
+        },
+        {
+          "project": "idioms",
+          "name": "caddy_srcs",
+          "dir": ".",
+          "outs": {
+            "globs": [
+              "docker/Caddyfile"
+            ],
+            "exclude": []
+          }
+        },
+        {
+          "project": "idioms",
+          "name": "served_srcs",
+          "dir": ".",
+          "outs": {
+            "globs": [
+              "shell/index.html",
+              "shell/shell.css",
+              "shell/boot.js",
+              "offline-first-sw.js",
+              "shell/shell.yaml",
+              "shell/shell.json",
+              "shell/design.css",
+              "shell/screens/counter.html",
+              "shell/screens/counter.css",
+              "shell/screens/todo.html",
+              "shell/screens/todo.css",
+              "shell/screens/grid.html",
+              "shell/screens/grid.css",
+              "shell/screens/timer.html",
+              "shell/screens/timer.css",
+              "shell/handlers/count.js",
+              "shell/handlers/press.js",
+              "shell/handlers/remove.js",
+              "shell/handlers/roll.js",
+              "shell/handlers/tally.js",
+              "shell/handlers/tick.js",
+              "messages/en.json",
+              "messages/pt-BR.json",
+              "brief.md",
+              "brief.html",
+              "journal.html",
+              "ir.html",
+              "ir/card.css",
+              "acceptance.md",
+              "DESIGN.md",
+              "ir/neighbourhood-app.svg",
+              "ir/neighbourhood-counter.svg",
+              "ir/neighbourhood-grid.svg",
+              "ir/neighbourhood-timer.svg",
+              "ir/neighbourhood-todo.svg",
+              "robots.txt",
+              "sitemap.xml"
+            ],
+            "exclude": []
+          }
+        }
+      ],
       "chainedDeps": [],
       "cmds": [],
       "cache": {
@@ -541,6 +614,9 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml",
         "./.bayt/compose.caddy.yaml",
         "./.bayt/compose.served.yaml"
       ]
@@ -564,12 +640,9 @@
   "transitiveDeps": [
     "ci-visual_srcs",
     "ci-visual_bayt",
-    "integrate_srcs_srcs",
-    "integrate_bayt_srcs",
-    "caddy_srcs_srcs",
-    "served_srcs_srcs",
-    "launch_outs_srcs_srcs",
-    "served_outs_srcs_srcs"
+    "integrate_srcs",
+    "caddy_srcs",
+    "served_srcs"
   ],
   "transitiveCrossDeps": [],
   "upClosure": [
@@ -577,6 +650,9 @@
     "./.bayt/compose.ci-visual.yaml",
     "./.bayt/compose.integrate.yaml",
     "./.bayt/compose.launch.yaml",
+    "./.bayt/compose.build.yaml",
+    "./.bayt/compose.generate.yaml",
+    "./.bayt/compose.setup.yaml",
     "./.bayt/compose.caddy.yaml",
     "./.bayt/compose.served.yaml"
   ],
@@ -603,6 +679,76 @@
           ".bayt/Taskfile.bayt.yml",
           ".bayt/Taskfile.ci-visual.yaml",
           ".bayt/process-compose.yaml"
+        ],
+        "exclude": []
+      }
+    },
+    {
+      "name": "integrate_srcs",
+      "project": "idioms",
+      "dir": ".",
+      "outs": {
+        "globs": [
+          "shell/shell.yaml",
+          "shell/screens/**"
+        ],
+        "exclude": []
+      }
+    },
+    {
+      "name": "caddy_srcs",
+      "project": "idioms",
+      "dir": ".",
+      "outs": {
+        "globs": [
+          "docker/Caddyfile"
+        ],
+        "exclude": []
+      }
+    },
+    {
+      "name": "served_srcs",
+      "project": "idioms",
+      "dir": ".",
+      "outs": {
+        "globs": [
+          "shell/index.html",
+          "shell/shell.css",
+          "shell/boot.js",
+          "offline-first-sw.js",
+          "shell/shell.yaml",
+          "shell/shell.json",
+          "shell/design.css",
+          "shell/screens/counter.html",
+          "shell/screens/counter.css",
+          "shell/screens/todo.html",
+          "shell/screens/todo.css",
+          "shell/screens/grid.html",
+          "shell/screens/grid.css",
+          "shell/screens/timer.html",
+          "shell/screens/timer.css",
+          "shell/handlers/count.js",
+          "shell/handlers/press.js",
+          "shell/handlers/remove.js",
+          "shell/handlers/roll.js",
+          "shell/handlers/tally.js",
+          "shell/handlers/tick.js",
+          "messages/en.json",
+          "messages/pt-BR.json",
+          "brief.md",
+          "brief.html",
+          "journal.html",
+          "ir.html",
+          "ir/card.css",
+          "acceptance.md",
+          "DESIGN.md",
+          "ir/neighbourhood-app.svg",
+          "ir/neighbourhood-counter.svg",
+          "ir/neighbourhood-grid.svg",
+          "ir/neighbourhood-timer.svg",
+          "ir/neighbourhood-todo.svg",
+          "robots.txt",
+          "sitemap.xml"
         ],
         "exclude": []
       }

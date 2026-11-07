@@ -92,8 +92,10 @@ export function withheld(hatches: Record<string, Hatch>, raw: RawMigration[]): M
 /** squawk's findings as lint findings, with the forgiven rule dropped. */
 export function findings(reported: Squawk[], appDir: string): Finding[] {
   const out: Finding[] = [];
+  const normApp = appDir.replaceAll("\\", "/");
   for (const r of reported) {
-    const path = r.file.startsWith(appDir + "/") ? r.file.slice(appDir.length + 1) : r.file;
+    const normFile = r.file.replaceAll("\\", "/");
+    const path = normFile.startsWith(normApp + "/") ? normFile.slice(normApp.length + 1) : normFile;
     if (r.rule_name === FORGIVEN.rule && path === FORGIVEN.path) continue;
     out.push({
       severity: "error",

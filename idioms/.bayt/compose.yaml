@@ -64,17 +64,17 @@ services:
     profiles:
     - ci
     scale: 1
-  served:
-    extends:
-      file: ./compose.served.yaml
-      service: idioms-served
-    profiles:
-    - served
-    scale: 1
   caddy:
     extends:
       file: ./compose.caddy.yaml
       service: idioms-caddy
     profiles:
     - caddy
+    scale: 1
+  served:
+    extends:
+      file: ./compose.served.yaml
+      service: idioms-served
+    profiles:
+    - served
     scale: 1

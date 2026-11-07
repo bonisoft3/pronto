@@ -560,7 +560,7 @@ Deno.test("the roles migration leaves electric's password to the deployment", as
 
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {
   const files = await emitFiles(bridged(MAIL_BRIDGE));
-  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", value: "http://smtp:8080" });
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", secretKeyRef: { name: "BRIDGE_MAIL_URL", key: "BRIDGE_MAIL_URL" } });
   assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, "unknown");
 });
 
@@ -1225,8 +1225,12 @@ app: state: mecha: rows: PaymentMachine: states: pending: entry: [
 });
 
 Deno.test("a bridge uses its container hatch's address and selected port", async () => {
-  const files = await emitFiles(bridged(MAIL_BRIDGE.replace("8080", "9090")));
-  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", value: "http://smtp:9090" });
+  const program = bridged(MAIL_BRIDGE.replace("8080", "9090"));
+  const files = await emitFiles(program);
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", secretKeyRef: { name: "BRIDGE_MAIL_URL", key: "BRIDGE_MAIL_URL" } });
+  const env = await cue(["export", "-", "-e", '_cluster.surface.targets["airlock-mesh"].compose.environment.BRIDGE_MAIL_URL', "--out", "json"], program);
+  assertEquals(env.success, true, env.stderr);
+  assertEquals(JSON.parse(env.stdout), "http://smtp:9090");
 });
 
 Deno.test("declaring a bridge hatch without supplying its container fails emission", async () => {

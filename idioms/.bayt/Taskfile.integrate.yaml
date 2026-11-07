@@ -4,8 +4,152 @@ tasks:
     deps:
     - "::bayt:launch"
     run: once
-    status:
-    - >-
-      mise x -- bayt fingerprint --manifest '{{.TASKFILE_DIR}}/bayt.integrate.json'
-      --stamp-file .task/bayt/integrate.hash
+    cmds:
+    - |-
+      nu -c "let os = (match \$nu.os-info.name { \"macos\" => \"macos\", \"windows\" => \"windows\", _ => \"linux\" })
+      let home = (\$env.HOME? | default (\$env.USERPROFILE? | default ('~' | path expand)))
+      let default_pw = (match \$os {
+        \"macos\" => (\$home | path join \"Library/Caches/ms-playwright\")
+        \"windows\" => ((\$env.LOCALAPPDATA? | default (\$home | path join \"AppData/Local\")) | path join \"ms-playwright\")
+        _ => (\$home | path join \".cache/ms-playwright\")
+      })
+      let pw_dir = (if ((\$env.PLAYWRIGHT_BROWSERS_PATH? | default \"\") != \"\") { \$env.PLAYWRIGHT_BROWSERS_PATH } else { \$default_pw })
+      mkdir \$pw_dir
+      let marker = (\$pw_dir | path join \".playwright-chromium-1.61.1\")
+      let has_chromium = ((glob (\$pw_dir | path join \"chromium-*\" | str replace -a (char -u 5c) \"/\") | length) > 0)
+      if (not (\$marker | path exists)) or (not \$has_chromium) {
+        if \$os == \"linux\" {
+          ^mise x -- deno run -A --node-modules-dir=none npm:playwright@1.61.1 install --with-deps chromium
+        } else {
+          ^mise x -- deno run -A --node-modules-dir=none npm:playwright@1.61.1 install chromium
+        }
+        \"\" | save -f \$marker
+      }
+      let omnishell = (if ((\$env.OMNISHELL_DIR? | default \"\") != \"\") { \$env.OMNISHELL_DIR } else { (^mise where github:bonisoft3/omnishell | str trim) })
+      let check_visual = (\$omnishell | path join \"check-visual.ts\")
+      let nm_marker = (\$omnishell | path join \"node_modules/.omnishell-visual-nm-v1\")
+      if (\$check_visual | path exists) and (not (\$nm_marker | path exists)) {
+        let deno_bin = (which deno | get 0.path)
+        do { cd \$omnishell; ^\$deno_bin install --node-modules-dir=auto --entrypoint \$check_visual }
+        \"\" | save -f \$nm_marker
+      }
+      let base_tmp = (if ((\$env.RUNNER_TEMP? | default \"\") != \"\") { \$env.RUNNER_TEMP } else { \$nu.temp-dir })
+      let work = (\$base_tmp | path join \$\"bayt-host-idioms-(\$nu.pid)-(random int 100000..999999)\")
+      let wbin = (\$work | path join \"bin\")
+      mkdir \$wbin
+      if \$os == \"windows\" {
+        ([\"@echo off\" \"exit /b 0\" \"\"] | str join (char crlf)) | save -f (\$wbin | path join \"task.cmd\")
+      } else {
+        ([\"#!/bin/sh\" \"exit 0\" \"\"] | str join (char nl)) | save -f (\$wbin | path join \"task\")
+        ^chmod +x (\$wbin | path join \"task\")
+      }
+      if (not (\".certs/localhost.pem\" | path exists)) or (not (\".certs/localhost-key.pem\" | path exists)) {
+        mkdir .certs
+        with-env { CAROOT: (\".certs\" | path expand) } {
+          ^mise x -- mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem localhost caddy 127.0.0.1 ::1
+        }
+      }
+      let caroot_ca = ((^mise x -- mkcert -CAROOT | str trim) | path join \"rootCA.pem\")
+      let cert_p = (\$work | path join \"ca.pem\")
+      ([\".certs/localhost.pem\" \".certs/rootCA.pem\" \$caroot_ca] | where (\$it | path exists) | each {|p| open --raw \$p } | str join (char nl)) | save -f \$cert_p
+      let served_dir = (\$work | path join \"served\")
+      if (\".bayt/bayt.served.json\" | path exists) {
+        let omnishell = (if ((\$env.OMNISHELL_DIR? | default \"\") != \"\") { \$env.OMNISHELL_DIR } else { (^mise where github:bonisoft3/omnishell | str trim) })
+        let tree_dir = (\$served_dir | path join \"tree\")
+        let caddy_dir = (\$served_dir | path join \"caddy\")
+        let srv_dir = (\$served_dir | path join \"srv\")
+        let omni_dir = (\$served_dir | path join \"omnishell\")
+        let scripts_out = (\$caddy_dir | path join \"release-scripts\")
+        mkdir \$tree_dir \$caddy_dir \$srv_dir
+        let ep = (open .bayt/bayt.served.json | get dockerfile.epilogue.0)
+        \$ep | parse -r 'install -D -m 644 \\x27(?<src>[^\\x27]+)\\x27 \\x27(?<dst>[^\\x27]+)\\x27' | each {|p|
+          let s = (if (\$p.src | str starts-with \"/omnishell/\") { (\$omnishell | path join (\$p.src | str replace \"/omnishell/\" \"\")) } else { (\$p.src | str replace \"/app/\" \"\") })
+          let d = (\$tree_dir | path join (\$p.dst | str replace \"/served/\" \"\"))
+          mkdir (\$d | path dirname)
+          cp -f \$s \$d
+        } | ignore
+        for d in (\$ep | parse -r 'grep -rqE \\x27\\[\\[:space:\\]\\](?<k>[^=]+)=\\x22(?<v>[^\\x22]*)\\x22\\x27 \\x27[^\\x27]+\\x27 --include=\\x27\\*\\.html\\x27 \\|\\| \\{ echo \\x27(?<msg>[^\\x27]+)\\x27') {
+          mut matched = false
+          for f in (glob (\$tree_dir | path join \"**/*.html\" | str replace -a (char -u 5c) \"/\")) {
+            let raw = (open --raw \$f)
+            let pat = ('(\\s' + \$d.k + '=)\\x22[^\\x22]*\\x22')
+            let rep = ('\$1' + (char dquote) + \$d.v + (char dquote))
+            let next = (\$raw | str replace -a -r \$pat \$rep)
+            if \$next != \$raw { \$next | save --raw -f \$f }
+            if (\$next =~ ('[\\s]' + \$d.k + '=' + (char dquote) + \$d.v + (char dquote))) { \$matched = true }
+          }
+          if not \$matched { error make { msg: \$d.msg } }
+        }
+        ^mise x -- deno run --config (\$omnishell | path join \"server/deno.json\") \$\"--allow-read=(\$tree_dir)\" \$\"--allow-write=(\$tree_dir),(\$scripts_out)\" (\$omnishell | path join \"server/address.ts\") \$tree_dir \$scripts_out
+        glob (\$tree_dir | path join \"*\" | str replace -a (char -u 5c) \"/\") | each {|item| cp -rf \$item \$srv_dir } | ignore
+        if ((\$tree_dir | path join \"omnishell\") | path exists) { cp -rf (\$tree_dir | path join \"omnishell\") \$omni_dir }
+        for rdir in [\$srv_dir \$omni_dir] {
+          if (\$rdir | path exists) {
+            glob (\$rdir | path join \"**/*\" | str replace -a (char -u 5c) \"/\") | where (\$it | path type) == \"file\" and (not (\$it | str ends-with \".etag\")) | each {|f|
+              let h = (open --raw \$f | hash sha256)
+              ((char dquote) + \$h + (char dquote)) | save --raw -f \$\"(\$f).etag\"
+            } | ignore
+          }
+        }
+      }
+      let path_key = (if (\"PATH\" in \$env) { \"PATH\" } else { \"Path\" })
+      let raw_p = (\$env | get -o \$path_key | default [])
+      let cur_p = (if ((\$raw_p | describe) == \"string\") { \$raw_p | split row (char esep) } else { \$raw_p })
+      let new_p = ([\$wbin ((^mise where github:bonisoft3/bayt | str trim) | path join \"bin\")] | append \$cur_p)
+      let val_p = (if \$os == \"windows\" { \$new_p | str join (char esep) } else { \$new_p })
+      load-env {
+        (\$path_key): \$val_p
+        MISE_ENV: \"host\"
+        BAYT_LOCAL_SERVED_DIR: \$served_dir
+        BAYT_LOCAL_MOCK_AI: (\$env.BAYT_LOCAL_MOCK_AI? | default \"1\")
+        SAYT_PLATFORM: \"host\"
+        DENO_NO_PROMPT: \"1\"
+        DENO_CERT: \$cert_p
+      }
+      let pc_bin = (^mise which process-compose | str trim)
+      let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where ((\$it.def | into int) >= 10000) | get var | uniq | sort)
+      mut next_p = (15000 + ((((\$nu.pid * 2654435761) + (random int 0..999999)) mod 85) * 200))
+      let ok = (try {
+        for suite in ['visual'] {
+          let sdir = (\$work | path join \$\"suite-(\$suite)\")
+          mkdir \$sdir
+          let alloc = (^mise x -- deno eval --no-config 'const vars = JSON.parse(Deno.args[0]); let p = Number(Deno.args[1]); const out = {}; for (const k of vars) { while (true) { try { const l = Deno.listen({ hostname: \"127.0.0.1\", port: p }); l.close(); break; } catch { p++; } } out[k] = String(p++); } out._next = String(p); console.log(JSON.stringify(out));' (\$pvars | to json -r) (\$next_p | into string) | from json)
+          \$next_p = (\$alloc._next | into int)
+          load-env (\$alloc | reject _next | merge { BAYT_LOCAL_WORK_DIR: \$sdir })
+          let sdir_fwd = (\$sdir | str replace -a (char -u 5c) '/')
+          \$\"log_location: (\$sdir_fwd)/proc.log
+      \" | save -f (\$sdir | path join \"pc-logs.yaml\")
+          let suite_err = (try {
+            ^\$pc_bin --no-server -L (\$sdir | path join \"pc.log\") -f .bayt/process-compose.yaml -f (\$sdir | path join \"pc-logs.yaml\") run \$suite
+            null
+          } catch {|err|
+            \$err
+          })
+          for pf in (glob \$\"(\$sdir_fwd)/pg-*/postmaster.pid\") {
+            try { ^mise x -- pg_ctl -D (\$pf | path dirname) -m immediate -w stop | ignore } catch { }
+          }
+          try {
+            ps -l | where (((\$it.command? | default \"\") | str contains \$sdir) or ((\$it.command? | default \"\") | str contains \$sdir_fwd)) and (\$it.pid != \$nu.pid) and (\$it.name =~ '(?i)(postgres|caddy|postgrest|deno|daprd|conduit|redis-server|rclone|imgproxy|redpanda-connect|mailpit|hydra)') | each {|p| try { kill -f \$p.pid } catch { } } | ignore
+          } catch { }
+          if \$suite_err != null {
+            let proc_log = (\$sdir | path join \"proc.log\")
+            if (\$proc_log | path exists) {
+              let plines = (open --raw \$proc_log | lines | where (not (\$it | str contains \"http.log.access\")) and (not (\$it | str contains \"NOTICE:\")) and (not (\$it | str contains \"WARNING:  cast will be ignored\")))
+              print -e (\$plines | where (\$it | str contains \$\"\"process\":\"(\$suite)\"\") | last 80 | str join (char nl))
+              print -e (\$plines | last 120 | str join (char nl))
+            }
+            let pc_log = (\$sdir | path join \"pc.log\")
+            if (\$pc_log | path exists) {
+              print -e (open --raw \$pc_log | lines | last 80 | str join (char nl))
+            }
+            error make { msg: (\$suite_err.msg? | default \$\"suite (\$suite) failed\") }
+          }
+        }
+        true
+      } catch {|err|
+        print -e (\$err.msg? | default (\$err | to text))
+        false
+      })
+      try { rm -rf \$work } catch { }
+      if (not \$ok) { exit 1 }"
 version: "3"
