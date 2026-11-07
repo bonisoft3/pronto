@@ -21,17 +21,17 @@ say:
         priority: -1
         cmds:
           - do: "cue vet -c ./testdata/emit"
-          - do: "deno test --no-config --allow-read --allow-run=cue,nu read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts"
+          - do: "deno test --parallel --no-config --allow-read --allow-run=cue,nu read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts"
           - do: "deno test --no-config --allow-read --allow-write --allow-env --allow-run=git,nu,tar,sh gcp-build.test.ts"
       activepieces:
         priority: -1
         cmds:
-          - do: "mise exec github:denoland/deno@v2.9.7 -- deno test --config deno.json --frozen --allow-read --allow-write --allow-run=cue activepieces-compiler.test.ts edge-hatches-compiler.test.ts activepieces-package.test.ts"
+          - do: "mise exec github:denoland/deno@v2.9.7 -- deno test --parallel --config deno.json --frozen --allow-read --allow-write --allow-run=cue activepieces-compiler.test.ts edge-hatches-compiler.test.ts activepieces-package.test.ts"
           - do: "mise exec github:denoland/deno@v2.9.7 -- deno test --config deno.json --frozen --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 activepieces-package.integration.test.ts"
       distribution:
         priority: -1
         cmds:
-          - do: "deno test --config deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
+          - do: "deno test --parallel --config deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
       types:
         priority: -1
         cmds:
@@ -64,11 +64,11 @@ say:
       outcome-obligations:
         priority: -1
         cmds:
-          - do: "deno test --config deno.json --allow-read --allow-write --allow-env check-outcomes.test.ts check-workflows.test.ts workflow-control.test.ts workflow-invocations.test.ts workflow-omnishell-control.test.ts check-verification.test.ts"
+          - do: "deno test --parallel --config deno.json --allow-read --allow-write --allow-env check-outcomes.test.ts check-workflows.test.ts workflow-control.test.ts workflow-invocations.test.ts workflow-omnishell-control.test.ts check-verification.test.ts"
       type-system:
         priority: -1
         cmds:
-          - do: "deno test --no-config --allow-read --allow-run=cue type-proto.test.ts type-sql.test.ts portable-types.test.ts types.test.ts"
+          - do: "deno test --parallel --no-config --allow-read --allow-run=cue type-proto.test.ts type-sql.test.ts portable-types.test.ts types.test.ts"
           # The client's transformations against the table that defines them,
           # and the table against CUE's own reading of it. Both need `cue`, and
           # the agreement test needs a scratch directory to run it in.
@@ -82,7 +82,7 @@ say:
       schema-evolution:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --no-config --allow-read --allow-write --allow-run --allow-env replay.test.ts withheld.test.ts proto-baseline.test.ts check-inputs_test.ts"
+          - do: "mise exec -- deno test --parallel --no-config --allow-read --allow-write --allow-run --allow-env replay.test.ts withheld.test.ts proto-baseline.test.ts check-inputs_test.ts"
       machines:
         priority: -1
         cmds:
