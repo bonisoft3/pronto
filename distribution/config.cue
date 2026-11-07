@@ -146,6 +146,7 @@ import (
 	_run:     #Run
 	compiler: "^\((#Writer & {root: "(^mise where \(#Runtimes.pronto) | str trim)"}).out)"
 	write: (_run & {args: "run-mise exec -- \((#Writer & {root: "$pronto"}).out)"}).out
+	launch: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join launch-watch.ts)"}).out
 	// The live tables a pages release fills from the settled container
 	// cluster, and the streams that cluster runs; none where the app runs no
 	// stream and no computation.

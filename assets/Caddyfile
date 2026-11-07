@@ -7,6 +7,26 @@
 # strips that suffix from a revalidation. The sidecars themselves are no
 # content.
 (files) {
+  import files-{$PRONTO_FILE_MODE:release}
+}
+
+(files-development) {
+  route {
+    request_header -If-None-Match
+    request_header -If-Modified-Since
+    header {
+      Cache-Control no-store
+      -ETag
+      -Last-Modified
+      defer
+    }
+    file_server {
+      hide *.etag
+    }
+  }
+}
+
+(files-release) {
   file_server {
     etag_file_extensions .etag
     hide *.etag

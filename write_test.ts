@@ -1,6 +1,7 @@
 import {
   assert,
   assertEquals,
+  assertRejects,
   assertStringIncludes,
 } from "jsr:@std/assert@1.0.11";
 import { fileURLToPath } from "node:url";
@@ -130,9 +131,33 @@ Deno.test("a settled build preserves outputs and still follows new template read
     assertEquals(await outputs(), before);
     assertEquals((await Deno.stat(screen)).mtime, mtime);
 
+    const irPath = join(app, "ir.html");
+    const ir = await Deno.readTextFile(irPath);
+    const withoutCards = ir.replace(/<!-- pronto:card -->[\s\S]*?<!-- \/pronto:card -->/g, "<!-- pronto:card --><!-- /pronto:card -->");
+    assert(withoutCards !== ir);
+    await Deno.writeTextFile(irPath, withoutCards);
+    const redrawn = await build();
+    assertStringIncludes(redrawn, "(1 derivation)");
+    assertStringIncludes(redrawn, '"phase":"ir-facts"');
+    assertEquals(await Deno.readTextFile(irPath), ir);
+    assertEquals(await outputs(), before);
+
+    const { derive } = await import("./derive.ts");
+    const derivedIr = await derive(app);
+    const changedDecision = ir.replace('data-kind="decision"><strong>', 'data-kind="decision"><strong>Changed decision: ');
+    assert(changedDecision !== ir);
+    await Deno.writeTextFile(irPath, changedDecision);
+    await assertRejects(derivedIr.refreshIr, Error, "authored compiler inputs changed");
+    assertEquals(await outputs(), before);
+    await Deno.writeTextFile(irPath, ir);
+
     // Authored markup reaches derivation before the emission settles.
     const source = join(app, "screens.cue");
     const markup = await Deno.readTextFile(source);
+    await Deno.writeTextFile(source, markup.replace('class="screen"', 'class="screen presentation-edit"'));
+    assertStringIncludes(await build(), "(1 derivation)");
+    assertStringIncludes(await Deno.readTextFile(screen), 'class="screen presentation-edit"');
+    assertEquals(await Deno.readTextFile(join(app, "program_derived.cue")), before["program_derived.cue"]);
     await Deno.writeTextFile(
       source,
       markup.replace(

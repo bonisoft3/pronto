@@ -15,3 +15,10 @@ import pronto "github.com/bonisoft3/pronto"
 }
 
 #installedWithTerminal: #installedBuild & {seats: {terminal: #builderTerm}}
+
+#installedAuthored: (pronto.#DefaultBuild & {
+	code: _code & {surface: screens: board: files: {html: "screens/board.html", css: "styles/board.css"}}
+	loop: #builderLoop
+	cluster: #builderCluster
+	terminal: #builderTerm
+}).out

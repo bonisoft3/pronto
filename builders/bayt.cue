@@ -84,6 +84,7 @@ import (
 				"pronto-tests": *{glob: "tests/**"} | null
 				"pronto-task": {glob: ".task/**"}
 				"pronto-history": *{glob: ".pronto/proto-baseline.json"} | null
+				"pronto-live": *{glob: ".pronto/live/**"} | null
 				"pronto-node": {glob: "**/node_modules/**"}
 				// A checkout's mise lock records its absolute paths.
 				"pronto-local-lock": {glob: "mise.local.lock"}
@@ -251,7 +252,7 @@ import (
 		load-env { MISE_ENV: "host" }
 		let pc_bin = (^mise which process-compose | str trim)
 		let arguments = (if (($env.SAYT_TASK_ARGS? | default "") != "") { $env.SAYT_TASK_ARGS | from json } else { [] })
-		let watch = ("--watch" in $arguments) or ("-w" in $arguments)
+		if ("--watch" in $arguments) or ("-w" in $arguments) { error make {msg: "Native watch is disabled; use sayt launch --watch for Docker"} }
 		let os = (match $nu.os-info.name { "macos" => "macos", "windows" => "windows", _ => "linux" })
 		let h = (pwd | hash sha256)
 		let sock = ($nu.temp-dir | path join $"bayt-launch-($h | str substring 0..12).sock")
@@ -310,58 +311,43 @@ import (
 		  DENO_NO_PROMPT: "1"
 		  DENO_CERT: $cert_p
 		} | insert $path_key $val_p)
-		if $watch {
-		  try {
-		    with-env $pc_env {
-		      ^$pc_bin --no-server -t=false -L ($work | path join "pc.log") -f .bayt/process-compose.yaml -f ($work | path join "pc-logs.yaml") up launch
-		    }
-		  } catch {|e|
-		    dump-logs $work
-		    cleanup-work $work
-		    rm -f $state_file
-		    error make {msg: ($e.msg? | default ($e | to text))}
+		try {
+		  with-env $pc_env {
+		    ^$pc_bin ...$pc_conn -D -L ($work | path join "pc.log") -f .bayt/process-compose.yaml -f ($work | path join "pc-logs.yaml") up launch
 		  }
+		} catch {|e|
+		  dump-logs $work
 		  cleanup-work $work
-		  rm -f $state_file
-		} else {
-		  try {
-		    with-env $pc_env {
-		      ^$pc_bin ...$pc_conn -D -L ($work | path join "pc.log") -f .bayt/process-compose.yaml -f ($work | path join "pc-logs.yaml") up launch
-		    }
-		  } catch {|e|
-		    dump-logs $work
-		    cleanup-work $work
-		    rm -f $sock $state_file
-		    error make {msg: ($e.msg? | default ($e | to text))}
+		  rm -f $sock $state_file
+		  error make {msg: ($e.msg? | default ($e | to text))}
+		}
+		mut ready = false
+		for _ in 1..600 {
+		  sleep 500ms
+		  if $os != "windows" and not ($sock | path exists) { continue }
+		  let res = (do { ^$pc_bin ...$pc_conn process get launch -o json } | complete)
+		  if $res.exit_code != 0 { continue }
+		  let proc = (try { $res.stdout | from json | get -o 0 } catch { null })
+		  if $proc == null { continue }
+		  let st = ($proc.status? | default "")
+		  let rdy = ($proc.is_ready? | default "")
+		  if $st == "Running" and $rdy == "Ready" {
+		    $ready = true
+		    break
 		  }
-		  mut ready = false
-		  for _ in 1..600 {
-		    sleep 500ms
-		    if $os != "windows" and not ($sock | path exists) { continue }
-		    let res = (do { ^$pc_bin ...$pc_conn process get launch -o json } | complete)
-		    if $res.exit_code != 0 { continue }
-		    let proc = (try { $res.stdout | from json | get -o 0 } catch { null })
-		    if $proc == null { continue }
-		    let st = ($proc.status? | default "")
-		    let rdy = ($proc.is_ready? | default "")
-		    if $st == "Running" and $rdy == "Ready" {
-		      $ready = true
-		      break
-		    }
-		    if $st in ["Skipped" "Error" "Completed" "Disabled"] { break }
-		  }
-		  if not $ready {
-		    dump-logs $work
-		    do { ^$pc_bin ...$pc_conn down } | complete
-		    cleanup-work $work
-		    rm -f $sock $state_file
-		    error make {msg: "launch@host failed to become ready"}
-		  }
-		  if ($env.SAYT_LAUNCH_ONCE? | default "") == "1" {
-		    do { ^$pc_bin ...$pc_conn down } | complete
-		    cleanup-work $work
-		    rm -f $sock $state_file
-		  }
+		  if $st in ["Skipped" "Error" "Completed" "Disabled"] { break }
+		}
+		if not $ready {
+		  dump-logs $work
+		  do { ^$pc_bin ...$pc_conn down } | complete
+		  cleanup-work $work
+		  rm -f $sock $state_file
+		  error make {msg: "launch@host failed to become ready"}
+		}
+		if ($env.SAYT_LAUNCH_ONCE? | default "") == "1" {
+		  do { ^$pc_bin ...$pc_conn down } | complete
+		  cleanup-work $work
+		  rm -f $sock $state_file
 		}
 		"""
 	_localIntegrateDo: """
@@ -550,9 +536,50 @@ import (
 	// own (#DefaultCluster). Named from omnishell's root, and never none: a
 	// caddy without them would serve no interpreter.
 	terminalStatics: [_, ...{file: string, target: string, ...}]
+	screenSources: [...string]
 	_runtimeStatics: [for s in B.terminalStatics if strings.HasPrefix(s.target, "/omnishell/") {s}]
 
+	_presentation: {
+		caddy: {
+			workdir: "/pronto"
+			hmr: {
+				native: true
+				code: [".pronto/live/readiness/**"]
+				configs: [B.cluster.meta.caddyfile]
+				reactions: {code: "none", configs: "restart", assets: "restart"}
+				assets: [".certs/**"]
+				tools: [], docs: []
+			}
+		}
+		render: {
+			workdir: "/render"
+			hmr: {
+				native: true
+				code: ["shell/index.html"]
+				reactions: {code: "none", assets: "restart"}
+				assets: [".pronto/development/shell.json"]
+				configs: [], tools: [], docs: []
+			}
+		}
+	}
+
 	project: core.#project & sayt.gate & {
+		files: "presentation.json": {
+			dockerfile: """
+				FROM \(B.cluster.surface.targets.caddy.dockerfile.from.name) AS caddy
+				WORKDIR /pronto
+				RUN mkdir -p /pronto/.pronto/live/readiness
+				COPY \(B.cluster.meta.caddyfile) /pronto/\(B.cluster.meta.caddyfile)
+				COPY .certs/ /pronto/.certs/
+				COPY .pronto/live/srv/ /pronto/.pronto/live/srv/
+				COPY .pronto/live/omnishell/ /pronto/.pronto/live/omnishell/
+				"""
+			caddyfile: B.cluster.meta.caddyfile
+			for name, part in B._presentation {
+				(name): {watch: (core.#hmrCompose & {hmr: part.hmr, workdir: part.workdir}).watch}
+			}
+		}
+
 		files: "say.yaml": say: {for verb in ["launch", "integrate"] {
 			(verb): rulemap: {
 				builtin: {
@@ -562,7 +589,7 @@ import (
 				host: {
 					platform: "host"
 					stop:     true
-					cmds: [{use: "./bayt-task.nu", do: "with-env { MISE_ENV: 'host' } { ^mise install; bayt-task \(verb) --generate }"}]
+					cmds: [{use: "./bayt-task.nu", do: "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task \(verb) --generate ...$args } }; host-verb"}]
 				}
 			}
 		}}
@@ -705,16 +732,10 @@ import (
 			// browser cannot reach a running caddy from a build RUN, so the
 			// check is the container's CMD and the verdict is its exit code.
 			"integrate": {
-				// No :build dep. The screens this photographs are checked-in
-				// artifacts the srcs below carry, and the build verb regenerates
-				// them before integrate runs — depending on the build image would
-				// couple visual lint to a toolchain it does not use. The plane it
-				// drives is an image-only dep, so the entry closure carries every
-				// fragment the aggregate waits on and loads on its own — the bkid
-				// tier runs it that way.
+				// Image-only runtime dependencies keep its toolchain out of the visual checker.
 				deps: [":launch:outs"]
 				taskfile: incremental: false
-				srcs: globs: ["shell/shell.yaml", "shell/screens/**"]
+				srcs: globs: list.Concat([["shell/shell.yaml"], B.screenSources])
 				activate: ""
 				dockerfile: {
 					from: name: core.lock.images.playwright

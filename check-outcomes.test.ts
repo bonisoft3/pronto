@@ -1,17 +1,18 @@
 import { assertEquals, assert } from "jsr:@std/assert@1.0.13";
 import { expandTemplates } from "../omnishell/expand-templates.ts";
-import { parseHTML } from "npm:linkedom@0.18.4";
-import { checkApp, evaluateOutcomes, machineDeclarations, type OutcomeInputs } from "./check-outcomes.ts";
+import { resolveMachineMarkup } from "../omnishell/interpreter/lint.ts";
+import { checkApp, evaluateOutcomes, loadOutcomeInputs, machineDeclarations, type OutcomeInputs } from "./check-outcomes.ts";
 
 const app = new URL("../../apps/snapcards/", import.meta.url);
 const read = (path: string) => Deno.readTextFile(new URL(path, app));
 
 Deno.test("Snapcards observed producer phases use the actual invocation and attempt mapping", async () => {
-  const inputs = JSON.parse(await read(".pronto/check-inputs.json")) as OutcomeInputs;
+  const inputs = await loadOutcomeInputs(app.pathname, { expandTemplates, resolveMachineMarkup });
   const shell = JSON.parse(await read("shell/shell.json"));
-  const { document } = parseHTML(await read("shell/screens/generate.html")) as unknown as { document: { querySelector(selector: string): { getAttribute(name: string): string | null } } };
-  const chart = JSON.parse(document.querySelector("#generation-form").getAttribute("data-machine")!);
-  const input: OutcomeInputs = { ...inputs, actors: shell.actors, mounts: [{ path: "shell/screens/generate.html", table: "generation_form", index: 0, chart }] };
+  const mount = inputs.mounts!.find((mount) => mount.table === "generation_form")!;
+  assert(mount, "the authored chart reference must contribute an outcome mount");
+  const chart = mount.chart as { states: Record<string, { on: Record<string, unknown> }> };
+  const input: OutcomeInputs = { ...inputs, actors: shell.actors, mounts: [mount] };
   const report = evaluateOutcomes(input);
   assertEquals(report.counts.violation, 0);
   const outcome = (r: ReturnType<typeof evaluateOutcomes>) => r.obligations.find((o) => o.id.includes("generating:generationProgress:signal:deck_progress.failed"));
@@ -44,7 +45,7 @@ Deno.test("backend source and invocation contract inventory", () => {
 
 Deno.test("other applications do not acquire invented source vocabularies", async () => {
   for (const name of ["truco", "apexrun", "golaberto"]) {
-    const report = await checkApp(new URL(`../../apps/${name}/`, import.meta.url).pathname, expandTemplates);
+    const report = await checkApp(new URL(`../../apps/${name}/`, import.meta.url).pathname, { expandTemplates, resolveMachineMarkup });
     assertEquals(report.counts.violation, 0);
     assert(!report.obligations.some((o) => o.property === "outcome-consumer" && o.status === "violation"));
   }

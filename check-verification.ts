@@ -107,12 +107,13 @@ export function declarationInventory(inputs: unknown) {
 export async function checkVerification(appDir: string, omnishellRoot: string): Promise<Inventory> {
   const app = pathToFileURL(`${resolve(appDir)}/`);
   const root = resolve(omnishellRoot);
-  const [presentation, templates, engine] = await Promise.all([
+  const [presentation, templates, engine, markup] = await Promise.all([
     import(pathToFileURL(resolve(root, "check-presentation.ts")).href),
     import(pathToFileURL(resolve(root, "expand-templates.ts")).href),
     import(pathToFileURL(resolve(root, "interpreter/machine-engine.js")).href),
+    import(pathToFileURL(resolve(root, "interpreter/lint.ts")).href),
   ]);
-  const inputs = await loadOutcomeInputs(resolve(appDir), templates.expandTemplates);
+  const inputs = await loadOutcomeInputs(resolve(appDir), { expandTemplates: templates.expandTemplates, resolveMachineMarkup: markup.resolveMachineMarkup });
   // A backend-only program has no terminal routes; loader preserves that distinction.
   const ui: { obligations: Evidence[] } = inputs.mounts === undefined
     ? { obligations: [] }

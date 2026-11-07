@@ -6,8 +6,9 @@ description: How pronto compiles a screen — what it derives from the markup, w
 
 # Screens
 
-A screen is a route's HTML and CSS, written as assembly under `shell/screens/`
-or composed as a `markup` string in CUE, plus what `#Screen` keeps about it:
+A screen is a route's HTML and CSS at its declared `files.html` and `files.css`
+paths (defaulting to `shell/screens/`), or HTML composed from a `markup` string
+in CUE, plus what `#Screen` keeps about it:
 the route, its forms, its storyboard states and paths, how many instances the
 navigation stack holds, and how its first document is rendered. The markup is
 the authority on what a screen reads and binds; the program is the authority on
@@ -15,6 +16,25 @@ what exists. pronto derives the first from the markup, checks the markup
 against the second, and decides per route what a crawler and a first paint
 receive. Writing a screen is omnishell's [GUIDE](https://github.com/bonisoft3/omnishell/blob/v0.21.7/GUIDE.md), and
 every attribute it may carry is its [REFERENCE](https://github.com/bonisoft3/omnishell/blob/v0.21.7/REFERENCE.md).
+
+## Presentation editing
+
+Use `sayt launch --watch` for Docker. Native `launch@host --watch` is disabled.
+Authored HTML/CSS saves reach the served paths directly, without a
+resident compiler. Development configuration covers declared capabilities so new
+bindings to them need no generation. Reload the browser to see an edit.
+
+[[pronto-hmr|Pronto HMR]] defines the transport, configuration and caching
+behavior, the validation deferred by watch mode, and what launch actually checks.
+A working watch preview does not establish that the current source passed
+Pronto's authoring gates.
+
+Keep independently edited presentation bytes in files. CUE-authored `markup`
+still requires generation. A region can reference a declared actor chart with
+`data-cortex="cardRows" data-machine-ref="study"`, resolving the chart from
+`setup.actors.cardRows.charts.study` in generated configuration. Editing the
+screen does not reevaluate or substitute chart JSON into its source; changing
+the chart declaration requires generation.
 
 ## Derived from the markup
 

@@ -35,7 +35,7 @@ externalVisualContext: (_externalBuild.targets.integrate.compose.build.additiona
 // the program the same way.
 // mise.local.lock records the checkout's absolute paths, which a container
 // does not have.
-externalTreeExcludes: [for _, e in _externalBuild.targets.generate.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", ".pronto/proto-baseline.json", "**/node_modules/**", "mise.local.lock", ".mise.host.toml", "mise.host.lock"]
+externalTreeExcludes: [for _, e in _externalBuild.targets.generate.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", ".pronto/proto-baseline.json", ".pronto/live/**", "**/node_modules/**", "mise.local.lock", ".mise.host.toml", "mise.host.lock"]
 // Installed apps verify releases as the monorepo's do: off, globally and per
 // backend, since mise reads attestations from a rate-limited GitHub API.
 _settings: _project.mise.settings
@@ -63,9 +63,9 @@ externalImageTestUsesGeneratedInputs: _externalBuild.targets.test.cmd.builtin.do
 externalLintChecksConcreteCue: _externalBuild.files["checks.yaml"].say.lint.rulemap.cue.cmds[0].do & "mise exec -- cue vet -c ./..."
 externalGenerateKeepsCheckerInputs: list.Contains(_externalBuild.targets.generate.state.globs, ".pronto/check-inputs.json") & true
 
-externalLaunchHostGate: _externalBuild.files["say.yaml"].say.launch.rulemap.host.cmds & [{use: "./bayt-task.nu", do: "with-env { MISE_ENV: 'host' } { ^mise install; bayt-task launch --generate }"}]
+externalLaunchHostGate: _externalBuild.files["say.yaml"].say.launch.rulemap.host.cmds & [{use: "./bayt-task.nu", do: "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task launch --generate ...$args } }; host-verb"}]
 externalIntegrateAction: _externalBuild.files["say.yaml"].say.integrate.rulemap.builtin.cmds & [{use: "./bayt-task.nu", do: "bayt-task integrate-action --generate"}]
-externalIntegrateHostGate: _externalBuild.files["say.yaml"].say.integrate.rulemap.host.cmds & [{use: "./bayt-task.nu", do: "with-env { MISE_ENV: 'host' } { ^mise install; bayt-task integrate --generate }"}]
+externalIntegrateHostGate: _externalBuild.files["say.yaml"].say.integrate.rulemap.host.cmds & [{use: "./bayt-task.nu", do: "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task integrate --generate ...$args } }; host-verb"}]
 externalIntegrateAlwaysRuns: _externalBuild.targets["integrate-action"].taskfile.incremental & false
 externalVisualRunsTask:       _externalBuild.targets["ci-visual"].dockerfile.incremental & true
 externalVisualKeepsInjection: len(_externalBuild.targets["ci-visual"].cmd.builtin.dockerfile.inject.secrets) > 0 & true

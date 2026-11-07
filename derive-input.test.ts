@@ -58,7 +58,8 @@ for (const [name, subdir, module] of [
       }).output();
       assert(!deployment.success, "unrelated deployment root unexpectedly became concrete");
       const input = await readDerivation(app, "sample", true) as Record<string, unknown>;
-      assert(Object.keys(input).length === 19, "canonical input fields changed");
+      assert(Object.keys(input).length === 20, "canonical input fields changed");
+      assert(JSON.stringify(input.actors) === "{}", "an app without Cortex acquired actors");
       const grants = (input.endowments as Record<string, string[]>)["shell/handlers/local.js"];
       assert(JSON.stringify(grants) === '["Statechart"]', "automatic emitted grants were omitted from derivation");
       assert(jessieFacts("(state) => Statechart.initial(state)", "handler", grants).references.length === 0, "generated host was treated as a denied reference");
@@ -77,6 +78,25 @@ for (const [name, subdir, module] of [
     });
   });
 }
+
+Deno.test("derive input resolves chart declarations before a generated shell exists", async () => {
+  await fixture("app", "example.com/charts@v0", async (app) => {
+    await Deno.writeTextFile(join(app, "program.cue"), source + `
+code: state: cortex: browser: {
+  config: meta: host: "omnishell"
+  setup: actors: {
+    cards: {via: "rows", screen: "home", charts: flip: {field: "side", initial: "front", states: {front: {}, back: {}}}}
+    events: {via: "observe"}
+  }
+}
+code: state: cortex: backend: {config: meta: host: "mecha", setup: actors: worker: {via: "rows"}}
+`);
+    const input = await readDerivation(app, "sample", true) as { actors: Record<string, { charts: { flip: { initial: string } } }> };
+    assert(Object.keys(input.actors).join() === "cards", "markup received actors outside the browser row/navigation contract");
+    assert(input.actors.cards.charts.flip.initial === "front", "markup lost the declared chart");
+    await assertClean(app);
+  });
+});
 
 Deno.test("derive input refuses invalid selected values and cleans its temporary inputs", async () => {
   await fixture("app", "example.com/refusal", async (app) => {

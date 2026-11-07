@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"list"
+	pathpkg "path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1541,6 +1542,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // same path language as the manifest.
 #shellConfig: S={
 	code!: _
+	development: *false | bool
+	adapters: *[] | [...string]
+	_appAdapters: {for _, screen in S.code.surface.screens for p in screen.files.adapters if !strings.HasPrefix(p, "/") {
+		(pathpkg.Base(p)): {(p): true}
+	}}
+	_composedHandlers: [if S.code.state.cortex != _|_ for _, chart in S.code.state.cortex if chart.setup != _|_ for name, actor in chart.setup.actors if list.Contains(["session", "sync", "local"], actor.via) if actor.handler != _|_ {"shell/handlers/\(name).js"}]
 	migrations: [...string]
 	// The terminal's measured floors, carried into the file visual lint
 	// reads. #scale publishes the same struct as --min-*, so the rung an author
@@ -1560,8 +1567,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	native: bool
 	// The tables the terminal registers, each with the durability it builds
 	// the collection from (#App.#collections says which).
-	_tables: {for t, _ in S.code.#collections {(t): true}}
-	_tablePath: {for t, n in S.code.#collections {(t): S.code.state.entities[n].durability}}
+	// Development admits declared capabilities before markup first uses them.
+	_collections: {
+		if !S.development {for t, n in S.code.#collections {(t): n}}
+		if S.development {for n, e in S.code.state.entities {(e.table): n}}
+	}
+	_tables: {for t, _ in S._collections {(t): true}}
+	_tablePath: {for t, n in S._collections {(t): S.code.state.entities[n].durability}}
 
 	// Browser-only durabilities. They are collections like any other — read by a
 	// data-live region, mutated by a form — but the terminal builds them from
@@ -1569,7 +1581,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// among the tables it subscribes.
 	_localTables: {for _, e in S.code.state.entities if !e.server {(e.table): true}}
 	_local: {for t, p in S._tablePath if S._localTables[t] != _|_ {(t): p}}
-	_tableKeys: {for t, n in S.code.#collections {(t): S.code._readKey[n]}}
+	_tableKeys: {for t, n in S._collections {(t): S.code._readKey[n]}}
 	_nonIdKeys: {for t, k in S._tableKeys if k != "id" {(t): k}}
 	// Natural keys only: a partial unique (`where:`) witnesses a slot's
 	// cardinality but cannot resolve an upsert, so it stays out of `uniques:`.
@@ -1632,7 +1644,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}}
 	_validatedTables: [for _, e in S.code.state.entities if S._tables[e.table] != _|_ if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	// A browser tier has no read mode to compare.
-	_lazy: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.server if e.read == "lazy" {(e.table): "lazy"}}
+	_lazy: {for n, e in S.code.state.entities if S._tables[e.table] != _|_ if e.server {
+		if !S.development if e.read == "lazy" {(e.table): "lazy"}
+		if S.development if S.code.#developmentRead[n] == "lazy" {(e.table): "lazy"}
+	}}
 	// The seeds #appMigrations.seeded leaves out: a browser durability has no
 	// migration to render into, so the terminal is told the rows instead.
 	_localSeeds: {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
@@ -1724,14 +1739,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if s.slug != _|_ {slug: s.slug}
 				paths: S._addressOf[n]
 			}
-			if s.prerender {
+			if !S.development if s.prerender {
 				prerender: true
 			}
 			if [if S.code.capabilities.auth != _|_ if S.code.capabilities.auth.required {false}, true][0] if s.access == "private" {
 				access: "private"
 			}
 			if s.ssr != _|_ {
-				ssr: s.ssr
+				ssr: [if S.development if s.prerender {"spa"}, s.ssr][0]
 			}
 
 			// `label` is the default-language spelling and the whole of what an
@@ -1743,7 +1758,21 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if !s.strip {strip: false}
 			}
 			if len(s.hatches) > 0 {hatches: s.hatches}
-			files:  s.files
+			files: {
+				for k, v in s.files if k != "handlers" && k != "adapters" {(k): v}
+				if !S.development {adapters: s.files.adapters, handlers: s.files.handlers}
+				if S.development {
+					let routeAdapters = {for p in s.files.adapters {(pathpkg.Base(p)): true}}
+					adapters: list.Concat([s.files.adapters, list.SortStrings([
+						for appAdapterName, candidates in S._appAdapters if routeAdapters[appAdapterName] == _|_ if len(candidates) == 1 for p, _ in candidates {p},
+						for p in S.adapters let builtinAdapterName = pathpkg.Base(p) if routeAdapters[builtinAdapterName] == _|_ if S._appAdapters[builtinAdapterName] == _|_ {p},
+					])])
+					handlers: list.Concat([s.files.handlers, list.SortStrings([for p, _ in {
+						for _, h in S.code.surface.handlers {(h.src): true}
+						for p in S._composedHandlers {(p): true}
+					} if !list.Contains(s.files.handlers, p) {p}])])
+				}
+			}
 			states: s.states // storybook frame list; semantics stay in the ir storyboard
 			if s.keep != 1 {
 				keep: s.keep
@@ -2030,6 +2059,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	terminal!: _
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
+		launchCommand: {do: distribution.#Project.launch, use: "./tools.nu"}
 		surface: {
 			_distribution: distribution.#Project & {
 				if D.code.meta.domain != _|_ {
@@ -2193,6 +2223,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: prontobuild.#Build & {
 		"cluster":       D.cluster
 		terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]
+		screenSources: [for _, s in D.code.surface.screens for path in [s.files.html, s.files.css] {path}]
 		project: files: "checks.yaml": D.loop.surface.sayYaml
 		meta: {
 			app:         D.code.meta.name
@@ -3069,6 +3100,7 @@ _pgrollDir: "services/database/pgroll"
 	// Caddyfile's own matcher list is read out of the same addresses, so the
 	// door and the router cannot disagree about what a route is.
 	_shell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, presenter: E.terminal.capabilities.presenter, server: E._serverOn, native: E.code.capabilities.native}).out
+	_developmentShell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, presenter: E.terminal.capabilities.presenter, server: E._serverOn, native: E.code.capabilities.native, development: true, adapters: [for p in E.terminal.surface.adapters {"/omnishell/components/\(p)"}]}).out
 	// The locales in one order, so every artifact that lists them lists them the
 	// same way and a regenerated file has no spurious diff.
 	_locales: list.SortStrings([if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}])
@@ -3353,6 +3385,7 @@ _pgrollDir: "services/database/pgroll"
 			}
 		}
 	}
+	development: statics: [for path, _ in E._composedHandlers {file: path, target: "/srv/\(path)"}]
 	files: [string]: #File
 	checkout: [string]: #File
 	files: {
@@ -4223,6 +4256,8 @@ _pgrollDir: "services/database/pgroll"
 			// origin (`_origin` below), which is what its canonical and
 			// alternates are absolute against, answered with its file's
 			// validator as the crawler files are (the asset's `templated`).
+			// Development enters the browser shell so authored HTML syncs without
+			// regenerating these release documents.
 			_documentAt: list.SortStrings([
 				for a in E.terminal.surface.documents
 				let bare = strings.TrimSuffix(a, "/")
@@ -4231,6 +4266,11 @@ _pgrollDir: "services/database/pgroll"
 			_document: [
 				if len(_documentAt) == 0 {""},
 				"""
+				    @developmentDocument {
+				      path \(strings.Join(_documentAt, " "))
+				      expression `"{$PRONTO_FILE_MODE:release}" == "development"`
+				    }
+				    rewrite @developmentDocument /\(E.terminal.surface.entry)
 				    @document path \(strings.Join(_documentAt, " "))
 				    handle @document {
 				      root * {$PRONTO_SRV_ROOT:/srv}
@@ -4442,6 +4482,11 @@ _pgrollDir: "services/database/pgroll"
 		"shell/shell.yaml": {
 			format: "yaml"
 			data:   E._shell
+		}
+		".pronto/development/.gitignore": {format: "text", text: "*\n"}
+		".pronto/development/shell.json": {
+			format: "json"
+			data: E._developmentShell
 		}
 		"shell/shell.json": {
 			format: "json"

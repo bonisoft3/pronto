@@ -156,14 +156,15 @@ Deno.test("a prerendered document is a template the door answers with the sitema
   if (handle > caddyfile.indexOf("rewrite @route")) throw new Error("the entry's rewrite answers before the document does");
 });
 
-// A file_server outside `(files)` answers with Caddy's own ETag, mtime and size,
+// A release file_server outside `(files-release)` answers with Caddy's own ETag, mtime and size,
 // which clamped image mtimes reduce to size (caddy-etag.integration.test.ts).
-Deno.test("every file the door serves is answered with its validator", async () => {
+Deno.test("release files retain content validators by default", async () => {
   const ssg = await ssgDefault();
   if (!ssg.ok) throw new Error(ssg.out);
   const { caddyfile } = JSON.parse(ssg.out) as { caddyfile: string };
   const servers = caddyfile.split("\n").filter((l) => /^\s*file_server\b/.test(l));
-  if (servers.length !== 1 || !/\(files\) \{\n\s*file_server \{\n\s*etag_file_extensions \.etag\n\s*hide \*\.etag\n/.test(caddyfile)) throw new Error(`a file_server reads no validator:\n${caddyfile}`);
+  if (!caddyfile.includes("import files-{$PRONTO_FILE_MODE:release}")) throw new Error("release validators are not the default");
+  if (servers.length !== 2 || !/\(files-release\) \{\n\s*file_server \{\n\s*etag_file_extensions \.etag\n\s*hide \*\.etag\n/.test(caddyfile)) throw new Error(`release file serving lost its content validator:\n${caddyfile}`);
 });
 
 Deno.test("the door advertises h3 on its published host port over both TCP and UDP", async () => {

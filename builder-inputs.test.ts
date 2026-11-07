@@ -43,3 +43,12 @@ Deno.test("a checkout runner carries Activepieces image and source views", async
     }
   }
 });
+
+Deno.test("visual integration carries authored screens outside the default directory", async () => {
+  const got = await built('#installedAuthored.project.targets.integrate.srcs.globs');
+  if (!got.ok) throw new Error(got.out);
+  const paths: string[] = JSON.parse(got.out);
+  for (const path of ["shell/shell.yaml", "screens/board.html", "styles/board.css"]) {
+    if (!paths.includes(path)) throw new Error(`integration image omits ${path}`);
+  }
+});

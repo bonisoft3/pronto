@@ -271,7 +271,12 @@ export function machineDeclarations(path: string, html: string, expandTemplates:
   return { mounts, gaps };
 }
 
-export async function loadOutcomeInputs(appDir: string, expandTemplates: TemplateExpander): Promise<OutcomeInputs> {
+export type MarkupTools = {
+  expandTemplates: TemplateExpander;
+  resolveMachineMarkup: (html: string, bindings?: Record<string, unknown>, screen?: string) => string;
+};
+
+export async function loadOutcomeInputs(appDir: string, terminal: MarkupTools): Promise<OutcomeInputs> {
   const inputs = await readCheckInputs(appDir) as unknown as OutcomeInputs;
   let shellText: string;
   try { shellText = await Deno.readTextFile(`${appDir}/shell/shell.json`); }
@@ -282,27 +287,30 @@ export async function loadOutcomeInputs(appDir: string, expandTemplates: Templat
     }
     return inputs;
   }
-  const shell = JSON.parse(shellText) as { actors?: Record<string, Actor>; routes?: { files?: { html?: string } }[] };
+  const shell = JSON.parse(shellText) as { actors?: Record<string, Actor>; cortex?: { actors?: Record<string, unknown> }; routes?: { screen: string; files?: { html?: string } }[] };
   const mounts: NonNullable<OutcomeInputs["mounts"]> = [];
   const mountGaps: NonNullable<OutcomeInputs["mountGaps"]> = [];
-  for (const path of [...new Set((shell.routes ?? []).flatMap((r) => r.files?.html ? [r.files.html] : []))].sort()) {
-    const html = await Deno.readTextFile(`${appDir}/${path}`);
-    const declared = machineDeclarations(path, html, expandTemplates);
+  const screens = new Map((shell.routes ?? []).map((route) => [route.screen, route.files?.html]));
+  for (const [screen, path] of screens) {
+    if (!path) throw new Error(`screen ${screen} declares no HTML file`);
+    const html = terminal.resolveMachineMarkup(await Deno.readTextFile(`${appDir}/${path}`), shell.cortex?.actors, screen);
+    const declared = machineDeclarations(path, html, terminal.expandTemplates);
     mounts.push(...declared.mounts);
     mountGaps.push(...declared.gaps);
   }
   return { ...inputs, actors: shell.actors, mounts, mountGaps };
 }
 
-export async function checkApp(appDir: string, expandTemplates: TemplateExpander, runtime: Pick<WorkflowOptions, "omnishellEngine"> = {}): Promise<OutcomeReport> {
-  return evaluateOutcomes(await loadOutcomeInputs(appDir, expandTemplates), runtime);
+export async function checkApp(appDir: string, terminal: MarkupTools, runtime: Pick<WorkflowOptions, "omnishellEngine"> = {}): Promise<OutcomeReport> {
+  return evaluateOutcomes(await loadOutcomeInputs(appDir, terminal), runtime);
 }
 
 export async function run(args: string[]): Promise<number> {
   if (args.length !== 3 || args[1] !== "--omnishell") throw Error("usage: check-outcomes.ts <appDir> --omnishell <root>");
   const module = await import(pathToFileURL(resolve(args[2], "expand-templates.ts")).href);
   const engine = await import(pathToFileURL(resolve(args[2], "interpreter/machine-engine.js")).href);
-  const report = await checkApp(args[0], module.expandTemplates as TemplateExpander, { omnishellEngine: engine.machineEngine });
+  const markup = await import(pathToFileURL(resolve(args[2], "interpreter/lint.ts")).href);
+  const report = await checkApp(args[0], { expandTemplates: module.expandTemplates, resolveMachineMarkup: markup.resolveMachineMarkup }, { omnishellEngine: engine.machineEngine });
   console.log(JSON.stringify(report, null, 2));
   return report.counts.violation ? 1 : 0;
 }

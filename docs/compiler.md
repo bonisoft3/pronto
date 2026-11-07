@@ -90,6 +90,13 @@ in the program, so nothing executable lives at the rung a person reads.
 that has since changed. `tests/pairs.yaml`, which the emitter writes from the
 program's tests, has no runner.
 
+After drawing generated IR cards and diagrams, the writer refreshes only IR
+claims, nesting, acceptance and diagram facts, artifact hashes, and the served
+IR image list. It retains application facts from the settled derivation rather
+than evaluating CUE and scanning application markup again. If rendering changes
+authored decision notes, test citations, or the fragment list, generation fails
+instead of accepting a changed compiler input under the previous evaluation.
+
 ## The bijection
 
 `objects.ts` names the ids each rung defines and `check-facts` compares the
@@ -233,3 +240,5 @@ distribution running the same program.
 - **Bun as the local runtime** — no permission model, so a checker's
   `--allow-read=.` has no equivalent and purity rests on SES alone; its Node
   compatibility surface diverges from the browser APIs Deno mirrors.
+
+For the development configuration and direct source transport, see [[pronto-hmr]].

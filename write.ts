@@ -12,6 +12,7 @@
 // stale emissions; a file authored in place is never recorded, so the sweep
 // cannot reach it.
 
+import type { LiveStatic } from "./live-tree.ts";
 import { dirname, resolve } from "node:path";
 import { packageHatch, type Declaration } from "./activepieces-package.ts";
 import { pathToFileURL } from "node:url";
@@ -38,9 +39,10 @@ type Emission = {
   manifest: string[];
   files: Record<string, EmitFile>;
   checkout: Record<string, EmitFile>;
-  terminal: { surface: { runtime: string; documentRenderer: string; documentConfig: string } };
+  terminal: { surface: { runtime: string; documentRenderer: string; documentConfig: string; statics: { file: string; target: string }[] } };
   build?: { meta?: { dir?: string } };
-  cluster?: { meta?: { root?: string; statics?: { file: string }[] } };
+  cluster?: { meta?: { root?: string; statics?: { file: string; target: string }[] } };
+  development?: { statics: { file: string; target: string }[] };
 };
 
 // jessie/bloblang/js entries always carry `src`, never `text`, so they need
@@ -488,41 +490,69 @@ async function writeMiseLocal(): Promise<void> {
   if ((await ifMissing(Deno.readTextFile(path), "")) !== text) await Deno.writeTextFile(path, text);
 }
 
+const timings: { phase: string; ms: number }[] = [];
+async function timed<T>(phase: string, run: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  try {
+    return await run();
+  } finally {
+    timings.push({ phase, ms: Math.round(performance.now() - start) });
+  }
+}
+
 // Emitted markup feeds derivation. A second pass is needed only when emission
 // or the derived declarations moved; unchanged declarations and bytes cannot
 // change what the first pass read. Every generation still derives and exports once.
-await writeMiseLocal();
-await writeIrStylesheet(appDir);
-const before = await derivedText();
-const read = await derive(appDir);
-// An entity's writers come from the screens, so ids are minted once a derivation exists.
-await mint(appDir, Object.values(read));
-const settled = await derivedText();
-const first = await exportEmission();
-let emission = await writeEmission(first.emission);
-let derivations = 1;
-// A drawing is stale once anything its export read was written again.
-let drawn: Drawing | undefined = emission.wrote ? undefined : first.drawing;
-if (emission.changed || settled !== before) {
-  await derive(appDir);
-  derivations++;
-  drawn = undefined;
-  if ((await derivedText()) !== settled) {
-    emission = await writeEmission((await exportEmission()).emission);
-    const again = await derivedText();
-    await derive(appDir);
+async function generate(): Promise<void> {
+  timings.length = 0;
+  await writeMiseLocal();
+  await writeIrStylesheet(appDir);
+  const before = await derivedText();
+  let read = await timed("derive", () => derive(appDir));
+  // An entity's writers come from the screens, so ids are minted once a derivation exists.
+  await mint(appDir, Object.values(read.entities));
+  const settled = await derivedText();
+  const first = await timed("export", exportEmission);
+  let currentEmission = first.emission;
+  let emission = await timed("emit", () => writeEmission(first.emission));
+  let derivations = 1;
+  // A drawing is stale once anything its export read was written again.
+  let drawn: Drawing | undefined = emission.wrote ? undefined : first.drawing;
+  if (emission.changed || settled !== before) {
+    read = await timed("derive", () => derive(appDir));
     derivations++;
-    if ((await derivedText()) !== again) fail("derivation did not settle in two passes");
+    drawn = undefined;
+    if ((await derivedText()) !== settled) {
+      const next = await timed("export", exportEmission);
+      currentEmission = next.emission;
+      emission = await timed("emit", () => writeEmission(next.emission));
+      const again = await derivedText();
+      read = await timed("derive", () => derive(appDir));
+      derivations++;
+      if ((await derivedText()) !== again) fail("derivation did not settle in two passes");
+    }
   }
+  // Generated IR contributes claims and diagrams, not application bindings.
+  if (await timed("ir", () => drawIr(drawn))) {
+    await timed("ir-facts", read.refreshIr);
+  }
+  console.error(`pronto write timings: ${JSON.stringify(timings)}`);
+  console.error(`pronto write: ${emission.written.length} files emitted → ${appDir} (${derivations} derivation${derivations === 1 ? "" : "s"})`);
+  const runtimeRoot = dirname(await terminalPath("deno.json", appDir));
+  const statics = new Map<string, LiveStatic>();
+  for (const s of [...(currentEmission.cluster?.meta?.statics ?? []), ...currentEmission.terminal.surface.statics, ...(currentEmission.development?.statics ?? [])]) {
+    statics.set(s.target, { source: resolve(s.target.startsWith("/omnishell/") ? runtimeRoot : appDir, s.file), target: s.target });
+  }
+  statics.set("/srv/shell/shell.json", { source: resolve(appDir, ".pronto/development/shell.json"), target: "/srv/shell/shell.json" });
+  const live = `${appDir}/.pronto/live`;
+  await Deno.mkdir(`${live}/caddy`, { recursive: true });
+  await Deno.writeTextFile(`${live}/.gitignore`, "*\n");
+  await Deno.writeTextFile(`${live}/caddy/release-scripts`, "");
+  await Deno.writeTextFile(`${live}/sources.json`, JSON.stringify([...statics.values()]));
 }
-// The cards ir.html carries are drawn from the settled program and the emitted
-// screens; a redraw moves ir.html, whose hash the facts hold, so derive runs
-// once more to record it.
-if (await drawIr(drawn)) {
-  await derive(appDir);
-  derivations++;
-}
-console.error(`pronto write: ${emission.written.length} files emitted → ${appDir} (${derivations} derivation${derivations === 1 ? "" : "s"})`);
+
+await generate();
+
 
 async function drawIr(drawn: Drawing | undefined): Promise<boolean> {
   const { program, ir } = drawn ?? await exportDrawing();

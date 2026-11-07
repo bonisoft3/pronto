@@ -49,6 +49,12 @@ import pronto "github.com/bonisoft3/pronto"
 	_build: (pronto.#DefaultBuild & {code: _app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
 	_files: (pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files
 	caddyfile: _files["docker/Caddyfile"].text
+	entry: _terminal.surface.entry
+	routes: {
+		release: _files["shell/shell.json"].data.routes
+		development: _files[".pronto/development/shell.json"].data.routes
+	}
+
 	document:  _files["documents/regras/index.html"]
 	sitemap:   _files["sitemap.xml"].text
 	robots:    _files["robots.txt"].text
