@@ -3996,7 +3996,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// A door built as a release names the inline scripts its documents
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
-				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
+				// A released page leaves the door as written: no-transform keeps a proxy in front
+				// (Cloudflare's, before a node's tunnel) from rewriting it, such as injecting its
+				// analytics beacon, a script from another origin this policy refuses (a console
+				// error on every page). Cloudflare skips that and its other rewrites of HTML on
+				// no-transform (developers.cloudflare.com/web-analytics/faq). A field of its own,
+				// beside whatever Cache-Control the page's handler sets.
+				let untransformed = "  header {\n    match header Content-Type text/html*\n    +Cache-Control no-transform\n    defer\n  }\n"
+				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n" + untransformed}, ""][0]
 				let forms = [for i, f in _forms {"  @form\(i) path \(f.path)\n  header @form\(i) Content-Security-Policy \(json.Marshal(strings.Replace(policy, "form-action 'self'", strings.Join(list.Concat([["form-action 'self'"], f.to]), " "), 1)))\n"}]
 				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(forms, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
