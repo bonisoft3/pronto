@@ -196,9 +196,9 @@ async function cueFiles(appDir: string): Promise<string[]> {
 /** Stamps an id on every entity and an ordinal on every field that has none,
  * and records them in the snapshot. write.ts calls it first, so an author
  * never writes one; it writes nothing when everything is already minted, and says
- * whether it wrote. */
-export async function mint(appDir: string): Promise<boolean> {
-  const before = await exportEntities(appDir);
+ * whether it wrote. `read` is the entities of a read of this very tree taken already. */
+export async function mint(appDir: string, read?: Record<string, ProgramEntity>): Promise<boolean> {
+  const before = read === undefined ? await exportEntities(appDir) : Object.values(read);
   if (before.length === 0) return false;
   if (before.every((e) => e.id !== undefined && e.fields.every((f) => f.ordinal !== undefined)) && (await readSnapshot(appDir)) !== undefined) return false;
   // Every stamp is computed before any is written: a refusal halfway would
