@@ -194,10 +194,13 @@ async function cueFiles(appDir: string): Promise<string[]> {
 }
 
 /** Stamps an id on every entity and an ordinal on every field that has none,
- * and records them in the snapshot. write.ts calls it first, so an author
- * never writes one; it writes nothing when everything is already minted. */
-export async function mint(appDir: string): Promise<void> {
-  const before = await exportEntities(appDir);
+ * and records them in the snapshot. write.ts calls it after the first
+ * derivation, passing the entities that derivation read, so an author never
+ * writes one; it writes nothing when everything is already minted. */
+export async function mint(appDir: string, read?: ProgramEntity[]): Promise<void> {
+  // A derivation's read serves: an id or ordinal is stamped only in authored
+  // source, which the derived files never touch.
+  const before = read ?? await exportEntities(appDir);
   if (before.length === 0) return;
   if (before.every((e) => e.id !== undefined && e.fields.every((f) => f.ordinal !== undefined)) && (await readSnapshot(appDir)) !== undefined) return;
   // Every stamp is computed before any is written: a refusal halfway would

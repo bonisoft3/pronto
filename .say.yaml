@@ -104,6 +104,7 @@ say:
         priority: -1
         cmds:
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-run --allow-env duckstream.test.ts duckstream-columns_test.ts"
+          - do: "mise exec -- deno test --config deno.json --allow-read --allow-write duckstream/compiler_test.ts"
       edge-compute:
         platform: cloudflare
         priority: -1

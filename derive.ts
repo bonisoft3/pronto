@@ -119,9 +119,11 @@ export type ScreenProjection = { handlers: string[]; adapters: string[]; reads: 
 /** The slice of a program's entity this pass reads off its own export; every
  * module it hands the entities to declares the slice it reads for itself. */
 type Entity = {
+  name: string;
   table: string;
+  id?: string;
   durability: string;
-  fields: { name: string; type: string; cel?: string }[];
+  fields: { name: string; type: string; ordinal?: number; retired?: boolean; cel?: string }[];
   invariant?: { cel: string };
 };
 
@@ -400,7 +402,8 @@ export async function readDerivation(appDir: string, pkg: string, lifting: boole
   }
 }
 
-export async function derive(appDir: string): Promise<void> {
+/** Derives the program's companion files; returns the whole entities it read. */
+export async function derive(appDir: string): Promise<Record<string, Entity & VEntity>> {
   const program = await ifMissing(Deno.readTextFile(`${appDir}/program.cue`), null);
   if (program === null) {
     fail(`${appDir}/program.cue: no such file — author program.cue unifying \`code: pronto.#App & { ... }\``);
@@ -1116,7 +1119,7 @@ export async function derive(appDir: string): Promise<void> {
       i18nFacts(defaultLocale, locales, catalogs, allMsgRefs, allProse),
     )),
   );
-
+  return entities;
 }
 
 /** The entities a screen needs a collection for, its `reads` fact: each

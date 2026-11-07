@@ -64,8 +64,8 @@ say:
             str trim); let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts
             *.test.ts mecha-local.ts mecha-battery.ts hybrid-local.ts hybrid-battery.ts
             refresh-portable-types.ts mecha-xstate-entry.ts mecha-xstate-bundle.ts
-            cortex-conformance.ts] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno
-            check --config ($pronto | path join deno.json) ...$files
+            cortex-conformance.ts access-test-fixture.ts] '*.ts') ...(glob --no-dir 'scales/*.ts') ] };
+            run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files
       proto:
         cmds:
         - do: >-

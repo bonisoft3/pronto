@@ -101,7 +101,7 @@
             "types": {
               "cmds": [
                 {
-                  "do": "use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts mecha-local.ts mecha-battery.ts hybrid-local.ts hybrid-battery.ts refresh-portable-types.ts mecha-xstate-entry.ts mecha-xstate-bundle.ts cortex-conformance.ts] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"
+                  "do": "use tools.nu [run-mise]; let pronto = (run-mise where github:bonisoft3/pronto | str trim); let files = do { cd $pronto; [ ...(glob --no-dir --exclude [*_test.ts *.test.ts mecha-local.ts mecha-battery.ts hybrid-local.ts hybrid-battery.ts refresh-portable-types.ts mecha-xstate-entry.ts mecha-xstate-bundle.ts cortex-conformance.ts access-test-fixture.ts] '*.ts') ...(glob --no-dir 'scales/*.ts') ] }; run-mise exec -- deno check --config ($pronto | path join deno.json) ...$files"
                 }
               ]
             },
@@ -1518,7 +1518,8 @@
           "ARG MONOREPO_COMPOSE_MODE",
           "ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
           "ARG BAYT_RUNTIME",
-          "ENV BAYT_RUNTIME=$BAYT_RUNTIME"
+          "ENV BAYT_RUNTIME=$BAYT_RUNTIME",
+          "ENV FELDERA_COMPILATION_PROFILE=unoptimized"
         ],
         "defaultPreamble": {
           "bayt-runtime": {
@@ -2336,7 +2337,8 @@
           "ARG MONOREPO_COMPOSE_MODE",
           "ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
           "ARG BAYT_RUNTIME",
-          "ENV BAYT_RUNTIME=$BAYT_RUNTIME"
+          "ENV BAYT_RUNTIME=$BAYT_RUNTIME",
+          "ENV FELDERA_COMPILATION_PROFILE=unoptimized"
         ],
         "defaultPreamble": {
           "bayt-runtime": {

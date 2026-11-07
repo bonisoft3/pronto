@@ -111,16 +111,34 @@ function render(rel: string, f: EmitFile): string {
   return fail(`${rel}: no text and format ${f.format} is not structured`);
 }
 
-async function exportEmission(): Promise<Emission> {
+/** Compiles the emission's cortex machines to their SQL, in place. */
+function cortexSql(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  const node = value as Record<string, unknown>;
+  for (const [k, v] of Object.entries(node)) {
+    if (typeof v === "string") {
+      if (v.includes("@PRONTO_XSTATE")) node[k] = compileCortexSql(v);
+    } else cortexSql(v);
+  }
+}
+
+/** What ir.html's cards are drawn from: Program's slices of the program. */
+type Drawing = { program: Program; ir: string };
+const DRAWING = "program: {state: code.state, surface: code.surface, capabilities: code.capabilities}, ir: code.meta.ir.source";
+
+/** The emission, and the drawing read in the same evaluation: each export of a
+ * program evaluates it whole. */
+async function exportEmission(): Promise<{ emission: Emission; drawing: Drawing }> {
   const exported = await new Deno.Command("cue", {
-    args: ["export", ".", "-e", "out", "--out", "json"],
+    args: ["export", ".", "-e", `{emission: out, ${DRAWING}}`, "--out", "json"],
     cwd: appDir,
     stdout: "piped",
     stderr: "inherit",
   }).output();
   if (!exported.success) fail("cue export failed");
-  const emission: Emission = JSON.parse(new TextDecoder().decode(exported.stdout), (_key, value) =>
-    typeof value === "string" && value.includes("@PRONTO_XSTATE") ? compileCortexSql(value) : value);
+  const exportedJson = JSON.parse(new TextDecoder().decode(exported.stdout)) as { emission: Emission } & Drawing;
+  const emission = exportedJson.emission;
+  cortexSql(emission);
   checkTypeSeeds(emission.files["schema/entities.proto"].data as Record<string, TypeEntity>);
   const checks = await projectSay(appDir, emission.files[".say.yaml"].data) as { say: Record<string, unknown> };
   const graph = emission.files["bayt.json"].data as { files: Record<string, { say: Record<string, unknown> }> };
@@ -156,7 +174,7 @@ async function exportEmission(): Promise<Emission> {
       fail(`${s.file}: no such file — the cluster serves it from the build context, so it must exist in the app (${owed[s.file] ?? "most often a review ladder file"})`);
     }
   }
-  return emission;
+  return { emission, drawing: { program: exportedJson.program, ir: exportedJson.ir } };
 }
 
 const unsafe = (p: string) => p.split("/").some((s) => s === "" || s === "." || s === "..");
@@ -330,7 +348,7 @@ async function renderDocuments(emission: Emission): Promise<Map<string, string>>
 }
 
 /** Reconciles the emission, including stale files and rendered documents. */
-async function writeEmission(emission: Emission): Promise<{ written: string[]; changed: boolean }> {
+async function writeEmission(emission: Emission): Promise<{ written: string[]; changed: boolean; wrote: boolean }> {
   const contents = await rendered(emission);
   const documents = Object.keys(emission.files).filter((rel) => emission.files[rel].format === "document");
   const written = [...contents.keys(), ...documents].sort();
@@ -372,6 +390,7 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
   // The checkout's own files, as mise.local.toml is: written only in one,
   // and in no manifest a mirror copies, so after the sweep of what the last
   // manifest recorded.
+  let checkoutChanged = false;
   if ((await checkout()) !== undefined) {
     for (const [rel, f] of Object.entries(emission.checkout)) {
       const text = render(rel, f);
@@ -379,9 +398,10 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
       if ((await ifMissing(Deno.readTextFile(path), "")) === text) continue;
       await Deno.mkdir(dirname(path), { recursive: true });
       await Deno.writeTextFile(path, text);
+      checkoutChanged = true;
     }
   }
-  return { written, changed };
+  return { written, changed, wrote: changed || checkoutChanged };
 }
 
 const derivedText = async () => JSON.stringify(await Promise.all(
@@ -474,17 +494,21 @@ async function writeMiseLocal(): Promise<void> {
 await writeMiseLocal();
 await writeIrStylesheet(appDir);
 const before = await derivedText();
-await derive(appDir);
+const read = await derive(appDir);
 // An entity's writers come from the screens, so ids are minted once a derivation exists.
-await mint(appDir);
+await mint(appDir, Object.values(read));
 const settled = await derivedText();
-let emission = await writeEmission(await exportEmission());
+const first = await exportEmission();
+let emission = await writeEmission(first.emission);
 let derivations = 1;
+// A drawing is stale once anything its export read was written again.
+let drawn: Drawing | undefined = emission.wrote ? undefined : first.drawing;
 if (emission.changed || settled !== before) {
   await derive(appDir);
   derivations++;
+  drawn = undefined;
   if ((await derivedText()) !== settled) {
-    emission = await writeEmission(await exportEmission());
+    emission = await writeEmission((await exportEmission()).emission);
     const again = await derivedText();
     await derive(appDir);
     derivations++;
@@ -494,22 +518,27 @@ if (emission.changed || settled !== before) {
 // The cards ir.html carries are drawn from the settled program and the emitted
 // screens; a redraw moves ir.html, whose hash the facts hold, so derive runs
 // once more to record it.
-if (await drawIr()) {
+if (await drawIr(drawn)) {
   await derive(appDir);
   derivations++;
 }
 console.error(`pronto write: ${emission.written.length} files emitted → ${appDir} (${derivations} derivation${derivations === 1 ? "" : "s"})`);
 
-async function drawIr(): Promise<boolean> {
-  const lift = (await derivedText()).includes("@tag(derive,") ? ["-t", "derive=true"] : [];
+async function drawIr(drawn: Drawing | undefined): Promise<boolean> {
+  const { program, ir } = drawn ?? await exportDrawing();
+  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/facts.json`));
+  return await renderIr(appDir, ir, program, facts);
+}
+
+// Strict, as the emission's export is, so a reused drawing and a fresh one
+// are the same read of the program.
+async function exportDrawing(): Promise<Drawing> {
   const out = await new Deno.Command("cue", {
-    args: ["export", ...lift, ".", "-e", "{program: code, ir: code.meta.ir.source}", "--out", "json"],
+    args: ["export", ".", "-e", `{${DRAWING}}`, "--out", "json"],
     cwd: appDir,
     stdout: "piped",
     stderr: "piped",
   }).output();
   if (!out.success) fail(new TextDecoder().decode(out.stderr));
-  const { program, ir } = JSON.parse(new TextDecoder().decode(out.stdout)) as { program: Program; ir: string };
-  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/facts.json`));
-  return await renderIr(appDir, ir, program, facts);
+  return JSON.parse(new TextDecoder().decode(out.stdout)) as Drawing;
 }

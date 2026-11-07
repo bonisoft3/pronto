@@ -5,6 +5,7 @@ import {
   type Schema,
   translate,
 } from "./translator.ts";
+import { ifMissing } from "../missing.ts";
 import {
   checkDiagnostics,
   type Diagnostic,
@@ -127,13 +128,89 @@ export async function compileProgram(options: ProgramOptions) {
   await Deno.mkdir(options.outputDirectory, { recursive: true });
   const directory = await Deno.realPath(options.outputDirectory);
   const source = await Deno.realPath(options.sourcePath);
-  let diagnostics: string;
-  if (options.jarPath) {
-    const jar = await Deno.realPath(options.jarPath);
-    require(
-      await sha256(await Deno.readFile(jar)) === compiler.sha256,
-      "compiler artifact hash",
+  // Checked even when the output is reused, so a wrong jar fails here and not
+  // at the next unrelated edit.
+  const jar = options.jarPath
+    ? await Deno.realPath(options.jarPath)
+    : undefined;
+  if (jar !== undefined) await judgeJar(jar);
+  if (!(await compiledFrom(directory, source))) {
+    await runCompiler(directory, source, jar);
+  }
+  const result = await artifacts(options);
+  for (const [view, sql] of Object.entries(result.queries)) {
+    await Deno.writeTextFile(`${directory}/${view}.sql`, sql);
+  }
+  await Deno.writeTextFile(
+    `${directory}/manifest.json`,
+    JSON.stringify(result.manifest, null, 2) + "\n",
+  );
+  return result;
+}
+
+/** Whether the directory holds this compiler's output for this source: that
+ * output is a function of the two alone, and the manifest names both, the code
+ * that read diagnostics.json off it, and the hash of each output. */
+// One judgement per jar for the process: a build compiles several programs.
+const judged = new Map<string, Promise<void>>();
+function judgeJar(jar: string): Promise<void> {
+  let judgement = judged.get(jar);
+  if (judgement === undefined) {
+    judgement = (async () =>
+      require(
+        await sha256(await Deno.readFile(jar)) === compiler.sha256,
+        "compiler artifact hash",
+      ))();
+    judged.set(jar, judgement);
+  }
+  return judgement;
+}
+
+export async function compiledFrom(directory: string, source: string) {
+  const text = await ifMissing(
+    Deno.readTextFile(`${directory}/manifest.json`),
+    null,
+  );
+  if (text === null) return false;
+  // A manifest cut short or left mid-merge names nothing to trust, and the
+  // compile this answer asks for overwrites it.
+  let manifest: { format?: unknown; compiler?: unknown; hashes?: unknown };
+  try {
+    manifest = JSON.parse(text);
+  } catch (e) {
+    if (e instanceof SyntaxError) return false;
+    throw e;
+  }
+  if (
+    manifest === null || typeof manifest !== "object" ||
+    manifest.format !== 1 || manifest.hashes === null ||
+    typeof manifest.hashes !== "object"
+  ) return false;
+  const hashes = manifest.hashes as Record<string, unknown>;
+  if (JSON.stringify(manifest.compiler) !== JSON.stringify(compiler)) {
+    return false;
+  }
+  for (const [name, hash] of Object.entries(await currentCompilerHashes())) {
+    if (hashes[name] !== hash) return false;
+  }
+  if (hashes.source !== await sha256(await Deno.readFile(source))) {
+    return false;
+  }
+  for (const name of ["plan", "schema", "diagnostics"]) {
+    const bytes = await ifMissing(
+      Deno.readFile(`${directory}/${name}.json`),
+      null,
     );
+    if (bytes === null || hashes[name] !== await sha256(bytes)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function runCompiler(directory: string, source: string, jar?: string) {
+  let diagnostics: string;
+  if (jar !== undefined) {
     diagnostics = await command("java", [
       "-jar",
       jar,
@@ -176,15 +253,6 @@ export async function compileProgram(options: ProgramOptions) {
     `${directory}/diagnostics.json`,
     JSON.stringify(readDiagnostics(diagnostics, plan), null, 2) + "\n",
   );
-  const result = await artifacts(options);
-  for (const [view, sql] of Object.entries(result.queries)) {
-    await Deno.writeTextFile(`${directory}/${view}.sql`, sql);
-  }
-  await Deno.writeTextFile(
-    `${directory}/manifest.json`,
-    JSON.stringify(result.manifest, null, 2) + "\n",
-  );
-  return result;
 }
 
 export async function checkCompiledProgram(
