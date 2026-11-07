@@ -882,15 +882,9 @@ import (
 					}
 					dockerfile: {
 						from: ref: base
-						preamble: ["ENV DENO_DIR=/deno-cache"]
 						copy: [{from: name: B._omnishell, srcs: ["/"], dst: "/omnishell"}]
 					}
-					cmd: {
-						"builtin": null
-						"deno-cache": (deno.#containerCmd & {
-							do: "if [ -f tests/deno.json ] && [ -f tests/deno.lock ]; then deno cache --config tests/deno.json --lock tests/deno.lock --frozen tests/*.ts; fi"
-						}).out
-					}
+					cmd: "builtin": null
 					compose: {
 						up:     true
 						manual: true
