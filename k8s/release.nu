@@ -457,17 +457,46 @@ export def app-services-environment [compose: record, services: list<string>, ow
 	}
 }
 
-# The ConfigMaps the app's services mount (App.services.<n>.files) that are not there yet, made from
-# the app's files that seed them (App.services.<n>.seed), each keyed by its file's name. Never over
-# one that exists: what is in it then is the operator's (pronto-flags push's), not the release's.
+# The ConfigMaps the app's services mount (App.services.<n>.files), made from the app's files that
+# seed them (App.services.<n>.seed), each keyed by its file's name, when they are not there yet. One
+# that exists is the operator's (pronto-flags push's): nothing in it changes, but a JSON seed fills in
+# what it lacks (seed-fill), so a flag added since the ConfigMap was seeded reaches it with its
+# default, not as an unknown flag.
 export def seed-configmaps [services: record, app_dir: string, namespace: string] {
 	for s in ($services | values) {
 		for c in ($s.seed? | default {} | transpose name file) {
-			if (kubectl get configmap $c.name -n $namespace | complete).exit_code == 0 { continue }
 			let file = ($app_dir | path join $c.file)
 			if not ($file | path exists) { error make { msg: $"ConfigMap ($c.name)'s seed ($file) does not exist" } }
-			kubectl create configmap $c.name -n $namespace $"--from-file=($file | path basename)=($file)" | ignore
-			print $"Seeded ConfigMap ($namespace)/($c.name) from ($c.file)"
+			let key = ($file | path basename)
+			let got = (kubectl get configmap $c.name -n $namespace -o json | complete)
+			if $got.exit_code != 0 {
+				kubectl create configmap $c.name -n $namespace $"--from-file=($key)=($file)" | ignore
+				print $"Seeded ConfigMap ($namespace)/($c.name) from ($c.file)"
+				continue
+			}
+			if not ($key | str ends-with ".json") { continue }
+			let have = ($got.stdout | from json | get -o data | default {} | get -o $key)
+			let seed = (open --raw $file | from json)
+			let next = (if $have == null { $seed } else { seed-fill ($have | from json) $seed })
+			if $have != null and $next == ($have | from json) { continue }
+			kubectl patch configmap $c.name -n $namespace --type merge -p ({data: {$key: ($next | to json --indent 2)}} | to json -r) | ignore
+			print $"Filled ConfigMap ($namespace)/($c.name) from ($c.file)"
+		}
+	}
+}
+
+# `have` with what `seed` has and it lacks: a missing top-level key, or a missing member of a top-level
+# object (one flag of flagd's `flags`). Nothing `have` holds is changed, and nothing deeper is added,
+# so a flag the operator changed keeps its variants and targeting as they are.
+export def seed-fill [have: record, seed: record]: nothing -> record {
+	$seed | transpose k v | reduce -f $have {|e, acc|
+		let mine = ($acc | get -o $e.k)
+		if $mine == null {
+			$acc | upsert $e.k $e.v
+		} else if (($mine | describe) =~ "^record" and ($e.v | describe) =~ "^record") {
+			$acc | upsert $e.k ($e.v | transpose k v | reduce -f $mine {|m, inner| if ($inner | get -o $m.k) == null { $inner | upsert $m.k $m.v } else { $inner } })
+		} else {
+			$acc
 		}
 	}
 }
