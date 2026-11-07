@@ -2531,7 +2531,7 @@ _pgrollDir: "services/database/pgroll"
 						dockerfile: {
 							from: name: "alpine/curl@sha256:5bd4985f3daa6d1ca87619802190afc24c0ccd410b1f123de5afc8e891b5fc71"
 							copy: [{srcs: ["\(dir)/"], dst: "/seed/"}]
-							epilogue: ["ENTRYPOINT \(json.Marshal(["/bin/sh", "-c", load]))"]
+							entrypoint: ["/bin/sh", "-c", load]
 						}
 						compose: {
 							depends_on: "rclone-s3": {condition: "service_healthy"}
