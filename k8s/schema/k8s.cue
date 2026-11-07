@@ -144,12 +144,13 @@ import (
 			}
 			spec: {
 				instances: 1
-				// A stop is bounded: a smart shutdown waits for sessions for 30 s, then a fast one, and
-				// at 300 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
+				// A stop is bounded: a smart shutdown waits for sessions for 15 s, then a fast one, and
+				// at 120 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
 				// walsender holds a fast shutdown open, so every restart of the primary stalled a
-				// release for half an hour. Killed, the next start replays the WAL it wrote.
-				smartShutdownTimeout: 30
-				stopDelay:            300
+				// release for half an hour. Killed, the next start replays the WAL it wrote. The
+				// release waits for the primary (release.nu) longer than this stop.
+				smartShutdownTimeout: 15
+				stopDelay:            120
 				imageName: (#appImage & {svc: "database"}).out
 				// mecha's database image derives from the official postgres image,
 				// whose postgres user is 999, not CloudNativePG's 26.
