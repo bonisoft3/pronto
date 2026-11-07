@@ -76,12 +76,6 @@ export const OPERATORS = [
 		check_deployments: ["dapr-operator" "dapr-sentry" "dapr-sidecar-injector"]
 		# The chart grants secret reads in `default`; apps live in their own namespaces.
 		set: ["dapr_rbac.secretReader.enabled=false"]
-		# A cluster of one node has no quorum to keep: the scheduler's three etcd members (the chart
-		# runs three whenever it is on) back the jobs API, actor reminders and workflows, which no pronto
-		# app uses, and cost a node about a third of a core idle. Turned off, its StatefulSet is kept
-		# at no replicas and its volumes stay, so a second node turns it back on with nothing lost.
-		# Placement already runs one replica without `ha`.
-		single_node_set: ["global.scheduler.enabled=false"]
 	}
 ]
 
@@ -155,11 +149,6 @@ export def ensure-operators [
 	ensure-envoy-gateway-class $ingress
 }
 
-# A chart's values: its own, and on a cluster of one node those it sets for a single node.
-export def operator-set [entry: record, nodes: int]: nothing -> list<string> {
-	($entry.set? | default []) ++ (if $nodes == 1 { $entry.single_node_set? | default [] } else { [] })
-}
-
 # One operator: its manifests applied, its deployments waited for.
 def install-operator [entry: record, timeout: string] {
 	if ($entry.namespace? | is-not-empty) {
@@ -169,8 +158,7 @@ def install-operator [entry: record, timeout: string] {
 	let file = (fetch-verified $entry)
 	if ($entry.kind? | default "") == "helm" {
 		# Split as text: a YAML round trip through nu rewrites values kubectl then rejects.
-		let set = (operator-set $entry (kubectl get nodes -o name | lines | length))
-		let docs = (helm template $entry.name $file --include-crds --namespace $entry.namespace ...($set | each { [--set $in] } | flatten) | split row --regex '(?m)^---\s*$' | where ($it | str trim | is-not-empty))
+		let docs = (helm template $entry.name $file --include-crds --namespace $entry.namespace ...($entry.set? | default [] | each { [--set $in] } | flatten) | split row --regex '(?m)^---\s*$' | where ($it | str trim | is-not-empty))
 		let is_crd = {|d| $d =~ '(?m)^kind:\s*CustomResourceDefinition\s*$' }
 		# A chart's own custom resources map only once its CRDs are established.
 		let crds = ($docs | where {|d| do $is_crd $d })
