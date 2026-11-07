@@ -26,6 +26,7 @@ use release.nu [
 	tunnel-manifests
 	app-services-environment
 	seed-configmaps
+	seed-fill
 	apply-alert-rules
 	check-backup-secrets
 ]
@@ -645,20 +646,30 @@ def test_door_egress [] {
 }
 
 def test_seed_configmaps [] {
-	print "test a missing ConfigMap is seeded from the app's file, and one that exists is left alone..."
+	print "test a missing ConfigMap is seeded from the app's file, and one that exists only gains what it lacks..."
 	let dir = (mktemp -d)
 	mkdir $"($dir)/bin" $"($dir)/app/flags"
-	'{"flags": {}}' | save $"($dir)/app/flags/flags.json"
+	'{"flags": {"old": {"defaultVariant": "on"}, "new": {"defaultVariant": "off"}}}' | save $"($dir)/app/flags/flags.json"
 	let log = $"($dir)/kubectl.log"
-	# A stand-in kubectl: `get` finds only kept-flags; every call is logged.
-	$"#!/bin/sh\necho \"$@\" >> ($log)\nif [ \"$1\" = get ]; then [ \"$3\" = kept-flags ]; exit; fi\n" | save $"($dir)/bin/kubectl"
+	# A stand-in kubectl: `get` finds kept-flags (old set by the operator, new missing) and full-flags
+	# (already holding both); every call is logged.
+	let kept = ({data: {"flags.json": ({flags: {old: {defaultVariant: "off"}}} | to json)}} | to json -r)
+	let full = ({data: {"flags.json": ({flags: {old: {defaultVariant: "off"}, new: {defaultVariant: "on"}}} | to json)}} | to json -r)
+	$"#!/bin/sh\necho \"$@\" >> ($log)\nif [ \"$1\" = get ]; then case \"$3\" in kept-flags\) echo '($kept)';; full-flags\) echo '($full)';; *\) exit 1;; esac; fi\n" | save $"($dir)/bin/kubectl"
 	^chmod +x $"($dir)/bin/kubectl"
 	with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} {
-		seed-configmaps {flagd: {seed: {sample-flags: "flags/flags.json", kept-flags: "flags/flags.json"}}, billing: {port: 8688}} $"($dir)/app" "sample"
+		seed-configmaps {flagd: {seed: {sample-flags: "flags/flags.json", kept-flags: "flags/flags.json", full-flags: "flags/flags.json"}}, billing: {port: 8688}} $"($dir)/app" "sample"
 	}
 	let calls = (open $log | lines)
 	assert ($calls | any {|c| $c == $"create configmap sample-flags -n sample --from-file=flags.json=($dir)/app/flags/flags.json" }) "the missing one is made from the app's file"
 	assert ($calls | all {|c| not ($c | str starts-with "create configmap kept-flags") }) "one that exists is never written over"
+	let patch = ($calls | where {|c| $c | str starts-with "patch configmap kept-flags" })
+	assert (($patch | length) == 1) "the one that lacks a flag is patched once"
+	assert ($calls | all {|c| not ($c | str starts-with "patch configmap full-flags") }) "one that lacks nothing is left alone"
+	let filled = (seed-fill {flags: {old: {defaultVariant: "off"}}} {flags: {old: {defaultVariant: "on", targeting: {}}, new: {defaultVariant: "off"}}, "$schema": "x"})
+	assert ($filled.flags.old == {defaultVariant: "off"}) "a flag the operator set keeps its value, and gains nothing deeper"
+	assert ($filled.flags.new == {defaultVariant: "off"}) "a flag it lacks comes with the seed's default"
+	assert ($filled."$schema" == "x") "a top-level key it lacks is added"
 	let bad = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { seed-configmaps {flagd: {seed: {other: "nope.json"}}} $"($dir)/app" "sample" }; false } catch { true })
 	assert $bad "a seed that is not there fails the release"
 	rm -r $dir
