@@ -495,8 +495,7 @@ import (
 	// What a stack builds its images from beyond the app: mecha's and
 	// omnishell's targets, with the compose files that declare them.
 	_imageViews: list.Concat([
-		[for s, _ in mecha.published if s != "activepieces" {"libraries_mecha-\(s)-image_bayt"}],
-		["libraries_mecha-activepieces-image_bayt"],
+		[for s in mecha.#Images {"libraries_mecha-\(s)-image_bayt"}],
 		[for s in mecha.#Sourced {"libraries_mecha-\(s)-image_srcs"}],
 		[for v in ["srcs", "bayt"] {"\(_omnishell)_\(v)"}],
 		["workspaceroot-pronto-sources_bayt"],
