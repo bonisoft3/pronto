@@ -929,7 +929,10 @@ export def main [
 	# primary runs that image and is ready itself.
 	let db_image = ($released | from yaml | where kind == "Cluster" | first | get spec.imageName)
 	print $"Waiting for CloudNativePG cluster ($app_info.name)-db in ($target_ns) on ($db_image)..."
-	let deadline = (date now) + 300sec
+	# The old primary's stop (its stopDelay, up to the Cluster's 120 s; a pod made before that bound
+	# keeps its 1800 s) and the new one's start.
+	let grace = ($released | from yaml | where kind == "Cluster" | first | get -o spec.stopDelay | default 0)
+	let deadline = (date now) + (($grace + 300) * 1sec)
 	loop {
 		let primary = (kubectl get pods -n $target_ns -l $"cnpg.io/cluster=($app_info.name)-db,cnpg.io/instanceRole=primary" -o json | from json | get items
 			| where {|p| $p.metadata.deletionTimestamp? == null and ($p.spec.containers | where name == "postgres" | first | get image) == $db_image and ($p.status.conditions? | default [] | any {|c| $c.type == "Ready" and $c.status == "True" }) })
