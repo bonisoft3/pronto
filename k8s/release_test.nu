@@ -278,6 +278,9 @@ def test_render_manifests_kind [] {
 	let yaml = (render-manifests $app.cue_path "kind")
 
 	assert ($yaml | str contains "kind: Cluster")
+	let db = ($yaml | from yaml | where kind == "Cluster" | first)
+	assert equal $db.spec.stopDelay 300 "a stop of the primary is bounded, not CloudNativePG's 1800 s"
+	assert equal $db.spec.smartShutdownTimeout 30
 	# Every service runs the app's own compose image: CloudNativePG's stock
 	# postgres lacked the plv8 mecha's database image installs.
 	for svc in ["database" "crud" "electric" "auth" "caddy" "render"] {
