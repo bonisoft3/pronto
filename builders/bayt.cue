@@ -14,6 +14,7 @@
 package bayt
 
 import (
+	"encoding/yaml"
 	"list"
 	"strings"
 
@@ -449,9 +450,16 @@ import (
 		out:     "${MONOREPO_COMPOSE_MODE:-docker-image://\(S.pin)}${MONOREPO_COMPOSE_MODE:+:\(S.service)}"
 	}
 	// mecha's images, named by #DefaultCluster.
-	_mechaContexts: {for s, pin in mecha.published {
-		"libraries_mecha-\(s)-image": (_switch & {service: "libraries_mecha-\(s)-image", "pin": pin}).out
-	}}
+	_mechaContexts: {
+		for s, pin in mecha.published {
+			"libraries_mecha-\(s)-image": (_switch & {service: "libraries_mecha-\(s)-image", "pin": pin}).out
+		}
+		// An image mecha has not published yet builds in the monorepo alone:
+		// elsewhere a build that needs it pulls a reference that names why.
+		for s in mecha.#Images if mecha.published[s] == _|_ {
+			"libraries_mecha-\(s)-image": "${MONOREPO_COMPOSE_MODE:-docker-image://unpublished.invalid/mecha-publishes-no-\(s)-image-yet}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-\(s)-image}"
+		}
+	}
 	// omnishell's runtime tree, as one image.
 	_omnishell:        omnishell.#RuntimeImage
 	_omnishellContext: (_switch & {service: _omnishell, pin: omnishell.published.runtime}).out
@@ -937,26 +945,169 @@ import (
 					"""#
 			}
 			if list.Contains(B.meta.targets, "docker") && B.cluster.capabilities.server {
+				// The appliance runs the airlock as the compose stack does: the
+				// same images' contents as processes beside the database, one
+				// address (127.0.0.1) under each service's compose name.
+				let _effects = len(B.cluster.state.effects) > 0
+				let _ai = _effects && (len([for e in B.cluster.state.effects if e.ai != _|_ {e}]) > 0 || B.cluster.capabilities.ai != _|_)
+				let _bridges = [for b in B.cluster.state.bridges if list.Contains(b.targets, "docker") {b}]
+				// A container several bridges share (one per action) runs once.
+				let _containers = {for b in _bridges {(b.container): b.appliance}}
+				// The change feed, as compose runs it: Conduit off the logical slot,
+				// the bus on daprd and Redis, and Redpanda Connect running the
+				// pipelines and the drains' streams. These are process-compose's own
+				// processes (.bayt/process-compose.yaml), given the images' binaries.
+				let _capture = B.cluster.capabilities.capture
+				let _compute = len(B.cluster.state.computations) > 0
+				// The transform runs the pipelines and the drains' streams, and
+				// carries compute's invalidations to it.
+				let _streams = len(B.cluster.state.pipelines) > 0 || _compute
+				// The ticker sweeps schedules and timers; the airlock runs for as
+				// long as the appliance does, so nothing wakes it.
+				let _wakes = len(B.cluster.state.schedules) > 0 || len(B.cluster.state.timers) > 0
+				let _timers = len(B.cluster.state.timers) > 0
+				let _blobs = B.cluster.capabilities.blobs
+				// What an effect declares it reads, which compose refuses to start
+				// without (the airlock's environment there).
+				let _secrets = [for e in B.cluster.state.effects if e.secrets != _|_ for k in e.secrets {k}]
+				// A computation's files, by the paths the processes' environment
+				// names them, relative to the app.
+				let _computed = [for f, _ in {for c in B.cluster.state.computations for f in list.Concat([[c.file], c.wasm, [if c.feldera != _|_ {c.feldera}]]) {(f): true}} {f}]
+				let _overlaid = _effects || _wakes
+				// The forward migrations, which compose's migrate service applies: the
+				// appliance runs that same process (process-compose.yaml), which what
+				// reads the schema already waits on, over the migrate image's files.
+				let _pgroll = B.cluster.surface.schema.pgroll
+				let _db = "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@database:5432/${POSTGRES_DB:-\(B.meta.app)}"
+				let _ready = {period_seconds: 1, timeout_seconds: 5, failure_threshold: 120}
+				// process-compose.yaml declares these processes too: an override's
+				// `command` replaces their entrypoint (an override's entrypoint would
+				// not), and its environment merges over theirs by name.
+				// Each argument single-quoted for the shell, a quote closed and
+				// escaped. process-compose expands variables in commands as it
+				// loads the file, which the appliance's own commands rely on; a
+				// bridge's command, the app's, is taken as written: its `$` doubled.
+				let _command = {
+					args: [...string]
+					literal: *false | bool
+					out: strings.Join([for a in args {
+						let q = strings.Replace(a, "'", "'\\''", -1)
+						"'" + [if literal {strings.Replace(q, "$", "$$", -1)}, q][0] + "'"
+					}], " ")
+				}
+				let _overlay = {
+					version: "0.5"
+					processes: {
+						if _effects {
+							"airlock-upgrade": {
+								command: (_command & {args: ["psql", _db, "-X", "--set=ON_ERROR_STOP=1", "--single-transaction", "--file=/airlock-upgrade.sql"]}).out
+								depends_on: database: condition: "process_healthy"
+							}
+							for c, a in _containers {
+								(c): {
+									command: (_command & {args: a.command, literal: true}).out
+									readiness_probe: _ready & {exec: command: "portcheck --port \(a.port)"}
+									availability: restart: "on_failure"
+								}
+							}
+							"airlock-mesh": {
+								// As compose runs it: every listener on loopback, metrics and
+								// profiling off.
+								command: (_command & {args: ["/daprd", "--app-id", "airlock", "--dapr-listen-addresses", "127.0.0.1", "--dapr-internal-grpc-listen-address", "127.0.0.1", "--resources-path", "/dapr/airlock", "--config", "/dapr/config.yaml", "--dapr-http-port", "\(mecha.#AppliancePort.meshHttp)", "--dapr-grpc-port", "\(mecha.#AppliancePort.meshGrpc)", "--dapr-internal-grpc-port", "\(mecha.#AppliancePort.meshInternal)", "--metrics-port", "0", "--profile-port", "0", "--log-level", "info"]}).out
+								depends_on: {for c, _ in _containers {(c): condition: "process_healthy"}}
+								// Each binding reads its bridge's address from the environment.
+								environment: [for b in _bridges {
+									let _act = [if b.action != _|_ {"/actions/\(b.action)"}, ""][0]
+									"BRIDGE_\(strings.ToUpper(strings.Replace(b.name, "-", "_", -1)))_URL=http://\(b.container):\(b.appliance.port)\(_act)"
+								}]
+								readiness_probe: _ready & {exec: command: "portcheck --port \(mecha.#AppliancePort.meshHttp)"}
+								availability: restart: "on_failure"
+							}
+							airlock: {
+								command: (_command & {args: ["airlock-deno", "run", "--frozen", "--unstable-worker-options", "--allow-net=database:\(mecha.#AppliancePort.database),airlock-mesh:\(mecha.#AppliancePort.meshHttp),0.0.0.0:\(mecha.#AppliancePort.airlock)", "--allow-read", "--allow-env", "--allow-sys", "main.ts"]}).out
+								working_dir: "/app/airlock"
+								environment: list.Concat([
+									["DATABASE_URL=\(_db)", "MESH_URL=http://airlock-mesh:\(mecha.#AppliancePort.meshHttp)", "AIRLOCK_DIR=/airlock", "DENO_DIR=/airlock-deno-dir", "PORT=\(mecha.#AppliancePort.airlock)"],
+									[if len(B.cluster.state.bridges) > 0 {"AIRLOCK_TARGET=docker"}],
+								])
+								depends_on: {
+									"airlock-upgrade": condition: "process_completed_successfully"
+									"airlock-mesh": condition:    "process_healthy"
+								}
+								readiness_probe: _ready & {exec: command: "portcheck --port \(mecha.#AppliancePort.airlock)"}
+								availability: restart: "on_failure"
+							}
+						}
+						// The timers' check from the script the image carries, its
+						// connection the base process's.
+						if _timers {
+							"timer-check": command: (_command & {args: ["psql", "-X", "--set=ON_ERROR_STOP=1", "--single-transaction", "--file=/timer-check.sql"]}).out
+						}
+						if _wakes {
+							ticker: {
+								command: (_command & {args: ["ticker-deno", "run", "--frozen", "--allow-net", "--allow-env", "main.ts"]}).out
+								working_dir: "/ticker-app"
+								environment: list.Concat([
+									["CRUD_URL=http://crud:3000", "CALL_TIMEOUT_MS=\(B.cluster.meta.bounds.tickerCallMs)", "SERVICE_JWT=${SERVICE_JWT:-\(mecha.#DevServiceJwt)}", "DENO_DIR=/ticker-deno-dir", "PORT=\(mecha.#AppliancePort.ticker)"],
+									[[if _effects {"WAKE_URLS=http://airlock:\(mecha.#AppliancePort.airlock)/healthz"}, "WAKE_URLS="][0]],
+								])
+								depends_on: crud: condition: "process_healthy"
+								readiness_probe: _ready & {exec: command: "portcheck --port \(mecha.#AppliancePort.ticker)"}
+								availability: restart: "on_failure"
+							}
+							// The clock's poke, at the cadence compose's clock keeps. A
+							// refused one ends the clock, which its restart makes visible.
+							clock: {
+								// A script, since process-compose expands variables in commands.
+								command: (_command & {args: ["/usr/local/bin/appliance-clock.sh"]}).out
+								environment: ["SERVICE_JWT=${SERVICE_JWT:-\(mecha.#DevServiceJwt)}"]
+								depends_on: ticker: condition: "process_healthy"
+								availability: restart: "on_failure"
+							}
+						}
+					}
+				}
+				// The secrets an effect declares, which the airlock inherits from the
+				// container: the appliance does not start without one, as compose's
+				// airlock does not (process-compose substitutes no `:?` refusal).
+				let _secretCheck = [if len(_secrets) > 0 {"'for k in \(strings.Join(_secrets, " ")); do' '  eval \"v=\\${$k:-}\"' '  [ -n \"$v\" ] || { echo \"appliance: $k is required: an effect declares it\" >&2; exit 1; }' 'done' "}, ""][0]
+				let _hosts = strings.Join(list.Concat([["crud", "database", "auth"], if _effects {["airlock-mesh", "airlock"]}, if _wakes {["ticker"]}, [for c, _ in _containers {c}]]), " ")
 				"release-docker": core.#target & {
 					activate: ""
 					deps: list.Concat([
 						[":database", ":crud", ":caddy"],
-						if B.cluster.meta.served != _|_ {[":served-release"]},
-						if B.cluster.capabilities.auth {[":auth"]},
+						if _pgroll != _|_ {[":\(_pgroll.target):outs"]},
+						// Image-only: these images keep their files outside the
+						// monorepo tree, which a workdir dependency copies.
+						if B.cluster.meta.served != _|_ {[":served-release:outs"]},
+						if B.cluster.capabilities.auth {[":auth:outs"]},
+						if _effects {[":airlock:outs", ":airlock-mesh:outs", ":airlock-upgrade:outs"]},
+						if _capture {[":mesh-events:outs", ":conduit:outs"]},
+						if _streams {[":transform:outs"]},
+						if _wakes {[":ticker:outs"]},
+						if _timers {[":timer-check:outs"]},
+						if _compute {[":compute:outs"]},
+						[for c, _ in _containers {":\(c)-appliance:outs"}],
 					])
-					srcs: globs: [".bayt/process-compose.yaml"]
+					srcs: globs: list.Concat([[".bayt/process-compose.yaml"], if _capture {["docker/*.yaml"]}, _computed])
 					compose: {
 						manual: true
+						// mecha's extensions image, which the runtime's targets are not.
+						build: additional_contexts: "libraries_mecha-extensions-image": B._mechaContexts["libraries_mecha-extensions-image"]
 						ports: ["${PORT:-8080}:${PORT:-8080}"]
 						image: "${BAYT_DOCKER_REPOSITORY:-ghcr.io/bonisoft3/\(B.meta.app)}:${BAYT_IMAGE_TAG:-latest}"
 					}
 					dockerfile: core.nubox & {
 						defaultPreamble: "zypper-postgres": (zypper.#install & {
-							pkgs: [
-								"postgresql18-server=18.6-160000.1.1",
-								"postgresql18-contrib=18.6-160000.1.1",
-								"libopenssl3=3.5.0-160000.10.1",
-							]
+							pkgs: list.Concat([
+								[
+									"postgresql18-server=\(mecha.#AppliancePostgres)",
+									"postgresql18-contrib=\(mecha.#AppliancePostgres)",
+									"libopenssl3=3.5.0-160000.10.1",
+								],
+								// The bus's store; Redis's own image links musl.
+								[if _capture {"redis=8.2.0-bp160.1.3"}],
+							])
 							then: [
 								"rm -rf /usr/lib/locale/*",
 								"mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql",
@@ -972,6 +1123,10 @@ import (
 								{from: {ref: ":caddy"}, srcs: ["/usr/bin/caddy"], dst: "/usr/bin/caddy"},
 								{from: {ref: ":caddy"}, srcs: ["/etc/caddy/Caddyfile"], dst: "/etc/caddy/Caddyfile"},
 								{srcs: [".bayt/process-compose.yaml"], dst: "/.bayt/process-compose.yaml"},
+								// pljs as `plv8` and pg_ivm, which leap ships without, built once by
+								// mecha against this same server (mecha.#AppliancePostgres).
+								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/lib/"], dst: "/usr/lib/postgresql18/lib64/"},
+								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/extension/"], dst: "/usr/share/postgresql18/extension/"},
 							],
 							// The door's tree as this target releases it (emit.cue's
 							// served-release), and the inline scripts its policy names.
@@ -989,13 +1144,95 @@ import (
 								{from: {ref: ":auth"}, srcs: ["/app"], dst: "/app"},
 								{from: {ref: ":auth"}, srcs: ["/deno-dir"], dst: "/deno-dir"},
 							]},
+							// pgroll, its runner and the program's forward migrations, from the
+							// image compose's migrate service runs.
+							if _pgroll != _|_ {[
+								{from: {ref: ":\(_pgroll.target)"}, srcs: [_pgroll.dir], dst: _pgroll.dir},
+								{from: {ref: ":\(_pgroll.target)"}, srcs: ["/migrate.sh"], dst: "/migrate.sh"},
+								{from: {ref: ":\(_pgroll.target)"}, srcs: ["/usr/local/bin/pgroll"], dst: "/usr/local/bin/pgroll"},
+							]},
+							// The airlock's own Deno and cache, apart from auth's, the
+							// handlers and manifest, its daprd with the effects' bindings,
+							// and the ledger's upgrade.
+							if _effects {[
+								{from: {ref: ":airlock"}, srcs: ["/usr/bin/deno"], dst: "/usr/local/bin/airlock-deno"},
+								{from: {ref: ":airlock"}, srcs: ["/deno-dir"], dst: "/airlock-deno-dir"},
+								{from: {ref: ":airlock"}, srcs: ["/app"], dst: "/app"},
+								{from: {ref: ":airlock"}, srcs: ["/airlock"], dst: "/airlock"},
+								{from: {ref: ":airlock-mesh"}, srcs: ["/daprd"], dst: "/daprd"},
+								{from: {ref: ":airlock-mesh"}, srcs: ["/dapr"], dst: "/dapr"},
+								{from: {ref: ":airlock-upgrade"}, srcs: ["/airlock-upgrade.sql"], dst: "/airlock-upgrade.sql"},
+							]},
+							// The change feed's binaries and mecha's files, where the processes'
+							// overrides name them, and the app's pipeline files beside its tree.
+							if _capture {[
+								{from: {ref: ":mesh-events"}, srcs: ["/daprd"], dst: "/usr/local/bin/daprd"},
+								{from: {ref: ":mesh-events"}, srcs: ["/dapr/components/"], dst: "/mesh-events/dapr/components/"},
+								{from: {ref: ":conduit"}, srcs: ["/app/conduit"], dst: "/usr/local/bin/conduit"},
+								{from: {ref: ":conduit"}, srcs: ["/app/connectors/"], dst: "/usr/local/bin/"},
+								// The pipelines alone: the app's own docker/Caddyfile, which the
+								// door prefers where it is, would bring back the renderer the
+								// appliance's edited one drops.
+								{srcs: ["docker/*.yaml"], dst: "docker/"},
+							]},
+							if _streams {[
+								{from: {ref: ":transform"}, srcs: ["/redpanda-connect"], dst: "/usr/local/bin/redpanda-connect"},
+								{from: {ref: ":transform"}, srcs: ["/cdc-trace.yaml"], dst: "/transform/cdc-trace.yaml"},
+							]},
+							// The timers' check, which the overlay's timer-check runs.
+							if _timers {[
+								{from: {ref: ":timer-check"}, srcs: ["/timer-check.sql"], dst: "/timer-check.sql"},
+							]},
+							// Compute's app, its cache and DuckDB's extensions, its sibling
+							// sources where its imports reach them, and the program's
+							// computations where the environment names them.
+							if _compute {list.Concat([
+								[
+									{from: {ref: ":compute"}, srcs: ["/app/"], dst: "/compute-app/"},
+									// One cache, content-addressed, beside auth's.
+									{from: {ref: ":compute"}, srcs: ["/deno-dir"], dst: "/deno-dir"},
+									{from: {ref: ":compute"}, srcs: ["/durex"], dst: "/durex"},
+									{from: {ref: ":compute"}, srcs: ["/packages"], dst: "/packages"},
+								],
+								[if !B.cluster.capabilities.auth {{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"}}],
+								[for f in _computed {srcs: [f], dst: f}],
+							])},
+							// The ticker, with its own Deno and cache.
+							if _wakes {[
+								{from: {ref: ":ticker"}, srcs: ["/usr/bin/deno"], dst: "/usr/local/bin/ticker-deno"},
+								{from: {ref: ":ticker"}, srcs: ["/deno-dir"], dst: "/ticker-deno-dir"},
+								{from: {ref: ":ticker"}, srcs: ["/app"], dst: "/ticker-app"},
+							]},
+							[for c, a in _containers for f in a.srcs {from: {ref: ":\(c)-appliance"}, srcs: [f], dst: f}],
 						])
 						preamble: list.Concat([
-							// The appliance runs no airlock, so a program's effects would
-							// claim their ledger and never run: the release is refused,
-							// as k8s's and gcp's are, rather than shipped silently inert.
-							if len(B.cluster.state.effects) > 0 {[
-								#"RUN echo "release@docker does not yet deploy airlock; refusing to omit a runtime service" >&2 && exit 1"#,
+							// The AI gateway is no process of the appliance yet, so an
+							// effect answered through it would never run.
+							if _ai {[
+								#"RUN echo "release@docker does not yet run the AI gateway; refusing to omit a runtime service" >&2 && exit 1"#,
+							]},
+							// An answer's bytes go to the blob plane, which the appliance
+							// does not run.
+							if _effects && _blobs {[
+								#"RUN echo "release@docker does not yet run the blob plane an effect's answer is stored in; refusing to omit a runtime service" >&2 && exit 1"#,
+							]},
+							// The computations on DuckDB snapshots, as launch@local runs them:
+							// compute and the transform reading its invalidations both find
+							// its app and extensions here, the container's environment.
+							if _compute {[
+								"ENV COMPUTE_APP_DIR=/compute-app",
+								"ENV BAYT_LOCAL_DUCKDB_EXTENSIONS=/compute-app/extensions",
+								"ENV DENO_DIR=/deno-dir",
+							]},
+							if _capture {[
+								"ENV MECHA_MESH_DIR=/mesh-events",
+								"ENV MECHA_TRANSFORM_DIR=/transform",
+							]},
+							if _overlaid {[
+								"COPY <<'APPLIANCE' /.bayt/process-compose.appliance.yaml\n\(yaml.Marshal(_overlay))APPLIANCE",
+							]},
+							if _wakes {[
+								#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'while sleep "${POKE_INTERVAL_SECONDS:-60}"; do' '  curl -fsS -X POST -H "Authorization: Bearer ${SERVICE_JWT}" "http://ticker:\#(mecha.#AppliancePort.ticker)/poke?caller=appliance" >/dev/null || { echo "clock: the ticker refused its poke" >&2; exit 1; }' 'done' > /usr/local/bin/appliance-clock.sh && chmod 755 /usr/local/bin/appliance-clock.sh"#,
 							]},
 							[
 								"ENV PATH=/usr/lib/postgresql18/bin:/usr/local/bin:$PATH",
@@ -1008,26 +1245,49 @@ import (
 								"ENV PORT=8080",
 								"ENV ORIGIN=http://localhost:8080",
 								"ENV CADDY_TLS_HOST_PORT=8080",
+								// The door's own config, edited below: an app's docker/Caddyfile,
+								// which caddy prefers where a tree brings it, keeps the renderer.
+								"ENV CADDY_CONFIG_FILE=/etc/caddy/Caddyfile",
 							],
 							if B.cluster.capabilities.auth {[
 								"ENV DENO_DIR=/deno-dir",
 							]},
 						])
 						epilogue: [
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'export PGDATA="${PGDATA:-/var/lib/pgsql/data}"' 'export POSTGRES_DB="${POSTGRES_DB:-\#(B.meta.app)}"' 'export PATH="/usr/lib/postgresql18/bin:$PATH"' 'q=$(printf "\047")' 'if [ ! -s "$PGDATA/PG_VERSION" ]; then' '  mkdir -p "$PGDATA" /run/postgresql' '  chown -R postgres:postgres "$PGDATA" /run/postgresql' '  setpriv --reuid=postgres --regid=postgres --clear-groups initdb -D "$PGDATA" --no-sync --encoding=UTF8 --auth=trust --locale-provider=icu --icu-locale=und --locale=C' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\''" start' '  if [ "$POSTGRES_DB" != "postgres" ]; then setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\""; fi' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      echo "Applying $f..."' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '      base=$(basename "$f")' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q) ON CONFLICT DO NOTHING"' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'else' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\''" start' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      base=$(basename "$f")' '      case "$base" in *seed*) continue;; esac' '      applied=$(setpriv --reuid=postgres --regid=postgres --clear-groups psql -t -A -U postgres -d "$POSTGRES_DB" -c "SELECT count(*) FROM _pronto_migrations WHERE name = $q$base$q")' '      if [ "$applied" = "0" ]; then' '        echo "Applying pending migration $f..."' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q)"' '      fi' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'fi' 'if [ "$1" = "postgres" ]; then shift; fi' 'exec setpriv --reuid=postgres --regid=postgres --clear-groups postgres -D "$PGDATA" -c listen_addresses=127.0.0.1 "$@"' > /usr/local/bin/docker-entrypoint.sh && chmod 755 /usr/local/bin/docker-entrypoint.sh"#,
+							// The temporary server starts with the server's options.
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if [ "$1" = "postgres" ]; then shift; fi' 'export PGDATA="${PGDATA:-/var/lib/pgsql/data}"' 'export POSTGRES_DB="${POSTGRES_DB:-\#(B.meta.app)}"' 'export PATH="/usr/lib/postgresql18/bin:$PATH"' 'q=$(printf "\047")' 'if [ ! -s "$PGDATA/PG_VERSION" ]; then' '  mkdir -p "$PGDATA" /run/postgresql' '  chown -R postgres:postgres "$PGDATA" /run/postgresql' '  setpriv --reuid=postgres --regid=postgres --clear-groups initdb -D "$PGDATA" --no-sync --encoding=UTF8 --auth=trust --locale-provider=icu --icu-locale=und --locale=C' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  if [ "$POSTGRES_DB" != "postgres" ]; then setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\""; fi' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      echo "Applying $f..."' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '      base=$(basename "$f")' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q) ON CONFLICT DO NOTHING"' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'else' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      base=$(basename "$f")' '      case "$base" in *seed*) continue;; esac' '      applied=$(setpriv --reuid=postgres --regid=postgres --clear-groups psql -t -A -U postgres -d "$POSTGRES_DB" -c "SELECT count(*) FROM _pronto_migrations WHERE name = $q$base$q")' '      if [ "$applied" = "0" ]; then' '        echo "Applying pending migration $f..."' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q)"' '      fi' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'fi' 'exec setpriv --reuid=postgres --regid=postgres --clear-groups postgres -D "$PGDATA" -c listen_addresses=127.0.0.1 "$@"' > /usr/local/bin/docker-entrypoint.sh && chmod 755 /usr/local/bin/docker-entrypoint.sh"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'if [ "$1" = "microcheck" ]; then' '  shift' '  exec "$@"' 'fi' 'exec "$@"' > /usr/local/bin/bayt && chmod 755 /usr/local/bin/bayt"#,
-							#"RUN /root/.local/share/lazybox/bin/nu --version && cp "$(find /root/.local/share/mise/installs -name nu -type f | head -n 1)" /usr/local/bin/nu && chmod 755 /usr/local/bin/nu"#,
+							// nu, wherever mise installed it, by its own account.
+							#"RUN cp "$(/root/.local/share/lazybox/bin/nu -c '$nu.current-exe')" /usr/local/bin/nu && chmod 755 /usr/local/bin/nu && /usr/local/bin/nu --version"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'while [ $# -gt 0 ]; do if [ "$1" = "--" ]; then shift; break; fi; shift; done' 'exec "$@"' > /usr/local/bin/mise && chmod 755 /usr/local/bin/mise"#,
 							"RUN printf '#!/bin/sh\\nexit 0\\n' > /usr/local/bin/task && chmod 755 /usr/local/bin/task",
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if ! grep -q "crud" /etc/hosts 2>/dev/null; then' '  echo "127.0.0.1 crud database auth" >> /etc/hosts 2>/dev/null || true' 'fi' 'export PORT="${PORT:-8080}"' 'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)'export PORT="${PORT:-8080}"' 'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
 							#"RUN sed -Ei 's|http://127\.0\.0\.1:\$\{CADDY_HTTP_PORT:-[0-9]+\}/health|http://127.0.0.1:${PORT:-8080}/health|g' /.bayt/process-compose.yaml"#,
-							"RUN sed -i '/handle @rendered {/,/^[[:space:]]*}[[:space:]]*$/d' /etc/caddy/Caddyfile",
-							#"RUN awk '/handle \/electric\/\* \{/{p=1; print "  handle /electric/* {\n    header Content-Type application/json\n    header electric-handle stub\n    header electric-offset 0_0\n    header electric-cursor 0\n    header electric-schema `{\"id\":{\"type\":\"text\"}}`\n    header electric-up-to-date true\n    header Access-Control-Allow-Origin *\n    header Access-Control-Expose-Headers \"electric-handle, electric-offset, electric-cursor, electric-schema, electric-up-to-date, content-type, cache-control, x-txid\"\n\n    @subset query subset__where=*\n    handle @subset {\n      respond `{\"metadata\":{\"xmin\":\"1\",\"xmax\":\"1\",\"xip_list\":[],\"snapshot_mark\":0,\"database_lsn\":\"0\"},\"data\":[]}` 200\n    }\n    handle {\n      respond `[{\"headers\":{\"control\":\"up-to-date\"}}]` 200\n    }\n  }"; next} p && /^  \}/{p=0; next} !p{print}' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile"#,
+							// The appliance runs no renderer: its handler goes, braces counted,
+							// since a handler holds nested blocks a line match would cut short.
+							#"RUN awk 'skip { d += gsub(/\{/, "{") - gsub(/\}/, "}"); if (d <= 0) skip = 0; next } /handle @rendered \{/ { skip = 1; d = 1; next } { print }' /etc/caddy/Caddyfile > /tmp/Caddyfile && mv /tmp/Caddyfile /etc/caddy/Caddyfile"#,
+							#"RUN awk '/handle \/electric\/\* \{/{p=1; d=1; print "  handle /electric/* {\n    header Content-Type application/json\n    header electric-handle stub\n    header electric-offset 0_0\n    header electric-cursor 0\n    header electric-schema `{\"id\":{\"type\":\"text\"}}`\n    header electric-up-to-date true\n    header Access-Control-Allow-Origin *\n    header Access-Control-Expose-Headers \"electric-handle, electric-offset, electric-cursor, electric-schema, electric-up-to-date, content-type, cache-control, x-txid\"\n\n    @subset query subset__where=*\n    handle @subset {\n      respond `{\"metadata\":{\"xmin\":\"1\",\"xmax\":\"1\",\"xip_list\":[],\"snapshot_mark\":0,\"database_lsn\":\"0\"},\"data\":[]}` 200\n    }\n    handle {\n      respond `[{\"headers\":{\"control\":\"up-to-date\"}}]` 200\n    }\n  }"; next} p { d += gsub(/\{/, "{") - gsub(/\}/, "}"); if (d <= 0) p = 0; next } {print}' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile"#,
+							// The extensions came with compute's image: it installs none at start.
+							if _compute {"RUN touch /compute-app/extensions/\(mecha.#DuckdbExtensionsMarker)"},
+							// A bridge's port is no port an appliance process takes, the ones bayt
+							// assigns the app included, and no other bridge's.
+							if len(_bridges) > 0 {
+								#"RUN ports="\#(strings.Join([for _, a in _containers {"\(a.port)"}], " "))"; for p in $ports; do if grep -Eq ":-$p\}" /.bayt/process-compose.yaml; then echo "appliance: bridge port $p is one an appliance process takes; name another" >&2; exit 1; fi; done; dup="$(printf '%s\n' $ports | sort | uniq -d)"; if [ -n "$dup" ]; then echo "appliance: bridges share port $dup" >&2; exit 1; fi"#
+							},
+							// Every edit above leaves a Caddyfile the door can load, or the image fails here.
+							"RUN caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile",
 						]
 						entrypoint: ["/usr/local/bin/appliance-entrypoint.sh"]
 						cmd: list.Concat([
-							["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml", "-t=false", "--no-server", "caddy"],
+							["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml"],
+							[if _overlaid for a in ["-f", "/.bayt/process-compose.appliance.yaml"] {a}],
+							["-t=false", "--no-server", "caddy"],
 							[if B.cluster.capabilities.auth {"auth"}],
+							[if _effects {"airlock"}],
+							[if _capture {"conduit"}],
+							[if _streams {"transform"}],
+							[if _compute {"compute"}],
+							if _wakes {["ticker", "clock"]},
 						])
 					}
 				}

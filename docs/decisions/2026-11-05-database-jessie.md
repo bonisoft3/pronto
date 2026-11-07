@@ -8,15 +8,22 @@ itself. Three positions share it:
 
 | Position | Answers | Engine | Built |
 | --- | --- | --- | --- |
-| A [[../../GUIDE#Validations|validation]] | whether a write stands | plv8 at the cluster rungs; the store at every rung | yes |
-| A Mecha reducer's step | the next state of an instance | plv8 on PostgreSQL; `pgl_step` on the edge | yes |
-| A function | a transformed value the commit stores | plv8 on PostgreSQL; `pgl_step` on the edge | yes |
+| A [[../../GUIDE#Validations|validation]] | whether a write stands | the `plv8` language at the cluster rungs; the store at every rung | yes |
+| A Mecha reducer's step | the next state of an instance | the `plv8` language on PostgreSQL; `pgl_step` on the edge | yes |
+| A function | a transformed value the commit stores | the `plv8` language on PostgreSQL; `pgl_step` on the edge | yes |
+
+On PostgreSQL the `plv8` language is QuickJS's pljs, built under that name in the
+database image and in `@local`'s host Postgres from one pin
+([libraries/mecha/services/database/pljs/pins.cue](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/database/pljs/pins.cue)). It defines the
+`plv8` global, and raises a JavaScript error's first line as the error, its text and
+stack as the detail. The edge's `pgl_step` still runs the host's V8; pljs inside
+PGlite, on the edge and in the page, is the next step and retires that callback.
 
 Each is a module SES confines and omnishell's `instrument.ts` meters with fuel, so
-the battery's executor runs the file production runs. Fuel is the bound that fires
-inside plv8: the pinned build has no working `execution_timeout`, and
-`statement_timeout` does not interrupt V8. Elsewhere it agrees with the timeouts
-production relies on, and it is deterministic. Work that may run long, recompute
+the battery's executor runs the file production runs. Fuel is deterministic, the same
+on every tier. pljs's interrupt handler also honours `statement_timeout`: a
+`while (true) {}` stops at the timeout with `InternalError: interrupted`, so on
+PostgreSQL fuel is no longer the only bound that fires. Work that may run long, recompute
 over many rows or call Wasm is a
 [[../pipelines-and-schedules#Computations|computation]] instead, after the commit.
 
@@ -46,8 +53,9 @@ stricter is the predicate's polarity: `every` over an empty edge passes where
   COMMITTED snapshot, locks nothing an edge reads, and never re-judges when a
   referenced row changes; a rule that must survive that is a set constraint.
 - **A backward edge costs its fan-in** on every write; a batch pays it once.
-- **One engine per seat.** The database image pins plv8 by URL and sha256, so
-  a cluster lacking it fails at `000_extensions.sql`. PGlite cannot host V8, so
+- **One engine per seat.** The database image builds pljs from its pinned tag and
+  commit, so a cluster lacking it fails at `000_extensions.sql`. PGlite hosts no
+  JavaScript engine yet, so
   the browser tier runs the store seat alone and `pages` refuses a validation.
   The edge's `pgl_step` already runs Mecha reducer steps inside PGlite's transaction;
   validations do not use it yet.
@@ -74,7 +82,7 @@ exhausted fuel raises in the calling transaction. Endowments are refused until a
 function needs one.
 
 [[../../database-functions.ts]] compiles each into `009_functions.sql`: the engine
-`pronto_functions.<name>`, plv8 at the container tier, and `public.fn_<name>`, a
+`pronto_functions.<name>`, in the `plv8` language at the container tier, and `public.fn_<name>`, a
 `SECURITY DEFINER` wrapper every tier declares, so any caller runs it and only the
 wrapper reaches the engine. The edge object creates the engine over `pgl_step` under
 the step name `fn:<name>`, apart from any machine's
@@ -107,7 +115,7 @@ own reproducible build. Nothing in `pgl_step` is workerd's: it hands the call to
 whatever host sets `globalThis.__pgliteStep`, and a page's realm can. A browser
 loader or a browser variant of that build would give the page the engine every
 position here uses, so `pages` would stop refusing validations and gain functions.
-"PGlite cannot host V8" is true and beside the point: the step calls back into the
+PGlite lacking an engine of its own is beside the point here: the step calls back into the
 host's engine.
 
 ### Endowments per seat
@@ -115,19 +123,19 @@ host's engine.
 Each seat should offer every endowment it can, and a function declaring one is
 refused for a target whose seat cannot. Four facts shape how:
 
-- plv8 is bare V8: no `TextEncoder`, `URL`, `URLSearchParams` or WebCrypto, and
-  `Intl` only if the pinned build carries ICU, which is unmeasured.
+- pljs is bare QuickJS: no `TextEncoder`, `URL`, `URLSearchParams`, `Intl`,
+  WebCrypto or WebAssembly.
 - WebCrypto is asynchronous and a `pgl_step` call cannot await, so the host's crypto
   cannot back a synchronous `Crypto`.
 - Fuel meters the module's own code, not a host object's: a native parser working on
-  a hostile input is unmetered, and in plv8 no timeout stops it.
+  a hostile input is unmetered, and only `statement_timeout` stops it.
 - Native implementations differ between V8, ICU and workerd versions, so the same
   file could answer differently by tier.
 
 The proposed answer is endowments as pinned pure-JS modules, loaded into the
-compartment on every seat and instrumented like the app's code: present in plv8,
+compartment on every seat and instrumented like the app's code: present in pljs,
 synchronous, metered and identical everywhere, at the cost of size, per-session
 load and native speed. `Intl` stays out, since locale data does not pin cheaply;
 formatting is the screen's. Compute's `ENDOWABLE` and omnishell's `SAFE_ENDOWMENTS`
-become one registry stating which seats supply each endowment. Measure plv8's ICU and
-`cheerio/slim`'s load time before choosing.
+become one registry stating which seats supply each endowment. Measure `cheerio/slim`'s
+load time in pljs before choosing.

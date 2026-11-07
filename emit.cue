@@ -2345,7 +2345,7 @@ _pgrollDir: "services/database/pgroll"
 			statics: list.Concat([[for s in D.statics if !strings.HasPrefix(s.target, "/omnishell/") {s}], D._ladder, D._crawl, _envelope.statics])
 			// mecha's images by name, which the build resolves to the pinned
 			// release or, in the monorepo, to mecha's sources.
-			images: {for s in ["database", "mesh", "conduit", "auth", "ticker", "clock", "compute", "airlock"] {
+			images: {for s in ["database", "extensions", "mesh", "conduit", "auth", "ticker", "clock", "compute", "airlock"] {
 				(s): {name: "libraries_mecha-\(s)-image"}
 			}}
 			bounds: {
@@ -3375,6 +3375,7 @@ _pgrollDir: "services/database/pgroll"
 		data: include: list.Concat([
 			[for s, _ in mecha.published {"\(up)libraries/mecha/.bayt/compose.\(s)-image.yaml"}],
 			[for s in mecha.#Sourced if mecha.published[s] == _|_ {"\(up)libraries/mecha/.bayt/compose.\(s)-image.yaml"}],
+			[for s in mecha.#Sourced for b in *mecha.#Builds[s] | [] {"\(up)libraries/mecha/.bayt/compose.\(b).yaml"}],
 			["\(up)plugins/omnishell/.bayt/compose.runtime-image.yaml", "\(up).bayt/compose.pronto-sources.yaml"],
 		])
 	}
@@ -3787,7 +3788,11 @@ _pgrollDir: "services/database/pgroll"
 							if i.effect.endowments != _|_ {endowments: i.effect.endowments}
 							if i.effect.sink.bridge != _|_ {
 								let b = E.code.state.bridges[i.effect.sink.bridge]
-								bridge: {name: i.effect.sink.bridge, targets: b.targets, simulated: b.simulator != _|_}
+								bridge: {
+									name:      i.effect.sink.bridge
+									targets:   b.targets
+									simulated: b.simulator != _|_
+								}
 							}
 						}
 					}}

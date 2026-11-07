@@ -601,30 +601,87 @@ credential such as `CLOUDFLARE_API_TOKEN` is the release's own, not the app's.
 
 `sayt release@docker` packages the container tier into a single-container
 appliance image running under process-compose: PostgreSQL 18, PostgREST (`crud`),
-Caddy as reverse proxy and static asset server, and, when `capabilities.auth` is
-configured, Deno running the app's `auth` service.
+Caddy as reverse proxy and static asset server, when `capabilities.auth` is
+configured, Deno running the app's `auth` service, and, when the program declares
+them, the program's forward migrations, the airlock with its daprd, the change
+feed, and the ticker with its clock.
 
 What fixes its shape:
 
 - **Single self-contained image.** The appliance builds on `core.nubox`
   (openSUSE Leap 16.0 with the lazybox toolbelt, Nushell, and GNU utilities),
   adding PostgreSQL 18 with ICU collations (`--locale-provider=icu --icu-locale=und`),
-  `setpriv`, PostgREST, Caddy and `process-compose`. When `capabilities.auth` is
+  `setpriv`, PostgREST, Caddy and `process-compose`. Leap ships neither pg_ivm, which
+  the cluster preloads, nor the `plv8` language the database's Jessie names:
+  mecha's `extensions` image builds both once, against Leap's
+  `postgresql18-server-devel` at the version the appliance's server installs
+  (mecha's `#AppliancePostgres`), from the recipe and pins its database image
+  uses (pljs, QuickJS's PL/JavaScript, as `plv8`; and pg_ivm), and every app's
+  appliance takes only their libraries and extension files. Outside the monorepo
+  the release refuses until a mecha release publishes that image. When `capabilities.auth` is
   enabled, the Deno binary and cached `/deno-dir` are copied into the image and
   run alongside the other services.
-- **No airlock.** The appliance runs no Airlock, so a program that declares
-  effects is refused at release, its build failing with "release@docker does
-  not yet deploy airlock", as k8s and gcp refuse one, rather than shipping rows
-  whose effects claim their ledger and never run.
+- **Effects run as the compose stack runs them.** A program that declares
+  effects gets the airlock, its daprd with one binding per effect, and the
+  ledger's upgrade as processes in `/.bayt/process-compose.appliance.yaml`,
+  started after the database and before nothing else depends on them. They are
+  the compose services' own image contents: the airlock's Deno, cache, handlers
+  and manifest; the daprd binary, its bindings-only config and the effects'
+  bindings. Graphile's schema and the ledger arrive in the initdb sequence the
+  database image already stages, at their placed steps. Delivery is the
+  airlock's: at-least-once, counted when a run starts, recovered from the ledger
+  after a crash (the process restarts on failure).
+- **Forward migrations run as the migrate service runs them.** The appliance
+  takes pgroll, `migrate.sh` and the program's pgroll set from the migrate image,
+  and process-compose's own `migrate` applies them after the database starts and
+  before crud, the change feed and the airlock, recording them in pgroll's ledger,
+  so a restart applies only what that ledger lacks.
+- **The change feed runs as compose runs it.** A program with drains or pipelines
+  runs Conduit off the logical slot, the bus on daprd over Redis, and Redpanda
+  Connect running the pipelines and the drains' streams: process-compose's own
+  processes, given the compose images' binaries (daprd, Conduit and its HTTP
+  connector, Redpanda Connect), Leap's Redis (Redis's image links musl), and mecha's
+  files where `MECHA_MESH_DIR` and `MECHA_TRANSFORM_DIR` name them. Delivery is the
+  stack's: at-least-once, a change made while a process is down held by the slot.
+  The appliance refuses to start without a secret an effect declares, as compose
+  does, and with effects and the blob plane together, which it does not run.
+- **Computations run on DuckDB snapshots**, as `launch@local` runs them, whatever
+  engine the program states for its container stack: the compute service, from
+  its image's app, Deno cache and DuckDB extensions, with the transform carrying
+  its invalidations. Feldera is no process of the appliance; its Rust compile
+  would need gigabytes the appliance does not carry. The program's Feldera SQL
+  runs through its committed DuckDB translations, as on pages and Cloudflare.
+- **Schedules and timers are swept by mecha's ticker.** A program that declares
+  either runs the ticker and a clock poking it every `POKE_INTERVAL_SECONDS`
+  (default 60), the cadence compose's clock keeps, with the same `SERVICE_JWT`
+  default crud's development secret verifies; set both together in production.
+- **A bridge runs as a process.** A bridge whose `targets` include `docker`
+  declares an `appliance` form: the files copied from its real container's image
+  and the command that serves its port on localhost
+  ([container bridges](container-bridges.md#targets)). The airlock settles a
+  bridge not on `docker` failed and not deployed there.
+- **No AI gateway.** tsbifrost is no process of the appliance yet, so a program
+  whose effects reach it is refused at release, its build failing with
+  "release@docker does not yet run the AI gateway".
+- **One address, no network walls.** The compose stack keeps the airlock's daprd
+  and each bridge on networks of their own; inside one container every process
+  shares the loopback and the container's egress. Deno's `--allow-net` still
+  bounds the airlock to the database, its daprd and its health port, and the
+  daprd's bindings-only API still offers only declared bindings, but a bridge's
+  process reaches whatever the container may, so its own destination policy and
+  the release environment's egress rules carry that boundary.
 - **Loopback networking.** Internal services communicate over loopback.
   `appliance-entrypoint.sh` appends `127.0.0.1 crud database auth` to
-  `/etc/hosts` before launching `process-compose`, so internal HTTP and database
-  references resolve without external DNS service discovery.
-- **Idempotent schema upgrades on existing volumes.** `docker-entrypoint.sh`
-  initializes fresh `PGDATA` databases or inspects existing volumes. A dedicated
-  ledger table, `_pronto_migrations`, records applied migration scripts. On a
-  volume mounted from an earlier release, pending migrations run in order while
-  seed scripts are skipped.
+  `/etc/hosts` before launching `process-compose`, with `airlock`, `airlock-mesh`
+  and each docker bridge's container name when the program has effects and
+  `ticker` when it has schedules or timers (the change feed's processes dial
+  `127.0.0.1`), so internal HTTP
+  and database references resolve without external DNS service discovery.
+- **Idempotent schema upgrades on an existing volume.** `docker-entrypoint.sh`
+  initializes a fresh `PGDATA` database or inspects the existing one. A dedicated
+  ledger table, `_pronto_migrations`, records applied migration scripts. On the
+  volume an earlier container left, pending migrations run in order while seed
+  scripts are skipped.
 - **Startup isolation.** `pg_ctl` runs with `listen_addresses=''` during initial
   setup and migration runs, ensuring Postgres is only reachable over its Unix
   domain socket until all migrations finish. External clients and readiness
@@ -635,8 +692,12 @@ What fixes its shape:
   (`[{"headers":{"control":"up-to-date"}}]` with `electric-offset: 0_0` and
   `electric-up-to-date: true`). Browser sync engines settle cleanly in
   standalone mode without requiring a full live replication cluster.
-- **Configuration knobs and persistence.** The appliance runs standalone or with mounted state:
-  - `PGDATA`: path to PostgreSQL database directory (default `/var/lib/pgsql/data`). Bind-mounting a host directory or named volume to `/var/lib/pgsql/data` preserves database state across container updates while executing idempotent migrations on startup.
+- **Persistence and updates.** The database lives on a docker-managed named
+  volume at `PGDATA` (`/var/lib/pgsql/data`), never a bind mount. An update stops
+  the running container and starts the new image on the same volume, with
+  downtime between the two; the new container's startup applies what is pending.
+- **Configuration knobs.**
+  - `PGDATA`: path to PostgreSQL database directory, where the named volume is mounted (default `/var/lib/pgsql/data`).
   - `PORT`: external HTTP ingress port served by Caddy (default `8080`).
   - `ORIGIN`: public base URL of the service (default `http://localhost:8080`).
   - `WEBAUTHN_RP_ID` and `WEBAUTHN_ORIGIN`: WebAuthn relying party identity and origin; automatically inferred from `ORIGIN` when unset.

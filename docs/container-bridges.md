@@ -55,10 +55,38 @@ runner a test points at a local SMTP server. Snapcards wires its checkout,
 Prodigi and Mailpit stand-ins by hand in `program_commerce.cue`; a bridge's
 simulator is that pattern as a declaration.
 
-`targets` names the release targets the real container is deployed on. No
-release target lowers a bridge's container yet — the docker appliance runs no
-airlock and Cloudflare Containers is not built — so `targets` stays empty and
-naming one is refused.
+## Targets
+
+`targets` names the release targets the real container is deployed on. The
+docker appliance is the one that lowers a bridge; Cloudflare Containers is not
+built, and k8s and gcp run no airlock, so naming another is refused. On a target
+the bridge is not deployed on, its effects settle `failed` without a call.
+
+The appliance is one container, so a bridge there is a process, declared by its
+`appliance` form:
+
+```cue
+code: state: bridges: crawler: {
+    container: "crawler"
+    port:      8080
+    targets:   ["docker"]
+    appliance: {
+        srcs:    ["/usr/local/bin/crawler"]
+        command: ["/usr/local/bin/crawler", "--listen", "127.0.0.1:8081"]
+        port:    8081
+    }
+}
+```
+
+`srcs` are copied, at the same paths, from the real container's image, which the
+cluster builds as `<container>-appliance` and never starts. Keep them under
+paths the appliance's own image leaves free, such as `/usr/local/bin`: a file
+copied to `/bin/<name>` replaces the base image's `/bin` symlink with a
+directory and breaks every binary resolved through it. `command` serves
+`port` on localhost, where the airlock's daprd dials the container's name; it
+defaults to the bridge's port, and a port the appliance's own services hold
+(mecha's `#AppliancePorts`: the door's 8080 among them) is refused, as is a
+bridge naming `docker` without an `appliance` form.
 
 Where a bridge does not run, the program still releases and its effects exist,
 but each fails at once: the airlock settles the claimed effect `failed` with

@@ -141,9 +141,10 @@ the others and reads them as one page rather than near-duplicates.
 
 A Jessie module can run in three runtimes with three ideas of a locale: a
 browser compartment, the Deno cage the checkers use, and, for a validation,
-plv8 inside the write. A bare SES compartment has no `Intl`, and its tamed
+the database's `plv8` language inside the write. A bare SES compartment has no `Intl`, and its tamed
 `toLocaleString` lies (`(1234.5).toLocaleString("pt-BR")` is `"1234.5"`).
-plv8 in the database image ships no ICU, and PGlite cannot host plv8 at all, so
+QuickJS, the database image's `plv8` engine, has no `Intl`, and PGlite hosts no
+engine at all, so
 in the browser the store's predicate is the only one.
 
 So `Intl` is the interpreter's. The terminal formats (`datetime`, `number`,

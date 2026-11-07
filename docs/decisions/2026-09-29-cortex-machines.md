@@ -342,7 +342,7 @@ queries and writes forms. What differs per tier is only how far from pure it may
 | Executor | Closed over | Level | Runs as | Status |
 |---|---|---|---|---|
 | Omnishell machine | a `tab`/`device` row in the client | 2 | the terminal: SES-caged Jessie, XState JSON | built |
-| Mecha machine | a `server` row in Postgres | 3 | plpgsql interpreter or bounded SES reducer in PLV8, inside the transaction | built |
+| Mecha machine | a `server` row in Postgres | 3 | plpgsql interpreter or bounded SES reducer in the `plv8` language (QuickJS's pljs), inside the transaction | built |
 | Compute, whole-table | a snapshot of the tables it `reads` | 3 | Jessie planning WASI jobs over a DuckDB lake; woken by CDC invalidations through the change feed, batched and retried | built |
 | Compute, per key | one changed row and its declared edges | 3 | the same cage, warm; Conduit → compute's own daprd over gRPC, no bus; a direct write | not built |
 | Airlock | one ledger row per effect instance | 4 | Graphile Worker listening on `jobs:insert`, woken from zero by the ticker's one-shot row; one declared Dapr binding per effect; bridges for what is not HTTP | built ([external effects](2026-10-03-external-effects.md)) |
@@ -396,9 +396,9 @@ relational preconditions remain in Mecha declarations.
 The stable contracts live in [[../cortex|Cortex machines]] and
 [Mecha machines](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/machines.md). The
 execution proof in `apps/truco/docs/mecha-machine-proof.md` also checks
-shared local/PostgreSQL reductions and private projections. The pinned PLV8
-build's native timeout verification gap remains advisory; adoption assumes the
-timeout contract and retains deterministic fuel.
+shared local/PostgreSQL reductions and private projections. The database's
+`plv8` language is QuickJS's pljs, whose interrupt handler honours
+`statement_timeout`; deterministic fuel stays the bound every tier shares.
 
 Verification includes real PostgreSQL races and rollback, complete matches for
 two-, four- and six-seat tables, the ticker's timeouts and lease lapses, and two
