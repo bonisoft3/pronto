@@ -98,6 +98,39 @@ if [ "$mem" = 0 ]; then
   exit "$code"
 fi
 
+folder=$(printf '%s\n' "$where" | sed -n 2p)
+
+# A claimed vet re-vets only what changed: vetted.ts cuts it into its packages, each keyed by every
+# file vetting it reads (its CUE, its parents', its imports', their embeds, cue.mod) and the cue that
+# vets, and a package whose key passed before, anywhere on this machine (another worktree, a ci
+# runner, main after the merge), is not evaluated again. What passes records its keys. A vet that
+# can't be keyed runs as asked; CUE_VETTED=off vets every time.
+vetted=$self/cue-budget/vetted.ts
+[ -f "$vetted" ] || vetted=$self/vetted.ts
+plan=
+if [ "$1" = vet ] && [ "$CUE_VETTED" != off ] && [ -f "$vetted" ]; then
+  if plan=$("$deno" run -A --no-config --no-lock "$vetted" plan "$real" "$@" 2>/dev/null); then
+    if [ -z "$plan" ]; then
+      echo "cue: vet of ${folder:-.} passed before with these same inputs; not evaluated again" >&2
+      exit 0
+    fi
+    keys=$(printf '%s\n' "$plan" | sed -n 's/^key //p')
+    runargs=$(printf '%s\n' "$plan" | sed -n 's/^run //p')
+    set -f; IFS='
+'
+    # shellcheck disable=SC2086
+    set -- $runargs
+    unset IFS; set +f
+    skipped=$(printf '%s\n' "$plan" | sed -n 's/^skipped //p')
+    if [ "${skipped:-0}" != 0 ]; then
+      echo "cue: vet of ${folder:-.}: $skipped packages passed before with these same inputs; vetting only $*" >&2
+      # A part of the vet: its peak is not what the whole vet holds, so it teaches the claim nothing.
+      learned=/dev/null
+    fi
+  else
+    plan=
+  fi
+fi
 # Linux's ceiling: the budget (RAM but STACK_MEM_RESERVE, as slot.ts counts it), held by the kernel;
 # never below half again what was claimed, since a lone claim larger than the budget is let run.
 run=$real
@@ -106,5 +139,22 @@ if [ "$(uname)" = Linux ] && systemd-run --user --scope --quiet true 2>/dev/null
   set -- --user --scope --quiet -p "MemoryMax=${ceiling}G" -- "$real" "$@"
   run=systemd-run
 fi
-folder=$(printf '%s\n' "$where" | sed -n 2p)
-exec "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$learned.cores" --what "cue ${folder:-.}" -- "$run" "$@"
+
+[ -z "$plan" ] && exec "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$learned.cores" --what "cue ${folder:-.}" -- "$run" "$@"
+
+# In the background, so a signal to this wrapper reaches the claim (as above), and its pass recorded.
+if { : <&0; } 2>/dev/null; then exec 3<&0; else exec 3</dev/null; fi
+cores=$learned.cores; [ "$learned" = /dev/null ] && cores=/dev/null
+"$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$cores" --what "cue ${folder:-.}" -- "$run" "$@" <&3 &
+pid=$!
+trap 'kill -TERM "$pid" 2>/dev/null' TERM INT HUP
+wait "$pid"; code=$?
+while kill -0 "$pid" 2>/dev/null; do wait "$pid"; code=$?; done
+if [ "$code" = 0 ]; then
+  set -f; IFS='
+'
+  # shellcheck disable=SC2086
+  printf '%s\n' "$keys" | "$deno" run -A --no-config --no-lock "$vetted" record "$real" $runargs 2>/dev/null
+  unset IFS; set +f
+fi
+exit "$code"

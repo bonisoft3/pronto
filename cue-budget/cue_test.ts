@@ -154,3 +154,42 @@ Deno.test("two wrappers on one PATH (a machine's and a runtime's) claim once and
   assertMatch(text(stdout), new RegExp(`^real cue export ${spec.replace(/[.]/g, "\\.")}`));
   assertEquals(text(stderr).match(/slot: cue/g)?.length, 1, "one claim, not one per wrapper");
 });
+
+Deno.test("a vet re-vets only the packages whose inputs changed since one passed", async () => {
+  // The module is the case's folder: run() puts its bin (the fake cue) on PATH and its HOME there.
+  const dir = (await Deno.makeTempDir()) + "/m";
+  await Deno.mkdir(dir);
+  await fake(dir);
+  await Deno.mkdir(`${dir}/cue.mod`, { recursive: true });
+  await Deno.writeTextFile(`${dir}/cue.mod/module.cue`, `module: "t.example/m@v0"\nlanguage: version: "v0.16.0"\n`);
+  for (const p of ["a", "b", "c"]) await Deno.mkdir(`${dir}/${p}`);
+  await Deno.writeTextFile(`${dir}/a/a.cue`, `package a\nx: 1\n`);
+  await Deno.writeTextFile(`${dir}/b/b.cue`, `package b\nimport "t.example/m/a"\ny: a.x\n`);
+  await Deno.writeTextFile(`${dir}/c/c.cue`, `package c\nz: _ @embed(file="z.json")\n`);
+  await Deno.writeTextFile(`${dir}/c/z.json`, `1`);
+  await Deno.writeTextFile(`${dir}/c/notes.cue`, `// no package clause: not a package of its own\n`);
+  const vet = (env: Record<string, string> = {}) =>
+    run(dir, ["vet", "-c", "./..."], { CUE_DIRECT_GB: "0", CUE_UNKNOWN_GB: "0.1", ...env });
+  const first = await vet();
+  assertEquals(first.code, 0);
+  assertMatch(first.stdout, /real cue vet -c \.\/a \.\/b \.\/c/);
+  const again = await vet();
+  assertEquals(again.code, 0);
+  assertEquals(again.stdout, "", "every package passed before: cue is not run");
+  assertMatch(again.stderr, /passed before with these same inputs/);
+  // An edit to a reaches b, which imports it; c is untouched.
+  await Deno.writeTextFile(`${dir}/a/a.cue`, `package a\nx: 2\n`);
+  const edited = await vet();
+  assertMatch(edited.stdout, /real cue vet -c \.\/a \.\/b\n/);
+  // An embedded file is an input too.
+  await Deno.writeTextFile(`${dir}/c/z.json`, `2`);
+  assertMatch((await vet()).stdout, /real cue vet -c \.\/c\n/);
+  // A vet that fails records nothing; CUE_VETTED=off vets every time.
+  await Deno.writeTextFile(`${dir}/bin/cue`, `#!/bin/sh\necho "real cue $*"\nexit 1\n`);
+  await Deno.writeTextFile(`${dir}/b/b.cue`, `package b\nimport "t.example/m/a"\ny: a.x + 1\n`);
+  assertEquals((await vet()).code, 1);
+  assertEquals((await vet()).code, 1, "a failed vet was not recorded");
+  await fake(dir);
+  assertEquals((await vet()).code, 0);
+  assertMatch((await vet({ CUE_VETTED: "off" })).stdout, /real cue vet -c \.\/\.\.\./);
+});
