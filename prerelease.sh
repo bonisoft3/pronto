@@ -1,7 +1,7 @@
 #!/bin/sh
-# Publishes a prerelease of this fork from a machine, as .github/workflows/prerelease-gcp.yml did
-# from Actions, which this account does not pay for: the CUE module to ghcr.io/bsoneca/cue-modules
-# and the runtime tarballs as a GitHub release here, both free. No Docker: crane serves a registry
+# Publishes a prerelease of this fork, from a machine or from Actions (.github/workflows/prerelease-gcp.yml
+# runs this on a publish/v<version> push): the CUE module to ghcr.io/bsoneca/cue-modules and the
+# runtime tarballs as a GitHub release here, both free. No Docker: crane serves a registry
 # for `cue mod publish` and copies the module out, with the ghcr.io credentials crane already holds
 # (~/.docker/config.json) and gh's own login for the release.
 #   ./prerelease.sh 0.24.1-gcp.25 [commit=HEAD]
