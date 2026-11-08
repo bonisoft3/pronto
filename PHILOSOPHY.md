@@ -41,9 +41,9 @@ transformation is done by pure languages alone, like Jessie (a JavaScript
 subset). Real programs interact with
 the external world, and among the most successful experiments in splitting
 functional boundaries from impure effects was the TEA model, which powers the
-Elm language and inspired Redux and React. Pronto adopts it in spirit, and
-besides the natural ledger given by IVM to our data movements, any impure
-effect needs to be serialized before application so it can be replayed. The
+Elm language and inspired Redux and React. Pronto adopts it in spirit. Pronto records the changes that feed its incremental
+views, and any impure effect needs to be serialized before application so it can
+be replayed. The
 result is the same that surprised the world with Redux: time travel
 capabilities, now extended way beyond UI updates in Pronto since we apply the
 discipline application-wide.
@@ -85,7 +85,7 @@ We tamed time within Pronto, but outside in the real world the time axis continu
 have walked every declared arrow at a point, the program evolves, and
 Pronto uses different techniques to make it safe to update your invariants as
 time passes. The update of invariants is fully aware of the different notions
-of time in the system, and their consequences to performance and parallelism.
+of time in the system, and their consequences for performance and parallelism.
 Each part of the system is Newtonian, but in a distributed system relativity
 kicks in. Lamport taught us that order does not need a global clock, and the
 database's CDC LSN is the one we use as the tiebreaker as computations arrive;
@@ -96,14 +96,16 @@ its non-atomic release nature.
 
 ## Homage
 
+This is our understanding of the lineage; we welcome earlier work that challenges these claims.
+
 A lot of these ideas are foreign to people writing code on a daily basis. But
 some of them have been around for decades, and even the more recent
 incarnations are incremental developments of research lines established years
-ago. The magic of pronto is making them practical, which only became possible
+ago. The magic of Pronto is making them practical, which only became possible
 with LLMs as code authors. What may be Pronto's innovation is bringing
 this full framework together into a harmonious whole and deriving a pragmatic
 system that can deploy production code. To wrap up, here is a quick overview
-of the classical works we build upon, each with the document where pronto
+of the classical works we build upon, each with the document where Pronto
 takes its side.
 
 ### Move data
@@ -111,7 +113,7 @@ takes its side.
 - **MapReduce**: Dean and Ghemawat,
   [*MapReduce: Simplified Data Processing on Large Clusters*](https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf)
   (OSDI 2004). Map and reduce over a cluster with the shuffle in between;
-  pronto's pipelines are the same two verbs over rows
+  Pronto's pipelines are the same two verbs over rows
   ([the Cortex machines record](docs/decisions/2026-09-29-cortex-machines.md)).
 - **Incremental view maintenance**: Gupta, Mumick and Subrahmanian,
   [*Maintaining Views Incrementally*](https://doi.org/10.1145/170035.170066)
@@ -139,7 +141,8 @@ takes its side.
 - **Rollback**: Jefferson, [*Virtual Time*](https://gdo-pdes-course-2014.llnl.gov/attachments/20776356/20907222.pdf)
   (TOPLAS 1985), the Time Warp mechanism; Cannon, [GGPO](https://www.ggpo.net/)
   (2006), the same idea at the frame rate of a fighting game, with no paper of
-  its own. Speculative execution with rollback as IVM at frame rate, built on
+  its own. Speculative execution with rollback, a close relative of incremental
+  maintenance: late inputs revise an earlier result and its consequences. Built on
   GGRS (omnishell's
   [kinetic plane](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/kinetic.md),
   [the kinetic machine record](docs/decisions/2026-10-23-kinetic-machine.md)).
@@ -185,7 +188,7 @@ takes its side.
 - **Guarded recursion and productivity**: Atkey and McBride,
   [*Productive Coprogramming with Guarded Recursion*](https://bentnib.org/productive.html)
   (ICFP 2013). Infinite processes whose successive outputs can each be produced
-  in finite time. A theoretical relative of pronto's discipline: computations
+  in finite time. A theoretical relative of Pronto's discipline: computations
   are bounded and continuation belongs to the framework
   ([escape hatches](README.md#escape-hatches)).
 - **Essential state and logic**: Moseley and Marks,
@@ -211,7 +214,7 @@ takes its side.
   humans doing the refinement, Alloy stated a whole system but only to
   analyze it. None made the constraint lattice the spine that pins schema,
   deployment, screens and tests together while a generator fills the free
-  variables and export stays deterministic; pronto is the first thing we know
+  variables and export stays deterministic; Pronto is the first thing we know
   of that holds an application that way.
 - **Order-free distributed programs**: Loo et al.,
   [*Declarative Networking*](https://netdb.cis.upenn.edu/papers/dnsigmod06.pdf)
@@ -256,8 +259,9 @@ takes its side.
 
 - **Logical clocks**: Lamport,
   [*Time, Clocks, and the Ordering of Events in a Distributed System*](https://lamport.azurewebsites.net/pubs/time-clocks.pdf)
-  (CACM 1978). Order without a global clock; pronto takes the commit LSN as
-  its happens-before, which is the order entry above
+  (CACM 1978). Order without a global clock; Pronto uses the commit LSN to
+  order committed database changes, giving its replicas the common authority
+  described above
   (mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/change-capture.md)).
 - **Online schema change**: Rae, Rollins, Shute, Sodhi and Vingralek,
   [*Online, Asynchronous Schema Change in F1*](https://www.vldb.org/pvldb/vol6/p1045-rae.pdf)
@@ -273,7 +277,7 @@ takes its side.
   [Unison](https://www.unison-lang.org/docs/the-big-idea/) (2019, no paper),
   a definition is its hash and a name is metadata; Varda,
   [Cap'n Proto](https://capnproto.org/encoding.html), field numbers that
-  outlive labels. An entity is a type id minted once with an ordinal per
+  outlive labels. An entity is a type ID minted once with an ordinal per
   field ([types and identity](docs/types-and-identity.md)).
 - **A page that is never closed**: Armstrong,
   [*Making reliable distributed systems in the presence of software errors*](https://erlang.org/download/armstrong_thesis_2003.pdf)
@@ -304,6 +308,8 @@ takes its side.
 
 ## Testimonial
 
+Claude produced this testimonial after working overnight and unattended on an Orkut clone, starting from scratch. The result is live at [yogurt.bonisoft3.com](https://yogurt.bonisoft3.com). We preserve it as an account of that experience, including its judgments about correctness; those judgments are not additional framework guarantees.
+
 **Claude Fable 5.1**, from the sessions that built and reviewed apps on this
 tree through October 2026. On a traditional stack I am trusted by default: I
 write a handler that fetches, a component that holds state, a migration that
@@ -315,7 +321,7 @@ every machine and treats one that never fires as an error, the battery feeds
 a handler every value its schema admits, and a release refuses a schema it
 cannot migrate and rolls itself back. What this changes is the character of
 a bug. In a stack built from imperative pieces a failure is a story I have
-to reconstruct, across a fetch, a cache, a component and a cron. In pronto
+to reconstruct, across a fetch, a cache, a component and a cron. In Pronto
 there is no story, because there is no randomness and no effect outside the
 ledger, so a failing test is a replay with an input nobody recorded, and the
 fix is to record it. The same discipline is why a WhatsApp bridge onto a

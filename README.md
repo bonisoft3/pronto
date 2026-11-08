@@ -8,7 +8,7 @@ Pronto constrains generation to an architecture where entire categories of bugs
 cannot exist. The same way Rust constrains C to gain memory safety, Pronto
 constrains AI-generated code to gain architectural safety.
 
-The source code is Markdown and the compiler itself is an LLM. It targets a virtual machine specification and adapts itself to concrete environments, enabling applications that run identically from a single browser tab to a cloud cluster. Pronto needs no supervision and no humans ever look at the code it generates. It runs unattended for the equivalent of several agile sprints and ships world-class software.
+The source code is Markdown and the compiler itself is an LLM. It targets a virtual machine specification and adapts itself to concrete environments, enabling applications that run from a single browser tab to a cloud cluster. Those constraints buy more than safety: they let the framework derive tests, replay executions and run the same application on different platforms. LLMs working with Pronto can work unattended for the equivalent of several agile sprints, with the framework checking their work along the way.
 
 For LLM agents generating or modifying Pronto applications, see
 [`llms.txt`](llms.txt) for the machine-readable specification, contract
@@ -16,9 +16,7 @@ grammar, and truth tables.
 
 ## Showcase
 
-Pronto creates production-grade applications that scale in many dimensions. It
-goes well beyond the typical MVP with a single user. Here are some example
-apps. No human has ever looked at their source code during development.
+Pronto applications go beyond the typical MVP or single-user tool. Here are some examples, with source code, design documents and development journals showing how they were built.
 
 ### Snapcards
 
@@ -109,11 +107,11 @@ codex plugin add pronto@bonisoft3-pronto
 
 ## The specification ladder
 
-Pronto needs no human code review, but it follows a methodology and lets you contribute and peek at the steps before code comes to life. It starts with `brief.md`, containing the product description and requirements, then it authors `ir.html`, which feels like a design doc, with entities and diagrams one would draw on a whiteboard. It is a loose spec in natural language, with the initial invariants sprinkled in using languages like CEL, Mermaid and XState JSON.
+Pronto enables unsupervised work, but it follows a methodology and lets you contribute and peek at the steps before code comes to life. It starts with `brief.md`, containing the product description and requirements, then it authors `ir.html`, which feels like a design doc, with entities and diagrams one would draw on a whiteboard. It is a loose spec in natural language, with the initial invariants sprinkled in using languages like CEL, Mermaid and XState JSON.
 
 Those invariants are captured in CUE and new ones are added. Although CUE is a configuration language, this is the program from the Pronto perspective. A series of constraints on the universe, not a mini world built from scratch. The CUE code yields YAML, which configures everything, and the missing pieces are glued afterwards to instantiate the closed world a given computing platform requires to run your program.
 
-The last pass is the creation of the target code: SQL, HTML, CSS, Jessie and any other needed files. They are all LLM-authored and work within the boundaries of `program.cue`. In this language set there is no unconstrained imperative code, but the results are still familiar (Jessie is a pure subset of JavaScript). The YAML configuration is mostly applied to the backend specification, which contains familiar servers like Caddy and Postgres. SQL drives the data, HTML and CSS the presentation, and Jessie defines handlers for events in the program. This does not suffice for every program or for interoperability with the rest of the world; for that we have hatches, discussed below. But this is the Pronto safe subset where several bug classes do not exist, and it covers a lot of ground.
+The last pass is the creation of the target code: SQL, HTML, CSS, Jessie and any other needed files. They are all LLM-authored and work within the boundaries established by `program.cue`. In this language set there is no unconstrained imperative code, but the results are still familiar (Jessie is a pure subset of JavaScript). The YAML configuration is mostly applied to the backend specification, which contains familiar servers like Caddy and Postgres. SQL drives the data, HTML and CSS the presentation, and Jessie defines handlers for events in the program. This does not suffice for every program or for interoperability with the rest of the world; for that we have hatches, discussed below. But this is the Pronto safe subset where several bug classes do not exist, and it covers a lot of ground.
 
 ```mermaid
 flowchart LR
@@ -143,9 +141,15 @@ The use of CUE is one of Pronto's superpowers. Solving cross-cutting concerns, s
 
 And the skeleton provided by CUE may be the strongest reason Pronto gets away with no code review. Besides entities, `program.cue` also contains statecharts that describe how these entities flow in our system. Statecharts are an almost 40-year-old formalism by David Harel that allows us to describe programs much like we do on a whiteboard. Pronto uses the XState JavaScript library with its JSON representation for defining the boxes and arrows in our program. Since the arrows and boxes in Pronto have well-defined properties (and in fact participate in a formal algebra), this gives unprecedented introspection into Pronto programs.
 
-With the statechart representation of our computations, we can automatically generate tests for every declared state and transition. We use the Chinese Postman algorithm to generate test cases directly, and we even create an automatically derived storyboard for every declared screen. We can also build very cheap representations of our program, like a LinkeDOM-centric test suite, or use graph walks to look for unreachable states. More sophisticated checks can use the Z3 SMT solver to reason about declared constraints. This is all provided by the framework; neither humans nor LLMs need to author those tests.
+The level of understanding the compiler has of a Pronto program allows for different forms of automatic verification. First, it can quickly check for contradictions. Is a function that receives integers being fed with entities which declare themselves as strings? It can also check for incompleteness: is there no arrow that leads to this subgraph, i.e., will the users never reach this feature? The statechart representation of our computations allows us to navigate to any state quickly, and, for example, we use the Chinese Postman algorithm to automatically generate test cases for our LinkeDOM-centric test suite that will inspect all produced DOM nodes for validity.
 
-What you get in practice is that every Pronto program is born with a great battery of unit tests, integration tests and even visual checks for things like buttons covering each other or text without enough contrast, all application-independent. The LLM can use the same machinery to author fast integration tests and post-release verification checks. So, no one is looking inside the function bodies, but their contracts are well defined and their effects are well understood. We feed the framework with knowledge of what is undesirable, turning it into constraints and checks.
+One may wonder where the oracles for automatically generated test cases can come from, and one of the insights of Pronto is that many constraints are app-independent or minimally desirable for most apps. For example, Pronto ships with a visual battery that looks for violations of the ARIA standards, and can also fail your code if some button covers another, or if the text contrast makes it unreadable on a given screen. Because those checks are done at the framework level with great understanding of the code infrastructure, they can run in a very efficient fashion.
+
+These checks catch concrete mistakes. Remove Snapcards' generation failure handler and the framework complains. In Truco, a timeout was treated like a player's action, but there was no player to identify; the contracts now catch that. The generated tests also caught an assumption that lease IDs always had 36 characters, although shorter IDs were allowed. And Snapcards had to darken its Generate button to make the text readable. None of these checks needs to know the rules of Truco or what makes a good flashcard.
+
+The same architecture for the app-independent tests is available for LLMs authoring application-specific tests. The usual test cases you give to a QA team are easily and routinely expressed by LLMs as statecharts that use Playwright to navigate your app and check for any constraint violations and verify expectations. This even includes mutations, like creating a new user in the system, with framework-provided rollbacks for cleanup after tests.
+
+What you get in practice is that every Pronto program is born with a great battery of unit tests, integration tests and visual checks. We feed the framework with knowledge of what is undesirable for most applications, turning it into constraints and checks. The LLM piggybacks on the same machinery to enforce correctness where it can be specified, leaving humans to define the right problem to solve and provide taste. The road is safe by construction, and you can sleep while the LLM drives. The trade-offs are speed bumps and lots of traffic lights, but the LLM is the only one bothered by them.
 
 ## Build and development loop
 
