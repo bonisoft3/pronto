@@ -17,6 +17,7 @@
 
 import { fileURLToPath } from "node:url";
 import { exists } from "./missing.ts";
+import { type Catalog, CATALOG_SQL, unrecorded } from "./sql-recorded.ts";
 
 type Finding = { severity: "error" | "advisory"; path: string; message: string };
 
@@ -239,19 +240,24 @@ export async function locate(appDir: string, scriptPath: string): Promise<string
 }
 
 export async function main(appDir: string): Promise<number> {
-  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published };
+  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published; actors?: string };
   if (!facts.server || facts.schema === undefined) {
     throw new Error("this app's every entity is a browser tier: it has no schema to replay");
   }
   const fixtures = await loadFixtures(appDir);
-  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures });
+  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures, actors: facts.actors });
   console.log(JSON.stringify(found, null, 2));
   return found.some((f) => f.severity === "error") ? 1 : 0;
 }
 
 export type Migrator = { entrypoint?: string[]; command?: string[]; env?: Record<string, string> };
-export async function replayDatabase({ appDir, published, env, migrator, fixtures = [] }: {
-  appDir: string; published: Published; env: Record<string, string>; migrator?: Migrator; fixtures?: UpgradeFixture[];
+/** Replays the app's schema from a fresh database: its bootstrap, its
+ * migrations run and run again, and its retained-data fixtures. `actors` is
+ * the machines' migration (services/database/migrations/<actors>), whose SQL
+ * reads time and randomness only as recorded input (sql-recorded.ts), judged
+ * against the catalog of the database it just bootstrapped. */
+export async function replayDatabase({ appDir, published, env, migrator, fixtures = [], actors }: {
+  appDir: string; published: Published; env: Record<string, string>; migrator?: Migrator; fixtures?: UpgradeFixture[]; actors?: string;
 }): Promise<Finding[]> {
   const settings = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_INITDB_ARGS"];
   const missing = settings.filter((k) => env[k] === undefined);
@@ -311,6 +317,13 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
       return true;
     };
     if (!await bootstrap(REPLAY_DB)) return finish(findings);
+    if (actors !== undefined) {
+      const path = `services/database/migrations/${actors}`;
+      const catalog = JSON.parse(await sql(REPLAY_DB, CATALOG_SQL)) as Catalog;
+      for (const read of await unrecorded(await Deno.readTextFile(`${appDir}/${path}`), catalog)) {
+        findings.push({ severity: "error", path, message: `${read}: a machine reads time and randomness only through its clock and draw` });
+      }
+    }
     if (!published.pgroll) {
       if (fixtures.length) throw new Error("retained fixtures require a migration runner");
       return finish(findings);

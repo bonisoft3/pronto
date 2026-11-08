@@ -9,11 +9,11 @@ import (
 #Version:     "1.0.9"
 #SaytVersion: "0.45.3"
 
-// Development-only modules: an app's tests import the mecha oracle harnesses by URL,
-// and the portable types are refreshed from the checkout's mecha client. An
-// installed pronto neither type-checks nor runs them (installed_test.ts holds
-// the rest to its own tree).
-#TestModules: ["mecha-local.ts", "mecha-battery.ts", "hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts", "mecha-xstate-entry.ts", "mecha-xstate-bundle.ts", "cortex-conformance.ts", "access-test-fixture.ts"]
+// Checkout-only modules: the compiler's test fixtures read omnishell beside
+// pronto, and the portable types are refreshed from the checkout's mecha
+// client. An installed pronto neither type-checks nor runs them
+// (installed_test.ts holds the rest to its own tree).
+#TestModules: ["mecha-fixtures.ts", "refresh-portable-types.ts", "mecha-xstate-entry.ts", "mecha-xstate-bundle.ts", "cortex-conformance.ts", "access-test-fixture.ts", "mecha-snapshot-fixture.ts", "bundle/mecha-edge-fixture.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.

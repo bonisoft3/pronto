@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { compileCortexDurable, type CortexDurable } from "./cortex-durable.ts";
-import { terminal } from "./testdata/mecha-fixtures.ts";
-import { executeMecha } from "./mecha-local.ts";
+import { terminal } from "./mecha-fixtures.ts";
+import { executeMecha } from "../omnishell/test/mecha-local.ts";
 
 import { spec, rules } from "./testdata/cortex-durable.ts";
 

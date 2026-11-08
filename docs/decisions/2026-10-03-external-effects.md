@@ -371,7 +371,7 @@ an app with effects gets the union of its targets' closures instead of the exact
 alternative is a target-level `networks` in bayt that a fragment declares at its top, which
 compose merges across fragments; that is a bayt change, and until it lands mecha's own stack
 places no airlock, since every app's compose includes mecha's fragments and those would name
-networks the app does not declare. `tests/airlock_test.ts` therefore writes a bayt project
+networks the app does not declare. `mecha-airlock.integration.test.ts` therefore writes a bayt project
 of its own for the run, a cluster with two effects, one through a bridge, has bayt generate
 it, and boots its launch closure: bayt's Dockerfiles and fragments, and the
 `compose.includes` file carrying the networks, are what it runs.
@@ -501,7 +501,7 @@ revisions, or any number of instances, unlocks nothing a live process holds.
 reproduces the D, G1-G6 and M rows against mecha's pinned Deno 2.9.7, the cluster's
 postgres 18 image and its daprd 1.16.1. `peer` stands in for the sink: a row in it is a
 call that happened. The B rows are steps of `task integrate:airlock` (daprd under the
-bindings-only allowlist, a sink served from the test) and of `tests/airlock_test.ts`, which
+bindings-only allowlist, a sink served from the test) and of `mecha-airlock.integration.test.ts`, which
 boots the plane bayt lowers for a cluster with two effects, one through the mail bridge; G7,
 S1-S2 and W2 are steps of the first, W1 of the second.
 
@@ -661,14 +661,14 @@ One PR. These are its commits, in order, each green:
    declares an effect, with Graphile's schema and the ledger as initdb steps 011 and 012,
    and the ledger in a schema only its owner may use. `cluster_test.ts` covers placement
    and every refusal, `testdata/emit/effect.cue` pronto's wiring, and
-   `tests/airlock_test.ts` the plane bayt lowers, end to end.
+   `mecha-airlock.integration.test.ts` the plane bayt lowers, end to end.
 4. **Bridges, Crypto and the bindings wall** (built). `state.bridges` in pronto and the
    cluster through declared container hatches, and mecha's
    [mail bridge](https://github.com/bonisoft3/mecha/blob/v0.20.6/pieces/mail/README.md); `Crypto` in the realm and `secrets` as the handler's third
    argument; the airlock calling a Dapr output binding per effect, its daprd allowed the
    bindings API alone, in place of HTTPEndpoints and the CONNECT proxy.
    The mail service integration suite holds the bridge's answers against SMTP, `crypto_test.ts`
-   Crypto's against FIPS 180-2 and RFC 4231 and each refusal, and `tests/airlock_test.ts`
+   Crypto's against FIPS 180-2 and RFC 4231 and each refusal, and `mecha-airlock.integration.test.ts`
    sends a signed confirmation through the bridge and fails without the allowlist.
 5. **The oracle app** (started). `apps/calcom`, a
    clone of Cal.com, the open-source Calendly, at brief stage. It is the first app graded

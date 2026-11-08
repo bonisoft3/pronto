@@ -207,8 +207,8 @@ settled; minting `id` on a table keyed on another column; and waking a
 subscription after it stopped. The store keeps its file name: installed apps
 copy it by that path.
 
-The runtime and the timer have batteries of their own. `mecha-battery.ts`
-walks a machine from a fresh instance through seeded steps of every event,
+The runtime and the timer have batteries of their own. omnishell's
+`test/mecha-battery.ts` walks a machine from a fresh instance through seeded steps of every event,
 from either tier and any seat. The runtime refuses what a caller sent that the
 machine does not take (another tier's event, a payload outside its shape) as a
 `RefusedError`; any other throw is a finding: a rule reading what is not there,

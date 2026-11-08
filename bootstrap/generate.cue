@@ -22,5 +22,12 @@ import (
 		say: file.Create & {$after: G.program, filename: ".say.yaml", contents: yaml.Marshal(G.project.say)}
 	}
 	mise:     file.Create & {$after: G._after, filename: ".mise.toml", contents: toml.Marshal(G.project.mise)}
-	miseHost: file.Create & {$after: G._after, filename: ".mise.host.toml", contents: toml.Marshal(G.project.miseHost)}
+	miseHost: file.Create & {$after: G._after, filename: ".mise.host.toml", contents: (#Roster & {project: G.project}).out}
+}
+
+// The host roster's text: what generate writes as .mise.host.toml, and what
+// apps/platform_pins.nu holds every host app's copy to.
+#Roster: R={
+	project: distribution.#Project
+	out:     toml.Marshal(R.project.miseHost)
 }

@@ -2,7 +2,7 @@ import { assert, assertEquals, assertRejects, assertStringIncludes, assertThrows
 import { renderFunctions } from "./edge-functions.ts";
 import { compileFunction } from "../database-functions.ts";
 import { browserTier } from "../../../libraries/mecha/packages/mecha-browser/fence.ts";
-import { terminal } from "../testdata/mecha-fixtures.ts";
+import { terminal } from "../mecha-fixtures.ts";
 import { declared, functionApp, ROUND, round, reshaped } from "../testdata/function-fixtures.ts";
 
 const omnishell = new URL("../../omnishell", import.meta.url).pathname;

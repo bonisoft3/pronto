@@ -78,7 +78,9 @@
         "plugins/pronto/.bayt/compose.build.yaml",
         "plugins/pronto/.bayt/compose.setup.yaml",
         "plugins/omnishell/.bayt/compose.build.yaml",
-        "plugins/omnishell/.bayt/compose.setup.yaml"
+        "plugins/omnishell/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.bundle.yaml",
+        "libraries/mecha/.bayt/compose.setup.yaml"
       ]
     },
     "outs": {
@@ -109,7 +111,9 @@
         "plugins/pronto/.bayt/compose.build.yaml",
         "plugins/pronto/.bayt/compose.setup.yaml",
         "plugins/omnishell/.bayt/compose.build.yaml",
-        "plugins/omnishell/.bayt/compose.setup.yaml"
+        "plugins/omnishell/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.bundle.yaml",
+        "libraries/mecha/.bayt/compose.setup.yaml"
       ]
     },
     "srcs": {
@@ -219,7 +223,9 @@
         "plugins/pronto/.bayt/compose.build.yaml",
         "plugins/pronto/.bayt/compose.setup.yaml",
         "plugins/omnishell/.bayt/compose.build.yaml",
-        "plugins/omnishell/.bayt/compose.setup.yaml"
+        "plugins/omnishell/.bayt/compose.setup.yaml",
+        "plugins/omnishell/.bayt/compose.bundle.yaml",
+        "libraries/mecha/.bayt/compose.setup.yaml"
       ]
     }
   },
@@ -292,7 +298,9 @@
     "plugins/pronto/.bayt/compose.build.yaml",
     "plugins/pronto/.bayt/compose.setup.yaml",
     "plugins/omnishell/.bayt/compose.build.yaml",
-    "plugins/omnishell/.bayt/compose.setup.yaml"
+    "plugins/omnishell/.bayt/compose.setup.yaml",
+    "plugins/omnishell/.bayt/compose.bundle.yaml",
+    "libraries/mecha/.bayt/compose.setup.yaml"
   ],
   "chainedDeps": [
     {

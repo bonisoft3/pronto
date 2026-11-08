@@ -10,6 +10,12 @@ say:
     # after it is emitted and never runs.
     do: "deno run --allow-read=. bounds.ts"
     rulemap:
+      # The scratch apps the distribution tests write run omnishell's CLI from
+      # its tree, which imports the data-plane bundle omnishell builds.
+      omnishell-bundle:
+        priority: -2
+        cmds:
+          - do: "with-env {MISE_LOCKED: '0'} { mise tool-stub ../sayt/task.toml -t ../omnishell/.bayt/Taskfile.yml bayt:bundle }"
       loop:
         priority: -1
         cmds:
@@ -88,6 +94,9 @@ say:
         cmds:
           - do: "mise exec -- deno test --no-config --unstable-raw-imports --allow-env --allow-read --allow-write --allow-run=deno,docker,cue mecha-xstate.test.ts xstate-host.integration.test.ts"
           - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-run=cue mecha-machine.test.ts lifecycle-machine.test.ts vendored-unit.test.ts kinetic-child.test.ts browser-security.test.ts objects_test.ts ai-capabilities.test.ts"
+          # The compute batch machine, run by mecha's snapshot coordinator over
+          # PGlite: claims, captures, publication and materialization.
+          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-env mecha-snapshot.test.ts mecha-snapshot-materialize.test.ts"
           - do: "mise exec -- deno test --parallel --config deno.json --frozen --allow-read --allow-write --allow-env --allow-run=cue cortex-machine.test.ts cortex-sources.test.ts cortex-conformance.test.ts cortex-validation.test.ts"
           - do: 'mise exec -- deno test --config deno.json --allow-read --allow-run=cue --filter "server timers refuse" machine-timers.integration.test.ts'
           - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
@@ -105,11 +114,30 @@ say:
         cmds:
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-run --allow-env duckstream.test.ts duckstream-columns_test.ts"
           - do: "mise exec -- deno test --config deno.json --allow-read --allow-write duckstream/compiler_test.ts"
+      # The airlock plane bayt lowers for a declared effect, booted as a compose
+      # project of mecha's cluster with a sink and a mail bridge beside it.
+      # Docker, so a platform of its own: CI's bonisoft3 job runs it on Linux
+      # where the replay regression runs, and no other platform does.
+      airlock:
+        platform: docker
+        priority: -1
+        cmds:
+          - do: "mise exec -- deno task test:airlock"
+      # Needs libraries/mecha/packages/pglite-workerd/dist. Runs locally:
+      # edge-compute's native DuckDB build does not reproduce its manifest
+      # hashes on CI's runners.
       edge-compute:
         platform: cloudflare
         priority: -1
         cmds:
           - do: "mise exec -- deno test -A --config bundle/deno.json bundle/edge-compute_test.ts bundle/edge-reader_test.ts bundle/edge-compute.integration.test.ts bundle/edge-ssr-rpc_test.ts bundle/publish-edge-state_test.ts bundle/publish-edge-secrets_test.ts bundle/publish-edge-storage.test.ts"
+      # The rendered machines computing in mecha's edge object, over the same
+      # dist; CI's pglite-workerd job builds it and runs this platform.
+      edge-object:
+        platform: edge
+        priority: -1
+        cmds:
+          - do: "mise exec -- deno test -A --config bundle/deno.json bundle/mecha-edge-compute_test.ts bundle/mecha-edge-retention_test.ts bundle/mecha-edge-compression_test.ts"
       # A pages release's derived rows: their SQL, and a bundled page whose
       # PGlite boots holding them; bundling needs the omnishell and mecha trees.
       bundle:
@@ -122,6 +150,12 @@ say:
         priority: -1
         cmds:
           - do: "deno test --config deno.json --allow-read negotiation_test.ts"
+      # daisyUI's theme contract graded against #Design and emit.cue through
+      # cue probes over this package; docs/design-tokens.md is its finding.
+      design-tokens:
+        priority: -1
+        cmds:
+          - do: "deno test --no-config --allow-read --allow-run=cue design-tokens.test.ts"
       links:
         priority: -1
         cmds:

@@ -1,6 +1,6 @@
 import { assertEquals, assertRejects, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.11";
 import { compileFunction } from "./database-functions.ts";
-import { terminal } from "./testdata/mecha-fixtures.ts";
+import { terminal } from "./mecha-fixtures.ts";
 import { ROUND } from "./testdata/function-fixtures.ts";
 import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
 

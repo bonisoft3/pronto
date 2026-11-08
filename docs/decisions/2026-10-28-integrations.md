@@ -118,7 +118,7 @@ and execution of JSON flows. That is useful, but duplicates durable orchestratio
 Pronto already owns and adds its own PostgreSQL/Redis/worker deployment. Importing
 its engine package alone does not bring those surrounding services.
 
-The [[../../spikes/activepieces-triggers/README|trigger spike]] ran unchanged pinned
+The trigger spike ran unchanged pinned
 Stripe, GitHub and RSS triggers through one provider-independent host. It supports
 implementing common context capabilities once rather than adapting every provider.
 It also exposed limits the full engine does not automatically repair:

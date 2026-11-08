@@ -14,7 +14,7 @@ chooses its backend. Neither runtime must imitate the other's scheduling,
 internal state, intermediate notifications or numerical execution order.
 
 This refines the [[2026-10-19-duckstream-runtime|runtime migration decision]].
-The [[../../spikes/duckstream/contract/docs/index|contract backend spike]] tests
+The contract backend spike tests
 selected obligations; it is not the production compiler or CDC replacement.
 The existing [[../pipelines-and-schedules#Computations|Golaberto coordinator]]
 continues to run its numerical computations, with opt-in typed query and sink
@@ -55,7 +55,7 @@ placement likewise requires a concrete
 [container/service configuration](https://developers.cloudflare.com/containers/),
 not an assumption that a Worker is a native database process.
 
-The existing [[../../spikes/duckstream/replication/docs/index|pg_duckpipe probe]]
+The existing pg_duckpipe probe
 observed independent per-table commits, a per-table bootstrap and insufficient
 transaction metadata for reconstructing a common source cut. This is acceptable
 for the eventual lake view and does not block native streaming adoption. A stable
@@ -139,7 +139,7 @@ custom Java translation and Python orchestration in the first spike are
 experimental scaffolding, not the intended production architecture. Export
 existence alone does not establish that expressions, declared schemas and
 temporal obligations survive serialization.
-The [[../../spikes/duckstream/json-plan/docs/index|stock JSON probe]] tests this
+The stock JSON probe tests this
 boundary: the verbosity setting matters because the default diagnostic plan
 omits expressions that the translator needs.
 
@@ -209,7 +209,7 @@ or reject feeds that cannot supply that boundary. A common snapshot frontier is
 not promised merely because all tables originate in PostgreSQL.
 
 Prefer an existing replication engine to a new WAL consumer. The
-[[../../spikes/duckstream/replication/docs/index|pg_duckpipe probe]] evaluates both
+pg_duckpipe probe evaluates both
 current-row synchronization and append-mode history. These are separate
 capabilities: retaining row changes does not establish a common source
 transaction boundary. Independent table flushes can produce lake snapshots
@@ -268,7 +268,7 @@ selected by the relation; its durable work boundary commits result candidates
 and completion receipts. These
 execution records are necessary durable authority for effects, rather than a
 second copy of the source-event queue. The
-[[../../spikes/duckstream/feedback/docs/index|feedback spike]] exercises the
+feedback spike exercises the
 query and a local transactional stand-in for that authority.
 
 ### Inputs and coverage
@@ -329,7 +329,7 @@ Completion carries coverage of durably stored result candidates and the recorded
 job outcome. The final PostgreSQL materialization has separate published
 coverage. A completed calculation must not be rerun merely because sink delivery
 lags: replay its retained result instead. The earlier
-[[../../spikes/duckstream/feedback/docs/index|feedback spike]] combines execution
+feedback spike combines execution
 and final publication in one local transaction; when a second streaming query
 selects authoritative candidates, those are distinct durable boundaries.
 Claim/failure events carry forward completed coverage. Lifecycle revisions prevent
@@ -444,10 +444,10 @@ intentional. It does not promise a single PostgreSQL transaction across the whol
 source-to-result pipeline. Deterministic replay uses recorded admission decisions
 and frozen inputs; independent live runs may choose different batch boundaries.
 
-The [[../../spikes/duckstream/publication/docs/index|publication spike]] exercises
+The publication spike exercises
 source capture, pure WASM, translated authoritative-result SQL and a guarded
-PostgreSQL sink. The [[../../spikes/duckstream/postgres-sink/docs/index|native sink
-spike]] checks the pinned Feldera connector separately. Their references delimit
+PostgreSQL sink. The native sink spike checks the pinned Feldera connector
+separately. Their references delimit
 executed failure cases from assumptions; neither installs this protocol in
 Golaberto or proves arbitrary connector recovery and multi-table publication.
 
@@ -495,7 +495,7 @@ copy. An interrupted copy without a durable complete marker is abandoned or
 restarted; a captured transaction is acknowledged only after durable application.
 A restart does not create a new input identity merely because the process changed.
 
-The [[../../spikes/duckstream/bootstrap/docs/index|bootstrap spike]] tests these
+The bootstrap spike tests these
 native primitives under concurrent source changes. It does not replace a
 production CDC engine. Existing pg_duckpipe evidence still shows independent
 table cuts, so readiness of each table alone is insufficient for this stronger
@@ -516,7 +516,7 @@ advances the scope's accepted generation and records its receipt and local hooks
 Old generations are superseded and identical retries add no effect. A generation
 number orders only one explicitly authorized program/source domain.
 
-The [[../../spikes/duckstream/generation/docs/index|generation spike]] tests that
+The generation spike tests that
 boundary and contrasts it with independently committed table writes. A compact
 complete envelope can enter through one PostgreSQL row and a trigger invoking the
 same finalizer. The native experiment executes this with Feldera's stock

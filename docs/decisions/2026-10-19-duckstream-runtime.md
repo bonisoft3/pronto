@@ -12,7 +12,7 @@ derivation over an identified snapshot elsewhere. Golaberto is the first
 consumer of its expensive-computation boundary. Its ratings and simulations
 do not define the engine's scheduling or join semantics.
 
-The [[../../spikes/duckstream/docs/index|spikes]] are executable experiments,
+The spikes are executable experiments,
 not a production adapter. The current emitter writes SQL files and the checker
 inspects their DuckDB AST. Neither starts Feldera, installs CDC connectors, nor
 implements a reactive DuckDB runtime. The existing `hot`/`cold` schema remains
@@ -385,7 +385,7 @@ for control state. Feldera owns relational maintenance; workers execute pure
 computations. A machine coordinates claims, retries, deadlines, and publication.
 It does not contain joins, simulation loops, or SQL dialect translation.
 
-The [[../../spikes/duckstream/machine/docs/index|batch protocol spike]] executes
+The batch protocol spike executes
 the existing Mecha compiler and reducer runtime. One instance coordinates one
 materialization or explicitly independent partition:
 

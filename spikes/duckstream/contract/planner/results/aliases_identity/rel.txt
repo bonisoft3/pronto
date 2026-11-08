@@ -1,2 +1,0 @@
-LogicalProject(renamed=[$0], Other=[$1])
-  LogicalTableScan(table=[[schema, t]], hints=[[[alias inheritPath:[] options:[t]]]])

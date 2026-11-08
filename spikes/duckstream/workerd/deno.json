@@ -1,4 +1,0 @@
-{
-  "imports": { "apache-arrow": "npm:apache-arrow@17.0.0" },
-  "nodeModulesDir": "auto"
-}

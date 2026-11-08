@@ -47,10 +47,12 @@ How pronto works inside, what it decided and what it superseded.
 * [Pipelines and schedules](pipelines-and-schedules.md) - concept: How a derived entity is kept from another's changes — a pure transform over an absolute read, delivered at least once into an idempotent sink — the shapes a program declares, when a value earns one, how a database function is called when its tables change, and how periodic work becomes rows.
 * [Localization](localization.md) - concept: How an app's declared locales become catalogues, addresses, door redirects and crawlable documents, where locale-dependent code may run, and how text sorts — each gap a refusal before release, never a fallback that ships.
 * [The design scale](design-scale.md) - concept: The value vocabulary beneath an app's design roles: rungs quoted byte for byte from vendored Open Props and Primer, a lint that refuses a literal wherever a rung exists, and a hatch with two checkable reasons.
+* [daisyUI theme coverage](design-tokens.md) - metric: The finding design-tokens.test.ts prints when its reading of daisyUI's themes and its pin disagree.
 * [[pronto-hmr|Pronto HMR]] — direct presentation sync, capability availability, deferred validation, and the launch guarantee.
 * [Screens](screens.md) - concept: How pronto compiles a screen — what it derives from the markup, what it checks the markup against, and how each route's first document is rendered and cached.
 * [Identity](identity.md) - concept: Social sign-in beside the passkey through one operator's broker on Ory Hydra — the app embeds `identity.#Signin`, each app a tenant with pairwise subjects, the broker brought up by the app's own launch.
 * [Release targets](release-targets.md) - concept: Where a program is released: each target in meta.targets becomes a sayt release@<target> rule carrying the whole app on one tier of mecha's ladder; pages, cloudflare, and docker are built, and the clouds and k8s are designed.
+* [Monorepo mode](monorepo.md) - reference: How an app runs against the platform's trees in the monorepo and the releases it pins in its mirror — `mise.local.toml`, `mise where`, the platform links its tests import through, the image switch, the escape rule, and sync's mirror gate.
 
 ## Decisions
 
@@ -60,7 +62,6 @@ How pronto works inside, what it decided and what it superseded.
 
 * [[activepieces-hatches|Activepieces application hatches]] — app-owned standard pieces and CUE opt-in, generated package closure and isolated action runner.
 * [[edge-hatches|Edge hatch routes]] — trusted app-specific Worker routes, cluster database authority and public target configuration.
-* [[../spikes/activepieces-triggers/README|Activepieces trigger spike]] — shared lifecycle execution across Stripe, GitHub and RSS; authentication and checkpoint failure experiments.
 
 * [Review by consequence](decisions/2026-08-27-review-by-consequence.md) - decision, partially built: Levies ir coverage by what a write reaches — an update to a `tab` entity machine-checked only, one reaching `device` or above owing an ir element — with handler reach derived from the charts naming it, and an explicit write capability deferred.
 * [Owner stamping](decisions/2026-08-31-owner-stamping.md) - decision, unbuilt: Moves a row's owner stamp from the apps' `default: "auth_uid()"` column defaults to an emitted per-table BEFORE INSERT trigger beside the policies, and narrows `#Field.default` to what a bare Postgres has, so the data-holding steps need nothing from the rules.
@@ -80,6 +81,7 @@ How pronto works inside, what it decided and what it superseded.
 
 ## Archive
 
+* [[archive/2026-10-03-regenerable-mirror-design|golaberto's mirror is an installed app]] — built: the app regenerable in its mirror, the runtime by mise and CUE module; contract moved to [[monorepo]].
 * [[archive/2026-10-28-activepieces-hatch|Activepieces hatch decision]] — built for local Docker/Compose; standard piece ownership, invocation isolation and supporting spikes.
 
 * [Design: Pronto — AI App Builder With Constraint-Cascade Architecture](archive/2026-06-12-design-constraint-cascade.md) - decision, superseded: The startup-mode design — constraint-cascade generation and a scale-to-zero runtime against the prompt-to-app category — whose business analysis still stands.

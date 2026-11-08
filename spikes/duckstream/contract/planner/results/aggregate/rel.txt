@@ -1,4 +1,0 @@
-LogicalProject(n=[$0], total=[$1])
-  LogicalAggregate(group=[{}], n=[COUNT()], total=[SUM($0)])
-    LogicalProject(amount=[$2])
-      LogicalTableScan(table=[[schema, events]], hints=[[[alias inheritPath:[] options:[events]]]])

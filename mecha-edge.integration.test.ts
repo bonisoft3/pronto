@@ -6,9 +6,9 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { compileMechaReducer } from "./mecha-reducer.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
-import { executeMecha } from "./mecha-local.ts";
+import { executeMecha } from "../omnishell/test/mecha-local.ts";
 import { renderMachines } from "./bundle/edge-machines.ts";
-import { ROOT, fixture, initial, quote, request, run, surface, terminal, uuid } from "./testdata/mecha-fixtures.ts";
+import { ROOT, fixture, initial, quote, request, run, surface, terminal, uuid } from "./mecha-fixtures.ts";
 import { startWorker } from "../../libraries/mecha/packages/pglite-workerd/wrangler-dev.ts";
 import { load } from "../../libraries/mecha/packages/pglite-workerd/load.ts";
 import { browserTier } from "../../libraries/mecha/packages/mecha-browser/fence.ts";
@@ -19,13 +19,13 @@ const mecha = `${root}libraries/mecha`;
 Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a deadline", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   Deno.statSync(`${mecha}/packages/pglite-workerd/dist/pglite.wasm`);
   const { spec, rules, compiled } = await fixture();
-  const spin = await compileMechaReducer({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
-  const schema = "hybrid_truco_turn";
+  const spin = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
+  const schema = "hybrid_proof_turn";
   const tmp = await Deno.makeTempDir({ prefix: "pronto-mecha-edge-" });
 
   // The app's rules, where the release reads them.
   await Deno.mkdir(`${tmp}/app/machines`, { recursive: true });
-  await Deno.copyFile(`${root}apps/truco/tests/fixtures/mecha/turn.js`, `${tmp}/app/machines/turn.js`);
+  await Deno.copyFile(`${root}plugins/pronto/testdata/mecha/turn.js`, `${tmp}/app/machines/turn.js`);
   await Deno.writeTextFile(`${tmp}/app/machines/spin.js`, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"));
 
   // The data directory, as pgdata.ts builds one: PostgreSQL's roles and
@@ -33,14 +33,14 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
   // the migration with its container-tier engine fenced away, and the wake
   // port a deadline arms through.
   const timers = (await Deno.readTextFile(`${mecha}/services/ticker/schedule.sql`)) + "\n" + (await Deno.readTextFile(`${mecha}/services/ticker/machine-timers.sql`));
-  const ports = compileMechaPorts({ truco_turn: { ...spec, ports: { wake: { phases: ["playing"], deadline: "deadline", event: "timeout" } } } });
+  const ports = compileMechaPorts({ proof_turn: { ...spec, ports: { wake: { phases: ["playing"], deadline: "deadline", event: "timeout" } } } });
   const seedSql = `CREATE ROLE anon; CREATE ROLE app_user; CREATE ROLE service NOLOGIN BYPASSRLS;
     GRANT USAGE ON SCHEMA public TO anon, app_user, service;
     ${await Deno.readTextFile(`${mecha}/services/database/rls/rls.sql`)}
     ${timers}
     GRANT SELECT, INSERT, UPDATE ON public.machine_timer_tick TO service;
-    ${surface("truco_turn")}
-    ${surface("truco_spin")}
+    ${surface("proof_turn")}
+    ${surface("proof_spin")}
     ${browserTier(compiled.sql)}
     ${browserTier(spin.sql)}
     ${browserTier(ports)}`;
@@ -60,8 +60,8 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
   // a SQL door for the oracle's statements and a hand on the alarm.
   await Deno.mkdir(`${tmp}/worker`);
   await Deno.writeTextFile(`${tmp}/worker/machines.js`, await renderMachines("proof", `${tmp}/app`, `${root}plugins/omnishell`, {
-    truco_turn: { reducer: spec as unknown as Record<string, unknown> & { name: string; fuel: number }, rules: "machines/turn.js" },
-    truco_spin: { reducer: { ...spec, name: "truco_spin" } as unknown as Record<string, unknown> & { name: string; fuel: number }, rules: "machines/spin.js" },
+    proof_turn: { reducer: spec as unknown as Record<string, unknown> & { name: string; fuel: number }, rules: "machines/turn.js" },
+    proof_spin: { reducer: { ...spec, name: "proof_spin" } as unknown as Record<string, unknown> & { name: string; fuel: number }, rules: "machines/spin.js" },
   }));
   const edge = `${mecha}/packages/mecha-edge/src`;
   const dist = `${mecha}/packages/pglite-workerd/dist`;
@@ -137,7 +137,7 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
       INSERT INTO ${schema}.member VALUES ('${uuid(id)}', '${uuid(1)}', 'a'), ('${uuid(id)}', '${uuid(2)}', 'b');`);
   };
   // As the gateway does: the role and claims last the request's transaction.
-  const call = (id: number, actor: number, command: number, req = request(0), name = "truco_turn") => `
+  const call = (id: number, actor: number, command: number, req = request(0), name = "proof_turn") => `
     BEGIN;
     SET LOCAL ROLE app_user;
     SELECT set_config('request.jwt.claims', '${JSON.stringify({ sub: uuid(actor) })}', true);
@@ -176,7 +176,7 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
       const expected = await executeMecha(compiled.source, spec.fuel, { state: initial(), event: request(0).event, context, viewers: ["a", "b"] }) as { state: unknown; views: unknown };
       assertEquals(actual.state, expected.state);
       const views = await one(`SELECT jsonb_agg(jsonb_build_object('viewer', v.seat, 'value', v.view::jsonb) ORDER BY v.seat)
-        FROM public.truco_turn_seat v WHERE instance_id = '${uuid(10)}';`);
+        FROM public.proof_turn_seat v WHERE instance_id = '${uuid(10)}';`);
       assertEquals(views, expected.views);
     });
 
@@ -220,12 +220,12 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
       const spoof = await psql(call(13, 1, 108, request(0, "play", { card: 0, actor: "b" })));
       assertEquals(spoof.ok, false);
       assertStringIncludes(spoof.err, "undeclared field");
-      for (const query of [`SELECT * FROM ${schema}.instance`, `SELECT * FROM ${schema}.receipt`, `UPDATE ${schema}.instance SET revision=99`, `SELECT ${schema}.step('{}')`, `SELECT public.pgl_step('truco_turn', '{}')`, `UPDATE public.truco_turn_seat SET view = '{}'`]) {
+      for (const query of [`SELECT * FROM ${schema}.instance`, `SELECT * FROM ${schema}.receipt`, `UPDATE ${schema}.instance SET revision=99`, `SELECT ${schema}.step('{}')`, `SELECT public.pgl_step('proof_turn', '{}')`, `UPDATE public.proof_turn_seat SET view = '{}'`]) {
         const denied = await psql(`BEGIN; SET LOCAL ROLE app_user; ${query}; COMMIT;`);
         assertEquals(denied.ok, false, query);
         assertStringIncludes(denied.err, "permission denied");
       }
-      const view = await one(`SELECT view::jsonb FROM public.truco_turn_seat WHERE instance_id = '${uuid(10)}' AND actor = '${uuid(1)}';`) as { hand: number[]; b?: unknown };
+      const view = await one(`SELECT view::jsonb FROM public.proof_turn_seat WHERE instance_id = '${uuid(10)}' AND actor = '${uuid(1)}';`) as { hand: number[]; b?: unknown };
       assertEquals(view.hand, [1, 2]);
       assertEquals(view.b, undefined);
     });
@@ -245,7 +245,7 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
       await seed(15);
       await sql(`${call(15, 1, 112).replace(/COMMIT;\s*$/, "ROLLBACK;")}`);
       assertEquals((await snapshot(15)).revision, "0");
-      assertEquals(Number(await one(`SELECT (SELECT count(*) FROM public.truco_turn_seat WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM public.truco_turn_command WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM ${schema}.receipt WHERE instance_id = '${uuid(15)}');`)), 0);
+      assertEquals(Number(await one(`SELECT (SELECT count(*) FROM public.proof_turn_seat WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM public.proof_turn_command WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM ${schema}.receipt WHERE instance_id = '${uuid(15)}');`)), 0);
       assertEquals((await answer(call(15, 1, 112))).kind, "accepted");
     });
 
@@ -271,7 +271,7 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
     await t.step("a runaway reducer is terminated by the same fuel limit, and the object answers on", async () => {
       const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
       const start = performance.now();
-      const failure = await psql(`SELECT hybrid_truco_spin.step(${quote(input)});`);
+      const failure = await psql(`SELECT hybrid_proof_spin.step(${quote(input)});`);
       assertEquals(failure.ok, false);
       assert(performance.now() - start < 10000, "the edge reducer did not terminate within its budget");
       assertStringIncludes(failure.err.toLowerCase(), "fuel exhausted");

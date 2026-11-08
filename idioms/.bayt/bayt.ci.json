@@ -565,7 +565,14 @@
           "outs": {
             "globs": [
               "shell/shell.yaml",
-              "shell/screens/**"
+              "shell/screens/counter.html",
+              "shell/screens/counter.css",
+              "shell/screens/todo.html",
+              "shell/screens/todo.css",
+              "shell/screens/grid.html",
+              "shell/screens/grid.css",
+              "shell/screens/timer.html",
+              "shell/screens/timer.css"
             ],
             "exclude": []
           }
@@ -716,7 +723,14 @@
       "outs": {
         "globs": [
           "shell/shell.yaml",
-          "shell/screens/**"
+          "shell/screens/counter.html",
+          "shell/screens/counter.css",
+          "shell/screens/todo.html",
+          "shell/screens/todo.css",
+          "shell/screens/grid.html",
+          "shell/screens/grid.css",
+          "shell/screens/timer.html",
+          "shell/screens/timer.css"
         ],
         "exclude": []
       }

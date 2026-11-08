@@ -1,0 +1,42 @@
+{
+  "dockerfile": "FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f AS caddy\nWORKDIR /pronto\nRUN mkdir -p /pronto/.pronto/live/readiness\nCOPY docker/Caddyfile /pronto/docker/Caddyfile\nCOPY .certs/ /pronto/.certs/\nCOPY .pronto/live/srv/ /pronto/.pronto/live/srv/\nCOPY .pronto/live/omnishell/ /pronto/.pronto/live/omnishell/",
+  "caddyfile": "docker/Caddyfile",
+  "caddy": {
+    "watch": [
+      {
+        "action": "sync",
+        "path": "../.pronto/live/readiness",
+        "target": "/pronto/.pronto/live/readiness",
+        "initial_sync": true
+      },
+      {
+        "action": "sync+restart",
+        "path": "../docker/Caddyfile",
+        "target": "/pronto/docker/Caddyfile",
+        "initial_sync": true
+      },
+      {
+        "action": "sync+restart",
+        "path": "../.certs",
+        "target": "/pronto/.certs",
+        "initial_sync": true
+      }
+    ]
+  },
+  "render": {
+    "watch": [
+      {
+        "action": "sync",
+        "path": "../shell/index.html",
+        "target": "/render/shell/index.html",
+        "initial_sync": true
+      },
+      {
+        "action": "sync+restart",
+        "path": "../.pronto/development/shell.json",
+        "target": "/render/.pronto/development/shell.json",
+        "initial_sync": true
+      }
+    ]
+  }
+}

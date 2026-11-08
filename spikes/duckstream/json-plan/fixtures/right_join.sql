@@ -1,4 +1,0 @@
-CREATE TABLE a(id INTEGER NOT NULL);
-CREATE TABLE b(id INTEGER NOT NULL);
-CREATE VIEW result AS
-SELECT a.id AS a_id, b.id AS b_id FROM a RIGHT JOIN b ON a.id = b.id;

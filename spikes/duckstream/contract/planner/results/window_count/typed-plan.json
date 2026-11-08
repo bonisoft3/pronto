@@ -1,5 +1,0 @@
-{
-  "backend" : "bounded-contract-v1",
-  "rowType" : "RecordType(BIGINT NOT NULL n) NOT NULL",
-  "view" : "result"
-}

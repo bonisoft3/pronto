@@ -75,9 +75,7 @@ Analytic `LogicalWindow` nodes are refused: partition/order/call/frame
 information is exported as diagnostic strings rather than typed structured
 calls. Author equivalent relational queries where practical; this module does
 not parse those strings to implement LAG or running SUM. Ordered list
-aggregation remains outside the profile. The
-[[../../spikes/duckstream/json-plan/docs/index|compiler probes]] record other
-export losses and supported ordinary operators.
+aggregation remains outside the profile.
 
 ## Timestamp and aggregate profile
 
@@ -126,10 +124,4 @@ literals are exact string constants, while general CHAR input/cast semantics
 remain unsupported. The module does not validate source row constraints or
 define timezone normalization, snapshot consistency, publication, or transport.
 
-The owning executable gate is [[../../spikes/duckstream/json-plan/probe.ts|the
-native compiler probe]] through its Sayt build/lint/test tasks. It tests
-fractional and negative timestamp differences, nullable and empty extrema,
-duplicate COUNT/DISTINCT, overflow, local dependencies, explicit and
-optimizer-created FILTER rejection, and missing or truncated diagnostic
-evidence. Plausible additionally compares generated results with its independent
-DuckDB oracle.
+Plausible compares generated results with its independent DuckDB oracle.

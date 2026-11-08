@@ -4,6 +4,8 @@
     ".goreleaser.yaml",
     ".pronto/check-inputs.json",
     ".pronto/cluster.json",
+    ".pronto/development/.gitignore",
+    ".pronto/development/shell.json",
     ".pronto/edge-hatches.json",
     ".pronto/mail.json",
     ".say.yaml",

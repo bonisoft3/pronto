@@ -1,8 +1,8 @@
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
-import { executeMecha } from "./mecha-local.ts";
-import { fixture, initial, terminal } from "./testdata/mecha-fixtures.ts";
+import { executeMecha } from "../omnishell/test/mecha-local.ts";
+import { fixture, initial, terminal } from "./mecha-fixtures.ts";
 
 Deno.test("initializers use the bounded input, initial-phase, invariant and projection checks", async () => {
   const {spec, rules} = await fixture();

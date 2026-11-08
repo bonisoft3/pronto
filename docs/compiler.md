@@ -189,7 +189,8 @@ mise's tools from the runtime's trees, and `MONOREPO_COMPOSE_MODE`, under which
 each image builds mecha's and omnishell's from those trees instead of pulling
 the pins, and takes the checkout's layout (bayt's `imageDir`) so the views of
 the trees it copies land where `mise.local.toml` names them. A mirror has no
-such file and runs the releases it pins; its release gate validates them.
+such file and runs the releases it pins; its release gate validates them
+([monorepo mode](monorepo.md)).
 
 Each brings what the others cannot. sayt bootstraps the rest and carries the
 cross-platform concern, which is why it alone ships per-platform binaries;

@@ -1,8 +1,0 @@
-{
-	"name": "@pronto-spike/local-greeting-piece",
-	"version": "0.0.0",
-	"private": true,
-	"main": "./dist/piece.cjs",
-	"exports": { ".": "./dist/piece.cjs" },
-	"dependencies": { "@activepieces/pieces-framework": "0.32.0" }
-}

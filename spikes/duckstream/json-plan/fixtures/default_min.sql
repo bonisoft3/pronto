@@ -1,2 +1,0 @@
-CREATE TABLE t (x BIGINT);
-CREATE VIEW result AS SELECT MIN(x) AS total FROM t;

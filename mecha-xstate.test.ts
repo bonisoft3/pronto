@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { getQuickJS } from "npm:@tootallnate/quickjs-emscripten@0.23.0";
 import { bundleMechaXState } from "./mecha-xstate-bundle.ts";
 import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
-import { executeMecha } from "./mecha-local.ts";
-import { run, terminal } from "./testdata/mecha-fixtures.ts";
+import { executeMecha } from "../omnishell/test/mecha-local.ts";
+import { run, terminal } from "./mecha-fixtures.ts";
 
 const row = { type: "object" as const, fields: { phase: { type: "string" as const, maxLength: 12, values: ["idle", "choose", "done"] }, count: { type: "integer" as const, min: 0, max: 1000 } } };
 const spec: MechaReducerMachine = {

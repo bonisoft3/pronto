@@ -3,7 +3,7 @@
 // machine's action would.
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { compileFunction } from "./database-functions.ts";
-import { DATABASE, quote, run, terminal } from "./testdata/mecha-fixtures.ts";
+import { DATABASE, quote, run, terminal } from "./mecha-fixtures.ts";
 import { LOOSE, ROUND, SPIN, THROW, round, reshaped } from "./testdata/function-fixtures.ts";
 
 Deno.test({ name: "a function runs in plv8 inside the caller's transaction, and its failure rolls that back", sanitizeOps: false, sanitizeResources: false, fn: async t => {

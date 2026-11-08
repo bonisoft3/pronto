@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1.0.11";
 import { compileCortexDurable } from "../cortex-durable.ts";
-import { terminal } from "../testdata/mecha-fixtures.ts";
-import { executeMecha } from "../mecha-local.ts";
+import { terminal } from "../mecha-fixtures.ts";
+import { executeMecha } from "../../omnishell/test/mecha-local.ts";
 import { batchMachine } from "./machine.ts";
 const source = await Deno.readTextFile(new URL("./rules.js",import.meta.url));
 const compiled = await compileCortexDurable(batchMachine,source,terminal);

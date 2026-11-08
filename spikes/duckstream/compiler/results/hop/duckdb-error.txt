@@ -1,4 +1,0 @@
-Parser Error: syntax error at or near "TABLE"
-
-LINE 2: FROM TABLE(HOP((SELECT *
-             ^

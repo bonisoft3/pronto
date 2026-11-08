@@ -3,8 +3,8 @@ import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
 import { compileMechaReducer } from "./mecha-reducer.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { type Catalog, CATALOG_SQL, unrecorded } from "./sql-recorded.ts";
-import { executeMecha } from "./mecha-local.ts";
-import { DATABASE, fixture, initial, quote, request, run, surface, terminal, uuid } from "./testdata/mecha-fixtures.ts";
+import { executeMecha } from "../omnishell/test/mecha-local.ts";
+import { DATABASE, fixture, initial, quote, request, run, surface, terminal, uuid } from "./mecha-fixtures.ts";
 
 Deno.test({ name: "mecha commands serialize, replay and preserve private projections in PostgreSQL", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   const { spec, rules, compiled } = await fixture();
@@ -23,14 +23,14 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
     if (result.ok) return result.out;
     throw new Error(result.err);
   };
-  const schema = "hybrid_truco_turn";
+  const schema = "hybrid_proof_turn";
   const seed = async (id: number, deadline = initial().deadline) => {
     const state = { ...initial(), deadline };
     await sql(`INSERT INTO ${schema}.instance VALUES ('${uuid(id)}', 1, 0, ${quote(state)});
       INSERT INTO ${schema}.member VALUES ('${uuid(id)}', '${uuid(1)}', 'a'), ('${uuid(id)}', '${uuid(2)}', 'b');`);
   };
   // A command is a row: inserting it dispatches it, and its receipt is read back off it.
-  const call = (id: number, actor: number, command: number, req = request(0), name = "truco_turn") => `
+  const call = (id: number, actor: number, command: number, req = request(0), name = "proof_turn") => `
     SET ROLE app_user;
     SET request.jwt.claims = '${JSON.stringify({ sub: uuid(actor) })}';
     INSERT INTO public.${name}_command (id, instance_id, request) VALUES ('${uuid(command)}', '${uuid(id)}', ${quote(req)}::text) ON CONFLICT DO NOTHING;
@@ -46,7 +46,7 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
       CREATE OR REPLACE FUNCTION public.auth_uid() RETURNS uuid LANGUAGE sql STABLE AS $$
       SELECT (current_setting('request.jwt.claims', true)::jsonb->>'sub')::uuid;
       $$;
-      ${surface("truco_turn")}
+      ${surface("proof_turn")}
       ${compiled.sql}`);
 
     await t.step("a machine's steps run read committed, and refuse to run otherwise", async () => {
@@ -89,7 +89,7 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
         assertEquals(found.length, 1, `${body}: ${found.join("; ")}`);
         assertStringIncludes(found[0], finding);
       }
-      const dynamic = await unrecorded("CREATE FUNCTION hybrid_truco_turn.f() RETURNS void LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'SELECT 1'; END; $f$;", catalog);
+      const dynamic = await unrecorded("CREATE FUNCTION hybrid_proof_turn.f() RETURNS void LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'SELECT 1'; END; $f$;", catalog);
       assertEquals(dynamic.length, 1, dynamic.join("; "));
       assertStringIncludes(dynamic[0], "runs dynamic SQL");
       // What reads neither: immutable functions, and settings, which are not the clock.
@@ -118,7 +118,7 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
       const expected = await executeMecha(compiled.source, spec.fuel, { state: initial(), event: request(0).event, context, viewers: ["a", "b"] }) as { state: unknown; views: unknown };
       assertEquals(actual.state, expected.state);
       const views = JSON.parse(await sql(`SELECT jsonb_agg(jsonb_build_object('viewer', v.seat, 'value', v.view::jsonb) ORDER BY v.seat)
-        FROM public.truco_turn_seat v WHERE instance_id = '${uuid(10)}';`));
+        FROM public.proof_turn_seat v WHERE instance_id = '${uuid(10)}';`));
       assertEquals(views, expected.views);
     });
 
@@ -149,17 +149,17 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
         sql: `(request->'event'->'payload'->>'card')::integer > ${card}`,
         reason: card === 0 ? "first_check" : "second_check",
       }));
-      const checked = await compileMechaReducer({ ...spec, name: "truco_checks", mecha: {
+      const checked = await compileMechaReducer({ ...spec, name: "proof_checks", mecha: {
         locks: "", transitions: [{ phase: "playing", event: "play", requires: checks, sql: "NULL;" }],
       } }, rules, terminal);
-      await sql(`${surface("truco_checks")} ${checked.sql}`);
+      await sql(`${surface("proof_checks")} ${checked.sql}`);
       for (const card of [0, 1, 2]) {
         const id = uuid(800 + card);
-        await sql(`INSERT INTO hybrid_truco_checks.instance VALUES ('${id}', 1, 0, ${quote(initial())});
-          INSERT INTO hybrid_truco_checks.member VALUES ('${id}', '${uuid(1)}', 'a'), ('${id}', '${uuid(2)}', 'b');`);
-        const answer = JSON.parse(await sql(call(800 + card, 1, 900 + card, request(0, "play", { card }), "truco_checks")));
+        await sql(`INSERT INTO hybrid_proof_checks.instance VALUES ('${id}', 1, 0, ${quote(initial())});
+          INSERT INTO hybrid_proof_checks.member VALUES ('${id}', '${uuid(1)}', 'a'), ('${id}', '${uuid(2)}', 'b');`);
+        const answer = JSON.parse(await sql(call(800 + card, 1, 900 + card, request(0, "play", { card }), "proof_checks")));
         assertEquals([answer.kind, answer.reason], card < 2 ? ["rejected", checks[card].reason] : ["accepted", null]);
-        assertEquals(await sql(`SELECT revision FROM hybrid_truco_checks.instance WHERE id = '${id}';`), card < 2 ? "0" : "1");
+        assertEquals(await sql(`SELECT revision FROM hybrid_proof_checks.instance WHERE id = '${id}';`), card < 2 ? "0" : "1");
       }
     });
 
@@ -206,15 +206,15 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
       const spoof = await psql(call(13, 1, 108, request(0, "play", { card: 0, actor: "b" })));
       assertEquals(spoof.ok, false);
       assertStringIncludes(spoof.err, "undeclared field");
-      for (const query of [`SELECT * FROM ${schema}.instance`, `SELECT * FROM ${schema}.receipt`, `UPDATE ${schema}.instance SET revision=99`, `SELECT ${schema}.step('{}')`, `UPDATE public.truco_turn_seat SET revision = 99`]) {
+      for (const query of [`SELECT * FROM ${schema}.instance`, `SELECT * FROM ${schema}.receipt`, `UPDATE ${schema}.instance SET revision=99`, `SELECT ${schema}.step('{}')`, `UPDATE public.proof_turn_seat SET revision = 99`]) {
         const denied = await psql(`SET ROLE app_user; ${query};`);
         assertEquals(denied.ok, false);
         assertStringIncludes(denied.err, "permission denied");
       }
-      const view = JSON.parse(await sql(`SELECT view FROM public.truco_turn_seat WHERE instance_id = '${uuid(10)}' AND actor = '${uuid(1)}';`));
+      const view = JSON.parse(await sql(`SELECT view FROM public.proof_turn_seat WHERE instance_id = '${uuid(10)}' AND actor = '${uuid(1)}';`));
       assertEquals(view.hand, [1, 2]);
       assertEquals(view.b, undefined);
-      assertEquals(await sql(`SELECT count(*) FROM public.truco_turn_seat WHERE instance_id = '${uuid(10)}' AND actor = '${uuid(3)}';`), "0");
+      assertEquals(await sql(`SELECT count(*) FROM public.proof_turn_seat WHERE instance_id = '${uuid(10)}' AND actor = '${uuid(3)}';`), "0");
     });
 
     await t.step("expired moves cannot beat a delayed ticker and duplicate wakes cannot affect the next turn", async () => {
@@ -245,7 +245,7 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
       await seed(15);
       await sql(`BEGIN; ${call(15, 1, 112)} ROLLBACK;`);
       assertEquals(JSON.parse(await snapshot(15)).revision, "0");
-      assertEquals(await sql(`SELECT (SELECT count(*) FROM public.truco_turn_seat WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM public.truco_turn_command WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM ${schema}.receipt WHERE instance_id = '${uuid(15)}');`), "0");
+      assertEquals(await sql(`SELECT (SELECT count(*) FROM public.proof_turn_seat WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM public.proof_turn_command WHERE instance_id = '${uuid(15)}') + (SELECT count(*) FROM ${schema}.receipt WHERE instance_id = '${uuid(15)}');`), "0");
       assertEquals(JSON.parse(await sql(call(15, 1, 112))).kind, "accepted");
     });
 
@@ -270,10 +270,10 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
 
     await t.step("PLV8 uses the same cage and refuses computed ambient authority", async () => {
       for (const [name, expression] of Object.entries({ random: "Math['random']()", database: "({}).constructor.constructor('return plv8')()" })) {
-        const altered = await compileMechaReducer({ ...spec, name: `truco_${name}` }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", `play: () => ${expression}`), terminal);
-        await sql(`${surface(`truco_${name}`)} ${altered.sql}`);
+        const altered = await compileMechaReducer({ ...spec, name: `proof_${name}` }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", `play: () => ${expression}`), terminal);
+        await sql(`${surface(`proof_${name}`)} ${altered.sql}`);
         const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
-        const failure = await psql(`SELECT hybrid_truco_${name}.step(${quote(input)});`);
+        const failure = await psql(`SELECT hybrid_proof_${name}.step(${quote(input)});`);
         assertEquals(failure.ok, false);
         assertStringIncludes(failure.err, "ERROR:");
       }
@@ -282,7 +282,7 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
     await t.step("bounded Mecha actions reuse native invocation and its transactional Airlock claim", async () => {
       // The fixture's transition is replaced, not unified with: a value CUE
       // cannot unify is the machine as data, read into its reducer anew.
-      const base = await run("cue", ["export", "./apps/truco/tests/fixtures/mecha", "-e", "machine"]);
+      const base = await run("cue", ["export", "./plugins/pronto/testdata/mecha", "-e", "machine"]);
       if (!base.ok) throw new Error(base.err);
       const machine = JSON.parse(base.out);
       machine.config.states.playing.on.play.actions = ["play", "charge"];
@@ -324,11 +324,11 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
     });
 
     await t.step("runaway reducer is terminated by the shared deterministic fuel limit", async () => {
-      const altered = await compileMechaReducer({ ...spec, name: "truco_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
-      await sql(`${surface("truco_spin")} ${altered.sql}`);
+      const altered = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
+      await sql(`${surface("proof_spin")} ${altered.sql}`);
       const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
       const start = performance.now();
-      const failure = await psql(`SELECT hybrid_truco_spin.step(${quote(input)});`);
+      const failure = await psql(`SELECT hybrid_proof_spin.step(${quote(input)});`);
       assertEquals(failure.ok, false);
       assert(performance.now() - start < 10000, "PLV8 reducer did not terminate within its budget");
       assertStringIncludes(failure.err.toLowerCase(), "fuel exhausted");

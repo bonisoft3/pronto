@@ -33,6 +33,7 @@ import { compileCortexSources, type CortexChart } from "./cortex-sources.ts";
 import { compileFunction } from "./database-functions.ts";
 import { compileCortexSql } from "./cortex-machine.ts";
 import { surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
+import { sha256Hex } from "./facts.ts";
 
 type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
 type Emission = {
@@ -244,6 +245,19 @@ async function rendered(emission: Emission): Promise<Map<string, string | Uint8A
         statements.push(compileFunction({ name, fuel }, await Deno.readTextFile(`${appDir}/${rules}`), terminalOf));
       }
       contents.set(rel, sqlFile(rel, statements.join("\n")));
+      continue;
+    }
+    if (f.format === "mecha-reducer-local") {
+      const { reducers } = f.data as { reducers: Record<string, { machine: MechaReducerMachine; rules: string }> };
+      const terminalOf = await terminal();
+      const compiled: Record<string, { source: string; engine: { sha256: string } }> = {};
+      for (const name of Object.keys(reducers).sort()) {
+        const mecha = reducers[name];
+        if (unsafe(mecha.rules)) fail(`${rel}: unsafe mecha rules path`);
+        const { source, engine } = await compileMechaReducer(mecha.machine, await Deno.readTextFile(`${appDir}/${mecha.rules}`), terminalOf);
+        compiled[name] = { source, engine: { sha256: await sha256Hex(new TextEncoder().encode(engine)) } };
+      }
+      contents.set(rel, JSON.stringify(compiled, null, 2) + "\n");
       continue;
     }
     if (f.format === "mecha-reducer-sql") {

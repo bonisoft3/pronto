@@ -100,7 +100,7 @@ that property either. It grants no idempotence. A reusable mail action can accep
 It can also expose an explicit `messageId` option for other users; this app binding
 must prohibit overriding the identity it promises.
 
-The [[../../spikes/activepieces-hatch/declaration/README|closed CUE prototype]]
+The closed CUE prototype
 checks positive and negative declarations. It omits outer program wrappers and
 does not implement lowering, source existence checks, export discovery, schema
 validation or realpath/symlink confinement.
@@ -115,7 +115,7 @@ only that exact `/actions/sendMail/` POST route, rejecting suffixes, other metho
 and undeclared aliases. It never accepts package, action or authentication overrides
 from the body.
 
-The [[../../spikes/activepieces-hatch/routing/README|Dapr experiment]] verified
+The Dapr experiment verified
 base-path joining with Mecha's actual pinned Dapr image. Preserve Airlock's path
 validator, which rejects traversal, encoded paths and absolute URLs. This scopes
 the Jessie handler's capability; it does not isolate trusted containers on the
@@ -193,7 +193,7 @@ package downloads are forbidden.
 
 This is a proposed execution arrangement, not an implemented sandbox. Trusted
 pieces can transmit credentials through their network authority. The
-[[../../spikes/activepieces-hatch/catalogue/README|isolation spike]] found Worker
+isolation spike found Worker
 environment writes visible to the host and sibling Workers, whereas `clearEnv`
 subprocess writes remained separate. The published HTTP helper writes a TLS-related
 environment variable, so this matters beyond hypothetical isolation. Fresh processes
@@ -284,7 +284,7 @@ package shapes and execution contract. No upstream contribution or paid Activepi
 
 ## Evidence and alternatives
 
-[[../../spikes/activepieces-hatch/README|Reproducible experiments]] cover package
+Reproducible experiments cover package
 loading, limited context, metadata bypass, published HTTP retry counts, sensitive
 errors/logs, timeout continuation, environment isolation, closed CUE declarations
 and actual Dapr routing. They do not establish a production runner, full catalogue

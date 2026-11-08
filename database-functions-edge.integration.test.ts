@@ -5,7 +5,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { compileFunction } from "./database-functions.ts";
 import { renderFunctions } from "./bundle/edge-functions.ts";
-import { ROOT, quote, run, terminal } from "./testdata/mecha-fixtures.ts";
+import { ROOT, quote, run, terminal } from "./mecha-fixtures.ts";
 import { declared, functionApp, LOOSE, ROUND, SPIN, THROW, round, reshaped } from "./testdata/function-fixtures.ts";
 import { startWorker } from "../../libraries/mecha/packages/pglite-workerd/wrangler-dev.ts";
 import { load } from "../../libraries/mecha/packages/pglite-workerd/load.ts";

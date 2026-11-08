@@ -1,0 +1,44 @@
+{
+  "effects": {
+    "probe": {
+      "table": "airlock_smoke",
+      "field": "status",
+      "state": "charging",
+      "onDone": "settled",
+      "onError": "failed",
+      "row": [
+        "id"
+      ],
+      "key": [
+        "id"
+      ],
+      "idempotent": true,
+      "attempts": 5,
+      "handler": "effects/probe.js"
+    },
+    "confirm": {
+      "table": "airlock_smoke_mail",
+      "field": "status",
+      "state": "sending",
+      "onDone": "sent",
+      "onError": "failed",
+      "row": [
+        "id"
+      ],
+      "key": [
+        "id"
+      ],
+      "idempotent": false,
+      "reentry": "unknown",
+      "attempts": 5,
+      "handler": "effects/confirm.js",
+      "secrets": [
+        "CONFIRM_SIGNING_KEY"
+      ],
+      "endowments": [
+        "Crypto",
+        "TextEncoder"
+      ]
+    }
+  }
+}

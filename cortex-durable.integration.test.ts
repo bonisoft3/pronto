@@ -1,7 +1,7 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { compileCortexDurable } from "./cortex-durable.ts";
 import { spec, rules } from "./testdata/cortex-durable.ts";
-import { DATABASE, quote, run, terminal, uuid } from "./testdata/mecha-fixtures.ts";
+import { DATABASE, quote, run, terminal, uuid } from "./mecha-fixtures.ts";
 
 Deno.test({ name: "durable Cortex invocation, publication and receipt share PostgreSQL transactions", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   const declaration = structuredClone(spec);

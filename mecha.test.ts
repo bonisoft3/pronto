@@ -1,9 +1,9 @@
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
 import { compileMechaReducer } from "./mecha-reducer.ts";
 import { moving } from "./mecha-contracts.ts";
-import { walk } from "./mecha-battery.ts";
-import { executeMecha } from "./mecha-local.ts";
-import { fixture, initial, request, run, terminal } from "./testdata/mecha-fixtures.ts";
+import { walk } from "../omnishell/test/mecha-battery.ts";
+import { executeMecha } from "../omnishell/test/mecha-local.ts";
+import { fixture, initial, request, run, terminal } from "./mecha-fixtures.ts";
 
 Deno.test("mecha chart dispatches internal events, validates ownership, and projects private hands", async () => {
   const { spec, compiled } = await fixture();

@@ -5,11 +5,6 @@ package bootstrap
 import (
 	"list"
 	"tool/file"
-
-	"github.com/bonisoft3/pronto/distribution"
-	terminal "github.com/bonisoft3/pronto/terminals:omnishell"
-	"github.com/bonisoft3/pronto/clusters:mecha"
-	"github.com/bonisoft3/pronto/builders:bayt"
 )
 
 command: bootstrap: B={
@@ -62,7 +57,7 @@ command: bootstrap: B={
 				command: generate: bootstrap.#Generate & {project: pronto}
 				"""
 		}
-		config: #Generate & {_after: B._after, project: distribution.#Project & terminal.#Project & mecha.#Project & bayt.#Toolchain}
+		config: #Generate & {_after: B._after, project: #Host}
 		// The default roster's lock, every platform's URL and checksum, so
 		// the first install fetches each artifact directly and asks GitHub's
 		// API nothing: the seed's .mise.toml already turns off the

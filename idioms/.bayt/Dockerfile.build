@@ -2,14 +2,14 @@
 FROM idioms-generate AS build
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --parents --exclude=.pronto/proto-baseline.json --exclude=mise.host.lock --exclude=.mise.host.toml --exclude=mise.local.lock --exclude=**/node_modules/** --exclude=.task/** --exclude=tests/** ** .bayt/checks.yaml ./
+COPY --parents --exclude=.pronto/proto-baseline.json --exclude=mise.host.lock --exclude=.mise.host.toml --exclude=.pronto/live/** --exclude=mise.local.lock --exclude=**/node_modules/** --exclude=.task/** --exclude=tests/** ** .bayt/checks.yaml ./
 RUN ["nu", "-c", "mise x -- ^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf build'"]
 COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/Taskfile.build.yaml .bayt/bayt.build.json ./.bayt/
 
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS build_ctxs
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --parents --exclude=.pronto/proto-baseline.json --exclude=mise.host.lock --exclude=.mise.host.toml --exclude=mise.local.lock --exclude=**/node_modules/** --exclude=.task/** --exclude=tests/** ** .bayt/checks.yaml ./
+COPY --parents --exclude=.pronto/proto-baseline.json --exclude=mise.host.lock --exclude=.mise.host.toml --exclude=.pronto/live/** --exclude=mise.local.lock --exclude=**/node_modules/** --exclude=.task/** --exclude=tests/** ** .bayt/checks.yaml ./
 COPY --from=idioms-generate_srcs /monorepo /monorepo
 COPY --from=idioms-setup_srcs /monorepo /monorepo
 ARG SOURCE_DATE_EPOCH

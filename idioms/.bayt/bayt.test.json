@@ -33,6 +33,7 @@
       ".pronto/proto-baseline.json",
       "mise.host.lock",
       ".mise.host.toml",
+      ".pronto/live/**",
       "mise.local.lock",
       "**/node_modules/**",
       ".task/**"
@@ -140,6 +141,7 @@
           ".pronto/proto-baseline.json",
           "mise.host.lock",
           ".mise.host.toml",
+          ".pronto/live/**",
           "mise.local.lock",
           "**/node_modules/**",
           ".task/**"
@@ -167,6 +169,7 @@
               ".pronto/proto-baseline.json",
               "mise.host.lock",
               ".mise.host.toml",
+              ".pronto/live/**",
               "mise.local.lock",
               "**/node_modules/**",
               ".task/**",
@@ -187,6 +190,7 @@
               ".pronto/proto-baseline.json",
               "mise.host.lock",
               ".mise.host.toml",
+              ".pronto/live/**",
               "mise.local.lock",
               "**/node_modules/**",
               ".task/**",
@@ -289,6 +293,7 @@
           ".pronto/proto-baseline.json",
           "mise.host.lock",
           ".mise.host.toml",
+          ".pronto/live/**",
           "mise.local.lock",
           "**/node_modules/**",
           ".task/**"

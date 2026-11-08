@@ -10,7 +10,7 @@ import {
   compileMechaReducer,
   type MechaReducerMachine,
 } from "../mecha-reducer.ts";
-import { executeMecha } from "../mecha-local.ts";
+import { executeMecha } from "../../omnishell/test/mecha-local.ts";
 import { evaluateCaged } from "../../omnishell/interpreter/jessie.js";
 import { fuelMeter, instrument } from "../../omnishell/instrument.ts";
 
@@ -20,7 +20,7 @@ import {
   initial,
   request,
   ROOT,
-} from "../testdata/mecha-fixtures.ts";
+} from "../mecha-fixtures.ts";
 
 async function edgeMachine(spec: MechaReducerMachine, rules: string) {
   const dir = await Deno.makeTempDir({ prefix: "edge-machine-parity-" });

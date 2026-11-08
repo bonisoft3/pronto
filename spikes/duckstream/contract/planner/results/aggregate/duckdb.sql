@@ -1,1 +1,0 @@
-SELECT result.c0 AS "n", result.c1 AS "total" FROM (SELECT t.c0 AS c0, t.c1 AS c1 FROM (SELECT CAST(COUNT(*) AS BIGINT) AS c0, CAST(SUM(t.c0) AS BIGINT) AS c1 FROM (SELECT t.c2 AS c0 FROM (SELECT "id" AS c0, "ts" AS c1, "amount" AS c2 FROM "events") t) t) t) result;

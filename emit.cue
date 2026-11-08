@@ -38,7 +38,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "cortex-sql" | "local-handler" | "mecha-reducer-sql" | "function-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
+	format: "sql" | "cortex-sql" | "local-handler" | "mecha-reducer-sql" | "mecha-reducer-local" | "function-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -3426,17 +3426,21 @@ _pgrollDir: "services/database/pgroll"
 
 		// What tools outside CUE read of the cluster, evaluated here once:
 		// evaluating a program takes gigabytes, too much to repeat in
-		// ci-replay or in a release. The
+		// ci-replay, in a release or in a test. The
 		// token roles are those 001_roles.sql grants authenticator, which a
 		// Kubernetes release's operator would otherwise revoke. The drains are
 		// what the page's and the edge's clusters call (mecha-browser's
-		// drains.ts), where no stream runs them.
+		// drains.ts), where no stream runs them. The database image is the
+		// one a test runs the app's migrations in; the actors migration is
+		// the machines' SQL, which the replay holds to recorded time.
 		".pronto/cluster.json": {
 			format: "json"
 			data: {
 				server: E.cluster.capabilities.server
 				if E.cluster.capabilities.server {
 					schema:     E.cluster.surface.schema
+					database:   mecha.published.database
+					if len(E.code.state.mecha.reducers) > 0 {actors: E._steps.actors}
 					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
 					computations: E.cluster.state.computations
 					drains: list.Concat([
@@ -3764,6 +3768,13 @@ _pgrollDir: "services/database/pgroll"
 			}
 			if E.code.state.functions != _|_ if len([for r in E._raw if r.name == "009_functions.sql" {r}]) == 0 {
 				"services/database/migrations/009_functions.sql": {format: "function-sql", data: functions: E.code.state.functions}
+			}
+			if len(E.code.state.mecha.reducers) > 0 {
+				// Each machine compiled bare, without its surface: the step as
+				// PostgreSQL runs it, for the app's tests to step in omnishell's
+				// executor (test/mecha-local.ts), and its engine statement's digest,
+				// for a retained baseline's upgrade to be held to the current engine.
+				".pronto/mecha-reducers.json": {format: "mecha-reducer-local", data: reducers: {for n, h in E.code.state.mecha.reducers {(n): {machine: h.reducer, rules: h.rules}}}}
 			}
 			if len(E.code.state.mecha.reducers) > 0 if len([for r in E._raw if r.name == E._steps.actors {r}]) == 0 {
 				// Each machine's surface is entities the app declares; the writer

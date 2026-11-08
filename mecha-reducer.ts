@@ -53,7 +53,7 @@ export async function compileMechaReducer(
   terminal: Terminal,
   surface: Surface = { seat: [], public: [] },
   options: { serverOnly?: boolean; beforeTransitionSql?: string; afterTransitionSql?: string } = {},
-): Promise<{ source: string; sql: string }> {
+): Promise<{ source: string; sql: string; engine: string }> {
   if (!MECHA_NAME.test(spec.name)) throw new Error("invalid mecha name");
   if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid mecha version");
   if (!Number.isSafeInteger(spec.fuel) || spec.fuel < 1 || spec.fuel > 1000000) throw new Error("invalid mecha fuel");
@@ -129,6 +129,8 @@ return JSON.parse(run(JSON.stringify(input)));
   const parts = options.serverOnly ? [] : partsOf(spec);
   const protocol = literal(`Hybrid ${spec.name} protocol ${spec.version}; no public canonical-state access`);
   const isolation = options.serverOnly ? "serializable" : "read committed";
+  // The engine statement alone is what a retained baseline's upgrade is held to.
+  const engine = `CREATE OR REPLACE FUNCTION ${schema}.engine(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};`;
   const sql = `
 -- tier: container
 CREATE EXTENSION IF NOT EXISTS plv8;
@@ -233,7 +235,7 @@ CREATE TABLE IF NOT EXISTS ${schema}.receipt (
 -- steps nothing. plpgsql resolves the engine when a step runs, so the step is
 -- declared once, on every tier, before any engine exists.
 -- tier: container
-CREATE OR REPLACE FUNCTION ${schema}.engine(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};
+${engine}
 REVOKE ALL ON FUNCTION ${schema}.engine(jsonb) FROM PUBLIC;
 -- tier: any
 CREATE OR REPLACE FUNCTION ${schema}.step(input jsonb) RETURNS jsonb LANGUAGE plpgsql AS $step$
@@ -426,5 +428,5 @@ $private$;
 ` : ""}
 COMMENT ON SCHEMA ${schema} IS ${protocol};
 `;
-  return { source: script, sql };
+  return { source: script, sql, engine };
 }

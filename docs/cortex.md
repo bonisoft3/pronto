@@ -27,9 +27,10 @@ These remain distinct execution bindings; Cortex composition uses their
 existing sources and sinks. Persisted SQL naming is covered by
 [libraries/mecha/docs/machines#Bounded reducer machines](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/machines.md#bounded-reducer-machines).
 
-The `hybrid-local.ts` and `hybrid-battery.ts` entry points only bridge published
-app-test URLs to the Mecha implementations. They introduce no separate machine
-kind or authoring grammar. Consumer pins move with a coordinated Pronto release.
+An app's tests step a compiled machine through omnishell's test harness
+(`test/mecha-local.ts`) and walk it with `test/mecha-battery.ts`, from the
+step pronto emitted in `.pronto/mecha-reducers.json`; neither introduces a
+separate machine kind or authoring grammar.
 
 ## The parent
 
@@ -185,11 +186,11 @@ Run's run machine (`shell/handlers/run.js`) is the instance.
 
 Truco's root machine is its own `machines/root.cue`. `test:mecha` covers the
 reducer's commands, races, receipts, timers and Airlock claim on the surface
-rows, and the surface check's refusals. `test:truco-online` runs Truco's
-machines through their surface in PostgreSQL under the generated policies —
-leases, challenges, admissions, seat races, team matches, the ticker's
-timeouts — and two readers completing a match through PostgREST as the store
-writes it.
+rows, and the surface check's refusals. Truco's `tests/online.integration.test.ts`
+runs its machines through their surface in PostgreSQL under the generated
+policies — leases, challenges, admissions, seat races, team matches, the
+ticker's timeouts — and two readers completing a match through PostgREST as
+the store writes it.
 
 The interactive graph is verified by walking the composition:
 - **The walk** (`test/walker.ts`, extending Omnishell's Chinese Postman tour):

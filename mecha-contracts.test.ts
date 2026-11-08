@@ -1,8 +1,8 @@
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
 import { carries, contracted, moving } from "./mecha-contracts.ts";
 import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
-import { executeMecha } from "./mecha-local.ts";
-import { fixture, initial, terminal } from "./testdata/mecha-fixtures.ts";
+import { executeMecha } from "../omnishell/test/mecha-local.ts";
+import { fixture, initial, terminal } from "./mecha-fixtures.ts";
 
 const contract = (spec: MechaReducerMachine, rule: string, reads: string[], writes?: string[]): MechaReducerMachine =>
   ({...spec, contracts: {...spec.contracts, [rule]: writes ? {reads, writes} : {reads}}});

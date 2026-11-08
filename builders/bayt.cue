@@ -45,10 +45,10 @@ import (
 	}
 }
 
-// apps/deno.json maps the platform URLs an app's checks import to these trees
-// (docs/component-contracts.md#platform-pins).
+// The platform trees mise.local.toml resolves an app's toolchain to in the
+// monorepo (docs/monorepo.md).
 #CompilerSources: {
-	paths: ["cue.mod", "apps/deno.json", "apps/*/tests/deno.json", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
+	paths: ["cue.mod", "plugins/pronto", "plugins/omnishell", "plugins/bayt", "plugins/sayt", "libraries/mecha"]
 	exclude: ["**/docs/**", "**/testdata/**", "**/*_test.*", "**/*.test.*", "**/.bayt/**", "**/.task/**", "**/node_modules/**"]
 }
 
@@ -589,10 +589,16 @@ import (
 				host: {
 					platform: "host"
 					stop:     true
-					cmds: [{use: "./bayt-task.nu", do: "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task \(verb) --generate ...$args } }; host-verb"}]
+					cmds: [{use: "./bayt-task.nu", do: "\(_hostBundle); def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task \(verb) --generate ...$args } }; host-verb"}]
 				}
 			}
 		}}
+		// The host tier serves omnishell from `mise where`, and its data-plane
+		// bundle is a build product (omnishell's bayt `bundle`): in the
+		// monorepo, where the switch is set, the host verbs build it from the
+		// checkout's mecha; a release ships it, and one without it is refused
+		// here rather than served as a dead terminal.
+		_hostBundle: "use tools.nu [run-mise]; def omnishell-bundle [] { let omnishell = (run-mise where github:bonisoft3/omnishell | str trim); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
 		// The app is its repository's root, in its mirror and in the monorepo
 		// alike: the files it commits are its mirror's. Its images take the
 		// monorepo's layout where the switch is on.
@@ -880,9 +886,11 @@ import (
 				let c = B.checks[name]
 				let base = [if c.browser {":browser"}, ":setup"][0]
 
-				// The image is the base, which carries the toolchain, and omnishell's
-				// tree, which the tests import from /omnishell (tests/deno.json
-				// maps `omnishell/` there).
+				// The image is the base, which carries the toolchain, with
+				// omnishell's runtime tree at /omnishell. The commands are nushell
+				// on both paths, the host's process-compose and the image's
+				// compose: a check that runs code of a platform tree finds the
+				// tree with `mise where` (pronto's #Platform).
 				"check-\(name)": {
 					// The plane is an image-only dep, as visual lint's is.
 					deps: [base, ":launch:outs"]
@@ -936,7 +944,7 @@ import (
 						}
 						depends_on: "\(project.name)-launch": condition: "service_healthy"
 						// `$$` so compose leaves a variable to the container's shell.
-						command: ["mise", "x", "--", "sh", "-c", strings.Join([for x in c.cmds {strings.Replace(x, "$", "$$", -1)}], " && ")]
+						command: ["mise", "x", "--", "nu", "-c", strings.Join([for x in c.cmds {strings.Replace(x, "$", "$$", -1)}], "; ")]
 					}
 				}
 				// The check's bkid runner (omnishell.#BkidCheck).
