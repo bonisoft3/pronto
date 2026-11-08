@@ -1,6 +1,9 @@
 package schema
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"encoding/yaml"
 	"list"
 	"strings"
@@ -9,6 +12,15 @@ import (
 )
 
 // #BuildManifests maps a ReleaseSpec and Environment into standard Kubernetes manifests.
+// A container's requests and limits: the release's own, under what its containerResources names
+// for that container (crud, electric, auth, caddy, render, or one of the app's services).
+#resourcesOf: {
+	r:   _
+	n:   string
+	out: r.resources
+	if r.containerResources[n] != _|_ {out: r.containerResources[n]}
+}
+
 #BuildManifests: {
 	release: #ReleaseSpec
 	env:     #Environment
@@ -68,6 +80,24 @@ import (
 		}
 	}
 
+	// What a pod signs in to Google Cloud with, no key held: an external_account credential that
+	// reads the pod's projected token (audience = the provider's), trades it at STS for the
+	// workload identity `provider`'s, and impersonates `serviceAccount`. GOOGLE_APPLICATION_CREDENTIALS
+	// names the file this is written to; the metrics export and the blob plane share it.
+	#workloadCredentials: {
+		provider:       string
+		serviceAccount: string
+		tokenFile:      string | *"/var/run/secrets/gcp/token"
+		out: {
+			type:                              "external_account"
+			audience:                          "//iam.googleapis.com/\(provider)"
+			subject_token_type:                "urn:ietf:params:oauth:token-type:jwt"
+			token_url:                         "https://sts.googleapis.com/v1/token"
+			credential_source: file:           tokenFile
+			service_account_impersonation_url: "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/\(serviceAccount):generateAccessToken"
+		}
+	}
+
 	// Where a service sends its spans: Deno exports OTLP over HTTP (4318),
 	// caddy's `tracing` over gRPC (4317); both read the same variables.
 	#otelExport: {
@@ -114,6 +144,13 @@ import (
 			}
 			spec: {
 				instances: 1
+				// A stop is bounded: a smart shutdown waits for sessions for 15 s, then a fast one, and
+				// at 120 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
+				// walsender holds a fast shutdown open, so every restart of the primary stalled a
+				// release for half an hour. Killed, the next start replays the WAL it wrote. The
+				// release waits for the primary (release.nu) longer than this stop.
+				smartShutdownTimeout: 15
+				stopDelay:            120
 				imageName: (#appImage & {svc: "database"}).out
 				// mecha's database image derives from the official postgres image,
 				// whose postgres user is 999, not CloudNativePG's 26.
@@ -154,6 +191,94 @@ import (
 						storageClass: targetEnv.storageClass
 					}
 				}
+				if release.database.backup.provider != _|_ {
+					// The backups' sign-in (backupObjs): the plugin's sidecar shares the postgres
+					// container's mounts, /projected among them.
+					projectedVolumeTemplate: sources: [{
+						serviceAccountToken: {path: "gcp-token", audience: release.database.backup.audience, expirationSeconds: 3600}
+					}, {
+						configMap: {name: "\(release.name)-backup", items: [{key: "credentials.json", path: "gcp-credentials.json"}]}
+					}]
+				}
+				if release.database.backup != _|_ {
+					plugins: [{
+						name:          "barman-cloud.cloudnative-pg.io"
+						isWALArchiver: true
+						parameters: barmanObjectName: "\(release.name)-backup"
+					}]
+				}
+			}
+		},
+	]
+
+	// release.database.backup: the bucket the barman-cloud plugin writes to, and the nightly
+	// base backup; WAL goes there as the Cluster's archiver (prontoClusterObj's plugins). To an
+	// S3 store with the keys Secret the release checks; to Cloud Storage with the credential the
+	// ConfigMap holds (no key: #workloadCredentials over the Cluster's projected token), named by
+	// GOOGLE_APPLICATION_CREDENTIALS, which gkeEnvironment has barman-cloud take as Google's default.
+	let backupObjs = [
+		if release.type == "pronto" && release.database.backup.provider != _|_
+		let b = release.database.backup {
+			apiVersion: "v1"
+			kind:       "ConfigMap"
+			metadata: {
+				name:      "\(release.name)-backup"
+				namespace: release.namespace
+				labels:    appLabels & {"app.kubernetes.io/component": "database"}
+			}
+			data: "credentials.json": json.Marshal((#workloadCredentials & {provider: b.provider, serviceAccount: b.serviceAccount, tokenFile: "/projected/gcp-token"}).out)
+		},
+		if release.type == "pronto" && release.database.backup != _|_
+		let b = release.database.backup {
+			apiVersion: "barmancloud.cnpg.io/v1"
+			kind:       "ObjectStore"
+			metadata: {
+				name:      "\(release.name)-backup"
+				namespace: release.namespace
+				labels:    appLabels & {"app.kubernetes.io/component": "database"}
+			}
+			spec: {
+				retentionPolicy: b.retention
+				if b.provider != _|_ && b.endpoint == _|_ {
+					configuration: {
+						destinationPath: "gs://\(b.bucket)/\(b.path)"
+						googleCredentials: gkeEnvironment: true
+					}
+					instanceSidecarConfiguration: env: [{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/projected/gcp-credentials.json"}]
+				}
+				if b.endpoint != _|_ && b.provider == _|_ {
+					configuration: {
+						destinationPath: "s3://\(b.bucket)/\(b.path)"
+						endpointURL:     b.endpoint
+						s3Credentials: {
+							accessKeyId: {name: b.secret, key: "ACCESS_KEY_ID"}
+							secretAccessKey: {name: b.secret, key: "ACCESS_SECRET_KEY"}
+						}
+					}
+				}
+				// One store or the other: with both or neither named there is no destination.
+				configuration: {
+					destinationPath!: string
+					wal: compression:  "gzip"
+					data: compression: "gzip"
+				}
+			}
+		},
+		if release.type == "pronto" && release.database.backup != _|_ {
+			apiVersion: "postgresql.cnpg.io/v1"
+			kind:       "ScheduledBackup"
+			metadata: {
+				name:      "\(release.name)-db-nightly"
+				namespace: release.namespace
+				labels:    appLabels & {"app.kubernetes.io/component": "database"}
+			}
+			spec: {
+				schedule:             release.database.backup.schedule
+				immediate:            true
+				backupOwnerReference: "self"
+				cluster: name: "\(release.name)-db"
+				method: "plugin"
+				pluginConfiguration: name: "barman-cloud.cloudnative-pg.io"
 			}
 		},
 	]
@@ -241,12 +366,25 @@ import (
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 					if [ "$marker" = "pronto initdb" ]; then
 					  echo "initdb: already built"
-					  # Its re-runnable steps are the release's, though (emit.cue's): a new
-					  # entity's table, every policy, trigger and publication, and the hybrid
-					  # machines' code run again, keeping every row.
-					  for step in 005_create_tables 006_policies 007_txid 008_publication 016_mecha_actors; do
-					    f=/docker-entrypoint-initdb.d/$step.sql
-					    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+					  # Its re-runnable steps are the release's, though (emit.cue's), as on Cloud Run
+					  # (gcp.cue's): a new entity's table and a new field's column, every policy,
+					  # trigger and publication, the status charts' triggers (010_machines), the
+					  # hybrid machines' code, and the app's own migrations (database.replays), each
+					  # idempotent, run again, keeping every row, before migrate's pgroll steps call
+					  # what they define. Live traffic can deadlock a step's ALTER: being idempotent,
+					  # the step is run again, up to three times.
+					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql \(strings.Join(release.database.replays, " ")); do
+					    f=/docker-entrypoint-initdb.d/$step
+					    if [ -f "$f" ]; then echo "initdb: replaying $step"
+					      for try in 1 2 3; do
+					        # 010 drops and recreates triggers and constraints: one transaction, so no
+					        # write slips between them and a failure leaves the old ones in force.
+					        if [ "$step" = 010_machines.sql ]; then one=--single-transaction; else one=; fi
+					        if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi
+					        if [ "$try" = 3 ]; then exit 1; fi
+					        echo "initdb: $step failed, again in 10s"; sleep 10
+					      done
+					    fi
 					  done
 					  exit 0
 					fi
@@ -408,11 +546,17 @@ import (
 
 	let bounds = resilience.resilience.timeouts
 
-	// Every call between sidecars to the cluster's own apps is bounded. No
-	// circuit breaker: Dapr 1.14 counts any answer outside 200-399 as a
-	// failure, so a client's 401s, a shape's 409s or a missing row's 404s would
-	// open a target's circuit for everyone. No retry policy either: a write is
-	// not replayed.
+	// No sidecar bounds a call between the cluster's own apps: a Dapr timeout that fires while
+	// a response is still being copied returns its handler and leaves the copy running, whose
+	// next write lands on a recycled buffer and panics the sidecar (dapr/dapr#10371, open in every
+	// release through 1.18). Bonk Chess's door sidecar died that way under its scenarios
+	// (2026-11-06), and every upstream with it, so the door answered 500. Each hop stays bounded
+	// outside the mesh: the gateway's request bound, caddy's per-upstream bound (the door's), render's
+	// own on each read (renderDoor), Postgres's statement bounds, and Electric's hold. The budget's
+	// mesh numbers still nest those (resilience.cue) for compose and Cloud Run. The Resiliency is
+	// still written, empty, so a release replaces a cluster's earlier one. No circuit breaker either:
+	// Dapr counts any answer outside 200-399 as a failure, so a client's 401s, a shape's 409s or a
+	// missing row's 404s would open a target's circuit for everyone. No retry: a write is not replayed.
 	let daprResiliencyObj = [if release.type == "pronto" {
 		apiVersion: "dapr.io/v1alpha1"
 		kind:       "Resiliency"
@@ -422,14 +566,8 @@ import (
 			labels:    appLabels
 		}
 		spec: {
-			policies: {
-				timeouts: {for id, s in bounds.mesh {(id): "\(s)s"}}
-			}
-			targets: apps: {
-				for id, _ in bounds.mesh {
-					(id): timeout: id
-				}
-			}
+			policies: {}
+			targets: {}
 		}
 	}]
 
@@ -475,6 +613,8 @@ import (
 						labels: appLabels & {"app.kubernetes.io/component": "crud"}
 						annotations: (#daprSidecar & {id: "crud", port: "3000"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "crud"
 						image:           (#appImage & {svc: "crud"}).out
@@ -512,7 +652,7 @@ import (
 							{name: "PGRST_SERVER_PORT", value: "3000"},
 							{name: "PGRST_ADMIN_SERVER_PORT", value: "3001"},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "crud"}).out
 						livenessProbe: {
 							httpGet: {
 								path: "/ready"
@@ -581,6 +721,8 @@ import (
 						labels: appLabels & {"app.kubernetes.io/component": "electric"}
 						annotations: (#daprSidecar & {id: "electric", port: "3000"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "electric"
 						image:           (#appImage & {svc: "electric"}).out
@@ -611,7 +753,7 @@ import (
 							},
 							{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "electric"}).out
 						livenessProbe: {
 							httpGet: {
 								path: "/v1/health"
@@ -683,6 +825,8 @@ import (
 							annotations: "pronto.dev/oidc-secret-digest": release.auth.oidcSecretDigest
 						}
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "auth"
 						image:           (#appImage & {svc: "auth"}).out
@@ -723,7 +867,7 @@ import (
 									}
 								}},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "auth"}).out
 						livenessProbe: {
 							tcpSocket: port: 9999
 							initialDelaySeconds: 5
@@ -786,6 +930,8 @@ import (
 						labels: appLabels & {"app.kubernetes.io/component": "caddy"}
 						annotations: (#daprSidecar & {id: "caddy", port: "8080"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "caddy"
 						image:           (#appImage & {svc: "caddy"}).out
@@ -815,7 +961,7 @@ import (
 								value: v
 							},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "caddy"}).out
 						livenessProbe: {
 							httpGet: {
 								path: "/health"
@@ -885,6 +1031,8 @@ import (
 						labels:      appLabels & {"app.kubernetes.io/component": "render"}
 						annotations: (#daprSidecar & {id: "render", port: "\(release.render.port)"}).out
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            "render"
 						image:           (#appImage & {svc: "render"}).out
@@ -901,7 +1049,7 @@ import (
 							{name: "PORT", value: "\(release.render.port)"},
 							for e in (#denoTelemetry & {service: "render"}).env {e},
 						]
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: "render"}).out
 						livenessProbe: {
 							httpGet: {
 								path: "/health"
@@ -949,12 +1097,289 @@ import (
 
 	]
 
+	// The app's alerting (release.alerting): its rules, which the release writes to <name>-alert-rules,
+	// evaluated by a vmalert of its own against the cluster's VictoriaMetrics (observability's vmsingle),
+	// its alerts' state written back there, reloading a changed rule file within a minute.
+	let vmalertObjs = [if len(release.alerting.rules) > 0 {
+		let labels = appLabels & {"app.kubernetes.io/component": "vmalert"}
+		let vm = "http://vmsingle.observability.svc.cluster.local:8428"
+		{
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {
+				name:      "\(release.name)-vmalert"
+				namespace: release.namespace
+				"labels":  labels
+			}
+			spec: {
+				replicas: 1
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "vmalert"
+				}
+				template: {
+					metadata: "labels": labels
+					spec: enableServiceLinks: false
+					spec: containers: [{
+						name:  "vmalert"
+						image: "docker.io/victoriametrics/vmalert:v1.106.1@sha256:b546a4fbd2d382419dcf521caba096a1f09b15c9338c8f89fb009e5b8d0cfbce"
+						args: [
+							"-rule=/etc/vmalert/rules/*.yaml",
+							"-rule=/etc/vmalert/rules/*.yml",
+							"-datasource.url=\(vm)",
+							"-remoteWrite.url=\(vm)",
+							"-remoteRead.url=\(vm)",
+							"-configCheckInterval=1m",
+							"-external.label=app=\(release.name)",
+							if release.alerting.notifier != _|_ {"-notifier.url=\(release.alerting.notifier)"},
+							if release.alerting.notifier == _|_ {"-notifier.blackhole"},
+						]
+						ports: [{name: "http", containerPort: 8880}]
+						readinessProbe: httpGet: {path: "/ready", port: 8880}
+						resources: (#resourcesOf & {r: release, n: "vmalert"}).out
+						volumeMounts: [{name: "rules", mountPath: "/etc/vmalert/rules", readOnly: true}]
+					}]
+					spec: volumes: [{name: "rules", configMap: name: "\(release.name)-alert-rules"}]
+				}
+			}
+		}
+	}]
+
+	// release.metricsExport: an OpenTelemetry collector scraping each service's metrics port through
+	// its Service and writing to Managed Service for Prometheus, signed in through workload identity.
+	let metricsExportObjs = [if release.metricsExport != _|_ {
+		let x = release.metricsExport
+		let exportName = "\(release.name)-metrics-export"
+		let labels = appLabels & {"app.kubernetes.io/component": "metrics-export"}
+		let config = {
+			receivers: prometheus: config: scrape_configs: [for sn, s in release.services if s.metrics != _|_ {
+				job_name:        sn
+				scrape_interval: x.interval
+				metrics_path:    s.metrics.path
+				static_configs: [{targets: ["\(sn).\(release.namespace).svc.cluster.local:\(s.metrics.port)"]}]
+			}]
+			processors: {
+				resource: attributes: [
+					{key: "cloud.region", value: x.location, action: "upsert"},
+					{key: "k8s.cluster.name", value: x.cluster, action: "upsert"},
+					{key: "k8s.namespace.name", value: release.namespace, action: "upsert"},
+				]
+				batch: {}
+			}
+			exporters: googlemanagedprometheus: project: x.project
+			service: pipelines: metrics: {
+				receivers: ["prometheus"]
+				processors: ["resource", "batch"]
+				exporters: ["googlemanagedprometheus"]
+			}
+		}
+		let credentials = (#workloadCredentials & {provider: x.provider, serviceAccount: x.serviceAccount}).out
+		[{
+			apiVersion: "v1"
+			kind:       "ServiceAccount"
+			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+		}, {
+			apiVersion: "v1"
+			kind:       "ConfigMap"
+			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+			data: {
+				"config.yaml":      yaml.Marshal(config)
+				"credentials.json": json.Marshal(credentials)
+			}
+		}, {
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+			spec: {
+				replicas: 1
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "metrics-export"
+				}
+				template: {
+					metadata: "labels": labels
+					// A changed config rolls the collector.
+					metadata: annotations: "pronto.dev/config": hex.Encode(sha256.Sum256(yaml.Marshal(config) + json.Marshal(credentials)))
+					spec: {
+						serviceAccountName: exportName
+						enableServiceLinks: false
+						containers: [{
+							name:  "otelcol"
+							image: "docker.io/otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6"
+							args: ["--config=/etc/otelcol/config.yaml"]
+							env: [{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/etc/otelcol/credentials.json"}]
+							resources: (#resourcesOf & {r: release, n: "metrics-export"}).out
+							volumeMounts: [
+								{name: "config", mountPath: "/etc/otelcol", readOnly: true},
+								{name: "token", mountPath: "/var/run/secrets/gcp", readOnly: true},
+							]
+						}]
+						volumes: [
+							{name: "config", configMap: name: exportName},
+							{name: "token", projected: sources: [{serviceAccountToken: {path: "token", audience: x.audience, expirationSeconds: 3600}}]},
+						]
+					}
+				}
+			}
+		}]
+	}]
+
+	// release.blobs: mecha's blob plane over a Cloud Storage bucket, as gcp.cue's rclone-s3 and
+	// imgproxy sidecars are. rclone serves the bucket as the S3 bucket every app names (mecha-objects),
+	// signed in through workload identity (no key); imgproxy reads it over the cluster network (the
+	// services' network policy admits the app's pods on these ports) rather than through the mesh,
+	// whose invoke path would be part of what the S3 client signs. Both are in the mesh as
+	// app-ids rclone-s3 and imgproxy, where the door's PRONTO_UPSTREAM_RCLONE_S3 and _IMGPROXY reach them.
+	let blobsPorts = {rcloneS3: 3900, imgproxy: 8081}
+	let blobsObjs = [if release.blobs != _|_ {
+		let x = release.blobs
+		let blobsName = "\(release.name)-blobs"
+		let credentials = (#workloadCredentials & {provider: x.provider, serviceAccount: x.serviceAccount}).out
+		let rcloneLabels = appLabels & {"app.kubernetes.io/component": "rclone-s3"}
+		let imgproxyLabels = appLabels & {"app.kubernetes.io/component": "imgproxy"}
+		let rcloneURL = "http://rclone-s3.\(release.namespace).svc.cluster.local:\(blobsPorts.rcloneS3)"
+		[{
+			apiVersion: "v1"
+			kind:       "ServiceAccount"
+			metadata: {name: blobsName, namespace: release.namespace, labels: rcloneLabels}
+		}, {
+			apiVersion: "v1"
+			kind:       "ConfigMap"
+			metadata: {name: blobsName, namespace: release.namespace, labels: rcloneLabels}
+			data: "credentials.json": json.Marshal(credentials)
+		}, {
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {name: "\(release.name)-rclone-s3", namespace: release.namespace, labels: rcloneLabels}
+			spec: {
+				replicas: release.replicas
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "rclone-s3"
+				}
+				template: {
+					metadata: {
+						labels:      rcloneLabels
+						annotations: (#daprSidecar & {id: "rclone-s3", port: "\(blobsPorts.rcloneS3)"}).out
+						// A changed credential rolls the pods.
+						annotations: "pronto.dev/config": hex.Encode(sha256.Sum256(json.Marshal(credentials)))
+					}
+					spec: {
+						serviceAccountName: blobsName
+						enableServiceLinks: false
+						containers: [{
+							name:            "rclone-s3"
+							image:           (#appImage & {svc: "rclone-s3"}).out
+							imagePullPolicy: targetEnv.imagePullPolicy
+							command: ["rclone"]
+							args: ["serve", "s3", "--addr=0.0.0.0:\(blobsPorts.rcloneS3)", "--vfs-cache-mode=off", "objects:"]
+							lifecycle: preStop: sleep: seconds: 15
+							ports: [{name: "http", containerPort: blobsPorts.rcloneS3}]
+							// mecha's blob plane over the bucket: a combine remote names its root
+							// mecha-objects, and the pod's service account reaches it with no key.
+							env: [
+								{name: "RCLONE_CONFIG_OBJECTS_TYPE", value: "combine"},
+								{name: "RCLONE_CONFIG_OBJECTS_UPSTREAMS", value: "mecha-objects=gcs:\(x.bucket)"},
+								{name: "RCLONE_CONFIG_GCS_TYPE", value: "google cloud storage"},
+								{name: "RCLONE_CONFIG_GCS_ENV_AUTH", value: "true"},
+								{name: "RCLONE_CONFIG_GCS_BUCKET_POLICY_ONLY", value: "true"},
+								{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/etc/gcp/credentials.json"},
+							]
+							startupProbe: {tcpSocket: port: blobsPorts.rcloneS3, periodSeconds: 2, failureThreshold: 60}
+							resources: (#resourcesOf & {r: release, n: "rclone-s3"}).out
+							volumeMounts: [
+								{name: "credentials", mountPath: "/etc/gcp", readOnly: true},
+								{name: "token", mountPath: "/var/run/secrets/gcp", readOnly: true},
+							]
+						}]
+						volumes: [
+							{name: "credentials", configMap: name: blobsName},
+							{name: "token", projected: sources: [{serviceAccountToken: {path: "token", audience: x.audience, expirationSeconds: 3600}}]},
+						]
+					}
+				}
+			}
+		}, {
+			apiVersion: "v1"
+			kind:       "Service"
+			metadata: {name: "rclone-s3", namespace: release.namespace, labels: rcloneLabels}
+			spec: {
+				type: "ClusterIP"
+				selector: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "rclone-s3"
+				}
+				ports: [{name: "http", port: blobsPorts.rcloneS3, targetPort: blobsPorts.rcloneS3, protocol: "TCP"}]
+			}
+		}, {
+			apiVersion: "apps/v1"
+			kind:       "Deployment"
+			metadata: {name: "\(release.name)-imgproxy", namespace: release.namespace, labels: imgproxyLabels}
+			spec: {
+				replicas: release.replicas
+				selector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "imgproxy"
+				}
+				template: {
+					metadata: {
+						labels:      imgproxyLabels
+						annotations: (#daprSidecar & {id: "imgproxy", port: "\(blobsPorts.imgproxy)"}).out
+					}
+					spec: {
+						enableServiceLinks: false
+						containers: [{
+							name:            "imgproxy"
+							image:           (#appImage & {svc: "imgproxy"}).out
+							imagePullPolicy: targetEnv.imagePullPolicy
+							lifecycle: preStop: sleep: seconds: 15
+							ports: [{name: "http", containerPort: blobsPorts.imgproxy}]
+							// As gcp.cue's imgproxy (and the app's compose): mecha's presets alone, no key signs a URL.
+							env: [
+								{name: "IMGPROXY_USE_S3", value: "true"},
+								{name: "IMGPROXY_S3_ENDPOINT", value: rcloneURL},
+								// The store takes any key pair; imgproxy's S3 client insists on one.
+								{name: "AWS_ACCESS_KEY_ID", value: "GK000000000000000000000000"},
+								{name: "AWS_SECRET_ACCESS_KEY", value: "0000000000000000000000000000000000000000000000000000000000000000"},
+								{name: "AWS_REGION", value: "rclone"},
+								{name: "IMGPROXY_BIND", value: ":\(blobsPorts.imgproxy)"},
+								{name: "IMGPROXY_MAX_SRC_RESOLUTION", value: "50"},
+								// The store and Google's photo host, as mecha's #ImgproxySources.
+								{name: "IMGPROXY_ALLOWED_SOURCES", value: "s3://mecha-objects/,https://lh3.googleusercontent.com/"},
+								{name: "IMGPROXY_ONLY_PRESETS", value: "true"},
+								{name: "IMGPROXY_PRESETS", value: "thumb=rs:fill:128:128/f:webp,avatar=rs:fill:256:256/f:webp,picture=rs:fit:1024:1024/f:webp"},
+								{name: "IMGPROXY_MAX_RESULT_DIMENSION", value: "1024"},
+								{name: "IMGPROXY_SET_CANONICAL_HEADER", value: "false"},
+								{name: "IMGPROXY_CACHE_CONTROL_PASSTHROUGH", value: "true"},
+							]
+							startupProbe: {tcpSocket: port: blobsPorts.imgproxy, periodSeconds: 2, failureThreshold: 60}
+							resources: (#resourcesOf & {r: release, n: "imgproxy"}).out
+						}]
+					}
+				}
+			}
+		}, {
+			apiVersion: "v1"
+			kind:       "Service"
+			metadata: {name: "imgproxy", namespace: release.namespace, labels: imgproxyLabels}
+			spec: {
+				type: "ClusterIP"
+				selector: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "imgproxy"
+				}
+				ports: [{name: "http", port: blobsPorts.imgproxy, targetPort: blobsPorts.imgproxy, protocol: "TCP"}]
+			}
+		}]
+	}]
+
 	// The app's own services (release.services): a Deployment and a Service each,
 	// in the mesh as render is. Compose's SERVICE_JWT is a development value: the
 	// release's own is minted against the cluster's PGRST_JWT_SECRET (release.nu
 	// ensure-service-jwt) into <name>-service-jwt.
 	let appServiceObjs = [for n, s in release.services {
 		let labels = appLabels & {"app.kubernetes.io/component": n}
+		let serviceName = n
 		[{
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
@@ -973,7 +1398,16 @@ import (
 					metadata: {
 						"labels":    labels
 						annotations: (#daprSidecar & {id: n, port: "\(s.port)"}).out
+						if s.metrics != _|_ {
+							annotations: {
+								"prometheus.io/scrape": "true"
+								"prometheus.io/port":   "\(s.metrics.port)"
+								"prometheus.io/path":   s.metrics.path
+							}
+						}
 					}
+					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
+					spec: enableServiceLinks: false
 					spec: containers: [{
 						name:            n
 						image:           (#appImage & {svc: n}).out
@@ -981,18 +1415,25 @@ import (
 						// A pod going away keeps serving while the mesh learns of its
 						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
 						lifecycle: preStop: sleep: seconds: 15
-						ports: [{name: "http", containerPort: s.port}]
+						ports: [{name: "http", containerPort: s.port}, if s.metrics != _|_ {{name: "metrics", containerPort: s.metrics.port}}]
 						env: list.Concat([
 							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" {name: k, value: v}],
 							[
 								{name: "PORT", value: "\(s.port)"},
 								{name: "ORIGIN", value: originValue},
 								{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}},
+								for k, v in s.secrets {name: k, valueFrom: secretKeyRef: {name: v, key: k}},
 							],
 							(#denoTelemetry & {service: n}).env,
 						])
-						resources: release.resources
+						resources: (#resourcesOf & {r: release, n: serviceName}).out
+						if len(s.files) > 0 {
+							volumeMounts: [for dir, cm in s.files {name: "files-\(cm)", mountPath: dir, readOnly: true}]
+						}
 					}]
+					if len(s.files) > 0 {
+						spec: volumes: [for _, cm in s.files {name: "files-\(cm)", configMap: name: cm}]
+					}
 				}
 			}
 		}, {
@@ -1009,9 +1450,62 @@ import (
 					"app.kubernetes.io/name":      release.name
 					"app.kubernetes.io/component": n
 				}
-				ports: [{name: "http", port: s.port, targetPort: s.port, protocol: "TCP"}]
+				ports: [
+					{name: "http", port: s.port, targetPort: s.port, protocol: "TCP"},
+					if s.metrics != _|_ {{name: "metrics", port: s.metrics.port, targetPort: s.metrics.port, protocol: "TCP"}},
+				]
 			}
 		}]
+	}]
+
+	// A service's clock (services.<n>.clock): each minute (its schedule), a pod that POSTs to the
+	// service's path with the service role's token, as Cloud Scheduler pokes the ticker on Cloud Run.
+	// It carries the app's name label, which the services' network policy admits on their ports.
+	let appServiceClockObjs = [for n, s in release.services if s.clock != _|_ {
+		let labels = appLabels & {"app.kubernetes.io/component": "\(n)-clock"}
+		{
+			apiVersion: "batch/v1"
+			kind:       "CronJob"
+			metadata: {
+				name:      "\(release.name)-\(n)-clock"
+				namespace: release.namespace
+				"labels":  labels
+			}
+			spec: {
+				schedule:                   s.clock.schedule
+				timeZone:                   "Etc/UTC"
+				concurrencyPolicy:          "Forbid"
+				startingDeadlineSeconds:    50
+				successfulJobsHistoryLimit: 1
+				failedJobsHistoryLimit:     3
+				jobTemplate: spec: {
+					backoffLimit:            0
+					activeDeadlineSeconds:   60
+					ttlSecondsAfterFinished: 600
+					template: {
+						metadata: "labels": labels
+						spec: {
+							restartPolicy:      "Never"
+							enableServiceLinks: false
+							containers: [{
+								name:  "poke"
+								image: "docker.io/curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
+								env: [{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}}]
+								// A new pod's address reaches the network policies a few seconds after it starts
+								// (k3s's kube-router refuses it until then): it waits, up to 30s, for the service to
+								// take a connection, then pokes once.
+								command: ["sh", "-c", """
+									u=http://\(n).\(release.namespace).svc.cluster.local:\(s.port)
+									for i in $(seq 15); do [ "$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$u/")" != 000 ] && break; sleep 2; done
+									exec curl -fsS -m 50 -X POST -H "Authorization: Bearer $SERVICE_JWT" "$u\(s.clock.path)?caller=k8s-cronjob"
+									"""]
+								resources: limits: {cpu: "100m", memory: "32Mi"}
+							}]
+						}
+					}
+				}
+			}
+		}
 	}]
 
 	// Each of the app's own services takes the door's requests on its port and
@@ -1019,7 +1513,7 @@ import (
 	// 443 (a broker): the backends' policy holds the cluster's own, which reach
 	// nothing outside.
 	let appServicesNetworkPolicyObj = [
-		if release.networkPolicy.enabled if len(release.services) > 0 {
+		if release.networkPolicy.enabled if len(release.services) > 0 || release.blobs != _|_ {
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
@@ -1031,7 +1525,7 @@ import (
 				podSelector: matchExpressions: [{
 					key:      "app.kubernetes.io/component"
 					operator: "In"
-					values: [for n, _ in release.services {n}]
+					values: list.Concat([[for n, _ in release.services {n}], [if release.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}]])
 				}]
 				policyTypes: ["Ingress", "Egress"]
 				ingress: [
@@ -1039,19 +1533,28 @@ import (
 						from: [{podSelector: matchLabels: "app.kubernetes.io/name": release.name}]
 						ports: list.Concat([
 							[for _, s in release.services {port: s.port, protocol: "TCP"}],
+							[if release.blobs != _|_ for _, p in blobsPorts {port: p, protocol: "TCP"}],
 							[{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}],
 						])
 					},
 					{
 						from: [{namespaceSelector: matchLabels: "kubernetes.io/metadata.name": "observability"}]
-						ports: [{port: 9090, protocol: "TCP"}]
+						ports: [{port: 9090, protocol: "TCP"}, for _, s in release.services if s.metrics != _|_ {port: s.metrics.port, protocol: "TCP"}]
+					},
+					// A service's metrics, which the cluster's VictoriaMetrics and the app's metrics export scrape.
+					if len([for _, s in release.services if s.metrics != _|_ {s}]) > 0 {
+						from: [{podSelector: matchLabels: {
+							"app.kubernetes.io/name":      release.name
+							"app.kubernetes.io/component": "metrics-export"
+						}}]
+						ports: [for _, s in release.services if s.metrics != _|_ {port: s.metrics.port, protocol: "TCP"}]
 					},
 				]
 				egress: [
 					{ports: [{port: 53, protocol: "UDP"}, {port: 53, protocol: "TCP"}]},
 					{
 						to: [{podSelector: matchLabels: "app.kubernetes.io/name": release.name}]
-						ports: [{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}]
+						ports: list.Concat([[{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}], [if release.blobs != _|_ {{port: blobsPorts.rcloneS3, protocol: "TCP"}}]])
 					},
 					{
 						to: [{namespaceSelector: matchLabels: "kubernetes.io/metadata.name": "observability"}]
@@ -1246,6 +1749,13 @@ import (
 							{port: 50006, protocol: "TCP"},
 							{port: 6500, protocol: "TCP"},
 						]
+					},
+					// What the door proxies to outside the cluster, as Cloud Run's door does: a plugin's
+					// upstream on the internet (pronto-analytics' Umami at /a/), on 443 only, and nothing
+					// private.
+					{
+						to: [{ipBlock: {cidr: "0.0.0.0/0", except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}}]
+						ports: [{port: 443, protocol: "TCP"}]
 					},
 				]
 			}
@@ -1471,6 +1981,7 @@ import (
 			prontoExternalSecretObj,
 			daprConfigObj,
 			daprResiliencyObj,
+			backupObjs,
 			prontoClusterObj,
 			schemaJobObj,
 			prontoDatabaseServiceObj,
@@ -1485,6 +1996,10 @@ import (
 			prontoRenderDeploymentObj,
 			prontoRenderServiceObj,
 			for o in appServiceObjs {o},
+			appServiceClockObjs,
+			for o in blobsObjs {o},
+			vmalertObjs,
+			for o in metricsExportObjs {o},
 			gatewayObj,
 			httpRouteObj,
 			backendTrafficPolicyObj,

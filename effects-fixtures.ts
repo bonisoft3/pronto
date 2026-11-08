@@ -7,7 +7,7 @@ export function paymentProgram({ effect = "", machine = "", entity = "", vendore
   return `
 package test
 
-import "bonisoft.org/plugins/pronto"
+import "github.com/bonisoft3/pronto"
 
 app: pronto.#App & {
   meta: {

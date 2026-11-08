@@ -7,12 +7,14 @@
 #   ./prerelease.sh 0.24.1-gcp.25 [commit=HEAD]
 #   ./prerelease.sh --runtime-only 0.24.1-gcp.25 [commit]   the runtime again, over a published
 #     version's release, from the commit it was published from: its module is never touched
-# The mecha module the snapshot pins is .github/prerelease.env's MECHA_V, a version
-# ghcr.io/bsoneca/cue-modules already holds, and its runtime the fork's mecha-v$MECHA_V release.
+# The mecha and omnishell modules the snapshot pins are .github/prerelease.env's MECHA_V and
+# OMNISHELL_V, versions ghcr.io/bsoneca/cue-modules already holds, and their runtimes the fork's
+# mecha-v$MECHA_V and omnishell-v$OMNISHELL_V releases.
 # A repo the published bootstrap starts runs on this fork as the monorepo's apps do: its .mise.toml
 # names the fork's CUE registry, and the lock bootstrap ships names this release's pronto (by URL:
 # its checksum is the tarball's own, which holds the lock, so mise records it at the first install)
-# and the fork's mecha.
+# and the fork's mecha and omnishell. A new app's omnishell is its module's toolchain's, so the
+# checks its lint runs (omnishell check machines) are the fork's too.
 set -eu
 runtime_only=false
 if [ "${1:-}" = --runtime-only ]; then runtime_only=true; shift; fi
@@ -22,6 +24,8 @@ SRC=$(git -C "$here" rev-parse "${2:-HEAD}")
 MODULE=ghcr.io/bsoneca/cue-modules/github.com/bonisoft3/pronto
 MECHA_V=$(sed -n 's/^MECHA_V=\([0-9A-Za-z.-]*\)$/\1/p' "$here/.github/prerelease.env")
 [ -n "$MECHA_V" ] || { echo ".github/prerelease.env names no MECHA_V" >&2; exit 1; }
+OMNISHELL_V=$(sed -n 's/^OMNISHELL_V=\([0-9A-Za-z.-]*\)$/\1/p' "$here/.github/prerelease.env")
+[ -n "$OMNISHELL_V" ] || { echo ".github/prerelease.env names no OMNISHELL_V" >&2; exit 1; }
 # sayt's own mise, where sayt caches it: ~/Library/Caches on macOS, the XDG cache elsewhere.
 case $(uname -s) in
 Darwin) cache=$HOME/Library/Caches ;;
@@ -44,16 +48,18 @@ mkdir "$work/pronto"
 git -C "$here" archive "$SRC" | tar x -C "$work/pronto"
 cd "$work/pronto"
 gh api "repos/bsoneca/pronto-fork/releases/tags/mecha-v$MECHA_V" --jq '[.assets[] | {name, digest, url}]' > "$work/mecha-assets.json"
-python3 -I - "$MECHA_V" "$PRONTO_V" "$work/mecha-assets.json" <<'EOF'
+gh api "repos/bsoneca/pronto-fork/releases/tags/omnishell-v$OMNISHELL_V" --jq '[.assets[] | {name, digest, url}]' > "$work/omnishell-assets.json"
+python3 -I - "$MECHA_V" "$PRONTO_V" "$work/mecha-assets.json" "$OMNISHELL_V" "$work/omnishell-assets.json" <<'EOF'
 import json, re, sys
-mecha_v, pronto_v, mecha_assets = sys.argv[1:]
+mecha_v, pronto_v, mecha_assets, omnishell_v, omnishell_assets = sys.argv[1:]
 def edit(p, f):
     s = open(p).read(); t = f(s); assert t != s, p; open(p, 'w').write(t)
-edit('cue.mod/module.cue', lambda s: re.sub(r'("github.com/bonisoft3/mecha@v0": \{\n\t\tv:\s+)"[^"]+"', lambda m: m.group(1) + f'"v{mecha_v}"', s))
+for dep, v in (('mecha', mecha_v), ('omnishell', omnishell_v)):
+    edit('cue.mod/module.cue', lambda s: re.sub(r'("github.com/bonisoft3/' + dep + r'@v0": \{\n\t\tv:\s+)"[^"]+"', lambda m: m.group(1) + f'"v{v}"', s))
 edit('distribution/config.cue', lambda s: re.sub(r'#Version:(\s+)"([^"]+)"', lambda m: f'#Version:{m.group(1)}"{pronto_v}" // was "{m.group(2)}"', s, count=1))
-registry = 'github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,registry.cue.works'
+registry = 'github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/omnishell=ghcr.io/bsoneca/cue-modules,registry.cue.works'
 edit('distribution/config.cue', lambda s: s.replace('\tmise: {\n\t\t...\n', f'\tmise: {{\n\t\t...\n\t\t// The fork\'s modules, where the fork publishes them (prerelease.sh), a default that an app sets again.\n\t\tenv: CUE_REGISTRY: *"{registry}" | string\n', 1))
-# The lock bootstrap ships, its pronto and mecha the fork's: every other tool is upstream's.
+# The lock bootstrap ships, its pronto, mecha and omnishell the fork's: every other tool is upstream's.
 def block(s, tool):
     start = s.index(f'[[tools."{tool}"]]')
     nxt = s.find('\n[[tools.', start + 1)
@@ -64,18 +70,21 @@ def fork_lock(s):
     pr = re.sub(r'https://github\.com/bonisoft3/pronto/releases/download/v[^/]+/', f'https://github.com/bsoneca/pronto-fork/releases/download/v{pronto_v}/', pr)
     pr = re.sub(r'\n(checksum|url_api) = "[^"]*"', '', pr)
     s = s[:a] + pr + s[b:]
-    assets = {x['name']: x for x in json.load(open(mecha_assets))}
-    a, b = block(s, 'github:bonisoft3/mecha')
-    def platform(m):
-        body = m.group(0)
-        name = re.search(r'/(mecha-[a-z0-9-]+\.tar\.gz)"', body).group(1)
-        x = assets[name]
-        body = re.sub(r'checksum = "[^"]*"', f'checksum = "{x["digest"]}"', body)
-        body = re.sub(r'url = "[^"]*"', f'url = "https://github.com/bsoneca/pronto-fork/releases/download/mecha-v{mecha_v}/{name}"', body)
-        return re.sub(r'url_api = "[^"]*"', f'url_api = "{x["url"]}"', body)
-    me = re.sub(r'version = "[^"]+"', f'version = "{mecha_v}"', s[a:b], count=1)
-    me = re.sub(r'\[tools\."github:bonisoft3/mecha"\."platforms\.[a-z0-9-]+"\](?:\n[^\[\n][^\n]*)*', platform, me)
-    return s[:a] + me + s[b:]
+    # Each fork runtime by its release's own assets: one tarball a platform, named as upstream's.
+    for tool, v, listed in (('mecha', mecha_v, mecha_assets), ('omnishell', omnishell_v, omnishell_assets)):
+        assets = {x['name']: x for x in json.load(open(listed))}
+        a, b = block(s, f'github:bonisoft3/{tool}')
+        def platform(m, tool=tool, v=v, assets=assets):
+            body = m.group(0)
+            name = re.search(r'/(' + tool + r'-[a-z0-9-]+\.tar\.gz)"', body).group(1)
+            x = assets[name]
+            body = re.sub(r'checksum = "[^"]*"', f'checksum = "{x["digest"]}"', body)
+            body = re.sub(r'url = "[^"]*"', f'url = "https://github.com/bsoneca/pronto-fork/releases/download/{tool}-v{v}/{name}"', body)
+            return re.sub(r'url_api = "[^"]*"', f'url_api = "{x["url"]}"', body)
+        me = re.sub(r'version = "[^"]+"', f'version = "{v}"', s[a:b], count=1)
+        me = re.sub(r'\[tools\."github:bonisoft3/' + tool + r'"\."platforms\.[a-z0-9-]+"\](?:\n[^\[\n][^\n]*)*', platform, me)
+        s = s[:a] + me + s[b:]
+    return s
 edit('bootstrap/mise.lock', fork_lock)
 # The tools the fork's roster adds (bootstrap/fork.lock), each one the shipped lock lacks.
 def with_fork_tools(s):
@@ -92,7 +101,7 @@ crane registry serve --address localhost:5051 >/dev/null 2>&1 &
 serve=$!
 sleep 2
 git init -q && git add -A && git -c user.email=fork@local -c user.name=fork commit -qm "pronto v$PRONTO_V"
-CUE_REGISTRY='github.com/bonisoft3/pronto=localhost:5051+insecure,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,registry.cue.works' cue mod publish "v$PRONTO_V"
+CUE_REGISTRY='github.com/bonisoft3/pronto=localhost:5051+insecure,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/omnishell=ghcr.io/bsoneca/cue-modules,registry.cue.works' cue mod publish "v$PRONTO_V"
 crane copy --insecure "localhost:5051/github.com/bonisoft3/pronto:v$PRONTO_V" "$MODULE:v$PRONTO_V"
 kill "$serve" 2>/dev/null || true; wait "$serve" 2>/dev/null || true; serve=
 fi

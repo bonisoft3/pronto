@@ -1624,6 +1624,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if [if S.code.capabilities.auth != _|_ if S.code.capabilities.auth.required {false}, true][0] if s.access == "private" {
 				access: "private"
 			}
+			// A screen an app behind a sign-in opens to visitors (#Screen.access).
+			if [if S.code.capabilities.auth != _|_ if S.code.capabilities.auth.required {true}, false][0] if s.access == "public" {
+				access: "public"
+			}
 			if s.ssr != _|_ {
 				ssr: s.ssr
 			}
@@ -1951,6 +1955,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if D.code.meta.ssrOrigin != _|_ {
 					ssrOrigin: D.code.meta.ssrOrigin
 				}
+				if D.code.meta.firstLoad != _|_ {
+					firstLoad: D.code.meta.firstLoad
+				}
 				// What only the cluster's streams and computations write lands in
 				// live tables, which the page ships as they stood at bundling.
 				if len(D.code.state.pipelines)+len(D.code.state.drains)+len(D.code.state.computations) > 0 {
@@ -2044,6 +2051,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						}], " ")]
 						note: "Pronto computations admitted"
 					}
+				}
+				// A pages app's first load within its budget, bundled as the
+				// release bundles it, so the gate fails where the release would.
+				// An app with derived tables is held to it at release only: its
+				// rows come from a settled cluster the gate does not run.
+				if list.Contains(D.code.meta.targets, "pages") && _distribution.firstLoad > 0 && len(_distribution.derived.tables) == 0 {
+					firstLoad: {verb: "test", cmds: [_distribution.checks.firstLoad], note: "Pronto first-load budget"}
 				}
 				if D.code.state.effects != _|_ if len(D.code.state.effects) > 0 {
 					admitEffects: {verb: "lint", cmds: [_distribution.checks.admitEffects], note: "Pronto effect handlers admitted"}
@@ -3982,7 +3996,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				// A door built as a release names the inline scripts its documents
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
-				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
+				// A released page leaves the door as written: no-transform keeps a proxy in front
+				// (Cloudflare's, before a node's tunnel) from rewriting it, such as injecting its
+				// analytics beacon, a script from another origin this policy refuses (a console
+				// error on every page). Cloudflare skips that and its other rewrites of HTML on
+				// no-transform (developers.cloudflare.com/web-analytics/faq). A field of its own,
+				// beside whatever Cache-Control the page's handler sets.
+				let untransformed = "  header {\n    match header Content-Type text/html*\n    +Cache-Control no-transform\n    defer\n  }\n"
+				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n" + untransformed}, ""][0]
 				let forms = [for i, f in _forms {"  @form\(i) path \(f.path)\n  header @form\(i) Content-Security-Policy \(json.Marshal(strings.Replace(policy, "form-action 'self'", strings.Join(list.Concat([["form-action 'self'"], f.to]), " "), 1)))\n"}]
 				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(strings.Join(presenter, ""))\(strings.Join(forms, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]

@@ -358,10 +358,18 @@ async function readAppNow(appDir: string, pkg: string, lifting: boolean, express
   const version = versionAt < 0 ? "" : module.slice(versionAt);
   const subdir = relative(root, app).split(sep).join("/");
   const importPath = `${modulePath}${subdir ? `/${subdir}` : ""}${version}:${pkg}`;
-  // Write permissions are scoped to the caller's spelling, including Windows short paths.
-  const observer = await Deno.makeTempDir({ dir: appDir, prefix: ".pronto-derive-" });
+  // Fixed names, so the cue wrapper's export cache (pronto's tools/cue-budget) keys the same read the
+  // same way in every generate and replays it while the app is unchanged; random names made every read
+  // a new key, and a new memory claim. A lock on the app's folder keeps another process's read (a
+  // check beside a generate) from sharing or removing these files while one runs.
+  const observer = join(appDir, ".pronto-derive");
+  const bootstrap = join(appDir, "pronto_derive.cue");
+  await Deno.mkdir(join(appDir, ".task", "pronto"), { recursive: true });
+  const lock = await Deno.open(join(appDir, ".task", "pronto", "derive.lock"), { create: true, write: true });
   try {
-    const bootstrap = await Deno.makeTempFile({ dir: appDir, prefix: "pronto_derive_", suffix: ".cue" });
+    await lock.lock(true);
+    await ifMissing(Deno.remove(observer, { recursive: true }), undefined);
+    await Deno.mkdir(observer);
     try {
       // Tag injection applies only to the CLI package, so the imported app is lifted explicitly.
       // Every field program_derived.cue holds is defaulted, so a first generate can read a program it has not derived.
@@ -372,10 +380,11 @@ async function readAppNow(appDir: string, pkg: string, lifting: boolean, express
       await Deno.writeTextFile(join(observer, "input.cue"), `package ${pkg === "pronto_derivation" ? "pronto_derivation_reader" : "pronto_derivation"}\nimport app ${JSON.stringify(importPath)}\nreading: ${expression}\n`);
       return await cueJson(observer, ["export", ".", "-e", "reading", "--out", "json"]);
     } finally {
-      await Deno.remove(bootstrap);
+      await ifMissing(Deno.remove(bootstrap), undefined);
+      await ifMissing(Deno.remove(observer, { recursive: true }), undefined);
     }
   } finally {
-    await Deno.remove(observer, { recursive: true });
+    lock.close();
   }
 }
 

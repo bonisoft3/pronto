@@ -98,7 +98,7 @@ Manifests are cached in `~/.cache/sayt/k8s/operators` and applied via `kubectl a
 | **Envoy Gateway** | `v1.2.4` | `5554f170...` | Next-generation API Gateway with OpenTelemetry tracing |
 | **CloudNativePG (CNPG)** | `v1.25.0` | `54032561...` | Declarative cloud-native PostgreSQL clusters |
 | **External Secrets (ESO)** | `v0.10.5` (Helm chart) | `5cf78ad9...` | Syncs SOPS / external stores into native Kubernetes Secrets |
-| **Dapr** | `v1.14.4` (Helm chart) | `97f64b80...` | Distributed application runtime with native Kubernetes secret store |
+| **Dapr** | `v1.16.21` (Helm chart) | `71233ad4...` | Distributed application runtime with native Kubernetes secret store |
 
 ---
 

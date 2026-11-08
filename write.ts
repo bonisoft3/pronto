@@ -18,6 +18,7 @@ import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive, exclusive, GENERATED_HTML_HEADER, programPackage, readApp, terminalPath } from "./derive.ts";
 import { mint } from "./identity.ts";
 import { entries, exists, ifMissing } from "./missing.ts";
+import { keepBlocks, writeWhole } from "./caddy-blocks.ts";
 import { projectSay, projectGates } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 import { generateProto, type ProtoEntity } from "./type-proto.ts";
@@ -343,14 +344,16 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
     changed = true;
     touched = true;
   }
-  const put = async (rel: string, text: string) => {
+  const put = async (rel: string, emitted: string) => {
     const path = `${appDir}/${rel}`;
-    if (await ifMissing(Deno.readTextFile(path), null) === text) return;
+    const current = await ifMissing(Deno.readTextFile(path), null);
+    const text = rel === "docker/Caddyfile" ? keepBlocks(current, emitted) : emitted;
+    if (current === text) return;
     changed = true;
     touched = true;
     const dir = parent(path);
     if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
-    await Deno.writeTextFile(path, text);
+    await writeWhole(path, text);
   };
   for (const [rel, text] of contents) await put(rel, text);
   for (const [rel, text] of await renderDocuments(emission)) await put(rel, text);
@@ -462,16 +465,16 @@ await writeMiseLocal();
 await writeIrStylesheet(appDir);
 const before = await derivedText();
 await derive(appDir);
-// Three reads of the same tree, none writing: the identities mint checks, the emission and the
-// program the ir is drawn from. They are queued together and run one at a time (exclusive); the
-// last two are taken on the supposition that mint writes nothing and the emission moves nothing,
-// and are taken again where it did.
-const minting = mint(appDir);
+// Two reads of the same tree, none writing: the program the ir is drawn from, whose entities are
+// what mint checks, and the emission. They are queued together and run one at a time (exclusive);
+// the emission is taken on the supposition that mint writes nothing, and is taken again where it did.
 const liftAfterDerive = (await derivedText()).includes("@tag(derive,");
-const speculation = Promise.all([exportOut(true).catch(() => null), exportProgram(liftAfterDerive).catch(() => null)]);
+const reading = exportProgram(liftAfterDerive).catch(() => null);
+const speculating = exportOut(true).catch(() => null);
 // An entity's writers come from the screens, so ids are minted once a derivation exists.
-const minted = await minting;
-const [heldOut, heldProgram] = await speculation;
+const heldProgram = await reading;
+const minted = await mint(appDir, heldProgram?.program.state.entities as Parameters<typeof mint>[1]);
+const heldOut = await speculating;
 const settled = await derivedText();
 let emission = await writeEmission(await exportEmission(minted ? null : heldOut));
 let derivations = 1;

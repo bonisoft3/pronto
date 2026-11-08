@@ -142,8 +142,13 @@ export def start-drivers [app_dir: string, plan: record]: nothing -> record {
 		# container; each one's log is printed whole once all are done. The
 		# first makes the compose project's network, which the others join.
 		"mkdir -p /workspace/shots /workspace/verdicts /workspace/logs"
+		# Every driver's image is local by now, pulled or built. `compose run` is
+		# given the config without its builds: with them it builds the services a
+		# driver's contexts name (the browser) when only the driver was pulled,
+		# and that build's downloads fail on whatever third party is down then.
+		"docker compose --profile '*' config --format json | jq 'del(.services[].build)' >/workspace/run.json"
 		"drive() {"
-		"  docker compose --profile '*' run --name \"verify-$1\" --no-deps -e APP_URL=\"$APP_URL\" -e SHOTS=/shots \"$1\" >\"/workspace/logs/$1\" 2>&1 || true"
+		"  docker compose -f /workspace/run.json --profile '*' run --name \"verify-$1\" --no-deps -e APP_URL=\"$APP_URL\" -e SHOTS=/shots \"$1\" >\"/workspace/logs/$1\" 2>&1 || true"
 		"  docker inspect -f '{{.State.ExitCode}}' \"verify-$1\" >\"/workspace/verdicts/$1\" 2>/dev/null || echo 1 >\"/workspace/verdicts/$1\""
 		"  docker cp \"verify-$1:/shots\" \"/workspace/shots/$1\" 2>/dev/null || true"
 		"  docker rm -f \"verify-$1\" >/dev/null 2>&1 || true"
