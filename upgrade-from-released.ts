@@ -97,12 +97,18 @@ export function localJob(jobYaml: string, o: { stepsDir: string; migrateSh: stri
 const q = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
 
 /** The migrate process's replacement: the released commit's pgroll migrations, then the release's job. */
+/** The initdb step a test database's rows are (emit.cue: #App.state.fixture). */
+export const FIXTURE = "950_fixture.sql"
+
 export function upgradeScript(o: {
   oldDir: string
   oldBaseline: string
   oldMigrationsDir: string | undefined
   jobFile: string
   mecha: string
+  // This tree's test rows (#App.state.fixture), which the released commit's database was built with
+  // its own commit's of: a test database holds the tree's, applied over it once the job has run.
+  fixtureFile?: string
 }): string {
   return `set -euo pipefail
 # The stack's database, from the address it gives this process (a libpq URL).
@@ -136,6 +142,15 @@ if [ "$after" != "$before" ]; then
   echo "upgrade-from-released: the schema job left $((after - before)) inferred pgroll migrations: its replays ran with pgroll's capture on (it skips only pgroll.no_inferred_migrations = 'TRUE')" >&2
   exit 1
 fi
+${
+    o.fixtureFile
+      ? `# 4. This tree's test rows: the released commit's database holds that commit's, and a release's
+# initdb skips them, so a stack under test would otherwise run on the old ones (Studio's visual-lint
+# app, PRONTO-57).
+echo "upgrade-from-released: this tree's fixture"
+psql -X -v ON_ERROR_STOP=1 -q -f ${q(o.fixtureFile)}`
+      : "# 4. The tree has no fixture."
+  }
 # PostgREST reads its schema once (migrate.sh tells it too, where there are pgroll migrations).
 psql -X -qAc "NOTIFY pgrst, 'reload schema'"
 `
@@ -222,7 +237,8 @@ export async function prepare(appDir: string, gateDir: string, dir: string, rele
   const jobFile = `${dir}/job.sh`
   await Deno.writeTextFile(jobFile, script)
   const upgradeFile = `${dir}/upgrade.sh`
-  await Deno.writeTextFile(upgradeFile, upgradeScript({ oldDir, oldBaseline: oldMig?.baseline ?? "", oldMigrationsDir: oldMig ? oldMigDir : undefined, jobFile, mecha }))
+  const fixtureFile = steps[FIXTURE] ? `${stepsDir}/${FIXTURE}` : undefined
+  await Deno.writeTextFile(upgradeFile, upgradeScript({ oldDir, oldBaseline: oldMig?.baseline ?? "", oldMigrationsDir: oldMig ? oldMigDir : undefined, jobFile, mecha, fixtureFile }))
 
   // The tree's own stack, but its database is the released commit's, and its migrate step the upgrade.
   const migrate = procs.migrate ?? { depends_on: { database: { condition: "process_healthy" } }, availability: { exit_on_skipped: true }, environment: procs.database.environment }
