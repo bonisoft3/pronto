@@ -131,6 +131,22 @@ if [ "$1" = vet ] && [ "$CUE_VETTED" != off ] && [ -f "$vetted" ]; then
     plan=
   fi
 fi
+# A claimed export whose inputs are those of one that passed before, anywhere on this machine, prints
+# what that one printed, without evaluating: vetted.ts keys it the same way (with its tags, its
+# expression and its format), and keeps what a passing export printed in ~/.cache/pronto/cue-exported.
+# The output is always written here, from the cache or from cue: what a reader saves from it is this
+# checkout's. One that writes a file (-o) or can't be keyed runs as asked; CUE_EXPORTED=off exports every
+# time.
+exportpath=
+if [ "$1" = export ] && [ "$CUE_EXPORTED" != off ] && [ -f "$vetted" ]; then
+  exportpath=$("$deno" run -A --no-config --no-lock "$vetted" export-key "$real" "$@" 2>/dev/null); erc=$?
+  if [ "$erc" = 0 ] && cat "$exportpath" 2>/dev/null; then
+    echo "cue: export of ${folder:-.} ($*) printed from a passing export with these same inputs; not evaluated again" >&2
+    exit 0
+  fi
+  [ "$erc" = 1 ] || exportpath=
+  [ -n "$exportpath" ] && exportargs=$(printf '%s\n' "$@")
+fi
 # Linux's ceiling: the budget (RAM but STACK_MEM_RESERVE, as slot.ts counts it), held by the kernel;
 # never below half again what was claimed, since a lone claim larger than the budget is let run.
 run=$real
@@ -140,17 +156,33 @@ if [ "$(uname)" = Linux ] && systemd-run --user --scope --quiet true 2>/dev/null
   run=systemd-run
 fi
 
-[ -z "$plan" ] && exec "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$learned.cores" --what "cue ${folder:-.}" -- "$run" "$@"
+[ -z "$plan" ] && [ -z "$exportpath" ] && exec "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$learned.cores" --what "cue ${folder:-.}" -- "$run" "$@"
 
 # In the background, so a signal to this wrapper reaches the claim (as above), and its pass recorded.
 if { : <&0; } 2>/dev/null; then exec 3<&0; else exec 3</dev/null; fi
 cores=$learned.cores; [ "$learned" = /dev/null ] && cores=/dev/null
-"$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$cores" --what "cue ${folder:-.}" -- "$run" "$@" <&3 &
+if [ -n "$exportpath" ]; then
+  # What cue prints, kept to store once it passed, then printed.
+  out=$(mktemp "${TMPDIR:-/tmp}/cue-export.XXXXXX") || exec "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$cores" --what "cue ${folder:-.}" -- "$run" "$@" <&3
+  "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$cores" --what "cue ${folder:-.}" -- "$run" "$@" <&3 >"$out" &
+else
+  "$deno" run -A --no-config --no-lock "$slot" --mem "$mem" --mem-learn "$learned" --cores-learn "$cores" --what "cue ${folder:-.}" -- "$run" "$@" <&3 &
+fi
 pid=$!
 trap 'kill -TERM "$pid" 2>/dev/null' TERM INT HUP
 wait "$pid"; code=$?
 while kill -0 "$pid" 2>/dev/null; do wait "$pid"; code=$?; done
-if [ "$code" = 0 ]; then
+if [ -n "$exportpath" ]; then
+  cat "$out"
+  if [ "$code" = 0 ]; then
+    set -f; IFS='
+'
+    # shellcheck disable=SC2086
+    "$deno" run -A --no-config --no-lock "$vetted" export-store "$real" "$exportpath" "$out" $exportargs 2>/dev/null
+    unset IFS; set +f
+  fi
+  rm -f "$out"
+elif [ "$code" = 0 ]; then
   set -f; IFS='
 '
   # shellcheck disable=SC2086

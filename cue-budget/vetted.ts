@@ -122,13 +122,15 @@ function walk(d: string, onlyCue: boolean, out: string[] = []): string[] {
 }
 
 // The folders `./...` takes below d, as cue's own ./... does: one that holds a .cue file with a package
-// clause and no @if (with no -t given, a file under @if is left out, and a folder of only such files,
-// or only package-less files, is no package); not a folder whose name starts with `.` or `_`, nor
+// clause that cue builds with no tags (see built: a folder of only `@if(x)` files, or only package-less
+// files, is no package); not a folder whose name starts with `.` or `_`, nor
 // testdata, nor cue.mod, nor another module (a folder with its own cue.mod). node_modules is walked,
 // as cue walks it.
+const NOTAGS = new Set<string>();
+
 function packagesBelow(d: string, top = true, out: string[] = []): string[] {
   if (!top && isDir(join(d, "cue.mod"))) return out;
-  if (cueIn(d).some((f) => packageOf(f) !== undefined && !conditional(f))) out.push(d);
+  if (cueIn(d).some((f) => packageOf(f) !== undefined && built(f, NOTAGS))) out.push(d);
   for (const e of entries(d)) {
     if (!e.isDirectory || /^[._]/.test(e.name) || e.name === "cue.mod" || e.name === "testdata") continue;
     packagesBelow(join(d, e.name), false, out);
@@ -136,11 +138,39 @@ function packagesBelow(d: string, top = true, out: string[] = []): string[] {
   return out;
 }
 
-// Whether a file is built only under a tag: an @if attribute before its package clause.
-function conditional(file: string): boolean {
+// Whether cue builds a file with these tags: its `@if(expr)` attributes before the package clause all hold
+// (an identifier is true when `-t <it>` was given; !, &&, || and parentheses as in CUE). An expression this
+// does not read counts the file in, which can only make a key include more than cue reads, never less.
+function built(file: string, tags: Set<string>): boolean {
   const text = source(file).replace(/\/\/[^\n]*/g, "");
   const pkg = /^\s*package\s/m.exec(text);
-  return /@if\(/.test(pkg ? text.slice(0, pkg.index) : text);
+  for (const m of (pkg ? text.slice(0, pkg.index) : text).matchAll(/@if\(([^)]*(?:\([^)]*\)[^)]*)*)\)/g)) {
+    if (holds(m[1], tags) === false) return false;
+  }
+  return true;
+}
+
+function holds(expr: string, tags: Set<string>): boolean | undefined {
+  const toks = expr.match(/\s*(&&|\|\||!|\(|\)|[A-Za-z_$#][\w$#]*|\S)/g)?.map((t) => t.trim()) ?? [];
+  let i = 0;
+  const or = (): boolean | undefined => {
+    let v = and();
+    while (toks[i] === "||") { i++; const r = and(); v = v === undefined || r === undefined ? undefined : v || r; }
+    return v;
+  };
+  const and = (): boolean | undefined => {
+    let v = not();
+    while (toks[i] === "&&") { i++; const r = not(); v = v === undefined || r === undefined ? undefined : v && r; }
+    return v;
+  };
+  const not = (): boolean | undefined => {
+    if (toks[i] === "!") { i++; const v = not(); return v === undefined ? undefined : !v; }
+    if (toks[i] === "(") { i++; const v = or(); if (toks[i++] !== ")") return undefined; return v; }
+    const t = toks[i++];
+    return t !== undefined && /^[A-Za-z_$#][\w$#]*$/.test(t) ? tags.has(t) : undefined;
+  };
+  const v = or();
+  return i === toks.length ? v : undefined;
 }
 
 const sources = new Map<string, string>();
@@ -227,14 +257,43 @@ function tail(cue: string): string[] {
 
 type Unit = { key: string; arg?: string };
 
-const FLAGS = new Set(["-c", "--concrete", "-E", "--all-errors"]);
+const VET_FLAGS = new Set(["-c", "--concrete", "-E", "--all-errors"]);
+// export's flags this reads: those taking a value (its tags, the expression, the format, the package),
+// and plain ones that change only how the result is printed.
+const EXPORT_VALUE = new Set(["-t", "--inject", "-e", "--expression", "--out", "-p", "--package"]);
+const EXPORT_PLAIN = new Set(["-E", "--all-errors", "--escape", "--list"]);
 
-// The units of a vet, each with its key; undefined when it can't be keyed.
+// The units of a vet (its packages) or an export (one unit), each with its key; undefined when it can't
+// be keyed. An export's output goes to stdout: one that writes a file (-o) is not keyed.
 function units(cue: string, args: string[]): Unit[] | undefined {
-  if (args[0] !== "vet") return undefined;
+  const verb = args[0];
+  if (verb !== "vet" && verb !== "export") return undefined;
   const rest = args.slice(1);
   if (rest.some((a) => a === "-" || a === "-T" || a === "--inject-vars" || a.startsWith("--inject-vars="))) {
     return undefined;
+  }
+  // The arguments as flags (each with its value) and positionals; whether each flag is one this reads.
+  const flags: string[] = [], pkgArgs: string[] = [], tags = new Set<string>();
+  let known = true;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (!a.startsWith("-")) {
+      // A `json:data.txt` names a file cue reads through a qualifier the key would not see.
+      if (/^[A-Za-z+]+:/.test(a) && !isFile(resolve(Deno.cwd(), a)) && !isDir(resolve(Deno.cwd(), a))) return undefined;
+      pkgArgs.push(a);
+      continue;
+    }
+    if (verb === "export" && /^(-o|--outfile)/.test(a)) return undefined; // -o, -oout.json, --outfile=x: cue writes a file
+    const [f, inline] = a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, undefined];
+    if (verb === "export" && EXPORT_VALUE.has(f)) {
+      const v = inline ?? rest[++i];
+      if (v === undefined) return undefined;
+      flags.push(`${f} ${v}`);
+      if ((f === "-t" || f === "--inject") && !v.includes("=")) tags.add(v);
+    } else {
+      flags.push(a);
+      if (!(verb === "vet" ? VET_FLAGS : EXPORT_PLAIN).has(a)) known = false;
+    }
   }
   const cwd = Deno.cwd();
   const root = moduleRoot(cwd);
@@ -244,12 +303,11 @@ function units(cue: string, args: string[]): Unit[] | undefined {
   const modLines = walk(join(root, "cue.mod"), false).map(fileLine);
 
   try {
-    const flags = rest.filter((a) => a.startsWith("-"));
-    const pkgArgs = rest.filter((a) => !a.startsWith("-"));
-    const perPackage = flags.every((f) => FLAGS.has(f)) && pkgArgs.length > 0 &&
-      pkgArgs.every((a) => a === "./..." || ((a === "." || a.startsWith("./")) && isDir(resolve(cwd, a))));
+    const perPackage = known && pkgArgs.length > 0 &&
+      pkgArgs.every((a) => a === "./..." || ((a === "." || a.startsWith("./")) && isDir(resolve(cwd, a)))) &&
+      (verb === "vet" || (pkgArgs.length === 1 && pkgArgs[0] !== "./..."));
     if (!perPackage) {
-      const lines = [...modLines];
+      const lines = [`verb ${verb}`, ...modLines];
       for (const f of walk(root, true)) lines.push(fileLine(f), ...embeds(f, root).map(fileLine));
       for (const a of rest) {
         lines.push(`arg ${a}`);
@@ -269,13 +327,13 @@ function units(cue: string, args: string[]): Unit[] | undefined {
     // A package's own files: its folder's, and those of its parents up to the root that name the same
     // package (a file whose package clause can't be read is counted wherever it is).
     const own = (d: string): string[] => {
-      const out = cueIn(d);
+      const out = cueIn(d).filter((f) => built(f, tags));
       const names = new Set(out.map(packageOf));
       for (let p = d; p !== root && dirname(p) !== p;) {
         p = dirname(p);
         out.push(...cueIn(p).filter((f) => {
           const n = packageOf(f);
-          return n === undefined || names.has(n) || names.has(undefined);
+          return (n === undefined || names.has(n) || names.has(undefined)) && built(f, tags);
         }));
       }
       return out;
@@ -312,7 +370,7 @@ function units(cue: string, args: string[]): Unit[] | undefined {
     return [...pkgs].sort().map((d) => {
       const rel = relative(cwd, d);
       return {
-        key: finish([...linesOf(d), ...modLines, `unit ${name(d)}`, ...flags.map((f) => `flag ${f}`), ...tail(cue)]),
+        key: finish([`verb ${verb}`, ...linesOf(d), ...modLines, `unit ${name(d)}`, ...flags.map((f) => `flag ${f}`), ...tail(cue)]),
         arg: rel === "" ? "." : rel.startsWith("..") ? d : "./" + rel,
       };
     });
@@ -324,8 +382,60 @@ function units(cue: string, args: string[]): Unit[] | undefined {
 
 const passed = (k: string) => isFile(join(dir, k));
 
+// Files older than 30 days go, and an export cache over its size (CUE_EXPORTED_GB, 8) loses its oldest.
+function prune(d: string, capBytes = Infinity) {
+  const old = Date.now() - 30 * 86400_000;
+  const kept: { p: string; t: number; n: number }[] = [];
+  for (const e of Deno.readDirSync(d)) {
+    const p = join(d, e.name);
+    try {
+      const st = Deno.statSync(p);
+      const t = st.mtime?.getTime() ?? 0;
+      if (t < old || (e.name.includes(".tmp-") && t < Date.now() - 86400_000)) Deno.removeSync(p);
+      else if (!e.name.includes(".tmp-")) kept.push({ p, t, n: st.size });
+    } catch { /* another checkout pruned it */ }
+  }
+  let total = kept.reduce((a, k) => a + k.n, 0);
+  for (const k of kept.sort((a, b) => a.t - b.t)) {
+    if (total <= capBytes) break;
+    try {
+      Deno.removeSync(k.p);
+      total -= k.n;
+    } catch { /* gone */ }
+  }
+}
+
+const exported = Deno.env.get("CUE_EXPORTED_DIR") ??
+  join(Deno.env.get("HOME") ?? Deno.env.get("TMPDIR") ?? "/tmp", ".cache/pronto/cue-exported");
+
 const [cmd, cue, ...args] = Deno.args;
-if (cmd === "plan") {
+if (cmd === "export-key") {
+  // Prints the path the export's output is kept at; exits 0 when it is there (a hit), 1 when not, 3 when
+  // the export can't be keyed.
+  const us = args[0] === "export" ? units(cue, args) : undefined;
+  if (!us || us.length !== 1) Deno.exit(3);
+  const p = join(exported, us[0].key);
+  console.log(p);
+  if (isFile(p)) {
+    try {
+      Deno.utimeSync(p, new Date(), new Date());
+    } catch { /* pruned meanwhile: a miss next time */ }
+    Deno.exit(0);
+  }
+  Deno.exit(1);
+} else if (cmd === "export-store") {
+  // export-store <cue> <path> <output> <args...>: keeps an export's output that passed, if its inputs are
+  // still the ones keyed before it ran.
+  const [path, output, ...rest] = args;
+  const us = units(cue, rest);
+  if (!us || us.length !== 1 || join(exported, us[0].key) !== path) Deno.exit(1);
+  Deno.mkdirSync(exported, { recursive: true });
+  const tmp = `${path}.tmp-${crypto.randomUUID().slice(0, 8)}`;
+  Deno.copyFileSync(output, tmp);
+  Deno.renameSync(tmp, path);
+  prune(exported, Number(Deno.env.get("CUE_EXPORTED_GB") ?? 8) * 2 ** 30);
+} else if (cmd === "plan") {
+  if (args[0] !== "vet") Deno.exit(1);
   const us = units(cue, args);
   if (!us) Deno.exit(1);
   const todo = us.filter((u) => !passed(u.key));
@@ -346,17 +456,11 @@ if (cmd === "plan") {
       /^[0-9a-f]{64}$/.test(l)
     ),
   );
-  const now = units(cue, args) ?? [];
+  const now = args[0] === "vet" ? units(cue, args) ?? [] : [];
   Deno.mkdirSync(dir, { recursive: true });
   for (const u of now) if (before.has(u.key)) Deno.writeTextFileSync(join(dir, u.key), "");
-  const old = Date.now() - 30 * 86400_000;
-  for (const e of Deno.readDirSync(dir)) {
-    const p = join(dir, e.name);
-    try {
-      if ((Deno.statSync(p).mtime?.getTime() ?? 0) < old) Deno.removeSync(p);
-    } catch { /* another checkout pruned it */ }
-  }
+  prune(dir);
 } else {
-  console.error("usage: vetted.ts plan <cue> <args...> | record <cue> <args...> < keys");
+  console.error("usage: vetted.ts plan|record|export-key <cue> <args...> | export-store <cue> <path> <output> <args...>");
   Deno.exit(2);
 }

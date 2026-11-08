@@ -193,3 +193,39 @@ Deno.test("a vet re-vets only the packages whose inputs changed since one passed
   assertEquals((await vet()).code, 0);
   assertMatch((await vet({ CUE_VETTED: "off" })).stdout, /real cue vet -c \.\/\.\.\./);
 });
+
+Deno.test("an export is printed from a passing one with the same inputs, tags deciding which files count", async () => {
+  const dir = (await Deno.makeTempDir()) + "/m";
+  await Deno.mkdir(dir);
+  await fake(dir);
+  await Deno.mkdir(`${dir}/cue.mod`, { recursive: true });
+  await Deno.writeTextFile(`${dir}/cue.mod/module.cue`, `module: "t.example/m@v0"\nlanguage: version: "v0.16.0"\n`);
+  await Deno.mkdir(`${dir}/a`);
+  await Deno.writeTextFile(`${dir}/a/a.cue`, `package a\nx: 1\n`);
+  await Deno.writeTextFile(`${dir}/a/l1.cue`, `@if(l1)\npackage a\ny: 1\n`);
+  await Deno.writeTextFile(`${dir}/a/l2.cue`, `@if(l2)\npackage a\ny: 2\n`);
+  const env = { CUE_DIRECT_GB: "0", CUE_UNKNOWN_GB: "0.1" };
+  const exp = (args: string[], more: Record<string, string> = {}) => run(dir, ["export", "./a", ...args], { ...env, ...more });
+  const first = await exp(["-t", "l1", "--out", "json"]);
+  assertEquals(first.code, 0);
+  assertMatch(first.stdout, /^real cue export \.\/a -t l1 --out json\n/);
+  const again = await exp(["-t", "l1", "--out", "json"]);
+  assertEquals(again.stdout, first.stdout, "the kept output is printed as cue printed it");
+  assertMatch(again.stderr, /printed from a passing export/);
+  // A file the tags leave out is not an input; one they keep is.
+  await Deno.writeTextFile(`${dir}/a/l2.cue`, `@if(l2)\npackage a\ny: 3\n`);
+  assertMatch((await exp(["-t", "l1", "--out", "json"])).stderr, /printed from a passing export/);
+  await Deno.writeTextFile(`${dir}/a/l1.cue`, `@if(l1)\npackage a\ny: 4\n`);
+  assertEquals((await exp(["-t", "l1", "--out", "json"])).stderr.includes("printed from a passing export"), false);
+  // A failing export keeps nothing; -o and CUE_EXPORTED=off run as asked.
+  await Deno.writeTextFile(`${dir}/bin/cue`, `#!/bin/sh\necho "real cue $*"\nexit 1\n`);
+  assertEquals((await exp(["-e", "x"])).code, 1);
+  assertEquals((await exp(["-e", "x"])).code, 1, "a failed export was not kept");
+  await fake(dir);
+  assertMatch((await exp(["-e", "x"])).stdout, /^real\ cue\ export\ \.\/a\ \-e\ x\n/);
+  assertMatch((await exp(["-e", "x"], { CUE_EXPORTED: "off" })).stdout, /^real\ cue\ export\ \.\/a\ \-e\ x\n/);
+  assertMatch((await exp(["-o", "out.json"])).stdout, /^real\ cue\ export\ \.\/a\ \-o\ out\.json\n/);
+  assertMatch((await exp(["-o", "out.json"])).stdout, /^real\ cue\ export\ \.\/a\ \-o\ out\.json\n/, "-o is never printed from the cache");
+  assertMatch((await exp(["-oout.json"])).stdout, /^real cue export \.\/a -oout\.json\n/);
+  assertMatch((await exp(["-oout.json"])).stdout, /^real cue export \.\/a -oout\.json\n/, "nor a glued -o");
+});
