@@ -224,6 +224,12 @@ import (
 			// An app that bootstraps its repository's root from pronto keeps that
 			// project in pronto/, with the command that writes it; a pronto/
 			// holding only an app's own rules has nothing to write.
+			// First: one generate at a time in a checkout (generate-lock.sh), so a
+			// stack's `launch --watch` and a gate never write the same files at once.
+			"generate-lock": {
+				priority: -1000
+				cmds: [{do: (_run & {args: "^sh ($pronto | path join generate-lock.sh) .task/bayt/generate.lock"}).out}]
+			}
 			"auto-cue": cmds: [{use: "./tools.nu", do: "if ('pronto/generate_tool.cue' | path exists) { tools run-cue cmd generate ./pronto }"}]
 			"pronto": {
 				priority: 1
