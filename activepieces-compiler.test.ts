@@ -48,9 +48,9 @@ Deno.test("Activepieces declarations emit paths and action-scoped binding", asyn
 	);
 	assertEquals(
 		(files["services/airlock/dapr/charge.yaml"] as unknown as {
-			data: { spec: { metadata: { secretKeyRef: { name: string; key: string } }[] } };
-		}).data.spec.metadata[0].secretKeyRef,
-		{ name: "BRIDGE_MAIL_URL", key: "BRIDGE_MAIL_URL" },
+			data: { spec: { baseUrl: string } };
+		}).data.spec.baseUrl,
+		"http://smtp:8080/actions/sendMail",
 	);
 	const env = await cue(["export", "-", "-e", '_cluster.surface.targets["airlock-mesh"].compose.environment.BRIDGE_MAIL_URL', "--out", "json"], program());
 	assertEquals(env.success, true, env.stderr);

@@ -283,7 +283,7 @@ async function launch(args: string[]): Promise<void> {
           "presentation synchronization did not become ready within five minutes",
         );
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     return null;
   })().catch((error) => {

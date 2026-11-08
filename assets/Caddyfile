@@ -142,6 +142,25 @@
       import bounded-crud
     }
   }
+  # A provider's signal (pronto's #Signal), public and believed in nothing: the
+  # path says which, and PostgREST's own path is the function's.
+  handle /signal/* {
+    route {
+      @other not method POST
+      respond @other 405
+      request_body {
+        max_size 1MB
+      }
+      request_header X-Signal-Path {http.request.uri.path}
+      request_header -Authorization
+      request_header Content-Type application/json
+      rewrite * /rpc/signal_in
+      reverse_proxy {$PRONTO_UPSTREAM_CRUD:crud:3000} {
+        header_up dapr-app-id crud
+        import bounded-crud
+      }
+    }
+  }
   handle /electric/* {
     uri strip_prefix /electric
     # Electric names four parameters the server must own, and a client that
@@ -205,14 +224,57 @@
   # The blob plane. Ships unconditionally, like /auth — in a cluster
   # without the blobs services the upstreams never resolve and these
   # unused routes just 502.
+  # A write is a row first: the path is the key the function claims.
+  handle /blob-claim/* {
+    route {
+      @other not method POST
+      respond @other 405
+      request_header X-Blob-Path {http.request.uri.path}
+      request_header Content-Type application/json
+      rewrite * /rpc/claim_upload
+      reverse_proxy {$PRONTO_UPSTREAM_CRUD:crud:3000} {
+        header_up dapr-app-id crud
+        import bounded-crud
+      }
+    }
+  }
   handle /blobs/* {
     # A stored object can claim any type, and on this origin an SVG's or an HTML file's script would run.
     header X-Content-Type-Options nosniff
     header Content-Security-Policy sandbox
-    uri strip_prefix /blobs
-    reverse_proxy {$PRONTO_UPSTREAM_RCLONE_S3:rclone-s3:3900} {
-      header_up dapr-app-id rclone-s3
-      import bounded-blobs
+    @write {
+      method PUT
+      path_regexp ^/blobs/mecha-objects/[^/]+$
+    }
+    # No listing and no delete: a key is all a door hands out. A read names one,
+    # and an effect's stowed bytes sit under a prefix.
+    @refused {
+      not {
+        method PUT
+        path_regexp ^/blobs/mecha-objects/[^/]+$
+      }
+      not {
+        method GET HEAD
+        path_regexp ^/blobs/[^/]+/.*[^/]$
+      }
+    }
+    route {
+      respond @refused 405
+      route @write {
+        request_body {
+          max_size 16MB
+        }
+        forward_auth {$PRONTO_UPSTREAM_CRUD:crud:3000} {
+          uri /rpc/upload_allowed?key={http.request.uri.path.2}
+          header_up dapr-app-id crud
+          import bounded-crud
+        }
+      }
+      uri strip_prefix /blobs
+      reverse_proxy {$PRONTO_UPSTREAM_RCLONE_S3:rclone-s3:3900} {
+        header_up dapr-app-id rclone-s3
+        import bounded-blobs
+      }
     }
   }
   handle /img/* {

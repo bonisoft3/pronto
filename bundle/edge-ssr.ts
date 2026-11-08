@@ -80,6 +80,7 @@ ${compute ? "import computeMachines from './compute-machine.js'\n" : ''}
 class SnapshotReader extends RpcTarget {
   constructor(snapshot, done) { super(); this.snapshot = snapshot; this.done = done }
   read(path) { return this.snapshot.read(path) }
+  readMany(paths) { return this.snapshot.readMany(paths) }
   [Symbol.dispose]() { this.done() }
 }
 const Base = edgeObject({
@@ -105,9 +106,16 @@ export class Cluster extends Base {
       const snapshotDone = this.readPublic(async snapshot => {
         let readerDone
         const rendered = new Promise(resolve => { readerDone = resolve })
-        const response = await renderer.render(request, snapshot.revision, new SnapshotReader(snapshot, readerDone))
-        resolveResponse(response)
-        await rendered
+        // The lane is the object's one connection: a renderer that never gives the snapshot back
+        // would hold every other read behind it.
+        const SNAPSHOT_LEASE_MS = 20_000
+        let expire
+        const lease = new Promise((_, reject) => { expire = setTimeout(() => reject(Object.assign(new Error(\`\${request.url} held its snapshot past \${SNAPSHOT_LEASE_MS} ms\`), { refused: true })), SNAPSHOT_LEASE_MS) })
+        try {
+          const response = await Promise.race([renderer.render(request, snapshot.revision, new SnapshotReader(snapshot, readerDone)), lease])
+          resolveResponse(response)
+          await Promise.race([rendered, lease])
+        } finally { clearTimeout(expire) }
       }, priority).catch(error => {
         if (!committed) {
           rejectResponse(error)
@@ -118,7 +126,8 @@ export class Cluster extends Base {
       this.ctx?.waitUntil?.(snapshotDone)
       return await responseReady
     } catch (error) {
-      if (!(error instanceof PublicSnapshotCapacity) && !(error instanceof DataDirectoryLoading)) throw error
+      if (!(error instanceof PublicSnapshotCapacity) && !(error instanceof DataDirectoryLoading) && error?.refused !== true) throw error
+      console.error('render refused', request.url, error.message)
       return new Response(request.method === 'HEAD' ? null : error.message, { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '1' } })
     }
   }
@@ -147,6 +156,14 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
     const isAsset = /^\\/(?:_immutable-|(?:shell|omnishell|messages)\\/)/.test(url.pathname)
     const found = (!isAsset && (request.method === 'GET' || request.method === 'HEAD')) ? routeAt(hints, url.pathname, url.search, preferred) : null
+    // What a spa route serves: the entry shell, whose store reads the rows itself.
+    const entryShell = async () => {
+      let asset = await env.ASSETS.fetch(request)
+      if (asset.status === 404) asset = await env.ASSETS.fetch(new Request(new URL('/', request.url), request))
+      const result = new Response(request.method === 'HEAD' ? null : asset.body, asset)
+      if (result.status === 200) result.headers.set('Link', edgeHints(request, hints, routeAt, preferred))
+      return result
+    }
     if (found && found.route.ssr === 'ssr') {
       const prefetch = request.headers.get('x-pronto-prefetch') === '1' || request.headers.get('purpose') === 'prefetch' || Boolean(request.headers.get('sec-purpose')?.includes('prefetch'))
       const linkHeader = prefetch ? null : edgeHints(request, hints, routeAt, preferred)
@@ -280,20 +297,22 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
       }
       if (prefetch) return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } })
       const fresh = await (request.headers.has('if-none-match') ? renderFresh() : renderShared())
+      // A refused render costs the visitor the server's rows, not the page.
+      if (fresh.status === 503) {
+        ctx?.waitUntil?.(fresh.done)
+        const shell = await entryShell()
+        shell.headers.set('Cache-Control', 'no-store')
+        shell.headers.set('x-render-source', 'refused')
+        return shell
+      }
       const freshHeaders = new Headers(fresh.headers)
       if (!linkHeader) freshHeaders.delete('Link')
       if (request.method === 'HEAD') ctx?.waitUntil?.(fresh.done)
       return new Response(request.method === 'HEAD' ? null : fresh.makeStream(), { status: fresh.status, headers: freshHeaders })
     }
-    if (found) {
-      let asset = await env.ASSETS.fetch(request)
-      if (asset.status === 404) asset = await env.ASSETS.fetch(new Request(new URL('/', request.url), request))
-      const result = new Response(request.method === 'HEAD' ? null : asset.body, asset)
-      if (result.status === 200) result.headers.set('Link', edgeHints(request, hints, routeAt, preferred))
-      return result
-    }
+    if (found) return await entryShell()
     if (env.ASSETS &&
-        !['auth', 'crud', 'electric', 'import', 'poke'].includes(url.pathname.split('/')[1]) &&
+        !['auth', 'crud', 'electric', 'import', 'poke', 'signal'].includes(url.pathname.split('/')[1]) &&
         (request.method === 'GET' || request.method === 'HEAD')) {
       const asset = await env.ASSETS.fetch(request)
       if (asset.status === 200) {

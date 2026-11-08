@@ -20,7 +20,7 @@ Pronto applications go beyond the typical MVP or single-user tool. Here are some
 
 ### Snapcards
 
-[snapcards.bonisoft3.com](https://snapcards.bonisoft3.com) ([source](https://github.com/bonisoft3/snapcards))
+[snapcards.fun](https://snapcards.fun) ([source](https://github.com/bonisoft3/snapcards))
 
 Generate flashcards to teach toddlers to read. Leverages modern image generation models, with a fully reactive UI, gorgeous on your phone and your desktop. Supports multiple languages, extremely fast. And it is free :-).
 

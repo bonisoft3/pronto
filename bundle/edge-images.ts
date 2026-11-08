@@ -13,6 +13,8 @@ export async function edgeImage(req: Request, env: ImagesEnvironment, cache: Pic
   const url = new URL(req.url)
   const raw = url.pathname.startsWith('/blobs/mecha-objects/')
   if (!raw && (!url.pathname.startsWith('/img/') || env.IMAGES === undefined)) return null
+  // A claimed write is the cluster's route (mecha-edge's worker.ts).
+  if (raw && req.method === 'PUT') return null
   if (req.method !== 'GET' && req.method !== 'HEAD') return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } })
   const sized = /^\/img\/insecure\/rs:fit:(\d+):\1\/plain\//.exec(url.pathname)
   const width = sized ? Number(sized[1]) : undefined

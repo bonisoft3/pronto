@@ -466,7 +466,8 @@ advance a later visit to the same state. Duplicate tick IDs are absorbed.
 Primary keys cross the ticker as text, preserving large integers and composite
 keys. Client roles cannot read or write the schedule or tick tables. Timed
 machines require a server-held entity and a primary key; final states have no
-`after`. They require a declared cloud clock and cannot target Pages.
+`after`. Every target but Cloudflare, whose object keeps its own alarm, names
+its clock in `meta.clocks`; a page's sweeps only while the page is open.
 
 `010_machines.sql` installs the timer tables and interpreters before seeds.
 Retained databases must apply the generated SQL through their migration path;

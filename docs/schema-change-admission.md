@@ -18,13 +18,19 @@ and what an already-served page does is omnishell's
 
 An app can keep applied bootstrap bytes by naming them in `state.rawMigrations`.
 An entry named `003_rls.sql` replaces mecha's tenancy floor for both the native
-database image and page or edge releases. Entries named as the row machines'
+database image and page or edge releases. One named `005_create_tables.sql`
+keeps the tables a live database applied, so a column added to a baseline
+entity rewrites no applied script and arrives in a forward migration alone.
+Entries named as the row machines'
 or the reducers' step (`010_machines.sql` and `016_mecha_actors.sql`, or where
 `state.steps` places them), or as a declared Cortex source migration, replace
 those generated scripts. Each name may be declared once; its source is copied
 without regenerating it. Omitted entries keep the current generated or mecha-provided
 scripts. Carry changes to an applied baseline in a forward `state.migrations`
-pgroll migration; the ledger still refuses a changed digest.
+pgroll migration; the ledger still refuses a changed digest. A machine added
+after `010_machines.sql` was pinned takes its guard from the same generator,
+never a copy: `(pronto.#mechaMachineSql & {machine, entities, effects, runtime:
+false}).out` as the migration's SQL.
 
 ## Who cannot be migrated
 
@@ -200,6 +206,48 @@ completed ledger, so a migration that conflicts with a folded-in column fails.
 Retained fixtures exercise the same runner over earlier schemas and data.
 Folding a change into initdb remains a deployment discipline
 ([[../PENDING#schema-changes|pending work]]).
+
+### A new entity on a live database
+
+The baseline scripts, `005_create_tables` through `010_machines`, are each
+emitted over every entity, so declaring one rewrites them, and a database that
+applied them refuses a changed script: the edge's ledger checks every applied
+script's digest before it applies anything. The first path above cannot help,
+since an entity a reader syncs, a policy guards and a machine drives has to be
+declared.
+
+So an app whose database outlives a release names the entities its baseline
+holds, `code.state.baseline.entities`. The baseline scripts are then emitted
+over those alone, byte for byte what the database applied, and each later
+server entity gets one pgroll migration, `<after>_<table>`, generated with what those scripts
+would hold for it: the table, its indexes, its policies, its txid trigger, its
+place in both publications, its `anon` grant and its machine. A fresh database
+applies it after the baseline; a live one applies it as a migration its ledger
+lacks. `baseline.after` must sort past every migration a live database has
+run, since a container's migrate step refuses one that sorts before them, and
+a migration of the app's that reads the new table sorts after it. The list
+never changes once a database has run it: an entity added later stays in its
+own migration for good.
+
+That migration is generated from the entity as it stands, and a database that
+ran it refuses changed text, as it refuses a changed baseline script. So once a
+release has carried it, the app owns its bytes: it declares that same name in
+`state.migrations` with the text the release applied, and the emitter generates
+nothing under it. A change to the entity or its machine is then carried by a
+migration that sorts after it: the new columns, and the machine restated by
+`#mechaMachineSql` with `runtime: false`, which a fresh database runs after the
+kept one just as a live one does. The emitter refuses a kept migration its
+entity has moved past unless a later migration names the table and
+`state.baseline.carried` holds the digest of what it would generate today, which
+the refusal prints; so each further change is refused again until the app writes
+the migration that carries it and acknowledges the new digest. The emitter
+cannot tell that a release ran a migration it still generates: keeping the
+bytes is the release's step.
+
+Two things stay out of reach. A later entity cannot declare validations, which
+`009_validations` holds for every entity, or drive a Cortex machine, whose SQL
+is compiled where files are written. And a change to an entity the baseline
+already holds still rewrites its script, so it is a pgroll migration as above.
 
 ### Retyping a column from a domain to its base type
 

@@ -428,6 +428,30 @@ async function refusal(code: string): Promise<string> {
   return res.stderr;
 }
 
+const signalled = (signal: string) => paymentProgram({
+  effect: `key: ["id", "checks"]`,
+  entity: "",
+  machine: `pending: on: nudge: "charging"
+        charging: invoke: {src: "charge", onDone: "settled", onError: "pending"}
+        settled: type: "final"`,
+}).replace(`{name: "failure", type: "string"},`, `{name: "failure", type: "string"},\n          {name: "checks", type: "int32"},`)
+  .replace("    effects: charge:", `    signals: ${signal}\n    effects: charge:`);
+
+Deno.test("a signal is one machine's event over a counted row, and nothing refusable reaches a door", async () => {
+  const good = `stripe: {machine: "PaymentMachine", event: "nudge", id: {body: ["data", "object", "client_reference_id"]}, count: "checks"}`;
+  const files = await emitFiles(signalled(`{${good}}`));
+  const sql = files["services/database/migrations/802_signals.sql"].text;
+  assertStringIncludes(sql, `row_key := body #>> '{data,object,client_reference_id}';`);
+  assertStringIncludes(sql, `UPDATE "payment" SET "status" = 'charging', "checks" = "checks" + 1 WHERE "id" = row_key;`);
+  assertStringIncludes(sql, `IF state_now IN ('charging') THEN RAISE EXCEPTION`);
+  assertStringIncludes(sql, `GRANT EXECUTE ON FUNCTION public.signal_in(json) TO anon;`);
+  for (const bad of [`event: "absent"`, `count: "absent"`]) {
+    const [k] = bad.split(":");
+    const broken = good.replace(new RegExp(`${k}: "[a-z]+"`), bad);
+    assertStringIncludes(await refusal(signalled(`{${broken}}`)), "signal stripe");
+  }
+});
+
 Deno.test("entering an invoking state claims the ledger and enqueues in the transition's commit", async () => {
   const files = await emitFiles(paymentProgram());
   const sql = files["services/database/migrations/010_machines.sql"].text;
@@ -472,13 +496,9 @@ Deno.test("the airlock is handed each effect's state, outcome targets, sink and 
   });
   assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data, {
     apiVersion: "dapr.io/v1alpha1",
-    kind: "Component",
+    kind: "HTTPEndpoint",
     metadata: { name: "charge" },
-    spec: {
-      type: "bindings.http",
-      version: "v1",
-      metadata: [{ name: "url", value: "https://api.acquirer.example" }, { name: "errorIfNot2XX", value: "false" }],
-    },
+    spec: { baseUrl: "https://api.acquirer.example" },
   });
   assertEquals(JSON.parse(JSON.stringify(files["effects/charge.js"])), { format: "jessie", src: "effects/charge.js" });
 });
@@ -496,6 +516,16 @@ const bridged = (bridges: string, sink = `sink: {bridge: "mail", idempotent: fal
     .replace('sink: {origin: "https://api.acquirer.example", idempotent: true}', sink)
     .replace("effects: charge:", `${bridges}\n    effects: charge:`) + `\napp: capabilities: hatches: smtp: {kind: "container", note: "SMTP transport outside confinement"}\n_cluster: surface: targets: smtp: {cmd: builtin: null, activate: "", dockerfile: from: name: "bridge-fixture:1", compose: {}}\n`;
 const MAIL_BRIDGE = `bridges: mail: {container: "smtp", port: 8080}`;
+
+Deno.test("an origin that takes no JSON declares its media type, and only an origin may", async () => {
+  const program = paymentProgram().replace(
+    `sink: {origin: "https://api.acquirer.example", idempotent: true}`,
+    `sink: {origin: "https://api.acquirer.example", idempotent: true, contentType: "application/x-www-form-urlencoded"}`,
+  );
+  const files = await emitFiles(program);
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.contentType, "application/x-www-form-urlencoded");
+  assertStringIncludes(await refusal(program.replace("application/x-www-form-urlencoded", "application/json")), "contentType");
+});
 
 Deno.test("a sink's credential is a header the airlock adds from a declared secret, required of the environment and handed to no handler", async () => {
   const program = paymentProgram({ effect: `secrets: ["ACQUIRER_WEBHOOK_KEY"]` }).replace(
@@ -560,8 +590,29 @@ Deno.test("the roles migration leaves electric's password to the deployment", as
 
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {
   const files = await emitFiles(bridged(MAIL_BRIDGE));
-  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", secretKeyRef: { name: "BRIDGE_MAIL_URL", key: "BRIDGE_MAIL_URL" } });
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.baseUrl, "http://smtp:8080");
   assertEquals(JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.reentry, "unknown");
+});
+
+Deno.test("a sink's target entry wins, the rest take its default, and a target left with neither is refused", async () => {
+  const at = async (sink: string) => {
+    const files = await emitFiles(bridged(MAIL_BRIDGE, sink).replace("targets: []", 'targets: ["cloudflare"]'));
+    return {
+      compose: JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.baseUrl,
+      edge: JSON.parse(JSON.stringify(files["services/airlock/effects.json"])).data.effects.charge.edgeOrigin,
+    };
+  };
+  // A simulator stands in for an idempotent sink on the stack it runs in.
+  assertEquals(await at(`sink: {origin: "https://api.acquirer.example", targets: docker: bridge: "mail", idempotent: true}`), { compose: "http://smtp:8080", edge: "https://api.acquirer.example" });
+  assertEquals(await at(`sink: {bridge: "mail", targets: {docker: origin: "https://a.example", cloudflare: origin: "https://b.example"}, idempotent: false}\n      reentry: "repeat"`), { compose: "https://a.example", edge: "https://b.example" });
+  assertEquals(await at(`sink: {targets: {docker: bridge: "mail", cloudflare: origin: "https://b.example"}, idempotent: true}`), { compose: "http://smtp:8080", edge: "https://b.example" });
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {targets: cloudflare: origin: "https://b.example", idempotent: true}`)), "effect charge names no sink for target docker");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", bridge: "mail", idempotent: false}\n      reentry: "repeat"`)), "more than one of origin, bridge and ai");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: bridge: "absent", idempotent: true}`)), "effect charge reaches undeclared bridge: absent");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: "repeat"`).replace("targets: []", 'targets: ["cloudflare"]')), "effect charge reaches a bridge on cloudflare");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: {origin: "https://b.example", bridge: "mail"}, idempotent: true}`)), "names one of origin and bridge for target docker");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: local: bridge: "mail", idempotent: true}`)), "local");
+  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: origin: "http://plain.example", idempotent: true}`)), "plain.example");
 });
 
 Deno.test("a bridged effect states what a repeat costs: neither idempotent nor reconciled", async () => {
@@ -1227,7 +1278,7 @@ app: state: mecha: rows: PaymentMachine: states: pending: entry: [
 Deno.test("a bridge uses its container hatch's address and selected port", async () => {
   const program = bridged(MAIL_BRIDGE.replace("8080", "9090"));
   const files = await emitFiles(program);
-  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.metadata[0], { name: "url", secretKeyRef: { name: "BRIDGE_MAIL_URL", key: "BRIDGE_MAIL_URL" } });
+  assertEquals(JSON.parse(JSON.stringify(files["services/airlock/dapr/charge.yaml"])).data.spec.baseUrl, "http://smtp:9090");
   const env = await cue(["export", "-", "-e", '_cluster.surface.targets["airlock-mesh"].compose.environment.BRIDGE_MAIL_URL', "--out", "json"], program);
   assertEquals(env.success, true, env.stderr);
   assertEquals(JSON.parse(env.stdout), "http://smtp:9090");

@@ -9,7 +9,7 @@
 //
 // The world outside is a compose file beside it, standing on the networks the
 // cluster goes out on, each on a documentation range: the declared sink (the
-// fixture pair testdata/mecha-airlock/sink.pem, which the effect's binding
+// fixture pair testdata/mecha-airlock/sink.pem, which the effect's endpoint
 // trusts) and an undeclared one on the daprd's `airlock-egress`, and Mailpit,
 // as smtp.mailpit.test, on the bridge's `bridge-mail-egress`. The second
 // effect reaches Mailpit through the cluster's mail bridge, and signs its body
@@ -184,10 +184,10 @@ Deno.test("the airlock plane bayt lowers reaches its declared sink, and nothing 
     await must(compose(["up", "-d", "--build", "--wait", "--wait-timeout", "400", "bayt", `${P}-launch`, "sink", "other", "mailpit"]), "up");
     const sinkAddress = await must(run("docker", ["inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", `${PROJECT}-sink-1`]), "inspect sink");
 
-    const call = (binding: string, path: string, key: string) =>
-      wget(["--header", "Content-Type: application/json", "--post-data", JSON.stringify({ operation: "post", data: {}, metadata: { path, "Idempotency-Key": key } }), `http://127.0.0.1:3500/v1.0/bindings/${binding}`]);
+    const call = (endpoint: string, path: string, key: string) =>
+      wget(["--header", "Content-Type: application/json", "--header", `Idempotency-Key: ${key}`, "--post-data", "{}", `http://127.0.0.1:3500/v1.0/invoke/${endpoint}/method${path}`]);
 
-    await t.step("a call of the declared binding reaches its sink, verified by the binding's root", async () => {
+    await t.step("a call of the declared endpoint reaches its sink, verified by the endpoint's root", async () => {
       const before = await hits("sink");
       const got = await call("probe", "/v1/a", "smoke:a");
       assert.equal(got.ok, true, got.stderr);
@@ -195,13 +195,12 @@ Deno.test("the airlock plane bayt lowers reaches its declared sink, and nothing 
       assert.equal(await hits("sink") - before, 1);
     });
 
-    await t.step("the daprd offers no invoke: a full URL to an undeclared origin is refused, and nothing reaches it", async () => {
-      for (const path of ["/v1.0/invoke/https://other.mecha.test:8443/method/x", "/v1.0/invoke/probe/method/x"]) {
+    await t.step("the wall keeps a mistaken target from leaving", async () => {
+      for (const path of ["/v1.0/invoke/https://other.mecha.test:8443/method/x", "/v1.0/invoke/other/method/x", "/v1.0/bindings/other", "/x"]) {
         const got = await wget(["--post-data", "{}", `http://127.0.0.1:3500${path}`]);
         assert.equal(got.ok, false, path);
-        assert.match(got.stderr, /404/, path);
+        assert.match(got.stderr, /400/, path);
       }
-      assert.equal((await call("other", "/x", "smoke:b")).ok, false, "no binding is named other");
       assert.equal(await hits("other"), 0);
     });
 
@@ -216,7 +215,7 @@ Deno.test("the airlock plane bayt lowers reaches its declared sink, and nothing 
       assert.equal((await exec("airlock", ["deno", "eval", `(await Deno.connect({hostname: "airlock-mesh", port: 3500})).close()`])).ok, true, "its daprd");
     });
 
-    await t.step("nothing on the default network reaches the daprd's bindings or a bridge", async () => {
+    await t.step("nothing on the default network reaches the daprd or a bridge", async () => {
       for (const url of ["http://airlock-mesh:3500/v1.0/healthz", "http://bridge-mail:8080/send"]) {
         const got = await onDefault(["wget", "-q", "-T", "3", "-O", "-", url]);
         assert.equal(got.ok, false, url);

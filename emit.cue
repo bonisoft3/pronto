@@ -1039,6 +1039,138 @@ _sqlType: {
 		"""
 }
 
+// The one function both doors call for a signal (#Signal): the edge's object
+// directly, the container's through PostgREST by `signal_in`, whose path the door
+// states in a header since PostgREST's own is /rpc. The row is locked first, so a
+// signal and an outcome cannot pass in the read. PT503 is PostgREST's way to a 503,
+// and the edge's object reads the same code.
+#signalsSql: {
+	signals: {...}
+	state: {...}
+	_branches: [for name, sg in signals {
+		let m = state.mecha.rows[sg.machine]
+		let ent = [for en, e in state.entities if en == m.entity || e.table == m.entity {e}][0]
+		let pk = [for f in ent.fields if f.pk != _|_ if f.pk {f.name}][0]
+		let idSql = [if sg.id.path != _|_ {"path_id"}, "body #>> '{\(strings.Join(sg.id.body, ","))}'"][0]
+		let invoking = [for sn, st in m.states if st.invoke != _|_ {"'\(sn)'"}]
+		let moves = [for sn, st in m.states if st.on != _|_ if st.on[sg.event] != _|_ {
+			"""
+			      IF state_now = '\(sn)' THEN
+			        UPDATE "\(ent.table)" SET "\(m.field)" = '\(st.on[sg.event])', "\(sg.count)" = "\(sg.count)" + 1 WHERE "\(pk)" = row_key;
+			        RETURN 'moved';
+			      END IF;
+			"""
+		}]
+		"""
+		  IF name = '\(name)' THEN
+		    DECLARE
+		      row_key "\(ent.table)"."\(pk)"%TYPE;
+		      state_now text;
+		    BEGIN
+		      BEGIN
+		        row_key := \(idSql);
+		      EXCEPTION WHEN data_exception THEN
+		        RETURN 'ignored';
+		      END;
+		      IF row_key IS NULL THEN RETURN 'ignored'; END IF;
+		      SELECT "\(m.field)"::text INTO state_now FROM "\(ent.table)" WHERE "\(pk)" = row_key FOR UPDATE;
+		      IF NOT FOUND THEN RETURN 'ignored'; END IF;
+		      \([if len(invoking) > 0 {"IF state_now IN (\(strings.Join(invoking, ", "))) THEN RAISE EXCEPTION 'a check of % is in flight', row_key USING ERRCODE = 'PT503'; END IF;"}, ""][0])
+		\(strings.Join(moves, "\n"))
+		      RETURN 'ignored';
+		    END;
+		  END IF;
+		"""
+	}]
+	// A signal may move an entity whose table a later migration creates
+	// (#laterEntityMigrations), after this script on a fresh database: the
+	// body's types resolve when it first runs, not here.
+	out: """
+		SET LOCAL check_function_bodies = off;
+		CREATE OR REPLACE FUNCTION airlock.signal(name text, path_id text, body json) RETURNS text
+		LANGUAGE plpgsql
+		SECURITY DEFINER
+		SET search_path = public, pg_catalog AS $$
+		BEGIN
+		\(strings.Join(_branches, "\n"))
+		  RAISE EXCEPTION 'no signal %', name USING ERRCODE = 'PT404';
+		END $$;
+		REVOKE ALL ON FUNCTION airlock.signal(text, text, json) FROM PUBLIC;
+		CREATE OR REPLACE FUNCTION public.signal_in(json) RETURNS json
+		LANGUAGE plpgsql
+		SECURITY DEFINER
+		SET search_path = public, pg_catalog AS $$
+		DECLARE
+		  parts text[] := string_to_array(current_setting('request.headers', true)::json ->> 'x-signal-path', '/');
+		BEGIN
+		  RETURN json_build_object('signal', airlock.signal(parts[3], parts[4], $1));
+		END $$;
+		REVOKE ALL ON FUNCTION public.signal_in(json) FROM PUBLIC;
+		GRANT EXECUTE ON FUNCTION public.signal_in(json) TO anon;
+		"""
+}
+
+// A write to the blob plane is a row first (mecha's authorized blob plane): whoever
+// holds a session, a guest included, claims a key, and only the claimant may write it.
+// Guests' ids are free, so what bounds them is the plane's whole budget of recent claims.
+#blobClaimsSql: """
+	CREATE SCHEMA IF NOT EXISTS blob_plane;
+	REVOKE ALL ON SCHEMA blob_plane FROM PUBLIC;
+	CREATE TABLE IF NOT EXISTS blob_plane.claim (
+	  key text PRIMARY KEY,
+	  owner uuid NOT NULL,
+	  claimed_at timestamptz NOT NULL DEFAULT now()
+	);
+	CREATE INDEX IF NOT EXISTS blob_claim_recent ON blob_plane.claim (claimed_at);
+	CREATE INDEX IF NOT EXISTS blob_claim_owner ON blob_plane.claim (owner, claimed_at);
+	CREATE OR REPLACE FUNCTION blob_plane.claim_key(who uuid, wanted text) RETURNS void
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	SET search_path = public, pg_catalog AS $$
+	DECLARE
+	  holder uuid;
+	BEGIN
+	  IF who IS NULL THEN RAISE EXCEPTION 'a claim needs a session' USING ERRCODE = 'PT401'; END IF;
+	  IF wanted IS NULL OR wanted !~ '^[A-Za-z0-9-]{1,128}\\.[a-z0-9]{1,12}$' THEN
+	    RAISE EXCEPTION 'not a blob key' USING ERRCODE = 'PT400';
+	  END IF;
+	  PERFORM pg_advisory_xact_lock(hashtext('blob_plane.claim'));
+	  SELECT owner INTO holder FROM blob_plane.claim WHERE key = wanted;
+	  IF holder = who THEN RETURN; END IF;
+	  IF FOUND THEN RAISE EXCEPTION 'another claim holds %', wanted USING ERRCODE = 'PT409'; END IF;
+	  IF (SELECT count(*) FROM blob_plane.claim WHERE claimed_at > now() - interval '1 day') >= 100000
+	    OR (SELECT count(*) FROM blob_plane.claim WHERE owner = who AND claimed_at > now() - interval '1 day') >= 1000 THEN
+	    RAISE EXCEPTION 'too many recent claims' USING ERRCODE = 'PT429';
+	  END IF;
+	  INSERT INTO blob_plane.claim (key, owner) VALUES (wanted, who);
+	END $$;
+	CREATE OR REPLACE FUNCTION blob_plane.may_write(who uuid, wanted text) RETURNS boolean
+	LANGUAGE sql STABLE
+	SECURITY DEFINER
+	SET search_path = public, pg_catalog AS $$
+	  SELECT who IS NOT NULL AND EXISTS (SELECT 1 FROM blob_plane.claim WHERE key = wanted AND owner = who)
+	$$;
+	REVOKE ALL ON FUNCTION blob_plane.claim_key(uuid, text), blob_plane.may_write(uuid, text) FROM PUBLIC;
+	CREATE OR REPLACE FUNCTION public.claim_upload() RETURNS void
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	SET search_path = public, pg_catalog AS $$
+	BEGIN
+	  PERFORM blob_plane.claim_key(auth_uid(), (string_to_array(current_setting('request.headers', true)::json ->> 'x-blob-path', '/'))[3]);
+	END $$;
+	CREATE OR REPLACE FUNCTION public.upload_allowed(key text) RETURNS void
+	LANGUAGE plpgsql STABLE
+	SECURITY DEFINER
+	SET search_path = public, pg_catalog AS $$
+	BEGIN
+	  IF NOT blob_plane.may_write(auth_uid(), key) THEN
+	    RAISE EXCEPTION 'not this session''s claim' USING ERRCODE = 'PT403';
+	  END IF;
+	END $$;
+	REVOKE ALL ON FUNCTION public.claim_upload(), public.upload_allowed(text) FROM PUBLIC;
+	GRANT EXECUTE ON FUNCTION public.claim_upload(), public.upload_allowed(text) TO anon, app_user;
+	"""
+
 // The app_user USING clause of a private entity. `qual` prefixes the row's
 // own columns: the table name in the entity's policies, the parent alias
 // when a folder-scope child inlines this clause. `table` is the private
@@ -2010,12 +2142,22 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 #appMigrations: M={
 	code!: _
-	_validatedTables: [for _, e in M.code.state.entities if e.server if len([for n, _ in e.validations {n}]) > 0 {e.table}]
+	// A database that outlives a release has applied the baseline scripts
+	// (005-010), and an applied script may never change. An app with one names
+	// the entities that baseline holds (#App.state.baseline); each later server
+	// entity is carried by a migration of its own (#laterEntityMigrations).
+	held: {for n, e in M.code.state.entities if M.code.state.baseline == _|_ || !e.server {(n): true}}
+	if M.code.state.baseline != _|_ for n in M.code.state.baseline.entities {held: (n): true}
+	later: [for n, e in M.code.state.entities if M.held[n] == _|_ {e}]
+	_base: {for n, e in M.code.state.entities if M.held[n] != _|_ {(n): e}}
+	_validatedTables: [for _, e in M._base if e.server if len([for n, _ in e.validations {n}]) > 0 {e.table}]
+	// A later entity's validations would rewrite 009_validations.sql.
+	_laterUnvalidated: [] & [for e in M.later if len([for n, _ in e.validations {n}]) > 0 {e.name}]
 	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
 	_seedFile: len(M.seeded) > 0 || M.code.state.seed != _|_
-	accessed: [for _, e in M.code.state.entities if e.access != _|_ {e}]
+	accessed: [for _, e in M._base if e.access != _|_ {e}]
 	updateOnly: [for e in M.accessed if e.access.scope == "public" if e.access["write"] != _|_ if e.access.write == "update" {e}]
-	machines: [if M.code.state.mecha.rows != _|_ {[for _, m in M.code.state.mecha.rows for en, e in M.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
+	machines: [if M.code.state.mecha.rows != _|_ {[for _, m in M.code.state.mecha.rows for en, e in M._base if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
 	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
 	_steps: #steps & {code: M.code}
 	// The cluster copies this list into its database image, so it follows the
@@ -2028,13 +2170,16 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"services/database/migrations/001_roles.sql",
 		"services/database/migrations/002_grants.sql",
 		"services/database/migrations/004_types.sql",
-		"services/database/migrations/005_create_tables.sql",
+		// A live baseline keeps the tables it applied; a later column is a migration's.
+		if len([for r in M.raw if r.name == "005_create_tables.sql" {r}]) == 0 {"services/database/migrations/005_create_tables.sql"},
 		if len(M.accessed) > 0 {"services/database/migrations/006_policies.sql"},
 		"services/database/migrations/007_txid.sql",
 		"services/database/migrations/008_publication.sql",
 		if M.code.state.functions != _|_ if len([for r in M.raw if r.name == "009_functions.sql" {r}]) == 0 {"services/database/migrations/009_functions.sql"},
 		if len(M._validatedTables) > 0 {"services/database/migrations/009_validations.sql"},
 		if len(M.machines) > 0 if len([for r in M.raw if r.name == M._steps.machines {r}]) == 0 {"services/database/migrations/\(M._steps.machines)"},
+		if M.code.state.signals != _|_ if len([for r in M.raw if r.name == "802_signals.sql" {r}]) == 0 {"services/database/migrations/802_signals.sql"},
+		if M.code.capabilities.blobs {"services/database/migrations/803_blob_claims.sql"},
 		if len(M.code.state.mecha.reducers) > 0 if len([for r in M.raw if r.name == M._steps.actors {r}]) == 0 {"services/database/migrations/\(M._steps.actors)"},
 		for r in M.raw {"services/database/migrations/\(r.name)"},
 		if len(M.updateOnly) > 0 {"services/database/migrations/799_write_permissions.sql"},
@@ -2044,6 +2189,67 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if len(M.code.state.schedules) > 0 {"services/database/migrations/801_schedule_seed.sql"},
 		if M._seedFile {"services/database/migrations/900_seed.sql"},
 	]
+}
+
+// Each server entity an app's applied baseline lacks, as one pgroll
+// migration, <baseline.after>_<table>: what 005-010 would hold for it, so the
+// baseline's bytes never change. A live database applies it as a migration
+// its ledger lacks; a fresh one runs it after the baseline.
+#laterEntityMigrations: L={
+	code!: _
+	// mecha's rule for the change feed (#Cluster's capabilities.capture).
+	_capture: len(L.code.state.pipelines)+len(L.code.state.computations)+len(L.code.state.schedules) > 0
+	_pub:     "\(strings.Replace(L.code.meta.name, "-", "_", -1))_cdc"
+	_effects: [if L.code.state.effects != _|_ {L.code.state.effects}, {}][0]
+	// A database that ran an entity's migration refuses changed text, so once
+	// it is released the app declares it, its bytes kept, and the emitter
+	// generates nothing under that name. An entity that moved on since must be
+	// carried by a migration after it, and baseline.carried names the digest of
+	// what the emitter would generate today, so every later change of the
+	// entity or its machine is refused until a migration carries it too.
+	_declared: [if L.code.state.migrations != _|_ {L.code.state.migrations}, {}][0]
+	_carried: [if L.code.state.baseline.carried != _|_ {L.code.state.baseline.carried}, {}][0]
+	_all: [for e in (#appMigrations & {code: L.code}).later {name: "\(L.code.state.baseline.after)_\(e.table)", entity: e}]
+	_later: [for x in L._all if L._declared[x.name] == _|_ {x}]
+	_drifted: [for x in L._all if L._declared[x.name] != _|_
+		let generated = L._up[x.entity.name]
+		let digest = hex.Encode(sha256.Sum256(generated))
+		let acknowledged = [if L._carried[x.name] != _|_ {L._carried[x.name]}, ""][0]
+		if L._declared[x.name].operations[0].sql.up != generated
+		if acknowledged != digest || len([for n, m in L._declared if n > x.name for op in m.operations if op.sql != _|_ if strings.Contains(op.sql.up, x.entity.table) {n}]) == 0 {
+			"later entity \(x.entity.name) changed since its released migration \(x.name): carry the change in a migration after it, then set state.baseline.carried[\"\(x.name)\"] to \"\(digest)\""
+		}]
+	_machines: {for x in L._all {(x.entity.name): [if L.code.state.mecha.rows != _|_ for _, m in L.code.state.mecha.rows if m.entity == x.entity.name || m.entity == x.entity.table {m}]}}
+	// A Cortex machine's SQL is compiled as write.ts writes it, which a
+	// migration does not pass through.
+	_uncompiled: [] & [for _, ms in L._machines for m in ms if m.cortex != _|_ {m.name}]
+	_up: {for x in L._all {
+		let e = x.entity
+		let machines = L._machines[e.name]
+		(e.name): strings.Join(list.Concat([
+			["SET LOCAL lock_timeout = '5s';\nSET LOCAL statement_timeout = '30s';"],
+			[(#tableSql & {"e": e, columns: L.code._machineColumns}).out],
+			[if e.indexes != _|_ {strings.Join((#indexSql & {"e": e}).out, "\n")}],
+			[for u in e.uniques {"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(e.table) (\(strings.Join(u.cols, ", ")));"}],
+			[if e.access != _|_ {(#policySql & {"e": e, entities: L.code.state.entities}).out}],
+			["""
+				DROP TRIGGER IF EXISTS restamp_txid ON \(e.table);
+				CREATE TRIGGER restamp_txid BEFORE UPDATE ON \(e.table)
+				  FOR EACH ROW EXECUTE FUNCTION restamp_txid();
+				"""],
+			["-- tier: container\n" + (#publication & {name: L._pub, tables: [e.table]}).out + [if L._capture {"\n" + (#txnMarker & {pub: L._pub, tables: [e.table]}).out}, ""][0] + "\n" +
+				(#publication & {name: "electric_publication_default", tables: [e.table]}).out + "\nALTER TABLE \(e.table) REPLICA IDENTITY FULL;\n-- tier: any"],
+			["GRANT SELECT, INSERT, UPDATE, DELETE ON \(e.table) TO anon;"],
+			[for m in machines {(#mechaMachineSql & {machine: m, entities: L.code.state.entities, effects: L._effects, runtime: false}).out}],
+		]), "\n\n") + "\n"
+	}}
+	out: {
+		for x in L._later {
+			(x.name): operations: [{sql: {onComplete: true, up: L._up[x.entity.name]}}]
+		}
+		// Every reader of the migrations meets the refusal, which names itself.
+		if len(L._drifted) > 0 {(L._drifted[0]): L._drifted[0] & true}
+	}
 }
 
 // Default runtime instances, parameterized by the code. program.cue wires
@@ -2403,9 +2609,12 @@ _pgrollDir: "services/database/pgroll"
 		}
 		state: {
 			migrations: (#appMigrations & {"code": D.code}).list
-			if D.code.state.migrations != _|_ {
-				pgroll: D.code.state.migrations
-				if len(D.code.state.migrations) > 0 {pgrollDir: _pgrollDir}
+			if D.code.state.migrations != _|_ || D.code.state.baseline != _|_ {
+				pgroll: {
+					if D.code.state.migrations != _|_ {D.code.state.migrations}
+					(#laterEntityMigrations & {code: D.code}).out
+				}
+				if len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}]) + len((#appMigrations & {"code": D.code}).later) > 0 {pgrollDir: _pgrollDir}
 			}
 			reconcile: {
 				let updateOnly = [for _, e in D.code.state.entities if e.access != _|_ if e.access.scope == "public" if e.access["write"] != _|_ if e.access.write == "update" {e}]
@@ -2428,12 +2637,9 @@ _pgrollDir: "services/database/pgroll"
 			// cluster looks for them by default.
 			effects: [if D.code.state.effects != _|_ for n, x in D.code.state.effects {
 				name: n
-				if x.sink.origin != _|_ {origin: x.sink.origin}
-				if x.sink.bridge != _|_ {bridge: x.sink.bridge}
-				if x.sink.ai != _|_ {
-					ai:   x.sink.ai
-					tier: x.sink.tier
-				}
+				// The compose stack is the docker target's.
+				(#SinkAt & {sink: x.sink, target: "docker"}).out
+				if x.sink.targets != _|_ if x.sink.targets.docker != _|_ if x.sink.targets.docker.bridge != _|_ {simulated: true}
 				// The credential's variable is required of the environment with
 				// the handler's secrets, and handed to the airlock alone.
 				_secrets: [for s, _ in {for s in list.Concat([[if x.secrets != _|_ {x.secrets}, []][0], [if x.sink.credential != _|_ {[x.sink.credential.secret]}, []][0]]) {(s): true}} {s}]
@@ -2680,7 +2886,7 @@ _pgrollDir: "services/database/pgroll"
 // and bayt.cue redeclares cluster, terminal and loop as the escape-hatch seams.
 #emit: E={
 	_uniqueLines: [
-		for ent in E._serverEntities for u in ent.uniques {
+		for ent in E._baseServer for u in ent.uniques {
 			"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(ent.table) (\(strings.Join(u.cols, ", ")));"
 		},
 	]
@@ -2733,6 +2939,10 @@ _pgrollDir: "services/database/pgroll"
 	// trigger, no publication entry, no policy, no seed — which is the whole
 	// point of separating durability from visibility.
 	_serverEntities: [for e in E._entities if e.server {e}]
+	// What the baseline scripts hold: every server entity, or those an app's
+	// applied baseline already has (#appMigrations.held).
+	_baseServer: [for e in E._serverEntities if E._appMigrations.held[e.name] != _|_ {e}]
+	_baseTables: [for e in E._baseServer {e.table}]
 	// Server entities with validations, as a list so len() is decidable in
 	// cue 0.16 (see #shellConfig's guard note).
 	_validated: [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
@@ -3494,7 +3704,7 @@ _pgrollDir: "services/database/pgroll"
 						}
 					}
 				}
-				effects: {if E.code.state.effects != _|_ for en, e in E.code.state.effects if e.sink.bridge != _|_ {(en): e.sink.bridge}}
+				effects: {if E.code.state.effects != _|_ for en, e in E.code.state.effects let at = (#SinkAt & {sink: e.sink, target: "docker"}).out if at != null if at.bridge != _|_ {(en): at.bridge}}
 			}
 		}
 		".pronto/check-inputs.json": {
@@ -3565,6 +3775,9 @@ _pgrollDir: "services/database/pgroll"
 		// targets instantiates none of the services these configure.
 		if E._serverOn {
 			if E.code.state.migrations != _|_ for n, m in E.code.state.migrations {
+				"\(_pgrollDir)/\(n).json": {format: "json", data: m}
+			}
+			for n, m in (#laterEntityMigrations & {code: E.code}).out {
 				"\(_pgrollDir)/\(n).json": {format: "json", data: m}
 			}
 			"services/database/migrations/004_types.sql": {
@@ -3696,11 +3909,11 @@ _pgrollDir: "services/database/pgroll"
 				_wal: #Tier & "container"
 				// Marked only where the feed runs: with nothing reading the WAL,
 				// a marker is a write per statement for nobody.
-				_marker: [if E.cluster.capabilities.capture {"\n" + (#txnMarker & {pub: E._pub, tables: strings.Split(E._cdcTables, ",")}).out}, ""][0]
+				_marker: [if E.cluster.capabilities.capture {"\n" + (#txnMarker & {pub: E._pub, tables: E._baseTables}).out}, ""][0]
 				text: [
-					if len(E._syncTables) > 0 {
+					if len(E._baseTables) > 0 {
 						"""
-				\([if len(E._cdcTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: strings.Split(E._cdcTables, ",")}).out + _marker + "\n-- tier: any"}, "-- No authoritative source entity: nothing for the bus to read."][0])
+				\([if len(E._baseTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: E._baseTables}).out + _marker + "\n-- tier: any"}, "-- No authoritative source entity: nothing for the bus to read."][0])
 
 				-- Electric's own publication, declared rather than left to it.
 				-- ELECTRIC_MANUAL_TABLE_PUBLISHING makes it validate this instead of
@@ -3709,9 +3922,9 @@ _pgrollDir: "services/database/pgroll"
 				-- adding a table to one needs ownership of that table. A sync service
 				-- that owns the app's tables can drop them.
 				-- tier: \(_wal)
-				\((#publication & {name: "electric_publication_default", tables: E._syncTables}).out)
+				\((#publication & {name: "electric_publication_default", tables: E._baseTables}).out)
 
-				\(strings.Join([for t in E._syncTables {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
+				\(strings.Join([for t in E._baseTables {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
 				-- tier: any
 				GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
 
@@ -3736,19 +3949,21 @@ _pgrollDir: "services/database/pgroll"
 			// PRIMARY KEY — a client-minted uuid that never collides — so a
 			// repeated pair reaches this index and comes back 23505 rather than
 			// merging silently.
-			"services/database/migrations/005_create_tables.sql": {
-				format: "sql"
-				_indexLines: list.Concat([for ent in E._serverEntities if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
-				text: strings.Join(list.Concat([
-					[for ent in E._serverEntities {(#tableSql & {e: ent, columns: E.code._machineColumns}).out}],
-					[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
-					[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
-				]), "\n\n") + "\n"
+			if len([for r in E._raw if r.name == "005_create_tables.sql" {r}]) == 0 {
+				"services/database/migrations/005_create_tables.sql": {
+					format: "sql"
+					_indexLines: list.Concat([for ent in E._baseServer if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
+					text: strings.Join(list.Concat([
+						[for ent in E._baseServer {(#tableSql & {e: ent, columns: E.code._machineColumns}).out}],
+						[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
+						[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
+					]), "\n\n") + "\n"
+				}
 			}
 			if len(E._accessed) > 0 {
 				"services/database/migrations/006_policies.sql": {
 					format: "sql"
-					text: strings.Join([for ent in E._entities if ent.access != _|_ {
+					text: strings.Join([for ent in E._entities if ent.access != _|_ if E._appMigrations.held[ent.name] != _|_ {
 						(#policySql & {e: ent, entities: E.code.state.entities}).out
 					}], "\n\n") + "\n"
 				}
@@ -3772,7 +3987,7 @@ _pgrollDir: "services/database/pgroll"
 				}
 			}
 
-			_machines: [if E.code.state.mecha.rows != _|_ {[for _, m in E.code.state.mecha.rows for en, e in E.code.state.entities if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
+			_machines: E._appMigrations.machines
 			// A Mecha machine a Cortex state runs locally is the terminal's: a
 			// handler composing the app's module over the machine's own rules.
 			for path, local in E._composedHandlers {
@@ -3801,6 +4016,20 @@ _pgrollDir: "services/database/pgroll"
 				"services/database/migrations/\(E._steps.machines)": {
 					format: "sql"
 					text: [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], runtime: false, step: E._steps.machines}).out}], "\n\n") + "\n"
+				}
+			}
+
+			if E.code.state.signals != _|_ if len([for r in E._raw if r.name == "802_signals.sql" {r}]) == 0 {
+				"services/database/migrations/802_signals.sql": {
+					format: "sql"
+					text: (#signalsSql & {signals: E.code.state.signals, state: E.code.state}).out
+				}
+			}
+
+			if E.code.capabilities.blobs {
+				"services/database/migrations/803_blob_claims.sql": {
+					format: "sql"
+					text:   #blobClaimsSql
 				}
 			}
 
@@ -3841,6 +4070,10 @@ _pgrollDir: "services/database/pgroll"
 							handler:  "effects/\(i.effect.name).js"
 							if i.effect.secrets != _|_ {secrets: i.effect.secrets}
 							if i.effect.sink.credential != _|_ {credential: i.effect.sink.credential}
+							if i.effect.sink.contentType != _|_ {contentType: i.effect.sink.contentType}
+							// Where the edge's airlock goes: it has no daprd to read an endpoint from.
+							let edge = (#SinkAt & {sink: i.effect.sink, target: "cloudflare"}).out
+							if list.Contains(E.code.meta.targets, "cloudflare") if edge != null if edge.origin != _|_ {edgeOrigin: edge.origin}
 							if i.effect.endowments != _|_ {endowments: i.effect.endowments}
 							if i.effect.sink.bridge != _|_ {
 								let b = E.code.state.bridges[i.effect.sink.bridge]
@@ -3857,30 +4090,17 @@ _pgrollDir: "services/database/pgroll"
 			for i in _invoking {
 				"services/airlock/dapr/\(i.effect.name).yaml": {
 					format: "yaml"
-					_envVar: [
-						if i.effect.sink.bridge != _|_ {"BRIDGE_\(strings.ToUpper(strings.Replace(i.effect.sink.bridge, "-", "_", -1)))_URL"},
-						if i.effect.sink.ai != _|_ {"TSBIFROST_URL"},
-						"",
-					][0]
 					data: {
 						apiVersion: "dapr.io/v1alpha1"
-						kind:       "Component"
+						kind:       "HTTPEndpoint"
 						metadata: name: i.effect.name
-						spec: {
-							type:    "bindings.http"
-							version: "v1"
-							metadata: [
-								// Cluster-owned bridges and the AI gateway read their upstream URL from the environment.
-								if _envVar != "" {{name: "url", secretKeyRef: {name: _envVar, key: _envVar}}},
-								if _envVar == "" {{name: "url", value: i.effect.sink.origin}},
-								// The sink's own status comes back to the handler, a refusal
-								// being an answer rather than a binding error.
-								{name: "errorIfNot2XX", value: "false"},
-							]
-						}
-						if _envVar != "" {
-							auth: secretStore: "env"
-						}
+						// Cluster-owned bridges and the AI gateway use plain HTTP.
+						let at = (#SinkAt & {sink: i.effect.sink, target: "docker"}).out
+						spec: baseUrl: [
+							if at.bridge != _|_ {"http://\(E.code.state.bridges[at.bridge].container):\(E.code.state.bridges[at.bridge].port)\([if E.code.state.bridges[at.bridge].action != _|_ {"/actions/\(E.code.state.bridges[at.bridge].action)"}, ""][0])"},
+							if at.ai != _|_ {"http://tsbifrost:\(mecha.#TsBifrostPort)"},
+							at.origin,
+						][0]
 					}
 				}
 				"effects/\(i.effect.name).js": {format: "jessie", src: "effects/\(i.effect.name).js"}
@@ -3926,7 +4146,7 @@ _pgrollDir: "services/database/pgroll"
 					  RETURN NEW;
 					END $$;
 
-					""" + strings.Join([for ent in E._serverEntities {
+					""" + strings.Join([for ent in E._baseServer {
 					"""
 					DROP TRIGGER IF EXISTS restamp_txid ON \(ent.table);
 					CREATE TRIGGER restamp_txid BEFORE UPDATE ON \(ent.table)

@@ -470,6 +470,7 @@ import (
 							(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
 							{name: "MESH_URL", value: "http://127.0.0.1:\(meshPort)"},
 							{name: "AIRLOCK_DIR", value: "/airlock"},
+							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
 						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
 						startupProbe: {tcpSocket: port: P.airlock, periodSeconds: 2, failureThreshold: 60}
 					}},

@@ -23,21 +23,6 @@ function bridgeTarget(name: string, bridge: { name: string; targets: string[] },
   return container ? { kind: 'container', bridge: bridge.name, binding: bridgeNames(bridge.name).binding } : { kind: 'bridge', bridge: bridge.name }
 }
 
-async function resolveEffectTarget(appDir: string, name: string): Promise<EffectTarget> {
-  try {
-    const yaml = await Deno.readTextFile(path.join(appDir, 'services/airlock/dapr', `${name}.yaml`))
-    const match = yaml.match(/-\s*name:\s*url\s*\r?\n\s*value:\s*['"]?([^'"\r\n]+)['"]?/)
-    const url = match?.[1]?.trim()
-    if (!url || /^https?:\/\/(tsbifrost|127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(url)) {
-      return { kind: 'tsbifrost' }
-    }
-    return { kind: 'origin', url }
-  } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return { kind: 'tsbifrost' }
-    throw e
-  }
-}
-
 /** The release's effects twice over: `effects`, each declaration and target
  * bound to its handler module, which only the dispatcher Worker imports, and
  * `declarations`, the declarations and targets alone, which the object reads
@@ -58,6 +43,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
       secrets?: string[]
       credential?: { header: string; scheme?: string; secret: string }
       endowments?: string[]
+      edgeOrigin?: string
       bridge?: { name: string; targets: string[]; simulated: boolean }
     }>
   }
@@ -81,7 +67,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     }
     const handlerPath = path.join(appDir, decl.handler)
     await Deno.stat(handlerPath)
-    const target: EffectTarget = decl.bridge === undefined ? await resolveEffectTarget(appDir, name) : bridgeTarget(name, decl.bridge, containers)
+    const target: EffectTarget = decl.bridge !== undefined ? bridgeTarget(name, decl.bridge, containers) : decl.edgeOrigin ? { kind: 'origin', url: decl.edgeOrigin } : { kind: 'tsbifrost' }
     const ident = `handler_${i}`
     imports.push(`import * as ${ident} from ${JSON.stringify(fromSrc(handlerPath))}`)
     entries.push(
@@ -89,6 +75,13 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     )
     declared.push(`  ${JSON.stringify(name)}: { declaration: ${JSON.stringify(decl)}, target: ${JSON.stringify(target)} },`)
   }
+  // A handler here runs in the Worker's own realm, so the endowments it declares
+  // past the platform's globals are defined for it: Pdf, mecha's one frozen call.
+  if (names.some((n) => effects[n].endowments?.includes('Pdf'))) {
+    imports.push(`import { Pdf } from ${JSON.stringify(fromSrc(path.join(mecha, 'services/airlock/pdf.ts')))}`)
+    imports.push(`Object.defineProperty(globalThis, 'Pdf', { value: Object.freeze(Pdf) })`)
+  }
+
   const harden = `const harden = (value, seen = new WeakSet()) => {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) return value
   seen.add(value)

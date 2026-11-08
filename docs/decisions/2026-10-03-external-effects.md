@@ -231,19 +231,20 @@ never holds it and no component carries it. A client certificate, which ponto's 
 submission will need, is a binding's `MTLSClientCert` and is not declared yet
 ([open](#open)).
 
-The airlock's daprd runs under a configuration that allows the bindings API and nothing
-else (`services/airlock/dapr.yaml`). That removes the hole M3 measured, daprd forwarding an
-invoke whose target is a full URL to any origin, by removing service invocation itself
-(B2), with state, pubsub, secrets and metadata (B5); an undeclared binding is refused (B4).
-So the only traffic this daprd can originate is a call of a binding the program declared.
+The airlock's daprd now invokes declared `HTTPEndpoint`s, since the bindings API cannot carry a
+body that is not JSON ([commerce through the airlock](2026-11-05-commerce-through-the-airlock.md)).
+Allowing invocation brings back what M3 measured, daprd forwarding a full URL to any origin, so a
+rule generated from the effects keeps a mistake from reaching anything undeclared, with state,
+pubsub, secrets and metadata (B5) still removed. It is a guard against mistakes, not a security
+boundary (the airlock's README names what it does not stop).
 
 ### The wall is the allowlist
 
 - **The endowment.** The handler names a path, and the host only its own effect's
-  binding. No code path in the airlock builds a URL.
-- **The allowlist.** The daprd has no API that reaches anything but a declared binding, over
-  HTTP or over the gRPC it always serves; a list naming HTTP alone leaves gRPC whole, and
-  there it fetched `https://example.com` by service invocation (B9).
+  endpoint. No code path in the airlock builds a URL.
+- **The allowlist.** Over HTTP a generated rule passes only the declared endpoints, and over the
+  gRPC it always serves the daprd offers bindings alone; a list naming HTTP alone leaves gRPC whole,
+  and there it fetched `https://example.com` by service invocation (B9).
 - **The airlock's network.** The airlock stands on an internal network with the database
   and its daprd, so its own code cannot go around the daprd.
 

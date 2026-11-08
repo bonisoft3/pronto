@@ -147,12 +147,13 @@ await holdIceServers(builtRelease(publicDir), iceServers, publicDir)
 await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify(hints))
 
 // Blob storage is R2 here, one bucket per app, and the image service a layer above it.
+const blobVars: Record<string, string> = blobs ? {
+  BLOB_URL: images ? '/img/insecure/plain/s3://mecha-objects/' : '/blobs/mecha-objects/',
+  ...(images?.sourceBucket ? { IMAGE_SOURCE_BUCKET: images.sourceBucket } : {}),
+} : {}
 const blobBindings = blobs ? {
   r2_buckets: [{ binding: 'BLOB_OBJECTS', bucket_name: `${name}-mecha-objects` }],
-  vars: {
-    BLOB_URL: images ? '/img/insecure/plain/s3://mecha-objects/' : '/blobs/mecha-objects/',
-    ...(images?.sourceBucket ? { IMAGE_SOURCE_BUCKET: images.sourceBucket } : {}),
-  },
+  vars: blobVars,
   ...(images ? { images: { binding: 'IMAGES' } } : {}),
 } : {}
 // The app's own files ride with its release, after addressing: they are already
@@ -381,6 +382,8 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   exports: { Cluster: { type: 'durable-object', storage: 'sqlite' }, ...(compute ? { ComputeCoordinator: { type: 'durable-object', storage: 'sqlite' } } : {}) },
   observability: { enabled: true },
   ...blobBindings,
+  // A handler's sink.origin: the release's domain, never the host a request came by.
+  ...(domain ? { vars: { ...blobVars, ORIGIN: `https://${domain}` } } : {}),
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
   ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   rules: [

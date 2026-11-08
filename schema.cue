@@ -1110,6 +1110,19 @@ import (
 // Level 4: what a machine's invoking state asks of the world outside the
 // cluster, performed by mecha's airlock against one sink and recorded in the
 // ledger (docs/decisions/2026-10-03-external-effects.md).
+// The sink an effect reaches on a release target; null where it names none.
+#SinkAt: S={
+	sink:   _
+	target: string
+	out: [
+		if S.sink.targets != _|_ if S.sink.targets[S.target] != _|_ {S.sink.targets[S.target]},
+		if S.sink.origin != _|_ {{origin: S.sink.origin}},
+		if S.sink.bridge != _|_ {{bridge: S.sink.bridge}},
+		if S.sink.ai != _|_ {{ai: S.sink.ai, tier: S.sink.tier}},
+		null,
+	][0]
+}
+
 #ExternalEffect: {
 	// Also the sink's Dapr binding name, so a DNS label.
 	name: =~"^[a-z][a-z0-9-]*$"
@@ -1124,12 +1137,27 @@ import (
 	input: {[string]: _} | *{}
 	// An https origin naming a host by a DNS name of two labels or more, as
 	// mecha spells it (#Origin); a name that resolves inward is not refused,
-	// since the airlock's daprd dials what its binding names, and that is the
+	// since the airlock's daprd dials what its endpoint names, and that is the
 	// record's residual. No userinfo: the sink's credential, where it takes
 	// one, is a header the airlock adds to every call from a declared secret,
 	// which the handler never holds. Or a declared bridge, for a sink that
 	// does not speak HTTP, or mecha's AI gateway (`ai: "text" | "image"`).
-	sink: {origin: mechaCluster.#Origin, credential?: #Credential} | {bridge: string} | {ai: mechaCluster.#AiModality, tier: *"cheap" | mechaCluster.#AiBackendTier}
+	// `contentType` names what an origin takes that is not JSON; its handler
+	// sends the body already encoded, as a string.
+	//
+	// `targets` overrides the sink per release target, as ai.targets does the
+	// models: the entry wins, the rest take the default, and a target left with
+	// neither is refused. docker is the compose stack every app launches and
+	// integrates on, simulators included. Sandbox or live is the app's own value.
+	sink: {
+		origin?: mechaCluster.#Origin
+		bridge?: string
+		ai?:     mechaCluster.#AiModality
+		if ai != _|_ {tier: *"cheap" | mechaCluster.#AiBackendTier}
+		targets?: [("docker" | "cloudflare" | "gcp" | "k8s" | "aws")]: {origin?: mechaCluster.#Origin, bridge?: string}
+		credential?:  #Credential
+		contentType?: =~"^[a-z]+/[a-z0-9][a-z0-9.+-]*$" & !="application/json"
+	}
 	// What a handler does when the ledger shows an earlier entry that may have
 	// reached the sink. An idempotent sink is simply called again; a repeat
 	// is called again too, and `note` says why a duplicate is acceptable.
@@ -1148,6 +1176,20 @@ import (
 	// What its handler may use past the language, as an omnishell module
 	// declares Intl: Crypto to sign with, TextEncoder to give it bytes.
 	endowments?: [...mechaCluster.#CageEndowment]
+}
+
+// A provider's word that a row may have changed: `POST /signal/<name>[/<id>]`.
+// Nothing in the body is believed and no signature is checked, since all a signal
+// can do is send the machine's `event` to the row `id` names, whose target state
+// asks the provider through an effect. So a forged one costs one read. A row that
+// is mid-check answers 503, the provider's redelivery being what keeps the signal.
+// `count` is an integer field the move adds one to and the target's effect names
+// in its `key`, since a ledger key is performed once and a row is checked often.
+#Signal: {
+	machine: string
+	event:   string
+	id: {path: true} | {body: [string, ...string]}
+	count: string
 }
 
 // What a sink reads a caller's credential from: `Authorization: Bearer <key>`
@@ -1597,9 +1639,28 @@ import (
 		// the name's numeric prefix orders it among the emitted migrations.
 		// Three digits no other startup file holds, then `_`: mecha's cluster
 		// refuses any other name. The app owns 000-799 and its seed at 900;
-		// 800-899 are the framework's steps (mecha's cluster.cue).
+		// 800-899 are the framework's steps (mecha's cluster.cue), but for
+		// 802_signals.sql, which a live database applied as the app's signals
+		// and their machines' states stood.
 		// A named baseline keeps its applied bytes; later changes go in state.migrations.
-		rawMigrations?: [...{name: string & !~"^8", src: string}]
+		rawMigrations?: [...{name: (string & !~"^8") | "802_signals.sql", src: string}]
+		// What a live database's baseline scripts (005-010) were applied with.
+		// Set once a database outlives a release: those scripts then hold
+		// `entities` alone, since an applied script may never change, and each
+		// later server entity arrives in a pgroll migration of its own,
+		// <after>_<table>. `after` sorts past every migration a live database
+		// ran, which a container's migrate step demands. Unset, the baseline
+		// holds every entity.
+		baseline?: {
+			entities: [...or([for n, e in A.state.entities if e.server {n}])]
+			after: =~"^[0-9]+$"
+			// For each released later-entity migration the app keeps in
+			// state.migrations, the digest of what the emitter generates for
+			// its entity now: the change since is carried by a later migration.
+			carried?: [=~"^[0-9]+_[a-z0-9_]+$"]: =~"^[0-9a-f]{64}$"
+		}
+		// Each a route a provider posts to (#Signal).
+		signals?: [=~"^[a-z][a-z0-9-]*$"]: #Signal
 		_rawMigrationNames: [if rawMigrations != _|_ for migration in rawMigrations {migration.name}] & list.UniqueItems()
 		// Where the framework's own steps run, for an app whose steps already
 		// hold their default digits (#steps). The program writes each step's
@@ -2412,11 +2473,9 @@ import (
 
 	_timedMachines: [if A.state.mecha.rows != _|_ for _, m in A.state.mecha.rows if m._timed {m}]
 	_timerViolations: list.Concat([
-
-		[if len(A._timedMachines) > 0 for target in A.meta.targets if target == "pages" {
-			"server timers cannot target pages"
-		}],
-		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "pages" if target != "cloudflare" if !list.Contains(A.meta.clocks, target) {
+		// A page's clock (mecha-browser's clock.ts) sweeps only while it is
+		// open, so a page states that it is the clock.
+		[if len(A._timedMachines) > 0 for target in A.meta.targets if target != "cloudflare" if !list.Contains(A.meta.clocks, target) {
 			"server timers require a declared clock for \(target)"
 		}],
 		[if A.state.mecha.rows != _|_ for mn, m in A.state.mecha.rows if m._timed for en, e in A.state.entities if en == m.entity || e.table == m.entity if !e.server {
@@ -2500,6 +2559,20 @@ import (
 	_unitRefusal: [if len(_unitViolations) == 0 {true}, _unitViolations[0]][0] & true
 
 	_effects: [if A.state.effects != _|_ {A.state.effects}, {}][0]
+	_signals: [if A.state.signals != _|_ {A.state.signals}, {}][0]
+	_signalViolations: [
+		for n, sg in _signals
+		let m = [if A.state.mecha.rows[sg.machine] != _|_ {A.state.mecha.rows[sg.machine]}, {}][0]
+		let ent = [for en, e in A.state.entities if m.entity != _|_ if en == m.entity || e.table == m.entity {e}]
+		let taking = [if m.states != _|_ for _, st in m.states if st.on != _|_ if st.on[sg.event] != _|_ {st.on[sg.event]}]
+		if len(taking) == 0 ||
+			len([for t in taking if (t & string) == _|_ {t}]) > 0 ||
+			len([for e in ent for f in e.fields if f.name == sg.count {f}]) == 0 ||
+			len([for e in ent for f in e.fields if f.pk != _|_ if f.pk {f}]) != 1 {
+			"signal \(n): one machine's event, a plain target in every state that takes it, over a row with one primary key and the declared count field"
+		},
+	]
+	_signalRefusal: [if len(_signalViolations) == 0 {true}, _signalViolations[0]][0] & true
 	_invokes: [
 		if A.state.mecha.rows != _|_
 		for mName, m in A.state.mecha.rows
@@ -2635,10 +2708,32 @@ import (
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.action != _|_ if A.capabilities.hatches[b.container].activepieces.actions[b.action] == _|_ {
 			"bridge \(n) needs an opted-in action"
 		}],
-		[for n, x in _effects if x.sink.bridge != _|_ if _declaredBridges[x.sink.bridge] == _|_ {
-			"effect \(n) reaches undeclared bridge: \(x.sink.bridge)"
+		[for n, x in _effects
+			let reached = list.Concat([[if x.sink.bridge != _|_ {x.sink.bridge}], [if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ {at.bridge}]])
+			for b in reached if _declaredBridges[b] == _|_ {
+				"effect \(n) reaches undeclared bridge: \(b)"
 		}],
-		[for b, _ in _declaredBridges if len([for _, x in _effects if x.sink.bridge != _|_ if x.sink.bridge == b {x}]) == 0 {
+		[for n, x in _effects
+			let defaults = len([if x.sink.origin != _|_ {1}]) + len([if x.sink.bridge != _|_ {1}]) + len([if x.sink.ai != _|_ {1}])
+			if defaults > 1 {
+				"effect \(n) names more than one of origin, bridge and ai as its default sink"
+		}],
+		[for n, x in _effects if x.sink.targets != _|_ for t, at in x.sink.targets
+			if len([if at.origin != _|_ {1}]) + len([if at.bridge != _|_ {1}]) != 1 {
+				"effect \(n) names one of origin and bridge for target \(t)"
+		}],
+		[for n, x in _effects if x.sink.origin == _|_ if x.sink.bridge != _|_ || x.sink.ai != _|_ if x.sink.credential != _|_ || x.sink.contentType != _|_ {
+			"effect \(n) declares a credential or content type for a sink that is no origin"
+		}],
+		[for n, x in _effects for t in list.Concat([["docker"], [for t in A.meta.targets if t != "docker" && t != "pages" {t}]])
+			if (#SinkAt & {sink: x.sink, target: t}).out == null {
+				"effect \(n) names no sink for target \(t)"
+		}],
+		[for n, x in _effects if list.Contains(A.meta.targets, "cloudflare")
+			if (#SinkAt & {sink: x.sink, target: "cloudflare"}).out.bridge != _|_ {
+				"effect \(n) reaches a bridge on cloudflare, which runs no container"
+		}],
+		[for b, _ in _declaredBridges if len(list.Concat([[for _, x in _effects if x.sink.bridge != _|_ if x.sink.bridge == b {x}], [for _, x in _effects if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ if at.bridge == b {x}]])) == 0 {
 			"bridge \(b) is reached by no effect"
 		}],
 		// Past a bridge nothing is the platform's to promise, and a bridge

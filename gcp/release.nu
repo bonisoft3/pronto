@@ -381,6 +381,14 @@ def deploy [app_info: record, preview: string, dry_run: bool, snapshot: bool, fr
 
 	# The providers compose gives the auth service, under what release.cue sets.
 	let compose = (do { cd $app_info.dir; ^docker compose --profile "*" config --format json } | from json)
+	# Cloud Run's airlock has no daprd: its mesh address is the AI gateway, so an effect reaching anything else would reach that.
+	if $has_airlock {
+		let mesh = ($compose.services."airlock-mesh".environment? | default {})
+		let elsewhere = (($mesh.AIRLOCK_ORIGINS? | default "" | split row " " | where {|o| $o != "" }) ++ ($mesh.AIRLOCK_BRIDGES? | default "" | split row " " | where {|b| $b != "" and $b != "tsbifrost" }))
+		if ($elsewhere | is-not-empty) {
+			error make {msg: $"release@gcp runs AI effects alone: this app's effects also reach ($elsewhere | str join ', ')"}
+		}
+	}
 	let auth_env = $compose.services.auth.environment
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
 	let oidc = ($auth_env | transpose key value | where {|e| ($e.key starts-with "OIDC_") and ($e.key not-in $fixed) and not ($e.key ends-with "_CLIENT_SECRET") }

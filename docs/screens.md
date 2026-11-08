@@ -265,7 +265,11 @@ its document, a route rendered on request from the renderer, `{path}` or
 path that matches a route, else 404, all `Cache-Control: no-cache`. On the
 Cloudflare Edge worker (`edge-ssr.ts`), only routes with `ssr: "ssr"` invoke the
 `RENDERER` and `CLUSTER` Durable Objects; `spa` and `ssg` routes serve directly
-from `ASSETS` with `Link` preload hints. Edge assets keep extensionless routes
+from `ASSETS` with `Link` preload hints. A render the object refuses (its
+snapshot queue is full, its data directory is loading, or the renderer held the
+snapshot past its 20 s lease) is answered as a `spa` route is, with the entry
+shell, `no-store` and `x-render-source: refused`: the visitor loses the
+server's rows for that request, never the page. Edge assets keep extensionless routes
 without a trailing slash, so a prerendered `index.html` cannot change the
 address the shell matches. The edge binds the generated origin templates to
 the request origin, preserving the source validator; Caddy's literal escapes

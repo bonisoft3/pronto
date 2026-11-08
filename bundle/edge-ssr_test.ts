@@ -212,6 +212,11 @@ Deno.test('generated Cluster holds the snapshot through rendering without waitin
     const { renderObject } = await import(pathToFileURL(path.join(out, 'render-object.ts')).href)
     const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
     const setup = source.slice(source.indexOf('class SnapshotReader'), source.indexOf('const Base = edgeObject('))
+    // The renderer batches reads (snapshot-store.js), and a reader that forwarded only read()
+    // failed every server render once omnishell called readMany.
+    const Reader = new Function('RpcTarget', setup + '\nreturn SnapshotReader')(class {})
+    const forwarded = new Reader({ read: async (p: string) => [p], readMany: async (ps: string[]) => ps.map(p => [p]) }, () => {})
+    assert.deepEqual(await forwarded.readMany(['/a', '/b']), [['/a'], ['/b']])
     const declaration = source.slice(source.indexOf('export class Cluster'), source.indexOf('export default')).replace('export class', 'class')
     let releaseRead!: () => void
     const gate = new Promise<void>(resolve => { releaseRead = resolve })
@@ -238,7 +243,20 @@ Deno.test('generated Cluster holds the snapshot through rendering without waitin
       stream.onChunk(' tail')
       return { html: 'head tail', status: 200 }
     })
-    class RpcTarget { dup() { return this } }
+    // As workerd: the target is disposed once its last stub is. The renderer dropped the call's
+    // own stub, so the object held its snapshot, and its one connection, past every render.
+    class RpcTarget {
+      constructor() {
+        let stubs = 1
+        return new Proxy(this, {
+          get(target, key, receiver) {
+            if (key === 'dup') return () => { stubs++; return receiver }
+            if (key === Symbol.dispose) return () => { if (--stubs === 0) (Reflect.get(target, key, receiver) as () => void).call(receiver) }
+            return Reflect.get(target, key, receiver)
+          },
+        })
+      }
+    }
     class Loading extends Error {}
     class Capacity extends Error {}
     const Cluster = new Function('RpcTarget', 'Base', 'DataDirectoryLoading', 'PublicSnapshotCapacity', setup + declaration + '\nreturn Cluster')(
@@ -303,6 +321,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     })
 
     let renders = 0
+    let refuse = false
     let releaseRender: (() => void) | null = null
     const env = {
       CF_VERSION_METADATA: { id: 'v1' },
@@ -319,6 +338,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
         idFromName: (n: string) => n,
         get: () => ({
           async render() {
+            if (refuse) return new Response('public snapshot queue full', { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '1' } })
             renders += 1
             if (releaseRender) await new Promise<void>(r => { releaseRender = r })
             return new Response(
@@ -485,6 +505,20 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     // Cluster routes still pass through to edgeWorker.
     const cluster = await worker.fetch(new Request('https://app.example/crud/game'), env, ctx)
     assert.equal(await cluster.text(), 'api')
+
+    // A refused render once reached the visitor as its 503 body in place of a page; the entry
+    // shell's store reads the rows itself, as on a spa route, and is never cached as the render.
+    refuse = true
+    const refused = await worker.fetch(new Request('https://app.example/campeonato/refused'), env, ctx)
+    assert.equal(refused.status, 200)
+    assert.equal(refused.headers.get('x-render-source'), 'refused')
+    assert.equal(refused.headers.get('cache-control'), 'no-store')
+    assert.equal(await refused.text(), '<!doctype html><title>SPA</title>')
+    await Promise.all(background)
+    refuse = false
+    const after = await worker.fetch(new Request('https://app.example/campeonato/refused'), env, ctx)
+    assert.equal(after.headers.get('x-edge-cache'), 'miss')
+    assert.match(await after.text(), /<h1>Render/)
   } finally {
     if (savedCaches) Object.defineProperty(globalThis, 'caches', savedCaches)
     else Reflect.deleteProperty(globalThis, 'caches')
@@ -506,7 +540,7 @@ Deno.test('renderObject folds version into ETag, serves 304 on streaming GET, re
     await Deno.writeTextFile(modPath, stubbed)
     const { renderObject } = await import(pathToFileURL(modPath).href)
 
-    const reader = { read() { return Promise.resolve([]) }, dup() { return { ...this, [Symbol.dispose]() {} } } }
+    const reader = { read() { return Promise.resolve([]) }, dup() { return { ...this, [Symbol.dispose]() {} } }, [Symbol.dispose]() {} }
     const RendererV1 = renderObject(async (_req: Request, _reader: unknown, stream?: { onHead?: (h: { status: number; gone: boolean }) => void; onChunk?: (c: string) => void }) => {
       stream?.onHead?.({ status: 200, gone: false })
       stream?.onChunk?.('<html>v1</html>')

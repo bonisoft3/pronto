@@ -400,8 +400,10 @@ a row names: each file, named by its sha256, goes to blob storage at `seed/<file
 the publish here and by a one-shot `seed-blobs` target in a cluster, and is then an
 object like any other. Pages has no blob storage, and inlines them
 ([pages](#pages)). An effect's answered bytes are written at run time to the same
-bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-handler));
-uploads have no store at the edge yet. A bridge naming `cloudflare` runs as a
+bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-handler)).
+A session's upload is a claim first, `POST /blob-claim/<key>`, and then `PUT
+/blobs/mecha-objects/<key>`, as behind the container's door; the plane's budget of claims is
+what bounds guests, whose ids are free. A bridge naming `cloudflare` runs as a
 Cloudflare Container of the airlock's dispatcher Worker, built from its Dockerfile
 by the publish, which therefore needs Docker; one not naming it has its effects
 settle failed without a call ([targets](container-bridges.md#targets)).
@@ -820,7 +822,8 @@ What bit on a real instance:
   container at the instance's address, so crud binds `*`.
 
 The release refuses an app whose compose project runs anything else: the
-change-feed unit, the airlock, compute, blobs, images or render. A provider's settings come from compose as
+change-feed unit, compute, blobs, images or render, and an airlock whose effects reach
+anything but the AI gateway, since Cloud Run's has no daprd. A provider's settings come from compose as
 the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
 secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
 release maps it onto the service and prints the DNS records it needs; each of

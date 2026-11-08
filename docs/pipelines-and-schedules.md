@@ -287,7 +287,7 @@ admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
 `eval(` in a string, and top-level await are each refused — without the
 clock, randomness, time zone and locale. `endowments` grants it what it names
 of `Crypto` (WebCrypto's deterministic-by-specification subset),
-`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams` and `Cheerio`, as a surface module
+`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`, `Cheerio` and `Pdf`, as a surface module
 is granted `Intl`; an undeclared one throws where it is reached.
 
 `Cheerio.load(html)` creates a private mutable document using the pinned Cheerio
@@ -297,6 +297,14 @@ is frozen and exposes only `load`, not the top-level network or stream loaders.
 Documents are local scratch state, not sink values; return plain records. The cage
 is discarded after a computation, so mutated documents and parser prototypes do not
 cross runs. Parsed HTML does not sanitize strings for later rendering.
+
+`Pdf.fromJpegs({size, title?, pages})` writes a PDF of JPEG pages with the pinned
+`@pdfme/pdf-lib`: `size` is `{width, height}` in points, and each page is
+`{jpeg, x, y, width, height}`, the image drawn at that rectangle and clipped by the
+page, so one image gives several pages, a face each. It is the endowment's only
+call: no load, fonts, forms or encryption, the paths that reach the clock and
+`Math.random`, and the document carries no modification date, so the same input
+writes the same bytes.
 
 A computation can call an ordinary Crawlee-shaped function without changing the
 platform contract. Keep that function in the same module, call it from `finish`,

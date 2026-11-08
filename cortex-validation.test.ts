@@ -51,12 +51,14 @@ app: state: cortex: PaymentFlow: {
 }
 app: state: rawMigrations: [
   {name: "003_rls.sql", src: "baseline/003.sql"},
+  {name: "005_create_tables.sql", src: "baseline/005.sql"},
   {name: "010_machines.sql", src: "baseline/010.sql"},
   {name: "019_payment.sql", src: "baseline/019.sql"},
 ]
 `;
   const files = await emitFiles(program) as unknown as Record<string, { src?: string; text?: string; data?: unknown }>;
-  for (const [name, src] of [["003_rls.sql", "baseline/003.sql"], ["010_machines.sql", "baseline/010.sql"], ["019_payment.sql", "baseline/019.sql"]]) {
+  // 005 too: a live baseline keeps the tables it applied, and a later column is a migration's.
+  for (const [name, src] of [["003_rls.sql", "baseline/003.sql"], ["005_create_tables.sql", "baseline/005.sql"], ["010_machines.sql", "baseline/010.sql"], ["019_payment.sql", "baseline/019.sql"]]) {
     const file = files[`services/database/migrations/${name}`];
     assertEquals(file.src, src);
     assertEquals(file.text, undefined);
@@ -65,7 +67,7 @@ app: state: rawMigrations: [
   const listed = await cue(["export", "-", "-e", "_cluster.state.migrations", "--out", "json"], program);
   assertEquals(listed.success, true, listed.stderr);
   const names = JSON.parse(listed.stdout) as string[];
-  for (const name of ["003_rls.sql", "010_machines.sql", "019_payment.sql"]) assertEquals(names.filter((path) => path.endsWith(`/${name}`)).length, 1);
+  for (const name of ["003_rls.sql", "005_create_tables.sql", "010_machines.sql", "019_payment.sql"]) assertEquals(names.filter((path) => path.endsWith(`/${name}`)).length, 1);
   const duplicate = await cue(["export", "-", "-e", "app.state", "--out", "json"], program.replace('{name: "019_payment.sql", src: "baseline/019.sql"}', '{name: "010_machines.sql", src: "baseline/019.sql"}'));
   assertEquals(duplicate.success, false);
   assertStringIncludes(duplicate.stderr, "UniqueItems");

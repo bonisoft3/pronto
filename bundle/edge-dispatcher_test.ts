@@ -20,7 +20,7 @@ Deno.test('the object reads the effects as declarations alone, and only the disp
     assert.doesNotMatch(declarations, /^import /m)
     await Deno.writeTextFile(path.join(out, 'src/effect-declarations.js'), declarations)
     const { default: declared } = await import(`file://${out}/src/effect-declarations.js`)
-    assert.deepEqual(Object.keys(declared).sort(), ['heavy-draft', 'illustrate-card', 'smollm3-draft'])
+    assert.deepEqual(Object.keys(declared).sort(), ['heavy-draft', 'illustrate-card', 'print-alert', 'print-check', 'print-fx', 'print-place', 'print-quote', 'print-record', 'print-session', 'print-status', 'smollm3-draft'])
     for (const effect of Object.values(declared) as { declaration: { handler: string }; target: { kind: string }; issue?: unknown }[]) {
       assert.equal(typeof effect.declaration.handler, 'string')
       assert.equal(typeof effect.target.kind, 'string')

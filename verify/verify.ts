@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { verifyHttp, type EdgeHints, type EdgeRoute } from "./http-sweep.ts";
 import { verifyBrowser } from "./browser-sweep.ts";
+import { declaredSecrets, requireSecrets, wranglerSecretNames } from "./secrets.ts";
 
 function parseArgs(args: string[]) {
   const flags: Record<string, string> = {};
@@ -157,6 +158,34 @@ async function resolveTargetUrl(
   );
 }
 
+/** The dispatcher Worker's secret names against those its effects declare; compose refuses
+ * to start without them and the GCP release checks Secret Manager. */
+function mechaRoot(flags: Record<string, string>): string {
+  if (!flags.mecha) throw new Error("--mecha names the mecha root the release published with");
+  return path.resolve(flags.mecha);
+}
+
+async function verifyEdgeSecrets(appDir: string, mecha: string) {
+  const declared = await Deno.readTextFile(path.join(appDir, "services/airlock/effects.json")).then(declaredSecrets, (e) => {
+    if (e instanceof Deno.errors.NotFound) return [];
+    throw e;
+  });
+  if (declared.length === 0) return;
+  // The wrangler publish-edge.ts deploys with, resolved the same way.
+  const { wranglerTools } = await import(pathToFileURL(path.join(mecha, "packages/pglite-workerd/wrangler-tools.ts")).href);
+  const { wrangler, env } = await wranglerTools();
+  const listed = await new Deno.Command(wrangler, {
+    args: ["secret", "list", "--config", path.join(appDir, "dist/cloudflare/airlock/wrangler.jsonc"), "--format", "json"],
+    env,
+    stdin: "null",
+    stdout: "piped",
+    stderr: "inherit",
+  }).output();
+  if (!listed.success) throw new Error(`wrangler secret list exited ${listed.code}`);
+  requireSecrets(declared, wranglerSecretNames(new TextDecoder().decode(listed.stdout)));
+  console.log(`  - ${declared.length} declared effect secrets are held`);
+}
+
 export async function main(argv = Deno.args) {
   const { flags, positionals } = parseArgs(argv);
   const appDir = positionals[0] ? path.resolve(positionals[0]) : Deno.cwd();
@@ -169,6 +198,10 @@ export async function main(argv = Deno.args) {
 
   console.log(`Verifying deployment at ${targetUrl} (platform: ${platform})`);
   const startTime = Date.now();
+
+  if (platform === "cloudflare") {
+    await verifyEdgeSecrets(appDir, mechaRoot(flags));
+  }
 
   const hints = await loadHints(appDir, platform);
   let publicDir: string | undefined = undefined;

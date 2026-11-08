@@ -29,11 +29,13 @@ Deno.test("verify CLI fails when Cloudflare release hints and shell metadata are
   try {
     await assertRejects(
       async () => {
-        await main([tempDir, "--target=https://app.example.com", "--platform=cloudflare"]);
+        await main([tempDir, "--target=https://app.example.com", "--platform=cloudflare", `--mecha=${tempDir}`]);
       },
       Error,
       "Missing shell metadata"
     );
+    // The wrangler it asks for the dispatcher's secrets is the mecha root's, as publish's.
+    await assertRejects(() => main([tempDir, "--target=https://app.example.com", "--platform=cloudflare"]), Error, "--mecha names");
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }

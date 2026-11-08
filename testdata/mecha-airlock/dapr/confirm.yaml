@@ -1,16 +1,6 @@
 apiVersion: dapr.io/v1alpha1
-kind: Component
+kind: HTTPEndpoint
 metadata:
   name: confirm
 spec:
-  type: bindings.http
-  version: v1
-  metadata:
-    - name: url
-      secretKeyRef:
-        name: BRIDGE_MAIL_URL
-        key: BRIDGE_MAIL_URL
-    - name: errorIfNot2XX
-      value: "false"
-auth:
-  secretStore: env
+  baseUrl: http://bridge-mail:8080/actions/sendMail

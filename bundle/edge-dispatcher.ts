@@ -90,6 +90,8 @@ ${classes.join('')}`)
   for (const b of bridges) await Deno.writeTextFile(path.join(out, 'airlock', `Dockerfile.${b.name}`), await bridgeDockerfile(app, b, builds.get(b.name)!))
   const context = path.relative(path.join(out, 'airlock'), app).replaceAll('\\', '/') || '.'
   const blobUrl = front.vars?.BLOB_URL
+  // A handler's sink.origin is the object's: the release's domain.
+  const origin = front.vars?.ORIGIN
   await Deno.writeTextFile(path.join(out, 'airlock/wrangler.jsonc'), JSON.stringify({
     name: queue,
     main: '../src/dispatcher.ts',
@@ -109,7 +111,7 @@ ${classes.join('')}`)
     // never redelivers: a retried message would be a run the ledger never counted.
     queues: { consumers: [{ queue, max_retries: 0, max_batch_size: 1 }] },
     ...(front.r2_buckets?.length ? { r2_buckets: front.r2_buckets.filter(b => b.binding === 'BLOB_OBJECTS') } : {}),
-    ...(blobUrl ? { vars: { BLOB_URL: blobUrl } } : {}),
+    ...(blobUrl || origin ? { vars: { ...(blobUrl ? { BLOB_URL: blobUrl } : {}), ...(origin ? { ORIGIN: origin } : {}) } } : {}),
     // `wrangler deploy` builds each image for linux/amd64 with the publisher's
     // Docker (publish-edge.ts), under the container's own build args, and
     // pushes it to Cloudflare's registry.
