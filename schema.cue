@@ -2729,10 +2729,6 @@ import (
 			if (#SinkAt & {sink: x.sink, target: t}).out == null {
 				"effect \(n) names no sink for target \(t)"
 		}],
-		[for n, x in _effects if list.Contains(A.meta.targets, "cloudflare")
-			if (#SinkAt & {sink: x.sink, target: "cloudflare"}).out.bridge != _|_ {
-				"effect \(n) reaches a bridge on cloudflare, which runs no container"
-		}],
 		[for b, _ in _declaredBridges if len(list.Concat([[for _, x in _effects if x.sink.bridge != _|_ if x.sink.bridge == b {x}], [for _, x in _effects if x.sink.targets != _|_ for _, at in x.sink.targets if at.bridge != _|_ if at.bridge == b {x}]])) == 0 {
 			"bridge \(b) is reached by no effect"
 		}],

@@ -89,3 +89,15 @@ Deno.test("an effect's secret cannot take a bridge's name", async () => {
   assert((await credential("ACQUIRER_KEY")).success);
   assert(!(await credential("BRIDGE_FETCH_URL")).success, "a credential named as a bridge's mesh address was accepted");
 });
+
+// An app released on cloudflare may reach a bridge: one naming cloudflare runs
+// there as a container, and one that does not settles its effects failed at
+// run time as not deployed (container-bridges.md#Targets), so neither is a
+// compile error.
+Deno.test("an app on cloudflare compiles with a bridge whether or not the bridge runs there", async () => {
+  const onCloudflare = (bridge: string) => program(bridge).replace("targets: []", 'targets: ["cloudflare"]').replace("clocks: []", 'clocks: ["cloudflare"]');
+  const runs = await cue(["export", "-", "-e", "out"], onCloudflare('{container: "transport", targets: ["cloudflare"]}'));
+  assert(runs.success, runs.stderr);
+  const settles = await cue(["export", "-", "-e", "out"], onCloudflare('{container: "transport", targets: ["docker"], appliance: {srcs: ["/bin/fetch"], command: ["/bin/fetch", "--listen", "127.0.0.1:8090"], port: 8090}}'));
+  assert(settles.success, settles.stderr);
+});

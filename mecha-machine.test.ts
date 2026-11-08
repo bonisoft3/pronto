@@ -609,7 +609,11 @@ Deno.test("a sink's target entry wins, the rest take its default, and a target l
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {targets: cloudflare: origin: "https://b.example", idempotent: true}`)), "effect charge names no sink for target docker");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", bridge: "mail", idempotent: false}\n      reentry: "repeat"`)), "more than one of origin, bridge and ai");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: bridge: "absent", idempotent: true}`)), "effect charge reaches undeclared bridge: absent");
-  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: "repeat"`).replace("targets: []", 'targets: ["cloudflare"]')), "effect charge reaches a bridge on cloudflare");
+  // A bridge the app reaches on cloudflare compiles whether or not the bridge
+  // names cloudflare: where it does not run, its effects settle failed at run
+  // time as not deployed (container-bridges.md#Targets).
+  const settled = await emitFiles(bridged(MAIL_BRIDGE, `sink: {bridge: "mail", idempotent: false}\n      reentry: "repeat"`).replace("targets: []", 'targets: ["cloudflare"]'));
+  assertEquals(JSON.parse(JSON.stringify(settled["services/airlock/effects.json"])).data.effects.charge.bridge.targets, []);
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: {origin: "https://b.example", bridge: "mail"}, idempotent: true}`)), "names one of origin and bridge for target docker");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: local: bridge: "mail", idempotent: true}`)), "local");
   assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: docker: origin: "http://plain.example", idempotent: true}`)), "plain.example");
