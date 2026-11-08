@@ -1,133 +1,90 @@
 // A slot: one of several local stacks on one machine at once, of this app or any other, each on
-// ports of its own. The same file in every app with a local stack, copied unchanged. Every stack binds the ports .bayt/process-compose.yaml names: each `${<VAR>_PORT:-<n>}`,
-// which a variable moves, and a few the plugins write as literals (the identity broker's front,
-// the billing broker, flagd's evaluation, management and sync), which nothing moves. So two stacks
-// of the app, from two checkouts, collide, and the second's migrations can land in the first's
-// database. A slot moves all of them:
+// ports of its own. The same file in every app with a local stack, copied unchanged, and frozen: a
+// byte-identity guard (tests/lint.ts, guard-slot) fails an app whose copy differs from
+// apps/brawl-chess's, and ci checks one app, not all, when only the shared copies change.
 //
-//   slot n's ports are 33000 + 100·(n-1) onward: the door (CADDY_DOOR_PORT, and
-//   CADDY_TLS_HOST_PORT, which ORIGIN names) first, then each variable by name, then each
-//   literal by number. Above the 10000-32767 bayt and pronto-identity hash an app's ports into,
-//   below macOS's ephemeral 49152 (integrate@local's fresh ports): 160 slots, none another's,
-//   whichever app holds it, since every app's stacks share the one pool.
+// It is a static semaphore, nothing more (docs/queue-research-2026-11-07.md): GitHub's runner pools
+// cap who may start, this file only keeps stacks off each other's ports and one `cue` evaluation at a
+// time off the machine's memory. It measures nothing: no load, no cores, no memory.
 //
-// The stack runs from the slot's own copy of the app (<pool>/slot-<n>/app): every entry a link
-// to the checkout's, but .bayt/process-compose.yaml, written with the slot's ports for its
-// defaults and its literals. Any verb run there brings its stack up on the slot: integrate@local
-// (pronto's integrate-local.ts reads that file), a launch (below), verify@local
-// (tests/rehearse.ts, which takes a slot of its own).
+//   Ports. Slot n's ports are 33000 + 100·(n-1) onward: the door (CADDY_DOOR_PORT, and
+//   CADDY_TLS_HOST_PORT, which ORIGIN names) first, then each ${<VAR>_PORT:-<n>} variable of
+//   .bayt/process-compose.yaml by name, then each port it writes as a literal by number. Above the
+//   10000-32767 bayt and pronto-identity hash an app's ports into, below macOS's ephemeral 49152: 160
+//   slots, none another's, whichever app holds it. The stack runs from the slot's own copy of the app
+//   (<pool>/slot-<n>/app): every entry a link to the checkout's, but .bayt/process-compose.yaml,
+//   written with the slot's ports. A slot is held as <pool>/slot-<n>/pid (STACK_POOL, else
+//   /tmp/pronto-stacks); STACK_SLOT=<n> asks for one by number (a command run under tests/slot.ts is
+//   given its slot there; a claim of its own for that number fails at once, naming the holder).
 //
-// The pool: the machine's cores, shared by every app's stacks, as a budget of weight
-// (STACK_BUDGET, else every core but STACK_RESERVE, 3: 15 on an 18-core Mac). The reserve is
-// for what runs outside the pool (the Claude app and its sessions, WindowServer, other work),
-// measured at 2.1 cores on average and 2.9 at p90 beside a rehearsal: a budget of every core
-// left that work none, and the machine saturated. A holder declares its weight, the cores it
-// keeps busy: a launch ½ (it idles), a plain stack (integrate@local, the scenarios once) 1, a rehearsal
-// (verify@local: integrate@local, then a scenarios pass, its throttled pages and the stack) 6,
-// and each lane it adds by what the lane runs (weights, below); STACK_WEIGHT=<n> names another.
-// One is admitted while the weights held, its own added, stay within the budget (the first
-// always is); STACK_SLOTS=<n>, when set, also caps the count. Why these numbers:
-// apps/brawl-chess/README.md's "Several stacks at once". A slot is held as <pool>/slot-<n>/pid,
-// its weight beside it (STACK_POOL, else /tmp/pronto-stacks). A stack on the app's own ports (a
-// plain launch@local) is outside the pool and holds no slot. A slot is taken when its holder is
-// gone and nothing answers on its ports (a stack orphaned by a killed holder keeps its slot until
-// it is down); STACK_SLOT=<n> asks for one by number and waits for it.
+//   Weight. A holder declares its weight, a plain count: a launch ½ (it idles), a stack 1, a gate 3
+//   (integrate@local with the few `slow` scenarios throttled), a rehearsal 6, a scenarios pass 6,
+//   its Premium lane 2; STACK_WEIGHT=<n> or --weight <n> names another. The budget is fixed:
+//   STACK_BUDGET, else every core but STACK_RESERVE (3): 15 on an 18-core Mac. A claim is admitted
+//   when the weight held, the weight of every live ticket older than its own (they reserve their room)
+//   and its own fit the budget; the oldest ticket is admitted on an empty pool whatever it weighs.
+//   First come first served, so a heavy claim is never starved by lighter ones. There is no priority,
+//   no release lane, no ci lane (STACK_PRIORITY, STACK_RELEASE_LANE, STACK_CI_LANE are accepted and
+//   ignored): GitHub's runner pools separate release, gate and ci, not this file.
 //
-// A claim that does not wait (claim(..., false), as a rehearsal's extra lanes take theirs) is
-// asked once, in its place in the line, and gives back no slot when it is not admitted then: what
-// it would have run, its holder runs on a slot it already has.
+//   Reclaim. Every claim, under the pool's lock, frees what dead pids left: job-<pid> dirs, queue
+//   tickets, and slot-<n> dirs whose holder is gone and whose door answers nothing (a stack orphaned
+//   by a killed holder keeps its slot until it is down).
 //
-// A release is never blocked or slowed by pull request work: a claim with STACK_PRIORITY=release
-// (release-cron's rehearsal and its lanes) is in line ahead of every claim without it, and counts
-// only the weight release holders hold (and the release tickets ahead), so it is admitted whatever
-// the pull requests' gates and launches hold, the budget and STACK_SLOTS alike; a claim without it
-// still counts everything, so no new plain stack starts while a release holds its room. A holder
-// records `release` beside its weight. While this process holds a release slot, every ~5 s it puts
-// the browsers (Chrome, chrome-headless-shell) in each live plain holder's process tree to
-// background priority (`taskpolicy -b -p`: the lowest CPU tier, I/O and timers throttled), so the
-// release gets the cores its pages would spin; the last release slot given back restores them
-// (`taskpolicy -B -p`). Only the browsers: a whole tree demoted (its database, door and probes too)
-// starved a pull request's stack until its probes were killed and its door refused, and its gate
-// failed; its pages only run slower.
+//   Nested. A claim with a live holder above it (by the process tree, or STACK_JOB, the job that ran
+//   it, or STACK_SLOT, the slot of the command it runs under) is admitted at once inside that
+//   holder's weight: it adds none (its record says weight 0 and `in=<holder>`), takes no ticket, and
+//   a stack still gets a free slot of its own, for its ports. A claim that waited for its own holder
+//   would wait for ever (2026-11-07 09:22 BRT).
 //
-// A release holds the machine: while release-cron runs a release it keeps ~/.cache/pronto/release-active
-// (RELEASE_ACTIVE names another), one line of JSON, {"app","pid","started","phase"}, phase one of
-// slot, rehearse, release, confirm. Written by release-cron as the run enters its slot, updated at each
-// step, removed when the run ends. A file whose pid is gone (kill -0) is stale: ignored, and deleted
-// here. While it is live a claim without STACK_PRIORITY=release is not admitted, whatever room the
-// pool has: it waits in line, says why, and looks again every 30 s; one with it is admitted as above,
-// and holders already running keep their slots. The wait for a release is not a wedge: it does not
-// count against STACK_WAIT_MINUTES.
+//   Runner jobs first. A claim made inside a GitHub Actions job (GITHUB_ACTIONS=true: ci's checks,
+//   gate.yml's gates) is admitted at once on cores, its weight still held: the runner pools are its
+//   cap (docs/queue.md), and a job holding a runner while it waits here queues twice. Local claims
+//   (a session's own commands) wait behind them. On 2026-11-07 at 23:29 BRT main's ci checks held 6
+//   runners while waiting 8th in line behind sessions' local gates. The cue lock still applies.
 //
-// Heavy work that is not a stack (a gate, a build, a local-model or GPU job, in any app) claims
-// its weight the same way and runs on the pool's budget, so the machine as a whole is capped:
+//   Cue lock. A job that names --mem (the cue wrapper, tools/cue-budget/cue: one evaluation of tens
+//   of GB; 21 at once ran macOS out of memory on 2026-11-05) takes the cue lock: one such evaluation
+//   at a time on the machine, the rest first come first served in <pool>/cue-queue, nested or not. It
+//   weighs no cores. --mem-learn <file> writes its peak (GB) there at the end, for the wrapper's next
+//   run; --cores-learn is accepted and ignored. A job the memory watchdog (tools/cue-budget) killed
+//   under pressure, not for its own size, waits its turn again, once.
 //
-//   deno run -A tests/slot.ts --weight <n> --what "<label>" -- <command...>
-//                                            claims <n> of the budget, with no stack and no ports
-//                                            moved, runs the command where it is, releases on exit
-//
-// (--what defaults to the command; STACK_WEIGHT=<n> names the weight when --weight is left out; a
-// job is held as <pool>/job-<pid> and is not held back by STACK_SLOTS, a cap on stacks.) A job that is a series of
-// units claims each unit separately, so the release check falls between units.
-//
-// Memory is the pool's second budget, for work whose cost is memory, not cores: a CUE evaluation
-// of a large spec holds tens of GB (aprende's 17 GB for 52 s), and on 2026-11-05 21 of them at
-// once held 210 GB of a 128 GB Mac until macOS ran out of memory and swap. A job that names
-// --mem <GB> is admitted only while the memory every holder claimed, the memory the tickets ahead
-// reserve and its own fit in the memory budget (STACK_MEM_BUDGET GB, else the machine's RAM but
-// STACK_MEM_RESERVE, 32 GB, for the stacks, browsers and sessions outside it), and while the
-// memory the machine has available, less what the holders claimed and do not hold yet, leaves
-// STACK_MEM_HEADROOM (8 GB) beside it; the oldest is admitted when no memory is claimed, so a spec
-// larger than the budget still runs, alone. Such a job weighs no cores unless it says so
-// (--weight 0, the default with --mem): it runs inside gates and stacks that hold cores already,
-// and a claim of cores there would wait on its own holder. Nor does it wait for a release: the
-// release's own evaluations are in line ahead of it, and memory counts every holder, the release's
-// and the pull requests' alike. While it runs, its holder records what it holds (rss=, every
-// second) and raises its claim when it holds more, so the next claim sees the truth; --mem-learn
-// <file> writes its peak (GB) there at the end, for the next run's --mem (tools/cue-budget's cue
-// wrapper does that for every cue evaluation). A job the memory watchdog (tools/cue-budget) killed
-// under pressure, not for its own size, waits its turn again with its peak as its claim, once.
-//
-// The queue: a claim that has to wait is in line, first come first served, or a heavy one would
-// never get its room, every plain stack that fits being let in ahead of it. Each claim registers
-// a ticket at the start, <pool>/queue/<time>-<pid> holding its weight and what it runs, and
-// removes it when it has a slot, fails or is signalled (one whose pid is gone is ignored and
-// swept). A claim is admitted while the weights held, the weights of every ticket older than its
-// own (they reserve their room) and its own stay within the budget, so a lighter claim still
-// backfills around a waiting rehearsal when the room is there for both, but never into the
-// rehearsal's. The oldest ticket is admitted on an empty pool whatever its weight. The wait has no
-// wall-clock limit but progress: a claim fails after STACK_WAIT_MINUTES (else 120) in which no
-// ticket ahead of it left and no weight held dropped, so a rehearsal behind others, each about
-// twenty minutes, waits as long as the line moves, and one behind a wedge does not wait for ever.
+//   A claim that does not wait (claim(..., false), as a rehearsal's extra lanes) is asked once, in its
+//   place in the line, and gives back no slot when it is not admitted then. The wait has no
+//   wall-clock limit but progress: a claim fails after STACK_WAIT_MINUTES (else 120) in which no
+//   ticket ahead of it left and no weight held dropped.
 //
 //   deno run -A tests/slot.ts <command...>   the command on a slot, in the slot's copy, with
 //                                            APP_URL, ORIGIN and every port variable set
 //   deno run -A tests/slot.ts launch         the stack itself, as launch@local, until stopped
 //   deno run -A tests/slot.ts launch --watch the same, warm: an edit lands without a relaunch
-//                                            (watch, below)
 //   deno run -A tests/slot.ts ./saytw launch@local
-//                                            generate and build in the checkout, then launch:
-//                                            launch@local run in the copy would generate there,
-//                                            writing the copy's process-compose over with the
-//                                            app's own literals, and two slots' identity brokers
-//                                            would share one port
+//                                            generate and build in the checkout, then launch
+//   deno run -A tests/slot.ts --weight <n> --what "<label>" -- <command...>
+//                                            claims <n> of the budget, no stack, no ports moved, runs
+//                                            the command where it is, releases on exit (a job is held
+//                                            as <pool>/job-<pid>)
+//
+// A launch is a stack kept up for someone to use, and forgotten: three of them held slots for 16 h
+// after their sessions were gone. So it ends after an hour (STACK_LAUNCH_TTL seconds, 3600; 0 =
+// none): at the deadline it stops its stack, frees the slot, and logs what it stopped to stderr and
+// to the slot's owner file. The deadline is <pool>/slot-<n>/deadline (ms since the epoch);
+// `renew [<slot n>|<pid>]` pushes it to now + the TTL. Only a launch has one.
+//
+//   deno run -A tests/slot.ts status         the slots held: holder, what, since when, deadline
+//   deno run -A tests/slot.ts renew [n|pid]  a launch's deadline to now + STACK_LAUNCH_TTL
 //
 // Run inside the app's toolchain (mise exec), which has process-compose, as the verbs are.
 
 const app = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const pool = Deno.env.get("STACK_POOL") ?? "/tmp/pronto-stacks";
 const budget = Number(Deno.env.get("STACK_BUDGET") ?? Math.max(1, navigator.hardwareConcurrency - Number(Deno.env.get("STACK_RESERVE") ?? 3)));
-const cap = Number(Deno.env.get("STACK_SLOTS") ?? Infinity);
 const asked = Number(Deno.env.get("STACK_SLOT") ?? "0");
-const GB = 2 ** 30;
-// Read when a claim needs it, not as the module loads: the unit tests import it without --allow-sys.
-const memBudget = () => Number(Deno.env.get("STACK_MEM_BUDGET") ?? Math.max(1, Deno.systemMemoryInfo().total / GB - Number(Deno.env.get("STACK_MEM_RESERVE") ?? 32)));
-const memHeadroom = Number(Deno.env.get("STACK_MEM_HEADROOM") ?? 8);
 const say = (s: string) => console.error(`slot: ${s}`);
 
 // queued and admitted: when the claim asked for its slot and when it got it (ms since the epoch).
-// hold: a job's record of the memory it claims and holds (GB), for the claims after it.
-export type Slot = { n: number; dir: string; door: number; env: Record<string, string>; release: () => void; queued: number; admitted: number; hold?: (mem: number, rss: number) => void };
+export type Slot = { n: number; dir: string; door: number; env: Record<string, string>; release: () => void; queued: number; admitted: number };
 
 // The slot's ports, from the app's process-compose: the variables and the literals, each its own.
 export const layout = (compose: string, n: number) => {
@@ -178,66 +135,71 @@ const alive = async (pid: number) => {
   return code === 0 || /not permitted/i.test(new TextDecoder().decode(stderr));
 };
 const holder = async (name: string) => Number(await Deno.readTextFile(`${pool}/${name}/pid`).catch(() => "0"));
-// The weights a holder declares (the README's measures): a launch (idle between the clicks of
-// whoever plays it: 0.32 core on average, 0.53 at p90), a stack, a rehearsal, and each lane a
-// rehearsal adds to its own (tests/rehearse.ts: one more stack and the throttled pages of the
-// check it runs), a scenarios pass's or Premium's. A throttled page spins about a core whatever
-// it does (Chrome's throttle busy-waits), so a check weighs its pages.
-export const weights = { launch: 0.5, stack: 1, rehearsal: 6, pass: 6, premium: 2 };
-// A slot's weight, "<pid> <weight>[ release][ mem=<GB> rss=<GB>]", its holder's only while the pid
-// is the holder's: a holder that wrote none (a slot.ts before weights) weighs a stack, one that wrote
-// two fields (before releases) is not a release, and one without mem= claims no memory.
+// The weights a holder declares: a launch (idle between the clicks of whoever plays it: 0.32 core on
+// average, 0.53 at p90), a stack, a rehearsal, and each lane a rehearsal adds to its own
+// (tests/rehearse.ts), a scenarios pass's or Premium's.
+export const weights = { launch: 0.5, stack: 1, rehearsal: 6, pass: 6, premium: 2, gate: 3 };
+// What a command run under slot.ts weighs when STACK_WEIGHT names none: a launch, a stack, or, for an
+// integrate@local whose pages will run throttled, the stack and those pages (weights.pass). It mirrors
+// tests/slow.ts: SLOW named (not 0 or empty) throttles every scenario's pages, weights.pass; SLOW unset
+// in the local gate (INTEGRATE_LOCAL_DRIVERS=all, not SCENARIOS_ALL) throttles only the scenarios
+// marked `slow`, weights.gate.
+export const commandWeight = (args: string[], env: Record<string, string | undefined>) => {
+  if (args[0] === "launch") return weights.launch;
+  if (!(/(^|\/)saytw$/.test(args[0] ?? "") && args[1] === "integrate@local")) return weights.stack;
+  const asked = env.SLOW;
+  if (asked === undefined) return env.INTEGRATE_LOCAL_DRIVERS === "all" && !env.SCENARIOS_ALL ? weights.gate : weights.stack;
+  return asked !== "" && asked !== "0" ? weights.pass : weights.stack;
+};
+// A holder's record, "<pid> <weight>[ cue][ in=<holder>]", its holder's only while the pid is the
+// holder's: a holder that wrote none weighs a stack. A record from before this rule (`mem=<GB>`) is a
+// cue holder too, so a copy of slot.ts that is not this one is still counted by the lock.
 export const weightOf = (text: string, pid: number) => {
   const [p, w, ...rest] = text.trim().split(" ");
-  const field = (k: string) => Number(rest.find((x) => x.startsWith(`${k}=`))?.slice(k.length + 1)) || 0;
   return p === String(pid) && w !== undefined && w !== "" && Number(w) >= 0
-    ? { weight: Number(w), release: rest.includes("release"), mem: field("mem"), rss: field("rss") }
-    : { weight: weights.stack, release: false, mem: 0, rss: 0 };
+    ? { weight: Number(w), cue: rest.some((x) => x === "cue" || x.startsWith("mem=")) }
+    : { weight: weights.stack, cue: false };
 };
+// A launch's TTL in seconds (STACK_LAUNCH_TTL, else an hour; 0 or less = none), and the deadline it
+// gives a claim made or renewed at `now` (ms since the epoch; 0 = none). Only a launch has one.
+export const launchTtl = (env: string | undefined = Deno.env.get("STACK_LAUNCH_TTL")) => {
+  const t = env === undefined || env.trim() === "" ? 3600 : Number(env);
+  return Number.isFinite(t) && t > 0 ? t : 0;
+};
+export const deadlineOf = (kind: "launch" | "gate" | "job" | "cue", now: number, ttl: number) => kind === "launch" && ttl > 0 ? now + ttl * 1000 : 0;
+// A claim is expired when it is a launch with a deadline and the deadline has come.
+export const expired = (claim: { kind: "launch" | "gate" | "job" | "cue"; deadline: number }, now: number) =>
+  claim.kind === "launch" && claim.deadline > 0 && now >= claim.deadline;
+// BRT, as the user reads times.
+const brt = (ms: number) => new Date(ms - 3 * 3600_000).toISOString().replace("T", " ").slice(0, 19) + " BRT";
 const weighs = async (name: string, pid: number) => weightOf(await Deno.readTextFile(`${pool}/${name}/weight`).catch(() => ""), pid);
-// The memory rule: a claim of `mem` GB fits when the memory the holders claimed (`held`, each its
-// claim and what it holds now), the memory reserved by the tickets ahead (`ahead`) and its own stay
-// within the `budget`, and the memory the machine has `available`, less what the holders claimed
-// and do not hold yet and what is reserved ahead, leaves `headroom` beside it. With no memory
-// claimed or reserved, it fits whatever it needs.
-export const fitsMemory = (held: { mem: number; rss: number }[], mem: number, ahead: number, budget: number, available: number, headroom: number) => {
-  const used = held.reduce((n, h) => n + h.mem, 0);
-  const pending = held.reduce((n, h) => n + Math.max(0, h.mem - h.rss), 0);
-  return used + ahead === 0 || (used + ahead + mem <= budget && available - pending - ahead - mem >= headroom);
-};
 const round = (gb: number) => Math.round(gb * 10) / 10;
-// What a claim counts of the live holders: all of them, or, for a release, only the releases (the
-// pull requests' weight and slots do not count against it): their number and their weight.
-export const counted = (holders: { weight: number; release: boolean; job?: boolean }[], release: boolean) => {
-  const mine = holders.filter((h) => h.release || !release);
-  return { live: mine.filter((h) => !h.job).length, used: mine.reduce((n, h) => n + h.weight, 0) };
-};
-// The release-active file's text as a record, or nothing when it is not one: an app, a pid and a phase.
-export const activeOf = (text: string) => {
-  try {
-    const a = JSON.parse(text);
-    const phases = ["slot", "rehearse", "release", "confirm"];
-    return typeof a?.app === "string" && Number.isInteger(a.pid) && a.pid > 0 && phases.includes(a.phase)
-      ? { app: a.app as string, pid: a.pid as number, started: String(a.started ?? ""), phase: a.phase as string } : null;
-  } catch { return null; }
-};
-// A claim waits for the release in progress unless it is the release's own.
-export const waitsForRelease = (release: boolean, active: boolean) => active && !release;
-const activeFile = Deno.env.get("RELEASE_ACTIVE") ?? `${Deno.env.get("HOME")}/.cache/pronto/release-active`;
-// The live release, if any; a file that is not one or whose pid is gone is stale and removed.
-const releasing = async () => {
-  const text = await Deno.readTextFile(activeFile).catch(() => "");
-  if (!text) return undefined;
-  const a = activeOf(text);
-  if (a && await alive(a.pid)) return a;
-  if (await Deno.readTextFile(activeFile).catch(() => "") === text) await Deno.remove(activeFile).catch(() => {});
-  return undefined;
-};
+// The weight the live holders hold, and how many are stacks (a job is no stack).
+export const held = (holders: { weight: number; job?: boolean }[]) => ({ live: holders.filter((h) => !h.job).length, used: holders.reduce((n, h) => n + h.weight, 0) });
 // The admission rule: a claim of `weight` is admitted when the weight held (`used`) and the weight
 // reserved by the tickets older than its own (`ahead`) leave room for it within the `budget`; the
 // oldest ticket (`ahead` 0) is admitted on an empty pool whatever its weight.
 export const admits = (used: number, weight: number, ahead: number, budget: number) =>
   used + ahead === 0 || used + ahead + weight <= budget;
+// The cue lock: one memory-claimed evaluation at a time, first come first served: admitted when no
+// live ticket is older than its own (`ahead`) and no live holder holds the lock (`holding`).
+export const cueAdmits = (ahead: number, holding: number) => ahead === 0 && holding === 0;
+// Which line a claim waits in: "none" inside a live holder (`parent`) with no memory, or inside one
+// that holds the cue lock (`insideCue`: the same evaluation's memory, a `cue` its own job runs; waiting
+// for the lock its ancestor holds would wait for ever, as two aprende generates did for 70 min on
+// 2026-11-07); "cue" for any other memory claim, nested or not; "cores" otherwise.
+export const lineOf = (parent: number, mem: number, insideCue = false) =>
+  mem > 0 && !(insideCue && parent > 0) ? "cue" : parent > 0 ? "none" : "cores";
+// Whether a claim comes from a GitHub Actions job (GITHUB_ACTIONS): admitted at once on cores.
+export const runnerJob = (env: string | undefined) => env === "true";
+// The cores rule: a nested claim is admitted whatever the room, any other by `admits`.
+export const admitsCores = (nested: boolean, used: number, weight: number, ahead: number, budget: number) =>
+  nested || admits(used, weight, ahead, budget);
+// A slot's directory is stale, to be freed at the next claim, when its holder is gone and nothing
+// answers on its door.
+export const staleSlot = (holderAlive: boolean, doorAnswers: boolean) => !holderAlive && !doorAnswers;
+// A ticket's name: when it was asked for, in ms, and its pid; names sort in the order of the line.
+export const ticketOf = (now: number, pid: number) => `${String(now).padStart(15, "0")}-${pid}`;
 const ordinal = (n: number) => `${n}${["th", "st", "nd", "rd"][n % 100 >= 11 && n % 100 <= 13 ? 0 : Math.min(n % 10, 4) % 4]}`;
 // Held when something answers there, on either loopback.
 const answers = (port: number) => Promise.all(["127.0.0.1", "::1"].map((hostname) =>
@@ -256,131 +218,126 @@ const choosing = async <T>(f: () => Promise<T>): Promise<T> => {
   try { return await f(); } finally { await Deno.remove(lock, { recursive: true }).catch(() => {}); }
 };
 
-// A ticket's name: when it was asked for, in ms, and its pid; a release's dated 10^12 ms early.
-export const ticketOf = (now: number, pid: number, release: boolean) => `${String(now - (release ? 1e12 : 0)).padStart(15, "0")}-${pid}`;
-
-// Pull request work yields to a release: while this process holds a release slot (`yielding(1)` as
-// one is taken, `yielding(-1)` as one is given back), a sweep every ~5 s demotes the browsers in the
-// process tree of each live plain holder to background priority, those not demoted yet; the last slot given
-// back restores every pid demoted. One sweeper per process, whatever the slots it holds. Any
-// failure (ps, taskpolicy, a pid gone) is ignored: the release then runs as before.
-const demoted = new Set<number>();
-let holds = 0, sweeper: ReturnType<typeof setInterval> | undefined;
-const policy = (flag: string, pids: number[]) => Promise.all(pids.map((p) =>
-  new Deno.Command("taskpolicy", { args: [flag, "-p", String(p)], stdout: "null", stderr: "null" }).output().then((r) => r.success, () => false)));
-const sweep = async () => {
+// A slot asked for by number is not waited for when its holder is the asker or above it.
+export const heldByAncestor = (holder: number, lineage: number[]) => holder > 0 && lineage.includes(holder);
+// A process and its parents, nearest first: one ps of the whole table, not one per level (stops at
+// init or a loop). Without ps (a sandbox), the process alone.
+const lineage = async (pid: number) => {
+  const out = [pid];
   try {
-    const kids = new Map<number, number[]>(), parent = new Map<number, number>(), browser = new Set<number>();
-    const ps = await new Deno.Command("ps", { args: ["-A", "-o", "pid=,ppid=,comm="], stdout: "piped", stderr: "null" }).output();
-    for (const l of new TextDecoder().decode(ps.stdout).split("\n")) {
-      const [, pid, ppid, comm = ""] = l.match(/^\s*([0-9]+)\s+([0-9]+)\s+(.*)$/) ?? [];
-      const p = Number(pid), pp = Number(ppid);
-      if (p > 0) { parent.set(p, pp); kids.set(pp, [...kids.get(pp) ?? [], p]); if (/chrom|headless_shell/i.test(comm)) browser.add(p); }
+    const { stdout } = await new Deno.Command("ps", { args: ["-A", "-o", "pid=,ppid="], stdout: "piped", stderr: "null" }).output();
+    const parent = new Map<number, number>();
+    for (const l of new TextDecoder().decode(stdout).split("\n")) {
+      const [p, pp] = l.trim().split(/\s+/).map(Number);
+      if (p > 0) parent.set(p, pp);
     }
-    const mine = new Set<number>();
-    for (let p = Deno.pid; p > 0 && !mine.has(p); p = parent.get(p) ?? 0) mine.add(p);
-    const todo = new Set<number>();
-    for await (const e of Deno.readDir(pool)) {
-      const m = e.name.match(/^(?:slot|job)-[0-9]+$/);
-      const pid = m ? await holder(e.name) : 0;
-      if (!m || !await alive(pid) || (await weighs(e.name, pid)).release) continue;
-      for (const q = [pid]; q.length;) { const p = q.pop()!; if (!mine.has(p) && !todo.has(p)) { todo.add(p); q.push(...kids.get(p) ?? []); } }
+    for (let p = pid; out.length < 64;) {
+      const up = parent.get(p) ?? 0;
+      if (!(up > 1) || out.includes(up)) break;
+      out.push(up); p = up;
     }
-    const fresh = [...todo].filter((p) => browser.has(p) && !demoted.has(p));
-    (await policy("-b", fresh)).forEach((ok, i) => ok && demoted.add(fresh[i]));
-  } catch { /* quietly */ }
+  } catch { /* alone */ }
+  return out;
 };
-const yielding = (by: 1 | -1) => {
-  holds += by;
-  if (holds === 1 && by === 1) { sweeper = setInterval(sweep, 5000); sweep(); Deno.unrefTimer(sweeper); }
-  if (holds === 0) {
-    clearInterval(sweeper);
-    sweeper = undefined;
-    const pids = [...demoted];
-    demoted.clear();
-    // Synchronous, so it also runs as the process exits.
-    for (const p of pids) try { new Deno.Command("taskpolicy", { args: ["-B", "-p", String(p)], stdout: "null", stderr: "null" }).outputSync(); } catch { /* gone */ }
-  }
-};
-addEventListener("unload", () => { if (holds > 0) { holds = 1; yielding(-1); } });
+// The live holder among the processes above a claim (0: none): a claim with one is nested, and its cores are not waited for.
+export const nestedUnder = (holders: number[], above: number[]) => holders.find((h) => heldByAncestor(h, above)) ?? 0;
 
 export async function claim(pid?: number, what?: string, weight?: number, wait?: true, job?: boolean, mem?: number): Promise<Slot>;
 export async function claim(pid: number, what: string, weight: number, wait: false, job?: boolean, mem?: number): Promise<Slot | undefined>;
 export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight = Number(Deno.env.get("STACK_WEIGHT") ?? weights.stack), wait = true, job = false, mem = 0): Promise<Slot | undefined> {
   await Deno.mkdir(pool, { recursive: true });
-  const isRelease = Deno.env.get("STACK_PRIORITY") === "release";
+  const ancestry = await lineage(pid);
+  // STACK_SLOT=<n> names the slot of the command this process runs under (tests/slot.ts <command>): a
+  // claim for that number from the command itself would wait for ever, its holder above it. Before the
+  // ticket, so the head of the line is never a claim that cannot be admitted.
+  if (!job && asked) {
+    const held = await holder(`slot-${asked}`);
+    if (heldByAncestor(held, ancestry) && await alive(held)) {
+      throw new Error(`slot ${asked} (STACK_SLOT) is held by ${held}, this process or one above it: ${what} runs on the slot it was given and takes none of its own, so it is not run under tests/slot.ts (verify@local takes its own slot: run it directly)`);
+    }
+  }
+  // A claim is nested when a live holder is above it: by the process tree (not this process, whose
+  // own slot a rehearsal's lanes sit beside), or by the environment when the tree was lost (a daemon):
+  // STACK_JOB, the job that ran it, and for a job STACK_SLOT, its slot.
+  const above = [...ancestry.slice(1), Number(Deno.env.get("STACK_JOB") ?? 0), job && asked ? await holder(`slot-${asked}`) : 0];
+  const live: number[] = [];
+  let insideCue = false;
+  for await (const e of Deno.readDir(pool)) {
+    const h = /^(?:slot|job)-[0-9]+$/.test(e.name) ? await holder(e.name) : 0;
+    if (h > 0 && above.includes(h) && await alive(h)) {
+      live.push(h);
+      if ((await weighs(e.name, h)).cue) insideCue = true;
+    }
+  }
+  const parent = nestedUnder(live, above);
+  if (parent) weight = 0;
+  const line = lineOf(parent, mem, insideCue);
   // A job (--weight) brings up no stack: no process-compose, no ports, no slot number.
   const compose = job ? "" : await Deno.readTextFile(`${app}/.bayt/process-compose.yaml`);
   let told = "";
   const queued = Date.now();
-  // The ticket: its name orders the line. A release's (STACK_PRIORITY=release, release-cron's
-  // rehearsal and its lanes) is dated 10^12 ms early, so it sorts ahead of every other ticket, in
-  // this slot.ts and in a copy from before priorities alike, and releases keep their own order.
-  const queue = `${pool}/queue`;
-  const ticket = ticketOf(Date.now(), pid, isRelease);
+  const dirOf = line === "cue" ? "cue-queue" : "queue";
+  const queue = `${pool}/${dirOf}`;
+  const ticket = ticketOf(queued, pid);
   await Deno.mkdir(queue, { recursive: true });
-  await Deno.writeTextFile(`${queue}/${ticket}`, `${weight}${mem > 0 ? ` mem=${round(mem)}` : ""} ${what}`);
+  if (line !== "none") await Deno.writeTextFile(`${queue}/${ticket}`, `${weight} ${what}`);
   const minutes = Number(Deno.env.get("STACK_WAIT_MINUTES") ?? 120);
-  let end = Date.now() + minutes * 60_000, fewest = Infinity, lightest = Infinity, leanest = Infinity;
+  let end = Date.now() + minutes * 60_000, fewest = Infinity, lightest = Infinity;
   try {
   for (;;) {
     const got = await choosing(async () => {
-      // The line: the live tickets older than this one, their weights reserved.
-      const older: { name: string; weight: number; mem: number; what: string }[] = [];
-      for await (const e of Deno.readDir(queue)) {
-        const m = e.name.match(/^[0-9]+-([0-9]+)$/);
-        if (!m || e.name >= ticket) continue;
-        if (!await alive(Number(m[1]))) { await Deno.remove(`${queue}/${e.name}`).catch(() => {}); continue; }
-        const [w, ...what] = (await Deno.readTextFile(`${queue}/${e.name}`).catch(() => "")).split(" ");
-        const mm = what[0]?.startsWith("mem=") ? Number(what.shift()!.slice(4)) || 0 : 0;
-        older.push({ name: e.name, weight: w !== "" && Number(w) >= 0 && (Number(w) > 0 || mm > 0) ? Number(w) : weights.stack, mem: mm, what: what.join(" ") });
-      }
-      older.sort((x, y) => x.name < y.name ? -1 : 1);
-      const ahead = older.reduce((n, o) => n + o.weight, 0);
-      const memAhead = older.reduce((n, o) => n + o.mem, 0);
-      const line = `${ordinal(older.length + 1)} in line${older.length ? ` behind ${older.at(-1)!.what} (weight ${older.at(-1)!.weight})` : ""}`;
-      const holders: { weight: number; release: boolean; job: boolean; mem: number; rss: number }[] = [];
-      for await (const e of Deno.readDir(pool)) {
-        const m = e.name.match(/^(slot|job)-[0-9]+$/);
-        const pid = m ? await holder(e.name) : 0;
-        if (m && await alive(pid)) holders.push({ ...await weighs(e.name, pid), job: m[1] === "job" });
-        else if (m?.[1] === "job") await Deno.remove(`${pool}/${e.name}`, { recursive: true }).catch(() => {});
-      }
-      const { live, used } = counted(holders, isRelease);
-      const releasePhase = await releasing();
-      // Memory counts every holder, a release's and a pull request's alike: it is the machine's.
-      const memUsed = holders.reduce((n, h) => n + h.mem, 0);
-      const why = (s: string) => ({ why: `${line}: ${s}`, ahead: older.length, used, memUsed, release: false });
-      // A release holds the machine: nothing without its priority starts until it is over, but a
-      // job that claims memory and no cores.
-      if (releasePhase && weight > 0 && waitsForRelease(isRelease, true)) return { ...why(`the release of ${releasePhase.app} holds the machine (${releasePhase.phase}, run ${releasePhase.pid}, since ${releasePhase.started})`), release: true };
-      // The cap counts those ahead too, so a younger claim never takes the slot a waiter is owed.
-      if (!job && live + older.length >= cap) return why(`${live} stacks up${older.length ? `, ${older.length} ahead` : ""}, the cap (STACK_SLOTS=${cap})`);
-      if (mem > 0) {
-        const available = Deno.systemMemoryInfo().available / GB;
-        if (!fitsMemory(holders, mem, memAhead, memBudget(), available, memHeadroom)) {
-          return why(`memory: ${round(memUsed)} GB of ${round(memBudget())} claimed${memAhead ? `, ${round(memAhead)} reserved by those ahead` : ""}, ${round(available)} GB available, this needs ${round(mem)} (STACK_MEM_BUDGET, STACK_MEM_HEADROOM)`);
+      // Reclaim, at every claim: the live tickets of this claim's line older than its own (their
+      // weights reserved), the dead ones freed; the live holders, the dead jobs and stale slots freed.
+      const older: { name: string; weight: number; what: string }[] = [];
+      if (line !== "none") {
+        for await (const e of Deno.readDir(queue)) {
+          const m = e.name.match(/^[0-9]+-([0-9]+)$/);
+          if (!m) continue;
+          if (!await alive(Number(m[1]))) { await Deno.remove(`${queue}/${e.name}`).catch(() => {}); continue; }
+          if (e.name >= ticket) continue;
+          const [w, ...rest] = (await Deno.readTextFile(`${queue}/${e.name}`).catch(() => "")).split(" ");
+          older.push({ name: e.name, weight: w !== "" && Number(w) >= 0 ? Number(w) : weights.stack, what: rest.join(" ") });
         }
+        older.sort((x, y) => x.name < y.name ? -1 : 1);
       }
-      if (weight > 0 && !admits(used, weight, ahead, budget)) return why(`weight ${used} of ${budget} held${ahead ? `, ${ahead} reserved by those ahead` : ""}, this needs ${weight} (STACK_BUDGET)`);
+      const ahead = older.reduce((n, o) => n + o.weight, 0);
+      const where = `${ordinal(older.length + 1)} in line${older.length ? ` behind ${older.at(-1)!.what} (weight ${older.at(-1)!.weight})` : ""}`;
+      const holders: { weight: number; cue: boolean; job: boolean }[] = [];
+      for await (const e of Deno.readDir(pool)) {
+        const m = e.name.match(/^(slot|job)-([0-9]+)$/);
+        if (!m) continue;
+        const pid = await holder(e.name);
+        if (await alive(pid)) holders.push({ ...await weighs(e.name, pid), job: m[1] === "job" });
+        else if (m[1] === "job") await Deno.remove(`${pool}/${e.name}`, { recursive: true }).catch(() => {});
+        else if (staleSlot(false, await answers(33000 + 100 * (Number(m[2]) - 1)))) await Deno.remove(`${pool}/${e.name}`, { recursive: true }).catch(() => {});
+      }
+      const { used } = held(holders);
+      const why = (s: string) => ({ why: `${where}: ${s}`, ahead: older.length, used });
+      if (line === "cue") {
+        const holding = holders.filter((h) => h.cue).length;
+        if (!cueAdmits(older.length, holding)) return why(`the cue lock: ${holding ? "held" : "free"}, ${older.length} ahead (one cue evaluation at a time)`);
+      } else if (!admitsCores(line === "none" || runnerJob(Deno.env.get("GITHUB_ACTIONS")), used, weight, ahead, budget)) {
+        return why(`weight ${used} of ${budget} held (STACK_BUDGET)${ahead ? `, ${ahead} reserved by those ahead` : ""}, this needs ${weight}`);
+      }
+      const tag = `${mem > 0 ? " cue" : ""}${parent ? ` in=${parent}` : ""}`;
       if (job) {
         const dir = `${pool}/job-${pid}`;
         await Deno.mkdir(dir, { recursive: true });
-        await Deno.writeTextFile(`${dir}/weight`, `${pid} ${weight}${isRelease ? " release" : ""}${mem > 0 ? ` mem=${round(mem)} rss=0` : ""}`);
+        await Deno.writeTextFile(`${dir}/weight`, `${pid} ${weight}${tag}`);
         await Deno.writeTextFile(`${dir}/pid`, String(pid));
-        await Deno.writeTextFile(`${dir}/owner`, `${pid} ${new Date().toISOString()} ${what} (weight ${weight}${mem > 0 ? `, ${round(mem)} GB` : ""})\n`);
+        await Deno.writeTextFile(`${dir}/owner`, `${pid} ${new Date().toISOString()} ${what} (weight ${weight}${mem > 0 ? ", cue lock" : ""})\n`);
         return { n: 0, dir, door: 0, ports: {}, text: "" };
       }
       const busy: string[] = [];
       for (const n of asked ? [asked] : Array.from({ length: 160 }, (_, i) => i + 1)) {
         if (await alive(await holder(`slot-${n}`))) { busy.push(`${n} held by ${await holder(`slot-${n}`)}`); continue; }
         const { door, ports, moved, text } = layout(compose, n);
-        const held = [];
-        for (const p of new Set([...Object.values(ports), ...moved.values()])) if (await answers(p)) held.push(p);
-        if (held.length) { busy.push(`${n}'s ports ${held.join(", ")} answer, its stack not down`); continue; }
+        const open = [];
+        for (const p of new Set([...Object.values(ports), ...moved.values()])) if (await answers(p)) open.push(p);
+        if (open.length) { busy.push(`${n}'s ports ${open.join(", ")} answer, its stack not down`); continue; }
         const dir = `${pool}/slot-${n}`;
         await Deno.mkdir(dir, { recursive: true });
-        await Deno.writeTextFile(`${dir}/weight`, `${pid} ${weight}${isRelease ? " release" : ""}`);
+        await Deno.writeTextFile(`${dir}/weight`, `${pid} ${weight}${tag}`);
         await Deno.writeTextFile(`${dir}/pid`, String(pid));
         await Deno.writeTextFile(`${dir}/owner`, `${pid} ${new Date().toISOString()} ${app} ${what} (weight ${weight})\n`);
         return { n, dir, door, ports, text };
@@ -389,22 +346,13 @@ export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight =
     });
     if (!("why" in got)) {
       const { n, dir, door, ports, text } = got;
+      const tail = `${parent ? ` (inside ${parent}: admitted at once, within its weight)` : ""}${mem > 0 ? " (cue lock)" : ""}`;
       if (job) {
-        say(`${what}: weight ${weight} of ${budget}${mem > 0 ? `, ${round(mem)} GB of ${round(memBudget())}` : ""}`);
-        if (isRelease) yielding(1);
-        let given = false;
+        say(`${what}: weight ${weight} of ${budget}${tail}`);
         const release = () => {
           try { Deno.removeSync(dir, { recursive: true }); } catch { /* gone */ }
-          if (isRelease && !given) { given = true; yielding(-1); }
         };
-        const hold = (m: number, r: number) => {
-          // Written aside and renamed: a claim reading it never sees it empty, a stack's weight.
-          try {
-            Deno.writeTextFileSync(`${dir}/weight.tmp`, `${pid} ${weight}${isRelease ? " release" : ""} mem=${round(m)} rss=${round(r)}`);
-            Deno.renameSync(`${dir}/weight.tmp`, `${dir}/weight`);
-          } catch { /* released */ }
-        };
-        return { n, dir, door, env: {}, release, queued, admitted: Date.now(), hold };
+        return { n, dir, door, env: {}, release, queued, admitted: Date.now() };
       }
       // The slot's copy of the app: links to the checkout, but its process-compose.
       const copy = `${dir}/app`;
@@ -416,36 +364,31 @@ export async function claim(pid = Deno.pid, what = Deno.args.join(" "), weight =
       }
       await Deno.writeTextFile(`${copy}/.bayt/process-compose.yaml`, text);
       const url = `https://localhost:${door}`;
-      say(`slot ${n}: ${url}, ports ${door}-${door + 99}, weight ${weight} of ${budget}, from ${copy}`);
+      say(`slot ${n}: ${url}, ports ${door}-${door + 99}, weight ${weight} of ${budget}${tail}, from ${copy}`);
       // mise reads the copy's .mise.toml, which it trusts as the checkout's.
       const trusted = [Deno.env.get("MISE_TRUSTED_CONFIG_PATHS"), copy].filter(Boolean).join(":");
       const env = { ...Object.fromEntries(Object.entries(ports).map(([k, v]) => [k, String(v)])), ORIGIN: url, APP_URL: url, STACK_SLOT: String(n), PRONTO_GATE_DIR: app, MISE_TRUSTED_CONFIG_PATHS: trusted };
-      if (isRelease) yielding(1);
-      let given = false;
       const release = () => {
         try { Deno.removeSync(`${dir}/pid`); } catch { /* gone */ }
-        if (isRelease && !given) { given = true; yielding(-1); }
       };
       return { n, dir: copy, door, env, release, queued, admitted: Date.now() };
     }
     if (!wait) { say(`not taken: ${got.why}`); return undefined; }
-    // Said again when the reason changes, not the memory the machine has available, which moves every look.
-    const reason = got.why.replace(/[0-9.]+ GB available/, "");
-    if (reason !== told) say(`waiting: ${got.why}`);
-    told = reason;
+    // Said again when the reason changes.
+    if (got.why !== told) say(`waiting: ${got.why}`);
+    told = got.why;
     // Progress: a ticket ahead left, or the weight held dropped, below the least seen.
-    if (got.release || got.ahead < fewest || got.used < lightest || got.memUsed < leanest) end = Date.now() + minutes * 60_000;
+    if (got.ahead < fewest || got.used < lightest) end = Date.now() + minutes * 60_000;
     fewest = Math.min(fewest, got.ahead);
     lightest = Math.min(lightest, got.used);
-    leanest = Math.min(leanest, got.memUsed);
     if (Date.now() > end) throw new Error(`no slot, and the line did not move for ${minutes} minutes: ${got.why}`);
-    // A memory job (an evaluation of tens of seconds) looks again sooner than a stack.
-    await new Promise((r) => setTimeout(r, got.release ? 30_000 : weight === 0 ? 2000 : 5000));
+    await new Promise((r) => setTimeout(r, 1000));
   }
   } finally {
-    await Deno.remove(`${queue}/${ticket}`).catch(() => {});
+    if (line !== "none") await Deno.remove(`${queue}/${ticket}`).catch(() => {});
   }
 }
+
 
 // process-compose with its API on a socket in the run's own folder, and its log there, so the
 // stack can be brought down whole: a launch stopped by a signal can leave its postgres behind.
@@ -561,14 +504,16 @@ const killedFor = (pid: number) => {
   try { const why = Deno.readTextFileSync(`${dir}/killed/${pid}`).trim().split(" ")[0]; Deno.removeSync(`${dir}/killed/${pid}`); return why; } catch { return ""; }
 };
 
-if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn"].includes(Deno.args[0] ?? "")) {
-  // A job: its weight (and memory) claimed, no stack, the command run where it is.
+
+if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn", "--cores-learn"].includes(Deno.args[0] ?? "")) {
+  // A job: its weight claimed (--mem: the cue lock instead), no stack, the command run where it is.
   const split = Deno.args.indexOf("--");
   const opts = Deno.args.slice(0, split < 0 ? Deno.args.length : split);
   const cmd = split < 0 ? [] : Deno.args.slice(split + 1);
   const opt = (name: string) => opts[opts.indexOf(name) + 1];
-  let mem = opts.includes("--mem") ? Number(opt("--mem")) : 0;
+  const mem = opts.includes("--mem") ? Number(opt("--mem")) : 0;
   const learn = opts.includes("--mem-learn") ? opt("--mem-learn") : undefined;
+  // --cores-learn is accepted and ignored: nothing weighs cores by what they used any more.
   const weight = Number(opts.includes("--weight") ? opt("--weight") : Deno.env.get("STACK_WEIGHT") ?? (mem > 0 ? 0 : weights.stack));
   if (!cmd.length || !(mem >= 0) || !(weight > 0 || (weight === 0 && mem > 0))) {
     console.error('usage: deno run -A tests/slot.ts --weight <n> [--mem <GB>] [--mem-learn <file>] --what "<label>" -- <command...>');
@@ -592,20 +537,11 @@ if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn"].includes(
   let peak = 0, status: Deno.CommandStatus;
   for (let attempt = 1; ; attempt++) {
     slot = await claim(Deno.pid, what, weight, true, true, mem);
-    const c = child = new Deno.Command(cmd[0], { args: cmd.slice(1), stdin: "inherit", stdout: "inherit", stderr: "inherit" }).spawn();
-    // What it holds, at once and every second after, and its claim raised to it when it holds more;
-    // a sample still out when it ends writes nothing.
-    const s = slot;
+    const c = child = new Deno.Command(cmd[0], { args: cmd.slice(1), env: { STACK_JOB: String(Deno.pid) }, stdin: "inherit", stdout: "inherit", stderr: "inherit" }).spawn();
+    // What it holds, every second, for its peak: the next run's --mem and a watchdog kill's verdict.
     let running = true;
-    const sample = async () => {
-      const rss = await residentOf(c.pid);
-      if (!running) return;
-      peak = Math.max(peak, rss);
-      if (rss > mem) mem = rss * 1.1;
-      s.hold?.(mem, rss);
-    };
-    if (mem > 0) sample();
-    const sampler = mem > 0 ? setInterval(sample, 1000) : undefined;
+    const sample = async () => { const rss = await residentOf(c.pid); if (running) peak = Math.max(peak, rss); };
+    const sampler = learn ? (sample(), setInterval(sample, 1000)) : undefined;
     status = await c.status;
     running = false;
     clearInterval(sampler);
@@ -613,16 +549,14 @@ if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn"].includes(
     slot.release();
     slot = undefined;
     if (mem > 0 && attempt === 1 && status.signal === "SIGKILL" && killedFor(c.pid) === "pressure") {
-      // Its claim was the peak it reached before it was killed, a quarter more: a floor.
-      mem = Math.max(mem, peak * 1.25);
-      say(`${what}: the memory watchdog killed it under the machine's pressure at ${round(peak)} GB; in line again for ${round(mem)} GB`);
+      say(`${what}: the memory watchdog killed it under the machine's pressure at ${round(peak)} GB; in line again`);
       continue;
     }
     break;
   }
   // Its peak, for the next run's claim. A run that failed or was killed may have stopped before its
   // peak (a missing file, a bad flag): its peak only raises what was learned. One that ended before
-  // a sample held next to nothing: learned as such, so it runs outside the pool.
+  // a sample held next to nothing: learned as such, so it runs outside the lock.
   if (learn) {
     if (!(peak > 0)) peak = 0.05;
     const before = status.success ? 0 : Number((await Deno.readTextFile(learn).catch(() => "")).split(" ")[0]) || 0;
@@ -633,7 +567,28 @@ if (import.meta.main && ["--weight", "--what", "--mem", "--mem-learn"].includes(
 }
 
 if (import.meta.main) {
-  if (!Deno.args.length) { console.error("usage: deno run -A tests/slot.ts launch [--watch] | <command...> | --weight <n> --what <label> -- <command...>"); Deno.exit(2); }
+  if (!Deno.args.length) { console.error("usage: deno run -A tests/slot.ts launch [--watch] | <command...> | status | renew [n|pid] | --weight <n> --what <label> -- <command...>"); Deno.exit(2); }
+  if (Deno.args[0] === "status" || Deno.args[0] === "renew") {
+    const asked = Deno.args[1] === undefined ? 0 : Number(Deno.args[1]);
+    let found = 0;
+    const names: string[] = [];
+    try { for (const e of Deno.readDirSync(pool)) if (/^(slot|job)-[0-9]+$/.test(e.name)) names.push(e.name); } catch { /* no pool */ }
+    for (const name of names.sort((a, b) => Number(a.split("-")[1]) - Number(b.split("-")[1]))) {
+      const pid = await holder(name);
+      if (!await alive(pid)) continue;
+      const owner = (await Deno.readTextFile(`${pool}/${name}/owner`).catch(() => "")).trim();
+      const deadline = Number(await Deno.readTextFile(`${pool}/${name}/deadline`).catch(() => "0"));
+      if (Deno.args[0] === "status") { console.log(`${name} pid ${pid} ${owner}${deadline ? ` deadline ${brt(deadline)}` : ""}`); continue; }
+      if (!deadline || (asked && asked !== pid && `slot-${asked}` !== name)) continue;
+      const next = deadlineOf("launch", Date.now(), launchTtl());
+      if (!next) { say(`${name}: STACK_LAUNCH_TTL is 0, no deadline to push`); continue; }
+      await Deno.writeTextFile(`${pool}/${name}/deadline`, String(next));
+      say(`${name} (pid ${pid}) renewed to ${brt(next)}`);
+      found++;
+    }
+    if (Deno.args[0] === "renew" && !found) { console.error("no live launch with a deadline" + (asked ? ` for ${asked}` : "")); Deno.exit(1); }
+    Deno.exit(0);
+  }
   const args = /(^|\/)saytw$/.test(Deno.args[0]) && Deno.args[1] === "launch@local" ? ["launch", ...Deno.args.slice(2)] : Deno.args;
   if (args !== Deno.args) {
     for (const verb of ["generate", "build"]) {
@@ -642,10 +597,12 @@ if (import.meta.main) {
       if (code) Deno.exit(code);
     }
   }
-  const slot = await claim(Deno.pid, args.join(" "), Number(Deno.env.get("STACK_WEIGHT") ?? (args[0] === "launch" ? weights.launch : weights.stack)));
+  const slot = await claim(Deno.pid, args.join(" "), Number(Deno.env.get("STACK_WEIGHT") ?? commandWeight(args, Deno.env.toObject())));
   let stopping: (() => Promise<void>) | undefined;
+  // Where the command was run from: the owner dir an expiry names (the cwd, not the slot's copy).
+  const checkout = Deno.cwd();
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    Deno.addSignalListener(signal, async () => { await stopping?.(); slot.release(); Deno.exit(130); });
+    Deno.addSignalListener(signal, async () => { await stopping?.(); slot.release(); await Deno.remove(`${slot.dir.replace(/\/app$/, "")}/deadline`).catch(() => {}); Deno.exit(130); });
   }
   let code: number;
   if (args[0] === "launch") {
@@ -653,7 +610,27 @@ if (import.meta.main) {
     const s = stack(slot, tmp);
     const unwatch = args.includes("--watch") ? watch(slot, s.pc, s.env) : undefined;
     stopping = async () => { say("the stack going down"); unwatch?.(); await s.down(); };
-    say(`the stack coming up at ${slot.env.APP_URL}, its log ${tmp}/process-compose.log; stop it with a signal to ${Deno.pid}`);
+    // The launch ends after its TTL unless renewed (`renew`): the deadline is a file beside the slot's pid.
+    const slotDir = slot.dir.replace(/\/app$/, ""), started = brt(Date.now());
+    const deadlineFile = `${slotDir}/deadline`;
+    const first = deadlineOf("launch", Date.now(), launchTtl());
+    if (first) await Deno.writeTextFile(deadlineFile, String(first));
+    say(`the stack coming up at ${slot.env.APP_URL}, its log ${tmp}/process-compose.log; stop it with a signal to ${Deno.pid}${first ? `; it ends at ${brt(first)} unless renewed (deno run -A tests/slot.ts renew ${slot.n})` : ""}`);
+    if (first) {
+      const timer = setInterval(async () => {
+        const deadline = Number(await Deno.readTextFile(deadlineFile).catch(() => "0"));
+        if (!expired({ kind: "launch", deadline }, Date.now())) return;
+        clearInterval(timer);
+        const line = `the launch timed out and is stopped: ${args.join(" ")}, slot ${slot.n}, pid ${Deno.pid}, started ${started}, owner dir ${checkout}`;
+        say(line);
+        await Deno.writeTextFile(`${slotDir}/owner`, `${line}\n`, { append: true }).catch(() => {});
+        await stopping?.();
+        slot.release();
+        await Deno.remove(deadlineFile).catch(() => {});
+        Deno.exit(0);
+      }, Number(Deno.env.get("STACK_LAUNCH_POLL_MS") ?? 5000));
+      Deno.unrefTimer(timer);
+    }
     code = (await s.child.status).code;
     if (code === 0) await Deno.remove(tmp, { recursive: true }).catch(() => {});
     else console.error((await Deno.readTextFile(`${tmp}/process-compose.log`).catch(() => "")).split("\n").slice(-40).join("\n"));
@@ -669,5 +646,6 @@ if (import.meta.main) {
     code = (await child.status).code;
   }
   slot.release();
+  await Deno.remove(`${slot.dir.replace(/\/app$/, "")}/deadline`).catch(() => {});
   Deno.exit(code);
 }

@@ -64,7 +64,7 @@ Deno.test("an evaluation never seen claims CUE_UNKNOWN_GB, then learns its peak 
   await fake(dir, 64);
   const first = await run(dir, ["export", "./spec"], { CUE_UNKNOWN_GB: "3" });
   assertEquals(first.code, 0);
-  assertMatch(first.stderr, /slot: cue \.: weight 0 of [0-9.]+, 3 GB of/);
+  assertMatch(first.stderr, /slot: cue \.: weight 0 of [0-9.]+ \(cue lock\)/);
   const [peak] = (await learned(dir))[0].split(" ");
   assert.ok(Number(peak) > 0.05 && Number(peak) < 1, `learned ${peak} GB for a cue holding ~64 MB`);
   const second = await run(dir, ["export", "./spec"]);
@@ -73,14 +73,14 @@ Deno.test("an evaluation never seen claims CUE_UNKNOWN_GB, then learns its peak 
   assertMatch((await learned(dir))[0], /^0\.[0-9]+ cue export \.\/spec/, "measured again by time");
 });
 
-Deno.test("an evaluation learned large claims its peak and a quarter", async () => {
+Deno.test("an evaluation learned large takes the cue lock (memory is a lock, not a budget)", async () => {
   const dir = await Deno.makeTempDir();
   await fake(dir);
   await run(dir, ["vet", "-c", "./spec"], { CUE_UNKNOWN_GB: "1" });
   const file = (await Array.fromAsync(Deno.readDir(`${dir}/.cache/pronto/cue-mem`)))[0].name;
   await Deno.writeTextFile(`${dir}/.cache/pronto/cue-mem/${file}`, "2 cue vet -c ./spec\n");
   const r = await run(dir, ["vet", "-c", "./spec"]);
-  assertMatch(r.stderr, /, 2\.5 GB of /);
+  assertMatch(r.stderr, /slot: cue \.: weight 0 of [0-9.]+ \(cue lock\)/);
 });
 
 Deno.test("stdin reaches cue on both paths", async () => {
@@ -153,4 +153,87 @@ Deno.test("two wrappers on one PATH (a machine's and a runtime's) claim once and
   assertEquals(code, 0);
   assertMatch(text(stdout), new RegExp(`^real cue export ${spec.replace(/[.]/g, "\\.")}`));
   assertEquals(text(stderr).match(/slot: cue/g)?.length, 1, "one claim, not one per wrapper");
+});
+
+Deno.test("a vet re-vets only the packages whose inputs changed since one passed", async () => {
+  // The module is the case's folder: run() puts its bin (the fake cue) on PATH and its HOME there.
+  const dir = (await Deno.makeTempDir()) + "/m";
+  await Deno.mkdir(dir);
+  await fake(dir);
+  await Deno.mkdir(`${dir}/cue.mod`, { recursive: true });
+  await Deno.writeTextFile(`${dir}/cue.mod/module.cue`, `module: "t.example/m@v0"\nlanguage: version: "v0.16.0"\n`);
+  for (const p of ["a", "b", "c"]) await Deno.mkdir(`${dir}/${p}`);
+  await Deno.writeTextFile(`${dir}/a/a.cue`, `package a\nx: 1\n`);
+  await Deno.writeTextFile(`${dir}/b/b.cue`, `package b\nimport "t.example/m/a"\ny: a.x\n`);
+  await Deno.writeTextFile(`${dir}/c/c.cue`, `package c\nz: _ @embed(file="z.json")\n`);
+  await Deno.writeTextFile(`${dir}/c/z.json`, `1`);
+  await Deno.writeTextFile(`${dir}/c/notes.cue`, `// no package clause: not a package of its own\n`);
+  const vet = (env: Record<string, string> = {}) =>
+    run(dir, ["vet", "-c", "./..."], { CUE_DIRECT_GB: "0", CUE_UNKNOWN_GB: "0.1", ...env });
+  const first = await vet();
+  assertEquals(first.code, 0);
+  assertMatch(first.stdout, /real cue vet -c \.\/a \.\/b \.\/c/);
+  const again = await vet();
+  assertEquals(again.code, 0);
+  assertEquals(again.stdout, "", "every package passed before: cue is not run");
+  assertMatch(again.stderr, /passed before with these same inputs/);
+  // An edit to a reaches b, which imports it; c is untouched.
+  await Deno.writeTextFile(`${dir}/a/a.cue`, `package a\nx: 2\n`);
+  const edited = await vet();
+  assertMatch(edited.stdout, /real cue vet -c \.\/a \.\/b\n/);
+  // An embedded file is an input too.
+  await Deno.writeTextFile(`${dir}/c/z.json`, `2`);
+  assertMatch((await vet()).stdout, /real cue vet -c \.\/c\n/);
+  // A vet that fails records nothing; CUE_VETTED=off vets every time.
+  await Deno.writeTextFile(`${dir}/bin/cue`, `#!/bin/sh\necho "real cue $*"\nexit 1\n`);
+  await Deno.writeTextFile(`${dir}/b/b.cue`, `package b\nimport "t.example/m/a"\ny: a.x + 1\n`);
+  assertEquals((await vet()).code, 1);
+  assertEquals((await vet()).code, 1, "a failed vet was not recorded");
+  await fake(dir);
+  assertEquals((await vet()).code, 0);
+  assertMatch((await vet({ CUE_VETTED: "off" })).stdout, /real cue vet -c \.\/\.\.\./);
+});
+
+Deno.test("an export is printed from a passing one with the same inputs, tags deciding which files count", async () => {
+  const dir = (await Deno.makeTempDir()) + "/m";
+  await Deno.mkdir(dir);
+  await fake(dir);
+  await Deno.mkdir(`${dir}/cue.mod`, { recursive: true });
+  await Deno.writeTextFile(`${dir}/cue.mod/module.cue`, `module: "t.example/m@v0"\nlanguage: version: "v0.16.0"\n`);
+  await Deno.mkdir(`${dir}/a`);
+  await Deno.writeTextFile(`${dir}/a/a.cue`, `package a\nx: 1\n`);
+  await Deno.writeTextFile(`${dir}/a/l1.cue`, `@if(l1)\npackage a\ny: 1\n`);
+  await Deno.writeTextFile(`${dir}/a/l2.cue`, `@if(l2)\npackage a\ny: 2\n`);
+  const env = { CUE_DIRECT_GB: "0", CUE_UNKNOWN_GB: "0.1" };
+  const exp = (args: string[], more: Record<string, string> = {}) => run(dir, ["export", "./a", ...args], { ...env, ...more });
+  const first = await exp(["-t", "l1", "--out", "json"]);
+  assertEquals(first.code, 0);
+  assertMatch(first.stdout, /^real cue export \.\/a -t l1 --out json\n/);
+  const again = await exp(["-t", "l1", "--out", "json"]);
+  assertEquals(again.stdout, first.stdout, "the kept output is printed as cue printed it");
+  assertMatch(again.stderr, /printed from a passing export/);
+  // A file the tags leave out is not an input; one they keep is.
+  await Deno.writeTextFile(`${dir}/a/l2.cue`, `@if(l2)\npackage a\ny: 3\n`);
+  assertMatch((await exp(["-t", "l1", "--out", "json"])).stderr, /printed from a passing export/);
+  await Deno.writeTextFile(`${dir}/a/l1.cue`, `@if(l1)\npackage a\ny: 4\n`);
+  assertEquals((await exp(["-t", "l1", "--out", "json"])).stderr.includes("printed from a passing export"), false);
+  // A package importing a's with its major version and package (\`mod@v0:pkg\`, as pronto's reads do) is keyed by a's files.
+  await Deno.mkdir(`${dir}/a/obs`);
+  await Deno.writeTextFile(`${dir}/a/obs/o.cue`, `package obs\nimport a "t.example/m/a@v0:a"\nr: a.x\n`);
+  const obs = () => run(dir, ["export", "./a/obs", "-e", "r"], env);
+  await obs();
+  assertMatch((await obs()).stderr, /printed from a passing export/);
+  await Deno.writeTextFile(`${dir}/a/a.cue`, `package a\nx: 5\n`);
+  assertEquals((await obs()).stderr.includes("printed from a passing export"), false, "an edit to the imported package is a miss");
+  // A failing export keeps nothing; -o and CUE_EXPORTED=off run as asked.
+  await Deno.writeTextFile(`${dir}/bin/cue`, `#!/bin/sh\necho "real cue $*"\nexit 1\n`);
+  assertEquals((await exp(["-e", "x"])).code, 1);
+  assertEquals((await exp(["-e", "x"])).code, 1, "a failed export was not kept");
+  await fake(dir);
+  assertMatch((await exp(["-e", "x"])).stdout, /^real\ cue\ export\ \.\/a\ \-e\ x\n/);
+  assertMatch((await exp(["-e", "x"], { CUE_EXPORTED: "off" })).stdout, /^real\ cue\ export\ \.\/a\ \-e\ x\n/);
+  assertMatch((await exp(["-o", "out.json"])).stdout, /^real\ cue\ export\ \.\/a\ \-o\ out\.json\n/);
+  assertMatch((await exp(["-o", "out.json"])).stdout, /^real\ cue\ export\ \.\/a\ \-o\ out\.json\n/, "-o is never printed from the cache");
+  assertMatch((await exp(["-oout.json"])).stdout, /^real cue export \.\/a -oout\.json\n/);
+  assertMatch((await exp(["-oout.json"])).stdout, /^real cue export \.\/a -oout\.json\n/, "nor a glued -o");
 });
