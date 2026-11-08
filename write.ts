@@ -18,6 +18,7 @@ import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive, exclusive, GENERATED_HTML_HEADER, programPackage, readApp, terminalPath } from "./derive.ts";
 import { mint } from "./identity.ts";
 import { entries, exists, ifMissing } from "./missing.ts";
+import { keepBlocks, writeWhole } from "./caddy-blocks.ts";
 import { projectSay, projectGates } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 import { generateProto, type ProtoEntity } from "./type-proto.ts";
@@ -343,14 +344,16 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
     changed = true;
     touched = true;
   }
-  const put = async (rel: string, text: string) => {
+  const put = async (rel: string, emitted: string) => {
     const path = `${appDir}/${rel}`;
-    if (await ifMissing(Deno.readTextFile(path), null) === text) return;
+    const current = await ifMissing(Deno.readTextFile(path), null);
+    const text = rel === "docker/Caddyfile" ? keepBlocks(current, emitted) : emitted;
+    if (current === text) return;
     changed = true;
     touched = true;
     const dir = parent(path);
     if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
-    await Deno.writeTextFile(path, text);
+    await writeWhole(path, text);
   };
   for (const [rel, text] of contents) await put(rel, text);
   for (const [rel, text] of await renderDocuments(emission)) await put(rel, text);
