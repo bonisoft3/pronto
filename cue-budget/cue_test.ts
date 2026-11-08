@@ -64,7 +64,7 @@ Deno.test("an evaluation never seen claims CUE_UNKNOWN_GB, then learns its peak 
   await fake(dir, 64);
   const first = await run(dir, ["export", "./spec"], { CUE_UNKNOWN_GB: "3" });
   assertEquals(first.code, 0);
-  assertMatch(first.stderr, /slot: cue \.: weight 0 of [0-9.]+, 3 GB of/);
+  assertMatch(first.stderr, /slot: cue \.: weight 0 of [0-9.]+ \(cue lock\)/);
   const [peak] = (await learned(dir))[0].split(" ");
   assert.ok(Number(peak) > 0.05 && Number(peak) < 1, `learned ${peak} GB for a cue holding ~64 MB`);
   const second = await run(dir, ["export", "./spec"]);
@@ -73,14 +73,14 @@ Deno.test("an evaluation never seen claims CUE_UNKNOWN_GB, then learns its peak 
   assertMatch((await learned(dir))[0], /^0\.[0-9]+ cue export \.\/spec/, "measured again by time");
 });
 
-Deno.test("an evaluation learned large claims its peak and a quarter", async () => {
+Deno.test("an evaluation learned large takes the cue lock (memory is a lock, not a budget)", async () => {
   const dir = await Deno.makeTempDir();
   await fake(dir);
   await run(dir, ["vet", "-c", "./spec"], { CUE_UNKNOWN_GB: "1" });
   const file = (await Array.fromAsync(Deno.readDir(`${dir}/.cache/pronto/cue-mem`)))[0].name;
   await Deno.writeTextFile(`${dir}/.cache/pronto/cue-mem/${file}`, "2 cue vet -c ./spec\n");
   const r = await run(dir, ["vet", "-c", "./spec"]);
-  assertMatch(r.stderr, /, 2\.5 GB of /);
+  assertMatch(r.stderr, /slot: cue \.: weight 0 of [0-9.]+ \(cue lock\)/);
 });
 
 Deno.test("stdin reaches cue on both paths", async () => {
