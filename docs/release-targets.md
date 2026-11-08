@@ -401,8 +401,10 @@ the publish here and by a one-shot `seed-blobs` target in a cluster, and is then
 object like any other. Pages has no blob storage, and inlines them
 ([pages](#pages)). An effect's answered bytes are written at run time to the same
 bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-handler));
-uploads have no store at the edge yet. A bridge's container is not deployed here,
-so its effects settle failed without a call ([where a bridge runs](container-bridges.md#where-a-bridge-runs)).
+uploads have no store at the edge yet. A bridge naming `cloudflare` runs as a
+Cloudflare Container of the airlock's dispatcher Worker, built from its Dockerfile
+by the publish, which therefore needs Docker; one not naming it has its effects
+settle failed without a call ([targets](container-bridges.md#targets)).
 An app with effects runs them in a second Worker, `<object script>-airlock`, the
 consumer of a queue of the same name that the script holding the object produces
 to ([edge-dispatcher.ts](../bundle/edge-dispatcher.ts), mecha-edge's
@@ -658,7 +660,7 @@ What fixes its shape:
 - **A bridge runs as a process.** A bridge whose `targets` include `docker`
   declares an `appliance` form: the files copied from its real container's image
   and the command that serves its port on localhost
-  ([container bridges](container-bridges.md#targets)). The airlock settles a
+  ([container bridges](container-bridges.md#docker)). The airlock settles a
   bridge not on `docker` failed and not deployed there.
 - **No AI gateway.** tsbifrost is no process of the appliance yet, so a program
   whose effects reach it is refused at release, its build failing with

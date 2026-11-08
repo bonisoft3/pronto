@@ -1,0 +1,32 @@
+{
+  "effects": {
+    "acquire": {
+      "table": "fetch_request",
+      "field": "status",
+      "state": "acquiring",
+      "onDone": "applied",
+      "onError": "failed",
+      "row": ["id"],
+      "key": ["id"],
+      "idempotent": false,
+      "reentry": "repeat",
+      "attempts": 5,
+      "handler": "effects/acquire.js",
+      "bridge": {"name": "fetch-pages", "targets": ["docker", "cloudflare"], "simulated": true}
+    },
+    "confirm": {
+      "table": "fetch_request",
+      "field": "status",
+      "state": "confirming",
+      "onDone": "confirmed",
+      "onError": "failed",
+      "row": ["id"],
+      "key": ["id"],
+      "idempotent": false,
+      "reentry": "repeat",
+      "attempts": 3,
+      "handler": "effects/confirm.js",
+      "bridge": {"name": "mail", "targets": ["docker"], "simulated": false}
+    }
+  }
+}

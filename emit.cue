@@ -3456,6 +3456,18 @@ _pgrollDir: "services/database/pgroll"
 				// The effect steps a page or edge release places among the
 				// migrations, where the program places them, and why it may.
 				if E.code.state.steps != _|_ {steps: {graphile: E._steps.graphile, airlock: E._steps.airlock, note: E.code.state.steps.note}}
+				// The bridges a release lowers past the cluster: each container's
+				// port, release targets and the cluster target building its image,
+				// whose bayt files hold the Dockerfile and the resolved environment
+				// the edge release's dispatcher ships as a Cloudflare Container
+				// (bundle/edge-bridges.ts).
+				if E.code.state.bridges != _|_ {bridges: [for _, b in E.code.state.bridges {
+					name:      b.name
+					container: b.container
+					port:      b.port
+					targets:   b.targets
+					build:     "\(b.container)-appliance"
+				}]}
 			}
 		}
 		".pronto/edge-hatches.json": {

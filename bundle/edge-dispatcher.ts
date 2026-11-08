@@ -5,6 +5,7 @@
 // the queue's producer and the dispatcher's way back.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { bridgeBuild, bridgeDockerfile, bridgeNames, clusterBridges, onCloudflare } from './edge-bridges.ts'
 
 interface Config {
   name: string
@@ -16,14 +17,15 @@ interface Config {
 }
 
 /** What publish-edge.ts reads: the queue to create, the dispatcher's config,
- * and the secrets only the dispatcher holds: those the effects declare, each
+ * the secrets only the dispatcher holds: those the effects declare, each
  * required, and the keys their AI providers read, a group per provider any of
- * whose names serves. */
+ * whose names serves; and the bridges whose containers the deploy builds. */
 export interface AirlockRelease {
   queue: string
   deployment: 'airlock/wrangler.jsonc'
   secrets: string[]
   providers: string[][]
+  containers: string[]
 }
 
 /** The dispatcher's Worker and queue, named after the script holding the
@@ -61,13 +63,32 @@ export async function writeEdgeDispatcher(out: string, mecha: string, app: strin
   // cloudflare, global overrides and key aliases included.
   const { providerKeyGroups } = await import(String(pathToFileURL(path.join(mecha, 'services/airlock/ai-models.ts')))) as { providerKeyGroups: (config: unknown, target: 'cloudflare') => string[][] }
   const providers = providerKeyGroups(ai, 'cloudflare')
-  const dispatch = path.relative(path.join(out, 'src'), path.join(mecha, 'packages/mecha-edge/src/dispatch.ts')).replaceAll('\\', '/')
-  await Deno.writeTextFile(path.join(out, 'src/dispatcher.ts'), `// Written by pronto's edge.ts for ${host.name}: the airlock's dispatcher Worker.
-import { edgeDispatcher } from '${dispatch.startsWith('.') ? dispatch : `./${dispatch}`}'
-import effects from './effects.js'
-export default edgeDispatcher({ effects${ai ? `, ai: ${JSON.stringify(ai)}` : ''} })
+  const mechaEdge = (file: string) => {
+    const rel = path.relative(path.join(out, 'src'), path.join(mecha, 'packages/mecha-edge/src', file)).replaceAll('\\', '/')
+    return rel.startsWith('.') ? rel : `./${rel}`
+  }
+  // The bridges on cloudflare, each a Bridge class of this Worker
+  // (edge-bridges.ts, mecha-edge's bridge.ts): one instance, asleep after ten
+  // idle minutes, with the environment bayt resolved for the container and
+  // the internet its hatch exists for.
+  const bridges = onCloudflare(await clusterBridges(app))
+  const builds = new Map(await Promise.all(bridges.map(async b => [b.name, await bridgeBuild(app, b)] as const)))
+  const classes = bridges.map(b => `
+export class ${bridgeNames(b.name).className} extends Bridge {
+  defaultPort = ${b.port}
+  sleepAfter = '10m'
+  enableInternet = true
+  envVars = ${JSON.stringify(builds.get(b.name)!.environment)}
+}
 `)
+  await Deno.writeTextFile(path.join(out, 'src/dispatcher.ts'), `// Written by pronto's edge.ts for ${host.name}: the airlock's dispatcher Worker.
+import { edgeDispatcher } from '${mechaEdge('dispatch.ts')}'
+${bridges.length ? `import { Bridge } from '${mechaEdge('bridge.ts')}'\n` : ''}import effects from './effects.js'
+export default edgeDispatcher({ effects${ai ? `, ai: ${JSON.stringify(ai)}` : ''} })
+${classes.join('')}`)
   await Deno.mkdir(path.join(out, 'airlock'), { recursive: true })
+  for (const b of bridges) await Deno.writeTextFile(path.join(out, 'airlock', `Dockerfile.${b.name}`), await bridgeDockerfile(app, b, builds.get(b.name)!))
+  const context = path.relative(path.join(out, 'airlock'), app).replaceAll('\\', '/') || '.'
   const blobUrl = front.vars?.BLOB_URL
   await Deno.writeTextFile(path.join(out, 'airlock/wrangler.jsonc'), JSON.stringify({
     name: queue,
@@ -78,14 +99,29 @@ export default edgeDispatcher({ effects${ai ? `, ai: ${JSON.stringify(ai)}` : ''
     preview_urls: false,
     observability: { enabled: true },
     ai: { binding: 'AI' },
-    durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster', script_name: host.name }] },
+    durable_objects: {
+      bindings: [
+        { name: 'CLUSTER', class_name: 'Cluster', script_name: host.name },
+        ...bridges.map(b => ({ name: bridgeNames(b.name).binding, class_name: bridgeNames(b.name).className })),
+      ],
+    },
     // The object's lease on a run is what dispatches it again, so the queue
     // never redelivers: a retried message would be a run the ledger never counted.
     queues: { consumers: [{ queue, max_retries: 0, max_batch_size: 1 }] },
     ...(front.r2_buckets?.length ? { r2_buckets: front.r2_buckets.filter(b => b.binding === 'BLOB_OBJECTS') } : {}),
     ...(blobUrl ? { vars: { BLOB_URL: blobUrl } } : {}),
+    // `wrangler deploy` builds each image for linux/amd64 with the publisher's
+    // Docker (publish-edge.ts), under the container's own build args, and
+    // pushes it to Cloudflare's registry.
+    ...(bridges.length ? {
+      containers: bridges.map(b => {
+        const { args } = builds.get(b.name)!
+        return { class_name: bridgeNames(b.name).className, image: `./Dockerfile.${b.name}`, image_build_context: context, ...(Object.keys(args).length ? { image_vars: args } : {}), max_instances: 1 }
+      }),
+      exports: Object.fromEntries(bridges.map(b => [bridgeNames(b.name).className, { type: 'durable-object', storage: 'sqlite' }])),
+    } : {}),
   }, null, 2) + '\n')
-  const release: AirlockRelease = { queue, deployment: 'airlock/wrangler.jsonc', secrets, providers }
+  const release: AirlockRelease = { queue, deployment: 'airlock/wrangler.jsonc', secrets, providers, containers: bridges.map(b => b.name) }
   await Deno.writeTextFile(path.join(out, 'src/airlock.json'), JSON.stringify(release))
   return release
 }

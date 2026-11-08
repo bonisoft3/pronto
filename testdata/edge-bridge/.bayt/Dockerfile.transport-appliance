@@ -1,0 +1,24 @@
+# generated from bayt.cue — do not edit
+FROM rust:1.88.0-bookworm@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0 AS transport-appliance
+ARG BAYT_DIR
+WORKDIR /app
+COPY tools/transport/Cargo.toml tools/transport/Cargo.lock /app/
+COPY tools/transport/src/*.rs /app/src/
+COPY --parents tools/transport/Cargo.toml tools/transport/Cargo.lock tools/transport/src/*.rs ./
+COPY .bayt/Taskfile.yml .bayt/Taskfile.bayt.yml .bayt/bayt.transport-appliance.json ./.bayt/
+CMD ["transport", "--listen", "0.0.0.0:8090"]
+RUN cargo build --release --locked --manifest-path /app/Cargo.toml && cp /app/target/release/transport /usr/local/bin/transport
+
+FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS transport-appliance_ctxs
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY --parents tools/transport/Cargo.toml tools/transport/Cargo.lock tools/transport/src/*.rs ./
+FROM scratch AS transport-appliance_srcs
+COPY --from=transport-appliance_ctxs /monorepo /monorepo
+
+FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS transport-appliance_bayt_ctxs
+ARG BAYT_DIR
+WORKDIR /monorepo/${BAYT_DIR}
+COPY --parents .bayt/compose.transport-appliance.yaml .bayt/Dockerfile.transport-appliance .bayt/bayt.transport-appliance.json ./
+FROM scratch AS transport-appliance_bayt
+COPY --from=transport-appliance_bayt_ctxs /monorepo /monorepo

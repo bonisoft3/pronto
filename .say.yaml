@@ -28,6 +28,7 @@ say:
         cmds:
           - do: "cue vet -c ./testdata/emit"
           - do: "deno test --parallel --no-config --allow-read --allow-write --allow-run=cue,nu,sh read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts host-postgres.test.ts"
+          - do: "deno test --config deno.json --allow-read --allow-write --allow-run=cue bridge-targets.test.ts"
           - do: "deno test --no-config --allow-read --allow-write --allow-env --allow-run=git,nu,tar,sh gcp-build.test.ts"
       activepieces:
         priority: -1
@@ -143,7 +144,7 @@ say:
       bundle:
         priority: -1
         cmds:
-          - do: "mise exec -- deno test --parallel --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-scripts_test.ts bundle/edge-addresses_test.ts bundle/edge-deployment_test.ts bundle/edge-jwt_test.ts bundle/edge-hatches_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts bundle/edge-static_test.ts mecha-reducer.test.ts"
+          - do: "mise exec -- deno test --parallel --config bundle/deno.json --allow-read --allow-write --allow-run --allow-env bundle/bundle_test.ts bundle/edge-scripts_test.ts bundle/edge-addresses_test.ts bundle/edge-deployment_test.ts bundle/edge-jwt_test.ts bundle/edge-hatches_test.ts bundle/edge-ssr_test.ts bundle/edge-machines_test.ts bundle/edge-static_test.ts bundle/edge-dispatcher_test.ts bundle/edge-bridges_test.ts mecha-reducer.test.ts"
       # The door's language rule against the terminal's, over an emitted
       # Caddyfile: two runtimes that cannot share code and must not disagree.
       negotiation:

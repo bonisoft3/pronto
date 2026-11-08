@@ -1,10 +1,27 @@
 // Renders an edge release's src/effects.js: the app's external effects from
 // services/airlock/effects.json, each bound to its handler module and target
-// (tsbifrost or declared HTTPS origin) for mecha-edge's airlock.ts.
+// (tsbifrost, declared HTTPS origin, or a bridge's container) for mecha-edge's
+// airlock.ts.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { bridgeNames, CLOUDFLARE, clusterBridges, onCloudflare } from './edge-bridges.ts'
 
-export type EffectTarget = { kind: 'tsbifrost' | 'origin'; url?: string } | { kind: 'bridge'; bridge: string }
+export type EffectTarget =
+  | { kind: 'tsbifrost' | 'origin'; url?: string }
+  | { kind: 'bridge'; bridge: string }
+  | { kind: 'container'; bridge: string; binding: string }
+
+// A bridge on cloudflare is the dispatcher's own container, reached by its
+// binding (edge-bridges.ts) on the port its class holds; any other is an
+// internal address the edge never dials, and the object settles its effect
+// failed (mecha-edge's airlock.ts).
+function bridgeTarget(name: string, bridge: { name: string; targets: string[] }, containers: Set<string>): EffectTarget {
+  const container = containers.has(bridge.name)
+  if (bridge.targets.includes(CLOUDFLARE) !== container) {
+    throw new Error(`effect ${name}: effects.json and .pronto/cluster.json disagree on whether the bridge ${bridge.name} is on cloudflare: regenerate the app`)
+  }
+  return container ? { kind: 'container', bridge: bridge.name, binding: bridgeNames(bridge.name).binding } : { kind: 'bridge', bridge: bridge.name }
+}
 
 async function resolveEffectTarget(appDir: string, name: string): Promise<EffectTarget> {
   try {
@@ -50,6 +67,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
   const imports: string[] = []
   const entries: string[] = []
   const declared: string[] = []
+  const containers = new Set(onCloudflare(await clusterBridges(appDir)).map(b => b.name))
   const srcDir = path.join(outDir, 'src')
   const fromSrc = (p: string) => {
     const rel = path.relative(srcDir, p).replaceAll('\\', '/')
@@ -63,9 +81,7 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     }
     const handlerPath = path.join(appDir, decl.handler)
     await Deno.stat(handlerPath)
-    // A bridge's binding is a container's internal address, which the edge
-    // never dials: the object settles its effect failed (mecha-edge's airlock.ts).
-    const target: EffectTarget = decl.bridge === undefined ? await resolveEffectTarget(appDir, name) : { kind: 'bridge', bridge: decl.bridge.name }
+    const target: EffectTarget = decl.bridge === undefined ? await resolveEffectTarget(appDir, name) : bridgeTarget(name, decl.bridge, containers)
     const ident = `handler_${i}`
     imports.push(`import * as ${ident} from ${JSON.stringify(fromSrc(handlerPath))}`)
     entries.push(

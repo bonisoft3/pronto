@@ -1,0 +1,16 @@
+# generated from bayt.cue — do not edit
+services:
+  fixture-transport-appliance:
+    build:
+      context: ..
+      dockerfile: .bayt/Dockerfile.transport-appliance
+      target: transport-appliance
+      args:
+        BAYT_DIR: ${MONOREPO_COMPOSE_MODE:+apps/fixture}
+        BUILDKIT_SYNTAX: >-
+          docker/dockerfile:1.27@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+    image: bayt-fixture-transport-appliance:latest
+    environment:
+      TRANSPORT_MODE: live
+      RUST_LOG: info
+    scale: 0

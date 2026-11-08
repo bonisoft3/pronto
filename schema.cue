@@ -1164,8 +1164,9 @@ import (
 }
 
 // An environment variable an effect declares, never one the cluster's own
-// services read.
-#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS)$"
+// services read, nor a bridge's: BRIDGE_<NAME> binds a container on the
+// dispatcher Worker and BRIDGE_<NAME>_URL addresses one on the mesh.
+#SecretName: =~"^[A-Z][A-Z0-9_]*$" & !~"^(SERVICE_JWT|PGRST_JWT_SECRET|POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|ELECTRIC_SECRET|DATABASE_URL|MESH_URL|AIRLOCK_DIR|WAKE_URLS)$" & !~"^BRIDGE_"
 
 #ActivepiecesAlias:      string & =~"^[a-zA-Z][a-zA-Z0-9_]*$"
 #ActivepiecesPath:       string & =~"^\\./pieces/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$"
@@ -1691,11 +1692,13 @@ import (
 		// An Airlock-facing endpoint of a declared container hatch.
 		// A bridge runs as its simulator in the local stack and as its container
 		// on the release targets it names; elsewhere its effects fail at run time
-		// ([[docs/container-bridges#Targets]]). `docker` is the one
-		// release target that lowers a bridge, as a process of its appliance,
-		// so it needs the bridge's `appliance` form; naming another is refused
-		// here rather than failing every call there.
-		bridges?: [Name=string]: mechaCluster.#Bridge & {name: Name, targets: *[] | ["docker"]}
+		// ([[docs/container-bridges#Targets]]). `docker` lowers a bridge as a
+		// process of its appliance, so it needs the bridge's `appliance` form;
+		// `cloudflare` ships the container's own image as a Cloudflare
+		// Container of the dispatcher Worker, so its container needs a
+		// Dockerfile. Naming another is refused here rather than failing every
+		// call there.
+		bridges?: [Name=string]: mechaCluster.#Bridge & {name: Name, targets: *[] | [...("docker" | "cloudflare")]}
 		duckstreams?: [Name=string]: #DuckStreamPipeline & {name: Name}
 		// Seed rows held as data rather than stated: a JSON file beside the
 		// program, outside its package, keyed by entity name —
@@ -2619,6 +2622,12 @@ import (
 		}],
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if b.action == _|_ {
 			"bridge \(n) needs an Activepieces action"
+		}],
+		// An Activepieces mail action on cloudflare lowers to Email Routing
+		// (bundle/edge-effects.ts), so a container there would be built and
+		// never called.
+		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces != _|_ if list.Contains(b.targets, "cloudflare") {
+			"bridge \(n) names cloudflare, where its Activepieces action runs without a container"
 		}],
 		[for n, b in _declaredBridges if A.capabilities.hatches[b.container] != _|_ if A.capabilities.hatches[b.container].activepieces == _|_ if b.action != _|_ {
 			"bridge \(n) selects an action on a non-Activepieces hatch"

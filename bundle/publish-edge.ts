@@ -170,11 +170,31 @@ await refuseMissingHatchSecrets({
 })
 // The airlock's dispatcher (edge-dispatcher.ts): its queue exists before the
 // object's script names it, and the effects' secrets are the dispatcher's alone.
-let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][] } | undefined
+let airlock: { queue: string; deployment: string; secrets: string[]; providers: string[][]; containers: string[] } | undefined
 try { airlock = JSON.parse(await Deno.readTextFile(path.join(out, 'src/airlock.json'))) }
 catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error }
 if (airlock) {
   if (airlock.deployment !== 'airlock/wrangler.jsonc') throw new Error(`invalid airlock deployment: ${airlock.deployment}`)
+  // A bridge's container is built here by the dispatcher's `wrangler deploy`,
+  // for linux/amd64, and pushed to Cloudflare's registry: without a running
+  // Docker the publish has no image to ship.
+  if (airlock.containers.length) {
+    const shipped = airlock.containers.join(', ')
+    const info = await new Deno.Command('docker', { args: ['info', '--format', '{{.ServerVersion}}'], cwd: out, stdin: 'null', stdout: 'piped', stderr: 'piped' }).output()
+      .catch((error: Error) => fail(`the dispatcher ships ${shipped} as Cloudflare Containers, and docker cannot be run: ${error.message}`))
+    if (!info.success) fail(`the dispatcher ships ${shipped} as Cloudflare Containers, and Docker is not running: ${new TextDecoder().decode(info.stderr).trim()}`)
+    console.log(`publish-edge: Docker ${new TextDecoder().decode(info.stdout).trim()} builds ${shipped} for linux/amd64 at the dispatcher's deploy; a first deploy provisions each container, which takes minutes, and its effects wait on it`)
+    // Each image is built here first, as wrangler will build it, so a
+    // Dockerfile that does not build fails the publish before the object's
+    // Worker is switched to a release whose dispatcher never deploys.
+    const dispatcher = path.join(out, airlock.deployment)
+    const { containers = [] } = JSON.parse(await Deno.readTextFile(dispatcher)) as { containers?: { class_name: string; image: string; image_build_context: string; image_vars?: Record<string, string> }[] }
+    for (const c of containers) {
+      const args = Object.entries(c.image_vars ?? {}).flatMap(([k, v]) => ['--build-arg', `${k}=${v}`])
+      const built = await new Deno.Command('docker', { args: ['build', '--platform', 'linux/amd64', '--provenance=false', '-f', c.image, ...args, c.image_build_context], cwd: path.dirname(dispatcher), stdin: 'null', stdout: 'inherit', stderr: 'inherit' }).output()
+      if (!built.success) fail(`the image of ${c.class_name} (${c.image}) does not build, so nothing deploys`)
+    }
+  }
   // A secret the environment does not carry must already be the deployed
   // dispatcher's, as an edge hatch's is (edge-hatches.ts): a release never
   // invents one, and a first deploy without it would run every effect keyless.
