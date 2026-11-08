@@ -217,6 +217,14 @@ Deno.test("an export is printed from a passing one with the same inputs, tags de
   assertMatch((await exp(["-t", "l1", "--out", "json"])).stderr, /printed from a passing export/);
   await Deno.writeTextFile(`${dir}/a/l1.cue`, `@if(l1)\npackage a\ny: 4\n`);
   assertEquals((await exp(["-t", "l1", "--out", "json"])).stderr.includes("printed from a passing export"), false);
+  // A package importing a's with its major version and package (\`mod@v0:pkg\`, as pronto's reads do) is keyed by a's files.
+  await Deno.mkdir(`${dir}/a/obs`);
+  await Deno.writeTextFile(`${dir}/a/obs/o.cue`, `package obs\nimport a "t.example/m/a@v0:a"\nr: a.x\n`);
+  const obs = () => run(dir, ["export", "./a/obs", "-e", "r"], env);
+  await obs();
+  assertMatch((await obs()).stderr, /printed from a passing export/);
+  await Deno.writeTextFile(`${dir}/a/a.cue`, `package a\nx: 5\n`);
+  assertEquals((await obs()).stderr.includes("printed from a passing export"), false, "an edit to the imported package is a miss");
   // A failing export keeps nothing; -o and CUE_EXPORTED=off run as asked.
   await Deno.writeTextFile(`${dir}/bin/cue`, `#!/bin/sh\necho "real cue $*"\nexit 1\n`);
   assertEquals((await exp(["-e", "x"])).code, 1);

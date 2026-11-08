@@ -225,7 +225,8 @@ function imports(file: string): string[] {
     for (const p of m[1].matchAll(/"([^"]+)"/g)) out.push(p[1]);
   }
   for (const m of text.matchAll(/(?:^|\n)\s*import\s+(?:[\w$#]+\s+)?"([^"]+)"/g)) out.push(m[1]);
-  return out.map((p) => p.replace(/:[\w$#]+$/, ""));
+  // `mod@v0/x:pkg` names the folder `mod/x`: its package qualifier and major version are not path.
+  return out.map((p) => p.replace(/:[\w$#]+$/, "").replace(/@v\d+(?=\/|$)/, ""));
 }
 
 // A file's package clause, the first `package x` outside comments; undefined when there is none.
