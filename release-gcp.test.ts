@@ -148,7 +148,7 @@ Deno.test("initdb builds the schema once, and its re-runnable steps every releas
   assertStringIncludes(c.command[2], `if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"\n`);
   // A guard the app changed reaches a database built before it (a friend's
   // refused seat, found in production), and so does a new entity's table.
-  assertStringIncludes(c.command[2], `for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql`);
+  assertStringIncludes(c.command[2], `for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null)`);
   // A status chart the app changed reaches a live database too: 010_machines.sql is in the replay
   // ("invalid transition on rental_request from accepting to paying", found in production).
   // 010 drops and recreates triggers and constraints: atomically, or a write slips between them.

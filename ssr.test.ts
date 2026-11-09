@@ -55,8 +55,8 @@ Deno.test("a public route's addresses reach the renderer, ahead of the entry", a
 // with Cloud Run's 429 page for minutes. The SPA draws the route itself, so the
 // door serves the entry, status 200, when the renderer is rate-limited, failing
 // or unreachable, and passes every other answer, a real 404 included, through.
-Deno.test("a renderer that is down or limiting falls back to the entry at 200", () => {
-  const { ok, out } = ask("_view", "caddyfile");
+Deno.test("a renderer that is down or limiting falls back to the entry at 200", async () => {
+  const { ok, out } = await ask("_view", "caddyfile");
   if (!ok) throw new Error(out);
   const proxy = out.slice(out.indexOf("handle @rendered {"));
   const response = proxy.slice(proxy.indexOf("@renderdown status 429 502 503 504\n"), proxy.indexOf("    handle {\n"));
@@ -315,10 +315,10 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
 
   // An app behind a sign-in: its screens are private unless one is declared public, which
   // the terminal then opens to visitors (a guest session, no sign-in), so its route says so.
-  const walled = exported("(#accessCase & {reads: [_view], signIn: true}).out.shellRoute", false);
+  const walled = await exported("(#accessCase & {reads: [_view], signIn: true}).out.shellRoute", false);
   if (!walled.ok) throw new Error(walled.out);
   if ("access" in JSON.parse(walled.out)) throw new Error(`a screen behind the sign-in names an access:\n${walled.out}`);
-  const opened = exported('(#accessCase & {reads: [_view], signIn: true, extra: {access: "public"}}).out', false);
+  const opened = await exported('(#accessCase & {reads: [_view], signIn: true, extra: {access: "public"}}).out', false);
   if (!opened.ok) throw new Error(opened.out);
   const openedData = JSON.parse(opened.out);
   if (openedData.screen.access !== "public" || openedData.shellRoute.access !== "public") throw new Error(opened.out);
@@ -336,8 +336,8 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
 // list is carried as `_redirects` proxy rules at 200 (bundle.ts), from the same
 // addresses as the Caddyfile's @route: a route answers the entry, a :param stays
 // a placeholder, both slash spellings are listed, and `/` needs no rule.
-Deno.test("the routes' addresses are a Pages _redirects file, each proxied to the entry at 200", () => {
-  const { ok, out } = exported("#ssgCase.pagesRedirects", true);
+Deno.test("the routes' addresses are a Pages _redirects file, each proxied to the entry at 200", async () => {
+  const { ok, out } = await exported("#ssgCase.pagesRedirects", true);
   if (!ok) throw new Error(out);
   // cue --out text ends the document with a newline of its own.
   const want = "/jogo/:id / 200\n/jogo/:id/ / 200\n/regras / 200\n/regras/ / 200\n\n";

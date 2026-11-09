@@ -610,7 +610,13 @@ export def render-manifests [
 	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
-	{App: {database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
+	# What the compose project runs beside the cluster (runtime.cue), on every cluster but metal,
+	# whose release names its services itself (App.services, App.blobs) and runs no other.
+	let app_dir = ($cue_path | path dirname)
+	let runtime = if $env_name != "metal" and ($app_dir | path join compose.yaml | path exists) {
+		runtime-services (do { cd $app_dir; docker compose --profile "*" config --format json } | from json)
+	} else { {} }
+	{App: {database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}, runtime: $runtime, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file

@@ -2040,6 +2040,9 @@ import (
 			for o in blobsObjs {o},
 			vmalertObjs,
 			for o in metricsExportObjs {o},
+			// What the app's compose project runs beside the cluster (App.runtime, runtime.cue); the
+			// metal path names its services in App.services instead, so it is empty there.
+			for o in runtimeObjects {o},
 			gatewayObj,
 			httpRouteObj,
 			backendTrafficPolicyObj,
