@@ -6,7 +6,7 @@ import (
 	saycfg "github.com/bonisoft3/sayt:say"
 )
 
-#Version:     "1.0.10"
+#Version:     "1.1.0"
 #SaytVersion: "0.48.0"
 
 // Checkout-only modules: the compiler's test fixtures read omnishell beside
