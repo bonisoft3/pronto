@@ -142,14 +142,19 @@ import (
 			}
 			spec: {
 				instances: 1
-				postgresql: parameters: {
-					wal_level:             "logical"
-					max_replication_slots: "128"
-					max_wal_senders:       "128"
-					max_connections:       "200"
-					fsync:                 "on"
-					synchronous_commit:    "on"
-					full_page_writes:      "on"
+				// upstream's parameters for the services an app's compose runs beside the cluster
+				// (feldera, conduit: logical slots); an app without them keeps the parameters its
+				// live database runs with, as a change to them restarts it.
+				if len(release.runtime) > 0 {
+					postgresql: parameters: {
+						wal_level:             "logical"
+						max_replication_slots: "128"
+						max_wal_senders:       "128"
+						max_connections:       "200"
+						fsync:                 "on"
+						synchronous_commit:    "on"
+						full_page_writes:      "on"
+					}
 				}
 				// A stop is bounded: a smart shutdown waits for sessions for 15 s, then a fast one, and
 				// at 120 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
