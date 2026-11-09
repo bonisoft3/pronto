@@ -1463,7 +1463,8 @@ import (
 						// A pod going away keeps serving while the mesh learns of its
 						// successor (#daprSidecar's block-shutdown-duration holds its sidecar).
 						lifecycle: preStop: sleep: seconds: 15
-						ports: [{name: "http", containerPort: s.port}, if s.metrics != _|_ {{name: "metrics", containerPort: s.metrics.port}}]
+						// A service that answers its metrics on its own port (an exporter) has that port once.
+						ports: [{name: "http", containerPort: s.port}, if s.metrics != _|_ if s.metrics.port != s.port {{name: "metrics", containerPort: s.metrics.port}}]
 						env: list.Concat([
 							// A variable a Secret holds is that Secret's alone: compose's development value for it goes.
 							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" && s.secrets[k] == _|_ && !list.Contains(dbEnv, k) {name: k, value: v}],
@@ -1510,7 +1511,7 @@ import (
 				}
 				ports: [
 					{name: "http", port: s.port, targetPort: s.port, protocol: "TCP"},
-					if s.metrics != _|_ {{name: "metrics", port: s.metrics.port, targetPort: s.metrics.port, protocol: "TCP"}},
+					if s.metrics != _|_ if s.metrics.port != s.port {{name: "metrics", port: s.metrics.port, targetPort: s.metrics.port, protocol: "TCP"}},
 				]
 			}
 		}, if s.google != _|_ {
