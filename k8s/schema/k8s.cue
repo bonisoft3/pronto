@@ -26,6 +26,8 @@ import (
 	env:     #Environment
 
 	let targetEnv = env
+	// The Secret of each of the app's database logins: <app>-<login, dashes for underscores>-db.
+	let loginSecret = {for l, _ in release.database.logins {(l): "\(release.name)-\(strings.Replace(l, "_", "-", -1))-db"}}
 	let appLabels = {
 		"app.kubernetes.io/name":       release.name
 		"app.kubernetes.io/instance":   release.name
@@ -189,6 +191,15 @@ import (
 					inherit: false
 					inRoles: release.database.tokenRoles
 					passwordSecret: name: "\(release.name)-authenticator-db"
+				}, for l, d in release.database.logins {
+					// A service's own login (services.<n>.database): a member of the roles the
+					// app's migrations made, its password the generated one of its Secret.
+					name:    l
+					ensure:  "present"
+					login:   true
+					inherit: true
+					inRoles: d.inRoles
+					passwordSecret: name: loginSecret[l]
 				}]
 				bootstrap: initdb: {
 					database:       release.name
@@ -450,13 +461,16 @@ import (
 	// The app's secrets come from the cluster's store when it has one, and are
 	// otherwise generated once in-cluster by ESO; none is ever a literal.
 	// Generated values carry no symbols: electric's lands inside a URL.
-	let appSecrets = [
+	let appSecrets = list.Concat([[
 		{key: "PGRST_JWT_SECRET", length: 48, target: "\(release.name)-auth-secrets"},
 		{key: "ELECTRIC_SECRET", length: 32, target: "\(release.name)-auth-secrets"},
 		{key: "ELECTRIC_PASSWORD", length: 32, target: "\(release.name)-electric-db", role: "electric"},
 		{key: "AUTHENTICATOR_PASSWORD", length: 32, target: "\(release.name)-authenticator-db", role: "authenticator"},
 		{key: "POSTGRES_PASSWORD", length: 32, target: "\(release.name)-db-postgres", role: "postgres"},
-	]
+	], [for l, _ in release.database.logins {
+		// A service's database login: its Secret also carries the URL a service reads.
+		{key: "\(strings.ToUpper(l))_PASSWORD", length: 32, target: loginSecret[l], role: l, url: "postgres://\(l):{{ .\(strings.ToUpper(l))_PASSWORD }}@database:5432/\(release.name)?sslmode=disable"}
+	}]])
 
 	let prontoSecretGeneratorObj = [
 		if release.type == "pronto" && !release.externalSecrets.enabled
@@ -547,6 +561,7 @@ import (
 						data: {
 							username: sec.role
 							password: "{{ .\(sec.key) }}"
+							if sec.url != _|_ {url: sec.url}
 						}
 					}
 				}
@@ -1398,6 +1413,8 @@ import (
 	let appServiceObjs = [for n, s in release.services {
 		let labels = appLabels & {"app.kubernetes.io/component": n}
 		let serviceName = n
+		// The variable a database login's URL fills, whose compose value goes.
+		let dbEnv = [if s.database != _|_ {s.database.env}]
 		[{
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
@@ -1449,12 +1466,13 @@ import (
 						ports: [{name: "http", containerPort: s.port}, if s.metrics != _|_ {{name: "metrics", containerPort: s.metrics.port}}]
 						env: list.Concat([
 							// A variable a Secret holds is that Secret's alone: compose's development value for it goes.
-							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" && s.secrets[k] == _|_ {name: k, value: v}],
+							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" && s.secrets[k] == _|_ && !list.Contains(dbEnv, k) {name: k, value: v}],
 							[
 								{name: "PORT", value: "\(s.port)"},
 								{name: "ORIGIN", value: originValue},
 								{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}},
 								for k, v in s.secrets {name: k, valueFrom: secretKeyRef: {name: v, key: k}},
+								if s.database != _|_ {{name: s.database.env, valueFrom: secretKeyRef: {name: loginSecret[s.database.login], key: "url"}}},
 							],
 							(#denoTelemetry & {service: n}).env,
 						])
@@ -1580,6 +1598,31 @@ import (
 	// the mesh's, and reaches the cluster through the mesh and the internet on
 	// 443 (a broker): the backends' policy holds the cluster's own, which reach
 	// nothing outside.
+	// A service with a database login also reaches the database on 5432: a policy of its own, since
+	// policies add up and the shared one below stays as it was.
+	let appServicesDatabaseNetworkPolicyObj = [
+		for n, s in release.services if s.database != _|_ if release.networkPolicy.enabled {
+			apiVersion: "networking.k8s.io/v1"
+			kind:       "NetworkPolicy"
+			metadata: {
+				name:      "\(release.name)-\(n)-database-egress"
+				namespace: release.namespace
+				labels:    appLabels
+			}
+			spec: {
+				podSelector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": n
+				}
+				policyTypes: ["Egress"]
+				egress: [{
+					to: [{podSelector: matchLabels: "cnpg.io/cluster": "\(release.name)-db"}]
+					ports: [{port: 5432, protocol: "TCP"}]
+				}]
+			}
+		},
+	]
+
 	let appServicesNetworkPolicyObj = [
 		if release.networkPolicy.enabled if len(release.services) > 0 || release.blobs != _|_ {
 			apiVersion: "networking.k8s.io/v1"
@@ -2150,6 +2193,7 @@ import (
 			authEgressNetworkPolicyObj,
 			databaseNetworkPolicyObj,
 			appServicesNetworkPolicyObj,
+			appServicesDatabaseNetworkPolicyObj,
 		]
 		for item in list {item},
 	]

@@ -57,6 +57,7 @@ def run-tests [] {
 	test_app_service_jail
 	test_container_resources_and_files
 	test_service_host
+	test_service_database_login
 	test_seed_configmaps
 	test_alerting
 	test_door_egress
@@ -479,6 +480,38 @@ def test_service_host [] {
 	assert equal ($vars | where name == "BROKER_ISSUER" | get value) ["https://billing.example.com"]
 	let plain = (render-manifests $app.cue_path "metal" | from yaml)
 	assert equal ($plain | where kind == "HTTPRoute" | length) 1 "no service host, no route of its own"
+}
+
+def test_service_database_login [] {
+	print "test a service's own database login: a managed role, a generated password, its URL in the service's variable, and egress to the database..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t login.XXXXXX.json | str trim)
+	{App: {
+		database: {logins: {analytics_reader: {inRoles: ["analytics_viewer"]}}}
+		services: {exporter: {port: 9399, env: {SQLEXPORTER_TARGET_DSN: "postgres://dev"}, database: {login: "analytics_reader", env: "SQLEXPORTER_TARGET_DSN"}}}
+	}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	let role = ($objs | where kind == "Cluster" | first | get spec.managed.roles | where name == "analytics_reader" | first)
+	assert equal [$role.login $role.inherit $role.inRoles $role.passwordSecret.name] [true true ["analytics_viewer"] "sample-analytics-reader-db"]
+	let es = ($objs | where kind == "ExternalSecret" and metadata.name == "sample-analytics-reader-db" | first)
+	assert equal $es.spec.target.template.type "kubernetes.io/basic-auth"
+	assert equal $es.spec.target.template.data.username "analytics_reader"
+	assert equal $es.spec.target.template.data.url "postgres://analytics_reader:{{ .ANALYTICS_READER_PASSWORD }}@database:5432/sample?sslmode=disable"
+	assert equal ($objs | where kind == "Password" and metadata.name == "sample-analytics-reader-password" | length) 1 "the password is generated in-cluster"
+	let vars = ($objs | where kind == "Deployment" and metadata.name == "sample-exporter" | first | get spec.template.spec.containers.0.env | where name == "SQLEXPORTER_TARGET_DSN")
+	assert equal ($vars | length) 1 "the login's URL alone, not compose's too"
+	assert equal $vars.0.valueFrom.secretKeyRef {name: "sample-analytics-reader-db", key: "url"}
+	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-exporter-database-egress" | first)
+	assert equal $pol.spec.policyTypes ["Egress"]
+	assert equal $pol.spec.egress [{to: [{podSelector: {matchLabels: {"cnpg.io/cluster": "sample-db"}}}], ports: [{port: 5432, protocol: "TCP"}]}]
+	let stores = (mktemp -t login.XXXXXX.json | str trim)
+	{App: {externalSecrets: {enabled: true}, database: {logins: {analytics_reader: {inRoles: []}}}}} | to json | save -f $stores
+	let withStore = (render-manifests $app.cue_path "metal" --data $stores | from yaml | where kind == "ExternalSecret" and metadata.name == "sample-analytics-reader-db" | first)
+	assert equal $withStore.spec.data [{secretKey: "ANALYTICS_READER_PASSWORD", remoteRef: {key: "sample/ANALYTICS_READER_PASSWORD"}}]
+	{App: {services: {exporter: {port: 9399, env: {}, database: {login: "nobody"}}}}} | to json | save -f $data
+	let bad = (try { render-manifests $app.cue_path "metal" --data $data | from yaml; false } catch { true })
+	assert $bad "a login the app does not declare fails the release"
+	rm $data $stores
 }
 
 def test_alerting [] {
