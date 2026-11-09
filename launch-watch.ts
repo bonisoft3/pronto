@@ -148,7 +148,7 @@ async function launch(args: string[]): Promise<void> {
         "-c",
         "use launch.nu; launch ...($env.PRONTO_LAUNCH_ARGS | from json)",
       ],
-      env: { PRONTO_LAUNCH_ARGS: JSON.stringify(args) },
+      env: { MISE_LOCKED: "0", PRONTO_LAUNCH_ARGS: JSON.stringify(args) },
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
