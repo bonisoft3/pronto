@@ -1,6 +1,6 @@
 // integrate@local's upgrade from the last release (upgrade-from-released.ts).
 import { assertEquals, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.11";
-import { databaseSteps, lastReleased, localJob, migrations, shellWords, upgradeScript } from "./upgrade-from-released.ts";
+import { databaseProcess, databaseSteps, lastReleased, localJob, migrations, shellWords, upgradeScript } from "./upgrade-from-released.ts";
 
 const sha = (c: string) => c.repeat(40);
 const rec = (o: Record<string, unknown>) => JSON.stringify({ outcome: "live", preview: "", dirty: false, started: "t", commit: sha("a"), ...o });
@@ -26,6 +26,35 @@ const mecha = `exec bash "$$(mise where github:bonisoft3/mecha)"/services`;
 Deno.test("the database's steps are the files its host.sh builds, in the order named", () => {
   const p = script(`${mecha}/database/host.sh 000_a.sql 'm/000.sql' 003_rls.sql '{mecha}/rls.sql+x.sql' 899.sh '{mecha}/p.sh' -- -c wal_level=logical`);
   assertEquals(databaseSteps(p), { "000_a.sql": "m/000.sql", "003_rls.sql": "{mecha}/rls.sql+x.sql", "899.sh": "{mecha}/p.sh" });
+});
+
+// mecha 0.22's database process (a nu script, `$$` being process-compose's escape for `$`).
+const nuDb = script([
+  "if ('/docker-entrypoint-initdb.d' | path exists) { exec docker-entrypoint.sh postgres -c wal_level=logical }",
+  "let mecha = (if (($$env.PRONTO_INITDB_SRC_DIR? | default '') != '') { $$env.PRONTO_INITDB_SRC_DIR } else { (^mise where github:bonisoft3/mecha | str trim) })",
+  "let initdb = (($$env.BAYT_LOCAL_WORK_DIR? | default $$nu.temp-dir) | path join 'initdb.d')",
+  "cp -f ($$mecha | path join 'services/database/rls/rls.sql') ($$initdb | path join '003_rls.sql')",
+  "cp -f ($$mecha | path join 'services/database/role_passwords.sh') ($$initdb | path join '899_role_passwords.sh')",
+  "open .bayt/bayt.database.json | get dockerfile.copy.0.srcs | each {|s| cp -f $$s ($$initdb | path join ($$s | path basename)) } | ignore",
+  "exec nu ($$mecha | path join 'services/database/entrypoint.nu') $$initdb postgres -c wal_level=logical -c fsync=off",
+].join("\n"));
+
+Deno.test("mecha 0.22's database process: mecha's two steps, the app's from its database json, and the postgres arguments", () => {
+  const srcs = ["services/database/migrations/000_a.sql", "services/database/migrations/950_fixture.sql"];
+  assertEquals(databaseProcess(nuDb, srcs), {
+    steps: {
+      "003_rls.sql": "{mecha}/services/database/rls/rls.sql",
+      "899_role_passwords.sh": "{mecha}/services/database/role_passwords.sh",
+      "000_a.sql": srcs[0],
+      "950_fixture.sql": srcs[1],
+    },
+    args: ["-c", "wal_level=logical", "-c", "fsync=off"],
+  });
+  assertEquals(databaseProcess(script(`${mecha}/database/host.sh 000_a.sql 'm/000.sql' -- -c wal_level=logical`)).args, ["-c", "wal_level=logical"]);
+});
+
+Deno.test("a database process of neither form is refused", () => {
+  assertThrows(() => databaseProcess(script("exec postgres")), Error, "neither");
 });
 
 Deno.test("the migrate step's baseline and its migrations, decoded", () => {

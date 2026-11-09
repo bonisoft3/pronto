@@ -52,14 +52,43 @@ export function scriptOf(proc: Proc): string {
   return e[i + 1]
 }
 
-/** `database/host.sh <step> <file>... -- <postgres args>`: the initdb steps by name, to the file(s) each is built from. */
-export function databaseSteps(proc: Proc): Record<string, string> {
-  const w = shellWords(scriptOf(proc))
+/** The initdb steps a database process builds, by name, to the file(s) each is built from (`+` joins files), and the postgres arguments it runs. */
+export type Database = { steps: Record<string, string>; args: string[] }
+
+/**
+ * The database process's initdb steps and postgres arguments, in either form a stack has had:
+ *  - mecha before 0.22: `database/host.sh <step> <file>... -- <postgres args>`;
+ *  - mecha 0.22: a nu script that copies mecha's rls.sql and role_passwords.sh to their steps, copies
+ *    the app's own steps from `.bayt/bayt.database.json`'s `dockerfile.copy.0.srcs` (`srcs`, the
+ *    app's folder's files, each its own step by its basename) and execs `services/database/entrypoint.nu
+ *    <initdb> postgres <args>`.
+ * `srcs` is that list, read by the caller from the app's folder.
+ */
+export function databaseProcess(proc: Proc, srcs: string[] = []): Database {
+  const script = scriptOf(proc)
+  const w = shellWords(script)
   const at = w.findIndex((x) => x.endsWith("/database/host.sh"))
-  if (at < 0) throw new Error("the database process does not run mecha's database/host.sh")
+  if (at >= 0) {
+    const steps: Record<string, string> = {}
+    let i = at + 1
+    for (; i + 1 < w.length && w[i] !== "--"; i += 2) steps[w[i]] = w[i + 1]
+    return { steps, args: w.slice(i + 1) }
+  }
+  // process-compose's `$$` is a literal `$` to the shell it runs.
+  const nu = script.replaceAll("$$", "$")
+  const exec = nu.match(/exec nu \([^)]*\) \$initdb\s+postgres\s*(.*)$/m)
+  if (!exec || !nu.includes("services/database/entrypoint.nu")) {
+    throw new Error("the database process runs neither mecha's database/host.sh nor its services/database/entrypoint.nu")
+  }
   const steps: Record<string, string> = {}
-  for (let i = at + 1; i + 1 < w.length && w[i] !== "--"; i += 2) steps[w[i]] = w[i + 1]
-  return steps
+  for (const m of nu.matchAll(/cp -f \(\$mecha \| path join '([^']+)'\) \(\$initdb \| path join '([^']+)'\)/g)) steps[m[2]] = `{mecha}/${m[1]}`
+  if (nu.includes("bayt.database.json")) for (const f of srcs) steps[f.split("/").pop()!] = f
+  return { steps, args: shellWords(exec[1]) }
+}
+
+/** The initdb steps by name, to the file(s) each is built from. */
+export function databaseSteps(proc: Proc, srcs: string[] = []): Record<string, string> {
+  return databaseProcess(proc, srcs).steps
 }
 
 /** `migrate/host.sh <baseline> [<name> <base64 JSON>]...`: the baseline and the pgroll migrations by name. */
@@ -156,6 +185,15 @@ psql -X -qAc "NOTIFY pgrst, 'reload schema'"
 `
 }
 
+/** The app's own initdb step files (`.bayt/bayt.database.json`), where it has that file: mecha 0.22's database process. */
+async function databaseSrcs(dir: string): Promise<string[]> {
+  try {
+    return JSON.parse(await Deno.readTextFile(`${dir}/.bayt/bayt.database.json`))?.dockerfile?.copy?.[0]?.srcs ?? []
+  } catch {
+    return []
+  }
+}
+
 const run = async (cmd: string[], opts: Deno.CommandOptions = {}) => {
   const out = await new Deno.Command(cmd[0], { args: cmd.slice(1), stdout: "piped", stderr: "piped", ...opts }).output()
   return { ok: out.success, out: new TextDecoder().decode(out.stdout), err: new TextDecoder().decode(out.stderr) }
@@ -214,16 +252,23 @@ export async function prepare(appDir: string, gateDir: string, dir: string, rele
   await Deno.writeTextFile(data, JSON.stringify({ GCP: { database: { tokenRoles: facts.tokenRoles, replays: facts.replays ?? [] }, ...(procs.migrate ? { migrate: { env: {} } } : {}) } }))
   const plan = await cue("gcpRelease.plan.jobYaml", data)
   if (!plan.ok) throw new Error(`upgrade-from-released: ${appDir}/release.cue renders no schema job: ${plan.err}`)
-  const steps = databaseSteps(procs.database)
-  const stepsDir = `${dir}/initdb`
-  await Deno.mkdir(stepsDir, { recursive: true })
-  const mecha = (await run(["mise", "where", "github:bonisoft3/mecha"], { cwd: appDir })).out.trim()
+  const mecha = (await run([Deno.env.get("SAYT_MISE_BIN") ?? "mise", "where", "github:bonisoft3/mecha"], { cwd: appDir })).out.trim()
   if (!mecha) throw new Error("upgrade-from-released: mise does not place mecha's runtime")
-  for (const [step, files] of Object.entries(steps)) {
-    let body = ""
-    for (const f of files.split("+")) body += await Deno.readTextFile(f.startsWith("{mecha}/") ? `${mecha}/${f.slice(8)}` : `${appDir}/${f}`)
-    await Deno.writeTextFile(`${stepsDir}/${step}`, body)
+  // The steps of a folder's database process, written to `dest` as the database's initdb directory.
+  const build = async (proc: Proc, base: string, dest: string) => {
+    const db = databaseProcess(proc, await databaseSrcs(base))
+    await Deno.mkdir(dest, { recursive: true })
+    for (const [step, files] of Object.entries(db.steps)) {
+      let body = ""
+      for (const f of files.split("+")) body += await Deno.readTextFile(f.startsWith("{mecha}/") ? `${mecha}/${f.slice(8)}` : `${base}/${f}`)
+      await Deno.writeTextFile(`${dest}/${step}`, body)
+    }
+    return db
   }
+  const stepsDir = `${dir}/initdb`
+  const steps = (await build(procs.database, appDir, stepsDir)).steps
+  const oldInitdb = `${dir}/initdb-released`
+  const oldDb = await build(oldCompose.processes.database, oldDir, oldInitdb)
   const newMig = procs.migrate ? migrations(procs.migrate) : undefined
   const migDir = `${dir}/pgroll`
   await Deno.mkdir(migDir, { recursive: true })
@@ -242,7 +287,20 @@ export async function prepare(appDir: string, gateDir: string, dir: string, rele
 
   // The tree's own stack, but its database is the released commit's, and its migrate step the upgrade.
   const migrate = procs.migrate ?? { depends_on: { database: { condition: "process_healthy" } }, availability: { exit_on_skipped: true }, environment: procs.database.environment }
-  procs.database = { ...oldCompose.processes.database, working_dir: oldDir }
+  // Postgres from the released commit's initdb steps, built by mecha's own entrypoint (the released commit's
+  // own process may run a mecha runtime this one no longer carries).
+  procs.database = {
+    ...procs.database,
+    environment: oldCompose.processes.database.environment ?? procs.database.environment,
+    working_dir: oldDir,
+    // The initdb directory is where the tree's own database process puts its (BAYT_LOCAL_WORK_DIR/initdb.d),
+    // which the `replay` check reads: here it holds the released commit's steps.
+    entrypoint: [
+      "mise", "x", "--", "nu", "-c",
+      `let initdb = (($env.BAYT_LOCAL_WORK_DIR? | default $nu.temp-dir) | path join 'initdb.d'); rm -rf $initdb; cp -r '${oldInitdb}' $initdb; ` +
+        `exec nu '${mecha}/services/database/entrypoint.nu' $initdb postgres ${oldDb.args.map((a) => `'${a}'`).join(" ")}`,
+    ],
+  }
   procs.migrate = { ...migrate, entrypoint: ["mise", "x", "--", "bash", upgradeFile] }
   const file = `${dir}/process-compose.upgrade.yaml`
   await Deno.writeTextFile(file, stringify(compose))

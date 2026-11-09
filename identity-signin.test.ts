@@ -54,6 +54,18 @@ Deno.test("a local launch brings the broker up: Hydra, then the front waiting on
   assertEquals(targets.value.auth.compose.environment.OIDC_GOOGLE_INTERNAL, "${OIDC_GOOGLE_INTERNAL:-http://identity:" + port + "/}");
 });
 
+Deno.test("the front's host command starts at column 0: process-compose reads it as a YAML block, whose first line sets the indent and takes no tab", async () => {
+  const targets = await exported(signin(), "_cluster.surface.targets");
+  assertEquals(targets.success, true, targets.stderr);
+  for (const name of ["identity-hydra", "identity"]) {
+    const run: string = targets.value[name].entrypoint.do;
+    assertEquals(/^\s/.test(run), false, `${name}: ${JSON.stringify(run)}`);
+    // The block's closing brace is at the block's own indent, as its opening line is.
+    assertEquals(run.split("\n").every((l) => !l.startsWith(" ")), true, `${name}: ${JSON.stringify(run)}`);
+  }
+  assertStringIncludes(targets.value.identity.entrypoint.do, "let p = ");
+});
+
 Deno.test("an operator's broker elsewhere is theirs to run: no local broker", async () => {
   const targets = await exported(signin(`broker: "https://id.example.com"`), "_cluster.surface.targets");
   assertEquals(targets.success, true, targets.stderr);

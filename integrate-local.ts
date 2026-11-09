@@ -23,6 +23,7 @@
 import { localDrivers } from "./local-drivers.ts"
 import { hostPrepare } from "./host-prepare.ts"
 import { prepare } from "./upgrade-from-released.ts"
+import { parse, stringify } from "jsr:@std/yaml@1.0.5"
 
 const args: Record<string, string> = {}
 const rest: string[] = []
@@ -128,7 +129,26 @@ const dir = await Deno.makeTempDir({ prefix: "integrate-local." })
 const upgrade = await prepare(appDir, gateDir, dir)
 if ("skip" in upgrade) console.error(`integrate@local: NOT TESTING THE UPGRADE FROM THE LAST RELEASE: ${upgrade.skip}; the database is built fresh`)
 else console.error(`integrate@local: upgrade from the last release: ${upgrade.note}`)
-const composeFile = "file" in upgrade ? upgrade.file : ".bayt/process-compose.yaml"
+// The checks are this run's to run, once each, after the stack is ready: the visual lint above all, and
+// each driver of the app's compose project (below). The host compose names them as processes too (mecha
+// 0.22's `visual` and `check-acceptance`), which would run them a second time, at once and on the one
+// database the drivers share, so the acceptance and the lint see each other's rows. The stack is
+// the file without them. Where the drivers are not read (no docker CLI, the lint-only run), the names
+// a host compose gives its check processes stay out.
+const driverConfig = async () => {
+  const out = await new Deno.Command("docker", { args: ["compose", "--profile", "*", "config", "--format", "json"], cwd: appDir, stdout: "piped", stderr: "piped" }).output().catch(() => undefined)
+  return out?.success ? JSON.parse(new TextDecoder().decode(out.stdout)) : undefined
+}
+const config = await driverConfig()
+const checks = new Set(["visual", "check-acceptance", ...(config ? (() => { try { return localDrivers(config, "https://localhost", args.omnishell).map((d) => d.name) } catch { return [] } })() : [])])
+const stackFile = `${dir}/process-compose.stack.yaml`
+{
+  const file = parse(await Deno.readTextFile("file" in upgrade ? upgrade.file : `${appDir}/.bayt/process-compose.yaml`)) as { processes?: Record<string, { depends_on?: Record<string, unknown> }> }
+  for (const name of checks) delete file.processes?.[name]
+  for (const p of Object.values(file.processes ?? {})) for (const name of checks) delete p.depends_on?.[name]
+  await Deno.writeTextFile(stackFile, stringify(file))
+}
+const composeFile = stackFile
 const socket = `${dir}/pc.sock`
 // Its own account of the processes, which their output does not carry (one
 // it could not start says so only here).
@@ -284,10 +304,9 @@ if (verdict === undefined) {
   ], { cwd: dir, env: { APP_URL: url, SETTLE_TIMEOUT_MS: args.settle, SLOW: Deno.env.get("SLOW") ?? "1" } })
   if (mode === "all") {
     // The compose project's config, read as verify.nu reads it: no daemon.
-    const out = await new Deno.Command("docker", { args: ["compose", "--profile", "*", "config", "--format", "json"], cwd: appDir, stdout: "piped" }).output()
-    if (!out.success) fail("docker compose config failed: the drivers are not known")
+    if (!config) fail("docker compose config failed: the drivers are not known")
     const failed: string[] = []
-    for (const d of localDrivers(JSON.parse(new TextDecoder().decode(out.stdout)), url, args.omnishell)) {
+    for (const d of localDrivers(config, url, args.omnishell)) {
       console.error(`integrate@local: ${d.name} against ${url}`)
       const code = await run(d.cmd[0], d.cmd.slice(1), { cwd: appDir, env: { MISE_LOCKED: "0", ...(miseDir ? { PATH: `${Deno.env.get("PATH")}:${miseDir}` } : {}), ...ports, ...d.env } })
       console.error(`integrate@local: ${d.name} ${code === 0 ? "passed" : `FAILED (exit ${code})`}`)
