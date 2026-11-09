@@ -103,9 +103,10 @@ hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b
 			"identity-hydra": bayt.healthcheck.http & {
 				cmd: builtin: null
 				activate: ""
-				healthcheck: url: "http://127.0.0.1:28453/health/ready"
 				// Per app on the host, each moved by its variable, as every
-				// other port of a launch: the front names them as its peer's.
+				// other port of a launch: the front names them as its peer's. The
+				// check names its port (not a url) so the host probe is moved with it.
+				healthcheck: {port: 28453, path: "/health/ready"}
 				expose: {public: {port: 28453, env: "SERVE_PUBLIC_PORT"}, admin: {port: 28455, env: "SERVE_ADMIN_PORT"}}
 				"process-compose": activate: "mise x --"
 				entrypoint: {
@@ -194,4 +195,4 @@ _frontCmd: """
 		(^mise where github:bonisoft3/pronto | str trim)
 	})
 	^deno run --no-config --allow-net --allow-env ($p | path join "identity/hydra/front.ts")
-"""
+	"""
