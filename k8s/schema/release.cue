@@ -162,6 +162,11 @@ package schema
 		// its key the file's name (flagd's flags as generate wrote them). Once, on the release that
 		// finds it missing; a release never writes over one that exists (pronto-flags push owns it).
 		seed: [=~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"]: =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+		// A public hostname of the service's own, answered by it straight from the gateway, not through
+		// the door: an operator's broker (billing.example.com, id.example.com), which the open internet
+		// and Stripe's webhook call by that name. The gateway listens for it on HTTP, as behind a tunnel,
+		// where Cloudflare holds the certificate and the name is a DNS record onto the tunnel.
+		host?: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$"
 		// Where the service exports Prometheus metrics (a collector's journey_runs_total, which the
 		// alerting rules read), scraped by the cluster's VictoriaMetrics as gcp's gmp-collector does.
 		metrics?: {

@@ -55,6 +55,7 @@ def run-tests [] {
 	test_render_ready_through_the_door
 	test_app_services
 	test_container_resources_and_files
+	test_service_host
 	test_seed_configmaps
 	test_alerting
 	test_door_egress
@@ -447,6 +448,36 @@ def test_container_resources_and_files [] {
 	assert equal $flagd.spec.template.spec.volumes [{name: "files-sample-flags", configMap: {name: "sample-flags"}}]
 	let billing = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-caddy" | first)
 	assert ($billing.spec.template.spec.volumes? | default [] | all {|v| not ($v.name | str starts-with "files-") }) "no files, no volumes for them"
+}
+
+def test_service_host [] {
+	print "test a service's own hostname: a gateway listener, a route straight to it, its port open to the gateway, and a Secret's variable over compose's..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t host.XXXXXX.json | str trim)
+	{App: {services: {
+		"billing-broker": {port: 28463, host: "billing.example.com", env: {BROKER_ISSUER: "https://billing.example.com", BROKER_SECRET: "dev"}, secrets: {BROKER_SECRET: "billing-broker"}}
+		analyst: {port: 8689, env: {}}
+	}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let gw = ($objs | where kind == "Gateway" | first)
+	let listener = ($gw.spec.listeners | where name == "host-billing-broker" | first)
+	assert equal [$listener.hostname $listener.protocol $listener.port] ["billing.example.com" "HTTP" 80]
+	assert equal ($gw.spec.listeners | where name == "host-analyst" | length) 0 "a service with no host gets no listener"
+	let route = ($objs | where kind == "HTTPRoute" and metadata.name == "sample-billing-broker-route" | first)
+	assert equal $route.spec.hostnames ["billing.example.com"]
+	assert equal $route.spec.parentRefs [{name: "sample-gateway", sectionName: "host-billing-broker"}]
+	assert equal ($route.spec.rules.0.backendRefs) [{name: "billing-broker", port: 28463}]
+	assert equal ($objs | where kind == "HTTPRoute" | length) 2 "the app's route and the broker's"
+	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert ($pol.spec.ingress | any {|r| ($r.from? == null) and ($r.ports == [{port: 28463, protocol: "TCP"}]) }) "the gateway reaches the broker's port"
+	let vars = ($objs | where kind == "Deployment" and metadata.name == "sample-billing-broker" | first | get spec.template.spec.containers.0.env)
+	let secret = ($vars | where name == "BROKER_SECRET")
+	assert equal ($secret | length) 1 "the Secret's variable alone, not compose's too"
+	assert equal ($secret.0.valueFrom.secretKeyRef) {name: "billing-broker", key: "BROKER_SECRET"}
+	assert equal ($vars | where name == "BROKER_ISSUER" | get value) ["https://billing.example.com"]
+	let plain = (render-manifests $app.cue_path "metal" | from yaml)
+	assert equal ($plain | where kind == "HTTPRoute" | length) 1 "no service host, no route of its own"
 }
 
 def test_alerting [] {
