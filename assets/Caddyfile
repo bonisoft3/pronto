@@ -85,6 +85,22 @@
   # origin alone. Unset, it names a host nobody asks for.
   @alias host {$PRONTO_ALIASES:alias.invalid}
   redir @alias {$ORIGIN}{uri} 308
+  # Everything the door serves that is not a page stays out of the index. Google
+  # finds these files through the importmap every document carries, fetches them
+  # to render the pages, and reports each one it indexes nothing of: the shell's
+  # fragments and catalogs, the models, fonts and wasm, the docs, and the files
+  # of an earlier release (the `_immutable-` copies, 404 once superseded). Not
+  # robots.txt's Disallow, which would stop the fetch and so the rendering; a
+  # noindex is read after one. The entry's own address, which answers with a
+  # redirect to the page, is excluded: a route's document never carries it.
+  # Deferred, so an upstream's error (the gate's 401, a 502) carries it too.
+  @noindex {
+    path /shell/* /messages/* /docs/* /omnishell/* /.well-known/* /electric/* /blobs/* /img/*
+    not path /shell/ /shell/index.html
+  }
+  header @noindex >X-Robots-Tag "noindex, nofollow"
+  @noindexfile path_regexp /_immutable-[0-9a-f]{64}-[^/]*$
+  header @noindexfile >X-Robots-Tag "noindex, nofollow"
   # The interpreter ships as plain ES modules plus a vendored data-plane
   # driver measured in hundreds of KiB; compression at the door is what keeps
   # a cold cache from paying for that in seconds on a slow link. Caddy's own

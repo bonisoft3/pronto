@@ -67,6 +67,24 @@ export async function unseal(key: CryptoKey, token: unknown): Promise<Record<str
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
 
+// An identity service answers sign-ins, not pages: its authorize screens are
+// parameterized by whoever started them, and Search Console reported each
+// one it had crawled as a duplicate with no canonical. It asks crawlers to
+// stay away (robots.txt) and, for the ones that arrive through a link anyway,
+// to index nothing (the header on every answer).
+export function unlisted(handler: (req: Request) => Promise<Response>): (req: Request) => Promise<Response> {
+  return async (req) => {
+    const crawl = (req.method === "GET" || req.method === "HEAD") && new URL(req.url).pathname === "/robots.txt";
+    const res = crawl
+      ? new Response("User-agent: *\nDisallow: /\n", { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } })
+      : await handler(req);
+    // Rebuilt, since a response taken from fetch or Response.redirect has immutable headers.
+    const headers = new Headers(res.headers);
+    headers.set("x-robots-tag", "noindex, nofollow");
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  };
+}
+
 export function page(title: string, body: string, status = 200): Response {
   return new Response(`<!doctype html>
 <html lang="en">
@@ -191,7 +209,7 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
     providers: [...providers.values()].map((x) => ({ name: x.name, label: x.label })),
   };
 
-  return async function handler(req: Request): Promise<Response> {
+  return unlisted(async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
@@ -207,7 +225,7 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
       console.error(e);
       return json(500, { error: "internal error" });
     }
-  };
+  });
 }
 
 if (import.meta.main) {
