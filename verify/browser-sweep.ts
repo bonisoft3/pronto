@@ -366,6 +366,15 @@ export async function verifyBrowser(
     const context = typeof browser.newContext === "function"
       ? await browser.newContext({ baseURL: appBaseUrl, bypassCSP: true })
       : null;
+    if (context && typeof context.addInitScript === "function") {
+      await context.addInitScript(() => {
+        try {
+          localStorage.removeItem("electric_up_to_date_tracker");
+        } catch {
+          // Ignore storage initialization failure
+        }
+      });
+    }
 
     try {
       while (queue.length > 0) {

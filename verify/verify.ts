@@ -178,8 +178,16 @@ async function verifyEdgeSecrets(appDir: string, mecha: string) {
   // The wrangler publish-edge.ts deploys with, resolved the same way.
   const { wranglerTools } = await import(pathToFileURL(path.join(workerd, "wrangler-tools.ts")).href);
   const { wrangler, env } = await wranglerTools();
+  const configPath = path.join(appDir, "dist/cloudflare/airlock/wrangler.jsonc");
+  const hasConfig = await Deno.stat(configPath).then(() => true, (e) => {
+    if (e instanceof Deno.errors.NotFound) return false;
+    throw e;
+  });
+  const targetArgs = hasConfig
+    ? ["--config", configPath]
+    : ["--name", `${JSON.parse(await Deno.readTextFile(path.join(appDir, "shell/shell.json"))).app}-airlock`];
   const listed = await new Deno.Command(wrangler, {
-    args: ["secret", "list", "--config", path.join(appDir, "dist/cloudflare/airlock/wrangler.jsonc"), "--format", "json"],
+    args: ["secret", "list", ...targetArgs, "--format", "json"],
     env,
     stdin: "null",
     stdout: "piped",

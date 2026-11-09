@@ -1115,3 +1115,36 @@ Deno.test("attachNetworkTrap excludes prefetch and API requests from pending ass
   trap.assertNoErrors();
   trap.detach();
 });
+
+Deno.test("verifyBrowser clears electric_up_to_date_tracker across pages in shared browser context", async () => {
+  // Fresh pages in the same BrowserContext start with empty in-memory collections;
+  // a prior page's electric_up_to_date_tracker in localStorage would otherwise cause
+  // ShapeStream to ignore cached offset=-1 up-to-date responses and stall on live=true.
+  const contextInitScripts: (() => void)[] = [];
+  const fakePage = {
+    on: () => {},
+    off: () => {},
+    close: async () => {},
+    goto: async () => ({ status: () => 200 }),
+    waitForFunction: async () => true,
+  };
+  const fakeBrowser = {
+    newContext: async () => ({
+      addInitScript: async (fn: () => void) => {
+        contextInitScripts.push(fn);
+      },
+      newPage: async () => fakePage,
+      close: async () => {},
+    }),
+  };
+
+  const result = await verifyBrowser({
+    targetUrl: "https://app.example.com",
+    browser: fakeBrowser,
+    hints: { routes: [{ path: "/", screen: "home" }] },
+  });
+
+  assertEquals(result.passed, true);
+  assertEquals(contextInitScripts.length, 1);
+  assertEquals(contextInitScripts[0].toString().includes("electric_up_to_date_tracker"), true);
+});
