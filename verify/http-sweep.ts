@@ -259,7 +259,7 @@ export function resolveParameterizedRoutes(
       const entries = ((r as { nav?: { entries?: { params?: Record<string, string> }[] } }).nav?.entries ?? []);
       const values = (name: string) => [...new Set(entries.map((e) => e.params?.[name]).filter((v): v is string => typeof v === "string"))];
       const regexParts = parts.map((p, i) =>
-        p.startsWith(":") && p.endsWith("?") ? `(?:/(${values(p.slice(1, -1)).map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") || "[^/]+"}))?"
+        p.startsWith(":") && p.endsWith("?") ? `(?:/(${values(p.slice(1, -1)).map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") || "[^/]+"}))?`
           : (i === 0 ? "" : "/") + (p.startsWith(":") ? "([^/]+)" : p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
       );
       return new RegExp(`^${regexParts.join("")}$`);
