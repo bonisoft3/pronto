@@ -1763,6 +1763,35 @@ import (
 		},
 	]
 
+	// Sign in with a provider: auth fetches the identity broker's discovery and keys, and trades the
+	// code, on the internet (release.auth.oidc's issuer, e.g. id.bonkchess.com), on 443 only and
+	// nothing private, as the services' and the door's policies allow theirs. The backends' policy
+	// gives auth no egress past the cluster, so without this the start hung on "Connection refused"
+	// and the door answered 504 (2026-11-09 12:10 BRT, Bonk Chess's first hour on the node). Only
+	// auth, only when the app signs in with a provider; a policy of its own, since policies add up.
+	let authEgressNetworkPolicyObj = [
+		if release.networkPolicy.enabled && len(release.auth.oidc) > 0 {
+			apiVersion: "networking.k8s.io/v1"
+			kind:       "NetworkPolicy"
+			metadata: {
+				name:      "\(release.name)-auth-oidc-egress"
+				namespace: release.namespace
+				labels:    appLabels
+			}
+			spec: {
+				podSelector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": "auth"
+				}
+				policyTypes: ["Egress"]
+				egress: [{
+					to: [{ipBlock: {cidr: "0.0.0.0/0", except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}}]
+					ports: [{port: 443, protocol: "TCP"}]
+				}]
+			}
+		},
+	]
+
 	let backendsNetworkPolicyObj = [
 		if release.networkPolicy.enabled {
 			apiVersion: "networking.k8s.io/v1"
@@ -2006,6 +2035,7 @@ import (
 			backendTrafficPolicyObj,
 			caddyNetworkPolicyObj,
 			backendsNetworkPolicyObj,
+			authEgressNetworkPolicyObj,
 			databaseNetworkPolicyObj,
 			appServicesNetworkPolicyObj,
 		]

@@ -56,6 +56,7 @@ def run-tests [] {
 	test_seed_configmaps
 	test_alerting
 	test_door_egress
+	test_auth_oidc_egress
 	test_service_clock
 	test_metrics_export
 	test_blobs
@@ -130,6 +131,22 @@ def test_auth_providers [] {
 	assert equal $vars.OIDC_GOOGLE_CLIENT_ID "client.apps.googleusercontent.com"
 	# Given none, the auth service is deployed as before.
 	assert not ((render-manifests $app.cue_path "kind") | str contains "OIDC_")
+}
+
+def test_auth_oidc_egress [] {
+	print "test auth may reach a sign-in provider's broker on 443 alone, and only when the app names one..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t oidc.XXXXXX.json | str trim)
+	{App: {auth: {oidc: {OIDC_PROVIDERS: "google", OIDC_GOOGLE_INTERNAL: "https://id.example.com"}}}} | to json | save -f $data
+	let pols = (render-manifests $app.cue_path "metal" --data $data | from yaml | where kind == "NetworkPolicy" and metadata.name == "sample-auth-oidc-egress")
+	rm $data
+	assert equal ($pols | length) 1
+	let pol = ($pols | first)
+	assert equal $pol.spec.podSelector.matchLabels."app.kubernetes.io/component" "auth"
+	assert equal $pol.spec.egress.0.ports [{port: 443, protocol: "TCP"}]
+	assert ("192.168.0.0/16" in $pol.spec.egress.0.to.0.ipBlock.except) "nothing private"
+	# No provider, no hole: the backends' own policy is all auth has.
+	assert not ((render-manifests $app.cue_path "metal") | str contains "sample-auth-oidc-egress")
 }
 
 # The door's own tree is the dev stack's, with no ICE servers: a gcp or k8s
