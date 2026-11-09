@@ -22,7 +22,7 @@ Pronto applications go beyond the typical MVP or single-user tool. Here are some
 
 [snapcards.fun](https://snapcards.fun) ([source](https://github.com/bonisoft3/snapcards))
 
-Generate flashcards to teach toddlers to read. Leverages modern image generation models, with a fully reactive UI, gorgeous on your phone and your desktop. Supports multiple languages, extremely fast. And it is free :-).
+Generate flashcards to teach toddlers to read. Leverages modern image generation models, with a fully reactive UI, gorgeous on your phone and your desktop. Supports multiple languages and is extremely fast. And it is free :-).
 
 <table>
   <tr>
@@ -57,7 +57,7 @@ The Latino game that crossed continents. Turn-based card game supporting nationa
 
 [apexrun.bonisoft3.com](https://apexrun.bonisoft3.com) ([source](https://github.com/bonisoft3/apexrun))
 
-An homage to the OutRun arcade game, LLM-dreamed from SuperTuxKart source code. Leverages WebGPU with adaptive load, with fully AI-generated art. Great offline support, and when online allows for real-time duels. Uses Pronto time travel magic to give you a nice scenic ride at the end of the game, replaying your game from multiple angles, Mario Kart style.
+An homage to the OutRun arcade game, LLM-dreamed from the SuperTuxKart source code. Leverages WebGPU with adaptive load, with fully AI-generated art. Great offline support, and when online it allows for real-time duels. Uses Pronto time travel magic to give you a nice scenic ride at the end of the game, replaying your game from multiple angles, Mario Kart style.
 
 <table>
   <tr>
@@ -141,28 +141,27 @@ What you get in practice is that every Pronto program is born with a great batte
 
 ## A scalable software factory
 
-The unified lattice gives Pronto a blueprint for what to build, but how to build it depends on the product and its stage. A dozen users or a billion? A dense, productive UX or a joyful one that makes users want to return? Humans and machines alike must make trade-offs they cannot settle beforehand. Pronto acknowledges that uncertainty and builds on the ideas of the book [Scaling Your Artifacts with Your Team](https://www.amazon.com.br/Scaling-Your-Artifacts-Team-Microservices/dp/B0CXY8V3TB). Its unusual choices of build system, development loop and frameworks are not inherent to Pronto, but fit it well: they let the same program grow with little effort from your local browser to software running across operating systems and clouds.
+The unified lattice gives Pronto a blueprint for what to build, but how to build it depends on the product and its stage. A dozen users or a billion? A dense, productive UX or a joyful one that makes users want to return? Humans and machines alike must make trade-offs they cannot settle beforehand. Pronto acknowledges that uncertainty and builds on the ideas in the book [Scaling Your Artifacts with Your Team](https://www.amazon.com.br/Scaling-Your-Artifacts-Team-Microservices/dp/B0CXY8V3TB). Its unusual choices of build system, development loop and frameworks are not inherent to Pronto, but fit it well: they let the same program grow with little effort from your local browser to software running across operating systems and clouds.
 
 ### Build and development loop
 
-We build Pronto programs with [bayt](http://github.com/bonisoft3/bayt), which borrows Bazel's explicit specification idea and drives it with CUE to generate configuration for the best tools of each ecosystem. In particular, we leverage the strong dev-cycle support from the language-specific tools and combine it with different caching layers and techniques, for great iteration speed at any altitude, from your laptop's inner loop to managed CI with ephemeral runners.
+We build Pronto programs with [bayt](https://github.com/bonisoft3/bayt), which borrows Bazel's explicit specification idea and drives it with CUE to generate configuration for the best tools of each ecosystem. In particular, we leverage the strong dev-cycle support from the language-specific tools and combine it with different caching layers and techniques, for great iteration speed at any altitude, from your laptop's inner loop to managed CI with ephemeral runners.
 
-The development loop is driven by [sayt](http://github.com/bonisoft3/sayt), which encodes a set of conventions for how software should be developed. These conventions are mapped to the actual practices of a codebase through configuration, so the LLM has a single vocabulary to drive everything, from pure Pronto code to the hatches we add. It pays special attention to concerns like portability (it runs natively on Windows, Linux and macOS), relocatability (deploy stuff just by moving a directory) and its ability to bootstrap (it can build your code in a scratch image or on your remote co-worker's random laptop).
+The development loop is driven by [sayt](https://github.com/bonisoft3/sayt), which encodes a set of conventions for how software should be developed. These conventions are mapped to the actual practices of a codebase through configuration, so the LLM has a single vocabulary to drive everything, from pure Pronto code to the hatches we add. It pays special attention to concerns like portability (it runs natively on Windows, Linux and macOS), relocatability (deploy stuff just by moving a directory) and its ability to bootstrap (it can build your code in a scratch image or on your remote co-worker's random laptop).
 
 ### The target surface
 
 A Pronto program is configuration for a virtual target: the JSON resulting from the unification of `program.cue`. The virtual target can be anything that can be configured by a simple transformation of that JSON. It has two pieces: a virtual cluster, which can be seen as the backend, and a virtual terminal, which can be seen as the frontend.
 
-The virtual cluster is defined by [mecha](http://github.com/bonisoft3/mecha). It provides a few primitives: a relational database, a gateway, an executor for external effects, event processing pipelines, an incremental query engine, a data lake and workers for arbitrary pure computations. On a Kubernetes cluster, these are ordinary servers: Postgres, Caddy, Graphile, Conduit/Redis, Feldera, DuckDB and Deno+SES+WASM. However, Mecha defines the contract, not the implementation, and it can scale from a single HTML file of dozens of megabytes, running your application standalone with an embedded Postgres and all these other services, to a deployment on GCP managed services. One particularly interesting Mecha deployment is Cloudflare's free tier, which allows you to deploy fully functional programs that scale to hundreds of users with a GitHub account alone, no credit card needed.
+The virtual cluster is defined by [mecha](https://github.com/bonisoft3/mecha). It provides a few primitives: a relational database, a gateway, an executor for external effects, event processing pipelines, an incremental query engine, a data lake and workers for arbitrary pure computations. On a Kubernetes cluster, these are ordinary servers: Postgres, Caddy, Graphile, Conduit/Redis, Feldera, DuckDB and Deno+SES+WASM. However, Mecha defines the contract, not the implementation, and it can scale from a single HTML file of dozens of megabytes, running your application standalone with an embedded Postgres and all these other services, to a deployment on GCP managed services. One particularly interesting Mecha deployment is Cloudflare's free tier, which allows you to deploy fully functional programs that scale to hundreds of users with a GitHub account alone, no credit card needed.
 
-The virtual terminal is what the user interacts with, and is provided by [omnishell](http://github.com/bonisoft3/omnishell). Omnishell is also a contract, with its most mature implementation based on web technologies, but a Pronto program can also be deployed on other platforms, from native (using DivKit) to conversational (Omnishell will take screenshots and send them through WhatsApp for you to control). Because a Pronto program is mostly its JSON structure and pure transformations, the code that defines how it gets presented can be safely adapted and kept in sync for different runtimes by an LLM.
-
+The virtual terminal is what the user interacts with, and is provided by [omnishell](https://github.com/bonisoft3/omnishell). Omnishell is also a contract, with its most mature implementation based on web technologies, but a Pronto program can also be deployed on other platforms, from native (using DivKit) to conversational (Omnishell will take screenshots and send them through WhatsApp for you to control). Because a Pronto program is mostly its JSON structure and pure transformations, the code that defines how it gets presented can be safely adapted and kept in sync for different runtimes by an LLM.
 
 ## Escape hatches
 
-Pronto does not make every computation easy to express. Part of this is deliberate: computations are bounded, and continuation belongs to the framework, so code must cooperate with an event loop, much as servers built around `select()` do. Pronto must also interact with code outside the framework, where its guarantees do not necessarily hold. We make those boundaries explicit through the first-class concept of escape hatches.
+Pronto does not make every computation easy to express. Part of this is deliberate: computations are bounded, and continuation belongs to the framework, so code must cooperate with an event loop, much as servers built around `select()` or frontends using Elm do. But Pronto must also interact with code outside the framework, where its guarantees do not necessarily hold. We make those boundaries explicit through the first-class concept of escape hatches.
 
-All non-framework code that participates in a Pronto application needs to declare an effect level. Anything at Level 0 is pure Pronto code and safe from most common programming bugs. Everything at Level 1 or above is a hatch and needs to be quarantined somehow.
+All non-framework code that participates in a Pronto application needs to declare an effect level. Anything at Level 0 is pure Pronto code and safe from most common programming bugs. Everything at Level 1 or above is a hatch and needs isolation appropriate to its effects, which Pronto provides.
 
 | Level | Effect | Familiar model | What it means |
 | :---: | --- | --- | --- |
@@ -173,6 +172,8 @@ All non-framework code that participates in a Pronto application needs to declar
 | **4** | **External** | Durable workflows and side effects | Act on another system: send an email, charge a card or call a service. Record attempts and outcomes; safe retries require the recipient's cooperation, and compensation is a separate action. |
 
 This discipline allows Pronto applications to time travel, similar to what Redux offers. For Level 0 and Level 1 this is trivial, and the applications can leverage it. For Level 2 it gets harder and for 3 it is feasible. Because we do not control the external world, time travel can no longer be guaranteed when a Level 4 effect is involved.
+
+Pronto is not restricted to greenfield projects. It can act as a black box microservice replacing parts of a legacy system, run a backoffice connected to existing systems, or integrate with services such as Stripe. The airlock provides machinery for communicating with fragile external systems: recording attempts and outcomes, coordinating retries and letting LLM-authored handlers deal with failures. The language is not confined to its garden; it can go outside and play in the mud, with no fear of thunder or lightning.
 
 ## Philosophy
 
