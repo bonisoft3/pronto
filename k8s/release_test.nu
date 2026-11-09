@@ -409,7 +409,7 @@ def test_release_override [] {
 }
 
 def test_render_ready_through_the_door [] {
-	print "test render is ready only once the door answers it, and lives on its own health..."
+	print "test render starts on its own health, is ready only once the door answers it, and lives on its own health..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let render = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-render" | first | get spec.template.spec.containers | where name == "render" | first)
 	let probe = ($render.readinessProbe.exec.command | str join " ")
@@ -417,6 +417,9 @@ def test_render_ready_through_the_door [] {
 	assert ($probe | str contains "/shell/shell.json") "readiness reads a page's shell through the door"
 	assert ($probe | str contains "/health") "readiness keeps render's own health"
 	assert equal $render.livenessProbe.httpGet.path "/health"
+	# A pod still syncing its tables is given time to start before liveness may kill it (PRONTO-107).
+	assert equal $render.startupProbe.httpGet.path "/health"
+	assert (($render.startupProbe.periodSeconds * $render.startupProbe.failureThreshold) >= 120) "render may take compose's start_period to start"
 }
 
 def test_container_resources_and_files [] {

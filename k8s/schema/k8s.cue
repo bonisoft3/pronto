@@ -1051,6 +1051,12 @@ import (
 							for e in (#denoTelemetry & {service: "render"}).env {e},
 						]
 						resources: (#resourcesOf & {r: release, n: "render"}).out
+						// render answers /health once every table has synced, which takes
+						// longer than liveness alone waits (5 s, then 3 misses 10 s apart:
+						// a pod still syncing was killed after about 35 s, PRONTO-107). Up to
+						// 150 s to start, compose's start_period with room; liveness and
+						// readiness begin once it has answered.
+						startupProbe: {httpGet: {path: "/health", port: release.render.port}, periodSeconds: 2, failureThreshold: 75}
 						livenessProbe: {
 							httpGet: {
 								path: "/health"
