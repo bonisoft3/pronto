@@ -472,27 +472,29 @@ What fixes its shape, as built:
   object runs. Where the program declares schedules it also applies mecha's
   `schedule` table, the container image's 800 step, before the 801 seed.
   `--from=<dir>` starts it from a directory built elsewhere
-  instead, an archive restored from its database with its pgroll ledger
+  instead, an archive restored from its database with the ledger of what that
+  database applied
   ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/pglite-workerd/restore.ts)),
-  applies the cluster's pgroll migrations the ledger lacks, as its migrate step
-  would ([`migrate.ts`](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/pglite-workerd/migrate.ts)),
-  and skips the derivation.
+  applies the release's scripts the ledger lacks as a publish applies them to
+  a kept directory (below), and skips the derivation.
 - **Loading is once, and a later release migrates.** The object opens only
   a directory whose load verified every chunk; a load resumes where it
   stopped and leaves a complete directory alone, so a later release changes
   the Worker and the page and never the data, unless `--reset` replaces it.
   A directory left alone is handed the release's migrations
-  (`migrations.json`: the shell's files and the cluster's pgroll set, by
-  name), and the object applies the ones its ledger lacks and starts over on
-  the new schema. The ledger is the docker appliance's `_pronto_migrations`,
-  with each script's digest beside its name: a directory records what it
-  applied when it was built (a fresh one applies the pgroll set after its
-  files, as a fresh volume's migrate step does), a script the ledger lacks
-  is applied in name order, a seed never, and a recorded file whose text the
-  release changed is refused by name — a live schema moves only by a pgroll
-  migration ([schema change admission](schema-change-admission.md)), never
-  by the entity file a directory already ran. A directory built before the
-  ledger existed is refused too. A definitive refusal is reported before the
+  (`migrations.json`: the shell's files, then the cluster's pgroll set, in
+  the order a directory applies them), and the object applies the ones its
+  ledger lacks, in that order, and starts over on the new schema. The ledger
+  is the docker appliance's `_pronto_migrations`, with each script's digest
+  beside its name: a directory records what it applied when it was built (a
+  fresh one applies the pgroll set after its files, as a fresh volume's
+  migrate step does), an archive what its database applied, a script the
+  ledger lacks is applied where the release orders it, a seed never, and a
+  recorded script whose text the release changed is refused by name — a live
+  schema moves only by a pgroll migration ([schema change
+  admission](schema-change-admission.md#what-a-live-directory-carries)),
+  never by the entity file a directory already ran. A directory built before
+  the ledger existed is refused too. A definitive refusal is reported before the
   publisher attempts to restore each Worker's previous version. Durable Object
   schema migrations can prevent rollback; every failure remains visible and
   the publisher still attempts the other Workers. A lost response or HTTP

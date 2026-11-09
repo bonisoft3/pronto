@@ -1,10 +1,15 @@
 // The scripts a release's database is built from, in the order it applies
-// them, and what a publish hands a directory the object kept: mecha's tenancy
-// step, the shell's migrations with mecha's schedule table before its seed,
-// then the cluster's pgroll set, which is what carries a kept directory
-// forward. pgdata.ts builds the edge's directory from them and bundle.ts the
-// page's database; edge.ts writes them as migrations.json; one list, so the
-// names a directory records are the names a publish sends.
+// them, and what carries a directory the object kept or an archive forward:
+// mecha's tenancy step, the shell's migrations with the effect steps where
+// their names sort and mecha's schedule table before its seed, then the
+// cluster's pgroll set. A kept directory applies the ones its ledger lacks in
+// this same order (pglite-workerd's applyScripts), files before pgroll
+// whatever their names, because that is the order a fresh directory ran them
+// in and the only order under which a script valid on one is valid on the
+// other (docs/schema-change-admission.md). pgdata.ts builds and carries the
+// edge's directory from them and bundle.ts the page's database; edge.ts
+// writes them as migrations.json; one list, so the names a directory records
+// are the names a publish sends.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -13,6 +18,8 @@ export interface ReleaseScripts {
   /** The files, each to be applied through the browser tier's fence. */
   files: { name: string; sql: string }[]
   pgroll: Script[]
+  /** Both, in the order a directory applies them: what it records, and what a carry is handed. */
+  scripts: Script[]
 }
 
 const SCHEDULE_SEED = '801_schedule_seed.sql'
@@ -75,7 +82,9 @@ export async function releaseFiles(app: string, mecha: string, migrations: strin
 }
 
 export async function releaseScripts(app: string, mecha: string, migrations: string[], pgroll: Record<string, { operations: Record<string, unknown>[] }>, steps: Steps = {}): Promise<ReleaseScripts> {
-  return { files: await releaseFiles(app, mecha, migrations, steps), pgroll: (await scripts(mecha)).pgrollScripts(pgroll) }
+  const files = await releaseFiles(app, mecha, migrations, steps)
+  const set = (await scripts(mecha)).pgrollScripts(pgroll)
+  return { files, pgroll: set, scripts: [...files, ...set] }
 }
 
 /** The drain table the emitter writes into an app's .pronto/cluster.json,

@@ -14,11 +14,11 @@
 //                for the same host import
 // <out>/pgdata   rls.sql, the migrations and --derived's rows, applied on disk;
 //                or, with --from, a copy of a directory built elsewhere (an
-//                archive) with the pgroll migrations its ledger lacks applied
-//                (pgdata.ts), the set read from the app's cluster by cue
-// <out>/migrations.json   the migrations by name, the cluster's pgroll set
-//                among them: what a publish hands a data directory the object
-//                kept (publish-edge.ts)
+//                archive) with the scripts its ledger lacks applied (pgdata.ts),
+//                the pgroll set read from the app's cluster by cue
+// <out>/migrations.json   the migrations by name in the order a directory
+//                applies them, the cluster's pgroll set last: what a publish
+//                hands a data directory the object kept (publish-edge.ts)
 // <out>/src/index.ts, <out>/wrangler.jsonc
 import { readEdgeHatches, applyHatchAttributes } from './edge-hatches.ts'
 import * as path from 'node:path'
@@ -219,9 +219,9 @@ await run(Deno.execPath(), [
 ], undefined, { DENO_NO_PACKAGE_JSON: '1' })
 
 // What a publish hands a directory the object kept: the scripts a directory
-// is built from (edge-scripts.ts), the pgroll set among them.
+// is built from (edge-scripts.ts), in the order it applies them.
 const release = await releaseScripts(app, mecha, shell.migrations, JSON.parse(new TextDecoder().decode(pgrollOut.stdout)), await clusterSteps(path.join(app, '.pronto/cluster.json')))
-await Deno.writeTextFile(path.join(out, 'migrations.json'), JSON.stringify([...release.files.map(({ name, sql }) => ({ name, sql })), ...release.pgroll]))
+await Deno.writeTextFile(path.join(out, 'migrations.json'), JSON.stringify(release.scripts))
 
 // The app's machines and functions: the migration declared each over an engine
 // this tier supplies (mecha-edge's machines.ts), so the object is handed the

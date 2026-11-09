@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { releaseFiles } from './edge-scripts.ts'
+import { releaseFiles, releaseScripts } from './edge-scripts.ts'
 import { emitFiles, paymentProgram } from '../effects-fixtures.ts'
+import { browserTier } from '../../../libraries/mecha/packages/mecha-browser/fence.ts'
 
 const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
 
@@ -88,7 +89,6 @@ Deno.test('release files place the effect steps where their names sort', async (
 // runs them where their names sort, and its invoking state claims and enqueues.
 Deno.test('placed effect steps build a page database that claims and enqueues', async () => {
   const { PGlite } = await import('@electric-sql/pglite')
-  const { browserTier } = await import('../../../libraries/mecha/packages/mecha-browser/fence.ts')
   const files = await emitFiles(paymentProgram() + '\napp: state: steps: {machines: "062", graphile: "060", airlock: "061", note: "no payment row is written below 060"}\n')
   const steps = (files['.pronto/cluster.json'] as unknown as { data: { steps: { graphile: string; airlock: string } } }).data.steps
   const app = await Deno.makeTempDir()
@@ -108,6 +108,45 @@ Deno.test('placed effect steps build a page database that claims and enqueues', 
     await db.exec(`INSERT INTO payment VALUES ('${id}', 'pending', 12.50, NULL); UPDATE payment SET status = 'charging' WHERE id = '${id}';`)
     const counts = await db.query<{ n: string }>('SELECT (SELECT count(*) FROM airlock.external_effect_ledger) || \',\' || (SELECT count(*) FROM graphile_worker.jobs) AS n')
     assert.equal(counts.rows[0].n, '1,1')
+  } finally {
+    await db.close()
+    await Deno.remove(app, { recursive: true })
+  }
+})
+
+// A carried directory applies what its ledger lacks in this order, so a step
+// placed at 060 runs before a pgroll migration named 052, and the reducer
+// actors at 063 before the migration named 20261108_seat whose table they
+// drive fails as it does on a fresh directory, which runs them in this order.
+Deno.test('release scripts are the files then the pgroll set, whatever their names sort as, and a carry applies the lacking ones in that order', async () => {
+  const { PGlite } = await import('@electric-sql/pglite')
+  const { applyScripts, recordScripts } = await import('../../../libraries/mecha/packages/pglite-workerd/scripts.ts')
+  const app = await Deno.makeTempDir()
+  const db = await PGlite.create()
+  try {
+    const dir = path.join(app, 'services/database/migrations')
+    await Deno.mkdir(dir, { recursive: true })
+    await Deno.writeTextFile(path.join(dir, '005_create_tables.sql'), 'CREATE TABLE IF NOT EXISTS seat (id int PRIMARY KEY);\n')
+    const migrations = ['services/database/migrations/005_create_tables.sql', 'services/database/migrations/063_mecha_actors.sql']
+    // A directory built before the program declared effects, reducers and the two migrations.
+    const built = await releaseScripts(app, mecha, migrations.slice(0, 1), {}, {})
+    await db.exec('CREATE ROLE anon; CREATE ROLE app_user; CREATE ROLE electric; CREATE ROLE service;')
+    for (const file of built.scripts) await db.exec(browserTier(file.sql!))
+    await recordScripts(db, built.scripts)
+    await Deno.mkdir(path.join(app, 'services/airlock'), { recursive: true })
+    await Deno.writeTextFile(path.join(app, 'services/airlock/effects.json'), JSON.stringify({ effects: { charge: {} } }))
+    await Deno.writeTextFile(path.join(dir, '063_mecha_actors.sql'), 'CREATE SCHEMA IF NOT EXISTS hybrid_seat;\nCREATE OR REPLACE FUNCTION hybrid_seat.sealed() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;\nCREATE OR REPLACE TRIGGER seat_sealed BEFORE INSERT ON seat FOR EACH ROW EXECUTE FUNCTION hybrid_seat.sealed();\n')
+    const steps = { graphile: '060_graphile_worker.sql', airlock: '061_airlock.sql' }
+    const pgroll = {
+      '20261108_seat': { operations: [{ sql: { up: 'CREATE TABLE IF NOT EXISTS seat (id int PRIMARY KEY)' } }] },
+      '052_jobs': { operations: [{ sql: { up: 'CREATE VIEW jobs AS SELECT count(*) FROM graphile_worker.jobs' } }] },
+    }
+    const release = await releaseScripts(app, mecha, migrations, pgroll, steps)
+    assert.deepEqual(release.scripts.map((s) => s.name), ['003_rls.sql', '005_create_tables.sql', '060_graphile_worker.sql', '061_airlock.sql', '063_mecha_actors.sql', '052_jobs', '20261108_seat'])
+    assert.deepEqual(release.scripts, [...release.files, ...release.pgroll])
+    assert.deepEqual(await applyScripts(db, release.scripts, () => {}), ['060_graphile_worker.sql', '061_airlock.sql', '063_mecha_actors.sql', '052_jobs', '20261108_seat'])
+    assert.equal((await db.query<{ n: string }>('SELECT count::text AS n FROM jobs')).rows[0].n, '0')
+    assert.deepEqual(await applyScripts(db, release.scripts, () => {}), [])
   } finally {
     await db.close()
     await Deno.remove(app, { recursive: true })
