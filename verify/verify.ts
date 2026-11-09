@@ -171,8 +171,12 @@ async function verifyEdgeSecrets(appDir: string, mecha: string) {
     throw e;
   });
   if (declared.length === 0) return;
+  const workerd = path.join(mecha, "packages/pglite-workerd");
+  const mise = Deno.env.get("SAYT_MISE_BIN") ?? "mise";
+  await new Deno.Command(mise, { args: ["trust", "--yes", "--all"], cwd: workerd, stdin: "null" }).output();
+  await new Deno.Command(mise, { args: ["install", "node", "npm:wrangler"], cwd: workerd, stdin: "null" }).output();
   // The wrangler publish-edge.ts deploys with, resolved the same way.
-  const { wranglerTools } = await import(pathToFileURL(path.join(mecha, "packages/pglite-workerd/wrangler-tools.ts")).href);
+  const { wranglerTools } = await import(pathToFileURL(path.join(workerd, "wrangler-tools.ts")).href);
   const { wrangler, env } = await wranglerTools();
   const listed = await new Deno.Command(wrangler, {
     args: ["secret", "list", "--config", path.join(appDir, "dist/cloudflare/airlock/wrangler.jsonc"), "--format", "json"],

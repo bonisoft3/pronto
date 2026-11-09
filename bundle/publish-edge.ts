@@ -119,6 +119,9 @@ async function run(cmd: string, args: string[], { cwd = out, env }: { cwd?: stri
   return text
 }
 
+const mise = Deno.env.get('SAYT_MISE_BIN') ?? 'mise'
+await run(mise, ['trust', '--yes', '--all'], { cwd: workerd })
+await run(mise, ['install', 'node', 'npm:wrangler'], { cwd: workerd })
 const { wranglerTools } = await import(String(pathToFileURL(path.join(workerd, 'wrangler-tools.ts'))))
 const { wrangler, env } = await wranglerTools()
 const runWrangler = (args: string[]) => run(wrangler, args, { env })
