@@ -21,6 +21,7 @@
 // A pass stamps the app's tree (gcp/local-gate-key.nu), which the release skips its gate for.
 
 import { localDrivers } from "./local-drivers.ts"
+import { hostPrepare } from "./host-prepare.ts"
 import { prepare } from "./upgrade-from-released.ts"
 
 const args: Record<string, string> = {}
@@ -97,8 +98,30 @@ const [, doorVar] = compose.match(/DOOR_PORT=\$\{([A-Z0-9_]+):-[0-9]+\}/) ??
 const door = ports[doorVar]
 ports.CADDY_DOOR_PORT ??= door
 
-// process-compose with its API on a socket of its own, which `list` reads.
+// The host launch's own preparation (host-prepare.ts), as mecha 0.22's `integrate@host` makes it:
+// the stack's tools are the app's `.mise.host.toml` (MISE_ENV=host), installed as its lock says.
 const t0 = Date.now()
+// sayt names its mise (SAYT_MISE_BIN) and puts none on PATH; the compose's processes call `mise`,
+// so its directory goes on the stack's PATH.
+const miseBin = Deno.env.get("SAYT_MISE_BIN") ?? "mise"
+// This process runs under a `mise exec`, whose __MISE_* bookkeeping makes the next mise it meets
+// take back the tools' directories from PATH (a postinstall hook then cannot find `nu`): the stack's
+// environment is this one without it, as under the host launch's own nu.
+const base = Object.fromEntries(Object.entries(Deno.env.toObject()).filter(([k]) => !k.startsWith("__MISE")))
+const hostInstall = await run(miseBin, ["install"], { cwd: appDir, clearEnv: true, env: { ...base, MISE_ENV: "host", MISE_LOCKED: "1" } })
+if (hostInstall !== 0) fail("mise install of the host tools (.mise.host.toml, mise.host.lock) failed")
+const miseDir = miseBin.includes("/") ? miseBin.slice(0, miseBin.lastIndexOf("/")) : ""
+const host = await hostPrepare(appDir, miseDir, base).catch((e) => fail(e.message))
+const pathKey = Object.keys(host.env).find((k) => k.toLowerCase() === "path")!
+const hostEnv = { ...base, ...host.env, ...(miseDir ? { [pathKey]: `${host.env[pathKey]}:${miseDir}` } : {}), MISE_LOCKED: "0" }
+const pcBin = new TextDecoder().decode((await new Deno.Command(miseBin, { args: ["which", "process-compose"], cwd: appDir, clearEnv: true, env: hostEnv, stdout: "piped" }).output()).stdout).trim() ||
+  fail("the host tools carry no process-compose")
+// The stack's scratch (its database, Caddy's state), under the preparation's own work directory
+// and logging its processes to a file, as the host launch does.
+const stackWork = `${host.work}/stack`
+await Deno.mkdir(stackWork, { recursive: true })
+await Deno.writeTextFile(`${host.work}/pc-logs.yaml`, `log_location: ${stackWork}/proc.log\n`)
+// process-compose with its API on a socket of its own, which `list` reads.
 const dir = await Deno.makeTempDir({ prefix: "integrate-local." })
 // The stack's database is the last release's, carried forward as the release carries it
 // (upgrade-from-released.ts); an app with nothing released says so here and runs a fresh one.
@@ -115,10 +138,11 @@ const pc = (more: string[]) => ["-U", "-u", socket, "-L", log, ...more]
 // gives it, so one it starts while it stops, which outlives it and would hold
 // the run's output open, is found and stopped (survivors()).
 const tag = `INTEGRATE_LOCAL_RUN=${crypto.randomUUID()}`
-const stack = new Deno.Command("process-compose", {
-  args: pc(["-f", composeFile, "up", "--tui=false"]),
+const stack = new Deno.Command(pcBin, {
+  args: pc(["-f", composeFile, "-f", `${host.work}/pc-logs.yaml`, "up", "--tui=false"]),
   cwd: appDir,
-  env: { MISE_LOCKED: "0", ...ports, [tag.split("=")[0]]: tag.split("=")[1] },
+  clearEnv: true,
+  env: { ...hostEnv, BAYT_LOCAL_WORK_DIR: stackWork, ...ports, [tag.split("=")[0]]: tag.split("=")[1] },
   stdout: "inherit",
   stderr: "inherit",
 }).spawn()
@@ -127,7 +151,7 @@ stack.status.then(() => exited = true)
 
 type Proc = { name: string; status: string; is_ready: string; exit_code: number; has_ready_probe: boolean }
 const list = async (): Promise<Proc[] | undefined> => {
-  const out = await new Deno.Command("process-compose", { args: pc(["list", "-o", "json"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "piped", stderr: "null", signal: AbortSignal.timeout(10_000) }).output().catch(() => undefined)
+  const out = await new Deno.Command(pcBin, { args: pc(["list", "-o", "json"]), cwd: appDir, clearEnv: true, env: hostEnv, stdout: "piped", stderr: "null", signal: AbortSignal.timeout(10_000) }).output().catch(() => undefined)
   if (!out?.success) return undefined
   try {
     return JSON.parse(new TextDecoder().decode(out.stdout))
@@ -187,7 +211,7 @@ const down = async (failed: boolean) => {
   await watch().catch(() => {})
   // `down` itself can hang on a stack whose process failed (seen on reclaim-clone, 25 minutes):
   // given 20 s, then the stack is stopped, so a failed run fails rather than waits.
-  await new Deno.Command("process-compose", { args: pc(["down"]), cwd: appDir, env: { MISE_LOCKED: "0" }, stdout: "null", stderr: "null", signal: AbortSignal.timeout(20_000) }).output()
+  await new Deno.Command(pcBin, { args: pc(["down"]), cwd: appDir, clearEnv: true, env: hostEnv, stdout: "null", stderr: "null", signal: AbortSignal.timeout(20_000) }).output()
     .catch(() => console.error("integrate@local: process-compose's down did not answer in 20 s"))
   if (!await settled(20_000)) {
     console.error("integrate@local: process-compose did not stop; terminating it")
@@ -244,6 +268,8 @@ for (;;) {
   await new Promise((r) => setTimeout(r, 2000))
 }
 
+// Whatever the lint or a driver throws, the stack goes down: a verdict of 1 and the teardown below.
+try {
 if (verdict === undefined) {
   const url = `https://localhost:${door}`
   console.error(`integrate@local: the stack is ready at ${url} after ${Math.round((Date.now() - t0) / 1000)} s; running the visual lint`)
@@ -263,7 +289,7 @@ if (verdict === undefined) {
     const failed: string[] = []
     for (const d of localDrivers(JSON.parse(new TextDecoder().decode(out.stdout)), url, args.omnishell)) {
       console.error(`integrate@local: ${d.name} against ${url}`)
-      const code = await run(d.cmd[0], d.cmd.slice(1), { cwd: appDir, env: { MISE_LOCKED: "0", ...ports, ...d.env } })
+      const code = await run(d.cmd[0], d.cmd.slice(1), { cwd: appDir, env: { MISE_LOCKED: "0", ...(miseDir ? { PATH: `${Deno.env.get("PATH")}:${miseDir}` } : {}), ...ports, ...d.env } })
       console.error(`integrate@local: ${d.name} ${code === 0 ? "passed" : `FAILED (exit ${code})`}`)
       if (code !== 0) failed.push(d.name)
     }
@@ -282,6 +308,10 @@ if (verdict === undefined) {
       }
     }
   }
+}
+} catch (e) {
+  console.error(`integrate@local: ${e instanceof Error ? e.stack ?? e.message : e}`)
+  verdict = 1
 }
 await down(verdict !== 0)
 Deno.exit(verdict)
