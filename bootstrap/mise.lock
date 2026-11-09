@@ -93,44 +93,44 @@ version = "0.22.0"
 backend = "github:bonisoft3/mecha"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-arm64"]
-checksum = "sha256:f6aa10e4c0e11843f222e75faf70c6085193c9eea2e01469a36b0e4aab91f403"
+checksum = "sha256:f06d297e111b3f7a64551d4a6f370bb0cbddd76663c44aa96b178d3be3f5b377"
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.22.0/mecha-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/726755732"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/727501584"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-arm64-musl"]
-checksum = "sha256:f6aa10e4c0e11843f222e75faf70c6085193c9eea2e01469a36b0e4aab91f403"
+checksum = "sha256:f06d297e111b3f7a64551d4a6f370bb0cbddd76663c44aa96b178d3be3f5b377"
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.22.0/mecha-linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/726755732"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/727501584"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-x64"]
-checksum = "sha256:f6aa10e4c0e11843f222e75faf70c6085193c9eea2e01469a36b0e4aab91f403"
+checksum = "sha256:f06d297e111b3f7a64551d4a6f370bb0cbddd76663c44aa96b178d3be3f5b377"
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.22.0/mecha-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/726755730"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/727501590"
 
 [tools."github:bonisoft3/mecha"."platforms.linux-x64-musl"]
-checksum = "sha256:f6aa10e4c0e11843f222e75faf70c6085193c9eea2e01469a36b0e4aab91f403"
+checksum = "sha256:f06d297e111b3f7a64551d4a6f370bb0cbddd76663c44aa96b178d3be3f5b377"
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.22.0/mecha-linux-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/726755730"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/727501590"
 
 [tools."github:bonisoft3/mecha"."platforms.macos-arm64"]
-checksum = "sha256:f6aa10e4c0e11843f222e75faf70c6085193c9eea2e01469a36b0e4aab91f403"
+checksum = "sha256:f06d297e111b3f7a64551d4a6f370bb0cbddd76663c44aa96b178d3be3f5b377"
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.22.0/mecha-macos-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/726755736"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/727501589"
 
 [tools."github:bonisoft3/mecha"."platforms.macos-x64"]
-checksum = "sha256:f6aa10e4c0e11843f222e75faf70c6085193c9eea2e01469a36b0e4aab91f403"
+checksum = "sha256:f06d297e111b3f7a64551d4a6f370bb0cbddd76663c44aa96b178d3be3f5b377"
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.22.0/mecha-macos-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/726755734"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/727501588"
 
 [tools."github:bonisoft3/mecha"."platforms.windows-arm64"]
-checksum = "sha256:f6aa10e4c0e11843f222e75faf70c6085193c9eea2e01469a36b0e4aab91f403"
+checksum = "sha256:f06d297e111b3f7a64551d4a6f370bb0cbddd76663c44aa96b178d3be3f5b377"
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.22.0/mecha-windows-arm64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/726755735"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/727501688"
 
 [tools."github:bonisoft3/mecha"."platforms.windows-x64"]
-checksum = "sha256:f6aa10e4c0e11843f222e75faf70c6085193c9eea2e01469a36b0e4aab91f403"
+checksum = "sha256:f06d297e111b3f7a64551d4a6f370bb0cbddd76663c44aa96b178d3be3f5b377"
 url = "https://github.com/bonisoft3/mecha/releases/download/v0.22.0/mecha-windows-x64.tar.gz"
-url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/726755737"
+url_api = "https://api.github.com/repos/bonisoft3/mecha/releases/assets/727501694"
 
 [[tools."github:bonisoft3/omnishell"]]
 version = "0.23.0"
