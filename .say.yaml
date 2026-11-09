@@ -41,6 +41,11 @@ say:
         cmds:
           - do: "deno test --config deno.json --allow-read --allow-run=cue identity_test.ts"
           - do: "deno test --no-config --allow-read --allow-run=cue auth-providers.test.ts login-design.test.ts"
+      # The cue wrapper at the runtime's root, against a fake cue (cue-budget/cue_test.ts).
+      cue-budget:
+        priority: -1
+        cmds:
+          - do: "deno test --no-config --allow-read --allow-write --allow-run --allow-env --allow-sys cue-budget/cue_test.ts"
       k8s:
         priority: -1
         cmds:

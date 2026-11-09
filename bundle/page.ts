@@ -1,90 +1,30 @@
-// The single-file page's entry: the payload read from the document, the app's
-// files served from it through a fetch shim, and mecha's browser platform
-// booted in the tab behind the same shim. `omnishell/` and `mecha-browser/`
-// resolve through the map the bundler writes from the roots it is given.
-import { decodeBase64 } from '@std/encoding/base64'
-import { createCluster, type Cluster } from 'mecha-browser/cluster.ts'
+// The page of an app with server entities: mecha's browser platform booted in
+// the tab behind the shim (page-core.ts), on PGlite. `mecha-browser/` resolves
+// through the map the bundler writes from the root it is given.
+import { createCluster } from 'mecha-browser/cluster.ts'
 import type { Drain } from 'mecha-browser/drains.ts'
 import { createPageDatabase, type DatabaseAssets } from './database.ts'
-// @ts-ignore untyped interpreter module
-import { createShell } from 'omnishell/shell.js'
-// @ts-ignore untyped interpreter module
-import { ensureSes } from 'omnishell/jessie.js'
-import { installSes } from 'pronto-bundle-ses'
+import { payload, startPage } from './page-core.ts'
 
-interface Payload {
-  files: Record<string, string>
-  /** Absent for an app with no server entity, which boots no cluster. */
-  cluster?: { sql: string[]; tables: string[]; drains: Drain[]; clock: 'ticker' | 'disabled'; assets: DatabaseAssets }
+const { sql, tables, drains, clock, assets } = payload.cluster as {
+  sql: string[]
+  tables: string[]
+  drains: Drain[]
+  clock: 'ticker' | 'disabled'
+  assets: DatabaseAssets
 }
 
-const payload: Payload = JSON.parse(new TextDecoder().decode(decodeBase64(document.getElementById('pronto-payload')!.textContent!)))
-
-const MIME: Record<string, string> = {
-  html: 'text/html', css: 'text/css', js: 'text/javascript', json: 'application/json', yaml: 'text/yaml', md: 'text/markdown',
-}
-const mime = (p: string) => MIME[p.split('.').pop() ?? ''] ?? 'text/plain'
-
-let cluster: Cluster | null = null
-const origFetch = globalThis.fetch.bind(globalThis)
-// The shell asks for its files from the root, its <base> being /shell/ under
-// any prefix, and the door's routes are root-absolute at every target.
-const served = new Map(Object.entries(payload.files).map(([k, text]) => [`/${k}`, text]))
-
-globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const req = input instanceof Request ? input : null
-  const url = new URL(req ? req.url : String(input), location.href)
-  if (url.origin === location.origin) {
-    const path = url.pathname
-    const text = served.get(path)
-    if (text !== undefined) return new Response(text, { headers: { 'content-type': mime(path) } })
-    if (cluster && /^\/(crud|auth|electric)(\/|$)/.test(path)) {
-      const method = req?.method ?? init?.method ?? 'GET'
-      const headers = new Headers(req?.headers ?? init?.headers)
-      const body = method === 'GET' || method === 'HEAD' ? undefined : req ? await req.arrayBuffer() : (init?.body as BodyInit)
-      const signal = req?.signal ?? init?.signal ?? undefined
-      return cluster.handle(new Request(`http://cluster.local${path}${url.search}`, { method, headers, body, signal }))
-    }
-  }
-  return origFetch(input as RequestInfo, init)
-}
-
-const OrigWorker = globalThis.Worker
-if (typeof OrigWorker === 'function') {
-  globalThis.Worker = class BundledWorker extends OrigWorker {
-    constructor(scriptURL: string | URL, options?: WorkerOptions) {
-      const url = new URL(String(scriptURL), location.href)
-      if (url.origin === location.origin) {
-        const text = served.get(url.pathname)
-        if (text !== undefined) {
-          super(URL.createObjectURL(new Blob([text], { type: 'text/javascript' })), options)
-          return
-        }
-      }
-      super(scriptURL, options)
-    }
-  }
-}
-
-;(async () => {
-  if (payload.cluster) {
-    const { sql, tables, drains, clock, assets: a } = payload.cluster
-    const { schema } = JSON.parse(payload.files['shell/shell.json'])
-    const db = await createPageDatabase(a)
-    // A change the cluster lost leaves a table no read can trust again, so
-    // the page dies of it where its boot would.
-    cluster = await createCluster({
-      db, sql, tables, schema, drains, clock, log: console.error,
-      fail: (e) => {
-        document.body.textContent = `page failed: ${e.message}`
-        reportError(e)
-      },
-    })
-  }
-  // The shim answers every file a preload would ask the network for.
-  await ensureSes(installSes)
-  createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false })
-})().catch((e) => {
-  document.body.textContent = `boot failed: ${e instanceof Error ? e.message : String(e)}`
-  throw e
+startPage(async () => {
+  const { schema } = JSON.parse(payload.files['shell/shell.json'])
+  const db = await createPageDatabase(assets)
+  // A change the cluster lost leaves a table no read can trust again, so
+  // the page dies of it where its boot would.
+  const cluster = await createCluster({
+    db, sql, tables, schema, drains, clock, log: console.error,
+    fail: (e) => {
+      document.body.textContent = `page failed: ${e.message}`
+      reportError(e)
+    },
+  })
+  return (req) => cluster.handle(req)
 })

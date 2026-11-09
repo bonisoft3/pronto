@@ -198,6 +198,15 @@ Deno.test("a passkey's relying party is the domain, else the run.app host the re
   assertEquals(env.find((e: { name: string }) => e.name === "WEBAUTHN_ORIGIN").value, "https://battlechess-504479523278.us-central1.run.app");
 });
 
+Deno.test("the app's Android certificates reach auth, and none leaves the variable unset", async () => {
+  const fp = "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C";
+  const r = await built(release(`, auth: {android: "${fp}"}`), "service");
+  assertEquals(r.success, true, r.stderr);
+  assertEquals(r.value.spec.template.spec.containers[2].env.find((e: { name: string }) => e.name === "WEBAUTHN_ANDROID_ORIGINS").value, fp);
+  const none = (await built(release(), "service")).value.spec.template.spec.containers[2].env;
+  assertEquals(none.some((e: { name: string }) => e.name === "WEBAUTHN_ANDROID_ORIGINS"), false);
+});
+
 Deno.test("a provider's settings are values and its client secret a reference", async () => {
   const r = await built(release(`, auth: {oidc: {OIDC_PROVIDERS: "google", OIDC_GOOGLE_CLIENT_ID: "abc"}, oidcSecrets: {OIDC_GOOGLE_CLIENT_SECRET: "battlechess-google-client-secret"}}`), "service");
   assertEquals(r.success, true, r.stderr);

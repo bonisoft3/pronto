@@ -136,7 +136,9 @@ const list = async (): Promise<Proc[] | undefined> => {
 // there, running the same command: one reparented to init is found by what it was.
 const known = new Map<number, string>()
 const snapshot = async (): Promise<Map<number, { ppid: number; command: string }>> => {
-  const ps = await new Deno.Command("ps", { args: ["-axo", "pid=,ppid=,command="], stdout: "piped", stderr: "null" }).output()
+  // From "/": a stack's own directory can go while it stops (a slot taken over once its holder died),
+  // and a command spawned from a vanished cwd fails before it runs, leaving the survivors running.
+  const ps = await new Deno.Command("ps", { args: ["-axo", "pid=,ppid=,command="], cwd: "/", stdout: "piped", stderr: "null" }).output()
   const all = new Map<number, { ppid: number; command: string }>()
   for (const line of new TextDecoder().decode(ps.stdout).split("\n")) {
     const m = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)

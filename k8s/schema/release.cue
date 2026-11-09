@@ -66,6 +66,36 @@ package schema
 		// The roles a token may name, which the schema grants PostgREST's login
 		// (the app's .pronto/cluster.json; the release fills it).
 		tokenRoles: [...string]
+		// The app's own migrations (services/database/migrations' raw SQL, each idempotent),
+		// replayed over a database initdb already built, as on Cloud Run (.pronto/cluster.json;
+		// the release fills it).
+		replays: *[] | [...=~"^[0-9A-Za-z_.-]+\\.sql$"]
+		// Where its base backups and WAL go, through CloudNativePG's barman-cloud plugin: WAL as
+		// each segment fills, a base backup on `schedule` (six fields, UTC) and once when the
+		// Cluster first gets it, kept `retention` (CloudNativePG's form, 30d say). One of two stores:
+		// - An S3-compatible bucket at `endpoint`, whose keys are a Secret the operator keeps in the
+		//   app's namespace, ACCESS_KEY_ID and ACCESS_SECRET_KEY: the release refuses to start without it.
+		// - A Cloud Storage bucket, `provider` set, no key: the database pod's projected token
+		//   (audience `audience`) is traded at that workload identity provider for `serviceAccount`'s,
+		//   as blobs' and the metrics export's are; the provider admits the subject
+		//   system:serviceaccount:<namespace>:<name>-db, and the account may write the bucket.
+		backup?: {
+			bucket!:   =~"^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$"
+			path:      =~"^[a-z0-9][a-z0-9/_.-]*$" | *name
+			retention: =~"^[1-9][0-9]*[dwm]$" | *"30d"
+			schedule:  string | *"0 0 6 * * *"
+			endpoint?: =~"^https://"
+			provider?: =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+			// Never both: k8s.cue's ObjectStore then has no destination, which the export refuses.
+			if endpoint != _|_ {
+				secret:    =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" | *"\(name)-backup-s3"
+			}
+			if endpoint == _|_ {
+				provider!:       _
+				serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
+				audience:        string | *"https://iam.googleapis.com/\(provider)"
+			}
+		}
 	}
 
 	// Present where the app's compose project has a migrate service: the
@@ -82,6 +112,9 @@ package schema
 		oidc: *{} | {[=~"^OIDC_[A-Z0-9_]+$" & !~"_CLIENT_SECRET$"]: string}
 		oidcSecrets: *[] | [...=~"^OIDC_[A-Z0-9_]+_CLIENT_SECRET$"]
 		oidcSecretDigest: *"" | =~"^[0-9a-f]{64}$"
+		// The SHA-256 fingerprints of the app's Android release certificates,
+		// comma-separated, as compose gives auth WEBAUTHN_ANDROID_ORIGINS.
+		android: *"" | string
 	}
 
 	render: {
@@ -101,8 +134,81 @@ package schema
 	services: [=~"^[a-z][a-z0-9-]*$"]: {
 		port!: int & >1024 & <65536
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
+		// Variables read from a Secret the operator keeps in the app's namespace, each under its
+		// variable's name (a sender's VAPID key): the pod does not start until it is there.
+		secrets: [=~"^[A-Z_][A-Z0-9_]*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+		// Files read from a ConfigMap in the app's namespace, mounted read-only at each directory,
+		// its keys the file names (flagd's live flags, which pronto-flags push writes): the pod does
+		// not start until it is there, and a change reaches the files in about a minute.
+		files: [=~"^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+		// What a ConfigMap of files is made from when it is not there yet, by name: a file of the app,
+		// its key the file's name (flagd's flags as generate wrote them). Once, on the release that
+		// finds it missing; a release never writes over one that exists (pronto-flags push owns it).
+		seed: [=~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"]: =~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+		// Where the service exports Prometheus metrics (a collector's journey_runs_total, which the
+		// alerting rules read), scraped by the cluster's VictoriaMetrics as gcp's gmp-collector does.
+		metrics?: {
+			port!: int & >1024 & <65536
+			path:  *"/metrics" | =~"^/"
+		}
+		// A clock that pokes the service: a CronJob POSTing to `path` on its port each `schedule`
+		// (five fields, UTC), with the service role's token as its bearer, as Cloud Scheduler pokes
+		// mecha's ticker on Cloud Run (gcp.cue's clock). A missed minute is the next one's: no retry.
+		clock?: {
+			schedule: string | *"* * * * *"
+			path:     =~"^/" | *"/poke"
+		}
 	}
 
+
+	// The app's alerting rules, each a file of the app in vmalert's (Prometheus's) format: pronto-journeys'
+	// burn rates, pronto-perf's. A vmalert of the app's own evaluates them against the cluster's
+	// VictoriaMetrics, as Cloud Monitoring does on gcp. A firing alert goes to `notifier` (an
+	// Alertmanager) where one is named; without one it is kept as the ALERTS series in VictoriaMetrics,
+	// which a probe or a dashboard reads. The release writes the files to <name>-alert-rules each run,
+	// and vmalert reads a change within a minute.
+	alerting: {
+		rules: [...=~"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\\.ya?ml$"]
+		notifier?: =~"^https?://[^ ]+$"
+	}
+
+	// The services' metrics (services.<n>.metrics) sent on to Google Cloud Monitoring's Managed Service
+	// for Prometheus, where Cloud Run's sidecars send theirs, so one set of burn-rate policies reads both:
+	// an OpenTelemetry collector of the app's own scrapes them and writes them as `project`'s
+	// prometheus.googleapis.com series, under `location` and `cluster`. It signs in with no key: its
+	// service account's token, which this cluster signs, is traded at a workload identity `provider`
+	// that trusts the cluster's issuer (its JWKS uploaded) for `serviceAccount`'s, which may write
+	// metrics. The token's subject is system:serviceaccount:<namespace>:<name>-metrics-export.
+	metricsExport?: {
+		project!:        =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+		provider!:       =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+		serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
+		audience:        string | *"https://iam.googleapis.com/\(provider)"
+		location:        string | *"europe-west3"
+		cluster:         string | *"metal"
+		interval:        =~"^[0-9]+s$" | *"30s"
+	}
+
+	// The blob plane mecha's profile pictures live on (the door's /blobs and /img): rclone serving the
+	// Cloud Storage `bucket` as the S3 bucket every app names, and imgproxy over it, in the mesh as
+	// the app-ids rclone-s3 and imgproxy, built from the app's compose services of those names. rclone
+	// signs in with no key, as the metrics export does: the token of the service account
+	// <name>-blobs, whose subject is system:serviceaccount:<namespace>:<name>-blobs, is traded at the
+	// workload identity `provider` for `serviceAccount`'s, which may read and write the bucket.
+	blobs?: {
+		bucket!:         =~"^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$"
+		provider!:       =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+		serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
+		audience:        string | *"https://iam.googleapis.com/\(provider)"
+	}
+
+	// A container's own requests and limits over `resources`, by its name: crud, electric, auth,
+	// caddy, render, or one of the app's services. An Electric holding a shape per player and
+	// table needs more memory than a door (Bonk Chess's was OOMKilled at 256Mi, 2026-11-06).
+	containerResources: [string]: {
+		requests?: {cpu?: string, memory?: string}
+		limits?: {cpu?: string, memory?: string}
+	}
 
 	resources: {
 		requests: {

@@ -53,7 +53,9 @@ import pronto "github.com/bonisoft3/pronto"
 	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _terminal.surface.statics}).out
 	_loop: (pronto.#DefaultLoop & {code: _app, terminal: _terminal, cluster: _cluster}).out
 	_build: (pronto.#DefaultBuild & {code: _app, loop: _loop, cluster: _cluster, terminal: _terminal}).out
-	_files: (pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}).files
+	_emit: pronto.#emit & {code: _app, cluster: _cluster, terminal: _terminal, loop: _loop, build: _build}
+	_files: _emit.files
+	pagesRedirects: _emit.pagesRedirects
 	caddyfile: _files["docker/Caddyfile"].text
 	document:  _files["documents/regras/index.html"]
 	sitemap:   _files["sitemap.xml"].text
@@ -71,12 +73,14 @@ import pronto "github.com/bonisoft3/pronto"
 #accessCase: {
 	reads: [...pronto.#Read]
 	extra?: {...}
+	// An app behind a sign-in, where a public screen is one open to visitors.
+	signIn: *false | bool
 	_base: (#readCase & {
 		"reads": reads
 		route:   "/jogos"
 		goal: {table: "goal", durability: "live", access: {scope: "public"}}
 	}).app & {
-		capabilities: auth: {required: false, service: "/auth"}
+		capabilities: auth: {required: signIn, service: "/auth"}
 		surface: screens: jogo: {files: {handlers: [], adapters: []}, [if extra != _|_ {extra}, {}][0]}
 	}
 	_terminal: (pronto.#DefaultTerminal & {code: _base}).out

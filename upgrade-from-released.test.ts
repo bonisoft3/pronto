@@ -55,3 +55,12 @@ Deno.test("the upgrade carries the released commit's migrations, marks the datab
   // The job's replays add no inferred migration to pgroll's ledger: counted on either side of it.
   assertEquals(at("before=$(inferred)") < at("bash '/j.sh'") && at("bash '/j.sh'") < at("after=$(inferred)"), true);
 });
+
+Deno.test("a test database holds this tree's fixture, applied after the job, before PostgREST reloads", () => {
+  const s = upgradeScript({ oldDir: "/old", oldBaseline: "", oldMigrationsDir: undefined, jobFile: "/j.sh", mecha: "/mecha", fixtureFile: "/steps/950_fixture.sql" })
+  const at = (x: string) => s.indexOf(x)
+  assertStringIncludes(s, "psql -X -v ON_ERROR_STOP=1 -q -f '/steps/950_fixture.sql'")
+  assertEquals(at("bash '/j.sh'") < at("-f '/steps/950_fixture.sql'") && at("-f '/steps/950_fixture.sql'") < at("NOTIFY pgrst"), true)
+  // No fixture, no step: a released database never gains test rows.
+  assertEquals(upgradeScript({ oldDir: "/old", oldBaseline: "", oldMigrationsDir: undefined, jobFile: "/j.sh", mecha: "/mecha" }).includes("950_fixture"), false)
+})

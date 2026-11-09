@@ -24,6 +24,10 @@ use release.nu [
 	envoy-proxy
 	tunnel-manifests
 	app-services-environment
+	seed-configmaps
+	seed-fill
+	apply-alert-rules
+	check-backup-secrets
 ]
 
 def main [] {
@@ -48,6 +52,16 @@ def run-tests [] {
 	test_render_manifests_metal
 	test_render_ready_through_the_door
 	test_app_services
+	test_container_resources_and_files
+	test_seed_configmaps
+	test_alerting
+	test_door_egress
+	test_auth_oidc_egress
+	test_service_clock
+	test_metrics_export
+	test_blobs
+	test_initdb_replays
+	test_database_backup
 	test_app_services_environment
 	test_pods_hand_over
 	test_environment_access
@@ -119,6 +133,22 @@ def test_auth_providers [] {
 	assert not ((render-manifests $app.cue_path "kind") | str contains "OIDC_")
 }
 
+def test_auth_oidc_egress [] {
+	print "test auth may reach a sign-in provider's broker on 443 alone, and only when the app names one..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t oidc.XXXXXX.json | str trim)
+	{App: {auth: {oidc: {OIDC_PROVIDERS: "google", OIDC_GOOGLE_INTERNAL: "https://id.example.com"}}}} | to json | save -f $data
+	let pols = (render-manifests $app.cue_path "metal" --data $data | from yaml | where kind == "NetworkPolicy" and metadata.name == "sample-auth-oidc-egress")
+	rm $data
+	assert equal ($pols | length) 1
+	let pol = ($pols | first)
+	assert equal $pol.spec.podSelector.matchLabels."app.kubernetes.io/component" "auth"
+	assert equal $pol.spec.egress.0.ports [{port: 443, protocol: "TCP"}]
+	assert ("192.168.0.0/16" in $pol.spec.egress.0.to.0.ipBlock.except) "nothing private"
+	# No provider, no hole: the backends' own policy is all auth has.
+	assert not ((render-manifests $app.cue_path "metal") | str contains "sample-auth-oidc-egress")
+}
+
 # The door's own tree is the dev stack's, with no ICE servers: a gcp or k8s
 # release baked from it would duel on one network and fail between two homes.
 def test_release_tree [] {
@@ -165,6 +195,14 @@ def test_auth_provider_secrets [] {
 	assert equal $secret.valueFrom.secretKeyRef {name: "sample-oidc", key: "OIDC_GOOGLE_CLIENT_SECRET"}
 	assert ($secret.value? == null)
 	assert equal ($pod.metadata.annotations | get "pronto.dev/oidc-secret-digest") $split.oidcSecretDigest
+	assert equal $split.android ""
+	assert (($pod.spec.containers.0.env | where name == "WEBAUTHN_ANDROID_ORIGINS") | is-empty)
+	# The app's Android certificates, as compose gives auth them, reach its pod.
+	let fp = "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C"
+	let android = (auth-provider-environment ($environment | insert WEBAUTHN_ANDROID_ORIGINS $fp))
+	{App: {auth: ($android | reject secretValues)}} | to json | save -f $data
+	let with_android = (render-manifests $app.cue_path "kind" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-auth" | first)
+	assert equal ($with_android.spec.template.spec.containers.0.env | where name == "WEBAUTHN_ANDROID_ORIGINS" | first | get value) $fp
 	let rotated = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET "rotated-credential"))
 	assert ($rotated.oidcSecretDigest != $split.oidcSecretDigest)
 	let public_client = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET ""))
@@ -263,6 +301,9 @@ def test_render_manifests_kind [] {
 	let yaml = (render-manifests $app.cue_path "kind")
 
 	assert ($yaml | str contains "kind: Cluster")
+	let db = ($yaml | from yaml | where kind == "Cluster" | first)
+	assert equal $db.spec.stopDelay 120 "a stop of the primary is bounded, not CloudNativePG's 1800 s"
+	assert equal $db.spec.smartShutdownTimeout 15
 	# Every service runs the app's own compose image: CloudNativePG's stock
 	# postgres lacked the plv8 mecha's database image installs.
 	for svc in ["database" "crud" "electric" "auth" "caddy" "render"] {
@@ -368,7 +409,7 @@ def test_release_override [] {
 }
 
 def test_render_ready_through_the_door [] {
-	print "test render is ready only once the door answers it, and lives on its own health..."
+	print "test render starts on its own health, is ready only once the door answers it, and lives on its own health..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let render = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-render" | first | get spec.template.spec.containers | where name == "render" | first)
 	let probe = ($render.readinessProbe.exec.command | str join " ")
@@ -376,6 +417,291 @@ def test_render_ready_through_the_door [] {
 	assert ($probe | str contains "/shell/shell.json") "readiness reads a page's shell through the door"
 	assert ($probe | str contains "/health") "readiness keeps render's own health"
 	assert equal $render.livenessProbe.httpGet.path "/health"
+	# A pod still syncing its tables is given time to start before liveness may kill it (PRONTO-107).
+	assert equal $render.startupProbe.httpGet.path "/health"
+	assert (($render.startupProbe.periodSeconds * $render.startupProbe.failureThreshold) >= 120) "render may take compose's start_period to start"
+}
+
+def test_container_resources_and_files [] {
+	print "test a container's own resources over the release's, and a service's files from a ConfigMap..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t resources.XXXXXX.json | str trim)
+	{App: {
+		containerResources: {electric: {limits: {memory: "1Gi"}}, flagd: {requests: {cpu: "20m"}}}
+		services: {flagd: {port: 8693, env: {}, files: {"/etc/flags-live": "sample-flags"}}}
+	}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let container = {|dep, name| $objs | where kind == "Deployment" and metadata.name == $dep | first | get spec.template.spec.containers | where name == $name | first }
+	let electric = (do $container "sample-electric" "electric")
+	assert equal $electric.resources.limits.memory "1Gi"
+	assert equal $electric.resources.limits.cpu "500m" "the release's own where the container names none"
+	assert equal $electric.resources.requests.memory "64Mi"
+	assert equal (do $container "sample-crud" "crud" | get resources.limits.memory) "256Mi" "another container keeps the release's"
+	let flagd = ($objs | where kind == "Deployment" and metadata.name == "sample-flagd" | first)
+	let c = ($flagd.spec.template.spec.containers | where name == "flagd" | first)
+	assert equal $c.resources.requests.cpu "20m"
+	assert equal $c.volumeMounts [{name: "files-sample-flags", mountPath: "/etc/flags-live", readOnly: true}]
+	assert equal $flagd.spec.template.spec.volumes [{name: "files-sample-flags", configMap: {name: "sample-flags"}}]
+	let billing = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-caddy" | first)
+	assert ($billing.spec.template.spec.volumes? | default [] | all {|v| not ($v.name | str starts-with "files-") }) "no files, no volumes for them"
+}
+
+def test_alerting [] {
+	print "test an app's alerting rules: a vmalert of its own, and the rules written each release..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let none = (render-manifests $app.cue_path "metal" | from yaml)
+	assert (($none | where metadata.name == "sample-vmalert") | is-empty) "no rules, no vmalert"
+	let data = (mktemp -t alerting.XXXXXX.json | str trim)
+	{App: {alerting: {rules: ["observability/journeys.rules.yaml"]}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	let dep = ($objs | where kind == "Deployment" and metadata.name == "sample-vmalert" | first)
+	let c = ($dep.spec.template.spec.containers | first)
+	assert ($c.args | any {|a| $a == "-datasource.url=http://vmsingle.observability.svc.cluster.local:8428" }) "it reads the cluster's VictoriaMetrics"
+	assert ($c.args | any {|a| $a == "-notifier.blackhole" }) "with no notifier, alerts are kept as series"
+	assert equal $dep.spec.template.spec.volumes [{name: "rules", configMap: {name: "sample-alert-rules"}}]
+	{App: {services: {"journeys-collector": {port: 8686, env: {}, metrics: {port: 9598}}}}} | to json | save -f $data
+	let col = (render-manifests $app.cue_path "metal" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-journeys-collector" | first | get spec.template)
+	assert equal [$col.metadata.annotations."prometheus.io/scrape" $col.metadata.annotations."prometheus.io/port" $col.metadata.annotations."prometheus.io/path"] ["true" "9598" "/metrics"] "a service's metrics are scraped"
+	assert ($col.spec.containers.0.ports | any {|p| $p.containerPort == 9598 }) "its metrics port is declared, which pod discovery keeps"
+	{App: {alerting: {rules: ["a.rules.yaml"], notifier: "http://alertmanager.observability:9093"}}} | to json | save -f $data
+	let notified = (render-manifests $app.cue_path "metal" --data $data | from yaml | where metadata.name == "sample-vmalert" | first | get spec.template.spec.containers.0.args)
+	rm $data
+	assert ("-notifier.url=http://alertmanager.observability:9093" in $notified and not ("-notifier.blackhole" in $notified)) "a named notifier gets the alerts"
+
+	let dir = (mktemp -d)
+	mkdir $"($dir)/bin" $"($dir)/app/observability"
+	"groups: []\n" | save $"($dir)/app/observability/journeys.rules.yaml"
+	let log = $"($dir)/kubectl.log"
+	$"#!/bin/sh\necho \"$@\" >> ($log)\n" | save $"($dir)/bin/kubectl"
+	^chmod +x $"($dir)/bin/kubectl"
+	with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { apply-alert-rules "sample" ["observability/journeys.rules.yaml"] $"($dir)/app" "sample" }
+	let call = (open $log | lines | where {|l| $l starts-with "create" } | first)
+	assert (($call | str starts-with "create configmap sample-alert-rules -n sample --from-file=journeys.rules.yaml=") and ($call | str ends-with "/app/observability/journeys.rules.yaml --dry-run=client -o yaml")) $"the rules are written under their names: ($call)"
+	let twice = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { apply-alert-rules "sample" ["a/x.yaml" "b/x.yaml"] $"($dir)/app" "sample" }; false } catch { true })
+	assert $twice "two files of one name are refused"
+	rm -r $dir
+}
+
+def test_database_backup [] {
+	print "test a database's backups: the plugin archives its WAL to a Cloud Storage bucket, nightly base backups, signed in with no key..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let none = (render-manifests $app.cue_path "metal" | from yaml)
+	assert (($none | where kind in ["ObjectStore" "ScheduledBackup"]) | is-empty) "no backup, no object store"
+	assert (($none | where kind == "Cluster" | first | get spec.plugins? | default []) | is-empty) "and no archiver"
+	let data = (mktemp -t backup.XXXXXX.json | str trim)
+	let provider = "projects/123/locations/global/workloadIdentityPools/node/providers/k3s"
+	{App: {database: {backup: {bucket: "pronto-backups", provider: $provider, serviceAccount: "backups@p.iam.gserviceaccount.com", audience: "k3s-node"}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let store = ($objs | where kind == "ObjectStore" | first)
+	assert equal $store.metadata.name "sample-backup"
+	assert equal $store.spec.retentionPolicy "30d"
+	assert equal $store.spec.configuration.destinationPath "gs://pronto-backups/sample"
+	assert equal $store.spec.configuration.googleCredentials {gkeEnvironment: true} "Google's default credentials, no key Secret"
+	assert ($store.spec.configuration.s3Credentials? == null) "no S3 keys"
+	assert equal $store.spec.instanceSidecarConfiguration.env [{name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/projected/gcp-credentials.json"}]
+	let creds = ($objs | where kind == "ConfigMap" and metadata.name == "sample-backup" | first | get data."credentials.json" | from json)
+	assert equal $creds.type "external_account"
+	assert equal $creds.audience $"//iam.googleapis.com/($provider)"
+	assert equal $creds.credential_source.file "/projected/gcp-token" "the Cluster's projected token"
+	assert ($creds.service_account_impersonation_url | str contains "backups@p.iam.gserviceaccount.com")
+	let cluster = ($objs | where kind == "Cluster" | first)
+	assert equal $cluster.spec.plugins [{name: "barman-cloud.cloudnative-pg.io", isWALArchiver: true, parameters: {barmanObjectName: "sample-backup"}}] "the plugin archives the Cluster's WAL"
+	assert equal $cluster.spec.projectedVolumeTemplate.sources [
+		{serviceAccountToken: {path: "gcp-token", audience: "k3s-node", expirationSeconds: 3600}}
+		{configMap: {name: "sample-backup", items: [{key: "credentials.json", path: "gcp-credentials.json"}]}}
+	] "the token and the credential under /projected, which the sidecar shares"
+	let nightly = ($objs | where kind == "ScheduledBackup" | first)
+	assert equal [$nightly.spec.cluster.name $nightly.spec.method $nightly.spec.schedule $nightly.spec.immediate] ["sample-db" "plugin" "0 0 6 * * *" true]
+	let at = {|kind| $objs | enumerate | where item.kind == $kind | first | get index }
+	assert ((do $at "ObjectStore") < (do $at "Cluster")) "the store is there before the Cluster names it"
+	assert ((check-backup-secrets [$store] "sample") == null) "a store with no keys needs no Secret"
+
+	print "  ...or to an S3-compatible bucket, its keys a Secret the release checks"
+	let data = (mktemp -t backup.XXXXXX.json | str trim)
+	{App: {database: {backup: {endpoint: "https://usc1.contabostorage.com", bucket: "pronto-backups"}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let store = ($objs | where kind == "ObjectStore" | first)
+	assert equal $store.spec.configuration.destinationPath "s3://pronto-backups/sample"
+	assert equal $store.spec.configuration.endpointURL "https://usc1.contabostorage.com"
+	assert equal $store.spec.configuration.s3Credentials {accessKeyId: {name: "sample-backup-s3", key: "ACCESS_KEY_ID"}, secretAccessKey: {name: "sample-backup-s3", key: "ACCESS_SECRET_KEY"}}
+	assert equal $store.spec.configuration.wal.compression "gzip"
+	assert ($store.spec.instanceSidecarConfiguration? == null) "no Google credential"
+	assert (($objs | where kind == "ConfigMap" and metadata.name == "sample-backup") | is-empty) "no credential ConfigMap"
+	let cluster = ($objs | where kind == "Cluster" | first)
+	assert ($cluster.spec.projectedVolumeTemplate? == null) "no projected token"
+	assert equal $cluster.spec.plugins [{name: "barman-cloud.cloudnative-pg.io", isWALArchiver: true, parameters: {barmanObjectName: "sample-backup"}}]
+	let dir = (mktemp -d)
+	mkdir $"($dir)/bin"
+	$"#!/bin/sh\ncat \"($dir)/secret.json\" 2>/dev/null || exit 1\n" | save $"($dir)/bin/kubectl"
+	^chmod +x $"($dir)/bin/kubectl"
+	let check = {|| with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { check-backup-secrets [$store] "sample" } }
+	assert (try { do $check; false } catch { true }) "a missing Secret is refused"
+	{data: {ACCESS_KEY_ID: "YQ=="}} | to json | save -f $"($dir)/secret.json"
+	assert (try { do $check; false } catch { true }) "a Secret without both keys is refused"
+	{data: {ACCESS_KEY_ID: "YQ==", ACCESS_SECRET_KEY: "Yg=="}} | to json | save -f $"($dir)/secret.json"
+	do $check
+	rm -r $dir
+
+	let data = (mktemp -t backup.XXXXXX.json | str trim)
+	{App: {database: {backup: {endpoint: "https://usc1.contabostorage.com", bucket: "pronto-backups", provider: $provider}}}} | to json | save -f $data
+	let both = (try { let out = (render-manifests $app.cue_path "metal" --data $data); "rendered" } catch { "refused" })
+	rm $data
+	assert equal $both "refused" "an endpoint and a provider at once are refused"
+}
+
+def test_initdb_replays [] {
+	print "test initdb replays the app's own migrations over a database it already built, as on Cloud Run..."
+	# A copy of sample beside it, so cue finds pronto's schema, whose facts name two migrations.
+	let dir = ($fixtures_dir | path join $".replays-(random uuid)")
+	cp -r ($fixtures_dir | path join "sample") $dir
+	open ($dir | path join .pronto cluster.json) | upsert replays ["700_gold.sql" "780_standin.sql"] | to json | save -f ($dir | path join .pronto cluster.json)
+	let job = (render-manifests ($dir | path join release.cue) "metal" | from yaml | where kind == "Job" and metadata.name == "sample-initdb" | first)
+	rm -r $dir
+	let script = ($job.spec.template.spec.containers.0.command | last)
+	assert ($script | str contains "010_machines.sql 016_mecha_actors.sql 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
+	assert ($script | str contains "--single-transaction") "010_machines in one transaction"
+}
+
+def test_metrics_export [] {
+	print "test an app's metrics sent on to Managed Service for Prometheus, signed in through workload identity..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t mexport.XXXXXX.json | str trim)
+	{App: {services: {"journeys-collector": {port: 8686, env: {}, metrics: {port: 9598}}}}} | to json | save -f $data
+	let none = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	assert (($none | where metadata.name? == "sample-metrics-export") | is-empty) "no export, no collector"
+	let pol = ($none | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert ($pol.spec.ingress | any {|r| ($r.from.0.namespaceSelector?.matchLabels?."kubernetes.io/metadata.name"? == "observability") and ($r.ports | any {|p| $p.port == 9598 }) }) "the cluster's VictoriaMetrics may scrape a service's metrics"
+	let svc = ($none | where kind == "Service" and metadata.name == "journeys-collector" | first)
+	assert ($svc.spec.ports | any {|p| $p.name == "metrics" and $p.port == 9598 }) "the Service carries the metrics port"
+	{App: {
+		services: {"journeys-collector": {port: 8686, env: {}, metrics: {port: 9598}}}
+		metricsExport: {project: "brawl-chess", provider: "projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/k3s", serviceAccount: "metrics-writer@brawl-chess.iam.gserviceaccount.com", audience: "contabo-k3s"}
+	}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let cm = ($objs | where kind == "ConfigMap" and metadata.name == "sample-metrics-export" | first)
+	let config = ($cm.data."config.yaml" | from yaml)
+	assert equal ($config.receivers.prometheus.config.scrape_configs | first | get static_configs.0.targets) ["journeys-collector.sample.svc.cluster.local:9598"]
+	assert equal $config.exporters.googlemanagedprometheus.project "brawl-chess"
+	let creds = ($cm.data."credentials.json" | from json)
+	assert equal $creds.audience "//iam.googleapis.com/projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/k3s"
+	assert ($creds.service_account_impersonation_url | str ends-with "metrics-writer@brawl-chess.iam.gserviceaccount.com:generateAccessToken")
+	let dep = ($objs | where kind == "Deployment" and metadata.name == "sample-metrics-export" | first)
+	assert equal $dep.spec.template.spec.serviceAccountName "sample-metrics-export"
+	let token = ($dep.spec.template.spec.volumes | where name == "token" | first | get projected.sources.0.serviceAccountToken)
+	assert equal $token.audience "contabo-k3s" "the token is minted for the provider's audience"
+	assert (($objs | where kind == "ServiceAccount" and metadata.name == "sample-metrics-export") | is-not-empty)
+	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert ($pol.spec.ingress | any {|r| ($r.from.0.podSelector?.matchLabels?."app.kubernetes.io/component"? == "metrics-export") and ($r.ports | any {|p| $p.port == 9598 }) }) "the collector may scrape the metrics port"
+}
+
+def test_blobs [] {
+	print "test the blob plane: rclone over a bucket and imgproxy, in the mesh, signed in through workload identity..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t blobs.XXXXXX.json | str trim)
+	{App: {services: {ticker: {port: 9998, env: {}}}}} | to json | save -f $data
+	let none = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	assert (($none | where metadata.name? in ["sample-rclone-s3" "sample-imgproxy" "sample-blobs" "rclone-s3" "imgproxy"]) | is-empty) "no blobs, no blob plane"
+	{App: {
+		services: {ticker: {port: 9998, env: {}}}
+		blobs: {bucket: "brawl-chess-metal-staging-blobs", provider: "projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/contabo-k3s", serviceAccount: "metal-blobs@brawl-chess.iam.gserviceaccount.com", audience: "contabo-k3s"}
+	}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let rc = ($objs | where kind == "Deployment" and metadata.name == "sample-rclone-s3" | first)
+	let img = ($objs | where kind == "Deployment" and metadata.name == "sample-imgproxy" | first)
+	assert equal $rc.spec.template.metadata.annotations."dapr.io/app-id" "rclone-s3"
+	assert equal $rc.spec.template.metadata.annotations."dapr.io/app-port" "3900"
+	assert equal $img.spec.template.metadata.annotations."dapr.io/app-id" "imgproxy"
+	assert equal $img.spec.template.metadata.annotations."dapr.io/app-port" "8081"
+	assert equal $rc.spec.template.spec.serviceAccountName "sample-blobs"
+	let c = ($rc.spec.template.spec.containers | first)
+	assert equal $c.command ["rclone"]
+	assert equal $c.args ["serve" "s3" "--addr=0.0.0.0:3900" "--vfs-cache-mode=off" "objects:"]
+	let renv = ($c.env | reduce -f {} {|e, acc| $acc | insert $e.name $e.value })
+	assert equal $renv.RCLONE_CONFIG_OBJECTS_UPSTREAMS "mecha-objects=gcs:brawl-chess-metal-staging-blobs"
+	assert equal $renv.RCLONE_CONFIG_GCS_ENV_AUTH "true"
+	assert equal $renv.RCLONE_CONFIG_GCS_BUCKET_POLICY_ONLY "true"
+	assert equal $renv.GOOGLE_APPLICATION_CREDENTIALS "/etc/gcp/credentials.json"
+	assert ($c.image | str contains "sample-rclone-s3") "built from the app's compose service"
+	let cm = ($objs | where kind == "ConfigMap" and metadata.name == "sample-blobs" | first)
+	let creds = ($cm.data."credentials.json" | from json)
+	assert equal $creds.type "external_account"
+	assert equal $creds.audience "//iam.googleapis.com/projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/contabo-k3s"
+	assert ($creds.service_account_impersonation_url | str ends-with "metal-blobs@brawl-chess.iam.gserviceaccount.com:generateAccessToken")
+	let token = ($rc.spec.template.spec.volumes | where name == "token" | first | get projected.sources.0.serviceAccountToken)
+	assert equal $token.audience "contabo-k3s" "the token is minted for the provider's audience"
+	assert (($objs | where kind == "ServiceAccount" and metadata.name == "sample-blobs") | is-not-empty)
+	let ienv = (($img.spec.template.spec.containers | first).env | reduce -f {} {|e, acc| $acc | insert $e.name $e.value })
+	assert equal $ienv.IMGPROXY_S3_ENDPOINT "http://rclone-s3.sample.svc.cluster.local:3900"
+	assert equal $ienv.IMGPROXY_ONLY_PRESETS "true"
+	assert equal ($objs | where kind == "Service" and metadata.name in ["rclone-s3" "imgproxy"] | get metadata.name | sort) ["imgproxy" "rclone-s3"]
+	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert ($pol.spec.podSelector.matchExpressions.0.values | all {|v| $v in ["ticker" "rclone-s3" "imgproxy"] }) "the services' policy covers the blob plane"
+	assert ($pol.spec.egress | any {|r| ($r.ipBlock? | is-empty) and ($r.to?.0?.ipBlock?.cidr? == "0.0.0.0/0") and ($r.ports == [{port: 443, protocol: "TCP"}]) }) "Google's APIs on 443"
+	assert ($pol.spec.egress | any {|r| ($r.to?.0?.podSelector? | is-not-empty) and ($r.ports | any {|p| $p.port == 3900 }) }) "imgproxy reaches rclone"
+	assert ($pol.spec.ingress | any {|r| $r.ports | any {|p| $p.port == 8081 } }) "the mesh reaches imgproxy"
+}
+
+def test_service_clock [] {
+	print "test a service's clock pokes it each minute with the service token, as Cloud Scheduler pokes the ticker..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t clock.XXXXXX.json | str trim)
+	{App: {services: {ticker: {port: 9998, env: {}, clock: {}}, flagd: {port: 8693, env: {}}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let crons = ($objs | where kind == "CronJob")
+	assert equal ($crons | get metadata.name) ["sample-ticker-clock"] "only the service with a clock gets one"
+	let cron = ($crons | first)
+	assert equal [$cron.spec.schedule $cron.spec.concurrencyPolicy] ["* * * * *" "Forbid"]
+	let c = ($cron.spec.jobTemplate.spec.template.spec.containers | first)
+	assert ($c.command | last | str contains "u=http://ticker.sample.svc.cluster.local:9998") ($c.command | last)
+	assert ($c.command | last | str contains "-X POST -H \"Authorization: Bearer $SERVICE_JWT\" \"$u/poke?caller=k8s-cronjob\"") ($c.command | last)
+	assert equal ($c.env | first | get valueFrom.secretKeyRef) {name: "sample-service-jwt", key: "SERVICE_JWT"}
+	assert equal $cron.spec.jobTemplate.spec.template.metadata.labels."app.kubernetes.io/name" "sample" "the services' network policy admits it"
+}
+
+def test_door_egress [] {
+	print "test the door may reach the internet on 443 alone, for an upstream a plugin names (Umami)..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let pol = (render-manifests $app.cue_path "metal" | from yaml | where kind == "NetworkPolicy" and metadata.name == "sample-caddy-netpol" | first)
+	let out = ($pol.spec.egress | where {|r| ($r.to?.0?.ipBlock? | is-not-empty) })
+	assert equal ($out | length) 1
+	assert equal ($out.0.ports) [{port: 443, protocol: "TCP"}]
+	assert ("10.0.0.0/8" in $out.0.to.0.ipBlock.except) "nothing private"
+}
+
+def test_seed_configmaps [] {
+	print "test a missing ConfigMap is seeded from the app's file, and one that exists only gains what it lacks..."
+	let dir = (mktemp -d)
+	mkdir $"($dir)/bin" $"($dir)/app/flags"
+	'{"flags": {"old": {"defaultVariant": "on"}, "new": {"defaultVariant": "off"}}}' | save $"($dir)/app/flags/flags.json"
+	let log = $"($dir)/kubectl.log"
+	# A stand-in kubectl: `get` finds kept-flags (old set by the operator, new missing) and full-flags
+	# (already holding both); every call is logged.
+	let kept = ({data: {"flags.json": ({flags: {old: {defaultVariant: "off"}}} | to json)}} | to json -r)
+	let full = ({data: {"flags.json": ({flags: {old: {defaultVariant: "off"}, new: {defaultVariant: "on"}}} | to json)}} | to json -r)
+	$"#!/bin/sh\necho \"$@\" >> ($log)\nif [ \"$1\" = get ]; then case \"$3\" in kept-flags\) echo '($kept)';; full-flags\) echo '($full)';; *\) exit 1;; esac; fi\n" | save $"($dir)/bin/kubectl"
+	^chmod +x $"($dir)/bin/kubectl"
+	with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} {
+		seed-configmaps {flagd: {seed: {sample-flags: "flags/flags.json", kept-flags: "flags/flags.json", full-flags: "flags/flags.json"}}, billing: {port: 8688}} $"($dir)/app" "sample"
+	}
+	let calls = (open $log | lines)
+	assert ($calls | any {|c| $c == $"create configmap sample-flags -n sample --from-file=flags.json=($dir)/app/flags/flags.json" }) "the missing one is made from the app's file"
+	assert ($calls | all {|c| not ($c | str starts-with "create configmap kept-flags") }) "one that exists is never written over"
+	let patch = ($calls | where {|c| $c | str starts-with "patch configmap kept-flags" })
+	assert (($patch | length) == 1) "the one that lacks a flag is patched once"
+	assert ($calls | all {|c| not ($c | str starts-with "patch configmap full-flags") }) "one that lacks nothing is left alone"
+	let filled = (seed-fill {flags: {old: {defaultVariant: "off"}}} {flags: {old: {defaultVariant: "on", targeting: {}}, new: {defaultVariant: "off"}}, "$schema": "x"})
+	assert ($filled.flags.old == {defaultVariant: "off"}) "a flag the operator set keeps its value, and gains nothing deeper"
+	assert ($filled.flags.new == {defaultVariant: "off"}) "a flag it lacks comes with the seed's default"
+	assert ($filled."$schema" == "x") "a top-level key it lacks is added"
+	let bad = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { seed-configmaps {flagd: {seed: {other: "nope.json"}}} $"($dir)/app" "sample" }; false } catch { true })
+	assert $bad "a seed that is not there fails the release"
+	rm -r $dir
 }
 
 def test_app_services [] {
@@ -537,11 +863,11 @@ def test_timeout_budget_nests [] {
 	let route = ($objects | where kind == "HTTPRoute" | first | get spec.rules | each {|r| [($r.matches | first | get path.value) $r.timeouts.request] } | into record)
 	assert equal $route {"/": $"($budget.gateway.default)s", "/electric/": $"($budget.gateway.electric)s"}
 	let resiliency = ($objects | where kind == "Resiliency" | first | get spec)
-	assert equal $resiliency.policies.timeouts ($budget.mesh | items {|id, s| [$id $"($s)s"] } | into record)
-	# Timeouts alone. Dapr 1.14 counts every answer outside 200-399 as a
-	# failure, so a breaker opened on clients' 401s and shapes' 409s; and no
-	# retry policy, so a write is never replayed.
-	assert equal ($resiliency.targets.apps | values | where {|t| $t.circuitBreaker? != null } | length) 0
+	# Nothing in the mesh: a sidecar timeout that fires mid-response panics daprd
+	# (dapr/dapr#10371); a breaker opens on clients' 401s and shapes' 409s; a retry
+	# replays a write. The hops are bounded outside it (gateway, caddy, render, Postgres).
+	assert ($resiliency.policies.timeouts? == null)
+	assert ($resiliency.targets.apps? == null)
 	assert ($resiliency.policies.circuitBreakers? == null)
 	assert ($resiliency.policies.retries? == null)
 	assert equal ($objects | where kind == "BackendTrafficPolicy" | first | get spec.circuitBreaker) $resilience.gateway

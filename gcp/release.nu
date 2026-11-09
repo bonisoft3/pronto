@@ -600,7 +600,7 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
-	{GCP: ({image: {pushed: ($pushed | items {|svc, ref| {k: $svc, v: ($ref | reject -o key)} } | reduce -f {} {|i, acc| $acc | insert $i.k $i.v })}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $render_cfg | merge $airlock_cfg | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	{GCP: ({image: {pushed: ($pushed | items {|svc, ref| {k: $svc, v: ($ref | reject -o key)} } | reduce -f {} {|i, acc| $acc | insert $i.k $i.v })}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default ""), android: ($auth_env.WEBAUTHN_ANDROID_ORIGINS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $render_cfg | merge $airlock_cfg | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	{plan: $plan, number: $number}

@@ -62,7 +62,7 @@ import (
 
 published: impl.#Published & {
 	airlock:  "bonitao/mecha-airlock:0.20.6@sha256:b999fe8ff8e7e349f5fc5ed827584567c1c98f16c774884839a854b98ee28b50"
-	auth:     "ghcr.io/bsoneca/mecha-auth:0.18.1-host.9@sha256:6d74c2603bb24a05cb4d1649406762285e7ef035d555105fc64878a9b57b7058"
+	auth:     "ghcr.io/bsoneca/mecha-auth:0.18.1-host.12@sha256:1d65ff2308704128a8975d02bf67530bcc157b3afaf1ccbb5118d8e6cd5424cc"
 	clock:    "bonitao/mecha-clock:0.20.6@sha256:9d8cdaca612d880a4de4ab3176f80a1e7acdb38b10295f9aa5990217dcb3317f"
 	compute:  "bonitao/mecha-compute:0.20.6@sha256:ead90c13996630d80ab26ae42f5c36d88d8481753848b31899cf63faab91af28"
 	conduit:  "bonitao/mecha-conduit:0.20.6@sha256:c18a81780ff1c066c2dc2f7ed1115ac0333b28b2f6c9fe4c9390708c8f7810a1"

@@ -18,10 +18,26 @@ app: capabilities: resources: {
   assertStringIncludes(caddy, "script-src-attr 'none';");
 });
 
+Deno.test("a frame may name every name under a domain or every port of a host, as a CSP host-source", async () => {
+  const caddy = (await emitFiles(paymentProgram() + `
+app: capabilities: resources: {
+  hosted: {kind: "frame", source: "https://*.example.com", note: "previews under the app's own domain"}
+  local: {kind: "frame", source: "https://localhost:*", note: "a preview on a stack of this machine"}
+}
+`))["docker/Caddyfile"].text;
+  assertStringIncludes(caddy, "frame-src 'self' https://*.example.com https://localhost:*;");
+  assertStringIncludes(caddy, "connect-src 'self';");
+});
+
 Deno.test("resource declarations cannot relax scripts, omit a reason or broaden non-image origins", async () => {
   for (const fields of [
     'kind: "script", source: "https://example.org", note: "code"',
     'kind: "frame", source: "https:", note: "any frame"',
+    'kind: "frame", source: "https://*", note: "any host"',
+    'kind: "frame", source: "http://localhost:*", note: "plain http"',
+    'kind: "frame", source: "https://*.example.com/path", note: "a path"',
+    'kind: "connect", source: "https://*.example.org", note: "a wildcard is a frame\'s alone"',
+    'kind: "connect", source: "https://localhost:*", note: "a wildcard is a frame\'s alone"',
     'kind: "connect", source: "https://example.org/path", note: "a path"',
     'kind: "img", source: "https://example.org"',
     'kind: "img", source: "https://example.org", note: ""',

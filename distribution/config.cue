@@ -126,6 +126,10 @@ import (
 	domain:    *"" | string
 	ssrOrigin: *"" | string
 	edgeClock: *"ticker" | "disabled"
+	// The most bytes, gzipped, a pages release's first load may weigh: its
+	// document and the module chunks that document imports. A bundle over it
+	// fails the release; 0 sets none.
+	firstLoad: *0 | int & >=0
 	// The interpreter's root and mecha's, which the bundler reads from.
 	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
 	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
@@ -160,7 +164,7 @@ import (
 	derive: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle derived.ts) . --tables \(strings.Join(P.derived.tables, ","))\([if len(P.derived.streams) > 0 {" --streams \(strings.Join(P.derived.streams, ","))"}, ""][0]) --out \(P._derivedOut)"}).out
 	// The browser tier's artifact: the app bundled into dist/browser/index.html,
 	// under the path prefix `sayt release@pages --base=/<prefix>` names.
-	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])"}).out
+	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.firstLoad > 0 {" --first-load \(P.firstLoad)"}, ""][0])"}).out
 	// The edge tier's artifact, dist/cloudflare (bundle/edge.ts): the page, the
 	// Worker on mecha's edge cluster and the data directory its object loads.
 	// `--from`, given to `sayt release@cloudflare`, starts that directory from
@@ -198,6 +202,8 @@ import (
 		facts: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
 		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
 		proto: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."}).out
+		// The pages bundle written to a scratch folder and held to firstLoad.
+		firstLoad: (_run & {args: "let out = (mktemp -d); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out $out --first-load \(P.firstLoad); rm -r $out"}).out
 		hybrids: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-hybrids.ts) ."}).out
 		// Under the compute service's own pins, as it runs them: queries over
 		// DuckDB, the cage's workers, the wasm.
@@ -219,6 +225,12 @@ import (
 			// An app that bootstraps its repository's root from pronto keeps that
 			// project in pronto/, with the command that writes it; a pronto/
 			// holding only an app's own rules has nothing to write.
+			// First: one generate at a time in a checkout (generate-lock.sh), so a
+			// stack's `launch --watch` and a gate never write the same files at once.
+			"generate-lock": {
+				priority: -1000
+				cmds: [{do: (_run & {args: "^sh ($pronto | path join generate-lock.sh) .task/bayt/generate.lock"}).out}]
+			}
 			"auto-cue": cmds: [{use: "./tools.nu", do: "if ('pronto/generate_tool.cue' | path exists) { tools run-cue cmd generate ./pronto }"}]
 			"pronto": {
 				priority: 1

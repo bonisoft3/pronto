@@ -395,8 +395,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       import { createPageDatabase } from ${JSON.stringify(String(pathToFileURL(path.join(here, 'database.ts'))))}
       import { createCluster } from ${JSON.stringify(String(pathToFileURL(path.join(browser, 'cluster.ts'))))}
       const html = await Deno.readTextFile(Deno.args[0])
-      const b64 = /<script type="application\\/octet-stream" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1]
-      const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))))
+      const payload = JSON.parse(/<script type="application\\/json" id="pronto-payload">([^<]*)<\\/script>/.exec(html)![1])
       // PGlite's files come from beside the page, and nothing from elsewhere.
       const dir = Deno.args[0].replace(/index\\.html$/, '')
       globalThis.fetch = async (href) => {
@@ -594,5 +593,57 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
     assert.match(html, /preload: false/)
   } finally {
     await Deno.remove(app, { recursive: true })
+  }
+})
+
+// Regression: Cloudflare Pages answered every unknown path with the entry at
+// 200 (aprende's cd check for a missing asset read HTTP 200), because a build
+// with no 404.html is a single-page app to it. A page at the root of a site
+// carries its routes as proxy rules and the document as 404.html, so a route
+// loads and a missing file is a 404; under --base, a project site that reads no
+// _redirects, only 404.html.
+Deno.test('a page bundled at the root of a site carries its routes as _redirects, and 404.html', async () => {
+  const stub = await Deno.makeTempDir({ prefix: 'cue-stub-' })
+  const bundle = async (extra: string[]) => {
+    const app = await Deno.makeTempDir({ prefix: 'pages-bundle-test-' })
+    const write = async (p: string, text: string) => {
+      await Deno.mkdir(path.dirname(path.join(app, p)), { recursive: true })
+      await Deno.writeTextFile(path.join(app, p), text)
+    }
+    await write('shell/shell.json', JSON.stringify({ routes: [], migrations: [], tables: [] }))
+    await write('shell/shell.css', '')
+    await write('shell/design.css', '')
+    await write('shell/boot.js', '')
+    await write('shell/index.html', '<!doctype html><html><head><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>')
+    await write('cue.mod/module.cue', 'module: "example.test/app@v0"\n')
+    const bundled = await new Deno.Command(Deno.execPath(), {
+      args: [
+        'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
+        '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'), ...extra,
+      ],
+      env: { PATH: `${stub}:${Deno.env.get('PATH')}` },
+      stdout: 'inherit',
+      stderr: 'inherit',
+    }).output()
+    assert.deepEqual(bundled.success, true, 'bundle.ts failed')
+    return app
+  }
+  const apps: string[] = []
+  try {
+    // The program's own export, which an app's program.cue names `out`, and whose content emit's tests hold.
+    await Deno.writeTextFile(path.join(stub, 'cue'), `#!/bin/sh\n[ "$4" = out.pagesRedirects ] || exit 1\ncat <<'JSON'\n"/regras / 200\\n/regras/ / 200\\n"\nJSON\n`, { mode: 0o755 })
+    const root = await bundle([])
+    apps.push(root)
+    const html = await Deno.readTextFile(path.join(root, 'dist/browser/index.html'))
+    assert.equal(await Deno.readTextFile(path.join(root, 'dist/browser/404.html')), html)
+    assert.equal(await Deno.readTextFile(path.join(root, 'dist/browser/_redirects')), '/regras / 200\n/regras/ / 200\n')
+
+    const project = await bundle(['--base', '/truco'])
+    apps.push(project)
+    assert.equal(await Deno.readTextFile(path.join(project, 'dist/browser/404.html')), await Deno.readTextFile(path.join(project, 'dist/browser/index.html')))
+    await assert.rejects(Deno.stat(path.join(project, 'dist/browser/_redirects')), Deno.errors.NotFound)
+  } finally {
+    for (const app of apps) await Deno.remove(app, { recursive: true })
+    await Deno.remove(stub, { recursive: true })
   }
 })

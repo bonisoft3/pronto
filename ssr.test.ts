@@ -282,6 +282,16 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
   if (overData.caddyfile.includes("@rendered")) throw new Error(overData.caddyfile);
   if (overData.sitemap.includes("/jogos</loc>")) throw new Error(overData.sitemap);
 
+  // An app behind a sign-in: its screens are private unless one is declared public, which
+  // the terminal then opens to visitors (a guest session, no sign-in), so its route says so.
+  const walled = exported("(#accessCase & {reads: [_view], signIn: true}).out.shellRoute", false);
+  if (!walled.ok) throw new Error(walled.out);
+  if ("access" in JSON.parse(walled.out)) throw new Error(`a screen behind the sign-in names an access:\n${walled.out}`);
+  const opened = exported('(#accessCase & {reads: [_view], signIn: true, extra: {access: "public"}}).out', false);
+  if (!opened.ok) throw new Error(opened.out);
+  const openedData = JSON.parse(opened.out);
+  if (openedData.screen.access !== "public" || openedData.shellRoute.access !== "public") throw new Error(opened.out);
+
   // Inconsistent overrides are refused.
   const pubOverPriv = exported(`(#accessCase & {reads: [${note()}], extra: {access: "public"}}).out.caddyfile`, true);
   if (pubOverPriv.ok || !/screen jogo declares access: "public" over Note \(private\)/.test(pubOverPriv.out)) {
@@ -291,4 +301,16 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
   if (ssrOverPriv.ok || !/screen jogo is private and declares ssr: "ssr"/.test(ssrOverPriv.out)) {
     throw new Error(ssrOverPriv.out);
   }
+});
+
+// A Cloudflare Pages build has no rewrite with a status, so the door's route
+// list is carried as `_redirects` proxy rules at 200 (bundle.ts), from the same
+// addresses as the Caddyfile's @route: a route answers the entry, a :param stays
+// a placeholder, both slash spellings are listed, and `/` needs no rule.
+Deno.test("the routes' addresses are a Pages _redirects file, each proxied to the entry at 200", () => {
+  const { ok, out } = exported("#ssgCase.pagesRedirects", true);
+  if (!ok) throw new Error(out);
+  // cue --out text ends the document with a newline of its own.
+  const want = "/jogo/:id / 200\n/jogo/:id/ / 200\n/regras / 200\n/regras/ / 200\n\n";
+  if (out !== want) throw new Error(`unexpected _redirects:\n${out}`);
 });

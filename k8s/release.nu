@@ -36,10 +36,27 @@ export const OPERATORS = [
 	},
 	{
 		name: "cnpg"
-		url: "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.25.0/cnpg-1.25.0.yaml"
-		checksum: "sha256:540325612313f775b624a444c217c4c1851269c043f72ca73dbcf6aff433dcb4"
+		url: "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.1/cnpg-1.30.1.yaml"
+		checksum: "sha256:37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb"
 		namespace: "cnpg-system"
 		check_deployments: ["cnpg-controller-manager"]
+	},
+	# The certificates CloudNativePG's barman-cloud plugin and the operator talk through.
+	{
+		name: "cert-manager"
+		url: "https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml"
+		checksum: "sha256:c04a51295adda2b1a775146751f973e787190778c7f35180861d9678876e5c74"
+		namespace: "cert-manager"
+		check_deployments: ["cert-manager" "cert-manager-cainjector" "cert-manager-webhook"]
+	},
+	# Backups and WAL to an object store (#ReleaseSpec.database.backup): a sidecar beside
+	# postgres, so the database's own image needs no barman-cloud of its own.
+	{
+		name: "barman-cloud"
+		url: "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.15.1/manifest.yaml"
+		checksum: "sha256:8f377ff4a7d0d3f74fc64b0f7ac4f449fc38ca9e83a40107cca2f9315a9bd920"
+		namespace: "cnpg-system"
+		check_deployments: ["barman-cloud"]
 	},
 	{
 		name: "external-secrets"
@@ -51,8 +68,8 @@ export const OPERATORS = [
 	},
 	{
 		name: "dapr"
-		url: "https://dapr.github.io/helm-charts/dapr-1.14.4.tgz"
-		checksum: "sha256:97f64b80b3809356a5dae84b07684d4ed81ce57d371acbe7013bbc157c614795"
+		url: "https://dapr.github.io/helm-charts/dapr-1.16.21.tgz"
+		checksum: "sha256:71233ad45bf72cc095abd718b592c0442a215940c32c7130fff5f775b18bc62c"
 		kind: "helm"
 		namespace: "dapr-system"
 		# The injector admits pods without their sidecar while it is down (failurePolicy Ignore).
@@ -152,7 +169,19 @@ def install-operator [entry: record, timeout: string] {
 		# helm template leaves namespace off objects that do not set it; the chart's namespace is theirs.
 		$docs | where {|d| not (do $is_crd $d) } | str join "\n---\n" | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false --request-timeout=120s -f -
 	} else {
-		kubectl apply --server-side --force-conflicts --validate=false --request-timeout=120s -f $file
+		# A manifest whose objects another operator's webhook admits (the barman-cloud plugin's
+		# Certificate, cert-manager's) is refused for the few seconds that webhook takes to serve
+		# once its deployment is ready: applied again, for at most a minute.
+		mut attempt = 1
+		loop {
+			let applied = (do { kubectl apply --server-side --force-conflicts --validate=false --request-timeout=120s -f $file } | complete)
+			print -n $applied.stdout
+			if $applied.exit_code == 0 { break }
+			if $attempt >= 12 { error make { msg: $"($entry.name): kubectl apply failed: ($applied.stderr)" } }
+			print $"($entry.name) not admitted yet \(($applied.stderr | str trim | lines | last)\): again in 5s"
+			$attempt += 1
+			sleep 5sec
+		}
 	}
 
 	for d in ($entry.check_deployments? | default []) {
@@ -416,6 +445,78 @@ export def app-services-environment [compose: record, services: list<string>, ow
 	}
 }
 
+# The ConfigMaps the app's services mount (App.services.<n>.files), made from the app's files that
+# seed them (App.services.<n>.seed), each keyed by its file's name, when they are not there yet. One
+# that exists is the operator's (pronto-flags push's): nothing in it changes, but a JSON seed fills in
+# what it lacks (seed-fill), so a flag added since the ConfigMap was seeded reaches it with its
+# default, not as an unknown flag.
+export def seed-configmaps [services: record, app_dir: string, namespace: string] {
+	for s in ($services | values) {
+		for c in ($s.seed? | default {} | transpose name file) {
+			let file = ($app_dir | path join $c.file)
+			if not ($file | path exists) { error make { msg: $"ConfigMap ($c.name)'s seed ($file) does not exist" } }
+			let key = ($file | path basename)
+			let got = (kubectl get configmap $c.name -n $namespace -o json | complete)
+			if $got.exit_code != 0 {
+				kubectl create configmap $c.name -n $namespace $"--from-file=($key)=($file)" | ignore
+				print $"Seeded ConfigMap ($namespace)/($c.name) from ($c.file)"
+				continue
+			}
+			if not ($key | str ends-with ".json") { continue }
+			let have = ($got.stdout | from json | get -o data | default {} | get -o $key)
+			let seed = (open --raw $file | from json)
+			let next = (if $have == null { $seed } else { seed-fill ($have | from json) $seed })
+			if $have != null and $next == ($have | from json) { continue }
+			kubectl patch configmap $c.name -n $namespace --type merge -p ({data: {$key: ($next | to json --indent 2)}} | to json -r) | ignore
+			print $"Filled ConfigMap ($namespace)/($c.name) from ($c.file)"
+		}
+	}
+}
+
+# `have` with what `seed` has and it lacks: a missing top-level key, or a missing member of a top-level
+# object (one flag of flagd's `flags`). Nothing `have` holds is changed, and nothing deeper is added,
+# so a flag the operator changed keeps its variants and targeting as they are.
+export def seed-fill [have: record, seed: record]: nothing -> record {
+	$seed | transpose k v | reduce -f $have {|e, acc|
+		let mine = ($acc | get -o $e.k)
+		if $mine == null {
+			$acc | upsert $e.k $e.v
+		} else if (($mine | describe) =~ "^record" and ($e.v | describe) =~ "^record") {
+			$acc | upsert $e.k ($e.v | transpose k v | reduce -f $mine {|m, inner| if ($inner | get -o $m.k) == null { $inner | upsert $m.k $m.v } else { $inner } })
+		} else {
+			$acc
+		}
+	}
+}
+
+# <name>-alert-rules: the app's alerting rules (App.alerting.rules), each file under its name, written
+# every release so it follows the repository; vmalert reads a change within a minute.
+export def apply-alert-rules [name: string, rules: list<string>, app_dir: string, namespace: string] {
+	if ($rules | is-empty) { return }
+	let names = ($rules | each {|r| $r | path basename })
+	let twice = ($names | uniq -d)
+	if ($twice | is-not-empty) { error make { msg: $"two alerting rule files share a name: ($twice | str join ', ')" } }
+	let from = ($rules | each {|r|
+		let file = ($app_dir | path join $r)
+		if not ($file | path exists) { error make { msg: $"alerting rule file ($file) does not exist" } }
+		$"--from-file=($r | path basename)=($file)"
+	})
+	kubectl create configmap $"($name)-alert-rules" -n $namespace ...$from --dry-run=client -o yaml | kubectl apply -f - | ignore
+}
+
+# The database's backups to an S3 store read their keys from a Secret the operator keeps: without it the
+# Cluster could archive no WAL, which piles up on the node until its disk fills.
+export def check-backup-secrets [objects: list, namespace: string] {
+	for store in ($objects | where kind == "ObjectStore" | where {|s| $s.spec.configuration.s3Credentials? != null }) {
+		let secret = $store.spec.configuration.s3Credentials.accessKeyId.name
+		let keys = (do { kubectl get secret $secret -n $namespace -o json } | complete)
+		let data = if $keys.exit_code == 0 { $keys.stdout | from json | get data? | default {} } else { {} }
+		if not ("ACCESS_KEY_ID" in ($data | columns) and "ACCESS_SECRET_KEY" in ($data | columns)) {
+			error make { msg: $"database.backup: Secret ($secret) in ($namespace) needs ACCESS_KEY_ID and ACCESS_SECRET_KEY, the object store's keys \(kubectl create secret generic ($secret) -n ($namespace) --from-literal=ACCESS_KEY_ID=... --from-literal=ACCESS_SECRET_KEY=...\)" }
+		}
+	}
+}
+
 # <name>-service-jwt: the service role's token, signed with <name>-auth-secrets'
 # PGRST_JWT_SECRET, restated each release so it follows the secret. The value
 # goes through stdin, never a command line.
@@ -487,7 +588,7 @@ export def render-manifests [
 	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
-	{App: {database: {tokenRoles: $facts.tokenRoles}}} | to json | save -f $roles_file
+	{App: {database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}}} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file
@@ -629,6 +730,8 @@ export def auth-provider-environment [environment: record]: nothing -> record {
 	{
 		oidc: $settings, oidcSecrets: ($secrets | columns), secretValues: $secrets
 		oidcSecretDigest: (if ($secrets | is-empty) { "" } else { $secrets | sort | to json --raw | hash sha256 })
+		# The app's Android builds whose passkeys auth admits (capabilities.auth.android).
+		android: ($environment.WEBAUTHN_ANDROID_ORIGINS? | default "")
 	}
 }
 
@@ -674,7 +777,7 @@ export def main [
 	let root = (git rev-parse --show-toplevel | str trim)
 	let app_source_dir = $app_info.dir
 
-	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path } | complete)
+	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, alerting: App.alerting, blobs: len([if App.blobs != _|_ {1}]) > 0, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path } | complete)
 	if $meta_res.exit_code != 0 {
 		error make { msg: $"Failed to read release metadata from ($app_info.cue_path): ($meta_res.stderr)" }
 	}
@@ -699,6 +802,14 @@ export def main [
 	let missing = ($services | where {|s| $s not-in $compose_services })
 	if ($missing | is-not-empty) {
 		error make { msg: $"($app_info.cue_path): App.services names ($missing | str join ', '), which the app's compose project lacks" }
+	}
+
+	# The blob plane (App.blobs) is the app's rclone-s3 and imgproxy compose services, built and pushed
+	# as its own services are.
+	let blob_svcs = if $app_meta.blobs { ["rclone-s3" "imgproxy"] } else { [] }
+	let blobs_missing = ($blob_svcs | where {|s| $s not-in $compose_services })
+	if ($blobs_missing | is-not-empty) {
+		error make { msg: $"($app_info.cue_path): App.blobs needs the app's compose project to define ($blobs_missing | str join ', ')" }
 	}
 
 	let target_env = (read-environment $cluster_env $app_info.cue_path)
@@ -736,7 +847,7 @@ export def main [
 
 	# migrate runs where the app has pgroll migrations to carry, as in compose.
 	let has_migrate = ("migrate" in $compose_services)
-	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append $services
+	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
 	# A node's registry is pushed to through this release's tunnel, on a local
 	# port, while the manifests name it as the node sees it (registry).
@@ -771,7 +882,9 @@ export def main [
 	} else { {} }
 	# The providers compose gives the auth service, and each one's client:
 	# compose refuses to render a provider whose client is unset.
-	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment))
+	# What release.cue sets is the release's, over compose's, as gcp/release.nu's auth.oidc is.
+	let fixed = (^cue export --expression App.auth.oidc --out json $app_info.cue_path | from json | columns)
+	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment | reject -o ...$fixed))
 	let own_env = (app-services-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json) $services $app_meta.own)
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
 	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }))} | to json | save -f $pushed_file
@@ -797,6 +910,7 @@ export def main [
 	let of_kind = {|kind| $docs | where {|d| $d =~ $"\(?m\)^kind:\\s*($kind)\\s*$" } }
 	let deployments_yaml = (do $of_kind "Deployment")
 	let jobs_yaml = (do $of_kind "Job")
+	check-backup-secrets ($released | from yaml) $target_ns
 	print $"Applying manifests for ($app_info.name)..."
 	$docs | where {|d| not ($d in $deployments_yaml or $d in $jobs_yaml) } | str join "\n---\n" | kubectl apply -f -
 
@@ -805,7 +919,10 @@ export def main [
 	# primary runs that image and is ready itself.
 	let db_image = ($released | from yaml | where kind == "Cluster" | first | get spec.imageName)
 	print $"Waiting for CloudNativePG cluster ($app_info.name)-db in ($target_ns) on ($db_image)..."
-	let deadline = (date now) + 300sec
+	# The old primary's stop (its stopDelay, up to the Cluster's 120 s; a pod made before that bound
+	# keeps its 1800 s) and the new one's start.
+	let grace = ($released | from yaml | where kind == "Cluster" | first | get -o spec.stopDelay | default 0)
+	let deadline = (date now) + (($grace + 300) * 1sec)
 	loop {
 		let primary = (kubectl get pods -n $target_ns -l $"cnpg.io/cluster=($app_info.name)-db,cnpg.io/instanceRole=primary" -o json | from json | get items
 			| where {|p| $p.metadata.deletionTimestamp? == null and ($p.spec.containers | where name == "postgres" | first | get image) == $db_image and ($p.status.conditions? | default [] | any {|c| $c.type == "Ready" and $c.status == "True" }) })
@@ -840,10 +957,12 @@ export def main [
 	# the JWT secret the cluster generated (an ExternalSecret, there by now: crud
 	# logs in with it).
 	if ($services | is-not-empty) { ensure-service-jwt $workload_name $target_ns }
+	seed-configmaps $app_meta.services $app_source_dir $target_ns
+	apply-alert-rules $workload_name ($app_meta.alerting?.rules? | default []) $app_source_dir $target_ns
 
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
-	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services
+	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
 	for d in ($components | each { $"deployment/($app_info.name)-($in)" }) {
 		print $"Waiting for ($d) rollout..."
 		kubectl rollout status $d -n $target_ns --timeout=180s
