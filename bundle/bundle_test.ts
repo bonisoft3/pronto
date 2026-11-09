@@ -624,8 +624,8 @@ Deno.test('a page bundled at the root of a site carries its routes as _redirects
   }
   const apps: string[] = []
   try {
-    // The program's own export, whose content emit's tests hold.
-    await Deno.writeTextFile(path.join(stub, 'cue'), `#!/bin/sh\ncat <<'JSON'\n"/regras / 200\\n/regras/ / 200\\n"\nJSON\n`, { mode: 0o755 })
+    // The program's own export, which an app's program.cue names `out`, and whose content emit's tests hold.
+    await Deno.writeTextFile(path.join(stub, 'cue'), `#!/bin/sh\n[ "$4" = out.pagesRedirects ] || exit 1\ncat <<'JSON'\n"/regras / 200\\n/regras/ / 200\\n"\nJSON\n`, { mode: 0o755 })
     const root = await bundle([])
     apps.push(root)
     const html = await Deno.readTextFile(path.join(root, 'dist/browser/index.html'))

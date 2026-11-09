@@ -442,7 +442,7 @@ await Deno.writeTextFile(path.join(out, 'index.html'), html)
 // A host that answers an unknown path with 404.html serves the same document
 // there, and the deep link boots.
 await Deno.writeTextFile(path.join(out, '404.html'), html)
-// The program's own `cue export`: its fields are the app's, as written.
+// The program's own `cue export`: `terminal` and `out`, as the app's program.cue names them.
 const surface = (e: string) => {
   const exported = new Deno.Command('cue', { args: ['export', '.', '-e', e, '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).outputSync()
   if (!exported.success) fail(`cue export of ${e} failed`)
@@ -456,7 +456,7 @@ const surface = (e: string) => {
 // is owed. Under --base the host is a project site, which reads no _redirects.
 // An app with no CUE module has no program to list its routes.
 if (!base && await Deno.stat(path.join(app, 'cue.mod')).then(() => true, () => false)) {
-  await Deno.writeTextFile(path.join(out, '_redirects'), surface('pagesRedirects') as string)
+  await Deno.writeTextFile(path.join(out, '_redirects'), surface('out.pagesRedirects') as string)
 }
 // The host-DOM hatches, as the terminal serves them (hostDomAssets), and every
 // file a hatch names, wherever it sits: a hatch may serve files outside its own
