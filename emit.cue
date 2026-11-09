@@ -2927,6 +2927,27 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_locales: list.SortStrings([if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}])
 	// Every address a route answers at, flattened for the door's matcher list.
 	_addressed: list.FlattenN([for r in E._shell.routes {E._spellings[r.screen]}], 1)
+	// The same addresses as the _redirects file a Cloudflare Pages build carries
+	// (bundle.ts). Pages answers EVERY unknown path with the entry document at
+	// 200 when the build has no 404.html, so a missing asset reads as a page;
+	// with one, only what a rule proxies at 200 is a route and the rest is a
+	// 404 — the Caddyfile's @route/rewrite below, for a host that cannot rewrite
+	// with a status. A `:param` stays a placeholder, which Pages matches as one
+	// segment (a row id the door cannot know), and both slash spellings are
+	// listed, as a path matcher is exact there too. `/` is the entry itself and
+	// needs no rule.
+	pagesRedirects: strings.Join([
+		for a in list.SortStrings([for p, _ in _pagesPaths {p}]) {"\(a) / 200"},
+	], "\n") + "\n"
+	_pagesPaths: {
+		for a in E._addressed {
+			let trimmed = strings.TrimSuffix(a, "/")
+			if trimmed != "" {
+				(trimmed):       true
+				(trimmed + "/"): true
+			}
+		}
+	}
 	// The locales a reader can be sent TO. The default is where they already
 	// are, so it names no redirect — only the captures that mean "stay".
 	_others: [for tag in E._locales if E._shell.i18n != _|_ if tag != E._shell.i18n.default {tag}]

@@ -266,3 +266,15 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
     throw new Error(ssrOverPriv.out);
   }
 });
+
+// A Cloudflare Pages build has no rewrite with a status, so the door's route
+// list is carried as `_redirects` proxy rules at 200 (bundle.ts), from the same
+// addresses as the Caddyfile's @route: a route answers the entry, a :param stays
+// a placeholder, both slash spellings are listed, and `/` needs no rule.
+Deno.test("the routes' addresses are a Pages _redirects file, each proxied to the entry at 200", () => {
+  const { ok, out } = exported("#ssgCase.pagesRedirects", true);
+  if (!ok) throw new Error(out);
+  // cue --out text ends the document with a newline of its own.
+  const want = "/jogo/:id / 200\n/jogo/:id/ / 200\n/regras / 200\n/regras/ / 200\n\n";
+  if (out !== want) throw new Error(`unexpected _redirects:\n${out}`);
+});

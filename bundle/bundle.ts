@@ -24,6 +24,8 @@
 // does: the shell reads it from its config, takes it off every address it
 // matches and puts it on every address it composes, and the same document is
 // written as 404.html, which is what makes a deep link boot instead of 404.
+// Without --base the build also carries a Cloudflare Pages _redirects file
+// listing the routes, so that only a route answers the entry (see below).
 //
 // --derived names the rows the app's streams and computations derive, as
 // derived.ts writes them, run after the migrations: the page runs neither, its
@@ -439,18 +441,29 @@ for (const [name, text] of seedFiles) await Deno.writeTextFile(path.join(out, na
 await Deno.writeTextFile(path.join(out, 'index.html'), html)
 // A host that answers an unknown path with 404.html serves the same document
 // there, and the deep link boots.
-if (base) await Deno.writeTextFile(path.join(out, '404.html'), html)
+await Deno.writeTextFile(path.join(out, '404.html'), html)
+// The program's own `cue export`: `terminal` and `out`, as the app's program.cue names them.
+const surface = (e: string) => {
+  const exported = new Deno.Command('cue', { args: ['export', '.', '-e', e, '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).outputSync()
+  if (!exported.success) fail(`cue export of ${e} failed`)
+  return JSON.parse(new TextDecoder().decode(exported.stdout))
+}
+// At the root of a site, Cloudflare Pages answers every unknown path with the
+// entry at 200 unless the build has a 404.html, and then answers only what a
+// _redirects rule proxies at 200: the routes, which the program lists once
+// (pagesRedirects, from the addresses the door's Caddyfile matches), so a
+// route loads and a file that is not there is the 404 a check or a crawler
+// is owed. Under --base the host is a project site, which reads no _redirects.
+// An app with no CUE module has no program to list its routes.
+if (!base && await Deno.stat(path.join(app, 'cue.mod')).then(() => true, () => false)) {
+  await Deno.writeTextFile(path.join(out, '_redirects'), surface('out.pagesRedirects') as string)
+}
 // The host-DOM hatches, as the terminal serves them (hostDomAssets), and every
 // file a hatch names, wherever it sits: a hatch may serve files outside its own
 // directory, as aprende's voice hatch serves the exams' figures.
 const hatchSrcs = Object.values(shell.hostDom ?? {}).map((h) => h.src)
 let hatchFiles = 0
 if (hatchSrcs.length) {
-  const surface = (e: string) => {
-    const exported = new Deno.Command('cue', { args: ['export', '.', '-e', e, '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).outputSync()
-    if (!exported.success) fail(`cue export of ${e} failed`)
-    return JSON.parse(new TextDecoder().decode(exported.stdout))
-  }
   const held = hostDomAssets(surface('terminal.surface.statics') as StaticAsset[], hatchSrcs)
   for (const src of hatchSrcs) if (![...held.keys()].includes(src)) fail(`host-DOM hatch ${src} is not among the terminal's statics`)
   for (const file of surface('terminal.surface.hostDom') as string[]) {
