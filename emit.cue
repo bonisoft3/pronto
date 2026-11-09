@@ -2540,7 +2540,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// The cluster on this machine, each service a process
 			// (.bayt/process-compose.yaml), where `launch` alone runs it in
 			// containers.
-			sayYaml: say: launch: rulemap: local: {platform: "local", priority: -1, stop: true, cmds: [{do: (_distribution.launchLocal & {prepare: D.cluster.surface.hostPrepare}).out}]}
+			sayYaml: say: launch: rulemap: local: {platform: "local", priority: -1, stop: true, cmds: [{do: _distribution.launchLocal.out}]}
 			// Post-release verification across live deployments.
 			if list.Contains(D.code.meta.targets, "pages") {
 				sayYaml: say: verify: rulemap: pages: {platform: "pages", cmds: [{do: _distribution.verifyPages}]}
@@ -2965,7 +2965,7 @@ _pgrollDir: "services/database/pgroll"
 		// waits on it: a launch is up when its documents can be answered.
 		if D._rendersOnRequest {
 			// A host launch runs it beside the cluster's own processes, and the
-			// door proxies to it at its host address (_hostPeers).
+			// door proxies to it at its host address (its peer variable, below).
 			surface: targets: {
 				render: bayt.healthcheck.http & {
 					cmd: "builtin": null
@@ -3049,10 +3049,11 @@ _pgrollDir: "services/database/pgroll"
 	}
 	_rendersOnRequest: list.Contains([for _, s in D.code.surface.screens {s.ssr}], "ssr")
 	// The services beside the door a host launch runs too: the program's
-	// (code.meta.hostPeers, a plugin's) and the renderer, pronto's own.
+	// (code.meta.hostPeers, a plugin's). The renderer, pronto's own, is not
+	// listed: its door variable is a peer of the cluster (above), which mecha's
+	// host launch resolves to the renderer's host address.
 	_hostPeers: {
 		if D.code.meta.hostPeers != _|_ {D.code.meta.hostPeers}
-		if D._rendersOnRequest {render: omnishell.#Render.port}
 	}
 	_terminal:         list.Contains([for s in D.statics {s.target}], "/srv/shell/index.html")
 }

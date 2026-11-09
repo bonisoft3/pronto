@@ -230,7 +230,7 @@ def test_schema_jobs [] {
 	# files and mecha's staged steps: k8s ran a schema integrate never tested.
 	assert ($yaml | str contains "name: sample-initdb")
 	assert ($yaml | str contains "image: localhost:5001/sample-database:latest")
-	assert ($yaml | str contains "docker_process_init_files /docker-entrypoint-initdb.d/*")
+	assert ($yaml | str contains "docker_process_init_files /docker-entrypoint-initdb.d/!(950_fixture.sql)")
 	assert ($yaml | str contains "name: sample-migrate")
 	assert ($yaml | str contains "image: localhost:5001/sample-migrate:latest")
 	assert ($yaml | str contains "value: schedule")
@@ -563,7 +563,7 @@ def test_initdb_replays [] {
 	let job = (render-manifests ($dir | path join release.cue) "metal" | from yaml | where kind == "Job" and metadata.name == "sample-initdb" | first)
 	rm -r $dir
 	let script = ($job.spec.template.spec.containers.0.command | last)
-	assert ($script | str contains "010_machines.sql 016_mecha_actors.sql 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
+	assert ($script | str contains "010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
 	assert ($script | str contains "--single-transaction") "010_machines in one transaction"
 }
 

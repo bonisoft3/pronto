@@ -112,27 +112,24 @@ import (
 
 // The cluster as host processes under process-compose, inside the app's
 // toolchain: every process and probe finds the cluster's tools and bayt's on
-// its PATH. What the cluster prepares first (its surface's hostPrepare) runs
-// in the same toolchain.
-#LaunchLocal: L={
-	prepare: [...string]
-	_prepare: strings.Join([for c in L.prepare {"run-mise exec -- env MISE_LOCKED=0 sh -c \(json.Marshal(c)); "}], "")
-	out:      "use tools.nu [run-mise]; \(L._prepare)run-mise exec -- env MISE_LOCKED=0 process-compose --no-server -f .bayt/process-compose.yaml up --tui=false"
+// its PATH. mecha's host processes are nu scripts that build and fetch what they
+// need themselves (mecha 0.22 dropped the surface's hostPrepare), so nothing runs
+// before process-compose starts.
+#LaunchLocal: {
+	out: "use tools.nu [run-mise]; run-mise exec -- env MISE_LOCKED=0 process-compose --no-server -f .bayt/process-compose.yaml up --tui=false"
 }
 
 // The same stack, the terminal's visual lint against its door, and the stack
 // down again (integrate-local.ts): `integrate` without containers. The
 // omnishell tree is the installed one unless given.
 #IntegrateLocal: I={
-	prepare: [...string]
 	// A screen settles inside its door's bounds, as the visual check's.
 	let _door = resilience.resilience.timeouts.door
 	settleMs:  *((_door.auth + _door.crud) * 1000) | (int & >0)
 	omnishell: *"(run-mise where \(#Runtimes.omnishell) | str trim)" | string
-	let _l = #LaunchLocal & {prepare: I.prepare}
 	// An app with a slot guard (tests/slot.ts) runs it on a slot of its own, so another stack of the
 	// machine, on the app's ports or any, never meets it; inside a slot (STACK_SLOT) it runs plain.
-	let _direct = "\(_l._prepare)run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell) --settle \(I.settleMs)"
+	let _direct = "run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell) --settle \(I.settleMs)"
 	out: (#Run & {args: "if ('tests/slot.ts' | path exists) and ($env.STACK_SLOT? | is-empty) { run-mise exec -- deno run -A tests/slot.ts ./saytw integrate@local } else { \(_direct) }"}).out
 }
 

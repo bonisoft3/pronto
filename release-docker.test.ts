@@ -411,7 +411,7 @@ Deno.test("a program with the AI capability and no effects releases the applianc
 // The overlay spelled the daprd's, the airlock's and the ticker's ports apart
 // from the list a bridge is checked against.
 Deno.test("the overlay's ports are the ones a bridge is refused", async () => {
-  const ports = await exportJson("ports", `package test\nimport mecha "bonisoft.org/plugins/pronto/clusters:mecha"\nports: mecha.#AppliancePort\n`);
+  const ports = await exportJson("ports", `package test\nimport mecha "github.com/bonisoft3/pronto/clusters:mecha"\nports: mecha.#AppliancePort\n`);
   assertEquals(ports.success, true, ports.stderr);
   const rd = await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'));
   const overlay = overlayOf(rd).processes;

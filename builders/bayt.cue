@@ -613,7 +613,7 @@ import (
 				platform: "local"
 				priority: -1
 				stop:     true
-				cmds: [{do: (distribution.#IntegrateLocal & {prepare: B.cluster.surface.hostPrepare}).out}]
+				cmds: [{do: distribution.#IntegrateLocal.out}]
 			}
 		}
 		// The host tier serves omnishell from `mise where`, and its data-plane

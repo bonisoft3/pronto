@@ -26,16 +26,18 @@ import pronto "github.com/bonisoft3/pronto"
 }
 
 #ssrView: #ssrCase & {reads: [_view]}
-// The services beside the door a host launch runs: the renderer, pronto's own,
-// and those the program names (a plugin's, code.meta.hostPeers) in one list;
+// The services beside the door a host launch runs: those the program names (a plugin's,
+// code.meta.hostPeers); the renderer is a peer of the door's own variable, not listed here;
 // an app whose plugin states the list itself, as one did before, keeps it.
 #peersCase: {
 	peers: [string]: int
 	ssr: *true | bool
 	stated: *null | [...string]
 	_base: (#readCase & {reads: []}).app & {surface: screens: jogo: files: {handlers: [], adapters: []}}
-	_app: _base & {meta: hostPeers: peers} & {if ssr {(#ssrCase & {reads: []})._app}}
-	_cluster: (pronto.#DefaultCluster & {code: _app, statics: []}).out & {if stated != null {meta: hostPeers: stated}}
+	_ssr: #ssrCase & {reads: []}
+	_app: [if ssr {_ssr._app}, _base][0] & {meta: hostPeers: peers}
+	_statics: [if ssr {(pronto.#DefaultTerminal & {code: _app}).out.surface.statics}, []][0]
+	_cluster: (pronto.#DefaultCluster & {code: _app, statics: _statics}).out & {if stated != null {meta: hostPeers: stated}}
 	hostPeers: _cluster.meta.hostPeers
 }
 

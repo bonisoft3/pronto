@@ -142,6 +142,15 @@ import (
 			}
 			spec: {
 				instances: 1
+				postgresql: parameters: {
+					wal_level:             "logical"
+					max_replication_slots: "128"
+					max_wal_senders:       "128"
+					max_connections:       "200"
+					fsync:                 "on"
+					synchronous_commit:    "on"
+					full_page_writes:      "on"
+				}
 				// A stop is bounded: a smart shutdown waits for sessions for 15 s, then a fast one, and
 				// at 120 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
 				// walsender holds a fast shutdown open, so every restart of the primary stalled a
@@ -2042,7 +2051,7 @@ import (
 			for o in metricsExportObjs {o},
 			// What the app's compose project runs beside the cluster (App.runtime, runtime.cue); the
 			// metal path names its services in App.services instead, so it is empty there.
-			for o in runtimeObjects {o},
+			runtimeObjects,
 			gatewayObj,
 			httpRouteObj,
 			backendTrafficPolicyObj,

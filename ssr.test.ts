@@ -46,7 +46,7 @@ Deno.test("a public route's addresses reach the renderer, ahead of the entry", a
   if (!r.ok) throw new Error(r.out);
   const { caddyfile: out } = JSON.parse(r.out) as { caddyfile: string };
   const rendered = out.indexOf("@rendered {\n      expression");
-  if (out.indexOf("handle @rendered {\n      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
+  if (out.indexOf("handle @rendered {\n      vars renderer true\n      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered > out.indexOf("rewrite @route")) throw new Error("the entry's rewrite answers before the renderer does");
 });
@@ -94,12 +94,12 @@ Deno.test("every upstream the door dials is its own variable's when set, naming 
   }
 });
 
-Deno.test("a host launch runs the renderer and the program's peers beside the door, one list of them", async () => {
+Deno.test("a host launch runs the program's peers beside the door; the renderer is the door's peer variable, not on the list", async () => {
   const peers = (c: string) => exported(`(#peersCase & ${c}).hostPeers`, false);
   const both = await peers("{peers: {billing: 8688, flagd: 8016}}");
   if (!both.ok) throw new Error(both.out);
   const listed = JSON.parse(both.out) as string[];
-  if (JSON.stringify([...listed].sort()) !== JSON.stringify(["billing=8688", "flagd=8016", "render=8090"])) throw new Error(`peers: ${both.out}`);
+  if (JSON.stringify([...listed].sort()) !== JSON.stringify(["billing=8688", "flagd=8016"])) throw new Error(`peers: ${both.out}`);
   const alone = await peers("{ssr: false}");
   if (!alone.ok || JSON.parse(alone.out).length !== 0) throw new Error(`an app with no peers: ${alone.out}`);
   // A plugin that still states the list itself, on an app that renders nothing.
