@@ -31,7 +31,27 @@ jobs:
           repository: bsoneca/omnishell-fork
           ref: ${{ env.OMNISHELL_REF }}
           path: omnishell
-          fetch-depth: 1
+          fetch-depth: 0
+      # A fork's next version carries every commit of the one before it: fork.9-17 were cut from
+      # another line than fork.8's and lost its eight PRs, the visitor's guest among them (PRONTO-70).
+      # A <base>-fork.<n> is refused unless the highest published <base>-fork.<k>, k < n, is its
+      # ancestor; a patch on a version (fork.8.1) is its own and checks nothing.
+      - name: descends from the version before
+        run: |
+          base=${OMNISHELL_V%-fork.*}
+          n=${OMNISHELL_V##*-fork.}
+          case "$n" in *[!0-9]* | "") echo "$OMNISHELL_V is no <base>-fork.<n>: nothing to descend from"; exit 0 ;; esac
+          prev=$(git ls-remote origin "refs/heads/publish-omnishell/v$base-fork.*" | sed -n "s|.*refs/heads/publish-omnishell/v$base-fork\.\([0-9]*\)$|\1|p" | awk -v n="$n" '$1 < n' | sort -n | tail -n 1)
+          [ -n "$prev" ] || { echo "no $base-fork before $n: nothing to descend from"; exit 0; }
+          git fetch -q origin "publish-omnishell/v$base-fork.$prev"
+          ref=$(git show FETCH_HEAD:.github/prerelease-omnishell.env | sed -n 's/^OMNISHELL_REF=\([0-9a-f]\{40\}\)$/\1/p')
+          if git -C omnishell merge-base --is-ancestor "$ref" "$OMNISHELL_REF"; then
+            echo "$OMNISHELL_V ($OMNISHELL_REF) descends from $base-fork.$prev ($ref)"
+          else
+            echo "::error::$OMNISHELL_V ($OMNISHELL_REF) does not carry $base-fork.$prev ($ref): it would drop:"
+            git -C omnishell log --oneline "$OMNISHELL_REF..$ref"
+            exit 1
+          fi
       - uses: cue-lang/setup-cue@v1.0.1
         with:
           version: v0.16.1
