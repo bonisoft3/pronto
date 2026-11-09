@@ -12,9 +12,25 @@ lives where nothing can migrate it. Four checks enforce that, and each sees
 something the other three cannot. What an identity is (the type id, the
 ordinals, retirement) is [types and identity](types-and-identity.md). How an
 author declares a change is [the guide](../GUIDE.md#identity). How a running
-cluster notices one is mecha's [schema](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/schema.md),
+cluster notices one is mecha's [schema](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/schema.md),
 and what an already-served page does is omnishell's
-[data](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/data.md#skew).
+[data](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/data.md#skew).
+
+An app can keep applied bootstrap bytes by naming them in `state.rawMigrations`.
+An entry named `003_rls.sql` replaces mecha's tenancy floor for both the native
+database image and page or edge releases. One named `005_create_tables.sql`
+keeps the tables a live database applied, so a column added to a baseline
+entity rewrites no applied script and arrives in a forward migration alone.
+Entries named as the row machines'
+or the reducers' step (`010_machines.sql` and `016_mecha_actors.sql`, or where
+`state.steps` places them), or as a declared Cortex source migration, replace
+those generated scripts. Each name may be declared once; its source is copied
+without regenerating it. Omitted entries keep the current generated or mecha-provided
+scripts. Carry changes to an applied baseline in a forward `state.migrations`
+pgroll migration; the ledger still refuses a changed digest. A machine added
+after `010_machines.sql` was pinned takes its guard from the same generator,
+never a copy: `(pronto.#mechaMachineSql & {machine, entities, effects, runtime:
+false}).out` as the migration's SQL.
 
 ## Who cannot be migrated
 
@@ -172,7 +188,7 @@ opening with a letter or digit, never the baseline's `00_initdb`, and never
 stated again as a `name` field inside it, which the pinned pgroll refuses.
 They are not emitted as files: `#DefaultCluster` hands them to the cluster,
 whose migrate step applies each one the database's ledger lacks, before the
-readers start ([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/schema.md#carrying-a-live-database-forward)).
+readers start ([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/schema.md#carrying-a-live-database-forward)).
 pgroll keeps a ledger, so a migration runs once and running it again is a
 no-op; that is what lets these be written plainly, with no `IF NOT EXISTS` and
 no `DO` block to hide from squawk.
@@ -191,6 +207,112 @@ Retained fixtures exercise the same runner over earlier schemas and data.
 Folding a change into initdb remains a deployment discipline
 ([[../PENDING#schema-changes|pending work]]).
 
+### A new entity on a live database
+
+The baseline scripts, `005_create_tables` through `010_machines`, are each
+emitted over every entity, so declaring one rewrites them, and a database that
+applied them refuses a changed script: the edge's ledger checks every applied
+script's digest before it applies anything. The first path above cannot help,
+since an entity a reader syncs, a policy guards and a machine drives has to be
+declared.
+
+So an app whose database outlives a release names the entities its baseline
+holds, `code.state.baseline.entities`. The baseline scripts are then emitted
+over those alone, byte for byte what the database applied, and each later
+server entity gets one pgroll migration, `<after>_<table>`, generated with what those scripts
+would hold for it: the table, its indexes, its policies, its txid trigger, its
+place in both publications, its `anon` grant and its machine. A fresh database
+applies it after the baseline; a live one applies it as a migration its ledger
+lacks. `baseline.after` must sort past every migration a live database has
+run, since a container's migrate step refuses one that sorts before them, and
+a migration of the app's that reads the new table sorts after it. The list
+never changes once a database has run it: an entity added later stays in its
+own migration for good.
+
+That migration is generated from the entity as it stands, and a database that
+ran it refuses changed text, as it refuses a changed baseline script. So once a
+release has carried it, the app owns its bytes: it declares that same name in
+`state.migrations` with the text the release applied, and the emitter generates
+nothing under it. A change to the entity or its machine is then carried by a
+migration that sorts after it: the new columns, and the machine restated by
+`#mechaMachineSql` with `runtime: false`, which a fresh database runs after the
+kept one just as a live one does. The emitter refuses a kept migration its
+entity has moved past unless a later migration names the table and
+`state.baseline.carried` holds the digest of what it would generate today, which
+the refusal prints; so each further change is refused again until the app writes
+the migration that carries it and acknowledges the new digest. The emitter
+cannot tell that a release ran a migration it still generates: keeping the
+bytes is the release's step.
+
+A later entity cannot declare validations, which `009_validations` holds for
+every entity, and a change to an entity the baseline already holds still
+rewrites its script, so it is a pgroll migration as above. What a later entity
+cannot drive is below.
+
+### What a live directory carries
+
+An edge release that keeps its data directory, or starts one from an archive
+([release targets](release-targets.md#cloudflare)), carries it forward with
+every script of the release its ledger lacks: the pgroll set, and the files
+too — a framework step the program places (`060_graphile_worker.sql`,
+`061_airlock.sql`), the reducer actors (`0NN_mecha_actors.sql`), the database
+functions, a raw migration added since. The ledger (pglite-workerd's
+[`scripts.ts`](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/pglite-workerd/scripts.ts))
+is established when a directory is built, and for an archive when it is
+restored: the files of the release that built its database, as the restore is
+told them, and the pgroll migrations the database's own pgroll ledger holds,
+by the text each ran. A directory restored without it is refused.
+
+**The order is the fresh one: the release's files, in the order a fresh
+directory applies them, then its pgroll set in name order.** Only the scripts
+the ledger lacks run, but they run in that sequence, whatever their names
+sort as, and a pgroll migration owed that sorts before one the directory
+already applied is refused naming both, as mecha's migrate step refuses it,
+since a fresh directory would run it first. A fresh directory ran every file before any pgroll migration, so a
+pgroll migration may name what a file made (a view over a reducer's `instance`
+table, a grant on `graphile_worker`) and a file may not name what a pgroll
+migration made; a carry in the same order admits exactly the scripts a fresh
+directory admits, and a database built fresh and one carried from an archive
+hold the same schema. The cost is on the author of a live database whose
+baseline predates something a file needs: a seat table the actors drive, a
+type function a table's check calls, has to reach the live directory as a
+file step sorting before the step that needs it (`CREATE … IF NOT EXISTS`,
+`CREATE OR REPLACE`), not as a pgroll migration; on a fresh directory that
+file is a no-op after the baseline.
+
+So a later entity still cannot drive a reducer: its table arrives in a
+pgroll migration, after the actors step, on a fresh directory and on a
+carried one alike. Lifting that is the emitter's, not the carry's: the actors
+over a later entity would have to be compiled into the entity's migration, as
+a row machine's SQL is, and `compileMechaReducer` runs where files are
+written. A Cortex machine is in the same position.
+
+Rejected orderings:
+
+- **Every lacking script in byte order of its name**, files and pgroll mixed
+  (the ledger's first rule). A placed step `060_…` sorted after a pgroll
+  migration `052_…` that a fresh directory runs after it, and the actors
+  `063_…` before the migrations `20261108_…` that make the tables they
+  drive; the sequence depended on how the program numbered its steps and
+  dated its migrations, and a migration valid on a fresh directory failed on
+  a carried one.
+- **The lacking files after every lacking pgroll migration**, so an actors
+  step finds a later entity's table. It inverts the fresh order: a pgroll
+  migration that names a reducer's or a framework step's objects, valid on
+  a fresh directory, fails on the carry, and the two directories admit
+  different scripts. It would also leave the fresh directory refusing the
+  actors over a later entity that the carry accepts.
+- **The lacking files after the later entities' migrations and before the
+  rest**, a cut in the pgroll stream at `baseline.after`. The carry would need
+  the baseline to find the cut, pgroll migrations that sort before the cut
+  would run after ones that sort after it, and a later entity's migration
+  that needs a function another migration carries would run before it.
+- **Running the pgroll set from the archive's own `pgroll` ledger** and the
+  files from `_pronto_migrations`, two ledgers with two rules. The archive's
+  pgroll ledger is read once, at restore, into the one ledger a directory
+  carries; its text is the authority for what the database ran, and a
+  release whose text moved since is refused as any changed script is.
+
 ### Retyping a column from a domain to its base type
 
 The domain/base split ([types](types-and-identity.md#a-domain-only-where-the-output-needs-one))
@@ -198,7 +320,7 @@ changes the column type of every field of the nine types that lost their
 domain. A database built from the regenerated migrations takes the new types
 from initdb. No pronto deployment carries a data directory from one image to
 the next: `PGDATA` sits on the database container's writable layer
-([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.18.1/docs/schema.md)), and a rebuilt image
+([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/schema.md)), and a rebuilt image
 recreates the container empty. So no migration is emitted, and the database is
 rebuilt with its migrations: a container started again from an image built
 before the split keeps its domains, and the first subset a lazily read

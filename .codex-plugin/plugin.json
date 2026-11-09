@@ -7,7 +7,7 @@
     "url": "https://github.com/bonisoft3"
   },
   "repository": "https://github.com/bonisoft3/pronto",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "keywords": ["pronto", "sayt", "review", "workflow", "coding"],
   "skills": "./skills/",
   "interface": {

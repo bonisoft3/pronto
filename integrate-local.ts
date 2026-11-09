@@ -7,8 +7,7 @@
 //   deno run -A integrate-local.ts <app dir> --omnishell <omnishell dir> --settle <ms>
 //
 // Run inside the app's toolchain, which has process-compose and every tool
-// the cluster's processes name on PATH; the cluster's host preparation (its
-// surface's hostPrepare) has run before this. The browser is Playwright's
+// the cluster's processes name on PATH. The browser is Playwright's
 // Chromium at the version the lint imports, installed once per host, with its
 // system libraries where the host is Linux (a CI runner).
 //

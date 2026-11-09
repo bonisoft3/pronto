@@ -42,7 +42,7 @@ Deno.test("IR resolves a machine's table alias for both its card and the screen'
 Deno.test("a SQL hatch is linked from its machine and prevents a derived delivery guarantee", async () => {
   const { html, sql } = await render(paymentProgram() + `
 app: {
-  state: machines: PaymentMachine: states: pending: entry: hatch: {name: "billing", call: "bill", args: [{raw: "NEW.id"}]}
+  state: mecha: rows: PaymentMachine: states: pending: entry: hatch: {name: "billing", call: "bill", args: [{raw: "NEW.id"}]}
   capabilities: hatches: billing: {ir: "billing-sql", kind: "sql", files: ["services/database/migrations/020_billing.sql"], note: "the billing function owns the write"}
 }`);
   assertStringIncludes(sql, "PERFORM bill(NEW.id)");
@@ -53,8 +53,8 @@ app: {
 
 Deno.test("IR renders lifecycle reducers with their timing and actions without inventing a statechart", async () => {
   const normal = paymentProgram();
-  const reducer = normal.slice(0, normal.indexOf("    machines:")) + `
-    machines: PaymentMachine: {
+  const reducer = normal.slice(0, normal.indexOf("    mecha:")) + `
+    mecha: rows: PaymentMachine: {
       name: "PaymentMachine", entity: "Payment"
       on: {
         insert: assign: failure: "fresh"
@@ -65,7 +65,7 @@ Deno.test("IR renders lifecycle reducers with their timing and actions without i
   }
 ` + normal.slice(normal.indexOf("  capabilities:"));
   for (const timing of [undefined, "BEFORE"]) {
-    const { html, sources, sql } = await render(reducer + (timing === undefined ? "" : `\napp: state: machines: PaymentMachine: timing: "${timing}"`));
+    const { html, sources, sql } = await render(reducer + (timing === undefined ? "" : `\napp: state: mecha: rows: PaymentMachine: timing: "${timing}"`));
     const effective = timing ?? "AFTER";
     assertStringIncludes(sql, `${effective} INSERT OR UPDATE OR DELETE`);
     for (const event of ["insert", "update", "delete"]) assertStringIncludes(html, `<th>${effective} ${event}</th>`);
@@ -84,7 +84,7 @@ Deno.test("IR covers every invoking state's effect and a separate lifecycle mach
     failed: type: "final"
   ` }) + `
 app: state: {
-  machines: PaymentLifecycle: {entity: "Payment", on: insert: raise: {notify: "payment_created", payload: "NEW.id"}}
+  mecha: rows: PaymentLifecycle: {entity: "Payment", on: insert: raise: {notify: "payment_created", payload: "NEW.id"}}
   effects: refund: {
     input: {amount: "NEW.total"}
     sink: {origin: "https://api.acquirer.example", idempotent: false}
@@ -109,7 +109,7 @@ app: state: {
 
 Deno.test("IR links lifecycle guards independently from their actions", async () => {
   const { html } = await render(paymentProgram() + `
-app: state: machines: PaymentRules: {
+app: state: mecha: rows: PaymentRules: {
   entity: "Payment"
   guards: positive: {
     ir: "positive-payment"

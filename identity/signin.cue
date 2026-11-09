@@ -94,6 +94,12 @@ hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b
 			// A docker launch brings up what its aggregate waits on, which is
 			// mecha's plane alone: the broker joins it.
 			launch: compose: depends_on: identity: {condition: "service_healthy", restart: true}
+			auth: "process-compose": env: {
+				for p in S.signin.providers {
+					let e = "OIDC_\(strings.ToUpper(p))_INTERNAL"
+					(e): ["${\(e):-", {peer: "identity", port: "http", prefix: "http://", suffix: "/"}, "}"]
+				}
+			}
 			"identity-hydra": bayt.healthcheck.http & {
 				cmd: builtin: null
 				activate: ""
@@ -101,12 +107,23 @@ hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b
 				// Per app on the host, each moved by its variable, as every
 				// other port of a launch: the front names them as its peer's.
 				expose: {public: {port: 28453, env: "SERVE_PUBLIC_PORT"}, admin: {port: 28455, env: "SERVE_ADMIN_PORT"}}
-				"process-compose": activate: ""
+				"process-compose": activate: "mise x --"
 				entrypoint: {
 					do:    _hydraCmd
-					shell: "sh"
+					shell: "nu"
 					dockerfile: {do: "hydra serve all --dev", shell: "exec"}
-					env: compose.environment
+					env: {
+						DSN:                                     "memory"
+						SECRETS_SYSTEM:                          "pronto-identity-local-launch-hydra-0000"
+						LOG_LEVEL:                               "warn"
+						URLS_SELF_ISSUER:                        S.signin.broker
+						URLS_LOGIN:                              "\(S.signin.broker)/login"
+						URLS_CONSENT:                            "\(S.signin.broker)/consent"
+						SERVE_PUBLIC_PORT:                       {port: "public", part: "port"}
+						SERVE_ADMIN_PORT:                        {port: "admin", part: "port"}
+						OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS: "true"
+						TTL_ID_TOKEN:                            "5m"
+					}
 				}
 				dockerfile: from: name: hydraImage
 				compose: environment: {
@@ -126,12 +143,21 @@ hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b
 				healthcheck: url: "http://127.0.0.1:\(S._port)/health"
 				// The broker's issuer, which the browser and Google's redirect name.
 				expose: http: port: S._port
-				"process-compose": activate: ""
+				"process-compose": activate: "mise x --"
 				entrypoint: {
 					do:    _frontCmd
-					shell: "sh"
+					shell: "nu"
 					dockerfile: {do: "deno run --no-config --allow-net --allow-env /app/hydra/front.ts", shell: "exec"}
-					env: compose.environment
+					env: {
+						BROKER_ISSUER:        S.signin.broker
+						BROKER_SECRET:        "${BROKER_SECRET:-pronto-identity-local-launch-secret-0000}"
+						BROKER_FAKE_GOOGLE:   "1"
+						GOOGLE_CLIENT_ID:     "${GOOGLE_CLIENT_ID:-}"
+						GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+						HYDRA_PUBLIC:         {peer: "identity-hydra", port: "public", prefix: "http://"}
+						HYDRA_ADMIN:          {peer: "identity-hydra", port: "admin", prefix: "http://"}
+						PORT:                 {port: "http", part: "port"}
+					}
 					after: "identity-hydra": "healthy"
 				}
 				dockerfile: from: name: frontImage
@@ -156,19 +182,16 @@ hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b
 
 // On the host, hydra runs directly via mise and the front directly under deno,
 // with no custom container image needed.
-_hydraCmd: "exec mise x github:ory/hydra@26.2.0 -- hydra serve all --dev"
-// Spaces, not tabs: the script lands in a YAML block scalar, where a tab
-// after its indentation breaks the file process-compose reads.
+_hydraCmd: "exec hydra serve all --dev"
 _frontCmd: """
-p="${PRONTO_DIR:-}"
-if [ -z "$p" ]; then
-  if [ -f "plugins/pronto/identity/hydra/front.ts" ]; then
-    p="plugins/pronto"
-  elif [ -f "identity/hydra/front.ts" ]; then
-    p="."
-  else
-    p="$(mise where github:bonisoft3/pronto 2>/dev/null || true)"
-  fi
-fi
-exec deno run --no-config --allow-net --allow-env "$p/identity/hydra/front.ts"
+	let p = (if (($env.PRONTO_DIR? | default "") != "") {
+		$env.PRONTO_DIR
+	} else if ("plugins/pronto/identity/hydra/front.ts" | path exists) {
+		"plugins/pronto"
+	} else if ("identity/hydra/front.ts" | path exists) {
+		"."
+	} else {
+		(^mise where github:bonisoft3/pronto | str trim)
+	})
+	^deno run --no-config --allow-net --allow-env ($p | path join "identity/hydra/front.ts")
 """

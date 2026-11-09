@@ -1,10 +1,15 @@
 // The scripts a release's database is built from, in the order it applies
-// them, and what a publish hands a directory the object kept: mecha's tenancy
-// step, the shell's migrations with mecha's schedule table before its seed,
-// then the cluster's pgroll set, which is what carries a kept directory
-// forward. pgdata.ts builds the edge's directory from them and bundle.ts the
-// page's database; edge.ts writes them as migrations.json; one list, so the
-// names a directory records are the names a publish sends.
+// them, and what carries a directory the object kept or an archive forward:
+// mecha's tenancy step, the shell's migrations with the effect steps where
+// their names sort and mecha's schedule table before its seed, then the
+// cluster's pgroll set. A kept directory applies the ones its ledger lacks in
+// this same order (pglite-workerd's applyScripts), files before pgroll
+// whatever their names, because that is the order a fresh directory ran them
+// in and the only order under which a script valid on one is valid on the
+// other (docs/schema-change-admission.md). pgdata.ts builds and carries the
+// edge's directory from them and bundle.ts the page's database; edge.ts
+// writes them as migrations.json; one list, so the names a directory records
+// are the names a publish sends.
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -13,6 +18,8 @@ export interface ReleaseScripts {
   /** The files, each to be applied through the browser tier's fence. */
   files: { name: string; sql: string }[]
   pgroll: Script[]
+  /** Both, in the order a directory applies them: what it records, and what a carry is handed. */
+  scripts: Script[]
 }
 
 const SCHEDULE_SEED = '801_schedule_seed.sql'
@@ -22,24 +29,66 @@ export const FIXTURE = '950_fixture.sql'
 
 const scripts = (mecha: string) => import(String(pathToFileURL(path.join(mecha, 'packages/pglite-workerd/scripts.ts')))) as Promise<{
   pgrollScripts: (set: unknown) => Script[]
+  AIRLOCK_SCRIPT: string
+  GRAPHILE_SCRIPT: string
   SCHEDULE_SCRIPT: string
   TENANCY_SCRIPT: string
 }>
 
-export async function releaseFiles(app: string, mecha: string, migrations: string[]): Promise<ReleaseScripts['files']> {
-  const { SCHEDULE_SCRIPT, TENANCY_SCRIPT } = await scripts(mecha)
-  const files = [{ name: TENANCY_SCRIPT, file: path.join(mecha, 'services/database/rls/rls.sql') }]
-  for (const m of migrations) {
-    const name = path.basename(m)
-    if (name === FIXTURE) continue
-    if (name === SCHEDULE_SEED) files.push({ name: SCHEDULE_SCRIPT, file: path.join(mecha, 'services/ticker/schedule.sql') })
-    files.push({ name, file: path.join(app, m) })
+export async function hasEffects(app: string): Promise<boolean> {
+  try {
+    const { effects } = JSON.parse(await Deno.readTextFile(path.join(app, 'services/airlock/effects.json'))) as { effects?: Record<string, unknown> }
+    return effects !== undefined && Object.keys(effects).length > 0
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return false
+    throw e
   }
-  return await Promise.all(files.map(async ({ name, file }) => ({ name, sql: await Deno.readTextFile(file) })))
 }
 
-export async function releaseScripts(app: string, mecha: string, migrations: string[], pgroll: Record<string, { operations: Record<string, unknown>[] }>): Promise<ReleaseScripts> {
-  return { files: await releaseFiles(app, mecha, migrations), pgroll: (await scripts(mecha)).pgrollScripts(pgroll) }
+/** Where the program places the effect steps (.pronto/cluster.json); a
+ * program that places none runs them at mecha's names. */
+export interface Steps { graphile?: string; airlock?: string; note?: string }
+
+export async function releaseFiles(app: string, mecha: string, migrations: string[], steps: Steps = {}): Promise<ReleaseScripts['files']> {
+  const { AIRLOCK_SCRIPT, GRAPHILE_SCRIPT, SCHEDULE_SCRIPT, TENANCY_SCRIPT } = await scripts(mecha)
+  const effects = await hasEffects(app)
+  const names = new Set<string>()
+  for (const migration of migrations) {
+    const name = path.basename(migration)
+    if (names.has(name)) throw new Error(`duplicate migration ${name}`)
+    names.add(name)
+  }
+  const tenancy = migrations.find((migration) => path.basename(migration) === TENANCY_SCRIPT)
+  const files: { name: string; read: () => Promise<string> }[] = [
+    { name: TENANCY_SCRIPT, read: () => Deno.readTextFile(tenancy ? path.join(app, tenancy) : path.join(mecha, 'services/database/rls/rls.sql')) },
+  ]
+  // Each effect step goes where its name sorts among the app's, as initdb runs them.
+  const framework = effects
+    ? [
+      { name: steps.graphile ?? GRAPHILE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/durex/graphile.sql')) },
+      {
+        name: steps.airlock ?? AIRLOCK_SCRIPT,
+        read: async () =>
+          `${await Deno.readTextFile(path.join(mecha, 'services/ticker/schedule.sql'))}\n${await Deno.readTextFile(path.join(mecha, 'services/airlock/airlock.sql'))}`,
+      },
+    ]
+    : []
+  for (const m of [...migrations].sort((a, b) => path.basename(a) < path.basename(b) ? -1 : path.basename(a) > path.basename(b) ? 1 : 0)) {
+    const name = path.basename(m)
+    if (name === FIXTURE) continue
+    if (name === TENANCY_SCRIPT) continue
+    while (framework.length > 0 && name > framework[0].name) files.push(framework.shift()!)
+    if (name === SCHEDULE_SEED) files.push({ name: SCHEDULE_SCRIPT, read: () => Deno.readTextFile(path.join(mecha, 'services/ticker/schedule.sql')) })
+    files.push({ name, read: () => Deno.readTextFile(path.join(app, m)) })
+  }
+  files.push(...framework)
+  return await Promise.all(files.map(async ({ name, read }) => ({ name, sql: await read() })))
+}
+
+export async function releaseScripts(app: string, mecha: string, migrations: string[], pgroll: Record<string, { operations: Record<string, unknown>[] }>, steps: Steps = {}): Promise<ReleaseScripts> {
+  const files = await releaseFiles(app, mecha, migrations, steps)
+  const set = (await scripts(mecha)).pgrollScripts(pgroll)
+  return { files, pgroll: set, scripts: [...files, ...set] }
 }
 
 /** The drain table the emitter writes into an app's .pronto/cluster.json,
@@ -49,4 +98,10 @@ export async function clusterDrains(clusterJson: string): Promise<unknown[]> {
   const { drains } = JSON.parse(await Deno.readTextFile(clusterJson)) as { drains?: unknown[] }
   if (drains === undefined) throw new Error(`${clusterJson} lists no drains: generate the app with this pronto`)
   return drains
+}
+
+/** The effect steps the emitter writes into an app's .pronto/cluster.json. */
+export async function clusterSteps(clusterJson: string): Promise<Steps> {
+  const { steps } = JSON.parse(await Deno.readTextFile(clusterJson)) as { steps?: Steps }
+  return steps ?? {}
 }

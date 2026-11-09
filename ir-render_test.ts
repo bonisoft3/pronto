@@ -1,7 +1,7 @@
 // The entity card the compiler draws into ir.html: where it goes, that a redraw
 // replaces it and only it, what it says, and the chart it draws.
 import { assertEquals, assertRejects, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.11";
-import { authoredNotes, cardHtml, chartD2, type Effect, fillNeighbourhoodRegions, fillRegions, irRegions, mergeNeighbourhoods, neighbourhoodD2, type Program, renderIr, screenNeighbourhood } from "./ir-render.ts";
+import { authoredNotes, cardHtml, chartD2, composeIr, type Effect, fillMermaidRegions, fillNeighbourhoodRegions, fillRegions, irRegions, mergeNeighbourhoods, neighbourhoodD2, type Program, renderIr, screenNeighbourhood } from "./ir-render.ts";
 
 const IR = `<!doctype html><html><head><title>x</title></head><body>
 <section id="Game" data-kind="entity" data-durability="device">
@@ -68,15 +68,16 @@ const program: Program = {
       Tick: { ir: "Tick", table: "tick", durability: "tab", level: "local", fields: [{ name: "id", type: "uuid", pk: true }], writers: [] },
       Quoted: { ir: 'Quoted "Thing"', table: "quoted thing", durability: "device", level: "local", fields: [{ name: "id", type: "uuid", pk: true }, { name: 'game "id"', type: "uuid", ref: "game" }], writers: [] },
     },
-    machines: {
-      GameMachine: {
+    mecha: {
+      reducers: { reducer: { machine: {}, rules: "rules.js", reducer: {} } },
+      rows: { GameMachine: {
         ir: "GameMachine",
         entity: "Game",
         field: "status",
         initial: "pending",
         level: "external",
         states: { pending: { on: { pay: "charging" } }, charging: { invoke: { src: "charge", onDone: "settled", onError: "failed" } }, settled: { type: "final" }, failed: { on: { retry: "pending" } } },
-      },
+      } },
     },
     effects: { charge: { ir: "charge", sink: { origin: "https://api.acquirer.example", idempotent: false }, reentry: "reconcile", note: "the acquirer answers a charge by key" } },
   },
@@ -182,8 +183,8 @@ Deno.test("the derived line names the units handed an entity's row, and the unit
     ...program,
     capabilities: {
       vendored: {
-        stockfish: { isolation: "agent", ports: { reads: ["Game"], raises: ["answer"] }, memo: { entity: "Tick", key: ["fen", "nodes"] } },
-        embed: { isolation: "realm", ports: { reads: ["Game"], raises: [] } },
+        stockfish: { isolation: "agent", ports: { reads: ["Game"], raises: { answer: {} } }, memo: { entity: "Tick", key: ["fen", "nodes"] } },
+        embed: { isolation: "realm", ports: { reads: ["Game"], raises: {} } },
       },
     },
   };
@@ -234,13 +235,22 @@ Deno.test("delivery follows the sink: the card's chip and the machine's panel sa
 });
 
 Deno.test("a chart's D2 draws every arrow by its event, an invoking state dashed, a final state as a ring", () => {
-  const machine = program.state.machines!.GameMachine;
+  const machine = program.state.mecha!.rows!.GameMachine;
   const d2 = chartD2({ initial: machine.initial!, states: machine.states! });
   assertStringIncludes(d2, '"charging": {label: "charging\\ninvoke charge"; style.stroke-dash: 3}');
   assertStringIncludes(d2, '"settled": {shape: circle; style.double-border: true}');
   assertStringIncludes(d2, '"pending" -> "charging": "pay"');
   assertStringIncludes(d2, '"charging" -> "settled": onDone');
   assertStringIncludes(d2, '"failed" -> "pending": "retry"');
+  const attachments = chartD2({ initial: "watching", states: {
+    watching: { invoke: [{ src: "progress" }, { src: "existence" }] },
+    working: { invoke: { src: "work", onError: [{ guard: "uncertain", target: "unknown" }, { target: "failed" }] } },
+    unknown: {}, failed: {},
+  } });
+  assertStringIncludes(attachments, "invoke progress, existence");
+  assertStringIncludes(attachments, '"working" -> "unknown": onError');
+  assertStringIncludes(attachments, '"working" -> "failed": onError');
+  assertEquals(attachments.includes("undefined"), false);
   const timer = chartD2({ initial: "on", states: { on: { after: { "1000": { assign: { n: "bump" }, target: "on" } } } } });
   assertStringIncludes(timer, '"on" -> "on": "after 1000 ms / n = bump"');
   // A root-level transition fires in every state: one arrow from "any".
@@ -373,4 +383,54 @@ Deno.test("a screen's host-DOM authority is visible even without entity reads", 
     assertEquals(await renderIr(appDir, "ir.html", p, {}, draw), false);
     await assertRejects(() => renderIr(appDir, "ir.html", { ...p, capabilities: {} }, {}, draw), Error, "undeclared host-DOM hatch");
   } finally { await Deno.remove(appDir, { recursive: true }); }
+});
+
+Deno.test("composeIr and renderIr support ir/*.html fragments and summarize seed arrays in JSON trees", async () => {
+  const appDir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(`${appDir}/ir`, { recursive: true });
+    await Deno.writeTextFile(`${appDir}/ir.html`, '<!doctype html><html><head></head><body><link rel="import" href="ir/entities.html">\n![[ir/screens.html]]</body></html>');
+    await Deno.writeTextFile(`${appDir}/ir/entities.html`, '<section id="Game" data-kind="entity"><h2>Game</h2><p>entity prose</p></section>');
+    await Deno.writeTextFile(`${appDir}/ir/screens.html`, '<section id="board" data-kind="screen"><h2>Board</h2><p>board prose</p></section>');
+    const p: Program = {
+      state: {
+        entities: {
+          Game: { ...program.state.entities.Game, ...({ seed: [{ id: "1" }, { id: "2" }] } as Record<string, unknown>) },
+        },
+      },
+      surface: { screens: { routeName: { ir: "board", title: "Board", reads: [{ table: "game" }] } } },
+      capabilities: {},
+    };
+    const d2 = () => Promise.resolve('<svg viewBox="0 0 400 900"><svg width="400" height="900"></svg></svg>');
+    assertEquals(await renderIr(appDir, "ir.html", p, { read_mode: [{ entity: "Game", mode: "eager" }] }, d2), true);
+    const entitiesHtml = await Deno.readTextFile(`${appDir}/ir/entities.html`);
+    const screensHtml = await Deno.readTextFile(`${appDir}/ir/screens.html`);
+    assertStringIncludes(entitiesHtml, "<!-- pronto:card -->");
+    assertStringIncludes(entitiesHtml, '<div class="jl"><span class="jk">seed</span>: <span class="jv">[2]</span></div>');
+    assertEquals(entitiesHtml.includes("<!-- pronto:neighbourhood -->"), false);
+    assertStringIncludes(screensHtml, "<!-- pronto:app-neighbourhood -->");
+    assertStringIncludes(screensHtml, "<!-- pronto:neighbourhood -->");
+    const composed = await composeIr(appDir, "ir.html");
+    assertEquals(composed?.fragments, ["ir/entities.html", "ir/screens.html"]);
+    assertStringIncludes(composed?.html ?? "", "<!-- pronto:card -->");
+    assertStringIncludes(composed?.html ?? "", "<!-- pronto:neighbourhood -->");
+    assertEquals(await renderIr(appDir, "ir.html", p, { read_mode: [{ entity: "Game", mode: "eager" }] }, d2), false);
+  } finally {
+    await Deno.remove(appDir, { recursive: true });
+  }
+});
+
+Deno.test("fillMermaidRegions renders pele SVG with role annotations and replaces cleanly on redraw", () => {
+  const ir = `<main><div class="mermaid">graph LR\n  Game["Game (live)"] -->|invokes| GameMachine["GameMachine (external)"]\n  board["board (screen: /)"] -.->|reads| Game</div><p>after</p></main>`;
+  const once = fillMermaidRegions(ir, program);
+  assertStringIncludes(once, `</div>\n<!-- pronto:mermaid --><figure class="pronto-pele"><svg `);
+  assertStringIncludes(once, `class="pele pele-flowchart"`);
+  assertStringIncludes(once, `data-id="Game" data-role="live"`);
+  assertStringIncludes(once, `data-id="GameMachine" data-role="machine"`);
+  assertStringIncludes(once, `data-id="board" data-role="screen"`);
+  assertStringIncludes(once, `<rect class="pele-band"`);
+  assertStringIncludes(once, `<!-- /pronto:mermaid --><p>after</p>`);
+  const twice = fillMermaidRegions(once, program);
+  assertEquals(twice, once);
+  assertEquals(twice.split("pronto:mermaid").length, 3);
 });

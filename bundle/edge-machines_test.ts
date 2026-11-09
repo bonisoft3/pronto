@@ -10,7 +10,7 @@ import {
   compileMechaReducer,
   type MechaReducerMachine,
 } from "../mecha-reducer.ts";
-import { executeHybrid } from "../hybrid-local.ts";
+import { executeMecha } from "../../omnishell/test/mecha-local.ts";
 import { evaluateCaged } from "../../omnishell/interpreter/jessie.js";
 import { fuelMeter, instrument } from "../../omnishell/instrument.ts";
 
@@ -20,7 +20,7 @@ import {
   initial,
   request,
   ROOT,
-} from "../testdata/hybrid-fixtures.ts";
+} from "../mecha-fixtures.ts";
 
 async function edgeMachine(spec: MechaReducerMachine, rules: string) {
   const dir = await Deno.makeTempDir({ prefix: "edge-machine-parity-" });
@@ -73,7 +73,7 @@ Deno.test("edge steps initialize rules and spend initialization fuel on every in
   for (let i = 0; i < 2; i++) {
     assertEquals(edge.execute(input()), expected);
     assertEquals(
-      await executeHybrid(compiled.source, required, input()),
+      await executeMecha(compiled.source, required, input()),
       expected,
     );
   }
@@ -81,7 +81,7 @@ Deno.test("edge steps initialize rules and spend initialization fuel on every in
   for (let i = 0; i < 2; i++) {
     assertThrows(() => short.execute(input()), RangeError, "fuel exhausted");
     await assertRejects(
-      () => executeHybrid(compiled.source, required - 1, input()),
+      () => executeMecha(compiled.source, required - 1, input()),
       Error,
       "fuel limit exceeded",
     );
@@ -105,7 +105,7 @@ Deno.test("a projection cannot catch fuel exhaustion and return a successful edg
   });
   assertThrows(() => edge.execute(input()), RangeError, "fuel exhausted");
   await assertRejects(
-    () => executeHybrid(compiled.source, limited.fuel, input()),
+    () => executeMecha(compiled.source, limited.fuel, input()),
     Error,
     "fuel limit exceeded",
   );

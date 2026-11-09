@@ -50,7 +50,7 @@ app: pronto.#App & {
   }
   capabilities: {hatches: {}, vendored: painter: {
     isolation: "agent"
-    ports: {reads: [], raises: []}
+    ports: {reads: [], raises: {}}
     scripts: []
     src: "shell/engine/present.js"
     files: ["shell/engine/present.js"]
@@ -168,6 +168,7 @@ Deno.test("each release target writes its own ICE servers, and a dev or CI stack
   assertStringIncludes(data(".say.yaml").say.release.rulemap.cloudflare.cmds[0].do, ` --ice-servers '[{"urls":"stun:stun.cloudflare.com:3478"}]'`);
   const targets = data("bayt.json").targets;
   assertEquals(targets["served-release"].dockerfile.epilogue[0].endsWith(google), true);
+  assertEquals(targets["release-docker"].dockerfile.preamble.some((l: string) => l.includes("does not yet deploy airlock")), false, "a program without effects releases its appliance")
   const copied = targets["release-docker"].dockerfile.copy.filter((c: { from: { ref?: string } | null }) => c.from?.ref === ":served-release");
   assertEquals(copied.map((c: { srcs: string[]; dst: string }) => [c.srcs, c.dst]), [
     [["/served/omnishell/"], "/omnishell/"],

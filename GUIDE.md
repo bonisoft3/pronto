@@ -10,8 +10,8 @@ The author's tour of one app, from the first turn to a release. What a
 conforming `brief.md`, `ir.html` and `program.cue` contain is
 [`SPEC.md`](SPEC.md); the component knowledge every compile assumes is
 [`prelude.md`](prelude.md); a screen, in detail, is omnishell's
-[`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/GUIDE.md), and every attribute it may carry is
-omnishell's [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/REFERENCE.md).
+[`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/GUIDE.md), and every attribute it may carry is
+omnishell's [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md).
 
 ## Starting an app and running a turn
 
@@ -32,11 +32,12 @@ An app is one directory. What you author:
 
 | File | What it is |
 |---|---|
-| `brief.md`, `brief.html` | the product-altitude source and its browser presentation |
-| `ir.html` | the engineering design doc, pinned per compile |
+| `brief.md` | the product-altitude source: what the app is today and the next sprint's turns; rewritten at the sprint wrap, edited by people at any time (`brief.html`, a fixed emitted page, renders it in the browser) |
+| `journal.html`, `journal/*` | the reverse-chronological turn log, authored by turns and read by people and models (dated entries and assets in `journal/`, collected at the sprint wrap) |
+| `ir.html`, `ir/*.html` | the engineering design doc, pinned per compile (optionally composed from `ir/*.html` fragments) |
 | `acceptance.md` | the flat checklist whose `{#accept-…}` ids every test and path cites |
 | `DESIGN.md` | the design block in its frontmatter, the argument in its body |
-| `program.cue` and the `.cue` files of its package | the program: entities, pipelines, screens, flows, tests, decisions |
+| `program.cue` and the `.cue` files of its package | the program: entities, pipelines, screens, flows, tests, decisions (split into sibling files like `screens.cue` or `seed.cue` when large) |
 | `shell/screens/<name>.html` + `.css`, or `markup:` in CUE | a screen: HTML at `files.html`, or a `markup` string for a component-bearing screen, which the writer emits there |
 | `shell/handlers/*.js`, `shell/validations/*.js` | Jessie modules, one arrow function each |
 | `pipelines/*.blobl`, `pipelines/*.browser.js` | a pipeline's transform and its browser twin |
@@ -67,11 +68,11 @@ fixed point, so a markup change reports errors about the previous markup on the
 first run — run it again. Do not delete `shell/screens/*.html` to clear a stale
 error: manifest cleanup removes what the last manifest listed and the current
 bundle lacks, hand-authored handlers included; omnishell's guide has
-[the recovery](https://github.com/bonisoft3/omnishell/blob/v0.20.3/GUIDE.md#the-writer-deleted-my-handler).
+[the recovery](https://github.com/bonisoft3/omnishell/blob/v0.23.0/GUIDE.md#the-writer-deleted-my-handler).
 
 The verbs are sayt's, and every check lands under the verb whose layer it
 needs: `lint` for anything that fails in seconds without executing the app
-(`cue vet`, `check-facts`, `check-sql`, `check-hybrids`, `identity.ts check`,
+(`cue vet`, `check-facts`, `check-sql`, `check-mecha`, `identity.ts check`,
 omnishell's `check handlers` and `check markup`), `test` for the app's behaviour against fixtures
 with no live service (`tests/*.test.ts`, `check machines`, `check battery`),
 `integrate` for anything that needs the cluster up (the migration replay, the
@@ -125,7 +126,7 @@ lifecycle guard: a Jessie predicate over the row and the rows its declared
 references reach. The machine names which writes it guards.
 
 ```cue
-state: machines: FavoriteRules: {
+state: mecha: rows: FavoriteRules: {
 	entity: "Favorite"
 	guards: "own-article": {
 		src: "shell/validations/own-article.js"
@@ -172,8 +173,9 @@ edge from a server entity to a `tab` or `device` one, two edges to one table,
 an edge to a table no screen reads and no form writes, a name a unique already
 uses and a denied name in the source. A validation is an ir kind
 (`data-kind="validation"`, `data-of` its entity), paired by the bijection like
-a handler. Where it runs, when the server judges it, and the rung it fills are
-[the lattice's](docs/lattice.md#the-validation-ladder).
+a handler. The rung it fills is [the lattice's](docs/lattice.md#the-validation-ladder);
+where it runs and when the server judges it are
+[Jessie in the database](docs/decisions/2026-11-05-database-jessie.md#validations)'s.
 
 ### A count the reader is inside of
 
@@ -188,12 +190,16 @@ can tell is [access](docs/access.md#a-count-the-reader-is-inside-of).
 
 An entity's `seed` states the rows its store holds before anyone writes one: a
 cluster durability renders them into `900_seed.sql`, a `tab` one into
-`shell.yaml`. CUE unifies each with its entity's constraints, at every
-evaluation of the program — which is right for the rows a program means, and a
-tax on every export, vet and check for an archive a crawler produced.
-
-Such an archive is held as data instead: a JSON file beside the program,
-outside its package, named by `state: seed: src`.
+`shell.yaml`. Keep `program.cue` free of bulky inline `seed:` lists:
+- When a database exists and the data is user-generated content (UGC) or
+  operational state, favor SQL migrations (`services/database/sql/*.sql`) or
+  runtime writes over static `seed:` declarations.
+- When the rows are static CUE declarations, split them into a sibling
+  `seed.cue` in the app's root package so reading `program.cue` does not pull
+  the dataset into context.
+- When the rows are a large archive a tool or crawler produced, hold them as
+  data outside CUE evaluation in `seed.json` (`state: seed: src: "seed.json"`),
+  since CUE otherwise unifies every stated row on every export, vet and check.
 
 ```cue
 state: seed: src: "seed.json" // {"<Entity>": [row, ...]}
@@ -241,7 +247,7 @@ state: fixture: src: "tests/fixtures/visual.sql"
 ### Schedules
 
 Periodic work is declared as `schedules` (`#Schedule` in `schema.cue`), and
-mecha's [ticker](https://github.com/bonisoft3/mecha/blob/v0.18.1/services/ticker/README.md) turns each
+mecha's [ticker](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/ticker/README.md) turns each
 occurrence into a row the app's pipelines read; how it wakes, what it
 guarantees and how to choose a cadence are there.
 
@@ -299,7 +305,7 @@ An entity is a durable identity — a Cap'n Proto type id, with ordinals for its
 fields — and no model mints it:
 
 ```bash
-deno run --allow-read --allow-write plugins/pronto/identity.ts mint apps/<name>
+deno run --allow-read --allow-write --allow-run plugins/pronto/identity.ts mint apps/<name>
 ```
 
 stamps every entity and field that has none and grows `.pronto/identity.json`;
@@ -316,9 +322,9 @@ migration ([the two-step rule](docs/schema-change-admission.md#pgroll-migrations
 ## Screens
 
 A screen is HTML the terminal interprets, with no build step and no component
-per screen. Omnishell's [`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/GUIDE.md) is the contract and
-the rules that bite, and [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.20.3/REFERENCE.md) is every
-attribute and placeholder, [machines](https://github.com/bonisoft3/omnishell/blob/v0.20.3/REFERENCE.md#machines)
+per screen. Omnishell's [`GUIDE.md`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/GUIDE.md) is the contract and
+the rules that bite, and [`REFERENCE.md`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md) is every
+attribute and placeholder, [machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md#machines)
 included.
 
 ## i18n
@@ -353,7 +359,7 @@ asks to be rendered with its rows on request with `ssr: "ssr"`
 ([addresses](docs/localization.md#addresses),
 [crawlable documents](docs/localization.md#crawlable-documents)). An internal
 link names a route rather than a path — `<a data-route="<screen>">`, with
-`data-param-<name>` for its params ([links](https://github.com/bonisoft3/omnishell/blob/v0.20.3/REFERENCE.md#links)) —
+`data-param-<name>` for its params ([links](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md#links)) —
 and a language switcher is the same link with `data-locale`.
 
 A missing translation is refused, never shown in the default language: at
@@ -379,7 +385,7 @@ app, each case citing the ids it realizes — `apps/truco/tests/acceptance.ts`
 (standalone readers: the `bonisoft3/truco` mirror), declared as an
 `integrate` check, drives the table under `?clock=manual`.
 Omnishell's `check battery` (at `test`) runs
-[the battery](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/automated-tests-battery.md) over every handler
+[the battery](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/automated-tests-battery.md) over every handler
 and validation module; `check machines` fires every arrow of every chart;
 visual lint (at `integrate`) fails only on `critical`. The battery runs from
 the committed `.bayt` closure: render it with the cue.mod-pinned `bayt`

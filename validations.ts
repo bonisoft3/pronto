@@ -110,7 +110,7 @@ export function renderValidations(
     "// `module` is the Jessie source split at its completion for the plv8 body.",
     `package ${pkg}`,
     "",
-    "code: state: machines: {",
+    "code: state: mecha: rows: {",
     ...lines,
     "}",
     "",

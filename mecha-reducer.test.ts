@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { assert, assertEquals } from "jsr:@std/assert@1.0.11";
 import { compileMechaReducer } from "./mecha-reducer.ts";
-import { ROOT, fixture, run, terminal } from "./testdata/hybrid-fixtures.ts";
+import { ROOT, fixture, run, terminal } from "./mecha-fixtures.ts";
 
 Deno.test("SQL entropy omits UUID version and variant nibbles and fills byte boundaries", async () => {
   const { spec, rules } = await fixture();

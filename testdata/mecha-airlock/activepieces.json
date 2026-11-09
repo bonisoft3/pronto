@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "lock": "./pieces/mail.lock",
+  "pieces": {"mail": {"local": "./pieces/mail", "export": "mail"}},
+  "limits": {"timeoutMs": 8000, "maxConcurrent": 4, "maxRequestBytes": 1048576, "maxResultBytes": 1048576},
+  "actions": {"sendMail": {
+    "piece": "mail",
+    "action": "send-mail",
+    "inputSchema": "./pieces/mail/send.input.schema.json",
+    "outputSchema": "./pieces/mail/send.output.schema.json",
+    "fixedProps": {"host": "smtp.mailpit.test", "port": 1025, "starttls": false, "messageIdDomain": "airlock.test"},
+    "idempotencyKeyProp": "requestKey"
+  }}
+}

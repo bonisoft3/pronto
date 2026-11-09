@@ -1,11 +1,14 @@
 // The derived rows a pages release ships: derived.ts's SQL, and bundle.ts
 // carrying it into a page whose PGlite runs it after the migrations.
 import './edge-addresses_test.ts'
+import './css-assets_test.ts'
+import './edge-jwt_test.ts'
+import './edge-templates_test.ts'
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotSql } from './derived.ts'
+import { dependencyOrder, derivedSql, dollar, inputCompletions, pipelineState, Settlement, singleMessageInput, snapshotCompose, snapshotSql } from './derived.ts'
 import { hostDomAssets, writeEdgeAssets } from './edge-assets.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -255,7 +258,8 @@ Deno.test('an authoritative restore suppresses derivation triggers, retains fore
       await db.close()
     `)
     const ran = await new Deno.Command(Deno.execPath(), {
-      args: ['run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'restore.ts')],
+      env: { DENO_NO_PACKAGE_JSON: '1' },
+      args: ['run', '-A', '--no-config', '--import-map', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'restore.ts')],
       stdout: 'inherit', stderr: 'inherit',
     }).output()
     assert.equal(ran.success, true, 'the authoritative restore regression failed')
@@ -299,7 +303,8 @@ Deno.test('a committed-content snapshot sees changes immediately and preserves n
       await db.close()
     `)
     const ran = await new Deno.Command(Deno.execPath(), {
-      args: ['run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'snapshot.ts')],
+      env: { DENO_NO_PACKAGE_JSON: '1' },
+      args: ['run', '-A', '--no-config', '--import-map', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'snapshot.ts')],
       stdout: 'inherit', stderr: 'inherit',
     }).output()
     assert.equal(ran.success, true, 'the database snapshot regression failed')
@@ -351,7 +356,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       'CREATE TABLE tally_count (n int NOT NULL); GRANT SELECT ON tally TO service; GRANT ALL ON tally_count TO service;',
       'CREATE FUNCTION count_tallies() RETURNS integer LANGUAGE sql AS $$ DELETE FROM tally_count; INSERT INTO tally_count SELECT count(*) FROM tally; SELECT 1 $$;',
     ].join('\n'))
-    await write('.pronto/cluster.json', JSON.stringify({ server: true, drains: [{ name: 'count', on: ['tally'], call: 'count_tallies', body: {} }] }))
+    await write('.pronto/cluster.json', JSON.stringify({ server: true, computations: [], drains: [{ name: 'count', on: ['tally'], call: 'count_tallies', body: {} }] }))
     // A seeded row the derivation no longer produces, which the page must not keep.
     await write('m/900_seed.sql', "INSERT INTO tally VALUES ('gone', 9);")
     const order = dependencyOrder(['tally_note', 'tally'], [['tally_note', 'tally']])
@@ -361,6 +366,7 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     }))
 
     const bundled = await new Deno.Command(Deno.execPath(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
         'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
         '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
@@ -414,8 +420,9 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
       await db.close()
     `)
     const booted = await new Deno.Command(Deno.execPath(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
-        'run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen',
+        'run', '-A', '--no-config', '--lock', path.join(browser, 'deno.lock'), '--frozen',
         '--import-map', path.join(app, 'boot-imports.json'),
         path.join(app, 'boot.ts'), path.join(app, 'dist/browser/index.html'),
       ],
@@ -492,7 +499,8 @@ Deno.test("the page's store behind its cluster raises a refused subset as the pr
       Deno.exit(0)
     `)
     const ran = await new Deno.Command(Deno.execPath(), {
-      args: ['run', '-A', '--config', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'page.ts')],
+      env: { DENO_NO_PACKAGE_JSON: '1' },
+      args: ['run', '-A', '--no-config', '--import-map', path.join(browser, 'cluster.deno.json'), '--lock', path.join(browser, 'deno.lock'), '--frozen', path.join(dir, 'page.ts')],
       stdout: 'piped',
       stderr: 'inherit',
     }).output()
@@ -513,7 +521,7 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
       await Deno.writeTextFile(path.join(app, p), text)
     }
     await write('shell/shell.json', JSON.stringify({
-      routes: [{ files: { css: 'shell/screens/home.css' } }],
+      routes: [{ ssr: 'ssr', files: { css: 'shell/screens/home.css' } }, { ssr: 'ssg', files: { css: 'shell/screens/home.css' } }],
       migrations: ['m/001.sql'], tables: ['item'],
       schema: { item: { durability: 'live' } },
     }))
@@ -523,9 +531,10 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
     const policy = (await Deno.readTextFile(path.join(repo, 'plugins/omnishell/content-security-policy.txt'))).trim()
     await write('shell/index.html', `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>`)
     await write('m/001.sql', 'CREATE TABLE item (id text PRIMARY KEY);')
-    await write('.pronto/cluster.json', JSON.stringify({ server: true, drains: [] }))
+    await write('.pronto/cluster.json', JSON.stringify({ server: true, computations: [], drains: [] }))
 
     const bundled = await new Deno.Command(Deno.execPath(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
         'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
         '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
@@ -535,15 +544,20 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
     }).output()
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
+    const payload = JSON.parse(/<script type="application\/json" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1])
+    assert.deepEqual(JSON.parse(payload.files['shell/shell.json']).routes.map((route: { ssr: string }) => route.ssr), ['spa', 'spa'])
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
-    const scripts = [...html.matchAll(/<script(?: type="module")?>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+    // The boot runs first and installs the policy; only the module runs under it.
+    const [boot, ...scripts] = [...html.matchAll(/<script(?: type="module")?>([\s\S]*?)<\/script>/g)].map((m) => m[1])
     assert.equal(scripts.length, 1, 'SES must initialize through the interpreter inside the application module')
     assert.ok(!scripts[0].includes('\0'), 'HTML replaces literal NULs before checking script hashes')
+    assert.ok(!/http-equiv="Content-Security-Policy"/.test(html), 'the policy is the boot\'s to install, not markup')
+    assert.ok(html.indexOf(boot) < html.indexOf('<style>'), 'nothing but inert data precedes the boot')
     const hashes = await Promise.all(scripts.map(async (source) => {
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
       return `'sha256-${Buffer.from(digest).toString('base64')}'`
     }))
-    const bundledPolicy = /http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)![1]
+    const bundledPolicy = JSON.parse(/m\.content=("(?:[^"\\]|\\.)*")/.exec(boot)![1])
     assert.equal(bundledPolicy, policy.replace(/script-src ([^;]+)/, `$& ${hashes.join(' ')}`))
     assert.ok(!/<script src="data:/.test(html), 'data: would authorize scripts beyond this release')
   } finally {
@@ -573,6 +587,7 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
       '</head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>',
     ].join('\n'))
     const bundled = await new Deno.Command(Deno.execPath(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
         'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app,
         '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
@@ -584,7 +599,98 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
     const preloads = [...html.matchAll(/<link rel="preload" href="([^"]+)"/g)].map((m) => m[1])
     assert.deepEqual(preloads, ['https://fonts.example/a.woff2'])
-    assert.match(html, /preload: false/)
+    assert.match(html, /preload:\s*(?:false|!1)/)
+  } finally {
+    await Deno.remove(app, { recursive: true })
+  }
+})
+
+Deno.test('Pages precomputation forces snapshots and excludes the Feldera service and startup dependency', () => {
+  const model = {
+    networks: { default: { name: 'derived' } },
+    services: {
+      'plausible-feldera': { environment: { RUST_LOG: 'info' } },
+      'plausible-compute': {
+        build: { additional_contexts: { 'plausible-feldera': 'service:plausible-feldera', 'compute-image': 'docker-image://compute' } },
+        environment: { COMPUTATIONS: '[{"name":"analytics","feldera":"/app/analytics.json"}]', DUCKSTREAM_ENGINE: 'feldera', FELDERA_URL: 'http://feldera:8080' },
+        depends_on: { 'plausible-feldera': { condition: 'service_healthy' }, 'plausible-database': { condition: 'service_healthy' } },
+      },
+      'plausible-database': { environment: { POSTGRES_DB: 'plausible' } },
+    },
+  }
+  const result = snapshotCompose(model)
+  assert.equal(result.services['plausible-feldera'], undefined)
+  assert.deepEqual(result.services['plausible-compute'].environment, {
+    COMPUTATIONS: model.services['plausible-compute'].environment.COMPUTATIONS,
+    DUCKSTREAM_ENGINE: 'duckdb-snapshot',
+  })
+  assert.deepEqual(result.services['plausible-compute'].depends_on, { 'plausible-database': { condition: 'service_healthy' } })
+  assert.deepEqual(result.services['plausible-compute'].build?.additional_contexts, { 'compute-image': 'docker-image://compute' })
+  assert.deepEqual(result.networks, model.networks)
+  assert.equal(model.services['plausible-compute'].environment.DUCKSTREAM_ENGINE, 'feldera')
+  assert.deepEqual(snapshotCompose({ services: {} }), { services: {} })
+})
+
+// A realm unit is a document of its own, so a single-file page serves it from
+// itself (omnishell hatch.js selfSrc): inlined, inert beside the boot, and
+// marked `self` in the shell's units. An agent is fetched through the shim.
+Deno.test('a bundled page carries its realm units inlined beside the boot, its agents behind the shim and its host-DOM hatches compiled in', async () => {
+  const app = await Deno.makeTempDir({ prefix: 'unit-bundle-test-' })
+  try {
+    const write = async (p: string, text: string) => {
+      await Deno.mkdir(path.dirname(path.join(app, p)), { recursive: true })
+      await Deno.writeTextFile(path.join(app, p), text)
+    }
+    const units = {
+      map: { isolation: 'realm', src: 'shell/units/map/index.html', files: ['shell/units/map/index.html', 'shell/units/map/vendor/lib.js', 'shell/units/map/vendor/lib.css'], ports: { reads: [], raises: {} } },
+      geocoder: { isolation: 'agent', src: 'shell/units/geocoder/unit.js', files: ['shell/units/geocoder/unit.js'], ports: { reads: [], raises: {} } },
+    }
+    const shellJson = (u: unknown) => JSON.stringify({ routes: [{ files: { css: 'shell/screens/home.css' } }], migrations: [], tables: [], units: u, hostDom: { press: { src: 'shell/hatches/press.js', note: 'prints' } } })
+    await write('shell/hatches/press.js', 'export default () => () => "press-hatch-compiled-in"')
+    await write('shell/shell.json', shellJson(units))
+    await write('shell/shell.css', '')
+    await write('shell/design.css', '')
+    await write('shell/screens/home.css', '')
+    await write('shell/index.html', '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src \'self\'"><link rel="stylesheet" href="./shell.css"><link rel="stylesheet" href="./design.css"></head><body><div id="app"></div><script type="module" src="./boot.js"></script></body></html>')
+    await write('shell/units/map/index.html', '<!doctype html><html><head><link rel="stylesheet" href="vendor/lib.css"><script src="vendor/lib.js"></script></head><body>São Paulo</body></html>')
+    await write('shell/units/map/vendor/lib.js', 'window.lib = "</script><!--"')
+    await write('shell/units/map/vendor/lib.css', 'body{color:red}')
+    await write('shell/units/geocoder/unit.js', 'postMessage({type:"pronto:ready"})')
+    const bundle = () => new Deno.Command(Deno.execPath(), {
+      args: [
+        'run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app, '--no-cluster',
+        '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'),
+      ],
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output()
+    const done = await bundle()
+    assert.equal(done.success, true, new TextDecoder().decode(done.stderr))
+    const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
+    const data = /<script type="application\/octet-stream" id="pronto-unit-map">([^<]*)<\/script>/.exec(html)
+    assert.ok(data, 'the realm rides inert beside the boot')
+    assert.ok(html.indexOf(data![0]) < html.indexOf('<script>'), 'and before it, so the boot can read it')
+    const doc = new TextDecoder().decode(Buffer.from(data![1], 'base64'))
+    assert.match(doc, /<style>body\{color:red\}<\/style>/)
+    assert.match(doc, /<script>window\.lib = "<\\\/script><\\!--"<\/script>/)
+    assert.match(doc, /São Paulo/)
+    const payload = JSON.parse(/id="pronto-payload">([^<]*)</.exec(html)![1])
+    assert.equal(payload.files['shell/units/geocoder/unit.js'], 'postMessage({type:"pronto:ready"})')
+    assert.equal(JSON.parse(payload.files['shell/shell.json']).units.map.self, true)
+    assert.equal(JSON.parse(payload.files['shell/shell.json']).units.geocoder.self, undefined)
+    // A host-DOM hatch is imported by path, which no shim answers: it rides
+    // compiled into the page's module.
+    assert.ok(html.includes('press-hatch-compiled-in'), 'the hatch is compiled into the page')
+
+    await write('shell/units/map/index.html', '<!doctype html><html><head><script src="vendor/other.js"></script></head></html>')
+    const undeclared = await bundle()
+    assert.equal(undeclared.success, false)
+    assert.match(new TextDecoder().decode(undeclared.stderr), /unit map loads vendor\/other\.js, which its files do not declare/)
+
+    await write('shell/shell.json', shellJson({ painter: { ...units.geocoder, role: 'presenter' } }))
+    const presenter = await bundle()
+    assert.equal(presenter.success, false)
+    assert.match(new TextDecoder().decode(presenter.stderr), /presenter units are not bundled yet: painter/)
   } finally {
     await Deno.remove(app, { recursive: true })
   }

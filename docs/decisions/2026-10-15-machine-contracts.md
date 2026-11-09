@@ -7,7 +7,7 @@ status: partially-built
 
 # Machine contracts
 
-The review of Truco on [[2026-09-29-hybrid-machines|hybrid machines]] found no
+The review of Truco on [[2026-09-29-cortex-machines|Cortex machines]] found no
 data race: a fold is a pure function the terminal runs one at a time, and a
 machine step runs under its instance's row lock. It found logic races and
 stalls instead:
@@ -115,7 +115,7 @@ may change. A guard implemented in the database keeps its `sql` form and
 states its rules guard's reads beside it; an action implemented there stays a
 list of relational effects. The two forms are told apart by shape.
 
-The runtime (`hybrid-runtime.js`, in the database and in the browser alike)
+The runtime (`mecha-runtime.js`, in the database and in the browser alike)
 enforces it without translating the rules. A rule is handed only the inputs it
 reads; every other input is a getter that refuses the step, and is not
 enumerable, so the `{...context}` idiom passes over it rather than reading it.
@@ -143,7 +143,7 @@ lifecycle machine and referenced by its name.
 
 ## Checks over the declarations
 
-Built, as the `hybrids` lint (`check-hybrids.ts`), and without a solver.
+Built, as the `reducers` lint (`check-mecha.ts`), and without a solver.
 Generation refuses only what the runtime could not run as declared; these are
 properties of a machine that runs, so they are findings, reported together
 with paths, and a machine that has one still generates and launches to be
@@ -207,8 +207,8 @@ settled; minting `id` on a table keyed on another column; and waking a
 subscription after it stopped. The store keeps its file name: installed apps
 copy it by that path.
 
-The runtime and the timer have batteries of their own. `hybrid-battery.ts`
-walks a machine from a fresh instance through seeded steps of every event,
+The runtime and the timer have batteries of their own. omnishell's
+`test/mecha-battery.ts` walks a machine from a fresh instance through seeded steps of every event,
 from either tier and any seat. The runtime refuses what a caller sent that the
 machine does not take (another tier's event, a payload outside its shape) as a
 `RefusedError`; any other throw is a finding: a rule reading what is not there,

@@ -1,7 +1,9 @@
 {
   "nodeModulesDir": "none",
   "imports": {
-    "@std/encoding/base64": "jsr:@std/encoding@1.0.7/base64"
+    "@electric-sql/pglite": "npm:@electric-sql/pglite@0.5.8",
+    "@std/encoding/base64": "jsr:@std/encoding@1.0.7/base64",
+    "@std/yaml": "jsr:@std/yaml@1.0.9"
   },
   "unstable": [
     "raw-imports"

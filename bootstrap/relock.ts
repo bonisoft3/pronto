@@ -14,6 +14,7 @@ const PLATFORMS = [
   "linux-x64", "linux-arm64", "linux-x64-musl", "linux-arm64-musl",
   "macos-x64", "macos-arm64", "windows-x64", "windows-arm64",
 ];
+const HOST_PLATFORMS = PLATFORMS.filter((p) => p !== "windows-arm64");
 
 const here = import.meta.dirname!;
 const repo = join(here, "../../..");
@@ -33,10 +34,22 @@ async function run(cmd: string, args: string[], opts: { cwd?: string; stdin?: st
   return new TextDecoder().decode(out.stdout);
 }
 
-// The .mise.toml bootstrap writes, from the same roster its seed names.
-const roster = await run("cue", ["export", "-", "-e", "out", "--out", "text"], {
-  cwd: repo,
-  stdin: `package roster
+const checksumCache = new Map<string, string>();
+async function sha256Url(url: string): Promise<string> {
+  const cached = checksumCache.get(url);
+  if (cached !== undefined) return cached;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await res.arrayBuffer()));
+  const hex = Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
+  checksumCache.set(url, hex);
+  return hex;
+}
+
+async function lockConfig(field: "mise" | "miseHost", configFile: string, lockFile: string, platforms: string[], miseEnv?: string): Promise<void> {
+  const roster = await run("cue", ["export", "-", "-e", "out", "--out", "text"], {
+    cwd: repo,
+    stdin: `package roster
 
 import (
 	"encoding/toml"
@@ -46,37 +59,49 @@ import (
 	"bonisoft.org/plugins/pronto/builders:bayt"
 )
 
-out: toml.Marshal((distribution.#Project & terminal.#Project & mecha.#Project & bayt.#Toolchain).mise)
+out: toml.Marshal((distribution.#Project & terminal.#Project & mecha.#Project & bayt.#Toolchain).${field})
 `,
-});
+  });
 
-const work = await Deno.makeTempDir({ prefix: "pronto-relock-" });
-try {
-  await Deno.writeTextFile(join(work, ".mise.toml"), roster);
-  await Deno.writeTextFile(join(work, "mise.lock"), "");
-  // Isolated from the caller's own mise config, whose tools are no
-  // consumer's.
-  const env = { MISE_LOCKED: "0", MISE_TRUSTED_CONFIG_PATHS: work, MISE_GLOBAL_CONFIG_FILE: join(work, "none.toml") };
-  await run("nu", [tools, "mise", "lock", "--platform", PLATFORMS.join(",")], { cwd: work, env });
+  const work = await Deno.makeTempDir({ prefix: "pronto-relock-" });
+  try {
+    try {
+      const prev = await Deno.readTextFile(join(here, lockFile));
+      for (const b of prev.split(/^(?=\[)/m)) {
+        const cs = b.match(/^checksum = "sha256:([0-9a-f]{64})"/m)?.[1];
+        const u = b.match(/^url = "([^"]+)"/m)?.[1];
+        if (cs && u) checksumCache.set(u, cs);
+      }
+    } catch { /* no existing lock */ }
+    await Deno.writeTextFile(join(work, configFile), roster);
+    await Deno.writeTextFile(join(work, lockFile), "");
+    const env: Record<string, string> = {
+      MISE_LOCKED: "0",
+      MISE_TRUSTED_CONFIG_PATHS: work,
+      MISE_GLOBAL_CONFIG_FILE: join(work, "none.toml"),
+    };
+    const args = [tools, "mise", ...(miseEnv ? ["-E", miseEnv] : []), "lock", "--platform", platforms.join(",")];
+    await run("nu", args, { cwd: work, env });
 
-  let lock = await Deno.readTextFile(join(work, "mise.lock"));
-  const blocks = lock.split(/^(?=\[)/m);
-  for (const [i, block] of blocks.entries()) {
-    if (!/^\[tools\."[^"]+"\."platforms\.[^"]+"\]\n/.test(block) || /^checksum = /m.test(block)) continue;
-    const url = block.match(/^url = "([^"]+)"/m)?.[1];
-    if (url === undefined) throw new Error(`a lock entry carries no url:\n${block}`);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`${url}: ${res.status}`);
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await res.arrayBuffer()));
-    const hex = Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
-    blocks[i] = block.replace(`url = "${url}"`, `checksum = "sha256:${hex}"\nurl = "${url}"`);
+    let lock = (await Deno.readTextFile(join(work, lockFile))).replace(/^provenance = .*\n/gm, "");
+    const blocks = lock.split(/^(?=\[)/m);
+    for (const [i, block] of blocks.entries()) {
+      if (!/^\[tools\."[^"]+"\."platforms\.[^"]+"\]\n/.test(block) || /^checksum = /m.test(block)) continue;
+      const url = block.match(/^url = "([^"]+)"/m)?.[1];
+      if (url === undefined) throw new Error(`a lock entry carries no url:\n${block}`);
+      const hex = await sha256Url(url);
+      blocks[i] = block.replace(`url = "${url}"`, `checksum = "sha256:${hex}"\nurl = "${url}"`);
+    }
+    lock = blocks.join("");
+    for (const tool of lock.matchAll(/^\[\[tools\."([^"]+)"\]\]$/gm)) {
+      if (!lock.includes(`[tools."${tool[1]}"."platforms.`)) throw new Error(`${tool[1]}: mise lock wrote no platform entry`);
+    }
+    await Deno.writeTextFile(join(here, lockFile), lock);
+    console.log(`wrote ${join(here, lockFile)}`);
+  } finally {
+    await Deno.remove(work, { recursive: true });
   }
-  lock = blocks.join("");
-  for (const tool of lock.matchAll(/^\[\[tools\."([^"]+)"\]\]$/gm)) {
-    if (!lock.includes(`[tools."${tool[1]}"."platforms.`)) throw new Error(`${tool[1]}: mise lock wrote no platform entry`);
-  }
-  await Deno.writeTextFile(join(here, "mise.lock"), lock);
-  console.log(`wrote ${join(here, "mise.lock")}`);
-} finally {
-  await Deno.remove(work, { recursive: true });
 }
+
+await lockConfig("mise", ".mise.toml", "mise.lock", PLATFORMS);
+await lockConfig("miseHost", ".mise.host.toml", "mise.host.lock", HOST_PLATFORMS, "host");

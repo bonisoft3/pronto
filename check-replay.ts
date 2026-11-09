@@ -17,6 +17,7 @@
 
 import { fileURLToPath } from "node:url";
 import { exists } from "./missing.ts";
+import { type Catalog, CATALOG_SQL, unrecorded } from "./sql-recorded.ts";
 
 type Finding = { severity: "error" | "advisory"; path: string; message: string };
 
@@ -133,7 +134,7 @@ export async function compareCatalogs(before: Column[], after: Column[], path: s
     const rows: Row[] = [...before.map(c => ({ ...c, step: 0, mig: "retained" })), ...after.map(c => ({ ...c, step: 1, mig: path }))];
     await Deno.writeTextFile(`${scratch}/states.json`, JSON.stringify(rows));
     await Deno.writeTextFile(`${scratch}/steps.json`, JSON.stringify([{ step: 0, mig: "retained" }, { step: 1, mig: path }]));
-    const literal = (s: string) => `'${s.replaceAll("'", "''")}'`;
+    const literal = (s: string) => `'${s.replaceAll("\\", "/").replaceAll("'", "''")}'`;
     const query = `CREATE TABLE snapshot (step INTEGER, mig VARCHAR, rel BIGINT, tbl VARCHAR, kind VARCHAR, col VARCHAR, typ VARCHAR, ordinal INTEGER);
       INSERT INTO snapshot SELECT * FROM read_json(${literal(`${scratch}/states.json`)}, columns={step:'INTEGER',mig:'VARCHAR',rel:'BIGINT',tbl:'VARCHAR',kind:'VARCHAR',col:'VARCHAR',typ:'VARCHAR',ordinal:'INTEGER'});
       CREATE TABLE step AS SELECT * FROM read_json_auto(${literal(`${scratch}/steps.json`)});
@@ -170,7 +171,8 @@ const DATA_SNAPSHOT = `
 // the sentence is chosen by what a diagnosis says, and the last non-empty frame
 // is the fallback that still says something.
 const PLAIN = /\u001b\[[0-9;]*[A-Za-z]/g;
-const DIAGNOSIS = /\b(error|fail(ed|ure)?|fatal|panic)\b/i;
+const DIAGNOSIS = /\b(error|fail(ed|ure)?|fatal|panic|not found)\b/i;
+const NU_WRAPPER = /^(Error: nu::shell::|[x×] External command failed$)/;
 
 /** Every frame of a spinner's output, stripped and in order, empties dropped. */
 export function frames(text: string): string[] {
@@ -179,7 +181,7 @@ export function frames(text: string): string[] {
 
 export function plain(text: string): string {
   const seen = frames(text);
-  return seen.findLast((f) => DIAGNOSIS.test(f)) ?? seen.at(-1) ?? "";
+  return seen.findLast((f) => DIAGNOSIS.test(f) && !NU_WRAPPER.test(f)) ?? seen.findLast((f) => DIAGNOSIS.test(f)) ?? seen.at(-1) ?? "";
 }
 
 async function run(cmd: string, args: string[], opts: { cwd?: string; stdin?: string; env?: Record<string, string> } = {}) {
@@ -229,7 +231,7 @@ async function steps(initdb: string): Promise<string[]> {
  * came from mecha is not the app's to fix.
  */
 export async function locate(appDir: string, scriptPath: string): Promise<string> {
-  const name = scriptPath.split("/").pop() ?? scriptPath;
+  const name = scriptPath.replaceAll("\\", "/").split("/").pop() ?? scriptPath;
   const owned = `services/database/migrations/${name}`;
   // Absence is the answer this asks for. A dangling link is still the app's
   // file, and a directory that cannot be read is raised: either, reported as
@@ -238,19 +240,24 @@ export async function locate(appDir: string, scriptPath: string): Promise<string
 }
 
 export async function main(appDir: string): Promise<number> {
-  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published };
+  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published; actors?: string };
   if (!facts.server || facts.schema === undefined) {
     throw new Error("this app's every entity is a browser tier: it has no schema to replay");
   }
   const fixtures = await loadFixtures(appDir);
-  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures });
+  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures, actors: facts.actors });
   console.log(JSON.stringify(found, null, 2));
   return found.some((f) => f.severity === "error") ? 1 : 0;
 }
 
 export type Migrator = { entrypoint?: string[]; command?: string[]; env?: Record<string, string> };
-export async function replayDatabase({ appDir, published, env, migrator, fixtures = [] }: {
-  appDir: string; published: Published; env: Record<string, string>; migrator?: Migrator; fixtures?: UpgradeFixture[];
+/** Replays the app's schema from a fresh database: its bootstrap, its
+ * migrations run and run again, and its retained-data fixtures. `actors` is
+ * the machines' migration (services/database/migrations/<actors>), whose SQL
+ * reads time and randomness only as recorded input (sql-recorded.ts), judged
+ * against the catalog of the database it just bootstrapped. */
+export async function replayDatabase({ appDir, published, env, migrator, fixtures = [], actors }: {
+  appDir: string; published: Published; env: Record<string, string>; migrator?: Migrator; fixtures?: UpgradeFixture[]; actors?: string;
 }): Promise<Finding[]> {
   const settings = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_INITDB_ARGS"];
   const missing = settings.filter((k) => env[k] === undefined);
@@ -259,7 +266,7 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
   }
 
   const user = env.POSTGRES_USER;
-  const pgEnv = { ...Deno.env.toObject(), ...env, PGPASSWORD: env.POSTGRES_PASSWORD };
+  const pgEnv: Record<string, string> = { ...Deno.env.toObject(), ...env, PGPASSWORD: env.POSTGRES_PASSWORD };
   const psql = (db: string, sql: string, extra: string[] = []) =>
     run("psql", ["-h", "127.0.0.1", "-U", user, "-d", db, "-v", "ON_ERROR_STOP=1", "-q", ...extra], { stdin: sql, env: pgEnv });
   const created: string[] = [];
@@ -283,7 +290,7 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
     const live = await ready();
     if (!live.ok) throw new Error(`${published.target} never became ready: ${live.stderr || live.stdout}`);
 
-    const scripts = await steps(published.initdb);
+    const scripts = await steps(env.PRONTO_REPLAY_INITDB ?? published.initdb);
     if (scripts.length === 0) throw new Error("the database image carries no initdb scripts to replay");
     const findings: Finding[] = [];
     const must = async (result: ReturnType<typeof run>, what: string) => {
@@ -310,21 +317,30 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
       return true;
     };
     if (!await bootstrap(REPLAY_DB)) return finish(findings);
+    if (actors !== undefined) {
+      const path = `services/database/migrations/${actors}`;
+      const catalog = JSON.parse(await sql(REPLAY_DB, CATALOG_SQL)) as Catalog;
+      for (const read of await unrecorded(await Deno.readTextFile(`${appDir}/${path}`), catalog)) {
+        findings.push({ severity: "error", path, message: `${read}: a machine reads time and randomness only through its clock and draw` });
+      }
+    }
     if (!published.pgroll) {
       if (fixtures.length) throw new Error("retained fixtures require a migration runner");
       return finish(findings);
     }
-    const { dir, baseline } = published.pgroll;
+    const { dir: rawDir, baseline } = published.pgroll;
+    const dir = env.PRONTO_REPLAY_PGROLL_DIR ?? rawDir;
     const entries: string[] = [];
     for await (const entry of Deno.readDir(dir)) {
       if (entry.isFile) entries.push(entry.name);
     }
     const declared = pgrollMigrations(entries.join("\n"));
-    const entrypoint = migrator?.entrypoint ?? ["/migrate.sh"];
+    const entrypoint = migrator?.entrypoint ?? (env.PRONTO_MIGRATE_SH ? [env.PRONTO_MIGRATE_SH.endsWith(".nu") ? "nu" : "bash", env.PRONTO_MIGRATE_SH] : ["/migrate.sh"]);
     const command = migrator?.command ?? [dir, baseline];
     if (!Array.isArray(entrypoint) || !Array.isArray(command) || !entrypoint.length) throw new Error("migration runner must have an executable entrypoint");
     const migrate = async (db: string, through?: string) => {
-      const url = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(env.POSTGRES_PASSWORD)}@127.0.0.1:5432/${db}?sslmode=disable`;
+      const port = pgEnv.PGPORT ?? "5432";
+      const url = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(env.POSTGRES_PASSWORD)}@127.0.0.1:${port}/${db}?sslmode=disable`;
       const runEnv = { ...pgEnv, ...migrator?.env, DATABASE_URL: url };
       if (through !== undefined) {
         if (!declared.includes(through)) throw new Error(`retained fixture names unknown migration ${through}`);

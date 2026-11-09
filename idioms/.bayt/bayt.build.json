@@ -30,6 +30,9 @@
     ],
     "exclude": [
       ".pronto/proto-baseline.json",
+      "mise.host.lock",
+      ".mise.host.toml",
+      ".pronto/live/**",
       "mise.local.lock",
       "**/node_modules/**",
       ".task/**",
@@ -133,6 +136,9 @@
         ],
         "exclude": [
           ".pronto/proto-baseline.json",
+          "mise.host.lock",
+          ".mise.host.toml",
+          ".pronto/live/**",
           "mise.local.lock",
           "**/node_modules/**",
           ".task/**",
@@ -158,6 +164,9 @@
             "exclude": [
               ".bayt/**",
               ".pronto/proto-baseline.json",
+              "mise.host.lock",
+              ".mise.host.toml",
+              ".pronto/live/**",
               "mise.local.lock",
               "**/node_modules/**",
               ".task/**",
@@ -245,6 +254,9 @@
         ],
         "exclude": [
           ".pronto/proto-baseline.json",
+          "mise.host.lock",
+          ".mise.host.toml",
+          ".pronto/live/**",
           "mise.local.lock",
           "**/node_modules/**",
           ".task/**",

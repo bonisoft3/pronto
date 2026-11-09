@@ -6,7 +6,7 @@ import (
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 )
 
-#HybridShape: mecha.#Shape
+#MechaShape: mecha.#Shape
 
 // A machine Mecha runs, as an app declares it (mecha.#Machine): XState's
 // configuration and the setup beside it.
@@ -20,17 +20,17 @@ import (
 	entropy: *0 | (int & >=0 & <=1024)
 	initial: string
 	locks?: [...#MechaReadLock]
-	initialize?: {reduce: string, input: #HybridShape & {type: "object"}}
+	initialize?: {reduce: string, input: #MechaShape & {type: "object"}}
 	ports?: #MechaPorts
-	state: #HybridShape & {type: "object"}
-	view: #HybridShape & {type: "object"}
+	state: #MechaShape & {type: "object"}
+	view: #MechaShape & {type: "object"}
 	// What anyone may read of an instance: `rules.publish(state)` returns it, or
 	// null for an instance nobody else sees, into `<name>_public`.
-	public?: #HybridShape & {type: "object"}
+	public?: #MechaShape & {type: "object"}
 	contracts: [string]: {reads: [...string], writes?: [...string]}
 	events: [string]: {
 		tier: "omnishell" | "mecha"
-		payload: #HybridShape & {type: "object"}
+		payload: #MechaShape & {type: "object"}
 	}
 	states: [string]: {
 		final: *false | bool
@@ -127,7 +127,7 @@ import (
 	setup: _
 	_t: [
 		if (A.value & string) != _|_ {{target: A.value}},
-		// Any other list is #App's to refuse (_hybridRefusal), by name.
+		// Any other list is #App's to refuse (_mechaRefusal), by name.
 		if (A.value & [...]) != _|_ {[if len(A.value) == 1 {A.value[0]}, {}][0]},
 		A.value,
 	][0]

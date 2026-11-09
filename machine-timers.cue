@@ -7,26 +7,27 @@ import (
 
 #TimedMachines: T={
 	code: _
-	out: [if T.code.state.machines != _|_ for _, m in T.code.state.machines if m._timed {m}]
+	out: [if T.code.state.mecha.rows != _|_ for _, m in T.code.state.mecha.rows if m._timed {m}]
 }
 
 // A Mecha machine whose phases hold a deadline arms the ticker as they are
 // entered (mecha-ports.ts); one already waiting in such a phase when timers
 // are adopted has no schedule yet.
-#TimedHybrids: T={
+#TimedReducers: T={
 	code: _
-	out: [if T.code.state.hybrids != _|_ for _, h in T.code.state.hybrids if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h.reducer}]
+	out: [if T.code.state.mecha.reducers != _|_ for _, h in T.code.state.mecha.reducers if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h.reducer}]
 }
 
 #MachineTimerState: C={
 	code: _
-	_hybrids: (#TimedHybrids & {code: C.code}).out
+	_timed: (#TimedMachines & {code: C.code}).out
+	_reducers: (#TimedReducers & {code: C.code}).out
 	out: {
-		timers: list.Concat([[for m in (#TimedMachines & {code: C.code}).out {m.name}], [for m in C._hybrids {m.name}]])
+		timers: list.Concat([[for m in C._timed {m.name}], [for m in C._reducers {m.name}]])
 		if len(timers) > 0 {
-			timerCheck: strings.Join(list.Concat([[for m in (#TimedMachines & {code: C.code}).out {
-				(#mechaMachineSql & {machine: m, entities: C.code.state.entities, effects: [if C.code.state.effects != _|_ {C.code.state.effects}, {}][0]})._timerCheck
-			}], [for m in C._hybrids {
+			timerCheck: strings.Join(list.Concat([[for m in C._timed {
+				(#mechaMachineSql & {machine: m, entities: C.code.state.entities, effects: [if C.code.state.effects != _|_ {C.code.state.effects}, {}][0], step: (#steps & {code: C.code}).machines})._timerCheck
+			}], [for m in C._reducers {
 				let w = m.ports.wake
 				"""
 				DO $$ BEGIN
@@ -66,7 +67,7 @@ import (
 }
 
 #MachineTimerSql: T={
-	machine: #MechaMachine
+	machine: _
 	table:   string
 	pk: [...string]
 	_m:     T.machine

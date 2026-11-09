@@ -84,7 +84,9 @@ export async function unrecorded(sql: string, catalog: Catalog): Promise<string[
       const input = names.length === 1 ? catalog.types[names[0]] : undefined;
       if (input !== undefined && input !== "i") found.add(`${where}: casts to ${names[0]}, whose input reads the session`);
       else if (builtin(names) && fn) {
-        if (fn.volatility === "v") found.add(`${where}: calls ${names.join(".")}(), which the catalog marks volatile`);
+        // Transaction locks order steps but supply no unrecorded input.
+        const lock = names.at(-1) === "pg_advisory_xact_lock" && (names.length === 1 || names.length === 2 && names[0] === "pg_catalog");
+        if (fn.volatility === "v" && !lock) found.add(`${where}: calls ${names.join(".")}(), which the catalog marks volatile`);
         else if (fn.clock) found.add(`${where}: calls ${names.join(".")}(), the transaction's clock`);
       }
     }

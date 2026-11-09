@@ -34,7 +34,7 @@ Every stall falls into one of five classes. Each section below closes one.
 
 ## 1. The sample is the wrong size and the wrong version
 
-Truco is a reference app. It has a 1.4 MB shell, hybrid machines, online play
+Truco is a reference app. It has a 1.4 MB shell, mecha machines, online play
 and seven handlers. An agent copying idioms from it pays for all of that. The
 mirror also pins `pronto@v0.9.1` while
 [bootstrap](../../skills/pronto-turn/references/bootstrap.md) installs

@@ -33,7 +33,7 @@ app: pronto.#App & {
       }
       ${entity}
     }
-    machines: PaymentMachine: {
+    mecha: rows: PaymentMachine: {
       name: "PaymentMachine"
       entity: "Payment"
       field: "status"

@@ -44,8 +44,6 @@ import (
 		},
 	]
 
-
-
 	// Every service runs the image the app's own compose project builds, pushed
 	// to the environment's registry: what integrate tested is what releases.
 	#appImage: {
@@ -144,6 +142,20 @@ import (
 			}
 			spec: {
 				instances: 1
+				// upstream's parameters for the services an app's compose runs beside the cluster
+				// (feldera, conduit: logical slots); an app without them keeps the parameters its
+				// live database runs with, as a change to them restarts it.
+				if len(release.runtime) > 0 {
+					postgresql: parameters: {
+						wal_level:             "logical"
+						max_replication_slots: "128"
+						max_wal_senders:       "128"
+						max_connections:       "200"
+						fsync:                 "on"
+						synchronous_commit:    "on"
+						full_page_writes:      "on"
+					}
+				}
 				// A stop is bounded: a smart shutdown waits for sessions for 15 s, then a fast one, and
 				// at 120 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
 				// walsender holds a fast shutdown open, so every restart of the primary stalled a
@@ -285,8 +297,9 @@ import (
 
 	// The schema, built as compose builds it, by the app's own images: initdb
 	// runs the database image's initdb directory once, on a fresh database, and
-	// migrate carries it forward with pgroll on every release. The image's
-	// docker_process_sql pins the local socket, so the Job restates it against
+	// migrate applies pending pgroll migrations and reconciles permissions on
+	// every release. The image's docker_process_sql pins the local socket,
+	// so the Job restates it against
 	// the cluster's database Service; every step otherwise runs as the image's
 	// entrypoint runs it. A database comment marks initdb done.
 	let schemaEnv = [
@@ -369,11 +382,11 @@ import (
 					  # Its re-runnable steps are the release's, though (emit.cue's), as on Cloud Run
 					  # (gcp.cue's): a new entity's table and a new field's column, every policy,
 					  # trigger and publication, the status charts' triggers (010_machines), the
-					  # hybrid machines' code, and the app's own migrations (database.replays), each
+					  # mecha machines' code (found by its suffix, wherever the program places it), and the app's own migrations (database.replays), each
 					  # idempotent, run again, keeping every row, before migrate's pgroll steps call
 					  # what they define. Live traffic can deadlock a step's ALTER: being idempotent,
 					  # the step is run again, up to three times.
-					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql \(strings.Join(release.database.replays, " ")); do
+					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(release.database.replays, " ")); do
 					    f=/docker-entrypoint-initdb.d/$step
 					    if [ -f "$f" ]; then echo "initdb: replaying $step"
 					      for try in 1 2 3; do
@@ -591,7 +604,6 @@ import (
 			metric: enabled: true
 		}
 	}]
-
 
 	let prontoCrudDeploymentObj = [
 		if release.type == "pronto" {
@@ -947,7 +959,7 @@ import (
 								value: originValue
 							},
 							for up in ["CRUD", "AUTH", "ELECTRIC", "TICKER", "RCLONE_S3", "IMGPROXY", "RENDER"] {name: "PRONTO_UPSTREAM_\(up)", value: "localhost:3500"},
-							for n, _ in release.services {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "localhost:3500"},
+							for n in list.Concat([[for n, _ in release.services {n}], release.doors]) {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "localhost:3500"},
 							{name: "PRONTO_TRACING", value: "on"},
 							for e in (#otelExport & {service: "caddy", port: 4317}).env {e},
 							{
@@ -1008,7 +1020,6 @@ import (
 				}]
 			}
 		},
-
 
 	]
 
@@ -1853,6 +1864,7 @@ import (
 						ports: [
 							{port: 50002, protocol: "TCP"},
 							{port: 3500, protocol: "TCP"},
+							{port: 3000, protocol: "TCP"},
 						]
 					},
 				]
@@ -2009,6 +2021,12 @@ import (
 		},
 	]
 
+	let runtimeObjects = (#Runtime & {
+		app:         release
+		environment: targetEnv
+		images: {for name, _ in release.runtime {(name): (#appImage & {svc: name}).out}}
+	}).objects
+
 	// objects collects all generated Kubernetes API definitions in standard order
 	objects: [
 		for list in [
@@ -2036,6 +2054,9 @@ import (
 			for o in blobsObjs {o},
 			vmalertObjs,
 			for o in metricsExportObjs {o},
+			// What the app's compose project runs beside the cluster (App.runtime, runtime.cue); the
+			// metal path names its services in App.services instead, so it is empty there.
+			runtimeObjects,
 			gatewayObj,
 			httpRouteObj,
 			backendTrafficPolicyObj,

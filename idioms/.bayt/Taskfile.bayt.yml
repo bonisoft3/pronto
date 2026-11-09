@@ -24,6 +24,10 @@ includes:
     taskfile: ./Taskfile.test.yaml
     dir: ../
     optional: true
+  launch:
+    taskfile: ./Taskfile.launch.yaml
+    dir: ../
+    optional: true
   integrate:
     taskfile: ./Taskfile.integrate.yaml
     dir: ../

@@ -58,7 +58,7 @@ async function withDoor(env: string[], use: (name: string) => Promise<void>) {
     await Deno.writeTextFile(`${scratch}/${file}`, body);
   }
   try {
-    const run = await docker(["start", await created(["--name", name, "-e", "ELECTRIC_SECRET=test", ...env.flatMap((e) => ["-e", e]), "-p", "127.0.0.1::8080", CADDY, ...door], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], [`${scratch}/srv`, "/srv"], [`${scratch}/omnishell`, "/omnishell"]])]);
+    const run = await docker(["start", await created(["--name", name, "-e", "ELECTRIC_SECRET=test", ...env.flatMap((e) => ["-e", e]), "-p", "127.0.0.1::8080", "-p", "127.0.0.1::8443", CADDY, ...door], [[`${scratch}/Caddyfile`, "/etc/caddy/Caddyfile"], [`${scratch}/srv`, "/srv"], [`${scratch}/omnishell`, "/omnishell"]])]);
     if (!run.ok) fail(run.out);
     await use(name);
   } finally {
@@ -70,6 +70,7 @@ async function withDoor(env: string[], use: (name: string) => Promise<void>) {
 Deno.test({ name: "the door spells the deployment's origin whatever Host it is asked under", sanitizeOps: false, sanitizeResources: false, fn: async () => {
   await withDoor([`ORIGIN=${DEPLOYED}`], async (name) => {
     const port = (await docker(["port", name, "8080"])).out.trim().split("\n")[0].split(":").pop();
+    const tlsPort = (await docker(["port", name, "8443"])).out.trim().split("\n")[0].split(":").pop();
     const up = async () => {
       for (let i = 0; i < 40; i++) {
         if (await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.text().then(() => r.ok), () => false)) return;
@@ -78,6 +79,17 @@ Deno.test({ name: "the door spells the deployment's origin whatever Host it is a
       fail(`the door never answered:\n${(await docker(["logs", name])).out}`);
     };
     await up();
+    const tls = await new Deno.Command("curl", {
+      args: ["-k", "-sS", "-D", "-", "-o", "/dev/null", "--http2", "--resolve", `localhost:${tlsPort}:127.0.0.1`, `https://localhost:${tlsPort}/health`],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    const tlsHeaders = new TextDecoder().decode(tls.stdout);
+    if (!tls.success) fail(`https://localhost:${tlsPort}/health: ${new TextDecoder().decode(tls.stderr)}`);
+    if (!/^HTTP\/2 200\b/m.test(tlsHeaders)) fail(`expected HTTP/2 200 on https://localhost:${tlsPort}/health:\n${tlsHeaders}`);
+    if (!/^alt-svc:\s*h3=":8443";\s*ma=2592000\r?$/im.test(tlsHeaders)) {
+      fail(`expected Alt-Svc: h3=":8443"; ma=2592000 on https://localhost:${tlsPort}/health:\n${tlsHeaders}`);
+    }
     // curl, which sends the Host it is given as written.
     for (const host of HOSTILE) {
       for (const [path, want] of [

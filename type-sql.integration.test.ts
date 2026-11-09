@@ -266,3 +266,51 @@ CREATE PUBLICATION electric_publication_default FOR TABLE public.type_http_smoke
     await Deno.remove(scratch, { recursive: true });
   }
 } });
+
+Deno.test("CEL constraints and seeds execute on PostgreSQL reserved column names", async () => {
+  const { sqlCheck } = await import("./cel-emit.ts");
+  const size = sqlCheck({ expr: { callExpr: { function: "_<=_", args: [
+    { callExpr: { function: "size", target: { identExpr: { name: "this" } } } },
+    { constExpr: { int64Value: "8" } },
+  ] } } }, "column");
+  const member = sqlCheck({ expr: { callExpr: { function: "@in", args: [
+    { identExpr: { name: "this" } },
+    { listExpr: { elements: [{ constExpr: { stringValue: "hit" } }, { constExpr: { stringValue: "visit" } }] } },
+  ] } } }, "on");
+  const presence = sqlCheck({ expr: { callExpr: { function: "_==_", args: [
+    { selectExpr: { operand: { identExpr: { name: "this" } }, field: "column", testOnly: true } },
+    { selectExpr: { operand: { identExpr: { name: "this" } }, field: "on", testOnly: true } },
+  ] } } }, null);
+  const database = `cel-identifiers-${crypto.randomUUID().slice(0, 12)}`;
+  await docker(["run", "--rm", "-d", "--name", database, "-e", "POSTGRES_PASSWORD=fixture", POSTGRES]);
+  try {
+    await eventually(() => docker(["exec", database, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]), () => true);
+    const keywords = JSON.parse(await docker(["exec", database, "psql", "-U", "postgres", "-Atc",
+      "SELECT json_agg(json_build_object('name', word, 'quote', catcode IN ('R', 'T')) ORDER BY word) FROM pg_get_keywords()",
+    ])) as { name: string; quote: boolean }[];
+    const names = [...keywords, { name: "ordinary_name", quote: false }, { name: "CamelCase", quote: true },
+      { name: 'a"b', quote: true }, { name: "two words", quote: true }, { name: "x);SELECT 1;--", quote: true }];
+    const quoted = (name: string) => `"${name.replaceAll('"', '""')}"`;
+    const checks = names.map(({ name, quote }) => {
+      // Preserve ledger bytes for ordinary names while covering PostgreSQL's complete keyword catalog.
+      const check = sqlCheck({ expr: { callExpr: { function: "_>=_", args: [
+        { identExpr: { name: "this" } }, { constExpr: { int64Value: "0" } },
+      ] } } }, name);
+      if (check !== `${quote ? quoted(name) : name} >= 0`) fail(`unexpected SQL identifier: ${name}: ${check}`);
+      return `${quoted(name)} integer CHECK (${check})`;
+    });
+    await docker(["exec", database, "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-c",
+      `CREATE TABLE cel_keyword_checks (${checks.join(",")}); INSERT INTO cel_keyword_checks DEFAULT VALUES;`]);
+    await docker(["exec", database, "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-c", `
+      CREATE TABLE panel (id text PRIMARY KEY, "column" text CHECK (${size}), "on" text CHECK (${member}), CHECK (${presence}));
+      ${seedSql({entities: [{name: "Panel", table: "panel", columns: [{name: "id", type: "string"}, {name: "column", type: "string"}, {name: "on", type: "string"}], rows: [{id: "page", column: "pathname", on: "hit"}]}]}, {})}
+      INSERT INTO panel VALUES ('absent', NULL, NULL);`]);
+    for (const values of ["('bad','too-long-column','hit')", "('bad','path','invalid')", "('bad','path',NULL)"]) {
+      await dockerFails(["exec", database, "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-c", `INSERT INTO panel VALUES ${values}`]);
+    }
+    const count = await docker(["exec", database, "psql", "-U", "postgres", "-Atc", "SELECT count(*) FROM panel"]);
+    if (count.trim() !== "2") fail("refused CEL rows changed the table");
+  } finally {
+    await docker(["rm", "-f", database]);
+  }
+});

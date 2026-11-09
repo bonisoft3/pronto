@@ -1,9 +1,8 @@
 import { assertEquals, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.11";
-import { fixture } from "./testdata/hybrid-fixtures.ts";
+import { fixture } from "./mecha-fixtures.ts";
 import type { MechaReducerMachine } from "./mecha-reducer.ts";
 import { misfit, partsOf, surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
-import { machineFindings } from "./check-hybrids.ts";
-import { run } from "./testdata/hybrid-fixtures.ts";
+import { machineFindings } from "./check-mecha.ts";
 
 const owned = { durability: "live", access: { scope: "private", owner: "actor" } };
 const seat = (name: string, extra: SurfaceEntity["fields"] = []): SurfaceEntity => ({
@@ -68,17 +67,13 @@ Deno.test("every value a projection admits fits the column it fills", () => {
   assertStringIncludes(misfit(col("text", "this.matches('^[a-c]$')"), text(1, ["a", "d"])) ?? "fits", "may be d");
 });
 
-Deno.test("Truco's surfaces fit the projections that fill them", async () => {
-  const exported = await run("cue", ["export", "./apps/truco", "-e", "code.state", "--out", "json"]);
-  if (!exported.ok) throw new Error(exported.err);
-  const state = JSON.parse(exported.out) as { hybrids: Record<string, { reducer: MechaReducerMachine }>; entities: Record<string, SurfaceEntity> };
-  const checked = Object.values(state.entities).flatMap((e) => e.fields).filter((f) => (f as { cel?: string }).cel !== undefined);
-  assertEquals(checked.length > 0, true, "the entities reach the check with their constraints");
-  const hybrids = Object.fromEntries(Object.entries(state.hybrids).map(([n, h]) => [n, h.reducer]));
-  assertEquals(machineFindings(hybrids, state.entities), []);
-  // One variant name longer than its column, and the match is a finding.
-  const seat = Object.values(state.entities).find((e) => e.table === "truco_match_seat")!;
-  (seat.fields.find((f) => f.name === "variant") as { cel?: string }).cel = "this.size() <= 8";
-  assertEquals(machineFindings(hybrids, state.entities), [{ severity: "error", path: "program.cue",
-    message: "truco_match: truco_match_seat.variant admits lengths 0..8, and the value's reach 4..10" }]);
+Deno.test("a machine's surfaces fit the projections that fill them", async () => {
+  const { spec } = await fixture();
+  const machine: MechaReducerMachine = { ...spec, initialize: { reduce: "initial", input: { type: "object", fields: {} } } };
+  const entities = { S: seat(spec.name, [{ name: "turn", type: "text", cel: "this.size() <= 1" }]), C: command(spec.name) };
+  assertEquals(machineFindings({ [spec.name]: machine }, entities), []);
+  // A phase longer than its column, and the match is a finding.
+  (entities.S.fields.find((f) => f.name === "phase") as { cel?: string }).cel = "this.size() <= 7";
+  assertEquals(machineFindings({ [spec.name]: machine }, entities), [{ severity: "error", path: "program.cue",
+    message: `${spec.name}: ${spec.name}_seat.phase admits lengths 0..7, and the value's reach 7..8` }]);
 });

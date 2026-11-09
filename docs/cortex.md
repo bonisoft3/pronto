@@ -1,7 +1,7 @@
 # Cortex machines
 
 `state.cortex` declares `#CortexMachine`s ([[../cortex.cue]]): the app's
-screens over the Mecha machines in `state.hybrids`, and over the races its
+screens over the Mecha machines in `state.mecha`, and over the races its
 screens host. Each state names the screen that hosts it and the child it
 invokes: a fold the terminal runs over a Mecha machine, or a kinetic child. Nothing runs in the browser that the terminal does not record:
 a child's state is rows, its pauses are the terminal's clock, its entropy is
@@ -9,10 +9,28 @@ the terminal's draw, and everything it asks of a Mecha machine is a row it
 writes.
 
 Where this vocabulary is heading — Cortex spanning the tiers, each tier's own
-`#Machine` — is §4 of [[decisions/2026-09-29-hybrid-machines]]. Mecha retains
+`#Machine` — is §4 of [[decisions/2026-09-29-cortex-machines]]. Mecha retains
 the invoked domain charts, authorization, locking, writes, private views,
-receipts and deadlines. Cortex introduces no transaction coordinator, worker,
-pipeline or ledger.
+receipts and deadlines. The browser composition introduces no transaction coordinator, worker,
+pipeline or ledger. Server-side durable work is described below.
+
+## Machine vocabulary
+
+Mecha machines own domain transitions and transactional effects. Omnishell
+machines own UI-region transitions. Cortex machines coordinate those hosts and
+kinetic actors, whose engines run continuous simulations. Running a Mecha
+reducer in the browser does not make it a different kind of machine.
+
+`state.mecha.reducers` holds bounded reducers declared with `machine` and
+`rules`; `state.mecha.rows` holds transactional row machines bound by `entity`.
+These remain distinct execution bindings; Cortex composition uses their
+existing sources and sinks. Persisted SQL naming is covered by
+[libraries/mecha/docs/machines#Bounded reducer machines](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/machines.md#bounded-reducer-machines).
+
+An app's tests step a compiled machine through omnishell's test harness
+(`test/mecha-local.ts`) and walk it with `test/mecha-battery.ts`, from the
+step pronto emitted in `.pronto/mecha-reducers.json`; neither introduces a
+separate machine kind or authoring grammar.
 
 ## The parent
 
@@ -30,9 +48,15 @@ the terminal's navigation; nested states track multi-machine coordination.
 machine without a lease, a sync child over a machine without a join, and a sync
 child whose screen's route does not carry its `instance`.
 
+A signal names where a Mecha machine went: `signal:<table>.<state>` is a state
+of the machine on that table's entity, and `#App` refuses one naming no such
+state, an arrow nothing would ever fire. `.pronto/check-inputs.json` carries
+each chart and the machines, so a test can replay a machine's paths as the
+signals they send and hold the chart to hearing each one.
+
 ## Affordances, Commands, and Intents
 
-To prevent overlap with [Omnishell machines](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/machines.md#omnishell-machines),
+To prevent overlap with [Omnishell machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md#omnishell-machines),
 Cortex does not listen to raw DOM gestures (`click@<id>`, keyboard events).
 Local UI widget concerns — modal visibility, selected tab, input field values,
 and hover states — remain strictly in **Omnishell `#Machine`** on `tab` rows (Level ≤ 2).
@@ -127,7 +151,7 @@ replays like any other screen:
 
 - its state is a row the module writes, at the durability the app declares;
 - a pause is a `then` delay on the terminal's clock;
-- entropy is the terminal's draw (`then: {seed: true}`), recorded on a row and
+- entropy is the terminal's draw (`then: {seed: true}` or `{uuid: true}`), recorded on a row and
   expanded purely — never ambient randomness or the wall clock, which the cage
   refuses anyway;
 - a gesture writes an intent row, and the fold the app seats with
@@ -150,7 +174,7 @@ or presenter is undeclared, and one whose screen carries no
 own reduce, named by the mount's region: it hears each lifted milestone and
 menu press as an event and answers in rows, and the row's columns are the
 mount's props, so the race is the row's to start, hold and hand to the menu
-([the kinetic child](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/kinetic.md#the-kinetic-child)). With
+([the kinetic child](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/kinetic.md#the-kinetic-child)). With
 `mode: online` the row races one seat of a GGRS session whose two session
 descriptions a Mecha machine's rows carry, and its milestones go back to that
 machine as commands, which Apex Run's lobby fold sends to `apexrun_duel`. Why
@@ -160,13 +184,13 @@ Run's run machine (`shell/handlers/run.js`) is the instance.
 
 ## Evidence
 
-Truco's root machine is its own `machines/root.cue`. `test:hybrid` covers the
+Truco's root machine is its own `machines/root.cue`. `test:mecha` covers the
 reducer's commands, races, receipts, timers and Airlock claim on the surface
-rows, and the surface check's refusals. `test:truco-online` runs Truco's
-machines through their surface in PostgreSQL under the generated policies —
-leases, challenges, admissions, seat races, team matches, the ticker's
-timeouts — and two readers completing a match through PostgREST as the store
-writes it.
+rows, and the surface check's refusals. Truco's `tests/online.integration.test.ts`
+runs its machines through their surface in PostgreSQL under the generated
+policies — leases, challenges, admissions, seat races, team matches, the
+ticker's timeouts — and two readers completing a match through PostgREST as
+the store writes it.
 
 The interactive graph is verified by walking the composition:
 - **The walk** (`test/walker.ts`, extending Omnishell's Chinese Postman tour):
@@ -181,3 +205,86 @@ The interactive graph is verified by walking the composition:
 Mounting does not establish browser layout, Electric delivery or full-shell
 acceptance; these are executable safety checks, not an unbounded proof of
 liveness.
+
+## Transactional sources
+
+A chart with `config.meta.host: "mecha"` owns the state field of a server
+entity. Its `meta` names the entity, field, source function, migration, and
+watched entities. Root invocations name `via: "query"` actors whose SQL returns
+`key`, `event`, and `payload`; `event` must match the actor's declared event.
+The compiler rejects unsupported chart constructs and uninvoked sources.
+
+Source reconciliation runs in the database transaction. It dispatches facts
+through the row trigger and repeats when effects change watched data, with a
+finite bound for cycles. The private `cortex_runtime` tables hold only
+transaction-scoped dispatch and drain state. The request-entry gate acquires a
+shared advisory lock before writes take row or incremental-view locks. Direct
+SQL writers can receive a serialization failure and must retry the transaction.
+
+Named guards contain SQL; named actions lower to Mecha actions. External-effect
+outcomes may use ordered guarded branches with an unguarded fallback. The
+ledger's recorded outcome determines which branches are eligible, including
+when success and failure share a target.
+
+## Hosted composition and observations
+
+`#CortexComposition` projects one root definition into independently hosted
+charts. A `via: "mecha", lifetime: "row"` actor contains a backend chart;
+leaving its browser attachment does not destroy its durable instance. A
+`via: "rows", lifetime: "attachment"` actor names a screen and its row-chart
+families, mounted through `data-cortex-family`. A `via: "navigation"` actor
+resolves and activates the destination. Failed activation restores the last
+committed chart snapshot and its row attachments.
+
+An `observe` actor subscribes to a table while its owning invocation is active.
+`match` maps source keys to fields of the observing row; `require` lists other
+row fields that must be present before attachment. A `machine` reference resolves
+the observed backend chart's table and state field through composition. Pass only
+the entity table mappings these references need, avoiding a dependency on the
+whole derived entity graph.
+
+With `field` and `event`, observations emit the event prefix followed by the
+observed string, also available as `event.value`. `suffix: false` instead emits
+that exact event name with the same value. This supports identifiers and other
+open-ended values without requiring wildcard transitions:
+
+```cue
+{via: "observe", table: "job", field: "revision",
+ match: id: "job_id", event: "revision-observed", suffix: false}
+```
+
+`missing` names the event for confirmed absence; an unconfirmed local cache miss
+is not deletion. Delivery rechecks attachment identity, discards stale reads and
+acknowledges accepted snapshots. Fixed event names retain those same guarantees.
+These bindings are source configuration; the machine remains XState grammar.
+
+## Durable work
+
+`#CortexDurable` and `compileCortexDurable` compose server-only bounded Mecha
+machines with [Durex durable execution](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/durex/docs/index.md). The same reducer compiler checks shapes,
+guards, invariants and fuel, and emits a private PostgreSQL dispatcher. No
+browser admission or command ports are emitted. A stable invoking state names a
+task, immutable key/input expressions, completion events, release time and retry
+budget. Entering it claims a fresh Durex invocation key and enqueues Graphile work
+in the machine transition's transaction. Self-state events may update state but
+cannot change the active invocation identity.
+
+Only an outcome recorded for that task, key and instance authorizes its
+completion event. Durex records the outcome and delivers the event inside the
+caller's transaction, so internal PostgreSQL publication, machine completion and
+the receipt can commit together. Duplicate settlement returns the recorded
+outcome; a different outcome, a forged event or reuse of an old invocation key
+fails. Worker restart releases only pools registered to that worker owner;
+committed receipts dispose of jobs left behind before Graphile acknowledgment.
+Unsettled exhausted work fails visibly.
+
+Durex owns the private `durex` invocation and worker schema. Airlock owns external
+integration, with its separate effect ledger, restricted transport and
+reconciliation contract. Graphile supplies delivery and retry; the machine
+owns lifecycle decisions. Batch dependencies and retained input relations remain
+explicit SQL operations, while DuckDB and numerical workers implement the task.
+
+The first consumer is [[../compute/docs/index|the compute coordinator]]. Its
+compiled SQL ships with Mecha; Pronto is a build-time dependency, not a runtime
+import. Compiler and real-PostgreSQL tests cover atomic entry, outcome authority,
+publication rollback, duplicate settlement and invocation identity.

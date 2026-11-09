@@ -1,0 +1,16 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:@activepieces/piece-http@0.13.0": "0.13.0"
+  },
+  "npm": {
+    "@activepieces/piece-http@0.13.0": {
+      "integrity": "sha512-sHcz4Jrxg4Z93/GYcESN99B5TF6TmKapxLcHEvrTP3Lld6Rq6uDr+JcpnwZWT8eb/OhG9sfQ2JBetlxOM3fdQw=="
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "npm:ajv@8.20.0"
+    ]
+  }
+}

@@ -121,6 +121,23 @@ import (
 		command: *["/migrate.sh", "/pgroll", "00_initdb"] | [...string]
 	}
 
+	// Present where the app's compose project builds the SSR render sidecar.
+	render: {
+		enabled: *false | bool
+	}
+
+	// Present where the app's compose project declares external effects (airlock)
+	// and optional tiered AI routing through tsbifrost (proxying to Gemini / Imagen
+	// on GCP via GEMINI_API_KEY in Secret Manager).
+	airlock: {
+		enabled:  *false | bool
+		tsbifrost:  *false | bool
+		aiModels: *"" | string
+		// Provider API keys (e.g. GEMINI_API_KEY) mounted into tsbifrost/airlock
+		// from Secret Manager, keyed by environment variable name.
+		secrets: *{} | {[=~"^[A-Z][A-Z0-9_]*$"]: string}
+	}
+
 	// The roles the app's schema grants PostgREST's login, as generate wrote them
 	// (.pronto/cluster.json, the k8s release's source too): what the job grants
 	// Cloud SQL's postgres SET on, since which of them exist is the program's.
@@ -224,6 +241,9 @@ import (
 		"auth:9999":      "127.0.0.1:\(#Ports.auth)"
 		"electric:3000":  "127.0.0.1:\(#Ports.electric)"
 		"ticker:9998":    "127.0.0.1:\(#Ports.ticker)"
+		"render:8090":    "127.0.0.1:\(#Ports.render)"
+		"tsbifrost:8090":   "127.0.0.1:\(#Ports.tsbifrost)"
+		"airlock:9997":   "127.0.0.1:\(#Ports.airlock)"
 		"database:5432":  "127.0.0.1:\(#Ports.database)"
 		"rclone-s3:3900": "127.0.0.1:\(#Ports.rcloneS3)"
 		"imgproxy:8080":  "127.0.0.1:\(#Ports.imgproxy)"
@@ -326,9 +346,9 @@ import (
 	}
 }
 
-// Ports inside the shared instance: compose's own, but for electric, whose 3000
-// is crud's.
-#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, ticker: 9998, database: 5432, proxyHealth: 9090, rcloneS3: 3900, imgproxy: 8081}
+// Ports inside the shared instance: compose's own, except electric (whose 3000
+// is crud's) and render (8091, so tsbifrost keeps 8090).
+#Ports: {caddy: 8080, crud: 3000, crudAdmin: 3001, auth: 9999, electric: 3002, render: 8091, ticker: 9998, tsbifrost: 8090, airlock: 9997, database: 5432, proxyHealth: 9090, rcloneS3: 3900, imgproxy: 8081}
 
 // The smallest tier admits about 25 connections, fewer than the pools'
 // defaults together; the instance is raised to 50 and the pools capped.
@@ -370,6 +390,7 @@ import (
 	}
 	let sq = R.names.secrets
 	let bounds = resilience.resilience.timeouts
+	let meshPort = [if R.airlock.tsbifrost {P.tsbifrost}, 3500][0]
 
 	service: {
 		apiVersion: "serving.knative.dev/v1"
@@ -406,8 +427,10 @@ import (
 				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
 				if R.alwaysOn || R.minScale > 0 || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
-					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}], [for n, c in R._inside if c.probe != _|_ {n}]])
+					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.render.enabled {"render"}], [if R.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}], [for n, c in R._inside if c.probe != _|_ {n}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
+					if R.render.enabled {render: ["crud", "auth", "electric"]}
+					if R.airlock.enabled {airlock: list.Concat([["cloud-sql-proxy"], [if R.airlock.tsbifrost {"tsbifrost"}]])}
 					if R.blobs != _|_ {imgproxy: ["rclone-s3"]}
 					if len(R._scraped) > 0 {"gmp-collector": R._scraped}
 					crud: ["cloud-sql-proxy"]
@@ -435,6 +458,7 @@ import (
 						{name: "PRONTO_UPSTREAM_CRUD", value: "127.0.0.1:\(P.crud)"},
 						{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
 						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
+						if R.render.enabled {{name: "PRONTO_UPSTREAM_RENDER", value: "127.0.0.1:\(P.render)"}},
 						if R.ticker != _|_ {{name: "PRONTO_UPSTREAM_TICKER", value: "127.0.0.1:\(P.ticker)"}},
 						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_RCLONE_S3", value: "127.0.0.1:\(P.rcloneS3)"}},
 						if R.blobs != _|_ {{name: "PRONTO_UPSTREAM_IMGPROXY", value: "127.0.0.1:\(P.imgproxy)"}},
@@ -498,14 +522,61 @@ import (
 					startupProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 2, failureThreshold: 90}
 					// One of several replicas that hangs is restarted; the only one is not, as before.
 					if R._replicas > 1 {livenessProbe: {httpGet: {path: "/v1/health", port: P.electric}, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6}}
-				}, if R.ticker != _|_ {
+				}], [
+					if R.render.enabled {{
+						name:  "render"
+						image: (imageOf & {svc: "render"}).out
+						env: [
+							{name: "DOOR", value: "http://127.0.0.1:\(P.caddy)"},
+							{name: "DOOR_TIMEOUT_MS", value: "\(bounds.renderDoor*1000)"},
+							{name: "ENTRY", value: "/render/entry.html"},
+							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
+							{name: "PORT", value: "\(P.render)"},
+						]
+						startupProbe: {httpGet: {path: "/health", port: P.render}, periodSeconds: 2, failureThreshold: 60}
+					}},
+					if R.airlock.enabled && R.airlock.tsbifrost {{
+						name:  "tsbifrost"
+						image: (imageOf & {svc: "tsbifrost"}).out
+						env: list.Concat([[
+							{name: "TSBIFROST_PORT", value: "\(P.tsbifrost)"},
+							{name: "AI_TARGET", value: "gcp"},
+							if R.airlock.aiModels != "" {{name: "AI_MODELS", value: R.airlock.aiModels}},
+						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
+						startupProbe: {httpGet: {path: "/healthz", port: P.tsbifrost}, periodSeconds: 2, failureThreshold: 60}
+					}},
+					if R.airlock.enabled {{
+						name:  "airlock"
+						image: (imageOf & {svc: "airlock"}).out
+						args: [
+							"run",
+							"--frozen",
+							"--unstable-worker-options",
+							"--allow-net=127.0.0.1:\(P.database),127.0.0.1:\(meshPort),0.0.0.0:\(P.airlock)",
+							"--allow-read",
+							"--allow-env",
+							"--allow-sys",
+							"main.ts",
+						]
+						env: list.Concat([[
+							(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
+							{name: "MESH_URL", value: "http://127.0.0.1:\(meshPort)"},
+							{name: "AIRLOCK_DIR", value: "/airlock"},
+							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
+						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
+						startupProbe: {tcpSocket: port: P.airlock, periodSeconds: 2, failureThreshold: 60}
+					}},
+				], [if R.ticker != _|_ {
 					name: "ticker"
 					image: (imageOf & {svc: "ticker"}).out
 					env: list.Concat([[
 						{name: "CRUD_URL", value: "http://127.0.0.1:\(P.crud)"},
 						{name: "PORT", value: "\(P.ticker)"},
 						(secretOf & {env: "SERVICE_JWT", secret: sq.SERVICE_JWT}).out,
-					], [for k, v in R.ticker.env {name: k, value: v}]])
+						], [for k, v in R.ticker.env {
+							name: k
+							value: [if k == "WAKE_URLS" {strings.Replace(v, "airlock:9997", R._loopback["airlock:9997"], -1)}, v][0]
+						} ]])
 					startupProbe: {tcpSocket: port: P.ticker, periodSeconds: 2, failureThreshold: 60}
 					resources: limits: cpu: "250m"
 				}, if R.blobs != _|_ {
@@ -698,11 +769,12 @@ import (
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
 							  # entity's table and a new field's column, every policy, trigger and
-							  # publication, the status charts' triggers (010_machines), the hybrid machines' code, and the app's own
+							  # publication, the status charts' triggers (010_machines), the mecha machines' code (found by its
+							  # suffix, wherever the program places it), and the app's own
 							  # migrations, each idempotent, run again, keeping every row. Live traffic
 							  # can deadlock a step's ALTER (a lease's renewal against ENABLE ROW LEVEL
 							  # SECURITY); being idempotent, the step is run again, up to three times.
-							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql \(strings.Join(R.database.replays, " ")); do
+							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(R.database.replays, " ")); do
 							    f=/docker-entrypoint-initdb.d/$step
 							    if [ -f "$f" ]; then echo "initdb: replaying $step"
 							      for try in 1 2 3; do
@@ -827,7 +899,7 @@ import (
 			schedule: "* * * * *"
 			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
 		}}
-		oidcSecretKeys: [for _, v in R.auth.oidcSecrets {v}]
+		oidcSecretKeys: list.Concat([[for _, v in R.auth.oidcSecrets {v}], [for _, v in R.airlock.secrets {v}]])
 		// The sidecars' own secrets, which the release finds made before it starts.
 		sidecarSecretKeys: list.SortStrings([for s, _ in {for _, c in R.sidecars for _, v in c.secrets {(v): true}} {s}])
 		// The secrets its account reads, each granted on the secret alone.

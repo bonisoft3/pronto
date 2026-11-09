@@ -9,6 +9,8 @@ import { createShell } from 'omnishell/shell.js'
 // @ts-ignore untyped interpreter module
 import { ensureSes } from 'omnishell/jessie.js'
 import { installSes } from 'pronto-bundle-ses'
+// @ts-ignore written by the bundler beside the page: the app's host-DOM hatches, compiled in
+import { hostDomModules } from 'pronto-bundle-hatches'
 // The data plane, which every first screen reads through: the shell imports it
 // when it starts, and imported here it rides in this module instead of a chunk
 // fetched after it.
@@ -60,11 +62,24 @@ export function startPage(bootCluster?: () => Promise<Handle>) {
     return origFetch(input as RequestInfo, init)
   }
 
+  // An agent unit is a worker the shell starts from a served file: it runs from
+  // a Blob of the payload's text, as the shim cannot answer a worker's fetch.
+  const OrigWorker = globalThis.Worker
+  if (typeof OrigWorker === 'function') {
+    globalThis.Worker = class BundledWorker extends OrigWorker {
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        const url = new URL(String(scriptURL), location.href)
+        const text = url.origin === location.origin ? served.get(url.pathname) : undefined
+        super(text !== undefined ? URL.createObjectURL(new Blob([text], { type: 'text/javascript' })) : scriptURL, options)
+      }
+    }
+  }
+
   ;(async () => {
     if (bootCluster) handle = await bootCluster()
     // The shim answers every file a preload would ask the network for.
     await ensureSes(installSes)
-    createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false })
+    createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false, hostDomModules })
   })().catch((e) => {
     document.body.textContent = `boot failed: ${e instanceof Error ? e.message : String(e)}`
     throw e

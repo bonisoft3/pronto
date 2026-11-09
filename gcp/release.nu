@@ -1,10 +1,5 @@
-# release.nu: release@gcp, an app on Cloud Run beside Cloud SQL, with gcloud
-# alone (docs/release-targets.md#gcp).
-#
-# The app's release.cue defines `GCP: schema.#Release & {...}` and
-# `gcpRelease: schema.#Build & {release: GCP}` (gcp/schema). Each resource is
-# described before it is made, so a release runs again unchanged: the same
-# images push the same digests and roll nothing, and initdb finds its marker.
+# GCP releases use the native Kubernetes stack when GKE is declared;
+# otherwise they run Cloud Run beside Cloud SQL.
 
 use ../k8s/release.nu [resolve-app]
 use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers run-rehearsal plan-of]
@@ -12,12 +7,17 @@ use build.nu [builder stamp key-tag gc exists build-account push-images service-
 use local-gate-key.nu
 use release-record.nu
 use secrets.nu [check-secrets]
+# A release.cue that gives GKE is released to that cluster by k8s/release.nu.
+use ../k8s/release.nu
+alias release-gke = release
 
-# The services this target runs; anything else in the app's compose project
-# needs what it does not build yet (PENDING.md#release-targets).
+# Cloud Run has no durable filesystem for the native pipeline services.
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
 # compose's clock is not one of them: Cloud Scheduler is the ticker's clock here.
-const unbuilt = ["mesh-events" "conduit" "transform" "airlock" "compute" "render"]
+# The renderer, the airlock and tsbifrost are built when the app does not name them in
+# GCP.sidecars (then they run as those sidecars, as before): `render` becomes a container of the
+# service, `airlock` too, with `tsbifrost` its AI gateway.
+const unbuilt = ["feldera" "redis" "mesh-events" "conduit" "transform" "compute"]
 
 def render [cue_path: string, data?: string]: nothing -> record {
 	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
@@ -512,7 +512,7 @@ def base-of [app_info: record, preview: string]: nothing -> record {
 # The images a release builds or copies: the runtime's, the cluster's migrate step, the ticker, the
 # blob plane, and the app's own sidecars (GCP.sidecars).
 def images-of [services: list<string>, plan0: record]: nothing -> list<string> {
-	$runtime | append (if "migrate" in $services { ["migrate" "schema"] } else { [] }) | append (if "ticker" in $services { ["ticker"] } else { [] }) | append (if "rclone-s3" in $services { ["rclone-s3" "imgproxy"] } else { [] }) | append $plan0.sidecars
+	$runtime | append (if "migrate" in $services { ["migrate" "schema"] } else { [] }) | append (if "ticker" in $services { ["ticker"] } else { [] }) | append (if "rclone-s3" in $services { ["rclone-s3" "imgproxy"] } else { [] }) | append (["render" "airlock" "tsbifrost"] | where {|s| $s in $services and $s not-in $plan0.sidecars }) | append $plan0.sidecars | uniq
 }
 
 # The service's yaml as it is applied, carrying the hash of the job it was released with (job-hash),
@@ -567,6 +567,17 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 	let has_migrate = ("migrate" in $services)
 	let has_ticker = ("ticker" in $services)
 	let has_blobs = ("rclone-s3" in $services)
+	let has_render = ("render" in $services and "render" not-in $plan0.sidecars)
+	let has_airlock = ("airlock" in $services and "airlock" not-in $plan0.sidecars)
+	let has_tsbifrost = ("tsbifrost" in $services and "tsbifrost" not-in $plan0.sidecars)
+	# Cloud Run's airlock has no daprd: its mesh address is the AI gateway, so an effect reaching anything else would reach that.
+	if $has_airlock {
+		let mesh = ($compose.services."airlock-mesh"?.environment? | default {})
+		let elsewhere = (($mesh.AIRLOCK_ORIGINS? | default "" | split row " " | where {|o| $o != "" }) ++ ($mesh.AIRLOCK_BRIDGES? | default "" | split row " " | where {|b| $b != "" and $b != "tsbifrost" }))
+		if ($elsewhere | is-not-empty) {
+			error make {msg: $"release@gcp runs AI effects alone: this app's effects also reach ($elsewhere | str join ', ')"}
+		}
+	}
 	# The providers compose gives the auth service, under what release.cue sets.
 	let auth_env = $compose.services.auth.environment
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
@@ -576,6 +587,8 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 	let number = (gc projects describe $plan0.project --format "value(projectNumber)" | str trim)
 	let data_file = (mktemp -t gcp.XXXXXX.json | str trim)
 	let migrate = if $has_migrate { {migrate: {env: ($compose.services.migrate.environment? | default {} | reject -o DATABASE_URL)}} } else { {} }
+	let render_cfg = if $has_render { {render: {enabled: true}} } else { {} }
+	let airlock_cfg = if $has_airlock { {airlock: {enabled: true, tsbifrost: $has_tsbifrost, aiModels: ($compose.services.tsbifrost?.environment?.AI_MODELS? | default "")}} } else { {} }
 	let ticker = if $has_ticker { {ticker: {env: ($compose.services.ticker.environment? | default {} | reject -o CRUD_URL SERVICE_JWT PORT)}} } else { {} }
 	let blobs = if $has_blobs { {blobs: {}} } else { {} }
 	# Each sidecar's compose environment, its peers where it finds them: at their
@@ -592,7 +605,7 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 		$acc | insert $n {env: $compose_env}
 	})
 	let sidecar_env = if ($sidecars | is-empty) { {} } else { {sidecars: $sidecars} }
-	{GCP: ({image: {pushed: ($pushed | items {|svc, ref| {k: $svc, v: ($ref | reject -o key)} } | reduce -f {} {|i, acc| $acc | insert $i.k $i.v })}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default ""), android: ($auth_env.WEBAUTHN_ANDROID_ORIGINS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
+	{GCP: ({image: {pushed: ($pushed | items {|svc, ref| {k: $svc, v: ($ref | reject -o key)} } | reduce -f {} {|i, acc| $acc | insert $i.k $i.v })}, auth: {oidc: $oidc, env: $auth_own, programProviders: ($auth_env.OIDC_PROVIDERS? | default ""), android: ($auth_env.WEBAUTHN_ANDROID_ORIGINS? | default "")}, runHost: $run_host} | merge $migrate | merge $ticker | merge $blobs | merge $render_cfg | merge $airlock_cfg | merge $sidecar_env | merge ($base.GCP? | default {}))} | to json | save -f $data_file
 	let plan = (render $app_info.cue_path $data_file)
 	rm $data_file
 	{plan: $plan, number: $number}
@@ -1106,6 +1119,17 @@ export def main [
 	let dry_run = ($dry_run or (do $given DRY_RUN))
 	let snapshot = ($snapshot or (do $given SNAPSHOT))
 	let no_gate = ($no_gate or (do $given NO_GATE))
+	let gke = (do { ^cue export --expression GKE --out json $app_info.cue_path } | complete)
+	if $gke.exit_code != 0 and not ($gke.stderr | str contains 'reference "GKE" not found') {
+		error make {msg: $"($app_info.cue_path): ($gke.stderr)"}
+	}
+	if $gke.exit_code == 0 {
+		if $delete or ($preview | is-not-empty) {
+			error make {msg: "GKE releases do not support Cloud Run preview lifecycle flags"}
+		}
+		release-gke --app $app_info.dir --cluster-env gke --snapshot=$snapshot --dry-run=$dry_run
+		return
+	}
 	let rollback = ($rollback or (do $given ROLLBACK))
 	let force_rc = ($rc or (do $given RC))
 	let no_local_gate = ($no_local_gate or (do $given NO_LOCAL_GATE) or (($env.PRONTO_RELEASE_NO_LOCAL_GATE? | default "") not-in ["" "0" "false"]))

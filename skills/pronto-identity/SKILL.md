@@ -50,11 +50,11 @@ verbs are green:
 
    `signin: broker: "https://id.example.com"` names an operator's broker
    elsewhere than the default; the app then runs no local broker.
-2. Add a decision for the sign-in to `ir.html`, then re-pin `meta.ir.sha256`.
+2. Add a decision for the sign-in to `ir.html` (and `code.decisions` in CUE); `saytw generate` re-pins `meta.ir.sha256` automatically.
 3. The terminal's strip offers each provider to a guest. An app that hides the
    strip presses its `.shell-provider[data-provider=<name>]` link from its own
    bar, as it presses the passkey.
-4. `./saytw generate && ./saytw lint && ./saytw test && ./saytw integrate`.
+4. `mise x -- ./saytw generate && mise x -- ./saytw lint && mise x -- ./saytw test && mise x -- ./saytw integrate`.
 
 The broker's pins move with pronto's version: nothing to refresh.
 

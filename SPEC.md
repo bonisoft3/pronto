@@ -14,8 +14,8 @@ Scope: all three artifacts of the review ladder.
 An app directory holds `brief.md` → `ir.html` → `program.cue`, per the
 review ladder in [`README.md`](README.md). This spec defines the first two,
 plus their satellites: `acceptance.md` (transcluded checklist), `DESIGN.md`
-(visual identity), `brief.html` (presentation), and agent cards under
-`plugins/pronto/agents/`.
+(visual identity), `journal.html` and `journal/` (the turn log), and agent
+cards under `plugins/pronto/agents/`.
 
 ### DESIGN.md
 
@@ -33,22 +33,44 @@ verdicts, and what each token means — in prose.
 
 ## brief.md
 
-The product-altitude source: a plain markdown file. The compiler reads
-brief.md; every other rendering of it is presentation.
+The product-altitude source: a plain markdown file saying what the app is
+today and what the next sprint's turns deliver, in the product's words. The
+compiler reads brief.md; every other rendering of it is presentation. People
+edit it at any time; the sprint wrap rewrites it; a turn never does. The
+journal carries no requirements: a new requirement is an edit here.
 
-### brief.html: the presentation layer
+`brief.html` is that presentation: a fixed page the compiler emits beside
+`journal.html` and the cluster serves at `/docs/brief.html` with brief.md
+itself. It fetches brief.md and renders it in the browser (frontmatter
+dropped, `![[path.md]]` inlined from a sibling served file, `[[Id]]` linked to
+`ir.html#Id`, the first heading as title) with marked from a pinned CDN URL
+under Subresource Integrity, the admission ir.html's mermaid has. The ladder's
+pages answer with a Content-Security-Policy of their own, not the terminal's.
+An edit goes to brief.md and is current on reload.
 
-A sibling HTML shell that renders brief.md in any browser. It carries no
-content of its own — the source of truth is always brief.md:
+### journal.html and journal/: the turn log
 
-- Shell JS comes from CDN `<script>` tags pinned to exact versions with SRI
-  `integrity` hashes (markdown-it, markdown-it-attrs, js-yaml). Pronto-specific
-  semantics (the link taxonomy) are inline — they are ours, not a library's.
-- Editing is a source pane: a textarea over brief.md with live re-render.
-  Save writes brief.md back (File System Access API, download fallback).
-- Transclusions resolve by `fetch`, so they inline when served over HTTP and
-  degrade to a boxed link on `file://`. The compiler always sees the full
-  composition; only raw-file viewing degrades.
+`journal.html` is the app's rich HTML log, served at `/docs/journal.html`
+beside `ir.html`. Turns author it; people and models read it for what
+happened, never as state to resume a turn:
+
+- **Product-centric `<header>`:** `<header>` always opens with a
+  product-centric `<h1>` title (naming the product and what it does for people,
+  never an internal turn or mechanism headline) followed by one paragraph
+  saying what the product is, so a reader knows the product before scanning
+  the log.
+- **Most recent first:** Below `<header>`, `<article>` entries appear in reverse
+  chronological order (newest at the top), recording both product and technical
+  achievements.
+- **Dated composition (`journal/`):** Each turn prepends an `<article>` entry
+  showing what changed (before/after screenshots, recordings, diagrams, or gate
+  output) and what the product and engineering achieved. Compose larger entries
+  and assets from `journal/` using dated filenames (`journal/YYYY-MM-DD-<slug>.html`,
+  `journal/YYYY-MM-DD-<slug>.png`), which the cluster serves automatically under
+  `/docs/journal/`.
+- **Collection, once a sprint:** The sprint wrap deletes superseded entries and
+  their `journal/` files from `HEAD`. Git holds the full history; `HEAD` keeps
+  the subset worth a reader's time. A turn does not collect on its own.
 
 ### Format
 
@@ -156,7 +178,11 @@ are different compiles.
 ## ir.html
 
 Engineering-altitude design doc, plain HTML, pinned per compile. Renders with
-no JS except mermaid (pinned CDN + SRI) and an inline CEL highlighter.
+no JS except mermaid (pinned CDN + SRI) and an inline CEL highlighter. Large IRs
+may split sections across `ir/*.html` fragments and include them from `ir.html`
+via `<link rel="import" href="ir/...">` or `![[ir/...]]`; the compiler composes
+them, renders cards and neighbourhoods into each fragment in place, and hashes
+every fragment alongside `ir.html`.
 
 ### ir.md: the same document as Markdown
 
@@ -409,7 +435,7 @@ A mecha machine declares either a statechart (`states`) or lifecycle handlers
 (`on.insert`, `on.update`, `on.delete`). Combining them is refused; separate
 machines over the same entity keep both triggers explicit in SQL and in the IR.
 
-**Lifecycle guards own predicate validation.** `state.machines.<name>.guards`
+**Lifecycle guards own predicate validation.** `state.mecha.rows.<name>.guards`
 contains named Jessie predicates (`src`, `via`, `note`). Each `on.insert`,
 `on.update` or `on.delete` transition names `guard` (one name or an ordered
 list) and optional `actions`; an action or list alone is the action-only
@@ -451,7 +477,8 @@ advance a later visit to the same state. Duplicate tick IDs are absorbed.
 Primary keys cross the ticker as text, preserving large integers and composite
 keys. Client roles cannot read or write the schedule or tick tables. Timed
 machines require a server-held entity and a primary key; final states have no
-`after`. They require a declared cloud clock and cannot target Pages.
+`after`. Every target but Cloudflare, whose object keeps its own alarm, names
+its clock in `meta.clocks`; a page's sweeps only while the page is open.
 
 `010_machines.sql` installs the timer tables and interpreters before seeds.
 Retained databases must apply the generated SQL through their migration path;
@@ -477,7 +504,7 @@ still tells markup lint that a pending row may await a database default. A
 singleton machine region without `data-empty-row` requires a
 filter pinning `id`; it binds those defaults, then the filter's equalities,
 then its `field: initial`. An explicit `data-empty-row` remains the whole
-row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.20.3/docs/machines.md) states
+row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md) states
 the row and effect grammar.
 
 **Screen markup carries no executable code.** The markup check and terminal

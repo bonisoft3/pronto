@@ -4,6 +4,7 @@ import { exists } from "./missing.ts";
 export async function projectSay(
   appDir: string,
   programSay: unknown,
+  env?: Record<string, string>,
 ): Promise<unknown> {
   if (!(await exists(`${appDir}/pronto/config.cue`))) return programSay;
   const child = new Deno.Command("cue", {
@@ -18,6 +19,7 @@ export async function projectSay(
       "json",
     ],
     cwd: appDir,
+    ...(env ? { env } : {}),
     stdin: "piped",
     stdout: "piped",
     stderr: "inherit",
@@ -58,12 +60,23 @@ export function projectGates(
         ...options
       } = settings as Record<string, unknown>;
       const gate = gates[name] as { rulemap: Record<string, unknown> };
+      if (!gate.rulemap.builtin) {
+        return [name, {
+          ...options,
+          ...gate,
+          rulemap: { ...(rulemap ?? {}) as Record<string, unknown>, ...gate.rulemap },
+        }];
+      }
+      const gatedPlatforms = new Set(
+        Object.values(gate.rulemap as Record<string, { platform?: string } | null>)
+          .flatMap((rule) => rule?.platform ? [rule.platform] : []),
+      );
       const platforms = [
         ...new Set(
           Object.values(
             (rulemap ?? {}) as Record<string, { platform?: string } | null>,
           )
-            .flatMap((rule) => rule?.platform ? [rule.platform] : []),
+            .flatMap((rule) => rule?.platform && !gatedPlatforms.has(rule.platform) ? [rule.platform] : []),
         ),
       ];
       const dispatch = Object.fromEntries(platforms.map((platform, index) => [

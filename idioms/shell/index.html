@@ -17,6 +17,11 @@
 
 <link rel="preload" href="./shell.json" as="fetch" crossorigin>
 <link rel="modulepreload" href="/omnishell/interpreter/shell.js">
+<link rel="modulepreload" href="/omnishell/interpreter/cortex-navigation.js">
+<link rel="modulepreload" href="/omnishell/interpreter/row-attachments.js">
+<link rel="modulepreload" href="/omnishell/interpreter/machine-engine.js">
+<link rel="modulepreload" href="/omnishell/interpreter/observe-actor.js">
+<link rel="modulepreload" href="/omnishell/interpreter/invoked-actors.js">
 <link rel="modulepreload" href="/omnishell/interpreter/chrome.js">
 <link rel="modulepreload" href="/omnishell/interpreter/screen.js">
 <link rel="modulepreload" href="/omnishell/interpreter/fragment.js">
@@ -24,6 +29,9 @@
 <link rel="modulepreload" href="/omnishell/interpreter/validate.js">
 <link rel="modulepreload" href="/omnishell/interpreter/render.js">
 <link rel="modulepreload" href="/omnishell/interpreter/release-plan.js">
+<link rel="modulepreload" href="/omnishell/interpreter/early-gestures.js">
+<link rel="modulepreload" href="/omnishell/interpreter/early-replay.js">
+<link rel="modulepreload" href="/omnishell/interpreter/nav-feedback.js">
 <link rel="modulepreload" href="/omnishell/interpreter/preloads.js">
 <link rel="modulepreload" href="/omnishell/interpreter/link-prefetch.js">
 <link rel="modulepreload" href="/omnishell/interpreter/markup.js">
@@ -34,28 +42,10 @@
 <link rel="modulepreload" href="/omnishell/interpreter/hatch-presenter.js">
 <link rel="modulepreload" href="/omnishell/interpreter/presenter-realm.js">
 <link rel="modulepreload" href="/omnishell/interpreter/jessie.js">
+<link rel="modulepreload" href="/omnishell/interpreter/statechart.js">
 <link rel="modulepreload" href="/omnishell/interpreter/vendor/mecha-client.js">
+<link rel="modulepreload" href="/omnishell/interpreter/vendor/xstate.js">
 <link rel="modulepreload" href="/omnishell/interpreter/vendor/messages.js">
-<script type="speculationrules">
-{
-  "prefetch": [
-    {
-      "source": "document",
-      "where": {
-        "and": [
-          { "href_matches": "/*" },
-          { "not": { "href_matches": "/auth/*" } },
-          { "not": { "href_matches": "/crud/*" } },
-          { "not": { "href_matches": "/electric/*" } },
-          { "not": { "href_matches": "/srv/*" } },
-          { "not": { "href_matches": "/shell/*" } }
-        ]
-      },
-      "eagerness": "moderate"
-    }
-  ]
-}
-</script>
 </head>
 <body>
 <main id="app"></main>

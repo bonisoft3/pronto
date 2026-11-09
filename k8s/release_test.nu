@@ -17,6 +17,7 @@ use release.nu [
 	read-environment
 	auth-provider-environment
 	auth-provider-secret
+	runtime-services
 	release-tree
 	release-override
 	defines
@@ -40,6 +41,7 @@ def run-tests [] {
 	print "Running release-k8s tests...\n"
 
 	test_operators_metadata
+	test_native_runtime
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
@@ -228,11 +230,11 @@ def test_schema_jobs [] {
 	# files and mecha's staged steps: k8s ran a schema integrate never tested.
 	assert ($yaml | str contains "name: sample-initdb")
 	assert ($yaml | str contains "image: localhost:5001/sample-database:latest")
-	assert ($yaml | str contains "docker_process_init_files /docker-entrypoint-initdb.d/*")
+	assert ($yaml | str contains "docker_process_init_files /docker-entrypoint-initdb.d/!(950_fixture.sql)")
 	assert ($yaml | str contains "name: sample-migrate")
 	assert ($yaml | str contains "image: localhost:5001/sample-migrate:latest")
 	assert ($yaml | str contains "value: schedule")
-	# An app with no pgroll migrations (no migrate service) runs no migrate Job.
+	# An app with no ledger migrations or reconciliation (no migrate service) runs no migrate Job.
 	assert not ((render-manifests (resolve-app ($fixtures_dir | path join "minimal")).cue_path "kind") | str contains "minimal-migrate")
 	assert not ($yaml | str contains "postInitApplicationSQLRefs")
 	# One credential for postgres: CloudNativePG's superuser and owner secret is
@@ -561,7 +563,7 @@ def test_initdb_replays [] {
 	let job = (render-manifests ($dir | path join release.cue) "metal" | from yaml | where kind == "Job" and metadata.name == "sample-initdb" | first)
 	rm -r $dir
 	let script = ($job.spec.template.spec.containers.0.command | last)
-	assert ($script | str contains "010_machines.sql 016_mecha_actors.sql 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
+	assert ($script | str contains "010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
 	assert ($script | str contains "--single-transaction") "010_machines in one transaction"
 }
 
@@ -841,7 +843,8 @@ def test_dapr_annotations [] {
 		assert ($yaml | str contains $"dapr.io/app-id: ($id)\n")
 	}
 	assert ($yaml | str contains "dapr.io/config: sample-dapr-config")
-	for up in ["CRUD" "AUTH" "ELECTRIC" "TICKER" "RCLONE_S3" "IMGPROXY" "RENDER"] {
+	# A door hatch is dialed like the cluster's own services.
+	for up in ["CRUD" "AUTH" "ELECTRIC" "TICKER" "RCLONE_S3" "IMGPROXY" "RENDER" "PRINT_COMMERCE"] {
 		assert ($yaml | str contains $"name: PRONTO_UPSTREAM_($up)\n              value: localhost:3500")
 	}
 	assert ($yaml | str contains "value: http://localhost:3500/v1.0/invoke/caddy/method")
@@ -875,7 +878,8 @@ def test_timeout_budget_nests [] {
 	# Caddy names hops; the numbers are the budget's alone.
 	let caddyfile = (open ($pronto_dir | path join "assets" "Caddyfile"))
 	assert not ($caddyfile | str contains "_timeout ")
-	assert equal ($caddyfile | parse --regex '(?m)^\s*import bounded-(?<hop>[a-z]+)$' | get hop | uniq | sort) ($budget.door | columns | where $it != "render" | sort)
+	# The render and hatch hops are emitted per app (emit.cue), not in the asset.
+	assert equal ($caddyfile | parse --regex '(?m)^\s*import bounded-(?<hop>[a-z]+)$' | get hop | uniq | sort) ($budget.door | columns | where $it not-in ["render" "hatch"] | sort)
 	# A budget that does not nest is refused, not deployed: a sidecar bound past
 	# caddy's in front of it, and a gateway bound under Electric's gate plus
 	# Electric, which run one after the other on the same request.
@@ -1002,4 +1006,54 @@ def test_cloud_release_refused [] {
 	let res = (do { nu ($k8s_dir | path join "release.nu") --app ($fixtures_dir | path join "sample") -e eks } | complete)
 	assert ($res.exit_code != 0)
 	assert ($res.stderr | str contains "release to eks is not implemented")
+}
+
+
+def test_native_runtime [] {
+	print "test native CDC services persist state and never deploy compose credentials..."
+	let app = (resolve-app ($fixtures_dir | path join native))
+	let runtime = (runtime-services (open ($app.dir | path join compose.yaml)))
+	assert equal $runtime.compute.databaseEnvironment [DATABASE_URL]
+	assert equal $runtime.feldera.databaseEnvironment [FELDERA_DATABASE_URL]
+	assert not (($runtime | to json) | str contains "dev-password")
+	assert not ("FELDERA_DATABASE_URL" in $runtime.feldera.env)
+	# Feldera expands its connector credential in its own process. Both pods
+	# must read the operator's password rather than the Compose development URI.
+	for target in [kind gke] {
+		let rendered = (render-manifests $app.cue_path $target)
+		assert not ($rendered | str contains "dev-password")
+		let deployments = ($rendered | from yaml | where kind == Deployment)
+		for service in [{name: compute, database: DATABASE_URL}, {name: feldera, database: FELDERA_DATABASE_URL}] {
+			let variables = ($deployments | where metadata.name == $"native-($service.name)" | first | get spec.template.spec.containers.0.env)
+			let password = ($variables | where name == PGPASSWORD | first)
+			assert equal $password.valueFrom.secretKeyRef {name: native-db-postgres, key: password}
+			assert ($password.value? == null)
+			assert equal ($variables | where name == $service.database | first | get value) 'postgresql://postgres:$(PGPASSWORD)@database:5432/native?sslmode=disable'
+		}
+	}
+	let rendered = (render-manifests $app.cue_path kind)
+	let docs = ($rendered | from yaml)
+	assert not ($rendered | str contains "dev-password")
+	assert not ($rendered | str contains "dev-token")
+	let deployments = ($docs | where kind == "Deployment")
+	for name in [compute feldera conduit redis transform] {
+		let spec = ($deployments | where metadata.name == $"native-($name)" | first | get spec)
+		assert equal $spec.replicas 1
+		assert equal $spec.strategy.type "Recreate"
+	}
+	assert equal ($docs | where kind == "PersistentVolumeClaim" | get metadata.name | sort) [native-compute native-feldera native-redis]
+	let compute = ($deployments | where metadata.name == native-compute | first | get spec.template.spec.containers.0.env)
+	assert equal ($compute | where name == SERVICE_JWT | first | get valueFrom.secretKeyRef.name) native-service-token
+	assert equal ($compute | where name == FELDERA_URL | first | get value) "http://feldera:8080"
+	let conduit = ($deployments | where metadata.name == native-conduit | first | get spec.template.spec.containers.0.env)
+	assert equal ($conduit | where name == CONDUIT_DB_TYPE | first | get value) postgres
+	assert equal ($conduit | where name == CONDUIT_DB_POSTGRES_CONNECTION_STRING | first | get value) '$(DATABASE_URL)'
+	assert equal ($docs | where kind == Cluster | first | get spec.postgresql.parameters.max_replication_slots) "128"
+	let refused = (try { runtime-services {services: {compute: {environment: {DUCKSTREAM_ENGINE: duckdb-snapshot}}}}; false } catch { true })
+	assert $refused
+	let gcp = (do { nu ($pronto_dir | path join gcp release.nu) --dry-run --app $app.dir } | complete)
+	assert equal $gcp.exit_code 0
+	assert ($gcp.stdout | str contains "us-central1-docker.pkg.dev/test-project/pronto/native-compute:latest")
+	assert ($gcp.stdout | str contains "storageClassName: standard-rwo")
+	assert ($gcp.stdout | str contains "kind: PersistentVolumeClaim")
 }

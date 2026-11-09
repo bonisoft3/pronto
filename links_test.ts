@@ -65,7 +65,7 @@ Deno.test("the parser reads both link forms the docs use, and skips code", () =>
   const doc = [
     "See [the guide](../omnishell/GUIDE.md#links) and",
     "[[../../omnishell/docs/data#A region's rows]], | [[../../omnishell/docs/machines#Effects\\|machines]] |",
-    "and [[../../../apps/truco/docs/online-hybrid|Truco]].",
+    "and [[../../../apps/truco/docs/online-mecha|Truco]].",
     "`[x](path)` and `[[id]]` are syntax, as is",
     "```",
     "[y](../../elsewhere.md)",
@@ -75,11 +75,11 @@ Deno.test("the parser reads both link forms the docs use, and skips code", () =>
     { target: "../omnishell/GUIDE.md", wikilink: false },
     { target: "../../omnishell/docs/data.md", wikilink: true },
     { target: "../../omnishell/docs/machines.md", wikilink: true },
-    { target: "../../../apps/truco/docs/online-hybrid.md", wikilink: true },
+    { target: "../../../apps/truco/docs/online-mecha.md", wikilink: true },
   ]);
   assert.equal(land("docs/index.md", "../../omnishell/docs/terminal.md").sibling, "../omnishell");
   assert.equal(land("docs/a/b.md", "../../../../libraries/mecha/README.md").sibling, "../../libraries/mecha");
-  assert.equal(land("docs/index.md", "../../../apps/truco/docs/online-hybrid.md").sibling, undefined);
+  assert.equal(land("docs/index.md", "../../../apps/truco/docs/online-mecha.md").sibling, undefined);
   assert.deepEqual(land("docs/index.md", "../GUIDE.md"), { path: "GUIDE.md" });
   // The idioms are an app in the monorepo and a directory of the mirror; their
   // links must neither be refused nor sent to a sibling.

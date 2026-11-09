@@ -6,7 +6,6 @@ type Options = Route & { label: string };
 const routes = {
   review: { model: "review-model", effort: "medium" },
   risk: { model: "risk-model", effort: "high" },
-  advisor: { model: "advisor-model", effort: "high" },
 };
 
 async function run(args: unknown, calls: Options[]) {
@@ -31,7 +30,6 @@ async function run(args: unknown, calls: Options[]) {
       if (options.label.startsWith("verify:")) {
         return Promise.resolve({ refuted: false, why: "confirmed" });
       }
-      if (options.label === "advisor") return Promise.resolve("advice");
       return Promise.resolve({
         outcome: "reviewed",
         reason: "looked",
@@ -55,18 +53,16 @@ async function run(args: unknown, calls: Options[]) {
   );
 }
 
-Deno.test("studio routes every seat, verifier, and advisor without inheriting the lead", async () => {
+Deno.test("studio routes every seat and verifier without inheriting the lead", async () => {
   const calls: Options[] = [];
   const result = await run(
-    { context: "changed files", ir: "ir.html", routes },
+    { context: "changed files", ir: "ir.html", team: "studio", routes },
     calls,
   );
-  assert.equal(calls.length, 11);
-  assert.equal(result.confirmed.length, 5);
+  assert.equal(calls.length, 8);
+  assert.equal(result.confirmed.length, 4);
   for (const call of calls) {
-    const expected = call.label === "advisor"
-      ? routes.advisor
-      : call.label.includes(":backend")
+    const expected = call.label.includes(":architect")
       ? routes.risk
       : routes.review;
     assert.deepEqual(
@@ -77,11 +73,35 @@ Deno.test("studio routes every seat, verifier, and advisor without inheriting th
   }
 });
 
+Deno.test("studio runs a single rung seat when args.seat is supplied", async () => {
+  const calls: Options[] = [];
+  const result = await run(
+    {
+      context: "spec files",
+      ir: "ir.html",
+      team: "arcade",
+      seat: "product",
+      routes: { review: routes.review },
+    },
+    calls,
+  );
+  assert.equal(calls.length, 2);
+  assert.equal(result.confirmed.length, 1);
+  assert.equal(result.confirmed[0].seat, "product");
+  for (const call of calls) {
+    assert.deepEqual(
+      { model: call.model, effort: call.effort },
+      routes.review,
+      call.label,
+    );
+  }
+});
+
 Deno.test("studio rejects incomplete routing before paying for any seat", async () => {
   for (
     const incomplete of [undefined, {}, { ...routes, risk: {} }, {
       ...routes,
-      advisor: { model: "" },
+      review: { model: "" },
     }]
   ) {
     const calls: Options[] = [];

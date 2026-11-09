@@ -1,5 +1,5 @@
 // A Mecha machine's surface: the live entities a reader reaches it through
-// (docs/decisions/2026-09-29-hybrid-machines.md, "A Mecha machine's surface is
+// (docs/decisions/2026-09-29-cortex-machines.md, "A Mecha machine's surface is
 // rows"). The app declares them like any entity, so they carry an ir section
 // and identity; this checks each against the machine and names the columns
 // past the protocol's own, which the machine fills from its projection's
