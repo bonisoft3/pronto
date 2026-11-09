@@ -66,6 +66,13 @@ package schema
 		// The roles a token may name, which the schema grants PostgREST's login
 		// (the app's .pronto/cluster.json; the release fills it).
 		tokenRoles: [...string]
+		// Roles of its own a service connects as (a service's `database.login`), each a LOGIN role
+		// whose password the cluster generates in its namespace and no file ever holds.
+		logins: [=~"^[a-z][a-z0-9_]*$"]: {
+			// Roles the operator keeps it a member of (it revokes any it is not told of): the app's
+			// own migrations create them, so the login reads what they grant.
+			inRoles: [...string]
+		}
 		// The app's own migrations (services/database/migrations' raw SQL, each idempotent),
 		// replayed over a database initdb already built, as on Cloud Run (.pronto/cluster.json;
 		// the release fills it).
@@ -148,6 +155,7 @@ package schema
 	// names a developer's machine); a peer compose names (http://crud:3000) is that
 	// peer through the mesh, SERVICE_JWT the release's own (<name>-service-jwt),
 	// and ORIGIN where readers are. It may reach the internet on 443 (a broker).
+	let declared = database.logins
 	services: [=~"^[a-z][a-z0-9-]*$"]: {
 		port!: int & >1024 & <65536
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
@@ -167,6 +175,13 @@ package schema
 		// and Stripe's webhook call by that name. The gateway listens for it on HTTP, as behind a tunnel,
 		// where Cloudflare holds the certificate and the name is a DNS record onto the tunnel.
 		host?: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$"
+		// Connect to the app's own database as one of database.logins, its URL in the variable `env`
+		// (an exporter's SQLEXPORTER_TARGET_DSN): read from the login's Secret, over compose's value.
+		// A login the app does not declare fails the release.
+		database?: {
+			login!: or([for l, _ in declared {l}])
+			env:    =~"^[A-Z_][A-Z0-9_]*$" | *"DATABASE_URL"
+		}
 		// Where the service exports Prometheus metrics (a collector's journey_runs_total, which the
 		// alerting rules read), scraped by the cluster's VictoriaMetrics as gcp's gmp-collector does.
 		metrics?: {
