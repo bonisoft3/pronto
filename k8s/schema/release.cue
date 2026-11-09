@@ -43,6 +43,19 @@ package schema
 	name:      =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	namespace: string | *name
 
+	// A preview (`release@k8s --preview=<name>`): the release's whole stack in a namespace of its own beside
+	// the released one, to prove its images, migrations and config on the cluster before traffic moves. It is
+	// the same release under another name: `id` is what every object on the cluster is called (the release's
+	// name, a preview's `<name>-<preview>`) and `ns` the namespace it lives in (the release's, a preview's `id`).
+	// A preview claims no public name (no tunnel route or DNS: it is reached through `kubectl port-forward`)
+	// and takes no backups.
+	preview: *"" | =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+	id:      [if preview != "" {"\(name)-\(preview)"}, name][0]
+	ns:      [if preview != "" {id}, namespace][0]
+	// Where a preview is reached and says it is: the door's port-forwarded port on the machine releasing
+	// (the services' ORIGIN, and a passkey's relying party, localhost).
+	previewOrigin: *"http://localhost:18080" | =~"^http://localhost:[0-9]+$"
+
 	type: "pronto" | *"pronto"
 
 	image: {

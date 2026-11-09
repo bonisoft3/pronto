@@ -27,22 +27,23 @@ import (
 
 	let targetEnv = env
 	// The Secret of each of the app's database logins: <app>-<login, dashes for underscores>-db.
-	let loginSecret = {for l, _ in release.database.logins {(l): "\(release.name)-\(strings.Replace(l, "_", "-", -1))-db"}}
+	let loginSecret = {for l, _ in release.database.logins {(l): "\(release.id)-\(strings.Replace(l, "_", "-", -1))-db"}}
 	let appLabels = {
-		"app.kubernetes.io/name":       release.name
-		"app.kubernetes.io/instance":   release.name
+		"app.kubernetes.io/name":       release.id
+		"app.kubernetes.io/instance":   release.id
 		"app.kubernetes.io/managed-by": "cue"
 	}
+	// A preview claims no public name: its host is its own, which no DNS record points at.
 	let gatewayHostname = [
-		if release.gateway.host != _|_ {release.gateway.host},
-		"\(release.name).\(targetEnv.domainSuffix)",
+		if release.preview == "" && release.gateway.host != _|_ {release.gateway.host},
+		"\(release.id).\(targetEnv.domainSuffix)",
 	][0]
 
 	let namespaceObj = [
-		if release.namespace != "default" {
+		if release.ns != "default" {
 			apiVersion: "v1"
 			kind:       "Namespace"
-			metadata: name: release.namespace
+			metadata: name: release.ns
 		},
 	]
 
@@ -55,8 +56,8 @@ import (
 			":\(release.image.tag)",
 		][0]
 		out: [
-			if targetEnv.registry != "" {"\(targetEnv.registry)/\(release.name)-\(svc)\(ref)"},
-			"\(release.name)-\(svc)\(ref)",
+			if targetEnv.registry != "" {"\(targetEnv.registry)/\(release.id)-\(svc)\(ref)"},
+			"\(release.id)-\(svc)\(ref)",
 		][0]
 	}
 
@@ -69,7 +70,7 @@ import (
 			"dapr.io/enabled":        "true"
 			"dapr.io/app-id":         id
 			"dapr.io/app-port":       port
-			"dapr.io/config":         "\(release.name)-dapr-config"
+			"dapr.io/config":         "\(release.id)-dapr-config"
 			"dapr.io/enable-metrics": "true"
 			"dapr.io/metrics-port":   "9090"
 			// A pod being replaced is still the one other sidecars resolve for a
@@ -117,14 +118,16 @@ import (
 	}
 
 	let originValue = [
+		if release.preview != "" {release.previewOrigin},
 		if release.env["ORIGIN"] != _|_ {release.env["ORIGIN"]},
 		"https://\(gatewayHostname)",
 	][0]
 
 	let authRpId = [
+		if release.preview != "" {"localhost"},
 		if release.auth.rpId != _|_ {release.auth.rpId},
 		if release.gateway.host != _|_ {release.gateway.host},
-		if targetEnv.domainSuffix != "" {"\(release.name).\(targetEnv.domainSuffix)"},
+		if targetEnv.domainSuffix != "" {"\(release.id).\(targetEnv.domainSuffix)"},
 		"localhost",
 	][0]
 
@@ -138,8 +141,8 @@ import (
 			apiVersion: "postgresql.cnpg.io/v1"
 			kind:       "Cluster"
 			metadata: {
-				name:      "\(release.name)-db"
-				namespace: release.namespace
+				name:      "\(release.id)-db"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "database"}
 			}
 			spec: {
@@ -173,14 +176,14 @@ import (
 				// One credential for postgres, the role that owns the schema
 				// and the one auth and the schema Jobs connect as.
 				enableSuperuserAccess: true
-				superuserSecret: name: "\(release.name)-db-postgres"
+				superuserSecret: name: "\(release.id)-db-postgres"
 				managed: roles: [{
 					name:        "electric"
 					ensure:      "present"
 					login:       true
 					replication: true
 					bypassrls:   true
-					passwordSecret: name: "\(release.name)-electric-db"
+					passwordSecret: name: "\(release.id)-electric-db"
 				}, {
 					// PostgREST's login. The operator revokes any membership this
 					// list leaves out, so it names every role a token can: the
@@ -190,7 +193,7 @@ import (
 					login:   true
 					inherit: false
 					inRoles: release.database.tokenRoles
-					passwordSecret: name: "\(release.name)-authenticator-db"
+					passwordSecret: name: "\(release.id)-authenticator-db"
 				}, for l, d in release.database.logins {
 					// A service's own login (services.<n>.database): a member of the roles the
 					// app's migrations made, its password the generated one of its Secret.
@@ -202,11 +205,11 @@ import (
 					passwordSecret: name: loginSecret[l]
 				}]
 				bootstrap: initdb: {
-					database:       release.name
+					database:       release.id
 					owner:          "postgres"
 					localeProvider: "icu"
 					icuLocale:      "und"
-					secret: name:   "\(release.name)-db-postgres"
+					secret: name:   "\(release.id)-db-postgres"
 				}
 				storage: {
 					size: release.database.storage
@@ -214,20 +217,20 @@ import (
 						storageClass: targetEnv.storageClass
 					}
 				}
-				if release.database.backup.provider != _|_ {
+				if release.preview == "" && release.database.backup.provider != _|_ {
 					// The backups' sign-in (backupObjs): the plugin's sidecar shares the postgres
 					// container's mounts, /projected among them.
 					projectedVolumeTemplate: sources: [{
 						serviceAccountToken: {path: "gcp-token", audience: release.database.backup.audience, expirationSeconds: 3600}
 					}, {
-						configMap: {name: "\(release.name)-backup", items: [{key: "credentials.json", path: "gcp-credentials.json"}]}
+						configMap: {name: "\(release.id)-backup", items: [{key: "credentials.json", path: "gcp-credentials.json"}]}
 					}]
 				}
-				if release.database.backup != _|_ {
+				if release.preview == "" && release.database.backup != _|_ {
 					plugins: [{
 						name:          "barman-cloud.cloudnative-pg.io"
 						isWALArchiver: true
-						parameters: barmanObjectName: "\(release.name)-backup"
+						parameters: barmanObjectName: "\(release.id)-backup"
 					}]
 				}
 			}
@@ -240,24 +243,24 @@ import (
 	// ConfigMap holds (no key: #workloadCredentials over the Cluster's projected token), named by
 	// GOOGLE_APPLICATION_CREDENTIALS, which gkeEnvironment has barman-cloud take as Google's default.
 	let backupObjs = [
-		if release.type == "pronto" && release.database.backup.provider != _|_
+		if release.type == "pronto" && release.preview == "" && release.database.backup.provider != _|_
 		let b = release.database.backup {
 			apiVersion: "v1"
 			kind:       "ConfigMap"
 			metadata: {
-				name:      "\(release.name)-backup"
-				namespace: release.namespace
+				name:      "\(release.id)-backup"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "database"}
 			}
 			data: "credentials.json": json.Marshal((#workloadCredentials & {provider: b.provider, serviceAccount: b.serviceAccount, tokenFile: "/projected/gcp-token"}).out)
 		},
-		if release.type == "pronto" && release.database.backup != _|_
+		if release.type == "pronto" && release.preview == "" && release.database.backup != _|_
 		let b = release.database.backup {
 			apiVersion: "barmancloud.cnpg.io/v1"
 			kind:       "ObjectStore"
 			metadata: {
-				name:      "\(release.name)-backup"
-				namespace: release.namespace
+				name:      "\(release.id)-backup"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "database"}
 			}
 			spec: {
@@ -287,19 +290,19 @@ import (
 				}
 			}
 		},
-		if release.type == "pronto" && release.database.backup != _|_ {
+		if release.type == "pronto" && release.preview == "" && release.database.backup != _|_ {
 			apiVersion: "postgresql.cnpg.io/v1"
 			kind:       "ScheduledBackup"
 			metadata: {
-				name:      "\(release.name)-db-nightly"
-				namespace: release.namespace
+				name:      "\(release.id)-db-nightly"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "database"}
 			}
 			spec: {
 				schedule:             release.database.backup.schedule
 				immediate:            true
 				backupOwnerReference: "self"
-				cluster: name: "\(release.name)-db"
+				cluster: name: "\(release.id)-db"
 				method: "plugin"
 				pluginConfiguration: name: "barman-cloud.cloudnative-pg.io"
 			}
@@ -317,12 +320,12 @@ import (
 		{name: "PGHOST", value: "database"},
 		{name: "PGPORT", value: "5432"},
 		{name: "POSTGRES_USER", value: "postgres"},
-		{name: "POSTGRES_DB", value: release.name},
-		{name: "PGDATABASE", value: release.name},
+		{name: "POSTGRES_DB", value: release.id},
+		{name: "PGDATABASE", value: release.id},
 		{name: "PGUSER", value: "postgres"},
 		{
 			name: "PGPASSWORD"
-			valueFrom: secretKeyRef: {name: "\(release.name)-db-postgres", key: "password"}
+			valueFrom: secretKeyRef: {name: "\(release.id)-db-postgres", key: "password"}
 		},
 	]
 	let schemaJob = {
@@ -334,8 +337,8 @@ import (
 			apiVersion: "batch/v1"
 			kind:       "Job"
 			metadata: {
-				name:      "\(release.name)-\(component)"
-				namespace: release.namespace
+				name:      "\(release.id)-\(component)"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": component}
 			}
 			spec: {
@@ -376,7 +379,7 @@ import (
 				// secrets the operator sets them from too.
 				env: list.Concat([schemaEnv, [for role in ["electric", "authenticator"] {
 					name: "\(strings.ToUpper(role))_PASSWORD"
-					valueFrom: secretKeyRef: {name: "\(release.name)-\(role)-db", key: "password"}
+					valueFrom: secretKeyRef: {name: "\(release.id)-\(role)-db", key: "password"}
 				}]])
 				command: ["bash", "-c", """
 					set -euo pipefail
@@ -425,7 +428,7 @@ import (
 				component: "migrate"
 				svc:       "migrate"
 				env: list.Concat([schemaEnv, [
-					{name: "DATABASE_URL", value: "postgres://postgres:$(PGPASSWORD)@database:5432/\(release.name)?sslmode=disable"},
+					{name: "DATABASE_URL", value: "postgres://postgres:$(PGPASSWORD)@database:5432/\(release.id)?sslmode=disable"},
 					for k, v in release.migrate.env {name: k, value: v},
 				]])
 			}).out
@@ -438,13 +441,13 @@ import (
 			kind:       "Service"
 			metadata: {
 				name:      "database"
-				namespace: release.namespace
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "database"}
 			}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"cnpg.io/cluster":      "\(release.name)-db"
+					"cnpg.io/cluster":      "\(release.id)-db"
 					"cnpg.io/instanceRole": "primary"
 				}
 				ports: [{
@@ -462,14 +465,14 @@ import (
 	// otherwise generated once in-cluster by ESO; none is ever a literal.
 	// Generated values carry no symbols: electric's lands inside a URL.
 	let appSecrets = list.Concat([[
-		{key: "PGRST_JWT_SECRET", length: 48, target: "\(release.name)-auth-secrets"},
-		{key: "ELECTRIC_SECRET", length: 32, target: "\(release.name)-auth-secrets"},
-		{key: "ELECTRIC_PASSWORD", length: 32, target: "\(release.name)-electric-db", role: "electric"},
-		{key: "AUTHENTICATOR_PASSWORD", length: 32, target: "\(release.name)-authenticator-db", role: "authenticator"},
-		{key: "POSTGRES_PASSWORD", length: 32, target: "\(release.name)-db-postgres", role: "postgres"},
+		{key: "PGRST_JWT_SECRET", length: 48, target: "\(release.id)-auth-secrets"},
+		{key: "ELECTRIC_SECRET", length: 32, target: "\(release.id)-auth-secrets"},
+		{key: "ELECTRIC_PASSWORD", length: 32, target: "\(release.id)-electric-db", role: "electric"},
+		{key: "AUTHENTICATOR_PASSWORD", length: 32, target: "\(release.id)-authenticator-db", role: "authenticator"},
+		{key: "POSTGRES_PASSWORD", length: 32, target: "\(release.id)-db-postgres", role: "postgres"},
 	], [for l, _ in release.database.logins {
 		// A service's database login: its Secret also carries the URL a service reads.
-		{key: "\(strings.ToUpper(l))_PASSWORD", length: 32, target: loginSecret[l], role: l, url: "postgres://\(l):{{ .\(strings.ToUpper(l))_PASSWORD }}@database:5432/\(release.name)?sslmode=disable"}
+		{key: "\(strings.ToUpper(l))_PASSWORD", length: 32, target: loginSecret[l], role: l, url: "postgres://\(l):{{ .\(strings.ToUpper(l))_PASSWORD }}@database:5432/\(release.id)?sslmode=disable"}
 	}]])
 
 	let prontoSecretGeneratorObj = [
@@ -478,8 +481,8 @@ import (
 			apiVersion: "generators.external-secrets.io/v1alpha1"
 			kind:       "Password"
 			metadata: {
-				name:      "\(release.name)-\(strings.ToLower(strings.Replace(sec.key, "_", "-", -1)))"
-				namespace: release.namespace
+				name:      "\(release.id)-\(strings.ToLower(strings.Replace(sec.key, "_", "-", -1)))"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: {
@@ -496,14 +499,14 @@ import (
 	let secretSource = {
 		sec: _
 		data: [if release.externalSecrets.enabled {
-			{secretKey: sec.key, remoteRef: key: "\(release.name)/\(sec.key)"}
+			{secretKey: sec.key, remoteRef: key: "\(release.id)/\(sec.key)"}
 		}]
 		dataFrom: [if !release.externalSecrets.enabled {
 			{
 				sourceRef: generatorRef: {
 					apiVersion: "generators.external-secrets.io/v1alpha1"
 					kind:       "Password"
-					name:       "\(release.name)-\(strings.ToLower(strings.Replace(sec.key, "_", "-", -1)))"
+					name:       "\(release.id)-\(strings.ToLower(strings.Replace(sec.key, "_", "-", -1)))"
 				}
 				rewrite: [{regexp: {source: "password", target: sec.key}}]
 			}
@@ -524,18 +527,18 @@ import (
 			apiVersion: "external-secrets.io/v1beta1"
 			kind:       "ExternalSecret"
 			metadata: {
-				name:      "\(release.name)-auth-secrets"
-				namespace: release.namespace
+				name:      "\(release.id)-auth-secrets"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: storeRef & {
 				// A generated secret never rotates under running pods.
 				refreshInterval: [if release.externalSecrets.enabled {"1h"}, "0"][0]
 				target: {
-					name:           "\(release.name)-auth-secrets"
+					name:           "\(release.id)-auth-secrets"
 					creationPolicy: "Owner"
 				}
-				let auth = [for sec in appSecrets if sec.target == "\(release.name)-auth-secrets" {secretSource & {"sec": sec}}]
+				let auth = [for sec in appSecrets if sec.target == "\(release.id)-auth-secrets" {secretSource & {"sec": sec}}]
 				data: list.FlattenN([for src in auth {src.data}], 1)
 				dataFrom: list.FlattenN([for src in auth {src.dataFrom}], 1)
 			}
@@ -548,7 +551,7 @@ import (
 			kind:       "ExternalSecret"
 			metadata: {
 				name:      sec.target
-				namespace: release.namespace
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: storeRef & {
@@ -589,8 +592,8 @@ import (
 		apiVersion: "dapr.io/v1alpha1"
 		kind:       "Resiliency"
 		metadata: {
-			name:      "\(release.name)-resiliency"
-			namespace: release.namespace
+			name:      "\(release.id)-resiliency"
+			namespace: release.ns
 			labels:    appLabels
 		}
 		spec: {
@@ -603,8 +606,8 @@ import (
 		apiVersion: "dapr.io/v1alpha1"
 		kind:       "Configuration"
 		metadata: {
-			name:      "\(release.name)-dapr-config"
-			namespace: release.namespace
+			name:      "\(release.id)-dapr-config"
+			namespace: release.ns
 			labels:    appLabels
 		}
 		spec: {
@@ -625,14 +628,14 @@ import (
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
 			metadata: {
-				name:      "\(release.name)-crud"
-				namespace: release.namespace
+				name:      "\(release.id)-crud"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "crud"}
 			}
 			spec: {
 				replicas: release.replicas
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "crud"
 				}
 				template: {
@@ -657,13 +660,13 @@ import (
 							{
 								name: "AUTHENTICATOR_PASSWORD"
 								valueFrom: secretKeyRef: {
-									name: "\(release.name)-authenticator-db"
+									name: "\(release.id)-authenticator-db"
 									key:  "password"
 								}
 							},
 							{
 								name:  "PGRST_DB_URI"
-								value: "postgres://authenticator:$(AUTHENTICATOR_PASSWORD)@database:5432/\(release.name)"
+								value: "postgres://authenticator:$(AUTHENTICATOR_PASSWORD)@database:5432/\(release.id)"
 							},
 							{name: "PGRST_DB_SCHEMA", value: "public"},
 							{name: "PGRST_DB_ANON_ROLE", value: "anon"},
@@ -671,7 +674,7 @@ import (
 							{
 								name: "PGRST_JWT_SECRET"
 								valueFrom: secretKeyRef: {
-									name: "\(release.name)-auth-secrets"
+									name: "\(release.id)-auth-secrets"
 									key:  "PGRST_JWT_SECRET"
 								}
 							},
@@ -708,13 +711,13 @@ import (
 			kind:       "Service"
 			metadata: {
 				name:      "crud"
-				namespace: release.namespace
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "crud"}
 			}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "crud"
 				}
 				ports: [{
@@ -733,14 +736,14 @@ import (
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
 			metadata: {
-				name:      "\(release.name)-electric"
-				namespace: release.namespace
+				name:      "\(release.id)-electric"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "electric"}
 			}
 			spec: {
 				replicas: release.replicas
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "electric"
 				}
 				template: {
@@ -763,18 +766,18 @@ import (
 							{
 								name: "ELECTRIC_PASSWORD"
 								valueFrom: secretKeyRef: {
-									name: "\(release.name)-electric-db"
+									name: "\(release.id)-electric-db"
 									key:  "password"
 								}
 							},
 							{
 								name:  "DATABASE_URL"
-								value: "postgresql://electric:$(ELECTRIC_PASSWORD)@database:5432/\(release.name)?sslmode=disable"
+								value: "postgresql://electric:$(ELECTRIC_PASSWORD)@database:5432/\(release.id)?sslmode=disable"
 							},
 							{
 								name: "ELECTRIC_SECRET"
 								valueFrom: secretKeyRef: {
-									name: "\(release.name)-auth-secrets"
+									name: "\(release.id)-auth-secrets"
 									key:  "ELECTRIC_SECRET"
 								}
 							},
@@ -809,13 +812,13 @@ import (
 			kind:       "Service"
 			metadata: {
 				name:      "electric"
-				namespace: release.namespace
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "electric"}
 			}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "electric"
 				}
 				ports: [{
@@ -834,14 +837,14 @@ import (
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
 			metadata: {
-				name:      "\(release.name)-auth"
-				namespace: release.namespace
+				name:      "\(release.id)-auth"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "auth"}
 			}
 			spec: {
 				replicas: release.replicas
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "auth"
 				}
 				template: {
@@ -867,19 +870,19 @@ import (
 							{
 								name: "PG_PASSWORD"
 								valueFrom: secretKeyRef: {
-									name: "\(release.name)-db-postgres"
+									name: "\(release.id)-db-postgres"
 									key:  "password"
 								}
 							},
 							{
 								name:  "DATABASE_URL"
-								value: "postgres://postgres:$(PG_PASSWORD)@database:5432/\(release.name)"
+								value: "postgres://postgres:$(PG_PASSWORD)@database:5432/\(release.id)"
 							},
 							{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"},
 							{
 								name: "PGRST_JWT_SECRET"
 								valueFrom: secretKeyRef: {
-									name: "\(release.name)-auth-secrets"
+									name: "\(release.id)-auth-secrets"
 									key:  "PGRST_JWT_SECRET"
 								}
 							},
@@ -890,7 +893,7 @@ import (
 								for k in release.auth.oidcSecrets {{
 									name: k
 									valueFrom: secretKeyRef: {
-										name: "\(release.name)-oidc"
+										name: "\(release.id)-oidc"
 										key: k
 									}
 								}},
@@ -918,13 +921,13 @@ import (
 			kind:       "Service"
 			metadata: {
 				name:      "auth"
-				namespace: release.namespace
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "auth"}
 			}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "auth"
 				}
 				ports: [{
@@ -943,14 +946,14 @@ import (
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
 			metadata: {
-				name:      "\(release.name)-caddy"
-				namespace: release.namespace
+				name:      "\(release.id)-caddy"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "caddy"}
 			}
 			spec: {
 				replicas: release.replicas
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "caddy"
 				}
 				template: {
@@ -980,7 +983,7 @@ import (
 							{
 								name: "ELECTRIC_SECRET"
 								valueFrom: secretKeyRef: {
-									name: "\(release.name)-auth-secrets"
+									name: "\(release.id)-auth-secrets"
 									key:  "ELECTRIC_SECRET"
 								}
 							},
@@ -1018,13 +1021,13 @@ import (
 			kind:       "Service"
 			metadata: {
 				name:      "caddy"
-				namespace: release.namespace
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "caddy"}
 			}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "caddy"
 				}
 				ports: [{
@@ -1043,14 +1046,14 @@ import (
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
 			metadata: {
-				name:      "\(release.name)-render"
-				namespace: release.namespace
+				name:      "\(release.id)-render"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "render"}
 			}
 			spec: {
 				replicas: release.replicas
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "render"
 				}
 				template: {
@@ -1115,13 +1118,13 @@ import (
 			kind:       "Service"
 			metadata: {
 				name:      "render"
-				namespace: release.namespace
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "render"}
 			}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "render"
 				}
 				ports: [{name: "http", port: release.render.port, targetPort: release.render.port, protocol: "TCP"}]
@@ -1140,14 +1143,14 @@ import (
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
 			metadata: {
-				name:      "\(release.name)-vmalert"
-				namespace: release.namespace
+				name:      "\(release.id)-vmalert"
+				namespace: release.ns
 				"labels":  labels
 			}
 			spec: {
 				replicas: 1
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "vmalert"
 				}
 				template: {
@@ -1163,7 +1166,7 @@ import (
 							"-remoteWrite.url=\(vm)",
 							"-remoteRead.url=\(vm)",
 							"-configCheckInterval=1m",
-							"-external.label=app=\(release.name)",
+							"-external.label=app=\(release.id)",
 							if release.alerting.notifier != _|_ {"-notifier.url=\(release.alerting.notifier)"},
 							if release.alerting.notifier == _|_ {"-notifier.blackhole"},
 						]
@@ -1172,7 +1175,7 @@ import (
 						resources: (#resourcesOf & {r: release, n: "vmalert"}).out
 						volumeMounts: [{name: "rules", mountPath: "/etc/vmalert/rules", readOnly: true}]
 					}]
-					spec: volumes: [{name: "rules", configMap: name: "\(release.name)-alert-rules"}]
+					spec: volumes: [{name: "rules", configMap: name: "\(release.id)-alert-rules"}]
 				}
 			}
 		}
@@ -1182,20 +1185,20 @@ import (
 	// its Service and writing to Managed Service for Prometheus, signed in through workload identity.
 	let metricsExportObjs = [if release.metricsExport != _|_ {
 		let x = release.metricsExport
-		let exportName = "\(release.name)-metrics-export"
+		let exportName = "\(release.id)-metrics-export"
 		let labels = appLabels & {"app.kubernetes.io/component": "metrics-export"}
 		let config = {
 			receivers: prometheus: config: scrape_configs: [for sn, s in release.services if s.metrics != _|_ {
 				job_name:        sn
 				scrape_interval: x.interval
 				metrics_path:    s.metrics.path
-				static_configs: [{targets: ["\(sn).\(release.namespace).svc.cluster.local:\(s.metrics.port)"]}]
+				static_configs: [{targets: ["\(sn).\(release.ns).svc.cluster.local:\(s.metrics.port)"]}]
 			}]
 			processors: {
 				resource: attributes: [
 					{key: "cloud.region", value: x.location, action: "upsert"},
 					{key: "k8s.cluster.name", value: x.cluster, action: "upsert"},
-					{key: "k8s.namespace.name", value: release.namespace, action: "upsert"},
+					{key: "k8s.namespace.name", value: release.ns, action: "upsert"},
 				]
 				batch: {}
 			}
@@ -1210,11 +1213,11 @@ import (
 		[{
 			apiVersion: "v1"
 			kind:       "ServiceAccount"
-			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+			metadata: {name: exportName, namespace: release.ns, "labels": labels}
 		}, {
 			apiVersion: "v1"
 			kind:       "ConfigMap"
-			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+			metadata: {name: exportName, namespace: release.ns, "labels": labels}
 			data: {
 				"config.yaml":      yaml.Marshal(config)
 				"credentials.json": json.Marshal(credentials)
@@ -1222,11 +1225,11 @@ import (
 		}, {
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
-			metadata: {name: exportName, namespace: release.namespace, "labels": labels}
+			metadata: {name: exportName, namespace: release.ns, "labels": labels}
 			spec: {
 				replicas: 1
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "metrics-export"
 				}
 				template: {
@@ -1266,28 +1269,28 @@ import (
 	let blobsPorts = {rcloneS3: 3900, imgproxy: 8081}
 	let blobsObjs = [if release.blobs != _|_ {
 		let x = release.blobs
-		let blobsName = "\(release.name)-blobs"
+		let blobsName = "\(release.id)-blobs"
 		let credentials = (#workloadCredentials & {provider: x.provider, serviceAccount: x.serviceAccount}).out
 		let rcloneLabels = appLabels & {"app.kubernetes.io/component": "rclone-s3"}
 		let imgproxyLabels = appLabels & {"app.kubernetes.io/component": "imgproxy"}
-		let rcloneURL = "http://rclone-s3.\(release.namespace).svc.cluster.local:\(blobsPorts.rcloneS3)"
+		let rcloneURL = "http://rclone-s3.\(release.ns).svc.cluster.local:\(blobsPorts.rcloneS3)"
 		[{
 			apiVersion: "v1"
 			kind:       "ServiceAccount"
-			metadata: {name: blobsName, namespace: release.namespace, labels: rcloneLabels}
+			metadata: {name: blobsName, namespace: release.ns, labels: rcloneLabels}
 		}, {
 			apiVersion: "v1"
 			kind:       "ConfigMap"
-			metadata: {name: blobsName, namespace: release.namespace, labels: rcloneLabels}
+			metadata: {name: blobsName, namespace: release.ns, labels: rcloneLabels}
 			data: "credentials.json": json.Marshal(credentials)
 		}, {
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
-			metadata: {name: "\(release.name)-rclone-s3", namespace: release.namespace, labels: rcloneLabels}
+			metadata: {name: "\(release.id)-rclone-s3", namespace: release.ns, labels: rcloneLabels}
 			spec: {
 				replicas: release.replicas
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "rclone-s3"
 				}
 				template: {
@@ -1335,11 +1338,11 @@ import (
 		}, {
 			apiVersion: "v1"
 			kind:       "Service"
-			metadata: {name: "rclone-s3", namespace: release.namespace, labels: rcloneLabels}
+			metadata: {name: "rclone-s3", namespace: release.ns, labels: rcloneLabels}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "rclone-s3"
 				}
 				ports: [{name: "http", port: blobsPorts.rcloneS3, targetPort: blobsPorts.rcloneS3, protocol: "TCP"}]
@@ -1347,11 +1350,11 @@ import (
 		}, {
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
-			metadata: {name: "\(release.name)-imgproxy", namespace: release.namespace, labels: imgproxyLabels}
+			metadata: {name: "\(release.id)-imgproxy", namespace: release.ns, labels: imgproxyLabels}
 			spec: {
 				replicas: release.replicas
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "imgproxy"
 				}
 				template: {
@@ -1394,11 +1397,11 @@ import (
 		}, {
 			apiVersion: "v1"
 			kind:       "Service"
-			metadata: {name: "imgproxy", namespace: release.namespace, labels: imgproxyLabels}
+			metadata: {name: "imgproxy", namespace: release.ns, labels: imgproxyLabels}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "imgproxy"
 				}
 				ports: [{name: "http", port: blobsPorts.imgproxy, targetPort: blobsPorts.imgproxy, protocol: "TCP"}]
@@ -1419,14 +1422,14 @@ import (
 			apiVersion: "apps/v1"
 			kind:       "Deployment"
 			metadata: {
-				name:      "\(release.name)-\(n)"
-				namespace: release.namespace
+				name:      "\(release.id)-\(n)"
+				namespace: release.ns
 				"labels":  labels
 			}
 			spec: {
 				replicas: release.replicas
 				selector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": n
 				}
 				template: {
@@ -1444,7 +1447,7 @@ import (
 					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
 					spec: enableServiceLinks: false
 					if s.google != _|_ {
-						spec: serviceAccountName: "\(release.name)-\(n)"
+						spec: serviceAccountName: "\(release.id)-\(n)"
 					}
 					if s.jail {
 						spec: hostUsers: false
@@ -1471,7 +1474,7 @@ import (
 							[
 								{name: "PORT", value: "\(s.port)"},
 								{name: "ORIGIN", value: originValue},
-								{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}},
+								{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.id)-service-jwt", key: "SERVICE_JWT"}},
 								for k, v in s.secrets {name: k, valueFrom: secretKeyRef: {name: v, key: k}},
 								if s.database != _|_ {{name: s.database.env, valueFrom: secretKeyRef: {name: loginSecret[s.database.login], key: "url"}}},
 							],
@@ -1500,13 +1503,13 @@ import (
 			kind:       "Service"
 			metadata: {
 				name:      n
-				namespace: release.namespace
+				namespace: release.ns
 				"labels":  labels
 			}
 			spec: {
 				type: "ClusterIP"
 				selector: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": n
 				}
 				ports: [
@@ -1518,8 +1521,8 @@ import (
 			apiVersion: "v1"
 			kind:       "ServiceAccount"
 			metadata: {
-				name:      "\(release.name)-\(n)"
-				namespace: release.namespace
+				name:      "\(release.id)-\(n)"
+				namespace: release.ns
 				"labels":  labels
 			}
 		}, if release.networkPolicy.enabled if len(s.egress) > 0 {
@@ -1527,13 +1530,13 @@ import (
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
-				name:      "\(release.name)-\(n)-egress"
-				namespace: release.namespace
+				name:      "\(release.id)-\(n)-egress"
+				namespace: release.ns
 				"labels":  labels
 			}
 			spec: {
 				podSelector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": n
 				}
 				policyTypes: ["Egress"]
@@ -1554,8 +1557,8 @@ import (
 			apiVersion: "batch/v1"
 			kind:       "CronJob"
 			metadata: {
-				name:      "\(release.name)-\(n)-clock"
-				namespace: release.namespace
+				name:      "\(release.id)-\(n)-clock"
+				namespace: release.ns
 				"labels":  labels
 			}
 			spec: {
@@ -1577,12 +1580,12 @@ import (
 							containers: [{
 								name:  "poke"
 								image: "docker.io/curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
-								env: [{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.name)-service-jwt", key: "SERVICE_JWT"}}]
+								env: [{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(release.id)-service-jwt", key: "SERVICE_JWT"}}]
 								// A new pod's address reaches the network policies a few seconds after it starts
 								// (k3s's kube-router refuses it until then): it waits, up to 30s, for the service to
 								// take a connection, then pokes once.
 								command: ["sh", "-c", """
-									u=http://\(n).\(release.namespace).svc.cluster.local:\(s.port)
+									u=http://\(n).\(release.ns).svc.cluster.local:\(s.port)
 									for i in $(seq 15); do [ "$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$u/")" != 000 ] && break; sleep 2; done
 									exec curl -fsS -m 50 -X POST -H "Authorization: Bearer $SERVICE_JWT" "$u\(s.clock.path)?caller=k8s-cronjob"
 									"""]
@@ -1606,18 +1609,18 @@ import (
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
-				name:      "\(release.name)-\(n)-database-egress"
-				namespace: release.namespace
+				name:      "\(release.id)-\(n)-database-egress"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: {
 				podSelector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": n
 				}
 				policyTypes: ["Egress"]
 				egress: [{
-					to: [{podSelector: matchLabels: "cnpg.io/cluster": "\(release.name)-db"}]
+					to: [{podSelector: matchLabels: "cnpg.io/cluster": "\(release.id)-db"}]
 					ports: [{port: 5432, protocol: "TCP"}]
 				}]
 			}
@@ -1629,8 +1632,8 @@ import (
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
-				name:      "\(release.name)-services-netpol"
-				namespace: release.namespace
+				name:      "\(release.id)-services-netpol"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: {
@@ -1642,7 +1645,7 @@ import (
 				policyTypes: ["Ingress", "Egress"]
 				ingress: [
 					{
-						from: [{podSelector: matchLabels: "app.kubernetes.io/name": release.name}]
+						from: [{podSelector: matchLabels: "app.kubernetes.io/name": release.id}]
 						ports: list.Concat([
 							[for _, s in release.services {port: s.port, protocol: "TCP"}],
 							[if release.blobs != _|_ for _, p in blobsPorts {port: p, protocol: "TCP"}],
@@ -1660,7 +1663,7 @@ import (
 					// A service's metrics, which the cluster's VictoriaMetrics and the app's metrics export scrape.
 					if len([for _, s in release.services if s.metrics != _|_ {s}]) > 0 {
 						from: [{podSelector: matchLabels: {
-							"app.kubernetes.io/name":      release.name
+							"app.kubernetes.io/name":      release.id
 							"app.kubernetes.io/component": "metrics-export"
 						}}]
 						ports: [for _, s in release.services if s.metrics != _|_ {port: s.metrics.port, protocol: "TCP"}]
@@ -1669,7 +1672,7 @@ import (
 				egress: [
 					{ports: [{port: 53, protocol: "UDP"}, {port: 53, protocol: "TCP"}]},
 					{
-						to: [{podSelector: matchLabels: "app.kubernetes.io/name": release.name}]
+						to: [{podSelector: matchLabels: "app.kubernetes.io/name": release.id}]
 						ports: list.Concat([[{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}], [if release.blobs != _|_ {{port: blobsPorts.rcloneS3, protocol: "TCP"}}]])
 					},
 					{
@@ -1700,8 +1703,8 @@ import (
 			apiVersion: "gateway.networking.k8s.io/v1"
 			kind:       "Gateway"
 			metadata: {
-				name:      "\(release.name)-gateway"
-				namespace: release.namespace
+				name:      "\(release.id)-gateway"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: {
@@ -1736,7 +1739,7 @@ import (
 								certificateRefs: [{
 									name: [
 										if release.gateway.tls.secretName != _|_ {release.gateway.tls.secretName},
-										"\(release.name)-tls",
+										"\(release.id)-tls",
 									][0]
 								}]
 							}
@@ -1753,13 +1756,13 @@ import (
 			apiVersion: "gateway.networking.k8s.io/v1"
 			kind:       "HTTPRoute"
 			metadata: {
-				name:      "\(release.name)-route"
-				namespace: release.namespace
+				name:      "\(release.id)-route"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: {
 				parentRefs: [{
-					name: "\(release.name)-gateway"
+					name: "\(release.id)-gateway"
 				}]
 				hostnames: [gatewayHostname]
 				// Envoy's own default is 15s, under Electric's 20s live hold.
@@ -1777,12 +1780,12 @@ import (
 		apiVersion: "gateway.networking.k8s.io/v1"
 		kind:       "HTTPRoute"
 		metadata: {
-			name:      "\(release.name)-\(n)-route"
-			namespace: release.namespace
+			name:      "\(release.id)-\(n)-route"
+			namespace: release.ns
 			labels:    appLabels & {"app.kubernetes.io/component": n}
 		}
 		spec: {
-			parentRefs: [{name: "\(release.name)-gateway", sectionName: "host-\(n)"}]
+			parentRefs: [{name: "\(release.id)-gateway", sectionName: "host-\(n)"}]
 			hostnames: [s.host]
 			rules: [{
 				matches: [{path: {type: "PathPrefix", value: "/"}}]
@@ -1798,12 +1801,12 @@ import (
 			apiVersion: "gateway.envoyproxy.io/v1alpha1"
 			kind:       "BackendTrafficPolicy"
 			metadata: {
-				name:      "\(release.name)-backend"
-				namespace: release.namespace
+				name:      "\(release.id)-backend"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: {
-				targetRefs: [{group: "gateway.networking.k8s.io", kind: "HTTPRoute", name: "\(release.name)-route"}]
+				targetRefs: [{group: "gateway.networking.k8s.io", kind: "HTTPRoute", name: "\(release.id)-route"}]
 				timeout: tcp: connectTimeout: "\(bounds.dial)s"
 				circuitBreaker: resilience.resilience.gateway
 			}
@@ -1815,13 +1818,13 @@ import (
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
-				name:      "\(release.name)-caddy-netpol"
-				namespace: release.namespace
+				name:      "\(release.id)-caddy-netpol"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "caddy"}
 			}
 			spec: {
 				podSelector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "caddy"
 				}
 				policyTypes: ["Ingress", "Egress"]
@@ -1840,7 +1843,7 @@ import (
 					{
 						from: [{
 							podSelector: matchLabels: {
-								"app.kubernetes.io/name": release.name
+								"app.kubernetes.io/name": release.id
 							}
 						}]
 						ports: [
@@ -1859,7 +1862,7 @@ import (
 					{
 						to: [{
 							podSelector: matchLabels: {
-								"app.kubernetes.io/name": release.name
+								"app.kubernetes.io/name": release.id
 							}
 						}]
 						ports: [
@@ -1919,13 +1922,13 @@ import (
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
-				name:      "\(release.name)-auth-oidc-egress"
-				namespace: release.namespace
+				name:      "\(release.id)-auth-oidc-egress"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: {
 				podSelector: matchLabels: {
-					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "auth"
 				}
 				policyTypes: ["Egress"]
@@ -1942,8 +1945,8 @@ import (
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
-				name:      "\(release.name)-backends-netpol"
-				namespace: release.namespace
+				name:      "\(release.id)-backends-netpol"
+				namespace: release.ns
 				labels:    appLabels
 			}
 			spec: {
@@ -1962,7 +1965,7 @@ import (
 					{
 						from: [{
 							podSelector: matchLabels: {
-								"app.kubernetes.io/name":      release.name
+								"app.kubernetes.io/name":      release.id
 								"app.kubernetes.io/component": "caddy"
 							}
 						}]
@@ -1986,7 +1989,7 @@ import (
 					{
 						from: [{
 							podSelector: matchLabels: {
-								"app.kubernetes.io/name": release.name
+								"app.kubernetes.io/name": release.id
 							}
 						}]
 						ports: [
@@ -2006,7 +2009,7 @@ import (
 					{
 						to: [{
 							podSelector: matchLabels: {
-								"cnpg.io/cluster": "\(release.name)-db"
+								"cnpg.io/cluster": "\(release.id)-db"
 							}
 						}]
 						ports: [{port: 5432, protocol: "TCP"}]
@@ -2015,7 +2018,7 @@ import (
 						{
 							to: [{
 								podSelector: matchLabels: {
-									"app.kubernetes.io/name":      release.name
+									"app.kubernetes.io/name":      release.id
 									"app.kubernetes.io/component": "caddy"
 								}
 							}]
@@ -2025,7 +2028,7 @@ import (
 					{
 						to: [{
 							podSelector: matchLabels: {
-								"app.kubernetes.io/name": release.name
+								"app.kubernetes.io/name": release.id
 							}
 						}]
 						ports: [
@@ -2069,20 +2072,20 @@ import (
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "NetworkPolicy"
 			metadata: {
-				name:      "\(release.name)-database-netpol"
-				namespace: release.namespace
+				name:      "\(release.id)-database-netpol"
+				namespace: release.ns
 				labels:    appLabels & {"app.kubernetes.io/component": "database"}
 			}
 			spec: {
 				podSelector: matchLabels: {
-					"cnpg.io/cluster": "\(release.name)-db"
+					"cnpg.io/cluster": "\(release.id)-db"
 				}
 				policyTypes: ["Ingress", "Egress"]
 				ingress: [
 					{
 						from: [{
 							podSelector: matchLabels: {
-								"app.kubernetes.io/name": release.name
+								"app.kubernetes.io/name": release.id
 							}
 						}]
 						ports: [{port: 5432, protocol: "TCP"}]
@@ -2090,7 +2093,7 @@ import (
 					{
 						from: [{
 							podSelector: matchLabels: {
-								"cnpg.io/cluster": "\(release.name)-db"
+								"cnpg.io/cluster": "\(release.id)-db"
 							}
 						}]
 						ports: [
@@ -2136,7 +2139,7 @@ import (
 					{
 						to: [{
 							podSelector: matchLabels: {
-								"cnpg.io/cluster": "\(release.name)-db"
+								"cnpg.io/cluster": "\(release.id)-db"
 							}
 						}]
 						ports: [
