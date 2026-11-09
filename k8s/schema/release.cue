@@ -112,6 +112,9 @@ package schema
 		oidc: *{} | {[=~"^OIDC_[A-Z0-9_]+$" & !~"_CLIENT_SECRET$"]: string}
 		oidcSecrets: *[] | [...=~"^OIDC_[A-Z0-9_]+_CLIENT_SECRET$"]
 		oidcSecretDigest: *"" | =~"^[0-9a-f]{64}$"
+		// The SHA-256 fingerprints of the app's Android release certificates,
+		// comma-separated, as compose gives auth WEBAUTHN_ANDROID_ORIGINS.
+		android: *"" | string
 	}
 
 	render: {

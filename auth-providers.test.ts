@@ -24,6 +24,19 @@ Deno.test("a provider reaches the terminal's auth and the auth service as a requ
   assertStringIncludes(env.value.OIDC_GOOGLE_CLIENT_ID, "OIDC_GOOGLE_CLIENT_ID is required");
 });
 
+// The cluster's capabilities.android is mecha's from 0.18.1-host.12 (its cluster_test); this
+// module's own mecha predates it, so the case holds the program's side: the list a release reads.
+Deno.test("an app's Android certificates are 32-byte SHA-256 fingerprints, each once", async () => {
+  const fp = "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C";
+  const ok = await exported(withAuth(`{required: false, service: "/auth", android: ["${fp}"]}`), "app.capabilities.auth.android");
+  assertEquals(ok.success, true, ok.stderr);
+  assertEquals(ok.value, [fp]);
+  for (const bad of [`["fa:c6"]`, `[]`, `["${fp}", "${fp}"]`, `["${fp.toLowerCase()}"]`]) {
+    const res = await exported(withAuth(`{required: false, service: "/auth", android: ${bad}}`), "app.capabilities.auth.android");
+    assertEquals(res.success, false, bad);
+  }
+});
+
 Deno.test("an app naming no provider leaves the terminal and the auth service as they were", async () => {
   const code = withAuth(`{required: false, service: "/auth"}`);
   const files = await exported(code, "out");

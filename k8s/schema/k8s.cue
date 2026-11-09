@@ -858,6 +858,7 @@ import (
 							},
 							{name: "WEBAUTHN_RP_ID", value: authRpId},
 							{name: "WEBAUTHN_ORIGIN", value: authOrigin},
+							if release.auth.android != "" {{name: "WEBAUTHN_ANDROID_ORIGINS", value: release.auth.android}},
 							for k, v in release.auth.oidc {{name: k, value: v}},
 								for k in release.auth.oidcSecrets {{
 									name: k

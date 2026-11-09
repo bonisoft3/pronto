@@ -1589,7 +1589,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 		if S.code.capabilities.auth != _|_ {
 			// A provider's settings are the cluster's (#signIn); the auth image and env files too.
-			auth: {for k, v in S.code.capabilities.auth if k != "image" && k != "envFiles" && k != "provider" {(k): v}}
+			auth: {for k, v in S.code.capabilities.auth if k != "image" && k != "envFiles" && k != "provider" && k != "android" {(k): v}}
 		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the
@@ -2303,6 +2303,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.providers != _|_ {
 				signIn: (#signIn & {auth: D.code.capabilities.auth}).out
 			}
+			if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.android != _|_ {
+				android: D.code.capabilities.auth.android
+			}
 			blobs: D.code.capabilities.blobs
 			server: (#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out
 		}
@@ -2909,6 +2912,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
 	if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ {
 		cluster: capabilities: signIn: (#signIn & {auth: E.code.capabilities.auth}).out
+	}
+	if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.android != _|_ {
+		cluster: capabilities: android: E.code.capabilities.auth.android
 	}
 	cluster: capabilities: blobs: E.code.capabilities.blobs
 	_serverOn: (#serverOn & {servers: [for _, e in E.code.state.entities {e.server}], auth: E.code.capabilities.auth != _|_}).out
