@@ -180,6 +180,33 @@ package schema
 			schedule: string | *"* * * * *"
 			path:     =~"^/" | *"/poke"
 		}
+		// A service that runs others' code in a bubblewrap jail of its own (Studio's builder): its pod
+		// in a user namespace of its own (hostUsers: false, its root no one on the node), a /proc the
+		// jail can mount afresh (procMount Unmasked), and AppArmor and seccomp unconfined, since a node
+		// that restricts unprivileged user namespaces (Ubuntu's apparmor_restrict_unprivileged_userns)
+		// and the runtime's default seccomp refuse the jail's own namespaces. Each less fails bwrap
+		// (measured on the Contabo node, 2026-11-09).
+		jail: bool | *false
+		// A Google identity of the service's own, with no key, as blobs and metricsExport have: its pod
+		// runs as the service account <name>-<service>, whose projected token (`audience`) is at
+		// /var/run/secrets/gcp/token, for the service to trade at the workload identity `provider` for
+		// `serviceAccount`'s. The token's subject is system:serviceaccount:<namespace>:<name>-<service>.
+		google?: {
+			provider!:       =~"^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+			serviceAccount!: =~"^[a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com$"
+			audience:        string | *"https://iam.googleapis.com/\(provider)"
+		}
+		// Where the service may connect beyond the services' own policy (the mesh, and the internet on
+		// 443): each an address block, what it leaves out, and a port (the node's API server for a
+		// service that provisions namespaces, the internet on 80 for a proxy).
+		egress: [...{
+			cidr!:  =~"^[0-9.]+/[0-9]+$"
+			except: [...=~"^[0-9.]+/[0-9]+$"]
+			port!:  int & >0 & <65536
+		}]
+		// Folders of the pod's own, empty at each start, by path, with the most each may hold (a
+		// builder's workspace: clones, toolchains, a game's checks).
+		scratch: [=~"^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"]: =~"^[0-9]+(Mi|Gi)$"
 	}
 
 

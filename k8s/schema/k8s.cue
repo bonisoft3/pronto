@@ -1426,8 +1426,21 @@ import (
 					}
 					// A Service's links would give AUTH_PORT=tcp://... to a pod that reads AUTH_PORT as its port.
 					spec: enableServiceLinks: false
+					if s.google != _|_ {
+						spec: serviceAccountName: "\(release.name)-\(n)"
+					}
+					if s.jail {
+						spec: hostUsers: false
+						spec: securityContext: {
+							appArmorProfile: type: "Unconfined"
+							seccompProfile: type:  "Unconfined"
+						}
+					}
 					spec: containers: [{
 						name:            n
+						if s.jail {
+							securityContext: procMount: "Unmasked"
+						}
 						image:           (#appImage & {svc: n}).out
 						imagePullPolicy: targetEnv.imagePullPolicy
 						// A pod going away keeps serving while the mesh learns of its
@@ -1446,12 +1459,20 @@ import (
 							(#denoTelemetry & {service: n}).env,
 						])
 						resources: (#resourcesOf & {r: release, n: serviceName}).out
-						if len(s.files) > 0 {
-							volumeMounts: [for dir, cm in s.files {name: "files-\(cm)", mountPath: dir, readOnly: true}]
+						if len(s.files) > 0 || len(s.scratch) > 0 || s.google != _|_ {
+							volumeMounts: list.Concat([
+								[for dir, cm in s.files {name: "files-\(cm)", mountPath: dir, readOnly: true}],
+								[for dir, _ in s.scratch {name: "scratch-\(strings.SliceRunes(hex.Encode(sha256.Sum256(dir)), 0, 12))", mountPath: dir}],
+								[if s.google != _|_ {{name: "google-token", mountPath: "/var/run/secrets/gcp", readOnly: true}}],
+							])
 						}
 					}]
-					if len(s.files) > 0 {
-						spec: volumes: [for _, cm in s.files {name: "files-\(cm)", configMap: name: cm}]
+					if len(s.files) > 0 || len(s.scratch) > 0 || s.google != _|_ {
+						spec: volumes: list.Concat([
+							[for _, cm in s.files {name: "files-\(cm)", configMap: name: cm}],
+							[for dir, size in s.scratch {name: "scratch-\(strings.SliceRunes(hex.Encode(sha256.Sum256(dir)), 0, 12))", emptyDir: sizeLimit: size}],
+							[if s.google != _|_ {{name: "google-token", projected: sources: [{serviceAccountToken: {path: "token", audience: s.google.audience, expirationSeconds: 3600}}]}}],
+						])
 					}
 				}
 			}
@@ -1473,6 +1494,34 @@ import (
 					{name: "http", port: s.port, targetPort: s.port, protocol: "TCP"},
 					if s.metrics != _|_ {{name: "metrics", port: s.metrics.port, targetPort: s.metrics.port, protocol: "TCP"}},
 				]
+			}
+		}, if s.google != _|_ {
+			apiVersion: "v1"
+			kind:       "ServiceAccount"
+			metadata: {
+				name:      "\(release.name)-\(n)"
+				namespace: release.namespace
+				"labels":  labels
+			}
+		}, if release.networkPolicy.enabled if len(s.egress) > 0 {
+			// The service's own egress past the services' policy (services.<n>.egress): policies add up.
+			apiVersion: "networking.k8s.io/v1"
+			kind:       "NetworkPolicy"
+			metadata: {
+				name:      "\(release.name)-\(n)-egress"
+				namespace: release.namespace
+				"labels":  labels
+			}
+			spec: {
+				podSelector: matchLabels: {
+					"app.kubernetes.io/name":      release.name
+					"app.kubernetes.io/component": n
+				}
+				policyTypes: ["Egress"]
+				egress: [for e in s.egress {
+					to: [{ipBlock: {cidr: e.cidr, if len(e.except) > 0 {except: e.except}}}]
+					ports: [{port: e.port, protocol: "TCP"}]
+				}]
 			}
 		}]
 	}]
