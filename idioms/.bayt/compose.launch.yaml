@@ -34,6 +34,7 @@ services:
   idioms-launch_bayt:
     build:
       additional_contexts:
+        idioms-build_bayt: service:idioms-build_bayt
         idioms-caddy_bayt: service:idioms-caddy_bayt
       context: ..
       dockerfile: .bayt/Dockerfile.launch

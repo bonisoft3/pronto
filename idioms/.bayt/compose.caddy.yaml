@@ -135,8 +135,9 @@ services:
         path: ../sitemap.xml
         target: /srv/sitemap.xml
     environment:
-      ELECTRIC_SECRET: ${ELECTRIC_SECRET:-dev-electric-secret}
+      PORT: "8080"
       ORIGIN: ${ORIGIN:-https://localhost:${CADDY_TLS_HOST_PORT:-28068}}
+      ELECTRIC_SECRET: ${ELECTRIC_SECRET:-dev-electric-secret}
     healthcheck:
       test:
       - CMD

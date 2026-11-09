@@ -35,7 +35,7 @@ externalVisualContext: (_externalBuild.targets.integrate.compose.build.additiona
 // the program the same way.
 // mise.local.lock records the checkout's absolute paths, which a container
 // does not have.
-externalTreeExcludes: [for _, e in _externalBuild.targets.generate.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", ".pronto/proto-baseline.json", "**/node_modules/**", "mise.local.lock"]
+externalTreeExcludes: [for _, e in _externalBuild.targets.generate.srcs.defaultExclude if e != null {e.glob}] & [".bayt/**", "tests/**", ".task/**", ".pronto/proto-baseline.json", ".pronto/live/**", "**/node_modules/**", "mise.local.lock", ".mise.host.toml", "mise.host.lock"]
 // Installed apps verify releases as the monorepo's do: off, globally and per
 // backend, since mise reads attestations from a rate-limited GitHub API.
 _settings: _project.mise.settings
@@ -63,9 +63,14 @@ externalImageTestUsesGeneratedInputs: _externalBuild.targets.test.cmd.builtin.do
 externalLintChecksConcreteCue: _externalBuild.files["checks.yaml"].say.lint.rulemap.cue.cmds[0].do & "mise exec -- cue vet -c ./..."
 externalGenerateKeepsCheckerInputs: list.Contains(_externalBuild.targets.generate.state.globs, ".pronto/check-inputs.json") & true
 
-externalLaunchAction: _externalBuild.files["say.yaml"].say.launch.rulemap.builtin.cmds & [{use: "./bayt-task.nu", do: "bayt-task launch-action --generate"}]
+// A host verb builds omnishell's data-plane bundle in the monorepo (the
+// switch set) and refuses a release without it, before the stack comes up: a
+// fresh checkout's integrate@host served a dead terminal and no error.
+_hostBundle: "use tools.nu [run-mise]; def omnishell-bundle [] { let omnishell = (run-mise where github:bonisoft3/omnishell | str trim); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
+_hostVerb: {for verb in ["launch", "integrate"] {(verb): "\(_hostBundle); def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task \(verb) --generate ...$args } }; host-verb"}}
+externalLaunchHostGate: _externalBuild.files["say.yaml"].say.launch.rulemap.host.cmds & [{use: "./bayt-task.nu", do: _hostVerb.launch}]
 externalIntegrateAction: _externalBuild.files["say.yaml"].say.integrate.rulemap.builtin.cmds & [{use: "./bayt-task.nu", do: "bayt-task integrate-action --generate"}]
-externalLaunchAlwaysRuns:     _externalBuild.targets["launch-action"].taskfile.incremental & false
+externalIntegrateHostGate: _externalBuild.files["say.yaml"].say.integrate.rulemap.host.cmds & [{use: "./bayt-task.nu", do: _hostVerb.integrate}]
 externalIntegrateAlwaysRuns: _externalBuild.targets["integrate-action"].taskfile.incremental & false
 externalVisualRunsTask:       _externalBuild.targets["ci-visual"].dockerfile.incremental & true
 externalVisualKeepsInjection: len(_externalBuild.targets["ci-visual"].cmd.builtin.dockerfile.inject.secrets) > 0 & true

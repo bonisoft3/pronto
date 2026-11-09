@@ -22,15 +22,21 @@ const shipped = ["", "scales", "bundle"].flatMap((dir) =>
     .filter((file) => !testModules.has(file))
 );
 
+// The names deno.json maps onto the sibling trees, which only the checkout has.
+const siblings = Object.entries((JSON.parse(readFileSync(join(ROOT, "deno.json"), "utf8")) as { imports: Record<string, string> }).imports)
+  .filter(([, target]) => target.startsWith("../"))
+  .map(([name]) => name);
+
 // A module reaches outside by an import specifier or by a file it reads
 // beside itself (`new URL("../…", import.meta.url)`): mecha-reducer.ts read
 // omnishell's SES that way and an installed pronto died on it (NotFound) on
-// the first clean runner that ran it.
+// the first clean runner that ran it. A mapped name reaches the same way, and
+// passed a scan of `../` alone.
 Deno.test("no installed module imports or reads outside pronto", () => {
   const escapes = shipped.flatMap((file) =>
     [...readFileSync(join(ROOT, file), "utf8").matchAll(/^\s*(?:import|export)\b[^\n]*?\bfrom\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']|\bnew URL\(\s*["']([^"']+)["']/gm)]
       .map(([, from, call, url]) => from ?? call ?? url)
-      .filter((spec) => spec.startsWith("../") && join(dirname(file), spec).startsWith(".."))
+      .filter((spec) => (spec.startsWith("../") && join(dirname(file), spec).startsWith("..")) || siblings.some((name) => spec.startsWith(name)))
       .map((spec) => `${file}: ${spec}`)
   );
   assert.deepEqual(escapes, []);

@@ -13,8 +13,8 @@ must be idempotent, and it is, because the read is absolute: a redelivered
 change recomputes the same rows. Periodic work is a schedule, an occurrence
 the cluster's clock turns into a row a pipeline hears. The declarations are
 [the guide's](../GUIDE.md#schedules); the bus under the pipelines is mecha's
-[change capture](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/change-capture.md); the clock is
-the [ticker's contract](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/ticker/README.md).
+[change capture](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/change-capture.md); the clock is
+the [ticker's contract](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/ticker/README.md).
 
 ## When a value earns a pipeline
 
@@ -30,8 +30,12 @@ the other case, and its answer is a per-reader pair
 
 Four are `#Pipeline`s, one a `#DuckStreamPipeline`, one a `#Drain` and one a `#Schedule`, all in [`schema.cue`](../schema.cue):
 
-- **A DuckStream pipeline** (`#DuckStreamPipeline`): continuous streaming incremental view maintenance over local or replicated sources.
-  - `tempo: *"hot" | "cold"`: `hot` runs sub-second DBSP differential circuits on the server and reactive DuckDB-WASM in the browser for active screens and running counters. `cold` flushes batched partitions into lake storage.
+- **A DuckStream pipeline** (`#DuckStreamPipeline`): a declaration emitted as SQL
+  and checked at lint time. Feldera execution, CDC wiring and reactive browser
+  evaluation are not implemented by this emitter; see the
+  [[decisions/2026-10-19-duckstream-runtime|runtime design and spikes]].
+  - `tempo: *"hot" | "cold"`: a static classification used by the checks below,
+    not an implemented latency, batching or storage guarantee.
   - **Static loop proof**: CUE statically proves that no screen mutates entity $E$ (`forms`) while reading a cold pipeline whose sources include $E$ (`_hotViolations`), refusing broken UI feedback loops at compile time.
   - **Operator endowments**: advanced relational operators (`tumble`, `hop`, `session`, `distinct`, `cross_join`, `interval_join`) are declared in `operators` and checked against DuckDB's parsed AST at lint time. Windowing operators require `tempo: "cold"`.
 - **A CDC pipeline** (`trigger: "cdc"`, the default): `from`, `to`, a consumer
@@ -130,7 +134,7 @@ drains itself from the table the emitter writes into `.pronto/cluster.json`:
 a trigger on each `on` table, the same one-second batch, every drain called
 once as the cluster installs them in place of the stream's start, and a failed call retried after
 a backoff rather than redelivered
-([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/browser.md#drains-and-the-clock)).
+([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/browser.md#drains-and-the-clock)).
 No publication is involved, so a table outside it wakes the drain there too.
 The two obligations above are what keep that loop finite, as they keep the
 stream's. PGlite enforces no `statement_timeout`, so `timeout` bounds a call
@@ -157,7 +161,7 @@ A `#Schedule` names a five-field `cron`, a `timeZone` (UTC unless stated),
 tick table carries the five columns in `#tickFields`, which the ticker writes
 last so no declared value overwrites them. How a tick is keyed, when it is
 late, how the ticker wakes the change-capture unit and why a tick needs no
-durability are the [ticker's](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/ticker/README.md).
+durability are the [ticker's](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/ticker/README.md).
 
 What the emitter holds, at `cue vet`:
 
@@ -170,7 +174,7 @@ What the emitter holds, at `cue vet`:
 
 The `schedule` table is mecha's: the cluster is handed the schedules' names,
 and its database image creates the table as `800_schedule.sql`
-([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/schema.md#how-a-schema-reaches-the-database)),
+([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/schema.md#how-a-schema-reaches-the-database)),
 with a ticker and a clock beside it. The emitter seeds it in
 `801_schedule_seed.sql`, by an upsert on the name, and the table's `CHECK`
 refuses a `Forbid` without `done` in the row itself. Both are initdb steps,
@@ -185,10 +189,10 @@ ticking ([pending](../PENDING.md#pipelines-and-schedules)).
 A value no pure transform over one change can compute — a season simulated
 twenty thousand times, a rating refit over a decade — is a computation
 ([the numeric stage](archive/2026-09-30-numeric-stage.md)). A `#Computation`
-names its module (`src`, `computations/<name>.js` unless stated), the `live`
+names its module (`src`, `computations/<name>.js` unless stated), the `live` or `offline`
 entities it alone writes (`to`) and the committed Wasm modules its jobs call
 (`wasm`). mecha's compute service
-runs it; [its header](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/compute/main.ts) is the
+runs it; [its header](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/compute/main.ts) is the
 contract, from the lake snapshot to the writes. The module is one file that
 imports nothing, and exports exactly four names:
 
@@ -199,38 +203,91 @@ imports nothing, and exports exactly four names:
 - `finish(inputs, outputs)`, `{sink table: rows}`, each the sink's whole
   content.
 
-Optional `onComplete` names a no-argument CRUD RPC called as the service role
-after every sink write succeeds. It must match `^[a-z_][a-z0-9_]{0,62}$`.
-The RPC must be idempotent: a failed call leaves the run retryable, and retry
-can invoke it after the sink rows have already committed. A redelivery can
-call it again even when the output rows are unchanged.
+`queryTypes` optionally declares the complete result fields of selected named
+queries. `typedSinks: true` derives output fields from the existing sink entities.
+Pronto emits its portable type table and canonical type names into Mecha's
+computation specification; Mecha owns validation and has no Pronto dependency.
+Typed query results preserve exact integers, decimals and microsecond times
+before they cross into JavaScript. Typed publication validates the complete
+declared row shape and adapts canonical bytes to PostgreSQL's binary input.
+Unannotated queries retain the numerical computation contract above.
+
+```cue
+queryTypes: teams: [{name: "id", type: "uuid"}]
+typedSinks: true
+```
+
+The contract distinguishes carrying a value from computing over it. A native
+DuckDB stage can carry all portable types without promising that every Feldera
+operator supports those types. In particular, `duration` is a bounded elapsed
+time, while calendar-month arithmetic belongs to an explicitly selected SQL
+stage. Source defaults and generated columns execute in PostgreSQL; the captured
+values cross the boundary, not those PostgreSQL expressions.
+
+Optional `onComplete` names a no-argument SQL function called as the service
+role once per committed batch, including unchanged results. It must match
+`^[a-z_][a-z0-9_]{0,62}$`. All sink upserts, deletions, the hook and the batch
+completion receipt commit in one PostgreSQL transaction. A hook failure rolls
+back the whole publication; the durable receipt prevents a committed claim from
+calling it again after a crash. A later batch may call it with unchanged results,
+so daily-history and other hook-level identities must remain idempotent. A hook
+must perform only transactional database work, never an external side effect.
 
 The service refuses bootstrap until the source replication slot has reached
-its initial consistent point. It then runs every computation once and takes CDC deliveries
-through a framework-owned Redpanda Connect stream. Its Redis consumer group
-acknowledges only after successful HTTP completion. A stable consumer identity
-recovers pending deliveries on restart. Each delivery selects computations
-whose `reads` include the changed table, takes fresh inputs and runs them
-sequentially. PostgreSQL statistics are not a freshness gate.
-Each pure computation retains only its last query inputs and answer. Structurally
-equal fresh query results reuse that answer; publication and completion hooks
-still run. Changed inputs recompute, and failed reads never use the retained answer.
+its initial consistent point. It then durably requests every computation and
+opens its HTTP ingress. Conduit and Redis still carry invalidations through the
+framework-owned Connect stream, which unions changed tables over one second.
+HTTP success now means that PostgreSQL accepted the work, not that numerical
+execution finished. The Redis consumer can acknowledge and continue while the
+calculation runs. A failed acceptance remains unacknowledged and is retried.
 
-Only one compute process is supported. Snapshot capture, calculation, sink
-writes and completion hooks share a single execution slot. Overlapping HTTP
-requests receive a retryable response; pending work stays in Redis. A failure
-exits the service and the unacknowledged delivery is replayed after restart.
-This is at-least-once recomputation, without LSN fencing or atomic publication
-across sink tables. There is no timed accumulation window; each relevant event
-can cause a full recomputation. Concurrent writers or replicas require a
-stronger publication protocol.
+`compute.batch` exposes the requested/completed revisions of the compiled
+[[cortex#Durable work|Cortex durable machine]]. Its private Mecha instance owns
+the lifecycle; a separate capture relation retains query inputs. Durex
+provides Graphile dispatch, frozen invocation identity and outcome receipts. Invalidations merge behind one scheduled
+wake; its one-second release deadline is not reset by later edits. One active
+claim can have one merged pending successor. A session advisory lock permits
+only one compute coordinator per database. After a crash, it recovers only its
+own recorded Durex worker pools; exhausted jobs fail visibly. Machine entry
+and work enqueue are one transaction; publication, the recorded outcome and
+machine completion are another. Forged completion and reused invocation
+identities are rejected. The [[../compute/docs/index|coordinator source and
+upgrade contract]] describe generation and migration.
+
+Declared `reads` and `to` form an acyclic computation dependency graph. An
+invalidation marks dependent computations transitively, and an unclaimed
+consumer waits for the prerequisite revisions recorded when it first became
+pending. Later producer requests do not move that target, so continuous writes
+cannot starve consumers; producer publication also requests downstream work.
+Capture copies its inputs from
+one repeatable-read PostgreSQL snapshot through DuckDB, closes that source
+transaction, then saves the query rows in PostgreSQL before calculation. Retry
+uses those saved inputs. If publication encounters a foreign-key violation and
+a newer invalidation is already durable, it rolls back and records why the stale
+claim was superseded before capturing fresh inputs. Without newer work, that
+error retains its frozen claim and retries. Code, Wasm and table-schema fingerprints reject an
+incompatible unfinished claim on restart. An in-process identical-input cache
+can avoid repeating pure numerical work; publication still reconciles actual
+sink rows and updates only changed values.
+
+The internal publisher retains the service role, claims, pre-request hook,
+constraints and RLS behavior. It owns only the declared complete sinks. Outputs
+become ordinary PostgreSQL changes, so Electric updates already-open readers
+without reload. Multiple numerical workers, dirty-group partial replacement,
+a common CDC frontier across raw pipelines and checkpoint-based Feldera recovery
+are not yet implemented. Native Feldera captures rebuild a complete baseline
+after restart. The retained input rows can be large; this first implementation
+coalesces full computations rather than making an opaque solver incremental.
+Existing raw-pipeline outputs can still lag their sources and trigger another
+batch when they catch up. The broader migration is in the
+[[decisions/2026-10-19-duckstream-runtime|Duckstream runtime decision]].
 
 Its language is the header's: ES module text as the service's SES Compartment
 admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
 `eval(` in a string, and top-level await are each refused — without the
 clock, randomness, time zone and locale. `endowments` grants it what it names
 of `Crypto` (WebCrypto's deterministic-by-specification subset),
-`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams` and `Cheerio`, as a surface module
+`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`, `Cheerio` and `Pdf`, as a surface module
 is granted `Intl`; an undeclared one throws where it is reached.
 
 `Cheerio.load(html)` creates a private mutable document using the pinned Cheerio
@@ -240,6 +297,14 @@ is frozen and exposes only `load`, not the top-level network or stream loaders.
 Documents are local scratch state, not sink values; return plain records. The cage
 is discarded after a computation, so mutated documents and parser prototypes do not
 cross runs. Parsed HTML does not sanitize strings for later rendering.
+
+`Pdf.fromJpegs({size, title?, pages})` writes a PDF of JPEG pages with the pinned
+`@pdfme/pdf-lib`: `size` is `{width, height}` in points, and each page is
+`{jpeg, x, y, width, height}`, the image drawn at that rectangle and clipped by the
+page, so one image gives several pages, a face each. It is the endowment's only
+call: no load, fonts, forms or encryption, the paths that reach the clock and
+`Math.random`, and the document carries no modification date, so the same input
+writes the same bytes.
 
 A computation can call an ordinary Crawlee-shaped function without changing the
 platform contract. Keep that function in the same module, call it from `finish`,
@@ -256,6 +321,62 @@ loads each module as the service loads it at startup, so one the service would
 refuse fails there, naming its file and SES's rule, rather than taking the
 service down; and `test` runs the app's `computations/` tests under the
 service's own pins, the module in the same cage and the jobs on the same Wasm.
+
+### Named snapshot sources and replacement sinks
+
+`state.duckstreams` also admits a bounded `backend: "compute"` profile. It
+lowers to the computation runtime above, including its Cortex coordinator and
+Durex worker. Sources and sinks are contracts on that runtime. An optional
+`feldera` descriptor enables native query execution; deployment selects the
+engine, while the coordinator and publication contract stay the same.
+
+```cue
+state: duckstreams: analytics: {
+    name: "analytics"
+    backend: "compute"
+    src: "duckstream/program.js"
+    sources: traffic: {
+        entities: ["Event", "Filter"]
+        read: "snapshot"
+    }
+    sinks: {
+        sessions: {entity: "Session", write: "replace", version: "latest", transaction: "analytics"}
+        statistics: {entity: "Topline", write: "replace", version: "latest", transaction: "analytics"}
+    }
+}
+```
+
+Every source entity must reside in PostgreSQL. The module's `reads` must match
+the deduplicated physical source tables exactly; startup rejects a mismatch.
+Every sink has a schema derived from its entity, and all sinks must name one
+transaction. Publication replaces each complete relation, deletes absent rows
+and preserves unchanged rows. The transaction also records completion.
+
+An optional sink `columns: ["id", "count"]` selects the writable entity fields
+owned by that computation. Its exact output schema still derives types,
+nullability and decimal precision from the entity. Omitted columns keep their
+stored values on update and use database defaults on insert. The list must
+include `id` and every required insert field without a default; unknown,
+generated, retired and duplicate columns are refused. Without `columns`, the
+schema includes every writable entity field. Replacement still deletes absent
+rows, so column selection does not establish independent row ownership.
+
+`version: "latest"` uses the existing serialized computation claims: a later
+claim cannot publish before an earlier claim finishes. It does not add a
+freshness guard to unrelated writers. `transaction` names the group within this
+computation; equal names on separate computations do not combine their commits.
+Snapshots, `replace`, and `latest` are the only admitted modes in this profile.
+Change streams, append, per-key replacement and ordered parallel publication
+remain outside it. No `exactlyOnce` flag is inferred for the whole CDC pipeline.
+
+[Plausible](https://github.com/bonisoft3/pronto/tree/main/apps/plausible/duckstream/docs/index.md) exercises this
+profile with authored Feldera SQL followed by a pure JavaScript finish stage.
+Its server runs native Feldera views, and Pages uses translated DuckDB snapshot
+queries from the same stock compiler export. See
+[query engines](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/compute.md) for capture, restart and
+portable-value limits. The existing SQL-shaped Duckstream
+declaration remains a separate profile; broader shared semantics are described
+in [[decisions/2026-10-20-duckstream-backend-contract]].
 
 ## Rejected
 

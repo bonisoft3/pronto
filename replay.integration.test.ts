@@ -95,6 +95,16 @@ set -eu
       const findings = await replayDatabase({ ...options, migrator: { ...options.migrator, entrypoint: [`${bin}/broken.sh`] } });
       assertEquals(findings.filter(f => f.severity === "error").map(f => f.message), ["migration runner changed the schema, stored rows or ledger on restart"]);
     });
+    await t.step("a machine's SQL reading the clock outside its clock() is a finding on its migration", async () => {
+      const actors = "030_mecha_actors.sql";
+      await Deno.mkdir(`${context}/services/database/migrations`, { recursive: true });
+      await Deno.writeTextFile(`${context}/services/database/migrations/${actors}`, `CREATE SCHEMA hybrid_turn;
+        CREATE FUNCTION hybrid_turn.clock() RETURNS bigint LANGUAGE sql AS $$ SELECT (extract(epoch FROM now()) * 1000)::bigint $$;
+        CREATE FUNCTION hybrid_turn.step() RETURNS bigint LANGUAGE sql AS $$ SELECT (extract(epoch FROM now()) * 1000)::bigint $$;`);
+      const findings = await replayDatabase({ ...options, appDir: context, actors });
+      assertEquals(findings.filter(f => f.severity === "error").map(f => [f.severity, f.path, f.message]), [["error", `services/database/migrations/${actors}`,
+        "hybrid_turn.step: calls now(), the transaction's clock: a machine reads time and randomness only through its clock and draw"]]);
+    });
   } finally {
     Deno.env.set("PATH", priorPath);
     await docker(["rm", "-f", "-v", container]);

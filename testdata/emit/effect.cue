@@ -22,7 +22,7 @@ _effecting: _code & {
 				{name: "total", type: "int"},
 			]
 		}
-		machines: PaymentMachine: {
+		mecha: rows: PaymentMachine: {
 			name:    "PaymentMachine"
 			entity:  "Payment"
 			field:   "status"
@@ -67,7 +67,7 @@ effectManifest: _effectingTargets.airlock.dockerfile.copy[0] & {srcs: ["services
 effectManifestEmitted: (_effectingFiles["services/airlock/effects.json"].data.effects.charge.handler) & "effects/charge.js"
 effectHandler: _effectingTargets.airlock.dockerfile.copy[1] & {srcs: ["effects/charge.js"], dst: "/airlock/effects/charge.js"}
 effectBinding: _effectingTargets["airlock-mesh"].dockerfile.copy[1] & {srcs: ["services/airlock/dapr/charge.yaml"], dst: "/dapr/airlock/charge.yaml"}
-effectBindingEmitted: _effectingFiles["services/airlock/dapr/charge.yaml"].data.spec.metadata[0] & {name: "url", value: "https://api.acquirer.example"}
+effectBindingEmitted: _effectingFiles["services/airlock/dapr/charge.yaml"].data.spec.baseUrl & "https://api.acquirer.example"
 effectAllowlist: _effectingTargets["airlock-mesh"].dockerfile.copy[0] & {srcs: ["/app/airlock/dapr.yaml"], dst: "/dapr/config.yaml"}
 effectImage: _effectingTargets.airlock.dockerfile.from.name & "libraries_mecha-airlock-image"
 effectSteps: [for c in _effectingTargets.database.dockerfile.copy if c.from.name != _|_ {c.dst}] & ["/docker-entrypoint-initdb.d/899_role_passwords.sh", "/docker-entrypoint-initdb.d/011_graphile_worker.sql", "/docker-entrypoint-initdb.d/012_airlock.sql"]

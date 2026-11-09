@@ -1,0 +1,20 @@
+{
+  "server": true,
+  "drains": [],
+  "bridges": [
+    {
+      "name": "fetch-pages",
+      "container": "transport",
+      "port": 8090,
+      "targets": ["docker", "cloudflare"],
+      "build": "transport-appliance"
+    },
+    {
+      "name": "mail",
+      "container": "smtp",
+      "port": 8080,
+      "targets": ["docker"],
+      "build": "smtp-appliance"
+    }
+  ]
+}

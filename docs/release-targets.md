@@ -12,7 +12,8 @@ the same name, so the word in `program.cue` is the word after `@` in
 `sayt release@<target>`. A release builds the immutable artifact the target
 consumes, runs the version ceremony and makes the artifact live; each target
 carries the whole app on one tier of mecha's ladder. `pages`, `cloudflare`,
-`docker` and `gcp` are built, `cloudflare` for guests, passkeys and providers and, of the derivations, with its drains and its clock alone,
+`docker` and `gcp` are built, `cloudflare` for guests, passkeys and providers with drains, durable snapshot
+computations and its clock,
 `docker` as a single-container standalone appliance, `gcp` for a cluster of the
 database, crud, auth and electric alone, and `k8s` against a named kube context
 ([the clouds and k8s](#the-clouds-and-k8s)). `aws` and `azure` are designed
@@ -28,19 +29,19 @@ and [not built](../PENDING.md#release-targets). How an author releases an app is
   `docker`, `gcp` and `aws`, and not `azure` or `k8s`.
 - A mecha **tier** is what the cluster is made of there. The ladder is
   mecha's: browser, CLI, single machine, k8s, cloud and edge
-  ([invariant 4](https://github.com/bonisoft3/mecha/blob/v0.20.6/README.md#4-vertical-scalability-down-and-up)).
+  ([invariant 4](https://github.com/bonisoft3/mecha/blob/v0.22.0/README.md#4-vertical-scalability-down-and-up)).
   pronto's `#Tier` names five of its rungs — `browser`, `edge`, `container`,
   which is mecha's single machine, `k8s`, and `cloud` — and the browser, the
   edge, and the container are built. `container` is where every app develops,
   and for release it is the `docker` target: the SQL fence `-- tier:
   container` … `-- tier: any` around the publication and the replica identity,
   the statements that need a WAL reader
-  ([the fence](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/browser.md#the-fence)).
+  ([the fence](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/browser.md#the-fence)).
 
 | target | tier | the artifact | the door |
 |---|---|---|---|
 | `pages` | browser | one HTML file | none: the page's fetch shim |
-| `cloudflare` | edge | a Worker, one Durable Object running PGlite, and the data directory it loads | the Worker |
+| `cloudflare` | edge | the app Worker and PGlite Durable Object, its data directory, and private Query/Compute Workers for declared computations | the app Worker |
 | `docker` | container | single-container appliance image running postgres, crud, caddy, auth, and process-compose | caddy on port 8080 |
 | `gcp` | cloud | images by digest in Artifact Registry, one Cloud Run service and the Job that builds its schema | caddy, the service's ingress container |
 | `aws`, `azure` | cloud | versioned images and the list naming them | caddy on the cloud's compute |
@@ -49,7 +50,7 @@ and [not built](../PENDING.md#release-targets). How an author releases an app is
 ## What a release is
 
 A release rule is three steps the loop contract
-([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.45.3/loop.cue)) projects from one `release` verb: the
+([`loop.cue`](https://github.com/bonisoft3/sayt/blob/v0.48.0/loop.cue)) projects from one `release` verb: the
 target's `cmds` build the artifact; `release.nu` runs the ceremony — the
 git-cliff bump under the app's tag prefix, the `VERSION` gate, the tag, and
 goreleaser as a shim with builds and the GitHub release off; `publish` makes
@@ -82,9 +83,9 @@ Every target serves the files a page runs or fetches at their content
 addresses, `_immutable-<sha256>-<name>` beside each file, and every document
 that boots the terminal — the entry, a prerendered document, one rendered on
 request — carries the map from logical path to address as its import map,
-`#pronto-assets` (omnishell's [`release-addresses.ts`](https://github.com/bonisoft3/omnishell/blob/v0.21.7/server/release-addresses.ts)).
+`#pronto-assets` (omnishell's [`release-addresses.ts`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/server/release-addresses.ts)).
 A page therefore runs one release, and an open one takes the next at the
-level its changes allow ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/screen-updates.md#when-a-deployment-lands)).
+level its changes allow ([screen updates](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/screen-updates.md#when-a-deployment-lands)).
 An address never changes and is served `immutable`; the map is an inline
 script, so the door's policy names its hash.
 
@@ -99,7 +100,7 @@ as a reader's tab does.
 
 ## ICE servers
 
-An online race's data channel (omnishell's [kinetic](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/kinetic.md))
+An online race's data channel (omnishell's [kinetic](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/kinetic.md))
 gathers its candidates over the ICE servers in the terminal config,
 `shell.json`'s `iceServers`. They are derived from the release target, by
 `#IceServers` in [`distribution/config.cue`](../distribution/config.cue), and
@@ -132,7 +133,7 @@ symmetric NAT needs a TURN relay as well
 ([RFC 8656](https://www.rfc-editor.org/rfc/rfc8656)), which needs an account and
 short-lived credentials minted by a server-side key. At `release@cloudflare`, the
 Worker serves dynamic ICE servers from `/rtc-ice`: when `CLOUDFLARE_TURN_KEY_ID`
-and `CLOUDFLARE_TURN_KEY_TOKEN` are configured as secrets (or via `.turn-secret`),
+and `CLOUDFLARE_TURN_KEY_TOKEN` are configured as Cloudflare secrets,
 the Worker calls Cloudflare Calls TURN to mint ephemeral credentials. Without
 them, the release defaults to STUN alone, preserving deployment on the free
 card-less tier. Omnishell's kinetic child prefetches `/rtc-ice` to use dynamic
@@ -154,7 +155,7 @@ applying migrations, so declared collations retain case and accent semantics
 offline. ICU and PGlite versions are pinned together in the browser runtime;
 this is part of the database contract and requires no application setting. The
 page's fetch shim serves the table by path and hands `/crud`, `/auth` and
-`/electric` to [the one-user cluster](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/browser.md#the-one-user-cluster),
+`/electric` to [the one-user cluster](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/browser.md#the-one-user-cluster),
 which mints its user at boot, so the tenancy floor runs against a real subject
 and there is no door. A program begins as one HTML file, `ir.html`, and ships
 as one.
@@ -175,6 +176,23 @@ What the bundler holds to:
   URL, which PGlite's relative asset URLs resolve against.
 - **A publication or replica identity outside a container fence fails the
   bundle**, read by mecha's own fence grammar.
+- **A host-DOM hatch is compiled into the module.** The terminal imports one by
+  path, which no shim answers, so the bundler imports each declared hatch
+  into the page and the shell mounts it from there (`hostDomModules`).
+- **A unit rides with the page.** An agent is a worker the terminal starts
+  from a `blob:` of bytes it fetched, so the shim answers it like any served
+  file. A realm is a document of its own, behind an opaque origin and under no
+  policy of the app's, and every way to put a document into one file —
+  `srcdoc`, `blob:`, `data:` — inherits the creator's policy. So the page
+  serves the realm from itself: the unit's declared scripts and sheets are
+  inlined into its document, which rides as inert base64 before the
+  document's first script, and the frame's `src` is the page's own URL with
+  `#pronto-unit=<name>` (omnishell `hatch.js` `selfSrc`), one cache entry for
+  both loads. That first script is the boot: in a sandboxed frame whose
+  fragment names a unit it writes the unit and an unclosed `<plaintext>`,
+  which ends parsing of the rest of the file as markup; anywhere else it
+  installs the CSP `<meta>` before anything after it is parsed. The policy is
+  therefore not in the static markup, and only inert data precedes it.
 - **`--base` mounts the page under a path prefix**, as a GitHub Pages project
   site needs: the shell takes the prefix off every address it matches and puts
   it on every address it composes, and the document is also written as
@@ -202,13 +220,15 @@ that made it, as a check of every pull request against the pins would.
 **The refusals.** `emit.cue` refuses the target, a `cue vet` error rather than
 a broken release, for a program with:
 
-- a vendored unit, a worker the browser fetches past the document's shim;
+- an agent presenter, which reads its pinned scripts and files through its own
+  seat, past the document's shim;
 - a shared entity, since one user shares with nobody and the client opens a
   keyed shape per grant, which the page's cluster does not serve;
-- a validation, which runs in plv8, and PGlite has none.
+- a validation, which runs in plv8, and PGlite has none
+  ([Jessie in the database](decisions/2026-11-05-database-jessie.md#validations)).
 
 **The page runs its drains and its clock**
-([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/browser.md#drains-and-the-clock)):
+([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/browser.md#drains-and-the-clock)):
 the bundler carries the drains from `.pronto/cluster.json` and places mecha's
 `schedule` table before the seed, as the edge's data directory does
 ([`edge-scripts.ts`](../bundle/edge-scripts.ts)). The clock runs while the
@@ -287,7 +307,7 @@ contain private uploads.
 The adapter accepts GET and HEAD, rejects other source buckets, and caches
 transformed responses by object ETag and size for one hour. Besides plain
 imgproxy URLs it answers `rs:fit:<w>:<w>` at the widths a screen's
-[`data-image-src`](https://github.com/bonisoft3/omnishell/blob/v0.21.7/REFERENCE.md#responsive-images) offers, and
+[`data-image-src`](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md#responsive-images) offers, and
 refuses every other transformation: each size of each picture is a paid
 transformation.
 
@@ -335,10 +355,23 @@ For native M-SSR, declare `code.meta.ssrOrigin: "https://<public-host>"` so the
 generated release recipe passes `edge.ts --ssr-origin https://<public-host>`.
 By default,
 the entry keeps its existing `Cluster` namespace and persisted filesystem format,
-so enabling SSR does not replace live data. The builder also writes
-`renderer.jsonc`; `publish-edge.ts` deploys that renderer before updating the
-entry and its database class. Publishing leaves a complete directory intact.
-Keep the existing `.jwt-secret` beside the release directory to preserve sessions.
+so enabling SSR does not replace live data. The builder writes `renderer.jsonc`
+for a separate content-addressed renderer Worker. Its asset fetches are scoped
+to rendering; authentication, import and database requests retain native fetch.
+The snapshot stays open until rendering reads finish, independently of response
+consumption. The publisher deploys the renderer before the database and entry.
+
+For declared computations, [[../bundle/edge-compute.ts|the build]] also emits
+`compute/queries/` and `compute/execution/`. These private Workers have no public
+routes: the Query Durable Object runs statically packaged DuckDB, and the
+Compute Durable Object runs the admitted computation in a static SES cage with
+the same numerical WASM modules. Their content-derived names bind a release to
+its execution contract. The publisher deploys Query, then Compute, before the
+renderer, database and app entry that use them. The database object retains
+captures, retries and publication receipts. A separate `ComputeCoordinator` object
+owns the computation alarm and dispatch; companion execution owns only scratch
+state. The database object's alarm continues to serve schedules and drains even
+when a computation is slow or exhausted. See [the computation contract](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/compute.md#cloudflare-snapshot-execution).
 
 A new deployment can opt into `--ssr-database separate`: it writes
 `database.jsonc` for `<app>-database` with compressed 128 KiB filesystem blocks,
@@ -347,16 +380,16 @@ option is not an in-place migration of an existing app. The resumable import
 verifies checksums and uses gzip transport. Do not switch database modes on a
 live deployment without migrating its current data and controlling the cutover.
 
-Both modes keep the renderer in a separate isolate. Renderer Worker names include
-a digest of the origin, sources and assets, so an old entry continues to use its
-matching renderer during an upgrade. Retain previous immutable assets with
-`--assets-from`; old renderer Workers can be removed after their entry versions
-are no longer serving or needed for rollback.
+The Worker declares `exports.Cluster` with SQLite storage. Cloudflare reconciles
+that declaration with the existing namespace; legacy migration tags are not
+carried forward. Existing data stays in place. The switch from legacy migrations
+to exports is one-way for subsequent deployments.
 
-Every navigation renders under public RLS from a fresh database transaction,
-without guest login. No HTML cache can bypass that transaction. Language
+Speculative document requests use cached HTML without starting or refreshing a
+render. A cache miss returns `204` with `no-store`. Actual navigation may render
+or revalidate stale HTML under public RLS without guest login. Language
 negotiation matches the browser, and the response varies on `Accept-Language`.
-See [omnishell/docs/native-worker-ssr](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/native-worker-ssr.md) for the freshness and isolation
+See [omnishell/docs/native-worker-ssr](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/native-worker-ssr.md) for the freshness and isolation
 contract. Authentication and derivation support remain the edge target's.
 
 The integrated deployment has been exercised on Paid; Free enforcement,
@@ -373,29 +406,43 @@ a row names: each file, named by its sha256, goes to blob storage at `seed/<file
 the publish here and by a one-shot `seed-blobs` target in a cluster, and is then an
 object like any other. Pages has no blob storage, and inlines them
 ([pages](#pages)). An effect's answered bytes are written at run time to the same
-bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-handler));
-uploads have no store at the edge yet.
+bucket ([the airlock's blobs](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md#a-handler)).
+A session's upload is a claim first, `POST /blob-claim/<key>`, and then `PUT
+/blobs/mecha-objects/<key>`, as behind the container's door; the plane's budget of claims is
+what bounds guests, whose ids are free. A bridge naming `cloudflare` runs as a
+Cloudflare Container of the airlock's dispatcher Worker, built from its Dockerfile
+by the publish, which therefore needs Docker; one not naming it has its effects
+settle failed without a call ([targets](container-bridges.md#targets)).
+An app with effects runs them in a second Worker, `<object script>-airlock`, the
+consumer of a queue of the same name that the script holding the object produces
+to ([edge-dispatcher.ts](../bundle/edge-dispatcher.ts), mecha-edge's
+[effects](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/mecha-edge/README.md#effects)): the
+object never waits on an effect's network. The publish creates the queue when it
+is missing and deploys the dispatcher after the object's script, which its
+binding names. The dispatcher alone holds the secrets its effects declare and the
+keys their AI providers need (`GEMINI_API_KEY` for Google, `OPENAI_API_KEY` for
+OpenAI): each is set from the publish's environment, or must already be the
+deployed dispatcher's, or the publish is refused.
 
 The release also contains PGlite for workerd in `pglite/`, baked from mecha's pinned sources
-([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.18.1/packages/pglite-workerd/README.md))
+([pglite-workerd](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/pglite-workerd/README.md))
 ([`edge-pglite.ts`](../bundle/edge-pglite.ts)): with `EDGE_BUILD_PROJECT=<project>` in that
 project's Cloud Build, kept in `gs://<project>-pronto-edge` under a hash of those sources, so
 the next release on the same mecha downloads it and the machine releasing needs no Docker;
 without it, by the local Docker;
 the data directory in `pgdata/`; and a Worker in `src/index.ts` exporting
-[mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.18.1/packages/mecha-edge/README.md)
+[mecha's edge cluster](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/mecha-edge/README.md)
 as its one Durable Object, over the shell's tables. `publish` runs
 [`publish-edge.ts`](../bundle/publish-edge.ts): `wrangler deploy` at the
 version pglite-workerd's `mise.toml` pins, with `JWT_SECRET` (once) and a new
 `IMPORT_TOKEN` in the same version, then the data directory loaded into the
-object. CI's first cluster release requires `secrets.JWT_SECRET`. Later
-releases without an explicit key preserve the deployed secret after checking
-that every JWT-bearing Worker has it; they never generate a replacement key.
-`sayt release@cloudflare --temporary` deploys with no login, to a
-throwaway account wrangler creates and reuses; it expires unless claimed at
-the link wrangler prints. wrangler cannot list a temporary account's
-deployments, so such a publish has no version to roll back to when the data
-directory refuses its migrations. The target keeps the compose stack's shape, one Cloudflare piece per
+object. The first cluster deployment provisions `JWT_SECRET` in Cloudflare,
+using an explicit environment value or generating one. Subsequent deployments
+verify the stored secret and leave it unchanged, even if the environment has an
+older key. Local signing-key files are not read or written. An existing Worker
+missing its signing key fails rather than replacing active sessions' authority.
+Cluster deployments require a Cloudflare account so the publisher can inspect
+existing deployments and secrets. The target keeps the compose stack's shape, one Cloudflare piece per
 service, and nothing runs while no one uses the app:
 
 | compose service | at the edge | sleeps | |
@@ -403,18 +450,19 @@ service, and nothing runs while no one uses the app:
 | caddy | the Worker: static files, `/crud`, `/auth`, `/electric`, settled reads from the Cache API | per request | built |
 | database, crud, electric, auth | one Durable Object running mecha's edge cluster on PGlite, its data directory in the object's SQLite | when idle | built, guests, passkeys and providers |
 | conduit, mesh-events | for drains, a trigger per table and the object's dispatcher; for streams, an outbox table and a Cloudflare Queue | with the object | drains built, streams designed |
-| transform, compute | a Container each, from the images bayt builds | after an idle timeout | designed |
+| compute | private Query and Compute Workers, each with a Durable Object; a separate coordinator object dispatches through service bindings | when idle | built, snapshot mode |
+| transform | stream mapping through a Queue consumer | between batches | designed |
 | ticker, clock | the object's alarm, and a Cron Trigger poking it | between occurrences | built |
-| render | none: the page renders, as `pages` does | — | built |
+| render | browser rendering, or a separate native M-SSR Worker | per request | built |
 
 ```
-browser ──/crud──▶ Worker ──▶ object (PGlite) ── commit: triggers write the outbox
-   ▲                 │ Cache API                    │
-   │                 ▼                 Queue ◀── outbox, after commit
-   │                                     │
-   │                            consumer Worker ──HTTP──▶ transform ──/invalidate──▶ compute (tables on R2)
-   │                                                          └──── batched writes back through /crud ────┘
-   └──── object ──held-open shape requests──▶ every open tab
+browser ──/crud──▶ app Worker ──▶ database object (PGlite, receipts)
+   ▲                  │                          │ capture / publication RPC
+   │               Cache API                     ▼
+   │                                    Coordinator DO ──▶ Compute Worker/DO ──▶ Query Worker/DO (DuckDB)
+   │                                        static SES + WASM ◀── query results
+   │                                             │ complete sink rows
+   └──── shape requests ◀── database publication ◀┘
 ```
 
 What fixes its shape, as built:
@@ -434,31 +482,39 @@ What fixes its shape, as built:
   object runs. Where the program declares schedules it also applies mecha's
   `schedule` table, the container image's 800 step, before the 801 seed.
   `--from=<dir>` starts it from a directory built elsewhere
-  instead, an archive restored from its database with its pgroll ledger
-  ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/pglite-workerd/restore.ts)),
-  applies the cluster's pgroll migrations the ledger lacks, as its migrate step
-  would ([`migrate.ts`](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/pglite-workerd/migrate.ts)),
-  and skips the derivation.
+  instead, an archive restored from its database with the ledger of what that
+  database applied
+  ([`restore.ts`](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/pglite-workerd/restore.ts)),
+  applies the release's scripts the ledger lacks as a publish applies them to
+  a kept directory (below), and skips the derivation.
 - **Loading is once, and a later release migrates.** The object opens only
   a directory whose load verified every chunk; a load resumes where it
   stopped and leaves a complete directory alone, so a later release changes
   the Worker and the page and never the data, unless `--reset` replaces it.
   A directory left alone is handed the release's migrations
-  (`migrations.json`: the shell's files and the cluster's pgroll set, by
-  name), and the object applies the ones its ledger lacks and starts over on
-  the new schema. The ledger is the docker appliance's `_pronto_migrations`,
-  with each script's digest beside its name: a directory records what it
-  applied when it was built (a fresh one applies the pgroll set after its
-  files, as a fresh volume's migrate step does), a script the ledger lacks
-  is applied in name order, a seed never, and a recorded file whose text the
-  release changed is refused by name — a live schema moves only by a pgroll
-  migration ([schema change admission](schema-change-admission.md)), never
-  by the entity file a directory already ran. A directory built before the
-  ledger existed is refused too. A refusal rolls every Worker the publish
-  deployed back to the version it replaced, so the site keeps serving the
-  schema it has, and `--reset` loads a directory built for this release.
+  (`migrations.json`: the shell's files, then the cluster's pgroll set, in
+  the order a directory applies them), and the object applies the ones its
+  ledger lacks, in that order, and starts over on the new schema. The ledger
+  is the docker appliance's `_pronto_migrations`, with each script's digest
+  beside its name: a directory records what it applied when it was built (a
+  fresh one applies the pgroll set after its files, as a fresh volume's
+  migrate step does), an archive what its database applied, a script the
+  ledger lacks is applied where the release orders it, a seed never, and a
+  recorded script whose text the release changed is refused by name — a live
+  schema moves only by a pgroll migration ([schema change
+  admission](schema-change-admission.md#what-a-live-directory-carries)),
+  never by the entity file a directory already ran. A directory built before
+  the ledger existed is refused too. A definitive refusal is reported before the
+  publisher attempts to restore each Worker's previous version. Durable Object
+  schema migrations can prevent rollback; every failure remains visible and
+  the publisher still attempts the other Workers. A lost response or HTTP
+  500/502/503/504 can follow a committed migration and object restart: the
+  publisher waits for the object to settle and resends the same scripts, up to
+  three attempts. Exhausting those attempts fails the publish and retains the
+  deployed Workers because the migration may have committed. `--reset` loads a
+  directory built for this release.
 - **One object, every user behind one writer.** PGlite is one connection.
-  [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/postgrest-js/src/rest-handler.ts)
+  [`createRestHandler`](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/postgrest-js/src/rest-handler.ts)
   opens each request with a transaction-local role, `app.scopes` and
   `request.jwt.claims`, so a shared connection never leaks a subject, and row
   policy is Postgres's own here as on a single machine.
@@ -482,19 +538,32 @@ What fixes its shape, as built:
   by the object's epoch; a public table's chunks are every guest's.
 - **The drains run in the object**, called as their tables change and once
   after every boot that serves, a failed one's retry at the alarm
-  ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/mecha-edge/README.md#drains)).
+  ([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/mecha-edge/README.md#drains)).
   A drain's writes reach a guest's cached `/crud` read once its 5 seconds pass,
   and a cached render once its minute does, as every write the object makes
   itself; the shape stream carries them at once.
-- **The derived rows ship as the release found them**: no stream, whose
-  mapping is bloblang, and no computation runs at the edge yet.
+- **Snapshot computations run after invalidation.** The database captures all
+  declared source tables consistently, retains that input across retries and
+  dispatches through a private service binding. Publication checks the exact
+  computation version and claim and commits sink changes with its receipt.
+  Query, pure execution and PGlite use separate Worker isolates. This path
+  requires no Container and does not implement incremental relational state;
+  bloblang streams remain a separate, unbuilt edge path.
+- **Capacity is per isolate.** Each has 128 MB for JavaScript and WASM. A
+  seeded demo does not establish that a full archive's captures, joins or global
+  numerical jobs fit. The current
+  [Worker upload limit](https://developers.cloudflare.com/workers/platform/limits/#worker-size)
+  is 64 MiB uncompressed on both Free and Paid, with no compressed-size limit;
+  the former 3/10 MB comparison is obsolete. Account quotas, CPU time and
+  archive storage still determine which plan and workload are viable.
 - **The clock is two, and sleeps.** The object's alarm stands at the next
   instant any schedule owes a runnable tick and sweeps as mecha's ticker
   does; a Cron Trigger (`triggers.crons`, written where the program declares
-  an unsuspended cron schedule or a machine that arms a deadline, and the
-  clock is not disabled) pokes the object hourly from outside it, re-arming
-  an alarm the platform dropped and recording the occurrences a lost span
-  left behind; a publish pokes once.
+  an unsuspended cron schedule, a machine that arms a deadline, an effect or a
+  hatch, and the clock is not disabled) pokes the object hourly from outside it,
+  re-arming an alarm the platform dropped, recording the occurrences a lost span
+  left behind, calling each [[edge-hatches|hatch's]] sweep and checkpointing, which
+  nothing else does here; a publish pokes once, and sweeps nothing.
   Each wake of the object is a request and a boot, so the alarm, not the
   trigger, is the resolution: an app with a daily schedule idles inside the
   Free plan's day (100,000 requests, 13,000 GB-s of object duration, five Cron
@@ -511,17 +580,6 @@ As designed and [not built](../PENDING.md#release-targets):
   idempotent keyed upsert. A long write holds every read behind it, so
   derivations write back in batches of hundreds of rows, and the object
   checkpoints after a burst, since every wake replays what the WAL holds.
-- **The containers are the stack's own images, scaled to zero.** transform and
-  compute run what `./saytw launch` runs, with the Worker in place of
-  `crud:3000` and `compute:9997` and the service token as today. A batch from
-  the Queue wakes transform; its `/invalidate` wakes compute. Their disks are
-  ephemeral, so compute keeps its tables as Parquet on R2 and a cold start
-  reads only what it needs. The container classes are generated from the
-  compose closure bayt emits, so a service added to the app is a container
-  added to the release.
-- **Cost follows use.** Workers Paid at $5 a month, Containers billed for the
-  memory and disk they hold while awake and the CPU they spend, R2 inside its
-  free tier: about $5–10 a month for an idle app.
 
 Measured with GolAberto's full archive deployed (2026-10-10, 11): 7.1 GB in
 the object's SQLite, loaded at 10.2 MiB/s and verified in the object in 70 s;
@@ -529,52 +587,125 @@ a guest's first request reaching an evicted object in about 2 s, a warm one in
 0.25 s; object CPU per request 1–3 ms at the median, under 0.8 s at the
 largest; no memory or CPU kill.
 
-Derivation stays in containers until DuckStream runs. Work that is
-incremental by construction — a stream's mapping, a join or window kept up to
-date — needs memory proportional to a change, not to the data, so it fits an
-object with its state as indexed tables in the object's SQLite, on the free
-plan too. That is [DuckStream](decisions/2026-09-29-hybrid-machines.md): the
-SQL parsed at build time as `check-sql.ts` already parses it, lowered to a plan
-an object runs. It is built only together with the Feldera-backed engine that
-runs the same SQL locally, so an edge-only engine never becomes the reference.
-Batch work over the whole history — ratings refit over years — stays in a
-container on any tier.
+These archive measurements cover serving stored rows, not recomputing the full
+history. Edge compute now executes bounded DuckDB snapshots and the unchanged
+numerical algorithm. Native Feldera retains its incremental relations and
+partitioned capture contract; the edge release does not lower those relations
+to an incremental object engine. Large global work must be measured against the
+isolate budget before adoption; splitting execution into Workers does not make
+one oversized numerical job fit.
 
 An app's machines step in the object: the migration declares each step over
 an engine the tier supplies, and the object's is PGlite for workerd's host
 import, handed the machines `edge.ts` renders from the app's rules
-([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/mecha-edge/README.md#machines)).
+([the edge cluster](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/mecha-edge/README.md#machines)).
 A deadline a machine arms and a cron schedule the program declares are the
 object's alarm, swept as the ticker sweeps them
-([the clock](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/mecha-edge/README.md#the-clock)).
+([the clock](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/mecha-edge/README.md#the-clock)).
 For a frozen archive, `code.meta.edgeClock: "disabled"` emits `--clock disabled`:
-the object preserves schedule rows, clears alarms at boot and delivery, and no
-Cron Trigger is written. The default, `"ticker"`, runs them.
+the object preserves schedule rows but runs no schedule ticks, and no schedule
+Cron Trigger is written. Drain retry and computation deadlines still arm the
+durable alarm. The default, `"ticker"`, runs the schedules too.
+
+
+## Keys
+
+Where a key lives follows what it can spend:
+
+| Tier | Keys | Where |
+| --- | --- | --- |
+| Dev | Simulators' fakes | Plain, inline in the program's CUE |
+| Sandbox | Providers' test accounts | SOPS-encrypted in `secrets.enc.yaml`, read with `sops exec-env`; only a `kind` release decrypts it into a cluster |
+| Production | Real accounts | Only the target cloud's own secret service: on Cloudflare, Worker secrets. Never in the repo, SOPS or GitHub secrets, and never through a publisher's environment |
+
+A hatch declares production keys in [`edge.secrets`](edge-hatches.md); a deploy
+credential such as `CLOUDFLARE_API_TOKEN` is the release's own, not the app's.
 
 ## docker
 
 `sayt release@docker` packages the container tier into a single-container
 appliance image running under process-compose: PostgreSQL 18, PostgREST (`crud`),
-Caddy as reverse proxy and static asset server, and, when `capabilities.auth` is
-configured, Deno running the app's `auth` service.
+Caddy as reverse proxy and static asset server, when `capabilities.auth` is
+configured, Deno running the app's `auth` service, and, when the program declares
+them, the program's forward migrations, the airlock with its daprd, the change
+feed, and the ticker with its clock.
 
 What fixes its shape:
 
 - **Single self-contained image.** The appliance builds on `core.nubox`
   (openSUSE Leap 16.0 with the lazybox toolbelt, Nushell, and GNU utilities),
   adding PostgreSQL 18 with ICU collations (`--locale-provider=icu --icu-locale=und`),
-  `setpriv`, PostgREST, Caddy and `process-compose`. When `capabilities.auth` is
+  `setpriv`, PostgREST, Caddy and `process-compose`. Leap ships neither pg_ivm, which
+  the cluster preloads, nor the `plv8` language the database's Jessie names:
+  mecha's `extensions` image builds both once, against Leap's
+  `postgresql18-server-devel` at the version the appliance's server installs
+  (mecha's `#AppliancePostgres`), from the recipe and pins its database image
+  uses (pljs, QuickJS's PL/JavaScript, as `plv8`; and pg_ivm), and every app's
+  appliance takes only their libraries and extension files. Outside the monorepo
+  the release refuses until a mecha release publishes that image. When `capabilities.auth` is
   enabled, the Deno binary and cached `/deno-dir` are copied into the image and
   run alongside the other services.
+- **Effects run as the compose stack runs them.** A program that declares
+  effects gets the airlock, its daprd with one binding per effect, and the
+  ledger's upgrade as processes in `/.bayt/process-compose.appliance.yaml`,
+  started after the database and before nothing else depends on them. They are
+  the compose services' own image contents: the airlock's Deno, cache, handlers
+  and manifest; the daprd binary, its bindings-only config and the effects'
+  bindings. Graphile's schema and the ledger arrive in the initdb sequence the
+  database image already stages, at their placed steps. Delivery is the
+  airlock's: at-least-once, counted when a run starts, recovered from the ledger
+  after a crash (the process restarts on failure).
+- **Forward migrations run as the migrate service runs them.** The appliance
+  takes pgroll, `migrate.sh` and the program's pgroll set from the migrate image,
+  and process-compose's own `migrate` applies them after the database starts and
+  before crud, the change feed and the airlock, recording them in pgroll's ledger,
+  so a restart applies only what that ledger lacks.
+- **The change feed runs as compose runs it.** A program with drains or pipelines
+  runs Conduit off the logical slot, the bus on daprd over Redis, and Redpanda
+  Connect running the pipelines and the drains' streams: process-compose's own
+  processes, given the compose images' binaries (daprd, Conduit and its HTTP
+  connector, Redpanda Connect), Leap's Redis (Redis's image links musl), and mecha's
+  files where `MECHA_MESH_DIR` and `MECHA_TRANSFORM_DIR` name them. Delivery is the
+  stack's: at-least-once, a change made while a process is down held by the slot.
+  The appliance refuses to start without a secret an effect declares, as compose
+  does, and with effects and the blob plane together, which it does not run.
+- **Computations run on DuckDB snapshots**, as `launch@local` runs them, whatever
+  engine the program states for its container stack: the compute service, from
+  its image's app, Deno cache and DuckDB extensions, with the transform carrying
+  its invalidations. Feldera is no process of the appliance; its Rust compile
+  would need gigabytes the appliance does not carry. The program's Feldera SQL
+  runs through its committed DuckDB translations, as on pages and Cloudflare.
+- **Schedules and timers are swept by mecha's ticker.** A program that declares
+  either runs the ticker and a clock poking it every `POKE_INTERVAL_SECONDS`
+  (default 60), the cadence compose's clock keeps, with the same `SERVICE_JWT`
+  default crud's development secret verifies; set both together in production.
+- **A bridge runs as a process.** A bridge whose `targets` include `docker`
+  declares an `appliance` form: the files copied from its real container's image
+  and the command that serves its port on localhost
+  ([container bridges](container-bridges.md#docker)). The airlock settles a
+  bridge not on `docker` failed and not deployed there.
+- **No AI gateway.** tsbifrost is no process of the appliance yet, so a program
+  whose effects reach it is refused at release, its build failing with
+  "release@docker does not yet run the AI gateway".
+- **One address, no network walls.** The compose stack keeps the airlock's daprd
+  and each bridge on networks of their own; inside one container every process
+  shares the loopback and the container's egress. Deno's `--allow-net` still
+  bounds the airlock to the database, its daprd and its health port, and the
+  daprd's bindings-only API still offers only declared bindings, but a bridge's
+  process reaches whatever the container may, so its own destination policy and
+  the release environment's egress rules carry that boundary.
 - **Loopback networking.** Internal services communicate over loopback.
   `appliance-entrypoint.sh` appends `127.0.0.1 crud database auth` to
-  `/etc/hosts` before launching `process-compose`, so internal HTTP and database
-  references resolve without external DNS service discovery.
-- **Idempotent schema upgrades on existing volumes.** `docker-entrypoint.sh`
-  initializes fresh `PGDATA` databases or inspects existing volumes. A dedicated
-  ledger table, `_pronto_migrations`, records applied migration scripts. On a
-  volume mounted from an earlier release, pending migrations run in order while
-  seed scripts are skipped.
+  `/etc/hosts` before launching `process-compose`, with `airlock`, `airlock-mesh`
+  and each docker bridge's container name when the program has effects and
+  `ticker` when it has schedules or timers (the change feed's processes dial
+  `127.0.0.1`), so internal HTTP
+  and database references resolve without external DNS service discovery.
+- **Idempotent schema upgrades on an existing volume.** `docker-entrypoint.sh`
+  initializes a fresh `PGDATA` database or inspects the existing one. A dedicated
+  ledger table, `_pronto_migrations`, records applied migration scripts. On the
+  volume an earlier container left, pending migrations run in order while seed
+  scripts are skipped.
 - **Startup isolation.** `pg_ctl` runs with `listen_addresses=''` during initial
   setup and migration runs, ensuring Postgres is only reachable over its Unix
   domain socket until all migrations finish. External clients and readiness
@@ -585,8 +716,12 @@ What fixes its shape:
   (`[{"headers":{"control":"up-to-date"}}]` with `electric-offset: 0_0` and
   `electric-up-to-date: true`). Browser sync engines settle cleanly in
   standalone mode without requiring a full live replication cluster.
-- **Configuration knobs and persistence.** The appliance runs standalone or with mounted state:
-  - `PGDATA`: path to PostgreSQL database directory (default `/var/lib/pgsql/data`). Bind-mounting a host directory or named volume to `/var/lib/pgsql/data` preserves database state across container updates while executing idempotent migrations on startup.
+- **Persistence and updates.** The database lives on a docker-managed named
+  volume at `PGDATA` (`/var/lib/pgsql/data`), never a bind mount. An update stops
+  the running container and starts the new image on the same volume, with
+  downtime between the two; the new container's startup applies what is pending.
+- **Configuration knobs.**
+  - `PGDATA`: path to PostgreSQL database directory, where the named volume is mounted (default `/var/lib/pgsql/data`).
   - `PORT`: external HTTP ingress port served by Caddy (default `8080`).
   - `ORIGIN`: public base URL of the service (default `http://localhost:8080`).
   - `WEBAUTHN_RP_ID` and `WEBAUTHN_ORIGIN`: WebAuthn relying party identity and origin; automatically inferred from `ORIGIN` when unset.
@@ -804,7 +939,7 @@ What bit on a real instance:
   `<app>-authenticator-password`, as compose's does. It owns the tables
   mecha puts under `FORCE ROW LEVEL SECURITY` and the `SECURITY DEFINER`
   functions that write them, so without a superuser's bypass every
-  hybrid-machine write failed its policies; initdb gives it `BYPASSRLS`.
+  mecha-machine write failed its policies; initdb gives it `BYPASSRLS`.
 - It does grant `BYPASSRLS` and `REPLICATION` to a role it made, so electric's
   role is compose's.
 - **Electric's storage cannot be a bucket.** Its shape metadata is SQLite,
@@ -818,8 +953,8 @@ What bit on a real instance:
   emit.cue writes re-runnable run again on every release. `005_create_tables`
   creates a new entity's table and leaves every other alone; `006_policies`,
   `007_txid` and `008_publication` restate every policy, trigger and
-  publication; `016_mecha_actors` replaces the hybrid machines' functions and
-  triggers, so a changed guard, rule or port reaches games already in play,
+  publication; `016_mecha_actors`, or where `state.steps` places it, found
+  by its suffix, replaces the mecha machines' functions and triggers, so a changed guard, rule or port reaches games already in play,
   keeping their instances, and refuses a new protocol `version`, whose
   instances need a migration. A column added to an existing entity is still
   pgroll's: `CREATE TABLE IF NOT EXISTS` keeps the table's shape. When an app's initdb set changes
@@ -832,7 +967,8 @@ What bit on a real instance:
   container at the instance's address, so crud binds `*`.
 
 The release refuses an app whose compose project runs anything else: the
-change-feed unit, the airlock or compute, and a renderer the app does not name in `GCP.sidecars` (below). A provider's settings come from compose as
+change-feed unit, compute, blobs, images, and a renderer the app does not name in `GCP.sidecars` (below), and an airlock whose effects reach
+anything but the AI gateway, since Cloud Run's has no daprd. A provider's settings come from compose as
 the k8s release's do, under any `GCP.auth.oidc` the app sets, and its client
 secret from Secret Manager by `GCP.auth.oidcSecrets`. With `domain` set, the
 release maps it onto the service and prints the DNS records it needs; each of
@@ -1086,7 +1222,7 @@ highest, since Aurora does not pause while logical replication is on. Project,
 account, region and domain are declarations on the cluster; credentials are
 each cloud's own and never in the session. Region is the first of the axes a
 system shards along, before time and user. mecha's
-[clouds as built](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/deployment.md#clouds-as-built)
+[clouds as built](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/deployment.md#clouds-as-built)
 is the mapping these start from.
 
 A sign-in provider (`auth.providers`) is registered with the provider, told
@@ -1098,7 +1234,7 @@ The deployment overrides each as `OIDC_<NAME>_<SETTING>`, and gives what the
 program must not hold, Google's client secret as `OIDC_GOOGLE_CLIENT_SECRET`.
 Another OpenID issuer may stand in the provider's place, such as a broker an
 operator runs, by its issuer and the client `origin`
-(mecha's [provider sign-in](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/auth/README.md#provider-sign-in)).
+(mecha's [provider sign-in](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/auth/README.md#provider-sign-in)).
 Compose refuses to render the stack when neither gives a client id, and the
 k8s release copies the public `OIDC_*` settings onto the auth service. Nonempty
 client secrets go to a separate Kubernetes Secret through stdin; the Deployment
@@ -1131,10 +1267,6 @@ release metadata.
   them.
 - **Containers kept awake** — about $30 a month for one that does nothing most
   of the day; scaling to zero with state on R2 costs a cold start instead.
-- **DuckDB-wasm as compute in an object** — measured: it gives compute's
-  answers exactly, but needs about 65 MiB before its first query, a single
-  chances group peaks near 172 MiB, ratings over one year near 270 MiB, and
-  with no disk to spill to its memory limit only turns that into failures.
 - **Splitting the archive by age** across a live object and a read-only one —
   the whole archive fits one object's storage, and reads that span seasons
   would merge two sources.

@@ -1,5 +1,8 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { cue, paymentProgram } from "./effects-fixtures.ts";
+import { generateTypeSQL } from "./type-sql.ts";
 
 const POSTGRES = "postgres:18-trixie@sha256:073e7c8b84e2197f94c8083634640ab37105effe1bc853ca4d5fbece3219b0e8";
 const append = (value: string) => `{assign: failure: {raw: "coalesce(NEW.failure, '') || '${value}'"}}`;
@@ -196,7 +199,7 @@ Deno.test("server timers refuse incomplete state and deployment contracts", asyn
     [program().replace('durability: "server"', 'durability: "device"'), "requires a server-held entity"],
     [program().replace('type: "uuid", pk: true', 'type: "uuid"'), "_readKey.Payment"],
     [program().replace('type: "final", entry:', 'type: "final", after: {"1": "pending"}, entry:'), "cannot declare after"],
-    [program().replace('targets: []', 'targets: ["pages"]'), "server timers cannot target pages"],
+    [program().replace('targets: []', 'targets: ["pages"]'), "server timers require a declared clock for pages"],
     [program().replace('targets: []', 'targets: ["aws"]'), "server timers require a declared clock"],
   ]) {
     const r = await cue(["export", "-", "-e", "out"], source);
@@ -204,3 +207,65 @@ Deno.test("server timers refuse incomplete state and deployment contracts", asyn
     assertStringIncludes(r.stderr, error);
   }
 });
+
+// A page is a target with no ticker service: its one-user cluster sweeps the
+// same schedule table on its own clock while it is open (mecha-browser's
+// clock.ts). Timers were refused on pages before that clock existed; this is
+// what lets them through.
+Deno.test({ name: "a page's own clock fires a machine's deadline while it is open", sanitizeOps: false, sanitizeResources: false, fn: async () => {
+  const source = program().replace('targets: []', 'targets: ["pages"]').replace('clocks: []', 'clocks: ["pages"]');
+  const emitted = await cue(["export", "-", "-e", "{files: out, migrations: _cluster.state.migrations}", "--out", "json"], source);
+  if (!emitted.success) throw new Error(emitted.stderr);
+  const { files, migrations } = JSON.parse(emitted.stdout) as { files: Record<string, { text?: string; format: string; data: unknown }>; migrations: string[] };
+  // As write.ts renders each.
+  const text = (m: string) => files[m].text ?? (files[m].format === "type-sql" ? generateTypeSQL(files[m].data as { precision: number; scale: number }[]) : null) ?? (() => { throw new Error(`${m} has no text`); })();
+  const repo = path.resolve(import.meta.dirname!, "../..");
+  const browser = path.join(repo, "libraries/mecha/packages/mecha-browser");
+  const dir = await Deno.makeTempDir({ prefix: "page-timers-" });
+  try {
+    // The page's scripts as the bundler orders them: mecha's tenancy floor,
+    // then the app's migrations by name (bundle/edge-scripts.ts).
+    const sql = [
+      await Deno.readTextFile(path.join(repo, "libraries/mecha/services/database/rls/rls.sql")),
+      // The one user the cluster mints at boot, which an app with auth declares.
+      "CREATE TABLE app_user (id uuid PRIMARY KEY, handle text NOT NULL);",
+      ...[...migrations].sort((a, b) => path.basename(a) < path.basename(b) ? -1 : 1).map(text),
+      // A row the page held when it was closed, its deadline already due.
+      "INSERT INTO payment (id, status, total) VALUES ('00000000-0000-4000-8000-000000000001', 'pending', 10);",
+    ];
+    await Deno.writeTextFile(path.join(dir, "sql.json"), JSON.stringify(sql));
+    await Deno.writeTextFile(path.join(dir, "page.ts"), `
+      import { PGlite } from '@electric-sql/pglite'
+      import { createCluster } from ${JSON.stringify(String(pathToFileURL(path.join(browser, "cluster.ts"))))}
+      const db = await PGlite.create()
+      const cluster = await createCluster({
+        db, sql: JSON.parse(await Deno.readTextFile(Deno.args[0])), tables: ['payment'],
+        log: console.error, fail: (e) => { throw e },
+      })
+      const row = async () => (await db.query("SELECT status || ',' || failure AS s FROM payment")).rows[0].s
+      const deadline = Date.now() + 15000
+      while ((await row()).startsWith('pending') && Date.now() < deadline) {
+        await cluster.swept()
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      const ticks = (await db.query('SELECT caller, state, delay FROM public.machine_timer_tick')).rows
+      const left = (await db.query("SELECT count(*)::int AS n FROM public.schedule WHERE emits_entity = 'machine_timer_tick'")).rows[0].n
+      console.log(JSON.stringify({ row: await row(), ticks, left }))
+      await cluster.stop()
+      await db.close()
+    `);
+    const ran = await new Deno.Command(Deno.execPath(), {
+      args: ["run", "-A", "--config", path.join(browser, "cluster.deno.json"), "--lock", path.join(browser, "deno.lock"), "--frozen", path.join(dir, "page.ts"), path.join(dir, "sql.json")],
+      stdout: "piped",
+      stderr: "inherit",
+    }).output();
+    assertEquals(ran.success, true, "the page did not boot");
+    const seen = JSON.parse(new TextDecoder().decode(ran.stdout));
+    assertEquals(seen.row, "expired,IETN");
+    assertEquals(seen.ticks, [{ caller: "page", state: "pending", delay: "0" }]);
+    // Leaving the state cancelled the other deadline the visit armed.
+    assertEquals(seen.left, 0);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+} });

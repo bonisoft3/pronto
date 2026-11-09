@@ -25,10 +25,14 @@ _besideRules: (pronto.#emit & {
 
 besideRule: _besideRules["pronto-integrate-2"].cmds[0].do & "use integrate.nu; integrate --bake --no-up --with-buildx --target ci-plain"
 besideRunner: _besideTargets["ci-plain"] & {#closure: "check-plain", #check: "plain"}
+besideCompilesForTests: list.Contains(_besideTargets["ci-plain"].dockerfile.preamble, "ENV FELDERA_COMPILATION_PROFILE=unoptimized") & true
 besidePriority: _besideRules["pronto-integrate-2"].priority & 2
 besideWaits:    _besideTargets["check-plain"].compose.depends_on["\(_code.meta.name)-launch"].condition & "service_healthy"
 besideDoor:     _besideTargets["check-plain"].compose.environment.APP_URL & "https://caddy:8443"
-besideEscaped: _besideTargets["check-plain"].compose.command & ["mise", "x", "--", "sh", "-c", "deno run tests/plain.ts $$HOME"]
+// One shell on both paths, so a command finds the platform the same way
+// beside a launched stack and in its image.
+besideEscaped: _besideTargets["check-plain"].compose.command & ["mise", "x", "--", "nu", "-c", "deno run tests/plain.ts $$HOME"]
+besideHostShell: _besideTargets["check-plain"].entrypoint.shell & "nu"
 besidePlainBase: _besideTargets["check-plain"].dockerfile.from.ref & ":setup"
 besideBrowser:   _besideTargets["check-painted"].dockerfile.from.ref & ":browser"
 besideSources: _besideTargets["check-painted"].srcs.globs & ["tests/**", "fixtures/**"]

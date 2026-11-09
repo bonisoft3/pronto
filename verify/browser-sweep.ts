@@ -8,7 +8,7 @@
 // 3. Executes airlocked journeys with guaranteed compensating rollback.
 
 import type { AirlockJourney, AirlockContext } from "./airlock.ts";
-import { type EdgeHints, extractPrimaryScreen, resolveParameterizedRoutes } from "./http-sweep.ts";
+import { type EdgeHints, extractPrimaryScreen, resolveParameterizedRoutes, staticRoutePath } from "./http-sweep.ts";
 
 export interface JourneyItem {
   screen: string;
@@ -228,7 +228,7 @@ export function buildRepresentativeJourneys(
 
     const concretePath =
       screenRoutes?.get(primaryScreen) ??
-      (!route.path.includes(":") ? route.path : undefined);
+      staticRoutePath(route.path);
 
     if (concretePath) {
       seenScreens.add(primaryScreen);
@@ -511,7 +511,7 @@ export async function verifyBrowser(
             for (const r of options.hints.routes) {
               if (r.access === "private") {
                 const screen = extractPrimaryScreen(r);
-                const path = options.screenRoutes?.get(screen) ?? (r.path.includes(":") ? undefined : r.path);
+                const path = options.screenRoutes?.get(screen) ?? staticRoutePath(r.path);
                 if (path && !coveredScreens.has(screen) && !visitedPaths.has(path)) {
                   coveredScreens.add(screen);
                   queue.push({ screen, path });

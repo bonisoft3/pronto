@@ -14,9 +14,8 @@
 // `files.handlers` as shell/handlers/<name>.js for every handler name. They
 // are facts, not decisions: what a program concludes from them — which tables
 // the terminal reads lazily (read.cue) — is CUE's to say.
-// Screen names come from shell/screens/*.html; a stale html file for a screen
-// the program no longer declares fails the export rather than deriving in
-// silence.
+// Screen names and authored paths come from the program; generated copies
+// cannot contribute bindings back into their source.
 //
 // Derived per test: `accepts`, the claims the ir element the test's `ir`
 // names cites in `data-accepts`, so a test settles what its design says it
@@ -119,9 +118,11 @@ export type ScreenProjection = { handlers: string[]; adapters: string[]; reads: 
 /** The slice of a program's entity this pass reads off its own export; every
  * module it hands the entities to declares the slice it reads for itself. */
 type Entity = {
+  name: string;
   table: string;
+  id?: string;
   durability: string;
-  fields: { name: string; type: string; cel?: string }[];
+  fields: { name: string; type: string; ordinal?: number; retired?: boolean; cel?: string }[];
   invariant?: { cel: string };
 };
 
@@ -417,9 +418,11 @@ export const readDerivation = (appDir: string, pkg: string, lifting: boolean): P
         "designCss: app.out.files[\"shell/design.css\"].text, " +
         "shellCss: app.out.files[\"shell/shell.css\"].text, " +
         "entry: app.out.terminal.surface.entry, " +
+        'endowments: [if app.out.files["shell/shell.json"].data.endowments != _|_ {app.out.files["shell/shell.json"].data.endowments}, {}][0], ' +
         // The terminal's own paths: what this pass spawns to read the markup,
         // and the published schema it vets each chart against.
         "markupReader: app.out.terminal.surface.markupReader, " +
+        'actors: {if app.code.state.cortex != _|_ for _, c in app.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "omnishell" for name, actor in c.setup.actors if actor.via == "rows" || actor.via == "navigation" {(name): actor}}, ' +
         "machineSchema: app.out.terminal.surface.machineSchema, " +
         "statics: [for s in app.out.cluster.meta.statics {file: s.file, target: s.target}], " +
         // The scripts accounted for without being Jessie: a declared unit's or
@@ -437,7 +440,8 @@ export const readDerivation = (appDir: string, pkg: string, lifting: boolean): P
         "program: app.code}",
   );
 
-export async function derive(appDir: string): Promise<void> {
+/** Retains the settled application facts so an IR redraw need only refresh metadata. */
+export async function derive(appDir: string): Promise<{ entities: Record<string, Entity & VEntity>; refreshIr: () => Promise<void> }> {
   const pkg = await programPackage(appDir);
 
   // Both derivations unify back into the entities this export reads, so a
@@ -468,7 +472,9 @@ export async function derive(appDir: string): Promise<void> {
     designCss: string;
     shellCss: string;
     entry: string;
+    endowments: Record<string, string[]>;
     markupReader: string;
+    actors: Record<string, unknown>;
     machineSchema: string;
     statics: { file: string; target: string }[];
     scripts: { units: string[]; hatches: string[]; sw: string; boot: string; bootText: string; interpreterRoot: string };
@@ -487,7 +493,7 @@ export async function derive(appDir: string): Promise<void> {
   // read off it rather than added to the expression above.
   const { surface, state, meta: appMeta } = exp.program as unknown as {
     surface: {
-      screens: Record<string, { ir: string; route: string; markup?: string; forms?: { id: string; entity: string }[]; files: { html: string; renderers?: string[] } }>;
+      screens: Record<string, { ir: string; route: string; markup?: string; forms?: { id: string; entity: string }[]; files: { html: string; css: string; renderers?: string[] } }>;
       handlers?: Record<string, { ir: string; src: string }>;
       endowments?: Record<string, string[]>;
       engines?: Record<string, { src: string }>;
@@ -496,7 +502,7 @@ export async function derive(appDir: string): Promise<void> {
       pipelines?: Record<string, { fold?: { src: string; pair: { table: string } } }>;
       computations?: Record<string, { src: string; wasm: string[]; endowments: string[] }>;
       effects?: Record<string, { endowments?: string[] }>;
-      machines?: Record<string, unknown>;
+      mecha?: { rows?: Record<string, unknown>; reducers?: Record<string, unknown> };
       seed?: { src: string };
     };
     meta?: { i18n?: { default?: string; locales?: Record<string, { path: string }> } };
@@ -523,7 +529,7 @@ export async function derive(appDir: string): Promise<void> {
   const TAG = "$validation$";
   const modules: { path: string; references: string[]; completion: string; role: string }[] = [];
   const validated: { entity: string; machine: string; name: string; edges: ReturnType<typeof resolveEdges>; statements: string; completion: string }[] = [];
-  const surfaceEndowments = surface.endowments ?? {};
+  const surfaceEndowments = exp.endowments;
   for (const [ename, e] of Object.entries(entities)) {
     for (const [vname, v] of Object.entries(e.validations ?? {})) {
       const why = validationLint(entities, ename, vname);
@@ -638,6 +644,7 @@ export async function derive(appDir: string): Promise<void> {
   // CUE-authored HTML must reach the markup reader before chart validation,
   // which judges the current declaration rather than an earlier emission.
   const problems: string[] = [];
+  const screenPaths: Record<string, string> = {};
   for (const [sname, screen] of Object.entries(surface.screens)) {
     if (screen.markup !== undefined) {
       const path = `${appDir}/${screen.files.html}`;
@@ -648,24 +655,36 @@ export async function derive(appDir: string): Promise<void> {
       problems.push(
         `${screen.files.html}: no such file — author ${screen.files.html} with <section class="screen" data-screen="${sname}"> or set surface.screens.${sname}.markup in program.cue`,
       );
+      continue;
     }
+    screenPaths[sname] = screen.files.html;
   }
 
   // What the screens say, as the terminal reads them. Spawned like the export
   // above and from the same directory, so the path the program's terminal
   // declares is the path that resolves; --no-config because every module the
   // reader loads is a static import of its own.
-  let projected: Record<string, ScreenProjection> = {};
-  if (problems.length === 0 || await exists(`${appDir}/shell/screens`)) {
-    const read = await new Deno.Command("deno", {
-      args: ["run", "--no-lock", "--no-check", "--no-config", "--allow-read=.", await terminalPath(exp.markupReader, appDir), "."],
+  const markupReader = await terminalPath(exp.markupReader, appDir);
+  const readMarkup = async (): Promise<Record<string, ScreenProjection>> => {
+    const child = new Deno.Command("deno", {
+      args: ["run", "--no-lock", "--no-check", "--no-config", "--allow-read=.", markupReader, ".", "--actors-stdin"],
       cwd: appDir,
+      stdin: "piped",
       stdout: "piped",
       stderr: "inherit",
-    }).output();
-    if (!read.success) fail(`${exp.markupReader} refused this app's markup`);
-    ({ screens: projected } = JSON.parse(new TextDecoder().decode(read.stdout)));
-  }
+    }).spawn();
+    const input = child.stdin.getWriter();
+    await input.write(new TextEncoder().encode(JSON.stringify({
+      actors: exp.actors,
+      screens: screenPaths,
+    })));
+    await input.close();
+    const read = await child.output();
+    if (!read.success) throw new Error(`${exp.markupReader} refused this app's markup`);
+    return JSON.parse(new TextDecoder().decode(read.stdout)).screens;
+  };
+  const projected = Object.keys(screenPaths).length > 0 ? await readMarkup() : {};
+
 
   const screens: DerivedScreen[] = [];
   const machines: { screen: string; region: MachineProjection }[] = [];
@@ -673,8 +692,9 @@ export async function derive(appDir: string): Promise<void> {
   const allProse: FactTemplateProse[] = [];
   for (const [name, screen] of Object.entries(projected)) {
     if (defaultLocale !== null) {
-      const html = await Deno.readTextFile(`${appDir}/shell/screens/${name}.html`);
-      const { msgRefs, prose } = scanTemplateI18n(html, name, `shell/screens/${name}.html`);
+      const path = surface.screens[name].files.html;
+      const html = await Deno.readTextFile(`${appDir}/${path}`);
+      const { msgRefs, prose } = scanTemplateI18n(html, name, path);
       allMsgRefs.push(...msgRefs);
       allProse.push(...prose);
     }
@@ -818,7 +838,7 @@ export async function derive(appDir: string): Promise<void> {
   const seed_vetted: { src: string; key: string }[] = [];
   if (seedSrc !== undefined) {
     const bytes = await Deno.readFile(`${appDir}/${seedSrc}`).catch((e) => fail(`${seedSrc}: state.seed names it, and it does not open: ${e.message}`));
-    const key = await seedKey(bytes, entities, await Deno.readTextFile(`${appDir}/program_cel.cue`), state.machines);
+    const key = await seedKey(bytes, entities, await Deno.readTextFile(`${appDir}/program_cel.cue`), state.mecha?.rows);
     const previous = await ifMissing(Deno.readTextFile(`${appDir}/.pronto/facts.json`), null);
     const vetted = previous !== null &&
       ((JSON.parse(previous).seed_vetted ?? []) as { src: string; key: string }[]).some((r) => r.src === seedSrc && r.key === key);
@@ -881,7 +901,7 @@ export async function derive(appDir: string): Promise<void> {
   } catch (e) {
     problems.push((e as Error).message);
   }
-  const irHtml = composedIr?.html ?? null;
+  let irHtml = composedIr?.html ?? null;
   const irFragments = composedIr?.fragments ?? [];
   let notes: { id: string; note: string }[] = [];
   let diagrams: { nodes: Parameters<typeof diagramFacts>[0]; edges: Parameters<typeof diagramFacts>[1] } = { nodes: [], edges: [] };
@@ -981,7 +1001,7 @@ export async function derive(appDir: string): Promise<void> {
   // does not — never a file to skip, which would drop it from both token rules.
   const sharedPaths = new Set(Object.values(exp.shared).flat());
   const appCss: { path: string; css: string }[] = [];
-  for (const rel of [...Object.keys(surface.screens).map((name) => `shell/screens/${name}.css`), ...[...sharedPaths].sort()]) {
+  for (const rel of [...Object.values(surface.screens).map((screen) => screen.files.css), ...[...sharedPaths].sort()]) {
     const css = await ifMissing(Deno.readTextFile(`${appDir}/${rel}`), null);
     if (css === null) problems.push(`${rel} does not open — author ${rel}`);
     else appCss.push({ path: rel, css });
@@ -1118,37 +1138,62 @@ export async function derive(appDir: string): Promise<void> {
   artifacts.push({ path: "shell/design.css", sha256: designCss ?? "missing", derived: true });
 
   await Deno.mkdir(`${appDir}/.pronto`, { recursive: true });
-  await Deno.writeTextFile(
+  const fixedFacts = mergeFacts(
+    programFacts(entities, screens.map((s) => ({
+      name: s.name,
+      entities: screenEntities(s.reads, machines.filter((m) => m.screen === s.name).map((m) => m.region), byTable),
+    })), charts),
+    celFacts(sites, [...irs.keys()]),
+    scaleFacts(scaleSources(exp.scale), scaleDeclarations(exp.scale)),
+    designCssFacts(tokenDeclarations(exp.designCss)),
+    scriptFacts([...exp.scripts.units, ...exp.scripts.hatches], [exp.scripts.sw, ...(exp.scripts.bootText === terminalBoot ? [exp.scripts.boot] : [])]),
+    jessieFactRows(DENIED, modules),
+    { enum_value },
+    { read_mode: Object.entries(exp.read).map(([entity, s]) => ({ entity, ...s })) },
+    seed_vetted.length > 0 ? { seed_vetted } : {},
+  );
+  const irFactRows = () => mergeFacts(ledger, bijection, nestingFacts(irHtml!), diagramFacts(diagrams.nodes, diagrams.edges));
+  let irFacts = irFactRows();
+  const writeFacts = () => Deno.writeTextFile(
     `${appDir}/.pronto/facts.json`,
     renderFacts(mergeFacts(
-      programFacts(
-        entities,
-        screens.map((s) => ({
-          name: s.name,
-          entities: screenEntities(s.reads, machines.filter((m) => m.screen === s.name).map((m) => m.region), byTable),
-        })),
-        charts,
-      ),
-      ledger,
-      bijection,
-      nestingFacts(irHtml),
+      fixedFacts, irFacts,
       artifactFacts(artifacts),
-      celFacts(sites, [...irs.keys()]),
       styleFacts(ownedTokens(shared), appTokens),
       literalFacts(scaleSteps(exp.scale, exp.design), literals, EXCEPTION_REASONS, exp.pendingLiterals),
-      scaleFacts(scaleSources(exp.scale), scaleDeclarations(exp.scale)),
-      designCssFacts(tokenDeclarations(exp.designCss)),
       importFacts(exp.statics, imports),
-      scriptFacts([...exp.scripts.units, ...exp.scripts.hatches], [exp.scripts.sw, ...(exp.scripts.bootText === terminalBoot ? [exp.scripts.boot] : [])]),
-      jessieFactRows(DENIED, modules),
-      { enum_value },
-      { read_mode: Object.entries(exp.read).map(([entity, s]) => ({ entity, ...s })) },
-      seed_vetted.length > 0 ? { seed_vetted } : {},
-      diagramFacts(diagrams.nodes, diagrams.edges),
       i18nFacts(defaultLocale, locales, catalogs, allMsgRefs, allProse),
     )),
   );
-
+  await writeFacts();
+  const refreshIr = async () => {
+    const current = await composeIr(appDir, exp.ir);
+    if (current === null) throw new Error(`${exp.ir}: disappeared during generation`);
+    const nextNotes = notesFor(irDecisions(current.html), exp.decisions);
+    const nextAccepts = acceptsFor(irIds(current.html).get("test") ?? [], irAccepts(current.html), exp.tests);
+    if (JSON.stringify(current.fragments) !== JSON.stringify(irFragments) ||
+        JSON.stringify(nextNotes) !== JSON.stringify(notes) || JSON.stringify(nextAccepts) !== JSON.stringify(accepts)) {
+      throw new Error(`${exp.ir}: authored compiler inputs changed during rendering; regenerate`);
+    }
+    irHtml = current.html;
+    diagrams = await irDiagrams(irHtml);
+    bijection = bijectionFacts(KINDS, irIds(irHtml), irRoutes(irHtml), decls, exp.program);
+    ledger = acceptanceFacts(claims(ledgerMd!), irPaths(irHtml), irAccepts(irHtml),
+      Object.fromEntries(accepts.map((t) => [t.id, t.accepts])), exp.paths);
+    const images: string[] = [];
+    for (const entry of await entries(`${appDir}/ir`, [])) {
+      if (entry.isFile && entry.name.endsWith(".svg")) images.push(`ir/${entry.name}`);
+    }
+    const nextLadder = [...new Set([...irFragments, ...images, ...journalFiles])].sort();
+    await Deno.writeTextFile(`${appDir}/program_derived.cue`, renderDerived(pkg, screens, available, notes, accepts, nextLadder));
+    const refreshed = new Set([exp.ir, ...irFragments, "program_derived.cue"]);
+    for (const artifact of artifacts) {
+      if (refreshed.has(artifact.path)) artifact.sha256 = await sha(artifact.path);
+    }
+    irFacts = irFactRows();
+    await writeFacts();
+  };
+  return { entities, refreshIr };
 }
 
 /** The entities a screen needs a collection for, its `reads` fact: each

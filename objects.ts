@@ -45,7 +45,7 @@ const COLLECTIONS: Record<string, { bucket: string; field: string; kind: Kind; o
   handlers: { bucket: "surface", field: "handlers", kind: "handler" },
   hatches: { bucket: "capabilities", field: "hatches", kind: "hatch" },
   units: { bucket: "capabilities", field: "vendored", kind: "unit" },
-  machines: { bucket: "state", field: "machines", kind: "machine", optional: true },
+  "mecha.rows": { bucket: "state.mecha", field: "rows", kind: "machine", optional: true },
   effects: { bucket: "state", field: "effects", kind: "effect", optional: true },
 };
 
@@ -112,7 +112,7 @@ export type Declaration = { kind: Kind; id: string; where: string; owed: boolean
 export function declarations(code: Record<string, any>): Declaration[] {
   const out: Declaration[] = [];
   for (const [collection, { bucket, field, kind, optional }] of Object.entries(COLLECTIONS)) {
-    const objects = code[bucket]?.[field];
+    const objects = bucket.split(".").reduce((value, part) => value?.[part], code)?.[field];
     if (objects === undefined || objects === null || typeof objects !== "object") {
       if (optional) continue;
       throw new Error(

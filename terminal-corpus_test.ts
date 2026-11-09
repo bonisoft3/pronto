@@ -26,7 +26,7 @@ Deno.test("a handler-free release corpus compiles without an empty handlers dire
     await assertRejects(() => Deno.stat(join(fixture, "shell/handlers")), Deno.errors.NotFound);
     await prepareTerminalCorpus(fixture);
     const config = JSON.parse(await Deno.readTextFile(join(fixture, "shell/shell.json")));
-    assertEquals(typeof config, "object");
+    assertEquals(config.routes.find((route: { screen: string }) => route.screen === "gallery").ssr, "spa");
     assertEquals(await Deno.readTextFile(join(fixture, "shell/shell.yaml")), JSON.stringify(config));
     await assertRejects(() => Deno.stat(join(fixture, "storybook_bootstrap.cue")), Deno.errors.NotFound);
   } finally {

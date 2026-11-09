@@ -1,25 +1,24 @@
 // Writes the data directory an edge release loads into its object: rls.sql, the
 // app's migrations (mecha's schedule table before the seed that fills it, where
-// the program declares schedules) and, with --derived, the rows derived.ts wrote, applied by
-// npm's PGlite to a directory on disk, as the page's cluster applies them in a
-// tab. Runs under the cluster's pins: the same Postgres the object runs.
+// the program declares schedules), the cluster's pgroll set and, with --derived,
+// the rows derived.ts wrote, applied by npm's PGlite to a directory on disk, as
+// the page's cluster applies them in a tab. Runs under the cluster's pins: the
+// same Postgres the object runs.
 //
-// Either way the directory records what it applied, by name and digest, in
-// the ledger the docker appliance keeps (pglite-workerd's scripts.ts), which
-// a later release's publish reads to carry a directory the object kept
-// forward: the pgroll migrations it lacks, as the cluster's migrate step
-// carries a volume. A directory built fresh applies the cluster's pgroll set
-// after its files, as a fresh volume's migrate step does. The scripts and
-// their order are edge-scripts.ts's, which the publish's payload shares. An
-// archive records the release's digests: what its database applied is the
-// restore's to establish, and the pgroll set is what it is carried by.
+// The directory records what it applied, by name and digest, in the ledger
+// the docker appliance keeps (pglite-workerd's scripts.ts), which a later
+// release's publish reads to carry a directory the object kept forward. The
+// scripts and their order are edge-scripts.ts's, which the publish's payload
+// shares: files, then the pgroll set, as a fresh volume's initdb and migrate
+// steps run them.
 //
-// --from starts from a copy of a directory built elsewhere (an archive restored
-// from its database, its pgroll ledger included) instead, and applies the app's
-// pgroll migrations (--pgroll, the cluster's state.pgroll as JSON) its ledger
-// lacks, as the cluster's migrate step would (pglite-workerd's migrate.ts).
+// --from starts from a copy of a directory built elsewhere instead, an archive
+// restored from its database with its ledger (pglite-workerd's restore.ts),
+// and applies the release's scripts that ledger lacks, files then pgroll, as a
+// publish applies them to a kept directory (pglite-workerd's applyScripts):
+// the same carry, run here so the directory is loaded complete.
 //
-//   deno run -A --config <mecha>/packages/mecha-browser/cluster.deno.json --lock <mecha>/packages/mecha-browser/deno.lock --frozen \
+//   DENO_NO_PACKAGE_JSON=1 deno run -A --no-config --import-map <mecha>/packages/mecha-browser/cluster.deno.json --lock <mecha>/packages/mecha-browser/deno.lock --frozen \
 //     bundle/pgdata.ts <appDir> --mecha <dir> --out <dir> --pgroll <file> [--derived <file>] [--from <dir>]
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -30,7 +29,7 @@ function fail(msg: string): never {
 }
 
 const args = Deno.args.slice()
-const app = path.resolve(args.shift() ?? fail('usage: pgdata.ts <appDir> --mecha <dir> --out <dir> [--derived <file>] [--from <dir> --pgroll <file>]'))
+const app = path.resolve(args.shift() ?? fail('usage: pgdata.ts <appDir> --mecha <dir> --out <dir> --pgroll <file> [--derived <file>] [--from <dir>]'))
 const flags: Record<string, string> = {}
 while (args.length) {
   const flag = args.shift()!
@@ -49,8 +48,8 @@ const { createDatabase } = await browser('src/database.ts')
 const { browserTier } = await browser('fence.ts') as { browserTier: (sql: string) => string }
 
 const shell = JSON.parse(await Deno.readTextFile(path.join(app, 'shell/shell.json'))) as { migrations: string[] }
-const { releaseScripts } = await import('./edge-scripts.ts')
-const release = await releaseScripts(app, mecha, shell.migrations, pgrollSet)
+const { clusterSteps, releaseScripts } = await import('./edge-scripts.ts')
+const release = await releaseScripts(app, mecha, shell.migrations, pgrollSet, await clusterSteps(path.join(app, '.pronto/cluster.json')))
 
 async function copy(src: string, dst: string) {
   await Deno.mkdir(dst)
@@ -65,22 +64,19 @@ await Deno.remove(out, { recursive: true }).catch((e) => { if (!(e instanceof De
 await Deno.mkdir(path.dirname(out), { recursive: true })
 if (from) await copy(from, out)
 const db = await createDatabase({ dataDir: out })
-const { recordScripts, UnrunnableScript } = await import(String(pathToFileURL(path.join(mecha, 'packages/pglite-workerd/scripts.ts'))))
+const { applyScripts, recordScripts, UnrunnableScript } = await import(String(pathToFileURL(path.join(mecha, 'packages/pglite-workerd/scripts.ts'))))
 if (from) {
-  // The archive's database applied the files on its container; what it
-  // lacks of the pgroll set is applied here against its own ledger.
-  const { migrate } = await import(String(pathToFileURL(path.join(mecha, 'packages/pglite-workerd/migrate.ts'))))
-  await migrate(db, pgrollSet, (l: string) => console.error(`pgdata: ${l}`))
+  const applied = await applyScripts(db, release.scripts, (l: string) => console.error(`pgdata: ${l}`))
+  console.error(`pgdata: ${applied.length} scripts applied over ${from}`)
 } else {
-  for (const { sql } of release.files) await db.exec(browserTier(sql))
-  for (const script of release.pgroll) {
+  for (const script of release.scripts) {
     if (script.sql === null) throw new UnrunnableScript(script.name, 'an operation')
     await db.exec(browserTier(script.sql))
   }
   if (derived) await db.exec(browserTier(await Deno.readTextFile(path.resolve(derived))))
+  await recordScripts(db, release.scripts)
+  await db.exec('VACUUM ANALYZE')
 }
-await recordScripts(db, [...release.files, ...release.pgroll])
-if (!from) await db.exec('VACUUM ANALYZE')
 const { closeTrimmed } = await import(String(pathToFileURL(path.join(mecha, 'packages/pglite-workerd/restore.ts'))))
 await closeTrimmed(db, out)
 console.error(`pgdata: ${out}, ${from ? `from ${from}` : `${release.files.length} files and ${release.pgroll.length} pgroll migrations`}`)

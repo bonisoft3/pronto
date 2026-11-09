@@ -1,0 +1,178 @@
+# generated from bayt.cue — do not edit
+tasks:
+  default:
+    deps:
+    - "::bayt:build"
+    run: once
+    cmds:
+    - |-
+      nu -c "if ((\$env.SAYT_TASK_VERB? | default \"\") != \"launch\") or ((\$env.SAYT_PLATFORM? | default \"\") != \"host\") { exit 0 }
+      def dump-logs [work: string] {
+        for f in [\"proc.log\" \"pc.log\"] {
+          let p = (\$work | path join \$f)
+          if (\$p | path exists) {
+            open --raw \$p | lines | where (not (\$it | str contains \"http.log.access\")) | last 120 | str join (char nl) | print -e \$in
+          }
+        }
+      }
+      def cleanup-work [w: string] {
+        if (\$w | is-empty) or (not (\$w | path exists)) { return }
+        let w_fwd = (\$w | str replace -a (char -u 5c) \"/\")
+        for pf in (glob \$\"(\$w_fwd)/pg-*/postmaster.pid\") {
+          try { ^mise x -- pg_ctl -D (\$pf | path dirname) -m immediate -w stop | ignore } catch { }
+        }
+        try {
+          ps -l | where (((\$it.command? | default \"\") | str contains \$w) or ((\$it.command? | default \"\") | str contains \$w_fwd)) and (\$it.pid != \$nu.pid) and (\$it.name =~ '(?i)(postgres|caddy|postgrest|deno|daprd|conduit|redis-server|rclone|imgproxy|redpanda-connect|mailpit|hydra)') | each {|p| try { kill -f \$p.pid } catch { } } | ignore
+        } catch { }
+        try { rm -rf \$w } catch { }
+      }
+      load-env { MISE_ENV: \"host\" }
+      let pc_bin = (^mise which process-compose | str trim)
+      let arguments = (if ((\$env.SAYT_TASK_ARGS? | default \"\") != \"\") { \$env.SAYT_TASK_ARGS | from json } else { [] })
+      if (\"--watch\" in \$arguments) or (\"-w\" in \$arguments) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }
+      let os = (match \$nu.os-info.name { \"macos\" => \"macos\", \"windows\" => \"windows\", _ => \"linux\" })
+      let h = (pwd | hash sha256)
+      let sock = (\$nu.temp-dir | path join \$\"bayt-launch-(\$h | str substring 0..12).sock\")
+      let def_port = (28000 + ((\$h | str substring 0..6 | into int -r 16) mod 9000) | into string)
+      let state_file = (\$nu.temp-dir | path join \$\"bayt-launch-(\$h | str substring 0..12).work\")
+      mut prev_work = \"\"
+      mut prev_port = \$def_port
+      if (\$state_file | path exists) {
+        let raw_st = (open --raw \$state_file | str trim)
+        if (\$raw_st | str starts-with \"{\") {
+          let parsed = (\$raw_st | from json)
+          \$prev_work = (\$parsed.work? | default \"\")
+          \$prev_port = (\$parsed.port? | default \$def_port)
+        } else {
+          \$prev_work = \$raw_st
+        }
+      }
+      if \$os == \"windows\" or (\$sock | path exists) {
+        let prev_conn = (if \$os == \"windows\" { [\"-p\" \$prev_port] } else { [\"-U\" \"-u\" \$sock] })
+        try { ^\$pc_bin ...\$prev_conn down } catch { }
+        if (\$sock | path exists) { rm -f \$sock }
+      }
+      if (\$prev_work | is-not-empty) {
+        cleanup-work \$prev_work
+      }
+      if (\$state_file | path exists) { rm -f \$state_file }
+      let work = (\$nu.temp-dir | path join \$\"bayt-lw-(random chars -l 8)\")
+      let work_fwd = (\$work | str replace -a (char -u 5c) \"/\")
+      let wbin = (\$work | path join \"bin\")
+      mkdir \$wbin
+      if \$os == \"windows\" {
+        ([\"@echo off\" \"exit /b 0\" \"\"] | str join (char crlf)) | save -f (\$wbin | path join \"task.cmd\")
+      } else {
+        ([\"#!/bin/sh\" \"exit 0\" \"\"] | str join (char nl)) | save -f (\$wbin | path join \"task\")
+        ^chmod +x (\$wbin | path join \"task\")
+      }
+      if (not (\".certs/localhost.pem\" | path exists)) or (not (\".certs/localhost-key.pem\" | path exists)) {
+        mkdir .certs
+        with-env { CAROOT: (\".certs\" | path expand) } {
+          ^mise x -- mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem localhost caddy 127.0.0.1 ::1
+        }
+      }
+      let caroot_ca = ((^mise x -- mkcert -CAROOT | str trim) | path join \"rootCA.pem\")
+      let cert_p = (\$work | path join \"ca.pem\")
+      ([\".certs/localhost.pem\" \".certs/rootCA.pem\" \$caroot_ca] | where (\$it | path exists) | each {|p| open --raw \$p } | str join (char nl)) | save -f \$cert_p
+      let served_dir = (\$work | path join \"served\")
+      if (\".bayt/bayt.served.json\" | path exists) {
+        let omnishell = (if ((\$env.OMNISHELL_DIR? | default \"\") != \"\") { \$env.OMNISHELL_DIR } else { (^mise where github:bonisoft3/omnishell | str trim) })
+        let tree_dir = (\$served_dir | path join \"tree\")
+        let caddy_dir = (\$served_dir | path join \"caddy\")
+        let srv_dir = (\$served_dir | path join \"srv\")
+        let omni_dir = (\$served_dir | path join \"omnishell\")
+        let scripts_out = (\$caddy_dir | path join \"release-scripts\")
+        mkdir \$tree_dir \$caddy_dir \$srv_dir
+        let ep = (open .bayt/bayt.served.json | get dockerfile.epilogue.0)
+        \$ep | parse -r 'install -D -m 644 \\x27(?<src>[^\\x27]+)\\x27 \\x27(?<dst>[^\\x27]+)\\x27' | each {|p|
+          let s = (if (\$p.src | str starts-with \"/omnishell/\") { (\$omnishell | path join (\$p.src | str replace \"/omnishell/\" \"\")) } else { (\$p.src | str replace \"/app/\" \"\") })
+          let d = (\$tree_dir | path join (\$p.dst | str replace \"/served/\" \"\"))
+          mkdir (\$d | path dirname)
+          cp -f \$s \$d
+        } | ignore
+        for d in (\$ep | parse -r 'grep -rqE \\x27\\[\\[:space:\\]\\](?<k>[^=]+)=\\x22(?<v>[^\\x22]*)\\x22\\x27 \\x27[^\\x27]+\\x27 --include=\\x27\\*\\.html\\x27 \\|\\| \\{ echo \\x27(?<msg>[^\\x27]+)\\x27') {
+          mut matched = false
+          for f in (glob (\$tree_dir | path join \"**/*.html\" | str replace -a (char -u 5c) \"/\")) {
+            let raw = (open --raw \$f)
+            let pat = ('(\\s' + \$d.k + '=)\\x22[^\\x22]*\\x22')
+            let rep = ('\$1' + (char dquote) + \$d.v + (char dquote))
+            let next = (\$raw | str replace -a -r \$pat \$rep)
+            if \$next != \$raw { \$next | save --raw -f \$f }
+            if (\$next =~ ('[\\s]' + \$d.k + '=' + (char dquote) + \$d.v + (char dquote))) { \$matched = true }
+          }
+          if not \$matched { error make { msg: \$d.msg } }
+        }
+        ^mise x -- deno run --config (\$omnishell | path join \"server/deno.json\") \$\"--allow-read=(\$tree_dir)\" \$\"--allow-write=(\$tree_dir),(\$scripts_out)\" (\$omnishell | path join \"server/address.ts\") \$tree_dir \$scripts_out
+        glob (\$tree_dir | path join \"*\" | str replace -a (char -u 5c) \"/\") | each {|item| cp -rf \$item \$srv_dir } | ignore
+        if ((\$tree_dir | path join \"omnishell\") | path exists) { cp -rf (\$tree_dir | path join \"omnishell\") \$omni_dir }
+        for rdir in [\$srv_dir \$omni_dir] {
+          if (\$rdir | path exists) {
+            glob (\$rdir | path join \"**/*\" | str replace -a (char -u 5c) \"/\") | where (\$it | path type) == \"file\" and (not (\$it | str ends-with \".etag\")) | each {|f|
+              let h = (open --raw \$f | hash sha256)
+              ((char dquote) + \$h + (char dquote)) | save --raw -f \$\"(\$f).etag\"
+            } | ignore
+          }
+        }
+      }
+      \$\"log_location: (\$work_fwd)/proc.log
+      \" | save -f (\$work | path join \"pc-logs.yaml\")
+      let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where ((\$it.def | into int) >= 10000) and (\$it.var != \"CADDY_TLS_HOST_PORT\") | get var | uniq | sort | append (if \$os == \"windows\" { [\"_PC_PORT\"] } else { [] }))
+      let start_p = (20000 + ((\$h | str substring 0..6 | into int -r 16) mod 7000))
+      let alloc = (^mise x -- deno eval --no-config 'const vars = JSON.parse(Deno.args[0]); let p = Number(Deno.args[1]); const out = {}; for (const k of vars) { while (true) { try { const l = Deno.listen({ hostname: \"127.0.0.1\", port: p }); l.close(); break; } catch { p++; } } out[k] = String(p++); } console.log(JSON.stringify(out));' (\$pvars | to json -r) (\$start_p | into string) | from json)
+      let port = (\$alloc._PC_PORT? | default \$def_port)
+      let pc_conn = (if \$os == \"windows\" { [\"-p\" \$port] } else { [\"-U\" \"-u\" \$sock] })
+      ({ work: \$work, port: \$port } | to json -r) | save -f \$state_file
+      let path_key = (if (\"PATH\" in \$env) { \"PATH\" } else { \"Path\" })
+      let bins = [\$wbin ((^mise where github:bonisoft3/bayt | str trim) | path join \"bin\")]
+      let raw_p = (\$env | get -o \$path_key | default [])
+      let cur_p = (if ((\$raw_p | describe) == \"string\") { \$raw_p | split row (char esep) } else { \$raw_p })
+      let val_p = (if \$os == \"windows\" { (\$bins | append \$cur_p) | str join (char esep) } else { \$bins | append \$cur_p })
+      let pc_env = ((\$alloc | reject -o _PC_PORT) | merge {
+        MISE_ENV: \"host\"
+        BAYT_LOCAL_WORK_DIR: \$work
+        BAYT_LOCAL_SERVED_DIR: \$served_dir
+        BAYT_LOCAL_MOCK_AI: (\$env.BAYT_LOCAL_MOCK_AI? | default \"1\")
+        SAYT_PLATFORM: \"host\"
+        DENO_NO_PROMPT: \"1\"
+        DENO_CERT: \$cert_p
+      } | insert \$path_key \$val_p)
+      try {
+        with-env \$pc_env {
+          ^\$pc_bin ...\$pc_conn -D -L (\$work | path join \"pc.log\") -f .bayt/process-compose.yaml -f (\$work | path join \"pc-logs.yaml\") up launch
+        }
+      } catch {|e|
+        dump-logs \$work
+        cleanup-work \$work
+        rm -f \$sock \$state_file
+        error make {msg: (\$e.msg? | default (\$e | to text))}
+      }
+      mut ready = false
+      for _ in 1..600 {
+        sleep 500ms
+        if \$os != \"windows\" and not (\$sock | path exists) { continue }
+        let res = (do { ^\$pc_bin ...\$pc_conn process get launch -o json } | complete)
+        if \$res.exit_code != 0 { continue }
+        let proc = (try { \$res.stdout | from json | get -o 0 } catch { null })
+        if \$proc == null { continue }
+        let st = (\$proc.status? | default \"\")
+        let rdy = (\$proc.is_ready? | default \"\")
+        if \$st == \"Running\" and \$rdy == \"Ready\" {
+          \$ready = true
+          break
+        }
+        if \$st in [\"Skipped\" \"Error\" \"Completed\" \"Disabled\"] { break }
+      }
+      if not \$ready {
+        dump-logs \$work
+        do { ^\$pc_bin ...\$pc_conn down } | complete
+        cleanup-work \$work
+        rm -f \$sock \$state_file
+        error make {msg: \"launch@host failed to become ready\"}
+      }
+      if (\$env.SAYT_LAUNCH_ONCE? | default \"\") == \"1\" {
+        do { ^\$pc_bin ...\$pc_conn down } | complete
+        cleanup-work \$work
+        rm -f \$sock \$state_file
+      }"
+version: "3"

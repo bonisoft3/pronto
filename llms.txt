@@ -12,7 +12,7 @@ Pronto is a federated relational application compiler. It is maintained across m
 | :--- | :--- | :--- | :--- |
 | **Pronto** | [`bonisoft3/pronto`](https://github.com/bonisoft3/pronto) | `plugins/pronto` | Compiler, CUE schema envelopes (`#App`, `#Entity`), derivation emitter (`write.ts`), edge bundler (`bundle/edge.ts`), and Cloudflare publisher (`bundle/publish-edge.ts`). |
 | **Omnishell** | [`bonisoft3/omnishell`](https://github.com/bonisoft3/omnishell) | `plugins/omnishell` | Zero-VDOM browser runtime. Evaluates `data-live` DOM projections, executes pure Jessie folds in hardened SES compartments, manages WebRTC DataChannels and PGlite local stores. |
-| **Mecha** | [`bonisoft3/mecha`](https://github.com/bonisoft3/mecha) | `libraries/mecha` | Database and state machine engine. PostgreSQL RLS tenancy floor (`003_rls.sql`), hybrid actor state machines (`016_mecha_actors.sql`), CDC conduits, and edge pglite-workerd durable objects. |
+| **Mecha** | [`bonisoft3/mecha`](https://github.com/bonisoft3/mecha) | `libraries/mecha` | Database and state machine engine. PostgreSQL RLS tenancy floor (`003_rls.sql`), mecha actor state machines (`016_mecha_actors.sql`), CDC conduits, and edge pglite-workerd durable objects. |
 | **Bayt** | [`bonisoft3/bayt`](https://github.com/bonisoft3/bayt) | `plugins/bayt` / `bayt` | Declarative, hermetic build and packaging DAG. Pure CUE tasks, Docker buildx / Depot execution, cryptographic layer caching. |
 | **Sayt** | [`bonisoft3/sayt`](https://github.com/bonisoft3/sayt) | `sayt` / `saytw` | Development harness and verification CLI. Standardizes verbs across local, bare, and containerized platforms (`sayt lint`, `test`, `integrate`, `launch`). |
 
@@ -76,8 +76,7 @@ code: pronto.#App & {
         entities: { ... }
         pipelines: {}
         cortex?: { ... }
-        hybrids?: { ... }
-        machines?: { ... }
+        mecha?: { reducers?: { ... }, rows?: { ... } }
     }
     capabilities: {
         blobs: false
@@ -305,7 +304,7 @@ A **probe** is a nested one-row region with `data-empty=""` whose only job is to
 
 ### B. Jessie Handler / Cortex Execution Contract
 
-Client folds (`shell/handlers/*.js`) and validations (`shell/validations/*.js`) evaluate in an SES `Compartment` where the **last top-level expression in the file must be the bare arrow function** (do NOT use `export default`; `plugins/pronto/jessie.ts` checks `completion === "arrow"`). Hybrid Mecha rule modules (`machines/*.js`) instead form a function body that returns an object of named rule functions (`return {project, invariant, ...}`); copy the rule shape from `apps/truco/machines/match.js`.
+Client folds (`shell/handlers/*.js`) and validations (`shell/validations/*.js`) evaluate in an SES `Compartment` where the **last top-level expression in the file must be the bare arrow function** (do NOT use `export default`; `plugins/pronto/jessie.ts` checks `completion === "arrow"`). Mecha rule modules (`machines/*.js`) instead form a function body that returns an object of named rule functions (`return {project, invariant, ...}`); copy the rule shape from `apps/truco/machines/match.js`.
 
 ```javascript
 // File: shell/handlers/board.js
@@ -366,9 +365,9 @@ const indexOf = (r, c) => r * 9 + c;
 
 ---
 
-## 5. MECHA ACTORS & HYBRID STATE MACHINES
+## 5. MECHA ACTORS & STATE MACHINES
 
-In multiplayer and turn-based games (`truco`, `apexrun`), multi-player coordination is managed by **Hybrid Mecha Actors** (`016_mecha_actors.sql`):
+In multiplayer and turn-based games (`truco`, `apexrun`), multi-player coordination is managed by **Mecha Actors** (`016_mecha_actors.sql`):
 
 | Phase | Table / Trigger | Contract & Invariant |
 | :--- | :--- | :--- |
@@ -384,8 +383,8 @@ In multiplayer and turn-based games (`truco`, `apexrun`), multi-player coordinat
 | App | Domain Pattern | Durability & Key Mechanisms |
 | :--- | :--- | :--- |
 | `apps/jsfb` | Single-screen benchmark / pure client fold | `tab` only (`Bench` singleton + `Row` list). Single fold (`shell/handlers/bench.js`) handles create, append, update, swap (`ord` exchange), select (`cls` column), and delete without `<form>` elements. |
-| `apps/apexrun` | Real-time 3D racing & GGRS rollback netcode | `tab` (`run`, `lobby_tab`) + `server` (`high_score`) + hybrid actors (`presence`, `challenge`, `duel`). 60Hz deterministic step in isolated Jessie realm (`kinetic-mount.js`) over WebRTC DataChannel. |
-| `apps/truco` | Turn-based card game & 6-chair seating | Hybrid actor `truco_match` (`machines/match.js`) validates legal card plays, raises (Truco/Retruco/Vale Quatro), and round tricks; ephemeral tab leases track presence. |
+| `apps/apexrun` | Real-time 3D racing & GGRS rollback netcode | `tab` (`run`, `lobby_tab`) + `server` (`high_score`) + mecha actors (`presence`, `challenge`, `duel`). 60Hz deterministic step in isolated Jessie realm (`kinetic-mount.js`) over WebRTC DataChannel. |
+| `apps/truco` | Turn-based card game & 6-chair seating | Mecha actor `truco_match` (`machines/match.js`) validates legal card plays, raises (Truco/Retruco/Vale Quatro), and round tricks; ephemeral tab leases track presence. |
 | `apps/doom` | Wasm runtime + declarative HUD overlay | Custom `boot.js` embedded via `#DefaultTerminal.boot` loads Wasm/WebGL; host-DOM hatch writes `match`, `player`, `frag` tables projected by pure `data-live` HUD markup. |
 | `apps/snapcards` | Offline-first multilingual flashcards | `tab` and `offline` durability (zero server migrations); compile-time localized message catalogues (`messages/pt-BR.json`, `es-LA.json`, `he-IL.json`). |
 | `apps/plausible` | Time-series analytics & rollups | Dual `data-on-mutation` reduce folds aggregate pageviews into daily visitor counts and path popularity in memory; `zone` table evaluates local midnight without `Date`/`Intl`. |

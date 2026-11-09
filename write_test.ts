@@ -1,6 +1,7 @@
 import {
   assert,
   assertEquals,
+  assertRejects,
   assertStringIncludes,
 } from "jsr:@std/assert@1.0.11";
 import { fileURLToPath } from "node:url";
@@ -130,9 +131,33 @@ Deno.test("a settled build preserves outputs and still follows new template read
     assertEquals(await outputs(), before);
     assertEquals((await Deno.stat(screen)).mtime, mtime);
 
+    const irPath = join(app, "ir.html");
+    const ir = await Deno.readTextFile(irPath);
+    const withoutCards = ir.replace(/<!-- pronto:card -->[\s\S]*?<!-- \/pronto:card -->/g, "<!-- pronto:card --><!-- /pronto:card -->");
+    assert(withoutCards !== ir);
+    await Deno.writeTextFile(irPath, withoutCards);
+    const redrawn = await build();
+    assertStringIncludes(redrawn, "(1 derivation)");
+    assertStringIncludes(redrawn, '"phase":"ir-facts"');
+    assertEquals(await Deno.readTextFile(irPath), ir);
+    assertEquals(await outputs(), before);
+
+    const { derive } = await import("./derive.ts");
+    const derivedIr = await derive(app);
+    const changedDecision = ir.replace('data-kind="decision"><strong>', 'data-kind="decision"><strong>Changed decision: ');
+    assert(changedDecision !== ir);
+    await Deno.writeTextFile(irPath, changedDecision);
+    await assertRejects(derivedIr.refreshIr, Error, "authored compiler inputs changed");
+    assertEquals(await outputs(), before);
+    await Deno.writeTextFile(irPath, ir);
+
     // Authored markup reaches derivation before the emission settles.
     const source = join(app, "screens.cue");
     const markup = await Deno.readTextFile(source);
+    await Deno.writeTextFile(source, markup.replace('class="screen"', 'class="screen presentation-edit"'));
+    assertStringIncludes(await build(), "(1 derivation)");
+    assertStringIncludes(await Deno.readTextFile(screen), 'class="screen presentation-edit"');
+    assertEquals(await Deno.readTextFile(join(app, "program_derived.cue")), before["program_derived.cue"]);
     await Deno.writeTextFile(
       source,
       markup.replace(
@@ -513,3 +538,149 @@ pronto: say: say: {
     await Deno.remove(app, { recursive: true });
   }
 });
+
+Deno.test("writer packages Activepieces assets and sweeps only stale generated copies", async () => {
+  const app = await Deno.makeTempDir({dir: join(repo, "apps"), prefix: ".write-piece-"});
+  const build = async () => {
+    const result = await new Deno.Command(Deno.execPath(), {
+      args: ["run", "--config", join(repo, "plugins/pronto/deno.json"), "--allow-all", writer, "."],
+      cwd: app,
+      env: { MISE_TRUSTED_CONFIG_PATHS: repo, MISE_LOCKED: "0" },
+      stdout: "piped", stderr: "piped",
+    }).output();
+    assert(result.success, new TextDecoder().decode(result.stderr));
+  };
+  try {
+    await copyJsfb(app);
+    for await (const entry of Deno.readDir(app)) {
+      if (entry.isFile && entry.name.endsWith(".cue")) {
+        const path = join(app, entry.name);
+        await Deno.writeTextFile(path, (await Deno.readTextFile(path)).replace(/^package jsfb$/m, "package write_piece_fixture"));
+      }
+    }
+    const program = join(app, "program.cue");
+    await Deno.writeTextFile(program, (await Deno.readTextFile(program)).replace('targets: ["pages"]', 'targets: ["docker"]')
+      .replace('name:        "jsfb"', 'name:        "write-piece-fixture"') + `
+code: meta: clocks: ["docker"]
+code: capabilities: auth: {required: false, service: "/auth"}
+code: state: {
+  entities: Payment: {
+    id: "0xc75ee275aaa2d972", table: "payment", durability: "server"
+    fields: [{name: "id", ordinal: 1, type: "uuid", pk: true}, {name: "status", ordinal: 2, type: "string"}]
+  }
+  mecha: rows: PaymentMachine: {
+    entity: "Payment", field: "status", initial: "pending"
+    states: {
+      pending: on: start: "running"
+      running: invoke: {src: "send", onDone: "done", onError: "failed"}
+      done: type: "final"
+      failed: type: "final"
+    }
+  }
+  bridges: integration: {container: "integrations", action: "parse"}
+  effects: send: {sink: {bridge: "integration", idempotent: false}, reentry: "unknown", note: "the result may be uncertain"}
+}
+code: capabilities: hatches: integrations: {
+  kind: "container", note: "test integration"
+  activepieces: {
+    lock: "./pieces/integrations.lock"
+    pieces: sample: {local: "./pieces/sample", export: "sample"}
+    pieces: http: {npm: {package: "@activepieces/piece-http", version: "0.13.0", export: "http"}}
+    actions: parse: {
+      piece: "http", action: "parse_url"
+      inputSchema: "./pieces/http/parse.input.schema.json"
+      outputSchema: "./pieces/http/parse.output.schema.json"
+      fixedProps: {returnArrays: true}
+    }
+    actions: invoke: {
+      piece: "sample", action: "invoke"
+      inputSchema: "./pieces/sample/invoke.input.schema.json"
+      outputSchema: "./pieces/sample/invoke.output.schema.json"
+    }
+  }
+}
+`);
+    await Deno.mkdir(join(app, "effects"), {recursive: true});
+    await Deno.writeTextFile(join(app, "effects/send.js"), '(input, sink) => sink.fetch("/", {method: "POST", body: {props: input}})');
+    const ir = join(app, "ir.html");
+    await Deno.writeTextFile(ir, (await Deno.readTextFile(ir)).replace('</body>', '<section id="integrations" data-kind="hatch" data-hatch-kind="container">Test integration.</section>\n</body>'));
+    const source = join(app, "pieces/sample");
+    await Deno.mkdir(source, {recursive: true});
+    await Deno.writeTextFile(join(source, "package.json"), '{"exports":"./index.js"}');
+    await Deno.writeTextFile(join(source, "index.js"), 'export const sample = {};');
+    for (const name of ["invoke.input.schema.json", "invoke.output.schema.json"]) await Deno.writeTextFile(join(source, name), '{"type":"object"}');
+    const authoredLock = join(app, "pieces/integrations.lock");
+    const fixture = join(repo, "plugins/pronto/testdata/activepieces");
+    await Deno.copyFile(join(fixture, "pieces/npm.lock"), authoredLock);
+    await Deno.mkdir(join(app, "pieces/http"), {recursive: true});
+    for (const kind of ["input", "output"]) await Deno.copyFile(join(fixture, `pieces/http/parse.${kind}.schema.json`), join(app, `pieces/http/parse.${kind}.schema.json`));
+    const lock = await Deno.readFile(authoredLock);
+    const binary = new Uint8Array([0, 255, 128, 10]);
+    await Deno.writeFile(join(source, "asset.bin"), binary);
+    await build();
+    const context = join(app, "activepieces/integrations");
+    const generated = join(context, "pieces/sample/asset.bin");
+    assertEquals(await Deno.readFile(generated), binary);
+    assertEquals(JSON.parse(await Deno.readTextFile(join(context, "manifest.json"))).actions.invoke.inputSchema, {type: "object"});
+    assertStringIncludes(await Deno.readTextFile(join(context, "registry.ts")), 'from "./pieces/sample/index.js"');
+    assertStringIncludes(await Deno.readTextFile(join(app, "services/airlock/dapr/send.yaml")), "http://integrations:8080/actions/parse");
+    const manifestPath = join(app, ".pronto/manifest.json");
+    const recorded = JSON.parse(await Deno.readTextFile(manifestPath));
+    assert(recorded.written.includes("activepieces/integrations/pieces/sample/asset.bin"));
+    const time = (await Deno.stat(generated)).mtime;
+    await build();
+    assertEquals((await Deno.stat(generated)).mtime, time);
+    await Deno.rename(join(source, "asset.bin"), join(source, "renamed.bin"));
+    await build();
+    await assertRejectsNotFound(generated);
+    assert(!JSON.parse(await Deno.readTextFile(manifestPath)).written.includes("activepieces/integrations/pieces/sample/asset.bin"));
+    assertEquals(await Deno.readFile(join(context, "pieces/sample/renamed.bin")), binary);
+    assertEquals(await Deno.readFile(join(source, "renamed.bin")), binary);
+    assertEquals(await Deno.readFile(authoredLock), lock);
+    await Deno.writeTextFile(program, (await Deno.readTextFile(program))
+      .replace('    pieces: sample: {local: "./pieces/sample", export: "sample"}\n', "")
+      .replace(/    actions: invoke: \{[\s\S]*?\n    \}\n/, ""));
+    await build();
+    await runGeneratedActivepieces(context);
+  } finally { await Deno.remove(app, {recursive: true}); }
+});
+
+async function runGeneratedActivepieces(context: string): Promise<void> {
+  const runner = join(repo, "libraries/mecha/services/activepieces");
+  // The runner starts --cached-only, and a fresh machine holds neither graph.
+  for (const [config, entry] of [[`${context}/deno.json`, `${context}/registry.ts`], [`${runner}/deno.json`, `${runner}/main.ts`]]) {
+    const cache = await new Deno.Command(Deno.execPath(), {
+      args: ["cache", "--frozen", `--config=${config}`, entry],
+      stdout: "null", stderr: "piped",
+    }).output();
+    assert(cache.success, new TextDecoder().decode(cache.stderr));
+  }
+  const socket = Deno.listen({hostname: "127.0.0.1", port: 0});
+  const port = (socket.addr as Deno.NetAddr).port;
+  socket.close();
+  const child = new Deno.Command(Deno.execPath(), {
+    args: ["run", "--frozen", "--cached-only", `--config=${runner}/deno.json`, "--allow-env", "--allow-read", "--allow-net", "--allow-run", `${runner}/main.ts`],
+    env: {ACTIVEPIECES_MANIFEST: `${context}/manifest.json`, ACTIVEPIECES_REGISTRY: `${context}/registry.ts`, PORT: String(port)},
+    stdout: "null", stderr: "inherit",
+  }).spawn();
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    let ready = false;
+    for (let i = 0; i < 100; i++) {
+      try { await fetch(`${base}/ready`); ready = true; break; }
+      catch (error) { if (!(error instanceof TypeError)) throw error; await new Promise((resolve) => setTimeout(resolve, 50)); }
+    }
+    assert(ready, "runner did not become ready");
+    const response = await fetch(`${base}/actions/parse/`, {
+      method: "POST", headers: {"Content-Type": "application/json", "Idempotency-Key": "fixture-key"},
+      body: JSON.stringify({props: {url: "https://example.test/?a=1&a=2"}}),
+    });
+    assertEquals(response.status, 200);
+    assertEquals((await response.json()).result.query_parameters, {a: ["1", "2"]});
+  } finally {
+    try { child.kill("SIGKILL"); } catch (error) {
+      if (!(error instanceof TypeError && error.message === "Child process has already terminated")) throw error;
+    }
+    await child.status;
+  }
+}

@@ -421,12 +421,14 @@ export def ensure-observability [
 	kubectl rollout status deployment/vector -n observability $"--timeout=($timeout)"
 }
 
-# Decrypt and apply SOPS-encrypted secrets if present
-export def apply-sops-secrets [app_dir: string, namespace: string] {
+# The file is flat key/value pairs, so `sops exec-env` can feed the same file to local runs and publishes.
+export def apply-sops-secrets [app_name: string, app_dir: string, namespace: string] {
 	let enc_file = ($app_dir | path join "secrets.enc.yaml")
 	if not ($enc_file | path exists) { return }
-	print $"Decrypting and applying SOPS secrets from ($enc_file) to ($namespace)..."
-	^sops -d $enc_file | kubectl apply -n $namespace -f -
+	print $"Decrypting ($enc_file) into Secret ($app_name)-secrets in ($namespace)..."
+	^sops -d --output-type dotenv $enc_file
+		| ^kubectl create secret generic $"($app_name)-secrets" -n $namespace --from-env-file=/dev/stdin --dry-run=client -o yaml
+		| ^kubectl apply -f -
 }
 
 # Resolve application to release
@@ -576,6 +578,26 @@ export def run-job [manifest: string, name: string, namespace: string, --timeout
 	kubectl logs -n $namespace $"job/($name)" --tail=5
 }
 
+export def runtime-services [compose: record]: nothing -> record {
+	let supported = ["compute" "feldera" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy"]
+	if "airlock" in $compose.services {
+		error make {msg: "native release does not yet deploy airlock; refusing to omit a runtime service"}
+	}
+	let names = ($compose.services | columns | where {|s| $s in $supported })
+	$names | reduce -f {} {|name, acc|
+		let vars = ($compose.services | get $name | get -o environment | default {})
+		if $name == "compute" and ($vars.DUCKSTREAM_ENGINE? | default "") != "feldera" {
+			error make {msg: "native release requires DUCKSTREAM_ENGINE=feldera for compute"}
+		}
+		$acc | insert $name {
+			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING)
+			databaseEnvironment: ([DATABASE_URL FELDERA_DATABASE_URL] | where {|key| $key in $vars })
+			serviceToken: ("SERVICE_JWT" in $vars)
+			jwtSecret: ("PGRST_JWT_SECRET" in $vars)
+		}
+	}
+}
+
 export def render-manifests [
 	cue_path: string
 	env_name: string
@@ -588,7 +610,7 @@ export def render-manifests [
 	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
-	{App: {database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}}} | to json | save -f $roles_file
+	{App: {database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file
@@ -750,7 +772,7 @@ export def main [
 	--snapshot               # Build and render only, do not deploy
 	--dry-run                # Print rendered manifests to stdout and exit
 	--app: string            # Application name or path
-	--cluster-env (-e): string  # kind, metal, eks or aks; absent, the app's metal cluster where it gives one, else kind
+	--cluster-env (-e): string  # kind, metal, gke, eks or aks; absent, the app's metal cluster where it gives one, else kind
 	--skip-operators = false # Skip operator bootstrap
 	--skip-observability = false # Skip VictoriaMetrics/Jaeger/Vector bootstrap
 ] {
@@ -769,8 +791,8 @@ export def main [
 	}
 
 	# A cloud release needs its operators, observability and TLS on the target,
-	# which only the Kind and metal paths provision so far.
-	if $cluster_env not-in ["kind" "metal"] {
+	# which only the Kind, metal and GKE paths provision so far.
+	if $cluster_env not-in ["kind" "metal" "gke"] {
 		error make { msg: $"release to ($cluster_env) is not implemented: only --dry-run and --snapshot render its manifests" }
 	}
 
@@ -812,8 +834,20 @@ export def main [
 		error make { msg: $"($app_info.cue_path): App.blobs needs the app's compose project to define ($blobs_missing | str join ', ')" }
 	}
 
-	let target_env = (read-environment $cluster_env $app_info.cue_path)
+	let target_env = if $cluster_env == "gke" {
+		let config = (^cue export --expression GKE --out json $app_info.cue_path | from json)
+		let kubeconfig = (mktemp -t kubeconfig.XXXXXX | str trim)
+		kubectl config view --minify --flatten --context $config.context | save -f $kubeconfig
+		$env.KUBECONFIG = $kubeconfig
+		$config.environment
+	} else { read-environment $cluster_env $app_info.cue_path }
 	let registry = $target_env.registry
+	if $cluster_env == "gke" {
+		kubectl get crd clusters.postgresql.cnpg.io externalsecrets.external-secrets.io configurations.dapr.io gateways.gateway.networking.k8s.io backendtrafficpolicies.gateway.envoyproxy.io | ignore
+		kubectl get gatewayclass $target_env.gatewayClassName | ignore
+		let tls = ($manifests | from yaml | where kind == "Gateway" | first | get spec.listeners | where protocol == "HTTPS" | get -o 0.tls.certificateRefs.0.name)
+		if ($tls | is-not-empty) { kubectl get secret $tls -n $target_ns | ignore }
+	}
 
 	# Kind's cluster is made here; a metal one is the operator's, named by its context.
 	if $cluster_env == "kind" { ensure-cluster }
@@ -845,7 +879,7 @@ export def main [
 		error make { msg: $"Only Pronto applications are supported for k8s release: ($app_info.name)" }
 	}
 
-	# migrate runs where the app has pgroll migrations to carry, as in compose.
+	# migrate runs where the app has ledger migrations or permissions to reconcile, as in compose.
 	let has_migrate = ("migrate" in $compose_services)
 	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
@@ -896,8 +930,10 @@ export def main [
 		ensure-tls-secret $app_info.name $app_source_dir $target_ns $gateway_host
 	}
 
-	# Decrypt and apply SOPS secrets if present
-	apply-sops-secrets $app_source_dir $target_ns
+	# secrets.enc.yaml holds sandbox keys, which a production cluster must never get.
+	if $cluster_env == "kind" {
+		apply-sops-secrets $app_info.name $app_source_dir $target_ns
+	}
 	if ($oidc.secretValues | is-not-empty) {
 		auth-provider-secret $workload_name $target_ns $oidc.secretValues
 			| to json | kubectl apply --server-side --field-manager=pronto-oidc -f -

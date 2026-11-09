@@ -562,6 +562,7 @@ import (
 							(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
 							{name: "MESH_URL", value: "http://127.0.0.1:\(meshPort)"},
 							{name: "AIRLOCK_DIR", value: "/airlock"},
+							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
 						], [for k, v in R.airlock.secrets {(secretOf & {env: k, secret: v}).out}]])
 						startupProbe: {tcpSocket: port: P.airlock, periodSeconds: 2, failureThreshold: 60}
 					}},
@@ -768,11 +769,12 @@ import (
 							if [ "$marker" = "pronto initdb" ]; then echo "initdb: already built"
 							  # Its re-runnable steps are the release's, though (emit.cue's): a new
 							  # entity's table and a new field's column, every policy, trigger and
-							  # publication, the status charts' triggers (010_machines), the hybrid machines' code, and the app's own
+							  # publication, the status charts' triggers (010_machines), the mecha machines' code (found by its
+							  # suffix, wherever the program places it), and the app's own
 							  # migrations, each idempotent, run again, keeping every row. Live traffic
 							  # can deadlock a step's ALTER (a lease's renewal against ENABLE ROW LEVEL
 							  # SECURITY); being idempotent, the step is run again, up to three times.
-							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql 016_mecha_actors.sql \(strings.Join(R.database.replays, " ")); do
+							  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(R.database.replays, " ")); do
 							    f=/docker-entrypoint-initdb.d/$step
 							    if [ -f "$f" ]; then echo "initdb: replaying $step"
 							      for try in 1 2 3; do

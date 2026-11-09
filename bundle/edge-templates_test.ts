@@ -3,7 +3,7 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeEdgeAssets } from './edge-assets.ts'
 import { addressEdgeAssets, releaseAddresses } from './edge-addresses.ts'
-import { originAssets, prepareEdgeTemplate } from './edge-templates.ts'
+import { extensionless, originAssets, prepareEdgeTemplate } from './edge-templates.ts'
 
 const declaration = '{{- $o := placeholder "http.vars.origin" -}}'
 
@@ -71,4 +71,21 @@ Deno.test('edge template binding preserves literals, non-templates, validators, 
   assert.equal(await head.text(), '')
   assert.equal(head.headers.get('content-length'), null)
   assert.equal(head.headers.get('etag'), '"source"')
+})
+
+Deno.test('a realm document is served at its own address, where assets would redirect it', async () => {
+  const asked: string[] = []
+  const assets = originAssets({
+    fetch: (request) => {
+      asked.push(new URL(request.url).pathname)
+      return Promise.resolve(new Response('frame', { headers: { 'content-type': 'text/html' } }))
+    },
+  }, ['/shell/units/map/index.html'])
+  const framed = await assets.fetch(new Request('https://app.example/shell/units/map/index.html?x=1'))
+  assert.equal(await framed.text(), 'frame')
+  await assets.fetch(new Request('https://app.example/documents/regras/index.html'))
+  assert.deepEqual(asked, ['/shell/units/map', '/documents/regras/index.html'])
+  assert.equal(extensionless('shell/units/map/index.html'), 'shell/units/map')
+  assert.equal(extensionless('shell/units/map/frame.html'), 'shell/units/map/frame')
+  assert.equal(extensionless('shell/units/map/lib.js'), 'shell/units/map/lib.js')
 })

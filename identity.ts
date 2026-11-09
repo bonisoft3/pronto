@@ -194,13 +194,15 @@ async function cueFiles(appDir: string): Promise<string[]> {
 }
 
 /** Stamps an id on every entity and an ordinal on every field that has none,
- * and records them in the snapshot. write.ts calls it first, so an author
- * never writes one; it writes nothing when everything is already minted, and says
- * whether it wrote. `read` is the entities of a read of this very tree taken already. */
-export async function mint(appDir: string, read?: Record<string, ProgramEntity>): Promise<boolean> {
-  const before = read === undefined ? await exportEntities(appDir) : Object.values(read);
-  if (before.length === 0) return false;
-  if (before.every((e) => e.id !== undefined && e.fields.every((f) => f.ordinal !== undefined)) && (await readSnapshot(appDir)) !== undefined) return false;
+ * and records them in the snapshot. write.ts calls it after the first
+ * derivation, passing the entities that derivation read, so an author never
+ * writes one; it writes nothing when everything is already minted. */
+export async function mint(appDir: string, read?: ProgramEntity[]): Promise<void> {
+  // A derivation's read serves: an id or ordinal is stamped only in authored
+  // source, which the derived files never touch.
+  const before = read ?? await exportEntities(appDir);
+  if (before.length === 0) return;
+  if (before.every((e) => e.id !== undefined && e.fields.every((f) => f.ordinal !== undefined)) && (await readSnapshot(appDir)) !== undefined) return;
   // Every stamp is computed before any is written: a refusal halfway would
   // otherwise leave a program that is part minted and a snapshot that is not.
   const sources = new Map<string, string>();
@@ -229,7 +231,6 @@ export async function mint(appDir: string, read?: Record<string, ProgramEntity>)
   if (findings.length > 0) throw new Error(`refusing to grow the snapshot over a loss:\n${findings.map((f) => f.message).join("\n")}`);
   await Deno.writeTextFile(`${appDir}/${SNAPSHOT}`, JSON.stringify(program, null, 2) + "\n");
   console.log(`minted: ${after.length} entities, ${after.reduce((n, e) => n + e.fields.length, 0)} fields`);
-  return true;
 }
 
 async function check(appDir: string): Promise<void> {

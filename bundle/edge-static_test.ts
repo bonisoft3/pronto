@@ -1,5 +1,7 @@
 import { strictEqual as assertEquals } from 'node:assert'
-import worker from './edge-static.ts'
+import { staticWorker } from './edge-static.ts'
+
+const worker = staticWorker([])
 
 Deno.test('static releases serve navigation and never cache missing assets', async () => {
   const env = { ASSETS: { fetch: (req: Request) => Promise.resolve(new URL(req.url).pathname === '/' || new URL(req.url).pathname === '/shell/_immutable-abc.js' ? new Response('asset') : new Response('missing', { status: 404 })) } }

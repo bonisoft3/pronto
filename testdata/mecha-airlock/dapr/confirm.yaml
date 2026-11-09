@@ -1,0 +1,6 @@
+apiVersion: dapr.io/v1alpha1
+kind: HTTPEndpoint
+metadata:
+  name: confirm
+spec:
+  baseUrl: http://bridge-mail:8080/actions/sendMail

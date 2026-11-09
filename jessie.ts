@@ -39,10 +39,12 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
   ...[
     "Crypto",
     "Cheerio",
+    "Pdf",
     "TextEncoder",
     "TextDecoder",
     "URL",
     "URLSearchParams",
+    "Statechart",
   ].map((name) => ({
     name,
     reason: "safe platform primitives require opt-in via manifest endowments",
@@ -68,8 +70,8 @@ export const DENIED: { name: string; reason: string; exceptRole?: string }[] = [
  * (services/compute/language.ts ENDOWABLE). schema.cue's #SafeEndowment and
  * mecha's #CageEndowment spell the same two lists, and endowments_test.ts
  * holds all four together. An adapter is granted Intl without asking. */
-const TERMINAL = ["Intl", "TextEncoder", "TextDecoder", "URL", "URLSearchParams"] as const;
-const MECHA = ["Crypto", "Cheerio", "TextEncoder", "TextDecoder", "URL", "URLSearchParams"] as const;
+const TERMINAL = ["Intl", "TextEncoder", "TextDecoder", "URL", "URLSearchParams", "Statechart"] as const;
+const MECHA = ["Crypto", "Cheerio", "Pdf", "TextEncoder", "TextDecoder", "URL", "URLSearchParams"] as const;
 export const ENDOWABLE: Record<string, readonly string[]> = {
   handler: TERMINAL,
   adapter: TERMINAL,
@@ -79,6 +81,8 @@ export const ENDOWABLE: Record<string, readonly string[]> = {
   // A kinetic engine steps at the frame rate on nothing but its own state and
   // the commands it is handed, so its cage endows nothing at all.
   engine: [],
+  // A database function is handed its argument and nothing else.
+  function: [],
   computation: MECHA,
   effect: MECHA,
 };

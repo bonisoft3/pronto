@@ -13,6 +13,41 @@ async function securityHeaders(out: string) {
 
 type Config = { durable_objects: { bindings: { name: string; script_name?: string }[] } }
 
+Deno.test('SSR keeps the private compute service binding on the database Worker in both modes', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  const compute = { definitions: [{ name: 'total', version: 'v1', reads: ['source'], to: ['sink'] }], services: [{ binding: 'COMPUTE', service: 'app-compute-version' }], reader: { name: 'COMPUTE_READER', class_name: 'ComputeReader', script_name: 'app-reader-version' } }
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await Deno.writeTextFile(path.join(out, 'src/compute.json'), JSON.stringify(compute))
+    await securityHeaders(out)
+    for (const mode of ['existing', 'separate'] as const) {
+      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, services: compute.services }))
+      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
+      const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
+      assert.match(source, /compute: \{ computations:.*"total".*machine: computeMachines\.compute_batch/)
+      const entry = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+      if (mode === 'separate') {
+        assert.equal(entry.services, undefined)
+        assert.deepEqual(JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))).services, compute.services)
+      } else assert.deepEqual(entry.services, compute.services)
+      const database = mode === 'separate' ? JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))) : entry
+      assert.ok(database.durable_objects.bindings.some((b: { name: string }) => b.name === 'COMPUTE_COORDINATOR'))
+      assert.deepEqual(database.exports.ComputeCoordinator, { type: 'durable-object', storage: 'sqlite' })
+      assert.ok(database.durable_objects.bindings.some((b: { name: string }) => b.name === 'COMPUTE_READER'))
+      assert.deepEqual(database.durable_objects.bindings.find((b: { name: string }) => b.name === 'COMPUTE_READER'), compute.reader)
+      assert.match(source, /physicalSnapshots: true/)
+      assert.doesNotMatch(source, /export const ComputeReader/)
+      if (mode === 'existing') assert.match(await Deno.readTextFile(path.join(out, 'src/index.ts')), /export \{ Cluster, ComputeCoordinator \}/)
+      assert.match(source, /export class ComputeCoordinator extends computeCoordinator\(undefined, \[\], "app-compute-version"\)/)
+      if (mode === 'separate') assert.ok(!entry.durable_objects.bindings.some((b: { name: string }) => b.name === 'COMPUTE_COORDINATOR'))
+    }
+  } finally { await Deno.remove(out, { recursive: true }) }
+})
+
 Deno.test('SSR database generation preserves the clock policy in both database modes', async () => {
   const out = await Deno.makeTempDir()
   const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
@@ -32,6 +67,24 @@ Deno.test('SSR database generation preserves the clock policy in both database m
         assert.equal(captured.clock, clock)
       }
     }
+  } finally { await Deno.remove(out, { recursive: true }) }
+})
+
+Deno.test('an SSR Worker serves a realm document at its own address, as the static Worker does', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {}, units: {
+      map: { isolation: 'realm', src: 'shell/units/map/frame.html' },
+      geocoder: { isolation: 'agent', src: 'shell/units/geocoder/unit.js' },
+    } }))
+    await securityHeaders(out)
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
+    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [])
+    assert.match(await Deno.readTextFile(path.join(out, 'src/index.ts')), /originAssets\(env\.ASSETS, \["\/shell\/units\/map\/frame\.html"\]\)/)
   } finally { await Deno.remove(out, { recursive: true }) }
 })
 
@@ -72,71 +125,23 @@ Deno.test('installed edge helpers load the supplied runtime without a monorepo s
   } finally { await Deno.remove(tmp, { recursive: true }) }
 })
 
-Deno.test('the Cron Trigger follows the Worker that holds the object', async () => {
+Deno.test('SSR keeps cron with Cluster and binds an isolated immutable renderer', async () => {
   const out = await Deno.makeTempDir()
-  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
-  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
   try {
     await Deno.mkdir(path.join(out, 'src'))
     await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
     await securityHeaders(out)
     const triggers = { crons: ['0 * * * *'] }
-    const r2_buckets = [{ binding: 'BLOB_OBJECTS', bucket_name: 'objects' }]
-    const vars = { BLOB_URL: 'https://app.example/blobs/mecha-objects' }
-    for (const mode of ['existing', 'separate'] as const) {
-      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, triggers, r2_buckets, vars }))
-      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
-      const entry = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
-      assert.deepEqual(entry.triggers, mode === 'existing' ? triggers : undefined)
-      if (mode === 'separate') {
-        const database = JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc')))
-        assert.deepEqual(database.triggers, triggers)
-        // The object writes an effect's bytes, and without these only production would notice.
-        assert.deepEqual([database.r2_buckets, database.vars], [r2_buckets, vars])
-      }
-      const entrySource = await Deno.readTextFile(path.join(out, 'src/index.ts'))
-      const databaseSource = await Deno.readTextFile(path.join(out, 'src/database.ts'))
-      if (mode === 'existing') {
-        assert.match(entrySource, /scheduled: edgeWorker\.scheduled/)
-        assert.doesNotMatch(databaseSource, /scheduled/)
-      } else {
-        assert.doesNotMatch(entrySource, /scheduled/)
-        assert.match(databaseSource, /scheduled\(_controller, env\) \{ return pokeCluster\(env\) \}/)
-      }
-    }
-  } finally { await Deno.remove(out, { recursive: true }) }
-})
-
-Deno.test('separate SSR upgrades pin each entry to its renderer while retaining the database namespace', async () => {
-  const out = await Deno.makeTempDir()
-  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
-  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
-  try {
-    await Deno.mkdir(path.join(out, 'src'))
-    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
-    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
-    await securityHeaders(out)
-    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, migrations: [{ tag: 'old' }] }))
-    const build = async (origin = 'https://app.example') => {
-      await writeEdgeSsr(out, omnishell, mecha, 'app', origin, [], 'separate')
-      return JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
-    }
-    const first = await build(), second = await build()
-    assert.deepEqual(second.durable_objects, first.durable_objects)
-    assert.equal(first.migrations, undefined)
-    await Deno.writeTextFile(path.join(out, 'public/index.html'), '<p>new release</p>')
-    const changed = await build()
-    const binding = (config: Config, name: string) => config.durable_objects.bindings.find(item => item.name === name)!
-    assert.deepEqual(binding(first, 'CLUSTER'), binding(changed, 'CLUSTER'))
-    assert.notEqual(binding(first, 'RENDERER').script_name, binding(changed, 'RENDERER').script_name)
-    const moved = await build('https://other.example')
-    assert.notEqual(binding(moved, 'RENDERER').script_name, binding(changed, 'RENDERER').script_name)
-    const renderer = JSON.parse(await Deno.readTextFile(path.join(out, 'renderer.jsonc')))
-    assert.equal(renderer.name, binding(moved, 'RENDERER').script_name)
-    const database: Config & { name: string } = JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc')))
-    assert.equal(database.name, binding(moved, 'CLUSTER').script_name)
-    assert.equal(database.durable_objects.bindings.some(item => item.name === 'RENDERER'), false)
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: {}, triggers, alias: { typescript: './typescript-absent.js' } }))
+    await writeEdgeSsr(out, fileURLToPath(new URL('../../omnishell/', import.meta.url)), fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url)), 'app', 'https://app.example', [])
+    const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+    assert.deepEqual(config.triggers, triggers)
+    assert.equal(config.alias.typescript, './typescript-absent.js')
+    assert.deepEqual(config.durable_objects.bindings[0], { name: 'CLUSTER', class_name: 'Cluster' })
+    assert.match(config.durable_objects.bindings[1].script_name, /^app-renderer-[a-f0-9]{12}$/)
+    assert.deepEqual(config.exports, { Cluster: { type: 'durable-object', storage: 'sqlite' } })
+    assert.equal(JSON.parse(await Deno.readTextFile(path.join(out, 'renderer.jsonc'))).name, config.durable_objects.bindings[1].script_name)
   } finally { await Deno.remove(out, { recursive: true }) }
 })
 
@@ -155,7 +160,8 @@ Deno.test('enabling SSR on an existing app retains its Cluster namespace and per
     const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
     assert.equal(config.name, 'app')
     assert.deepEqual(config.durable_objects.bindings.find((b: { name: string }) => b.name === 'CLUSTER'), { name: 'CLUSTER', class_name: 'Cluster' })
-    assert.deepEqual(config.migrations, migrations)
+    assert.equal(config.migrations, undefined)
+    assert.deepEqual(config.exports, { Cluster: { type: 'durable-object', storage: 'sqlite' } })
     assert.match(await Deno.readTextFile(path.join(out, 'src/index.ts')), /export \{ Cluster \} from '.\/database.ts'/)
     assert.doesNotMatch(await Deno.readTextFile(path.join(out, 'src/database.ts')), /storageFormat/)
     assert.equal(config.alias['@electric-sql/pglite'], './pglite/index.js')
@@ -164,6 +170,7 @@ Deno.test('enabling SSR on an existing app retains its Cluster namespace and per
     // Run the emitted boundary with a failing authority; unrelated failures
     // must still escape instead of being mislabeled as a transient outage.
     const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
+    assert.doesNotMatch(source, /worker-roles\.ts|appRenderer/)
     const declaration = source.slice(source.indexOf('export class Cluster'), source.indexOf('export default')).replace('export class', 'class')
     class Loading extends Error {}
     class Capacity extends Error {}
@@ -186,6 +193,89 @@ Deno.test('enabling SSR on an existing app retains its Cluster namespace and per
   } finally { await Deno.remove(out, { recursive: true }) }
 })
 
+Deno.test('generated Cluster holds the snapshot through rendering without waiting for body consumption', async () => {
+  const out = await Deno.makeTempDir()
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
+    const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+    await writeEdgeSsr(out, omnishell, fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url)), 'app', 'https://app.example', [])
+    const rendererSource = await Deno.readTextFile(path.join(omnishell, 'server/render-object.ts'))
+    await Deno.writeTextFile(path.join(out, 'render-object.ts'), rendererSource.replace(
+      "import { DurableObject } from 'cloudflare:workers'",
+      'class DurableObject { ctx = {} }',
+    ))
+    await Deno.copyFile(path.join(omnishell, 'server/render-queue.ts'), path.join(out, 'render-queue.ts'))
+    const { renderObject } = await import(pathToFileURL(path.join(out, 'render-object.ts')).href)
+    const source = await Deno.readTextFile(path.join(out, 'src/database.ts'))
+    const setup = source.slice(source.indexOf('class SnapshotReader'), source.indexOf('const Base = edgeObject('))
+    // The renderer batches reads (snapshot-store.js), and a reader that forwarded only read()
+    // failed every server render once omnishell called readMany.
+    const Reader = new Function('RpcTarget', setup + '\nreturn SnapshotReader')(class {})
+    const forwarded = new Reader({ read: async (p: string) => [p], readMany: async (ps: string[]) => ps.map(p => [p]) }, () => {})
+    assert.deepEqual(await forwarded.readMany(['/a', '/b']), [['/a'], ['/b']])
+    const declaration = source.slice(source.indexOf('export class Cluster'), source.indexOf('export default')).replace('export class', 'class')
+    let releaseRead!: () => void
+    const gate = new Promise<void>(resolve => { releaseRead = resolve })
+    let enterRead!: () => void
+    const reading = new Promise<void>(resolve => { enterRead = resolve })
+    let snapshotOpen = false
+    let closed!: () => void
+    const snapshotClosed = new Promise<void>(resolve => { closed = resolve })
+    const waited: Promise<unknown>[] = []
+    class Authority {
+      env = { CF_VERSION_METADATA: { id: 'version' } }
+      ctx = { waitUntil: (p: Promise<unknown>) => { waited.push(p) } }
+      async readPublic<T>(use: (snapshot: { revision: string; read: () => Promise<unknown[]> }) => Promise<T>) {
+        snapshotOpen = true
+        try {
+          return await use({ revision: 'revision', read: async () => { enterRead(); await gate; assert.equal(snapshotOpen, true); return [] } })
+        } finally { snapshotOpen = false; closed() }
+      }
+    }
+    const Renderer = renderObject(async (_request: Request, reader: { read(): Promise<unknown[]> }, stream: { onHead(info: { status: number; gone: boolean }): void; onChunk(chunk: string): void }) => {
+      stream.onHead({ status: 200, gone: false })
+      stream.onChunk('head')
+      await reader.read()
+      stream.onChunk(' tail')
+      return { html: 'head tail', status: 200 }
+    })
+    // As workerd: the target is disposed once its last stub is. The renderer dropped the call's
+    // own stub, so the object held its snapshot, and its one connection, past every render.
+    class RpcTarget {
+      constructor() {
+        let stubs = 1
+        return new Proxy(this, {
+          get(target, key, receiver) {
+            if (key === 'dup') return () => { stubs++; return receiver }
+            if (key === Symbol.dispose) return () => { if (--stubs === 0) (Reflect.get(target, key, receiver) as () => void).call(receiver) }
+            return Reflect.get(target, key, receiver)
+          },
+        })
+      }
+    }
+    class Loading extends Error {}
+    class Capacity extends Error {}
+    const Cluster = new Function('RpcTarget', 'Base', 'DataDirectoryLoading', 'PublicSnapshotCapacity', setup + declaration + '\nreturn Cluster')(
+      RpcTarget, Authority, Loading, Capacity,
+    )
+    const cluster = new Cluster()
+    const response = await cluster.render(new Request('https://app.example/'), new Renderer())
+    await reading
+    assert.equal(snapshotOpen, true)
+    releaseRead()
+    await snapshotClosed
+    assert.equal(snapshotOpen, false)
+    assert.equal(await response.text(), 'head tail')
+    await Promise.all(waited)
+  } finally {
+    await Deno.remove(out, { recursive: true })
+  }
+})
+
 Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and strips pronto-reads on stale hits while revalidating', async () => {
   const out = await Deno.makeTempDir()
   const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
@@ -197,7 +287,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
     await securityHeaders(out)
     await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' } }))
-    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], 'separate')
+    await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [])
     await Deno.writeTextFile(path.join(out, 'src/hints.json'), JSON.stringify({
       common: ['</shell/boot.js>; rel=preload; as=script'],
       catalogues: {},
@@ -208,7 +298,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
       ],
     }))
     const source = await Deno.readTextFile(path.join(out, 'src/index.ts'))
-    const stubbed = source.replace(
+    const stubbed = source.replace(/^export \{ Cluster \} from .+$/m, '').replace(
       /^import \{ edgeWorker \} from '[^']+'$/m,
       'const edgeWorker = { fetch(req) { return new URL(req.url).pathname === "/gerenciar" ? new Response("<!doctype html><title>SPA</title>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }) : new Response("api") } }',
     )
@@ -231,6 +321,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     })
 
     let renders = 0
+    let refuse = false
     let releaseRender: (() => void) | null = null
     const env = {
       CF_VERSION_METADATA: { id: 'v1' },
@@ -247,6 +338,7 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
         idFromName: (n: string) => n,
         get: () => ({
           async render() {
+            if (refuse) return new Response('public snapshot queue full', { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '1' } })
             renders += 1
             if (releaseRender) await new Promise<void>(r => { releaseRender = r })
             return new Response(
@@ -266,6 +358,14 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     }
     const background: Promise<unknown>[] = []
     const ctx = { waitUntil(p: Promise<unknown>) { background.push(p) } }
+
+    for (const headers of <Record<string, string>[]>[{ purpose: 'prefetch' }, { 'sec-purpose': 'prefetch;prerender' }, { 'x-pronto-prefetch': '1' }]) {
+      const speculative = await worker.fetch(new Request('https://app.example/', { headers }), env, ctx)
+      assert.equal(speculative.status, 204)
+      assert.equal(speculative.headers.get('cache-control'), 'no-store')
+      assert.equal(renders, 0)
+      assert.equal(background.length, 0)
+    }
 
     // Concurrent cold misses share one in-flight render, even if one reader cancels its stream.
     releaseRender = () => {}
@@ -313,6 +413,14 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
       store.set(key, new Response(await res.arrayBuffer(), { status: res.status, headers }))
     }
 
+    for (const headers of <Record<string, string>[]>[{ purpose: 'prefetch' }, { 'sec-purpose': 'prefetch' }, { 'x-pronto-prefetch': '1' }]) {
+      const speculative = await worker.fetch(new Request('https://app.example/', { headers }), env, ctx)
+      assert.equal(speculative.headers.get('x-edge-cache'), 'stale')
+      assert.equal(speculative.headers.get('etag'), null)
+      await speculative.text()
+      assert.equal(renders, 2)
+      assert.equal(background.length, 0)
+    }
     const stale1 = await worker.fetch(new Request('https://app.example/'), env, ctx)
     const stale2 = await worker.fetch(new Request('https://app.example/'), env, ctx)
     assert.equal(stale1.headers.get('content-security-policy'), policy)
@@ -397,6 +505,20 @@ Deno.test('edge SSR caches 200 renders, serves fresh hits with pronto-reads, and
     // Cluster routes still pass through to edgeWorker.
     const cluster = await worker.fetch(new Request('https://app.example/crud/game'), env, ctx)
     assert.equal(await cluster.text(), 'api')
+
+    // A refused render once reached the visitor as its 503 body in place of a page; the entry
+    // shell's store reads the rows itself, as on a spa route, and is never cached as the render.
+    refuse = true
+    const refused = await worker.fetch(new Request('https://app.example/campeonato/refused'), env, ctx)
+    assert.equal(refused.status, 200)
+    assert.equal(refused.headers.get('x-render-source'), 'refused')
+    assert.equal(refused.headers.get('cache-control'), 'no-store')
+    assert.equal(await refused.text(), '<!doctype html><title>SPA</title>')
+    await Promise.all(background)
+    refuse = false
+    const after = await worker.fetch(new Request('https://app.example/campeonato/refused'), env, ctx)
+    assert.equal(after.headers.get('x-edge-cache'), 'miss')
+    assert.match(await after.text(), /<h1>Render/)
   } finally {
     if (savedCaches) Object.defineProperty(globalThis, 'caches', savedCaches)
     else Reflect.deleteProperty(globalThis, 'caches')
@@ -418,7 +540,7 @@ Deno.test('renderObject folds version into ETag, serves 304 on streaming GET, re
     await Deno.writeTextFile(modPath, stubbed)
     const { renderObject } = await import(pathToFileURL(modPath).href)
 
-    const reader = { async read() { return [] } }
+    const reader = { read() { return Promise.resolve([]) }, dup() { return { ...this, [Symbol.dispose]() {} } }, [Symbol.dispose]() {} }
     const RendererV1 = renderObject(async (_req: Request, _reader: unknown, stream?: { onHead?: (h: { status: number; gone: boolean }) => void; onChunk?: (c: string) => void }) => {
       stream?.onHead?.({ status: 200, gone: false })
       stream?.onChunk?.('<html>v1</html>')
@@ -489,7 +611,7 @@ Deno.test('renderObject folds version into ETag, serves 304 on streaming GET, re
   }
 })
 
-Deno.test('SSR retains native images and origin-bound assets in both database modes', async () => {
+Deno.test('SSR retains native images and origin-bound assets', async () => {
   const out = await Deno.makeTempDir()
   const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
   const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
@@ -503,9 +625,9 @@ Deno.test('SSR retains native images and origin-bound assets in both database mo
       r2_buckets: [{ binding: 'BLOB_OBJECTS', bucket_name: 'public-images' }],
       vars: { IMAGE_SOURCE_BUCKET: 'original-bucket' },
     }
-    for (const mode of ['existing', 'separate'] as const) {
+    {
       await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, ...bindings }))
-      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
+      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [])
       const config = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
       for (const key of Object.keys(bindings)) assert.deepEqual(config[key], bindings[key as keyof typeof bindings])
       const source = await Deno.readTextFile(path.join(out, 'src/index.ts'))
@@ -547,5 +669,66 @@ Deno.test('SSR retains native images and origin-bound assets in both database mo
       assert.equal(await (await worker.fetch(new Request('https://app.example/crud/card'), env, ctx)).text(), 'api')
       await Promise.all(pending)
     }
+  } finally { await Deno.remove(out, { recursive: true }) }
+})
+
+Deno.test('the Cron Trigger follows the Worker that holds the object', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    const triggers = { crons: ['0 * * * *'] }
+    for (const mode of ['existing', 'separate'] as const) {
+      await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, triggers }))
+      await writeEdgeSsr(out, omnishell, mecha, 'app', 'https://app.example', [], mode)
+      const entry = JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+      assert.deepEqual(entry.triggers, mode === 'existing' ? triggers : undefined)
+      if (mode === 'separate') assert.deepEqual(JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc'))).triggers, triggers)
+      const entrySource = await Deno.readTextFile(path.join(out, 'src/index.ts'))
+      const databaseSource = await Deno.readTextFile(path.join(out, 'src/database.ts'))
+      if (mode === 'existing') {
+        assert.match(entrySource, /scheduled: edgeWorker\.scheduled/)
+        assert.doesNotMatch(databaseSource, /scheduled/)
+      } else {
+        assert.doesNotMatch(entrySource, /scheduled/)
+        assert.match(databaseSource, /scheduled\(_controller, env\) \{ return pokeCluster\(env\) \}/)
+      }
+    }
+  } finally { await Deno.remove(out, { recursive: true }) }
+})
+
+Deno.test('separate SSR upgrades pin each entry to its renderer while retaining the database namespace', async () => {
+  const out = await Deno.makeTempDir()
+  const omnishell = fileURLToPath(new URL('../../omnishell/', import.meta.url))
+  const mecha = fileURLToPath(new URL('../../../libraries/mecha/', import.meta.url))
+  try {
+    await Deno.mkdir(path.join(out, 'src'))
+    await Deno.mkdir(path.join(out, 'public/shell'), { recursive: true })
+    await Deno.writeTextFile(path.join(out, 'public/shell/shell.json'), JSON.stringify({ routes: [], tables: [], schema: {} }))
+    await securityHeaders(out)
+    await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({ assets: { directory: './public' }, migrations: [{ tag: 'old' }] }))
+    const build = async (origin = 'https://app.example') => {
+      await writeEdgeSsr(out, omnishell, mecha, 'app', origin, [], 'separate')
+      return JSON.parse(await Deno.readTextFile(path.join(out, 'wrangler.jsonc')))
+    }
+    const first = await build(), second = await build()
+    assert.deepEqual(second.durable_objects, first.durable_objects)
+    assert.equal(first.migrations, undefined)
+    await Deno.writeTextFile(path.join(out, 'public/index.html'), '<p>new release</p>')
+    const changed = await build()
+    const binding = (config: Config, name: string) => config.durable_objects.bindings.find(item => item.name === name)!
+    assert.deepEqual(binding(first, 'CLUSTER'), binding(changed, 'CLUSTER'))
+    assert.notEqual(binding(first, 'RENDERER').script_name, binding(changed, 'RENDERER').script_name)
+    const moved = await build('https://other.example')
+    assert.notEqual(binding(moved, 'RENDERER').script_name, binding(changed, 'RENDERER').script_name)
+    const renderer = JSON.parse(await Deno.readTextFile(path.join(out, 'renderer.jsonc')))
+    assert.equal(renderer.name, binding(moved, 'RENDERER').script_name)
+    const database: Config & { name: string } = JSON.parse(await Deno.readTextFile(path.join(out, 'database.jsonc')))
+    assert.equal(database.name, binding(moved, 'CLUSTER').script_name)
+    assert.equal(database.durable_objects.bindings.some(item => item.name === 'RENDERER'), false)
   } finally { await Deno.remove(out, { recursive: true }) }
 })

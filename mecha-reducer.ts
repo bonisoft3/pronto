@@ -1,12 +1,13 @@
-import { HYBRID_NAME } from "./hybrid-spec.ts";
+import { MECHA_NAME } from "./mecha-spec.ts";
 import type { MechaPorts, MechaPortSql } from "./mecha-ports.ts";
 import { jessieFacts } from "./jessie.ts";
 import { partsOf } from "./mecha-surface.ts";
 import { contracted } from "./mecha-contracts.ts";
 // Read as text, so it loads wherever this module does (an app's tests take it
 // by URL); deno.lock records the module import of the same file, not the text.
-import "./hybrid-runtime.js";
-import runtime from "./hybrid-runtime.js" with { type: "text" };
+import "./mecha-runtime.js";
+import runtime from "./mecha-runtime.js" with { type: "text" };
+import { mechaXStateSource } from "./mecha-xstate.ts";
 
 export type Shape =
   | { type: "string"; maxLength: number; values?: string[] }
@@ -51,44 +52,47 @@ export async function compileMechaReducer(
   source: string,
   terminal: Terminal,
   surface: Surface = { seat: [], public: [] },
-): Promise<{ source: string; sql: string }> {
-  if (!HYBRID_NAME.test(spec.name)) throw new Error("invalid hybrid name");
-  if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid hybrid version");
-  if (!Number.isSafeInteger(spec.fuel) || spec.fuel < 1 || spec.fuel > 1000000) throw new Error("invalid hybrid fuel");
+  options: { serverOnly?: boolean; beforeTransitionSql?: string; afterTransitionSql?: string } = {},
+): Promise<{ source: string; sql: string; engine: string }> {
+  if (!MECHA_NAME.test(spec.name)) throw new Error("invalid mecha name");
+  if (!Number.isSafeInteger(spec.version) || spec.version < 1) throw new Error("invalid mecha version");
+  if (!Number.isSafeInteger(spec.fuel) || spec.fuel < 1 || spec.fuel > 1000000) throw new Error("invalid mecha fuel");
   const entropy = spec.entropy ?? 0;
-  if (!Number.isInteger(entropy) || entropy < 0 || entropy > 1024) throw new Error("invalid hybrid entropy");
-  if (spec.state.type !== "object" || spec.state.fields.phase?.type !== "string") throw new Error("hybrid state requires a phase string");
-  if (spec.view.type !== "object") throw new Error("hybrid view requires an object");
-  if (!Object.hasOwn(spec.states, spec.initial)) throw new Error("hybrid initial state is missing");
+  if (!Number.isInteger(entropy) || entropy < 0 || entropy > 1024) throw new Error("invalid mecha entropy");
+  if (spec.state.type !== "object" || spec.state.fields.phase?.type !== "string") throw new Error("mecha state requires a phase string");
+  if (spec.view.type !== "object") throw new Error("mecha view requires an object");
+  if (!Object.hasOwn(spec.states, spec.initial)) throw new Error("mecha initial state is missing");
   for (const [name, state] of Object.entries(spec.states)) {
-    if (state.final && (Object.keys(state.on).length || state.always?.length)) throw new Error(`hybrid final state ${name} has transitions`);
+    if (state.final && (Object.keys(state.on).length || state.always?.length)) throw new Error(`mecha final state ${name} has transitions`);
     for (const arrow of state.always ?? []) {
-      if (!Object.hasOwn(spec.states, arrow.target)) throw new Error(`hybrid missing target ${arrow.target}`);
+      if (!Object.hasOwn(spec.states, arrow.target)) throw new Error(`mecha missing target ${arrow.target}`);
     }
     for (const [event, arrow] of Object.entries(state.on)) {
-      if (!Object.hasOwn(spec.events, event)) throw new Error(`hybrid undeclared event ${event}`);
-      if (arrow.target !== undefined && !Object.hasOwn(spec.states, arrow.target)) throw new Error(`hybrid missing target ${arrow.target}`);
+      if (!Object.hasOwn(spec.events, event)) throw new Error(`mecha undeclared event ${event}`);
+      if (arrow.target !== undefined && !Object.hasOwn(spec.states, arrow.target)) throw new Error(`mecha missing target ${arrow.target}`);
     }
   }
   for (const event of Object.values(spec.events)) {
-    if (!["omnishell", "mecha"].includes(event.tier) || event.payload.type !== "object") throw new Error("invalid hybrid event declaration");
+    if (!["omnishell", "mecha"].includes(event.tier) || event.payload.type !== "object") throw new Error("invalid mecha event declaration");
   }
   contracted(spec);
   const facts = jessieFacts(source, "handler");
-  if (facts.references.length) throw new Error(`hybrid rules reach ${facts.references.join(", ")}`);
+  if (facts.references.length) throw new Error(`mecha rules reach ${facts.references.join(", ")}`);
   const script = `(() => {
     const spec = harden(${JSON.stringify(spec, (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)});
+    const xstate = (${mechaXStateSource});
     const rules = harden(${terminal.instrument(`(() => { ${source}\n })()`)});
     for (const name of ['project', 'invariant', ...(spec.public ? ['publish'] : []), ...(spec.initialize ? [spec.initialize.reduce] : []), ...Object.values(spec.states).flatMap(s => [...Object.values(s.on), ...(s.always ?? [])].flatMap(t => [...(t.reduce ? [t.reduce] : []), ...(t.guard ? [t.guard] : [])]))]) {
-      if (!Object.prototype.hasOwnProperty.call(rules, name) || typeof rules[name] !== 'function') throw new Error('hybrid missing function ' + name);
+      if (!Object.prototype.hasOwnProperty.call(rules, name) || typeof rules[name] !== 'function') throw new Error('mecha missing function ' + name);
     }
-    const execute = (${runtime.trim()})(spec, rules);
+    const execute = (${runtime.trim()})(spec, rules, xstate.Statechart);
     return json => {
       const answer = execute(JSON.parse(json));
       __fuel();
       return JSON.stringify(answer);
     };
   })()`;
+  // Schema, protocol marker and SES guard survive function replacement in live databases.
   const schema = `hybrid_${spec.name}`;
   const body = `
 if (!globalThis.__prontoHybridSES) {
@@ -97,14 +101,14 @@ if (!globalThis.__prontoHybridSES) {
   Object.defineProperty(globalThis, '__prontoHybridSES', {value: true});
 }
 let spent = 0;
-const meter = harden(() => { if (++spent > ${spec.fuel}) throw new RangeError('hybrid fuel exhausted'); });
+const meter = harden(() => { if (++spent > ${spec.fuel}) throw new RangeError('mecha fuel exhausted'); });
 const cage = new Compartment();
 Object.defineProperty(cage.globalThis, '__fuel', {value: meter, writable: false, configurable: false});
 const run = cage.evaluate(${JSON.stringify(script)});
 return JSON.parse(run(JSON.stringify(input)));
 `;
   // An app's strings must never terminate either SQL function body.
-  let tag = "$hybrid$";
+  let tag = "$mecha$";
   while (body.includes(tag)) tag = tag.slice(0, -1) + "_$";
   const mecha = spec.mecha ?? {locks: "", transitions: []};
   const branches = mecha.transitions.map(t => {
@@ -122,8 +126,11 @@ return JSON.parse(run(JSON.stringify(input)));
   const upsert = (columns: string[]) => columns.filter(c => c !== "id").map(c => `"${c}" = EXCLUDED."${c}"`).join(", ");
   // The surface's parts, as the surface check reads them: a trigger on a
   // table the machine has no part in would fail the migration.
-  const parts = partsOf(spec);
+  const parts = options.serverOnly ? [] : partsOf(spec);
   const protocol = literal(`Hybrid ${spec.name} protocol ${spec.version}; no public canonical-state access`);
+  const isolation = options.serverOnly ? "serializable" : "read committed";
+  // The engine statement alone is what a retained baseline's upgrade is held to.
+  const engine = `CREATE OR REPLACE FUNCTION ${schema}.engine(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};`;
   const sql = `
 -- tier: container
 CREATE EXTENSION IF NOT EXISTS plv8;
@@ -139,7 +146,7 @@ DO $protocol$ BEGIN
 END $protocol$;
 CREATE SCHEMA IF NOT EXISTS ${schema};
 REVOKE ALL ON SCHEMA ${schema} FROM PUBLIC;
--- A machine's steps run read committed, ordered by locks rather than by a
+${options.serverOnly ? `-- Durable publication and its receipt share the caller's serializable transaction.` : `-- A machine's steps run read committed, ordered by locks rather than by a
 -- snapshot: a step holds each player of its instance (hold) before it locks
 -- any row, so two steps sharing a player run one after the other, and a check
 -- reading that player's other instances (seated elsewhere, unavailable) reads
@@ -155,11 +162,11 @@ DO $isolation$ BEGIN
   IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service') THEN ALTER ROLE service RESET default_transaction_isolation; ALTER ROLE service RESET enable_seqscan; END IF;
 END $isolation$;
 -- A step that waited for a player must read what that player's last step
--- left, which a snapshot taken before the wait would not show.
+-- left, which a snapshot taken before the wait would not show.`}
 CREATE OR REPLACE FUNCTION ${schema}.serial() RETURNS void LANGUAGE plpgsql AS $serial$
 BEGIN
-  IF current_setting('transaction_isolation') <> 'read committed' THEN
-    RAISE EXCEPTION 'a ${spec.name} step runs read committed, not %', current_setting('transaction_isolation') USING ERRCODE = '25000';
+  IF current_setting('transaction_isolation') <> '${isolation}' THEN
+    RAISE EXCEPTION 'a ${spec.name} step runs ${isolation}, not %', current_setting('transaction_isolation') USING ERRCODE = '25000';
   END IF;
 END;
 $serial$;
@@ -228,7 +235,7 @@ CREATE TABLE IF NOT EXISTS ${schema}.receipt (
 -- steps nothing. plpgsql resolves the engine when a step runs, so the step is
 -- declared once, on every tier, before any engine exists.
 -- tier: container
-CREATE OR REPLACE FUNCTION ${schema}.engine(input jsonb) RETURNS jsonb LANGUAGE plv8 AS ${tag}${body}${tag};
+${engine}
 REVOKE ALL ON FUNCTION ${schema}.engine(jsonb) FROM PUBLIC;
 -- tier: any
 CREATE OR REPLACE FUNCTION ${schema}.step(input jsonb) RETURNS jsonb LANGUAGE plpgsql AS $step$
@@ -236,7 +243,7 @@ BEGIN RETURN ${schema}.engine(input); END;
 $step$;
 REVOKE ALL ON FUNCTION ${schema}.step(jsonb) FROM PUBLIC;
 
--- What every member and, where declared, everyone reads of the instance: its
+${options.serverOnly ? "" : `-- What every member and, where declared, everyone reads of the instance: its
 -- seats' rows, each column of the surface filled from the view's field of
 -- the same name.
 CREATE OR REPLACE FUNCTION ${schema}.settle(game ${schema}.instance, projected jsonb) RETURNS void
@@ -261,6 +268,7 @@ ${spec.public ? `  IF projected->'public' = 'null'::jsonb THEN
 ` : ""}END;
 $settle$;
 REVOKE ALL ON FUNCTION ${schema}.settle(${schema}.instance, jsonb) FROM PUBLIC;
+`}
 
 CREATE OR REPLACE FUNCTION ${schema}.dispatch(instance_id uuid, actor uuid, command_id text, request jsonb, tier text, at bigint DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -317,17 +325,20 @@ BEGIN
       'viewers', recipients
     ));
     IF reduced->>'kind' = 'accepted' THEN
+      ${options.beforeTransitionSql ?? ""}
       ${branches}
     END IF;
     IF reduced->>'kind' = 'accepted' THEN
       UPDATE ${schema}.instance i SET state = reduced->'state', revision = i.revision + 1 WHERE i.id = game.id
-        RETURNING i.* INTO STRICT game;
-      PERFORM ${schema}.settle(game, reduced);
+        ${options.afterTransitionSql ? `RETURNING i.revision INTO STRICT game.revision;
+      ${options.afterTransitionSql}
+      game.state := reduced->'state';` : `RETURNING i.* INTO STRICT game;`}
+${options.serverOnly ? "" : `      PERFORM ${schema}.settle(game, reduced);`}
       answer := jsonb_build_object('kind', 'accepted');
     ELSIF reduced->>'kind' = 'rejected' THEN
       answer := reduced;
     ELSE
-      RAISE EXCEPTION 'invalid hybrid result';
+      RAISE EXCEPTION 'invalid mecha result';
     END IF;
   END IF;
   answer := answer || jsonb_build_object('command_id', command_id, 'revision', game.revision::text);
@@ -370,7 +381,7 @@ $command$;
 REVOKE ALL ON FUNCTION ${schema}.command() FROM PUBLIC;
 CREATE OR REPLACE TRIGGER ${spec.name}_command_dispatch AFTER INSERT ON public.${spec.name}_command
   FOR EACH ROW EXECUTE FUNCTION ${schema}.command();` : ""}
--- Readers write only commands; everything else on the surface is the
+${options.serverOnly ? "" : `-- Readers write only commands; everything else on the surface is the
 -- machine's, written from inside its SECURITY DEFINER functions.
 CREATE OR REPLACE FUNCTION ${schema}.sealed() RETURNS trigger LANGUAGE plpgsql AS $sealed$
 BEGIN
@@ -384,7 +395,38 @@ ${parts.includes("seat") ? `CREATE OR REPLACE TRIGGER ${spec.name}_seat_sealed B
   FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
 ${spec.public ? `CREATE OR REPLACE TRIGGER ${spec.name}_public_sealed BEFORE INSERT OR UPDATE OR DELETE ON public.${spec.name}_public
   FOR EACH ROW EXECUTE FUNCTION ${schema}.sealed();` : ""}
+`}
+${options.serverOnly ? `DO $private$
+DECLARE relation record; grant_ record;
+BEGIN
+  FOR relation IN
+    SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = ${literal(schema)} AND c.relkind IN ('r', 'p')
+  LOOP
+    EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', ${literal(schema)}, relation.relname);
+  END LOOP;
+  FOR grant_ IN
+    SELECT DISTINCT 'SCHEMA' AS kind, quote_ident(n.nspname) AS name, a.grantee
+      FROM pg_namespace n, aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) a
+      WHERE n.nspname = ${literal(schema)} AND a.grantee <> n.nspowner
+    UNION
+    SELECT DISTINCT 'TABLE', format('%I.%I', n.nspname, c.relname), a.grantee
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
+        aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+      WHERE n.nspname = ${literal(schema)} AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND a.grantee <> c.relowner
+    UNION
+    SELECT DISTINCT 'FUNCTION', p.oid::regprocedure::text, a.grantee
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
+        aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+      WHERE n.nspname = ${literal(schema)} AND a.grantee <> p.proowner
+  LOOP
+    EXECUTE format('REVOKE ALL ON %s %s FROM %s', grant_.kind, grant_.name,
+      CASE WHEN grant_.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(grant_.grantee)) END);
+  END LOOP;
+END;
+$private$;
+` : ""}
 COMMENT ON SCHEMA ${schema} IS ${protocol};
 `;
-  return { source: script, sql };
+  return { source: script, sql, engine };
 }

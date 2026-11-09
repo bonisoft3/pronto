@@ -34,9 +34,10 @@
 import { seedBlobInliner } from './edge-blobs.ts'
 import { encodeBase64 } from '@std/encoding/base64'
 import * as path from 'node:path'
+import { computationPackages, computationDefinitions, computationMachine, browserComputations } from './compute.ts'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { hostDomAssets, type StaticAsset } from './edge-assets.ts'
-import { clusterDrains, releaseFiles } from './edge-scripts.ts'
+import { clusterDrains, clusterSteps, releaseFiles } from './edge-scripts.ts'
 
 function fail(msg: string): never {
   console.error(`bundle: ${msg}`)
@@ -76,15 +77,20 @@ const shell = JSON.parse(await read('shell/shell.json')) as {
   i18n?: { locales: Record<string, unknown> }
   migrations: string[]
   tables: string[]
+  units?: Record<string, { isolation: string; src: string; files: string[]; role?: string; self?: boolean }>
   hostDom?: Record<string, { src: string }>
   seed?: Record<string, unknown[] | { href: string }>
-  units?: Record<string, { isolation?: string; src?: string; files?: string[] }>
   prefix?: string
 }
-// Non-agent units cannot be bundled through the Worker Blob shim.
-const unsupportedUnits = Object.entries(shell.units ?? {}).filter(([, u]) => u.isolation !== 'agent').map(([k]) => k)
-if (unsupportedUnits.length) fail(`units are not bundled yet: ${unsupportedUnits.join(', ')}`)
+// A presenter reads its pinned scripts and files through its own seat, which
+// no shim answers.
+const presenters = Object.entries(shell.units ?? {}).filter(([, u]) => u.role === 'presenter').map(([n]) => n)
+if (presenters.length) fail(`presenter units are not bundled yet: ${presenters.join(', ')}`)
 
+// A module carries the two sequences only in a string, a regex or a comment,
+// where `\/` and `\!` read as the character.
+const scriptText = (text: string) => text.replace(/\r\n?/g, '\n').replaceAll('\0', '\\x00').replaceAll('</script', '<\\/script').replaceAll('<!--', '<\\!--')
+const b64 = (s: string) => encodeBase64(new TextEncoder().encode(s))
 // The served set is shell.json's: what its routes name, the catalogues its
 // locales name, agent worker units, and the shell's own three files. A file the terminal serves
 // from its own tree is named from the root, `/omnishell/...`, and read there.
@@ -93,8 +99,9 @@ for (const route of shell.routes) {
   for (const v of Object.values(route.files)) for (const f of typeof v === 'string' ? [v] : v) served.add(f)
 }
 for (const u of Object.values(shell.units ?? {})) {
-  if (u.src) served.add(u.src)
-  for (const f of u.files ?? []) served.add(f)
+  if (u.isolation !== 'agent') continue
+  served.add(u.src)
+  for (const f of u.files) served.add(f)
 }
 for (const loc of Object.keys(shell.i18n?.locales ?? {})) served.add(`messages/${loc}.json`)
 const files: Record<string, string> = {}
@@ -102,6 +109,37 @@ for (const p of [...served].sort()) {
   if (p.startsWith('/omnishell/')) files[p.slice(1)] = await Deno.readTextFile(path.join(omnishell, p.slice('/omnishell/'.length)))
   else if (p.startsWith('/')) fail(`${p} is served from neither the app nor the terminal`)
   else files[p] = await read(p)
+}
+// An agent is fetched by its seat and started from a blob:, so the shim
+// answers it like any other file. A realm is a document of its own: its
+// declared scripts and sheets are inlined into it, it rides as inert base64
+// beside the boot, and the seat frames this very document with the unit named
+// in the fragment (omnishell hatch.js selfSrc), which the boot then writes
+// instead of the app. A reference the unit makes to anything it did not
+// declare is refused rather than left to 404 in the frame.
+const realms: Record<string, string> = {}
+for (const [name, unit] of Object.entries(shell.units ?? {})) {
+  if (unit.isolation === 'agent') continue
+  const dir = path.posix.dirname(unit.src)
+  const declared = (ref: string) => {
+    const p = path.posix.normalize(path.posix.join(dir, ref))
+    if (!unit.files.includes(p)) fail(`unit ${name} loads ${ref}, which its files do not declare`)
+    return p
+  }
+  let doc = await read(unit.src)
+  for (const m of [...doc.matchAll(/<script\b([^>]*?)\s+src="([^"]+)"([^>]*)><\/script>/g)]) {
+    if (isExternal(m[2])) continue
+    doc = doc.replace(m[0], () => `<script${m[1]}${m[3]}>${scriptText(Deno.readTextFileSync(path.join(app, declared(m[2]))))}</script>`)
+  }
+  for (const m of [...doc.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"[^>]*>/g)]) {
+    if (isExternal(m[1])) continue
+    doc = doc.replace(m[0], () => `<style>${Deno.readTextFileSync(path.join(app, declared(m[1])))}</style>`)
+  }
+  for (const m of doc.matchAll(/\b(?:src|href)="([^"#][^"]*)"/g)) {
+    if (!isExternal(m[1])) fail(`unit ${name} references ${m[1]}, which a single-file page cannot serve`)
+  }
+  realms[name] = doc
+  unit.self = true
 }
 if (base) shell.prefix = base
 // A seed table larger than SEED_INLINE is written beside the page, named by its
@@ -196,12 +234,14 @@ const derived = flags['--derived']
 if (derived && !clustered) fail('--derived names rows for a cluster, and this app has no migration')
 // The scripts the edge's data directory is built from, so the page's
 // database is the same: mecha's schedule table before the seed among them.
-const scripts = clustered ? await releaseFiles(app, mecha, shell.migrations) : []
+const scripts = clustered ? await releaseFiles(app, mecha, shell.migrations, await clusterSteps(path.join(app, '.pronto/cluster.json'))) : []
 const steps = [...scripts.map((f) => f.name), ...(derived ? [derived] : [])]
 // The page is one file with no blob storage behind it, so a seed object's URL is its bytes here.
 const seedInlined = shell.seedBlobs && scripts.length > 0 ? await seedBlobInliner(path.join(app, shell.seedBlobs.dir)) : (text: string) => text
 const sql = [...scripts.map((f) => f.sql), ...(derived ? [await Deno.readTextFile(path.resolve(derived))] : [])].map(seedInlined)
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
+const programs = clustered ? await computationPackages(app, mecha) : []
+const compute = programs.length ? { ...await browserComputations(programs, mecha), computations: computationDefinitions(programs) } : undefined
 // A publication and a replica identity are a WAL reader's, which the page has
 // none of: the cluster skips them by the fence the emitter and an author write,
 // read here by the cluster's own grammar, so one outside a fence is refused.
@@ -256,6 +296,19 @@ try {
   const ses = await Deno.readTextFile(path.join(omnishell, 'interpreter/vendor/ses.umd.min.js'))
   await Deno.writeTextFile(sesFile, `export function installSes() {\n${ses}\n}\n`)
   map.imports['pronto-bundle-ses'] = String(pathToFileURL(sesFile))
+  const computeMachineFile = path.join(work, 'compute-machine.js')
+  await Deno.writeTextFile(computeMachineFile, programs.length ? await computationMachine(omnishell) : 'export default {}')
+  map.imports['pronto-bundle-compute-machine'] = String(pathToFileURL(computeMachineFile))
+  // A host-DOM hatch is a module the terminal imports by path, which no shim
+  // can answer, so each is compiled into the page and handed to the shell by
+  // its src (omnishell host-dom.js hostDomModules).
+  const hatches = Object.values(shell.hostDom ?? {}).map((h) => h.src)
+  const hatchesFile = path.join(work, 'hatches.js')
+  await Deno.writeTextFile(hatchesFile, [
+    ...hatches.map((src, i) => `import * as h${i} from ${JSON.stringify(String(pathToFileURL(path.join(app, src))))}`),
+    `export const hostDomModules = {${hatches.map((src, i) => `${JSON.stringify(src)}: h${i}`).join(', ')}}`,
+  ].join('\n') + '\n')
+  map.imports['pronto-bundle-hatches'] = String(pathToFileURL(hatchesFile))
   await Deno.writeTextFile(mapFile, JSON.stringify(map))
   const bundled = new Deno.Command(Deno.execPath(), {
     args: [
@@ -284,6 +337,7 @@ const assetFiles = new Map<string, Uint8Array>()
 if (clustered) {
   const pglite = /^npm:(@electric-sql\/pglite)@(.+)$/.exec(map.imports['@electric-sql/pglite']) ?? fail(`${clusterPins} pins no @electric-sql/pglite`)
   const icu = /^npm:(@electric-sql\/pglite-icu-full)@(.+)$/.exec(map.imports['@electric-sql/pglite-icu-full']) ?? fail(`${clusterPins} pins no @electric-sql/pglite-icu-full`)
+  const ivm = /^npm:(@electric-sql\/pglite-pg_ivm)@(.+)$/.exec(map.imports['@electric-sql/pglite-pg_ivm']) ?? fail(`${clusterPins} pins no @electric-sql/pglite-pg_ivm`)
   const info = new Deno.Command(Deno.execPath(), { args: ['info', '--json'], stdout: 'piped' }).outputSync()
   if (!info.success) fail('deno info failed')
   const denoDir = (JSON.parse(new TextDecoder().decode(info.stdout)) as { denoDir: string }).denoDir
@@ -297,7 +351,7 @@ if (clustered) {
     assetFiles.set(name, bytes)
     return `${base}/${name}`
   }
-  assets = { wasm: await beside(path.join(dist, 'pglite.wasm')), data: await beside(path.join(dist, 'pglite.data')), initdb: await beside(path.join(dist, 'initdb.wasm')), icu: await beside(icuArchive) }
+  assets = { wasm: await beside(path.join(dist, 'pglite.wasm')), data: await beside(path.join(dist, 'pglite.data')), initdb: await beside(path.join(dist, 'initdb.wasm')), icu: await beside(icuArchive), ivm: await beside(path.join(denoDir, 'npm/registry.npmjs.org', ivm[1], ivm[2], 'dist/pg_ivm.tar.gz')) }
 }
 // A file whose text another file already holds (an app's screens often share one
 // sheet) rides once: `same` names the file that holds it, and the page's shim
@@ -316,14 +370,12 @@ const payload = {
   files: unique,
   same,
   ...(clustered
-    ? { cluster: { sql, tables: shell.tables, drains, clock, assets } }
+    ? { cluster: { sql, tables: shell.tables, drains, clock, assets, compute } }
     : {}),
 }
 
 // The payload is JSON, which carries `<` only inside a string, written there as
-// \u003c, so neither `</script` nor `<!--` can occur in it. A module carries the two sequences only in a string, a regex or a comment,
-// where `\/` and `\!` read as the character.
-const scriptText = (text: string) => text.replace(/\r\n?/g, '\n').replaceAll('\0', '\\x00').replaceAll('</script', '<\\/script').replaceAll('<!--', '<\\!--')
+// \u003c, so neither `</script` nor `<!--` can occur in it (scriptText above).
 const module = scriptText(js)
 // A function, so a `$` in a stylesheet is written as it is and not read as
 // a replacement pattern.
@@ -332,6 +384,7 @@ const replace = (html: string, from: string | RegExp, to: string) => {
   return next === html ? fail(`shell/index.html: ${String(from)} not found`) : next
 }
 let html = await read('shell/index.html')
+if (programs.length) html = html.replace(/trusted-types ([^";]+)/g, '$& mecha-compute').replace("connect-src 'self'", "connect-src 'self' blob:")
 html = replace(html, '<link rel="stylesheet" href="./shell.css">', `<style>${files['shell/shell.css']}</style>`)
 html = replace(html, '<link rel="stylesheet" href="./design.css">', `<style>${files['shell/design.css']}</style>`)
 html = html.replace(/<link rel="stylesheet" href="([^"]+)">/g, (_match, href) => {
@@ -450,6 +503,27 @@ html = html.replace(/<meta\b[^>]*>/gi, (tag) => {
     return `content="${directives.join('; ')}"`
   })
 })
+// The policy is installed by the document's first script rather than parsed
+// from markup, because the same file is also a realm unit's document: in a
+// sandboxed frame (an opaque origin) whose fragment names a unit, the boot
+// writes that unit and an unclosed <plaintext>, which ends parsing of the rest
+// of this document as markup, so the app never runs there and the unit runs
+// under no policy of the app's. Anywhere else the policy goes in first; only
+// inert unit data precedes the boot. A malformed unit still installs it.
+let policy = ''
+html = html.replace(/<meta\b[^>]*\bhttp-equiv\s*=\s*["']Content-Security-Policy["'][^>]*>\n?/i, (tag) => {
+  policy = /\bcontent\s*=\s*"([^"]*)"/i.exec(tag)![1].replaceAll('&quot;', '"').replaceAll('&amp;', '&')
+  return ''
+})
+const boot = `(()=>{const policy=()=>{const m=document.createElement("meta");m.httpEquiv="Content-Security-Policy";m.content=${JSON.stringify(policy)};document.head.append(m)};` +
+  `const name=new URLSearchParams(location.hash.slice(1)).get("pronto-unit");` +
+  `const unit=name!==null&&self.origin==="null"?document.getElementById("pronto-unit-"+name):null;` +
+  `if(!unit){if(${JSON.stringify(policy)})policy();return}` +
+  `let doc;try{doc=new TextDecoder().decode(Uint8Array.from(atob(unit.textContent),(c)=>c.charCodeAt(0)))}catch(e){policy();throw e}` +
+  `document.write(doc+"<plaintext hidden>")})()`
+html = html.replace(/<head\b[^>]*>/, (head) =>
+  head + Object.entries(realms).map(([name, doc]) => `<script type="application/octet-stream" id="pronto-unit-${name}">${b64(doc)}</script>`).join('') +
+    `<script>${scriptText(boot)}</script>`)
 html = replace(
   html,
   '<script type="module" src="./boot.js"></script>',

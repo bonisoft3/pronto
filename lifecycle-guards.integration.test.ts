@@ -17,7 +17,7 @@ Deno.test({ name: "lifecycle guards and actions share the write transaction afte
   const action = (op: string) => `{effect: {op: "create", table: "audit", values: {id: {raw: "gen_random_uuid()"}, operation: "${op}"}}}`;
   const program = paymentProgram({ machine: "pending: {}", entity: `Audit: {table: "audit", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "operation", type: "string"}]}` })
     .replace(/\n    effects: charge: \{[\s\S]*?\n    }\n/, "\n") + `
-app: state: machines: PaymentRules: {
+app: state: mecha: rows: PaymentRules: {
   entity: "Payment"
   guards: positive: {
     src: "shell/validations/positive.js"

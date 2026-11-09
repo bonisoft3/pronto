@@ -29,10 +29,13 @@ import "strings"
 		// through render, whose door reaches crud back through caddy.
 		mesh: {
 			crud:     int & >statement.service
-			caddy:    int & >door.crud
+			caddy:    int & >door.crud & >door.hatch
 			render:   int & >caddy
 			auth:     int & >statement.client
 			electric: int & >electricHold
+			// A container hatch's door (its app id is the hatch's name): the
+			// hatch's own provider calls and mail end first.
+			hatch: int & >hatchCall
 		}
 
 		// Caddy to its upstreams, to their response headers: the door is
@@ -47,6 +50,7 @@ import "strings"
 			electric: int & >mesh.electric
 			ticker:   int & >tickerCall
 			blobs:    int & >0
+			hatch:    int & >mesh.hatch
 		}
 		// Each read render makes through its door: past caddy's sidecar on
 		// Kubernetes and caddy's crud bound under compose, inside render's
@@ -62,6 +66,9 @@ import "strings"
 		// Each call the ticker makes to crud, direct, as the service role: one
 		// it gave up on would commit anyway and be made again by the next tick.
 		tickerCall: int & >statement.service
+		// Everything one request to a container hatch waits on outside it
+		// (a payment provider's call, a mail relay's), which the hatch bounds.
+		hatchCall: int & >0
 
 		// Caddy's connect to any upstream, and the longest silence it allows
 		// between reads of Electric's stream: compose's bound, as on
@@ -72,7 +79,7 @@ import "strings"
 		// The gateway's whole request, by path prefix (HTTPRoute timeouts).
 		// Electric's gate runs before Electric itself, on the same request.
 		gateway: {
-			default:  int & >door.render & >door.crud & >door.auth & >door.blobs & >door.ticker
+			default:  int & >door.render & >door.crud & >door.auth & >door.blobs & >door.ticker & >door.hatch
 			electric: int & >(door.auth + door.electric)
 		}
 	}
@@ -94,11 +101,12 @@ resilience: #Resilience & {
 		lock: {client: 2, service: 5}
 		idleInTransaction: {client: 10, service: 60}
 		electricHold: 20
-		mesh: {crud: 35, caddy: 40, render: 42, auth: 10, electric: 60}
-		door: {crud: 38, render: 44, auth: 12, electric: 70, ticker: 40, blobs: 40}
+		mesh: {crud: 35, caddy: 40, render: 42, auth: 10, electric: 60, hatch: 27}
+		door: {crud: 38, render: 44, auth: 12, electric: 70, ticker: 40, blobs: 40, hatch: 30}
 		renderDoor: 41
 		drain:      35
 		tickerCall: 35
+		hatchCall:  24
 		dial:       2
 		streamRead: 300
 		gateway: {default: 45, electric: 90}
@@ -108,7 +116,13 @@ resilience: #Resilience & {
 
 // Caddy's bound on each upstream, `import bounded-<hop>` in the Caddyfile:
 // emitted ahead of it, so the Caddyfile names hops and never a number.
-caddySnippets: strings.Join([for hop, s in resilience.timeouts.door {
+caddySnippets: """
+	{
+	  admin off
+	  auto_https disable_redirects
+	}
+
+	""" + strings.Join([for hop, s in resilience.timeouts.door {
 	"""
 	(bounded-\(hop)) {
 	  transport http {

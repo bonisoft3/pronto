@@ -27,6 +27,7 @@ import (
 		if A.capabilities.auth != _|_ if A.capabilities.auth.self != _|_ if A.capabilities.auth.self.name != _|_ {
 			(A.capabilities.auth.self.name.table): A._entityByTable[A.capabilities.auth.self.name.table]
 		}
+
 		// A server join's dependencies may never be read as regions themselves.
 		for _, s in A.surface.screens for r in s.reads if r.embeds != _|_ for t in r.embeds {
 			if A._entityByTable[t] != _|_ {(t): A._entityByTable[t]}
@@ -37,12 +38,14 @@ import (
 			(A.state.entities[u.memo.entity].table): u.memo.entity
 		}
 		for _, p in A.state.pipelines if p.fold != _|_ {(p.fold.pair.table): A._entityByTable[p.fold.pair.table]}
-		// A Cortex fold is handed every hybrid's declaration and writes the
+
+		// A Cortex fold is handed every Mecha reducer's declaration and writes the
 		// reader's side of each surface, which no region names.
-		if A.state.cortex != _|_ if A.state.hybrids != _|_ for m, _ in A.state.hybrids for k in ["command", "open", "lease"] if A._entityByTable["\(m)_\(k)"] != _|_ {
+		if A.state.cortex != _|_ if A.state.mecha.reducers != _|_ for m, _ in A.state.mecha.reducers for k in ["command", "open", "lease"] if A._entityByTable["\(m)_\(k)"] != _|_ {
 			("\(m)_\(k)"): A._entityByTable["\(m)_\(k)"]
 		}
 		for _, p in A.state.pipelines if p.fold != _|_ {(A.state.entities[p.from].table): p.from}
+
 		// Visibility walks through parents and grants even when markup names
 		// only a child. Register every edge so ancestor metadata travels too.
 		for _, e in A.state.entities if e.access != _|_ {
@@ -92,7 +95,7 @@ import (
 	_readReducing: [for sn, s in A.surface.screens if len([for w in s.writes if w.op == "reduce" {w}]) > 0 {sn}]
 
 	// Every reason a table is eager, in the order the first one is given.
-	_readEager: list.Concat([
+	_readInvariant: list.Concat([
 		// What the terminal reads whole outside any region.
 		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: p.from, why: "the fold \(pn) projects the reader's own contribution from it"}],
 		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: A._entityByTable[p.fold.pair.table], why: "the fold \(pn) reads the reader's pair from it"}],
@@ -114,6 +117,14 @@ import (
 		// A view keeps no row whose visibility it cannot restate.
 		[for n, scope in _readRestricted {entity: n, why: "\(n) is \(scope), and a view cannot restate its visibility"}],
 
+	])
+
+	#developmentRead: {for n, e in A.state.entities if e.server {(n): [
+		if len([for r in _readInvariant if r.entity == n {r}]) > 0 || _readCompares[n][_readKey[n]] == _|_ {"eager"},
+		"lazy",
+	][0]}}
+
+	_readEager: list.Concat([_readInvariant,
 		// An opaque keyed effect may name a row no view holds. Whole-table
 		// mutations demand their snapshot at runtime; keyed effects still need
 		// a key Electric can compare to load that row.
@@ -122,7 +133,6 @@ import (
 				entity: n
 				why:    "\(_readReducing[0]).html writes from a reduce, and Electric cannot compare \(n)'s key to load a row it targets"
 			}],
-
 
 		// The writes that find their row in the collection. One by key loads
 		// a row no view loaded as a view of its key (data-sync.js `holding`),

@@ -9,6 +9,8 @@ import { createShell } from 'omnishell/shell.js'
 // @ts-ignore untyped interpreter module
 import { ensureSes } from 'omnishell/jessie.js'
 import { installSes } from 'pronto-bundle-ses'
+// @ts-ignore written by the bundler beside the page: the app's host-DOM hatches, compiled in
+import { hostDomModules } from 'pronto-bundle-hatches'
 // The data plane, which every first screen reads through: the shell imports it
 // when it starts, and imported here it rides in this module instead of a chunk
 // fetched after it.
@@ -77,7 +79,7 @@ export function startPage(bootCluster?: () => Promise<Handle>) {
     if (bootCluster) handle = await bootCluster()
     // The shim answers every file a preload would ask the network for.
     await ensureSes(installSes)
-    createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false })
+    createShell({ config: './shell.json', mount: document.getElementById('app'), preload: false, hostDomModules })
   })().catch((e) => {
     document.body.textContent = `boot failed: ${e instanceof Error ? e.message : String(e)}`
     throw e

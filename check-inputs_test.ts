@@ -4,14 +4,14 @@ import { readCheckInputs } from "./check-inputs.ts";
 import { identitiesOf } from "./identity.ts";
 import { typeTable } from "./type-table.ts";
 
-const inputs = { version: 1 as const, types: typeTable(), entities: {}, hybrids: {}, hatches: {}, rawMigrations: [], duckstreams: {} };
+const inputs = { version: 1 as const, types: typeTable(), entities: {}, reducers: {}, hatches: {}, rawMigrations: [], duckstreams: {} };
 
 Deno.test("checker inputs require generation and reject unsupported or malformed output", async () => {
   const app = await Deno.makeTempDir();
   try {
     await assert.rejects(() => readCheckInputs(app), Deno.errors.NotFound);
     await Deno.mkdir(`${app}/.pronto`);
-    for (const value of [null, {}, { ...inputs, version: 2 }, { ...inputs, types: null }, { ...inputs, types: {} }, { ...inputs, entities: [] }, { ...inputs, hatches: null }, { ...inputs, hybrids: [] }, { ...inputs, rawMigrations: {} }, { ...inputs, duckstreams: [] }]) {
+    for (const value of [null, {}, { ...inputs, version: 2 }, { ...inputs, types: null }, { ...inputs, types: {} }, { ...inputs, entities: [] }, { ...inputs, hatches: null }, { ...inputs, reducers: [] }, { ...inputs, rawMigrations: {} }, { ...inputs, duckstreams: [] }]) {
       await Deno.writeTextFile(`${app}/.pronto/check-inputs.json`, JSON.stringify(value));
       await assert.rejects(() => readCheckInputs(app), { message: /regenerate the application/ });
     }
@@ -70,5 +70,60 @@ Deno.test("identity and SQL checks read generation without permission to evaluat
     assert.deepEqual(JSON.parse(new TextDecoder().decode(output.stdout))[0].message, "hatch withholds trusted.sql, which the app does not have");
   } finally {
     await Deno.remove(app, { recursive: true });
+  }
+});
+
+Deno.test("one Mecha namespace keeps reducer and row-machine contracts distinct", async () => {
+  const { cue, paymentProgram } = await import("./effects-fixtures.ts");
+  const program = paymentProgram() + `
+app: state: mecha: reducers: counter: {
+  rules: "machines/counter.js"
+  machine: {
+    config: {initial: "ready", states: ready: {}}
+    setup: {
+      version: 1
+      types: {
+        context: {type: "object", fields: {}}
+        view: {type: "object", fields: {}}
+        events: {}
+      }
+    }
+  }
+}
+`;
+  const result = await cue(["export", "-", "-e", 'out[".pronto/check-inputs.json"].data', "--out", "json"], program);
+  assert.equal(result.success, true, result.stderr);
+  const data = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(data.reducers), ["counter"]);
+  assert.deepEqual(Object.keys(data.machines), ["PaymentMachine"]);
+  assert.equal(data.reducers.counter.name, "counter");
+  assert.equal(data.machines.PaymentMachine.entity, "Payment");
+  const parent = await cue(["export", "-", "-e", "app"], program + `
+app: state: cortex: root: {
+  config: {id: "root", initial: "active", states: active: {meta: screen: "board", invoke: src: "counter"}}
+  setup: actors: counter: {machine: "counter", via: "local", handler: "machines/counter.js"}
+}
+`);
+  assert.equal(parent.success, false);
+  assert.match(parent.stderr, /counter has no initializer/);
+  for (const extra of [
+    "app: state: hybrids: {}",
+    "app: state: machines: {}",
+    'app: state: mecha: reducers: counter: entity: "Payment"',
+    'app: state: mecha: reducers: counter: level: "external"',
+    'app: state: mecha: reducers: counter: unknown: true',
+    'app: state: mecha: reducers: neither: {}',
+    'app: state: mecha: counter: {}',
+  ]) {
+    const invalid = await cue(["export", "-", "-e", "app"], program + extra);
+    assert.equal(invalid.success, false, extra);
+  }
+  for (const [source, required] of [
+    [program.replace('rules: "machines/counter.js"', ""), "rules"],
+    [program.replace('initial: "ready", states: ready: {}', ""), "initial"],
+  ]) {
+    const invalid = await cue(["export", "-", "-e", "app"], source);
+    assert.equal(invalid.success, false, required);
+    assert.match(invalid.stderr, new RegExp(required));
   }
 });

@@ -7,7 +7,7 @@ status: partially-built
 
 # External effects
 
-[Hybrid machines](2026-09-29-hybrid-machines.md) gives level 4 to cortex, the
+[Cortex machines](2026-09-29-cortex-machines.md) gives level 4 to cortex, the
 coordinator, alone. Until now the door it coordinates through was half built: a `#SagaEffect` inserted a `saga` row and sent a `pg_notify`,
 and nothing read either. This record closes the door. A machine *invokes* an **external
 effect**. Mecha's **airlock** performs it against a declared **sink**. The answer comes back as
@@ -133,7 +133,7 @@ its outcome lands.
 ## The ledger
 
 `airlock.external_effect_ledger` is mecha's, in the airlock's
-[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/airlock.sql), and the
+[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/airlock.sql), and the
 cluster places it as it places the ticker's `schedule`. A row holds the key
 (`<effect>:<key fields>`, also the sink's idempotency key), the instance's primary key,
 the input frozen at the claim, the count of runs begun, and the outcome, set once.
@@ -156,8 +156,8 @@ does not. A ledger pronto owns has three uses an engine's private record would n
 
 ## The airlock
 
-Cortex coordinates across tiers ([hybrid
-machines](2026-09-29-hybrid-machines.md#4-cortex-coordination-and-level-4-external-effects));
+Cortex coordinates across tiers ([mecha
+machines](2026-09-29-cortex-machines.md#4-cortex-coordination-and-level-4-external-effects));
 when a coordination must leave the cluster, it does so through the **airlock**. The
 airlock is a mecha service, `libraries/mecha/services/airlock`, on Deno, with Graphile
 Worker as its queue. It is the only place in a cluster where code reaches the world
@@ -183,7 +183,7 @@ call.
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
   key; the others are the frozen `input` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
   "no answer", not "failed". The airlock's
-  [README](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md) is the contract.
+  [README](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md) is the contract.
 - **A thrown error** is retried by Graphile with backoff, and each retry is a re-entry.
   After `attempts` runs counted by the ledger the outcome is `unknown`: no answer ever
   came, and the sink may have acted. The ledger counts, not Graphile, which counts a run
@@ -231,19 +231,20 @@ never holds it and no component carries it. A client certificate, which ponto's 
 submission will need, is a binding's `MTLSClientCert` and is not declared yet
 ([open](#open)).
 
-The airlock's daprd runs under a configuration that allows the bindings API and nothing
-else (`services/airlock/dapr.yaml`). That removes the hole M3 measured, daprd forwarding an
-invoke whose target is a full URL to any origin, by removing service invocation itself
-(B2), with state, pubsub, secrets and metadata (B5); an undeclared binding is refused (B4).
-So the only traffic this daprd can originate is a call of a binding the program declared.
+The airlock's daprd now invokes declared `HTTPEndpoint`s, since the bindings API cannot carry a
+body that is not JSON ([commerce through the airlock](2026-11-05-commerce-through-the-airlock.md)).
+Allowing invocation brings back what M3 measured, daprd forwarding a full URL to any origin, so a
+rule generated from the effects keeps a mistake from reaching anything undeclared, with state,
+pubsub, secrets and metadata (B5) still removed. It is a guard against mistakes, not a security
+boundary (the airlock's README names what it does not stop).
 
 ### The wall is the allowlist
 
 - **The endowment.** The handler names a path, and the host only its own effect's
-  binding. No code path in the airlock builds a URL.
-- **The allowlist.** The daprd has no API that reaches anything but a declared binding, over
-  HTTP or over the gRPC it always serves; a list naming HTTP alone leaves gRPC whole, and
-  there it fetched `https://example.com` by service invocation (B9).
+  endpoint. No code path in the airlock builds a URL.
+- **The allowlist.** Over HTTP a generated rule passes only the declared endpoints, and over the
+  gRPC it always serves the daprd offers bindings alone; a list naming HTTP alone leaves gRPC whole,
+  and there it fetched `https://example.com` by service invocation (B9).
 - **The airlock's network.** The airlock stands on an internal network with the database
   and its daprd, so its own code cannot go around the daprd.
 
@@ -282,18 +283,16 @@ ledger and same re-entry, and it walls the bridge's own reach.
 The implemented declaration and container recipe are documented in
 [[../container-bridges|container bridges]]. A bridge is a role of a declared
 container hatch; it does not introduce a second container definition. Mail is one
-reusable implementation. Its Deno network permissions and connected-address check
-belong to that implementation, not to arbitrary bridge containers.
+reusable implementation. Its current contract is [Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md); bridge containers grant no protocol-specific confinement.
 
 - **Re-entry follows the protocol.** SMTP carries no idempotency key, so a mail bridge is
   a sink that is not idempotent: the server's `250` is the done answer, and a crash
   between that answer and the ledger's outcome is decided by the effect's `reentry`. The
-  bridge sets `Message-ID` from the ledger key, so a duplicate that does go out collapses
-  in the recipient's mail client.
+  bridge sets `Message-ID` from the ledger key, for correlation; duplicate suppression by recipients is not guaranteed.
 - **A Dapr binding is a bridge with no code.** The daprd calls bindings directly, so any
   binding type whose features a sink needs is one, declared as configuration. Dapr's SMTP
   binding has no attachments, no multipart body and no custom headers, so it can neither
-  carry a calendar invite nor set `Message-ID`; mecha's `mail` bridge, on nodemailer, is a
+  carry a calendar invite nor set `Message-ID`; mecha's `mail` bridge is a
   reference image for that case, swappable for any HTTP-to-SMTP relay.
 - **A provider with an HTTP API needs no bridge.** Postmark, SendGrid and SES are HTTPS
   origins.
@@ -349,7 +348,7 @@ ticker only where one declares a schedule: `state.effects` in mecha's `cluster.c
 effect's name and its origin or bridge, brings two services (`airlock` and its daprd
 `airlock-mesh`), each referenced container hatch, the ticker and its clock, two initdb
 steps, and four networks. The
-airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#in-a-cluster) is
+airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md#in-a-cluster) is
 the contract; what follows is why it has that shape.
 
 ### The networks
@@ -373,7 +372,7 @@ an app with effects gets the union of its targets' closures instead of the exact
 alternative is a target-level `networks` in bayt that a fragment declares at its top, which
 compose merges across fragments; that is a bayt change, and until it lands mecha's own stack
 places no airlock, since every app's compose includes mecha's fragments and those would name
-networks the app does not declare. `tests/airlock_test.ts` therefore writes a bayt project
+networks the app does not declare. `mecha-airlock.integration.test.ts` therefore writes a bayt project
 of its own for the run, a cluster with two effects, one through a bridge, has bayt generate
 it, and boots its launch closure: bayt's Dockerfiles and fragments, and the
 `compose.includes` file carrying the networks, are what it runs.
@@ -493,7 +492,7 @@ airlock's side there.
 
 The wall travels with the daprd: its allowlist and its bindings are its configuration on
 every tier, so compose, k8s and Cloud Run hold the same one.
-[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/deployment.md#the-airlocks-wake-and-wall)
+[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/deployment.md#the-airlocks-wake-and-wall)
 holds the table. Crash recovery reads each process's own advisory key, so an overlap of two
 revisions, or any number of instances, unlocks nothing a live process holds.
 
@@ -503,7 +502,7 @@ revisions, or any number of instances, unlocks nothing a live process holds.
 reproduces the D, G1-G6 and M rows against mecha's pinned Deno 2.9.7, the cluster's
 postgres 18 image and its daprd 1.16.1. `peer` stands in for the sink: a row in it is a
 call that happened. The B rows are steps of `task integrate:airlock` (daprd under the
-bindings-only allowlist, a sink served from the test) and of `tests/airlock_test.ts`, which
+bindings-only allowlist, a sink served from the test) and of `mecha-airlock.integration.test.ts`, which
 boots the plane bayt lowers for a cluster with two effects, one through the mail bridge; G7,
 S1-S2 and W2 are steps of the first, W1 of the second.
 
@@ -536,7 +535,7 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 | B9 | over gRPC, `InvokeService` to `https://example.com`, `GetMetadata`, `Shutdown`; with an HTTP-only list, then with the gRPC rule | — | with HTTP only, the page's HTML and the metadata came back; with the rule, UNIMPLEMENTED for each, `InvokeBinding` still served |
 | B10 | from a container on the default network, the daprd's port and the bridge's | 0 | neither name resolves there |
 | B11 | an effect declaring `credential: {scheme: Bearer, secret: VAULT_KEY}`, the sink recording its headers | 1 | `Authorization: Bearer <value>` arrives; the ledger's input and outcome hold no trace of the value; an effect without one sends no such header |
-| R1 | the mail bridge against Mailpit | 1 | 200 with the key's `Message-ID` and the invite; 422 for a 5xx refusal and for a refused STARTTLS, nothing sent in the clear; 503 with no server; 403 for an inward server |
+| R1 | the mail bridge against Mailpit | 1 | 200 with the key's `Message-ID` and the invite; 422 for a 5xx refusal and for a refused STARTTLS, nothing sent in the clear; 503 with no server; the former inward-address refusal is retired |
 | S1 | Graphile's `runMigrations` after `graphile.sql` | — | `pg_dump -s -n graphile_worker` unchanged: nothing to migrate |
 | S2 | `graphile.sql` against Graphile's own install | — | the same schema and the same `migrations` rows |
 | W1 | commit into the invoking state to `settled`, nothing poking, in the plane bayt lowers | 1 | 155 ms; one call carrying `Idempotency-Key: probe:settles` |
@@ -663,14 +662,14 @@ One PR. These are its commits, in order, each green:
    declares an effect, with Graphile's schema and the ledger as initdb steps 011 and 012,
    and the ledger in a schema only its owner may use. `cluster_test.ts` covers placement
    and every refusal, `testdata/emit/effect.cue` pronto's wiring, and
-   `tests/airlock_test.ts` the plane bayt lowers, end to end.
+   `mecha-airlock.integration.test.ts` the plane bayt lowers, end to end.
 4. **Bridges, Crypto and the bindings wall** (built). `state.bridges` in pronto and the
    cluster through declared container hatches, and mecha's
-   mail bridge on nodemailer; `Crypto` in the realm and `secrets` as the handler's third
+   [mail bridge](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md); `Crypto` in the realm and `secrets` as the handler's third
    argument; the airlock calling a Dapr output binding per effect, its daprd allowed the
    bindings API alone, in place of HTTPEndpoints and the CONNECT proxy.
-   `mail_docker_test.ts` holds the bridge's answers against Mailpit, `crypto_test.ts`
-   Crypto's against FIPS 180-2 and RFC 4231 and each refusal, and `tests/airlock_test.ts`
+   The mail service integration suite holds the bridge's answers against SMTP, `crypto_test.ts`
+   Crypto's against FIPS 180-2 and RFC 4231 and each refusal, and `mecha-airlock.integration.test.ts`
    sends a signed confirmation through the bridge and fails without the allowlist.
 5. **The oracle app** (started). `apps/calcom`, a
    clone of Cal.com, the open-source Calendly, at brief stage. It is the first app graded

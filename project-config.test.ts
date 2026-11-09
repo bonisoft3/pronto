@@ -4,7 +4,7 @@ import {
   assertStringIncludes,
 } from "jsr:@std/assert@1.0.11";
 import { fileURLToPath } from "node:url";
-import { projectSay } from "./project-config.ts";
+import { projectGates, projectSay } from "./project-config.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -110,4 +110,38 @@ pronto: say: say: generate: rulemap: custom: {priority: 3, cmds: [{do: "print cu
   } finally {
     await Deno.remove(app, { recursive: true });
   }
+});
+
+Deno.test("gates retain options and delegate every declared platform to the raw leaf", () => {
+  const cmd = { use: "./bayt-task.nu", do: "bayt-task test --generate" };
+  const raw = { test: { args: "default", keep_going: true, flags: "--platform browser", rulemap: {
+    custom: { platform: "browser", cmds: [{ do: "custom-check" }] },
+  } }, verify: { do: "original-verify" } };
+  const projected = projectGates(raw, { lint: { rulemap: { builtin: { stop: true, cmds: [cmd] } } }, test: { rulemap: { builtin: { stop: true, cmds: [cmd] } } } });
+  assertEquals(projected.say.test, { keep_going: true, flags: "--platform browser", rulemap: {
+    builtin: { stop: true, cmds: [cmd] },
+    "platform-0": { stop: true, cmds: [cmd], platform: "browser", priority: -1 },
+  } });
+  assertEquals(projected.say.verify, raw.verify);
+  assertEquals(projected.say.lint, { rulemap: { builtin: { stop: true, cmds: [cmd] } } });
+  assertEquals(raw.test.args, "default");
+  assertEquals(Object.keys(projected.gates), ["lint", "test"]);
+});
+
+Deno.test("gates without builtin merge platform rules alongside the check's own rulemap", () => {
+  const mkcert = { do: "mkcert" };
+  const launchLocal = { platform: "local", stop: true, cmds: [{ use: "./bayt-task.nu", do: "bayt-task launch --generate" }] };
+  const raw = { launch: { rulemap: { builtin: { cmds: [mkcert] } } } };
+  const projected = projectGates(raw, { launch: { rulemap: { local: launchLocal } } });
+  assertEquals(projected.say.launch, {
+    rulemap: {
+      builtin: { cmds: [mkcert] },
+      local: launchLocal,
+    },
+  });
+  assertEquals(projected.gates.launch, {
+    rulemap: {
+      local: launchLocal,
+    },
+  });
 });

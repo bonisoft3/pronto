@@ -7,14 +7,14 @@ import (
 	"github.com/bonisoft3/pronto/resilience"
 )
 
-#Version:     "1.0.9"
-#SaytVersion: "0.45.3"
+#Version:     "1.1.2"
+#SaytVersion: "0.48.0"
 
-// Test-only modules: an app's tests import the hybrid oracle harnesses by URL,
-// and the portable types are refreshed from the checkout's mecha client. An
-// installed pronto neither type-checks nor runs them (installed_test.ts holds
-// the rest to its own tree).
-#TestModules: ["hybrid-local.ts", "hybrid-battery.ts", "refresh-portable-types.ts"]
+// Checkout-only modules: the compiler's test fixtures read omnishell beside
+// pronto, and the portable types are refreshed from the checkout's mecha
+// client. An installed pronto neither type-checks nor runs them
+// (installed_test.ts holds the rest to its own tree).
+#TestModules: ["mecha-fixtures.ts", "refresh-portable-types.ts", "mecha-xstate-entry.ts", "mecha-xstate-bundle.ts", "cortex-conformance.ts", "access-test-fixture.ts", "mecha-snapshot-fixture.ts", "bundle/mecha-edge-fixture.ts"]
 
 // The mise tools that carry the three trees a browser bundle reads, for a
 // checkout with no monorepo sibling to read them from.
@@ -82,6 +82,26 @@ import (
 	}
 }
 
+#HostTools: {
+	...
+	"http:hydra": {
+		version: "26.2.0"
+		platforms: {
+			for platform, asset in {
+				"linux-x64":        "linux_sqlite_64bit.tar.gz"
+				"linux-arm64":      "linux_sqlite_arm64.tar.gz"
+				"linux-x64-musl":   "linux_sqlite_64bit.tar.gz"
+				"linux-arm64-musl": "linux_sqlite_arm64.tar.gz"
+				"macos-x64":        "macOS_sqlite_64bit.tar.gz"
+				"macos-arm64":      "macOS_sqlite_arm64.tar.gz"
+				"windows-x64":      "windows_sqlite_64bit.zip"
+			} {
+				"\(platform)": url: "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-\(asset)"
+			}
+		}
+	}
+}
+
 // Commands resolve an installation at execution time, never into generated
 // files: where mise puts it, the pinned release or, under a checkout's
 // mise.local.toml, its tree.
@@ -134,6 +154,9 @@ import (
 	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
 	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
 	tools:      #Tools
+	hostTools:  #HostTools
+	// Host tools installed under another name than their backend's.
+	hostToolAliases: *{} | {[string]: string}
 	mise: {
 		...
 		settings: {
@@ -150,9 +173,16 @@ import (
 		}
 		tools: P.tools
 	}
+	miseHost: {
+		...
+		settings: P.mise.settings
+		if len(P.hostToolAliases) > 0 {tool_alias: P.hostToolAliases}
+		tools: P.hostTools
+	}
 	_run:     #Run
 	compiler: "^\((#Writer & {root: "(^mise where \(#Runtimes.pronto) | str trim)"}).out)"
 	write: (_run & {args: "run-mise exec -- \((#Writer & {root: "$pronto"}).out)"}).out
+	launch: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ($pronto | path join launch-watch.ts)"}).out
 	// The live tables a pages release fills from the settled container
 	// cluster, and the streams that cluster runs; none where the app runs no
 	// stream and no computation.
@@ -191,7 +221,7 @@ import (
 	// Post-release verification across live deployments.
 	let _verifyArgs = "...(if ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else { ['--target', $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty) { [] } else { ['--tier', $env.SAY_VERIFY_ARGS_TIER] }) ...(if ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { [] } else { ['--headless', $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else { ['--session', $env.SAY_VERIFY_ARGS_SESSION] })"
 	verifyPages: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform pages\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
-	verifyEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform cloudflare\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
+	verifyEdge: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform cloudflare --mecha \(P._mecha)\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
 	verifyK8s: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform k8s\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
 	verifyGcp: (_run & {args: "if ([$env.SAY_VERIFY_ARGS_TARGET? $env.SAY_VERIFY_ARGS_TIER? $env.SAY_VERIFY_ARGS_HEADLESS? $env.SAY_VERIFY_ARGS_SESSION? $env.APP_URL?] | compact | any {|v| $v != \"\"}) { run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform gcp\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs) } else { run-mise exec -- nu ($pronto | path join gcp verify.nu) }"}).out
 	checks: {
@@ -205,9 +235,11 @@ import (
 		// The pages bundle written to a scratch folder and held to firstLoad.
 		firstLoad: (_run & {args: "let out = (mktemp -d); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out $out --first-load \(P.firstLoad); rm -r $out"}).out
 		hybrids: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-hybrids.ts) ."}).out
+		outcomes: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-verification.ts) . --omnishell \(P._omnishell)"}).out
+		mecha: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-mecha.ts) ."}).out
 		// Under the compute service's own pins, as it runs them: queries over
 		// DuckDB, the cage's workers, the wasm.
-		computations: (_run & {args: "run-mise exec -- deno test --config (\(P._mecha) | path join services compute deno.json) --frozen --permit-no-files --unstable-worker-options --allow-read --allow-ffi --allow-env computations"}).out
+		computations: (_run & {args: "if ('computations' | path exists) { run-mise exec -- deno test --config (\(P._mecha) | path join services compute deno.json) --frozen --permit-no-files --unstable-worker-options --allow-read --allow-ffi --allow-env --allow-sys=homedir computations }"}).out
 		// Each module loaded as the service loads it at startup, so one it
 		// would refuse fails here; the emitter appends the modules' paths.
 		admit: (_run & {args: "run-mise exec -- deno run --config (\(P._mecha) | path join services compute deno.json) --frozen --unstable-worker-options --allow-read --allow-env (\(P._mecha) | path join services compute admit.ts)"}).out

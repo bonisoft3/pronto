@@ -36,6 +36,7 @@ just test    # the .say.yaml rulemap: bounds.ts, check-loop.ts --self-test,
              # cue vet -c ./testdata/emit, and the *_test.ts / *.test.ts suites
 deno task test:replay        # bootstrap, retained upgrades and migrator restart; needs Docker
 deno task test:integration   # types through Postgres, PostgREST and Electric, the door over an Electric 5xx, and the external-effect guard; needs Docker
+deno task test:airlock       # the airlock plane bayt lowers for mecha's cluster, booted with a sink and a mail bridge; needs Docker
 ```
 
 From the repository root, `just sayt -d plugins/pronto <verb>` runs the same.
@@ -97,7 +98,7 @@ policy pronto owns over omnishell's mechanism: [screens.md](docs/screens.md).
 **Release targets** project each target a program declares into a sayt
 `release@<target>` rule on one tier: [release-targets.md](docs/release-targets.md).
 
-The terminal's arguments are [omnishell's index](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/index.md),
-the cluster's [mecha's](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/index.md), and what is argued
+The terminal's arguments are [omnishell's index](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/index.md),
+the cluster's [mecha's](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/index.md), and what is argued
 and not built is [`PENDING.md`](PENDING.md). Everything else:
 [docs/index.md](docs/index.md).

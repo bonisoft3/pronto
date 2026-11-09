@@ -1,8 +1,8 @@
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
 import { carries, contracted, moving } from "./mecha-contracts.ts";
 import { compileMechaReducer, type MechaReducerMachine } from "./mecha-reducer.ts";
-import { executeHybrid } from "./hybrid-local.ts";
-import { fixture, initial, terminal } from "./testdata/hybrid-fixtures.ts";
+import { executeMecha } from "../omnishell/test/mecha-local.ts";
+import { fixture, initial, terminal } from "./mecha-fixtures.ts";
 
 const contract = (spec: MechaReducerMachine, rule: string, reads: string[], writes?: string[]): MechaReducerMachine =>
   ({...spec, contracts: {...spec.contracts, [rule]: writes ? {reads, writes} : {reads}}});
@@ -47,7 +47,7 @@ Deno.test("a rule is handed only the inputs it reads, and refused a write it did
   const {spec, rules} = await fixture();
   const step = async (machine: MechaReducerMachine, source = rules) => {
     const compiled = await compileMechaReducer(machine, source, terminal);
-    return await executeHybrid(compiled.source, machine.fuel, {state: initial(), event: {kind: "play", payload: {card: 0}},
+    return await executeMecha(compiled.source, machine.fuel, {state: initial(), event: {kind: "play", payload: {card: 0}},
       context: {actor: "a", tier: "omnishell", now: 0}, viewers: ["a", "b"]}) as {kind: string; state: {turn: string}};
   };
   assertEquals((await step(spec)).state.turn, "b");

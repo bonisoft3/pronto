@@ -49,7 +49,7 @@ Deno.test("resource declarations cannot relax scripts, omit a reason or broaden 
 
 Deno.test("the terminal fence excludes the ladder and a declared realm's served files", async () => {
   const files = await emitFiles(paymentProgram({ vendored: `map: {
-    isolation: "realm", ports: {reads: [], raises: []}, note: "a sandboxed presenter",
+    isolation: "realm", ports: {reads: [], raises: {}}, note: "a sandboxed presenter",
     src: "shell/units/map/index.html", files: ["shell/units/map/index.html", "shell/units/map/map.js"]
   }` }));
   assertStringIncludes(files["docker/Caddyfile"].text,
@@ -59,17 +59,17 @@ Deno.test("the terminal fence excludes the ladder and a declared realm's served 
 Deno.test("a presenter's worker script answers with the presenter's policy, and the page connects to its pinned scripts", async () => {
   const babylon = "https://cdn.jsdelivr.net/npm/babylonjs@9.31.0/babylon.js";
   const files = await emitFiles(paymentProgram({ vendored: `painter: {
-    isolation: "agent", ports: {reads: [], raises: []}, note: "paints the kinetic plane", scripts: ["${babylon}"],
+    isolation: "agent", ports: {reads: [], raises: {}}, note: "paints the kinetic plane", scripts: ["${babylon}"],
     src: "shell/units/painter/unit.js", files: ["shell/units/painter/unit.js"]
   }` }));
   const caddy = files["docker/Caddyfile"].text;
-  assertStringIncludes(caddy, "@terminal not path /docs/* /shell/units/painter/unit.js /omnishell/interpreter/presenter.js\n  header @terminal Content-Security-Policy");
+  assertStringIncludes(caddy, "@terminal not path /docs/* /omnishell/interpreter/presenter.js\n  header @terminal Content-Security-Policy");
   assertStringIncludes(caddy, `@presenter path /omnishell/interpreter/presenter.js\n  header @presenter Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-eval'; connect-src blob:; worker-src 'self'"`);
   assertStringIncludes(caddy, `connect-src 'self' ${babylon};`);
   // The worker's script-src 'self' admits a module import of any path here,
   // a credentialed GET; an upstream's may act (a sign-in callback), so the
   // door answers a script's fetch from its own files or not at all.
-  assertStringIncludes(caddy, `  @scripted {\n    header_regexp Sec-Fetch-Dest ^(script|worker|sharedworker|serviceworker)$\n    not file {\n      root /srv\n    }\n  }\n  handle @scripted {\n    respond "" 403\n  }\n`);
+  assertStringIncludes(caddy, `  @scripted {\n    header_regexp Sec-Fetch-Dest ^(script|worker|sharedworker|serviceworker)$\n    not file {\n      root {$PRONTO_SRV_ROOT:/srv}\n    }\n  }\n  handle @scripted {\n    respond "" 403\n  }\n`);
   assert(caddy.indexOf("handle @scripted") < caddy.indexOf("handle /crud/*"), "the refusal precedes every upstream");
 });
 

@@ -1,0 +1,23 @@
+flowchart LR
+  brief["`**brief.md**
+product
+*written by anyone
+reviewed by anyone*`"]
+  ir["`**ir.html**
+engineering
+*written by LLM
+reviewed by human*`"]
+  cue["`**program.cue**
+the program
+*written by LLM
+reviewed by LLM*`"]
+  target["`**sql, jessie, html, css**
+target code
+*written by LLM
+enforced by platform*`"]
+  emitted(["`yaml, schema sql`"])
+  brief -. LLM .-> ir
+  ir -. "LLM, narrow" .-> cue
+  cue -. LLM .-> target
+  cue == cue export ==> emitted
+  ir <-- "ids, checked both ways" --> cue

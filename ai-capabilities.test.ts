@@ -46,7 +46,7 @@ app: pronto.#App & {
         ]
       }
     }
-    machines: DraftMachine: {
+    mecha: rows: DraftMachine: {
       name: "DraftMachine"
       entity: "Draft"
       field: "status"
@@ -113,7 +113,7 @@ Deno.test("capabilities.ai with model overrides and agent browser unit compiles 
     vendored: `
       "ai-browser": {
         isolation: "agent"
-        ports: {reads: ["Draft"], raises: ["draft_ready"]}
+        ports: {reads: ["Draft"], raises: {draft_ready: {}}}
         memo: {entity: "BrowserDraft", key: ["topic"]}
         src: "shell/units/ai-browser/unit.js"
         files: ["shell/units/ai-browser/unit.js"]
@@ -125,9 +125,9 @@ Deno.test("capabilities.ai with model overrides and agent browser unit compiles 
   assert(vet.success, vet.stderr);
   const files = await emitFiles(code) as unknown as Record<string, { data: Record<string, unknown> }>;
   const dapr = files["services/airlock/dapr/draft.yaml"].data as {
-    spec: { metadata: { name: string; value: string }[] };
+    spec: { baseUrl: string };
   };
-  assertEquals(dapr.spec.metadata[0], { name: "url", value: "http://tsbifrost:8090" });
+  assertEquals(dapr.spec.baseUrl, "http://tsbifrost:8090");
   const shell = files["shell/shell.yaml"].data as { ai: { text: string[]; models: { text: { heavy: { model: string } } } } };
   assertEquals(shell.ai.text, ["browser", "cheap", "heavy"]);
   assertEquals(shell.ai.models.text.heavy.model, "gemma4:26b-custom");

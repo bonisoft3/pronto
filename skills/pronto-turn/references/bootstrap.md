@@ -3,7 +3,7 @@
 Pronto is a CUE module and a source distribution, not a CLI. The agent plugin
 carries installation knowledge; it is not the compiler installation.
 
-Use Pronto **1.0.9** through CUE module **1.0.10**, and Sayt **0.45.3**.
+Use Pronto **1.1.2** through CUE module **1.1.3**, and Sayt **0.48.0**.
 Verify both Pronto releases and the Sayt release exist before installation; do
 not substitute `main` or `latest` for a missing release.
 
@@ -29,8 +29,8 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
 1. Download both project wrappers from the same pinned Sayt tag:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.45.3/saytw -o saytw
-   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.45.3/saytw.ps1 -o saytw.ps1
+   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.48.0/saytw -o saytw
+   curl -fsSL https://raw.githubusercontent.com/bonisoft3/sayt/v0.48.0/saytw.ps1 -o saytw.ps1
    chmod +x saytw
    ```
 
@@ -42,7 +42,7 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
 
    ```sh
    ./saytw --script tools.nu cue mod init example.com/my-app@v0
-   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.0.10
+   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.1.3
    ./saytw --script tools.nu cue cmd bootstrap github.com/bonisoft3/pronto/bootstrap@v1
    ```
 
@@ -52,8 +52,9 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
    or generated configuration files; reconcile them explicitly for adoption.
 
 3. Bootstrap writes `pronto/config.cue`, `pronto/generate_tool.cue`,
-   `.mise.toml`, `.say.yaml`, and `mise.lock`. The first two are the source;
-   `sayt generate` recreates `.mise.toml` and `.say.yaml`. The seed config
+   `.mise.toml`, `.mise.host.toml`, `.say.yaml`, `mise.lock`, and
+   `mise.host.lock`. The first two are the source; `sayt generate` recreates
+   `.mise.toml`, `.mise.host.toml` and `.say.yaml`. The seed config
    carries the default roster — terminal omnishell, cluster mecha, build
    bayt — and `mise.lock` is that roster's lock: every platform's artifact
    URL and checksum. With the attestation checks `.mise.toml` turns off,
@@ -97,9 +98,9 @@ project locking prevails. An already-installed tool is skipped without
 filling its entry; repeat the install with `--force <tool>` (for example,
 `^mise install --force http:duckdb`) and recheck the lock.
 
-Once the app has a `program.cue`, that command rewrites only `.mise.toml`; the
-seat's Sayt rules reach `.say.yaml` on the next `./saytw generate`, whose writer
-unifies them with the program's.
+Once the app has a `program.cue`, that command rewrites only `.mise.toml` and
+`.mise.host.toml`; the seat's Sayt rules reach `.say.yaml` on the next
+`./saytw generate`, whose writer unifies them with the program's.
 
 Host plugins and project configuration are separate installations. Use the
 host's supported plugin installer, then restart or reload when required by

@@ -29,10 +29,10 @@ Deno.test("a row renders each column the way its type is held", () => {
   });
   assert.equal(
     sql,
-    "INSERT INTO team (id, name, rank, active, motto, rating, crest, ground) VALUES (" +
+    "INSERT INTO \"team\" (\"id\", \"name\", \"rank\", \"active\", \"motto\", \"rating\", \"crest\", \"ground\") VALUES (" +
       `'06000000-0000-4000-8000-000000000001', 'D''Ávila\u2028', 3, true, ` +
       `public.portable_int64_from_json('"9007199254740993\\u2028"'::json), 1.5, ` +
-      `'{"a":[1,"\\u2028"]}'::json, '{"type":"Point","coordinates":[1,2]}'::json) ON CONFLICT (id) DO NOTHING;\n`,
+      `'{"a":[1,"\\u2028"]}'::json, '{"type":"Point","coordinates":[1,2]}'::json) ON CONFLICT (\"id\") DO NOTHING;\n`,
   );
 });
 
@@ -41,13 +41,13 @@ Deno.test("a row renders each column the way its type is held", () => {
 // absence, of a json column as of every other.
 Deno.test("a json column's null is SQL NULL", () => {
   const sql = seedSql({ entities: [{ ...team, rows: [{ id: "a", crest: null }] }] }, {});
-  assert.equal(sql, `INSERT INTO team (id, crest) VALUES ('a', NULL) ON CONFLICT (id) DO NOTHING;\n`);
+  assert.equal(sql, `INSERT INTO \"team\" (\"id\", \"crest\") VALUES ('a', NULL) ON CONFLICT (\"id\") DO NOTHING;\n`);
 });
 
 Deno.test("stated rows render without a seed file, and an entity with none renders nothing", () => {
   const stated = { ...team, rows: [{ id: "a" }] };
   const sql = seedSql({ entities: [{ ...team, name: "Empty", table: "empty" }, stated] }, {});
-  assert.equal(sql, `INSERT INTO team (id) VALUES ('a') ON CONFLICT (id) DO NOTHING;\n`);
+  assert.equal(sql, `INSERT INTO \"team\" (\"id\") VALUES ('a') ON CONFLICT (\"id\") DO NOTHING;\n`);
 });
 
 Deno.test("a held row is refused where nothing would judge or render it", () => {
@@ -98,7 +98,7 @@ code: pronto.#App & {
   state: {
     entities: Payment: {table: "payment", durability: "server", fields: [{name: "id", type: "uuid", pk: true}, {name: "status", type: "string"}]}
     seed: src: "seed.json"
-    machines: lifecycle: {entity: "payment", field: "status", initial: "pending", states: {${states}}}
+    mecha: rows: lifecycle: {entity: "payment", field: "status", initial: "pending", states: {${states}}}
   }
   capabilities: {hatches: {}, vendored: {}}
   surface: {screens: {}, handlers: {}, design: {}, flows: {}}
@@ -111,7 +111,7 @@ code: pronto.#App & {
     await Deno.writeTextFile(`${dir}/program.cue`, source('pending: {}, settled: {type: "final"}'));
     await vetHeld(dir, "seed.json", held, entities);
     assert.equal(seedSql({ src: "seed.json", entities: [{name: "Payment", table: "payment", columns: [{name: "id", type: "uuid"}, {name: "status", type: "string"}], rows: []}] }, held),
-      "INSERT INTO payment (id, status) VALUES ('06000000-0000-4000-8000-000000000001', 'settled') ON CONFLICT (id) DO NOTHING;\n");
+      "INSERT INTO \"payment\" (\"id\", \"status\") VALUES ('06000000-0000-4000-8000-000000000001', 'settled') ON CONFLICT (\"id\") DO NOTHING;\n");
     const before = await seedKey(bytes, entities, "", { lifecycle: {entity: "payment", field: "status", states: {pending: {}, settled: {type: "final"}}} });
     const after = await seedKey(bytes, entities, "", { lifecycle: {entity: "payment", field: "status", states: {pending: {}}} });
     assert.notEqual(before, after);

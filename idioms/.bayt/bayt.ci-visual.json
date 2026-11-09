@@ -6,21 +6,25 @@
     "build": {
       "additional_contexts": {
         "workspaceroot-pronto-sources_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}",
-        "libraries_mecha-airlock-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_bayt}",
+        "libraries_mecha-database-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_bayt}",
+        "libraries_mecha-extensions-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-extensions-image_bayt}",
+        "libraries_mecha-mesh-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_bayt}",
+        "libraries_mecha-conduit-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-conduit-image_bayt}",
         "libraries_mecha-auth-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-auth-image_bayt}",
+        "libraries_mecha-ticker-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_bayt}",
         "libraries_mecha-clock-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-clock-image_bayt}",
         "libraries_mecha-compute-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-compute-image_bayt}",
-        "libraries_mecha-conduit-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-conduit-image_bayt}",
-        "libraries_mecha-database-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_bayt}",
-        "libraries_mecha-mesh-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_bayt}",
-        "libraries_mecha-ticker-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_bayt}",
+        "libraries_mecha-airlock-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_bayt}",
+        "libraries_mecha-activepieces-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-activepieces-image_bayt}",
         "libraries_mecha-database-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-database-image_srcs}",
+        "libraries_mecha-extensions-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-extensions-image_srcs}",
         "libraries_mecha-mesh-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-mesh-image_srcs}",
         "libraries_mecha-auth-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-auth-image_srcs}",
         "libraries_mecha-ticker-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-ticker-image_srcs}",
         "libraries_mecha-clock-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-clock-image_srcs}",
         "libraries_mecha-compute-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-compute-image_srcs}",
         "libraries_mecha-airlock-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-airlock-image_srcs}",
+        "libraries_mecha-activepieces-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:libraries_mecha-activepieces-image_srcs}",
         "plugins_omnishell-runtime-image_srcs": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image_srcs}",
         "plugins_omnishell-runtime-image_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:plugins_omnishell-runtime-image_bayt}",
         "workspaceroot-pronto-sources_bayt": "${MONOREPO_COMPOSE_MODE:-docker-image://busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_bayt}"
@@ -49,12 +53,13 @@
       "ARG MONOREPO_COMPOSE_MODE",
       "ENV MONOREPO_COMPOSE_MODE=$MONOREPO_COMPOSE_MODE",
       "ARG BAYT_RUNTIME",
-      "ENV BAYT_RUNTIME=$BAYT_RUNTIME"
+      "ENV BAYT_RUNTIME=$BAYT_RUNTIME",
+      "ENV FELDERA_COMPILATION_PROFILE=unoptimized"
     ],
     "preambleCopyContexts": [
       {
         "name": "bayt",
-        "image": "bonitao/bayt-runtime:1.2.2@sha256:a2e08b0fd123349e30e28843665ab2a2fde9fe25fddf82919fe499f3f01f1b8f"
+        "image": "bonitao/bayt-runtime:1.3.0@sha256:c33b9187787fcbd5fa80f1f2f52c661d6e7c38a4822c269b8daff83e70dce22e"
       },
       {
         "name": "alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8"
@@ -133,6 +138,30 @@
     "extra_hosts": [],
     "epilogue": [],
     "copy": [
+      {
+        "from": {
+          "name": "libraries_mecha-activepieces-image_bayt"
+        },
+        "srcs": [
+          "/monorep[o]"
+        ],
+        "dst": "/monorepo/",
+        "link": true,
+        "parents": false,
+        "exclude": []
+      },
+      {
+        "from": {
+          "name": "libraries_mecha-activepieces-image_srcs"
+        },
+        "srcs": [
+          "/monorep[o]"
+        ],
+        "dst": "/monorepo/",
+        "link": true,
+        "parents": false,
+        "exclude": []
+      },
       {
         "from": {
           "name": "libraries_mecha-airlock-image_bayt"
@@ -256,6 +285,30 @@
       {
         "from": {
           "name": "libraries_mecha-database-image_srcs"
+        },
+        "srcs": [
+          "/monorep[o]"
+        ],
+        "dst": "/monorepo/",
+        "link": true,
+        "parents": false,
+        "exclude": []
+      },
+      {
+        "from": {
+          "name": "libraries_mecha-extensions-image_bayt"
+        },
+        "srcs": [
+          "/monorep[o]"
+        ],
+        "dst": "/monorepo/",
+        "link": true,
+        "parents": false,
+        "exclude": []
+      },
+      {
+        "from": {
+          "name": "libraries_mecha-extensions-image_srcs"
         },
         "srcs": [
           "/monorep[o]"
@@ -434,6 +487,9 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml",
         "./.bayt/compose.caddy.yaml",
         "./.bayt/compose.served.yaml"
       ]
@@ -466,6 +522,9 @@
         "./.bayt/compose.ci-visual.yaml",
         "./.bayt/compose.integrate.yaml",
         "./.bayt/compose.launch.yaml",
+        "./.bayt/compose.build.yaml",
+        "./.bayt/compose.generate.yaml",
+        "./.bayt/compose.setup.yaml",
         "./.bayt/compose.caddy.yaml",
         "./.bayt/compose.served.yaml"
       ]
@@ -494,15 +553,16 @@
     "integrate_srcs",
     "integrate_bayt",
     "caddy_srcs",
-    "served_srcs",
-    "launch_outs_srcs",
-    "served_outs_srcs"
+    "served_srcs"
   ],
   "transitiveCrossDeps": [],
   "upClosure": [
     "./.bayt/compose.ci-visual.yaml",
     "./.bayt/compose.integrate.yaml",
     "./.bayt/compose.launch.yaml",
+    "./.bayt/compose.build.yaml",
+    "./.bayt/compose.generate.yaml",
+    "./.bayt/compose.setup.yaml",
     "./.bayt/compose.caddy.yaml",
     "./.bayt/compose.served.yaml"
   ],
@@ -514,7 +574,14 @@
       "outs": {
         "globs": [
           "shell/shell.yaml",
-          "shell/screens/**"
+          "shell/screens/counter.html",
+          "shell/screens/counter.css",
+          "shell/screens/todo.html",
+          "shell/screens/todo.css",
+          "shell/screens/grid.html",
+          "shell/screens/grid.css",
+          "shell/screens/timer.html",
+          "shell/screens/timer.css"
         ],
         "exclude": []
       }
@@ -610,7 +677,7 @@
         "defaultExclude": null
       },
       "shell": "sh",
-      "do": "if [ -n \"$BUILDKIT_SYNTAX\" ]; then\n  # depot frontend-pin workaround (full rationale in stacks/sayt/sayt.cue)\n  find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i \"1i # syntax=$BUILDKIT_SYNTAX\" {} \\;\nfi\n[ -n \"$BKID_PROJECT\" ] || { echo \"bkid: BKID_PROJECT is unset; sayt integrate names the inner stack\" >&2; exit 1; }\np=\"${BKID_PROJECT}_visual\"\nf=.bayt/compose.integrate.closure.yaml\n[ -n \"$DEPOT_TOKEN\" ] && bake=\"depot bake --project $DEPOT_PROJECT_ID\" || bake=\"docker buildx bake\"\ndocker compose -p \"$p\" --profile '*' -f \"$f\" config | docker buildx bake --allow=fs.read=/monorepo -f - --print bayt | $bake -f - ${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} ${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} ${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} bayt\ndocker compose -p \"$p\" --profile '*' -f \"$f\" down -v --timeout 0 --remove-orphans\ns=0\ndocker compose -p \"$p\" --profile '*' -f \"$f\" up bayt --build --abort-on-container-failure --exit-code-from bayt --remove-orphans --attach-dependencies || s=$?\ndocker compose -p \"$p\" --profile '*' -f \"$f\" down -v --timeout 0 --remove-orphans\nexit \"$s\"",
+      "do": "if [ -n \"$BUILDKIT_SYNTAX\" ]; then\n  # depot frontend-pin workaround (full rationale in stacks/sayt/sayt.cue)\n  find /monorepo -path '*/.bayt/Dockerfile.*' -type f -exec sed -i \"1i # syntax=$BUILDKIT_SYNTAX\" {} \\;\nfi\n[ -n \"$BKID_PROJECT\" ] || { echo \"bkid: BKID_PROJECT is unset; sayt integrate names the inner stack\" >&2; exit 1; }\np=\"${BKID_PROJECT}_visual\"\nf=.bayt/compose.integrate.closure.yaml\n[ -n \"$DEPOT_TOKEN\" ] && bake=\"depot bake --project $DEPOT_PROJECT_ID\" || bake=\"docker buildx bake\"\ndocker compose -p \"$p\" --profile '*' -f \"$f\" config | docker buildx bake --allow=fs.read=/monorepo -f - --print bayt | $bake -f - --set \"*.output=type=cacheonly\" ${SAYT_NO_CACHE:+--no-cache --set \"*.cache-from=\" --set \"*.cache-to=\"} ${SAYT_NO_CACHE_FROM:+--set \"*.cache-from=\"} ${SAYT_NO_CACHE_TO:+--set \"*.cache-to=\"} bayt\ndocker compose -p \"$p\" --profile '*' -f \"$f\" down -v --timeout 0 --remove-orphans\ns=0\ndocker compose -p \"$p\" --profile '*' -f \"$f\" up bayt --build --abort-on-container-failure --exit-code-from bayt --remove-orphans --attach-dependencies || s=$?\ndocker compose -p \"$p\" --profile '*' -f \"$f\" down -v --timeout 0 --remove-orphans\nexit \"$s\"",
       "dockerfile": {
         "inject": {
           "secrets": [

@@ -12,14 +12,15 @@ const addresses = await releaseAddresses(fileURLToPath(new URL('../../omnishell'
 
 const stun = [{ urls: 'stun:stun.example:3478' }]
 
-async function fixture(changed = false, previous?: string, presenter?: { policy: string }) {
+async function fixture(changed = false, previous?: string, presenter?: { policy: string }, units?: Record<string, unknown>) {
   const out = await Deno.makeTempDir({ prefix: 'edge-addresses-' })
   const cfg = {
     ...(presenter ? { presenter } : {}),
+    ...(units ? { units } : {}),
     i18n: { default: 'pt-BR', locales: { 'pt-BR': { path: 'pt' }, 'en-GB': { path: 'en' } } },
     routes: [
       { path: '/equipe/:id', nav: { label: 'Equipe' }, paths: { 'pt-BR': '/equipe/:id', 'en-GB': '/team/:id' }, files: { html: 'shell/screens/team.html', css: 'shell/screens/team.css', handlers: ['shell/handlers/save.js'], shared: ['shell/shared/base.css'] } },
-      { path: '/other', nav: { label: 'Other' }, files: { html: 'shell/screens/other.html', css: 'shell/screens/other.css' } },
+      { path: '/other/:shelf?', nav: { label: 'Other', entries: [{ label: 'Mine', key: 'nav_mine', params: { shelf: 'mine' } }] }, files: { html: 'shell/screens/other.html', css: 'shell/screens/other.css' } },
     ],
   }
   const files: Record<string, string> = {
@@ -98,6 +99,9 @@ Deno.test('edge identity hashes the served bytes, preserves module bases, and au
     assert.ok(headers.startsWith(`/\n  Content-Security-Policy: ${f.document.querySelector('meta')!.getAttribute('content')}\n`))
     assert.deepEqual(JSON.parse(f.map).screens, { team: ['other'], other: [] })
     assert.deepEqual(f.hints.routes[0].screens, ['other'])
+    // The Worker binds an optional segment only to its entries' values (routeAt), so the hints carry them.
+    assert.deepEqual(f.hints.routes[1].nav, { entries: [{ params: { shelf: 'mine' } }] })
+    assert.equal(f.hints.routes[0].nav, undefined)
   } finally { await Deno.remove(f.out, { recursive: true }) }
 })
 
@@ -108,6 +112,24 @@ Deno.test("a presenter's worker script is sent with the presenter's policy, and 
     assert.ok((await Deno.readTextFile(path.join(with_.out, '_headers'))).includes(`/omnishell/interpreter/presenter.js\n  Content-Security-Policy: ${policy}\n`))
     assert.ok(!(await Deno.readTextFile(path.join(without.out, '_headers'))).includes('presenter.js'))
   } finally { await Promise.all([with_, without].map(f => Deno.remove(f.out, { recursive: true }))) }
+})
+
+// A realm's document loaded outside the seat's frame would run at this origin
+// under no policy, so the edge sends it the seat's sandbox, as the door does.
+Deno.test("a realm unit's files carry the seat's sandbox and only this app may frame them; an agent's carry nothing of their own", async () => {
+  const f = await fixture(false, undefined, undefined, {
+    map: { isolation: 'realm', src: 'shell/units/map/index.html', files: ['shell/units/map/index.html', 'shell/units/map/lib.js'] },
+    geo: { isolation: 'agent', src: 'shell/units/geo/unit.js', files: ['shell/units/geo/unit.js'] },
+  })
+  try {
+    const headers = await Deno.readTextFile(path.join(f.out, '_headers'))
+    const sandbox = "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self'"
+    assert.ok(headers.includes(`/shell/units/map/index.html\n  Content-Security-Policy: ${sandbox}\n`))
+    // Regression: assets serve a document at its bare address, which had no rule.
+    assert.ok(headers.includes(`/shell/units/map\n  Content-Security-Policy: ${sandbox}\n`))
+    assert.ok(headers.includes(`/shell/units/map/lib.js\n  Content-Security-Policy: ${sandbox}\n`))
+    assert.ok(!headers.includes('/shell/units/geo/'))
+  } finally { await Deno.remove(f.out, { recursive: true }) }
 })
 
 Deno.test('changing a module keeps unrelated asset URLs and its importing module reusable', async () => {

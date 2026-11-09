@@ -27,7 +27,7 @@ _writersApp: pronto.#App & {
 			count: {raw: true, note: "the authored pipeline owns the sink writes", from: "Goal", to: "Count", group: "count"}
 		}
 		computations: stats: {to: ["Chance"]}
-		machines: PaymentMachine: {
+		mecha: rows: PaymentMachine: {
 			entity:  "Payment"
 			field:   "status"
 			initial: "pending"

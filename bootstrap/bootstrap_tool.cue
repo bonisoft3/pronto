@@ -6,21 +6,16 @@ import (
 	"encoding/json"
 	"list"
 	"tool/file"
-
-	"github.com/bonisoft3/pronto/distribution"
-	terminal "github.com/bonisoft3/pronto/terminals:omnishell"
-	"github.com/bonisoft3/pronto/clusters:mecha"
-	"github.com/bonisoft3/pronto/builders:bayt"
 )
 
 command: bootstrap: B={
 	existing: {
-		for name in ["pronto", ".say.yaml", ".mise.toml", "mise.lock"] {
+		for name in ["pronto", ".say.yaml", ".mise.toml", ".mise.host.toml", "mise.lock", "mise.host.lock"] {
 			(name): file.Glob & {glob: name}
 		}
 	}
 	_matches: list.Concat([for _, scan in B.existing {scan.files}])
-	_after: [B.existing.pronto, B.existing[".say.yaml"], B.existing[".mise.toml"], B.existing["mise.lock"]]
+	_after: [B.existing.pronto, B.existing[".say.yaml"], B.existing[".mise.toml"], B.existing[".mise.host.toml"], B.existing["mise.lock"], B.existing["mise.host.lock"]]
 	if len(_matches) > 0 {
 		occupied: "bootstrap requires absent seed and configuration files" & false
 	}
@@ -63,12 +58,13 @@ command: bootstrap: B={
 				command: generate: bootstrap.#Generate & {project: pronto}
 				"""
 		}
-		config: #Generate & {_after: B._after, project: distribution.#Project & terminal.#Project & mecha.#Project & bayt.#Toolchain}
+		config: #Generate & {_after: B._after, project: #Host}
 		// The default roster's lock, every platform's URL and checksum, so
 		// the first install fetches each artifact directly and asks GitHub's
 		// API nothing: the seed's .mise.toml already turns off the
 		// attestation checks that would. A roster changed later is relocked.
-		lock: file.Create & {$after: B._after, filename: "mise.lock", contents: _lock}
+		lock:     file.Create & {$after: B._after, filename: "mise.lock", contents: _lock}
+		hostLock: file.Create & {$after: B._after, filename: "mise.host.lock", contents: _hostLock}
 		// Claude Code's settings for the repo (claude.cue), kept where it has its own.
 		claudeSettings: file.Glob & {$after: B._after, glob: ".claude/settings.json"}
 		if len(B.claudeSettings.files) == 0 {
@@ -78,4 +74,5 @@ command: bootstrap: B={
 	}
 }
 
-_lock: _ @embed(file="mise.lock", type=text)
+_lock:     _ @embed(file="mise.lock", type=text)
+_hostLock: _ @embed(file="mise.host.lock", type=text)

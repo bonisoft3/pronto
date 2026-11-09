@@ -47,6 +47,7 @@ export function oneHome(src: string, stated: Record<string, { seed?: Row[] }>, h
 // CUE's json.Marshal, which escapes the two line terminators JSON.stringify
 // leaves bare.
 const marshal = (v: unknown) => JSON.stringify(v).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+const identifier = (name: string) => `"${name.replaceAll('"', '""')}"`;
 const quote = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
 function literal(where: string, v: unknown): string {
@@ -90,7 +91,7 @@ export function seedSql(data: SeedData, held: Held): string {
         if (c.type === "double" && typeof v === "number" && Number.isFinite(v)) return String(v);
         return literal(at, v);
       });
-      return `INSERT INTO ${e.table} (${present.map((c) => c.name).join(", ")}) VALUES (${values.join(", ")}) ON CONFLICT (id) DO NOTHING;`;
+      return `INSERT INTO ${identifier(e.table)} (${present.map((c) => identifier(c.name)).join(", ")}) VALUES (${values.join(", ")}) ON CONFLICT ("id") DO NOTHING;`;
     }).join("\n"));
   }
   return blocks.join("\n") + "\n";

@@ -1,10 +1,5 @@
-# release.nu: release@gcp, an app on Cloud Run beside Cloud SQL, with gcloud
-# alone (docs/release-targets.md#gcp).
-#
-# The app's release.cue defines `GCP: schema.#Release & {...}` and
-# `gcpRelease: schema.#Build & {release: GCP}` (gcp/schema). Each resource is
-# described before it is made, so a release runs again unchanged: the same
-# images push the same digests and roll nothing, and initdb finds its marker.
+# GCP releases use the native Kubernetes stack when GKE is declared;
+# otherwise they run Cloud Run beside Cloud SQL.
 
 use ../k8s/release.nu [resolve-app]
 use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers run-rehearsal plan-of]
@@ -12,15 +7,17 @@ use build.nu [builder stamp key-tag gc exists build-account push-images service-
 use local-gate-key.nu
 use release-record.nu
 use secrets.nu [check-secrets]
+# A release.cue that gives GKE is released to that cluster by k8s/release.nu.
+use ../k8s/release.nu
+alias release-gke = release
 
-# The services this target runs; anything else in the app's compose project
-# needs what it does not build yet (PENDING.md#release-targets).
+# Cloud Run has no durable filesystem for the native pipeline services.
 const runtime = ["database" "crud" "electric" "auth" "caddy"]
 # compose's clock is not one of them: Cloud Scheduler is the ticker's clock here.
 # The renderer, the airlock and tsbifrost are built when the app does not name them in
 # GCP.sidecars (then they run as those sidecars, as before): `render` becomes a container of the
 # service, `airlock` too, with `tsbifrost` its AI gateway.
-const unbuilt = ["mesh-events" "conduit" "transform" "compute"]
+const unbuilt = ["feldera" "redis" "mesh-events" "conduit" "transform" "compute"]
 
 def render [cue_path: string, data?: string]: nothing -> record {
 	let inputs = [$cue_path] | append (if ($data | is-not-empty) { [$data] } else { [] })
@@ -573,6 +570,14 @@ def render-staged [app_info: record, compose: record, plan0: record, base: recor
 	let has_render = ("render" in $services and "render" not-in $plan0.sidecars)
 	let has_airlock = ("airlock" in $services and "airlock" not-in $plan0.sidecars)
 	let has_tsbifrost = ("tsbifrost" in $services and "tsbifrost" not-in $plan0.sidecars)
+	# Cloud Run's airlock has no daprd: its mesh address is the AI gateway, so an effect reaching anything else would reach that.
+	if $has_airlock {
+		let mesh = ($compose.services."airlock-mesh"?.environment? | default {})
+		let elsewhere = (($mesh.AIRLOCK_ORIGINS? | default "" | split row " " | where {|o| $o != "" }) ++ ($mesh.AIRLOCK_BRIDGES? | default "" | split row " " | where {|b| $b != "" and $b != "tsbifrost" }))
+		if ($elsewhere | is-not-empty) {
+			error make {msg: $"release@gcp runs AI effects alone: this app's effects also reach ($elsewhere | str join ', ')"}
+		}
+	}
 	# The providers compose gives the auth service, under what release.cue sets.
 	let auth_env = $compose.services.auth.environment
 	let fixed = (^cue export --expression GCP.auth.oidc --out json $app_info.cue_path | from json | columns)
@@ -1114,6 +1119,17 @@ export def main [
 	let dry_run = ($dry_run or (do $given DRY_RUN))
 	let snapshot = ($snapshot or (do $given SNAPSHOT))
 	let no_gate = ($no_gate or (do $given NO_GATE))
+	let gke = (do { ^cue export --expression GKE --out json $app_info.cue_path } | complete)
+	if $gke.exit_code != 0 and not ($gke.stderr | str contains 'reference "GKE" not found') {
+		error make {msg: $"($app_info.cue_path): ($gke.stderr)"}
+	}
+	if $gke.exit_code == 0 {
+		if $delete or ($preview | is-not-empty) {
+			error make {msg: "GKE releases do not support Cloud Run preview lifecycle flags"}
+		}
+		release-gke --app $app_info.dir --cluster-env gke --snapshot=$snapshot --dry-run=$dry_run
+		return
+	}
 	let rollback = ($rollback or (do $given ROLLBACK))
 	let force_rc = ($rc or (do $given RC))
 	let no_local_gate = ($no_local_gate or (do $given NO_LOCAL_GATE) or (($env.PRONTO_RELEASE_NO_LOCAL_GATE? | default "") not-in ["" "0" "false"]))

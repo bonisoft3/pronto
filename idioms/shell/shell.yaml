@@ -87,11 +87,11 @@ routes:
       key: nav_counter
       label: Counter
     files:
-      html: shell/screens/counter.html
-      css: shell/screens/counter.css
+      adapters: []
       handlers:
         - shell/handlers/count.js
-      adapters: []
+      html: shell/screens/counter.html
+      css: shell/screens/counter.css
       shared: []
     ssr: spa
     states:
@@ -102,11 +102,11 @@ routes:
       key: nav_todo
       label: Todo
     files:
-      html: shell/screens/todo.html
-      css: shell/screens/todo.css
+      adapters: []
       handlers:
         - shell/handlers/remove.js
-      adapters: []
+      html: shell/screens/todo.html
+      css: shell/screens/todo.css
       shared: []
     ssr: spa
     states:
@@ -118,12 +118,12 @@ routes:
       key: nav_grid
       label: Lights out
     files:
-      html: shell/screens/grid.html
-      css: shell/screens/grid.css
+      adapters: []
       handlers:
         - shell/handlers/press.js
         - shell/handlers/tally.js
-      adapters: []
+      html: shell/screens/grid.html
+      css: shell/screens/grid.css
       shared: []
     ssr: spa
     states:
@@ -134,12 +134,12 @@ routes:
       key: nav_timer
       label: Timer
     files:
-      html: shell/screens/timer.html
-      css: shell/screens/timer.css
+      adapters: []
       handlers:
         - shell/handlers/roll.js
         - shell/handlers/tick.js
-      adapters: []
+      html: shell/screens/timer.html
+      css: shell/screens/timer.css
       shared: []
     ssr: spa
     states:

@@ -435,7 +435,7 @@ A mecha machine declares either a statechart (`states`) or lifecycle handlers
 (`on.insert`, `on.update`, `on.delete`). Combining them is refused; separate
 machines over the same entity keep both triggers explicit in SQL and in the IR.
 
-**Lifecycle guards own predicate validation.** `state.machines.<name>.guards`
+**Lifecycle guards own predicate validation.** `state.mecha.rows.<name>.guards`
 contains named Jessie predicates (`src`, `via`, `note`). Each `on.insert`,
 `on.update` or `on.delete` transition names `guard` (one name or an ordered
 list) and optional `actions`; an action or list alone is the action-only
@@ -477,7 +477,8 @@ advance a later visit to the same state. Duplicate tick IDs are absorbed.
 Primary keys cross the ticker as text, preserving large integers and composite
 keys. Client roles cannot read or write the schedule or tick tables. Timed
 machines require a server-held entity and a primary key; final states have no
-`after`. They require a declared cloud clock and cannot target Pages.
+`after`. Every target but Cloudflare, whose object keeps its own alarm, names
+its clock in `meta.clocks`; a page's sweeps only while the page is open.
 
 `010_machines.sql` installs the timer tables and interpreters before seeds.
 Retained databases must apply the generated SQL through their migration path;
@@ -503,7 +504,7 @@ still tells markup lint that a pending row may await a database default. A
 singleton machine region without `data-empty-row` requires a
 filter pinning `id`; it binds those defaults, then the filter's equalities,
 then its `field: initial`. An explicit `data-empty-row` remains the whole
-row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/machines.md) states
+row. The terminal's [machine contract](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md) states
 the row and effect grammar.
 
 **Screen markup carries no executable code.** The markup check and terminal
