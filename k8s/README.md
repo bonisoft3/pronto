@@ -241,6 +241,20 @@ Metal: envs.Metal & {
 still releases to Kind), and installs the operators, observability and
 `cloudflared` on the first run.
 
+### Previews
+
+`sayt release@k8s --preview=rc` releases the app's whole stack a second time into a namespace of its own,
+`<name>-rc`, beside the released one: its own CloudNativePG database (initdb and the migrations replayed over
+it, as the release's are), its own secrets and services, the same images by digest. It exists to prove a
+release's images, migrations and config on the cluster before traffic moves, so it claims **no public name**:
+no tunnel route or DNS record is added, its gateway host is `<name>-rc.<domainSuffix>` which nothing points at,
+and it takes **no backups**. It is reached with `kubectl port-forward -n <name>-rc svc/caddy 18080:8080` (its
+services' `ORIGIN` is `http://localhost:18080`, `previewOrigin` in the release, and a passkey's relying party
+`localhost`). `sayt release@k8s --preview=rc --delete` removes the namespace, and with it the database, volumes
+and secrets; `--delete` without `--preview` is refused, and so is a namespace that is the release's own.
+Spec: `#ReleaseSpec.preview`, with `id` (every object's name) and `ns` (its namespace) derived in
+`k8s/schema/release.cue`; a release with no preview renders byte for byte as before.
+
 ### Once, for the node
 
 ```sh

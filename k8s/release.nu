@@ -781,10 +781,21 @@ export def main [
 	--cluster-env (-e): string  # kind, metal, gke, eks or aks; absent, the app's metal cluster where it gives one, else kind
 	--skip-operators = false # Skip operator bootstrap
 	--skip-observability = false # Skip VictoriaMetrics/Jaeger/Vector bootstrap
+	--preview: string = ""   # Release the whole stack into a namespace of its own, `<name>-<preview>`, beside the released one
+	--delete                 # With --preview: remove that preview's namespace (its database and secrets with it)
 ] {
 	let app_info = (resolve-app $app)
 	let cluster_env = ($cluster_env | default $env.SAY_RELEASE_ARGS_CLUSTER_ENV? | default (default-environment $app_info.cue_path))
-	let manifests = (render-manifests $app_info.cue_path $cluster_env)
+	if $delete and ($preview | is-empty) {
+		error make { msg: "--delete removes a preview: name it with --preview=<name>. A release is never deleted from here." }
+	}
+	# A preview is the release under another name (App.preview, k8s/schema/release.cue), unified into the package.
+	let preview_file = if ($preview | is-not-empty) {
+		let f = (mktemp -t preview.XXXXXX.json | str trim)
+		{App: {preview: $preview}} | to json | save -f $f
+		$f
+	} else { "" }
+	let manifests = if ($preview_file | is-not-empty) { render-manifests $app_info.cue_path $cluster_env --data $preview_file } else { render-manifests $app_info.cue_path $cluster_env }
 
 	if $dry_run {
 		print $manifests
@@ -805,15 +816,16 @@ export def main [
 	let root = (git rev-parse --show-toplevel | str trim)
 	let app_source_dir = $app_info.dir
 
-	let meta_res = (do { cue export --expression "{name: App.name, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, alerting: App.alerting, blobs: len([if App.blobs != _|_ {1}]) > 0, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path } | complete)
+	let meta_res = (do { cue export --expression "{name: App.name, id: App.id, ns: App.ns, namespace: App.namespace, type: App.type, image: App.image, render: App.render, services: App.services, alerting: App.alerting, blobs: len([if App.blobs != _|_ {1}]) > 0, own: {for n, s in App.services {(n): [for k, _ in s.env {k}]}}}" $app_info.cue_path ...(if ($preview_file | is-not-empty) { [$preview_file] } else { [] }) } | complete)
 	if $meta_res.exit_code != 0 {
 		error make { msg: $"Failed to read release metadata from ($app_info.cue_path): ($meta_res.stderr)" }
 	}
 	let app_meta = ($meta_res.stdout | from json)
 
-	let target_ns = $app_meta.namespace
+	let target_ns = $app_meta.ns
+	let rname = $app_meta.id
 	let gateway_host = ($manifests | from yaml | where kind == "Gateway" | get 0.spec.listeners.0.hostname)
-	let workload_name = $app_meta.name
+	let workload_name = $app_meta.id
 	let is_pronto = ($app_meta.type == "pronto")
 	let has_render = $app_meta.render.enabled
 
@@ -869,6 +881,16 @@ export def main [
 		$t
 	}
 	let reopen = if $tunnel != null { {|| close-api-tunnel $tunnel.target $tunnel.socket; open-api-tunnel $tunnel.target $tunnel.port $tunnel.socket } }
+	# A preview's namespace holds everything it made (its database and the volumes, its secrets and routes):
+	# deleting it deletes them. It is the preview's own: `ns` is never the released namespace.
+	if $delete {
+		if $target_ns == $app_meta.namespace { error make { msg: $"refusing to delete ($target_ns): it is the release's own namespace, not a preview's" } }
+		print $"Deleting the preview ($preview): namespace ($target_ns)..."
+		kubectl delete namespace $target_ns --ignore-not-found --wait=true --timeout=300s
+		if $tunnel != null { close-api-tunnel $tunnel.target $tunnel.socket }
+		print $"[SUCCESS] Deleted the preview ($preview) of ($app_info.name) from ($cluster_env)."
+		return
+	}
 	if not $skip_operators {
 		ensure-operators --ingress $target_env.ingress --reopen $reopen
 		if $target_env.ingress.by == "tunnel" { ensure-tunnel $target_env.ingress.id }
@@ -927,18 +949,18 @@ export def main [
 	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment | reject -o ...$fixed))
 	let own_env = (app-services-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json) $services $app_meta.own)
 	let pushed_file = (mktemp -t pushed.XXXXXX.json | str trim)
-	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }))} | to json | save -f $pushed_file
+	{App: ({image: {pushed: $pushed}, auth: ($oidc | reject secretValues)} | merge $migrate | merge (if ($services | is-empty) { {} } else { {services: $own_env} }) | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }))} | to json | save -f $pushed_file
 	let released = (render-manifests $app_info.cue_path $cluster_env --data $pushed_file)
 	rm $pushed_file
 
 	# Ingress / Gateway TLS secret for Kind HTTPS parity
 	if $cluster_env == "kind" {
-		ensure-tls-secret $app_info.name $app_source_dir $target_ns $gateway_host
+		ensure-tls-secret $rname $app_source_dir $target_ns $gateway_host
 	}
 
 	# secrets.enc.yaml holds sandbox keys, which a production cluster must never get.
 	if $cluster_env == "kind" {
-		apply-sops-secrets $app_info.name $app_source_dir $target_ns
+		apply-sops-secrets $rname $app_source_dir $target_ns
 	}
 	if ($oidc.secretValues | is-not-empty) {
 		auth-provider-secret $workload_name $target_ns $oidc.secretValues
@@ -953,33 +975,33 @@ export def main [
 	let deployments_yaml = (do $of_kind "Deployment")
 	let jobs_yaml = (do $of_kind "Job")
 	check-backup-secrets ($released | from yaml) $target_ns
-	print $"Applying manifests for ($app_info.name)..."
+	print $"Applying manifests for ($rname)..."
 	$docs | where {|d| not ($d in $deployments_yaml or $d in $jobs_yaml) } | str join "\n---\n" | kubectl apply -f -
 
 	# The cluster's status names a new image as soon as it starts rolling onto it,
 	# and Ready stays true through the restart: the database is there once its
 	# primary runs that image and is ready itself.
 	let db_image = ($released | from yaml | where kind == "Cluster" | first | get spec.imageName)
-	print $"Waiting for CloudNativePG cluster ($app_info.name)-db in ($target_ns) on ($db_image)..."
+	print $"Waiting for CloudNativePG cluster ($rname)-db in ($target_ns) on ($db_image)..."
 	# The old primary's stop (its stopDelay, up to the Cluster's 120 s; a pod made before that bound
 	# keeps its 1800 s) and the new one's start.
 	let grace = ($released | from yaml | where kind == "Cluster" | first | get -o spec.stopDelay | default 0)
 	let deadline = (date now) + (($grace + 300) * 1sec)
 	loop {
-		let primary = (kubectl get pods -n $target_ns -l $"cnpg.io/cluster=($app_info.name)-db,cnpg.io/instanceRole=primary" -o json | from json | get items
+		let primary = (kubectl get pods -n $target_ns -l $"cnpg.io/cluster=($rname)-db,cnpg.io/instanceRole=primary" -o json | from json | get items
 			| where {|p| $p.metadata.deletionTimestamp? == null and ($p.spec.containers | where name == "postgres" | first | get image) == $db_image and ($p.status.conditions? | default [] | any {|c| $c.type == "Ready" and $c.status == "True" }) })
 		if ($primary | is-not-empty) { break }
-		if (date now) > $deadline { error make { msg: $"cluster/($app_info.name)-db has no ready primary on ($db_image)" } }
+		if (date now) > $deadline { error make { msg: $"cluster/($rname)-db has no ready primary on ($db_image)" } }
 		sleep 3sec
 	}
 
 	for job in (["initdb"] | append (if $has_migrate { ["migrate"] } else { [] })) {
-		run-job ($jobs_yaml | where {|d| $d =~ $"\(?m\)^  name: ($app_info.name)-($job)\\s*$" } | first) $"($app_info.name)-($job)" $target_ns
+		run-job ($jobs_yaml | where {|d| $d =~ $"\(?m\)^  name: ($rname)-($job)\\s*$" } | first) $"($rname)-($job)" $target_ns
 	}
 
 	# authenticator's memberships name roles initdb creates, so the operator
 	# reconciles it, password included, only after the Jobs; crud logs in as it.
-	let cluster = $"cluster.postgresql.cnpg.io/($app_info.name)-db"
+	let cluster = $"cluster.postgresql.cnpg.io/($rname)-db"
 	# An attempt made before the Jobs (the instance is up first) stays failed:
 	# CloudNativePG syncs roles when the Cluster changes, not on a timer, so a
 	# first release on k3s waited out its five minutes on a role that was
@@ -1005,13 +1027,13 @@ export def main [
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
 	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
-	for d in ($components | each { $"deployment/($app_info.name)-($in)" }) {
+	for d in ($components | each { $"deployment/($rname)-($in)" }) {
 		print $"Waiting for ($d) rollout..."
 		kubectl rollout status $d -n $target_ns --timeout=180s
 	}
 
 	# The mesh is intrinsic to a k8s release: a pod the injector let through bare is a failed release.
-	let bare = (kubectl get pods -n $target_ns -l $"app.kubernetes.io/name=($app_info.name),app.kubernetes.io/component in \(($components | str join ',')\)" --field-selector=status.phase=Running -o json
+	let bare = (kubectl get pods -n $target_ns -l $"app.kubernetes.io/name=($rname),app.kubernetes.io/component in \(($components | str join ',')\)" --field-selector=status.phase=Running -o json
 		| from json | get items
 		| where {|p| $p.metadata.deletionTimestamp? == null and not ($p.spec.containers.name | any {|c| $c == "daprd" }) }
 		| get metadata.name)
@@ -1019,10 +1041,14 @@ export def main [
 		error make { msg: $"Pods running without their Dapr sidecar: ($bare | str join ', ')" }
 	}
 
-	if $target_env.ingress.by == "tunnel" {
+	if $target_env.ingress.by == "tunnel" and ($preview | is-empty) {
 		print $"The tunnel answers for ($gateway_host) once its DNS is a proxied CNAME onto ($target_env.ingress.id).cfargotunnel.com: cloudflared tunnel route dns ($target_env.ingress.id) ($gateway_host)"
 	}
 	if $tunnel != null { close-api-tunnel $tunnel.target $tunnel.socket }
-	print $"\n[SUCCESS] Released ($app_info.name) natively to ($cluster_env): https://($gateway_host)/"
+	if ($preview | is-not-empty) {
+		print $"\n[SUCCESS] Released the preview ($preview) of ($app_info.name) to ($cluster_env), namespace ($target_ns): no public name; reach it with kubectl port-forward -n ($target_ns) svc/caddy 18080:8080 and remove it with --preview=($preview) --delete"
+	} else {
+		print $"\n[SUCCESS] Released ($rname) natively to ($cluster_env): https://($gateway_host)/"
+	}
 }
 

@@ -85,6 +85,8 @@ def run-tests [] {
 	test_release_k8s_dry_run_cli
 	test_release_nu_k8s_platform_cli
 	test_cloud_release_refused
+	test_preview_renders_apart
+	test_preview_delete_needs_a_preview
 
 	print "\nAll release-k8s tests passed!"
 }
@@ -1164,4 +1166,40 @@ def test_native_runtime [] {
 	assert ($gcp.stdout | str contains "us-central1-docker.pkg.dev/test-project/pronto/native-compute:latest")
 	assert ($gcp.stdout | str contains "storageClassName: standard-rwo")
 	assert ($gcp.stdout | str contains "kind: PersistentVolumeClaim")
+}
+
+def test_preview_renders_apart [] {
+	print "test a preview is the release under another name: its own namespace, no public name, no backups..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let base = (render-manifests $app.cue_path metal)
+	let overlay = (mktemp -t preview.XXXXXX.json | str trim)
+	# The sample gives no backup: this one does, to show a preview takes none.
+	{App: {preview: rc, database: {backup: {bucket: "sample-backups", endpoint: "https://s3.example.com"}}}} | to json | save -f $overlay
+	let kept = (mktemp -t kept.XXXXXX.json | str trim)
+	{App: {database: {backup: {bucket: "sample-backups", endpoint: "https://s3.example.com"}}}} | to json | save -f $kept
+	let released = (render-manifests $app.cue_path metal --data $kept | from yaml)
+	let preview = (render-manifests $app.cue_path metal --data $overlay | from yaml)
+	rm $overlay $kept
+	assert equal ($released | where kind == "Namespace" | get metadata.name) [sample]
+	assert equal ($preview | where kind == "Namespace" | get metadata.name) [sample-rc]
+	# Every namespaced object is in the preview's namespace, and none keeps the release's name.
+	let namespaced = ($preview | where {|d| ($d.metadata?.namespace? | is-not-empty) })
+	assert equal ($namespaced | get metadata.namespace | uniq) [sample-rc]
+	assert equal ($preview | where kind in ["Deployment" "Service"] | get metadata.name | where {|n| $n starts-with "sample-" and not ($n starts-with "sample-rc") }) []
+	# The released one backs its database up; the preview does neither the store nor the schedule.
+	assert ($released | where kind == "ObjectStore" | is-not-empty)
+	assert equal ($preview | where kind in ["ObjectStore" "ScheduledBackup"]) []
+	# No public name: its host is its own, and its origin the port-forwarded door's, with a passkey rp of localhost.
+	assert ((($base | from yaml | where kind == "Gateway" | get 0.spec.listeners.0.hostname)) == "sample.apps.example.com")
+	assert equal ($preview | where kind == "Gateway" | get 0.spec.listeners.0.hostname) "sample-rc.apps.example.com"
+	let text = ($preview | to yaml)
+	assert ($text | str contains "http://localhost:18080")
+	assert not ($text | str contains "https://sample.apps.example.com")
+}
+
+def test_preview_delete_needs_a_preview [] {
+	print "test --delete is refused without --preview, so a release is never deleted from here..."
+	let res = (do { nu ($k8s_dir | path join "release.nu") --app ($fixtures_dir | path join "sample") --delete } | complete)
+	assert ($res.exit_code != 0)
+	assert ($res.stderr | str contains "--delete removes a preview")
 }
