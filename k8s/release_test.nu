@@ -531,6 +531,10 @@ def test_alerting [] {
 	let col = (render-manifests $app.cue_path "metal" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-journeys-collector" | first | get spec.template)
 	assert equal [$col.metadata.annotations."prometheus.io/scrape" $col.metadata.annotations."prometheus.io/port" $col.metadata.annotations."prometheus.io/path"] ["true" "9598" "/metrics"] "a service's metrics are scraped"
 	assert ($col.spec.containers.0.ports | any {|p| $p.containerPort == 9598 }) "its metrics port is declared, which pod discovery keeps"
+	{App: {services: {exporter: {port: 9399, env: {}, metrics: {port: 9399}}}}} | to json | save -f $data
+	let own = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	assert equal ($own | where kind == "Deployment" and metadata.name == "sample-exporter" | first | get spec.template.spec.containers.0.ports | length) 1 "metrics on the service's own port: the port once"
+	assert equal ($own | where kind == "Service" and metadata.name == "exporter" | first | get spec.ports | length) 1 "and the Service's port once"
 	{App: {alerting: {rules: ["a.rules.yaml"], notifier: "http://alertmanager.observability:9093"}}} | to json | save -f $data
 	let notified = (render-manifests $app.cue_path "metal" --data $data | from yaml | where metadata.name == "sample-vmalert" | first | get spec.template.spec.containers.0.args)
 	rm $data
