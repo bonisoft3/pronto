@@ -1384,6 +1384,9 @@ import (
 	ir:    *name | string
 	title: string
 	route: string // may contain `:param` segments; params reach filters, hidden values, and `{param.x}` interpolation
+	// A `?` makes a segment optional, and only the last segment may be: the
+	// terminal matches it there alone, and the door expands it there alone.
+	route: =~"^[^?]*(:[a-zA-Z_][a-zA-Z0-9_]*\\?)?$"
 	// The message key this route's FIRST segment is drawn from — regras /
 	// reglas / rules. Declaring it makes the route addressable in every
 	// locale; additional literals opt in through segments below. The key
@@ -1462,9 +1465,16 @@ import (
 	// Whether the terminal lists this screen in the strip it draws. A screen
 	// reached from somewhere more specific than "everywhere" — a person's own
 	// page, a row — declares false, so the strip keeps to the places a reader
-	// starts from. Parametrized routes are never listed: they have no static
-	// href.
+	// starts from. A route with a required param is never listed: it has no
+	// static href. A trailing `:name?` is optional, and a route may list the
+	// addresses it takes with it as further strip entries, each a link of its
+	// own that is current at its own address: the shelves of a library.
 	strip: *true | bool
+	entries: *[] | [...{
+		label:  string
+		key?:   string
+		params: [string]: string
+	}]
 	paths: [Name=string]: {states: [...string], accepts: [...string]}
 	// Assembly files (app-relative): the screen's semantics live in these
 	// directly generated artifacts, not in CUE. reads/forms above are the

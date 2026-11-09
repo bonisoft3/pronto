@@ -10,7 +10,7 @@ interface Release {
   imports: Record<string, string>
   screens: Record<string, string[]>
   cfg: {
-    routes: { path: string; screen?: string; paths?: Record<string, string>; access?: 'public' | 'private'; ssr?: 'spa' | 'ssg' | 'ssr'; files: Record<string, string | string[]> }[]
+    routes: { path: string; screen?: string; paths?: Record<string, string>; access?: 'public' | 'private'; ssr?: 'spa' | 'ssg' | 'ssr'; nav?: { entries?: { params?: Record<string, string> }[] }; files: Record<string, string | string[]> }[]
     i18n?: { locales?: Record<string, unknown> }
     prefix?: string
     presenter?: { policy: string }
@@ -41,7 +41,7 @@ export function releaseAddresses(omnishell: string): Promise<Addresses> {
 export interface EdgeHints {
   common: string[]
   catalogues: Record<string, string>
-  routes: { path: string; paths?: Record<string, string>; access?: 'public' | 'private'; ssr?: 'spa' | 'ssg' | 'ssr'; links: string[]; screens: string[] }[]
+  routes: { path: string; paths?: Record<string, string>; access?: 'public' | 'private'; ssr?: 'spa' | 'ssg' | 'ssr'; nav?: { entries: { params?: Record<string, string> }[] }; links: string[]; screens: string[] }[]
   i18n?: unknown
   prefix?: string
 }
@@ -106,6 +106,9 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
       ...(route.paths ? { paths: route.paths } : {}),
       ...(route.access ? { access: route.access } : {}),
       ...(route.ssr ? { ssr: route.ssr } : {}),
+      // The entries name what an optional segment may be bound to (routeAt's
+      // entryValues): without them the Worker answers /mine with its 404.
+      ...(route.nav?.entries?.length ? { nav: { entries: route.nav.entries.map(e => ({ params: e.params ?? {} })) } } : {}),
       links: [...links],
       screens: screens[name] ?? [],
     }

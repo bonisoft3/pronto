@@ -31,10 +31,17 @@ import { prepareStorage } from './publish-edge-storage.ts'
 import { releaseJwtSecret } from './edge-jwt.ts'
 import { requireLocalCluster } from './edge-deployment.ts'
 
+/** One hop's deadline: a stalled stream to the data directory held a publish
+ * for 36 minutes at 0% CPU (2026-11-08), past every retry the caller owns. */
+const HOP_MS = 60_000
 async function edgeFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(input, init)
+    const signal = init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(HOP_MS)]) : AbortSignal.timeout(HOP_MS)
+    return await fetch(input, { ...init, signal })
   } catch (err) {
+    // A hop that ran out its deadline is the answer; the raw request below is
+    // for a resolver that failed, not for a stream that stalled.
+    if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) throw err
     const u = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
     if (u.protocol !== 'https:') throw err
     const ips = await Deno.resolveDns(u.hostname, 'A', { nameServer: { ipAddr: '1.1.1.1', port: 53 } }).catch(() => [] as string[])

@@ -20,7 +20,7 @@ async function fixture(changed = false, previous?: string, presenter?: { policy:
     i18n: { default: 'pt-BR', locales: { 'pt-BR': { path: 'pt' }, 'en-GB': { path: 'en' } } },
     routes: [
       { path: '/equipe/:id', nav: { label: 'Equipe' }, paths: { 'pt-BR': '/equipe/:id', 'en-GB': '/team/:id' }, files: { html: 'shell/screens/team.html', css: 'shell/screens/team.css', handlers: ['shell/handlers/save.js'], shared: ['shell/shared/base.css'] } },
-      { path: '/other', nav: { label: 'Other' }, files: { html: 'shell/screens/other.html', css: 'shell/screens/other.css' } },
+      { path: '/other/:shelf?', nav: { label: 'Other', entries: [{ label: 'Mine', key: 'nav_mine', params: { shelf: 'mine' } }] }, files: { html: 'shell/screens/other.html', css: 'shell/screens/other.css' } },
     ],
   }
   const files: Record<string, string> = {
@@ -99,6 +99,9 @@ Deno.test('edge identity hashes the served bytes, preserves module bases, and au
     assert.ok(headers.startsWith(`/\n  Content-Security-Policy: ${f.document.querySelector('meta')!.getAttribute('content')}\n`))
     assert.deepEqual(JSON.parse(f.map).screens, { team: ['other'], other: [] })
     assert.deepEqual(f.hints.routes[0].screens, ['other'])
+    // The Worker binds an optional segment only to its entries' values (routeAt), so the hints carry them.
+    assert.deepEqual(f.hints.routes[1].nav, { entries: [{ params: { shelf: 'mine' } }] })
+    assert.equal(f.hints.routes[0].nav, undefined)
   } finally { await Deno.remove(f.out, { recursive: true }) }
 })
 

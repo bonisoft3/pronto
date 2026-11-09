@@ -19,6 +19,7 @@ export interface EdgeHintsRoute {
   screens?: string[];
   files?: { html?: string; [key: string]: unknown };
   access?: "public" | "private" | string;
+  nav?: { entries?: { params?: Record<string, string> }[] };
 }
 
 export type EdgeRoute = EdgeHintsRoute;
@@ -145,9 +146,8 @@ export function extractAssetsFromHints(hints: EdgeHints): ExtractedAssets {
     for (const link of r.links ?? []) {
       processLink(link);
     }
-    if (r.path && !r.path.includes(":")) {
-      routeSet.add(r.path);
-    }
+    const fixed = r.path && staticRoutePath(r.path);
+    if (fixed) routeSet.add(fixed);
   }
 
   if (routeSet.size === 0) {
@@ -196,6 +196,14 @@ export async function scanPublicDir(publicDir: string): Promise<ExtractedAssets>
 /**
  * Dynamically resolves concrete URLs for parameterized routes from harvested live links.
  */
+/** A route's one static address, where it has one: its pattern with every
+ * optional `:name?` segment left out, or undefined past a required param. */
+export function staticRoutePath(pattern: string): string | undefined {
+  const segments = pattern.split("/");
+  if (segments.some((s) => s.startsWith(":") && !s.endsWith("?"))) return undefined;
+  return segments.filter((s) => !s.startsWith(":")).join("/") || "/";
+}
+
 export function resolveParameterizedRoutes(
   routes: EdgeHintsRoute[],
   linkPool: Set<string>,
@@ -205,18 +213,21 @@ export function resolveParameterizedRoutes(
   const resolvedRoutes = new Map<string, string>();
   const screenRoutes = new Map<string, string>();
 
-  // 1. Direct static routes
+  // 1. Direct static routes, a route whose only params are optional among them
   for (const r of routes) {
     const screen = extractPrimaryScreen(r);
-    if (!r.path.includes(":")) {
-      resolvedRoutes.set(r.path, r.path);
-      screenRoutes.set(screen, r.path);
+    const fixed = staticRoutePath(r.path);
+    if (fixed !== undefined) {
+      resolvedRoutes.set(fixed, fixed);
+      screenRoutes.set(screen, fixed);
     }
   }
 
   // 2. Match parameterized routes against harvested live linkPool
   for (const r of routes) {
-    if (!r.path.includes(":")) continue;
+    // A route whose only param is optional was resolved in step 1, to its bare
+    // address; a harvested /mine must not displace it.
+    if (staticRoutePath(r.path) !== undefined) continue;
 
     // Collect all candidate patterns for this route: canonical, localized, and locale-prefixed
     const candidatePatterns = new Set<string>();
@@ -243,10 +254,15 @@ export function resolveParameterizedRoutes(
 
     const regexes = [...candidatePatterns].map((pat) => {
       const parts = pat.split("/");
-      const regexParts = parts.map((p) =>
-        p.startsWith(":") ? "([^/]+)" : p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      // An optional `:name?` segment takes its slash with it when absent, and
+      // is one of the values the route's entries give it.
+      const entries = ((r as { nav?: { entries?: { params?: Record<string, string> }[] } }).nav?.entries ?? []);
+      const values = (name: string) => [...new Set(entries.map((e) => e.params?.[name]).filter((v): v is string => typeof v === "string"))];
+      const regexParts = parts.map((p, i) =>
+        p.startsWith(":") && p.endsWith("?") ? `(?:/(${values(p.slice(1, -1)).map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") || "[^/]+"}))?"
+          : (i === 0 ? "" : "/") + (p.startsWith(":") ? "([^/]+)" : p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
       );
-      return new RegExp(`^${regexParts.join("/")}$`);
+      return new RegExp(`^${regexParts.join("")}$`);
     });
 
     for (const link of linkPool) {

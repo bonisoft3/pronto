@@ -88,8 +88,30 @@ _busConvertible: or(_busTypes)
 // name and never by position.
 #params: P={
 	pattern: string
-	out: [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimPrefix(seg, ":")}]
+	out: [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimSuffix(strings.TrimPrefix(seg, ":"), "?")}]
 }
+
+// Every concrete address one spelling answers at. A trailing `:name?` segment
+// is optional and its values are the route's strip entries' (nav.entries), so
+// the spelling expands to the bare address and one per value — `/`, `/mine`,
+// `/gallery` — while a required :param stays a pattern. The door's matchers,
+// the sitemap and the served regexp all read this expansion, so none of them
+// has to know a segment is optional, and `/anything` reaches no screen.
+#addresses: X={
+	pattern: string
+	entries: [...]
+	_segs:     strings.Split(X.pattern, "/")
+	_last:     _segs[len(_segs)-1]
+	_optional: strings.HasPrefix(_last, ":") && strings.HasSuffix(_last, "?")
+	_name:     strings.TrimSuffix(strings.TrimPrefix(_last, ":"), "?")
+	_values:   list.SortStrings([for v, _ in {for e in X.entries if e.params != _|_ if e.params[_name] != _|_ {(e.params[_name]): true}} {v}])
+	_bare:     [if len(_segs) <= 2 {"/"}, strings.Join(list.Slice(_segs, 0, len(_segs)-1), "/")][0]
+	out: [
+		if !_optional {X.pattern},
+		if _optional for a in list.Concat([[_bare], [for v in _values {strings.TrimSuffix(_bare, "/") + "/" + v}]]) {a},
+	]
+}
+#entriesOf: {route: _, out: [if route.nav != _|_ if route.nav.entries != _|_ {route.nav.entries}, []][0]}
 
 #routeRegexp: {
 	path: string
@@ -1888,6 +1910,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				label: s.title
 				if s.label != _|_ {key: s.label}
 				if !s.strip {strip: false}
+				if len(s.entries) > 0 {entries: s.entries}
 			}
 			if len(s.hatches) > 0 {hatches: s.hatches}
 			files: {
@@ -3569,12 +3592,12 @@ _pgrollDir: "services/database/pgroll"
 	// composition.
 	_spellings: {
 		for r in E._shell.routes {
-			(r.screen): [
-				if E._shell.i18n == _|_ {(#address & {route: r}).out},
+			(r.screen): list.FlattenN([
+				if E._shell.i18n == _|_ {(#addresses & {pattern: (#address & {route: r}).out, entries: (#entriesOf & {route: r}).out}).out},
 				if E._shell.i18n != _|_ for tag in E._locales {
-					(#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out
+					(#addresses & {pattern: (#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out, entries: (#entriesOf & {route: r}).out}).out
 				},
-			]
+			], 1)
 		}
 	}
 	// A server entity syncs through a gate the auth service answers, so a
@@ -4387,18 +4410,28 @@ _pgrollDir: "services/database/pgroll"
 			// terminal answers it, on the terms a plain route's language gets.
 			_defaultAddress: {for r in E._shell.routes {(r.screen): (#address & {route: r, i18n: E._shell.i18n, tag: E._shell.i18n.default}).out}}
 			// Caddy path matchers are exact, so a :param segment widens to `*`
-			// the way the served matcher list does.
-			_widened: {for s, a in _defaultAddress {(s): "/" + strings.Join([
-				for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
-					[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
+			// the way the served matcher list does; an optional one is spelled
+			// out, address by address (#addresses).
+			_widened: list.FlattenN([for r in E._shell.routes {[
+				for a in (#addresses & {pattern: _defaultAddress[r.screen], entries: (#entriesOf & {route: r}).out}).out {
+					"/" + strings.Join([
+						for seg in strings.Split(strings.TrimPrefix(a, "/"), "/") {
+							[if strings.HasPrefix(seg, ":") {"*"}, seg][0]
+						},
+					], "/")
 				},
-			], "/")
-			}}
+			]}], 1)
 			_branches: [
 				for r in E._shell.routes for tag in E._others
-				let here = _defaultAddress[r.screen]
-				let there = (#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out
+				let listed = (#entriesOf & {route: r}).out
+				// An optional segment is one matcher per concrete address, each
+				// rewritten to the same address in the other spelling.
+				let heres = (#addresses & {pattern: _defaultAddress[r.screen], entries: listed}).out
+				let theres = (#addresses & {pattern: (#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out, entries: listed}).out
+				for i, here in heres
+				let there = theres[i]
 				let names = (#params & {pattern: here}).out
+				let suffix = [if i == 0 {""}, "_\(i)"][0]
 				// Segment by segment, because a :param is a whole segment and
 				// replacing the "/:" that introduces it would leave its name
 				// behind in the pattern.
@@ -4424,12 +4457,12 @@ _pgrollDir: "services/database/pgroll"
 					], "/"),
 				][0]
 				let captures = [for c, l in E._meansLocale if l == tag {c}] {"""
-				        @\(r.screen)_\(E._shell.i18n.locales[tag].path) {
+				        @\(r.screen)_\(E._shell.i18n.locales[tag].path)\(suffix) {
 				\(at)
 				          not query lang=*
 				          vars_regexp {re.lang.1} (?i)^(\(strings.Join(captures, "|")))$
 				        }
-				        rewrite @\(r.screen)_\(E._shell.i18n.locales[tag].path) \(target)
+				        rewrite @\(r.screen)_\(E._shell.i18n.locales[tag].path)\(suffix) \(target)
 				"""},
 			]
 			// Caddy refuses an empty path matcher at provision, so a program with
@@ -4647,12 +4680,17 @@ _pgrollDir: "services/database/pgroll"
 				// the three spellings of a page are read as one page rather than as
 				// near-duplicates competing with each other.
 				_urls: [
-					if !_isAdvanced && E._shell.i18n == _|_ for r in E._crawlable {
-						"  <url><loc>\(_o)\((#address & {route: r}).out)</loc></url>"
+					// A route with an optional segment is one page to a crawler, its bare
+					// address; its shelves are the same page under other addresses.
+					// A shelf is the same page under another address — a crawler is
+					// offered the bare one (#addresses's first).
+					if !_isAdvanced && E._shell.i18n == _|_ for r in E._crawlable
+					let addr = (#addresses & {pattern: (#address & {route: r}).out, entries: (#entriesOf & {route: r}).out}).out[0] {
+						"  <url><loc>\(_o)\(addr)</loc></url>"
 					},
-					if _isAdvanced && E._shell.i18n == _|_ for r in E._crawlable {
-						let meta = _sitemapRoutes[r.screen]
-						let addr = (#address & {route: r}).out
+					if _isAdvanced && E._shell.i18n == _|_ for r in E._crawlable
+					let meta = _sitemapRoutes[r.screen]
+					let addr = (#addresses & {pattern: (#address & {route: r}).out, entries: (#entriesOf & {route: r}).out}).out[0] {
 						strings.Join([
 							"  <url>",
 							"    <loc>\(_o)\(addr)</loc>",
@@ -4661,9 +4699,12 @@ _pgrollDir: "services/database/pgroll"
 							"  </url>",
 						], "\n")
 					},
-					if E._shell.i18n != _|_ for r in E._crawlable for tag in E._locales {
-						let meta = _sitemapRoutes[r.screen]
-						let locAddr = (#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out
+					if E._shell.i18n != _|_ for r in E._crawlable for tag in E._locales
+					let meta = _sitemapRoutes[r.screen]
+					let listed = (#entriesOf & {route: r}).out
+					let spelled = {for loc in E._locales {(loc): (#addresses & {pattern: (#address & {route: r, i18n: E._shell.i18n, "tag": loc}).out, entries: listed}).out}}
+					let i = 0
+					let locAddr = spelled[tag][0] {
 						strings.Join(list.Concat([
 							[
 								"  <url>",
@@ -4674,10 +4715,10 @@ _pgrollDir: "services/database/pgroll"
 								if _isAdvanced { "    <priority>\(meta.priority)</priority>" },
 							],
 							[for other in E._locales {
-								"    <xhtml:link rel=\"alternate\" hreflang=\"\(other)\" href=\"\(_o)\((#address & {route: r, i18n: E._shell.i18n, tag: other}).out)\"/>"
+								"    <xhtml:link rel=\"alternate\" hreflang=\"\(other)\" href=\"\(_o)\(spelled[other][i])\"/>"
 							}],
 							[
-								"    <xhtml:link rel=\"alternate\" hreflang=\"x-default\" href=\"\(_o)\((#address & {route: r, i18n: E._shell.i18n, tag: E._shell.i18n.default}).out)\"/>",
+								"    <xhtml:link rel=\"alternate\" hreflang=\"x-default\" href=\"\(_o)\(spelled[E._shell.i18n.default][i])\"/>",
 								"  </url>",
 							],
 						]), "\n")
