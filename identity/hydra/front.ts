@@ -17,7 +17,7 @@
 // each application already linked.
 import { Refused, randomToken, verifyIdToken } from "../oidc.ts";
 import { callbackOf, pairwiseKey, pairwiseSubject, tenantOf } from "../broker/core.ts";
-import { esc, google, hmacKey, json, page, type Provider, seal, unseal } from "../broker/main.ts";
+import { esc, google, hmacKey, json, page, type Provider, seal, unlisted, unseal } from "../broker/main.ts";
 import { fakeGoogle } from "./fake.ts";
 
 export interface Hydra {
@@ -198,7 +198,7 @@ export async function front(p: {
     return go(redirect_to as string);
   }
 
-  return async function handler(req: Request): Promise<Response> {
+  return unlisted(async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     try {
@@ -220,7 +220,7 @@ export async function front(p: {
       console.error(e);
       return json(500, { error: "internal error" });
     }
-  };
+  });
 }
 
 if (import.meta.main) {

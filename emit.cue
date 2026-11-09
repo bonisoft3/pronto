@@ -4740,6 +4740,67 @@ _pgrollDir: "services/database/pgroll"
 				let bare = strings.TrimSuffix(a, "/")
 				for w in [if bare == "" {"/"}, if bare != "" {bare}, if bare != "" {bare + "/"}] {w},
 			])
+			// A spa route's first document is the entry, which is every route's, so
+			// its head names none of them: "Loading…", the default language, no
+			// canonical, and Google crawled /, /es and /pt-br and indexed none. For
+			// each route the sitemap offers that the terminal alone draws, in each
+			// locale, the door answers the entry with its head spoken for that
+			// address: the language, the screen's title, the canonical and the
+			// alternates the sitemap lists. Read from the file at request time and
+			// spelled after the origin the door holds, as the crawler files are
+			// (`_origin`), so one image answers whatever origin deploys it and the
+			// entry stays the one a service worker and a static host take as it is.
+			// The markers of the replaced elements are the entry's own, which
+			// spa-head's test pins against the emitted entry. A route with a
+			// parameter is no address a crawler is offered, and keeps the entry's.
+			_spaTags: [if E._shell.i18n != _|_ {E._locales}, [""]][0]
+			_spaAt: {
+				for r in E._crawlable if r.ssr == "spa" {
+					(r.screen): {
+						for tag in _spaTags {
+							(tag): (#addresses & {
+								pattern: [if E._shell.i18n != _|_ {(#address & {route: r, i18n: E._shell.i18n, "tag": tag}).out}, (#address & {route: r}).out][0]
+								entries: (#entriesOf & {route: r}).out
+							}).out[0]
+						}
+					}
+				}
+			}
+			// The title is the screen's, in markup a reader or a crawler sees: set
+			// in a caddy template, so no brace or backquote of it may reach caddy.
+			_spaEscaped: {for n, _ in _spaAt {
+				(n): strings.Replace(strings.Replace(strings.Replace(strings.Replace(strings.Replace(strings.Replace(strings.Replace(strings.Replace(
+					E.code.surface.screens[n].title, "&", "&amp;", -1), "<", "&lt;", -1), ">", "&gt;", -1), "\"", "&quot;", -1), "`", "&#96;", -1), "{", "&#123;", -1), "}", "&#125;", -1), "\\", "&#92;", -1)
+			}}
+			_spaDocument: strings.Join([
+				for n, byTag in _spaAt for tag, addr in byTag
+				let lang = [if tag != "" {tag}, E.terminal.language][0]
+				let dir = [if list.Contains(omnishell.#RtlLanguages, strings.Split(lang, "-")[0]) {"rtl"}, "ltr"][0]
+				let alternates = [
+					if E._shell.i18n != _|_ {strings.Join(list.Concat([
+						[for other in E._locales {"<link rel=\"alternate\" hreflang=\"\(other)\" href=\"@origin@\(_spaAt[n][other])\">"}],
+						["<link rel=\"alternate\" hreflang=\"x-default\" href=\"@origin@\(_spaAt[n][E._shell.i18n.default])\">"],
+					]), "\n") + "\n"},
+					"",
+				][0]
+				let head = "<title>\(_spaEscaped[n])</title>\n<link rel=\"canonical\" href=\"@origin@\(addr)\">\n\(alternates)"
+				let at = [if addr == "/" {"/"}, "\(addr) \(addr)/"][0]
+				let html = "<html lang=\"\(lang)\" dir=\"\(dir)\">"
+				let body = "{{ $o := placeholder \"http.vars.origin\" }}{{ regexReplaceAllLiteral \"<title>[^<]*</title>\" (regexReplaceAllLiteral \"<html lang=\\\"[^\\\"]*\\\" dir=\\\"[^\\\"]*\\\">\" (readFile \(json.Marshal(E.terminal.surface.entry))) \(json.Marshal(html))) (replace \"@origin@\" $o \(json.Marshal(head))) }}"
+				{"""
+				    @spa_\(n)_\(tag) path \(at)
+				    handle @spa_\(n)_\(tag) {
+				      root * {$PRONTO_SRV_ROOT:/srv}
+				      header Content-Type "text/html; charset=utf-8"
+				      header Cache-Control "no-cache"
+				      templates {
+				        mime text/html
+				      }
+				      respond `\(body)` 200
+				    }
+
+				"""},
+			], "")
 			// A renderer the door cannot reach never answers, so caddy's own 502
 			// or 504 stands in for it; handle_response above sees only answers. Only a
 			// request `handle @rendered` took is the renderer's: another upstream's
@@ -4797,7 +4858,7 @@ _pgrollDir: "services/database/pgroll"
 			][0]
 			_served: """
 				  route {
-				\(_entry)\(_alias)\(_negotiate)\(_render)\(_document)    handle {
+				\(_entry)\(_alias)\(_negotiate)\(_render)\(_document)\(_spaDocument)    handle {
 				      root * {$PRONTO_SRV_ROOT:/srv}
 				      header Cache-Control "no-cache"
 				      @file file {path} {path}/index.html
