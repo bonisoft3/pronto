@@ -12,9 +12,9 @@ lives where nothing can migrate it. Four checks enforce that, and each sees
 something the other three cannot. What an identity is (the type id, the
 ordinals, retirement) is [types and identity](types-and-identity.md). How an
 author declares a change is [the guide](../GUIDE.md#identity). How a running
-cluster notices one is mecha's [schema](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/schema.md),
+cluster notices one is mecha's [schema](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/schema.md),
 and what an already-served page does is omnishell's
-[data](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/data.md#skew).
+[data](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/data.md#skew).
 
 An app can keep applied bootstrap bytes by naming them in `state.rawMigrations`.
 An entry named `003_rls.sql` replaces mecha's tenancy floor for both the native
@@ -188,7 +188,7 @@ opening with a letter or digit, never the baseline's `00_initdb`, and never
 stated again as a `name` field inside it, which the pinned pgroll refuses.
 They are not emitted as files: `#DefaultCluster` hands them to the cluster,
 whose migrate step applies each one the database's ledger lacks, before the
-readers start ([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/schema.md#carrying-a-live-database-forward)).
+readers start ([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/schema.md#carrying-a-live-database-forward)).
 pgroll keeps a ledger, so a migration runs once and running it again is a
 no-op; that is what lets these be written plainly, with no `IF NOT EXISTS` and
 no `DO` block to hide from squawk.
@@ -257,7 +257,7 @@ every script of the release its ledger lacks: the pgroll set, and the files
 too — a framework step the program places (`060_graphile_worker.sql`,
 `061_airlock.sql`), the reducer actors (`0NN_mecha_actors.sql`), the database
 functions, a raw migration added since. The ledger (pglite-workerd's
-[`scripts.ts`](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/pglite-workerd/scripts.ts))
+[`scripts.ts`](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/pglite-workerd/scripts.ts))
 is established when a directory is built, and for an archive when it is
 restored: the files of the release that built its database, as the restore is
 told them, and the pgroll migrations the database's own pgroll ledger holds,
@@ -320,7 +320,7 @@ changes the column type of every field of the nine types that lost their
 domain. A database built from the regenerated migrations takes the new types
 from initdb. No pronto deployment carries a data directory from one image to
 the next: `PGDATA` sits on the database container's writable layer
-([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/schema.md)), and a rebuilt image
+([mecha's schema](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/schema.md)), and a rebuilt image
 recreates the container empty. So no migration is emitted, and the database is
 rebuilt with its migrations: a container started again from an image built
 before the split keeps its domains, and the first subset a lazily read

@@ -76,7 +76,7 @@ Cloud Run's airlock has no daprd, its mesh address being the AI gateway, so that
 app whose effects reach anything else.
 
 **Uploads go to the [authorized blob
-plane](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/decisions/2026-10-08-authorized-blob-plane.md),** with its
+plane](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/decisions/2026-10-08-authorized-blob-plane.md),** with its
 guest refusal relaxed and its raw reads kept. `/img` re-encodes, and a vendor must fetch the very
 bytes written.
 

@@ -26,7 +26,7 @@ selected container and port, and Airlock's mesh waits for that container to star
 The role adds `airlock-out` and a dedicated `bridge-<name>-egress` network. It does
 not implicitly join the default network. Additional networks are explicit hatch
 capabilities. No database credential, host port publication or callback permission
-is granted by being a bridge. See [Airlock](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md)
+is granted by being a bridge. See [Airlock](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md)
 for the ledger and transport contract.
 
 ## Where a bridge runs
@@ -73,7 +73,7 @@ code: state: bridges: crawler: {
 }
 ```
 
-The dispatcher Worker ([mecha-edge](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/mecha-edge/README.md#effects))
+The dispatcher Worker ([mecha-edge](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/mecha-edge/README.md#effects))
 owns the container as a Durable Object class, `Bridge<Name>` bound as
 `BRIDGE_<NAME>` (`fetch-pages` is `BridgeFetchPages`, `BRIDGE_FETCH_PAGES`;
 `bundle/edge-bridges.ts` decides both, and refuses two bridges meeting in one
@@ -99,7 +99,7 @@ throws them instead, so the run errs as an origin's transport error does:
 counted, backed off, run again, `unknown` when the attempts run out. The
 effects' contract is otherwise unchanged: at least once, each run counted and
 settled by the object
-([Airlock](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-bridge-not-deployed)).
+([Airlock](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md#a-bridge-not-deployed)).
 
 **Image.** The Dockerfile `wrangler deploy` builds is cut from the one bayt
 renders for the cluster target `<container>-appliance` (which nothing starts
@@ -173,7 +173,7 @@ Where a bridge does not run, the program still releases and its effects exist,
 but each fails at once: the airlock settles the claimed effect `failed` with
 `{bridge, target, reason: "not deployed"}` and calls neither handler nor sink,
 so the row takes its `onError` arrow, no run is spent and no dead letter is left
-([Airlock](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#a-bridge-not-deployed)).
+([Airlock](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md#a-bridge-not-deployed)).
 That is the local stack for a bridge without a simulator, and every release
 target it does not name. The edge never dials a bridge's internal address: a
 bridge not on `cloudflare` is such an address there. An explicitly declared

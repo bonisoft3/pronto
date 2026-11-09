@@ -37,7 +37,7 @@ refused: drain it with the previous runtime before upgrading. Subsequent machine
 schema changes require an explicit migration. Bootstrap repairs only the pinned
 read-committed guard artifact to its pinned serializable replacement, under the
 worker singleton lock and in the initialization transaction. Earlier compiler
-artifacts and unknown fingerprints remain refused. The [Durex upgrade](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/durex/docs/index.md#upgrade-from-internal-airlock-work)
+artifacts and unknown fingerprints remain refused. The [Durex upgrade](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/durex/docs/index.md#upgrade-from-internal-airlock-work)
 retains pending claims and committed receipts while moving internal work out of
 Airlock and replacing the compiled dispatcher. Program/schema changes still
 refuse incompatible unfinished inputs.

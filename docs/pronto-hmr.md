@@ -84,8 +84,8 @@ explicit validation targets. This separation is intentional: execution verbs
 prepare and run the application; their validation counterparts judge it. Launch
 may succeed while lint fails. The implementation is in
 [[../builders/bayt.cue|the Pronto builder]],
-[Sayt dispatch](https://github.com/bonisoft3/sayt/blob/v0.45.3/bayt-task.nu), and
-[the verb dependency defaults](https://github.com/bonisoft3/bayt/blob/v0.68.2/stacks/sayt/sayt.cue).
+[Sayt dispatch](https://github.com/bonisoft3/sayt/blob/v0.48.0/bayt-task.nu), and
+[the verb dependency defaults](https://github.com/bonisoft3/bayt/blob/v0.71.0/stacks/sayt/sayt.cue).
 
 Ordinary launch does not select the broad development configuration or the live
 presentation tree. It follows the generated application path. Watch launch

@@ -133,7 +133,7 @@ its outcome lands.
 ## The ledger
 
 `airlock.external_effect_ledger` is mecha's, in the airlock's
-[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/airlock.sql), and the
+[`airlock.sql`](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/airlock.sql), and the
 cluster places it as it places the ticker's `schedule`. A row holds the key
 (`<effect>:<key fields>`, also the sink's idempotency key), the instance's primary key,
 the input frozen at the claim, the count of runs begun, and the outcome, set once.
@@ -183,7 +183,7 @@ call.
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
   key; the others are the frozen `input` and the values of the effect's `secrets`. `issue` returns `{done: data}` or `{failed: data}`. Throwing means
   "no answer", not "failed". The airlock's
-  [README](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md) is the contract.
+  [README](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md) is the contract.
 - **A thrown error** is retried by Graphile with backoff, and each retry is a re-entry.
   After `attempts` runs counted by the ledger the outcome is `unknown`: no answer ever
   came, and the sink may have acted. The ledger counts, not Graphile, which counts a run
@@ -283,7 +283,7 @@ ledger and same re-entry, and it walls the bridge's own reach.
 The implemented declaration and container recipe are documented in
 [[../container-bridges|container bridges]]. A bridge is a role of a declared
 container hatch; it does not introduce a second container definition. Mail is one
-reusable implementation. Its current contract is [Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.20.6/pieces/mail/README.md); bridge containers grant no protocol-specific confinement.
+reusable implementation. Its current contract is [Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md); bridge containers grant no protocol-specific confinement.
 
 - **Re-entry follows the protocol.** SMTP carries no idempotency key, so a mail bridge is
   a sink that is not idempotent: the server's `250` is the done answer, and a crash
@@ -348,7 +348,7 @@ ticker only where one declares a schedule: `state.effects` in mecha's `cluster.c
 effect's name and its origin or bridge, brings two services (`airlock` and its daprd
 `airlock-mesh`), each referenced container hatch, the ticker and its clock, two initdb
 steps, and four networks. The
-airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md#in-a-cluster) is
+airlock's [README](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md#in-a-cluster) is
 the contract; what follows is why it has that shape.
 
 ### The networks
@@ -492,7 +492,7 @@ airlock's side there.
 
 The wall travels with the daprd: its allowlist and its bindings are its configuration on
 every tier, so compose, k8s and Cloud Run hold the same one.
-[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/deployment.md#the-airlocks-wake-and-wall)
+[Tiers and clouds](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/deployment.md#the-airlocks-wake-and-wall)
 holds the table. Crash recovery reads each process's own advisory key, so an overlap of two
 revisions, or any number of instances, unlocks nothing a live process holds.
 
@@ -665,7 +665,7 @@ One PR. These are its commits, in order, each green:
    `mecha-airlock.integration.test.ts` the plane bayt lowers, end to end.
 4. **Bridges, Crypto and the bindings wall** (built). `state.bridges` in pronto and the
    cluster through declared container hatches, and mecha's
-   [mail bridge](https://github.com/bonisoft3/mecha/blob/v0.20.6/pieces/mail/README.md); `Crypto` in the realm and `secrets` as the handler's third
+   [mail bridge](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md); `Crypto` in the realm and `secrets` as the handler's third
    argument; the airlock calling a Dapr output binding per effect, its daprd allowed the
    bindings API alone, in place of HTTPEndpoints and the CONNECT proxy.
    The mail service integration suite holds the bridge's answers against SMTP, `crypto_test.ts`

@@ -262,7 +262,7 @@ profile. A browser-only deployment cannot hold provider credentials.
    against the eight-second budget before freezing process topology.
 3. **Compiler/build.** Extend [[../../schema.cue|schema.cue]],
    [[../../emit.cue|emit.cue]], [[../../builders/bayt.cue|build closure]] and
-   [Mecha runtime](https://github.com/bonisoft3/mecha/blob/v0.20.6/cluster.cue). Generate action-specific
+   [Mecha runtime](https://github.com/bonisoft3/mecha/blob/v0.22.0/cluster.cue). Generate action-specific
    Dapr bases and app-specific source/image targets. Preserve ordinary bridge tests;
    reject unlisted actions, credential/fixed-prop overrides and escaping sources.
    Ensure changes to any selected asset invalidate the image.

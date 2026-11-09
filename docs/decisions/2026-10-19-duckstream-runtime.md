@@ -380,7 +380,7 @@ the machine. The target [[2026-10-20-duckstream-backend-contract#Coordination as
 contract]] moves required/published coverage and eligibility into SQL while
 retaining machine authority for claims, retries and publication.
 
-Reuse [Mecha's bounded reducers](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/machines.md)
+Reuse [Mecha's bounded reducers](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/machines.md)
 for control state. Feldera owns relational maintenance; workers execute pure
 computations. A machine coordinates claims, retries, deadlines, and publication.
 It does not contain joins, simulation loops, or SQL dialect translation.
@@ -425,7 +425,7 @@ contract]] instead admits durable result candidates into an authoritative SQL
 view, then materializes that view to PostgreSQL. Airlock remains the execution
 foundation; it need not dispatch a second job for each relational sink update.
 
-Reuse the [Airlock contract](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/airlock/README.md):
+Reuse the [Airlock contract](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/airlock/README.md):
 the machine transition atomically claims a frozen input in the ledger and
 enqueues Graphile work; retries preserve its logical key; recorded outcomes can
 redeliver the machine transition after a crash. PostgreSQL is already its durable

@@ -25,7 +25,7 @@ reducer in the browser does not make it a different kind of machine.
 `rules`; `state.mecha.rows` holds transactional row machines bound by `entity`.
 These remain distinct execution bindings; Cortex composition uses their
 existing sources and sinks. Persisted SQL naming is covered by
-[libraries/mecha/docs/machines#Bounded reducer machines](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/machines.md#bounded-reducer-machines).
+[libraries/mecha/docs/machines#Bounded reducer machines](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/machines.md#bounded-reducer-machines).
 
 An app's tests step a compiled machine through omnishell's test harness
 (`test/mecha-local.ts`) and walk it with `test/mecha-battery.ts`, from the
@@ -56,7 +56,7 @@ signals they send and hold the chart to hearing each one.
 
 ## Affordances, Commands, and Intents
 
-To prevent overlap with [Omnishell machines](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/machines.md#omnishell-machines),
+To prevent overlap with [Omnishell machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md#omnishell-machines),
 Cortex does not listen to raw DOM gestures (`click@<id>`, keyboard events).
 Local UI widget concerns — modal visibility, selected tab, input field values,
 and hover states — remain strictly in **Omnishell `#Machine`** on `tab` rows (Level ≤ 2).
@@ -174,7 +174,7 @@ or presenter is undeclared, and one whose screen carries no
 own reduce, named by the mount's region: it hears each lifted milestone and
 menu press as an event and answers in rows, and the row's columns are the
 mount's props, so the race is the row's to start, hold and hand to the menu
-([the kinetic child](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/kinetic.md#the-kinetic-child)). With
+([the kinetic child](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/kinetic.md#the-kinetic-child)). With
 `mode: online` the row races one seat of a GGRS session whose two session
 descriptions a Mecha machine's rows carry, and its milestones go back to that
 machine as commands, which Apex Run's lobby fold sends to `apexrun_duel`. Why
@@ -261,7 +261,7 @@ These bindings are source configuration; the machine remains XState grammar.
 ## Durable work
 
 `#CortexDurable` and `compileCortexDurable` compose server-only bounded Mecha
-machines with [Durex durable execution](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/durex/docs/index.md). The same reducer compiler checks shapes,
+machines with [Durex durable execution](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/durex/docs/index.md). The same reducer compiler checks shapes,
 guards, invariants and fuel, and emits a private PostgreSQL dispatcher. No
 browser admission or command ports are emitted. A stable invoking state names a
 task, immutable key/input expressions, completion events, release time and retry

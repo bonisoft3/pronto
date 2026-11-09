@@ -124,7 +124,7 @@ takes its side.
   (VLDB 2023). Derived data as a query kept current under inserts, updates
   and retractions ([pipelines and schedules](docs/pipelines-and-schedules.md),
   [the lattice](docs/lattice.md), mecha's
-  [streaming joins](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/streaming-joins.md)).
+  [streaming joins](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/streaming-joins.md)).
 - **Order from the database, not from the replicas**: Shapiro, Preguiça,
   Baquero and Zawirski,
   [*Conflict-free Replicated Data Types*](https://inria.hal.science/inria-00609399/document)
@@ -133,18 +133,18 @@ takes its side.
   (2019) as the argument for a central authority over CRDTs. Pronto's
   authority is the Postgres WAL, read by change data capture with its LSN as
   the clock ([logical decoding](https://www.postgresql.org/docs/current/logicaldecoding.html);
-  mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/change-capture.md)), and
+  mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/change-capture.md)), and
   [ElectricSQL](https://electric-sql.com/docs/reference/anomalies), founded by
   the CRDT school and rebuilt on the same choice, carries that order into the
-  browser (omnishell's [data](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/data.md) and
-  [screen updates](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/screen-updates.md)).
+  browser (omnishell's [data](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/data.md) and
+  [screen updates](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/screen-updates.md)).
 - **Rollback**: Jefferson, [*Virtual Time*](https://gdo-pdes-course-2014.llnl.gov/attachments/20776356/20907222.pdf)
   (TOPLAS 1985), the Time Warp mechanism; Cannon, [GGPO](https://www.ggpo.net/)
   (2006), the same idea at the frame rate of a fighting game, with no paper of
   its own. Speculative execution with rollback, a close relative of incremental
   maintenance: late inputs revise an earlier result and its consequences. Built on
   GGRS (omnishell's
-  [kinetic plane](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/kinetic.md),
+  [kinetic plane](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/kinetic.md),
   [the kinetic machine record](docs/decisions/2026-10-23-kinetic-machine.md)).
 
 ### Transform data
@@ -154,21 +154,21 @@ takes its side.
   (Information and Computation, 1991); Wadler,
   [*Monads for Functional Programming*](https://homepages.inf.ed.ac.uk/wadler/papers/marktoberdorf/baastad.pdf)
   (1992). Effects as values returned rather than actions performed
-  (omnishell's [terminal](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/terminal.md), "Returned requests are Elm's `Cmd`").
+  (omnishell's [terminal](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/terminal.md), "Returned requests are Elm's `Cmd`").
 - **The Elm Architecture**: Czaplicki,
   [*Elm: Concurrent FRP for Functional GUIs*](https://elm-lang.org/assets/papers/concurrent-frp.pdf)
   (2012); Czaplicki and Chong,
   [*Asynchronous Functional Reactive Programming for GUIs*](https://people.seas.harvard.edu/~chong/pubs/pldi13-elm.pdf)
   (PLDI 2013); Redux (Abramov, 2015) as its popular descendant. One funnel, a
   pure update, and time travel as a consequence (omnishell's
-  [data](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/data.md) and [terminal](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/terminal.md),
+  [data](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/data.md) and [terminal](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/terminal.md),
   the fold over history in [the lattice](docs/lattice.md)).
 - **Object capabilities, Jessie and SES**: Miller,
   [*Robust Composition: Towards a Unified Approach to Access Control and Concurrency Control*](http://www.erights.org/talks/thesis/markm-thesis.pdf)
   (2006), realized as [Jessie](https://github.com/endojs/Jessie) under
   Hardened JavaScript. A JavaScript subset in compartments with no ambient
-  authority (omnishell's [reference](https://github.com/bonisoft3/omnishell/blob/v0.21.7/REFERENCE.md) and
-  [machines](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/machines.md)).
+  authority (omnishell's [reference](https://github.com/bonisoft3/omnishell/blob/v0.23.0/REFERENCE.md) and
+  [machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md)).
 
 ### Update invariants
 
@@ -229,14 +229,14 @@ takes its side.
   (Science of Computer Programming, 1987), run by XState (Khourshid).
   Hierarchy and parallel regions against state explosion, one coordination
   language from a browser row to a Postgres trigger (omnishell's
-  [machines](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/machines.md), mecha's
-  [machines](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/machines.md), [cortex](docs/cortex.md)).
+  [machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md), mecha's
+  [machines](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/machines.md), [cortex](docs/cortex.md)).
 - **Chinese Postman**: Kwan,
   [*Graphic programming using odd or even points*](https://scholar.google.com/scholar?q=%22Graphic+programming+using+odd+or+even+points%22)
   (Chinese Mathematics, 1962, translating the 1960 original); Edmonds and Johnson,
   [*Matching, Euler Tours and the Chinese Postman*](https://link.springer.com/article/10.1007/BF01580113)
   (Mathematical Programming, 1973). Every arrow of every machine walked before
-  the app runs (omnishell's [machines](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/machines.md),
+  the app runs (omnishell's [machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md),
   extended by [cortex](docs/cortex.md)).
 - **Durable functions**: Skiadopoulos et al.,
   [*DBOS: A DBMS-oriented Operating System*](https://www.vldb.org/pvldb/vol15/p21-skiadopoulos.pdf)
@@ -252,7 +252,7 @@ takes its side.
   (TOPLAS 1994). An invariant under any order of clicks, a guard's
   satisfiability, a candidate list's coverage, all readable from a chart
   because state is relational and guards are data (omnishell's
-  [what stays provable](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/machines.md#what-stays-provable),
+  [what stays provable](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md#what-stays-provable),
   [the machine contracts record](docs/decisions/2026-10-15-machine-contracts.md)).
 
 ### Time
@@ -262,7 +262,7 @@ takes its side.
   (CACM 1978). Order without a global clock; Pronto uses the commit LSN to
   order committed database changes, giving its replicas the common authority
   described above
-  (mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/change-capture.md)).
+  (mecha's [change capture](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/change-capture.md)).
 - **Online schema change**: Rae, Rollins, Shute, Sodhi and Vingralek,
   [*Online, Asynchronous Schema Change in F1*](https://www.vldb.org/pvldb/vol6/p1045-rae.pdf)
   (VLDB 2013), practised as expand and contract by
@@ -286,7 +286,7 @@ takes its side.
   (PLDI 2001, TOPLAS 2005). A deployment reaches an open tab as the smallest
   change it needs, rows by live query and everything else by what its content
   address says changed ([releases by content](docs/decisions/2026-10-16-releases-by-content.md),
-  omnishell's [screen updates](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/screen-updates.md)).
+  omnishell's [screen updates](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/screen-updates.md)).
 - **M-SSR**: Osmani and Miller, [*Rendering on the Web*](https://web.dev/articles/rendering-on-the-web)
   (2019), the taxonomy of server, client and hydrated rendering and the cost
   of each; Vepsäläinen, Hevery and Vuorimaa,
@@ -296,14 +296,14 @@ takes its side.
   escapes it by having no framework state to serialize: a document is a
   materialized view of rows, and the client adopts its nodes with no diff
   because the same rows and the same templates produced them (omnishell's
-  [native worker SSR](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/native-worker-ssr.md),
-  [screen updates](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/screen-updates.md#a-pre-rendered-page)).
+  [native worker SSR](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/native-worker-ssr.md),
+  [screen updates](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/screen-updates.md#a-pre-rendered-page)).
   Borrowed from no one; it only becomes possible once everything above is in
   place.
 - **The lake's own time**: Raasveldt and Mühleisen,
   [*DuckDB: an Embeddable Analytical Database*](https://mytherin.github.io/papers/2019-duckdbdemo.pdf)
   (SIGMOD 2019), and the [DuckLake manifesto](https://ducklake.select/manifesto/).
-  Mecha's [lake](https://github.com/bonisoft3/mecha/blob/v0.20.6/packages/lake/README.md) and the
+  Mecha's [lake](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/lake/README.md) and the
   DuckStream tier of [the Cortex machines record](docs/decisions/2026-09-29-cortex-machines.md).
 
 ## Testimonial

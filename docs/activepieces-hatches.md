@@ -38,7 +38,7 @@ code: state: effects: confirmation: {
 ```
 
 These paths refer to an app-supplied package and schemas. The optional first-party
-[mail package](https://github.com/bonisoft3/mecha/blob/v0.20.6/pieces/mail/README.md) supplies this contract.
+[mail package](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md) supplies this contract.
 It is a normal private package with its own version and standard SDK exports, not a
 runner dependency. Applications may vendor its built package or maintain their own.
 Each piece export is a standard `createPiece` object; action names are those exported
@@ -116,7 +116,7 @@ errors, not fallback selections.
 
 ## Runtime and outcomes
 
-The [runner](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/activepieces/README.md) validates its
+The [runner](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/activepieces/README.md) validates its
 manifest, secrets and package/action availability before listening. Each invocation
 uses a fresh Deno subprocess with a cleared environment and no subprocess/native-FFI
 permission. Package code is trusted: it can use network access and transmit the

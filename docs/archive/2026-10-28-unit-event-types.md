@@ -1,6 +1,6 @@
 # A unit's events are typed by the program, not by the seat
 
-Status: built. The contract is in omnishell's [terminal reference](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/terminal.md); this record keeps the argument.
+Status: built. The contract is in omnishell's [terminal reference](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/terminal.md); this record keeps the argument.
 
 ## Context
 

@@ -101,8 +101,8 @@ or Jessie implementations to manufacture application contracts.
 
 | Surface | Checker | Claim |
 | --- | --- | --- |
-| ARIA declarations | [omnishell/check-aria.ts](https://github.com/bonisoft3/omnishell/blob/v0.21.7/check-aria.ts) | Supported cardinality, required roles and references; dynamic ownership, fragment boundaries and ARIA inside mounted item templates remain explicitly unchecked. |
-| Presentation dependencies | [omnishell/check-presentation.ts](https://github.com/bonisoft3/omnishell/blob/v0.21.7/check-presentation.ts) | A supported reachable UI state has a declared presentation consumer or interaction. Declared CSS use does not prove computed visibility. |
+| ARIA declarations | [omnishell/check-aria.ts](https://github.com/bonisoft3/omnishell/blob/v0.23.0/check-aria.ts) | Supported cardinality, required roles and references; dynamic ownership, fragment boundaries and ARIA inside mounted item templates remain explicitly unchecked. |
+| Presentation dependencies | [omnishell/check-presentation.ts](https://github.com/bonisoft3/omnishell/blob/v0.23.0/check-presentation.ts) | A supported reachable UI state has a declared presentation consumer or interaction. Declared CSS use does not prove computed visibility. |
 | Source/outcome wiring | [[../check-outcomes.ts]] | Declared outcomes have dispositions, names/types agree, and attachment references match their declared hosts. |
 | Finite workflows | [[../check-workflows.ts]] | Completion and reachability in the supported projected host graph. Opaque guards branch nondeterministically; this is not data feasibility or eventual delivery. |
 

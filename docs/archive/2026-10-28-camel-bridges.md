@@ -4,7 +4,7 @@ Status: superseded as the default integration design by
 [[../decisions/2026-10-28-integrations|standard Activepieces pieces with Pronto state]].
 That decision records the deployment/authoring tradeoff and mixed responsibilities.
 The built mail contract is
-[Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.20.6/pieces/mail/README.md).
+[Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md).
 The proposal below is historical; it does not describe the current mail runtime.
 
 ## Boundary
@@ -66,7 +66,7 @@ separate work, not claims made by this migration.
 
 ## Mail decision
 
-The HTTP and MIME contract lives in [Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.20.6/pieces/mail/README.md).
+The HTTP and MIME contract lives in [Activepieces mail](https://github.com/bonisoft3/mecha/blob/v0.22.0/pieces/mail/README.md).
 The migration retains the ledger-derived Message-ID, validated message fields,
 plain/HTML/calendar alternatives and calendar attachment, actual SMTP receipts,
 partial-recipient outcomes and required STARTTLS. A fixed FreeMarker template

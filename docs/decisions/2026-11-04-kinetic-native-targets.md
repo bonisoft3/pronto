@@ -37,7 +37,7 @@ Desktop and mobile split cleanly along their native ecosystems: **Desktop** is o
    Omnishell's markup reader (`read-markup.ts`) and runtime binder (`interpreter/screen.js`, `interpreter/fragment.js`) already resolve every `data-live` region, `data-text`, `data-attr-*`, `data-on-*`, `data-state` CSS rule, `data-kinetic` mount, `canvas[data-layer]` slot and `data-touch-zone`. From that single bound Omnishell screen representation:
    - **Phone back-end** lowers regions and state rules to **DivKit JSON + DivKit Variables**, rendered by upstream `com.yandex.div:div` on Android and `divkit-ios` on iOS.
    - **Desktop back-end** lowers the same bound regions and state rules to **`winio`'s Elm-like (`init` / `update` / `render`) component tree** in Rust, which instantiates real OS widgets (`NSView` on macOS, WinUI 3 / `HWND` on Windows, `GtkWidget` on GNOME, `QWidget` on KDE).
-   - Because both native targets are deterministic projections of the vetted Omnishell screen markup, `check-parity.ts` (which [native hosts](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/native-hosts.md#declaring-it) noted was hardcoded to `realworld`'s hand-written bundle) is replaced by construction.
+   - Because both native targets are deterministic projections of the vetted Omnishell screen markup, `check-parity.ts` (which [native hosts](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/native-hosts.md#declaring-it) noted was hardcoded to `realworld`'s hand-written bundle) is replaced by construction.
 
 ## 2. Why macOS uses `winio` (Desktop) rather than `divkit-ios` (Mobile)
 
@@ -48,7 +48,7 @@ Although `divkit-ios` can run on macOS through Apple's Mac Catalyst (`UIView`-on
 
 ## 3. The simulation stays Jessie in the native host's JS engine
 
-The 60 Hz engine (`surface.engines.apexrun`) is a linked Jessie module graph with no endowments ([[../archive/2026-10-23-jessie-import|Jessie import]]). On native hosts it runs unchanged inside the headless JS engine the host already embeds ([native hosts](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/native-hosts.md)):
+The 60 Hz engine (`surface.engines.apexrun`) is a linked Jessie module graph with no endowments ([[../archive/2026-10-23-jessie-import|Jessie import]]). On native hosts it runs unchanged inside the headless JS engine the host already embeds ([native hosts](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/native-hosts.md)):
 
 - **Desktop (macOS, Windows, Linux) & Android**: QuickJS (`rquickjs` in the Rust desktop host, `QuickJsOmnishellEngine` on Android).
 - **iOS**: `JavaScriptCore` (`JavaScriptCoreOmnishellEngine`).
@@ -115,9 +115,9 @@ Each target's presenter is then ~600–800 LoC: it loads the `.glb` manifest and
 - **Having the LLM author `DivKit` JSON or `winio` Rust views per screen** — violates [[../screens#Derived from the markup|the single-source screen contract]] (*"two statements of one fact need a checker, or one of them derived"*) and [[../compiler|the compiler ladder]] (everything below `program.cue` is deterministic); deriving both from Omnishell's screen markup eliminates cross-platform drift by construction.
 - **Translating `DivKit` AST into `winio` on desktop** — turns a mobile SDUI wire format into an unnecessary intermediate layer between Omnishell's screen markup and desktop widgets.
 - **Running `divkit-ios` on macOS via Mac Catalyst instead of `winio`** — blurs the Desktop (`winio` + Bevy in one Cargo workspace) vs. Phone (`DivKit` + Filament) split and gives macOS iPad-emulated `UIView` controls instead of native AppKit `NSView`s.
-- **Keeping the hand-rolled 5-node DivKit parsers in `apps/realworld` for Android and iOS** — upstream `com.yandex.div:div` and `divkit-ios` already provide `Div2View`, `DivView`, `div-state`, `div-animator`, `DivVariableController` and `div-custom` (`DivCustomContainerViewAdapter` / `DivCustomBlockFactory`), which [native-hosts.md](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/native-hosts.md) already assumed.
+- **Keeping the hand-rolled 5-node DivKit parsers in `apps/realworld` for Android and iOS** — upstream `com.yandex.div:div` and `divkit-ios` already provide `Div2View`, `DivView`, `div-state`, `div-animator`, `DivVariableController` and `div-custom` (`DivCustomContainerViewAdapter` / `DivCustomBlockFactory`), which [native-hosts.md](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/native-hosts.md) already assumed.
 - **`bevy_ui`, `egui`, `iced`, or `slint` for the desktop DOM plane** — none of them instantiates OS-native widget handles (`NSView`, `HWND`, `GtkWidget`, `QWidget`) across all four desktop environments the way `winio` does.
-- **Tauri / `wry` transparent WebView overlay on desktop** — brings back the browser layout/compositor process that [native hosts](https://github.com/bonisoft3/omnishell/blob/v0.21.7/docs/native-hosts.md#rejected) rejected on mobile.
+- **Tauri / `wry` transparent WebView overlay on desktop** — brings back the browser layout/compositor process that [native hosts](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/native-hosts.md#rejected) rejected on mobile.
 - **A custom cross-engine declarative scene or draw-list language** — rejected in [[2026-10-22-endowed-babylon#Rejected|the endowed-Babylon record]]; glTF 2.0 with `EXT_mesh_gpu_instancing` and `material.extras` already has native loaders in Babylon, Bevy and Filament for geometry, instancing and material metadata, while custom shaders and post-processing belong in thin target-specific presenters.
 - **OpenUSD as the runtime scene format** — no lightweight runtime loader exists for Filament on mobile or Babylon in the browser.
 - **Porting `simulation.js` to Rust or C++** — the 60 Hz Jessie step costs 45–110 µs (<0.7% of a 16.6 ms frame); rewriting it in a second language risks floating-point drift that breaks GGRS rollback checksums across Web, Desktop and Phone.

@@ -173,7 +173,7 @@ exact internal behavior is not the specification.
 
 ## Portable values and native stages
 
-Mecha's [compute boundary](https://github.com/bonisoft3/mecha/blob/v0.20.6/docs/compute.md) carries the
+Mecha's [compute boundary](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/compute.md) carries the
 fifteen portable types using a consumer-supplied type table. Pronto emits that
 table and derives sink fields from entity declarations. It does not require Mecha
 to depend on Pronto. Exact native transport and Feldera operator admission are
@@ -546,8 +546,8 @@ does not by itself make independent client subscriptions update in one render.
 | Whole-generation output | PostgreSQL transaction, constraints and trigger/function | A complete generation envelope and guarded finalizer for its owned tables. |
 
 Mecha already has multi-table publication under the caller's PostgreSQL
-transaction in [compute publication](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/compute/publication.ts),
-and its [batch executor](https://github.com/bonisoft3/mecha/blob/v0.20.6/services/compute/batches.ts)
+transaction in [compute publication](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/compute/publication.ts),
+and its [batch executor](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/compute/batches.ts)
 commits that publication with the internal-work outcome. Production integration
 should reuse its validation, ownership, hooks and authority contract rather than
 create a second competing publisher. The sink-trigger experiment tests an
