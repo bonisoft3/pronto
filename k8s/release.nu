@@ -730,6 +730,8 @@ export def auth-provider-environment [environment: record]: nothing -> record {
 	{
 		oidc: $settings, oidcSecrets: ($secrets | columns), secretValues: $secrets
 		oidcSecretDigest: (if ($secrets | is-empty) { "" } else { $secrets | sort | to json --raw | hash sha256 })
+		# The app's Android builds whose passkeys auth admits (capabilities.auth.android).
+		android: ($environment.WEBAUTHN_ANDROID_ORIGINS? | default "")
 	}
 }
 

@@ -178,6 +178,14 @@ def test_auth_provider_secrets [] {
 	assert equal $secret.valueFrom.secretKeyRef {name: "sample-oidc", key: "OIDC_GOOGLE_CLIENT_SECRET"}
 	assert ($secret.value? == null)
 	assert equal ($pod.metadata.annotations | get "pronto.dev/oidc-secret-digest") $split.oidcSecretDigest
+	assert equal $split.android ""
+	assert (($pod.spec.containers.0.env | where name == "WEBAUTHN_ANDROID_ORIGINS") | is-empty)
+	# The app's Android certificates, as compose gives auth them, reach its pod.
+	let fp = "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C"
+	let android = (auth-provider-environment ($environment | insert WEBAUTHN_ANDROID_ORIGINS $fp))
+	{App: {auth: ($android | reject secretValues)}} | to json | save -f $data
+	let with_android = (render-manifests $app.cue_path "kind" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-auth" | first)
+	assert equal ($with_android.spec.template.spec.containers.0.env | where name == "WEBAUTHN_ANDROID_ORIGINS" | first | get value) $fp
 	let rotated = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET "rotated-credential"))
 	assert ($rotated.oidcSecretDigest != $split.oidcSecretDigest)
 	let public_client = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET ""))

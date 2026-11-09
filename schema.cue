@@ -1599,6 +1599,12 @@ import (
 			// a guest's strip, run by the cluster's auth service. A provider's
 			// person and a passkey's are two.
 			providers?: [string, ...string] & list.UniqueItems()
+			// The app's Android builds whose passkeys the door admits, by the
+			// SHA-256 fingerprints of the certificates that sign them for
+			// release (keytool's `AB:CD:...`, 32 bytes): the cluster's
+			// capabilities.android, the auth service's WEBAUTHN_ANDROID_ORIGINS
+			// default and the release's. Never the terminal's.
+			android?: [string & =~"^[0-9A-F]{2}(:[0-9A-F]{2}){31}$", ...string & =~"^[0-9A-F]{2}(:[0-9A-F]{2}){31}$"] & list.UniqueItems()
 			// A named provider's settings, the cluster's defaults for what the
 			// deployment's OIDC_<NAME>_<SETTING> overrides: another issuer in
 			// the provider's place, where the cluster reaches it, the client

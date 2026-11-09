@@ -263,6 +263,9 @@ import (
 		// The auth service's own settings compose gives it (mecha's AUTH_*, such as
 		// its statement bound), filled by the release.
 		env: *{} | {[=~"^AUTH_[A-Z0-9_]+$"]: string}
+		// The SHA-256 fingerprints of the app's Android release certificates,
+		// comma-separated (compose's WEBAUTHN_ANDROID_ORIGINS), filled by the release.
+		android: *"" | string
 	}
 
 	// Where this release's resources are: a preview's project when it has one.
@@ -465,6 +468,7 @@ import (
 						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
 						if R._rpId != "" {{name: "WEBAUTHN_RP_ID", value: R._rpId}},
 						if R._origin != "" {{name: "WEBAUTHN_ORIGIN", value: R._origin}},
+						if R.auth.android != "" {{name: "WEBAUTHN_ANDROID_ORIGINS", value: R.auth.android}},
 					],
 						// The service refuses to start without its statement bound: compose's
 						// where it gives one, else resilience's client statement, in ms.
