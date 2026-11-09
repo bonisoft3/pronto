@@ -87,9 +87,15 @@ for (const v of portVars) {
   ports[v] = String((l.addr as Deno.NetAddr).port)
   l.close()
 }
+// The door: mecha's host launch before 0.22 named it DOOR_PORT; from 0.22 the
+// app's own URL names it (APP_URL=https://localhost:${CADDY_TLS_HOST_PORT:-n}),
+// and Caddy binds CADDY_DOOR_PORT (its Caddyfile's {$CADDY_DOOR_PORT:8443}),
+// which the compose leaves to its default: it is set here to the same port.
 const [, doorVar] = compose.match(/DOOR_PORT=\$\{([A-Z0-9_]+):-[0-9]+\}/) ??
+  compose.match(/APP_URL=https:\/\/localhost:\$\{([A-Z0-9_]+):-[0-9]+\}/) ??
   fail("the door's port is not in .bayt/process-compose.yaml; regenerate the app")
 const door = ports[doorVar]
+ports.CADDY_DOOR_PORT ??= door
 
 // process-compose with its API on a socket of its own, which `list` reads.
 const t0 = Date.now()
