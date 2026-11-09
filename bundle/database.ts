@@ -16,8 +16,13 @@ const load = async (href: string): Promise<ArrayBuffer> => {
   return res.arrayBuffer()
 }
 
+// pg_ivm ships as a gzipped tar, which PGlite's own loader gunzips and an extension handed over
+// as a blob must arrive already gunzipped.
+const gunzip = async (bytes: ArrayBuffer): Promise<ArrayBuffer> =>
+  new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+
 export async function createPageDatabase(assets: DatabaseAssets) {
-  const [wasm, data, initdb, icu, ivm] = await Promise.all([load(assets.wasm), load(assets.data), load(assets.initdb), load(assets.icu), load(assets.ivm)])
+  const [wasm, data, initdb, icu, ivm] = await Promise.all([load(assets.wasm), load(assets.data), load(assets.initdb), load(assets.icu), load(assets.ivm).then(gunzip)])
   return createDatabase({
     pgliteWasmModule: await WebAssembly.compile(wasm),
     initdbWasmModule: await WebAssembly.compile(initdb),

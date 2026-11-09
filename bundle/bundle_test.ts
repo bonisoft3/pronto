@@ -544,8 +544,7 @@ Deno.test('a bundled page resolves its imports and authorizes only its exact inl
     }).output()
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
-    const encoded = /<script type="application\/octet-stream" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1]
-    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))))
+    const payload = JSON.parse(/<script type="application\/json" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1])
     assert.deepEqual(JSON.parse(payload.files['shell/shell.json']).routes.map((route: { ssr: string }) => route.ssr), ['spa', 'spa'])
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
     // The boot runs first and installs the policy; only the module runs under it.
@@ -600,7 +599,7 @@ Deno.test('a bundled page preloads nothing its shim serves', async () => {
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
     const preloads = [...html.matchAll(/<link rel="preload" href="([^"]+)"/g)].map((m) => m[1])
     assert.deepEqual(preloads, ['https://fonts.example/a.woff2'])
-    assert.match(html, /preload: false/)
+    assert.match(html, /preload:\s*(?:false|!1)/)
   } finally {
     await Deno.remove(app, { recursive: true })
   }
@@ -675,7 +674,7 @@ Deno.test('a bundled page carries its realm units inlined beside the boot, its a
     assert.match(doc, /<style>body\{color:red\}<\/style>/)
     assert.match(doc, /<script>window\.lib = "<\\\/script><\\!--"<\/script>/)
     assert.match(doc, /São Paulo/)
-    const payload = JSON.parse(new TextDecoder().decode(Buffer.from(/id="pronto-payload">([^<]*)</.exec(html)![1], 'base64')))
+    const payload = JSON.parse(/id="pronto-payload">([^<]*)</.exec(html)![1])
     assert.equal(payload.files['shell/units/geocoder/unit.js'], 'postMessage({type:"pronto:ready"})')
     assert.equal(JSON.parse(payload.files['shell/shell.json']).units.map.self, true)
     assert.equal(JSON.parse(payload.files['shell/shell.json']).units.geocoder.self, undefined)

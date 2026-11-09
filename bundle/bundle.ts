@@ -562,15 +562,18 @@ const surface = (e: string) => {
 // route loads and a file that is not there is the 404 a check or a crawler
 // is owed. Under --base the host is a project site, which reads no _redirects.
 // An app with no CUE module has no program to list its routes.
-if (!base && await Deno.stat(path.join(app, 'cue.mod')).then(() => true, () => false)) {
+const hasProgram = await Deno.stat(path.join(app, 'cue.mod')).then(() => true, () => false)
+if (!base && hasProgram) {
   await Deno.writeTextFile(path.join(out, '_redirects'), surface('out.pagesRedirects') as string)
 }
 // The host-DOM hatches, as the terminal serves them (hostDomAssets), and every
 // file a hatch names, wherever it sits: a hatch may serve files outside its own
 // directory, as aprende's voice hatch serves the exams' figures.
+// The hatches themselves ride compiled into the page's module (hatches.js above), so an app with no
+// CUE module has no program to name the files they serve, and carries none.
 const hatchSrcs = Object.values(shell.hostDom ?? {}).map((h) => h.src)
 let hatchFiles = 0
-if (hatchSrcs.length) {
+if (hatchSrcs.length && hasProgram) {
   const held = hostDomAssets(surface('terminal.surface.statics') as StaticAsset[], hatchSrcs)
   for (const src of hatchSrcs) if (![...held.keys()].includes(src)) fail(`host-DOM hatch ${src} is not among the terminal's statics`)
   for (const file of surface('terminal.surface.hostDom') as string[]) {
