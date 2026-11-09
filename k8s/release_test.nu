@@ -54,6 +54,7 @@ def run-tests [] {
 	test_render_manifests_metal
 	test_render_ready_through_the_door
 	test_app_services
+	test_app_service_jail
 	test_container_resources_and_files
 	test_service_host
 	test_seed_configmaps
@@ -761,6 +762,45 @@ def test_app_services [] {
 	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
 	assert equal $pol.spec.podSelector.matchExpressions.0.values ["billing"]
 	assert ($pol.spec.egress | any {|e| ($e.ports? | default [] | any {|p| $p.port == 443 }) }) "it reaches a broker on 443"
+}
+
+def test_app_service_jail [] {
+	print "test a service may run a jail, act as a Google account, reach past the services' policy and keep scratch folders..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t jail.XXXXXX.json | str trim)
+	{App: {services: {
+		builder: {
+			port: 8690
+			jail: true
+			google: {provider: "projects/1/locations/global/workloadIdentityPools/contabo/providers/contabo-k3s", serviceAccount: "studio-run@p.iam.gserviceaccount.com", audience: "contabo-k3s"}
+			egress: [{cidr: "203.0.113.7/32", port: 6443}, {cidr: "0.0.0.0/0", except: ["10.0.0.0/8"], port: 80}]
+			scratch: {"/workspace": "20Gi"}
+		}
+		billing: {port: 8688}
+	}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let pod = ($objs | where kind == "Deployment" and metadata.name == "sample-builder" | first | get spec.template.spec)
+	assert equal $pod.hostUsers false "its root is no one on the node"
+	assert equal $pod.securityContext {appArmorProfile: {type: "Unconfined"}, seccompProfile: {type: "Unconfined"}}
+	let c = ($pod.containers | first)
+	assert equal $c.securityContext.procMount "Unmasked"
+	assert equal $pod.serviceAccountName "sample-builder"
+	assert (($objs | where kind == "ServiceAccount" and metadata.name == "sample-builder") | is-not-empty)
+	assert equal ($c.volumeMounts | where mountPath == "/var/run/secrets/gcp" | first | get readOnly) true
+	assert equal ($pod.volumes | where name == "google-token" | first | get projected.sources.0.serviceAccountToken.audience) "contabo-k3s"
+	let ws = ($c.volumeMounts | where mountPath == "/workspace" | first | get name)
+	assert equal ($pod.volumes | where name == $ws | first | get emptyDir.sizeLimit) "20Gi"
+	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-builder-egress" | first)
+	assert equal $pol.spec.podSelector.matchLabels."app.kubernetes.io/component" "builder"
+	assert equal $pol.spec.egress.0 {to: [{ipBlock: {cidr: "203.0.113.7/32"}}], ports: [{port: 6443, protocol: "TCP"}]}
+	assert equal $pol.spec.egress.1.to.0.ipBlock.except ["10.0.0.0/8"]
+	# A service that asks for none of it gets none.
+	let plain = ($objs | where kind == "Deployment" and metadata.name == "sample-billing" | first | get spec.template.spec)
+	assert (($plain | get -o hostUsers) == null) "no user namespace"
+	assert (($plain | get -o serviceAccountName) == null) "no account of its own"
+	assert (($plain.containers.0 | get -o securityContext) == null)
+	assert (($objs | where kind == "NetworkPolicy" and metadata.name == "sample-billing-egress") | is-empty)
 }
 
 def test_app_services_environment [] {
