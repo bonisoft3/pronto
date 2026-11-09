@@ -1435,7 +1435,8 @@ import (
 						lifecycle: preStop: sleep: seconds: 15
 						ports: [{name: "http", containerPort: s.port}, if s.metrics != _|_ {{name: "metrics", containerPort: s.metrics.port}}]
 						env: list.Concat([
-							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" {name: k, value: v}],
+							// A variable a Secret holds is that Secret's alone: compose's development value for it goes.
+							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" && s.secrets[k] == _|_ {name: k, value: v}],
 							[
 								{name: "PORT", value: "\(s.port)"},
 								{name: "ORIGIN", value: originValue},
@@ -1555,6 +1556,10 @@ import (
 							[{port: 50002, protocol: "TCP"}, {port: 3500, protocol: "TCP"}],
 						])
 					},
+					// A service with a hostname of its own takes the gateway's requests on its port, as caddy does.
+					if len([for _, s in release.services if s.host != _|_ {s}]) > 0 {
+						ports: [for _, s in release.services if s.host != _|_ {port: s.port, protocol: "TCP"}]
+					},
 					{
 						from: [{namespaceSelector: matchLabels: "kubernetes.io/metadata.name": "observability"}]
 						ports: [{port: 9090, protocol: "TCP"}, for _, s in release.services if s.metrics != _|_ {port: s.metrics.port, protocol: "TCP"}]
@@ -1616,6 +1621,16 @@ import (
 						hostname: gatewayHostname
 						allowedRoutes: namespaces: from: "Same"
 					},
+					// A service's own hostname (services.<n>.host), on HTTP: Cloudflare's tunnel holds its certificate.
+					for n, s in release.services if s.host != _|_ {
+						{
+							name:     "host-\(n)"
+							protocol: "HTTP"
+							port:     80
+							hostname: s.host
+							allowedRoutes: namespaces: from: "Same"
+						}
+					},
 					// Behind a tunnel, Cloudflare holds the certificate.
 					if release.gateway.tls.enabled && targetEnv.ingress.by != "tunnel" {
 						{
@@ -1663,6 +1678,26 @@ import (
 			}
 		},
 	]
+
+	// A service's own hostname straight to it (services.<n>.host): a broker the internet calls by name.
+	let serviceHostRouteObjs = [for n, s in release.services if release.gateway.enabled if s.host != _|_ {
+		apiVersion: "gateway.networking.k8s.io/v1"
+		kind:       "HTTPRoute"
+		metadata: {
+			name:      "\(release.name)-\(n)-route"
+			namespace: release.namespace
+			labels:    appLabels & {"app.kubernetes.io/component": n}
+		}
+		spec: {
+			parentRefs: [{name: "\(release.name)-gateway", sectionName: "host-\(n)"}]
+			hostnames: [s.host]
+			rules: [{
+				matches: [{path: {type: "PathPrefix", value: "/"}}]
+				timeouts: request: "\(bounds.gateway.default)s"
+				backendRefs: [{name: n, port: s.port}]
+			}]
+		}
+	}]
 
 	// The gateway's breaker is Envoy's concurrency limits on caddy's pool.
 	let backendTrafficPolicyObj = [
@@ -2059,6 +2094,7 @@ import (
 			runtimeObjects,
 			gatewayObj,
 			httpRouteObj,
+			serviceHostRouteObjs,
 			backendTrafficPolicyObj,
 			caddyNetworkPolicyObj,
 			backendsNetworkPolicyObj,
