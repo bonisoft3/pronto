@@ -56,7 +56,7 @@ Hydra holds those, with a store that can outlive a restart.
 | an app's `launch@local` | `identity-hydra` and `identity` as host processes via mise and Deno directly | Hydra in memory; Google with the operator's `broker.env`, else a stand-in signing in `tester` |
 | an app's `launch` | the same two services from their pinned base images | as above, the stand-in unless `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set |
 | the operator's machine | `identity/serve.sh` | Hydra on SQLite |
-| Cloud Run / k8s | `identity/serve.sh release` (operator), `release@gcp` / `release@k8s` (apps) | Hydra backed by PostgreSQL with private admin API; apps connect via `origin` public client |
-| `pages` / `cloudflare` | refused at compile time (`_authTargetRefusal`) | browser tier runs guest sessions; social providers require container/cloud tiers |
+| Cloud Run / k8s / Cloudflare | `identity/serve.sh release` (operator), `release@gcp` / `release@k8s` / `release@cloudflare` (apps) | Hydra backed by PostgreSQL with private admin API; apps connect via `origin` public client or direct `OIDC_<NAME>_CLIENT_ID` |
+| `pages` | refused at compile time (`_authTargetRefusal`) | browser tier runs guest sessions; social providers require edge, container or cloud tiers |
 
 An app naming `signin: broker: <url>` runs no local broker. Pronto publishes no custom runtime image: local runs use the host's Deno and Hydra binaries, and Docker launches use pinned base images.

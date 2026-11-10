@@ -3197,7 +3197,8 @@ _pgrollDir: "services/database/pgroll"
 		/* A short word is still a target: "sair" sets 23px of text, under the
 		   24px minimum a finger needs, so the box keeps the floor the label
 		   does not. */
-		body > nav .shell-signout { font-weight: 400;
+		body > nav :is(.shell-signout, .shell-signin, .shell-register) { font: inherit; font-weight: 400;
+		  color: inherit; background: none; border: 0; padding: 0; cursor: pointer;
 		  display: inline-flex; align-items: center; justify-content: center;
 		  min-height: 24px; min-width: 24px; }
 
@@ -4959,7 +4960,11 @@ _pgrollDir: "services/database/pgroll"
 				      - run: sayt verify@pages --target="${{ steps.deploy.outputs.page_url }}"\(pagesDir)
 				"""
 
-			let edgeEnvironment = {for _, h in E.code.capabilities.hatches if h.edge != _|_ for binding in h.edge.environment {(binding): binding}}
+			let authProviders = [if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ for p in E.code.capabilities.auth.providers {strings.ToUpper(p)}]
+			let edgeEnvironment = {
+				for _, h in E.code.capabilities.hatches if h.edge != _|_ for binding in h.edge.environment {(binding): binding}
+				for p in authProviders for s in ["CLIENT_ID", "CLIENT_SECRET", "ISSUER"] {("OIDC_\(p)_\(s)"): "OIDC_\(p)_\(s)"}
+			}
 			let edgeSecrets = strings.Join([for binding, _ in edgeEnvironment {"\n      \(binding): ${{ secrets.\(binding) }}"}], "")
 			let cloudflareJob = """
 				  cloudflare:

@@ -18,6 +18,8 @@
 //
 //	import "github.com/bonisoft3/pronto/identity"
 //	identity.#Signin & {signin: providers: ["google"]}
+@extern(embed)
+
 package identity
 
 import (
@@ -147,7 +149,28 @@ localBroker: "http://localhost:28443"
 					}
 					after: "identity-hydra": "healthy"
 				}
-				dockerfile: from: name: frontImage
+				dockerfile: {
+					from: name: frontImage
+					preamble: [
+						"""
+						COPY <<'EOF' /app/oidc.ts
+						\(_oidcTs)
+						EOF
+						COPY <<'EOF' /app/broker/core.ts
+						\(_brokerCoreTs)
+						EOF
+						COPY <<'EOF' /app/broker/main.ts
+						\(_brokerMainTs)
+						EOF
+						COPY <<'EOF' /app/hydra/fake.ts
+						\(_hydraFakeTs)
+						EOF
+						COPY <<'EOF' /app/hydra/front.ts
+						\(_hydraFrontTs)
+						EOF
+						""",
+					]
+				}
 				compose: {
 					ports: ["28443:28443"]
 					environment: {
@@ -172,13 +195,19 @@ localBroker: "http://localhost:28443"
 _hydraCmd: "exec hydra serve all --dev"
 _frontCmd: """
 	let p = (if (($env.PRONTO_DIR? | default "") != "") {
-		$env.PRONTO_DIR
+	  $env.PRONTO_DIR
 	} else if ("plugins/pronto/identity/hydra/front.ts" | path exists) {
-		"plugins/pronto"
+	  "plugins/pronto"
 	} else if ("identity/hydra/front.ts" | path exists) {
-		"."
+	  "."
 	} else {
-		(^mise where github:bonisoft3/pronto | str trim)
+	  (^mise where github:bonisoft3/pronto | str trim)
 	})
 	^deno run --no-config --allow-net --allow-env ($p | path join "identity/hydra/front.ts")
-"""
+	"""
+
+_oidcTs:       string @embed(file="oidc.ts", type=text)
+_brokerCoreTs: string @embed(file="broker/core.ts", type=text)
+_brokerMainTs: string @embed(file="broker/main.ts", type=text)
+_hydraFakeTs:  string @embed(file="hydra/fake.ts", type=text)
+_hydraFrontTs: string @embed(file="hydra/front.ts", type=text)

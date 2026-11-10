@@ -354,6 +354,7 @@ ${images ? '    const image = await edgeImage(request, env, caches.default, ctx,
     durable_objects: { bindings: [{ name: 'CLUSTER', class_name: 'Cluster' }, ...(compute ? [{ name: 'COMPUTE_COORDINATOR', class_name: 'ComputeCoordinator' }, compute.reader] : [])] },
     exports: { Cluster: { type: 'durable-object', storage: 'sqlite' }, ...(compute ? { ComputeCoordinator: { type: 'durable-object', storage: 'sqlite' } } : {}) },
     ...(config.ai ? { ai: config.ai } : {}),
+    ...(config.vars ? { vars: config.vars } : {}),
     rules: [
       { type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false },
       { type: 'Data', globs: ['**/*.data', '**/*.tgz'], fallthrough: false },

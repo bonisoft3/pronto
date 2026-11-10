@@ -100,9 +100,9 @@ if (hatches.length && !clustered) fail('edge hatches run in the cluster, which a
 const drains = clustered ? await clusterDrains(path.join(app, '.pronto/cluster.json')) : []
 
 // Asked before anything is cleared: a refused release leaves the last one's output standing.
-const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{assets: *code.capabilities.seedAssets | null, seedBlobs: *code.capabilities.seedBlobs | null, blobs: *code.capabilities.blobs | false, images: *code.capabilities.edgeImages | null}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
+const seedOut = await new Deno.Command('cue', { args: ['export', '.', '-e', '{assets: *code.capabilities.seedAssets | null, seedBlobs: *code.capabilities.seedBlobs | null, blobs: *code.capabilities.blobs | false, images: *code.capabilities.edgeImages | null, signIn: *cluster.capabilities.signIn | {}}', '--out', 'json'], cwd: app, stdout: 'piped', stderr: 'inherit' }).output()
 if (!seedOut.success) fail('cue export of code.capabilities failed')
-const { assets, seedBlobs, blobs, images } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null }
+const { assets, seedBlobs, blobs, images, signIn } = JSON.parse(new TextDecoder().decode(seedOut.stdout)) as { assets: { manifest: string; origin: string } | null; seedBlobs: { dir: string } | null; blobs: boolean; images: { sourceBucket?: string; plan: 'free' | 'paid' } | null; signIn: Record<string, { client?: string; issuer?: string; scope?: string; params?: string }> }
 const routeScreens: Record<string, string> = {}
 for (const { files } of shell.routes ?? []) routeScreens[files.html] = await Deno.readTextFile(path.join(app, files.html))
 const imagePlan = imagePlanRefusal(routeScreens, images)
@@ -151,6 +151,30 @@ const blobVars: Record<string, string> = blobs ? {
   BLOB_URL: images ? '/img/insecure/plain/s3://mecha-objects/' : '/blobs/mecha-objects/',
   ...(images?.sourceBucket ? { IMAGE_SOURCE_BUCKET: images.sourceBucket } : {}),
 } : {}
+const authProviders = Object.keys(signIn)
+const authVars: Record<string, string> = authProviders.length ? {
+  OIDC_PROVIDERS: authProviders.join(','),
+  ...Object.fromEntries(authProviders.flatMap((p) => {
+    const upper = p.toUpperCase()
+    const cfg = signIn[p] ?? {}
+    const localIssuer = cfg.issuer === 'http://localhost:28443'
+    const entries: [string, string][] = []
+    const issuer = Deno.env.get(`OIDC_${upper}_ISSUER`) || (!localIssuer ? cfg.issuer : undefined)
+    if (issuer) entries.push([`OIDC_${upper}_ISSUER`, issuer])
+    const client = Deno.env.get(`OIDC_${upper}_CLIENT_ID`) || (!localIssuer || issuer ? cfg.client : undefined)
+    if (client) entries.push([`OIDC_${upper}_CLIENT_ID`, client])
+    const scope = Deno.env.get(`OIDC_${upper}_SCOPE`) || (!localIssuer || issuer ? cfg.scope : undefined)
+    if (scope) entries.push([`OIDC_${upper}_SCOPE`, scope])
+    const params = Deno.env.get(`OIDC_${upper}_AUTHORIZE_PARAMS`) || (!localIssuer || issuer ? cfg.params : undefined)
+    if (params) entries.push([`OIDC_${upper}_AUTHORIZE_PARAMS`, params])
+    return entries
+  })),
+} : {}
+const workerVars: Record<string, string> = {
+  ...blobVars,
+  ...authVars,
+  ...(domain ? { ORIGIN: `https://${domain}` } : {}),
+}
 const blobBindings = blobs ? {
   r2_buckets: [{ binding: 'BLOB_OBJECTS', bucket_name: `${name}-mecha-objects` }],
   vars: blobVars,
@@ -383,7 +407,7 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   observability: { enabled: true },
   ...blobBindings,
   // A handler's sink.origin: the release's domain, never the host a request came by.
-  ...(domain ? { vars: { ...blobVars, ORIGIN: `https://${domain}` } } : {}),
+  ...(Object.keys(workerVars).length ? { vars: workerVars } : {}),
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
   ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   rules: [

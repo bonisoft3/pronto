@@ -78,10 +78,10 @@ A release names the operator's broker instead (`OIDC_<NAME>_ISSUER` and
 
 ## Deploy targets
 
-- **`gcp` & `k8s`**: An app points `mecha-auth` to the operator's production broker
-  via `OIDC_<NAME>_ISSUER` with client `origin`. No client secret is required.
-- **`pages` & `cloudflare`**: Refused at compile time (`_authTargetRefusal`). Browser-tier
-  apps run guest sessions; social provider sign-in requires container or cloud tiers.
+- **`gcp`, `k8s` & `cloudflare`**: An app points auth (`mecha-auth` or `mecha-edge`) to the operator's production broker
+  via `OIDC_<NAME>_ISSUER` with client `origin` (or a direct `OIDC_<NAME>_CLIENT_ID`). No client secret is required with the broker.
+- **`pages`**: Refused at compile time (`_authTargetRefusal`). Browser-tier
+  apps run guest sessions; social provider sign-in requires edge, container or cloud tiers.
 
 ## Running the broker (the operator, once)
 

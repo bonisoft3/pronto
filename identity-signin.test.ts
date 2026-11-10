@@ -38,6 +38,8 @@ Deno.test("a local launch brings the broker up: Hydra, then the front waiting on
   const front = targets.value.identity;
   assertStringIncludes(hydra.dockerfile.from.name, "oryd/hydra:v26.2.0@sha256:");
   assertStringIncludes(front.dockerfile.from.name, "denoland/deno:distroless-2.5.0@sha256:");
+  assertEquals(front.dockerfile.preamble.length, 1);
+  assert(!front.entrypoint.do.includes("\t"));
   assertEquals(front.entrypoint.after, { "identity-hydra": "healthy" });
   assertEquals(targets.value.launch.compose.depends_on.identity.condition, "service_healthy");
   // The auth service reaches the front by its service name, which the host projection reads as loopback.
@@ -67,20 +69,15 @@ Deno.test("a provider name or broker address that is not one is refused", async 
   }
 });
 
-Deno.test("pages and cloudflare release targets refuse social sign-in providers", async () => {
-  for (const [target, reason] of [
-    ["pages", "pages release target does not support social sign-in providers"],
-    ["cloudflare", "cloudflare release target does not yet support social sign-in providers"],
-  ]) {
-    const program = signin().replace("targets: []", `targets: ["${target}"]`);
-    const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
-    assertEquals(res.success, false, `expected target ${target} to fail`);
-    assertStringIncludes(res.stderr, reason);
-  }
+Deno.test("pages release target refuses social sign-in providers", async () => {
+  const program = signin().replace("targets: []", `targets: ["pages"]`);
+  const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
+  assertEquals(res.success, false, "expected target pages to fail");
+  assertStringIncludes(res.stderr, "pages release target does not support social sign-in providers");
 });
 
-Deno.test("gcp, k8s and docker targets admit social sign-in providers", async () => {
-  for (const target of ["gcp", "k8s", "docker"]) {
+Deno.test("cloudflare, gcp, k8s and docker targets admit social sign-in providers", async () => {
+  for (const target of ["cloudflare", "gcp", "k8s", "docker"]) {
     const program = signin().replace("targets: []", `targets: ["${target}"]`);
     const res = await cue(["export", "-", "-e", "out", "--out", "json"], program);
     assertEquals(res.success, true, res.stderr);

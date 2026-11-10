@@ -146,7 +146,11 @@ await requireLocalCluster({ config: authConfig, name: authSettings.name, previou
 const jwtSecret = keepJwtSecret
   ? (await keptJwtSecrets(authConfig, token, runWrangler), undefined)
   : await releaseJwtSecret({ secret: Deno.env.get('JWT_SECRET'), config: authConfig, previous, wrangler: runWrangler, random })
-const secrets: Record<string, string> = { ...await hatchEnvironment(out, name => Deno.env.get(name)), IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}) }
+const oidcSecrets: Record<string, string> = {}
+for (const [k, v] of Object.entries(Deno.env.toObject())) {
+  if (/^OIDC_[A-Z0-9_]+$/.test(k) && v.trim()) oidcSecrets[k] = v
+}
+const secrets: Record<string, string> = { ...oidcSecrets, ...await hatchEnvironment(out, name => Deno.env.get(name)), IMPORT_TOKEN: token, ...(jwtSecret ? { JWT_SECRET: jwtSecret } : {}) }
 const turnId = Deno.env.get('CLOUDFLARE_TURN_KEY_ID')
 const turnToken = Deno.env.get('CLOUDFLARE_TURN_KEY_TOKEN')
 if (Boolean(turnId) !== Boolean(turnToken)) fail('Configure both Cloudflare TURN credentials together')
