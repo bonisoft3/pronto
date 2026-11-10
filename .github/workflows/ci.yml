@@ -1,0 +1,45 @@
+# The fork line's checks (PRONTO-217): every pull request to feat/launch-local-0.16 runs the k8s
+# release suite and the deno tests that stand alone (ci-tests.txt), on bsoneca's Mac (the host
+# runner pronto-fork-1, pronto-plugins runners/setups.cue), never a hosted runner. A ruleset on the
+# fork line requires this job, so nothing merges past a broken suite again (PRONTO-124's k8s suite,
+# 2026-11-09). The other tests need the monorepo's layout (../omnishell, the plugins' CUE module) or
+# docker, which the Mac does not run: they are not listed. A test added to ci-tests.txt runs here.
+name: ci
+
+on:
+  pull_request:
+    branches: ['feat/launch-local-0.16']
+  push:
+    branches: ['feat/launch-local-0.16']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    # A public repository's pull request from a fork never runs on the Mac.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, macOS, pronto-fork]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # The tools .mise.toml pins (deno, cue), with mise as sayt keeps it on the Mac; nu as the
+      # suite's own shell and the one it runs `nu` with.
+      - name: Tools
+        run: |
+          mise=$(find "$HOME/Library/Caches/sayt" -maxdepth 2 -path '*/mise-*/mise' -type f | sort -V | tail -1)
+          echo "MISE=$mise" >> "$GITHUB_ENV"
+          "$mise" trust -q .
+          "$mise" install -q
+      - name: k8s release suite
+        run: '"$MISE" exec github:nushell/nushell@0.116.1 -- nu k8s/release_test.nu'
+      - name: deno tests
+        run: |
+          # shellcheck disable=SC2046
+          "$MISE" exec -- deno test -A --no-check $(cat ci-tests.txt)
