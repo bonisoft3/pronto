@@ -388,15 +388,13 @@ import "encoding/yaml"
 						{port: 53, protocol: "TCP"},
 					]
 				},
-				// Scrape targets: PostgREST's admin port, CloudNativePG's exporter,
-				// caddy, daprd's metrics.
+				// Scrape targets: any pod of the cluster, on the port its annotations name. A fixed list
+				// (PostgREST's admin, CloudNativePG's exporter, caddy, daprd) missed every app's own
+				// services.<n>.metrics port (a journeys collector's 9598, an exporter's 9399), whose
+				// scrapes were refused, so their series never reached VictoriaMetrics. Pods only: what
+				// lies outside the cluster stays at the API server's ports below.
 				{
-					ports: [
-						{port: 3001, protocol: "TCP"},
-						{port: 9187, protocol: "TCP"},
-						{port: 8080, protocol: "TCP"},
-						{port: 9090, protocol: "TCP"},
-					]
+					to: [{namespaceSelector: {}}]
 				},
 				// Pod discovery through the API server.
 				{

@@ -1060,6 +1060,9 @@ def test_observability_manifests [] {
 	assert ($yaml | str contains "value: /vmui")
 	assert ($yaml | str contains "value: /jaeger")
 	assert ($yaml | str contains "name: observability-netpol")
+	# VictoriaMetrics reaches any pod's metrics port (an app's collector, an exporter), not a fixed list.
+	let pol = ($yaml | split row "---" | each { from yaml } | where {|o| ($o.kind? == "NetworkPolicy") and ($o.metadata.name? == "observability-netpol") } | first)
+	assert ($pol.spec.egress | any {|e| ($e.to? == [{namespaceSelector: {}}]) and ($e.ports? == null) }) "scrapes reach every pod of the cluster"
 }
 
 def test_fetch_verified_checksum_mismatch [] {
