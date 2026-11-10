@@ -1855,6 +1855,14 @@ import (
 			// expires. A session otherwise lives in the tab, so every visit is a
 			// new, empty guest. Off, or unanswered, nothing is kept.
 			keepGuest?: string & =~"^[a-z][a-z0-9_-]{0,63}$"
+			// The flag (the app's flags_spec.cue) that has a provider's sign-in
+			// keep the guest it starts from: while it is on, the terminal hands
+			// the guest to the auth service before the provider's link leaves the
+			// page (POST {service}/oidc/adopt), and the account the provider makes
+			// is that guest, its rows and progress with it (a returning subject
+			// signs in as itself). Off, or unanswered, a provider's sign-in
+			// makes a new account as it always did.
+			adoptGuest?: string & =~"^[a-z][a-z0-9_-]{0,63}$"
 			// The image the cluster's auth service runs in place of mecha's: a
 			// target of the program's cluster unification (`{ref: ":<target>"}`)
 			// built FROM mecha's, or a pinned name. The service keeps mecha's

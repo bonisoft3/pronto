@@ -130,3 +130,13 @@ Deno.test("the flag that keeps a guest across visits reaches the terminal's auth
   const bad = await exported(withAuth(`{required: false, service: "/auth", keepGuest: "Keep Guest"}`), "out");
   assertEquals(bad.success, false);
 });
+
+// A provider's sign-in that keeps the guest it starts from (PRONTO-209): the flag that
+// turns it on reaches the terminal, which asks it before handing the guest over.
+Deno.test("the flag that has a provider's sign-in adopt the guest reaches the terminal's auth", async () => {
+  const files = await exported(withAuth(`{required: false, service: "/auth", adoptGuest: "google_adopts_guest"}`), "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals(files.value["shell/shell.json"].data.auth.adoptGuest, "google_adopts_guest");
+  const bad = await exported(withAuth(`{required: false, service: "/auth", adoptGuest: "Adopt Guest"}`), "out");
+  assertEquals(bad.success, false);
+});
