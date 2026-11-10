@@ -1090,6 +1090,13 @@ def test_observability_manifests [] {
 	let yaml = (cue export --expression '(#ObservabilityStack & {domainSuffix: "localhost"}).manifests' --out text $obs_cue)
 
 	assert ($yaml | str contains "name: vmsingle")
+	# Its samples outlive the pod (PRONTO-189).
+	let vm = ($yaml | from yaml)
+	assert equal ($vm | where kind == PersistentVolumeClaim | get metadata.name) [vmsingle-data]
+	let vmd = ($vm | where kind == Deployment and metadata.name == vmsingle | first).spec
+	assert equal $vmd.strategy.type Recreate
+	assert ($vmd.template.spec.containers.0.volumeMounts | any {|m| $m.name == "data" and $m.mountPath == "/vmsingle-data" })
+	assert equal ($vmd.template.spec.volumes | where name == data | first).persistentVolumeClaim.claimName vmsingle-data
 	assert ($yaml | str contains "image: docker.io/victoriametrics/victoria-metrics:v1.106.1@sha256:54b283129634239db62798fd8d92e8d8d4372a0b114e72967eb233dbb264ff53")
 	assert ($yaml | str contains "name: jaeger")
 	assert ($yaml | str contains "image: docker.io/jaegertracing/all-in-one:1.64.0@sha256:7e9591218e7ddd51e568ef892e3ea190ae420ecf97c4d718910a3f57e076c216")
