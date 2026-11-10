@@ -21,6 +21,7 @@ use release.nu [
 	auth-provider-environment
 	auth-provider-secret
 	runtime-services
+	schema-copy-steps
 	release-tree
 	release-override
 	defines
@@ -97,6 +98,7 @@ def run-tests [] {
 	test_cloud_release_refused
 	test_preview_renders_apart
 	test_preview_delete_needs_a_preview
+	test_preview_schema_from
 
 	print "\nAll release-k8s tests passed!"
 }
@@ -1275,4 +1277,30 @@ def test_environment_secrets [] {
 	"x" | save -f -r ((get-operator-cache-dir) | path join "sops-test.bin")
 	assert equal (fetch-verified $entry) ((get-operator-cache-dir) | path join "sops-test.bin")
 	rm -r $dir
+}
+
+# A preview's database starts as production's schema (--schema-from): roles without passwords, the
+# objects with their owners, pgroll's rows and initdb's marker, each read from the released primary
+# and loaded into the preview's, and never into a release's own database.
+def test_preview_schema_from [] {
+	print "test --schema-from copies production's schema, not its rows, into a preview only..."
+	let source = {namespace: "brawl-chess", pod: "brawl-chess-db-1", database: "app"}
+	let target = {namespace: "brawl-chess-rc", pod: "brawl-chess-rc-db-1", database: "app"}
+	let steps = (schema-copy-steps $source $target --pgroll)
+	assert equal ($steps | get what) ["roles" "schema" "pgroll" "initdb marker"]
+	assert ($steps | all {|s| ($s.from | take 5) == [kubectl exec -i -n brawl-chess] and ($s.into | take 5) == [kubectl exec -i -n brawl-chess-rc] })
+	let roles = ($steps | where what == roles | first)
+	assert ("--no-role-passwords" in $roles.from) "a preview never holds production's password hashes"
+	assert (not $roles.strict) "the preview's own roles exist already"
+	let schema = ($steps | where what == schema | first)
+	assert ("--schema-only" in $schema.from)
+	assert (not ("--no-owner" in $schema.from)) "objects keep production's owners, whose roles were copied"
+	assert ($steps | where what != roles | all {|s| $s.strict and ("ON_ERROR_STOP=1" in $s.into) })
+	assert ("--data-only" in ($steps | where what == pgroll | first).from)
+	assert ("--schema=pgroll" in ($steps | where what == pgroll | first).from)
+	assert (($steps | where what == "initdb marker" | first).from | last | str contains "COMMENT ON DATABASE %I IS %L;', 'app'")
+	assert equal (schema-copy-steps $source $target | get what) ["roles" "schema" "initdb marker"]
+	let res = (do { nu ($k8s_dir | path join "release.nu") --app ($fixtures_dir | path join "sample") --schema-from brawl-chess } | complete)
+	assert ($res.exit_code != 0)
+	assert ($res.stderr | str contains "--schema-from copies a schema into a preview")
 }

@@ -853,6 +853,66 @@ export def run-job [manifest: string, name: string, namespace: string, --timeout
 	kubectl logs -n $namespace $"job/($name)" --tail=5
 }
 
+# A preview whose database starts as production's is (`--schema-from`): the steps that copy a
+# released namespace's schema, without its rows, into a preview's empty database, each a dump
+# run on the source's primary whose output the target's primary reads. Its roles (no passwords:
+# a preview never holds production's), every object with its owner, pgroll's own rows (the
+# migrations production has run, so migrate runs only the ones it has not) and the comment
+# marking initdb done, so the preview's initdb replays its idempotent steps and its migrate
+# upgrades the copy as the release will upgrade production (#619, #624's failures show here).
+export def schema-copy-steps [
+	source: record # {namespace, pod, database}: the released primary, read only
+	target: record # {namespace, pod, database}: the preview's primary
+	--pgroll       # the app migrates with pgroll: copy its schema's rows
+]: nothing -> list<record> {
+	let on = {|side, cmd| ["kubectl" "exec" "-i" "-n" $side.namespace $side.pod "-c" "postgres" "--"] | append $cmd }
+	let psql = {|db, strict| ["psql" "-U" "postgres" "-d" $db "-Xq"] | append (if $strict { ["-v" "ON_ERROR_STOP=1"] } else { [] }) }
+	[
+		# The target's own roles (postgres, the operator's, its managed ones) already exist: their errors are expected.
+		{what: "roles", strict: false
+			from: (do $on $source ["pg_dumpall" "-U" "postgres" "--roles-only" "--no-role-passwords"])
+			into: (do $on $target (do $psql "postgres" false))}
+		{what: "schema", strict: true
+			from: (do $on $source ["pg_dump" "-U" "postgres" "-d" $source.database "--schema-only" "--clean" "--if-exists"])
+			into: (do $on $target (do $psql $target.database true))}
+	] | append (if $pgroll { [
+		{what: "pgroll", strict: true
+			from: (do $on $source ["pg_dump" "-U" "postgres" "-d" $source.database "--data-only" "--schema=pgroll"])
+			into: (do $on $target (do $psql $target.database true))}
+	] } else { [] }) | append [
+		{what: "initdb marker", strict: true
+			from: (do $on $source ["psql" "-U" "postgres" "-d" $source.database "-XtAc" ("SELECT format('COMMENT ON DATABASE %I IS %L;', '" + $target.database + "', d) FROM shobj_description((SELECT oid FROM pg_database WHERE datname = current_database()), 'pg_database') AS d WHERE d IS NOT NULL")])
+			into: (do $on $target (do $psql $target.database true))}
+	]
+}
+
+# A namespace's database primary: the pod, and the database its Cluster made.
+export def db-primary [namespace: string, cluster?: string]: nothing -> record {
+	let clusters = (kubectl get clusters.postgresql.cnpg.io -n $namespace -o json | from json | get items
+		| where {|c| ($cluster | is-empty) or $c.metadata.name == $cluster })
+	if ($clusters | length) != 1 { error make { msg: $"($namespace) has ($clusters | length) database clusters: name one" } }
+	let c = ($clusters | first)
+	{namespace: $namespace, pod: $c.status.currentPrimary, database: $c.spec.bootstrap.initdb.database}
+}
+
+# Copies the released namespace's schema into a preview's database (schema-copy-steps), once:
+# a database initdb already marked is the preview's own by now, and is left as it is.
+export def copy-schema [source_ns: string, target: record, --pgroll] {
+	let marker = (kubectl exec -n $target.namespace $target.pod -c postgres -- psql -U postgres -d $target.database -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()" | str trim)
+	if $marker == "pronto initdb" {
+		print $"($target.namespace)'s database is built already: its schema is not copied again"
+		return
+	}
+	let source = (db-primary $source_ns)
+	for step in (schema-copy-steps $source $target --pgroll=$pgroll) {
+		print $"Copying ($step.what) from ($source.namespace) into ($target.namespace)..."
+		let dump = (run-external ($step.from | first) ...($step.from | skip 1) | complete)
+		if $dump.exit_code != 0 { error make { msg: $"($step.what): the dump in ($source.namespace) failed: ($dump.stderr)" } }
+		let load = ($dump.stdout | run-external ($step.into | first) ...($step.into | skip 1) | complete)
+		if $step.strict and $load.exit_code != 0 { error make { msg: $"($step.what): loading into ($target.namespace) failed: ($load.stderr)" } }
+	}
+}
+
 export def runtime-services [compose: record]: nothing -> record {
 	let supported = ["compute" "feldera" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy"]
 	if "airlock" in $compose.services {
@@ -1058,11 +1118,15 @@ export def main [
 	--skip-observability = false # Skip VictoriaMetrics/Jaeger/Vector bootstrap
 	--preview: string = ""   # Release the whole stack into a namespace of its own, `<name>-<preview>`, beside the released one
 	--delete                 # With --preview: remove that preview's namespace (its database and secrets with it)
+	--schema-from: string = "" # With --preview: a new preview's database starts as this namespace's schema, without its rows (schema-copy-steps)
 ] {
 	let app_info = (resolve-app $app)
 	let cluster_env = ($cluster_env | default $env.SAY_RELEASE_ARGS_CLUSTER_ENV? | default (default-environment $app_info.cue_path))
 	if $delete and ($preview | is-empty) {
 		error make { msg: "--delete removes a preview: name it with --preview=<name>. A release is never deleted from here." }
+	}
+	if ($schema_from | is-not-empty) and ($preview | is-empty) {
+		error make { msg: "--schema-from copies a schema into a preview's database: name it with --preview=<name>. A release's own database is never overwritten." }
 	}
 	# A preview is the release under another name (App.preview, k8s/schema/release.cue), unified into the package.
 	let preview_file = if ($preview | is-not-empty) {
@@ -1275,6 +1339,10 @@ export def main [
 		sleep 3sec
 	}
 
+	if ($schema_from | is-not-empty) {
+		if $schema_from == $target_ns { error make { msg: $"--schema-from ($schema_from) is the preview's own namespace" } }
+		copy-schema $schema_from (db-primary $target_ns $"($rname)-db") --pgroll=$has_migrate
+	}
 	for job in (["initdb"] | append (if $has_migrate { ["migrate"] } else { [] })) {
 		run-job ($jobs_yaml | where {|d| $d =~ $"\(?m\)^  name: ($rname)-($job)\\s*$" } | first) $"($rname)-($job)" $target_ns
 	}
