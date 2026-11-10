@@ -526,7 +526,9 @@ export def ensure-node-buildkit [--timeout: string = "180s"] {
 # which stop-port-forward ends.
 export def port-forward [namespace: string, deployment: string, port: int] {
 	let log = (mktemp -t pf.XXXXXX | str trim)
-	let pid = (^bash -c $"kubectl port-forward -n ($namespace) deployment/($deployment) :($port) > ($log) 2>&1 & echo $!" | str trim | into int)
+	# A deployment by name, or any target kubectl names (pod/<name>: a release that may read pods alone).
+	let target = if ($deployment | str contains "/") { $deployment } else { $"deployment/($deployment)" }
+	let pid = (^bash -c $"kubectl port-forward -n ($namespace) ($target) :($port) > ($log) 2>&1 & echo $!" | str trim | into int)
 	for _ in 1..60 {
 		let found = (open --raw $log | parse --regex 'Forwarding from 127\.0\.0\.1:(?<p>\d+)')
 		if ($found | is-not-empty) { return {port: ($found.0.p | into int), pid: $pid} }
@@ -1123,14 +1125,73 @@ export def tenant-manifests [namespace: string]: string -> string {
 # What a tenant's release refuses before it builds: a namespace and a host to release into, and
 # nothing that needs more than the namespace's publisher (no preview, no SSH to the node, no node registry
 # pushed through it, no secrets decrypted with the cluster's key).
-export def tenant-refusals [tenant: string, host: string, preview: string, target: record, app_dir: string, environment: string]: nothing -> list<string> {
+export def tenant-refusals [tenant: string, host: string, preview: string, target: record, app_dir: string, environment: string, images: string = ""]: nothing -> list<string> {
 	[
+		(if ($tenant | is-not-empty) and ($images | is-empty) { "--tenant needs --images: a tenant's release builds nothing with its publisher's rights (tenant-images builds them)" })
+		(if ($tenant | is-empty) and ($images | is-not-empty) { "--images is a tenant's: name its namespace with --tenant" })
 		(if ($tenant | is-not-empty) and ($host | is-empty) { "--tenant needs --host, the one address its namespace was given" })
 		(if ($tenant | is-empty) and ($host | is-not-empty) { "--host is a tenant's address: name its namespace with --tenant" })
 		(if ($tenant | is-not-empty) and ($preview | is-not-empty) { "a tenant's release is never a preview" })
 		(if ($tenant | is-not-empty) and ($target.build?.by? == "node") { "a tenant's release cannot push to the node's registry, which only SSH reaches: build with buildkit or cloudbuild" })
 		(if ($tenant | is-not-empty) and ($app_dir | path join $"secrets.($environment).enc.yaml" | path exists) { $"a tenant's release decrypts no secrets with the cluster's key: secrets.($environment).enc.yaml is the operator's" })
 	] | compact
+}
+
+# A tenant's repository for one of its services: under its namespace's name, so the builder that pushes
+# it (tenant-images) pushes nowhere another release reads from. It is the schema's tenant naming (k8s.cue).
+export def tenant-repo [tenant: string, app: string, svc: string]: nothing -> string {
+	$"($tenant)-($app)-($svc)"
+}
+
+# A tenant's images (PRONTO-130), built where a tenant's untrusted build may run and pushed by whoever
+# runs this, never by the build: `buildkit` is a buildkitd that keeps its process sandbox and reaches
+# nothing on the node (pronto's services/buildkit-tenants), which hands each image back as an OCI archive;
+# they are pushed to the node's registry through a port-forward to its pod, under tenant-repo's names
+# alone. Answers what release@k8s --tenant --images reads, by service: the database's tagged with its
+# Postgres major. Needs docker's client and buildx (no daemon), crane and kubectl.
+export def tenant-images [app_dir: string, compose: string, services: list<string>, app: string, tenant: string, tag: string, buildkit: string, --platform: string]: nothing -> record {
+	let compose = ($compose | release-tree)
+	let root = (do { cd $app_dir; ^git rev-parse --show-toplevel } | str trim)
+	let builder = $"pronto-tenant-(random chars --length 6 | str lowercase)"
+	let out = (mktemp -d -t tenant-images.XXXXXX | str trim)
+	let sets = ($services | each {|s| [--set $"($s).output=type=oci,dest=($out)/($s).tar" --set $"($s).tags="] } | flatten)
+	let platform_set = if ($platform | is-not-empty) { [--set $"*.platform=($platform)"] } else { [] }
+	let pod = (^kubectl get pods -n pronto-registry -l app=registry -o jsonpath='{.items[0].metadata.name}' | str trim)
+	if ($pod | is-empty) { error make {msg: "the node's registry has no pod to push to"} }
+	^docker buildx create --name $builder --driver remote $buildkit | ignore
+	let reg = (try { port-forward pronto-registry $"pod/($pod)" $node_registry_port } catch {|e| do { ^docker buildx rm $builder } | complete | ignore; error make {msg: $e.msg} })
+	try {
+		do {
+			cd $app_dir
+			with-env {SOURCE_DATE_EPOCH: "0"} {
+				$compose | ^docker buildx bake -f - --builder $builder --provenance=false $"--allow=fs.read=($root)" ...$platform_set ...$sets ...$services
+			}
+		}
+		let registry = $"127.0.0.1:($reg.port)"
+		let pushed = ($services | each {|svc|
+			let layout = ($out | path join $svc)
+			mkdir $layout
+			^tar -xf ($out | path join $"($svc).tar") -C $layout
+			let repo = (tenant-repo $tenant $app $svc)
+			let first = if $svc == "database" { $"build-($builder)" } else { $tag }
+			let ref = (^crane push --insecure $layout $"($registry)/($repo):($first)" | str trim)
+			let digest = ($ref | split row "@" | last)
+			let final = if $svc == "database" {
+				let major = (node-registry-pg-major $registry $repo $digest)
+				node-registry-tag $registry $repo $digest $major
+				http delete $"http://($registry)/v2/($repo)/manifests/($first)" | ignore
+				$major
+			} else { $tag }
+			{svc: $svc, ref: {tag: $final, digest: $digest}}
+		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
+		do { ^docker buildx rm $builder } | complete | ignore
+		stop-port-forward $reg; rm -rf $out
+		$pushed
+	} catch {|e|
+		do { ^docker buildx rm $builder } | complete | ignore
+		stop-port-forward $reg; rm -rf $out
+		error make {msg: $e.msg}
+	}
 }
 
 # Main entrypoint for release@k8s
@@ -1146,6 +1207,7 @@ export def main [
 	--schema-from: string = "" # With --preview: a new preview's database starts as this namespace's schema, without its rows (schema-copy-steps)
 	--tenant: string = ""    # Release into this namespace, made by someone else, with its publisher's rights alone (the KUBECONFIG given): no namespace, operators, tunnel or observability (PRONTO-130)
 	--host: string = ""      # With --tenant: the one address the namespace was given, over the app's gateway.host
+	--images: string = ""    # With --tenant: a JSON file of the images tenant-images pushed, by service; a tenant's release builds nothing
 ] {
 	let app_info = (resolve-app $app)
 	let cluster_env = ($cluster_env | default $env.SAY_RELEASE_ARGS_CLUSTER_ENV? | default (default-environment $app_info.cue_path))
@@ -1230,7 +1292,7 @@ export def main [
 		$config.environment
 	} else { read-environment $cluster_env $app_info.cue_path }
 	let registry = $target_env.registry
-	let refused = (tenant-refusals $tenant $host $preview $target_env $app_source_dir $cluster_env)
+	let refused = (tenant-refusals $tenant $host $preview $target_env $app_source_dir $cluster_env $images)
 	if ($refused | is-not-empty) { error make { msg: ($refused | str join "; ") } }
 	if $cluster_env == "gke" {
 		kubectl get crd clusters.postgresql.cnpg.io externalsecrets.external-secrets.io configurations.dapr.io gateways.gateway.networking.k8s.io backendtrafficpolicies.gateway.envoyproxy.io | ignore
@@ -1295,11 +1357,16 @@ export def main [
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
 	# A node's registry is pushed to through this release's tunnel, on a local
 	# port, while the manifests name it as the node sees it (registry).
-	let push_registry = if $target_env.build.by == "node" {
+	let push_registry = if $target_env.build.by == "node" and not $is_tenant {
 		ensure-node-registry
 		$"localhost:(forward-node-registry $tunnel.target $tunnel.socket)"
 	} else { $registry }
-	let pushed = if $target_env.build.by == "cloudbuild" {
+	let pushed = if $is_tenant {
+		let given = (open $images)
+		let missing = ($build_svcs | where {|s| $s not-in ($given | columns) })
+		if ($missing | is-not-empty) { error make { msg: $"--images has no image for ($missing | str join ', ')" } }
+		$given | select ...$build_svcs
+	} else if $target_env.build.by == "cloudbuild" {
 		cloud-build-images $app_source_dir $app_info.name $build_svcs $target_env $app_meta.image.tag
 	} else if $target_env.build.by == "buildkit" {
 		ensure-node-buildkit

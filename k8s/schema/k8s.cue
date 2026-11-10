@@ -57,6 +57,9 @@ import (
 			":\(release.image.tag)",
 		][0]
 		out: [
+			// A tenant's images are its own, under its namespace's name, which no other release pushes to
+			// (tenant-images: the builder that pushes them fixes the name).
+			if targetEnv.registry != "" && release.tenant != "" {"\(targetEnv.registry)/\(release.tenant)-\(release.name)-\(svc)\(ref)"},
 			// A preview runs the release's images: their repositories are the release's name, never the preview's.
 			if targetEnv.registry != "" {"\(targetEnv.registry)/\(release.name)-\(svc)\(ref)"},
 			"\(release.name)-\(svc)\(ref)",

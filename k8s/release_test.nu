@@ -10,6 +10,7 @@ use std/assert
 use release.nu [
 	tenant-manifests
 	tenant-refusals
+	tenant-repo
 	node-registry-manifests
 	node-registry-in-use
 	node-registry-keep-tag
@@ -429,14 +430,21 @@ def test_tenant_release [] {
 	# Never a preview too.
 	{App: {tenant: "studio-ana", preview: "rc"}} | to json | save -f $data
 	assert ((try { render-manifests $app.cue_path "metal" --data $data; false } catch { true }))
-	rm $data
 	let built = {build: {by: "buildkit"}}
 	assert equal (tenant-refusals "" "" "" $built $app.dir "metal") []
-	assert equal (tenant-refusals "studio-ana" "a.example.com" "" $built $app.dir "metal") []
-	assert equal (tenant-refusals "studio-ana" "" "" $built $app.dir "metal" | length) 1
+	assert equal (tenant-refusals "studio-ana" "a.example.com" "" $built $app.dir "metal" "i.json") []
+	assert equal (tenant-refusals "studio-ana" "" "" $built $app.dir "metal" "i.json" | length) 1
 	assert equal (tenant-refusals "" "a.example.com" "" $built $app.dir "metal" | length) 1
-	assert equal (tenant-refusals "studio-ana" "a.example.com" "rc" $built $app.dir "metal" | length) 1
-	assert equal (tenant-refusals "studio-ana" "a.example.com" "" {build: {by: "node"}} $app.dir "metal" | length) 1
+	assert equal (tenant-refusals "studio-ana" "a.example.com" "rc" $built $app.dir "metal" "i.json" | length) 1
+	assert equal (tenant-refusals "studio-ana" "a.example.com" "" {build: {by: "node"}} $app.dir "metal" "i.json" | length) 1
+	# A tenant's release builds nothing: it is given its images.
+	assert equal (tenant-refusals "studio-ana" "a.example.com" "" $built $app.dir "metal" | length) 1
+	assert equal (tenant-refusals "" "" "" $built $app.dir "metal" "i.json" | length) 1
+	# Its images are under its namespace's name, as the schema names them.
+	{App: {tenant: "studio-ana", tenantHost: "mines-ana-games.example.com", image: {pushed: {caddy: {tag: "t1", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}} | to json | save -f $data
+	let caddy = (render-manifests $app.cue_path "metal" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-caddy" | first | get spec.template.spec.containers | where name == "caddy" | first | get image)
+	assert equal $caddy $"us-central1-docker.pkg.dev/ops/pronto/(tenant-repo studio-ana sample caddy):t1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	rm $data
 }
 
 def test_release_override [] {
