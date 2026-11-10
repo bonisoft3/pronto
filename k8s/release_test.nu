@@ -101,6 +101,7 @@ def run-tests [] {
 	test_release_nu_k8s_platform_cli
 	test_cloud_release_refused
 	test_preview_renders_apart
+	test_preview_origin_https
 	test_preview_delete_needs_a_preview
 	test_preview_schema_from
 
@@ -1259,6 +1260,22 @@ def test_preview_renders_apart [] {
 	let text = ($preview | to yaml)
 	assert ($text | str contains "http://localhost:18080")
 	assert not ($text | str contains "https://sample.apps.example.com")
+}
+
+def test_preview_origin_https [] {
+	print "test a preview may say it is reached over https at localhost, behind a local TLS front, and nowhere else..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let overlay = (mktemp -t preview-https.XXXXXX.json | str trim)
+	{App: {preview: rc, previewOrigin: "https://localhost:18443"}} | to json | save -f $overlay
+	let text = (render-manifests $app.cue_path metal --data $overlay)
+	rm $overlay
+	assert ($text | str contains "https://localhost:18443")
+	assert not ($text | str contains "http://localhost:18080")
+	let bad = (mktemp -t preview-bad.XXXXXX.json | str trim)
+	{App: {preview: rc, previewOrigin: "https://evil.example:443"}} | to json | save -f $bad
+	let refused = (try { render-manifests $app.cue_path metal --data $bad | ignore; false } catch { true })
+	rm $bad
+	assert $refused
 }
 
 def test_preview_delete_needs_a_preview [] {
