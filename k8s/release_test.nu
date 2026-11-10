@@ -1199,6 +1199,9 @@ def test_preview_renders_apart [] {
 	let namespaced = ($preview | where {|d| ($d.metadata?.namespace? | is-not-empty) })
 	assert equal ($namespaced | get metadata.namespace | uniq) [sample-rc]
 	assert equal ($preview | where kind in ["Deployment" "Service"] | get metadata.name | where {|n| $n starts-with "sample-" and not ($n starts-with "sample-rc") }) []
+	# A preview runs the release's own images, by the same names: none is named for the preview.
+	let images = {|docs| $docs | each {|d| ($d.spec?.template?.spec?.containers? | default []) | get -o image | compact } | flatten | append ($docs | where kind == "Cluster" | get -o spec.imageName | compact) | uniq | sort }
+	assert equal (do $images $preview) (do $images $released)
 	# The released one backs its database up; the preview does neither the store nor the schedule.
 	assert ($released | where kind == "ObjectStore" | is-not-empty)
 	assert equal ($preview | where kind in ["ObjectStore" "ScheduledBackup"]) []

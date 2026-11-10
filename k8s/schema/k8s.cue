@@ -56,8 +56,9 @@ import (
 			":\(release.image.tag)",
 		][0]
 		out: [
-			if targetEnv.registry != "" {"\(targetEnv.registry)/\(release.id)-\(svc)\(ref)"},
-			"\(release.id)-\(svc)\(ref)",
+			// A preview runs the release's images: their repositories are the release's name, never the preview's.
+			if targetEnv.registry != "" {"\(targetEnv.registry)/\(release.name)-\(svc)\(ref)"},
+			"\(release.name)-\(svc)\(ref)",
 		][0]
 	}
 
