@@ -39,6 +39,7 @@
     "npm:@bufbuild/protobuf@2.14.1": "2.14.1",
     "npm:@duckdb/duckdb-wasm@1.33.1-dev57.0": "1.33.1-dev57.0",
     "npm:@duckdb/node-api@1.5.6-r.1": "1.5.6-r.1",
+    "npm:@electric-sql/client@1.5.27": "1.5.27",
     "npm:@electric-sql/pglite-icu-full@0.0.2": "0.0.2",
     "npm:@electric-sql/pglite-pg_ivm@0.0.9": "0.0.9_@electric-sql+pglite@0.5.8",
     "npm:@electric-sql/pglite@0.5.8": "0.5.8",
@@ -391,6 +392,16 @@
         "@duckdb/node-bindings-win32-x64"
       ]
     },
+    "@electric-sql/client@1.5.27": {
+      "integrity": "sha512-JXyhdg2CBvTRGK1aEGBkb24HoN4Zk9v5lA9Ibxjmcrgjt1j/NgnXndxmuSxVtAYZsM4no5kHXfTnFplgiI9ztg==",
+      "dependencies": [
+        "@microsoft/fetch-event-source"
+      ],
+      "optionalDependencies": [
+        "@rollup/rollup-darwin-arm64"
+      ],
+      "bin": true
+    },
     "@electric-sql/pglite-icu-full@0.0.2": {
       "integrity": "sha512-K/yQbMlODpnwmjIPUkM6dFKVQjdGKVPArdjmlK275KVWDY+AbHCDEuvcDZXneQw8ELYKHnXhPEhJWSFUtpLk4A=="
     },
@@ -505,6 +516,9 @@
         "langium"
       ]
     },
+    "@microsoft/fetch-event-source@2.0.1": {
+      "integrity": "sha512-W6CLUJ2eBMw3Rec70qrsEW0jOm/3twwJv21mrmj2yORiaVmVYGS4sSS5yUwvQc1ZlDLYGPnClVWmUUMagKNsfA=="
+    },
     "@pdf-lib/standard-fonts@1.0.0": {
       "integrity": "sha512-hU30BK9IUN/su0Mn9VdlVKsWBS6GyhVfqjwl1FjZN4TxP6cCw0jP2w7V3Hf5uX7M0AZJ16vey9yE0ny7Sa59ZA==",
       "dependencies": [
@@ -562,6 +576,11 @@
     },
     "@protobufjs/utf8@1.1.2": {
       "integrity": "sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug=="
+    },
+    "@rollup/rollup-darwin-arm64@4.68.1": {
+      "integrity": "sha512-biPWTUPYDWejnysuD4A1kJ4mjT121duL6WJ8JJ0lyFWuLSnC91WF6C/X63CSz7z8yJIQEXixlHOpPK/VzPQ3Gw==",
+      "os": ["darwin"],
+      "cpu": ["arm64"]
     },
     "@swc/helpers@0.5.23": {
       "integrity": "sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==",

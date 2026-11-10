@@ -72,6 +72,23 @@ async function releaseDocker(code: string): Promise<Target> {
   return res.value;
 }
 
+Deno.test("the appliance runs the patched Electric with storage on the database volume", async () => {
+  const rd = await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'));
+  assert(rd.deps.includes(":electric:outs"));
+  assert(rd.dockerfile.copy.some((c) => c.from?.ref === ":electric" && c.srcs[0] === "/app/" && c.dst === "/electric-app/"));
+  const electric = overlayOf(rd).processes.electric;
+  assertStringIncludes(electric.command, "/electric-app/bin/entrypoint");
+  assertStringIncludes(electric.command, "ELECTRIC_STORAGE_DIR=${PGDATA:-/var/lib/pgsql/data}/electric");
+  assertStringIncludes(electric.command, "DATABASE_URL=postgresql://electric:");
+  assertStringIncludes(electric.command, "ELECTRIC_SECRET=${ELECTRIC_SECRET:-dev-electric-secret}");
+  assertStringIncludes(electric.command, "ELECTRIC_MANUAL_TABLE_PUBLISHING=true");
+  assertStringIncludes(electric.command, "LD_LIBRARY_PATH=/electric-libs");
+  assert(rd.dockerfile.copy.some((c) => c.from?.ref === ":electric" && c.srcs[0] === "/lib/*-linux-gnu/libtinfo.so.6*" && c.dst === "/electric-libs/"));
+  assert(rd.dockerfile.cmd.includes("electric"));
+  assertStringIncludes(rd.dockerfile.preamble.join("\n"), "ENV PRONTO_UPSTREAM_ELECTRIC=127.0.0.1:3002");
+  assert(!rd.dockerfile.epilogue.join("\n").includes("electric-handle stub"));
+});
+
 // The appliance runs the airlock beside its database: a program with effects
 // once released an image whose invoking rows claimed their ledger and never ran.
 Deno.test("release-docker runs a program's effects: the airlock, its daprd and the ledger's upgrade as processes", async () => {
@@ -107,6 +124,22 @@ Deno.test("a bridge served on another port in the appliance is dialed there, by 
   const overlay = rd.dockerfile.preamble.find((l) => l.includes("process-compose.appliance"))!;
   assertStringIncludes(overlay, "BRIDGE_FETCH_URL=http://transport:8091");
   assertStringIncludes(overlay, "portcheck --port 8091");
+  const edit = rd.dockerfile.epilogue.find((line) => line.includes("unexpected bridge endpoint in charge"));
+  assert(edit, "the endpoint file is not rewritten before daprd starts");
+  const dir = await Deno.makeTempDir();
+  try {
+    const endpoint = `${dir}/charge.yaml`;
+    await Deno.writeTextFile(endpoint, "kind: HTTPEndpoint\nmetadata:\n  name: charge\nspec:\n  baseUrl: http://transport:8080\n");
+    const command = edit.slice(4).replace("/dapr/airlock/charge.yaml", endpoint);
+    const result = await new Deno.Command("sh", { args: ["-c", command] }).output();
+    assert(result.success, new TextDecoder().decode(result.stderr));
+    const binding = parse(await Deno.readTextFile(endpoint)) as { spec: { baseUrl: string } };
+    assertEquals(binding.spec.baseUrl, "http://transport:8091");
+    const unexpected = await new Deno.Command("sh", { args: ["-c", command] }).output();
+    assert(!unexpected.success, "an unexpected endpoint must fail the image build");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("a bridge not deployed on docker starts nothing there, and its effects settle not deployed", async () => {
@@ -131,8 +164,8 @@ Deno.test("release-docker refuses an effect answered by the AI gateway, which th
 Deno.test("a program without effects releases the appliance it did before", async () => {
   const code = paymentProgram({ machine: "pending: type: \"final\"" }).replace("targets: []", 'targets: ["docker"]').replace(/effects: charge: \{[\s\S]*?\n    \}\n/, "");
   const rd = await releaseDocker(code);
-  assert(!rd.dockerfile.preamble.some((l) => l.includes("process-compose.appliance")), "an appliance overlay without effects");
-  assertEquals(rd.dockerfile.cmd, ["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml", "-t=false", "--no-server", "caddy"]);
+  assert(overlayOf(rd).processes.electric);
+  assertEquals(rd.dockerfile.cmd, ["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml", "-f", "/.bayt/process-compose.appliance.yaml", "-t=false", "--no-server", "caddy", "electric"]);
   // The names each go in, or the entrypoint dies naming the one it could not
   // add: one swallowed write once left the airlock dialing nothing.
   const epilogue = rd.dockerfile.epilogue.join("\n");
@@ -178,6 +211,7 @@ Deno.test("release-docker runs the change feed as compose does: Conduit, the bus
   // prefers where it is: golaberto's appliance served its renderer's 502.
   assert(!copied.includes("docker>docker"), "the app's docker/ is copied whole, its Caddyfile with it");
   assert(rd.dockerfile.preamble.includes("ENV CADDY_CONFIG_FILE=/etc/caddy/Caddyfile"), "the door may load the app's docker/Caddyfile");
+  assert(rd.dockerfile.preamble.includes("ENV CADDY_DATA_HOME=/var/lib/caddy"));
   const preamble = rd.dockerfile.preamble.join("\n");
   for (const s of ["ENV MECHA_MESH_DIR=/mesh-events", "ENV MECHA_TRANSFORM_DIR=/transform"]) assertStringIncludes(preamble, s);
   for (const p of ["conduit", "transform"]) assert(rd.dockerfile.cmd.includes(p), `${p} is not started: ${rd.dockerfile.cmd}`);
@@ -197,9 +231,50 @@ Deno.test("release-docker runs a program's computations on DuckDB snapshots, wit
   assert(!rd.deps.some((d) => d.includes("feldera")), `Feldera is a dependency: ${rd.deps}`);
   const copied = rd.dockerfile.copy.map((c) => `${c.from?.ref ?? ""}${c.srcs.join(",")}>${c.dst}`);
   for (const c of [":compute/app/>/compute-app/", ":compute/deno-dir>/deno-dir", ":compute/durex>/durex"]) assert(copied.includes(c), `${c} not copied: ${copied.join(" ")}`);
-  for (const e of ["ENV COMPUTE_APP_DIR=/compute-app", "ENV BAYT_LOCAL_DUCKDB_EXTENSIONS=/compute-app/extensions", "ENV DENO_DIR=/deno-dir"]) assert(rd.dockerfile.preamble.includes(e), e);
+  for (const e of ["ENV COMPUTE_APP_DIR=/compute-app", "ENV COMPUTE_STATE_DIR=/var/lib/duckstream", "ENV BAYT_LOCAL_DUCKDB_EXTENSIONS=/compute-app/extensions", "ENV DENO_DIR=/deno-dir"]) assert(rd.dockerfile.preamble.includes(e), e);
   for (const p of ["transform", "compute"]) assert(rd.dockerfile.cmd.includes(p), `${p} not started: ${rd.dockerfile.cmd}`);
-  assert(rd.dockerfile.epilogue.includes("RUN touch /compute-app/extensions/.installed-v1.5.6"), "compute would install extensions at start");
+  assert(rd.dockerfile.epilogue.some((line) => line.includes("touch /compute-app/extensions/.installed-v1.5.6")), "compute would install extensions at start");
+  assert(rd.dockerfile.epilogue.some((line) => line.includes("/compute-app/step-worker.ts")), "bounded worker must pass the offline dependency check");
+});
+
+Deno.test("the released appliance overrides development PostgreSQL durability settings", async () => {
+  const rd = await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'));
+  const command = overlayOf(rd).processes.database.command;
+  for (const setting of ["fsync", "synchronous_commit", "full_page_writes"]) {
+    assertStringIncludes(command, `${setting}=on`);
+    assert(command.lastIndexOf(`${setting}=on`) > command.lastIndexOf(`${setting}=off`));
+  }
+});
+
+Deno.test("a Feldera appliance builds native artifacts and runs them without a manager", async () => {
+  const code = paymentProgram().replace("targets: []", 'targets: ["docker"]') +
+    '\napp: state: entities: Total: {table: "total", durability: "live", fields: [{name: "id", type: "uuid", pk: true}, {name: "n", type: "int"}]}\napp: state: computations: totals: to: ["Total"]\n_cluster: state: duckstreamEngine: "feldera"\n';
+  const built = await exportJson('_build.project.targets["feldera-artifacts"]', code);
+  assertEquals(built.success, true, built.stderr);
+  const artifact = built.value;
+  assertStringIncludes(artifact.dockerfile.from.name, "pipeline-manager:0.367.0@sha256:");
+  assert(artifact.deps.includes(":compute:outs"));
+  const artifactFiles = artifact.dockerfile.copy.map((c: { from?: { ref?: string }; srcs: string[]; dst: string }) => `${c.from?.ref ?? ""}${c.srcs.join(",")}>${c.dst}`);
+  for (const file of ["native-artifacts-build.ts", "native-artifacts.ts", "native-sources.ts", "native-supervisor.c", "deno.json", "deno.lock", "computations/test-effects-totals.feldera.json"]) {
+    assert(artifactFiles.includes(`:compute/app/${file}>/app/${file}`), file);
+  }
+  assert(!artifactFiles.some((file: string) => file.includes(":compute/app/>") || file.includes(".wasm") || file.includes(".js>")), artifactFiles.join(" "));
+  // Structured commands precede Bayt metadata, so regeneration cannot recompile SQL.
+  assertEquals(artifact.dockerfile.epilogue ?? [], []);
+  const commands = artifact.dockerfile.preamble.join("\n") + "\n" + artifact.cmd.builtin.do;
+  for (const value of ["/app/computations/test-effects-totals.feldera.json", "USER ubuntu", "native-artifacts-build.ts /app/feldera-build-specs.json /opt/feldera"]) assertStringIncludes(commands, value);
+  const rd = await releaseDocker(code);
+  assert(rd.deps.includes(":feldera-artifacts:outs"));
+  for (const sibling of ["airlock", "durex", "packages"]) {
+    assert(rd.dockerfile.copy.some((c) => c.from?.ref === ":compute" && c.srcs[0] === `/${sibling}` && c.dst === `/${sibling}`));
+  }
+  assertStringIncludes(rd.dockerfile.epilogue.join("\n"), "deno check --cached-only --frozen --config /compute-app/deno.json /compute-app/main.ts /compute-app/cage.ts");
+  assert(rd.dockerfile.copy.some((c) => c.from?.ref === ":feldera-artifacts" && c.srcs[0] === "/opt/feldera/" && c.dst === "/opt/feldera/"));
+  assert(rd.dockerfile.preamble.includes("ENV DUCKSTREAM_ENGINE=feldera"));
+  assert(rd.dockerfile.preamble.includes("ENV FELDERA_ARTIFACTS_DIR=/opt/feldera"));
+  assert(rd.dockerfile.preamble.includes("ENV FELDERA_WORK_DIR=/var/lib/feldera"));
+  assert(!rd.dockerfile.cmd.includes("feldera"));
+  assertStringIncludes(rd.dockerfile.epilogue.join("\n"), "export DUCKSTREAM_ENGINE=feldera");
 });
 
 Deno.test("a program without drains, pipelines or schedules starts no change feed, ticker or clock", async () => {
@@ -228,14 +303,14 @@ Deno.test("a program without forward migrations copies no migrate image", async 
   assert(!rd.deps.some((d) => d.startsWith(":migrate")), `${rd.deps}`);
 });
 
-// The appliance drops the renderer's handler and stubs Electric's. Cut at the
+// The appliance drops the renderer's handler. Cut at the
 // first line that closed any block, both left golaberto's Caddyfile unbalanced:
 // "unrecognized directive: :8080".
 Deno.test("the appliance's Caddyfile edits keep its blocks balanced, and the image validates it", async () => {
   const rd = await releaseDocker(paymentProgram().replace("targets: []", 'targets: ["docker"]'));
   const edits = rd.dockerfile.epilogue.filter((l) => l.includes("/etc/caddy/Caddyfile") && l.startsWith("RUN awk"));
-  assertEquals(edits.length, 2, edits.join("\n"));
-  assertStringIncludes(rd.dockerfile.epilogue.join("\n"), "RUN caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile");
+  assertEquals(edits.length, 1, edits.join("\n"));
+  assertStringIncludes(rd.dockerfile.epilogue.join("\n"), "RUN ELECTRIC_SECRET=validation-only caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile");
   const dir = await Deno.makeTempDir();
   const nested = [
     "(app) {",
@@ -270,8 +345,7 @@ Deno.test("the appliance's Caddyfile edits keep its blocks balanced, and the ima
   const depth = [...out].reduce((d, c) => d + (c === "{" ? 1 : c === "}" ? -1 : 0), 0);
   assertEquals(depth, 0, out);
   assert(!out.includes("handle @rendered"), out);
-  assert(!out.includes("reverse_proxy {$UP:electric:3000}"), out);
-  assertStringIncludes(out, "header electric-handle stub");
+  assertStringIncludes(out, "reverse_proxy {$UP:electric:3000}");
   assertStringIncludes(out, "    handle {\n      file_server\n    }\n  }\n}\n:{$PORT:8080} {\n  import app\n}");
 });
 

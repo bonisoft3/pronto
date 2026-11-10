@@ -32,6 +32,7 @@ export async function writeEdgeCompute(out: string, mecha: string, omnishell: st
   const edge = path.join(mecha, 'packages/mecha-edge/src')
   const runtime = path.join(mecha, 'services/compute')
   const hostFiles = [
+    path.join(mecha, 'packages/compute-snapshot/src/chunk-limits.ts'),
     ...['compute.ts', 'snapshot-query.ts', 'snapshot-compute.ts', 'snapshot-program.ts', 'paged-query.ts', 'paged-execution.ts', 'paged-compute.ts', 'paged-transport.ts', 'paged-query-action.ts', 'query-sql.ts'].map(file => path.join(edge, file)),
     ...['static-build.ts', 'static-cage.ts', 'query-stages.ts'].map(file => path.join(runtime, file)),
     fileURLToPath(new URL('edge-compute.ts', import.meta.url)),

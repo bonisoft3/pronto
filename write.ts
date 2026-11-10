@@ -30,7 +30,7 @@ import { declaredMachine } from "./mecha-spec.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { compileMechaReducer, type MechaReducerMachine, type Terminal } from "./mecha-reducer.ts";
 import { compileCortexSources, type CortexChart } from "./cortex-sources.ts";
-import { compileFunction } from "./database-functions.ts";
+import { compileFunction, functionScript } from "./database-functions.ts";
 import { compileCortexSql } from "./cortex-machine.ts";
 import { surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
 import { sha256Hex } from "./facts.ts";
@@ -245,6 +245,18 @@ async function rendered(emission: Emission): Promise<Map<string, string | Uint8A
         statements.push(compileFunction({ name, fuel }, await Deno.readTextFile(`${appDir}/${rules}`), terminalOf));
       }
       contents.set(rel, sqlFile(rel, statements.join("\n")));
+      continue;
+    }
+    if (f.format === "function-local") {
+      const { functions } = f.data as { functions: Record<string, { rules: string; fuel: number }> };
+      const terminalOf = await terminal();
+      const compiled: Record<string, { source: string; fuel: number }> = {};
+      for (const name of Object.keys(functions).sort()) {
+        const { rules, fuel } = functions[name];
+        if (unsafe(rules)) fail(`${rel}: unsafe function rules path ${rules}`);
+        compiled[name] = { source: functionScript({ name, fuel }, await Deno.readTextFile(`${appDir}/${rules}`), terminalOf), fuel };
+      }
+      contents.set(rel, JSON.stringify(compiled, null, 2) + "\n");
       continue;
     }
     if (f.format === "mecha-reducer-local") {

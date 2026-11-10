@@ -41,9 +41,16 @@ export const PLAIN = `(value, where = 'answer') => {
   throw new TypeError(where + ' is not JSON')
 }`;
 
-export function compileFunction(spec: DatabaseFunction, source: string, terminal: Terminal): string {
+/** The module as a compartment evaluates it to the function: what the plv8
+ * engine runs, and what `.pronto/functions.json` carries for the app's tests to
+ * run in omnishell's executor (test/function-local.ts). */
+export function functionScript(spec: DatabaseFunction, source: string, terminal: Pick<Terminal, "instrument">): string {
   const module = functionModule(spec, source, terminal);
-  const script = `${module.statements}\n(${module.completion})`;
+  return `${module.statements}\n(${module.completion})`;
+}
+
+export function compileFunction(spec: DatabaseFunction, source: string, terminal: Terminal): string {
+  const script = functionScript(spec, source, terminal);
   const body = `
 if (!globalThis.__prontoHybridSES) {
   ${terminal.ses}

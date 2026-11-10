@@ -337,7 +337,6 @@ export async function main(argv = Deno.args) {
 
     console.log(`  - ${browserResult.journeysRun} user journeys executed`);
     console.log(`  - ${browserResult.screensChecked} unique screens verified`);
-    console.log("  - Zero-tolerance network trap: zero 4xx/5xx or request aborts");
 
     if (!browserResult.passed) {
       console.error("\nTier 2 Verification Failed:");
@@ -346,6 +345,7 @@ export async function main(argv = Deno.args) {
       }
       Deno.exit(1);
     }
+    console.log("  - Network trap: no HTTP failures, failed Electric recoveries, or transport errors");
     console.log("  ✔ Tier 2 passed cleanly.");
   }
 

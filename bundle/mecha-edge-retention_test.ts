@@ -19,18 +19,27 @@ async function controlled() {
     assert.fail(JSON.stringify(await read()))
   }
   const claim = async () => (await wait(() => json<ComputeCapture | null>('/test/capture'), value => value !== null))!
+  const prepare = async (capture: ComputeCapture) => {
+    for (let i = 0; i < 2000; i++) if (await json<boolean>('/test/prepare', capture)) return
+    throw new Error('physical reader did not finish preparation')
+  }
   const reader = (capture: ComputeCapture, owner: 'A' | 'B', action = 'status') =>
     json<{ waiting: number; released: boolean; imported: unknown }>(`/test/reader/${action}`, { capture, owner })
+  const computeStatus = async () => {
+    const response = await test.at('/import/compute', { headers: { authorization: 'Bearer test-import' } })
+    assert.equal(response.status, 200)
+    return await response.json() as { readerOwner: string; readers: { owner: string; capture: ComputeCapture; status: { released: boolean; transfer: unknown } | null }[] }
+  }
   const retention = () => json<{ readers: {owner: string; capture: ComputeCapture}[]; snapshots: {id: string}[]; resetStarted: boolean }>('/test/retention')
-  return { ...test, json, wait, claim, reader, retention }
+  return { ...test, json, wait, claim, prepare, reader, retention, computeStatus }
 }
 
-for (const lostRelease of [false, true]) Deno.test({ name: `staged publication releases physical input without new work${lostRelease ? ' after a lost cleanup acknowledgement' : ''}`, sanitizeResources: false, sanitizeOps: false }, async () => {
+for (const lostRelease of [false, true]) Deno.test({ name: `staged publication retires capture and retains baseline${lostRelease ? ' after a lost cleanup acknowledgement' : ''}`, sanitizeResources: false, sanitizeOps: false }, async () => {
   const test = await controlled()
   try {
-    await test.json('/auth/guest', {})
+    const guest = await test.json<{token: string}>('/auth/guest', {})
     const capture = await test.claim()
-    await test.json('/test/prepare', capture)
+    await test.prepare(capture)
     await test.json('/test/staged', { capture, action: 'stage' })
     if (lostRelease) await test.reader(capture, 'A', 'fail')
     const response = await test.at('/test/staged', { method: 'POST', body: JSON.stringify({ capture }) })
@@ -39,15 +48,25 @@ for (const lostRelease of [false, true]) Deno.test({ name: `staged publication r
     if (lostRelease) {
       assert.match(body, /lost reader release acknowledgement/)
       assert.equal((await test.retention()).snapshots.length, 1)
+      const report = await test.computeStatus()
+      assert.equal(report.readerOwner, test.owners.A)
+      assert.deepEqual(report.readers[0].status, { released: true, transfer: null })
       await test.worker.restart()
       assert.equal(await test.json('/test/capture'), null)
     }
     assert.equal(await test.json('/test/publication', capture), 'published')
     assert.deepEqual((await test.state()).rows, [{ id: 'staged', body: 'published' }])
-    assert.deepEqual((await test.retention()).snapshots, [])
+    assert.deepEqual((await test.retention()).snapshots, [{ id: JSON.stringify(capture.identity) }])
     assert.deepEqual((await test.retention()).readers, [])
     assert.equal((await test.reader(capture, 'A')).released, true)
     await test.json('/test/staged', { capture })
+    const write = await test.at('/crud/note', { method: 'POST', headers: { authorization: `Bearer ${guest.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ body: 'next capture' }) })
+    assert.equal(write.status, 201, await write.text())
+    const next = await test.claim()
+    const before = await test.retention()
+    assert.ok(before.snapshots.some(row => row.id === JSON.stringify(capture.identity)))
+    await test.prepare(next)
+    assert.deepEqual((await test.retention()).snapshots, [{ id: JSON.stringify(next.identity) }])
     await test.install(true)
     const stale = await test.at('/test/staged', { method: 'POST', body: JSON.stringify({ capture }) })
     assert.equal(stale.status, 500)
@@ -68,6 +87,12 @@ Deno.test({ name: 'immutable reader ownership survives rebind, publication and f
     await test.rebind('B')
     assert.equal(await test.json('/test/prepare', capture), false)
     assert.equal((await test.retention()).readers.length, 2)
+    const report = await test.computeStatus()
+    assert.equal(report.readerOwner, test.owners.B)
+    assert.equal(report.readers.find(row => row.owner === test.owners.A)?.status, null)
+    const current = report.readers.find(row => row.owner === test.owners.B)?.status
+    assert.equal(current?.released, false)
+    assert.ok(current?.transfer)
     await test.json('/test/stale', capture)
     assert.equal(await test.json('/test/publication', capture), 'published')
     assert.equal((await test.reader(capture, 'B')).released, true)

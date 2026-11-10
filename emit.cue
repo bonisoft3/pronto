@@ -38,7 +38,7 @@ import (
 )
 
 #File: {
-	format: "sql" | "cortex-sql" | "local-handler" | "mecha-reducer-sql" | "mecha-reducer-local" | "function-sql" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
+	format: "sql" | "cortex-sql" | "local-handler" | "mecha-reducer-sql" | "mecha-reducer-local" | "function-sql" | "function-local" | "type-sql" | "carrier-sql" | "seed-sql" | "proto" | "yaml" | "json" | "caddyfile" | "html" | "css" | "cue" | "bloblang" | "jessie" | "js" | "text" | "toml" | "document"
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
@@ -4019,6 +4019,12 @@ _pgrollDir: "services/database/pgroll"
 			}
 			if E.code.state.functions != _|_ if len([for r in E._raw if r.name == "009_functions.sql" {r}]) == 0 {
 				"services/database/migrations/009_functions.sql": {format: "function-sql", data: functions: E.code.state.functions}
+			}
+			if E.code.state.functions != _|_ {
+				// Each function's module as the engine evaluates it, with its fuel,
+				// for the app's tests to run in omnishell's executor
+				// (test/function-local.ts).
+				".pronto/functions.json": {format: "function-local", data: functions: E.code.state.functions}
 			}
 			if len(E.code.state.mecha.reducers) > 0 {
 				// Each machine compiled bare, without its surface: the step as

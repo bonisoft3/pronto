@@ -87,7 +87,10 @@ function needs one.
 wrapper reaches the engine. The edge object creates the engine over `pgl_step` under
 the step name `fn:<name>`, apart from any machine's
 ([[../../bundle/edge-functions.ts]], `mecha-edge/src/machines.ts`). The browser
-tier has no engine, so a call there fails.
+tier has no engine, so a call there fails. The same module, with its fuel, is
+emitted into the app as `.pronto/functions.json`, which the app's tests run
+through omnishell's `test/function-local.ts`
+([[../monorepo#commands-find-the-platform-with-mise-where|monorepo mode]]).
 
 It suits short, pure transformations of inputs larger than an event payload's
 declared shape: provider responses, documents, imported batches. Asynchronous

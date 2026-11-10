@@ -40,7 +40,7 @@ export async function fixture(maxAttempts = 25, clock = 'disabled', transportFai
   await Deno.writeTextFile(`${temporary}/worker.ts`, `import { edgeObject } from '${mecha}packages/mecha-edge/src/object.ts'
 import { edgeWorker } from '${mecha}packages/mecha-edge/src/worker.ts'
 import { computeCoordinator } from '${mecha}packages/mecha-edge/src/compute-coordinator.ts'
-import { computeReader } from '${mecha}packages/mecha-edge/src/compute-reader.ts'
+import { computeReader, readerName } from '${mecha}packages/mecha-edge/src/compute-reader.ts'
 import machines from './machine.js'
 import readerOwner from './reader-owner.js'
 import pgliteWasm from '${mecha}packages/pglite-workerd/dist/pglite.wasm'
@@ -69,12 +69,18 @@ export class Cluster extends Base {
  }
  async fetch(req) {
   const path=new URL(req.url).pathname
+  if(path==='/test/compute-no-sql'){
+   const db=await this.booted(),query=db.query,exec=db.exec;
+   db.query=()=>{throw new Error('status issued SQL')};db.exec=()=>{throw new Error('status issued SQL')};
+   try{return await super.fetch(new Request('https://test/import/compute?detail=1'))}
+   finally{db.query=query;db.exec=exec}
+  }
   if(path==='/import/reset')this.resetStarted=true;
   if(path==='/test/retention')return Response.json({readers:this.computeReaders(),resetStarted:this.resetStarted,snapshots:this.ctx.storage.sql.exec('SELECT id FROM fs_snapshot').toArray()});
   if(path.startsWith('/test/reader/')){
    const {capture,owner='A'}=await req.json();
    const binding=this.env['TEST_READER_'+owner];
-   const reader=binding.get(binding.idFromName(JSON.stringify([capture.generation,capture.identity.id])));
+   const reader=binding.get(binding.idFromName(readerName(capture)));
    const action=path.split('/').at(-1);
    if(action==='hold')await reader.holdRelease();
    else if(action==='fail')await reader.failRelease();
@@ -146,9 +152,9 @@ export class ComputeReader extends Reader {
  async failRelease(){this.failNextRelease=true}
  async holdRelease(){this.held=true}
  async resumeRelease(){this.held=false;for(const resolve of this.waiting.splice(0))resolve()}
- async release(){if(this.held)await new Promise(resolve=>this.waiting.push(resolve));await super.release();if(this.failNextRelease){this.failNextRelease=false;throw new Error('lost reader release acknowledgement')}}
+ async release(capture,destroy){if(this.held)await new Promise(resolve=>this.waiting.push(resolve));const base=await super.release(capture,destroy);if(this.failNextRelease){this.failNextRelease=false;throw new Error('lost reader release acknowledgement')}return base}
  async testStatus(capture){
-  const released=this.ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE name='reader_released'").toArray().length && this.ctx.storage.sql.exec('SELECT 1 FROM reader_released').toArray().length>0;
+  const released=this.ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE name='reader_state'").toArray().length && this.ctx.storage.sql.exec('SELECT 1 FROM reader_state WHERE retired=1').toArray().length>0;
   return {waiting:this.waiting.length,released:Boolean(released),imported:released?null:await this.status(capture)};
  }
 }

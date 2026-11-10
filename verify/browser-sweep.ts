@@ -4,7 +4,7 @@
 //
 // Runs in a headless browser against the target deployment:
 // 1. One representative user journey per role / screen type.
-// 2. Zero-tolerance network error trap: fails immediately on any 4xx/5xx or net::ERR_*.
+// 2. Network error trap: an Electric must-refetch must recover; other 4xx/5xx fail.
 // 3. Executes airlocked journeys with guaranteed compensating rollback.
 
 import type { AirlockJourney, AirlockContext } from "./airlock.ts";
@@ -38,7 +38,8 @@ export interface NetworkTrap {
 
 /**
  * Installs the zero-tolerance edge network error trap on a Playwright page.
- * Captures any HTTP status >= 400, request failures, or unhandled page errors.
+ * A same-origin Electric must-refetch is held until its matching snapshot
+ * completes; unresolved reset loops, other HTTP errors and page errors still fail.
  */
 export function attachNetworkTrap(
   page: any,
@@ -46,6 +47,55 @@ export function attachNetworkTrap(
 ): NetworkTrap {
   const errors: string[] = [];
   const pendingRequests = new Set<any>();
+  const recoveries = new Map<string, { oldHandle: string; handle: string; url: string }>();
+  let responseChecks = Promise.resolve();
+  let pendingChecks = 0;
+
+  const electricShape = (res: any): { url: URL; key: string } | null => {
+    if (!trapOptions?.targetOrigin || res.request?.()?.method?.() !== "GET") return null;
+    const url = new URL(res.url());
+    if (url.origin !== new URL(trapOptions.targetOrigin).origin || url.pathname !== "/electric/v1/shape" || !url.searchParams.get("table")) return null;
+    const identity = new URL(url);
+    for (const name of ["handle", "offset", "live", "cursor", "cache-buster", "expired_handle"]) identity.searchParams.delete(name);
+    identity.searchParams.sort();
+    return { url, key: identity.href };
+  };
+
+  const checkElectric = async (res: any, shape: { url: URL; key: string }, httpError: string) => {
+    const { url, key } = shape;
+    const headers = res.headers();
+    const handle = headers["electric-handle"];
+    if (res.status() === 409) {
+      const body = await res.json();
+      const oldHandle = url.searchParams.get("handle");
+      if (!oldHandle || !handle || !Array.isArray(body) || body.length !== 1 ||
+        Object.keys(body[0] ?? {}).join() !== "headers" ||
+        Object.keys(body[0]?.headers ?? {}).join() !== "control" || body[0].headers.control !== "must-refetch") {
+        errors.push(httpError);
+        return;
+      }
+      const pending = recoveries.get(key);
+      if (pending && (pending.oldHandle !== oldHandle || pending.handle !== handle || url.searchParams.get("expired_handle") === oldHandle)) {
+        errors.push(`Electric repeated must-refetch on ${url}`);
+        recoveries.delete(key);
+        return;
+      }
+      recoveries.set(key, { oldHandle, handle, url: url.href });
+      return;
+    }
+    const pending = recoveries.get(key);
+    if (!pending || url.searchParams.get("expired_handle") !== pending.oldHandle ||
+      url.searchParams.get("handle") !== pending.handle || handle !== pending.handle || url.searchParams.get("live") === "true") return;
+    const body = await res.json();
+    const subset = [...url.searchParams.keys()].some((name) => name.startsWith("subset__"));
+    const valid = /^\d+_\d+$/.test(headers["electric-offset"] ?? "") && (subset
+      ? body?.metadata && /^\d+$/.test(body.metadata.xmin) && /^\d+$/.test(body.metadata.xmax) &&
+        Array.isArray(body.metadata.xip_list) && Number.isSafeInteger(body.metadata.snapshot_mark) &&
+        /^\d+$/.test(body.metadata.database_lsn) && Array.isArray(body.data)
+      : Array.isArray(body) && body.some((message: any) => message?.headers?.control === "up-to-date"));
+    if (!valid) errors.push(`Electric refetch returned an invalid snapshot on ${url}`);
+    recoveries.delete(key);
+  };
 
   const isPersistentSync = (req: any) => {
     try {
@@ -115,11 +165,20 @@ export function attachNetworkTrap(
         (typeof res.request?.()?.isNavigationRequest === "function"
           ? res.request().isNavigationRequest()
           : false);
-      if (status >= 400 && !isNav404) {
-        errors.push(`Edge HTTP ${status} ${res.statusText()} on ${res.url()}`);
+      const ray = res.headers?.()?.["cf-ray"];
+      const trace = typeof ray === "string" && /^[a-zA-Z0-9-]{1,80}$/.test(ray) ? ` ray=${ray}` : "";
+      const httpError = `Edge HTTP ${status} ${res.statusText()} on ${res.url()} at ${new Date().toISOString()}${trace}`;
+      const shape = (status === 409 || status === 200) ? electricShape(res) : null;
+      if (shape) {
+        pendingChecks++;
+        responseChecks = responseChecks.then(() => checkElectric(res, shape, httpError))
+          .catch((error) => { errors.push(`${httpError}: Electric response validation failed: ${error}`); })
+          .finally(() => { pendingChecks--; });
+      } else if (status >= 400 && !isNav404) {
+        errors.push(httpError);
       }
-    } catch {
-      // Ignored if response detached
+    } catch (error) {
+      errors.push(`Edge response could not be verified: ${error}`);
     }
   };
 
@@ -165,11 +224,13 @@ export function attachNetworkTrap(
           `Zero-tolerance edge network trap detected ${errors.length} error(s):\n${errors.map((e) => `  - ${e}`).join("\n")}`
         );
       }
+      if (pendingChecks || recoveries.size) {
+        throw new Error(`Electric refetch has not completed: ${pendingChecks} response checks, ${[...recoveries.values()].map((r) => r.url).join(", ")}`);
+      }
     },
     waitForPendingAssets: async (timeoutMs = 45000) => {
-      if (pendingRequests.size === 0) return;
       const deadline = Date.now() + timeoutMs;
-      while (pendingRequests.size > 0 && Date.now() < deadline) {
+      while ((pendingRequests.size > 0 || pendingChecks > 0 || recoveries.size > 0) && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 20));
       }
       if (pendingRequests.size > 0) {
@@ -319,6 +380,7 @@ export async function verifyBrowser(
     const unresolved: string[] = [];
     const journeysToRun: (AirlockJourney<any> | JourneyItem)[] = [];
     const coveredScreens = new Set<string>();
+    const customScreens = new Set<string>();
 
     let currentProntoToken: string | null = options.session
       ? (typeof options.session === "string" ? options.session : JSON.stringify(options.session))
@@ -330,7 +392,8 @@ export async function verifyBrowser(
 
     for (const j of options.journeys ?? []) {
       journeysToRun.push(j);
-      coveredScreens.add("spec" in j ? (j as any).spec.screen : j.screen);
+      if ("run" in j && typeof j.run === "function") customScreens.add("spec" in j ? j.spec.screen : j.screen);
+      else coveredScreens.add("spec" in j ? j.spec.screen : j.screen);
     }
 
     const representative = options.hints
@@ -416,6 +479,7 @@ export async function verifyBrowser(
           token: currentProntoToken ?? options.ctx?.token,
         };
 
+        let routePath: string | undefined;
         try {
           if ("run" in item && typeof item.run === "function") {
             // Airlock journey or custom journey with run method
@@ -440,12 +504,13 @@ export async function verifyBrowser(
               }
               target = targetUrlObj.toString();
             }
+            routePath = new URL(target).pathname;
             const screenTimeout = options.screenTimeoutMs ?? 45000;
             const res = await page.goto(target, { waitUntil: "domcontentloaded", timeout: screenTimeout });
             const isPages = options.platform === "pages";
             const allowed = (status: number) => status === 200 || (isPages && status === 404);
             if (!res || !allowed(res.status())) {
-              throw new Error(`Navigation to ${target} returned HTTP ${res?.status() ?? "none"}`);
+              throw new Error(`Navigation returned HTTP ${res?.status() ?? "none"}`);
             }
             // Wait for observable application/screen hydration readiness with bounded timeout
             if (typeof page.waitForFunction === "function") {
@@ -529,9 +594,8 @@ export async function verifyBrowser(
             }
           }
 
-          // Harvest links from live hydrated browser DOM to discover further parameterized routes
-          // (runs for both custom journeys and default route visits)
-          if (options.hints?.routes && typeof page.$$eval === "function") {
+          // Airlock rollback may have removed the data behind the page's links.
+          if (!("spec" in item) && options.hints?.routes && typeof page.$$eval === "function") {
             try {
               const liveHrefs: string[] = await page.$$eval("a[href]", (els: any[]) =>
                 els.map((el) => {
@@ -578,7 +642,7 @@ export async function verifyBrowser(
           trap.assertNoErrors();
         } catch (err) {
           errors.push(
-            `Screen '${screenName}' failed: ${err instanceof Error ? err.message : String(err)}`
+            `Screen '${screenName}'${routePath ? ` (${routePath})` : ""} failed: ${err instanceof Error ? err.message : String(err)}`
           );
         } finally {
           trap.detach();
@@ -588,7 +652,7 @@ export async function verifyBrowser(
 
       for (const u of unresolved) {
         const match = /Screen '([^']+)'/.exec(u);
-        if (match && coveredScreens.has(match[1])) continue;
+        if (match && (coveredScreens.has(match[1]) || customScreens.has(match[1]))) continue;
         errors.push(u);
       }
     } finally {

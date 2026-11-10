@@ -14,6 +14,7 @@
 package bayt
 
 import (
+	"encoding/json"
 	"encoding/yaml"
 	"list"
 	"strings"
@@ -979,35 +980,43 @@ import (
 				let _effects = len(B.cluster.state.effects) > 0
 				let _ai = _effects && (len([for e in B.cluster.state.effects if e.ai != _|_ {e}]) > 0 || B.cluster.capabilities.ai != _|_)
 				let _bridges = [for b in B.cluster.state.bridges if list.Contains(b.targets, "docker") {b}]
+
 				// A container several bridges share (one per action) runs once.
 				let _containers = {for b in _bridges {(b.container): b.appliance}}
+
 				// The change feed, as compose runs it: Conduit off the logical slot,
 				// the bus on daprd and Redis, and Redpanda Connect running the
 				// pipelines and the drains' streams. These are process-compose's own
 				// processes (.bayt/process-compose.yaml), given the images' binaries.
 				let _capture = B.cluster.capabilities.capture
 				let _compute = len(B.cluster.state.computations) > 0
+				let _feldera = _compute && B.cluster.state.duckstreamEngine == "feldera"
+
 				// The transform runs the pipelines and the drains' streams, and
 				// carries compute's invalidations to it.
 				let _streams = len(B.cluster.state.pipelines) > 0 || _compute
+
 				// The ticker sweeps schedules and timers; the airlock runs for as
 				// long as the appliance does, so nothing wakes it.
 				let _wakes = len(B.cluster.state.schedules) > 0 || len(B.cluster.state.timers) > 0
 				let _timers = len(B.cluster.state.timers) > 0
 				let _blobs = B.cluster.capabilities.blobs
+
 				// What an effect declares it reads, which compose refuses to start
 				// without (the airlock's environment there).
 				let _secrets = [for e in B.cluster.state.effects if e.secrets != _|_ for k in e.secrets {k}]
+
 				// A computation's files, by the paths the processes' environment
 				// names them, relative to the app.
-				let _computed = [for f, _ in {for c in B.cluster.state.computations for f in list.Concat([[c.file], c.wasm, [if c.feldera != _|_ {c.feldera}]]) {(f): true}} {f}]
-				let _overlaid = _effects || _wakes
+				let _computed = [for f, _ in {for c in B.cluster.state.computations for f in list.Concat([[c.file], c.wasm, [if c.feldera != _|_ {c.feldera}], [if c.steps != _|_ {"\(c.steps).bundle.js"}]]) {(f): true}} {f}]
+
 				// The forward migrations, which compose's migrate service applies: the
 				// appliance runs that same process (process-compose.yaml), which what
 				// reads the schema already waits on, over the migrate image's files.
 				let _pgroll = B.cluster.surface.schema.pgroll
 				let _db = "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@database:5432/${POSTGRES_DB:-\(B.meta.app)}"
 				let _ready = {period_seconds: 1, timeout_seconds: 5, failure_threshold: 120}
+
 				// process-compose.yaml declares these processes too: an override's
 				// `command` replaces their entrypoint (an override's entrypoint would
 				// not), and its environment merges over theirs by name.
@@ -1026,6 +1035,12 @@ import (
 				let _overlay = {
 					version: "0.5"
 					processes: {
+						database: {
+							command: (_command & {args: list.Concat([["docker-entrypoint.sh", "postgres"], mecha.#PostgresArgs, ["-c", "fsync=on", "-c", "synchronous_commit=on", "-c", "full_page_writes=on"]])}).out
+						}
+						electric: {
+							command: (_command & {args: ["env", "DATABASE_URL=postgresql://electric:${ELECTRIC_PASSWORD:-dev-electric-password}@127.0.0.1:5432/${POSTGRES_DB:-\(B.meta.app)}?sslmode=disable", "ELECTRIC_SECRET=${ELECTRIC_SECRET:-dev-electric-secret}", "ELECTRIC_MANUAL_TABLE_PUBLISHING=true", "ELECTRIC_PORT=3002", "ELECTRIC_STORAGE_DIR=${PGDATA:-/var/lib/pgsql/data}/electric", "LD_LIBRARY_PATH=/electric-libs", "ELIXIR_ERL_OPTIONS=+fnu", "/electric-app/bin/entrypoint", "start"]}).out
+						}
 						if _effects {
 							"airlock-upgrade": {
 								command: (_command & {args: ["psql", _db, "-X", "--set=ON_ERROR_STOP=1", "--single-transaction", "--file=/airlock-upgrade.sql"]}).out
@@ -1066,6 +1081,7 @@ import (
 								availability: restart: "on_failure"
 							}
 						}
+
 						// The timers' check from the script the image carries, its
 						// connection the base process's.
 						if _timers {
@@ -1095,15 +1111,46 @@ import (
 						}
 					}
 				}
+
 				// The secrets an effect declares, which the airlock inherits from the
 				// container: the appliance does not start without one, as compose's
 				// airlock does not (process-compose substitutes no `:?` refusal).
+				let _engine = [if _feldera {"'export DUCKSTREAM_ENGINE=feldera' "}, ""][0]
 				let _secretCheck = [if len(_secrets) > 0 {"'for k in \(strings.Join(_secrets, " ")); do' '  eval \"v=\\${$k:-}\"' '  [ -n \"$v\" ] || { echo \"appliance: $k is required: an effect declares it\" >&2; exit 1; }' 'done' "}, ""][0]
 				let _hosts = strings.Join(list.Concat([["crud", "database", "auth"], if _effects {["airlock-mesh", "airlock"]}, if _wakes {["ticker"]}, [for c, _ in _containers {c}]]), " ")
+				if _feldera {
+					"feldera-artifacts": core.#target & {
+						activate: ""
+						deps: [":compute:outs"]
+						compose: manual: true
+						cmd: builtin: {
+							shell: "sh"
+							do: "deno run --no-check --config /app/deno.json --frozen -A /app/native-artifacts-build.ts /app/feldera-build-specs.json /opt/feldera"
+						}
+						dockerfile: {
+							from: name: B.cluster.surface.targets.feldera.dockerfile.from.name
+							preamble: [
+								"USER root",
+								"COPY <<'SPECS' /app/feldera-build-specs.json\n\(json.Marshal([for c in B.cluster.state.computations {name: c.name, feldera: "/app/computations/\(c.name).feldera.json"}]))\nSPECS",
+								"RUN mkdir -p /opt/feldera && chown ubuntu:ubuntu /opt/feldera",
+								"USER ubuntu",
+							]
+							copy: [
+								{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"},
+								for f in ["native-artifacts-build.ts", "native-artifacts.ts", "native-sources.ts", "native-supervisor.c", "deno.json", "deno.lock"] {
+									{from: {ref: ":compute"}, srcs: ["/app/\(f)"], dst: "/app/\(f)"}
+								},
+								for c in B.cluster.state.computations {
+									{from: {ref: ":compute"}, srcs: ["/app/computations/\(c.name).feldera.json"], dst: "/app/computations/\(c.name).feldera.json"}
+								},
+							]
+						}
+					}
+				}
 				"release-docker": core.#target & {
 					activate: ""
 					deps: list.Concat([
-						[":database", ":crud", ":caddy"],
+						[":database", ":crud", ":caddy", ":electric:outs"],
 						if _pgroll != _|_ {[":\(_pgroll.target):outs"]},
 						// Image-only: these images keep their files outside the
 						// monorepo tree, which a workdir dependency copies.
@@ -1115,6 +1162,7 @@ import (
 						if _wakes {[":ticker:outs"]},
 						if _timers {[":timer-check:outs"]},
 						if _compute {[":compute:outs"]},
+						if _feldera {[":feldera-artifacts:outs"]},
 						[for c, _ in _containers {":\(c)-appliance:outs"}],
 					])
 					srcs: globs: list.Concat([[".bayt/process-compose.yaml"], if _capture {["docker/*.yaml"]}, _computed])
@@ -1148,6 +1196,8 @@ import (
 								{from: {name: core.lock.images.microcheck}, srcs: ["/bin/portcheck"], dst: "/usr/local/bin/portcheck"},
 								{from: {ref: ":database"}, srcs: ["/docker-entrypoint-initdb.d"], dst: "/docker-entrypoint-initdb.d"},
 								{from: {ref: ":crud"}, srcs: ["/bin/postgrest"], dst: "/usr/local/bin/postgrest"},
+								{from: {ref: ":electric"}, srcs: ["/app/"], dst: "/electric-app/"},
+								{from: {ref: ":electric"}, srcs: ["/lib/*-linux-gnu/libtinfo.so.6*"], dst: "/electric-libs/"},
 								{from: {ref: ":caddy"}, srcs: ["/usr/bin/caddy"], dst: "/usr/bin/caddy"},
 								{from: {ref: ":caddy"}, srcs: ["/etc/caddy/Caddyfile"], dst: "/etc/caddy/Caddyfile"},
 								{srcs: [".bayt/process-compose.yaml"], dst: "/.bayt/process-compose.yaml"},
@@ -1214,17 +1264,22 @@ import (
 							// Compute's app, its cache and DuckDB's extensions, its sibling
 							// sources where its imports reach them, and the program's
 							// computations where the environment names them.
+							if _feldera {[
+								{from: {ref: ":feldera-artifacts"}, srcs: ["/opt/feldera/"], dst: "/opt/feldera/"},
+							]},
 							if _compute {list.Concat([
 								[
 									{from: {ref: ":compute"}, srcs: ["/app/"], dst: "/compute-app/"},
 									// One cache, content-addressed, beside auth's.
 									{from: {ref: ":compute"}, srcs: ["/deno-dir"], dst: "/deno-dir"},
 									{from: {ref: ":compute"}, srcs: ["/durex"], dst: "/durex"},
+									{from: {ref: ":compute"}, srcs: ["/airlock"], dst: "/airlock"},
 									{from: {ref: ":compute"}, srcs: ["/packages"], dst: "/packages"},
 								],
 								[if !B.cluster.capabilities.auth {{from: {name: core.lock.images.deno_bin}, srcs: ["/deno"], dst: "/usr/local/bin/deno"}}],
 								[for f in _computed {srcs: [f], dst: f}],
-							])},
+							])
+							},
 							// The ticker, with its own Deno and cache.
 							if _wakes {[
 								{from: {ref: ":ticker"}, srcs: ["/usr/bin/deno"], dst: "/usr/local/bin/ticker-deno"},
@@ -1249,16 +1304,20 @@ import (
 							// its app and extensions here, the container's environment.
 							if _compute {[
 								"ENV COMPUTE_APP_DIR=/compute-app",
+								"ENV COMPUTE_STATE_DIR=/var/lib/duckstream",
 								"ENV BAYT_LOCAL_DUCKDB_EXTENSIONS=/compute-app/extensions",
 								"ENV DENO_DIR=/deno-dir",
+							]},
+							if _feldera {[
+								"ENV DUCKSTREAM_ENGINE=feldera",
+								"ENV FELDERA_ARTIFACTS_DIR=/opt/feldera",
+								"ENV FELDERA_WORK_DIR=/var/lib/feldera",
 							]},
 							if _capture {[
 								"ENV MECHA_MESH_DIR=/mesh-events",
 								"ENV MECHA_TRANSFORM_DIR=/transform",
 							]},
-							if _overlaid {[
-								"COPY <<'APPLIANCE' /.bayt/process-compose.appliance.yaml\n\(yaml.Marshal(_overlay))APPLIANCE",
-							]},
+							["COPY <<'APPLIANCE' /.bayt/process-compose.appliance.yaml\n\(yaml.Marshal(_overlay))APPLIANCE"],
 							if _wakes {[
 								#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'while sleep "${POKE_INTERVAL_SECONDS:-60}"; do' '  curl -fsS -X POST -H "Authorization: Bearer ${SERVICE_JWT}" "http://ticker:\#(mecha.#AppliancePort.ticker)/poke?caller=appliance" >/dev/null || { echo "clock: the ticker refused its poke" >&2; exit 1; }' 'done' > /usr/local/bin/appliance-clock.sh && chmod 755 /usr/local/bin/appliance-clock.sh"#,
 							]},
@@ -1268,6 +1327,8 @@ import (
 								"ENV DATABASE_PG_PORT=5432",
 								"ENV CRUD_HTTP_PORT=3000",
 								"ENV CRUD_ADMIN_PORT=3001",
+								"ENV ELECTRIC_HTTP_PORT=3002",
+								"ENV PRONTO_UPSTREAM_ELECTRIC=127.0.0.1:3002",
 								"ENV AUTH_HTTP_PORT=9999",
 								"ENV CADDY_HTTP_PORT=8080",
 								"ENV PORT=8080",
@@ -1276,6 +1337,7 @@ import (
 								// The door's own config, edited below: an app's docker/Caddyfile,
 								// which caddy prefers where a tree brings it, keeps the renderer.
 								"ENV CADDY_CONFIG_FILE=/etc/caddy/Caddyfile",
+								"ENV CADDY_DATA_HOME=/var/lib/caddy",
 							],
 							if B.cluster.capabilities.auth {[
 								"ENV DENO_DIR=/deno-dir",
@@ -1289,27 +1351,32 @@ import (
 							#"RUN cp "$(/root/.local/share/lazybox/bin/nu -c '$nu.current-exe')" /usr/local/bin/nu && chmod 755 /usr/local/bin/nu && /usr/local/bin/nu --version"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'while [ $# -gt 0 ]; do if [ "$1" = "--" ]; then shift; break; fi; shift; done' 'exec "$@"' > /usr/local/bin/mise && chmod 755 /usr/local/bin/mise"#,
 							"RUN printf '#!/bin/sh\\nexit 0\\n' > /usr/local/bin/task && chmod 755 /usr/local/bin/task",
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)'export PORT="${PORT:-8080}"' 'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'for n in \#(_hosts); do' '  grep -Eq "^[^#]*[[:space:]]$n([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 $n" >> /etc/hosts || { echo "appliance: cannot name $n in /etc/hosts" >&2; exit 1; }' 'done' \#(_secretCheck)\#(_engine)'export PORT="${PORT:-8080}"' 'export CADDY_HTTP_PORT="${PORT}"' 'export CADDY_TLS_HOST_PORT="${PORT}"' 'if [ -n "$ORIGIN" ]; then' '  if [ -z "$WEBAUTHN_RP_ID" ]; then' '    h="${ORIGIN#*://}"' '    h="${h%%/*}"' '    h="${h%%:*}"' '    if [ -n "$h" ] && [ "$h" != "localhost" ]; then export WEBAUTHN_RP_ID="$h"; fi' '  fi' '  if [ -z "$WEBAUTHN_ORIGIN" ] && [ -n "$WEBAUTHN_RP_ID" ] && [ "$WEBAUTHN_RP_ID" != "localhost" ]; then export WEBAUTHN_ORIGIN="$ORIGIN"; fi' 'fi' 'exec "$@"' > /usr/local/bin/appliance-entrypoint.sh && chmod 755 /usr/local/bin/appliance-entrypoint.sh"#,
 							#"RUN sed -Ei 's|http://127\.0\.0\.1:\$\{CADDY_HTTP_PORT:-[0-9]+\}/health|http://127.0.0.1:${PORT:-8080}/health|g' /.bayt/process-compose.yaml"#,
 							// The appliance runs no renderer: its handler goes, braces counted,
 							// since a handler holds nested blocks a line match would cut short.
 							#"RUN awk 'skip { d += gsub(/\{/, "{") - gsub(/\}/, "}"); if (d <= 0) skip = 0; next } /handle @rendered \{/ { skip = 1; d = 1; next } { print }' /etc/caddy/Caddyfile > /tmp/Caddyfile && mv /tmp/Caddyfile /etc/caddy/Caddyfile"#,
-							#"RUN awk '/handle \/electric\/\* \{/{p=1; d=1; print "  handle /electric/* {\n    header Content-Type application/json\n    header electric-handle stub\n    header electric-offset 0_0\n    header electric-cursor 0\n    header electric-schema `{\"id\":{\"type\":\"text\"}}`\n    header electric-up-to-date true\n    header Access-Control-Allow-Origin *\n    header Access-Control-Expose-Headers \"electric-handle, electric-offset, electric-cursor, electric-schema, electric-up-to-date, content-type, cache-control, x-txid\"\n\n    @subset query subset__where=*\n    handle @subset {\n      respond `{\"metadata\":{\"xmin\":\"1\",\"xmax\":\"1\",\"xip_list\":[],\"snapshot_mark\":0,\"database_lsn\":\"0\"},\"data\":[]}` 200\n    }\n    handle {\n      respond `[{\"headers\":{\"control\":\"up-to-date\"}}]` 200\n    }\n  }"; next} p { d += gsub(/\{/, "{") - gsub(/\}/, "}"); if (d <= 0) p = 0; next } {print}' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile"#,
+							for e in B.cluster.state.effects if e.bridge != _|_ for b in _bridges if e.bridge == b.name {
+								let act = [if b.action != _|_ {"/actions/\(b.action)"}, ""][0]
+								let old = "http://\(b.container):\(b.port)\(act)"
+								let new = "http://\(b.container):\(b.appliance.port)\(act)"
+								#"RUN nu -c 'let f = "/dapr/airlock/\#(e.name).yaml"; let b = (open $f); if $b.spec.baseUrl != "\#(old)" { error make {msg: "appliance: unexpected bridge endpoint in \#(e.name)"} }; $b | upsert spec.baseUrl "\#(new)" | to yaml | save -f $f'"#
+							},
 							// The extensions came with compute's image: it installs none at start.
-							if _compute {"RUN touch /compute-app/extensions/\(mecha.#DuckdbExtensionsMarker)"},
+							if _compute {"RUN --network=none deno check --cached-only --frozen --config /compute-app/deno.json /compute-app/main.ts /compute-app/cage.ts /compute-app/step-worker.ts && touch /compute-app/extensions/\(mecha.#DuckdbExtensionsMarker)"},
 							// A bridge's port is no port an appliance process takes, the ones bayt
 							// assigns the app included, and no other bridge's.
 							if len(_bridges) > 0 {
 								#"RUN ports="\#(strings.Join([for _, a in _containers {"\(a.port)"}], " "))"; for p in $ports; do if grep -Eq ":-$p\}" /.bayt/process-compose.yaml; then echo "appliance: bridge port $p is one an appliance process takes; name another" >&2; exit 1; fi; done; dup="$(printf '%s\n' $ports | sort | uniq -d)"; if [ -n "$dup" ]; then echo "appliance: bridges share port $dup" >&2; exit 1; fi"#
 							},
 							// Every edit above leaves a Caddyfile the door can load, or the image fails here.
-							"RUN caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile",
+							"RUN ELECTRIC_SECRET=validation-only caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile",
 						]
 						entrypoint: ["/usr/local/bin/appliance-entrypoint.sh"]
 						cmd: list.Concat([
 							["/usr/local/bin/process-compose", "up", "-f", "/.bayt/process-compose.yaml"],
-							[if _overlaid for a in ["-f", "/.bayt/process-compose.appliance.yaml"] {a}],
-							["-t=false", "--no-server", "caddy"],
+							["-f", "/.bayt/process-compose.appliance.yaml"],
+							["-t=false", "--no-server", "caddy", "electric"],
 							[if B.cluster.capabilities.auth {"auth"}],
 							[if _effects {"airlock"}],
 							[if _capture {"conduit"}],

@@ -627,6 +627,9 @@ What fixes its shape:
   the release refuses until a mecha release publishes that image. When `capabilities.auth` is
   enabled, the Deno binary and cached `/deno-dir` are copied into the image and
   run alongside the other services.
+- **Durable PostgreSQL writes.** The appliance enables `fsync`,
+  `synchronous_commit`, and `full_page_writes`, overriding the development
+  cluster settings. Mount `PGDATA` on persistent storage.
 - **Effects run as the compose stack runs them.** A program that declares
   effects gets the airlock, its daprd with one binding per effect, and the
   ledger's upgrade as processes in `/.bayt/process-compose.appliance.yaml`,
@@ -651,12 +654,12 @@ What fixes its shape:
   stack's: at-least-once, a change made while a process is down held by the slot.
   The appliance refuses to start without a secret an effect declares, as compose
   does, and with effects and the blob plane together, which it does not run.
-- **Computations run on DuckDB snapshots**, as `launch@local` runs them, whatever
-  engine the program states for its container stack: the compute service, from
-  its image's app, Deno cache and DuckDB extensions, with the transform carrying
-  its invalidations. Feldera is no process of the appliance; its Rust compile
-  would need gigabytes the appliance does not carry. The program's Feldera SQL
-  runs through its committed DuckDB translations, as on pages and Cloudflare.
+- **Computations use the selected engine.** DuckDB snapshot computations run
+  with the compute service and the transform carrying its invalidations. When
+  the cluster selects Feldera, a separate build stage compiles the declared
+  programs using the pinned pipeline-manager image. The appliance carries the
+  resulting native pipelines and their isolated runtime under `/opt/feldera`;
+  it does not run the compiler or pipeline manager at startup.
 - **Schedules and timers are swept by mecha's ticker.** A program that declares
   either runs the ticker and a clock poking it every `POKE_INTERVAL_SECONDS`
   (default 60), the cadence compose's clock keeps, with the same `SERVICE_JWT`
@@ -693,16 +696,16 @@ What fixes its shape:
   domain socket until all migrations finish. External clients and readiness
   probes see Postgres only once the final `postgres` daemon binds network
   interfaces.
-- **Electric shape fallback.** For apps using Electric sync, Caddy intercepts
-  `/electric/*` requests and responds with a static up-to-date control shape
-  (`[{"headers":{"control":"up-to-date"}}]` with `electric-offset: 0_0` and
-  `electric-up-to-date: true`). Browser sync engines settle cleanly in
-  standalone mode without requiring a full live replication cluster.
+- **Electric sync.** The appliance runs the patched Electric release against
+  PostgreSQL and Caddy forwards authorized `/electric/*` requests to it. Electric
+  stores its shape state under `PGDATA/electric`, on the database volume.
 - **Persistence and updates.** The database lives on a docker-managed named
   volume at `PGDATA` (`/var/lib/pgsql/data`), never a bind mount. An update stops
   the running container and starts the new image on the same volume, with
   downtime between the two; the new container's startup applies what is pending.
 - **Configuration knobs.**
+  - `COMPUTE_STATE_DIR`: bounded DuckDB captures and unpublished outputs (default `/var/lib/duckstream`). For computations declaring `steps`, mount a named volume here and reuse it with the PostgreSQL volume across container replacement. Losing it while PostgreSQL retains a claim prevents replay.
+  - `CADDY_DATA_HOME`: persistent Caddy data directory (default `/var/lib/caddy`). Mount a named volume there to retain certificates across container replacement.
   - `PGDATA`: path to PostgreSQL database directory, where the named volume is mounted (default `/var/lib/pgsql/data`).
   - `PORT`: external HTTP ingress port served by Caddy (default `8080`).
   - `ORIGIN`: public base URL of the service (default `http://localhost:8080`).

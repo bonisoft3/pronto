@@ -183,6 +183,7 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #AppliancePorts: impl.#AppliancePorts
 #DuckdbExtensionsMarker: impl.#DuckdbExtensionsMarker
 #AppliancePostgres: impl.#AppliancePostgres
+#PostgresArgs: impl.#PostgresArgs
 
 // Mecha's AI gateway (services/airlock/tsbifrost.ts) and the tiered AI model schema.
 #TsBifrostPort:   impl.#TsBifrostPort

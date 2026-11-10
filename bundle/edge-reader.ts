@@ -21,9 +21,13 @@ export async function writeEdgeReader(out: string, mecha: string, definitions: r
   }
   for (const pkg of ['pglite-workerd', 'compute-snapshot']) await collect(path.join(mecha, 'packages', pkg, 'src'), `runtime/packages/${pkg}/src`, true)
   const reader = 'runtime/packages/mecha-edge/src/compute-reader.ts'
-  await Deno.mkdir(path.dirname(path.join(directory, reader)), { recursive: true })
-  await Deno.copyFile(path.join(mecha, 'packages/mecha-edge/src/compute-reader.ts'), path.join(directory, reader))
-  inputs.push([reader, await hash(await Deno.readFile(path.join(directory, reader)))])
+  for (const file of ['packages/mecha-edge/src/compute-reader.ts', 'packages/incremental-views/runtime.ts']) {
+    const target = path.join(directory, 'runtime', file)
+    await Deno.mkdir(path.dirname(target), { recursive: true })
+    const bytes = await Deno.readFile(path.join(mecha, file))
+    await Deno.writeFile(target, bytes)
+    inputs.push([`runtime/${file}`, await hash(bytes)])
+  }
   await collect(path.join(out, 'pglite'), '../../pglite', false)
   inputs.push(['../../src/compute-machine.js', await hash(await Deno.readFile(path.join(out, 'src/compute-machine.js')))])
   const entry = `import { computeReader } from './${reader}';

@@ -132,7 +132,7 @@ read no app's files, and of its tests only `check-outcomes.test.ts`,
 omnishell's one production edge to mecha is a bundle it builds from the
 mecha it pins, not a committed copy. pronto emits files
 into the app (`.pronto/check-inputs.json`, `.pronto/mecha-reducers.json`,
-`.pronto/cluster.json`, the migrations) or runs as a command over the app's
+`.pronto/functions.json`, `.pronto/cluster.json`, the migrations) or runs as a command over the app's
 files. One rule resolves a module of another tree: a command that runs code
 of that tree passes the tree's own Deno config and lock, found as it runs
 with `mise where github:bonisoft3/<tree>` (`#Platform`, `#Harness`), so a

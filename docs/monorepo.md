@@ -84,8 +84,10 @@ frozen.
 What an app's tests take from pronto is what pronto emitted: the compilers'
 inputs in `.pronto/check-inputs.json`, each Mecha machine's step compiled as
 PostgreSQL runs it in `.pronto/mecha-reducers.json`, stepped through
-omnishell's `test/mecha-local.ts` and walked by `test/mecha-battery.ts`, and
-the cluster's database image in `.pronto/cluster.json`.
+omnishell's `test/mecha-local.ts` and walked by `test/mecha-battery.ts`, each
+database function's module with its fuel in `.pronto/functions.json`, run
+through `test/function-local.ts`, and the cluster's database image in
+`.pronto/cluster.json`.
 
 The platform's trees reach one another the same way. omnishell pins mecha in
 its `.mise.toml` like any consumer, and `mise.local.toml` points the pin at the
