@@ -86,6 +86,38 @@ export function databaseProcess(proc: Proc, srcs: string[] = []): Database {
   return { steps, args: shellWords(exec[1]) }
 }
 
+/**
+ * The migrate process's baseline and pgroll migrations, in either form a stack has had: mecha before
+ * 0.22's `migrate/host.sh` (above), or 0.22's `services/migrate/migrate.nu`, whose migrations are the
+ * app's own files (`.bayt/bayt.migrate.json`: a `copy` of each, and the `epilogue`'s heredocs for
+ * those the app holds only in the file) that the process lays in one directory before it runs.
+ * `base` is the app folder the process belongs to.
+ */
+export async function migrationsOf(proc: Proc, base: string): Promise<{ baseline: string; files: Record<string, string> }> {
+  const script = scriptOf(proc)
+  if (shellWords(script).some((x) => x.endsWith("/migrate/host.sh"))) return migrations(proc)
+  if (!script.includes("bayt.migrate.json") || !script.includes("migrate.nu")) {
+    throw new Error("the migrate process runs neither mecha's migrate/host.sh nor its services/migrate/migrate.nu")
+  }
+  const baseline = script.match(/\^(?:nu|bash) \$+script \$+dir (\S+)/)?.[1]
+  if (!baseline) throw new Error("the migrate process names no baseline step")
+  const dockerfile = JSON.parse(await Deno.readTextFile(`${base}/.bayt/bayt.migrate.json`)).dockerfile ?? {}
+  const files: Record<string, string> = {}
+  const keep = (name: string, body: string) => { files[name.replace(/\.json$/, "")] = body }
+  for (const c of dockerfile.copy ?? []) keep(String(c.dst).split("/").pop()!, await Deno.readTextFile(`${base}/${c.srcs[0]}`))
+  for (const e of dockerfile.epilogue ?? []) {
+    const lines = String(e).split("\n")
+    let m
+    if ((m = lines[0].match(/^COPY <<'PGROLL' \/tmp\/(.+)\.parts$/))) {
+      const body = []
+      for (const l of lines.slice(1)) { if (l === "PGROLL") break; body.push(l) }
+      keep(m[1], atob(body.join("")))
+    } else if ((m = lines[0].match(/^COPY <<'PGROLL' \/pgroll\/(.+)$/))) keep(m[1], lines[1])
+    else if ((m = lines[0].match(/^COPY <<'RECONCILE' \/pgroll\/(.+)$/))) keep(m[1], lines.slice(1, -1).join("\n"))
+  }
+  return { baseline, files }
+}
+
 /** The initdb steps by name, to the file(s) each is built from. */
 export function databaseSteps(proc: Proc, srcs: string[] = []): Record<string, string> {
   return databaseProcess(proc, srcs).steps
@@ -269,11 +301,11 @@ export async function prepare(appDir: string, gateDir: string, dir: string, rele
   const steps = (await build(procs.database, appDir, stepsDir)).steps
   const oldInitdb = `${dir}/initdb-released`
   const oldDb = await build(oldCompose.processes.database, oldDir, oldInitdb)
-  const newMig = procs.migrate ? migrations(procs.migrate) : undefined
+  const newMig = procs.migrate ? await migrationsOf(procs.migrate, appDir) : undefined
   const migDir = `${dir}/pgroll`
   await Deno.mkdir(migDir, { recursive: true })
   for (const [n, body] of Object.entries(newMig?.files ?? {})) await Deno.writeTextFile(`${migDir}/${n}.json`, body)
-  const oldMig = oldCompose.processes.migrate ? migrations(oldCompose.processes.migrate) : undefined
+  const oldMig = oldCompose.processes.migrate ? await migrationsOf(oldCompose.processes.migrate, oldDir) : undefined
   const oldMigDir = `${dir}/pgroll-released`
   await Deno.mkdir(oldMigDir, { recursive: true })
   for (const [n, body] of Object.entries(oldMig?.files ?? {})) await Deno.writeTextFile(`${oldMigDir}/${n}.json`, body)
