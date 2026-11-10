@@ -9,6 +9,9 @@ use std/assert
 
 use release.nu [
 	node-registry-manifests
+	node-registry-in-use
+	node-registry-keep-tag
+	node-buildkit-manifests
 	OPERATORS
 	get-operator-cache-dir
 	fetch-verified
@@ -74,6 +77,9 @@ def run-tests [] {
 	test_release_override
 	test_tunnel_manifests
 	test_node_registry_manifests
+	test_node_registry_in_use
+	test_node_buildkit_manifests
+	test_environment_build_buildkit
 	test_envoy_proxy
 	test_render_manifests_aks
 	test_dapr_annotations
@@ -1202,4 +1208,48 @@ def test_preview_delete_needs_a_preview [] {
 	let res = (do { nu ($k8s_dir | path join "release.nu") --app ($fixtures_dir | path join "sample") --delete } | complete)
 	assert ($res.exit_code != 0)
 	assert ($res.stderr | str contains "--delete removes a preview")
+}
+
+def test_node_registry_in_use [] {
+	print "test a prune keeps every node-registry digest the cluster names, and only those..."
+	let objects = ({items: [
+		{spec: {containers: [{image: "127.0.0.1:5000/app-render:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {image: "daprio/daprd:1.15"}]}}
+		{spec: {template: {spec: {containers: [{image: "127.0.0.1:5000/app-render@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}}}}
+		{spec: {imageName: "127.0.0.1:5000/app-database:18@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+		{spec: {containers: [{image: "127.0.0.1:5000/app-crud:latest"} {image: "us-docker.pkg.dev/p/r/x@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}}
+		{spec: {containers: [{image: "127.0.0.1:5000/app-render:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}
+	]} | to json)
+	assert equal (node-registry-in-use $objects) [
+		{repo: "app-render", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+		{repo: "app-render", digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+		{repo: "app-database", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	]
+	assert equal (node-registry-keep-tag "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") "keep-bbbbbbbbbbbbbbbb"
+}
+
+def test_node_buildkit_manifests [] {
+	print "test the node's builder is rootless, on the node's loopback, pushing to its registry over HTTP..."
+	let docs = (node-buildkit-manifests | from yaml)
+	let spec = ($docs | where kind == "Deployment" | first | get spec.template.spec)
+	assert $spec.hostNetwork
+	let c = ($spec.containers | first)
+	assert ($c.image =~ '^moby/buildkit:v[0-9.]+-rootless@sha256:[0-9a-f]{64}$')
+	assert equal $c.securityContext.runAsUser 1000
+	assert ("--net=host" in $c.command)
+	let addr = ($c.args | skip until {|a| $a == "--addr" } | get 1)
+	assert equal $addr "tcp://127.0.0.1:1234"
+	let toml = ($docs | where kind == "ConfigMap" | first | get data."buildkitd.toml")
+	assert ($toml | str contains '[registry."127.0.0.1:5000"]')
+	assert ($toml | str contains "http = true")
+	let role = ($docs | where kind == "ClusterRole" | first)
+	assert equal ($role.rules | where {|r| "pods/portforward" in $r.resources } | get verbs.0) ["create"]
+}
+
+def test_environment_build_buildkit [] {
+	print "test build.by buildkit needs no SSH and pushes to the node's registry..."
+	let schema = ($k8s_dir | path join "schema" "release.cue")
+	let base = {name: "metal", gatewayClassName: "eg", storageClass: "s", imagePullPolicy: "IfNotPresent", domainSuffix: "d"}
+	let check = {|v| do { $v | ^cue vet -c $schema -d "#Environment" json: - } | complete }
+	assert equal (($base | merge {build: {by: "buildkit"}, registry: "127.0.0.1:5000"} | to json | do $check $in).exit_code) 0
+	assert (($base | merge {build: {by: "buildkit"}, registry: "us-docker.pkg.dev/p/r"} | to json | do $check $in).exit_code != 0) "buildkit pushes to the node's registry alone"
 }

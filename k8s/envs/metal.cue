@@ -14,7 +14,7 @@ Metal: schema.#Environment & {
 	name:             "metal"
 	context:          string
 	registry:         string
-	build: *{by: "node"} | {by: "cloudbuild", project: string}
+	build: *{by: "node"} | {by: "buildkit"} | {by: "cloudbuild", project: string}
 	ingress: {by: "tunnel", id: string}
 	gatewayClassName: "eg"
 	// k3s's own: a directory on the node. CloudNativePG keeps its copies, and
