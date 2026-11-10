@@ -1375,16 +1375,19 @@ export def main [
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
 	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
+	# A preview is a second whole stack starting on a node already running the released one and the rest (its pods
+	# wait on each other through a loaded node): it is given longer than a release to come up (PRONTO-153).
+	let rollout_wait = if ($preview | is-not-empty) { "900s" } else { "180s" }
 	for d in ($components | each { $"deployment/($rname)-($in)" }) {
 		print $"Waiting for ($d) rollout..."
-		kubectl rollout status $d -n $target_ns --timeout=180s
+		kubectl rollout status $d -n $target_ns $"--timeout=($rollout_wait)"
 	}
 	# The renderer reads the app through the door once, as it starts: one that rolled beside the door
 	# may have read the old door's catalogues and handlers, and renders every page a 500 until it starts
 	# again ("unknown message", "no Jessie module": PRONTO-154). So it starts again once the door has.
 	if $has_render {
 		kubectl rollout restart $"deployment/($rname)-render" -n $target_ns
-		kubectl rollout status $"deployment/($rname)-render" -n $target_ns --timeout=180s
+		kubectl rollout status $"deployment/($rname)-render" -n $target_ns $"--timeout=($rollout_wait)"
 	}
 	if $target_env.build.by == "node" { prune-node-registry $push_registry }
 	# A release with the publisher's rights alone may not run the registry's collector: the next operator's release does.
