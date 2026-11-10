@@ -183,7 +183,7 @@ ${
     o.oldMigrationsDir
       ? `# 1. The database as production has it: what the released commit's migrate step carried it to.
 echo "upgrade-from-released: the released commit's pgroll migrations"
-(cd ${q(o.oldDir)} && mise x -- bash "$(mise where github:bonisoft3/mecha)/services/migrate/migrate.sh" ${q(o.oldMigrationsDir)} ${q(o.oldBaseline)})`
+(mise x -- bash "$(mise where github:bonisoft3/mecha)/services/migrate/migrate.sh" ${q(o.oldMigrationsDir)} ${q(o.oldBaseline)})`
       : "# 1. The released commit had no pgroll migrations."
   }
 # 2. The cluster's initdb finds this marker on a database it built (gcp/schema/gcp.cue's job).
@@ -321,10 +321,12 @@ export async function prepare(appDir: string, gateDir: string, dir: string, rele
   const migrate = procs.migrate ?? { depends_on: { database: { condition: "process_healthy" } }, availability: { exit_on_skipped: true }, environment: procs.database.environment }
   // Postgres from the released commit's initdb steps, built by mecha's own entrypoint (the released commit's
   // own process may run a mecha runtime this one no longer carries).
+  // The tools are this tree's (its mise, as the tree's own database process runs it): the released commit's mise
+  // config names the tools of its own mecha (a Postgres without the plv8 the released steps create), and every
+  // path the steps use is absolute.
   procs.database = {
     ...procs.database,
     environment: oldCompose.processes.database.environment ?? procs.database.environment,
-    working_dir: oldDir,
     // The initdb directory is where the tree's own database process puts its (BAYT_LOCAL_WORK_DIR/initdb.d),
     // which the `replay` check reads: here it holds the released commit's steps.
     entrypoint: [
