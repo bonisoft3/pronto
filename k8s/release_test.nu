@@ -8,6 +8,8 @@ const fixtures_dir = path self testdata
 use std/assert
 
 use release.nu [
+	tenant-manifests
+	tenant-refusals
 	node-registry-manifests
 	node-registry-in-use
 	node-registry-keep-tag
@@ -57,6 +59,7 @@ def run-tests [] {
 	test_release_tree
 	test_read_environment
 	test_render_manifests_kind
+	test_tenant_release
 	test_render_manifests_eks
 	test_render_manifests_metal
 	test_render_ready_through_the_door
@@ -407,6 +410,33 @@ def test_render_manifests_metal [] {
 	# Kind keeps its HTTPS listener.
 	let kind_gateway = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Gateway" | first)
 	assert equal ($kind_gateway.spec.listeners | get name) ["http" "https"]
+}
+
+def test_tenant_release [] {
+	print "test a tenant's release: its namespace and address alone..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t tenant.XXXXXX.json | str trim)
+	{App: {tenant: "studio-ana", tenantHost: "mines-ana-games.example.com"}} | to json | save -f $data
+	let docs = (render-manifests $app.cue_path "metal" --data $data | tenant-manifests "studio-ana" | from yaml)
+	assert equal ($docs | where kind in ["Namespace" "NetworkPolicy"] | length) 0
+	assert equal ($docs | get metadata.namespace | uniq) ["studio-ana"]
+	# The objects keep the release's name: only where they live and answer changes.
+	assert equal ($docs | where kind == "Cluster" | first | get metadata.name) "sample-db"
+	assert equal ($docs | where kind == "Gateway" | first | get spec.listeners.0.hostname) "mines-ana-games.example.com"
+	assert equal ($docs | where kind == "HTTPRoute" | first | get spec.hostnames) ["mines-ana-games.example.com"]
+	# Anything outside the namespace is refused, never dropped.
+	assert ((try { render-manifests $app.cue_path "metal" | tenant-manifests "studio-ana"; false } catch { true }))
+	# Never a preview too.
+	{App: {tenant: "studio-ana", preview: "rc"}} | to json | save -f $data
+	assert ((try { render-manifests $app.cue_path "metal" --data $data; false } catch { true }))
+	rm $data
+	let built = {build: {by: "buildkit"}}
+	assert equal (tenant-refusals "" "" "" $built $app.dir "metal") []
+	assert equal (tenant-refusals "studio-ana" "a.example.com" "" $built $app.dir "metal") []
+	assert equal (tenant-refusals "studio-ana" "" "" $built $app.dir "metal" | length) 1
+	assert equal (tenant-refusals "" "a.example.com" "" $built $app.dir "metal" | length) 1
+	assert equal (tenant-refusals "studio-ana" "a.example.com" "rc" $built $app.dir "metal" | length) 1
+	assert equal (tenant-refusals "studio-ana" "a.example.com" "" {build: {by: "node"}} $app.dir "metal" | length) 1
 }
 
 def test_release_override [] {

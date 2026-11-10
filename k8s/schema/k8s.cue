@@ -35,6 +35,7 @@ import (
 	}
 	// A preview claims no public name: its host is its own, which no DNS record points at.
 	let gatewayHostname = [
+		if release.tenantHost != "" {release.tenantHost},
 		if release.preview == "" && release.gateway.host != _|_ {release.gateway.host},
 		"\(release.id).\(targetEnv.domainSuffix)",
 	][0]
@@ -126,6 +127,7 @@ import (
 
 	let authRpId = [
 		if release.preview != "" {"localhost"},
+		if release.tenantHost != "" {release.tenantHost},
 		if release.auth.rpId != _|_ {release.auth.rpId},
 		if release.gateway.host != _|_ {release.gateway.host},
 		if targetEnv.domainSuffix != "" {"\(release.id).\(targetEnv.domainSuffix)"},
