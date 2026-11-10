@@ -375,6 +375,62 @@ export def node-registry-manifests []: nothing -> string {
 	] | each { to yaml } | str join "---\n"
 }
 
+# The node registry's images the cluster still names, by digest: every image of a
+# pod, a ReplicaSet a rollback returns to, a workload's template or a database's
+# imageName, read out of their JSON. An image named by tag alone keeps its tag.
+export def node-registry-in-use [objects: string]: nothing -> list<record<repo: string, digest: string>> {
+	$objects
+	| parse --regex ('127\.0\.0\.1:' + ($node_registry_port | into string) + '/(?<repo>[a-z0-9._/-]+)(?::[A-Za-z0-9._-]+)?@(?<digest>sha256:[0-9a-f]{64})')
+	| select repo digest
+	| uniq
+}
+
+# The tag that holds a digest the cluster names (node-registry-in-use) through a prune.
+export def node-registry-keep-tag [digest: string]: nothing -> string {
+	$"keep-($digest | str replace 'sha256:' '' | str substring 0..15)"
+}
+
+# The node registry, cut to what is tagged: every digest the cluster names is
+# tagged keep-<digest> first, a keep- tag whose digest nothing names any more is
+# deleted, and the registry's garbage collector then deletes every untagged
+# manifest and every blob none of the rest reference. `registry` is the registry
+# as this release reaches it (forward-node-registry). Each release's push leaves
+# the one before it untagged, so without this the node's disk only grows (PRONTO-154).
+# Garbage collection deletes the blobs of a push still in flight, so a release
+# skips it while another release's upload is open; the next release collects.
+export def prune-node-registry [registry: string] {
+	let kinds = ["pods" "replicasets" "deployments" "statefulsets" "daemonsets" "jobs" "cronjobs" "clusters.postgresql.cnpg.io"]
+	let objects = ($kinds | each {|k| let r = (do { ^kubectl get $k -A -o json } | complete); if $r.exit_code == 0 { $r.stdout } else { "" } } | str join "\n")
+	let in_use = (node-registry-in-use $objects)
+	let accept = "application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json"
+	for it in $in_use {
+		let url = $"http://($registry)/v2/($it.repo)/manifests"
+		let got = (http get --raw --full --allow-errors --headers {Accept: $accept} $"($url)/($it.digest)")
+		if $got.status != 200 { continue }
+		let type = ($got.headers.response | where name == "content-type" | get value.0)
+		http put --content-type $type $"($url)/(node-registry-keep-tag $it.digest)" $got.body | ignore
+	}
+	let catalog = (http get $"http://($registry)/v2/_catalog?n=1000" | get repositories)
+	for repo in $catalog {
+		let tags = (http get $"http://($registry)/v2/($repo)/tags/list" | get tags? | default [])
+		let kept = ($in_use | where repo == $repo | each {|it| node-registry-keep-tag $it.digest })
+		for t in ($tags | where {|t| ($t starts-with "keep-") and not ($t in $kept) }) {
+			http delete $"http://($registry)/v2/($repo)/manifests/($t)" | ignore
+		}
+	}
+	let uploads = (kubectl exec -n pronto-registry deploy/registry -- sh -c "find /var/lib/registry/docker/registry/v2/repositories -path '*/_uploads/*' -mindepth 1 -maxdepth 4 | head -1" | str trim)
+	if ($uploads | is-not-empty) {
+		print "The node's registry has an upload open (another release is pushing): its garbage collection waits for the next release."
+		return
+	}
+	let before = (kubectl exec -n pronto-registry deploy/registry -- du -sh /var/lib/registry | split row "\t" | first)
+	let gc = (do { ^kubectl exec -n pronto-registry deploy/registry -- registry garbage-collect --delete-untagged /etc/distribution/config.yml } | complete)
+	if $gc.exit_code != 0 { error make {msg: $"the node's registry garbage collection failed: ($gc.stderr | lines | last 5 | str join (char nl))"} }
+	$gc.stdout | lines | where {|l| $l =~ "eligible for deletion" } | each { print $in } | ignore
+	let after = (kubectl exec -n pronto-registry deploy/registry -- du -sh /var/lib/registry | split row "\t" | first)
+	print $"The node's registry: ($before) before its garbage collection, ($after) after."
+}
+
 export def ensure-node-registry [--timeout: string = "120s"] {
 	node-registry-manifests | kubectl apply -f -
 	kubectl rollout status deployment/registry -n pronto-registry $"--timeout=($timeout)"
@@ -1038,6 +1094,7 @@ export def main [
 		kubectl rollout restart $"deployment/($rname)-render" -n $target_ns
 		kubectl rollout status $"deployment/($rname)-render" -n $target_ns --timeout=180s
 	}
+	if $target_env.build.by == "node" { prune-node-registry $push_registry }
 
 	# The mesh is intrinsic to a k8s release: a pod the injector let through bare is a failed release.
 	let bare = (kubectl get pods -n $target_ns -l $"app.kubernetes.io/name=($rname),app.kubernetes.io/component in \(($components | str join ',')\)" --field-selector=status.phase=Running -o json

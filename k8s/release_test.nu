@@ -9,6 +9,8 @@ use std/assert
 
 use release.nu [
 	node-registry-manifests
+	node-registry-in-use
+	node-registry-keep-tag
 	OPERATORS
 	get-operator-cache-dir
 	fetch-verified
@@ -74,6 +76,7 @@ def run-tests [] {
 	test_release_override
 	test_tunnel_manifests
 	test_node_registry_manifests
+	test_node_registry_in_use
 	test_envoy_proxy
 	test_render_manifests_aks
 	test_dapr_annotations
@@ -1202,4 +1205,21 @@ def test_preview_delete_needs_a_preview [] {
 	let res = (do { nu ($k8s_dir | path join "release.nu") --app ($fixtures_dir | path join "sample") --delete } | complete)
 	assert ($res.exit_code != 0)
 	assert ($res.stderr | str contains "--delete removes a preview")
+}
+
+def test_node_registry_in_use [] {
+	print "test a prune keeps every node-registry digest the cluster names, and only those..."
+	let objects = ({items: [
+		{spec: {containers: [{image: "127.0.0.1:5000/app-render:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {image: "daprio/daprd:1.15"}]}}
+		{spec: {template: {spec: {containers: [{image: "127.0.0.1:5000/app-render@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}}}}
+		{spec: {imageName: "127.0.0.1:5000/app-database:18@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+		{spec: {containers: [{image: "127.0.0.1:5000/app-crud:latest"} {image: "us-docker.pkg.dev/p/r/x@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}}
+		{spec: {containers: [{image: "127.0.0.1:5000/app-render:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}
+	]} | to json)
+	assert equal (node-registry-in-use $objects) [
+		{repo: "app-render", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+		{repo: "app-render", digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+		{repo: "app-database", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	]
+	assert equal (node-registry-keep-tag "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") "keep-bbbbbbbbbbbbbbbb"
 }
