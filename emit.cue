@@ -1924,6 +1924,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 	out: {
 		app:    S.code.meta.name
+		// What a reader calls the app, where its name is a service's ("battlechess" for Bonk Chess):
+		// omnishell titles a document `<h1> — <title>` and the sign-in by it (chrome.js appTitle), else by app.
+		if S.code.meta.social != _|_ if S.code.meta.social.title != _|_ {
+			title: S.code.meta.social.title
+		}
 		if S.code.state.cortex != _|_ {
 			for _, c in S.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "omnishell" {
 				cortex: {config: c.config, actors: {for name, actor in c.setup.actors if actor.via == "navigation" || actor.via == "rows" {(name): actor}}}
