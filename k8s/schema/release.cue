@@ -57,7 +57,15 @@ package schema
 	// and takes no backups.
 	preview: *"" | =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	id:      [if preview != "" {"\(name)-\(preview)"}, name][0]
-	ns:      [if preview != "" {id}, namespace][0]
+	// A tenant's release (`release@k8s --tenant=<namespace>`): the release, under its own name, in a
+	// namespace someone else made and gave a publisher's rights to (Studio's owners, PRONTO-130). It
+	// makes no namespace and nothing outside that one, so it is never a preview too.
+	tenant: *"" | =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+	if tenant != "" {preview: ""}
+	// The one address the tenant's namespace was given (`--host`), over the app's own gateway.host, which
+	// names where its author releases it: a tenant's gateway may answer only for what it was given.
+	tenantHost: *"" | =~"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+	ns: [if preview != "" {id}, if tenant != "" {tenant}, namespace][0]
 	// Where a preview is reached and says it is: the door's port-forwarded port on the machine releasing
 	// (the services' ORIGIN, and a passkey's relying party, localhost).
 	previewOrigin: *"http://localhost:18080" | =~"^http://localhost:[0-9]+$"
