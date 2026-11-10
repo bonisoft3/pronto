@@ -101,7 +101,7 @@ export def fetch-verified [entry: record]: nothing -> string {
 	mkdir $cache_dir
 
 	let is_helm = ($entry.kind? | default "") == "helm"
-	let ext = if $is_helm { "tgz" } else { "yaml" }
+	let ext = ($entry.ext? | default (if $is_helm { "tgz" } else { "yaml" }))
 	let cache_file = $cache_dir | path join $"($entry.name).($ext)"
 	let expected_hash = $entry.checksum | str replace --regex "^sha256:" ""
 
@@ -650,6 +650,62 @@ export def apply-sops-secrets [app_name: string, app_dir: string, namespace: str
 		| ^kubectl apply -f -
 }
 
+# The sops that decrypts a released environment's secrets, pinned by checksum and fetched once
+# per machine (fetch-verified), so the node and the Mac decrypt with the same build and need no
+# install. sops reads age keys itself; no age binary is needed.
+const sops_version = "v3.13.3"
+const sops_checksums = {
+	"darwin.amd64": "42162d5cef10b74fcf80a045a70e658d7ce6e63d6ea1be6f347e44015714468d"
+	"darwin.arm64": "b97c0d434aab577dc40310e8d22ff9e45eef4c80638ab978daae9b4681c59286"
+	"linux.amd64": "e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b"
+	"linux.arm64": "53b0abacd38ef1b12a66d6c100956691b9cefce018d91f81e73ddf7438b94d77"
+}
+
+export def sops-platform []: nothing -> string {
+	let os = match $nu.os-info.name { "macos" => "darwin", "linux" => "linux", $o => (error make {msg: $"no pinned sops for ($o)"}) }
+	let arch = match $nu.os-info.arch { "x86_64" => "amd64", "aarch64" => "arm64", $a => (error make {msg: $"no pinned sops for ($a)"}) }
+	$"($os).($arch)"
+}
+
+export def sops-bin []: nothing -> string {
+	let platform = (sops-platform)
+	let name = $"sops-($sops_version).($platform)"
+	let bin = (fetch-verified {
+		name: $name, ext: "bin", checksum: $"sha256:($sops_checksums | get $platform)"
+		url: $"https://github.com/getsops/sops/releases/download/($sops_version)/($name)"
+	})
+	^chmod +x $bin
+	$bin
+}
+
+# The age key that decrypts a released environment's secrets (.sops.yaml at the repository's root
+# names every recipient): SOPS_AGE_KEY when set; on a Mac, its Keychain item `pronto-sops-age`;
+# else the cluster's own key, the Secret pronto-sops/age-key, made on the node and never copied off it.
+export def sops-age-key []: nothing -> string {
+	if ($env.SOPS_AGE_KEY? | is-not-empty) { return $env.SOPS_AGE_KEY }
+	if $nu.os-info.name == "macos" {
+		let r = (do { ^security find-generic-password -s pronto-sops-age -w } | complete)
+		if $r.exit_code == 0 { return ($r.stdout | str trim) }
+	}
+	let r = (do { ^kubectl get secret age-key -n pronto-sops -o 'jsonpath={.data.keys\.txt}' } | complete)
+	if $r.exit_code != 0 or ($r.stdout | str trim | is-empty) {
+		error make {msg: $"no age key to decrypt secrets: set SOPS_AGE_KEY, or make the Secret pronto-sops/age-key on the cluster \(($r.stderr | str trim)\)"}
+	}
+	$r.stdout | decode base64 | decode | str trim
+}
+
+# A released environment's secrets: the Secrets in the app's secrets.<environment>.enc.yaml
+# (SOPS with age, values encrypted, names readable), decrypted in memory and applied to the app's
+# namespace. Server-side, owned by pronto-sops, so one made by hand before is taken over, not refused.
+export def apply-environment-secrets [app_dir: string, environment: string, namespace: string] {
+	let enc_file = ($app_dir | path join $"secrets.($environment).enc.yaml")
+	if not ($enc_file | path exists) { return }
+	print $"Decrypting ($enc_file) into ($namespace)..."
+	let sops = (sops-bin)
+	with-env {SOPS_AGE_KEY: (sops-age-key)} { ^$sops -d $enc_file }
+		| ^kubectl apply --server-side --force-conflicts --field-manager=pronto-sops -n $namespace -f -
+}
+
 # Resolve application to release
 # Each of the app's own services' compose environment, as release.cue does not set
 # it (own: the keys it sets, which are the release's): a peer compose names at
@@ -1183,6 +1239,8 @@ export def main [
 	# secrets.enc.yaml holds sandbox keys, which a production cluster must never get.
 	if $cluster_env == "kind" {
 		apply-sops-secrets $rname $app_source_dir $target_ns
+	} else {
+		apply-environment-secrets $app_source_dir $cluster_env $target_ns
 	}
 	if ($oidc.secretValues | is-not-empty) {
 		auth-provider-secret $workload_name $target_ns $oidc.secretValues

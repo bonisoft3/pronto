@@ -32,6 +32,9 @@ use release.nu [
 	seed-fill
 	apply-alert-rules
 	check-backup-secrets
+	sops-platform
+	sops-age-key
+	apply-environment-secrets
 ]
 
 def main [] {
@@ -80,6 +83,7 @@ def run-tests [] {
 	test_node_registry_in_use
 	test_node_buildkit_manifests
 	test_environment_build_buildkit
+	test_environment_secrets
 	test_envoy_proxy
 	test_render_manifests_aks
 	test_dapr_annotations
@@ -1252,4 +1256,17 @@ def test_environment_build_buildkit [] {
 	let check = {|v| do { $v | ^cue vet -c $schema -d "#Environment" json: - } | complete }
 	assert equal (($base | merge {build: {by: "buildkit"}, registry: "127.0.0.1:5000"} | to json | do $check $in).exit_code) 0
 	assert (($base | merge {build: {by: "buildkit"}, registry: "us-docker.pkg.dev/p/r"} | to json | do $check $in).exit_code != 0) "buildkit pushes to the node's registry alone"
+}
+
+def test_environment_secrets [] {
+	print "test a released environment's secrets: the pinned sops names this machine, SOPS_AGE_KEY wins, no file applies nothing..."
+	assert ((sops-platform) =~ '^(darwin|linux)\.(amd64|arm64)$')
+	assert equal (with-env {SOPS_AGE_KEY: "AGE-SECRET-KEY-1TEST"} { sops-age-key }) "AGE-SECRET-KEY-1TEST"
+	let dir = (mktemp -d)
+	# No secrets.metal.enc.yaml: returns before fetching sops, reading a key or calling kubectl.
+	assert equal (with-env {PATH: []} { apply-environment-secrets $dir "metal" "ns" }) null
+	let entry = {name: "sops-test", ext: "bin", url: "https://example.invalid/not-called", checksum: $"sha256:("x" | hash sha256)"}
+	"x" | save -f -r ((get-operator-cache-dir) | path join "sops-test.bin")
+	assert equal (fetch-verified $entry) ((get-operator-cache-dir) | path join "sops-test.bin")
+	rm -r $dir
 }
