@@ -235,6 +235,25 @@ Deno.test("social cards emit OpenGraph, Twitter, and canonical metadata", async 
   assertEquals(stat?.target, "/srv/preview.png");
 });
 
+Deno.test("a social title names the app to its readers: shell.json's title, beside its app", async () => {
+  const shell = async (social: string) => JSON.parse((await exportCue(`
+    meta: {
+      name: "social-app"
+      description: "social card demo"
+      ${social}
+      ir: sha256: ""
+      targets: []
+      clocks: []
+      decisions: {}
+      tests: {}
+    }
+  `)).files["shell/shell.json"]?.text ?? "{}");
+  const titled = await shell(`social: title: "Social Preview"`);
+  assertEquals([titled.app, titled.title], ["social-app", "Social Preview"]);
+  const untitled = await shell("");
+  assertEquals([untitled.app, "title" in untitled], ["social-app", false]);
+});
+
 Deno.test("resource hints inject dns-prefetch and preconnect with head ordering", async () => {
   const res = await exportCue(`
     meta: {
