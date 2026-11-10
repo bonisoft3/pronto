@@ -120,3 +120,13 @@ Deno.test("provider settings require a provider list while an empty settings map
   assertEquals(unauthenticated.success, true, unauthenticated.stderr);
   assertEquals("auth" in unauthenticated.value["shell/shell.json"].data, false);
 });
+
+// A guest kept across visits (PRONTO-208): the flag that turns it on reaches the
+// terminal, which asks it before keeping or adopting a guest.
+Deno.test("the flag that keeps a guest across visits reaches the terminal's auth", async () => {
+  const files = await exported(withAuth(`{required: false, service: "/auth", keepGuest: "keep_guest"}`), "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals(files.value["shell/shell.json"].data.auth.keepGuest, "keep_guest");
+  const bad = await exported(withAuth(`{required: false, service: "/auth", keepGuest: "Keep Guest"}`), "out");
+  assertEquals(bad.success, false);
+});
