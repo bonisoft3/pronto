@@ -1848,6 +1848,13 @@ import (
 			// one gesture that signs in, or keeps the guest's identity under a
 			// new passkey.
 			promote: *false | bool
+			// The flag (pronto-flags, the app's flags_spec.cue) that keeps a
+			// guest across visits in this browser: while it is on, the terminal
+			// keeps a minted guest in the browser's storage and a later visit
+			// is that guest, its games and progress with it, until its token
+			// expires. A session otherwise lives in the tab, so every visit is a
+			// new, empty guest. Off, or unanswered, nothing is kept.
+			keepGuest?: string & =~"^[a-z][a-z0-9_-]{0,63}$"
 			// The image the cluster's auth service runs in place of mecha's: a
 			// target of the program's cluster unification (`{ref: ":<target>"}`)
 			// built FROM mecha's, or a pinned name. The service keeps mecha's
