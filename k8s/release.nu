@@ -1127,8 +1127,8 @@ export def tenant-manifests [namespace: string]: string -> string {
 # pushed through it, no secrets decrypted with the cluster's key).
 export def tenant-refusals [tenant: string, host: string, preview: string, target: record, app_dir: string, environment: string, images: string = ""]: nothing -> list<string> {
 	[
-		(if ($tenant | is-not-empty) and ($images | is-empty) { "--tenant needs --images: a tenant's release builds nothing with its publisher's rights (tenant-images builds them)" })
-		(if ($tenant | is-empty) and ($images | is-not-empty) { "--images is a tenant's: name its namespace with --tenant" })
+		(if ($tenant | is-not-empty) and ($images | is-empty) { "--tenant needs --images or --buildkit: a tenant's release builds nothing with its publisher's rights (tenant-images builds them)" })
+		(if ($tenant | is-empty) and ($images | is-not-empty) { "--images and --buildkit are a tenant's: name its namespace with --tenant" })
 		(if ($tenant | is-not-empty) and ($host | is-empty) { "--tenant needs --host, the one address its namespace was given" })
 		(if ($tenant | is-empty) and ($host | is-not-empty) { "--host is a tenant's address: name its namespace with --tenant" })
 		(if ($tenant | is-not-empty) and ($preview | is-not-empty) { "a tenant's release is never a preview" })
@@ -1207,7 +1207,9 @@ export def main [
 	--schema-from: string = "" # With --preview: a new preview's database starts as this namespace's schema, without its rows (schema-copy-steps)
 	--tenant: string = ""    # Release into this namespace, made by someone else, with its publisher's rights alone (the KUBECONFIG given): no namespace, operators, tunnel or observability (PRONTO-130)
 	--host: string = ""      # With --tenant: the one address the namespace was given, over the app's gateway.host
-	--images: string = ""    # With --tenant: a JSON file of the images tenant-images pushed, by service; a tenant's release builds nothing
+	--images: string = ""    # With --tenant: a JSON file of the images tenant-images pushed, by service
+	--buildkit: string = ""  # With --tenant, instead of --images: build them now on this sandboxed buildkitd (tenant-images)
+	--push-kubeconfig: string = "" # With --buildkit: who pushes them (pronto-registry's port-forward), never the publisher; empty, the pod's own account
 ] {
 	let app_info = (resolve-app $app)
 	let cluster_env = ($cluster_env | default $env.SAY_RELEASE_ARGS_CLUSTER_ENV? | default (default-environment $app_info.cue_path))
@@ -1292,7 +1294,8 @@ export def main [
 		$config.environment
 	} else { read-environment $cluster_env $app_info.cue_path }
 	let registry = $target_env.registry
-	let refused = (tenant-refusals $tenant $host $preview $target_env $app_source_dir $cluster_env $images)
+	let refused = (tenant-refusals $tenant $host $preview $target_env $app_source_dir $cluster_env ([$images $buildkit] | str join ""))
+	if ($images | is-not-empty) and ($buildkit | is-not-empty) { error make { msg: "--images or --buildkit, not both" } }
 	if ($refused | is-not-empty) { error make { msg: ($refused | str join "; ") } }
 	if $cluster_env == "gke" {
 		kubectl get crd clusters.postgresql.cnpg.io externalsecrets.external-secrets.io configurations.dapr.io gateways.gateway.networking.k8s.io backendtrafficpolicies.gateway.envoyproxy.io | ignore
@@ -1362,7 +1365,16 @@ export def main [
 		$"localhost:(forward-node-registry $tunnel.target $tunnel.socket)"
 	} else { $registry }
 	let pushed = if $is_tenant {
-		let given = (open $images)
+		let given = if ($buildkit | is-not-empty) {
+			# Pushed with the builder's own rights: the publisher's KUBECONFIG is set aside for it.
+			let compose = (do { cd $app_source_dir; docker compose --profile "*" config })
+			let push_env = if ($push_kubeconfig | is-not-empty) { {KUBECONFIG: $push_kubeconfig} } else { {} }
+			# A closure's environment is its own: the publisher's KUBECONFIG is back once it returns.
+			do {
+				hide-env KUBECONFIG
+				with-env $push_env { tenant-images $app_source_dir $compose $build_svcs $app_info.name $tenant $app_meta.image.tag $buildkit --platform ($target_env.platform? | default "") }
+			}
+		} else { open $images }
 		let missing = ($build_svcs | where {|s| $s not-in ($given | columns) })
 		if ($missing | is-not-empty) { error make { msg: $"--images has no image for ($missing | str join ', ')" } }
 		$given | select ...$build_svcs
