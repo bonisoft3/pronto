@@ -67,8 +67,10 @@ package schema
 	tenantHost: *"" | =~"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
 	ns: [if preview != "" {id}, if tenant != "" {tenant}, namespace][0]
 	// Where a preview is reached and says it is: the door's port-forwarded port on the machine releasing
-	// (the services' ORIGIN, and a passkey's relying party, localhost).
-	previewOrigin: *"http://localhost:18080" | =~"^http://localhost:[0-9]+$"
+	// (the services' ORIGIN, and a passkey's relying party, localhost); or https, when a local TLS front
+	// (Caddy's `tls internal`) stands before that forward, so a browser speaks HTTP/2 to it and its
+	// live sync requests do not take all six of HTTP/1.1's connections to one host.
+	previewOrigin: *"http://localhost:18080" | =~"^https?://localhost:[0-9]+$"
 
 	type: "pronto" | *"pronto"
 

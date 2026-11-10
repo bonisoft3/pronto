@@ -251,7 +251,10 @@ release's images, migrations and config on the cluster before traffic moves, so 
 no tunnel route or DNS record is added, its gateway host is `<name>-rc.<domainSuffix>` which nothing points at,
 and it takes **no backups**. It is reached with `kubectl port-forward -n <name>-rc svc/caddy 18080:8080` (its
 services' `ORIGIN` is `http://localhost:18080`, `previewOrigin` in the release, and a passkey's relying party
-`localhost`). `sayt release@k8s --preview=rc --delete` removes the namespace, and with it the database, volumes
+`localhost`). A page that holds many live requests at once stalls over plain HTTP/1.1, which allows a browser six
+connections to one host: such an app sets `previewOrigin` to `https://localhost:<port>` and puts a local TLS front
+before the forward (`caddy reverse-proxy --from https://localhost:<port> --to localhost:18080`), so the browser
+speaks HTTP/2. `sayt release@k8s --preview=rc --delete` removes the namespace, and with it the database, volumes
 and secrets; `--delete` without `--preview` is refused, and so is a namespace that is the release's own.
 Spec: `#ReleaseSpec.preview`, with `id` (every object's name) and `ns` (its namespace) derived in
 `k8s/schema/release.cue`; a release with no preview renders byte for byte as before.
