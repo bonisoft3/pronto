@@ -437,7 +437,8 @@ def test_tenant_release [] {
 	assert equal (tenant-refusals "" "a.example.com" "" $built $app.dir "metal" | length) 1
 	assert equal (tenant-refusals "studio-ana" "a.example.com" "rc" $built $app.dir "metal" "i.json" | length) 1
 	assert equal (tenant-refusals "studio-ana" "a.example.com" "" {build: {by: "node"}} $app.dir "metal" "i.json" | length) 1
-	# A tenant's release builds nothing: it is given its images.
+	# A tenant's release builds nothing with the publisher's rights: it is given its images, or a buildkit to build them on.
+	assert equal (tenant-refusals "studio-ana" "a.example.com" "" $built $app.dir "metal" "tcp://buildkitd:1234") []
 	assert equal (tenant-refusals "studio-ana" "a.example.com" "" $built $app.dir "metal" | length) 1
 	assert equal (tenant-refusals "" "" "" $built $app.dir "metal" "i.json" | length) 1
 	# Its images are under its namespace's name, as the schema names them.
