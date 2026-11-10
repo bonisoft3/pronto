@@ -125,6 +125,23 @@ import "encoding/yaml"
 		},
 	]
 
+	// Its samples live on a volume of the cluster's default class: on the container's own disk, a
+	// restart (an OOM kill, a node reboot, a rollout) emptied every series, and with them each
+	// dashboard's history (PRONTO-189).
+	let vmVolumeObj = [{
+		apiVersion: "v1"
+		kind:       "PersistentVolumeClaim"
+		metadata: {
+			name:      "vmsingle-data"
+			namespace: ns
+			labels:    appLabels & {"app.kubernetes.io/name": "vmsingle"}
+		}
+		spec: {
+			accessModes: ["ReadWriteOnce"]
+			resources: requests: storage: "20Gi"
+		}
+	}]
+
 	let vmDeploymentObj = [{
 		apiVersion: "apps/v1"
 		kind:       "Deployment"
@@ -135,6 +152,8 @@ import "encoding/yaml"
 		}
 		spec: {
 			replicas: 1
+			// One process on the data at a time: the old one stops before the new one opens it.
+			strategy: type: "Recreate"
 			selector: matchLabels: {"app.kubernetes.io/name": "vmsingle"}
 			template: {
 				metadata: labels: appLabels & {"app.kubernetes.io/name": "vmsingle"}
@@ -152,15 +171,23 @@ import "encoding/yaml"
 						volumeMounts: [{
 							name:      "config"
 							mountPath: "/etc/vmsingle"
+						}, {
+							name:      "data"
+							mountPath: "/vmsingle-data"
 						}]
+						// 250Mi was OOM-killed once the apps' collectors and exporters were scraped here
+						// (2026-11-10, PRONTO-189).
 						resources: {
-							requests: {cpu: "20m", memory: "50Mi"}
-							limits: {cpu: "200m", memory: "250Mi"}
+							requests: {cpu: "20m", memory: "200Mi"}
+							limits: {cpu: "500m", memory: "1Gi"}
 						}
 					}]
 					volumes: [{
 						name: "config"
 						configMap: name: "vmsingle-config"
+					}, {
+						name: "data"
+						persistentVolumeClaim: claimName: "vmsingle-data"
 					}]
 				}
 			}
@@ -412,6 +439,7 @@ import "encoding/yaml"
 			namespaceObj,
 			vmScrapeConfigObj,
 			vmRbacObj,
+			vmVolumeObj,
 			vmDeploymentObj,
 			vmServiceObj,
 			jaegerDeploymentObj,
