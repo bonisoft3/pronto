@@ -424,7 +424,7 @@ export def prune-node-registry [registry: string] {
 	let before = (kubectl exec -n pronto-registry deploy/registry -- du -sh /var/lib/registry | split row "\t" | first)
 	let gc = (do { ^kubectl exec -n pronto-registry deploy/registry -- registry garbage-collect --delete-untagged /etc/distribution/config.yml } | complete)
 	if $gc.exit_code != 0 { error make {msg: $"the node's registry garbage collection failed: ($gc.stderr | lines | last 5 | str join (char nl))"} }
-	$gc.stdout | lines | where {|l| $l =~ "eligible for deletion" } | each { print $in } | ignore
+	$gc.stdout | lines | where {|l| $l =~ "blobs marked" } | each { print $in } | ignore
 	let after = (kubectl exec -n pronto-registry deploy/registry -- du -sh /var/lib/registry | split row "\t" | first)
 	print $"The node's registry: ($before) before its garbage collection, ($after) after."
 }
