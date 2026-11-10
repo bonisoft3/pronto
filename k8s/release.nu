@@ -1031,6 +1031,13 @@ export def main [
 		print $"Waiting for ($d) rollout..."
 		kubectl rollout status $d -n $target_ns --timeout=180s
 	}
+	# The renderer reads the app through the door once, as it starts: one that rolled beside the door
+	# may have read the old door's catalogues and handlers, and renders every page a 500 until it starts
+	# again ("unknown message", "no Jessie module": PRONTO-154). So it starts again once the door has.
+	if $has_render {
+		kubectl rollout restart $"deployment/($rname)-render" -n $target_ns
+		kubectl rollout status $"deployment/($rname)-render" -n $target_ns --timeout=180s
+	}
 
 	# The mesh is intrinsic to a k8s release: a pod the injector let through bare is a failed release.
 	let bare = (kubectl get pods -n $target_ns -l $"app.kubernetes.io/name=($rname),app.kubernetes.io/component in \(($components | str join ',')\)" --field-selector=status.phase=Running -o json
