@@ -11,6 +11,7 @@ use release.nu [
 	node-registry-manifests
 	node-registry-in-use
 	node-registry-keep-tag
+	node-buildkit-manifests
 	OPERATORS
 	get-operator-cache-dir
 	fetch-verified
@@ -77,6 +78,8 @@ def run-tests [] {
 	test_tunnel_manifests
 	test_node_registry_manifests
 	test_node_registry_in_use
+	test_node_buildkit_manifests
+	test_environment_build_buildkit
 	test_envoy_proxy
 	test_render_manifests_aks
 	test_dapr_annotations
@@ -1222,4 +1225,31 @@ def test_node_registry_in_use [] {
 		{repo: "app-database", digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 	]
 	assert equal (node-registry-keep-tag "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") "keep-bbbbbbbbbbbbbbbb"
+}
+
+def test_node_buildkit_manifests [] {
+	print "test the node's builder is rootless, on the node's loopback, pushing to its registry over HTTP..."
+	let docs = (node-buildkit-manifests | from yaml)
+	let spec = ($docs | where kind == "Deployment" | first | get spec.template.spec)
+	assert $spec.hostNetwork
+	let c = ($spec.containers | first)
+	assert ($c.image =~ '^moby/buildkit:v[0-9.]+-rootless@sha256:[0-9a-f]{64}$')
+	assert equal $c.securityContext.runAsUser 1000
+	assert ("--net=host" in $c.command)
+	let addr = ($c.args | skip until {|a| $a == "--addr" } | get 1)
+	assert equal $addr "tcp://127.0.0.1:1234"
+	let toml = ($docs | where kind == "ConfigMap" | first | get data."buildkitd.toml")
+	assert ($toml | str contains '[registry."127.0.0.1:5000"]')
+	assert ($toml | str contains "http = true")
+	let role = ($docs | where kind == "ClusterRole" | first)
+	assert equal ($role.rules | where {|r| "pods/portforward" in $r.resources } | get verbs.0) ["create"]
+}
+
+def test_environment_build_buildkit [] {
+	print "test build.by buildkit needs no SSH and pushes to the node's registry..."
+	let schema = ($k8s_dir | path join "schema" "release.cue")
+	let base = {name: "metal", gatewayClassName: "eg", storageClass: "s", imagePullPolicy: "IfNotPresent", domainSuffix: "d"}
+	let check = {|v| do { $v | ^cue vet -c $schema -d "#Environment" json: - } | complete }
+	assert equal (($base | merge {build: {by: "buildkit"}, registry: "127.0.0.1:5000"} | to json | do $check $in).exit_code) 0
+	assert (($base | merge {build: {by: "buildkit"}, registry: "us-docker.pkg.dev/p/r"} | to json | do $check $in).exit_code != 0) "buildkit pushes to the node's registry alone"
 }

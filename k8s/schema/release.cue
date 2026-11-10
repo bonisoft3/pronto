@@ -25,10 +25,16 @@ package schema
 	// releasing needs no Docker daemon. `node` builds with Docker on the machine
 	// releasing too, but pushes through the release's SSH tunnel (`access`) to a
 	// registry on the node itself, listening on its loopback alone, which the
-	// node pulls from: no cloud between the build and the cluster.
-	build: *{by: "docker"} | {by: "cloudbuild", project: string} | {by: "node"}
+	// node pulls from: no cloud between the build and the cluster. `buildkit`
+	// needs no Docker daemon and no SSH: the node's own buildkitd builds, on its
+	// loopback alone, reached through the cluster's API (a port-forward), and
+	// pushes to the same registry. Studio's builder, which has neither, builds so.
+	build: *{by: "docker"} | {by: "cloudbuild", project: string} | {by: "node"} | {by: "buildkit"}
 	if build.by == "node" {
 		access: ssh: _
+		registry: "127.0.0.1:5000"
+	}
+	if build.by == "buildkit" {
 		registry: "127.0.0.1:5000"
 	}
 	// How requests reach the gateway: the node's host ports 80 and 443 (Kind),

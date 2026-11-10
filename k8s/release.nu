@@ -20,6 +20,8 @@ const tunnel_gateway = "pronto-gateway"
 # and the loopback port it listens on, which #Environment.registry names.
 const node_registry = "registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e"
 const node_registry_port = 5000
+# What a registry is asked for a manifest: any of the four kinds a build pushes.
+const registry_accept = "application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json"
 
 export const OPERATORS = [
 	{
@@ -402,13 +404,9 @@ export def prune-node-registry [registry: string] {
 	let kinds = ["pods" "replicasets" "deployments" "statefulsets" "daemonsets" "jobs" "cronjobs" "clusters.postgresql.cnpg.io"]
 	let objects = ($kinds | each {|k| let r = (do { ^kubectl get $k -A -o json } | complete); if $r.exit_code == 0 { $r.stdout } else { "" } } | str join "\n")
 	let in_use = (node-registry-in-use $objects)
-	let accept = "application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json"
 	for it in $in_use {
-		let url = $"http://($registry)/v2/($it.repo)/manifests"
-		let got = (http get --raw --full --allow-errors --headers {Accept: $accept} $"($url)/($it.digest)")
-		if $got.status != 200 { continue }
-		let type = ($got.headers.response | where name == "content-type" | get value.0)
-		http put --content-type $type $"($url)/(node-registry-keep-tag $it.digest)" $got.body | ignore
+		let there = (http head --full --allow-errors --headers {Accept: $registry_accept} $"http://($registry)/v2/($it.repo)/manifests/($it.digest)" | get status)
+		if $there == 200 { node-registry-tag $registry $it.repo $it.digest (node-registry-keep-tag $it.digest) }
 	}
 	let catalog = (http get $"http://($registry)/v2/_catalog?n=1000" | get repositories)
 	for repo in $catalog {
@@ -434,6 +432,171 @@ export def prune-node-registry [registry: string] {
 export def ensure-node-registry [--timeout: string = "120s"] {
 	node-registry-manifests | kubectl apply -f -
 	kubectl rollout status deployment/registry -n pronto-registry $"--timeout=($timeout)"
+}
+
+# The node's builder (#Environment.build.by "buildkit"): a rootless buildkitd on
+# the node's network, listening on its loopback alone, so it pushes to the node's
+# registry as the node sees it (127.0.0.1:5000) and nothing outside the node
+# reaches it but a port-forward through the cluster's API, which RBAC grants:
+# a release that has neither Docker nor SSH (Studio's builder) builds through it.
+# Its cache is a directory on the node, trimmed to gckeepstorage (PRONTO-154).
+const node_buildkit = "moby/buildkit:v0.29.0-rootless@sha256:93efd7f1c17f16cea080c34f68e19863b9fe541db550bf607221ce425c0ab9ef"
+const node_buildkit_port = 1234
+
+export def node-buildkit-manifests []: nothing -> string {
+	let state = {name: "state", mountPath: "/home/user/.local/share/buildkit"}
+	[
+		{apiVersion: "v1", kind: "Namespace", metadata: {name: "pronto-buildkit"}}
+		{
+			apiVersion: "v1", kind: "ConfigMap"
+			metadata: {name: "buildkitd", namespace: "pronto-buildkit"}
+			data: {"buildkitd.toml": ([
+				$'[registry."127.0.0.1:($node_registry_port)"]'
+				"  http = true"
+				"[worker.oci]"
+				"  gc = true"
+				'  gckeepstorage = "20GB"'
+			] | str join "\n")}
+		}
+		{
+			apiVersion: "apps/v1"
+			kind: "Deployment"
+			metadata: {name: "buildkitd", namespace: "pronto-buildkit"}
+			spec: {
+				replicas: 1
+				strategy: {type: "Recreate"}
+				selector: {matchLabels: {app: "buildkitd"}}
+				template: {
+					metadata: {labels: {app: "buildkitd"}}
+					spec: {
+						hostNetwork: true
+						# The cache directory is created root's; the daemon runs as user 1000.
+						initContainers: [{
+							name: "own", image: $node_buildkit
+							command: ["sh" "-c" $"chown 1000:1000 ($state.mountPath)"]
+							securityContext: {runAsUser: 0}
+							volumeMounts: [$state]
+						}]
+						containers: [{
+							name: "buildkitd"
+							image: $node_buildkit
+							# rootlesskit keeps the node's network, so the daemon's loopback is the node's.
+							command: ["rootlesskit" "--net=host" "--copy-up=/etc" "--copy-up=/run" "buildkitd"]
+							args: ["--addr" $"tcp://127.0.0.1:($node_buildkit_port)" "--oci-worker-no-process-sandbox" "--config" "/etc/buildkit/buildkitd.toml"]
+							securityContext: {runAsUser: 1000, runAsGroup: 1000, seccompProfile: {type: "Unconfined"}, appArmorProfile: {type: "Unconfined"}}
+							readinessProbe: {exec: {command: ["buildctl" "--addr" $"tcp://127.0.0.1:($node_buildkit_port)" "debug" "workers"]}, initialDelaySeconds: 3, periodSeconds: 10}
+							resources: {requests: {cpu: "500m", memory: "1Gi"}, limits: {memory: "8Gi"}}
+							volumeMounts: [{name: "config", mountPath: "/etc/buildkit"} $state]
+						}]
+						volumes: [
+							{name: "config", configMap: {name: "buildkitd"}}
+							{name: "state", hostPath: {path: "/var/lib/pronto-buildkit", type: "DirectoryOrCreate"}}
+						]
+					}
+				}
+			}
+		}
+		# What a release that builds through it is granted (bound by whoever runs one).
+		{
+			apiVersion: "rbac.authorization.k8s.io/v1", kind: "ClusterRole"
+			metadata: {name: "pronto-buildkit-client"}
+			rules: [
+				{apiGroups: [""], resources: ["pods"], verbs: ["get" "list"]}
+				{apiGroups: ["apps"], resources: ["deployments"], verbs: ["get"]}
+				{apiGroups: [""], resources: ["pods/portforward"], verbs: ["create"]}
+			]
+		}
+	] | each { to yaml } | str join "---\n"
+}
+
+# The node's builder, made where this release may make it, else as it is: a
+# release with the publisher's rights alone finds it there or fails saying so.
+export def ensure-node-buildkit [--timeout: string = "180s"] {
+	let can = (do { ^kubectl auth can-i create deployments -n pronto-buildkit } | complete | get stdout | str trim)
+	if $can == "yes" {
+		node-buildkit-manifests | kubectl apply -f -
+	} else if (do { ^kubectl get deployment/buildkitd -n pronto-buildkit -o name } | complete | get exit_code) != 0 {
+		error make {msg: "the node has no builder (deployment/buildkitd in pronto-buildkit) and this release may not make it: release once with the operator's kubeconfig and build.by \"buildkit\""}
+	}
+	kubectl rollout status deployment/buildkitd -n pronto-buildkit $"--timeout=($timeout)"
+}
+
+# A port-forward through the cluster's API to `port` on a deployment's pod (a
+# host-network pod's port is the node's loopback): its local port and its pid,
+# which stop-port-forward ends.
+export def port-forward [namespace: string, deployment: string, port: int] {
+	let log = (mktemp -t pf.XXXXXX | str trim)
+	let pid = (^bash -c $"kubectl port-forward -n ($namespace) deployment/($deployment) :($port) > ($log) 2>&1 & echo $!" | str trim | into int)
+	for _ in 1..60 {
+		let found = (open --raw $log | parse --regex 'Forwarding from 127\.0\.0\.1:(?<p>\d+)')
+		if ($found | is-not-empty) { return {port: ($found.0.p | into int), pid: $pid} }
+		sleep 500ms
+	}
+	stop-port-forward {port: 0, pid: $pid}
+	error make {msg: $"no port-forward to deployment/($deployment) in ($namespace): (open --raw $log)"}
+}
+
+export def stop-port-forward [pf: record] {
+	do { ^kill $pf.pid } | complete | ignore
+}
+
+# The images built by the node's buildkitd and pushed by it to the node's
+# registry, by service, as cloud-build-images gives them: the database's tagged
+# with its Postgres major, read from the image's config in the registry.
+export def buildkit-images [app_dir: string, compose: string, services: list<string>, app: string, tag: string, --platform: string]: nothing -> record {
+	let compose = ($compose | release-tree)
+	let root = (do { cd $app_dir; ^git rev-parse --show-toplevel } | str trim)
+	let builder = $"pronto-buildkit-(random chars --length 6 | str lowercase)"
+	let bk = (port-forward pronto-buildkit buildkitd $node_buildkit_port)
+	let reg = (port-forward pronto-registry registry $node_registry_port)
+	let meta = (mktemp -t bake-meta.XXXXXX.json | str trim)
+	# A first push names the database by a tag of its own; its Postgres major is read after.
+	let first = {|svc| if $svc == "database" { $"build-($builder)" } else { $tag } }
+	let ref = {|svc| $"127.0.0.1:($node_registry_port)/($app)-($svc):(do $first $svc)" }
+	let sets = ($services | each {|s| [--set $"($s).tags=(do $ref $s)"] } | flatten)
+	let platform_set = if ($platform | is-not-empty) { [--set $"*.platform=($platform)"] } else { [] }
+	try {
+		^docker buildx create --name $builder --driver remote $"tcp://127.0.0.1:($bk.port)" | ignore
+		do {
+			cd $app_dir
+			with-env {SOURCE_DATE_EPOCH: "0"} {
+				$compose | ^docker buildx bake -f - --builder $builder --push --provenance=false --metadata-file $meta $"--allow=fs.read=($root)" ...$platform_set ...$sets ...$services
+			}
+		}
+		let digests = (open $meta)
+		let out = ($services | each {|svc|
+			let digest = ($digests | get $svc | get "containerimage.digest")
+			let final = if $svc == "database" {
+				let major = (node-registry-pg-major $"127.0.0.1:($reg.port)" $"($app)-($svc)" $digest)
+				node-registry-tag $"127.0.0.1:($reg.port)" $"($app)-($svc)" $digest $major
+				http delete $"http://127.0.0.1:($reg.port)/v2/($app)-($svc)/manifests/(do $first $svc)" | ignore
+				$major
+			} else { $tag }
+			{svc: $svc, ref: {tag: $final, digest: $digest}}
+		} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
+		do { ^docker buildx rm $builder } | complete | ignore
+		stop-port-forward $bk; stop-port-forward $reg; rm -f $meta
+		$out
+	} catch {|e|
+		do { ^docker buildx rm $builder } | complete | ignore
+		stop-port-forward $bk; stop-port-forward $reg; rm -f $meta
+		error make {msg: $e.msg}
+	}
+}
+
+# `digest` in `repo` tagged `tag` too: its manifest put again under the tag.
+export def node-registry-tag [registry: string, repo: string, digest: string, tag: string] {
+	let got = (http get --raw --full --headers {Accept: $registry_accept} $"http://($registry)/v2/($repo)/manifests/($digest)")
+	let type = ($got.headers.response | where name == "content-type" | get value.0)
+	http put --content-type $type $"http://($registry)/v2/($repo)/manifests/($tag)" $got.body | ignore
+}
+
+# The Postgres major an image in the node's registry states (PG_MAJOR), as registry-pg-major reads Artifact Registry's.
+export def node-registry-pg-major [registry: string, repo: string, digest: string]: nothing -> string {
+	let get = {|what| http get --raw --headers {Accept: $registry_accept} $"http://($registry)/v2/($repo)/($what)" | if ($in | describe) == "binary" { decode utf-8 } else { $in } | from json }
+	let top = (do $get $"manifests/($digest)")
+	let manifest = if ($top.manifests? | is-not-empty) { do $get $"manifests/($top.manifests | first | get digest)" } else { $top }
+	do $get $"blobs/($manifest.config.digest)" | get config.Env | where {|e| $e starts-with "PG_MAJOR=" } | first | split row "=" | last
 }
 
 # The node's registry through the release's SSH connection, on a free local
@@ -975,6 +1138,9 @@ export def main [
 	} else { $registry }
 	let pushed = if $target_env.build.by == "cloudbuild" {
 		cloud-build-images $app_source_dir $app_info.name $build_svcs $target_env $app_meta.image.tag
+	} else if $target_env.build.by == "buildkit" {
+		ensure-node-buildkit
+		buildkit-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs $app_info.name $app_meta.image.tag --platform ($target_env.platform? | default "")
 	} else {
 		let bake_targets = (bake-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs --platform ($target_env.platform? | default ""))
 		$build_svcs | each {|svc|
@@ -1095,6 +1261,12 @@ export def main [
 		kubectl rollout status $"deployment/($rname)-render" -n $target_ns --timeout=180s
 	}
 	if $target_env.build.by == "node" { prune-node-registry $push_registry }
+	# A release with the publisher's rights alone may not run the registry's collector: the next operator's release does.
+	if $target_env.build.by == "buildkit" and ((do { ^kubectl auth can-i create pods/exec -n pronto-registry } | complete | get stdout | str trim) == "yes") {
+		let reg = (port-forward pronto-registry registry $node_registry_port)
+		try { prune-node-registry $"127.0.0.1:($reg.port)" } catch {|e| stop-port-forward $reg; error make {msg: $e.msg} }
+		stop-port-forward $reg
+	}
 
 	# The mesh is intrinsic to a k8s release: a pod the injector let through bare is a failed release.
 	let bare = (kubectl get pods -n $target_ns -l $"app.kubernetes.io/name=($rname),app.kubernetes.io/component in \(($components | str join ',')\)" --field-selector=status.phase=Running -o json
