@@ -1,6 +1,6 @@
 // integrate@local's upgrade from the last release (upgrade-from-released.ts).
-import { assertEquals, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.11";
-import { databaseProcess, databaseSteps, lastReleased, localJob, migrations, shellWords, upgradeScript } from "./upgrade-from-released.ts";
+import { assertEquals, assertStringIncludes, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
+import { databaseProcess, databaseSteps, lastReleased, localJob, migrations, migrationsOf, shellWords, upgradeScript } from "./upgrade-from-released.ts";
 
 const sha = (c: string) => c.repeat(40);
 const rec = (o: Record<string, unknown>) => JSON.stringify({ outcome: "live", preview: "", dirty: false, started: "t", commit: sha("a"), ...o });
@@ -61,6 +61,25 @@ Deno.test("the migrate step's baseline and its migrations, decoded", () => {
   const p = script(`${mecha}/migrate/host.sh 00_initdb 16_x ${btoa('{"a":1}')}`);
   assertEquals(migrations(p), { baseline: "00_initdb", files: { "16_x": '{"a":1}' } });
 });
+
+Deno.test("mecha 0.22's migrate process: the app's migration files and the baseline its nu script is handed", async () => {
+  const dir = await Deno.makeTempDir()
+  try {
+    await Deno.mkdir(`${dir}/.bayt`)
+    await Deno.mkdir(`${dir}/services/database/pgroll`, { recursive: true })
+    await Deno.writeTextFile(`${dir}/services/database/pgroll/16_x.json`, '{"a":1}')
+    await Deno.writeTextFile(`${dir}/.bayt/bayt.migrate.json`, JSON.stringify({ dockerfile: {
+      copy: [{ srcs: ["services/database/pgroll/16_x.json"], dst: "/pgroll/16_x.json" }],
+      epilogue: [`COPY <<'PGROLL' /pgroll/17_y.json\n{"b":2}\nPGROLL`, `COPY <<'PGROLL' /tmp/18_z.json.parts\n${btoa('{"c":3}')}\nPGROLL`],
+    } }))
+    const p = { entrypoint: ["mise", "x", "--", "nu", "-c", "let d = 1; let script = 'services/migrate/migrate.nu'; open .bayt/bayt.migrate.json; ^nu $$script $$dir 00_initdb"] }
+    assertEquals(await migrationsOf(p, dir), { baseline: "00_initdb", files: { "16_x": '{"a":1}', "17_y": '{"b":2}', "18_z": '{"c":3}' } })
+    // The old form is still read, for the released commit's own process.
+    assertEquals(await migrationsOf(script(`${mecha}/migrate/host.sh 00_initdb 16_x ${btoa('{"a":1}')}`), dir), { baseline: "00_initdb", files: { "16_x": '{"a":1}' } })
+    await Deno.writeTextFile(`${dir}/.bayt/bayt.migrate.json`, "{}")
+    await assertRejects(() => migrationsOf({ entrypoint: ["sh", "-c", "true"] }, dir), Error, "neither")
+  } finally { await Deno.remove(dir, { recursive: true }) }
+})
 
 const job = (s: string) =>
   `spec:\n  template:\n    spec:\n      template:\n        spec:\n          containers:\n          - command: [bash, -c, ${JSON.stringify(s)}]\n            env:\n            - {name: PGHOST, value: /cloudsql/x}\n            - {name: REQUIRED_TABLES, value: a}\n            - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: s}}}\n`;
