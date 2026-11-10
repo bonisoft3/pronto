@@ -2983,6 +2983,14 @@ _pgrollDir: "services/database/pgroll"
 					entrypoint: {
 						shell: "nu"
 						do:    "let omni = (if (($env.OMNISHELL_DIR? | default '') != '') { $env.OMNISHELL_DIR } else { (^mise where github:bonisoft3/omnishell | str trim) }); let served = ($env.BAYT_LOCAL_SERVED_DIR? | default ''); let cfg = ($env.BAYT_LOCAL_RENDER_ENTRY? | default (if $served != '' { ($served | path join 'srv/shell/index.html') } else { 'shell/index.html' })); let entry = (if ($cfg | path exists) { $cfg } else { 'shell/index.html' }); with-env { ENTRY: $entry } { ^deno run --frozen --config ($omni | path join 'server/deno.json') --allow-net --allow-env --allow-read ($omni | path join 'server/render.ts') }"
+						// The image runs the renderer itself, as v0 did: its base (deno's) has no nu
+						// and no mise, and its tree and entry are already where the command reads
+						// them (dockerfile below). The command above is a host launch's alone
+						// (PRONTO-154: prontoweeper's render crash-looped on "nu" not found).
+						dockerfile: {
+							do:    strings.Join(omnishell.#Render.command, " ")
+							shell: "exec"
+						}
 						env: {
 							DOOR:            {peer: "caddy", port: "http", prefix: "http://"}
 							DOOR_TIMEOUT_MS: "\(resilience.resilience.timeouts.renderDoor*1000)"
