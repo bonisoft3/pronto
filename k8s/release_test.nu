@@ -688,6 +688,11 @@ def test_initdb_replays [] {
 	let script = ($job.spec.template.spec.containers.0.command | last)
 	assert ($script | str contains "010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
 	assert ($script | str contains "--single-transaction") "010_machines in one transaction"
+	# A database built on V8's plv8 moves onto pljs before the machines' code is replayed (PRONTO-279).
+	let repoint = ($script | str index-of "DO $repoint$")
+	assert ($repoint > 0 and $repoint < ($script | str index-of "for step in")) $"the plv8 repoint runs before the replays: ($script)"
+	assert ($script | str contains "\nSQL\n") "the repoint's heredoc ends at the start of a line"
+	assert ($script | str contains "pg_available_extension_versions WHERE name = 'plv8' AND version = plv8_installed") "only a version the image lacks is repointed"
 }
 
 def test_metrics_export [] {

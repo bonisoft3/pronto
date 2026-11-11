@@ -399,6 +399,34 @@ import (
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 					if [ "$marker" = "pronto initdb" ]; then
 					  echo "initdb: already built"
+					  # A database built when the image's plv8 was V8's (3.x) keeps its language's
+					  # handlers on that library ($libdir/plv8-3.2.5). The image now ships pljs under
+					  # the name plv8 (mecha's services/database/pljs, version 1.0.5) and not the old
+					  # library, so every plv8 function, and the replay of the machines' code below,
+					  # failed with `could not access file "plv8-3.2.5"` (Bonk Chess, 2026-11-11).
+					  # When the installed version is one the image no longer has, the three
+					  # handlers move onto pljs: nothing dropped, no row touched, the functions kept.
+					  psql -v ON_ERROR_STOP=1 -Xq <<'SQL'
+					DO $repoint$
+					DECLARE plv8_installed text;
+					BEGIN
+					  SELECT extversion INTO plv8_installed FROM pg_extension WHERE extname = 'plv8';
+					  IF plv8_installed IS NULL
+					    OR EXISTS (SELECT 1 FROM pg_available_extension_versions WHERE name = 'plv8' AND version = plv8_installed)
+					    OR NOT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pljs')
+					    OR EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'plv8_call_handler' AND probin = '$libdir/pljs') THEN
+					    RETURN;
+					  END IF;
+					  CREATE OR REPLACE FUNCTION pg_catalog.plv8_call_handler() RETURNS language_handler
+					    LANGUAGE c AS '$libdir/pljs', 'pljs_call_handler';
+					  CREATE OR REPLACE FUNCTION pg_catalog.plv8_inline_handler(internal) RETURNS void
+					    LANGUAGE c AS '$libdir/pljs', 'pljs_inline_handler';
+					  CREATE OR REPLACE FUNCTION pg_catalog.plv8_call_validator(oid) RETURNS void
+					    LANGUAGE c AS '$libdir/pljs', 'pljs_call_validator';
+					  RAISE NOTICE 'initdb: plv8 % is not in this image; its language now runs on pljs', plv8_installed;
+					END
+					$repoint$;
+					SQL
 					  # Its re-runnable steps are the release's, though (emit.cue's), as on Cloud Run
 					  # (gcp.cue's): a new entity's table and a new field's column, every policy,
 					  # trigger and publication, the status charts' triggers (010_machines), the
