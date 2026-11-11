@@ -46,7 +46,7 @@ const run = async (dir: string, args: string[], env: Record<string, string> = {}
 
 const learned = async (dir: string) => {
   const files = [];
-  for await (const e of Deno.readDir(`${dir}/.cache/pronto/cue-mem`)) files.push(await Deno.readTextFile(`${dir}/.cache/pronto/cue-mem/${e.name}`));
+  for await (const e of Deno.readDir(`${dir}/.cache/pronto/cue-mem`)) if (!/\.(cores|secs)$/.test(e.name)) files.push(await Deno.readTextFile(`${dir}/.cache/pronto/cue-mem/${e.name}`));
   return files;
 };
 
@@ -236,4 +236,29 @@ Deno.test("an export is printed from a passing one with the same inputs, tags de
   assertMatch((await exp(["-o", "out.json"])).stdout, /^real\ cue\ export\ \.\/a\ \-o\ out\.json\n/, "-o is never printed from the cache");
   assertMatch((await exp(["-oout.json"])).stdout, /^real cue export \.\/a -oout\.json\n/);
   assertMatch((await exp(["-oout.json"])).stdout, /^real cue export \.\/a -oout\.json\n/, "nor a glued -o");
+});
+
+Deno.test("an export run at once, outside the pool, is printed from a passing one with the same inputs (PRONTO-11)", async () => {
+  const dir = (await Deno.makeTempDir()) + "/m";
+  await Deno.mkdir(dir);
+  await Deno.mkdir(`${dir}/bin`);
+  // A cue that prints how many times it ran: a replay prints the first run's bytes, an evaluation new ones.
+  await Deno.writeTextFile(`${dir}/bin/cue`, `#!/bin/sh\nn=$(($(cat "${dir}/n" 2>/dev/null || echo 0) + 1)); echo $n > "${dir}/n"; echo "run $n"\n`);
+  await Deno.chmod(`${dir}/bin/cue`, 0o755);
+  await Deno.mkdir(`${dir}/cue.mod`);
+  await Deno.writeTextFile(`${dir}/cue.mod/module.cue`, `module: "t.example/m@v0"\nlanguage: version: "v0.16.0"\n`);
+  await Deno.writeTextFile(`${dir}/a.cue`, `package a\nx: 1\n`);
+  // CUE_UNKNOWN_GB=0: the first run's claim is 0, the direct path an export learned under CUE_DIRECT_GB takes.
+  const env = { CUE_UNKNOWN_GB: "0", CUE_REPLAY_MIN_S: "0" };
+  const exp = (more: Record<string, string> = {}, args: string[] = []) => run(dir, ["export", ".", "--out", "json", ...args], { ...env, ...more });
+  const first = await exp();
+  assertEquals([first.code, first.stdout, first.stderr.includes("slot:")], [0, "run 1\n", false]);
+  const second = await exp();
+  assertEquals(second.stdout, "run 1\n", "the same bytes, not evaluated");
+  assertMatch(second.stderr, /not evaluated again/);
+  assertEquals((await exp({ CUE_EXPORTED: "off" })).stdout, "run 2\n", "CUE_EXPORTED=off evaluates");
+  assertEquals((await exp({ CUE_REPLAY_MIN_S: "5" })).stdout, "run 3\n", "one that took less CPU than a hit costs is evaluated");
+  assertEquals((await exp({}, ["-o", "out.json"])).stdout, "run 4\n", "-o evaluates");
+  await Deno.writeTextFile(`${dir}/b.cue`, `package a\ny: 2\n`);
+  assertEquals((await exp()).stdout, "run 5\n", "a changed input evaluates");
 });

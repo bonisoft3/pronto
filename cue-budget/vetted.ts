@@ -11,11 +11,12 @@
 //   deno run -A vetted.ts plan <cue> <args...>
 //     exits 1 when the vet can't be keyed (it then runs as asked). Otherwise prints, for what has not
 //     passed with these inputs, `run <arg>` lines (the arguments to vet it with), `key <key>` lines and
-//     `skipped <n>` (the packages that passed before);
-//     nothing at all when everything passed before.
+//     `skipped <n>` (the packages that passed before) and `saved <seconds>` (what their evaluations took,
+//     as stored with their keys); when everything passed before, only those two lines (no `key`).
 //   deno run -A vetted.ts record <cue> <args...> < keys
 //     after the vet ran with those arguments and passed: records each key read on stdin that is still
-//     the key of what was vetted (an input changed while it ran records nothing for it).
+//     the key of what was vetted (an input changed while it ran records nothing for it). With
+//     CUE_RUN_SECS (the seconds the vet took), each key's file holds that divided by the keys it records.
 //
 // A unit is a package when the arguments are `vet`, the flags -c/--concrete/-E/--all-errors, and
 // package folders (`.`, `./x`, `./...`, which takes every folder below with CUE in it, less those whose
@@ -38,7 +39,8 @@
 // A failed vet records nothing, so it runs again until it passes. CUE_VETTED_LINES=1 prints each
 // key's lines to stderr.
 //
-// Kept in ~/.cache/pronto/cue-vetted/<key> (CUE_VETTED_DIR), one empty file per key, shared by every
+// Kept in ~/.cache/pronto/cue-vetted/<key> (CUE_VETTED_DIR), one small file per key (the seconds its
+// evaluation took, a share of its run's: what a hit saves, logged by the wrapper), shared by every
 // checkout on the machine (the worktrees, the ci and cd runners, all one user). Keys older than 30
 // days go when a new one is recorded.
 
@@ -382,18 +384,36 @@ function units(cue: string, args: string[]): Unit[] | undefined {
 }
 
 const passed = (k: string) => isFile(join(dir, k));
+// The seconds a kept entry's evaluation took (its file's text; 0 when empty or unknown).
+const secsIn = (p: string) => {
+  try {
+    return Number.parseFloat(Deno.readTextFileSync(p)) || 0;
+  } catch {
+    return 0;
+  }
+};
+const runSecs = () => Number(Deno.env.get("CUE_RUN_SECS")) || 0;
 
 // Files older than 30 days go, and an export cache over its size (CUE_EXPORTED_GB, 8) loses its oldest.
+// An entry's `<key>.secs` (the seconds its evaluation took) goes with it and is no entry of its own.
 function prune(d: string, capBytes = Infinity) {
   const old = Date.now() - 30 * 86400_000;
   const kept: { p: string; t: number; n: number }[] = [];
+  const secs: string[] = [];
+  const gone = new Set<string>();
   for (const e of Deno.readDirSync(d)) {
     const p = join(d, e.name);
+    if (e.name.endsWith(".secs")) {
+      secs.push(p);
+      continue;
+    }
     try {
       const st = Deno.statSync(p);
       const t = st.mtime?.getTime() ?? 0;
-      if (t < old || (e.name.includes(".tmp-") && t < Date.now() - 86400_000)) Deno.removeSync(p);
-      else if (!e.name.includes(".tmp-")) kept.push({ p, t, n: st.size });
+      if (t < old || (e.name.includes(".tmp-") && t < Date.now() - 86400_000)) {
+        Deno.removeSync(p);
+        gone.add(p);
+      } else if (!e.name.includes(".tmp-")) kept.push({ p, t, n: st.size });
     } catch { /* another checkout pruned it */ }
   }
   let total = kept.reduce((a, k) => a + k.n, 0);
@@ -401,8 +421,17 @@ function prune(d: string, capBytes = Infinity) {
     if (total <= capBytes) break;
     try {
       Deno.removeSync(k.p);
+      gone.add(k.p);
       total -= k.n;
     } catch { /* gone */ }
+  }
+  for (const s of secs) {
+    const entry = s.slice(0, -".secs".length);
+    if (gone.has(entry) || !isFile(entry)) {
+      try {
+        Deno.removeSync(s);
+      } catch { /* gone */ }
+    }
   }
 }
 
@@ -411,8 +440,9 @@ const exported = Deno.env.get("CUE_EXPORTED_DIR") ??
 
 const [cmd, cue, ...args] = Deno.args;
 if (cmd === "export-key") {
-  // Prints the path the export's output is kept at; exits 0 when it is there (a hit), 1 when not, 3 when
-  // the export can't be keyed.
+  // Prints the path the export's output is kept at; exits 0 when it is there (a hit, and then a second line,
+  // the seconds its evaluation took, as export-saved prints them: one deno start for a hit, not two), 1 when
+  // not, 3 when the export can't be keyed.
   const us = args[0] === "export" ? units(cue, args) : undefined;
   if (!us || us.length !== 1) Deno.exit(3);
   const p = join(exported, us[0].key);
@@ -421,9 +451,13 @@ if (cmd === "export-key") {
     try {
       Deno.utimeSync(p, new Date(), new Date());
     } catch { /* pruned meanwhile: a miss next time */ }
+    console.log(secsIn(`${p}.secs`));
     Deno.exit(0);
   }
   Deno.exit(1);
+} else if (cmd === "export-saved") {
+  // export-saved <path>: the seconds the evaluation of the export kept at <path> took (0 when unknown).
+  console.log(secsIn(`${cue}.secs`));
 } else if (cmd === "export-store") {
   // export-store <cue> <path> <output> <args...>: keeps an export's output that passed, if its inputs are
   // still the ones keyed before it ran.
@@ -433,6 +467,9 @@ if (cmd === "export-key") {
   Deno.mkdirSync(exported, { recursive: true });
   const tmp = `${path}.tmp-${crypto.randomUUID().slice(0, 8)}`;
   Deno.copyFileSync(output, tmp);
+  // Its evaluation's seconds first (CUE_RUN_SECS), then the entry: a hit never finds one without the other's time.
+  Deno.writeTextFileSync(`${tmp}.secs`, `${runSecs().toFixed(2)}\n`);
+  Deno.renameSync(`${tmp}.secs`, `${path}.secs`);
   Deno.renameSync(tmp, path);
   prune(exported, Number(Deno.env.get("CUE_EXPORTED_GB") ?? 8) * 2 ** 30);
 } else if (cmd === "plan") {
@@ -449,8 +486,9 @@ if (cmd === "export-key") {
       for (const u of todo) console.log(`run ${u.arg}`);
     }
     for (const u of todo) console.log(`key ${u.key}`);
-    console.log(`skipped ${us.length - todo.length}`);
   }
+  console.log(`skipped ${us.length - todo.length}`);
+  console.log(`saved ${us.filter((u) => passed(u.key)).reduce((a, u) => a + secsIn(join(dir, u.key)), 0).toFixed(2)}`);
 } else if (cmd === "record") {
   const before = new Set(
     new TextDecoder().decode(await new Response(Deno.stdin.readable).arrayBuffer()).split("\n").filter((l) =>
@@ -459,7 +497,8 @@ if (cmd === "export-key") {
   );
   const now = args[0] === "vet" ? units(cue, args) ?? [] : [];
   Deno.mkdirSync(dir, { recursive: true });
-  for (const u of now) if (before.has(u.key)) Deno.writeTextFileSync(join(dir, u.key), "");
+  const mine = now.filter((u) => before.has(u.key));
+  for (const u of mine) Deno.writeTextFileSync(join(dir, u.key), mine.length && runSecs() ? `${(runSecs() / before.size).toFixed(2)}\n` : "");
   prune(dir);
 } else {
   console.error("usage: vetted.ts plan|record|export-key <cue> <args...> | export-store <cue> <path> <output> <args...>");
