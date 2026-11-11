@@ -92,7 +92,7 @@ console.log(JSON.stringify(inputs.map(p=>({factory:staticFactory(p.compiled,p.fi
       wasm.push(`${JSON.stringify(path.basename(base, '.wasm'))}:${previous.variable}`)
     }
     const { name: computation, to, endowments, types, queryTypes, sinkTypes, sinkWrites } = p.spec
-    const contract = { paged: Boolean(p.spec.steps), version: p.version, reads: p.reads, queries: p.queries, ...(p.queryStages ? { queryStages: p.queryStages } : {}), spec: { name: computation, file: `${computation}.js`, to, endowments, types, queryTypes, sinkTypes, sinkWrites } }
+    const contract = { paged: true, version: p.version, reads: p.reads, queries: p.queries, ...(p.queryStages ? { queryStages: p.queryStages } : {}), spec: { name: computation, file: `${computation}.js`, to, endowments, types, queryTypes, sinkTypes, sinkWrites } }
     queryPrograms.push(contract)
     entries.push(`{...${JSON.stringify(contract)},factory:${factories[index].factory},${factories[index].steps ? `steps:${factories[index].steps},` : ""}wasm:{${wasm.join(',')}}}`)
   }
@@ -117,10 +117,6 @@ export class Queries {
     if(path!=='/execute'&&path!=='/paged')return new Response(null,{status:404});
     try {
       const body=await request.json();
-      if(path==='/paged'&&body.action==='cleanup'){
-        if(this.ready)(await this.ready).close();
-        this.ready=null;this.mode=null;await this.ctx.storage.deleteAll();return Response.json({cleared:true});
-      }
       const db=await this.open(path==='/paged');
       return Response.json(path==='/paged'?await pagedQueryAction(db,programs,body):snapshotQuery(db,programs,body));
     } catch(error) { return new Response(error instanceof Error ? error.message : String(error),{status:500}); }
@@ -129,7 +125,12 @@ export class Queries {
 export default {fetch(request,env){
   const url=new URL(request.url);const key=url.pathname==='/paged'?url.searchParams.get('key'):null;
   if(url.pathname==='/paged'&&(!key||key.length>4096))return new Response('missing capture key',{status:400});
-  return env.QUERIES.get(env.QUERIES.idFromName(key?'paged:'+key:'queries')).fetch(request);
+  let name='queries';
+  if(key){
+    let parsed;try{parsed=JSON.parse(key);}catch{parsed=null;}
+    name=Array.isArray(parsed)&&typeof parsed[0]==='string'&&parsed[0]?'paged:'+parsed[0]:'paged:'+key;
+  }
+  return env.QUERIES.get(env.QUERIES.idFromName(name)).fetch(request);
 }};
 `)
   await Deno.writeTextFile(path.join(executionDirectory, 'entry.ts'), `import { computeSnapshot } from ${JSON.stringify(modulePath(executionDirectory, path.join(edge, 'snapshot-compute.ts')))};
@@ -186,7 +187,7 @@ export default {fetch(request,env){return env.COMPUTATIONS.get(env.COMPUTATIONS.
   }, null, 2))
   const config = {
     definitions: computationDefinitions(packaged),
-    paged: packaged.filter(p => p.spec.steps).map(p => p.spec.name),
+    paged: packaged.map(p => p.spec.name),
     services: [{ binding: 'COMPUTE', service: computeName }],
     deployments: ['compute/queries/wrangler.jsonc', 'compute/execution/wrangler.jsonc'],
   }
