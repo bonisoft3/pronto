@@ -421,12 +421,15 @@ import (
 	// gets which is a decision, not a value to refuse a literal toward.
 	component: [string]: #Reference
 	component: {for k, v in D._preset.component {(k): *v | string}}
-	// Which colour the terminal's own chrome resolves to; the shell has no
-	// opinion about which swatch is a background.
+	// Which colour the terminal's own chrome resolves to, and which navigation
+	// posture (`strip` across the top, `sidebar` down the inline start on wide
+	// viewports with a top strip on narrow ones, or `custom` with only the
+	// link/control reset) `design.css` emits at `:where(...)` specificity.
 	shell: {
 		bg:   *"neutral" | string
 		fg:   *"primary" | string
 		rule: *"border" | string
+		nav:  *"strip" | "sidebar" | "custom"
 	}
 }
 

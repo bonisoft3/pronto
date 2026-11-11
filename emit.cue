@@ -3102,6 +3102,93 @@ _pgrollDir: "services/database/pgroll"
 	]), "\n"))
 		}
 		"""
+	// The navigation chrome's posture (`#Design.shell.nav`). Every selector is
+	// wrapped in `:where(...)` so the default posture has specificity (0,0,0),
+	// letting an app's own `chrome.css` or `nav.css` override any property at
+	// ordinary selector weight without `!important`.
+	_navCss: [
+		if E._design.shell.nav == "strip" {
+			"""
+				/* Sticky, because the navigation stack restores a screen's scroll
+				   position on return — without it the way back to the primary
+				   navigation is scrolling up. A sticky element is transparent, so it
+				   needs its own background or content runs under it.
+
+				   One line, always: a wrapped strip is as tall as its rows and pushes
+				   the masthead below the fold, and any app with more routes than a
+				   phone's width holds would wrap at its natural size. It scrolls
+				   instead, and the scrollbar is hidden because a horizontal bar across
+				   the chrome reads as a second rule under the strip. */
+				:where(body > nav) { position: sticky; top: 0; z-index: 10;
+				  background: var(--shell-bg);
+				  display: flex; gap: var(--shell-nav-gap, 20px);
+				  flex-wrap: nowrap; align-items: center;
+				  overflow-x: auto; scrollbar-width: none;
+				  padding: var(--shell-nav-pad, 14px 24px);
+				  font-weight: var(--shell-nav-weight, 600);
+				  border-block-end: 1px solid var(--shell-rule); }
+				:where(body > nav)::-webkit-scrollbar { display: none; }
+				/* The routes carry their own width — shrinking them is what would make
+				   the strip fit by breaking words, which is the wrap this avoids. The
+				   identity beside them keeps flex's default shrink, so it is the part
+				   that gives and ellipsises. 24px is check-visual's touch-target floor:
+				   nav labels are small type, so the box grows to the floor rather than
+				   the type growing with it. */
+				:where(body > nav > a) { white-space: nowrap; flex: none;
+				  display: inline-flex; align-items: center; min-height: 24px; }
+				/* The signed-in person at the strip's far end, name-then-handle as a
+				   byline. All four ellipsis rules are load-bearing: nowrap alone
+				   cannot shrink, and min-width: 0 is what lets a flex item shrink
+				   below its content width at all. */
+				:where(body > nav .shell-me) { margin-inline-start: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
+				"""
+		},
+		if E._design.shell.nav == "sidebar" {
+			"""
+				/* Sidebar posture (`shell.nav: "sidebar"`): a vertical inline-start rail
+				   on wide viewports and a sticky top strip on narrow ones, emitted at
+				   `:where(...)` specificity so the app's own chrome sheet can refine
+				   surfaces, icons, or mobile tabs without `!important`. */
+				@media (min-width: 860px) {
+				  :where(body > nav) { position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 10;
+				    width: var(--shell-nav-width, var(--size-13)); height: 100dvh;
+				    box-sizing: border-box; background: var(--shell-bg);
+				    display: flex; flex-direction: column; gap: var(--shell-nav-gap, 4px);
+				    overflow-y: auto; scrollbar-width: none;
+				    padding: var(--shell-nav-pad, 16px 12px);
+				    font-weight: var(--shell-nav-weight, 600);
+				    border-inline-end: 1px solid var(--shell-rule); }
+				  :where(body > nav)::-webkit-scrollbar { display: none; }
+				  :where(body > nav > a) { white-space: nowrap; flex: none;
+				    display: flex; align-items: center; gap: var(--sp-sm, 8px);
+				    width: 100%; box-sizing: border-box; min-height: 40px; }
+				  :where(body > nav .shell-me) { margin-block-start: auto; width: 100%; box-sizing: border-box;
+				    display: flex; flex-direction: column; gap: var(--sp-sm, 8px); min-width: 0; }
+				  :where(body:has(> nav:not([hidden])) > #app) {
+				    margin-inline-start: var(--shell-nav-width, var(--size-13));
+				    box-sizing: border-box; min-width: 0; }
+				}
+				@media (max-width: 859px) {
+				  :where(body > nav) { position: sticky; top: 0; z-index: 10;
+				    background: var(--shell-bg);
+				    display: flex; gap: var(--shell-nav-gap, 20px);
+				    flex-wrap: nowrap; align-items: center;
+				    overflow-x: auto; scrollbar-width: none;
+				    padding: var(--shell-nav-pad, 14px 24px);
+				    font-weight: var(--shell-nav-weight, 600);
+				    border-block-end: 1px solid var(--shell-rule); }
+				  :where(body > nav)::-webkit-scrollbar { display: none; }
+				  :where(body > nav > a) { white-space: nowrap; flex: none;
+				    display: inline-flex; align-items: center; min-height: 24px; }
+				  :where(body > nav .shell-me) { margin-inline-start: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
+				}
+				"""
+		},
+		"""
+			/* Custom posture (`shell.nav: "custom"`): the app's own stylesheet owns
+			   the container geometry; only the link and control resets below apply. */
+			""",
+	][0]
 	_designCss: """
 
 		\(E._scaleCss)
@@ -3153,51 +3240,20 @@ _pgrollDir: "services/database/pgroll"
 		html { scrollbar-gutter: stable; }
 		body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
 		  background: var(--shell-bg); color: var(--shell-fg); }
-		/* Sticky, because the navigation stack restores a screen's scroll
-		   position on return — without it the way back to the primary
-		   navigation is scrolling up. A sticky element is transparent, so it
-		   needs its own background or content runs under it.
-
-		   One line, always: a wrapped strip is as tall as its rows and pushes
-		   the masthead below the fold, and any app with more routes than a
-		   phone's width holds would wrap at its natural size. It scrolls
-		   instead, and the scrollbar is hidden because a horizontal bar across
-		   the chrome reads as a second rule under the strip. */
-		body > nav { position: sticky; top: 0; z-index: 10;
-		  background: var(--shell-bg);
-		  display: flex; gap: var(--shell-nav-gap, 20px);
-		  flex-wrap: nowrap; align-items: center;
-		  overflow-x: auto; scrollbar-width: none;
-		  padding: var(--shell-nav-pad, 14px 24px);
-		  font-weight: var(--shell-nav-weight, 600);
-		  border-bottom: 1px solid var(--shell-rule); }
-		body > nav::-webkit-scrollbar { display: none; }
-		body > nav a { color: inherit; text-decoration: none; }
-		body > nav a:hover { text-decoration: var(--shell-nav-hover, underline); }
-		/* The routes carry their own width — shrinking them is what would make
-		   the strip fit by breaking words, which is the wrap this avoids. The
-		   identity beside them keeps flex's default shrink, so it is the part
-		   that gives and ellipsises. 24px is check-visual's touch-target floor:
-		   nav labels are small type, so the box grows to the floor rather than
-		   the type growing with it. */
-		body > nav > a { white-space: nowrap; flex: none;
-		  display: inline-flex; align-items: center; min-height: 24px; }
-		/* The signed-in person at the strip's far end, name-then-handle as a
-		   byline. All four ellipsis rules are load-bearing: nowrap alone
-		   cannot shrink, and min-width: 0 is what lets a flex item shrink
-		   below its content width at all. */
-		body > nav .shell-me { margin-inline-start: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
-		body > nav .shell-who { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
-		body > nav .shell-who .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		body > nav .shell-who .name:empty { display: none; }
-		body > nav .shell-who .name:not(:empty)::after { content: " ·"; }
-		body > nav .shell-who .handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+		\(E._navCss)
+		:where(body > nav a) { color: inherit; text-decoration: none; }
+		:where(body > nav a:hover) { text-decoration: var(--shell-nav-hover, underline); }
+		:where(body > nav .shell-who) { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
+		:where(body > nav .shell-who .name) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		:where(body > nav .shell-who .name:empty) { display: none; }
+		:where(body > nav .shell-who .name:not(:empty))::after { content: " ·"; }
+		:where(body > nav .shell-who .handle) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 		/* De-emphasis comes from weight alone: layered opacity on --shell-fg
 		   lands below 4.5:1 contrast on both themes' nav ground. */
 		/* A short word is still a target: "sair" sets 23px of text, under the
 		   24px minimum a finger needs, so the box keeps the floor the label
 		   does not. */
-		body > nav :is(.shell-signout, .shell-signin, .shell-register) { font: inherit; font-weight: 400;
+		:where(body > nav :is(.shell-signout, .shell-signin, .shell-register)) { font: inherit; font-weight: 400;
 		  color: inherit; background: none; border: 0; padding: 0; cursor: pointer;
 		  display: inline-flex; align-items: center; justify-content: center;
 		  min-height: 24px; min-width: 24px; }

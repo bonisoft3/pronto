@@ -1,5 +1,15 @@
-import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { assert, assertEquals, assertFalse, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
+
+const FLOW_PHYSICAL =
+  /(?:^|[;{\s])(?:margin|padding)-(?:left|right)\s*:|(?:^|[;{\s])border-(?:left|right)(?:-(?:width|style|color))?\s*:|(?:^|[;{\s])border-(?:top|bottom)-(?:left|right)-radius\s*:|text-align\s*:\s*(?:left|right)\b|(?:float|clear)\s*:\s*(?:left|right)\b/;
+
+function navProgram(nav?: string): string {
+  return paymentProgram().replace(
+    "design: {}",
+    nav ? `design: { shell: { nav: "${nav}" } }` : "design: {}",
+  );
+}
 
 function loginProgram(surfaceOverride = ""): string {
   return paymentProgram()
@@ -58,4 +68,28 @@ Deno.test("an app can declare a login surface in both appearances without changi
   assertEquals(palette(css, "login-surface"), ["#ffffff", "#222222"]);
   assertStringIncludes(css, "--shell-bg: var(--neutral);");
   assertStringIncludes(css, "body:has(.shell-login) { background: var(--login-surface, var(--surface)); }");
+});
+
+Deno.test("shell.nav emits zero-specificity :where(...) rules for strip, sidebar, and custom postures without physical flow properties", async () => {
+  const stripCss = (await emitFiles(navProgram()))["shell/design.css"].text;
+  assertStringIncludes(stripCss, ":where(body > nav) { position: sticky; top: 0; z-index: 10;");
+  assertStringIncludes(stripCss, ":where(body > nav .shell-me) { margin-inline-start: auto;");
+  assertStringIncludes(stripCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register))");
+  assertFalse(FLOW_PHYSICAL.test(stripCss));
+
+  const sidebarCss = (await emitFiles(navProgram("sidebar")))["shell/design.css"].text;
+  assertStringIncludes(sidebarCss, "@media (min-width: 860px) {");
+  assertStringIncludes(sidebarCss, ":where(body > nav) { position: fixed; inset-block: 0; inset-inline-start: 0;");
+  assertStringIncludes(sidebarCss, "border-inline-end: 1px solid var(--shell-rule);");
+  assertStringIncludes(sidebarCss, ":where(body:has(> nav:not([hidden])) > #app) {");
+  assertStringIncludes(sidebarCss, "margin-inline-start: var(--shell-nav-width, var(--size-13));");
+  assertStringIncludes(sidebarCss, "@media (max-width: 859px) {");
+  assertStringIncludes(sidebarCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register))");
+  assertFalse(FLOW_PHYSICAL.test(sidebarCss));
+
+  const customCss = (await emitFiles(navProgram("custom")))["shell/design.css"].text;
+  assertFalse(customCss.includes(":where(body > nav) {"));
+  assertStringIncludes(customCss, ":where(body > nav a) { color: inherit; text-decoration: none; }");
+  assertStringIncludes(customCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register))");
+  assertFalse(FLOW_PHYSICAL.test(customCss));
 });

@@ -163,9 +163,11 @@ const contract = async (): Promise<Contract> => {
     if (bucket === "dark" || bucket === "preset") continue;
     assert(typeof kvs === "object", `#Design.${bucket} is not a bucket of tokens`);
     if (bucket === "shell") {
-      // Three fixed keys, emitted one literal line each rather than by
-      // comprehension, so the emitter is asked about them by name.
+      // Three fixed colour keys, emitted one literal line each rather than by
+      // comprehension, so the emitter is asked about them by name; `nav` is
+      // the navigation posture choice rather than a token.
       for (const key of Object.keys(kvs as Record<string, string>)) {
+        if (key === "nav") continue;
         assert(
           emitter.includes(`"  --shell-${key}: var(--\\(E._design.shell.${key}));"`),
           `#Design.shell.${key} is declared and emit.cue emits no --shell-${key}`,
