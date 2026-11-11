@@ -1971,7 +1971,11 @@ import (
 			// Browser permissions the unit asks its seat to delegate, from the
 			// terminal's `hatch.realm.grants` offer; only a realm's frame carries
 			// them, and the reader is asked in the app's name.
-			grants: *[] | [...("geolocation")]
+			grants: *[] | [...("geolocation" | "payment")]
+			// A dedicated subdomain label (`https://<subdomain>.<domain>`) for a
+			// realm unit that embeds a third-party provider requiring a non-opaque
+			// origin while remaining cross-origin isolated from the app's origin.
+			subdomain?: =~"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
 			// Derived, never authored: a question asks and its answer lands in
 			// the memo; a presenter shows. An agent presenter paints the frames
 			// the terminal hands it on a canvas the terminal transfers, in a
@@ -2538,6 +2542,9 @@ import (
 		}],
 		[for un, u in A.capabilities.vendored if u.isolation != "realm" if len(u.grants) > 0 {
 			"unit \(un) is seated as \(u.isolation) and asks for \(strings.Join(u.grants, ", ")): only a realm's frame is delegated a permission"
+		}],
+		[for un, u in A.capabilities.vendored if u.isolation != "realm" if u.subdomain != _|_ {
+			"unit \(un) is seated as \(u.isolation) and names subdomain \(u.subdomain): only a realm's frame has an origin of its own"
 		}],
 		[for un, u in A.capabilities.vendored if u.memo != _|_ if len(u.ports.raises) != 1 {
 			"unit \(un) has a memo and raises \(len(u.ports.raises)) events: a question has one answer"

@@ -179,10 +179,13 @@ import (
 		["visual"],
 	]) {"'\(s)'"}], " ")
 	_prepareHostWork: """
-		if (not (".certs/localhost.pem" | path exists)) or (not (".certs/localhost-key.pem" | path exists)) {
+		let subs = (if ("shell/shell.json" | path exists) { open shell/shell.json | get -o units | default {} | values | get -o subdomain | where ($it != null and $it != "") | uniq | each {|s| [$"($s).localhost" $"($s).caddy"] } | flatten } else { [] })
+		let dns_hosts = (["localhost" "caddy"] | append $subs)
+		let san = (if (".certs/localhost.pem" | path exists) { try { ^openssl x509 -in .certs/localhost.pem -noout -ext subjectAltName } catch { "" } } else { "" })
+		if (not (".certs/localhost.pem" | path exists)) or (not (".certs/localhost-key.pem" | path exists)) or ($dns_hosts | any {|h| not ($san | str contains $"DNS:($h)") }) {
 		  mkdir .certs
 		  with-env { CAROOT: (".certs" | path expand) } {
-		    ^mise x -- mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem localhost caddy 127.0.0.1 ::1
+		    ^mise x -- mkcert -cert-file .certs/localhost.pem -key-file .certs/localhost-key.pem ...$dns_hosts 127.0.0.1 ::1
 		  }
 		}
 		let caroot_ca = ((^mise x -- mkcert -CAROOT | str trim) | path join "rootCA.pem")

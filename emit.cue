@@ -2053,6 +2053,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							memo: {table: _memo.table, key: _memo.key, columns: _memo.columns}
 						}
 						if len(v.grants) > 0 {grants: v.grants}
+						if v.subdomain != _|_ {subdomain: v.subdomain}
 						// What a single-file page inlines for the unit.
 						files: v.files
 						if v.role == "presenter" && v.isolation == "agent" {
@@ -3462,9 +3463,13 @@ _pgrollDir: "services/database/pgroll"
 	]
 	// A presenter's pinned scripts are fetched by the terminal against their
 	// integrity, so the page connects to each file and to nothing else there.
+	// A realm unit with a subdomain is framed at its subdomain origin.
 	_resources: list.Concat([
 		[if E.code.capabilities.resources != _|_ for _, r in E.code.capabilities.resources {kind: r.kind, source: r.source}],
 		[for _, v in E.code.capabilities.vendored for u in v.scripts {kind: "connect", source: u}],
+		[for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ {kind: "frame", source: "https://\(v.subdomain).localhost:*"}],
+		[for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ {kind: "frame", source: "https://\(v.subdomain).caddy:*"}],
+		[if E.code.meta.domain != _|_ for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ {kind: "frame", source: "https://\(v.subdomain).\(E.code.meta.domain)"}],
 	])
 	_resourceSources: {for r in _resources {(r.kind): (r.source): true}}
 	_browserPolicy: [if E.terminal.surface.contentSecurityPolicy != _|_ {
@@ -4641,13 +4646,17 @@ _pgrollDir: "services/database/pgroll"
 			][0]
 			_split: strings.SplitN(_door, _anchor, 2)
 			// A realm's document is its own protection domain behind an opaque
-			// origin, under whatever policy it states; the terminal's policy is
-			// the app's. An agent shares this origin, so it runs under the
-			// app's policy, started from a blob: of its bytes.
+			// origin (or a dedicated subdomain origin), under whatever policy it
+			// states; the terminal's policy is the app's. An agent shares this
+			// origin, so it runs under the app's policy, started from a blob: of
+			// its bytes.
 			_unitPaths: list.SortStrings([for f, _ in {
 				for _, v in E.code.capabilities.vendored if v.isolation == "realm"
 				for f in v.files {(f): true}
 			} {"/\(f)"}])
+			_subdomains: list.SortStrings([for s, _ in {
+				for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ {(v.subdomain): true}
+			} {s}])
 			// A presenter's worker script answers with the presenter's own
 			// policy, which governs the worker it starts.
 			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
@@ -4668,10 +4677,19 @@ _pgrollDir: "services/database/pgroll"
 				// A realm's document is isolated by the seat's sandbox; loaded any
 				// other way it would run at this origin under no policy. So it
 				// carries the same sandbox itself (omnishell hatch.js SANDBOX), and
-				// only this app may frame it.
+				// only this app may frame it. A subdomain realm relaxes to
+				// allow-same-origin only when requested on its dedicated host.
 				let realms = [if len(_unitPaths) > 0 {"  @realm path \(strings.Join(_unitPaths, " "))\n  header @realm Content-Security-Policy \"sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self'\"\n"}, ""][0]
+				let subdomainRealms = strings.Join([for s in _subdomains {
+					let m = "subdomain_realm_\(strings.Replace(s, "-", "_", -1))"
+					let paths = list.SortStrings([for f, _ in {
+						for _, v in E.code.capabilities.vendored if v.isolation == "realm" if v.subdomain != _|_ if v.subdomain == s
+						for f in v.files {(f): true}
+					} {"/\(f)"}])
+					"  @\(m) {\n    header_regexp Host ^\(s)\\.\n    path \(strings.Join(paths, " "))\n  }\n  header @\(m) Content-Security-Policy \"sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self' {$ORIGIN}\"\n"
+				}], "")
 				let immutable = [if E.cluster.meta.served != _|_ {"  @immutable path_regexp /_immutable-[0-9a-f]{64}-[^/]*$\n  header @immutable >Cache-Control \"public, max-age=31536000, immutable\"\n"}, ""][0]
-				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(realms)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
+				"\(matcher) Content-Security-Policy \(json.Marshal(policy))\n\(ladder)\(realms)\(subdomainRealms)\(strings.Join(presenter, ""))\(strings.Join(scripted, ""))\(immutable)"
 			}, ""][0]
 			// A container hatch's door route, ahead of the platform's own
 			// routes' tail: dialed like every upstream, at its
@@ -4691,8 +4709,11 @@ _pgrollDir: "services/database/pgroll"
 
 				"""
 			}], "")
+			_subdomainBlocks: strings.Join([for s in _subdomains {
+				"\nhttps://\(s).localhost:{$CADDY_DOOR_PORT:8443}, https://\(s).caddy:{$CADDY_DOOR_PORT:8443} {\n  tls {$CADDY_TLS:internal}\n  import app\n}\n"
+			}], "")
 			_doorAnchored: true & strings.Contains(_caddyfileAsset, _doorAnchor)
-			text: resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1)
+			text: resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1) + _subdomainBlocks
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why

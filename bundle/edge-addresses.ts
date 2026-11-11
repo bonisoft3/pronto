@@ -14,7 +14,7 @@ interface Release {
     i18n?: { locales?: Record<string, unknown> }
     prefix?: string
     presenter?: { policy: string }
-    units?: Record<string, { isolation: string; files: string[] }>
+    units?: Record<string, { isolation: string; subdomain?: string; files: string[] }>
   }
 }
 /** An RTCIceServer, as omnishell's release addressing writes it. */
@@ -52,7 +52,7 @@ const REALM_POLICY = "sandbox allow-scripts allow-popups allow-popups-to-escape-
  * rules from `_headers`, and serve `/` from `index.html`; the Worker reads the
  * hints to send each route's preloads as early hints. The terminal config
  * carries the target's ICE servers. */
-export async function addressEdgeAssets(addresses: Addresses, out: string, { previous, iceServers }: { previous?: string; iceServers: IceServer[] }): Promise<EdgeHints> {
+export async function addressEdgeAssets(addresses: Addresses, out: string, { previous, iceServers }: { previous?: string; iceServers: IceServer[]; domain?: string }): Promise<EdgeHints> {
   const { addressRelease, local, retainReleases } = addresses
   const release = await addressRelease(out, { htmlSuffix: '.txt', iceServers })
   const { imports, screens, cfg } = release
@@ -70,7 +70,8 @@ export async function addressEdgeAssets(addresses: Addresses, out: string, { pre
   // A realm's document is isolated by the seat's sandbox; loaded any other way
   // it would run at this origin under no policy, so it carries the sandbox
   // itself (omnishell hatch.js SANDBOX) and only this app may frame it, as the
-  // container door sends it.
+  // container door sends it. A subdomain realm is relaxed to allow-same-origin
+  // only by originAssets when requested on its dedicated host.
   const realms = Object.values(cfg.units ?? {})
     .filter((unit) => unit.isolation === 'realm').flatMap((unit) => unit.files)
   await Deno.writeTextFile(path.join(out, '_headers'), [

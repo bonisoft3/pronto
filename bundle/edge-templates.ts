@@ -23,20 +23,39 @@ export function realmDocumentsOf(shell: { units?: Record<string, { isolation?: s
   return Object.values(shell.units ?? {}).filter((unit) => unit.isolation === 'realm').map((unit) => `/${unit.src}`)
 }
 
+/** A subdomain realm's files by subdomain, relaxed to allow-same-origin only when requested on that subdomain host. */
+export function subdomainRealmsOf(shell: { units?: Record<string, { isolation?: string; subdomain?: string; files?: string[]; src?: string }> }): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const unit of Object.values(shell.units ?? {})) {
+    if (unit.isolation !== 'realm' || !unit.subdomain) continue
+    const files = unit.files ?? (unit.src ? [unit.src] : [])
+    const paths = files.flatMap((f) => [...new Set([`/${f}`, `/${extensionless(f)}`])])
+    out[unit.subdomain] = [...new Set([...(out[unit.subdomain] ?? []), ...paths])]
+  }
+  return out
+}
+
 /** These templates vary only with the deployment's origin, so their file
  * validators remain valid, as they do behind the container's Caddy door. */
-export function originAssets(assets: Assets, realmDocuments: string[] = []): Assets {
+export function originAssets(assets: Assets, realmDocuments: string[] = [], subdomainRealms: Record<string, string[]> = {}): Assets {
   return {
     async fetch(request) {
       // Assets' html_handling redirects a document's .html address to its bare
       // one. A realm's frame must stay at its own address, or its relative
       // scripts resolve a directory too high.
       const url = new URL(request.url)
+      const matchedSub = Object.entries(subdomainRealms)
+        .find(([sub, paths]) => url.hostname.startsWith(`${sub}.`) && paths.includes(url.pathname))?.[0]
       if (realmDocuments.includes(url.pathname)) {
         url.pathname = `/${extensionless(url.pathname.slice(1))}`
         request = new Request(url, request)
       }
-      const response = await assets.fetch(request)
+      let response = await assets.fetch(request)
+      if (matchedSub && response.status === 200) {
+        const parentOrigin = `${url.protocol}//${url.host.slice(matchedSub.length + 1)}`
+        response = new Response(response.body, response)
+        response.headers.set('content-security-policy', `sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox; frame-ancestors 'self' ${parentOrigin}`)
+      }
       if (response.status !== 200 || !/^(text\/(html|plain|xml)|application\/xml)(;|$)/i.test(response.headers.get('content-type') ?? '')) return response
       if (request.method === 'HEAD') {
         const result = new Response(null, response)

@@ -1,7 +1,7 @@
 import * as path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { edgeRoutingRules } from './edge-addresses.ts'
-import { realmDocumentsOf } from './edge-templates.ts'
+import { realmDocumentsOf, subdomainRealmsOf } from './edge-templates.ts'
 import { clusterDrains } from './edge-scripts.ts'
 
 /** `drains` is the app's drain table (.pronto/cluster.json), which the
@@ -158,7 +158,7 @@ const inFlight = new Map()
 export default {
 ${separate ? '' : '  scheduled: edgeWorker.scheduled,\n'}
   async fetch(request, env, ctx) {
-    if (env.ASSETS) env = { ...env, ASSETS: originAssets(env.ASSETS, ${JSON.stringify(realmDocumentsOf(cfg))}) }
+    if (env.ASSETS) env = { ...env, ASSETS: originAssets(env.ASSETS, ${JSON.stringify(realmDocumentsOf(cfg))}${Object.keys(subdomainRealmsOf(cfg)).length ? `, ${JSON.stringify(subdomainRealmsOf(cfg))}` : ''}) }
 ${images ? '    const image = await edgeImage(request, env, caches.default, ctx, IMAGE_WIDTHS)\n    if (image) return image\n' : ''}    const url = new URL(request.url)
     const preferred = acceptedLanguages(request.headers.get('accept-language') ?? '')
     const isAsset = /^\\/(?:_immutable-|(?:shell|omnishell|messages)\\/)/.test(url.pathname)
