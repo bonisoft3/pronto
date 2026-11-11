@@ -1036,7 +1036,7 @@ import (
 					version: "0.5"
 					processes: {
 						database: {
-							command: (_command & {args: list.Concat([["docker-entrypoint.sh", "postgres"], mecha.#PostgresArgs, ["-c", "fsync=on", "-c", "synchronous_commit=on", "-c", "full_page_writes=on"]])}).out
+							command: (_command & {args: list.Concat([["docker-entrypoint.sh", "postgres"], mecha.#PostgresArgs, ["-c", "fsync=on", "-c", "synchronous_commit=on", "-c", "full_page_writes=on", "-c", "shared_buffers=512MB"]])}).out
 						}
 						electric: {
 							command: (_command & {args: ["env", "DATABASE_URL=postgresql://electric:${ELECTRIC_PASSWORD:-dev-electric-password}@127.0.0.1:5432/${POSTGRES_DB:-\(B.meta.app)}?sslmode=disable", "ELECTRIC_SECRET=${ELECTRIC_SECRET:-dev-electric-secret}", "ELECTRIC_MANUAL_TABLE_PUBLISHING=true", "ELECTRIC_PORT=3002", "ELECTRIC_STORAGE_DIR=${PGDATA:-/var/lib/pgsql/data}/electric", "LD_LIBRARY_PATH=/electric-libs", "ELIXIR_ERL_OPTIONS=+fnu", "/electric-app/bin/entrypoint", "start"]}).out
