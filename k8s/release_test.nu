@@ -72,6 +72,7 @@ def run-tests [] {
 	test_seed_configmaps
 	test_alerting
 	test_door_egress
+	test_airlock_internet
 	test_auth_oidc_egress
 	test_service_clock
 	test_metrics_export
@@ -802,6 +803,33 @@ def test_door_egress [] {
 	assert equal ($out | length) 1
 	assert equal ($out.0.ports) [{port: 443, protocol: "TCP"}]
 	assert ("10.0.0.0/8" in $out.0.to.0.ipBlock.except) "nothing private"
+}
+
+def test_airlock_internet [] {
+	print "test an app whose internet is the airlock's: no service out on 443, the blob plane's storage kept, and a direct call without a why refused..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let blobs = {bucket: "brawl-chess-metal-staging-blobs", provider: "projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/contabo-k3s", serviceAccount: "metal-blobs@brawl-chess.iam.gserviceaccount.com", audience: "contabo-k3s"}
+	let data = (mktemp -t airlock.XXXXXX.json | str trim)
+	{App: {networkPolicy: {internet: "airlock"}, blobs: $blobs, services: {ticker: {port: 9998, env: {}, egress: [
+		{cidr: "10.42.0.0/16", port: 4000}
+		{cidr: "13.140.186.223/32", port: 6443, why: "the node's API, to make namespaces"}
+	]}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	let svc = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	assert ($svc.spec.egress | all {|r| ($r.to?.0?.ipBlock? | is-empty) }) "no service reaches the internet"
+	let bl = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-blobs-egress" | first)
+	assert equal $bl.spec.podSelector.matchLabels."app.kubernetes.io/component" "rclone-s3"
+	assert equal $bl.spec.egress.0.ports [{port: 443, protocol: "TCP"}]
+	let own = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-ticker-egress" | first)
+	assert equal ($own.spec.egress | each {|r| $r.to.0.ipBlock.cidr }) ["10.42.0.0/16" "13.140.186.223/32"] "the entries the service names, the direct one with its why"
+	{App: {networkPolicy: {internet: "airlock"}, services: {ticker: {port: 9998, env: {}, egress: [{cidr: "0.0.0.0/0", except: ["10.0.0.0/8"], port: 443}]}}}} | to json | save -f $data
+	let refused = (try { render-manifests $app.cue_path "metal" --data $data; "" } catch {|e| $e.msg })
+	assert ($refused | str contains "services.ticker.egress 0.0.0.0/0 port 443") $"a direct call without a why fails the release: ($refused)"
+	# The default, "open": the services' policy lets them out on 443, as before.
+	{App: {services: {ticker: {port: 9998, env: {}, egress: [{cidr: "0.0.0.0/0", port: 443}]}}}} | to json | save -f $data
+	let svc = (render-manifests $app.cue_path "metal" --data $data | from yaml | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
+	rm $data
+	assert ($svc.spec.egress | any {|r| $r.to?.0?.ipBlock?.cidr? == "0.0.0.0/0" }) "open: out on 443"
 }
 
 def test_seed_configmaps [] {

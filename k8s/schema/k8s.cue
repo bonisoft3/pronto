@@ -1723,11 +1723,35 @@ import (
 							{port: 6500, protocol: "TCP"},
 						]
 					},
-					{
+					// The internet on 443, while the app's internet is "open"; under "airlock" no service
+					// goes out but through the airlock (networkPolicy.internet).
+					if release.networkPolicy.internet == "open" {
 						to: [{ipBlock: {cidr: "0.0.0.0/0", except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}}]
 						ports: [{port: 443, protocol: "TCP"}]
 					},
 				]
+			}
+		},
+		// Under "airlock", the blob plane's rclone still reaches its bucket's storage API on 443: the
+		// app's own storage, not a call of its services.
+		if release.networkPolicy.enabled if release.networkPolicy.internet == "airlock" if release.blobs != _|_ {
+			apiVersion: "networking.k8s.io/v1"
+			kind:       "NetworkPolicy"
+			metadata: {
+				name:      "\(release.id)-blobs-egress"
+				namespace: release.ns
+				labels:    appLabels
+			}
+			spec: {
+				podSelector: matchLabels: {
+					"app.kubernetes.io/name":      release.id
+					"app.kubernetes.io/component": "rclone-s3"
+				}
+				policyTypes: ["Egress"]
+				egress: [{
+					to: [{ipBlock: {cidr: "0.0.0.0/0", except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]}}]
+					ports: [{port: 443, protocol: "TCP"}]
+				}]
 			}
 		},
 	]
