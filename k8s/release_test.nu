@@ -79,6 +79,7 @@ def run-tests [] {
 	test_blobs
 	test_initdb_replays
 	test_database_backup
+	test_database_monitoring
 	test_app_services_environment
 	test_pods_hand_over
 	test_environment_access
@@ -607,6 +608,22 @@ def test_alerting [] {
 	let twice = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { apply-alert-rules "sample" ["a/x.yaml" "b/x.yaml"] $"($dir)/app" "sample" }; false } catch { true })
 	assert $twice "two files of one name are refused"
 	rm -r $dir
+}
+
+def test_database_monitoring [] {
+	print "test a database's exporter counts the logins stuck in authentication (PRONTO-321)..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let objs = (render-manifests $app.cue_path "metal" | from yaml)
+	let cm = ($objs | where kind == "ConfigMap" and metadata.name == "sample-db-monitoring" | first)
+	assert equal ($cm.metadata.labels | get "cnpg.io/reload") "" "the operator reloads the queries"
+	let q = ($cm.data.queries | from yaml | get backends_starting)
+	assert ($q.query | str contains "state = 'starting'") "the logins in authentication"
+	assert ($q.query | str contains "interval '1 minute'") "past authentication_timeout"
+	assert equal ($q.metrics | each {|m| $m | columns | first }) ["cluster" "count" "over_minute"]
+	let cluster = ($objs | where kind == "Cluster" | first)
+	assert equal $cluster.spec.monitoring.customQueriesConfigMap [{name: "sample-db-monitoring", key: "queries"}]
+	let at = {|pick| $objs | enumerate | where {|o| do $pick $o.item } | first | get index }
+	assert ((do $at {|o| $o.metadata.name == "sample-db-monitoring" }) < (do $at {|o| $o.kind == "Cluster" })) "the queries are there before the Cluster names them"
 }
 
 def test_database_backup [] {
