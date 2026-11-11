@@ -66,9 +66,13 @@ jobs:
           # shellcheck disable=SC2046
           "$MISE" exec github:nushell/nushell@0.116.1 -- deno test -A --no-check $(cat ci-tests.txt)
       # The monorepo around this checkout: plugins/pronto beside omnishell, mecha, sayt and bayt, the
-      # imports back on bonisoft.org (.github/monorepo.sh). bundle/'s tests take bundle/deno.json, as
+      # imports back on bonisoft.org, mecha, omnishell and bootstrap's lock as the fork publishes them
+      # (.github/monorepo.sh). bundle/'s tests take bundle/deno.json, as
       # .say.yaml runs them.
       - name: Monorepo layout
+        env:
+          # gh reads the fork's mecha and omnishell releases' assets for the lock bootstrap ships.
+          GH_TOKEN: ${{ github.token }}
         run: '"$MISE" exec -- .github/monorepo.sh "$RUNNER_TEMP/monorepo"'
       - name: Monorepo tests
         working-directory: ${{ runner.temp }}/monorepo/plugins/pronto

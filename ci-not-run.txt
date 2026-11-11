@@ -15,6 +15,3 @@ bundle/mecha-edge-compute_test.ts
 bundle/mecha-edge-retention_test.ts
 # Fails on the fork line: gcp/release.nu's setup reads a column 'tier' testdata/fake-cloud.sh does not answer.
 release-flow.test.ts
-# Fails on the fork line: bootstrap/mise.lock has no entry for the roster's process-compose 1.122.0,
-# and relock.ts cannot relock it here, the fork's mecha version being no bonisoft3/mecha release.
-bootstrap_test.ts

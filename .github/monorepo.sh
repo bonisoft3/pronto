@@ -33,9 +33,19 @@ sibling libraries/mecha bsoneca/mecha-fork "$MECHA_REF"
 sibling plugins/sayt bonisoft3/sayt "$SAYT_REF"
 sibling plugins/bayt bonisoft3/bayt "$BAYT_REF"
 
-# mecha as the fork's prerelease publishes it (mecha-snapshot.py): pronto pins the fork's images.
+# mecha and omnishell as the fork's prereleases publish them (mecha-snapshot.py: pronto pins the
+# fork's images; both toolchains name the prerelease's own version), and the lock bootstrap ships as
+# prerelease.sh publishes it (fork-lock.py: the fork's mecha and omnishell runtimes, by their
+# releases' assets, and bootstrap/fork.lock's tools). pronto's own version stays the tree's.
 mecha_v=$(sed -n 's/^MECHA_V=//p' "$src/.github/prerelease.env")
+omnishell_v=$(sed -n 's/^OMNISHELL_V=//p' "$src/.github/prerelease.env")
 (cd "$dest/libraries/mecha" && python3 -I "$src/.github/mecha-snapshot.py" "$mecha_v")
+(cd "$dest/plugins/omnishell" && python3 -I "$src/.github/omnishell-snapshot.py" "$omnishell_v")
+assets() { gh api "repos/bsoneca/pronto-fork/releases/tags/$1" --jq '[.assets[] | {name, digest, url}]'; }
+assets "mecha-v$mecha_v" >"$dest/.mecha-assets.json"
+assets "omnishell-v$omnishell_v" >"$dest/.omnishell-assets.json"
+(cd "$dest/plugins/pronto" && python3 -I "$src/.github/fork-lock.py" - "$mecha_v" "$dest/.mecha-assets.json" "$omnishell_v" "$dest/.omnishell-assets.json")
+rm "$dest/.mecha-assets.json" "$dest/.omnishell-assets.json"
 
 # Carried back: copybara copied apps/idioms and llms.txt into the mirror (.mirror/carried.json).
 mv "$dest/plugins/pronto/idioms" "$dest/apps/idioms"

@@ -4,6 +4,7 @@ ai-capabilities.test.ts
 auth-image.test.ts
 auth-providers.test.ts
 baseline.test.ts
+bootstrap_test.ts
 bridge-targets.test.ts
 browser-security.test.ts
 builder-inputs.test.ts
