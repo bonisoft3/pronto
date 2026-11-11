@@ -2152,6 +2152,9 @@ import (
 		favicon?:     #Favicon
 		manifest?:    bool | #Manifest
 		social?:      #Social
+		// What a reader calls the app, where its name is a service's: shell.json's title, which omnishell
+		// titles its documents and its sign-in by. Without it they say the name, as they always have.
+		title?: string & !=""
 		llms?:        bool | #Llms
 		wellKnown?:   [string]: #WellKnownItem
 		preconnect?:  string | #PreconnectItem | [...(string | #PreconnectItem)]
