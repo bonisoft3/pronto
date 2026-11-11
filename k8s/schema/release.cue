@@ -1,5 +1,7 @@
 package schema
 
+import "strings"
+
 // #Environment defines the infrastructure profile for target clusters.
 #Environment: {
 	name:             "kind" | "eks" | "aks" | "metal" | "gke"
@@ -241,12 +243,15 @@ package schema
 			audience:        string | *"https://iam.googleapis.com/\(provider)"
 		}
 		// Where the service may connect beyond the services' own policy (the mesh, and the internet on
-		// 443): each an address block, what it leaves out, and a port (the node's API server for a
-		// service that provisions namespaces, the internet on 80 for a proxy).
+		// 443 while networkPolicy.internet is "open"): each an address block, what it leaves out, and a
+		// port (the node's API server for a service that provisions namespaces, the internet on 80 for a
+		// proxy). Under networkPolicy.internet "airlock", an entry past the private ranges is a direct
+		// call around the airlock and says why it is one (`why`), or the release does not vet.
 		egress: [...{
 			cidr!:  =~"^[0-9.]+/[0-9]+$"
 			except: [...=~"^[0-9.]+/[0-9]+$"]
 			port!:  int & >0 & <65536
+			why?:   string & !=""
 		}]
 		// Folders of the pod's own, empty at each start, by path, with the most each may hold (a
 		// builder's workspace: clones, toolchains, a game's checks).
@@ -325,7 +330,30 @@ package schema
 
 	networkPolicy: {
 		enabled: bool | *true
+		// What the app's services reach on the internet (PRONTO-220, PRONTO-135: every external call
+		// goes through the airlock). "open", the default, lets each of them out on 443, as before.
+		// "airlock" lets none of them out: an external call is the airlock's, a declared effect it
+		// performs and records, and a new direct call is refused on the node. What stays: auth's
+		// provider sign-in (auth.oidc), the blob plane's storage (blobs), the door's upstreams (declared
+		// in the program's caddy blocks), and a service's egress entry that says `why`; an entry past
+		// the private ranges without one fails the release's vet, so a pull request adding one fails
+		// its gate.
+		internet: *"open" | "airlock"
 	}
+
+	// Each egress entry that reaches past the private ranges with no `why`, under "airlock".
+	_directCalls: [
+		for n, s in services for e in s.egress
+		if networkPolicy.internet == "airlock"
+		if e.why == _|_
+		if e.cidr !~ "^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)" {
+			"services.\(n).egress \(e.cidr) port \(e.port)"
+		},
+	]
+	_noDirectCalls: [
+		if len(_directCalls) == 0 {true},
+		"networkPolicy.internet is airlock, and these reach the internet around it without a why: \(strings.Join(_directCalls, ", "))",
+	][0] & true
 }
 
 #GKE: {
