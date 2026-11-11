@@ -74,15 +74,7 @@ jobs:
           cd "$RUNNER_TEMP/omnishell"
           # The runtime mise installs as github:bonisoft3/omnishell is this
           # prerelease too, so the module's toolchain names its own version.
-          python3 -I - "$OMNISHELL_V" <<'PY'
-          import re, sys
-          v = sys.argv[1]
-          p = 'toolchain/tools.cue'
-          s = open(p).read()
-          t = re.sub(r'("github:bonisoft3/omnishell":\s+)"[^"]+"', lambda m: m.group(1) + f'"{v}"', s, count=1)
-          assert t != s, p
-          open(p, 'w').write(t)
-          PY
+          python3 -I "$GITHUB_WORKSPACE/.github/omnishell-snapshot.py" "$OMNISHELL_V"
           grep -n '"github:bonisoft3/omnishell"' toolchain/tools.cue
           grep -n 'module:' cue.mod/module.cue
       # ghcr takes no single upload over 4MiB and `cue mod publish` sends a
