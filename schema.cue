@@ -1971,7 +1971,7 @@ import (
 			// Browser permissions the unit asks its seat to delegate, from the
 			// terminal's `hatch.realm.grants` offer; only a realm's frame carries
 			// them, and the reader is asked in the app's name.
-			grants: *[] | [...("geolocation" | "payment")]
+			grants: *[] | [...("geolocation" | "camera" | "payment")]
 			// A dedicated subdomain label (`https://<subdomain>.<domain>`) for a
 			// realm unit that embeds a third-party provider requiring a non-opaque
 			// origin while remaining cross-origin isolated from the app's origin.

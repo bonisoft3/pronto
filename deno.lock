@@ -63,6 +63,7 @@
     "npm:mermaid@11.9.0": "11.9.0_cytoscape@3.34.2",
     "npm:pele@1.12.0": "1.12.0",
     "npm:pg@8.16.3": "8.16.3",
+    "npm:playwright@*": "1.61.1",
     "npm:playwright@1.61.1": "1.61.1",
     "npm:ses@1.15.0": "1.15.0",
     "npm:xstate@5.32.6": "5.32.6"
