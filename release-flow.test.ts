@@ -12,6 +12,9 @@ const decoder = new TextDecoder()
 // no part of the app: taking it before the gates is what keeps two releases apart.
 const PROD_ANY = /--project brawl-chess( |$)/
 const PROD = { test: (l: string) => PROD_ANY.test(l) && !/release-locks/.test(l) } as RegExp
+// What changes nothing: the preflight's reads (describe) and its --dry-run validations of every service, which run before the gate.
+const READS = / describe | --dry-run /
+const CHANGES_PROD = { test: (l: string) => PROD.test(l) && !READS.test(l) } as RegExp
 const RC = /--project brawl-chess-previews( |$)/
 const services = ["database", "crud", "electric", "auth", "caddy", "billing", "worker", "front"]
 
@@ -73,6 +76,9 @@ const env = (w: World, extra: Record<string, string> = {}) => ({
   FAKE_LOG: w.log,
   FAKE_STATE: w.state,
   FAKE_COMPOSE: `${w.root}-compose.json`,
+  // The machine's cue wrapper (tools/cue-budget) writes its queue to stderr, which these checks read:
+  // a run that turned it off keeps it off in this cleared environment.
+  ...(Deno.env.get("CUE_BUDGET") ? { CUE_BUDGET: Deno.env.get("CUE_BUDGET")! } : {}),
   ...extra,
 })
 
@@ -132,8 +138,8 @@ Deno.test("no rc stamp: the rc preview deploys beside the local gate, and produc
     assertStringIncludes(lines[start], "drivers=all")
     const rcDeploy = at(lines, /replace .*dist\/gcp\/service.held.yaml is guestbook-rc$/, start)
     assert(rcDeploy > start && rcDeploy < end, `the preview deployed while the gate ran: ${start} ${rcDeploy} ${end}`)
-    const prod = at(lines, PROD)
-    assert(prod > end, `production first touched at ${prod}, after the gate ended at ${end}`)
+    const prod = at(lines, CHANGES_PROD)
+    assert(prod > end, `production first changed at ${prod}, after the gate ended at ${end}`)
     const live = at(lines, /replace .*dist\/gcp\/service.held.yaml is guestbook$/)
     assert(live > prod)
     assertEquals((await ledger(w, "rc-passed")).stdout.trim(), "true", "the release that passed rc is recorded")
@@ -149,7 +155,7 @@ Deno.test("a failing local gate: nothing reaches production", async () => {
     assertStringIncludes(r.stderr, "the local pre-gate failed")
     const lines = await log(w)
     assert(at(lines, /^saytw /) >= 0)
-    assertEquals(lines.filter((l) => PROD.test(l)), [], "no call against production")
+    assertEquals(lines.filter((l) => CHANGES_PROD.test(l)), [], "no call against production but the preflight's reads and validations")
     assertEquals((await ledger(w, "passed")).stdout.trim(), "false")
   } finally { await clean(w) }
 })
@@ -258,7 +264,11 @@ Deno.test("a go-live task that fails lets the others finish, then fails the rele
     const lines = await log(w)
     assert(at(lines, /replace .*sidecar-worker.yaml is /) >= 0, "the other sidecar was still made")
     assert(at(lines, /add-iam-policy-binding guestbook --region .* --member allUsers/) >= 0, "the door's grant was still made")
-    assertEquals(lines.filter((l) => l.startsWith("curl") && l.includes("/health")), [], "not declared live")
+    // The door is asked once before its sidecars are made (waited for, not required); live is the new
+    // revision answering at its own address, the traffic moved to it, and the public address answering as it.
+    assertEquals(lines.filter((l) => l.startsWith("curl") && l.includes("next---")), [], "the new revision's own address is never polled")
+    assertEquals(lines.filter((l) => /update-traffic guestbook --to-revisions/.test(l)), [], "no traffic moved")
+    assert(!r.stdout.includes("is live at"), "not declared live")
   } finally { await clean(w) }
 })
 
@@ -360,10 +370,13 @@ const lockFile = async (w: World) => {
   const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(LOCK)))].map((b) => b.toString(16).padStart(2, "0")).join("")
   return `${w.state}/gcs-${hex}`
 }
-const holdLock = async (w: World, until: Date) => {
+// Held by another release, last touched at `touched` (its heartbeat): a lock is taken over once
+// nothing touched it for ten minutes, however long the release has run.
+const holdLock = async (w: World, touched: Date) => {
   const f = await lockFile(w)
-  await write(`${f}.body`, JSON.stringify({ by: "other@machine", dir: "/elsewhere", pid: 7, since: new Date().toISOString(), until: until.toISOString() }))
+  await write(`${f}.body`, JSON.stringify({ by: "other@machine", dir: "/elsewhere", pid: 7, since: touched.toISOString() }))
   await write(`${f}.gen`, "41\n")
+  await Deno.utime(`${f}.gen`, touched, touched)
 }
 const lockHeld = async (w: World) => Deno.stat(`${await lockFile(w)}.gen`).then(() => true, () => false)
 
@@ -393,7 +406,7 @@ Deno.test("another release holding the app's lock: this one stops before product
     await ready(w)
     await ledger(w, "stamp")
     await ledger(w, "rc-stamp")
-    await holdLock(w, new Date(Date.now() + 20 * 60_000))
+    await holdLock(w, new Date(Date.now() - 60_000))
     const r = await release(w)
     assert(!r.success, "refused")
     assertStringIncludes(r.stderr, "another release of guestbook is running: other@machine")
@@ -409,7 +422,7 @@ Deno.test("an expired lock, as a release that died leaves, is taken over", async
     await ready(w)
     await ledger(w, "stamp")
     await ledger(w, "rc-stamp")
-    await holdLock(w, new Date(Date.now() - 60_000))
+    await holdLock(w, new Date(Date.now() - 20 * 60_000))
     const r = await release(w)
     assert(r.success, r.stderr + r.stdout)
     assertStringIncludes(r.stdout, "taken over from other@machine")
@@ -446,7 +459,7 @@ Deno.test("a release that is live does not wait for the rc preview's cleanup: it
     // A failed release stops the preview whole.
     await Deno.writeTextFile(w.log, "")
     await Deno.writeTextFile(`${w.app}/crud/file.txt`, "again")
-    const bad = await nu(w, [`${fork}/gcp/release.nu`, "--app", w.app, "--rc"], { FAKE_FAIL: "run services replace .*--project brawl-chess( |$)" })
+    const bad = await nu(w, [`${fork}/gcp/release.nu`, "--app", w.app, "--rc"], { FAKE_FAIL: "run services replace dist/gcp/[^ ]+ --region [^ ]+ --project brawl-chess( |$)" })
     assert(!bad.success)
     assert(at(await log(w), /run services update guestbook-rc --scaling 0/) >= 0, "a failure stops the preview")
     assertEquals((await log(w)).filter((l) => /run services delete guestbook-rc/.test(l)), [], "a stopped preview keeps its services, and so their allUsers grant")
@@ -466,7 +479,8 @@ Deno.test("a project set up the same way is not set up again; a changed input se
     const same = await release(w)
     assert(same.success, same.stderr + same.stdout)
     assertStringIncludes(same.stdout, "as the last release set it up")
-    assertEquals((await log(w)).filter((l) => /sql instances describe|iam service-accounts describe|artifacts repositories describe/.test(l)), [], "no setup call")
+    // (The preflight's one read of the service account, to see whether the project is set up, is no setup call.)
+    assertEquals((await log(w)).filter((l) => /sql instances describe|artifacts repositories describe/.test(l)), [], "no setup call")
     // An input of the setup changed: it runs.
     await Deno.writeTextFile(w.log, "")
     const cue = await Deno.readTextFile(`${w.app}/release.cue`)
@@ -499,6 +513,7 @@ Deno.test("a release gone live through the rc gate records its commit, revision 
       commit: decoder.decode(commit.stdout).trim(), dirty: false, pronto: version,
       started: undefined, ended: undefined, outcome: "live", failure: null,
       rc: "ran", localGate: "ran", revision: "r1", phases: undefined,
+      rehearsal: null, newFeatureScenarios: [],
     })
     assert(Date.parse(rec.started) <= Date.parse(rec.ended))
     for (const p of ["lock", "gate", "rc", "stage", "schema", "deploy", "total"]) assertEquals(typeof rec.phases[p], "number", p)
@@ -539,7 +554,7 @@ Deno.test("a release refused by another's lock records refused; a dry run record
   const w = await world()
   try {
     await ready(w)
-    await holdLock(w, new Date(Date.now() + 20 * 60_000))
+    await holdLock(w, new Date(Date.now() - 60_000))
     const r = await release(w)
     assert(!r.success)
     const [rec, ...more] = await records(w)
