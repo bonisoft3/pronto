@@ -13,5 +13,3 @@ bundle/edge-ssr-rpc_test.ts
 bundle/mecha-edge-compression_test.ts
 bundle/mecha-edge-compute_test.ts
 bundle/mecha-edge-retention_test.ts
-# Fails on the fork line: gcp/release.nu's setup reads a column 'tier' testdata/fake-cloud.sh does not answer.
-release-flow.test.ts

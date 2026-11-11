@@ -28,7 +28,9 @@ case "$args" in
   if grep -Eq ':[[:space:]]+(on|off|yes|no|On|Off|Yes|No|ON|OFF|YES|NO|y|n)[[:space:]]*$' "$f"; then echo "ERROR: (gcloud.run.services.replace) Expected type <class 'str'> for field value, found False" >&2; exit 1; fi
   # The service as replaced keeps its job hash label, which a describe returns.
   sn=$(grep -m1 -E '^[[:space:]]*"?name"?:' "$f" | sed -E 's/.*name"?:[[:space:]]*"?([^",]*).*/\1/')
-  grep -m1 'pronto-job' "$f" | sed -E 's/.*pronto-job"?:[[:space:]]*"?([^",]*)"?.*/\1/' > "$FAKE_STATE/job-$sn"
+  # A --dry-run validates and changes nothing: the live service keeps what it had.
+  case "$args" in *--dry-run*) ;; *)
+  grep -m1 'pronto-job' "$f" | sed -E 's/.*pronto-job"?:[[:space:]]*"?([^",]*)"?.*/\1/' > "$FAKE_STATE/job-$sn" ;; esac
   echo "  replace $f is $(grep -m1 -E '^[[:space:]]*"?name"?:' "$f" | sed -E 's/.*name"?:[[:space:]]*"?([^",]*).*/\1/')" >> "$FAKE_LOG" ;;
 esac
 # Cloud Storage objects (the release lock), each with a generation, kept in $FAKE_STATE; a write or
@@ -49,6 +51,9 @@ case "$args" in
     if [ "$cur" = 0 ]; then echo "ERROR: $obj not found: 404" >&2; exit 1; fi
     case "$args" in
     *"storage cat "*) cat "$k.body" ;;
+    # --format json is the object as gcloud gives it (its update_time is when it was last touched: the file's);
+    # value(generation) is the bare number.
+    *"objects describe "*"--format json"*) printf '{"generation":"%s","metageneration":"1","update_time":"%s"}\n' "$cur" "$(date -u -r "$k.gen" +%Y-%m-%dT%H:%M:%SZ)" ;;
     *"objects describe "*) echo "$cur" ;;
     *"storage rm "*) rm -f "$k.body" "$k.gen"; echo "  removed $obj" >> "$FAKE_LOG" ;;
     esac ;;
@@ -98,6 +103,8 @@ case "$args" in
   sec=$(echo "$args" | sed -E 's/.*secrets (create|versions add) ([^ ]+).*/\2/')
   cat > "$FAKE_STATE/secret-$(hex "$sec")" ;;
 *"auth print-access-token"*) echo fake-token ;;
+# Cloud SQL's describe as gcloud gives it: the instance's tier (the plan's default) beside its flags.
+*"sql instances describe"*"--format json"*) echo '{"settings":{"tier":"db-f1-micro","databaseFlags":[]}}' ;;
 *"--format json"*) echo '{"settings":{"databaseFlags":[]}}' ;;
 esac
 exit 0

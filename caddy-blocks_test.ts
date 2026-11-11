@@ -95,10 +95,18 @@ Deno.test("two generates started at once in one checkout run one after the other
   assert(Date.now() - started >= 2000, "the second waited for the first to end");
   const waited = new TextDecoder().decode(a.stderr) + new TextDecoder().decode(b.stderr);
   assert(waited.includes("another generate is running in this checkout"), waited);
-  // The lock outlives neither: a third starts at once.
-  const t = Date.now();
-  assert((await generate("c")).success);
-  assert(Date.now() - t < 2000, "the lock was released when the generates ended");
+  // The lock outlives neither: once its holder has seen the generates end (its owner file gone), a
+  // third takes it without waiting for anyone. Measured by what the lock says, not by the clock,
+  // which a loaded machine stretches (the bound below only catches a lock that never goes).
+  const owner = `${dir}/.task/bayt/generate.lock.owner`;
+  for (const until = Date.now() + 30_000; await Deno.stat(owner).then(() => true, () => false);) {
+    assert(Date.now() < until, "the lock outlived the generates");
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const c = await generate("c");
+  assert(c.success, new TextDecoder().decode(c.stderr));
+  const cWaited = new TextDecoder().decode(c.stderr);
+  assert(!cWaited.includes("another generate is running"), `a third waited on a released lock: ${cWaited}`);
   await Deno.remove(dir, { recursive: true });
 });
 
