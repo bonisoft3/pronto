@@ -2,8 +2,10 @@
 # release suite and the deno tests that stand alone (ci-tests.txt), on bsoneca's Mac (the host
 # runner pronto-fork-1, pronto-plugins runners/setups.cue), never a hosted runner. A ruleset on the
 # fork line requires this job, so nothing merges past a broken suite again (PRONTO-124's k8s suite,
-# 2026-11-09). The other tests need the monorepo's layout (../omnishell, the plugins' CUE module) or
-# docker, which the Mac does not run: they are not listed. A test added to ci-tests.txt runs here.
+# 2026-11-09). The tests that need the monorepo's layout (../omnishell, the plugins' CUE module,
+# mecha's tree) run in that layout, rebuilt around this checkout by .github/monorepo.sh from the
+# sibling commits .github/monorepo.env pins (ci-monorepo-tests.txt, PRONTO-221). The files left out,
+# docker's and upstream's own apps' among them, are ci-not-run.txt's, each with why.
 name: ci
 
 on:
@@ -24,7 +26,7 @@ jobs:
     # A public repository's pull request from a fork never runs on the Mac.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS, pronto-fork]
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -39,7 +41,42 @@ jobs:
           "$mise" install -q
       - name: k8s release suite
         run: '"$MISE" exec github:nushell/nushell@0.116.1 -- nu k8s/release_test.nu'
+      # Every test file sits in ci-tests.txt, ci-monorepo-tests.txt or ci-not-run.txt (with its
+      # reason), so a new one is placed on purpose rather than left out unseen.
+      - name: Every test placed
+        run: |
+          placed=$(cat ci-tests.txt ci-monorepo-tests.txt; grep -v '^#' ci-not-run.txt)
+          dup=$(printf '%s\n' "$placed" | sort | uniq -d)
+          [ -z "$dup" ] || { echo "listed twice: $dup"; exit 1; }
+          missing=$(git ls-files '*_test.ts' '*.test.ts' | grep -v '\.integration\.' | sort | comm -23 - <(printf '%s\n' "$placed" | sort))
+          [ -z "$missing" ] || { echo "in no list: $missing"; exit 1; }
+      # The tools the tests spawn (nu, hydra, caddy; mise as SAYT_MISE_BIN), and cue unbudgeted: the
+      # machine's cue wrapper (tools/cue-budget) writes its queue to stderr, which these tests read,
+      # and the runner's pool already admits this job.
+      - name: Test environment
+        run: |
+          {
+            echo "SAYT_MISE_BIN=$MISE"
+            echo "CUE_BUDGET=off"
+            echo "DENO_JOBS=4"
+          } >> "$GITHUB_ENV"
+          dirname "$MISE" >> "$GITHUB_PATH"
       - name: deno tests
         run: |
           # shellcheck disable=SC2046
-          "$MISE" exec -- deno test -A --no-check $(cat ci-tests.txt)
+          "$MISE" exec github:nushell/nushell@0.116.1 -- deno test -A --no-check $(cat ci-tests.txt)
+      # The monorepo around this checkout: plugins/pronto beside omnishell, mecha, sayt and bayt, the
+      # imports back on bonisoft.org (.github/monorepo.sh). bundle/'s tests take bundle/deno.json, as
+      # .say.yaml runs them.
+      - name: Monorepo layout
+        run: '"$MISE" exec -- .github/monorepo.sh "$RUNNER_TEMP/monorepo"'
+      - name: Monorepo tests
+        working-directory: ${{ runner.temp }}/monorepo/plugins/pronto
+        run: |
+          "$MISE" trust -q .
+          list="$GITHUB_WORKSPACE/ci-monorepo-tests.txt"
+          tools=(github:nushell/nushell@0.116.1 github:ory/hydra@26.2.0 github:caddyserver/caddy@2.11.7)
+          # shellcheck disable=SC2046
+          "$MISE" exec "${tools[@]}" -- deno test -A --no-check --parallel $(grep -v '^bundle/' "$list")
+          # shellcheck disable=SC2046
+          "$MISE" exec "${tools[@]}" -- deno test -A --no-check --parallel --config bundle/deno.json $(grep '^bundle/' "$list")

@@ -117,7 +117,7 @@ Deno.test("a container hatch's page that hands a form to another site adds that 
 app: capabilities: hatches: builder: {kind: "container", note: "registers an app on GitHub", forms: "/builder/github/new": ["https://github.com"]}
 `);
   const caddy = files["docker/Caddyfile"].text;
-  assertStringIncludes(caddy, "@terminal not path /builder/github/new\n  header @terminal Content-Security-Policy");
+  assertStringIncludes(caddy, "@terminal not path /docs/* /builder/github/new\n  header @terminal Content-Security-Policy");
   const page = caddy.split("\n").find((l) => l.startsWith("  header @form0 Content-Security-Policy")) ?? "";
   assertStringIncludes(page, "form-action 'self' https://github.com;");
   assertStringIncludes(page, "script-src-attr 'none';");

@@ -43,7 +43,8 @@ async function fixture(subdir: string, module: string, test: (app: string) => Pr
 
 async function assertClean(app: string): Promise<void> {
   const files = await Array.fromAsync(Deno.readDir(app));
-  const names = files.map((f) => f.name).filter((name) => name !== "cue.mod");
+  // .task/pronto/derive.lock is derive's lock on the app's folder (derive.ts), kept like task's own cache.
+  const names = files.map((f) => f.name).filter((name) => name !== "cue.mod" && name !== ".task");
   assert(names.length === 1 && names[0] === "program.cue", `observer inputs leaked: ${names}`);
 }
 

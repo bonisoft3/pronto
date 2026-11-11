@@ -19,13 +19,13 @@ async function images(code: string): Promise<Record<string, unknown>> {
 Deno.test("the auth service runs the program's image when it names one", async () => {
   const named = await images(withAuth(`{ref: ":google-auth-image"}`));
   assertEquals(named.auth, { ref: ":google-auth-image" });
-  assertEquals(named.database, { ref: "libraries_mecha:database-image" });
+  assertEquals(named.database, { name: "libraries_mecha-database-image" });
   const pinned = await images(withAuth(`{name: "registry.example/auth@sha256:0123"}`));
   assertEquals(pinned.auth, { name: "registry.example/auth@sha256:0123" });
 });
 
 Deno.test("naming none keeps mecha's auth image", async () => {
-  assertEquals((await images(withAuth())).auth, { ref: "libraries_mecha:auth-image" });
+  assertEquals((await images(withAuth())).auth, { name: "libraries_mecha-auth-image" });
 });
 
 Deno.test("the terminal's config carries the auth block without the image", async () => {
