@@ -40,6 +40,21 @@ Deno.test("the app's Android certificates reach the cluster's auth and not the t
   }
 });
 
+// The cluster's capabilities.apiKeys is mecha-fork's (0.22.0-host.9, PRONTO-312): the auth service
+// serves /auth/keys only where the app turns it on, and the terminal never sees it.
+Deno.test("the app's API keys reach the cluster's auth and not the terminal", async () => {
+  const code = withAuth(`{required: false, service: "/auth", apiKeys: true}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals("apiKeys" in files.value["shell/shell.json"].data.auth, false);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals(env.value.AUTH_API_KEYS, "true");
+  const off = await exported(withAuth(`{required: false, service: "/auth"}`), "_cluster.surface.targets.auth.compose.environment");
+  assertEquals("AUTH_API_KEYS" in off.value, false);
+  const bad = await exported(withAuth(`{required: false, service: "/auth", apiKeys: "yes"}`), "app.capabilities.auth.apiKeys");
+  assertEquals(bad.success, false);
+});
+
 Deno.test("an app naming no provider leaves the terminal and the auth service as they were", async () => {
   const code = withAuth(`{required: false, service: "/auth"}`);
   const files = await exported(code, "out");
