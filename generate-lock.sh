@@ -57,11 +57,18 @@ else
 fi
 holder=$!
 
-n=0
+# Said once, as soon as another generate is seen owning the lock: never after a count of turns,
+# which a loaded machine stretches past the other's whole hold (the wait then went unsaid).
+said=
 while [ ! -e "$ready" ]; do
   kill -0 "$holder" 2>/dev/null || { echo "generate-lock: the lock's holder ended before it held $lock" >&2; exit 1; }
-  n=$((n + 1))
-  [ "$n" = 20 ] && echo "generate-lock: another generate is running in this checkout (pid $(cat "$owner" 2>/dev/null)); waiting for it to end" >&2
+  if [ -z "$said" ]; then
+    other=$(cat "$owner" 2>/dev/null)
+    if [ -n "$other" ] && [ "$other" != "$root" ]; then
+      echo "generate-lock: another generate is running in this checkout (pid $other); waiting for it to end" >&2
+      said=1
+    fi
+  fi
   sleep 0.05
 done
 rm -f "$ready"
