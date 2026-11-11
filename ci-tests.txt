@@ -30,6 +30,7 @@ live-tree_test.ts
 local-drivers.test.ts
 local-gate-key.test.ts
 proto-baseline.test.ts
+release-flow.test.ts
 table-order.test.ts
 upgrade-from-released.test.ts
 verify/airlock_test.ts
