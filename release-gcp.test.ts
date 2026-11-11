@@ -7,7 +7,7 @@ import { cue, paymentProgram } from "./effects-fixtures.ts";
 const digest = (c: string) => "sha256:" + c.repeat(64);
 
 async function built(release: string, field = "plan") {
-  const code = `package probe\nimport "github.com/bonisoft3/pronto/gcp/schema"\nout: (schema.#Build & {release: ${release}}).${field}\n`;
+  const code = `package probe\nimport "bonisoft.org/plugins/pronto/gcp/schema"\nout: (schema.#Build & {release: ${release}}).${field}\n`;
   const res = await cue(["export", "-", "-e", "out", "--out", "json"], code);
   return { ...res, value: res.success ? JSON.parse(res.stdout) : undefined };
 }

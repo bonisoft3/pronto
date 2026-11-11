@@ -28,6 +28,7 @@ launch-watch.test.ts
 links_test.ts
 live-tree_test.ts
 local-drivers.test.ts
+local-gate-key.test.ts
 proto-baseline.test.ts
 table-order.test.ts
 upgrade-from-released.test.ts

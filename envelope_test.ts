@@ -236,7 +236,7 @@ Deno.test("social cards emit OpenGraph, Twitter, and canonical metadata", async 
 });
 
 Deno.test("the title an app names is shell.json's title, beside its app; a social title alone is not", async () => {
-  const shell = async (named: string) => JSON.parse((await exportCue(`
+  const shell = async (named: string) => ((await exportCue(`
     meta: {
       name: "social-app"
       description: "social card demo"
@@ -247,7 +247,7 @@ Deno.test("the title an app names is shell.json's title, beside its app; a socia
       decisions: {}
       tests: {}
     }
-  `)).files["shell/shell.json"]?.text ?? "{}");
+  `)).files["shell/shell.json"]?.data ?? {}) as Record<string, unknown>;
   const titled = await shell(`title: "Social Preview"`);
   assertEquals([titled.app, titled.title], ["social-app", "Social Preview"]);
   const social = await shell(`social: title: "Social Preview"`);
