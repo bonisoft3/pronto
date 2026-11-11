@@ -1,6 +1,6 @@
 // integrate@local's upgrade from the last release (upgrade-from-released.ts).
 import { assertEquals, assertStringIncludes, assertRejects, assertThrows } from "jsr:@std/assert@1.0.11";
-import { databaseProcess, databaseSteps, lastReleased, localJob, migrations, migrationsOf, shellWords, upgradeScript } from "./upgrade-from-released.ts";
+import { afterUpgrade, databaseProcess, databaseSteps, lastReleased, localJob, migrations, migrationsOf, shellWords, upgradeScript } from "./upgrade-from-released.ts";
 
 const sha = (c: string) => c.repeat(40);
 const rec = (o: Record<string, unknown>) => JSON.stringify({ outcome: "live", preview: "", dirty: false, started: "t", commit: sha("a"), ...o });
@@ -111,4 +111,21 @@ Deno.test("a test database holds this tree's fixture, applied after the job, bef
   assertEquals(at("bash '/j.sh'") < at("-f '/steps/950_fixture.sql'") && at("-f '/steps/950_fixture.sql'") < at("NOTIFY pgrst"), true)
   // No fixture, no step: a released database never gains test rows.
   assertEquals(upgradeScript({ oldDir: "/old", oldBaseline: "", oldMigrationsDir: undefined, jobFile: "/j.sh", mecha: "/mecha" }).includes("950_fixture"), false)
+})
+
+Deno.test("every process that reads the database waits for the upgrade, but those the upgrade waits on", () => {
+  const db = { database: { condition: "process_healthy" } }
+  const procs = afterUpgrade({
+    database: {},
+    "bayt:httpcheck": {},
+    migrate: { depends_on: { ...db, setup: { condition: "process_completed_successfully" } } },
+    setup: { depends_on: db },
+    electric: { depends_on: { ...db, "bayt:httpcheck": { condition: "process_completed_successfully" } } },
+    caddy: { depends_on: { electric: { condition: "process_healthy" } } },
+  })
+  assertEquals(procs.electric.depends_on, { ...db, "bayt:httpcheck": { condition: "process_completed_successfully" }, migrate: { condition: "process_completed_successfully" } })
+  assertEquals(procs.setup.depends_on, db, "the upgrade waits on it: no cycle")
+  assertEquals(procs.migrate.depends_on.migrate, undefined)
+  assertEquals(procs.caddy.depends_on, { electric: { condition: "process_healthy" } }, "it reads no database itself")
+  assertEquals(procs.database.depends_on, undefined)
 })

@@ -234,6 +234,26 @@ const run = async (cmd: string[], opts: Deno.CommandOptions = {}) => {
 export type Prepared = { file: string; note: string } | { skip: string }
 
 /**
+ * Every process that reads the database waits for the upgrade to end (PRONTO-339). A fresh stack's
+ * initdb gives its database this tree's schema before it is healthy; here the released commit's
+ * database is healthy first and the upgrade (`migrate`) adds the tree's tables and columns after, so
+ * a process that reads the schema once at boot (the host Electric stand-in's columns) would serve
+ * the released schema all run. A process the upgrade itself waits on is left as it is.
+ */
+export function afterUpgrade(procs: Record<string, Proc>): Record<string, Proc> {
+  const before = new Set<string>()
+  const walk = (name: string) => {
+    for (const dep of Object.keys(procs[name]?.depends_on ?? {})) if (!before.has(dep)) { before.add(dep); walk(dep) }
+  }
+  walk("migrate")
+  for (const [name, p] of Object.entries(procs)) {
+    if (name === "migrate" || before.has(name) || !p?.depends_on?.database) continue
+    p.depends_on = { ...p.depends_on, migrate: { condition: "process_completed_successfully" } }
+  }
+  return procs
+}
+
+/**
  * The process-compose file for an upgrade run, written in `dir`, or why there is none.
  * `appDir` is the app the stack runs; `gateDir` the checkout it is a copy of (the same, off a slot).
  */
@@ -336,6 +356,7 @@ export async function prepare(appDir: string, gateDir: string, dir: string, rele
     ],
   }
   procs.migrate = { ...migrate, entrypoint: ["mise", "x", "--", "bash", upgradeFile] }
+  afterUpgrade(procs)
   const file = `${dir}/process-compose.upgrade.yaml`
   await Deno.writeTextFile(file, stringify(compose))
   return { file, note: `the database starts as ${last.commit.slice(0, 8)} left it (${name.out.trim()}'s last release to production) and this tree's schema job is applied to it` }
