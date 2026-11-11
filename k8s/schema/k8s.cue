@@ -142,6 +142,41 @@ import (
 		originValue,
 	][0]
 
+	// Queries the Cluster's exporter runs beside CloudNativePG's default ones (spec.monitoring), each a
+	// cnpg_<query>_<column> series on its metrics port. backends_starting counts the logins Postgres 18
+	// still holds in authentication (pg_stat_activity's state "starting"), and those past a minute: on
+	// 2026-11-11 a kernel's AppArmor kept every login there until max_connections (PRONTO-306), and only
+	// log lines told it. authentication_timeout (one minute) ends a healthy one, so one older is stuck.
+	// cluster_name is the Cluster's name, the label cnpg_collector_up carries too.
+	let prontoMonitoringName = "\(release.id)-db-monitoring"
+	let prontoMonitoringObj = [
+		if release.type == "pronto" {
+			apiVersion: "v1"
+			kind:       "ConfigMap"
+			metadata: {
+				name:      prontoMonitoringName
+				namespace: release.ns
+				// The operator reloads the queries when this changes, with no restart.
+				labels: appLabels & {"app.kubernetes.io/component": "database", "cnpg.io/reload": ""}
+			}
+			data: queries: yaml.Marshal({
+				backends_starting: {
+					query: """
+						SELECT current_setting('cluster_name') AS cluster,
+						  count(*) AS count,
+						  count(*) FILTER (WHERE now() - backend_start > interval '1 minute') AS over_minute
+						FROM pg_stat_activity WHERE state = 'starting'
+						"""
+					metrics: [
+						{cluster: {usage: "LABEL", description: "The CloudNativePG Cluster"}},
+						{count: {usage: "GAUGE", description: "Logins still in authentication (state starting)"}},
+						{over_minute: {usage: "GAUGE", description: "Logins in authentication for over a minute: past authentication_timeout, stuck"}},
+					]
+				}
+			})
+		},
+	]
+
 	let prontoClusterObj = [
 		if release.type == "pronto" {
 			apiVersion: "postgresql.cnpg.io/v1"
@@ -174,6 +209,8 @@ import (
 				// release waits for the primary (release.nu) longer than this stop.
 				smartShutdownTimeout: 15
 				stopDelay:            120
+				// prontoMonitoringObj's queries; the operator adds its default ones beside them.
+				monitoring: customQueriesConfigMap: [{name: prontoMonitoringName, key: "queries"}]
 				imageName: (#appImage & {svc: "database"}).out
 				// mecha's database image derives from the official postgres image,
 				// whose postgres user is 999, not CloudNativePG's 26.
@@ -2225,6 +2262,7 @@ import (
 			daprConfigObj,
 			daprResiliencyObj,
 			backupObjs,
+			prontoMonitoringObj,
 			prontoClusterObj,
 			schemaJobObj,
 			prontoDatabaseServiceObj,
