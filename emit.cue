@@ -1352,7 +1352,9 @@ _sqlType: {
 		]
 	}
 
-	e: _
+	// The entity's access as the schema states it (#Access), so one it refuses (a public write of
+	// "delete") is refused here too, not rendered as a policy.
+	e: {access: #Access, ...}
 	entities: _ // parent lookup for folder scope
 	_t: P.e.table
 	if P.e.access.scope == "private" {
@@ -1452,6 +1454,9 @@ _sqlType: {
 	if !P._isShared if !P._underShared {_shapeKeys: []}
 
 	out: strings.Join(list.Concat([
+		// The entity's access read whole first: one the schema refuses (a public write of "delete")
+		// fails the policy here, where a guard that asks whether a field is there would read it as absent.
+		[if json.Marshal(P.e.access) == "" {""}],
 		P._pre,
 		P._scopeTrigger,
 		// The floor's text lives in mecha's rls.sql and is called, never
