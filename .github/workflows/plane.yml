@@ -1,0 +1,61 @@
+# The dev flow's board (pronto-plugins' devflow/dev-flow.md) told what a pull request did, as
+# bsoneca/pronto's plane workflow tells it: the issue its title or branch names (PRONTO-123) linked
+# to it and moved to Review when it opens, Merged when it merges, back to Implementing when it closes
+# unmerged. pronto-plugins' devflow/hook.ts decides (its devflow/flow.js), from this repository's
+# devflow/devflow.cue; the board's token is the PLANE_TOKEN secret, the same token bsoneca/pronto's
+# holds (Secret Manager's plane-api-token). The hook is main's pronto-plugins, whatever the pull
+# request changes.
+#
+# A pull request that names no issue only warns here (--warn). The same file is on main and on the
+# fork line (feat/launch-local-0.16, PRONTO-302): a pull request runs the workflow of the branch it
+# merges into, so a line without it never moved its issues.
+#
+# On a hosted runner, as bsoneca/ume's plane workflow: bsoneca/pronto's self-hosted runners are that
+# repository's alone. Deno and cue are fetched at the versions pronto pins.
+
+name: plane
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, edited, closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plane-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  DENO_VERSION: v2.5.0
+  CUE_VERSION: v0.16.1
+
+jobs:
+  board:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          sparse-checkout: devflow
+      # pronto-plugins is public: a plain git clone of main, which spends none of the run token's API
+      # calls (PRONTO-193).
+      - name: Check out pronto-plugins
+        run: |
+          rm -rf .pronto-plugins
+          git clone --quiet --depth 1 --filter=blob:none --sparse https://github.com/bsoneca/pronto-plugins .pronto-plugins
+          git -C .pronto-plugins sparse-checkout set devflow intents
+      - name: Tools
+        run: |
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL -o "$RUNNER_TEMP/deno.zip" "https://github.com/denoland/deno/releases/download/$DENO_VERSION/deno-x86_64-unknown-linux-gnu.zip"
+          unzip -q -o "$RUNNER_TEMP/deno.zip" -d "$bin"
+          curl -fsSL "https://github.com/cue-lang/cue/releases/download/$CUE_VERSION/cue_${CUE_VERSION}_linux_amd64.tar.gz" | tar -xz -C "$bin" cue
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Tell the board
+        env:
+          PLANE_TOKEN: ${{ secrets.PLANE_TOKEN }}
+        run: |
+          CUE=$(command -v cue) deno run --no-config -A .pronto-plugins/devflow/hook.ts pr . --warn
