@@ -64,7 +64,7 @@ With the default broker (`http://localhost:28443`), the app's own launch brings
 it up: `identity-hydra` (Ory Hydra, in memory) and `identity` (the front), two
 services of its cluster.
 
-- `launch@local` runs each as a host process (Hydra via mise, the front directly
+- `launch@host` runs each as a host process (Hydra via mise, the front directly
   under Deno). With the operator's `~/.config/pronto-identity/broker.env` it signs
   in through Google; without it, through a stand-in that says it is not Google and
   signs in a test person (`tester`, `tester-2`).

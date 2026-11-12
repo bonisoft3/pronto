@@ -85,7 +85,7 @@ localBroker: "http://localhost:28443"
 
 	// The broker itself, for a local test: Hydra and the front as two of the
 	// cluster's own services, from the front's image. On the host
-	// (launch@local) each runs hydra/local.sh from its files, which signs in
+	// (launch@host) each runs hydra/local.sh from its files, which signs in
 	// through Google with the operator's ~/.config/pronto-identity/broker.env
 	// and through a stand-in that signs in test people without it; in docker
 	// (launch) each runs its image, the stand-in unless GOOGLE_CLIENT_ID and

@@ -120,7 +120,7 @@ say:
       # Docker, so a platform of its own: CI's bonisoft3 job runs it on Linux
       # where the replay regression runs, and no other platform does.
       airlock:
-        platform: docker
+        platform: compose
         priority: -1
         cmds:
           - do: "mise exec -- deno task test:airlock"

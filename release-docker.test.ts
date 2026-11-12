@@ -220,7 +220,7 @@ Deno.test("release-docker runs the change feed as compose does: Conduit, the bus
 });
 
 // The appliance refused computations, for want of the compute service and
-// Feldera. It runs them on DuckDB snapshots, as launch@local does: no Feldera,
+// Feldera. It runs them on DuckDB snapshots, as launch@host does: no Feldera,
 // whose Rust compile ran out of memory, and compute's files from its image.
 Deno.test("release-docker runs a program's computations on DuckDB snapshots, without Feldera", async () => {
   const code = paymentProgram().replace("targets: []", 'targets: ["docker"]') +

@@ -146,8 +146,7 @@ Saves after a successful check create a new, unvalidated revision.
 
 `launch@host --watch` (including a forwarded `-w`) fails explicitly, directing the author
 to `launch --watch`. Ordinary `launch@host` remains available. Sayt's default
-platform is named `local`; in this Pronto builder it selects Docker, not native
-services. The native target is `host`.
+launch platform is `compose`, which runs Docker; the native target is `host`.
 
 Docker launch gives the watch contract a clear boundary: the image supplies the
 runtime and build environment, Compose delivers declared source changes, and

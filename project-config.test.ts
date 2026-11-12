@@ -130,18 +130,18 @@ Deno.test("gates retain options and delegate every declared platform to the raw 
 
 Deno.test("gates without builtin merge platform rules alongside the check's own rulemap", () => {
   const mkcert = { do: "mkcert" };
-  const launchLocal = { platform: "local", stop: true, cmds: [{ use: "./bayt-task.nu", do: "bayt-task launch --generate" }] };
+  const launchHost = { platform: "host", stop: true, cmds: [{ use: "./bayt-task.nu", do: "bayt-task launch --generate" }] };
   const raw = { launch: { rulemap: { builtin: { cmds: [mkcert] } } } };
-  const projected = projectGates(raw, { launch: { rulemap: { local: launchLocal } } });
+  const projected = projectGates(raw, { launch: { rulemap: { host: launchHost } } });
   assertEquals(projected.say.launch, {
     rulemap: {
       builtin: { cmds: [mkcert] },
-      local: launchLocal,
+      host: launchHost,
     },
   });
   assertEquals(projected.gates.launch, {
     rulemap: {
-      local: launchLocal,
+      host: launchHost,
     },
   });
 });

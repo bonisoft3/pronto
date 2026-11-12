@@ -1307,7 +1307,7 @@ import (
 							if _effects && _blobs {[
 								#"RUN echo "release@docker does not yet run the blob plane an effect's answer is stored in; refusing to omit a runtime service" >&2 && exit 1"#,
 							]},
-							// The computations on DuckDB snapshots, as launch@local runs them:
+							// The computations on DuckDB snapshots, as launch@host runs them:
 							// compute and the transform reading its invalidations both find
 							// its app and extensions here, the container's environment.
 							if _compute {[

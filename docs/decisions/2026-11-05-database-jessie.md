@@ -13,7 +13,7 @@ itself. Three positions share it:
 | A function | a transformed value the commit stores | the `plv8` language on PostgreSQL; `pgl_step` on the edge | yes |
 
 On PostgreSQL the `plv8` language is QuickJS's pljs, built under that name in the
-database image and in `@local`'s host Postgres from one pin
+database image and in `@host`'s Postgres from one pin
 ([libraries/mecha/services/database/pljs/pins.cue](https://github.com/bonisoft3/mecha/blob/v0.22.0/services/database/pljs/pins.cue)). It defines the
 `plv8` global, and raises a JavaScript error's first line as the error, its text and
 stack as the detail. The edge's `pgl_step` still runs the host's V8; pljs inside
