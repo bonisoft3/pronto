@@ -40,7 +40,7 @@ Deno.test("the app's Android certificates reach the cluster's auth and not the t
   }
 });
 
-// The cluster's capabilities.apiKeys is mecha-fork's (0.22.0-host.9, PRONTO-312): the auth service
+// The cluster's capabilities.apiKeys is mecha-fork's (0.22.0-host.9 on, PRONTO-312): the auth service
 // serves /auth/keys only where the app turns it on, and the terminal never sees it.
 Deno.test("the app's API keys reach the cluster's auth and not the terminal", async () => {
   const code = withAuth(`{required: false, service: "/auth", apiKeys: true}`);
