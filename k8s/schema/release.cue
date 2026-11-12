@@ -84,7 +84,19 @@ import "strings"
 		pushed: [string]: {tag: string, digest: =~"^sha256:[0-9a-f]{64}$"}
 	}
 
-	replicas:   int | *1
+	// How many pods of each workload run: `replicas` of every one, a workload's own in `scale` by its
+	// name (crud, electric, auth, caddy, render, rclone-s3, imgproxy, or one of the app's services), as
+	// containerResources is. A preview (the rc, the release under another name) runs `previewReplicas`,
+	// or a workload's own `preview`, never more than the release runs of it: n+1 for one, so it
+	// rehearses losing a pod and both stacks fit the node (PRONTO-359). A workload over one pod gets a
+	// PodDisruptionBudget of all but one, and spreads over the nodes by hostname where it can
+	// (ScheduleAnyway): on one node it schedules as before, and spreads the day more exist.
+	replicas:        int & >=1 | *1
+	previewReplicas: int & >=1 | *replicas
+	scale: [=~"^[a-z][a-z0-9-]*$"]: {
+		replicas?: int & >=1
+		preview?:  int & >=1
+	}
 
 	env:     *{} | {[string]: string}
 	externalSecrets: {
@@ -94,6 +106,9 @@ import "strings"
 
 	database: {
 		storage: string | *"1Gi"
+		// CloudNativePG's instances: one primary and instances-1 standbys, for which the operator
+		// keeps a PodDisruptionBudget itself. A preview runs as many.
+		instances: int & >=1 | *1
 		// The roles a token may name, which the schema grants PostgREST's login
 		// (the app's .pronto/cluster.json; the release fills it).
 		tokenRoles: [...string]

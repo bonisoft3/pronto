@@ -187,7 +187,7 @@ import (
 				labels:    appLabels & {"app.kubernetes.io/component": "database"}
 			}
 			spec: {
-				instances: 1
+				instances: release.database.instances
 				// upstream's parameters for the services an app's compose runs beside the cluster
 				// (feldera, conduit: logical slots); an app without them keeps the parameters its
 				// live database runs with, as a change to them restarts it.
@@ -694,6 +694,58 @@ import (
 		}
 	}]
 
+	// How many of each workload run, by its component (release.cue's replicas, scale, previewReplicas).
+	let countOf = {
+		for c in list.Concat([
+			[if release.type == "pronto" for c in ["crud", "electric", "auth", "caddy"] {c}],
+			[if release.type == "pronto" if release.render.enabled {"render"}],
+			[if release.blobs != _|_ for c in ["rclone-s3", "imgproxy"] {c}],
+			[for n, _ in release.services {n}],
+		]) {
+			let r = [if release.scale[c].replicas != _|_ {release.scale[c].replicas}, release.replicas][0]
+			let p = [if release.scale[c].preview != _|_ {release.scale[c].preview}, release.previewReplicas][0]
+			(c): [if release.preview == "" {r}, if p < r {p}, r][0]
+		}
+	}
+
+	// A workload over one pod spreads over the nodes where it can (ScheduleAnyway: on one node it
+	// schedules as before), and a PodDisruptionBudget keeps all but one of it through a voluntary
+	// disruption (a drain, an eviction). One pod gets neither, as before: its budget would block a
+	// one-node drain.
+	let spreadOf = {
+		for c, n in countOf {
+			(c): {
+				if n >= 2 {
+					topologySpreadConstraints: [{
+						maxSkew:           1
+						topologyKey:       "kubernetes.io/hostname"
+						whenUnsatisfiable: "ScheduleAnyway"
+						labelSelector: matchLabels: {
+							"app.kubernetes.io/name":      release.id
+							"app.kubernetes.io/component": c
+						}
+					}]
+				}
+			}
+		}
+	}
+	let disruptionBudgetObjs = [for c, n in countOf if n >= 2 {
+		apiVersion: "policy/v1"
+		kind:       "PodDisruptionBudget"
+		metadata: {
+			name:      "\(release.id)-\(c)"
+			namespace: release.ns
+			labels:    appLabels & {"app.kubernetes.io/component": c}
+		}
+		spec: {
+			minAvailable: n - 1
+			selector: matchLabels: {
+				"app.kubernetes.io/name":      release.id
+				"app.kubernetes.io/component": c
+			}
+		}
+	}]
+
 	let prontoCrudDeploymentObj = [
 		if release.type == "pronto" {
 			apiVersion: "apps/v1"
@@ -704,11 +756,12 @@ import (
 				labels:    appLabels & {"app.kubernetes.io/component": "crud"}
 			}
 			spec: {
-				replicas: release.replicas
+				replicas: countOf["crud"]
 				selector: matchLabels: {
 					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "crud"
 				}
+				template: spec: spreadOf["crud"]
 				template: {
 					metadata: {
 						labels: appLabels & {"app.kubernetes.io/component": "crud"}
@@ -812,11 +865,12 @@ import (
 				labels:    appLabels & {"app.kubernetes.io/component": "electric"}
 			}
 			spec: {
-				replicas: release.replicas
+				replicas: countOf["electric"]
 				selector: matchLabels: {
 					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "electric"
 				}
+				template: spec: spreadOf["electric"]
 				template: {
 					metadata: {
 						labels: appLabels & {"app.kubernetes.io/component": "electric"}
@@ -913,11 +967,12 @@ import (
 				labels:    appLabels & {"app.kubernetes.io/component": "auth"}
 			}
 			spec: {
-				replicas: release.replicas
+				replicas: countOf["auth"]
 				selector: matchLabels: {
 					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "auth"
 				}
+				template: spec: spreadOf["auth"]
 				template: {
 					metadata: {
 						labels: appLabels & {"app.kubernetes.io/component": "auth"}
@@ -1022,11 +1077,12 @@ import (
 				labels:    appLabels & {"app.kubernetes.io/component": "caddy"}
 			}
 			spec: {
-				replicas: release.replicas
+				replicas: countOf["caddy"]
 				selector: matchLabels: {
 					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "caddy"
 				}
+				template: spec: spreadOf["caddy"]
 				template: {
 					metadata: {
 						labels: appLabels & {"app.kubernetes.io/component": "caddy"}
@@ -1122,11 +1178,12 @@ import (
 				labels:    appLabels & {"app.kubernetes.io/component": "render"}
 			}
 			spec: {
-				replicas: release.replicas
+				replicas: countOf["render"]
 				selector: matchLabels: {
 					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "render"
 				}
+				template: spec: spreadOf["render"]
 				template: {
 					metadata: {
 						labels:      appLabels & {"app.kubernetes.io/component": "render"}
@@ -1359,11 +1416,12 @@ import (
 			kind:       "Deployment"
 			metadata: {name: "\(release.id)-rclone-s3", namespace: release.ns, labels: rcloneLabels}
 			spec: {
-				replicas: release.replicas
+				replicas: countOf["rclone-s3"]
 				selector: matchLabels: {
 					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "rclone-s3"
 				}
+				template: spec: spreadOf["rclone-s3"]
 				template: {
 					metadata: {
 						labels:      rcloneLabels
@@ -1423,11 +1481,12 @@ import (
 			kind:       "Deployment"
 			metadata: {name: "\(release.id)-imgproxy", namespace: release.ns, labels: imgproxyLabels}
 			spec: {
-				replicas: release.replicas
+				replicas: countOf["imgproxy"]
 				selector: matchLabels: {
 					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": "imgproxy"
 				}
+				template: spec: spreadOf["imgproxy"]
 				template: {
 					metadata: {
 						labels:      imgproxyLabels
@@ -1498,11 +1557,12 @@ import (
 				"labels":  labels
 			}
 			spec: {
-				replicas: release.replicas
+				replicas: countOf[n]
 				selector: matchLabels: {
 					"app.kubernetes.io/name":      release.id
 					"app.kubernetes.io/component": n
 				}
+				template: spec: spreadOf[n]
 				template: {
 					metadata: {
 						"labels":    labels
@@ -2278,6 +2338,7 @@ import (
 			prontoRenderServiceObj,
 			for o in appServiceObjs {o},
 			appServiceClockObjs,
+			disruptionBudgetObjs,
 			for o in blobsObjs {o},
 			vmalertObjs,
 			for o in metricsExportObjs {o},

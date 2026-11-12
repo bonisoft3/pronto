@@ -103,6 +103,7 @@ def run-tests [] {
 	test_release_nu_k8s_platform_cli
 	test_cloud_release_refused
 	test_preview_renders_apart
+	test_replicas_budget_spread
 	test_preview_origin_https
 	test_preview_delete_needs_a_preview
 	test_preview_schema_from
@@ -1278,6 +1279,56 @@ def test_native_runtime [] {
 	assert ($gcp.stdout | str contains "us-central1-docker.pkg.dev/test-project/pronto/native-compute:latest")
 	assert ($gcp.stdout | str contains "storageClassName: standard-rwo")
 	assert ($gcp.stdout | str contains "kind: PersistentVolumeClaim")
+}
+
+def test_replicas_budget_spread [] {
+	print "test a workload's replicas, its preview's count, a budget of all but one and spread over the nodes..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let render = {|app_data|
+		let data = (mktemp -t scale.XXXXXX.json | str trim)
+		{App: $app_data} | to json | save -f $data
+		let objs = (render-manifests $app.cue_path metal --data $data | from yaml)
+		rm $data
+		$objs
+	}
+	let deps = {|objs| $objs | where kind == "Deployment" | reduce -f {} {|d, acc| $acc | insert $d.metadata.name $d } }
+	let budgets = {|objs| $objs | where kind == "PodDisruptionBudget" | reduce -f {} {|d, acc| $acc | insert $d.metadata.name $d.spec } }
+	let billing = {billing: {port: 8688, env: {}}}
+	# One pod, as today: no budget (it would block a one-node drain) and no spread.
+	let one = (do $render {services: $billing})
+	assert equal ((do $deps $one) | values | get spec.replicas | uniq) [1]
+	assert equal ($one | where kind == "PodDisruptionBudget") []
+	assert ((do $deps $one) | values | all {|d| $d.spec.template.spec.topologySpreadConstraints? == null })
+	assert equal ($one | where kind == "Cluster" | get 0.spec.instances) 1
+	# Three of each, render held at one by its own scale, the database at three instances.
+	let three = (do $render {replicas: 3, previewReplicas: 2, scale: {render: {replicas: 1}}, database: {instances: 3}, services: $billing})
+	let d3 = (do $deps $three)
+	for n in [sample-crud sample-electric sample-auth sample-caddy sample-billing] {
+		assert equal ($d3 | get $n | get spec.replicas) 3 $n
+		assert equal ($d3 | get $n | get spec.template.spec.topologySpreadConstraints) [{
+			maxSkew: 1, topologyKey: "kubernetes.io/hostname", whenUnsatisfiable: "ScheduleAnyway"
+			labelSelector: {matchLabels: ($d3 | get $n | get spec.selector.matchLabels)}
+		}] $n
+	}
+	assert equal ($d3 | get sample-render | get spec.replicas) 1
+	assert ($d3 | get sample-render | get spec.template.spec.topologySpreadConstraints? | is-empty)
+	let b3 = (do $budgets $three)
+	assert equal ($b3 | columns | sort) [sample-auth sample-billing sample-caddy sample-crud sample-electric]
+	assert equal ($b3 | values | get minAvailable | uniq) [2]
+	assert equal ($b3 | get sample-billing | get selector.matchLabels) ($d3 | get sample-billing | get spec.selector.matchLabels)
+	assert equal ($three | where kind == "Cluster" | get 0.spec.instances) 3
+	# The rc preview runs previewReplicas, a workload's own preview, never more than the release runs.
+	let rc = (do $render {preview: rc, replicas: 3, previewReplicas: 2, scale: {render: {replicas: 1}, caddy: {preview: 3}}, services: $billing})
+	let drc = (do $deps $rc)
+	assert equal ($drc | get sample-rc-crud | get spec.replicas) 2
+	assert equal ($drc | get sample-rc-billing | get spec.replicas) 2
+	assert equal ($drc | get sample-rc-caddy | get spec.replicas) 3
+	assert equal ($drc | get sample-rc-render | get spec.replicas) 1 "a preview never runs more than the release"
+	let brc = (do $budgets $rc)
+	assert equal ($brc | get sample-rc-crud | get minAvailable) 1
+	assert equal ($brc | get sample-rc-caddy | get minAvailable) 2
+	assert ("sample-rc-render" not-in ($brc | columns))
+	assert equal ($rc | where kind == "PodDisruptionBudget" | get metadata.namespace | uniq) [sample-rc]
 }
 
 def test_preview_renders_apart [] {
