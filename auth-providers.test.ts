@@ -55,6 +55,19 @@ Deno.test("the app's API keys reach the cluster's auth and not the terminal", as
   assertEquals(bad.success, false);
 });
 
+// An app's gate over its keys (mecha-fork's apiKeysGate, PRONTO-323): a function in its database that
+// auth asks per request, so a flag decides; it turns keys on and never reaches the terminal.
+Deno.test("the app's API key gate reaches the cluster's auth and not the terminal", async () => {
+  const code = withAuth(`{required: false, service: "/auth", apiKeysGate: "public.api_keys_on"}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals("apiKeysGate" in files.value["shell/shell.json"].data.auth, false);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals([env.value.AUTH_API_KEYS, env.value.AUTH_API_KEYS_GATE], ["true", "public.api_keys_on"]);
+  const bad = await exported(withAuth(`{required: false, service: "/auth", apiKeysGate: "x; drop table y"}`), "app.capabilities.auth.apiKeysGate");
+  assertEquals(bad.success, false);
+});
+
 Deno.test("an app naming no provider leaves the terminal and the auth service as they were", async () => {
   const code = withAuth(`{required: false, service: "/auth"}`);
   const files = await exported(code, "out");

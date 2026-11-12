@@ -254,6 +254,15 @@ def test_auth_provider_secrets [] {
 	{App: {auth: ($android | reject secretValues)}} | to json | save -f $data
 	let with_android = (render-manifests $app.cue_path "kind" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-auth" | first)
 	assert equal ($with_android.spec.template.spec.containers.0.env | where name == "WEBAUTHN_ANDROID_ORIGINS" | first | get value) $fp
+	assert equal $split.apiKeysGate ""
+	assert (($pod.spec.containers.0.env | where name =~ "^AUTH_API_KEYS") | is-empty)
+	# An app's gate over its API keys (PRONTO-323), as compose gives auth it, turns keys on in its pod.
+	let gated = (auth-provider-environment ($environment | insert AUTH_API_KEYS_GATE "public.api_keys_on"))
+	{App: {auth: ($gated | reject secretValues)}} | to json | save -f $data
+	let with_gate = (render-manifests $app.cue_path "kind" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-auth" | first)
+	let gate_env = $with_gate.spec.template.spec.containers.0.env
+	assert equal ($gate_env | where name == "AUTH_API_KEYS" | first | get value) "true"
+	assert equal ($gate_env | where name == "AUTH_API_KEYS_GATE" | first | get value) "public.api_keys_on"
 	let rotated = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET "rotated-credential"))
 	assert ($rotated.oidcSecretDigest != $split.oidcSecretDigest)
 	let public_client = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET ""))

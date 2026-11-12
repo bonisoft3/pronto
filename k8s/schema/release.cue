@@ -198,6 +198,10 @@ import "strings"
 		// The SHA-256 fingerprints of the app's Android release certificates,
 		// comma-separated, as compose gives auth WEBAUTHN_ANDROID_ORIGINS.
 		android: *"" | string
+		// The app's gate over its API keys (capabilities.auth.apiKeysGate), as
+		// compose gives auth AUTH_API_KEYS_GATE: named, keys are on and the
+		// gate answers for each request, so its flag decides.
+		apiKeysGate: *"" | =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
 	}
 
 	runtime: [string]: {
