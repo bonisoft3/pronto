@@ -59,6 +59,7 @@ def run-tests [] {
 
 	test_operators_metadata
 	test_dapr_ha
+	test_electric_sticky
 	test_electric_slots
 	test_native_runtime
 	test_resolve_app_by_path
@@ -323,7 +324,7 @@ def test_schema_jobs [] {
 	assert ($yaml | str contains "port: 6443")
 	# One Service per component under its compose name; the database's on
 	# CloudNativePG's current role label, routes only from the app's namespace.
-	assert equal ($yaml | from yaml | where kind == "Service" | get metadata.name | sort) ["auth" "caddy" "crud" "database" "electric" "render"]
+	assert equal ($yaml | from yaml | where kind == "Service" | get metadata.name | sort) ["auth" "caddy" "crud" "database" "electric" "electric-pods" "render"]
 	assert ($yaml | str contains "cnpg.io/instanceRole: primary")
 	assert not ($yaml | str contains "from: All")
 	# caddy's tracing exports OTLP over gRPC, Deno over HTTP.
@@ -1495,6 +1496,28 @@ def test_database_ha [] {
 	assert ("replicationSlots" not-in ($strict | columns))
 	assert equal $strict.enablePDB false
 	assert equal (do $cluster {database: {enablePDB: false}} | get enablePDB) false "one instance may turn the budget off"
+}
+
+def test_electric_sticky [] {
+	print "test the door reaches Electric's pods straight, a browser kept on one by a cookie..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let objs = (render-manifests $app.cue_path metal | from yaml)
+	let pods = ($objs | where kind == Service and metadata.name == electric-pods | first)
+	assert equal $pods.spec.clusterIP None "headless: its name answers with every Ready pod"
+	assert equal $pods.spec.selector {"app.kubernetes.io/name": sample, "app.kubernetes.io/component": electric}
+	assert equal ($pods.spec.ports | get port) [3000]
+	let caddy = ($objs | where kind == Deployment and metadata.name == sample-caddy | first | get spec.template.spec.containers | where name == caddy | first | get env)
+	assert equal ($caddy | where name == PRONTO_ELECTRIC_UPSTREAM | first | get value) pods
+	assert equal ($caddy | where name == PRONTO_ELECTRIC_PODS | first | get value) "electric-pods.sample.svc.cluster.local"
+	# The backends' policy already admits caddy on 3000, which is Electric's port.
+	let pol = ($objs | where kind == NetworkPolicy and metadata.name == sample-backends-netpol | first | get spec)
+	assert ("electric" in ($pol.podSelector.matchExpressions.0.values))
+	assert ($pol.ingress | any {|i| $i.from? == [{podSelector: {matchLabels: {"app.kubernetes.io/name": sample, "app.kubernetes.io/component": caddy}}}] and ($i.ports | any {|p| $p.port == 3000 }) }) "caddy reaches Electric's pods on 3000"
+	# The door chooses its route by that variable; off k8s it keeps the one Electric.
+	let door = (open --raw ($pronto_dir | path join assets Caddyfile))
+	assert ($door | str contains "import electric-upstream-{$PRONTO_ELECTRIC_UPSTREAM:one}")
+	assert ($door | str contains "(electric-upstream-pods) {\n  dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {")
+	assert ($door | str contains "lb_policy cookie pronto_electric {$ELECTRIC_SECRET}")
 }
 
 def test_electric_slots [] {

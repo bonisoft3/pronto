@@ -85,7 +85,14 @@ Deno.test("every upstream the door dials is its own variable's when set, naming 
   const { caddyfile: out } = JSON.parse(r.out) as { caddyfile: string };
   const proxies = [...out.matchAll(/^\s*(reverse_proxy|forward_auth)\b(.*)$/gm)];
   if (!proxies.some((m) => m[2].includes("render:"))) throw new Error(`no renderer upstream:\n${out}`);
+  // Electric's route names its upstream in a snippet the door chooses (PRONTO-364): the one Electric's,
+  // held to the same rule here, or its pods' (k8s), which the door dials straight with a cookie.
+  const electric = /^\s*reverse_proxy \{\n\s*import electric-upstream-\{\$PRONTO_ELECTRIC_UPSTREAM:one\}$/m;
+  if (!electric.test(out)) throw new Error(`no Electric route choosing its upstream:\n${out}`);
+  const one = out.match(/^\(electric-upstream-one\) \{\n\s*to \{\$PRONTO_UPSTREAM_ELECTRIC:electric:3000\}\n\s*header_up dapr-app-id electric\n\}$/m);
+  if (!one) throw new Error(`the one Electric's snippet dials past its variable:\n${out}`);
   for (const m of proxies) {
+    if (m[2] === " {" && out.slice(m.index! + m[0].length).split("\n")[1]?.trim().startsWith("import electric-upstream-")) continue;
     const spelled = m[2].match(/^ \{\$PRONTO_UPSTREAM_([A-Z0-9_]+):([a-z0-9-]+):\d+\} \{$/);
     if (!spelled) throw new Error(`${m[0].trim()} dials past its variable`);
     if (spelled[1] !== spelled[2].toUpperCase().replaceAll("-", "_")) throw new Error(`${m[0].trim()} names another service's variable`);

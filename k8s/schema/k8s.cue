@@ -986,6 +986,30 @@ import (
 				}]
 			}
 		},
+		// Each Ready pod's own address, for the door to keep a browser on one (PRONTO-364): a
+		// headless Service answers its DNS name with every Ready pod, not one virtual address.
+		if release.type == "pronto" {
+			apiVersion: "v1"
+			kind:       "Service"
+			metadata: {
+				name:      "electric-pods"
+				namespace: release.ns
+				labels:    appLabels & {"app.kubernetes.io/component": "electric"}
+			}
+			spec: {
+				clusterIP: "None"
+				selector: {
+					"app.kubernetes.io/name":      release.id
+					"app.kubernetes.io/component": "electric"
+				}
+				ports: [{
+					name:       "http"
+					port:       3000
+					targetPort: 3000
+					protocol:   "TCP"
+				}]
+			}
+		},
 
 	]
 
@@ -1138,6 +1162,10 @@ import (
 								value: originValue
 							},
 							for up in ["CRUD", "AUTH", "ELECTRIC", "TICKER", "RCLONE_S3", "IMGPROXY", "RENDER"] {name: "PRONTO_UPSTREAM_\(up)", value: "localhost:3500"},
+							// Electric's pods straight, a browser kept on one by a cookie (PRONTO-364): the door's
+							// electric-upstream-pods, over the headless electric-pods Service.
+							{name: "PRONTO_ELECTRIC_UPSTREAM", value: "pods"},
+							{name: "PRONTO_ELECTRIC_PODS", value: "electric-pods.\(release.ns).svc.cluster.local"},
 							for n in list.Concat([[for n, _ in release.services {n}], release.doors]) {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "localhost:3500"},
 							{name: "PRONTO_TRACING", value: "on"},
 							for e in (#otelExport & {service: "caddy", port: 4317}).env {e},

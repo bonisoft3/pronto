@@ -21,6 +21,27 @@
     response_header_timeout 12s
   }
 }
+# Where /electric/ is proxied, chosen by PRONTO_ELECTRIC_UPSTREAM (PRONTO-364). Each Electric
+# keeps its own shape log, so a long-poll that reaches another one is answered 409 and the
+# browser refetches its shape: the door keeps a browser on one.
+# - one (compose, a host stack, Cloud Run's instance): the one Electric, at its
+#   PRONTO_UPSTREAM_ELECTRIC as every upstream.
+# - pods (a k8s release): each pod by the headless Service's records (PRONTO_ELECTRIC_PODS), a
+#   browser kept on one by a cookie. Not through Dapr, whose invocation spreads calls over the
+#   pods. A pod gone, its browsers' cookie names none left and they are moved: one refetch.
+(electric-upstream-one) {
+  to {$PRONTO_UPSTREAM_ELECTRIC:electric:3000}
+  header_up dapr-app-id electric
+}
+(electric-upstream-pods) {
+  dynamic a {$PRONTO_ELECTRIC_PODS:electric} 3000 {
+    refresh 5s
+  }
+  lb_policy cookie pronto_electric {$ELECTRIC_SECRET}
+  lb_try_duration 5s
+  fail_duration 30s
+}
+
 (bounded-electric) {
   transport http {
     dial_timeout 2s
@@ -285,8 +306,8 @@
       # proxy and never sent by a client. It is set after the gate, so a client
       # that supplies its own is refused there rather than silently overwritten.
       uri query secret {$ELECTRIC_SECRET}
-      reverse_proxy {$PRONTO_UPSTREAM_ELECTRIC:electric:3000} {
-        header_up dapr-app-id electric
+      reverse_proxy {
+        import electric-upstream-{$PRONTO_ELECTRIC_UPSTREAM:one}
         flush_interval -1
         import bounded-electric
         # Electric's 5xx reaches the client without its text: mecha's services/proxy/Caddyfile says why.
