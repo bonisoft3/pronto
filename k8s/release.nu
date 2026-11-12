@@ -59,6 +59,11 @@ export const OPERATORS = [
 		checksum: "sha256:8f377ff4a7d0d3f74fc64b0f7ac4f449fc38ca9e83a40107cca2f9315a9bd920"
 		namespace: "cnpg-system"
 		check_deployments: ["barman-cloud"]
+		# Every replica hot, serving the operator's gRPC (the owner, 2026-11-12: "I don't want
+		# replicas idle. I want the hot with traffic"): with leader election a standby opens no
+		# port 9090, so it took no traffic and was never Ready (PRONTO-391). Its reconcilers write
+		# a cluster's Role and RoleBinding by server-side apply, the same from either replica.
+		drop_args: ["--leader-elect"]
 	},
 	{
 		name: "external-secrets"
@@ -185,13 +190,25 @@ export def ensure-operators [
 	ensure-envoy-gateway-class $ingress
 }
 
+# A manifest without the container arguments named, each a list item of its own (`- --flag`),
+# as text so the rest of the manifest is applied byte for byte.
+export def drop-args [args: list]: string -> string {
+	let text = $in
+	$args | reduce -f $text {|a, t| $t | str replace --all --regex $"\(?m\)^[ \t]*- ['\"]?($a)['\"]?[ \t]*\r?\n" "" }
+}
+
 # One operator: its manifests applied, its deployments waited for.
 def install-operator [entry: record, timeout: string] {
 	if ($entry.namespace? | is-not-empty) {
 		kubectl create namespace $entry.namespace --dry-run=client -o yaml | kubectl apply -f -
 	}
 
-	let file = (fetch-verified $entry)
+	let fetched = (fetch-verified $entry)
+	let file = if ($entry.drop_args? | default [] | is-empty) { $fetched } else {
+		let out = $"($fetched).hot.yaml"
+		open --raw $fetched | drop-args ($entry.drop_args) | save --force --raw $out
+		$out
+	}
 	if ($entry.kind? | default "") == "helm" {
 		# Split as text: a YAML round trip through nu rewrites values kubectl then rejects.
 		let docs = (helm template $entry.name $file --include-crds --namespace $entry.namespace ...($entry.set? | default [] | each { [--set $in] } | flatten) | split row --regex '(?m)^---\s*$' | where ($it | str trim | is-not-empty))

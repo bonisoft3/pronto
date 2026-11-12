@@ -22,6 +22,7 @@ use release.nu [
 	rollout-floors
 	rollout-verdict
 	controller-replicas
+	drop-args
 	tunnel-proxy-kubernetes
 	get-operator-cache-dir
 	fetch-verified
@@ -1127,6 +1128,11 @@ def test_controller_replicas [] {
 	for n in [envoy-gateway cnpg cert-manager barman-cloud external-secrets] {
 		assert equal ($two | where name == $n | first | get replicas) 2 $n
 	}
+	# Every barman-cloud replica hot: no leader election, so each serves port 9090 (PRONTO-391).
+	assert equal ($OPERATORS | where name == "barman-cloud" | first | get drop_args) ["--leader-elect"]
+	let manifest = "        args:\n        - operator\n        - --server-address=:9090\n        - --leader-elect\n        - --log-level=debug\n"
+	assert equal ($manifest | drop-args ["--leader-elect"]) "        args:\n        - operator\n        - --server-address=:9090\n        - --log-level=debug\n"
+	assert equal ($manifest | drop-args []) $manifest "nothing named, nothing dropped"
 	assert ("replicas" not-in ($two | where name == "gateway-api-crds" | first | columns)) "no controllers, no count"
 	assert ("replicas" not-in ($two | where name == "dapr" | first | columns)) "Dapr counts by its own HA"
 	assert equal (controller-replicas $OPERATORS 1) $OPERATORS "one is the manifests' own"
