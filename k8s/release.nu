@@ -95,6 +95,16 @@ export def operators-for [environment: record, --ha-now]: nothing -> list {
 	}
 }
 
+# The replicas each controller of an operator runs, set after its manifests are applied (a static
+# manifest's own count would win again at the next apply otherwise): `controllers`, the
+# environment's #Environment.controllers (2 on metal, leader-elected, so n+1; 1 elsewhere, as the
+# manifests have them). Dapr's control plane counts by its own HA (operators-for).
+export def controller-replicas [operators: list, controllers: int]: nothing -> list {
+	$operators | each {|e|
+		if $e.name == "dapr" or ($e.check_deployments? | default [] | is-empty) or $controllers <= 1 { $e } else { $e | insert replicas $controllers }
+	}
+}
+
 # Whether the cluster's Dapr runs in HA now: its sentry at more than one replica.
 def dapr-ha-now []: nothing -> bool {
 	let r = (do { kubectl get deployment dapr-sentry -n dapr-system -o jsonpath={.spec.replicas} } | complete)
@@ -161,7 +171,8 @@ export def ensure-operators [
 	--reopen: closure # opens the release's tunnel to the API again (#Environment.access)
 	--environment: record = {} # the target's #Environment (its dapr.ha)
 ] {
-	let operators = if (dapr-ha-now) { operators-for $environment --ha-now } else { operators-for $environment }
+	let operators = (if (dapr-ha-now) { operators-for $environment --ha-now } else { operators-for $environment }
+		| controller-replicas $in ($environment.controllers? | default 1))
 	for entry in $operators {
 		try { install-operator $entry $timeout } catch {|e|
 			if $reopen == null { error make {msg: $e.msg} }
@@ -209,6 +220,11 @@ def install-operator [entry: record, timeout: string] {
 		}
 	}
 
+	if ($entry.replicas? | is-not-empty) {
+		for d in ($entry.check_deployments? | default []) {
+			kubectl scale $"deployment/($d)" -n $entry.namespace $"--replicas=($entry.replicas)"
+		}
+	}
 	for d in ($entry.check_deployments? | default []) {
 		print $"Waiting for deployment ($d) in ($entry.namespace)..."
 		kubectl rollout status $"deployment/($d)" -n $entry.namespace $"--timeout=($timeout)"
@@ -225,7 +241,7 @@ def install-operator [entry: record, timeout: string] {
 # dials by name. Every app's Gateway merges into the one proxy.
 export def ensure-envoy-gateway-class [ingress: record = {by: "hostPort"}] {
 	if $ingress.by == "tunnel" {
-		envoy-proxy "tunnel-proxy" {envoyService: {type: "ClusterIP", name: $tunnel_gateway}} | kubectl apply -f -
+		envoy-proxy "tunnel-proxy" (tunnel-proxy-kubernetes) | kubectl apply -f -
 		return
 	}
 	let eg_config = "apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -283,6 +299,29 @@ spec:
 
 # The EnvoyProxy `name` and the GatewayClass `eg` naming it, with tracing to
 # Jaeger and `kubernetes` as its provider's settings.
+# The node's one proxy behind the tunnel, n+1 (PRONTO-361): three Envoy pods, a budget of two through
+# a drain or an eviction, spread over the nodes where it can (on one node they schedule as before).
+export const proxy_pods = {
+	"app.kubernetes.io/name": "envoy"
+	"gateway.envoyproxy.io/owning-gatewayclass": "eg"
+}
+export def tunnel-proxy-kubernetes []: nothing -> record {
+	{
+		envoyService: {type: "ClusterIP", name: $tunnel_gateway}
+		envoyDeployment: {
+			replicas: 3
+			pod: {topologySpreadConstraints: [(spread-over-nodes $proxy_pods)]}
+		}
+		envoyPDB: {minAvailable: 2}
+	}
+}
+
+# A topologySpreadConstraint over the nodes' hostnames that schedules anyway where it cannot spread:
+# k8s.cue's for an app's workloads, here for the edge's.
+export def spread-over-nodes [labels: record]: nothing -> record {
+	{maxSkew: 1, topologyKey: "kubernetes.io/hostname", whenUnsatisfiable: "ScheduleAnyway", labelSelector: {matchLabels: $labels}}
+}
+
 export def envoy-proxy [name: string, kubernetes: record]: nothing -> string {
 	[
 		{
@@ -324,12 +363,14 @@ export def tunnel-manifests [id: string]: nothing -> string {
 			apiVersion: "apps/v1", kind: "Deployment"
 			metadata: {name: "cloudflared", namespace: "cloudflared", labels: $labels}
 			spec: {
-				# Two connectors, so a restart of one drops no request.
-				replicas: 2
+				# Three connectors, n+1 with a budget of two (PRONTO-361): a restart, an eviction or a
+				# release of one drops no request.
+				replicas: 3
 				selector: {matchLabels: $labels}
 				template: {
 					metadata: {labels: $labels, annotations: {"pronto.dev/config": ($config | to json | hash sha256)}}
 					spec: {
+						topologySpreadConstraints: [(spread-over-nodes $labels)]
 						containers: [{
 							name: "cloudflared"
 							image: $cloudflared
@@ -349,6 +390,11 @@ export def tunnel-manifests [id: string]: nothing -> string {
 					}
 				}
 			}
+		}
+		{
+			apiVersion: "policy/v1", kind: "PodDisruptionBudget"
+			metadata: {name: "cloudflared", namespace: "cloudflared", labels: $labels}
+			spec: {minAvailable: 2, selector: {matchLabels: $labels}}
 		}
 	] | each { to yaml } | str join "---\n"
 }
