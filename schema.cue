@@ -1886,6 +1886,12 @@ import (
 			// capabilities.android, the auth service's WEBAUTHN_ANDROID_ORIGINS
 			// default and the release's. Never the terminal's.
 			android?: [string & =~"^[0-9A-F]{2}(:[0-9A-F]{2}){31}$", ...string & =~"^[0-9A-F]{2}(:[0-9A-F]{2}){31}$"] & list.UniqueItems()
+			// Whether a signed-in account may hold API keys and exchange one for
+			// a short token that carries the key's scopes (mecha-fork's
+			// /auth/keys, PRONTO-312): the cluster's capabilities.apiKeys, the
+			// auth service's AUTH_API_KEYS. Off unless the app says so, and a
+			// release to a node (release@k8s) never carries it. Never the terminal's.
+			apiKeys?: bool
 			// A named provider's settings, the cluster's defaults for what the
 			// deployment's OIDC_<NAME>_<SETTING> overrides: another issuer in
 			// the provider's place, where the cluster reaches it, the client

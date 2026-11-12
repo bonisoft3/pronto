@@ -1948,7 +1948,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 		if S.code.capabilities.auth != _|_ {
 			// A provider's settings are the cluster's (#signIn); the auth image and env files too.
-			auth: {for k, v in S.code.capabilities.auth if k != "image" && k != "envFiles" && k != "provider" && k != "android" {(k): v}}
+			auth: {for k, v in S.code.capabilities.auth if k != "image" && k != "envFiles" && k != "provider" && k != "android" && k != "apiKeys" {(k): v}}
 		}
 
 		// Projected, not copied: the catalogues are the emitter's input and the
@@ -2781,6 +2781,9 @@ _pgrollDir: "services/database/pgroll"
 			if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.android != _|_ {
 				android: D.code.capabilities.auth.android
 			}
+			if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.apiKeys != _|_ {
+				apiKeys: D.code.capabilities.auth.apiKeys
+			}
 			blobs: D.code.capabilities.blobs
 			if D.code.capabilities.ai != _|_ {
 				ai: D.code.capabilities.ai
@@ -3505,6 +3508,9 @@ _pgrollDir: "services/database/pgroll"
 	}
 	if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.android != _|_ {
 		cluster: capabilities: android: E.code.capabilities.auth.android
+	}
+	if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.apiKeys != _|_ {
+		cluster: capabilities: apiKeys: E.code.capabilities.auth.apiKeys
 	}
 	cluster: capabilities: blobs: E.code.capabilities.blobs
 	if E.code.capabilities.ai != _|_ {
