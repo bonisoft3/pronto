@@ -52,6 +52,10 @@ import "strings"
 	// off elsewhere unless set. Dapr is the cluster's,
 	// shared by every app: once a release finds it in HA, it keeps it so, whatever its own says.
 	dapr: ha: bool | *(name == "metal")
+	// The replicas of each operator's controllers (Envoy Gateway, CloudNativePG, the barman-cloud
+	// plugin, External Secrets, cert-manager), set by the release after each install: leader-elected,
+	// so two is n+1. On by default on metal, which runs the apps' production (PRONTO-361).
+	controllers: int & >=1 | *[if name == "metal" {2}, 1][0]
 }
 
 // #ReleaseSpec defines a Pronto application workload intent independent of the target cluster.

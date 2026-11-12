@@ -17,6 +17,8 @@ use release.nu [
 	node-buildkit-manifests
 	OPERATORS
 	operators-for
+	controller-replicas
+	tunnel-proxy-kubernetes
 	get-operator-cache-dir
 	fetch-verified
 	resolve-app
@@ -94,6 +96,7 @@ def run-tests [] {
 	test_environment_build_buildkit
 	test_environment_secrets
 	test_envoy_proxy
+	test_controller_replicas
 	test_render_manifests_aks
 	test_dapr_annotations
 	test_timeout_budget_nests
@@ -1024,6 +1027,11 @@ def test_tunnel_manifests [] {
 	let container = ($deployment.spec.template.spec.containers | first)
 	assert ($container.image =~ '^cloudflare/cloudflared:[0-9.]+@sha256:[0-9a-f]{64}$')
 	assert equal ($deployment.spec.template.spec.volumes | where name == "credentials" | first | get secret.secretName) "tunnel-credentials"
+	# n+1 (PRONTO-361): three connectors, a budget of two, spread over the nodes where it can.
+	assert equal $deployment.spec.replicas 3
+	assert equal $deployment.spec.template.spec.topologySpreadConstraints [{maxSkew: 1, topologyKey: "kubernetes.io/hostname", whenUnsatisfiable: "ScheduleAnyway", labelSelector: {matchLabels: {"app.kubernetes.io/name": "cloudflared"}}}]
+	let pdb = ($docs | where kind == "PodDisruptionBudget" | first)
+	assert equal [$pdb.metadata.namespace $pdb.spec.minAvailable $pdb.spec.selector.matchLabels] ["cloudflared" 2 $deployment.spec.selector.matchLabels]
 }
 
 def test_envoy_proxy [] {
@@ -1033,6 +1041,28 @@ def test_envoy_proxy [] {
 	assert equal ($docs.0.spec.provider.kubernetes.envoyService.name) "pronto-gateway"
 	assert equal ($docs.1.metadata.name) "eg"
 	assert equal ($docs.1.spec.parametersRef.name) "tunnel-proxy"
+	# The tunnel's own: three Envoy pods with a budget of two, spread over the nodes (PRONTO-361).
+	let k = (envoy-proxy "tunnel-proxy" (tunnel-proxy-kubernetes) | from yaml | get 0.spec.provider.kubernetes)
+	assert equal $k.envoyService {type: "ClusterIP", name: "pronto-gateway"}
+	assert equal $k.envoyDeployment.replicas 3
+	assert equal $k.envoyPDB {minAvailable: 2}
+	assert equal $k.envoyDeployment.pod.topologySpreadConstraints.0.labelSelector.matchLabels {"app.kubernetes.io/name": "envoy", "gateway.envoyproxy.io/owning-gatewayclass": "eg"}
+	assert equal $k.envoyDeployment.pod.topologySpreadConstraints.0.whenUnsatisfiable "ScheduleAnyway"
+}
+
+def test_controller_replicas [] {
+	print "test each operator's controllers run two on metal, set after the install, and as their manifests elsewhere..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let metal = (read-environment metal $app.cue_path)
+	assert equal $metal.controllers 2
+	assert equal (read-environment kind | get controllers) 1
+	let two = (controller-replicas $OPERATORS $metal.controllers)
+	for n in [envoy-gateway cnpg cert-manager barman-cloud external-secrets] {
+		assert equal ($two | where name == $n | first | get replicas) 2 $n
+	}
+	assert ("replicas" not-in ($two | where name == "gateway-api-crds" | first | columns)) "no controllers, no count"
+	assert ("replicas" not-in ($two | where name == "dapr" | first | columns)) "Dapr counts by its own HA"
+	assert equal (controller-replicas $OPERATORS 1) $OPERATORS "one is the manifests' own"
 }
 
 def test_schema_jobs_wait_for_database [] {
