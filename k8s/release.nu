@@ -81,6 +81,27 @@ export const OPERATORS = [
 	}
 ]
 
+# The operators an environment installs: OPERATORS, with Dapr's control plane in HA where the
+# environment asks for it (#Environment.dapr.ha) or the cluster already runs it so (`ha_now`, its
+# sentry's replicas over one): Dapr is shared by every app, and a release whose own environment
+# says nothing must not take the cluster's HA away. In HA, placement and scheduler are
+# StatefulSets of 3 the release waits for too.
+export def operators-for [environment: record, --ha-now]: nothing -> list {
+	let ha = ($environment.dapr?.ha? | default false) or $ha_now
+	$OPERATORS | each {|e|
+		if $e.name == "dapr" and $ha {
+			$e | upsert set ($e.set | append "global.ha.enabled=true") | insert check_statefulsets ["dapr-placement-server" "dapr-scheduler-server"]
+		} else { $e }
+	}
+}
+
+# Whether the cluster's Dapr runs in HA now: its sentry at more than one replica.
+def dapr-ha-now []: nothing -> bool {
+	let r = (do { kubectl get deployment dapr-sentry -n dapr-system -o jsonpath={.spec.replicas} } | complete)
+	if $r.exit_code != 0 { return false }
+	(try { $r.stdout | str trim | into int } catch { 1 }) > 1
+}
+
 # Cache directory for downloaded operator manifests
 export def get-operator-cache-dir []: nothing -> string {
 	let base = if ($nu.os-info.name == 'windows') {
@@ -138,8 +159,10 @@ export def ensure-operators [
 	--timeout: string = "90s"
 	--ingress: record = {by: "hostPort"} # the environment's
 	--reopen: closure # opens the release's tunnel to the API again (#Environment.access)
+	--environment: record = {} # the target's #Environment (its dapr.ha)
 ] {
-	for entry in $OPERATORS {
+	let operators = if (dapr-ha-now) { operators-for $environment --ha-now } else { operators-for $environment }
+	for entry in $operators {
 		try { install-operator $entry $timeout } catch {|e|
 			if $reopen == null { error make {msg: $e.msg} }
 			print $"($entry.name) failed through the tunnel to the API \(($e.msg)\): opening it again"
@@ -189,6 +212,11 @@ def install-operator [entry: record, timeout: string] {
 	for d in ($entry.check_deployments? | default []) {
 		print $"Waiting for deployment ($d) in ($entry.namespace)..."
 		kubectl rollout status $"deployment/($d)" -n $entry.namespace $"--timeout=($timeout)"
+	}
+	# A StatefulSet's first rollout binds a volume per pod and pulls its image: five minutes.
+	for d in ($entry.check_statefulsets? | default []) {
+		print $"Waiting for statefulset ($d) in ($entry.namespace)..."
+		kubectl rollout status $"statefulset/($d)" -n $entry.namespace --timeout=300s
 	}
 }
 
@@ -1333,7 +1361,7 @@ export def main [
 		return
 	}
 	if not $skip_operators and not $is_tenant {
-		ensure-operators --ingress $target_env.ingress --reopen $reopen
+		ensure-operators --ingress $target_env.ingress --reopen $reopen --environment $target_env
 		if $target_env.ingress.by == "tunnel" { ensure-tunnel $target_env.ingress.id }
 	}
 	if not $skip_observability and not $is_tenant {

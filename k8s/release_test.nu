@@ -16,6 +16,7 @@ use release.nu [
 	node-registry-keep-tag
 	node-buildkit-manifests
 	OPERATORS
+	operators-for
 	get-operator-cache-dir
 	fetch-verified
 	resolve-app
@@ -51,6 +52,7 @@ def run-tests [] {
 	print "Running release-k8s tests...\n"
 
 	test_operators_metadata
+	test_dapr_ha
 	test_native_runtime
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
@@ -122,6 +124,27 @@ def test_operators_metadata [] {
 		assert ($op.checksum | str starts-with "sha256:")
 		assert (($op.checksum | str replace "sha256:" "" | str length) == 64)
 	}
+}
+
+def test_dapr_ha [] {
+	print "test Dapr's control plane in HA where the environment asks, and kept so once it runs so..."
+	let dapr = {|ops| $ops | where name == "dapr" | first }
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let metal = (read-environment metal $app.cue_path)
+	assert equal $metal.dapr.ha true "the metal target runs it in HA"
+	let on = (do $dapr (operators-for $metal))
+	assert equal $on.set ["dapr_rbac.secretReader.enabled=false" "global.ha.enabled=true"]
+	assert equal $on.check_statefulsets ["dapr-placement-server" "dapr-scheduler-server"]
+	assert equal $on.check_deployments ["dapr-operator" "dapr-sentry" "dapr-sidecar-injector"]
+	for target in [kind eks aks] {
+		let target_env = (read-environment $target)
+		assert equal $target_env.dapr.ha false $target
+		assert equal (do $dapr (operators-for $target_env)) (do $dapr $OPERATORS) $"($target)'s install is unchanged"
+	}
+	let off = ($metal | upsert dapr {ha: false})
+	assert equal (do $dapr (operators-for $off)) (do $dapr $OPERATORS)
+	assert equal (do $dapr (operators-for $off --ha-now)) $on "a cluster already in HA stays so"
+	assert equal ((operators-for $metal) | where name != "dapr") ($OPERATORS | where name != "dapr") "the other operators are untouched"
 }
 
 def test_resolve_app_by_path [] {
@@ -604,7 +627,9 @@ def test_alerting [] {
 	$"#!/bin/sh\necho \"$@\" >> ($log)\n" | save $"($dir)/bin/kubectl"
 	^chmod +x $"($dir)/bin/kubectl"
 	with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { apply-alert-rules "sample" ["observability/journeys.rules.yaml"] $"($dir)/app" "sample" }
-	let call = (open $log | lines | where {|l| $l starts-with "create" } | first)
+	let calls = (if ($log | path exists) { open --raw $log | lines } else { [] })
+	let call = ($calls | where {|l| $l starts-with "create" } | get -o 0 | default "")
+	assert ($call != "") $"kubectl was asked to create the rules' ConfigMap: it was called ($calls | to nuon), PATH ($env.PATH | to nuon)"
 	assert (($call | str starts-with "create configmap sample-alert-rules -n sample --from-file=journeys.rules.yaml=") and ($call | str ends-with "/app/observability/journeys.rules.yaml --dry-run=client -o yaml")) $"the rules are written under their names: ($call)"
 	let twice = (try { with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} { apply-alert-rules "sample" ["a/x.yaml" "b/x.yaml"] $"($dir)/app" "sample" }; false } catch { true })
 	assert $twice "two files of one name are refused"

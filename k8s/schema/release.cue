@@ -44,6 +44,14 @@ import "strings"
 	// behind NAT. Cloudflare terminates TLS there, so the gateway listens on
 	// HTTP alone, and each app's host is a DNS record onto the tunnel.
 	ingress: *{by: "hostPort"} | {by: "tunnel", id: =~"^[0-9a-f-]{36}$"}
+	// Dapr's control plane in HA mode (global.ha.enabled): operator, sentry and injector at 3 with
+	// their PodDisruptionBudgets, placement at 3 on volumes of the cluster's default class (raft
+	// needs 3), the scheduler at 3 as always. While the injector or sentry is down new pods start
+	// without their sidecar and every app's release refuses them, so on a cluster that runs the
+	// apps' production one Dapr pod must not be all there is (PRONTO-360): on by default on metal,
+	// off elsewhere unless set. Dapr is the cluster's,
+	// shared by every app: once a release finds it in HA, it keeps it so, whatever its own says.
+	dapr: ha: bool | *(name == "metal")
 }
 
 // #ReleaseSpec defines a Pronto application workload intent independent of the target cluster.
