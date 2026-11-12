@@ -23,6 +23,7 @@ use release.nu [
 	rollout-floors
 	rollout-verdict
 	controller-replicas
+	kube-items
 	drop-args
 	tunnel-proxy-kubernetes
 	get-operator-cache-dir
@@ -108,6 +109,7 @@ def run-tests [] {
 	test_environment_secrets
 	test_envoy_proxy
 	test_controller_replicas
+	test_kube_items_one_or_many
 	test_render_manifests_aks
 	test_dapr_annotations
 	test_timeout_budget_nests
@@ -1138,6 +1140,15 @@ def test_envoy_proxy [] {
 	assert equal $k.envoyPDB {minAvailable: 2}
 	assert equal $k.envoyDeployment.pod.topologySpreadConstraints.0.labelSelector.matchLabels {"app.kubernetes.io/name": "envoy", "gateway.envoyproxy.io/owning-gatewayclass": "eg"}
 	assert equal $k.envoyDeployment.pod.topologySpreadConstraints.0.whenUnsatisfiable "ScheduleAnyway"
+}
+
+def test_kube_items_one_or_many [] {
+	print "test kubectl's one bare object and its List both read as rows..."
+	let one = {apiVersion: "apps/v1", kind: "Deployment", metadata: {name: "render"}}
+	assert equal ($one | kube-items | get metadata.name) ["render"] "one name: the object itself"
+	let many = {apiVersion: "v1", kind: "List", items: [$one {kind: "Deployment", metadata: {name: "door"}}]}
+	assert equal ($many | kube-items | get metadata.name) ["render" "door"]
+	assert equal ({kind: "List", items: []} | kube-items) [] "none"
 }
 
 def test_controller_replicas [] {

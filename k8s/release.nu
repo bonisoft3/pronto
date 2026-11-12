@@ -932,11 +932,18 @@ export def rollout-verdict [floors: record, samples: list]: nothing -> record {
 	{held: true, why: ""}
 }
 
+# The objects of `kubectl get -o json`: a List's items, or the one object kubectl prints bare when
+# a single name is asked for (PRONTO-421: the renderer's rollout, one Deployment, failed on `items`).
+export def kube-items []: record -> list {
+	let o = $in
+	if ($o.kind? | default "") == "List" or ($o.items? != null) { $o.items? | default [] } else { [$o] }
+}
+
 # The named Deployments as the cluster has them now (those that exist).
 def deployments-now [names: list, ns: string]: nothing -> list {
 	let r = (do { kubectl get deployment ...$names -n $ns --ignore-not-found -o json } | complete)
 	if $r.exit_code != 0 or ($r.stdout | str trim | is-empty) { return [] }
-	$r.stdout | from json | get items
+	$r.stdout | from json | kube-items
 }
 
 # Waits for the Deployments' rollouts, sampling every two seconds, and fails the release at the first
