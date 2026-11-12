@@ -543,10 +543,9 @@ def test_render_ready_through_the_door [] {
 	print "test render starts on its own health, is ready only once the door answers it, and lives on its own health..."
 	let app = (resolve-app ($fixtures_dir | path join "sample"))
 	let render = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-render" | first | get spec.template.spec.containers | where name == "render" | first)
-	let probe = ($render.readinessProbe.exec.command | str join " ")
-	assert ($probe | str contains "DOOR") "readiness reads the door"
-	assert ($probe | str contains "/shell/shell.json") "readiness reads a page's shell through the door"
-	assert ($probe | str contains "/health") "readiness keeps render's own health"
+	# An httpGet on render's own /ready, which bounds and caches its read of the door: no exec, no cold start per probe (PRONTO-451).
+	assert equal $render.readinessProbe.httpGet.path "/ready"
+	assert ($render.readinessProbe | get exec? | is-empty) "readiness is not an exec"
 	assert equal $render.livenessProbe.httpGet.path "/health"
 	# A pod still syncing its tables is given time to start before liveness may kill it (PRONTO-107).
 	assert equal $render.startupProbe.httpGet.path "/health"

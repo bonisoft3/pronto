@@ -1285,14 +1285,17 @@ import (
 							initialDelaySeconds: 5
 							periodSeconds:       10
 						}
-						// Ready only once it renders: its own /health, and the door it
-						// reads every page from (DOOR, caddy through the sidecar)
-						// answering. A rollout keeps the old pod serving until then,
-						// where /health alone let it go while caddy was still starting
-						// and every page answered 500. Liveness stays its own /health,
-						// so a slow door never restarts it.
+						// Ready only once it renders: render's own /ready answers 200 when its tables
+						// have synced and the door it reads every page from (DOOR, caddy through the
+						// sidecar) answers, which render asks itself, bounded at 2 s and kept 3 s
+						// (PRONTO-451). A rollout keeps the old pod serving until then, where /health
+						// alone let it go while caddy was still starting and every page answered 500.
+						// It was an exec of `deno eval`: a deno cold start and an unbounded fetch
+						// through Dapr on every probe, which a loaded node ran past its 5 s, so no pod
+						// was ever Ready. Liveness stays its own /health, so a slow door never
+						// restarts it.
 						readinessProbe: {
-							exec: command: ["deno", "eval", "for (const u of [`http://localhost:${Deno.env.get('PORT')}/health`, `${Deno.env.get('DOOR')}/shell/shell.json`]) { const r = await fetch(u); await r.body?.cancel(); if (!r.ok) Deno.exit(1) }"]
+							httpGet: {path: "/ready", port: release.render.port}
 							initialDelaySeconds: 2
 							periodSeconds:       5
 							timeoutSeconds:      5
