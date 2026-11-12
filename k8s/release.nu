@@ -197,6 +197,15 @@ export def drop-args [args: list]: string -> string {
 	$args | reduce -f $text {|a, t| $t | str replace --all --regex $"\(?m\)^[ \t]*- ['\"]?($a)['\"]?[ \t]*\r?\n" "" }
 }
 
+# The StatefulSets an apply's stderr says it refused for an immutable field.
+export def immutable-statefulsets [stderr: string]: nothing -> list<string> {
+	$stderr | lines
+		| where {|l| $l =~ 'is invalid: spec: Forbidden: updates to statefulset spec for fields other than' }
+		| each {|l| $l | parse --regex 'The StatefulSet "(?<name>[^"]+)" is invalid' | get name }
+		| flatten
+		| uniq
+}
+
 # One operator: its manifests applied, its deployments waited for.
 def install-operator [entry: record, timeout: string] {
 	if ($entry.namespace? | is-not-empty) {
@@ -220,7 +229,22 @@ def install-operator [entry: record, timeout: string] {
 			kubectl wait --for=condition=Established $"--timeout=($timeout)" crd --all
 		}
 		# helm template leaves namespace off objects that do not set it; the chart's namespace is theirs.
-		$docs | where {|d| not (do $is_crd $d) } | str join "\n---\n" | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false --request-timeout=120s -f -
+		let manifests = ($docs | where {|d| not (do $is_crd $d) } | str join "\n---\n")
+		let applied = (do { $manifests | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false --request-timeout=120s -f - } | complete)
+		print -n $applied.stdout
+		if $applied.exit_code != 0 {
+			# A StatefulSet's volumeClaimTemplates, selector and serviceName are immutable: Dapr's
+			# placement gains a raft-log volume per replica when its control plane turns HA
+			# (PRONTO-395), and the apply is refused. The set is deleted and applied again: placement
+			# rebuilds its tables from the sidecars, and every replica then serves.
+			let stale = (immutable-statefulsets $applied.stderr)
+			if ($stale | is-empty) { error make { msg: $"($entry.name): kubectl apply failed: ($applied.stderr)" } }
+			for name in $stale {
+				print $"statefulset/($name) has an immutable field that differs: deleting it to apply it again"
+				kubectl delete statefulset $name -n $entry.namespace --wait
+			}
+			$manifests | kubectl apply -n $entry.namespace --server-side --force-conflicts --validate=false --request-timeout=120s -f -
+		}
 	} else {
 		# A manifest whose objects another operator's webhook admits (the barman-cloud plugin's
 		# Certificate, cert-manager's) is refused for the few seconds that webhook takes to serve

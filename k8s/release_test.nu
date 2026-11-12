@@ -18,6 +18,7 @@ use release.nu [
 	node-buildkit-manifests
 	OPERATORS
 	operators-for
+	immutable-statefulsets
 	rollout-sample
 	rollout-floors
 	rollout-verdict
@@ -60,6 +61,7 @@ def run-tests [] {
 
 	test_operators_metadata
 	test_dapr_ha
+	test_immutable_statefulsets
 	test_electric_sticky
 	test_electric_slots
 	test_native_runtime
@@ -158,6 +160,17 @@ def test_dapr_ha [] {
 	assert equal (do $dapr (operators-for $off)) (do $dapr $OPERATORS)
 	assert equal (do $dapr (operators-for $off --ha-now)) $on "a cluster already in HA stays so"
 	assert equal ((operators-for $metal) | where name != "dapr") ($OPERATORS | where name != "dapr") "the other operators are untouched"
+}
+
+# Dapr's placement gains volumeClaimTemplates when its control plane turns HA, and the apply is
+# refused for that immutable field (PRONTO-395): the release finds the set to delete in the error.
+def test_immutable_statefulsets [] {
+	print "test an apply refused for an immutable StatefulSet field names the set..."
+	let refused = "statefulset.apps/dapr-scheduler-server serverside-applied\nThe StatefulSet \"dapr-placement-server\" is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'ordinals', 'template', 'updateStrategy', 'revisionHistoryLimit', 'persistentVolumeClaimRetentionPolicy' and 'minReadySeconds' are forbidden\n"
+	assert equal (immutable-statefulsets $refused) ["dapr-placement-server"]
+	assert equal (immutable-statefulsets ($refused + $refused)) ["dapr-placement-server"] "once per set"
+	assert equal (immutable-statefulsets "error: the server could not find the requested resource") [] "any other failure stays one"
+	assert equal (immutable-statefulsets "") []
 }
 
 def test_resolve_app_by_path [] {
