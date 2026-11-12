@@ -1171,6 +1171,8 @@ export def auth-provider-environment [environment: record]: nothing -> record {
 		oidcSecretDigest: (if ($secrets | is-empty) { "" } else { $secrets | sort | to json --raw | hash sha256 })
 		# The app's Android builds whose passkeys auth admits (capabilities.auth.android).
 		android: ($environment.WEBAUTHN_ANDROID_ORIGINS? | default "")
+		# The app's gate over its API keys (capabilities.auth.apiKeysGate): keys on, its flag deciding.
+		apiKeysGate: ($environment.AUTH_API_KEYS_GATE? | default "")
 	}
 }
 

@@ -1892,6 +1892,13 @@ import (
 			// auth service's AUTH_API_KEYS. Off unless the app says so, and a
 			// release to a node (release@k8s) never carries it. Never the terminal's.
 			apiKeys?: bool
+			// The app's per-request say over its keys (mecha-fork's apiKeysGate,
+			// PRONTO-323): a function schema.name(owner uuid) returns boolean in
+			// its database, such as one that reads a feature flag, which auth asks
+			// on every make, list and exchange. Naming one turns keys on, here and
+			// in a release to a node (AUTH_API_KEYS_GATE), and leaves the answer
+			// to the function, so a flag, not a deploy, turns them on and off.
+			apiKeysGate?: =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
 			// A named provider's settings, the cluster's defaults for what the
 			// deployment's OIDC_<NAME>_<SETTING> overrides: another issuer in
 			// the provider's place, where the cluster reaches it, the client
