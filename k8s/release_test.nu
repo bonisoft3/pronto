@@ -18,6 +18,9 @@ use release.nu [
 	node-buildkit-manifests
 	OPERATORS
 	operators-for
+	rollout-sample
+	rollout-floors
+	rollout-verdict
 	controller-replicas
 	tunnel-proxy-kubernetes
 	get-operator-cache-dir
@@ -71,6 +74,8 @@ def run-tests [] {
 	test_render_manifests_metal
 	test_render_ready_through_the_door
 	test_app_services
+	test_app_service_readiness
+	test_rollout_guard
 	test_app_service_jail
 	test_container_resources_and_files
 	test_service_host
@@ -956,6 +961,55 @@ def test_app_services [] {
 	let pol = ($objs | where kind == "NetworkPolicy" and metadata.name == "sample-services-netpol" | first)
 	assert equal $pol.spec.podSelector.matchExpressions.0.values ["billing"]
 	assert ($pol.spec.egress | any {|e| ($e.ports? | default [] | any {|p| $p.port == 443 }) }) "it reaches a broker on 443"
+}
+
+def test_app_service_readiness [] {
+	print "test an app service is ready once it serves: its health route, else its port..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t ready.XXXXXX.json | str trim)
+	{App: {services: {billing: {port: 8688, env: {}, health: "/healthz"}, exporter: {port: 9399, env: {}}}}} | to json | save -f $data
+	let objs = (render-manifests $app.cue_path "metal" --data $data | from yaml)
+	rm $data
+	let probe = {|n| $objs | where kind == "Deployment" and metadata.name == $"sample-($n)" | first | get spec.template.spec.containers.0.readinessProbe }
+	assert equal (do $probe billing) {httpGet: {path: "/healthz", port: 8688}, periodSeconds: 5, failureThreshold: 3}
+	assert equal (do $probe exporter) {tcpSocket: {port: 9399}, periodSeconds: 5, failureThreshold: 3}
+}
+
+def test_rollout_guard [] {
+	print "test the rollout guard: n-1 held passes, a dip fails naming it, new pods never ready fail while the old serve..."
+	let dep = {|name, want, ready, updated, total, gen|
+		{metadata: {name: $name, generation: 2}, spec: {replicas: $want}, status: {observedGeneration: $gen, readyReplicas: $ready, updatedReplicas: $updated, replicas: $total}}
+	}
+	let before = (rollout-sample [(do $dep "app-crud" 3 3 3 3 1) (do $dep "app-auth" 1 1 1 1 1)])
+	let floors = (rollout-floors $before)
+	assert equal $floors {app-crud: 2, app-auth: 0}
+	# A surge rollout: 4 pods for a moment, never fewer than two ready, then done.
+	let held = [
+		[(do $dep "app-crud" 3 3 1 4 2) (do $dep "app-auth" 1 0 1 1 2)]
+		[(do $dep "app-crud" 3 2 2 4 2) (do $dep "app-auth" 1 1 1 1 2)]
+		[(do $dep "app-crud" 3 3 3 3 2) (do $dep "app-auth" 1 1 1 1 2)]
+	] | each {|s| rollout-sample $s }
+	assert equal (rollout-verdict $floors $held) {held: true, why: ""}
+	# One sample with a single crud pod ready: the release fails, naming crud.
+	let dipped = [
+		[(do $dep "app-crud" 3 3 1 4 2) (do $dep "app-auth" 1 1 1 1 2)]
+		[(do $dep "app-crud" 3 1 2 3 2) (do $dep "app-auth" 1 1 1 1 2)]
+		[(do $dep "app-crud" 3 3 3 3 2) (do $dep "app-auth" 1 1 1 1 2)]
+	] | each {|s| rollout-sample $s }
+	let d = (rollout-verdict $floors $dipped)
+	assert (not $d.held)
+	assert ($d.why | str contains "app-crud: 1 of 3 ready") $d.why
+	assert not ($d.why | str contains "app-auth")
+	# New pods that never get ready: the old three keep serving, and the release fails at its wait.
+	let stuck = [
+		[(do $dep "app-crud" 3 3 1 4 2)]
+		[(do $dep "app-crud" 3 3 1 4 2)]
+	] | each {|s| rollout-sample $s }
+	let st = (rollout-verdict $floors $stuck)
+	assert (not $st.held)
+	assert ($st.why | str contains "not rolled out in time, the old pods still serving: app-crud") $st.why
+	# A new Deployment, or one growing from one to three, is held to what it had before.
+	assert equal (rollout-floors (rollout-sample [(do $dep "app-new" 3 0 0 0 1) (do $dep "app-grow" 3 1 1 1 1)])) {app-new: 0, app-grow: 1}
 }
 
 def test_app_service_jail [] {

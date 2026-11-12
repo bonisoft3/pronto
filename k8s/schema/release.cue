@@ -248,6 +248,9 @@ import (
 	let declared = database.logins
 	services: [=~"^[a-z][a-z0-9-]*$"]: {
 		port!: int & >1024 & <65536
+		// Its health route on `port`, which its readiness probe asks (PRONTO-367): ready then means
+		// serving. Without one, ready means its port accepts connections.
+		health?: =~"^/"
 		env: [=~"^[A-Z_][A-Z0-9_]*$"]: string
 		// Variables read from a Secret the operator keeps in the app's namespace, each under its
 		// variable's name (a sender's VAPID key): the pod does not start until it is there.

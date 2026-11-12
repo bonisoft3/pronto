@@ -1658,6 +1658,14 @@ import (
 						lifecycle: preStop: sleep: seconds: 15
 						// A service that answers its metrics on its own port (an exporter) has that port once.
 						ports: [{name: "http", containerPort: s.port}, if s.metrics != _|_ if s.metrics.port != s.port {{name: "metrics", containerPort: s.metrics.port}}]
+						// Ready means serving (PRONTO-367), not only the mesh's sidecar: its health route where it
+						// names one, else its port accepting connections.
+						readinessProbe: {
+							if s.health != _|_ {httpGet: {path: s.health, port: s.port}}
+							if s.health == _|_ {tcpSocket: port: s.port}
+							periodSeconds:    5
+							failureThreshold: 3
+						}
 						env: list.Concat([
 							// A variable a Secret holds is that Secret's alone: compose's development value for it goes.
 							[for k, v in s.env if k != "PORT" && k != "SERVICE_JWT" && k != "ORIGIN" && s.secrets[k] == _|_ && !list.Contains(dbEnv, k) {name: k, value: v}],

@@ -844,6 +844,82 @@ export def seed-fill [have: record, seed: record]: nothing -> record {
 
 # <name>-alert-rules: the app's alerting rules (App.alerting.rules), each file under its name, written
 # every release so it follows the repository; vmalert reads a change within a minute.
+# The rollout guard (PRONTO-367): no Deployment over one pod serves with fewer than all but one
+# of its pods ready at any point of a release's rollout, and every one rolls out in time.
+
+# One sample of Deployments as `kubectl get -o json` gives them: each one's name, the replicas it
+# wants, those ready, and whether its rollout is done (all updated and ready, no old pod left).
+export def rollout-sample [deployments: list]: nothing -> list {
+	$deployments | each {|d|
+		let want = ($d.spec.replicas? | default 1)
+		let st = ($d.status? | default {})
+		{
+			name: $d.metadata.name
+			replicas: $want
+			ready: ($st.readyReplicas? | default 0)
+			done: (($st.observedGeneration? | default 0) >= ($d.metadata.generation? | default 0)
+				and ($st.updatedReplicas? | default 0) == $want
+				and ($st.readyReplicas? | default 0) == $want
+				and ($st.replicas? | default 0) == $want)
+		}
+	}
+}
+
+# The floor each Deployment holds through its rollout, from a sample taken before it: all but one of
+# its pods for one over a single pod; no more than were ready then for one that starts lower (a new
+# one, one growing, one already short), which the rollout is not to blame for.
+export def rollout-floors [before: list]: nothing -> record {
+	$before | reduce -f {} {|s, acc| $acc | upsert $s.name (if $s.replicas > 1 { [($s.replicas - 1) $s.ready] | math min } else { 0 }) }
+}
+
+# A sample's Deployments under their floors, each named.
+export def rollout-breaches [floors: record, sample: list]: nothing -> list<string> {
+	$sample | where {|s| $s.ready < ($floors | get -o $s.name | default 0) } | each {|s|
+		$"($s.name): ($s.ready) of ($s.replicas) ready, under all but one \(($floors | get $s.name)\)"
+	}
+}
+
+# The guard's verdict over a rollout's samples: the first breach, else those the last sample has not
+# rolled out (their new pods never got ready, while the old kept serving), else it held.
+export def rollout-verdict [floors: record, samples: list]: nothing -> record {
+	for s in $samples {
+		let b = (rollout-breaches $floors $s)
+		if ($b | is-not-empty) { return {held: false, why: $"a service dropped below n-1 during the rollout: ($b | str join '; ')"} }
+	}
+	let pending = ($samples | last | where not done | get name)
+	if ($pending | is-not-empty) { return {held: false, why: $"not rolled out in time, the old pods still serving: ($pending | str join ', ')"} }
+	{held: true, why: ""}
+}
+
+# The named Deployments as the cluster has them now (those that exist).
+def deployments-now [names: list, ns: string]: nothing -> list {
+	let r = (do { kubectl get deployment ...$names -n $ns --ignore-not-found -o json } | complete)
+	if $r.exit_code != 0 or ($r.stdout | str trim | is-empty) { return [] }
+	$r.stdout | from json | get items
+}
+
+# Waits for the Deployments' rollouts, sampling every two seconds, and fails the release at the first
+# sample that breaks a floor, or at `wait` with those still rolling, naming them.
+def watch-rollout [names: list, ns: string, floors: record, wait: duration] {
+	let deadline = (date now) + $wait
+	mut samples = []
+	loop {
+		let sample = (rollout-sample (deployments-now $names $ns))
+		$samples = [$sample]
+		let b = (rollout-breaches $floors $sample)
+		if ($b | is-not-empty) { error make {msg: $"a service dropped below n-1 during the rollout: ($b | str join '; ')"} }
+		if ($sample | length) == ($names | length) and ($sample | all {|s| $s.done }) { break }
+		if (date now) > $deadline { break }
+		sleep 2sec
+	}
+	let missing = ($names | where {|n| $n not-in ($samples | last | get name) })
+	if ($missing | is-not-empty) { error make {msg: $"not there after the apply: ($missing | str join ', ')"} }
+	let verdict = (rollout-verdict $floors $samples)
+	if not $verdict.held { error make {msg: $verdict.why} }
+	let guarded = ($floors | transpose name floor | where floor > 0 | each {|g| $"($g.name) ≥ ($g.floor)" })
+	print $"Rolled out ($names | length) deployments; the rollout guard held: (if ($guarded | is-empty) { 'none runs over one pod' } else { $guarded | str join ', ' })"
+}
+
 export def apply-alert-rules [name: string, rules: list<string>, app_dir: string, namespace: string] {
 	if ($rules | is-empty) { return }
 	let names = ($rules | each {|r| $r | path basename })
@@ -1600,22 +1676,24 @@ export def main [
 	seed-configmaps $app_meta.services $app_source_dir $target_ns
 	apply-alert-rules $workload_name ($app_meta.alerting?.rules? | default []) $app_source_dir $target_ns
 
+	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
+	let names = ($components | each { $"($rname)-($in)" })
+	# Each Deployment's floor through its rollout, from what runs before it (PRONTO-367).
+	let floors = (rollout-floors (rollout-sample (deployments-now $names $target_ns)))
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
-	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
 	# A preview is a second whole stack starting on a node already running the released one and the rest (its pods
 	# wait on each other through a loaded node): it is given longer than a release to come up (PRONTO-153).
-	let rollout_wait = if ($preview | is-not-empty) { "900s" } else { "180s" }
-	for d in ($components | each { $"deployment/($rname)-($in)" }) {
-		print $"Waiting for ($d) rollout..."
-		kubectl rollout status $d -n $target_ns $"--timeout=($rollout_wait)"
-	}
+	let rollout_wait = if ($preview | is-not-empty) { 900sec } else { 180sec }
+	watch-rollout $names $target_ns $floors $rollout_wait
 	# The renderer reads the app through the door once, as it starts: one that rolled beside the door
 	# may have read the old door's catalogues and handlers, and renders every page a 500 until it starts
 	# again ("unknown message", "no Jessie module": PRONTO-154). So it starts again once the door has.
 	if $has_render {
+		let render = [$"($rname)-render"]
+		let render_floors = (rollout-floors (rollout-sample (deployments-now $render $target_ns)))
 		kubectl rollout restart $"deployment/($rname)-render" -n $target_ns
-		kubectl rollout status $"deployment/($rname)-render" -n $target_ns $"--timeout=($rollout_wait)"
+		watch-rollout $render $target_ns $render_floors $rollout_wait
 	}
 	# Every Electric now runs on a temporary slot of its own: the permanent one goes, once.
 	print $"Electric's permanent slot: (drop-retired-electric-slot (db-primary $target_ns $"($rname)-db"))"
