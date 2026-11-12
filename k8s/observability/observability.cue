@@ -58,6 +58,10 @@ import "encoding/yaml"
 			        target_label: __address__
 			      - action: labelmap
 			        regex: __meta_kubernetes_pod_label_(.+)
+			      # Every series names its pod, as the export's do (PRONTO-370): a service at several
+			      # replicas is read per pod, and a dashboard sums or takes the max over them.
+			      - source_labels: [__meta_kubernetes_pod_name]
+			        target_label: pod
 			  - job_name: 'postgrest'
 			    kubernetes_sd_configs:
 			      - role: pod
@@ -164,6 +168,8 @@ import "encoding/yaml"
 						image: "docker.io/victoriametrics/victoria-metrics:v1.106.1@sha256:54b283129634239db62798fd8d92e8d8d4372a0b114e72967eb233dbb264ff53"
 						args: [
 							"-promscrape.config=/etc/vmsingle/promscrape.yaml",
+							// A changed scrape config is read from the mounted ConfigMap, without a restart.
+							"-promscrape.configCheckInterval=1m",
 							"-storageDataPath=/vmsingle-data",
 							"-httpListenAddr=:8428",
 						]

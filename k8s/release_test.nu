@@ -764,7 +764,17 @@ def test_metrics_export [] {
 	rm $data
 	let cm = ($objs | where kind == "ConfigMap" and metadata.name == "sample-metrics-export" | first)
 	let config = ($cm.data."config.yaml" | from yaml)
-	assert equal ($config.receivers.prometheus.config.scrape_configs | first | get static_configs.0.targets) ["journeys-collector.sample.svc.cluster.local:9598"]
+	# Each pod, not the Service (PRONTO-370): its own address and its name on every series.
+	let scrape = ($config.receivers.prometheus.config.scrape_configs | first)
+	assert ("static_configs" not-in ($scrape | columns)) "no scrape of the Service, which answers from one pod at random"
+	assert equal $scrape.kubernetes_sd_configs [{role: "pod", namespaces: {names: [sample]}, selectors: [{role: "pod", label: "app.kubernetes.io/name=sample,app.kubernetes.io/component=journeys-collector"}]}]
+	assert equal ($scrape.relabel_configs | get target_label? | compact) ["__address__" "pod"]
+	assert equal ($scrape.relabel_configs | where target_label? == "__address__" | first | get replacement) "$${1}:9598" "the collector's own $ is escaped"
+	assert equal ($scrape.relabel_configs | first) {source_labels: ["__meta_kubernetes_pod_phase"], regex: "Running", action: "keep"}
+	let role = ($objs | where kind == "Role" and metadata.name == "sample-metrics-export" | first)
+	assert equal $role.rules [{apiGroups: [""], resources: ["pods"], verbs: ["get" "list" "watch"]}] "it lists pods, and reads nothing else"
+	let binding = ($objs | where kind == "RoleBinding" and metadata.name == "sample-metrics-export" | first)
+	assert equal $binding.subjects [{kind: "ServiceAccount", name: "sample-metrics-export", namespace: "sample"}]
 	assert equal $config.exporters.googlemanagedprometheus.project "brawl-chess"
 	let creds = ($cm.data."credentials.json" | from json)
 	assert equal $creds.audience "//iam.googleapis.com/projects/504479523278/locations/global/workloadIdentityPools/contabo/providers/k3s"
@@ -1205,6 +1215,12 @@ def test_observability_manifests [] {
 	assert equal ($vm | where kind == PersistentVolumeClaim | get metadata.name) [vmsingle-data]
 	let vmd = ($vm | where kind == Deployment and metadata.name == vmsingle | first).spec
 	assert equal $vmd.strategy.type Recreate
+	# An app's pods are read one by one, each series naming its pod (PRONTO-370), and a changed
+	# scrape config is picked up without a restart.
+	let scrape = ($vm | where kind == ConfigMap and metadata.name == vmsingle-config | first | get data."promscrape.yaml" | from yaml)
+	let pods = ($scrape.scrape_configs | where job_name == kubernetes-pods | first)
+	assert ($pods.relabel_configs | any {|r| $r.source_labels? == ["__meta_kubernetes_pod_name"] and $r.target_label? == "pod" }) "every app series names its pod"
+	assert ("-promscrape.configCheckInterval=1m" in $vmd.template.spec.containers.0.args)
 	assert ($vmd.template.spec.containers.0.volumeMounts | any {|m| $m.name == "data" and $m.mountPath == "/vmsingle-data" })
 	assert equal ($vmd.template.spec.volumes | where name == data | first).persistentVolumeClaim.claimName vmsingle-data
 	assert ($yaml | str contains "image: docker.io/victoriametrics/victoria-metrics:v1.106.1@sha256:54b283129634239db62798fd8d92e8d8d4372a0b114e72967eb233dbb264ff53")
