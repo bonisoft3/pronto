@@ -106,6 +106,7 @@ def run-tests [] {
 	test_cloud_release_refused
 	test_preview_renders_apart
 	test_replicas_budget_spread
+	test_database_ha
 	test_preview_origin_https
 	test_preview_delete_needs_a_preview
 	test_preview_schema_from
@@ -1354,6 +1355,33 @@ def test_replicas_budget_spread [] {
 	assert equal ($brc | get sample-rc-caddy | get minAvailable) 2
 	assert ("sample-rc-render" not-in ($brc | columns))
 	assert equal ($rc | where kind == "PodDisruptionBudget" | get metadata.namespace | uniq) [sample-rc]
+}
+
+def test_database_ha [] {
+	print "test the database's HA settings: none at one instance, synchronous standbys, slots and a budget at three..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let cluster = {|app_data|
+		let data = (mktemp -t dbha.XXXXXX.json | str trim)
+		{App: $app_data} | to json | save -f $data
+		let c = (render-manifests $app.cue_path metal --data $data | from yaml | where kind == "Cluster" | first | get spec)
+		rm $data
+		$c
+	}
+	let one = (do $cluster {})
+	assert equal $one.instances 1
+	for f in [enablePDB replicationSlots] { assert ($f not-in ($one | columns)) $"one instance renders no ($f), as before" }
+	assert ($one.postgresql? == null) "nor a postgresql block"
+	let three = (do $cluster {database: {instances: 3, parameters: {max_slot_wal_keep_size: "2GB"}}})
+	assert equal $three.instances 3
+	assert equal $three.postgresql.synchronous {method: "any", number: 1, dataDurability: "preferred"}
+	assert equal $three.replicationSlots {highAvailability: {enabled: true}}
+	assert equal $three.enablePDB true
+	assert equal $three.postgresql.parameters {max_slot_wal_keep_size: "2GB"}
+	let strict = (do $cluster {database: {instances: 3, synchronous: {dataDurability: "required"}, haSlots: false, enablePDB: false}})
+	assert equal $strict.postgresql.synchronous.dataDurability "required"
+	assert ("replicationSlots" not-in ($strict | columns))
+	assert equal $strict.enablePDB false
+	assert equal (do $cluster {database: {enablePDB: false}} | get enablePDB) false "one instance may turn the budget off"
 }
 
 def test_preview_renders_apart [] {

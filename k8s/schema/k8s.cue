@@ -202,6 +202,19 @@ import (
 						full_page_writes:      "on"
 					}
 				}
+				if len(release.database.parameters) > 0 {
+					postgresql: parameters: release.database.parameters
+				}
+				// Standbys (release.cue's database.instances): synchronous replication and slots.
+				if release.database.instances > 1 {
+					postgresql: synchronous: release.database.synchronous
+				}
+				if release.database.haSlots {
+					replicationSlots: highAvailability: enabled: true
+				}
+				if release.database.instances > 1 || !release.database.enablePDB {
+					enablePDB: release.database.enablePDB
+				}
 				// A stop is bounded: a smart shutdown waits for sessions for 15 s, then a fast one, and
 				// at 120 s the pod is killed. CloudNativePG's default waits 1800 s, and Electric's
 				// walsender holds a fast shutdown open, so every restart of the primary stalled a

@@ -117,6 +117,23 @@ import "strings"
 		// CloudNativePG's instances: one primary and instances-1 standbys, for which the operator
 		// keeps a PodDisruptionBudget itself. A preview runs as many.
 		instances: int & >=1 | *1
+		// With standbys (instances over one), CloudNativePG's quorum-based synchronous replication:
+		// a commit waits for `number` standbys (`method` any of them, or the first in order), and a
+		// primary that has lost them keeps accepting writes under `dataDurability` "preferred"
+		// rather than stalling ("required"). One instance renders none of it, as before (PRONTO-365).
+		synchronous: {
+			method:         *"any" | "first"
+			number:         int & >=1 | *1
+			dataDurability: *"preferred" | "required"
+		}
+		// Replication slots for the standbys, kept on every instance, so a standby promoted to
+		// primary still holds the others' (CloudNativePG's replicationSlots.highAvailability).
+		haSlots: bool | *(instances > 1)
+		// CloudNativePG's own PodDisruptionBudgets (its default, on). With one instance a budget
+		// blocks a drain: docs/move-to-contabo.md's drains pass --disable-eviction.
+		enablePDB: bool | *true
+		// Postgres parameters of the app's own over CloudNativePG's (max_slot_wal_keep_size, say).
+		parameters: [string]: string
 		// The roles a token may name, which the schema grants PostgREST's login
 		// (the app's .pronto/cluster.json; the release fills it).
 		tokenRoles: [...string]
