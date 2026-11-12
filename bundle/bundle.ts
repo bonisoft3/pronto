@@ -38,6 +38,7 @@ import { computationPackages, computationDefinitions, computationMachine, browse
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { hostDomAssets, type StaticAsset } from './edge-assets.ts'
 import { clusterDrains, clusterSteps, releaseFiles } from './edge-scripts.ts'
+import { cssWithoutComments, htmlWithoutComments, jsWithoutComments } from './prose.ts'
 
 function fail(msg: string): never {
   console.error(`bundle: ${msg}`)
@@ -110,6 +111,13 @@ for (const p of [...served].sort()) {
   else if (p.startsWith('/')) fail(`${p} is served from neither the app nor the terminal`)
   else files[p] = await read(p)
 }
+// A served file's comments are for whoever reads its source, not for a first
+// visit: each sheet, script and screen rides without them (prose.ts).
+for (const [p, text] of Object.entries(files)) {
+  if (p.endsWith('.css')) files[p] = cssWithoutComments(text)
+  else if (p.endsWith('.js')) files[p] = jsWithoutComments(text)
+  else if (p.endsWith('.html')) files[p] = htmlWithoutComments(text)
+}
 // An agent is fetched by its seat and started from a blob:, so the shim
 // answers it like any other file. A realm is a document of its own: its
 // declared scripts and sheets are inlined into it, it rides as inert base64
@@ -146,8 +154,10 @@ if (base) shell.prefix = base
 // content, and the config names its file: the shell fetches it the first time
 // the table is read and the rest once the page is idle (omnishell's data-sync),
 // so the config the first screen waits on carries only the small tables. An
-// interpreter that reads only inline seeds gets them all inline.
-const SEED_INLINE = 32 * 1024
+// interpreter that reads only inline seeds gets them all inline. 16 KiB keeps
+// the settings and lookup tables a first screen reads inline and sends a
+// path's rows (aprende's units, 26 KB) beside the page.
+const SEED_INLINE = 16 * 1024
 const seedFiles = new Map<string, string>()
 const readsSeedFiles = (await Deno.readTextFile(path.join(omnishell, 'interpreter/data-sync.js'))).includes('seedRows(')
 for (const [table, rows] of readsSeedFiles ? Object.entries(shell.seed ?? {}) : []) {
@@ -158,6 +168,18 @@ for (const [table, rows] of readsSeedFiles ? Object.entries(shell.seed ?? {}) : 
   const name = `shell/seed/${table}.${[...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('')}.json`
   seedFiles.set(name, text)
   shell.seed![table] = { href: name }
+}
+// The sheets shell/index.html links are the document's for its whole life, so
+// a sheet that imports one again (a screen's, importing the shared sheets it
+// names) carries nothing for it: the rules apply once, from the head. A screen
+// lists no such sheet to preload, and the payload does not carry it again.
+const linked = new Set([...(await read('shell/index.html')).matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => new URL(m[1], 'file:///shell/').pathname.slice(1)))
+const headOnly = new Set<string>()
+for (const route of shell.routes) {
+  const shared = route.files.shared
+  if (!Array.isArray(shared)) continue
+  for (const p of shared) if (linked.has(p)) headOnly.add(p)
+  route.files.shared = shared.filter((p) => !linked.has(p))
 }
 for (const route of shell.routes) route.ssr = 'spa'
 files['shell/shell.json'] = JSON.stringify(shell)
@@ -216,6 +238,7 @@ function inline(p: string, asking: string[]): string {
     sheet = outsideComments(rebaseAssets(files[p], p), (code) => code.replace(IMPORT, (_m, a, b) => {
       const target = new URL(a ?? b, baseOf(p)).pathname.slice(1)
       if (!(target in files)) fail(`${p} imports ${target}, which shell.json does not serve`)
+      if (linked.has(target) && !linked.has(p)) return ''
       return inline(target, [...asking, p])
     }))
     if (parts(sheet).some((part, i) => !comment(i) && /@import\b/.test(part))) fail(`${p} carries an @import the bundler does not inline`)
@@ -360,6 +383,7 @@ const byText = new Map<string, string>()
 const unique: Record<string, string> = {}
 const same: Record<string, string> = {}
 for (const [p, text] of Object.entries(files)) {
+  if (headOnly.has(p)) continue
   const first = byText.get(text)
   if (first === undefined) {
     byText.set(text, p)
