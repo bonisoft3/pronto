@@ -15,7 +15,9 @@ import (
 // one Cloud Run service, sharing localhost the way mecha's bundled unit does
 // (docs/deployment.md#the-bundled-unit), beside the Cloud SQL Auth Proxy. One
 // instance at most, since electric is one; none while nobody plays.
-#Release: R={
+#Release: {
+	let R = self
+
 	// The app's compose project name, which names its database, secrets and images.
 	name: =~"^[a-z]([-a-z0-9]{0,28}[a-z0-9])?$"
 	// The Cloud Run service readers reach; the app's name unless it is known by
@@ -27,7 +29,7 @@ import (
 	repository: *"pronto" | =~"^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
 	// The address readers reach, mapped onto the service; absent, its run.app
 	// one, which the release fills from the project's number.
-	domain?: =~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
+	domain:  *"" | =~"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
 	runHost: *"" | =~"^[a-z0-9-]+\\.[a-z0-9-]+\\.run\\.app$"
 	// Other names mapped onto the service, each sent on to the domain by the
 	// door (www, say): a passkey's relying party is the domain alone.
@@ -43,12 +45,12 @@ import (
 	// the preview, at the service's run.app address with no domain or alias
 	// mapped. The release sets it (`sayt release@gcp --preview=pr-32`), and
 	// `--delete` removes all of it when the pull request closes.
-	preview?: =~"^[a-z0-9]([-a-z0-9]{0,14}[a-z0-9])?$"
+	preview: *"" | =~"^[a-z0-9]([-a-z0-9]{0,14}[a-z0-9])?$"
 	// The project previews run in, apart from the release's: everything a
 	// preview makes, its images and its account are there, so whoever deploys
 	// previews holds no role in the released app's project. Absent, previews
 	// run beside the release.
-	previewProject?: =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+	previewProject: *"" | =~"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
 
 	// Identity-Aware Proxy in front of the service: only the people the project's
 	// owner admits (roles/iap.httpsResourceAccessor on it) reach the app, for an
@@ -110,7 +112,6 @@ import (
 	// Filled by the release.
 	database: tokenRoles: [...string]
 
-
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
 	// by the release. The ticker runs as one more container of the service, and
@@ -129,7 +130,7 @@ import (
 		// container with none a whole one, against a cap of 8 for them all.
 		cpu: *250 | int & >=80 & <=8000
 		// Its memory, as Cloud Run spells it; absent, Cloud Run's default.
-		memory?: =~"^[1-9][0-9]*(Mi|Gi)$"
+		memory: *"" | =~"^[1-9][0-9]*(Mi|Gi)$"
 		// The environment compose gives the service, filled by the release, as
 		// the ticker's is; release.cue may add to it, and a key it sets is the
 		// release's in place of compose's (a broker's production address, say,
@@ -156,7 +157,7 @@ import (
 	}
 	// The sidecars in the cluster's instance, and those running apart.
 	_inside: {for n, c in R.sidecars if c.apart == _|_ {(n): c}}
-	_apart: {for n, c in R.sidecars if c.apart != _|_ {(n): c}}
+	_apart:  {for n, c in R.sidecars if c.apart != _|_ {(n): c}}
 	// The project's number, from the service's run.app address: a service's own
 	// address is <name>-<number>.<region>.run.app.
 	_number: strings.TrimSuffix(strings.TrimPrefix(R.runHost, "\(R._service)-"), ".\(R.region).run.app")
@@ -191,8 +192,8 @@ import (
 	])
 	// A preview's metrics stay in its instance: its release may not enable
 	// Monitoring nor grant its account a role there.
-	_scraped: [for n, c in R._inside if c.metrics != _|_ if R.preview == _|_ {n}]
-	_scrapedApart: [for n, c in R._apart if c.metrics != _|_ if R.preview == _|_ {n}]
+	_scraped:      [for n, c in R._inside if c.metrics != _|_ if R.preview == "" {n}]
+	_scrapedApart: [for n, c in R._apart if c.metrics != _|_ if R.preview == "" {n}]
 
 	auth: {
 		// The providers compose gives the auth service, filled by the release;
@@ -210,36 +211,36 @@ import (
 	}
 
 	// Where this release's resources are: a preview's project when it has one.
-	_project: [if R.preview != _|_ && R.previewProject != _|_ {R.previewProject}, R.project][0]
+	_project:  [if R.preview != "" && R.previewProject != "" {R.previewProject}, R.project][0]
 	_registry: "\(R.region)-docker.pkg.dev/\(R._project)/\(R.repository)"
 	// What a preview's resources are named for: the app, and the preview.
-	_id: [if R.preview != _|_ {"\(R.name)-\(R.preview)"}, R.name][0]
-	_service: [if R.preview != _|_ {"\(R.service)-\(R.preview)"}, R.service][0]
-	_domain: [if R.domain != _|_ && R.preview == _|_ {R.domain}, ""][0]
-	_aliases: [if R.preview != _|_ {[]}, R.aliases][0]
-	_iap: R.iap && R.preview == _|_
+	_id:      [if R.preview != "" {"\(R.name)-\(R.preview)"}, R.name][0]
+	_service: [if R.preview != "" {"\(R.service)-\(R.preview)"}, R.service][0]
+	_domain:  [if R.domain != "" && R.preview == "" {R.domain}, ""][0]
+	_aliases: [if R.preview != "" {[]}, R.aliases][0]
+	_iap:     R.iap && R.preview == ""
 	// Where readers are, which the door and a passkey's relying party are told
 	// (ORIGIN and WEBAUTHN_* in compose).
-	_host: [if _domain != "" {_domain}, R.runHost][0]
+	_host:   [if _domain != "" {_domain}, R.runHost][0]
 	_origin: [if _host != "" {"https://\(_host)"}, ""][0]
-	_rpId: _host
+	_rpId:   _host
 
 	names: {
-		instance: "\(R._id)-db" + [if R.sqlGeneration > 1 {"-\(R.sqlGeneration)"}, ""][0]
+		instance:   "\(R._id)-db" + [if R.sqlGeneration > 1 {"-\(R.sqlGeneration)"}, ""][0]
 		connection: "\(R._project):\(R.region):\(instance)"
 		database:   R.name
 		// Previews share one, made once by the project's owner with only what
 		// a revision needs (docs/release-targets.md#previews), so the release
 		// that makes a preview needs no say over the project's IAM.
-		serviceAccount: [if R.preview != _|_ {"\(R.name)-preview"}, "\(R.name)-run"][0] + "@\(R._project).iam.gserviceaccount.com"
-		job:        "\(R._id)-initdb"
-		migrateJob: "\(R._id)-migrate"
+		serviceAccount: [if R.preview != "" {"\(R.name)-preview"}, "\(R.name)-run"][0] + "@\(R._project).iam.gserviceaccount.com"
+		job:            "\(R._id)-initdb"
+		migrateJob:     "\(R._id)-migrate"
 		// The Cloud Scheduler job that pokes the ticker.
 		clock: "\(R._id)-clock"
 		// What the Managed Prometheus sidecar scrapes, as a secret it mounts.
 		scrapeConfig: "\(R._id)-gmp-config"
 		// Each sidecar apart's service, and what its own collector scrapes.
-		sidecarServices: {for n, _ in R._apart {(n): "\(R._service)-\(n)"}}
+		sidecarServices:      {for n, _ in R._apart {(n): "\(R._service)-\(n)"}}
 		sidecarScrapeConfigs: {for n in R._scrapedApart {(n): "\(R._id)-\(n)-gmp-config"}}
 		// Generated once by the release, never a literal in what it renders;
 		// the URLs are composed from the passwords, since Cloud Run expands no
@@ -282,8 +283,9 @@ import (
 
 // The smallest tier admits about 25 connections, fewer than the pools'
 // defaults together; the instance is raised to 50 and the pools capped.
-#Pools: {crud: 5, electric: 5}
+#Pools:    {crud: 5, electric: 5}
 #SqlFlags: "cloudsql.logical_decoding=on,max_connections=50"
+
 // A preview's database is the smallest tier and its tests open every shape at once: electric
 // fell behind the replication stream there for over a minute, Postgres's default
 // wal_sender_timeout cut it, and its live requests hung until the tests failed (seen five times
@@ -297,7 +299,8 @@ import (
 // The Cloud SQL Auth Proxy, pinned.
 #Proxy: "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2@sha256:fc224915ef435afeb5b2a9421260a0d31986d5c8b7c7f5783c7f5d5885700cd2"
 
-#Build: B={
+#Build: {
+	let B = self
 	release: #Release
 	let R = release
 	let P = #Ports
@@ -311,7 +314,7 @@ import (
 	let secretOf = {
 		env:    string
 		secret: string
-		out: {name: env, valueFrom: secretKeyRef: {name: secret, key: "latest"}}
+		out:    {name: env, valueFrom: secretKeyRef: {name: secret, key: "latest"}}
 	}
 	let sq = R.names.secrets
 	let bounds = resilience.resilience.timeouts
@@ -340,13 +343,13 @@ import (
 				"run.googleapis.com/startup-cpu-boost":     "true"
 				// A preview keeps its CPU between requests too: electric reads the replication
 				// stream in the background, and throttled there it fell behind (#PreviewSqlFlags).
-				if R.alwaysOn || R.preview != _|_ {"run.googleapis.com/cpu-throttling": "false"}
+				if R.alwaysOn || R.preview != "" {"run.googleapis.com/cpu-throttling": "false"}
 				"run.googleapis.com/container-dependencies": json.Marshal({
 					caddy: list.Concat([["crud", "auth", "electric"], [if R.ticker != _|_ {"ticker"}], [if R.render.enabled {"render"}]])
 					if R.ticker != _|_ {ticker: ["crud"]}
 					if len(R._scraped) > 0 {"gmp-collector": R._scraped}
-					crud: ["cloud-sql-proxy"]
-					auth: ["cloud-sql-proxy"]
+					crud:     ["cloud-sql-proxy"]
+					auth:     ["cloud-sql-proxy"]
 					electric: ["cloud-sql-proxy"]
 					if R.render.enabled {
 						render: ["crud", "auth", "electric"]
@@ -367,25 +370,25 @@ import (
 					volumes: [{name: "gmp-config", secret: {secretName: R.names.scrapeConfig, items: [{key: "latest", path: "config.yaml"}]}}]
 				}
 				containers: list.Concat([[{
-					name: "caddy"
+					name:  "caddy"
 					image: (imageOf & {svc: "caddy"}).out
 					ports: [{name: "http1", containerPort: P.caddy}]
 					env: list.Concat([[
-						if R._origin != "" {{name: "ORIGIN", value: R._origin}},
-						if len(R._aliases) > 0 {{name: "PRONTO_ALIASES", value: strings.Join(R._aliases, " ")}},
-						{name: "PRONTO_UPSTREAM_CRUD", value: "127.0.0.1:\(P.crud)"},
-						{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
-						{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
-						if R.render.enabled {{name: "PRONTO_UPSTREAM_RENDER", value: "127.0.0.1:\(P.render)"}},
-						if R.ticker != _|_ {{name: "PRONTO_UPSTREAM_TICKER", value: "127.0.0.1:\(P.ticker)"}},
-						(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
-					], [for n, c in R._inside {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "127.0.0.1:\(c.port)"}],
+							if R._origin != "" {{name: "ORIGIN", value: R._origin}},
+							if len(R._aliases) > 0 {{name: "PRONTO_ALIASES", value: strings.Join(R._aliases, " ")}},
+							{name: "PRONTO_UPSTREAM_CRUD", value: "127.0.0.1:\(P.crud)"},
+							{name: "PRONTO_UPSTREAM_AUTH", value: "127.0.0.1:\(P.auth)"},
+							{name: "PRONTO_UPSTREAM_ELECTRIC", value: "127.0.0.1:\(P.electric)"},
+							if R.render.enabled {{name: "PRONTO_UPSTREAM_RENDER", value: "127.0.0.1:\(P.render)"}},
+							if R.ticker != _|_ {{name: "PRONTO_UPSTREAM_TICKER", value: "127.0.0.1:\(P.ticker)"}},
+							(secretOf & {env: "ELECTRIC_SECRET", secret: sq.ELECTRIC_SECRET}).out,
+						], [for n, c in R._inside {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "127.0.0.1:\(c.port)"}],
 						// One apart is dialed over TLS: the app's route to it sets the
 						// Host its address answers to (docs/release-targets.md#gcp).
 						[for n, _ in R._apart {name: "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(n, "-", "_", -1)))", value: "https://\(R._apartHost[n])"}]])
 					startupProbe: {httpGet: {path: "/health", port: P.caddy}, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name: "crud"
+					name:  "crud"
 					image: (imageOf & {svc: "crud"}).out
 					env: [
 						(secretOf & {env: "PGRST_DB_URI", secret: sq.CRUD_DB_URI}).out,
@@ -401,21 +404,21 @@ import (
 					]
 					startupProbe: {httpGet: {path: "/ready", port: P.crudAdmin}, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name: "auth"
+					name:  "auth"
 					image: (imageOf & {svc: "auth"}).out
 					env: list.Concat([[
-						(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
-						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
-						if R._rpId != "" {{name: "WEBAUTHN_RP_ID", value: R._rpId}},
-						if R._origin != "" {{name: "WEBAUTHN_ORIGIN", value: R._origin}},
-					],
+							(secretOf & {env: "DATABASE_URL", secret: sq.AUTH_DATABASE_URL}).out,
+							(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
+							if R._rpId != "" {{name: "WEBAUTHN_RP_ID", value: R._rpId}},
+							if R._origin != "" {{name: "WEBAUTHN_ORIGIN", value: R._origin}},
+						],
 						// The service refuses to start without its statement bound: compose's
 						// where it gives one, else resilience's client statement, in ms.
 						[if R.auth.env.AUTH_STATEMENT_TIMEOUT_MS == _|_ {{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"}}],
 						[for k, v in R.auth.env {name: k, value: v}], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
 					startupProbe: {tcpSocket: port: P.auth, periodSeconds: 2, failureThreshold: 60}
 				}, {
-					name: "electric"
+					name:  "electric"
 					image: (imageOf & {svc: "electric"}).out
 					env: [
 						(secretOf & {env: "DATABASE_URL", secret: sq.ELECTRIC_DB_URL}).out,
@@ -475,29 +478,29 @@ import (
 						startupProbe: {tcpSocket: port: P.airlock, periodSeconds: 2, failureThreshold: 60}
 					}},
 				], [if R.ticker != _|_ {
-					name: "ticker"
+					name:  "ticker"
 					image: (imageOf & {svc: "ticker"}).out
 					env: list.Concat([[
 						{name: "CRUD_URL", value: "http://127.0.0.1:\(P.crud)"},
 						{name: "PORT", value: "\(P.ticker)"},
 						(secretOf & {env: "SERVICE_JWT", secret: sq.SERVICE_JWT}).out,
-						], [for k, v in R.ticker.env {
-							name: k
-							value: [if k == "WAKE_URLS" {strings.Replace(v, "airlock:9997", R._loopback["airlock:9997"], -1)}, v][0]
-						} ]])
+					], [for k, v in R.ticker.env {
+						name:  k
+						value: [if k == "WAKE_URLS" {strings.Replace(v, "airlock:9997", R._loopback["airlock:9997"], -1)}, v][0]
+					}]])
 					startupProbe: {tcpSocket: port: P.ticker, periodSeconds: 2, failureThreshold: 60}
 					resources: limits: cpu: "250m"
 				}, {
-					name:  "cloud-sql-proxy"
-					image: #Proxy
-					args: ["--port=\(P.database)", "--health-check", "--http-port=\(P.proxyHealth)", "--http-address=0.0.0.0", R.names.connection]
+					name:         "cloud-sql-proxy"
+					image:        #Proxy
+					args:         ["--port=\(P.database)", "--health-check", "--http-port=\(P.proxyHealth)", "--http-address=0.0.0.0", R.names.connection]
 					startupProbe: {httpGet: {path: "/startup", port: P.proxyHealth}, periodSeconds: 2, failureThreshold: 60}
 					resources: limits: cpu: "500m"
 				}], [for n, c in R._inside {
 					(sidecarOf & {"n": n, "c": c}).out
 					resources: limits: {
 						cpu: "\(c.cpu)m"
-						if c.memory != _|_ {memory: c.memory}
+						if c.memory != "" {memory: c.memory}
 					}
 				}], [if len(R._scraped) > 0 {gmpCollector}]])
 			}
@@ -509,7 +512,7 @@ import (
 		n: string
 		c: _
 		out: {
-			name: n
+			name:  n
 			image: (imageOf & {svc: n}).out
 			if len(c.env) > 0 {
 				env: [for k, v in c.env {[
@@ -559,7 +562,7 @@ import (
 					containers: list.Concat([[{
 						(sidecarOf & {"n": n, "c": c}).out
 						ports: [{name: "http1", containerPort: c.port}]
-						if c.memory != _|_ {resources: limits: memory: c.memory}
+						if c.memory != "" {resources: limits: memory: c.memory}
 					}], [if scraped {gmpCollector}]])
 				}
 			}
@@ -605,7 +608,7 @@ import (
 					maxRetries:         0
 					timeoutSeconds:     600
 					containers: [{
-						name: "initdb"
+						name:  "initdb"
 						image: [if R.migrate != _|_ {(imageOf & {svc: "schema"}).out}, (imageOf & {svc: "database"}).out][0]
 						command: ["bash", "-c", """
 							set -euo pipefail
@@ -646,9 +649,9 @@ import (
 	// does not serve leaves the terminal's way in answering 404. Either refuses the release.
 	let served = [for p in strings.Split([if R.auth.oidc.OIDC_PROVIDERS != _|_ {R.auth.oidc.OIDC_PROVIDERS}, ""][0], ",") if p != "" {p}]
 	let atDeveloper = [for p in served for k in ["ISSUER", "INTERNAL"]
-		let key = "OIDC_\(strings.ToUpper(p))_\(k)"
-		if R.auth.oidc[key] != _|_
-		if R.auth.oidc[key] =~ "//(localhost|127\\.0\\.0\\.1|\\[::1\\]|host\\.docker\\.internal)([:/]|$)" {"\(key) is \(R.auth.oidc[key])"}]
+	let key = "OIDC_\(strings.ToUpper(p))_\(k)"
+	if R.auth.oidc[key] != _|_
+	if R.auth.oidc[key] =~ "//(localhost|127\\.0\\.0\\.1|\\[::1\\]|host\\.docker\\.internal)([:/]|$)" {"\(key) is \(R.auth.oidc[key])"}]
 	let unserved = [for p in strings.Split(R.auth.programProviders, ",") if p != "" if !list.Contains(served, p) {p}]
 
 	// What the Managed Prometheus sidecar scrapes: each sidecar's metrics, on
@@ -656,7 +659,7 @@ import (
 	scrapeConfig: yaml.Marshal({
 		apiVersion: "monitoring.googleapis.com/v1beta"
 		kind:       "RunMonitoring"
-		metadata: name: R._id
+		metadata: name:  R._id
 		spec: endpoints: [for n in R._scraped let m = R.sidecars[n].metrics {port: m.port, path: m.path, interval: m.interval}]
 	})
 	// What each sidecar apart's own collector scrapes: its metrics, on its
@@ -665,7 +668,7 @@ import (
 		(R.names.sidecarScrapeConfigs[n]): yaml.Marshal({
 			apiVersion: "monitoring.googleapis.com/v1beta"
 			kind:       "RunMonitoring"
-			metadata: name: "\(R._id)-\(n)"
+			metadata: name:  "\(R._id)-\(n)"
 			spec: endpoints: [{port: m.port, path: m.path, interval: m.interval}]
 		})
 	}}
@@ -677,17 +680,17 @@ import (
 		repository: R.repository
 		registry:   R._registry
 		service:    R._service
-		if R.preview != _|_ {preview: R.preview}
+		if R.preview != "" {preview: R.preview}
 		names:    R.names
 		sqlTier:  R.sqlTier
-		sqlFlags: [if R.preview != _|_ {#PreviewSqlFlags}, #SqlFlags][0]
+		sqlFlags: [if R.preview != "" {#PreviewSqlFlags}, #SqlFlags][0]
 		if R._domain != "" {domain: R._domain}
 		aliases: R._aliases
 		if len(atDeveloper) > 0 {providers: error("a provider at a developer's address: \(strings.Join(atDeveloper, ", ")); give GCP.auth.oidc the provider's production issuer")}
 		if len(unserved) > 0 {providers: error("the terminal offers \(strings.Join(unserved, ", ")), which production does not serve, so its way in would answer 404: give GCP.auth.oidc the provider's production settings")}
 
 		// An alias sends readers on to the domain, so it needs one.
-		if len(R._aliases) > 0 {aliasTarget: R.domain}
+		if len(R._aliases) > 0 {aliasTarget: R.domain & !=""}
 		hasRpId:     R._rpId != ""
 		iap:         R._iap
 		serviceYaml: yaml.Marshal(B.service)
@@ -695,11 +698,13 @@ import (
 		// The ticker's clock, once a minute, the floor (mecha's services/ticker,
 		// the cloud clock): the service's own run.app address, which a domain
 		// mapping still provisioning cannot stall.
-		if R.ticker != _|_ && R.runHost != "" {clock: {
-			name:     R.names.clock
-			schedule: "* * * * *"
-			uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
-		}}
+		if R.ticker != _|_ && R.runHost != "" {
+			clock: {
+				name:     R.names.clock
+				schedule: "* * * * *"
+				uri:      "https://\(R.runHost)/poke?caller=cloud-scheduler"
+			}
+		}
 		oidcSecretKeys: list.Concat([[for _, v in R.auth.oidcSecrets {v}], [for _, v in R.airlock.secrets {v}]])
 		// The compose services built and run beside the cluster's.
 		sidecars: [for n, _ in R.sidecars {n}]
@@ -713,7 +718,7 @@ import (
 			for n, _ in R._apart {(n): R._remote}
 		}
 		// Each sidecar apart's service, applied after the cluster's.
-		sidecarServicesYaml: {for n, s in B.sidecarServices {(n): yaml.Marshal(s)}}
+		sidecarServicesYaml:  {for n, s in B.sidecarServices {(n): yaml.Marshal(s)}}
 		sidecarScrapeConfigs: B.sidecarScrapeConfigs
 		if len(R._sidecarClashes) > 0 {sidecarPorts: error("GCP.sidecars listen on \(strings.Join(R._sidecarClashes, ", "))")}
 		if len(B.service.spec.template.spec.containers) > 10 {containers: error("the service has \(len(B.service.spec.template.spec.containers)) containers, over Cloud Run's 10 a revision: run some of GCP.sidecars apart (apart: {})")}

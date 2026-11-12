@@ -375,8 +375,32 @@ async function renderDocuments(emission: Emission): Promise<Map<string, string>>
   }
 }
 
+async function cueInputs(root: string): Promise<(rel: string) => boolean> {
+  const files = new Set<string>(), prefixes: string[] = [];
+  const scan = async (dir: string, base: string) => {
+    for await (const e of Deno.readDir(dir)) {
+      if (e.isDirectory) {
+        if (!e.name.startsWith(".") && e.name !== "node_modules") await scan(`${dir}/${e.name}`, `${base}${e.name}/`);
+        continue;
+      }
+      if (!e.isFile || !e.name.endsWith(".cue")) continue;
+      const text = await Deno.readTextFile(`${dir}/${e.name}`);
+      for (const [attr] of text.matchAll(/@embed\((?:[^)"#]|(#*)"(?:(?!\1")[\s\S])*"\1)*\)/g)) {
+        for (const [, kind, , q, u] of attr.matchAll(/[(,\s](file|glob)\s*=\s*(?:(#*)"((?:(?!\2")[\s\S])*)"\2|([^\s,)]+))/g)) {
+          const v = `${base}${q ?? u}`;
+          if (kind === "file") files.add(v);
+          else prefixes.push(v.replace(/[*?\[].*$/, ""));
+        }
+      }
+    }
+  };
+  await scan(root, "");
+  return (rel) => rel.endsWith(".cue") || files.has(rel) || prefixes.some((p) => rel.startsWith(p));
+}
+
 /** Reconciles the emission, including stale files and rendered documents. */
-async function writeEmission(emission: Emission): Promise<{ written: string[]; changed: boolean; wrote: boolean }> {
+async function writeEmission(emission: Emission): Promise<{ written: string[]; changed: boolean; cueWrote: boolean }> {
+  const cueReads = await cueInputs(appDir);
   const contents = await rendered(emission);
   const documents = Object.keys(emission.files).filter((rel) => emission.files[rel].format === "document");
   const written = [...contents.keys(), ...documents].sort();
@@ -390,10 +414,12 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
     const info = await ifMissing(Deno.lstat(`${appDir}/${rel}`), null);
     if (info === null) continue;
     if (info.isDirectory) fail(`${rel}: recorded as written, but is now a directory`);
-    stale.push(`${appDir}/${rel}`);
+    stale.push(rel);
   }
-  let changed = stale.length > 0;
-  for (const path of stale) {
+  let changed = stale.some((rel) => !rel.startsWith(".pronto/development/"));
+  let cueWrote = stale.some(cueReads);
+  for (const rel of stale) {
+    const path = `${appDir}/${rel}`;
     await Deno.remove(path);
     for (let dir = parent(path); dir !== appDir && await empty(dir); dir = parent(dir)) await Deno.remove(dir);
   }
@@ -408,7 +434,8 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
     const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
     const previous = await ifMissing(Deno.readFile(path), null);
     if (previous !== null && previous.length === bytes.length && previous.every((byte, i) => byte === bytes[i])) return;
-    changed = true;
+    if (!rel.startsWith(".pronto/development/")) changed = true;
+    if (cueReads(rel)) cueWrote = true;
     const dir = parent(path);
     if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
     await Deno.writeFile(path, bytes);
@@ -418,18 +445,17 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
   // The checkout's own files, as mise.local.toml is: written only in one,
   // and in no manifest a mirror copies, so after the sweep of what the last
   // manifest recorded.
-  let checkoutChanged = false;
   if ((await checkout()) !== undefined) {
     for (const [rel, f] of Object.entries(emission.checkout)) {
       const text = render(rel, f);
       const path = `${appDir}/${rel}`;
       if ((await ifMissing(Deno.readTextFile(path), "")) === text) continue;
+      if (cueReads(rel)) cueWrote = true;
       await Deno.mkdir(dirname(path), { recursive: true });
       await Deno.writeTextFile(path, text);
-      checkoutChanged = true;
     }
   }
-  return { written, changed, wrote: changed || checkoutChanged };
+  return { written, changed, cueWrote };
 }
 
 const derivedText = async () => JSON.stringify(await Promise.all(
@@ -542,16 +568,16 @@ async function generate(): Promise<void> {
   let currentEmission = first.emission;
   let emission = await timed("emit", () => writeEmission(first.emission));
   let derivations = 1;
-  // A drawing is stale once anything its export read was written again.
-  let drawn: Drawing | undefined = emission.wrote ? undefined : first.drawing;
+  // A drawing is stale only when CUE's own package files or embeds moved.
+  let drawn: Drawing | undefined = emission.cueWrote ? undefined : first.drawing;
   if (emission.changed || settled !== before) {
     read = await timed("derive", () => derive(appDir));
     derivations++;
-    drawn = undefined;
     if ((await derivedText()) !== settled) {
       const next = await timed("export", exportEmission);
       currentEmission = next.emission;
       emission = await timed("emit", () => writeEmission(next.emission));
+      drawn = emission.cueWrote ? undefined : next.drawing;
       const again = await derivedText();
       read = await timed("derive", () => derive(appDir));
       derivations++;

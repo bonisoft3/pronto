@@ -360,6 +360,7 @@
         "defaultGlobs": null,
         "defaultExclude": null
       },
+      "name": "builtin",
       "do": "deno run --allow-read=. --allow-run check-build.ts",
       "shell": "sh",
       "dockerfile": {
@@ -374,7 +375,6 @@
         ],
         "shell": "sh"
       },
-      "name": "builtin",
       "stop": false
     }
   ],

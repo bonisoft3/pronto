@@ -9,7 +9,7 @@
 module: "github.com/bonisoft3/pronto@v1"
 
 language: {
-	version: "v0.16.1"
+	version: "v0.18.0"
 }
 
 source: {

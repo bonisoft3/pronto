@@ -39,7 +39,8 @@ hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b
 // The broker a local launch runs, whose issuer an app names by default.
 localBroker: "http://localhost:28443"
 
-#Signin: S={
+#Signin: {
+	let S = self
 	signin: {
 		// The broker as readers reach it, which is also its issuer: the
 		// operator's, so an application names nothing.
@@ -57,16 +58,29 @@ localBroker: "http://localhost:28443"
 
 	// Sign-in through the broker is the auth plane's own: there is none
 	// without it.
-	code: capabilities: auth: {
-		service:   "/auth"
-		providers: S.signin.providers
-		provider: {for p in S.signin.providers {(p): {
-			issuer:   S.signin.broker
-			internal: S.signin.brokerInternal
-			client:   "origin"
-			scope:    "openid"
-			params:   "provider=\(p)"
-		}}}
+	code: {
+		...
+		capabilities: {
+			...
+			auth: {
+				...
+				service:   "/auth"
+				providers: S.signin.providers
+				provider: {
+					...
+					for p in S.signin.providers {
+						(p): {
+							...
+							issuer:   S.signin.broker
+							internal: S.signin.brokerInternal
+							client:   "origin"
+							scope:    "openid"
+							params:   "provider=\(p)"
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// The broker itself, for a local test: Hydra and the front as two of the
@@ -78,110 +92,134 @@ localBroker: "http://localhost:28443"
 	// GOOGLE_CLIENT_SECRET are set. A release names the operator's broker
 	// instead.
 	if S._local {
-		cluster: surface: targets: {
-			// A docker launch brings up what its aggregate waits on, which is
-			// mecha's plane alone: the broker joins it.
-			launch: compose: depends_on: identity: {condition: "service_healthy", restart: true}
-			auth: "process-compose": env: {
-				for p in S.signin.providers {
-					let e = "OIDC_\(strings.ToUpper(p))_INTERNAL"
-					(e): ["${\(e):-", {peer: "identity", port: "http", prefix: "http://", suffix: "/"}, "}"]
-				}
-			}
-			"identity-hydra": bayt.healthcheck.http & {
-				cmd: builtin: null
-				activate: ""
-				healthcheck: {port: 28453, path: "/health/ready"}
-				// Fixed on the host as in a container: the front reaches them so.
-				expose: {public: port: 28453, admin: port: 28455}
-				"process-compose": activate: "mise x --"
-				entrypoint: {
-					do:    _hydraCmd
-					shell: "nu"
-					dockerfile: {do: "hydra serve all --dev", shell: "exec"}
-					env: {
-						DSN:                                     "memory"
-						SECRETS_SYSTEM:                          "pronto-identity-local-launch-hydra-0000"
-						LOG_LEVEL:                               "warn"
-						URLS_SELF_ISSUER:                        S.signin.broker
-						URLS_LOGIN:                              "\(S.signin.broker)/login"
-						URLS_CONSENT:                            "\(S.signin.broker)/consent"
-						SERVE_PUBLIC_PORT:                       {port: "public", part: "port"}
-						SERVE_ADMIN_PORT:                        {port: "admin", part: "port"}
-						OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS: "true"
-						TTL_ID_TOKEN:                            "5m"
+		cluster: {
+			...
+			surface: {
+				...
+				targets: {
+					...
+
+					// A docker launch brings up what its aggregate waits on, which is
+					// mecha's plane alone: the broker joins it.
+					launch: {
+						...
+						compose: {
+							...
+							depends_on: {
+								...
+								identity: {condition: "service_healthy", restart: true}
+							}
+						}
 					}
-				}
-				dockerfile: from: name: hydraImage
-				compose: environment: {
-					DSN:                                     "memory"
-					SECRETS_SYSTEM:                          "pronto-identity-local-launch-hydra-0000"
-					LOG_LEVEL:                               "warn"
-					URLS_SELF_ISSUER:                        S.signin.broker
-					URLS_LOGIN:                              "\(S.signin.broker)/login"
-					URLS_CONSENT:                            "\(S.signin.broker)/consent"
-					SERVE_PUBLIC_PORT:                       "28453"
-					SERVE_ADMIN_PORT:                        "28455"
-					OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS: "true"
-					TTL_ID_TOKEN:                            "5m"
-				}
-			}
-			identity: bayt.healthcheck.http & {
-				cmd: builtin: null
-				activate: ""
-				healthcheck: {port: 28443, path: "/health"}
-				// The broker's issuer, which the browser and Google's redirect name.
-				expose: http: port: 28443
-				"process-compose": activate: "mise x --"
-				entrypoint: {
-					do:    _frontCmd
-					shell: "nu"
-					dockerfile: {do: "deno run --no-config --allow-net --allow-env /app/hydra/front.ts", shell: "exec"}
-					env: {
-						BROKER_ISSUER:        S.signin.broker
-						BROKER_SECRET:        "${BROKER_SECRET:-pronto-identity-local-launch-secret-0000}"
-						BROKER_FAKE_GOOGLE:   "1"
-						GOOGLE_CLIENT_ID:     "${GOOGLE_CLIENT_ID:-}"
-						GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
-						HYDRA_PUBLIC:         {peer: "identity-hydra", port: "public", prefix: "http://"}
-						HYDRA_ADMIN:          {peer: "identity-hydra", port: "admin", prefix: "http://"}
-						PORT:                 {port: "http", part: "port"}
+					auth: {
+						...
+						"process-compose": {
+							...
+							env: {
+								...
+								for p in S.signin.providers {
+									let e = "OIDC_\(strings.ToUpper(p))_INTERNAL"
+									(e): ["${\(e):-", {peer: "identity", port: "http", prefix: "http://", suffix: "/"}, "}"]
+								}
+							}
+						}
 					}
-					after: "identity-hydra": "healthy"
-				}
-				dockerfile: {
-					from: name: frontImage
-					preamble: [
-						"""
-						COPY <<'EOF' /app/oidc.ts
-						\(_oidcTs)
-						EOF
-						COPY <<'EOF' /app/broker/core.ts
-						\(_brokerCoreTs)
-						EOF
-						COPY <<'EOF' /app/broker/main.ts
-						\(_brokerMainTs)
-						EOF
-						COPY <<'EOF' /app/hydra/fake.ts
-						\(_hydraFakeTs)
-						EOF
-						COPY <<'EOF' /app/hydra/front.ts
-						\(_hydraFrontTs)
-						EOF
-						""",
-					]
-				}
-				compose: {
-					ports: ["28443:28443"]
-					environment: {
-						BROKER_ISSUER:        S.signin.broker
-						BROKER_SECRET:        "${BROKER_SECRET:-pronto-identity-local-launch-secret-0000}"
-						BROKER_FAKE_GOOGLE:   "1"
-						GOOGLE_CLIENT_ID:     "${GOOGLE_CLIENT_ID:-}"
-						GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
-						HYDRA_PUBLIC:         "http://identity-hydra:28453"
-						HYDRA_ADMIN:          "http://identity-hydra:28455"
-						PORT:                 "28443"
+					"identity-hydra": bayt.healthcheck.http & {
+						cmd: builtin: null
+						activate:    ""
+						healthcheck: {port: 28453, path: "/health/ready"}
+						// Fixed on the host as in a container: the front reaches them so.
+						expose: {public: port: 28453, admin: port: 28455}
+						"process-compose": activate: "mise x --"
+						entrypoint: {
+							do:         _hydraCmd
+							shell:      "nu"
+							dockerfile: {do: "hydra serve all --dev", shell: "exec"}
+							env: {
+								DSN:                                     "memory"
+								SECRETS_SYSTEM:                          "pronto-identity-local-launch-hydra-0000"
+								LOG_LEVEL:                               "warn"
+								URLS_SELF_ISSUER:                        S.signin.broker
+								URLS_LOGIN:                              "\(S.signin.broker)/login"
+								URLS_CONSENT:                            "\(S.signin.broker)/consent"
+								SERVE_PUBLIC_PORT:                       {port: "public", part: "port"}
+								SERVE_ADMIN_PORT:                        {port: "admin", part: "port"}
+								OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS: "true"
+								TTL_ID_TOKEN:                            "5m"
+							}
+						}
+						dockerfile: from: name: hydraImage
+						compose: environment: {
+							DSN:                                     "memory"
+							SECRETS_SYSTEM:                          "pronto-identity-local-launch-hydra-0000"
+							LOG_LEVEL:                               "warn"
+							URLS_SELF_ISSUER:                        S.signin.broker
+							URLS_LOGIN:                              "\(S.signin.broker)/login"
+							URLS_CONSENT:                            "\(S.signin.broker)/consent"
+							SERVE_PUBLIC_PORT:                       "28453"
+							SERVE_ADMIN_PORT:                        "28455"
+							OAUTH2_PKCE_ENFORCED_FOR_PUBLIC_CLIENTS: "true"
+							TTL_ID_TOKEN:                            "5m"
+						}
+					}
+					identity: bayt.healthcheck.http & {
+						cmd: builtin: null
+						activate:    ""
+						healthcheck: {port: 28443, path: "/health"}
+						// The broker's issuer, which the browser and Google's redirect name.
+						expose: http: port: 28443
+						"process-compose": activate: "mise x --"
+						entrypoint: {
+							do:         _frontCmd
+							shell:      "nu"
+							dockerfile: {do: "deno run --no-config --allow-net --allow-env /app/hydra/front.ts", shell: "exec"}
+							env: {
+								BROKER_ISSUER:        S.signin.broker
+								BROKER_SECRET:        "${BROKER_SECRET:-pronto-identity-local-launch-secret-0000}"
+								BROKER_FAKE_GOOGLE:   "1"
+								GOOGLE_CLIENT_ID:     "${GOOGLE_CLIENT_ID:-}"
+								GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+								HYDRA_PUBLIC:         {peer: "identity-hydra", port: "public", prefix: "http://"}
+								HYDRA_ADMIN:          {peer: "identity-hydra", port: "admin", prefix: "http://"}
+								PORT:                 {port: "http", part: "port"}
+							}
+							after: "identity-hydra": "healthy"
+						}
+						dockerfile: {
+							from: name: frontImage
+							preamble: [
+								"""
+									COPY <<'EOF' /app/oidc.ts
+									\(_oidcTs)
+									EOF
+									COPY <<'EOF' /app/broker/core.ts
+									\(_brokerCoreTs)
+									EOF
+									COPY <<'EOF' /app/broker/main.ts
+									\(_brokerMainTs)
+									EOF
+									COPY <<'EOF' /app/hydra/fake.ts
+									\(_hydraFakeTs)
+									EOF
+									COPY <<'EOF' /app/hydra/front.ts
+									\(_hydraFrontTs)
+									EOF
+									""",
+							]
+						}
+						compose: {
+							ports: ["28443:28443"]
+							environment: {
+								BROKER_ISSUER:        S.signin.broker
+								BROKER_SECRET:        "${BROKER_SECRET:-pronto-identity-local-launch-secret-0000}"
+								BROKER_FAKE_GOOGLE:   "1"
+								GOOGLE_CLIENT_ID:     "${GOOGLE_CLIENT_ID:-}"
+								GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+								HYDRA_PUBLIC:         "http://identity-hydra:28453"
+								HYDRA_ADMIN:          "http://identity-hydra:28455"
+								PORT:                 "28443"
+							}
+						}
 					}
 				}
 			}

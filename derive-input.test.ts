@@ -31,7 +31,7 @@ async function fixture(subdir: string, module: string, test: (app: string) => Pr
   const root = await Deno.makeTempDir({ prefix: "derive input " });
   try {
     await Deno.mkdir(join(root, "cue.mod"));
-    await Deno.writeTextFile(join(root, "cue.mod/module.cue"), `module: ${JSON.stringify(module)}\nlanguage: version: "v0.16.1"\n`);
+    await Deno.writeTextFile(join(root, "cue.mod/module.cue"), `module: ${JSON.stringify(module)}\nlanguage: version: "v0.18.0"\n`);
     const app = join(root, subdir);
     await Deno.mkdir(app, { recursive: true });
     await Deno.writeTextFile(join(app, "program.cue"), source);

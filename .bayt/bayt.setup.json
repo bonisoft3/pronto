@@ -184,6 +184,7 @@
         "defaultGlobs": null,
         "defaultExclude": null
       },
+      "name": "builtin",
       "do": "mise install",
       "dockerfile": {
         "do": "d=/root/.local/share/mise/downloads; s=/mise-tarball-store; mkdir -p \"$d\" \"$s\"; cp -r \"$s\"/. \"$d\"/ 2>/dev/null || true; mise install || exit; cd \"$d\" && for f in */*/*; do [ -f \"$f\" ] || continue; o=\"$s/$f\"; [ -e \"$o\" ] && continue; mkdir -p \"$(dirname \"$o\")\"; t=\"$(mktemp \"$(dirname \"$o\")/.pXXXXXX\")\" && cp \"$f\" \"$t\" && mv -f \"$t\" \"$o\"; done; :",
@@ -203,7 +204,6 @@
         ],
         "shell": "sh"
       },
-      "name": "builtin",
       "shell": "exec",
       "stop": false
     }

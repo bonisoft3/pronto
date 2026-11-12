@@ -3,11 +3,11 @@ package emit
 import bayt "github.com/bonisoft3/bayt/core:bayt"
 
 configSeats: {
-	generate: _loop.surface.sayYaml.say.generate.rulemap.pronto.cmds[0].do
-	build:    _loop.surface.sayYaml.say.build.do
-	terminal: _terminal.surface.verbs.omnishell.cmds[0]
+	generate:           _loop.surface.sayYaml.say.generate.rulemap.pronto.cmds[0].do
+	build:              _loop.surface.sayYaml.say.build.do
+	terminal:           _terminal.surface.verbs.omnishell.cmds[0]
 	generateDockerfile: (#ConfigTargetDockerfile & {name: "generate"}).out
-	buildDockerfile: (#ConfigTargetDockerfile & {name: "build"}).out
+	buildDockerfile:    (#ConfigTargetDockerfile & {name: "build"}).out
 	checkDockerfile: (bayt.#render & {
 		project: {
 			name: "source-check"
@@ -27,7 +27,8 @@ configSeats: {
 	}).docker.dockerfiles.check
 }
 
-#ConfigTargetDockerfile: C={
+#ConfigTargetDockerfile: {
+	let C = self
 	name!:   "generate" | "build"
 	_target: _besideTargets[C.name]
 	out: (bayt.#render & {
@@ -35,7 +36,7 @@ configSeats: {
 			name: "source-\(C.name)"
 			dir:  "apps/emit"
 			targets: (C.name): {
-				deps: []
+				deps:     []
 				activate: C._target.activate
 				cmd:      C._target.cmd
 				dockerfile: from: name: "alpine"

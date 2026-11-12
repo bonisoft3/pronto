@@ -1,3 +1,8 @@
+[data-screen="todo"] { display: grid; gap: var(--sp-md); padding: var(--sp-lg); }
+[data-screen="todo"] > form { display: flex; gap: var(--sp-sm); align-items: center; }
+[data-screen="todo"] input { box-sizing: border-box; flex: 1; min-inline-size: 0; block-size: var(--control-h); padding: var(--size-1) var(--sp-sm); border: var(--border-size-1) solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--primary); font-family: inherit; font-size: inherit; }
+[data-screen="todo"] button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; block-size: var(--control-h); min-inline-size: var(--control-h); padding: var(--size-1) var(--sp-sm); border: var(--border-size-1) solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--primary); font-family: inherit; font-size: inherit; cursor: pointer; }
+.todos { display: grid; gap: var(--sp-sm); padding-inline-start: var(--size-1); list-style: none; }
 .todos li { display: flex; gap: var(--sp-sm); align-items: center; }
 .todos li[data-done="yes"] span { text-decoration: line-through; color: var(--secondary); }
 .todos li[data-done="yes"] form { visibility: hidden; }

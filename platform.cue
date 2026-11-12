@@ -7,7 +7,8 @@ package pronto
 // binding is `$<tree>`. A loop check is a sayt rule, with tools.nu on its
 // include path; a check beside the stack runs under `mise x`, with mise on
 // PATH and the config already trusted.
-#Platform: P={
+#Platform: {
+	let P = self
 	tree:  "pronto" | "omnishell" | "mecha"
 	rule:  "use tools.nu [run-mise]; let \(P.tree) = (run-mise where github:bonisoft3/\(P.tree) | str trim)"
 	check: "let \(P.tree) = (^mise where github:bonisoft3/\(P.tree) | str trim)"

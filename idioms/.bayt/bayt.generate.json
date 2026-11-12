@@ -235,12 +235,12 @@
         "defaultGlobs": null,
         "defaultExclude": null
       },
+      "name": "builtin",
       "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; task-leaf generate'",
       "shell": "nu",
       "dockerfile": {
         "do": "^deno run --config ((^mise where github:bonisoft3/pronto | str trim) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env ((^mise where github:bonisoft3/pronto | str trim) | path join write.ts) ."
       },
-      "name": "builtin",
       "stop": false
     }
   ],

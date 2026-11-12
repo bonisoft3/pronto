@@ -275,12 +275,12 @@
         "defaultGlobs": null,
         "defaultExclude": null
       },
+      "name": "builtin",
       "do": "^nu -I (^mise where github:bonisoft3/sayt | str trim) -c 'use task-leaf.nu; with-env {PRONTO_PROTO_BASELINE: (open --raw .pronto/proto-baseline.json)} { task-leaf lint }'",
       "shell": "nu",
       "dockerfile": {
         "do": "cue vet -c ./..."
       },
-      "name": "builtin",
       "stop": false
     }
   ],

@@ -33,7 +33,7 @@ package scales
 		url:       string & =~"\(version)"
 		integrity: string & =~"^sha512-"
 	}
-	buckets: [Name=string]: {
+	buckets: [string]~(Name,_): {
 		prefix:    #Prefix
 		dimension: string
 		source:    string
@@ -41,4 +41,4 @@ package scales
 	}
 }
 
-[Name=string]: #Vocabulary
+[string]~(Name,_): #Vocabulary

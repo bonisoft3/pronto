@@ -51,7 +51,7 @@ _cdcCarriersAsset: _cdcTypesAsset
 // The type a bus row's column is converted to, by its label: the physical
 // labels a program may still use name their type, and a tsvector is an
 // index, not a value anyone states, so it passes through.
-_busType: {for k, v in #typeAlias if k != "tsvector" {(k): v}, for k, _ in #types {(k): k}}
+_busType:    {for k, v in #typeAlias if k != "tsvector" {(k): v}, for k, _ in #types {(k): k}}
 _busCarrier: _busType
 
 // The types cdc-types.blobl has a measured bus spelling for — the
@@ -59,7 +59,7 @@ _busCarrier: _busType
 // cdc-types.integration.test.ts. A server column of any other type would
 // wedge its whole table at runtime, every change to it dropped by every
 // pipeline and visible only in a log, so it is refused where the app is built.
-_busTypes: ["string", "bool", "int32", "int64", "double", "uuid", "timestamp", "date", "time", "timezone", "duration", "decimal", "json", "geojson"]
+_busTypes:       ["string", "bool", "int32", "int64", "double", "uuid", "timestamp", "date", "time", "timezone", "duration", "decimal", "json", "geojson"]
 _busCarriers:    _busTypes
 _busConvertible: or(_busTypes)
 
@@ -68,7 +68,8 @@ _busConvertible: or(_busTypes)
 // read it — the Caddyfile's matcher list, the sitemap's <loc> and its hreflang
 // alternates — and they must agree, because a sitemap naming an address the
 // door does not route is a 404 handed to a crawler on purpose.
-#address: A={
+#address: {
+	let A = self
 	route: _
 	i18n?: _
 	_prefix: [
@@ -78,17 +79,18 @@ _busConvertible: or(_busTypes)
 	_pattern: [if A.i18n != _|_ if A.route.paths != _|_ {A.route.paths[A.tag]}, A.route.path][0]
 	// The bare prefix reads /es rather than /es/, and the default locale's root
 	// keeps the slash it cannot drop.
-	_joined: strings.TrimSuffix(A._prefix+A._pattern, "/")
+	_joined: strings.TrimSuffix(A._prefix + A._pattern, "/")
 	tag:     string | *""
-	out: [if A._joined == "" {"/"}, A._joined][0]
+	out:     [if A._joined == "" {"/"}, A._joined][0]
 }
 
 // A pattern's :params in the order it holds them. A translated spelling may
 // order them differently from the default's, so a capture is read back by
 // name and never by position.
-#params: P={
+#params: {
+	let P = self
 	pattern: string
-	out: [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimSuffix(strings.TrimPrefix(seg, ":"), "?")}]
+	out:     [for seg in strings.Split(P.pattern, "/") if strings.HasPrefix(seg, ":") {strings.TrimSuffix(strings.TrimPrefix(seg, ":"), "?")}]
 }
 
 // Every concrete address one spelling answers at. A trailing `:name?` segment
@@ -97,15 +99,16 @@ _busConvertible: or(_busTypes)
 // `/gallery` — while a required :param stays a pattern. The door's matchers,
 // the sitemap and the served regexp all read this expansion, so none of them
 // has to know a segment is optional, and `/anything` reaches no screen.
-#addresses: X={
-	pattern: string
-	entries: [...]
+#addresses: {
+	let X = self
+	pattern:   string
+	entries:   [...]
 	_segs:     strings.Split(X.pattern, "/")
 	_last:     _segs[len(_segs)-1]
 	_optional: strings.HasPrefix(_last, ":") && strings.HasSuffix(_last, "?")
 	_name:     strings.TrimSuffix(strings.TrimPrefix(_last, ":"), "?")
 	_values:   list.SortStrings([for v, _ in {for e in X.entries if e.params != _|_ if e.params[_name] != _|_ {(e.params[_name]): true}} {v}])
-	_bare:     [if len(_segs) <= 2 {"/"}, strings.Join(list.Slice(_segs, 0, len(_segs)-1), "/")][0]
+	_bare:     [if len(_segs) <= 2 {"/"}, strings.Join(list.Slice(_segs, 0, len(_segs) - 1), "/")][0]
 	out: [
 		if !_optional {X.pattern},
 		if _optional for a in list.Concat([[_bare], [for v in _values {strings.TrimSuffix(_bare, "/") + "/" + v}]]) {a},
@@ -114,7 +117,7 @@ _busConvertible: or(_busTypes)
 #entriesOf: {route: _, out: [if route.nav != _|_ if route.nav.entries != _|_ {route.nav.entries}, []][0]}
 
 #routeRegexp: {
-	path: string
+	path:  string
 	_base: strings.TrimSuffix(path, "/")
 	out: [if _base == "" {"/"}, strings.Join([
 		for seg in strings.Split(_base, "/") {
@@ -130,12 +133,13 @@ _busConvertible: or(_busTypes)
 // The one place a catalogue's value is held to the URL-safe shape: the
 // authored pattern constrains the default locale's address alone, and a
 // translated value is an address in exactly the same way.
-#localePattern: P={
-	screen: _
-	i18n:   _
-	tag:    string
+#localePattern: {
+	let P = self
+	screen:   _
+	i18n:     _
+	tag:      string
 	_segment: [if P.screen.slug != _|_ {P.i18n._msg[P.tag][P.screen.slug] & =~"^[a-z0-9]+(-[a-z0-9]+)*$"}]
-	_first: [for seg in P._segment {seg}, strings.Split(P.screen.route, "/")[1]][0]
+	_first:   [for seg in P._segment {seg}, strings.Split(P.screen.route, "/")[1]][0]
 	out: "/" + strings.Join([
 		for i, seg in strings.Split(P.screen.route, "/")[1:] {
 			[if i == 0 {P._first}, if P.screen.segments != _|_ if P.screen.segments[seg] != _|_ {
@@ -148,11 +152,16 @@ _busConvertible: or(_busTypes)
 // A column's PostgreSQL type: its domain where the type keeps one (types.cue
 // `column`), else the base type itself. decimal's domain is per field.
 _sqlType: {
-	text: "TEXT", int: "INTEGER", bigint: "BIGINT", timestamptz: "TIMESTAMPTZ", tsvector: "TSVECTOR"
+	text:        "TEXT"
+	int:         "INTEGER"
+	bigint:      "BIGINT"
+	timestamptz: "TIMESTAMPTZ"
+	tsvector:    "TSVECTOR"
 	for k, c in #Carrier if k != "decimal" {(k): [if c.column == "domain" {c.sql}, c.pg][0]}
 }
 
-#colSql: C={
+#colSql: {
+	let C = self
 	f:     #Field
 	table: string
 	_type: [if C.f.type == "decimal" {"portable_decimal_\(C.f.precision)_\(C.f.scale)"}, _sqlType[C.f.type]][0]
@@ -179,7 +188,8 @@ _sqlType: {
 	out: strings.Join(_frags, " ")
 }
 
-#indexSql: I={
+#indexSql: {
+	let I = self
 	e: _
 	out: [for ix in I.e.indexes {
 		"CREATE INDEX IF NOT EXISTS idx_\(I.e.table)_\(ix.on) ON \(I.e.table) USING \(ix.using) (\(ix.on));"
@@ -187,19 +197,21 @@ _sqlType: {
 }
 
 // Go-style duration composed of h/m/s integer units ("168h", "30m", "1h30m").
-#durationSeconds: D={
-	d:  string
-	_m: regexp.FindNamedSubmatch(#"^(?:(?P<h>\d+)h)?(?:(?P<m>\d+)m)?(?:(?P<s>\d+)s)?$"#, D.d)
+#durationSeconds: {
+	let D = self
+	d:      string
+	_m:     regexp.FindNamedSubmatch(#"^(?:(?P<h>\d+)h)?(?:(?P<m>\d+)m)?(?:(?P<s>\d+)s)?$"#, D.d)
 	_hours: [if D._m.h != "" {strconv.Atoi(D._m.h)}, 0][0]
-	_mins: [if D._m.m != "" {strconv.Atoi(D._m.m)}, 0][0]
-	_secs: [if D._m.s != "" {strconv.Atoi(D._m.s)}, 0][0]
-	out: D._hours*3600 + D._mins*60 + D._secs
+	_mins:  [if D._m.m != "" {strconv.Atoi(D._m.m)}, 0][0]
+	_secs:  [if D._m.s != "" {strconv.Atoi(D._m.s)}, 0][0]
+	out:    D._hours*3600 + D._mins*60 + D._secs
 }
 
 // SQL expressions and payload casts stay with the store; the terminal receives canonical literals.
-#literalDefault: D={
-	sql: string
-	type: #Type | #LegacyType
+#literalDefault: {
+	let D = self
+	sql:   string
+	type:  #Type | #LegacyType
 	_type: [if #typeAlias[D.type] != _|_ {#typeAlias[D.type]}, D.type][0]
 	_expr: strings.TrimSpace(D.sql)
 	if D._expr =~ "^'(?:[^']|'')*'$" if !list.Contains(["bytes", "json", "geojson"], D._type) {
@@ -222,40 +234,43 @@ _sqlType: {
 }
 
 // String carriers must keep every digit and expand exponents without float64.
-#exactNumericLiteral: N={
-	sql: string
-	_parts: strings.Split(strings.ToLower(N.sql), "e")
-	_mantissa: strings.TrimPrefix(strings.TrimPrefix(N._parts[0], "-"), "+")
-	_decimal: strings.Split(N._mantissa, ".")
-	_digits: strings.Join(N._decimal, "")
+#exactNumericLiteral: {
+	let N = self
+	sql:        string
+	_parts:     strings.Split(strings.ToLower(N.sql), "e")
+	_mantissa:  strings.TrimPrefix(strings.TrimPrefix(N._parts[0], "-"), "+")
+	_decimal:   strings.Split(N._mantissa, ".")
+	_digits:    strings.Join(N._decimal, "")
 	_digitList: strings.Split(N._digits, "")
-	_exponent: [if len(N._parts) == 2 {strconv.Atoi(N._parts[1])}, 0][0]
-	_point: len(N._decimal[0]) + N._exponent
+	_exponent:  [if len(N._parts) == 2 {strconv.Atoi(N._parts[1])}, 0][0]
+	_point:     len(N._decimal[0]) + N._exponent
 	_expanded: [
 		if N._point <= 0 {"0." + strings.Repeat("0", -N._point) + N._digits},
-		if N._point >= len(N._digits) {N._digits + strings.Repeat("0", N._point-len(N._digits))},
+		if N._point >= len(N._digits) {N._digits + strings.Repeat("0", N._point - len(N._digits))},
 		if N._point > 0 && N._point < len(N._digits) {strings.Join(N._digitList[:N._point], "") + "." + strings.Join(N._digitList[N._point:], "")},
 	][0]
-	_fields: strings.Split(N._expanded, ".")
-	_integer: [if strings.TrimLeft(N._fields[0], "0") != "" {strings.TrimLeft(N._fields[0], "0")}, "0"][0]
+	_fields:   strings.Split(N._expanded, ".")
+	_integer:  [if strings.TrimLeft(N._fields[0], "0") != "" {strings.TrimLeft(N._fields[0], "0")}, "0"][0]
 	_fraction: [if len(N._fields) == 2 {strings.TrimRight(N._fields[1], "0")}, ""][0]
-	_sign: [if strings.HasPrefix(N.sql, "-") if N._integer != "0" || N._fraction != "" {"-"}, ""][0]
-	out: N._sign + N._integer + [if N._fraction != "" {"." + N._fraction}, ""][0]
+	_sign:     [if strings.HasPrefix(N.sql, "-") if N._integer != "0" || N._fraction != "" {"-"}, ""][0]
+	out:       N._sign + N._integer + [if N._fraction != "" {"." + N._fraction}, ""][0]
 }
 
 // The column contract owned by a cluster chart; reducers have no state field.
-#machineColumn: C={
-	columns!: #machineColumns
+#machineColumn: {
+	let C = self
+	columns!:   #machineColumns
 	entityName: string
-	fieldName: string
+	fieldName:  string
 	if C.columns[C.entityName][C.fieldName] != _|_ {C.columns[C.entityName][C.fieldName]}
 }
 
 // #App._machineColumns: entity name, then field, then the chart's column.
 #machineColumns: [string]: [string]: {initial: string, states: [...string]}
 
-#tableSql: T={
-	e: _
+#tableSql: {
+	let T = self
+	e:        _
 	columns!: #machineColumns
 	_lines: list.Concat([
 		[for fld in T.e.fields {
@@ -314,7 +329,8 @@ _sqlType: {
 	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
 }
 
-#sqlLit: L={
+#sqlLit: {
+	let L = self
 	v: _
 	out: [
 		if (L.v & null) != _|_ if (L.v & (string | bool | number | {...} | [...])) == _|_ {"NULL"},
@@ -333,7 +349,8 @@ _sqlType: {
 // holds the writer reads from `src` itself. Every server entity is listed
 // where a seed file is declared, because which of them it holds rows for is
 // the file's to say.
-#seedData: S={
+#seedData: {
+	let S = self
 	code!: _
 	_held: S.code.state.seed != _|_
 	out: {
@@ -370,8 +387,9 @@ _sqlType: {
 // Predicate function identities survive the move into the lifecycle
 // interpreter. Its AFTER trigger receives generated columns and runs only
 // after RLS accepted the write, before making privileged related-row reads.
-#validationSql: V={
-	e: _
+#validationSql: {
+	let V = self
+	e:   _
 	_fn: {for n, _ in V.e.validations {(n): "\(V.e.table)_validation_\(strings.Replace(n, "-", "_", -1))"}}
 	// The statements carry their own line break, so a module that is a bare
 	// arrow function leaves no blank line above the completion.
@@ -384,14 +402,14 @@ _sqlType: {
 	// every function the anon role may execute as an /rpc/ endpoint.
 	_functions: [for n, v in V.e.validations {
 		"""
-		CREATE OR REPLACE FUNCTION \(V._fn[n])(state jsonb, event jsonb) RETURNS text
-		LANGUAGE plv8 IMMUTABLE AS $validation$
-		\(V._statements[n])const verdict = (\(v.module.completion))(state, event);
-		return verdict === true ? "true" : verdict === false ? "false" : "answered " + typeof verdict;
-		$validation$;
+			CREATE OR REPLACE FUNCTION \(V._fn[n])(state jsonb, event jsonb) RETURNS text
+			LANGUAGE plv8 IMMUTABLE AS $validation$
+			\(V._statements[n])const verdict = (\(v.module.completion))(state, event);
+			return verdict === true ? "true" : verdict === false ? "false" : "answered " + typeof verdict;
+			$validation$;
 
-		REVOKE EXECUTE ON FUNCTION \(V._fn[n])(jsonb, jsonb) FROM PUBLIC;
-		"""
+			REVOKE EXECUTE ON FUNCTION \(V._fn[n])(jsonb, jsonb) FROM PUBLIC;
+			"""
 	}]
 	out: strings.Join(list.Concat([V._functions, [
 		"DROP TRIGGER IF EXISTS \(V.e.table)_validate ON \(V.e.table);",
@@ -399,38 +417,40 @@ _sqlType: {
 	]]), "\n\n")
 }
 
-#lifecycleGuardSql: G={
-	e: _
+#lifecycleGuardSql: {
+	let G = self
+	e:      _
 	guards: [...string]
-	row: "NEW" | "OLD"
+	row:    "NEW" | "OLD"
 	out: strings.Join([for n in G.guards {
 		let v = G.e.validations[n]
 		let reads = strings.Join([for ed in v.edges {
 			"'\(ed.table)', (SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM \(ed.table) r WHERE r.\"\(ed.key)\" = \(G.row).\"\(ed.from)\")"
 		}], ", ")
 		"""
-		  v := \(G.e.table)_validation_\(strings.Replace(n, "-", "_", -1))(jsonb_build_object('items', items, 'rows', jsonb_build_object(\(reads))), event);
-		  IF v = 'false' THEN
-		    RAISE EXCEPTION USING ERRCODE = 'check_violation', MESSAGE = 'validation \(G.e.table).\(n)';
-		  ELSIF v IS DISTINCT FROM 'true' THEN
-		    RAISE EXCEPTION USING ERRCODE = 'raise_exception', MESSAGE = 'predicate \(G.e.table).\(n) ' || coalesce(v, 'answered nothing');
-		  END IF;
-		"""
+			  v := \(G.e.table)_validation_\(strings.Replace(n, "-", "_", -1))(jsonb_build_object('items', items, 'rows', jsonb_build_object(\(reads))), event);
+			  IF v = 'false' THEN
+			    RAISE EXCEPTION USING ERRCODE = 'check_violation', MESSAGE = 'validation \(G.e.table).\(n)';
+			  ELSIF v IS DISTINCT FROM 'true' THEN
+			    RAISE EXCEPTION USING ERRCODE = 'raise_exception', MESSAGE = 'predicate \(G.e.table).\(n) ' || coalesce(v, 'answered nothing');
+			  END IF;
+			"""
 	}], "\n")
 }
 
-#mechaEffectSql: EF={
+#mechaEffectSql: {
+	let EF = self
 	effect: #RelationalEffect
 	op:     *"INSERT" | "UPDATE" | "DELETE"
 
-	_rel: EF.effect
-	_table: [if _rel.schema != _|_ {"\"\(_rel.schema)\".\"\(_rel.table)\""}, "\"\(_rel.table)\""][0]
-	_cols: [if _rel["values"] != _|_ {[for c, _ in _rel.values {"\"\(c)\""}]}, []][0]
-	_rawKeys: [{[if _rel["key"] != _|_ {_rel.key}, ["id"]][0]}, []][0]
-	_keys: [{[for k in _rawKeys {"\"\(k)\""}]}, []][0]
-	_vals: [if _rel["values"] != _|_ {[for _, val in _rel.values {(#sqlLit & {v: val}).out}]}, []][0]
-	_updates: [if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {"\"\(c)\" = EXCLUDED.\"\(c)\""}]}, []][0]
-	_setClauses: [if _rel["values"] != _|_ {[for c, _ in _rel.values if (_rel["where"] != _|_ || !list.Contains(_rawKeys, c)) {"\"\(c)\" = \((#sqlLit & {v: _rel.values[c]}).out)"}]}, []][0]
+	_rel:           EF.effect
+	_table:         [if _rel.schema != _|_ {"\"\(_rel.schema)\".\"\(_rel.table)\""}, "\"\(_rel.table)\""][0]
+	_cols:          [if _rel["values"] != _|_ {[for c, _ in _rel.values {"\"\(c)\""}]}, []][0]
+	_rawKeys:       [{[if _rel["key"] != _|_ {_rel.key}, ["id"]][0]}, []][0]
+	_keys:          [{[for k in _rawKeys {"\"\(k)\""}]}, []][0]
+	_vals:          [if _rel["values"] != _|_ {[for _, val in _rel.values {(#sqlLit & {v: val}).out}]}, []][0]
+	_updates:       [if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {"\"\(c)\" = EXCLUDED.\"\(c)\""}]}, []][0]
+	_setClauses:    [if _rel["values"] != _|_ {[for c, _ in _rel.values if (_rel["where"] != _|_ || !list.Contains(_rawKeys, c)) {"\"\(c)\" = \((#sqlLit & {v: _rel.values[c]}).out)"}]}, []][0]
 	_customUpdates: [if _rel["updateValues"] != _|_ {[for c, val in _rel.updateValues {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
 	_accUpdates: [if _rel["values"] != _|_ {[for c, _ in _rel.values if !list.Contains(_rawKeys, c) {
 		if _rel["accumulate"] != _|_ {
@@ -446,11 +466,11 @@ _sqlType: {
 		}
 	}]}, []][0]
 
-	_wherePreds: [if _rel["where"] != _|_ {[for c, val in _rel.where {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
-	_rawWherePred: [if _rel["rawWhere"] != _|_ {[_rel.rawWhere]}, []][0]
-	_keyPreds: [if _rel["values"] != _|_ {[for k in _rawKeys if _rel.values[k] != _|_ {"\"\(k)\" = \((#sqlLit & {v: _rel.values[k]}).out)"}]}, []][0]
+	_wherePreds:    [if _rel["where"] != _|_ {[for c, val in _rel.where {"\"\(c)\" = \((#sqlLit & {v: val}).out)"}]}, []][0]
+	_rawWherePred:  [if _rel["rawWhere"] != _|_ {[_rel.rawWhere]}, []][0]
+	_keyPreds:      [if _rel["values"] != _|_ {[for k in _rawKeys if _rel.values[k] != _|_ {"\"\(k)\" = \((#sqlLit & {v: _rel.values[k]}).out)"}]}, []][0]
 	_explicitPreds: list.Concat([_wherePreds, _rawWherePred])
-	_preds: [{[if len(_explicitPreds) > 0 {_explicitPreds}, _keyPreds][0]}, []][0]
+	_preds:         [{[if len(_explicitPreds) > 0 {_explicitPreds}, _keyPreds][0]}, []][0]
 
 	_relBranches: [
 		if _rel["op"] != _|_ if _rel.op == "create" {"        INSERT INTO \(_table) (\(strings.Join(_cols, ", "))) VALUES (\(strings.Join(_vals, ", ")));"},
@@ -486,13 +506,15 @@ _sqlType: {
 	out: _relSql
 }
 
-#mechaHatchSql: H={
+#mechaHatchSql: {
+	let H = self
 	hatch: #SqlHatchCall
 	_args: [if H.hatch.args != _|_ {[for _, a in H.hatch.args {(#sqlLit & {v: a}).out}]}, []][0]
-	out: "        PERFORM \(H.hatch.call)(\(strings.Join(_args, ", ")));"
+	out:   "        PERFORM \(H.hatch.call)(\(strings.Join(_args, ", ")));"
 }
 
-#mechaRaiseSql: R={
+#mechaRaiseSql: {
+	let R = self
 	value:     #MechaRaise
 	op:        *"INSERT" | "UPDATE" | "DELETE"
 	_isNotify: (R.value & #NotifyRaise) != _|_
@@ -524,21 +546,23 @@ _sqlType: {
 	][0]
 	_streamSql: [if _isStream {
 		"""
-		        PERFORM pg_notify('duckstream_\(R.value.stream)', jsonb_build_object('signal', '\(_streamSignal)', 'table', TG_TABLE_NAME, 'id', \(_rawStreamKey))::text);
-		"""
+			        PERFORM pg_notify('duckstream_\(R.value.stream)', jsonb_build_object('signal', '\(_streamSignal)', 'table', TG_TABLE_NAME, 'id', \(_rawStreamKey))::text);
+			"""
 	}, ""][0]
 
 	out: [if _isNotify {_notifySql}, _streamSql][0]
 }
 
-#mechaLockSql: L={
-	lock: #MechaReadLock
-	_table: [if L.lock.schema != _|_ {"\"\(L.lock.schema)\".\"\(L.lock.table)\""}, "\"\(L.lock.table)\""][0]
+#mechaLockSql: {
+	let L = self
+	lock:       #MechaReadLock
+	_table:     [if L.lock.schema != _|_ {"\"\(L.lock.schema)\".\"\(L.lock.table)\""}, "\"\(L.lock.table)\""][0]
 	_statement: "PERFORM 1 FROM \(_table) WHERE \"\(L.lock.key)\" IN (\(strings.Join([for value in L.lock.values {(#sqlLit & {v: value}).out}], ", "))) ORDER BY \"\(L.lock.key)\" FOR UPDATE;"
-	out: [if L.lock.when != _|_ {"IF (\(L.lock.when)) THEN\n\(_statement)\nEND IF;"}, _statement][0]
+	out:        [if L.lock.when != _|_ {"IF (\(L.lock.when)) THEN\n\(_statement)\nEND IF;"}, _statement][0]
 }
 
-#mechaActionSql: AC={
+#mechaActionSql: {
+	let AC = self
 	action: _
 	op:     *"INSERT" | "UPDATE" | "DELETE"
 	track:  *false | bool
@@ -584,21 +608,22 @@ _sqlType: {
 	out: strings.Join(list.Concat([_locks, _assigns, _effects, _spawns, _sends, _hatches, _raises, _reject]), "\n")
 }
 
-#mechaStateSql: ST={
-	table: string
-	field: string
-	name:  string
-	state: _
+#mechaStateSql: {
+	let ST = self
+	table:  string
+	field:  string
+	name:   string
+	state:  _
 	states: _
-	timed: *false | bool
+	timed:  *false | bool
 	// The effect each invoking state of the machine claims on entry.
-	invokes: _
-	pk: [...string]
-	cortex: *false | bool
+	invokes:      _
+	pk:           [...string]
+	cortex:       *false | bool
 	cortexStates: _
 	sourceEvents: *[] | [...string]
 
-	_type: [if ST.state["type"] != _|_ {ST.state["type"]}, "normal"][0]
+	_type:    [if ST.state["type"] != _|_ {ST.state["type"]}, "normal"][0]
 	_isFinal: _type == "final"
 
 	_finalBlock: """
@@ -646,10 +671,10 @@ _sqlType: {
 	_transitionBranches: [if !ST.cortex for t in _allTransitions if t.target != _|_ if t.event == _|_ || !list.Contains(ST.sourceEvents, t.event) {
 		_guardLine: [if t["guard"] != _|_ if t.delayMs == _|_ {
 			"""
-			        IF (\(t.guard)) IS NOT TRUE THEN
-			          RAISE EXCEPTION 'guard failed on % transition from % to %', '\(ST.table)', '\(ST.name)', '\(t.target)' USING ERRCODE = 'check_violation';
-			        END IF;
-			"""
+				        IF (\(t.guard)) IS NOT TRUE THEN
+				          RAISE EXCEPTION 'guard failed on % transition from % to %', '\(ST.table)', '\(ST.name)', '\(t.target)' USING ERRCODE = 'check_violation';
+				        END IF;
+				"""
 		}, ""][0]
 		_timerGate: [if ST.timed {
 			[if t.delayMs != _|_ {" AND timer_delay = '\(t.delayMs)' AND timer_branch = \(t.branch)"}, " AND timer_delay IS NULL"][0]
@@ -663,11 +688,11 @@ _sqlType: {
 		}]
 		_enterLines: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
 		"""
-		      IF NEW."\(ST.field)" = '\(t.target)'\(_timerGate) THEN
-		\(_guardLine)\(strings.Join(list.Concat([_exitActions, _actionLines, _entryActions, _enterLines]), "\n"))
-		        RETURN NEW;
-		      END IF;
-		"""
+			      IF NEW."\(ST.field)" = '\(t.target)'\(_timerGate) THEN
+			\(_guardLine)\(strings.Join(list.Concat([_exitActions, _actionLines, _entryActions, _enterLines]), "\n"))
+			        RETURN NEW;
+			      END IF;
+			"""
 	}]
 
 	_cortexRecipe: {
@@ -682,29 +707,29 @@ _sqlType: {
 			if t.target != _|_ {target: t.target}
 			if t.guard != _|_ {guard: t.guard}
 			unchanged: strings.Join(list.Concat([["NEW.\"\(ST.field)\" IS NOT DISTINCT FROM OLD.\"\(ST.field)\""], [for col, _ in {for a in t.actions if a.assign != _|_ for c, _ in a.assign {(c): true}} {"NEW.\"\(col)\" IS NOT DISTINCT FROM OLD.\"\(col)\""}]]), " AND ")
-			actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
+			actions:   [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
 		}]
 	}
 	_dispatchBlock: [if ST.cortex {
 		"""
-		    IF OLD."\(ST.field)" = '\(ST.name)' THEN
-		@PRONTO_XSTATE'\(base64.Encode(null, json.Marshal(_dispatchRecipe)))'
-		    END IF;
-		"""
+			    IF OLD."\(ST.field)" = '\(ST.name)' THEN
+			@PRONTO_XSTATE'\(base64.Encode(null, json.Marshal(_dispatchRecipe)))'
+			    END IF;
+			"""
 	}, ""][0]
 	_directRecipe: _cortexRecipe & {
 		mode: "direct"
 		transitions: list.Concat([
 			[for t in _allTransitions if t.target != _|_ if t.event == _|_ || !list.Contains(ST.sourceEvents, t.event) {
-				event: "direct:\(t.target)" + [if t.delayMs != _|_ {":\(t.delayMs):\(t.branch)"}, ""][0]
-				when: "NEW.\"\(ST.field)\" = '\(t.target)'" + [if ST.timed {[if t.delayMs != _|_ {" AND timer_delay = '\(t.delayMs)' AND timer_branch = \(t.branch)"}, " AND timer_delay IS NULL"][0]}, ""][0]
+				event:  "direct:\(t.target)" + [if t.delayMs != _|_ {":\(t.delayMs):\(t.branch)"}, ""][0]
+				when:   "NEW.\"\(ST.field)\" = '\(t.target)'" + [if ST.timed {[if t.delayMs != _|_ {" AND timer_delay = '\(t.delayMs)' AND timer_branch = \(t.branch)"}, " AND timer_delay IS NULL"][0]}, ""][0]
 				target: t.target
 				if t.guard != _|_ if t.delayMs == _|_ {guard: t.guard}
 				actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
 			}],
 			[for t in _invokeTransitions {
-				event: "outcome:\(t.outcomeKind):\(t.delivery)"
-				when: "NEW.\"\(ST.field)\" = '\(t.delivery)' AND " + [if t.outcomeKind == "done" {"outcome->>'kind' = 'done'"}, "outcome->>'kind' <> 'done'"][0]
+				event:  "outcome:\(t.outcomeKind):\(t.delivery)"
+				when:   "NEW.\"\(ST.field)\" = '\(t.delivery)' AND " + [if t.outcomeKind == "done" {"outcome->>'kind' = 'done'"}, "outcome->>'kind' <> 'done'"][0]
 				target: t.target
 				if t.guard != _|_ {guard: t.guard}
 				actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
@@ -713,20 +738,20 @@ _sqlType: {
 	}
 
 	_outcomeBranches: [if !ST.cortex for t in _invokeTransitions {
-		_kind: [if t.outcomeKind == "done" {"outcome->>'kind' = 'done'"}, "outcome->>'kind' <> 'done'"][0]
-		_guard: [if t.guard != _|_ {" AND (\(t.guard)) IS TRUE"}, ""][0]
+		_kind:    [if t.outcomeKind == "done" {"outcome->>'kind' = 'done'"}, "outcome->>'kind' <> 'done'"][0]
+		_guard:   [if t.guard != _|_ {" AND (\(t.guard)) IS TRUE"}, ""][0]
 		_actions: [for a in t.actions {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
-		_exit: [if ST.state.exit != _|_ for a in [if (ST.state.exit & [...]) != _|_ {ST.state.exit}, [ST.state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
-		_entry: [if ST.states[t.target].entry != _|_ for a in [if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
-		_enter: [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
+		_exit:    [if ST.state.exit != _|_ for a in [if (ST.state.exit & [...]) != _|_ {ST.state.exit}, [ST.state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
+		_entry:   [if ST.states[t.target].entry != _|_ for a in [if (ST.states[t.target].entry & [...]) != _|_ {ST.states[t.target].entry}, [ST.states[t.target].entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE"}).out}]
+		_enter:   [if ST.invokes[t.target] != _|_ {(#invokeEnterSql & {effect: ST.invokes[t.target], state: t.target, pk: ST.pk}).out}]
 		"""
-		      IF NEW."\(ST.field)" = '\(t.delivery)' AND \(_kind)\(_guard) THEN
-		\(strings.Join(_exit, "\n"))
-		        NEW."\(ST.field)" := '\(t.target)';
-		\(strings.Join(list.Concat([_actions, _entry, _enter]), "\n"))
-		        RETURN NEW;
-		      END IF;
-		"""
+			      IF NEW."\(ST.field)" = '\(t.delivery)' AND \(_kind)\(_guard) THEN
+			\(strings.Join(_exit, "\n"))
+			        NEW."\(ST.field)" := '\(t.target)';
+			\(strings.Join(list.Concat([_actions, _entry, _enter]), "\n"))
+			        RETURN NEW;
+			      END IF;
+			"""
 	}]
 
 	// Only the outcome the airlock recorded leaves an invoking state, so no other
@@ -734,11 +759,11 @@ _sqlType: {
 	_outcomeCheck: [if _invoking {
 		_key: (#ledgerKeySql & {effect: ST.invokes[ST.name], rec: "OLD"}).out
 		"""
-		      SELECT l."outcome" INTO outcome FROM "airlock"."external_effect_ledger" l WHERE l."key" = \(_key);
-		      IF outcome IS NULL OR outcome->>'target' IS DISTINCT FROM NEW."\(ST.field)" THEN
-		        RAISE EXCEPTION '% leaves \(ST.name) only by the recorded outcome of %', '\(ST.table)', \(_key) USING ERRCODE = 'check_violation';
-		      END IF;
-		"""
+			      SELECT l."outcome" INTO outcome FROM "airlock"."external_effect_ledger" l WHERE l."key" = \(_key);
+			      IF outcome IS NULL OR outcome->>'target' IS DISTINCT FROM NEW."\(ST.field)" THEN
+			        RAISE EXCEPTION '% leaves \(ST.name) only by the recorded outcome of %', '\(ST.table)', \(_key) USING ERRCODE = 'check_violation';
+			      END IF;
+			"""
 	}, ""][0]
 
 	_normalBlock: """
@@ -751,7 +776,7 @@ _sqlType: {
 		    END IF;
 		"""
 
-	out: [if _isFinal {_finalBlock}, _normalBlock][0]
+	out:      [if _isFinal {_finalBlock}, _normalBlock][0]
 	dispatch: _dispatchBlock
 }
 
@@ -801,10 +826,11 @@ _sqlType: {
 	ON CONFLICT (table_name) DO UPDATE SET reason = EXCLUDED.reason;
 	"""
 
-#mechaMachineSql: S={
-	machine: #MechaMachine
+#mechaMachineSql: {
+	let S = self
+	machine:  #MechaMachine
 	entities: {[string]: _}
-	effects: [string]:  #ExternalEffect
+	effects: [string]: #ExternalEffect
 	runtime: *true | bool
 	// The step that installs it, which a changed interpreter names.
 	step: *"010_machines.sql" | string
@@ -815,48 +841,48 @@ _sqlType: {
 		_field:  S.machine.field
 		_fnName: "trg_\(_table)_\(_field)_machine"
 
-		_stateNames: [for s, _ in S.machine.states {s}]
+		_stateNames:   [for s, _ in S.machine.states {s}]
 		_stateLitList: [for s in _stateNames {"'\(s)'"}]
 		_checkConstraint: """
 			ALTER TABLE "\(_table)" DROP CONSTRAINT IF EXISTS "\(_table)_\(_field)_check";
 			ALTER TABLE "\(_table)" ADD CONSTRAINT "\(_table)_\(_field)_check" CHECK ("\(_field)" IN (\(strings.Join(_stateLitList, ", ")))) NOT VALID;
 			"""
 
-		_invokes: {for sName, sBody in S.machine.states if sBody["invoke"] != _|_ {(sName): S.effects[sBody.invoke.src]}}
-		_hasInvoke: len([for _, _ in _invokes {true}]) > 0
-		_hasTimers: S.machine._timed
-		_cortex:    S.machine.cortex != _|_
-		_declare: [if _hasInvoke || _hasTimers || _cortex {"DECLARE\n" + strings.Join([if _hasInvoke {"  outcome jsonb;\n"}, if _hasTimers {"  timer_delay text;\n  timer_branch integer;\n"}, if _cortex {"  cortex_event text;\n  cortex_payload jsonb;\n  cortex_rows integer;\n  cortex_changed integer := 0;\n"}], "")}, ""][0]
-		_timerContext: [if _hasTimers {"  IF TG_OP = 'UPDATE' THEN\n" + (#TimerContextSql & {machine: S.machine.name, field: _field, pk: _pk, rec: "OLD"}).out + "\n  END IF;\n"}, ""][0]
+		_invokes:       {for sName, sBody in S.machine.states if sBody["invoke"] != _|_ {(sName): S.effects[sBody.invoke.src]}}
+		_hasInvoke:     len([for _, _ in _invokes {true}]) > 0
+		_hasTimers:     S.machine._timed
+		_cortex:        S.machine.cortex != _|_
+		_declare:       [if _hasInvoke || _hasTimers || _cortex {"DECLARE\n" + strings.Join([if _hasInvoke {"  outcome jsonb;\n"}, if _hasTimers {"  timer_delay text;\n  timer_branch integer;\n"}, if _cortex {"  cortex_event text;\n  cortex_payload jsonb;\n  cortex_rows integer;\n  cortex_changed integer := 0;\n"}], "")}, ""][0]
+		_timerContext:  [if _hasTimers {"  IF TG_OP = 'UPDATE' THEN\n" + (#TimerContextSql & {machine: S.machine.name, field: _field, pk: _pk, rec: "OLD"}).out + "\n  END IF;\n"}, ""][0]
 		_sameStateGate: [if _hasTimers {" AND timer_delay IS NULL"}, ""][0]
-		_pk: [for e in S.entities if e.table == _table for f in e.fields if f.pk != _|_ if f.pk {f.name}]
-		_initialEnter: [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk}).out + "\n"}, ""][0]
+		_pk:            [for e in S.entities if e.table == _table for f in e.fields if f.pk != _|_ if f.pk {f.name}]
+		_initialEnter:  [if _invokes[S.machine.initial] != _|_ {(#invokeEnterSql & {effect: _invokes[S.machine.initial], state: S.machine.initial, pk: _pk}).out + "\n"}, ""][0]
 		_initialActions: [if S.machine.states[S.machine.initial].entry != _|_
-			for a in [if (S.machine.states[S.machine.initial].entry & [...]) != _|_ {S.machine.states[S.machine.initial].entry}, [S.machine.states[S.machine.initial].entry]][0] {
-				(#mechaActionSql & {action: a, op: "INSERT"}).out + "\n"
-			}]
+		for a in [if (S.machine.states[S.machine.initial].entry & [...]) != _|_ {S.machine.states[S.machine.initial].entry}, [S.machine.states[S.machine.initial].entry]][0] {
+			(#mechaActionSql & {action: a, op: "INSERT"}).out + "\n"
+		}]
 		// A row in an invoking state is the ledger's instance until its outcome
 		// lands: its key fields and primary key stay as the ledger holds them,
 		// and it is not deleted, or the outcome could never be delivered.
 		_held: [for sName, x in _invokes {
 			_cols: list.SortStrings([for c, _ in {for f in list.Concat([x.key, _pk]) {(f): true}} {c}])
-			_key: (#ledgerKeySql & {effect: x, rec: "OLD"}).out
+			_key:  (#ledgerKeySql & {effect: x, rec: "OLD"}).out
 			"""
-			  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = '\(sName)' AND (\(strings.Join([for c in _cols {"OLD.\"\(c)\" IS DISTINCT FROM NEW.\"\(c)\""}], " OR "))) THEN
-			    RAISE EXCEPTION '% in \(sName) keeps its key until the outcome of %', '\(_table)', \(_key) USING ERRCODE = 'check_violation';
-			  END IF;
-			"""
+				  IF TG_OP = 'UPDATE' AND OLD."\(_field)" = '\(sName)' AND (\(strings.Join([for c in _cols {"OLD.\"\(c)\" IS DISTINCT FROM NEW.\"\(c)\""}], " OR "))) THEN
+				    RAISE EXCEPTION '% in \(sName) keeps its key until the outcome of %', '\(_table)', \(_key) USING ERRCODE = 'check_violation';
+				  END IF;
+				"""
 		}]
 		_deleteBlock: [if _hasInvoke {
 			"""
-			  IF TG_OP = 'DELETE' THEN
-			    IF OLD."\(_field)" IN (\(strings.Join([for sName, _ in _invokes {"'\(sName)'"}], ", "))) THEN
-			      RAISE EXCEPTION '% in % awaits an outcome and is not deleted', '\(_table)', OLD."\(_field)" USING ERRCODE = 'check_violation';
-			    END IF;
-			    RETURN OLD;
-			  END IF;
+				  IF TG_OP = 'DELETE' THEN
+				    IF OLD."\(_field)" IN (\(strings.Join([for sName, _ in _invokes {"'\(sName)'"}], ", "))) THEN
+				      RAISE EXCEPTION '% in % awaits an outcome and is not deleted', '\(_table)', OLD."\(_field)" USING ERRCODE = 'check_violation';
+				    END IF;
+				    RETURN OLD;
+				  END IF;
 
-			"""
+				"""
 		}, ""][0]
 		_ops: [if _hasInvoke {"INSERT OR UPDATE OR DELETE"}, "INSERT OR UPDATE"][0]
 		// A ledger key is a field's text, which for a date or time is the
@@ -864,14 +890,16 @@ _sqlType: {
 		// check's are one.
 		_locale: [if _hasInvoke || _hasTimers {"\nSET TimeZone = 'UTC'\nSET DateStyle = 'ISO, YMD'"}, ""][0]
 
-		_cortexStates: {if _cortex for name, state in S.machine.states {(name): {
-			if state.type != _|_ {type: state.type}
-			entry: list.Concat([
-				[if state.entry != _|_ for a in [if (state.entry & [...]) != _|_ {state.entry}, [state.entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}],
-				[if _invokes[name] != _|_ {(#invokeEnterSql & {effect: _invokes[name], state: name, pk: _pk}).out}],
-			])
-			exit: [if state.exit != _|_ for a in [if (state.exit & [...]) != _|_ {state.exit}, [state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
-		}}}
+		_cortexStates: {if _cortex for name, state in S.machine.states {
+			(name): {
+				if state.type != _|_ {type: state.type}
+				entry: list.Concat([
+					[if state.entry != _|_ for a in [if (state.entry & [...]) != _|_ {state.entry}, [state.entry]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}],
+					[if _invokes[name] != _|_ {(#invokeEnterSql & {effect: _invokes[name], state: name, pk: _pk}).out}],
+				])
+				exit: [if state.exit != _|_ for a in [if (state.exit & [...]) != _|_ {state.exit}, [state.exit]][0] {(#mechaActionSql & {action: a, op: "UPDATE", track: true}).out}]
+			}
+		}}
 		_statesSql: [for sName, sBody in S.machine.states {
 			#mechaStateSql & {
 				table:        _table
@@ -887,19 +915,19 @@ _sqlType: {
 				sourceEvents: [if _cortex {S.machine.cortex.sourceEvents}, []][0]
 			}
 		}]
-		_stateBlocks: [for s in _statesSql {s.out}]
+		_stateBlocks:    [for s in _statesSql {s.out}]
 		_dispatchBlocks: [if _cortex for s in _statesSql {s.dispatch}]
 		_frameRead: [if _cortex {
 			"""
-			  IF TG_OP = 'UPDATE' THEN
-			    DELETE FROM cortex_runtime.dispatch_frame WHERE backend = pg_backend_pid() AND xid = txid_current() AND relation = TG_RELID AND depth = pg_trigger_depth() AND machine = '\(S.machine.cortex.id)' AND row_key = OLD."\(_pk[0])"::text
-			      RETURNING event, payload INTO cortex_event, cortex_payload;
-			    IF FOUND THEN
-			\(strings.Join(_dispatchBlocks, "\n"))
-			      RETURN NULL;
-			    END IF;
-			  END IF;
-			"""
+				  IF TG_OP = 'UPDATE' THEN
+				    DELETE FROM cortex_runtime.dispatch_frame WHERE backend = pg_backend_pid() AND xid = txid_current() AND relation = TG_RELID AND depth = pg_trigger_depth() AND machine = '\(S.machine.cortex.id)' AND row_key = OLD."\(_pk[0])"::text
+				      RETURNING event, payload INTO cortex_event, cortex_payload;
+				    IF FOUND THEN
+				\(strings.Join(_dispatchBlocks, "\n"))
+				      RETURN NULL;
+				    END IF;
+				  END IF;
+				"""
 		}, ""][0]
 
 		_triggerBody: """
@@ -942,55 +970,56 @@ _sqlType: {
 		_branches: [for op, tr in S.machine._on {
 			let row = [if op == "delete" {"OLD"}, "NEW"][0]
 			"""
-			  IF TG_OP = '\(strings.ToUpper(op))' THEN
-			\((#lifecycleGuardSql & {e: _entity, guards: tr.guard, "row": row}).out)
-			\(strings.Join([for a in tr.actions {(#mechaActionSql & {action: a, "op": strings.ToUpper(op)}).out}], "\n"))
-			    RETURN \(row);
-			  END IF;
-			"""
+				  IF TG_OP = '\(strings.ToUpper(op))' THEN
+				\((#lifecycleGuardSql & {e: _entity, guards: tr.guard, "row": row}).out)
+				\(strings.Join([for a in tr.actions {(#mechaActionSql & {action: a, "op": strings.ToUpper(op)}).out}], "\n"))
+				    RETURN \(row);
+				  END IF;
+				"""
 		}]
 		_timing: [if S.machine["timing"] != _|_ {S.machine.timing}, "AFTER"][0]
 		"""
-		CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
-		LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
-		DECLARE
-		  items jsonb;
-		  event jsonb;
-		  v text;
-		BEGIN
-		  items := CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN jsonb_build_array(to_jsonb(OLD)) ELSE '[]'::jsonb END;
-		  event := jsonb_build_object('type', lower(TG_OP), 'row', CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END);
-		\(strings.Join(_branches, "\n"))
-		  RETURN COALESCE(NEW, OLD);
-		END $$;
+			CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
+			LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+			DECLARE
+			  items jsonb;
+			  event jsonb;
+			  v text;
+			BEGIN
+			  items := CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN jsonb_build_array(to_jsonb(OLD)) ELSE '[]'::jsonb END;
+			  event := jsonb_build_object('type', lower(TG_OP), 'row', CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END);
+			\(strings.Join(_branches, "\n"))
+			  RETURN COALESCE(NEW, OLD);
+			END $$;
 
-		REVOKE EXECUTE ON FUNCTION "\(_fnName)"() FROM PUBLIC;
-		DROP TRIGGER IF EXISTS "\(_fnName)" ON "\(_table)";
-		CREATE TRIGGER "\(_fnName)"
-		  \(_timing) INSERT OR UPDATE OR DELETE ON "\(_table)"
-		  FOR EACH ROW EXECUTE FUNCTION "\(_fnName)"();
-		"""
+			REVOKE EXECUTE ON FUNCTION "\(_fnName)"() FROM PUBLIC;
+			DROP TRIGGER IF EXISTS "\(_fnName)" ON "\(_table)";
+			CREATE TRIGGER "\(_fnName)"
+			  \(_timing) INSERT OR UPDATE OR DELETE ON "\(_table)"
+			  FOR EACH ROW EXECUTE FUNCTION "\(_fnName)"();
+			"""
 	}, ""][0]
 
-	_compiledSql: [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
-	_signature: hex.Encode(sha256.Sum256(_compiledSql))
+	_compiledSql:   [if S.machine["states"] != _|_ {_stateMachineSql}, _lifecycleMachineSql][0]
+	_signature:     hex.Encode(sha256.Sum256(_compiledSql))
 	_timerFunction: [if S.machine._timed {"trg_\(_table)_\(S.machine.field)_timer_arm"}, ""][0]
 	_timerCheck: [if S.machine._timed {
 		"""
-		DO $$ BEGIN
-		  IF obj_description(to_regprocedure('"\(_timerFunction)"()'), 'pg_proc') IS DISTINCT FROM '\(_signature)' THEN
-		    RAISE EXCEPTION 'machine \(S.machine.name) timer interpreter differs from the program: migrate \(S.step) and existing state-entry deadlines before starting';
-		  END IF;
-		END $$;
-		"""
+			DO $$ BEGIN
+			  IF obj_description(to_regprocedure('"\(_timerFunction)"()'), 'pg_proc') IS DISTINCT FROM '\(_signature)' THEN
+			    RAISE EXCEPTION 'machine \(S.machine.name) timer interpreter differs from the program: migrate \(S.step) and existing state-entry deadlines before starting';
+			  END IF;
+			END $$;
+			"""
 	}, ""][0]
-	out: _compiledSql + [if S.machine._timed {"\nCOMMENT ON FUNCTION \"\(_timerFunction)\"() IS '\(_signature)';"}, ""][0]
+	out:               _compiledSql + [if S.machine._timed {"\nCOMMENT ON FUNCTION \"\(_timerFunction)\"() IS '\(_signature)';"}, ""][0]
 	_effectUpgradeSql: strings.Join([if S.machine._timed {_timerCheck}, out], "\n\n")
 }
 
 // A jsonb_build_object over a map of input values: "NEW.<col>"/"OLD.<col>"
 // read the row, {raw: sql} is an expression, anything else a literal.
-#jsonbObjectSql: J={
+#jsonbObjectSql: {
+	let J = self
 	values: {[string]: _}
 	out: [if len(J.values) > 0 {
 		"jsonb_build_object(" + strings.Join([for k, v in J.values {
@@ -1010,13 +1039,15 @@ _sqlType: {
 }
 
 // The instance's primary key, which the airlock's outcome UPDATE names.
-#ledgerRowSql: R={
-	pk: [...string]
+#ledgerRowSql: {
+	let R = self
+	pk:  [...string]
 	out: "jsonb_build_object(" + strings.Join([for f in R.pk {"'\(f)', NEW.\"\(f)\""}], ", ") + ")"
 }
 
 // The ledger key of an effect for the row `rec` (NEW or OLD) names.
-#ledgerKeySql: K={
+#ledgerKeySql: {
+	let K = self
 	effect: _
 	rec:    "NEW" | "OLD"
 	// One field is the key as it is; several are JSON-encoded, so a ':' in a
@@ -1042,10 +1073,11 @@ _sqlType: {
 // first. Graphile's own default.
 #QueueHeadroom: 25
 
-#invokeEnterSql: I={
+#invokeEnterSql: {
+	let I = self
 	effect: _
 	state:  string
-	pk: [...string]
+	pk:     [...string]
 	_key:   (#ledgerKeySql & {effect: I.effect, rec: "NEW"}).out
 	out: """
 		        INSERT INTO "airlock"."external_effect_ledger" ("key", "effect", "row", "input")
@@ -1054,7 +1086,7 @@ _sqlType: {
 		        IF NOT FOUND THEN
 		          RAISE EXCEPTION 'external effect % was already performed: entering \(I.state) again needs a new key', \(_key) USING ERRCODE = 'unique_violation';
 		        END IF;
-		        PERFORM graphile_worker.add_job('external_effect', json_build_object('key', \(_key)), job_key => \(_key), max_attempts => \(I.effect.attempts + #QueueHeadroom));
+		        PERFORM graphile_worker.add_job('external_effect', json_build_object('key', \(_key)), job_key => \(_key), max_attempts => \(I.effect.attempts+#QueueHeadroom));
 		        UPDATE "public"."schedule" SET "due_at" = date_trunc('milliseconds', clock_timestamp()), "last_tick_at" = NULL
 		         WHERE "name" = 'airlock' AND "last_tick_at" IS NOT NULL
 		           AND "name" IN (SELECT "name" FROM "public"."schedule" WHERE "name" = 'airlock' FOR UPDATE SKIP LOCKED);
@@ -1068,7 +1100,7 @@ _sqlType: {
 // and the edge's object reads the same code.
 #signalsSql: {
 	signals: {...}
-	state: {...}
+	state:   {...}
 	_branches: [for name, sg in signals {
 		let m = state.mecha.rows[sg.machine]
 		let ent = [for en, e in state.entities if en == m.entity || e.table == m.entity {e}][0]
@@ -1077,32 +1109,32 @@ _sqlType: {
 		let invoking = [for sn, st in m.states if st.invoke != _|_ {"'\(sn)'"}]
 		let moves = [for sn, st in m.states if st.on != _|_ if st.on[sg.event] != _|_ {
 			"""
-			      IF state_now = '\(sn)' THEN
-			        UPDATE "\(ent.table)" SET "\(m.field)" = '\(st.on[sg.event])', "\(sg.count)" = "\(sg.count)" + 1 WHERE "\(pk)" = row_key;
-			        RETURN 'moved';
-			      END IF;
-			"""
+				      IF state_now = '\(sn)' THEN
+				        UPDATE "\(ent.table)" SET "\(m.field)" = '\(st.on[sg.event])', "\(sg.count)" = "\(sg.count)" + 1 WHERE "\(pk)" = row_key;
+				        RETURN 'moved';
+				      END IF;
+				"""
 		}]
 		"""
-		  IF name = '\(name)' THEN
-		    DECLARE
-		      row_key "\(ent.table)"."\(pk)"%TYPE;
-		      state_now text;
-		    BEGIN
-		      BEGIN
-		        row_key := \(idSql);
-		      EXCEPTION WHEN data_exception THEN
-		        RETURN 'ignored';
-		      END;
-		      IF row_key IS NULL THEN RETURN 'ignored'; END IF;
-		      SELECT "\(m.field)"::text INTO state_now FROM "\(ent.table)" WHERE "\(pk)" = row_key FOR UPDATE;
-		      IF NOT FOUND THEN RETURN 'ignored'; END IF;
-		      \([if len(invoking) > 0 {"IF state_now IN (\(strings.Join(invoking, ", "))) THEN RAISE EXCEPTION 'a check of % is in flight', row_key USING ERRCODE = 'PT503'; END IF;"}, ""][0])
-		\(strings.Join(moves, "\n"))
-		      RETURN 'ignored';
-		    END;
-		  END IF;
-		"""
+			  IF name = '\(name)' THEN
+			    DECLARE
+			      row_key "\(ent.table)"."\(pk)"%TYPE;
+			      state_now text;
+			    BEGIN
+			      BEGIN
+			        row_key := \(idSql);
+			      EXCEPTION WHEN data_exception THEN
+			        RETURN 'ignored';
+			      END;
+			      IF row_key IS NULL THEN RETURN 'ignored'; END IF;
+			      SELECT "\(m.field)"::text INTO state_now FROM "\(ent.table)" WHERE "\(pk)" = row_key FOR UPDATE;
+			      IF NOT FOUND THEN RETURN 'ignored'; END IF;
+			      \([if len(invoking) > 0 {"IF state_now IN (\(strings.Join(invoking, ", "))) THEN RAISE EXCEPTION 'a check of % is in flight', row_key USING ERRCODE = 'PT503'; END IF;"}, ""][0])
+			\(strings.Join(moves, "\n"))
+			      RETURN 'ignored';
+			    END;
+			  END IF;
+			"""
 	}]
 	// A signal may move an entity whose table a later migration creates
 	// (#laterEntityMigrations), after this script on a fresh database: the
@@ -1197,7 +1229,8 @@ _sqlType: {
 // own columns: the table name in the entity's policies, the parent alias
 // when a folder-scope child inlines this clause. `table` is the private
 // entity's table regardless of qual — it names the shared-arm helper.
-#ownedUsing: U={
+#ownedUsing: {
+	let U = self
 	a:     #Access
 	qual:  string
 	table: string
@@ -1228,7 +1261,9 @@ _sqlType: {
 // One entity's RLS block. Policy names are deterministic:
 // <table>_<role>_<action>. Every mode grants service ALL; the floor binds
 // PUBLIC and 001 exempts service from it by role attribute.
-#policySql: P={
+#policySql: {
+	let P = self
+
 	// These reasons are read by a person out of rls_exempt, so each says why
 	// rather than naming a code. Empty means floored. The one that is not
 	// self-evident from the string: a per-object share is unfloorable because
@@ -1273,16 +1308,16 @@ _sqlType: {
 		_parentTable: P.entities[P.e.access.parent].table
 		_scopeTrigger: [
 			"""
-			DROP TRIGGER IF EXISTS \(P._t)_scope ON \(P._t);
-			CREATE TRIGGER \(P._t)_scope BEFORE INSERT OR UPDATE ON \(P._t)
-			  FOR EACH ROW EXECUTE FUNCTION mecha.scope_from_parent('\(P._parentTable)', 'id', '\(P.e.access.on)');
-			""",
+				DROP TRIGGER IF EXISTS \(P._t)_scope ON \(P._t);
+				CREATE TRIGGER \(P._t)_scope BEFORE INSERT OR UPDATE ON \(P._t)
+				  FOR EACH ROW EXECUTE FUNCTION mecha.scope_from_parent('\(P._parentTable)', 'id', '\(P.e.access.on)');
+				""",
 		]
 	}
 
-	e: _
+	e:        {access: #Access, ...}
 	entities: _ // parent lookup for folder scope
-	_t: P.e.table
+	_t:       P.e.table
 	if P.e.access.scope == "private" {
 		_using: (#ownedUsing & {a: P.e.access, qual: P._t, table: P._t}).out
 		// The helper runs as the migration superuser, so its read of the via
@@ -1317,17 +1352,18 @@ _sqlType: {
 		_onType: [for f in P.e.fields if f.name == P.e.access.on {f.type}][0]
 		_pkType: [for f in P._parent.fields if f.pk {f.type}][0]
 		_onCast: [if P._onType == P._pkType {""}, "::\(_sqlType[P._pkType])"][0]
-		_pre: []
-		_expr: "EXISTS (SELECT 1 FROM \(P._parent.table) p WHERE p.id = \(P._t).\(P.e.access.on)\(P._onCast) AND (\((#ownedUsing & {a: P._parent.access, qual: "p", table: P._parent.table}).out)))"
+		_pre:    []
+		_expr:   "EXISTS (SELECT 1 FROM \(P._parent.table) p WHERE p.id = \(P._t).\(P.e.access.on)\(P._onCast) AND (\((#ownedUsing & {a: P._parent.access, qual: "p", table: P._parent.table}).out)))"
 		_appUser: [
 			(#policy & {name: "\(P._t)_app_user_all", table: P._t, rest: "FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr))"}).out,
 		]
 	}
 	if P.e.access.scope == "public" {
-		_pre: []
+		_pre:   []
+		_write: ({write: *false | bool | "update", ...} & P.e.access).write
 		_appUser: list.Concat([
 			[(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (true)"}).out],
-			[if P.e.access["write"] != _|_ if P.e.access.write == true || P.e.access.write == "update" {
+			[if P._write == true || P._write == "update" {
 				(#policy & {name: "\(P._t)_app_user_write", table: P._t, rest: "FOR ALL TO app_user USING (true) WITH CHECK (true)"}).out
 			}],
 		])
@@ -1358,7 +1394,7 @@ _sqlType: {
 	// encode: a shared entity by its own key, its grant table by the sharee,
 	// a composition by its parent. Only where the parent is shared: a floored
 	// parent's children already carry its scope.
-	_pkName: [for f in P.e.fields if f.pk {f.name}][0]
+	_pkName:   [for f in P.e.fields if f.pk {f.name}][0]
 	_isShared: bool
 	if P.e.access.scope == "private" {_isShared: P.e.access.shared != _|_}
 	if P.e.access.scope != "private" {_isShared: false}
@@ -1404,9 +1440,10 @@ _sqlType: {
 // Prefix 799 is reserved for write permissions, before schedules and seeds.
 // A separate migration preserves 006's digest when narrowing an existing public
 // writer. The migration ledger can apply the restriction without resetting data.
-#publicUpdateSql: P={
-	e:  #Entity
-	_t: P.e.table
+#publicUpdateSql: {
+	let P = self
+	e:        #Entity
+	_t:       P.e.table
 	_columns: strings.Join([for f in P.e.fields if !f.pk {f.name}], ", ")
 	out: strings.Join([
 		"DROP POLICY IF EXISTS \(P._t)_app_user_write ON \(P._t);",
@@ -1421,8 +1458,9 @@ _sqlType: {
 // whoever made it: a database outliving its volume would publish every table
 // but the newest, and a WAL reader that arrives first makes it without the
 // generated columns. The options sit outside the DO block, where squawk sees them.
-#publication: P={
-	name: string
+#publication: {
+	let P = self
+	name:   string
 	tables: [...string]
 	out: """
 		DO $$ DECLARE t text; BEGIN
@@ -1447,39 +1485,41 @@ _sqlType: {
 // entry's key as one quoted identifier, so a schema-qualified name fails it.
 // Conduit names a collection without its schema, so the marker reaches the
 // bus as `__table: txn_trace`, which an app table must not also be.
-#txnMarker: M={
-	pub: string
-	tables: [...string]
+#txnMarker: {
+	let M = self
+	pub:         string
+	tables:      [...string]
 	_unshadowed: true & !list.Contains(M.tables, "txn_trace")
 	out: strings.Join(list.Concat([[
 		"""
-		DO $$ BEGIN
-		  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables
-		                 WHERE pubname = '\(M.pub)' AND schemaname = 'mecha' AND tablename = 'txn_trace') THEN
-		    ALTER PUBLICATION \(M.pub) ADD TABLE mecha.txn_trace;
-		  END IF;
-		END $$;
-		""",
+			DO $$ BEGIN
+			  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables
+			                 WHERE pubname = '\(M.pub)' AND schemaname = 'mecha' AND tablename = 'txn_trace') THEN
+			    ALTER PUBLICATION \(M.pub) ADD TABLE mecha.txn_trace;
+			  END IF;
+			END $$;
+			""",
 	], [for t in M.tables {
 		"""
-		CREATE OR REPLACE TRIGGER mark_txn BEFORE INSERT OR UPDATE OR DELETE ON \(t)
-		  FOR EACH STATEMENT EXECUTE FUNCTION mecha.mark_txn();
-		"""
+			CREATE OR REPLACE TRIGGER mark_txn BEFORE INSERT OR UPDATE OR DELETE ON \(t)
+			  FOR EACH STATEMENT EXECUTE FUNCTION mecha.mark_txn();
+			"""
 	}]]), "\n")
 }
 
 // Column conduit stamps onto every bus row naming the table it came from. Not
 // a database column: it exists only on the wire, so it must not collide with
 // one, hence the reserved prefix.
-_cdcTableField: "__table"
+_cdcTableField:  "__table"
 _cdcBeforeField: "__before"
 
 // A cdc-events stream's input processors: mecha's cdc_trace_join (the
 // transform's -r cdc-trace.yaml) consumes the transaction markers and stamps
 // each row's @traceparent, keyed by a name unique to the stream.
-#cdcTraceJoin: J={
+#cdcTraceJoin: {
+	let J = self
 	consumer: string
-	out: [{mutation: "meta cdc_consumer = \(json.Marshal(J.consumer))"}, {resource: "cdc_trace_join"}]
+	out:      [{mutation: "meta cdc_consumer = \(json.Marshal(J.consumer))"}, {resource: "cdc_trace_join"}]
 }
 
 // Sent with each call a stream makes for a row, so the call joins the row's
@@ -1487,7 +1527,8 @@ _cdcBeforeField: "__before"
 // marked with that trace too. Unset metadata sends no header.
 _traceHeader: include_patterns: ["^traceparent$"]
 
-#rpkPipeline: R={
+#rpkPipeline: {
+	let R = self
 	p:           #Pipeline
 	sourceTable: string
 	sinkTable:   string
@@ -1507,20 +1548,22 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// as JSON-encoded row strings) beside the rows so a delete's key stays
 	// reachable for delete-to-zero emissions.
 	_fetch: branch: {
-		processors: [{http: {
-			url:      "${CRUD_URL}/\(R.sourceTable)?\(R.p.transform.aggregate)"
-			verb:     "GET"
-			metadata: _traceHeader
-			if R.authOn {
-				headers: Authorization: "Bearer ${SERVICE_JWT}"
+		processors: [{
+			http: {
+				url:      "${CRUD_URL}/\(R.sourceTable)?\(R.p.transform.aggregate)"
+				verb:     "GET"
+				metadata: _traceHeader
+				if R.authOn {
+					headers: Authorization: "Bearer ${SERVICE_JWT}"
+				}
 			}
-		}}]
+		}]
 		result_map: "root.rows = this"
 	}
 	out: {
 		input: redis_streams: {
-			url: "${REDIS_URL}"
-			streams: ["cdc-events"]
+			url:            "${REDIS_URL}"
+			streams:        ["cdc-events"]
 			body_key:       "data"
 			consumer_group: R.p.group
 		}
@@ -1538,27 +1581,33 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// a refused row still pays a PostgREST GET, still runs the app's
 			// mapping over unconverted values, and reaches the catch with the
 			// transform's output in hand instead of the row that refused.
-			{"try": [
-				{bloblang: "let carriers = \(json.Marshal(R.carriers))\n" + _cdcTypesAsset},
-				R._fetch,
-				{bloblang: R.p.transform.bloblang},
-			]},
+			{
+				"try": [
+					{bloblang: "let carriers = \(json.Marshal(R.carriers))\n" + _cdcTypesAsset},
+					R._fetch,
+					{bloblang: R.p.transform.bloblang},
+				]
+			},
 			// A failed processor leaves the message untouched and carries on, so
 			// without this a throwing mapping silently POSTs the CloudEvent
 			// envelope and the only trace is PostgREST rejecting a column named
 			// `data`. Name the pipeline and the input, then drop: the read is
 			// absolute, so the next event for that key repairs the sink.
-			{catch: [
-				{log: {
-					level:   "ERROR"
-					message: "\(R.p.name): transform failed (${! error() }) on ${! content() }"
-				}},
-				{mapping: "root = deleted()"},
-			]},
+			{
+				catch: [
+					{
+						log: {
+							level:   "ERROR"
+							message: "\(R.p.name): transform failed (${! error() }) on ${! content() }"
+						}
+					},
+					{mapping: "root = deleted()"},
+				]
+			},
 		]
 		output: retry: {
 			max_retries: 3
-			backoff: {initial_interval: "2s", max_interval: "30s", max_elapsed_time: "3m"}
+			backoff:     {initial_interval: "2s", max_interval: "30s", max_elapsed_time: "3m"}
 			output: http_client: {
 				// CRUD_URL is PostgREST direct, never the gateway: Caddy's
 				// client-facing Prefer injection would clobber the
@@ -1583,7 +1632,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // the filter's time tokens as metadata (and the PATCH body as root), and the
 // http_client mutates the sink rows the filter matches. Derived entirely —
 // no .blobl assembly, no browser shim.
-#rpkScheduled: R={
+#rpkScheduled: {
+	let R = self
 	p:          #Pipeline
 	sinkTable:  string
 	authOn:     *false | bool // same service-token contract as #rpkPipeline
@@ -1599,15 +1649,16 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	_rootLine: [if R.p.set != _|_ {"root = " + json.Marshal(R.p.set)}, "root = {}"][0]
 	_url: "${CRUD_URL}/\(R.sinkTable)?" + strings.Replace(
 		strings.Replace(R.p.filter, "{cutoff}", "${! meta(\"cutoff\") }", -1),
-		"{nowts}", "${! meta(\"nowts\") }", -1)
+		"{nowts}", "${! meta(\"nowts\") }", -1,
+	)
 	out: {
-		input: generate: {interval: R.p.interval, mapping: "root = {}"}
+		input: generate:      {interval: R.p.interval, mapping: "root = {}"}
 		pipeline: processors: [{bloblang: strings.Join(list.Concat([R._metaLines, [R._rootLine]]), "\n")}]
 		output: retry: {
 			max_retries: 3
-			backoff: {initial_interval: "2s", max_interval: "30s", max_elapsed_time: "3m"}
+			backoff:     {initial_interval: "2s", max_interval: "30s", max_elapsed_time: "3m"}
 			output: http_client: {
-				url: R._url
+				url:  R._url
 				verb: [if R.p.action == "delete" {"DELETE"}, "PATCH"][0]
 				if R.p.action == "update" || R.authOn {
 					headers: {
@@ -1632,18 +1683,21 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // deletes the call itself makes of them, cost a call per batch rather than per
 // row. Those deletes are what wake it again while work remains, and the call
 // that finds none changes nothing, so an idle stack calls nothing.
-#rpkDrain: R={
+#rpkDrain: {
+	let R = self
 	d:      #Drain
 	app:    string
 	authOn: *false | bool // same service-token contract as #rpkPipeline
 	out: {
 		input: broker: inputs: [
-			{redis_streams: {
-				url: "${REDIS_URL}"
-				streams: ["cdc-events"]
-				body_key:       "data"
-				consumer_group: "\(R.app)-\(R.d.name)"
-			}},
+			{
+				redis_streams: {
+					url:            "${REDIS_URL}"
+					streams:        ["cdc-events"]
+					body_key:       "data"
+					consumer_group: "\(R.app)-\(R.d.name)"
+				}
+			},
 			// Rows queued before change capture began, or while the stream was
 			// down past the bus's retention, were never heard.
 			{generate: {count: 1, interval: "", mapping: "root = {\"wake\": \"start\"}"}},
@@ -1682,7 +1736,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 // Every stream the transform runs, by name. A pipeline and a drain share the
 // file docker/<app>-<name>.yaml, so one name for both is a conflict here.
-#streams: S={
+#streams: {
+	let S = self
 	code: _
 	out: {
 		for n, _ in S.code.state.pipelines {(n): "pipeline"}
@@ -1694,15 +1749,16 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // generated HTML/CSS/Jessie themselves; this only wires routes, data files,
 // and pipeline topology to the filesystem. All paths are app-relative — the
 // same path language as the manifest.
-#shellConfig: S={
-	code!: _
+#shellConfig: {
+	let S = self
+	code!:       _
 	development: *false | bool
-	adapters: *[] | [...string]
+	adapters:    *[] | [...string]
 	_appAdapters: {for _, screen in S.code.surface.screens for p in screen.files.adapters if !strings.HasPrefix(p, "/") {
 		(pathpkg.Base(p)): {(p): true}
 	}}
 	_composedHandlers: [if S.code.state.cortex != _|_ for _, chart in S.code.state.cortex if chart.setup != _|_ for name, actor in chart.setup.actors if list.Contains(["session", "sync", "local"], actor.via) if actor.handler != _|_ {"shell/handlers/\(name).js"}]
-	migrations: [...string]
+	migrations:        [...string]
 	// The terminal's measured floors, carried into the file visual lint
 	// reads. #scale publishes the same struct as --min-*, so the rung an author
 	// is sent to and the threshold a tap target is held to are one declaration.
@@ -1726,7 +1782,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		if !S.development {for t, n in S.code.#collections {(t): n}}
 		if S.development {for n, e in S.code.state.entities {(e.table): n}}
 	}
-	_tables: {for t, _ in S._collections {(t): true}}
+	_tables:    {for t, _ in S._collections {(t): true}}
 	_tablePath: {for t, n in S._collections {(t): S.code.state.entities[n].durability}}
 
 	// Browser-only durabilities. They are collections like any other — read by a
@@ -1734,21 +1790,21 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// a local factory instead of an Electric shape, so they cannot be listed
 	// among the tables it subscribes.
 	_localTables: {for _, e in S.code.state.entities if !e.server {(e.table): true}}
-	_local: {for t, p in S._tablePath if S._localTables[t] != _|_ {(t): p}}
-	_tableKeys: {for t, n in S._collections {(t): S.code._readKey[n]}}
-	_nonIdKeys: {for t, k in S._tableKeys if k != "id" {(t): k}}
+	_local:       {for t, p in S._tablePath if S._localTables[t] != _|_ {(t): p}}
+	_tableKeys:   {for t, n in S._collections {(t): S.code._readKey[n]}}
+	_nonIdKeys:   {for t, k in S._tableKeys if k != "id" {(t): k}}
 	// Natural keys only: a partial unique (`where:`) witnesses a slot's
 	// cardinality but cannot resolve an upsert, so it stays out of `uniques:`.
-	_naturalKeys: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where == _|_ {u.cols}]}}
+	_naturalKeys:  {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where == _|_ {u.cols}]}}
 	_uniqueTables: [for t, ks in S._naturalKeys if len(ks) > 0 {t}]
 	// Partial uniques travel apart, as the whole invariant: the terminal
 	// reconciles surviving browser-durability rows against them at first load.
 	_partialUniques: {for _, e in S.code.state.entities {(e.table): [for u in e.uniques if u.where != _|_ {cols: u.cols, where: u.where}]}}
-	_partialTables: [for t, ps in S._partialUniques if len(ps) > 0 {t}]
+	_partialTables:  [for t, ps in S._partialUniques if len(ps) > 0 {t}]
 	// A local table's `required: false` columns and their types, which the
 	// terminal fills on stored rows that predate them (data-sync.js fill).
 	// Server tables are left out: Postgres answers a missing value as null.
-	_optional: {for _, e in S.code.state.entities if S._local[e.table] != _|_ {(e.table): [for f in e.fields if !f.required && !f.retired {name: f.name, type: f.type}]}}
+	_optional:       {for _, e in S.code.state.entities if S._local[e.table] != _|_ {(e.table): [for f in e.fields if !f.required && !f.retired {name: f.name, type: f.type}]}}
 	_optionalTables: [for t, cs in S._optional if len(cs) > 0 {t}]
 	// What the terminal's own checks judge an app against: the columns a filter
 	// may name, the pk, unique field or declared unique that witnesses a slot's
@@ -1804,9 +1860,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}}
 	// The seeds #appMigrations.seeded leaves out: a browser durability has no
 	// migration to render into, so the terminal is told the rows instead.
-	_localSeeds: {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
+	_localSeeds:  {for _, e in S.code.state.entities if S._local[e.table] != _|_ if len(e.seed) > 0 {(e.table): e.seed}}
 	_seededLocal: [for t, _ in S._localSeeds {t}]
-	_unitNames: [for n, _ in S.code.capabilities.vendored {n}]
+	_unitNames:   [for n, _ in S.code.capabilities.vendored {n}]
 	_access: {for _, e in S.code.state.entities if S._tables[e.table] != _|_ if e.access != _|_ {
 		(e.table): {
 			scope: e.access.scope
@@ -1851,7 +1907,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}}
 	}
 	out: {
-		app:    S.code.meta.name
+		app: S.code.meta.name
 		if S.code.state.cortex != _|_ {
 			for _, c in S.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "omnishell" {
 				cortex: {config: c.config, actors: {for name, actor in c.setup.actors if actor.via == "navigation" || actor.via == "rows" {(name): actor}}}
@@ -1980,8 +2036,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 		// Natural keys, so the terminal can resolve a row the way the database
 		// would: an upsert writes "the row for this key", which is a local
-		// question the collection already answers. Guarded on a LIST: len() over
-		// the struct a comprehension builds reads as incomplete in cue 0.16.
+		// question the collection already answers. Guarded on a list so len()
+		// stays concrete across comprehension-built structs.
 		if len(S._uniqueTables) > 0 {
 			uniques: {
 				for t, ks in S._naturalKeys if len(ks) > 0 {
@@ -2044,7 +2100,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							}}}
 						}}
 						ports: {
-							reads: [for r in v.ports.reads {S.code.state.entities[r].table}]
+							reads:  [for r in v.ports.reads {S.code.state.entities[r].table}]
 							raises: [if v.memo != _|_ {{for r, _ in v.ports.raises {(r): _memo.shape}}}, v.ports.raises][0]
 						}
 						// The memo as the terminal performs it: the table, the key and
@@ -2054,10 +2110,11 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						}
 						if len(v.grants) > 0 {grants: v.grants}
 						if v.subdomain != _|_ {subdomain: v.subdomain}
+
 						// What a single-file page inlines for the unit.
 						files: v.files
 						if v.role == "presenter" && v.isolation == "agent" {
-							role: "presenter"
+							role:    "presenter"
 							scripts: [for u in v.scripts {url: u, integrity: S.presenter.scripts[u]}]
 							// The app's content-addressed assets are read through the seat beside
 							// its own files.
@@ -2068,24 +2125,28 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				}
 			}
 		}
+
 		// Each kinetic child the terminal mounts on a data-kinetic, as it
 		// loads them: the linked graphs, the presenter unit, the mappers.
 		let _kinetic = {if S.code.state.cortex != _|_ for _, c in S.code.state.cortex if c.setup != _|_ for n, a in c.setup.actors if a.via == "kinetic" {(n): a}}
 		if len(_kinetic) > 0 {
-			kinetic: {for n, a in _kinetic {(n): {
-				engine: "shell/engines/\(a.engine).json"
-				if a.sound != _|_ {sound: "shell/engines/\(a.sound).json"}
-				presenter: a.presenter
-				bindings:  a.bindings
-				if a.seats != _|_ {seats: a.seats}
-				menu:  a.menu
-				pause: a.pause
-			}}}
+			kinetic: {for n, a in _kinetic {
+				(n): {
+					engine: "shell/engines/\(a.engine).json"
+					if a.sound != _|_ {sound: "shell/engines/\(a.sound).json"}
+					presenter: a.presenter
+					bindings:  a.bindings
+					if a.seats != _|_ {seats: a.seats}
+					menu:  a.menu
+					pause: a.pause
+				}
+			}}
 			// The ICE servers its online race gathers over: none in a dev or
 			// CI stack, the release target's in a release (distribution's
 			// #IceServers, written as the tree is addressed).
 			iceServers: []
 		}
+
 		// The worker script's own policy, which an edge door sends as a
 		// header the way the container door's Caddyfile does, and the
 		// destinations its Worker refuses.
@@ -2095,7 +2156,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		}
 		let _localStatecharts = {if S.code.state.cortex != _|_ for _, chart in S.code.state.cortex for name, actor in chart.setup.actors if actor.via == "local" if actor.handler != _|_ {"shell/handlers/\(name).js": true}}
 		let _endowments = [if S.code.surface.endowments != _|_ {S.code.surface.endowments}, {}][0]
-		if len(_localStatecharts) + len(_endowments) > 0 {
+		if len(_localStatecharts)+len(_endowments) > 0 {
 			endowments: {for path, _ in {for p, _ in _endowments {(p): true}, for p, _ in _localStatecharts {(p): true}} {
 				let names = [if _endowments[path] != _|_ {_endowments[path]}, []][0]
 				(path): list.Concat([names, [if _localStatecharts[path] != _|_ if !list.Contains(names, "Statechart") {"Statechart"}]])
@@ -2144,7 +2205,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 // The providers the cluster's auth service signs in through, each with the
 // settings the app gives it as the deployment's defaults.
-#signIn: S={
+#signIn: {
+	let S = self
 	auth: _
 	out: {for p in S.auth.providers {
 		(p): {}
@@ -2157,14 +2219,17 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // Whether an app's cluster keeps server-side state: an entity of a cluster durability,
 // or auth, which is identity the cluster keeps. The one predicate the cluster's
 // services, its migrations and the emitted shell.yaml all follow.
-#serverOn: S={
+#serverOn: {
+	let S = self
+
 	// Only what the answer reads, so a caller hands over no seed rows.
 	servers: [...bool]
-	auth: bool
-	out:  list.Contains(S.servers, true) || S.auth
+	auth:    bool
+	out:     list.Contains(S.servers, true) || S.auth
 }
 
-#appMigrations: M={
+#appMigrations: {
+	let M = self
 	code!: _
 	// A database that outlives a release has applied the baseline scripts
 	// (005-010), and an applied script may never change. An app with one names
@@ -2172,23 +2237,23 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// entity is carried by a migration of its own (#laterEntityMigrations).
 	held: {for n, e in M.code.state.entities if M.code.state.baseline == _|_ || !e.server {(n): true}}
 	if M.code.state.baseline != _|_ for n in M.code.state.baseline.entities {held: (n): true}
-	later: [for n, e in M.code.state.entities if M.held[n] == _|_ {e}]
-	_base: {for n, e in M.code.state.entities if M.held[n] != _|_ {(n): e}}
+	later:            [for n, e in M.code.state.entities if M.held[n] == _|_ {e}]
+	_base:            {for n, e in M.code.state.entities if M.held[n] != _|_ {(n): e}}
 	_validatedTables: [for _, e in M._base if e.server if len([for n, _ in e.validations {n}]) > 0 {e.table}]
 	// A later entity's validations would rewrite 009_validations.sql.
 	_laterUnvalidated: [] & [for e in M.later if len([for n, _ in e.validations {n}]) > 0 {e.name}]
-	seeded: [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
-	_seedFile: len(M.seeded) > 0 || M.code.state.seed != _|_
-	accessed: [for _, e in M._base if e.access != _|_ {e}]
-	updateOnly: [for e in M.accessed if e.access.scope == "public" if e.access["write"] != _|_ if e.access.write == "update" {e}]
-	machines: [if M.code.state.mecha.rows != _|_ {[for _, m in M.code.state.mecha.rows for en, e in M._base if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
-	raw: [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
-	_steps: #steps & {code: M.code}
+	seeded:            [for _, e in M.code.state.entities if len(e.seed) > 0 if e.server {e}]
+	_seedFile:         len(M.seeded) > 0 || M.code.state.seed != _|_
+	accessed:          [for _, e in M._base if e.access != _|_ {e}]
+	updateOnly:        [for e in M.accessed if e.access.scope == "public" if e.access["write"] != _|_ if e.access.write == "update" {e}]
+	machines:          [if M.code.state.mecha.rows != _|_ {[for _, m in M.code.state.mecha.rows for en, e in M._base if en == m.entity || e.table == m.entity if e.server {m}]}, []][0]
+	raw:               [if M.code.state.rawMigrations != _|_ {M.code.state.rawMigrations}, []][0]
+	_steps:            #steps & {code: M.code}
 	// The cluster copies this list into its database image, so it follows the
 	// predicate that emits the database: a migration named without one would be
 	// a copy into a target that was never emitted.
 	_server: (#serverOn & {servers: [for _, e in M.code.state.entities {e.server}], auth: M.code.capabilities.auth != _|_}).out
-	list: [for f in M._all if M._server {f}]
+	list:    [for f in M._all if M._server {f}]
 	_all: [
 		"services/database/migrations/000_extensions.sql",
 		"services/database/migrations/001_roles.sql",
@@ -2219,7 +2284,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // migration, <baseline.after>_<table>: what 005-010 would hold for it, so the
 // baseline's bytes never change. A live database applies it as a migration
 // its ledger lacks; a fresh one runs it after the baseline.
-#laterEntityMigrations: L={
+#laterEntityMigrations: {
+	let L = self
 	code!: _
 	// mecha's rule for the change feed (#Cluster's capabilities.capture).
 	_capture: len(L.code.state.pipelines)+len(L.code.state.computations)+len(L.code.state.schedules) > 0
@@ -2232,17 +2298,18 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	// what the emitter would generate today, so every later change of the
 	// entity or its machine is refused until a migration carries it too.
 	_declared: [if L.code.state.migrations != _|_ {L.code.state.migrations}, {}][0]
-	_carried: [if L.code.state.baseline.carried != _|_ {L.code.state.baseline.carried}, {}][0]
-	_all: [for e in (#appMigrations & {code: L.code}).later {name: "\(L.code.state.baseline.after)_\(e.table)", entity: e}]
-	_later: [for x in L._all if L._declared[x.name] == _|_ {x}]
+	_carried:  [if L.code.state.baseline.carried != _|_ {L.code.state.baseline.carried}, {}][0]
+	later!:    _ // (#appMigrations & {code: L.code}).later
+	_all:      [for e in L.later {name: "\(L.code.state.baseline.after)_\(e.table)", entity: e}]
+	_later:    [for x in L._all if L._declared[x.name] == _|_ {x}]
 	_drifted: [for x in L._all if L._declared[x.name] != _|_
-		let generated = L._up[x.entity.name]
-		let digest = hex.Encode(sha256.Sum256(generated))
-		let acknowledged = [if L._carried[x.name] != _|_ {L._carried[x.name]}, ""][0]
-		if L._declared[x.name].operations[0].sql.up != generated
-		if acknowledged != digest || len([for n, m in L._declared if n > x.name for op in m.operations if op.sql != _|_ if strings.Contains(op.sql.up, x.entity.table) {n}]) == 0 {
-			"later entity \(x.entity.name) changed since its released migration \(x.name): carry the change in a migration after it, then set state.baseline.carried[\"\(x.name)\"] to \"\(digest)\""
-		}]
+	let generated = L._up[x.entity.name]
+	let digest = hex.Encode(sha256.Sum256(generated))
+	let acknowledged = [if L._carried[x.name] != _|_ {L._carried[x.name]}, ""][0]
+	if L._declared[x.name].operations[0].sql.up != generated
+	if acknowledged != digest || len([for n, m in L._declared if n > x.name for op in m.operations if op.sql != _|_ if strings.Contains(op.sql.up, x.entity.table) {n}]) == 0 {
+		"later entity \(x.entity.name) changed since its released migration \(x.name): carry the change in a migration after it, then set state.baseline.carried[\"\(x.name)\"] to \"\(digest)\""
+	}]
 	_machines: {for x in L._all {(x.entity.name): [if L.code.state.mecha.rows != _|_ for _, m in L.code.state.mecha.rows if m.entity == x.entity.name || m.entity == x.entity.table {m}]}}
 	// A Cortex machine's SQL is compiled as write.ts writes it, which a
 	// migration does not pass through.
@@ -2271,6 +2338,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		for x in L._later {
 			(x.name): operations: [{sql: {onComplete: true, up: L._up[x.entity.name]}}]
 		}
+
 		// Every reader of the migrations meets the refusal, which names itself.
 		if len(L._drifted) > 0 {(L._drifted[0]): L._drifted[0] & true}
 	}
@@ -2283,10 +2351,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 // terminal, build) is taken as `_` here, in #emit and in the helpers above:
 // restating the definition unifies the whole value again in each consumer.
 // #emit keeps cluster and loop typed because it declares fields into them.
-#DefaultLoop: D={
+#DefaultLoop: {
+	let D = self
 	code!:     _
 	cluster!:  _
 	terminal!: _
+	_streams:  (#streams & {code: D.code}).out
 	out: prontoloop.#Loop & {
 		meta: app: D.code.meta.name
 		launchCommand: {do: distribution.#Project.launch, use: "./tools.nu"}
@@ -2301,6 +2371,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				if D.code.meta.ssrOrigin != _|_ {
 					ssrOrigin: D.code.meta.ssrOrigin
 				}
+
 				// Portable inputs and results share a snapshot; private rows never ship in a release.
 				if len(D.code.state.pipelines)+len(D.code.state.drains)+len(D.code.state.computations) > 0 {
 					derived: {
@@ -2309,13 +2380,13 @@ _traceHeader: include_patterns: ["^traceparent$"]
 							for _, c in D.code.state.computations for entity in c.to {(D.code.state.entities[entity].table): true}
 							for _, c in D.code.state.computations if c.declaredReads != _|_ for table in c.declaredReads {(table): true}
 						} if len([for _, e in D.code.state.entities if e.table == table if e.access != _|_ if e.access.scope == "private" {true}]) == 0 {table}])
-						streams: list.SortStrings([for n, _ in (#streams & {code: D.code}).out {"\(D.code.meta.name)-\(n)"}])
+						streams: list.SortStrings([for n, _ in D._streams {"\(D.code.meta.name)-\(n)"}])
 					}
 				}
 			}
-			buildCmd: "./saytw build"
-			testCmd: "deno eval 0"
-			pipelineFiles: [for n, _ in (#streams & {code: D.code}).out {"docker/\(D.code.meta.name)-\(n).yaml"}]
+			buildCmd:      "./saytw build"
+			testCmd:       "deno eval 0"
+			pipelineFiles: [for n, _ in D._streams {"docker/\(D.code.meta.name)-\(n).yaml"}]
 			// Both runtimes declare checks about their own surfaces; the loop
 			// routes each to the verb it names. A name collision across the two
 			// is a conflict here rather than a silent overwrite.
@@ -2331,11 +2402,12 @@ _traceHeader: include_patterns: ["^traceparent$"]
 					pages: {
 						verb:     "release"
 						platform: "pages"
-						cmds: [if len(_distribution.derived.tables) > 0 {_distribution.derive}, _distribution.bundle]
-						publish: ["use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag"]
-						note: "Pronto release@pages"
+						cmds:     [if len(_distribution.derived.tables) > 0 {_distribution.derive}, _distribution.bundle]
+						publish:  ["use semver.nu [tag-on-head]; let tag = (tag-on-head); if ($tag | is-empty) { error make {msg: \"no release tag on HEAD to push\"} }; git push origin $tag"]
+						note:     "Pronto release@pages"
 					}
 				}
+
 				// The edge target: mecha's edge cluster in one Durable Object,
 				// where the app's machines step and their deadlines are its alarm.
 				if list.Contains(D.code.meta.targets, "cloudflare") {
@@ -2343,8 +2415,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						verb:     "release"
 						platform: "cloudflare"
 						note:     "Pronto release@cloudflare"
-						cmds: [if len(_distribution.derived.tables) > 0 {_distribution.edgeDerive}, _distribution.edge]
-						publish: [_distribution.publishEdge]
+						cmds:     [if len(_distribution.derived.tables) > 0 {_distribution.edgeDerive}, _distribution.edge]
+						publish:  [_distribution.publishEdge]
 					}
 				}
 				if list.Contains(D.code.meta.targets, "docker") {
@@ -2352,8 +2424,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						verb:     "release"
 						platform: "docker"
 						note:     "Pronto release@docker"
-						cmds: [_distribution.docker]
-						publish: [_distribution.publishDocker]
+						cmds:     [_distribution.docker]
+						publish:  [_distribution.publishDocker]
 					}
 				}
 			}
@@ -2408,35 +2480,45 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			// engine alone, so it carries none of release.nu's versioning
 			// and its flags (--dry-run, --snapshot) reach that engine.
 			if list.Contains(D.code.meta.targets, "k8s") {
-				sayYaml: say: release: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.k8s}]}
+				sayYaml: {..., say: {..., release: {..., rulemap: {..., k8s: {..., platform: "k8s", cmds: [{..., do: _distribution.k8s}]}}}}}
 			}
+
 			// The same for the cloud tier on GCP: a deploy, not a version. The
 			// release goes behind its integration tests, run against a preview of
 			// what it deploys rather than a stack on this machine (release.nu):
 			// the drivers integrate runs that read APP_URL, which verify@gcp runs
 			// alone against the release or a named preview (verify.nu).
 			if list.Contains(D.code.meta.targets, "gcp") {
-				sayYaml: say: release: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.gcp}]}
+				sayYaml: {..., say: {..., release: {..., rulemap: {..., gcp: {..., platform: "gcp", cmds: [{..., do: _distribution.gcp}]}}}}}
 			}
+
 			// Post-release verification across live deployments.
 			if list.Contains(D.code.meta.targets, "pages") {
-				sayYaml: say: verify: rulemap: pages: {platform: "pages", cmds: [{do: _distribution.verifyPages}]}
+				sayYaml: {..., say: {..., verify: {..., rulemap: {..., pages: {..., platform: "pages", cmds: [{..., do: _distribution.verifyPages}]}}}}}
 			}
 			if list.Contains(D.code.meta.targets, "cloudflare") {
-				sayYaml: say: verify: rulemap: cloudflare: {platform: "cloudflare", cmds: [{do: _distribution.verifyEdge}]}
+				sayYaml: {..., say: {..., verify: {..., rulemap: {..., cloudflare: {..., platform: "cloudflare", cmds: [{..., do: _distribution.verifyEdge}]}}}}}
 			}
 			if list.Contains(D.code.meta.targets, "k8s") {
-				sayYaml: say: verify: rulemap: k8s: {platform: "k8s", cmds: [{do: _distribution.verifyK8s}]}
+				sayYaml: {..., say: {..., verify: {..., rulemap: {..., k8s: {..., platform: "k8s", cmds: [{..., do: _distribution.verifyK8s}]}}}}}
 			}
 			if list.Contains(D.code.meta.targets, "gcp") {
-				sayYaml: say: verify: rulemap: gcp: {platform: "gcp", cmds: [{do: _distribution.verifyGcp}]}
+				sayYaml: {..., say: {..., verify: {..., rulemap: {..., gcp: {..., platform: "gcp", cmds: [{..., do: _distribution.verifyGcp}]}}}}}
 			}
-			sayYaml: say: {
-				lint: rulemap: cue: cmds: [{do: "mise exec -- cue vet -c ./..."}]
-				build: _distribution.say.say.build
-				generate: rulemap: {
-					pronto: _distribution.say.say.generate.rulemap.pronto
-					"auto-bayt": {priority: 2, cmds: [{use: "./auto-bayt.nu", do: "auto-bayt"}]}
+			sayYaml: {
+				...
+				say: {
+					...
+					lint:  {..., rulemap: {..., cue: {..., cmds: [{..., do: "mise exec -- cue vet -c ./..."}]}}}
+					build: _distribution.say.say.build
+					generate: {
+						...
+						rulemap: {
+							...
+							pronto:      _distribution.say.say.generate.rulemap.pronto
+							"auto-bayt": {..., priority: 2, cmds: [{..., do: "auto-bayt", use: "./auto-bayt.nu"}]}
+						}
+					}
 				}
 			}
 			sayYaml: _distribution.say
@@ -2444,7 +2526,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 }
 
-#DefaultBuild: D={
+#DefaultBuild: {
+	let D = self
 	code!:    _
 	loop!:    _
 	cluster!: _
@@ -2453,7 +2536,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	out: prontobuild.#Build & {
 		"cluster":       D.cluster
 		terminalStatics: [for s in D.terminal.surface.statics {file: s.file, target: s.target}]
-		screenSources: [for _, s in D.code.surface.screens for path in [s.files.html, s.files.css] {path}]
+		screenSources:   [for _, s in D.code.surface.screens for path in [s.files.html, s.files.css] {path}]
 		project: files: "checks.yaml": D.loop.surface.sayYaml
 		meta: {
 			app:         D.code.meta.name
@@ -2464,9 +2547,10 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 }
 
-#DefaultTerminal: D={
-	code!:       _
-	boot?:       string
+#DefaultTerminal: {
+	let D = self
+	code!: _
+	boot?: string
 	// An adapter the terminal serves is the terminal's file and not the app's,
 	// so only an app's own module joins the set. A declared handler is served
 	// whether or not markup binds it: an app module may fetch one itself.
@@ -2475,9 +2559,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		for _, s in D.code.surface.screens for i in s.files.handlers {(i): true}
 		for _, s in D.code.surface.screens for i in s.files.adapters if !strings.HasPrefix(i, "/") {(i): true}
 	}
-	_sharedSet: {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
-	_rendererSet: {for _, s in D.code.surface.screens if s.files.renderers != _|_ for i in s.files.renderers {(i): true}}
-	_unitSet: {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
+	_sharedSet:     {for _, s in D.code.surface.screens for i in s.files.shared {(i): true}}
+	_rendererSet:   {for _, s in D.code.surface.screens if s.files.renderers != _|_ for i in s.files.renderers {(i): true}}
+	_unitSet:       {for _, v in D.code.capabilities.vendored for f in v.files {(f): true}}
 	_validationSet: {for _, e in D.code.state.entities for _, v in e.validations {(v.src): true}}
 	// The prerendered screens, each refused where its first view reads rows
 	// the server holds: its document is drawn before any read lands, so those
@@ -2510,8 +2594,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			if D.boot != _|_ {
 				assets: boot: D.boot
 			}
-			screens: [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css, shared: s.files.shared}]
-			handlers: list.SortStrings([for i, _ in D._handlerSet {i}])
+			screens:   [for _, s in D.code.surface.screens {name: s.name, html: s.files.html, css: s.files.css, shared: s.files.shared}]
+			handlers:  list.SortStrings([for i, _ in D._handlerSet {i}])
 			renderers: list.SortStrings([for i, _ in D._rendererSet {i}])
 			// The union of what screens import, so the served set is exactly what
 			// something references — an unreferenced file under shell/shared/ is
@@ -2521,8 +2605,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 				for _, pl in D.code.state.pipelines if pl.fold != _|_ {pl.fold.src},
 			])
 			validations: list.SortStrings([for s, _ in D._validationSet {s}])
-			hostDom: list.SortStrings([for f, _ in {for _, h in D.code.capabilities.hatches if h.kind == "host-dom" for f in h.files {(f): true}} {f}])
-			engines: list.SortStrings([for n, _ in D.code.surface.engines {"shell/engines/\(n).json"}])
+			hostDom:     list.SortStrings([for f, _ in {for _, h in D.code.capabilities.hatches if h.kind == "host-dom" for f in h.files {(f): true}} {f}])
+			engines:     list.SortStrings([for n, _ in D.code.surface.engines {"shell/engines/\(n).json"}])
 			// A unit's whole directory, not just its src: the wrapper's own
 			// imports are files the browser fetches by name.
 			units: list.SortStrings([for f, _ in D._unitSet {f}])
@@ -2550,8 +2634,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 
 _pgrollDir: "services/database/pgroll"
 
-#DefaultCluster: D={
-	code!: _
+#DefaultCluster: {
+	let D = self
+	code!:   _
 	statics: [...mecha.#Static]
 
 	// The review ladder's artifacts, served beside the app by caddy's catch-all
@@ -2621,7 +2706,7 @@ _pgrollDir: "services/database/pgroll"
 		// same instance reaches the build seat and the emitter; #emit restates
 		// them as constraints.
 		capabilities: {
-			auth:  D.code.capabilities.auth != _|_
+			auth: D.code.capabilities.auth != _|_
 			if D.code.capabilities.auth != _|_ if D.code.capabilities.auth.providers != _|_ {
 				signIn: (#signIn & {auth: D.code.capabilities.auth}).out
 			}
@@ -2632,13 +2717,14 @@ _pgrollDir: "services/database/pgroll"
 			server: (#serverOn & {servers: [for _, e in D.code.state.entities {e.server}], auth: D.code.capabilities.auth != _|_}).out
 		}
 		state: {
-			migrations: (#appMigrations & {"code": D.code}).list
+			let _appMigrations = #appMigrations & {"code": D.code}
+			migrations: _appMigrations.list
 			if D.code.state.migrations != _|_ || D.code.state.baseline != _|_ {
 				pgroll: {
 					if D.code.state.migrations != _|_ {D.code.state.migrations}
-					(#laterEntityMigrations & {code: D.code}).out
+					(#laterEntityMigrations & {code: D.code, later: _appMigrations.later}).out
 				}
-				if len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}]) + len((#appMigrations & {"code": D.code}).later) > 0 {pgrollDir: _pgrollDir}
+				if len([if D.code.state.migrations != _|_ for _, m in D.code.state.migrations {m}])+len(_appMigrations.later) > 0 {pgrollDir: _pgrollDir}
 			}
 			reconcile: {
 				let updateOnly = [for _, e in D.code.state.entities if e.access != _|_ if e.access.scope == "public" if e.access["write"] != _|_ if e.access.write == "update" {e}]
@@ -2657,6 +2743,7 @@ _pgrollDir: "services/database/pgroll"
 			}]
 			schedules: [for _, sc in D.code.state.schedules {sc.name}]
 			(#MachineTimerState & {code: D.code}).out
+
 			// The emitted manifest, endpoints and handlers sit where the
 			// cluster looks for them by default.
 			effects: [if D.code.state.effects != _|_ for n, x in D.code.state.effects {
@@ -2664,6 +2751,7 @@ _pgrollDir: "services/database/pgroll"
 				// The compose stack is the docker target's.
 				(#SinkAt & {sink: x.sink, target: "docker"}).out
 				if x.sink.targets != _|_ if x.sink.targets.docker != _|_ if x.sink.targets.docker.bridge != _|_ {simulated: true}
+
 				// The credential's variable is required of the environment with
 				// the handler's secrets, and handed to the airlock alone.
 				_secrets: [for s, _ in {for s in list.Concat([[if x.secrets != _|_ {x.secrets}, []][0], [if x.sink.credential != _|_ {[x.sink.credential.secret]}, []][0]]) {(s): true}} {s}]
@@ -2675,13 +2763,13 @@ _pgrollDir: "services/database/pgroll"
 				steps: {graphile: placed.graphile, airlock: placed.airlock}
 			}
 			computations: [for _, c in D.code.state.computations {
-				name:  "\(D.code.meta.name)-\(c.name)"
-				file:  c.src
+				name: "\(D.code.meta.name)-\(c.name)"
+				file: c.src
 				if c.feldera != _|_ {feldera: c.feldera}
 				if c.steps != _|_ {steps: c.steps}
 				to: [for t in c.to {D.code.state.entities[t].table}]
 				if c.sinkWrites != _|_ {sinkWrites: {for entity, mode in c.sinkWrites {(D.code.state.entities[entity].table): mode}}}
-				wasm: c.wasm
+				wasm:       c.wasm
 				endowments: c.endowments
 				if c.onComplete != _|_ {onComplete: c.onComplete}
 				if c.declaredReads != _|_ {declaredReads: c.declaredReads}
@@ -2689,28 +2777,32 @@ _pgrollDir: "services/database/pgroll"
 					types: {types: #types, aliases: #typeAlias}
 				}
 				if c.queryTypes != _|_ {
-					queryTypes: {for n, fields in c.queryTypes {(n): [for f in fields {
-						name: f.name
-						type: [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0]
-						required: f.required
-						if f.precision != _|_ {precision: f.precision}
-						if f.scale != _|_ {scale: f.scale}
-					}]}}
-				}
-				if c.typedSinks {
-					sinkTypes: {for n in c.to
-						let columns = [if c.sinkColumns != _|_ if c.sinkColumns[n] != _|_ {c.sinkColumns[n]},
-							[for f in D.code.state.entities[n].fields {f.name}]][0] {
-						(D.code.state.entities[n].table): [
-						for f in D.code.state.entities[n].fields if !f.retired if f.generated == _|_ if list.Contains(columns, f.name) {
-							name: f.name
-							type: [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0]
+					queryTypes: {for n, fields in c.queryTypes {
+						(n): [for f in fields {
+							name:     f.name
+							type:     [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0]
 							required: f.required
 							if f.precision != _|_ {precision: f.precision}
 							if f.scale != _|_ {scale: f.scale}
-						},
-					]}}
+						}]
+					}}
 				}
+				if c.typedSinks {
+					sinkTypes: {for n in c.to
+					let columns = [if c.sinkColumns != _|_ if c.sinkColumns[n] != _|_ {c.sinkColumns[n]},
+						[for f in D.code.state.entities[n].fields {f.name}]][0] {
+						(D.code.state.entities[n].table): [
+							for f in D.code.state.entities[n].fields if !f.retired if f.generated == _|_ if list.Contains(columns, f.name) {
+								name:     f.name
+								type:     [if #typeAlias[f.type] != _|_ {#typeAlias[f.type]}, f.type][0]
+								required: f.required
+								if f.precision != _|_ {precision: f.precision}
+								if f.scale != _|_ {scale: f.scale}
+							},
+						]
+					}}
+				}
+
 				// A sink in the publication would feed the change it answers.
 				_live: [for t in c.to {D.code.state.entities[t].durability & ("live" | "offline")}]
 			}]
@@ -2724,11 +2816,12 @@ _pgrollDir: "services/database/pgroll"
 		}
 		for hn, h in D.code.capabilities.hatches if h.activepieces != _|_ {
 			surface: targets: (hn): (mecha.#ActivepiecesContainer & {
-				image: {ref: "libraries_mecha:activepieces-image"}
-				source: "activepieces/\(hn)"
+				image:   {ref: "libraries_mecha:activepieces-image"}
+				source:  "activepieces/\(hn)"
 				secrets: list.SortStrings([for secret, _ in {for _, a in h.activepieces.actions if a.auth != _|_ {(a.auth.jsonSecret): true}} {secret}])
 			}).target
 		}
+
 		// The door's tree as a release (omnishell.#Address): omnishell's tree
 		// from its runtime image, which the monorepo's switch builds from the
 		// checkout, every static placed at its URL's path, then addressed in
@@ -2745,9 +2838,9 @@ _pgrollDir: "services/database/pgroll"
 				dockerfile: {
 					from: name: omnishell.#Address.image
 					// Where bayt copies the srcs, each at its path in the app.
-					workdir: "/app"
+					workdir:   "/app"
 					finalCopy: [omnishell.#Address.tree, omnishell.#Address.scripts]
-					copy: [{from: {name: omnishell.#RuntimeImage}, srcs: ["/"], dst: omnishell.#Address.home}]
+					copy:      [{from: {name: omnishell.#RuntimeImage}, srcs: ["/"], dst: omnishell.#Address.home}]
 					let place = [for s in list.Concat([runtime, own]) {
 						let source = [
 							if strings.HasPrefix(s.target, "/omnishell/") {"\(omnishell.#Address.home)/\(strings.TrimPrefix(s.target, "/omnishell/"))"},
@@ -2760,6 +2853,7 @@ _pgrollDir: "services/database/pgroll"
 						"install -D -m 644 '\(source)' '\(omnishell.#Address.tree)\(url)'"
 					}]
 					let ice = [if _iceServers != null {" --ice-servers '\(json.Marshal(_iceServers))'"}, ""][0]
+
 					// The tree a container door serves carries each door hatch's
 					// public attributes, rewritten before it is addressed; one no
 					// document carries stops the build.
@@ -2781,17 +2875,17 @@ _pgrollDir: "services/database/pgroll"
 						visibility: "internal"
 						activate:   ""
 						"process-compose": activate: "mise x --"
-						cmd: "builtin": null
-						srcs: globs: ["\(dir)/*"]
+						cmd: "builtin":              null
+						srcs: globs:                 ["\(dir)/*"]
 						entrypoint: {
 							shell: "nu"
 							do:    "for f in (glob '\(dir)/*') { let ext = ($f | path parse | get extension); let t = (match $ext { 'webp' => 'image/webp', 'png' => 'image/png', 'jpg' => 'image/jpeg', _ => { print -e $'no type for ($f)'; exit 1 } }); let name = ($f | path basename); http put --content-type $t $'($env.SEED_BLOBS_URL)/mecha-objects/seed/($name)' (open --raw $f | into binary) | ignore }"
 							env: SEED_BLOBS_URL: {peer: "rclone-s3", port: "http", prefix: "http://"}
-							after: "rclone-s3": "healthy"
+							after: "rclone-s3":  "healthy"
 						}
 						dockerfile: {
 							from: name: "alpine/curl@sha256:5bd4985f3daa6d1ca87619802190afc24c0ccd410b1f123de5afc8e891b5fc71"
-							copy: [{srcs: ["\(dir)/"], dst: "/seed/"}]
+							copy:       [{srcs: ["\(dir)/"], dst: "/seed/"}]
 							entrypoint: ["/bin/sh", "-c", load]
 						}
 						compose: {
@@ -2814,6 +2908,7 @@ _pgrollDir: "services/database/pgroll"
 				}
 			}
 		}
+
 		// The terminal's server half, where a route asks to be rendered on
 		// request (#Screen.ssr; #emit decides which routes may). It reads the
 		// app through the door, so it waits on the door, and the aggregate
@@ -2866,13 +2961,13 @@ _pgrollDir: "services/database/pgroll"
 							[for d in omnishell.#Render.dirs {
 								from: {name: omnishell.#RuntimeImage}
 								srcs: ["/\(strings.TrimPrefix(d, omnishell.#Render.home+"/"))"]
-								dst: "\(omnishell.#Render.workdir)/\(d)"
+								dst:  "\(omnishell.#Render.workdir)/\(d)"
 							}],
 							// The entry as the release wrote it, carrying its map.
 							[{from: ref: ":served", srcs: ["\(omnishell.#Address.tree)/\(omnishell.#Render.entry.source)"], dst: omnishell.#Render.entry.target}],
 						])
 						epilogue: ["RUN \(omnishell.#Render.cache)"]
-						cmd: omnishell.#Render.command
+						cmd:      omnishell.#Render.command
 					}
 					compose: {
 						// The door, and what answers behind it: a guest is minted
@@ -2896,7 +2991,7 @@ _pgrollDir: "services/database/pgroll"
 						develop: watch: [{action: "sync+restart", path: "../\(omnishell.#Render.entry.source)", target: omnishell.#Render.entry.target}]
 					}
 				}
-				launch: compose: depends_on: render: {condition: "service_healthy"}
+				launch: compose: depends_on: render:            {condition: "service_healthy"}
 				caddy: entrypoint: env: PRONTO_UPSTREAM_RENDER: {peer: "render", port: "http"}
 			}
 		}
@@ -2908,7 +3003,8 @@ _pgrollDir: "services/database/pgroll"
 // The components of an app package — code, cluster, terminal, loop, build —
 // are inputs; program.cue wires the defaults (#DefaultCluster and the rest)
 // and bayt.cue redeclares cluster, terminal and loop as the escape-hatch seams.
-#emit: E={
+#emit: {
+	let E = self
 	_uniqueLines: [
 		for ent in E._baseServer for u in ent.uniques {
 			"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(ent.table) (\(strings.Join(u.cols, ", ")));"
@@ -2967,14 +3063,14 @@ _pgrollDir: "services/database/pgroll"
 	// applied baseline already has (#appMigrations.held).
 	_baseServer: [for e in E._serverEntities if E._appMigrations.held[e.name] != _|_ {e}]
 	_baseTables: [for e in E._baseServer {e.table}]
-	// Server entities with validations, as a list so len() is decidable in
-	// cue 0.16 (see #shellConfig's guard note).
-	_validated: [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
+	// Server entities with validations, projected to a list for concrete len()
+	// (see #shellConfig's guard note).
+	_validated:     [for e in E._serverEntities if len([for n, _ in e.validations {n}]) > 0 {e}]
 	_localEntities: [for e in E._entities if !e.server {e}]
 	// Derived rows can be another computation's inputs. Consumers select their
 	// dependencies; publication membership does not decide execution cycles.
 	_cdcEntities: E._serverEntities
-	_cdcTables: strings.Join([for e in E._cdcEntities {e.table}], ",")
+	_cdcTables:   strings.Join([for e in E._cdcEntities {e.table}], ",")
 	// Every table the publication carries, column by column, as the carrier
 	// cdc-carriers.blobl converts a bus row into before a pipeline reads it.
 	_cdcCarriers: {for e in E._cdcEntities {
@@ -2995,7 +3091,7 @@ _pgrollDir: "services/database/pgroll"
 	_timedMachines: (#TimedMachines & {code: E.code}).out
 	_clockDeclared: {
 		for t in E.code.meta.targets {
-			if (t != "pages" && t != "cloudflare" && len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0) || (E.code.state.effects != _|_ && len(E.code.state.effects) > 0) {
+			if (t != "pages" && t != "cloudflare" && len([for _, s in E.code.state.schedules if !s.suspend {s}]) > 0) || [if E.code.state.effects != _|_ {len(E.code.state.effects) > 0}, false][0] {
 				(t): true & list.Contains(E.code.meta.clocks, t)
 			}
 		}
@@ -3008,10 +3104,10 @@ _pgrollDir: "services/database/pgroll"
 	// The pages target is refused rather than released broken.
 	_pagesBundle: {
 		if list.Contains(E.code.meta.targets, "pages") {
-			units: true & (len([for _, v in E.code.capabilities.vendored if v.isolation == "agent" if v.role == "presenter" {v}]) == 0)
-			shared: true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
+			units:       true & (len([for _, v in E.code.capabilities.vendored if v.isolation == "agent" if v.role == "presenter" {v}]) == 0)
+			shared:      true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
-			providers: true & (E.code.capabilities.auth == _|_ || E.code.capabilities.auth.providers == _|_ || len(E.code.capabilities.auth.providers) == 0)
+			providers:   true & [if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ {len(E.code.capabilities.auth.providers) == 0}, true][0]
 		}
 	}
 
@@ -3046,9 +3142,9 @@ _pgrollDir: "services/database/pgroll"
 	// Share orchestration within a priority; each runner still owns its stack.
 	loop: surface: checks: {for _, p in _integrationPriorities {
 		let names = list.SortStrings([for name, c in E.build.checks
-			if [if c.priority != _|_ {c.priority}, 0][0] == p {name}])
+		if [if c.priority != _|_ {c.priority}, 0][0] == p {name}])
 		("pronto-integrate-\(p)"): {
-			verb: "integrate"
+			verb:     "integrate"
 			priority: p
 			cmds: [(omnishell.#BkidCheck & {
 				runner: strings.Join([for name in names {"ci-\(name)"}], ",")
@@ -3100,7 +3196,7 @@ _pgrollDir: "services/database/pgroll"
 		:where(html) {
 		\(strings.Join(list.Concat([
 			for _, b in #scale.buckets {[for k, v in b.steps {"  \(b.prefix)\(k): \(v);"}]},
-	]), "\n"))
+		]), "\n"))
 		}
 		"""
 	// The navigation chrome's posture (`#Design.shell.nav`). Every selector is
@@ -3218,7 +3314,7 @@ _pgrollDir: "services/database/pgroll"
 				"  --shell-rule: var(--\(E._design.shell.rule));",
 				"  color-scheme: light dark;",
 			],
-	]), "\n"))
+		]), "\n"))
 		}
 		/* The storybook stamps -dark frames as data-state values. colour-scheme
 		   is inherited and light-dark() reads it at the point of use, so
@@ -3358,7 +3454,7 @@ _pgrollDir: "services/database/pgroll"
 		"""
 
 	_appMigrations: #appMigrations & {"code": E.code}
-	_seedFile: _appMigrations._seedFile
+	_seedFile:      _appMigrations._seedFile
 
 	_migrations: _appMigrations.list
 
@@ -3378,7 +3474,7 @@ _pgrollDir: "services/database/pgroll"
 	// The cluster handed in must be the program's: #DefaultCluster derives
 	// these from the code, and a cluster that disagrees conflicts here.
 	cluster: state: (#MachineTimerState & {code: E.code}).out
-	cluster: capabilities: auth:  E.code.capabilities.auth != _|_
+	cluster: capabilities: auth: E.code.capabilities.auth != _|_
 	if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ {
 		cluster: capabilities: signIn: (#signIn & {auth: E.code.capabilities.auth}).out
 	}
@@ -3390,7 +3486,7 @@ _pgrollDir: "services/database/pgroll"
 	// The served route table, resolved once: shell.yaml IS this, and the
 	// Caddyfile's own matcher list is read out of the same addresses, so the
 	// door and the router cannot disagree about what a route is.
-	_shell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, presenter: E.terminal.capabilities.presenter, server: E._serverOn, native: E.code.capabilities.native}).out
+	_shell:            (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, presenter: E.terminal.capabilities.presenter, server: E._serverOn, native: E.code.capabilities.native}).out
 	_developmentShell: (#shellConfig & {"code": E.code, migrations: E._migrations, floors: E.terminal.capabilities.floors, hatch: E.terminal.capabilities.hatch, presenter: E.terminal.capabilities.presenter, server: E._serverOn, native: E.code.capabilities.native, development: true, adapters: [for p in E.terminal.surface.adapters {"/omnishell/components/\(p)"}]}).out
 	// The locales in one order, so every artifact that lists them lists them the
 	// same way and a regenerated file has no spurious diff.
@@ -3409,7 +3505,8 @@ _pgrollDir: "services/database/pgroll"
 	// ceiling: a tag is a BCP 47 subtag chain with no length a compiler may
 	// assume, and one left out of the alternation is a language the door
 	// cannot see at all.
-	_byLength: B={
+	_byLength: {
+		let B = self
 		of: [...string]
 		out: [
 			for n in list.Range(list.Max(list.Concat([[0], [for s in B.of {len(s)}]])), 0, -1)
@@ -3419,7 +3516,7 @@ _pgrollDir: "services/database/pgroll"
 	// Declaration order, not sorted: negotiateLocale resolves a bare language to
 	// the FIRST declared tag carrying it, and shell.yaml's order is that one.
 	_localeOrder: [if E._shell.i18n != _|_ for tag, _ in E._shell.i18n.locales {tag}]
-	_baseOf: {for tag in E._localeOrder {(tag): strings.Split(tag, "-")[0]}}
+	_baseOf:      {for tag in E._localeOrder {(tag): strings.Split(tag, "-")[0]}}
 	// A language already spelled as a tag needs no second alternative.
 	_baseOrder: [
 		for i, tag in E._localeOrder
@@ -3478,8 +3575,7 @@ _pgrollDir: "services/database/pgroll"
 				let kind = strings.TrimSuffix(strings.Split(part, " ")[0], "-src")
 				let sources = list.SortStrings([if _resourceSources[kind] != _|_ for src, _ in _resourceSources[kind] {src}])
 				strings.Join(list.Concat([[part], sources]), " ")
-			}], "; ")
-			}][0]
+			}], "; ")}][0]
 	}, ""][0]
 	// The ladder's pages run no app code and sit outside the terminal as they
 	// sit outside the auth gate, so they answer with a policy of their own:
@@ -3601,10 +3697,10 @@ _pgrollDir: "services/database/pgroll"
 	_isScreenExcluded: {
 		for r in E._shell.routes {
 			let scr = E.code.surface.screens[r.screen]
-			let route = [if scr != _|_ if scr.route != _|_ { scr.route }, (r.screen)][0]
+			let route = [if scr != _|_ if scr.route != _|_ {scr.route}, (r.screen)][0]
 			(r.screen): len([
 				for ex in _envelope.sitemap.exclude
-				if route == ex || (ex != "/" && strings.HasPrefix(route, strings.TrimSuffix(ex, "/")+"/")) {ex},
+				if route == ex || (ex != "/" && strings.HasPrefix(route, strings.TrimSuffix(ex, "/") + "/")) {ex},
 			]) > 0
 		}
 	}
@@ -3612,23 +3708,23 @@ _pgrollDir: "services/database/pgroll"
 		for r in E._shell.routes {
 			let scr = E.code.surface.screens[r.screen]
 			let isRoot = (#address & {route: r}).out == "/"
-			let hasReads = scr != _|_ && scr.reads != _|_ && len(scr.reads) > 0
-			let isPrerender = scr != _|_ && scr.prerender == true
+			let hasReads = [if scr != _|_ if scr.reads != _|_ {len(scr.reads) > 0}, false][0]
+			let isPrerender = [if scr != _|_ {scr.prerender == true}, false][0]
 			let authoredPriority = [
 				if scr != _|_ if scr.priority != _|_ {
 					[
-						if "\(scr.priority)" == "1" { "1.0" },
-						if "\(scr.priority)" == "0" { "0.0" },
+						if "\(scr.priority)" == "1" {"1.0"},
+						if "\(scr.priority)" == "0" {"0.0"},
 						"\(scr.priority)",
 					][0]
 				},
 				"",
 			][0]
-			let inferredPriority = [if isRoot { "1.0" }, if hasReads { "0.8" }, "0.6"][0]
-			let priority = [if authoredPriority != "" { authoredPriority }, inferredPriority][0]
-			let authoredFreq = [if scr != _|_ if scr.changefreq != _|_ { scr.changefreq }, ""][0]
-			let inferredFreq = [if isPrerender && !hasReads { "monthly" }, if isRoot || hasReads { "daily" }, "weekly"][0]
-			let freq = [if authoredFreq != "" { authoredFreq }, inferredFreq][0]
+			let inferredPriority = [if isRoot {"1.0"}, if hasReads {"0.8"}, "0.6"][0]
+			let priority = [if authoredPriority != "" {authoredPriority}, inferredPriority][0]
+			let authoredFreq = [if scr != _|_ if scr.changefreq != _|_ {scr.changefreq}, ""][0]
+			let inferredFreq = [if isPrerender && !hasReads {"monthly"}, if isRoot || hasReads {"daily"}, "weekly"][0]
+			let freq = [if authoredFreq != "" {authoredFreq}, inferredFreq][0]
 
 			(r.screen): {
 				"priority": priority
@@ -3681,8 +3777,8 @@ _pgrollDir: "services/database/pgroll"
 		}
 	}
 	development: statics: [for path, _ in E._composedHandlers {file: path, target: "/srv/\(path)"}]
-	files: [string]: #File
-	checkout: [string]: #File
+	files: [string]:      #File
+	checkout: [string]:   #File
 	files: {
 		for _, h in E.code.capabilities.hatches if h.activepieces != _|_ {if h.activepieces._refusal {}}
 		if E.code._timerRefusal {}
@@ -3697,7 +3793,7 @@ _pgrollDir: "services/database/pgroll"
 	// unset, the pinned images need none. `service` is the checkout's own,
 	// as mise.local.toml is: the writer writes it only there, and records
 	// it nowhere a mirror reads.
-	let up = strings.Repeat("../", len(strings.Split(E.build.meta.dir, "/"))+1)
+	let up = strings.Repeat("../", len(strings.Split(E.build.meta.dir, "/")) + 1)
 	checkout: "monorepo/service.yaml": {
 		format: "yaml"
 		data: include: list.Concat([
@@ -3709,13 +3805,13 @@ _pgrollDir: "services/database/pgroll"
 	}
 	files: "monorepo/docker-image.yaml": {
 		format: "yaml"
-		data: {}
+		data:   {}
 	}
 	files: {
 		for hn, h in E.code.capabilities.hatches if h.activepieces != _|_ {
 			"activepieces/\(hn)/declaration.json": {
 				format: "json"
-				data: {version: 1, lock: h.activepieces.lock, pieces: h.activepieces.pieces, actions: h.activepieces.actions, limits: h.activepieces.limits}
+				data:   {version: 1, lock: h.activepieces.lock, pieces: h.activepieces.pieces, actions: h.activepieces.actions, limits: h.activepieces.limits}
 			}
 		}
 
@@ -3733,80 +3829,87 @@ _pgrollDir: "services/database/pgroll"
 			data: {
 				server: E.cluster.capabilities.server
 				if E.cluster.capabilities.server {
-					schema:     E.cluster.surface.schema
-					database:   mecha.published.database
+					schema:   E.cluster.surface.schema
+					database: mecha.published.database
 					if len(E.code.state.mecha.reducers) > 0 {actors: E._steps.actors}
-					tokenRoles: E.files["services/database/migrations/001_roles.sql"]._tokenRoles
+					tokenRoles:   E.files["services/database/migrations/001_roles.sql"]._tokenRoles
 					computations: E.cluster.state.computations
 					drains: list.Concat([
 						[for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}],
 						[for _, p in E.code.state.pipelines if p.portableDrain != _|_ {let d = p.portableDrain
-							name: d.name, on: d.on, call: d.call, body: d.body}],
+							name: d.name
+							on:   d.on
+							call: d.call
+							body: d.body}],
 					])
 				}
+
 				// The container hatches the door routes to, by app id: a release
 				// dials and bounds each as it does the cluster's own services.
 				let doors = list.SortStrings([for hn, h in E.code.capabilities.hatches if h.door != _|_ {hn}])
 				if len(doors) > 0 {"doors": doors}
+
 				// The effect steps a page or edge release places among the
 				// migrations, where the program places them, and why it may.
 				if E.code.state.steps != _|_ {steps: {graphile: E._steps.graphile, airlock: E._steps.airlock, note: E.code.state.steps.note}}
+
 				// The bridges a release lowers past the cluster: each container's
 				// port, release targets and the cluster target building its image,
 				// whose bayt files hold the Dockerfile and the resolved environment
 				// the edge release's dispatcher ships as a Cloudflare Container
 				// (bundle/edge-bridges.ts).
-				if E.code.state.bridges != _|_ {bridges: [for _, b in E.code.state.bridges {
-					name:      b.name
-					container: b.container
-					port:      b.port
-					targets:   b.targets
-					build:     "\(b.container)-appliance"
-				}]}
+				if E.code.state.bridges != _|_ {
+					bridges: [for _, b in E.code.state.bridges {
+						name:      b.name
+						container: b.container
+						port:      b.port
+						targets:   b.targets
+						build:     "\(b.container)-appliance"
+					}]
+				}
 			}
 		}
 		".pronto/edge-hatches.json": {
 			format: "json"
-			data: [for hn, h in E.code.capabilities.hatches if h.edge != _|_ {name: hn, edge: h.edge}]
+			data:   [for hn, h in E.code.capabilities.hatches if h.edge != _|_ {name: hn, edge: h.edge}]
 		}
 		".pronto/mail.json": {
 			format: "json"
 			data: {
 				version: 1
 				bridges: {if E.code.state.bridges != _|_ for bn, b in E.code.state.bridges
-					let h = E.code.capabilities.hatches[b.container]
-					if h.activepieces != _|_ if b.action != _|_
-					let a = h.activepieces.actions[b.action]
-					if a.mail != _|_ {
-						(bn): {
-							action: b.action
-							messageIdDomain: a.fixedProps.messageIdDomain
-							if a.mail.pages != _|_ {pages: a.mail.pages}
-							cloudflare: {
-								workersPaid: E.code.meta.cloudflare.workersPaid
-								if a.mail.cloudflare != _|_ {recipients: a.mail.cloudflare.recipients}
-							}
+				let h = E.code.capabilities.hatches[b.container]
+				if h.activepieces != _|_ if b.action != _|_
+				let a = h.activepieces.actions[b.action]
+				if a.mail != _|_ {
+					(bn): {
+						action:          b.action
+						messageIdDomain: a.fixedProps.messageIdDomain
+						if a.mail.pages != _|_ {pages: a.mail.pages}
+						cloudflare: {
+							workersPaid: E.code.meta.cloudflare.workersPaid
+							if a.mail.cloudflare != _|_ {recipients: a.mail.cloudflare.recipients}
 						}
 					}
-				}
+				}}
 				effects: {if E.code.state.effects != _|_ for en, e in E.code.state.effects let at = (#SinkAt & {sink: e.sink, target: "docker"}).out if at != null if at.bridge != _|_ {(en): at.bridge}}
 			}
 		}
 		".pronto/check-inputs.json": {
 			format: "json"
 			data: {
-				version: 1
-				terminal: true
-				types: {types: #types, aliases: #typeAlias}
-				entities: E.code.state.entities
-				reducers: {if len(E.code.state.mecha.reducers) > 0 for n, h in E.code.state.mecha.reducers {(n): h.reducer}}
-				machines: {if E.code.state.mecha.rows != _|_ for n, m in E.code.state.mecha.rows {(n): m}}
-				hatches: E.code.capabilities.hatches
+				version:       1
+				terminal:      true
+				types:         {types: #types, aliases: #typeAlias}
+				entities:      E.code.state.entities
+				reducers:      {if len(E.code.state.mecha.reducers) > 0 for n, h in E.code.state.mecha.reducers {(n): h.reducer}}
+				machines:      {if E.code.state.mecha.rows != _|_ for n, m in E.code.state.mecha.rows {(n): m}}
+				hatches:       E.code.capabilities.hatches
 				rawMigrations: [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0]
-				duckstreams: [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
-				effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0]
+				duckstreams:   [if E.code.state.duckstreams != _|_ {E.code.state.duckstreams}, {}][0]
+				effects:       [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0]
 				if E.code.state.cortex != _|_ {
-					cortex: {for n, c in E.code.state.cortex if c.config != _|_ {(n): c.config}}
+					cortex:                {for n, c in E.code.state.cortex if c.config != _|_ {(n): c.config}}
 					cortexImplementations: {for n, c in E.code.state.cortex if c.config != _|_ {(n): c.setup}}
 				}
 			}
@@ -3819,8 +3922,8 @@ _pgrollDir: "services/database/pgroll"
 					charts: [for _, c in E.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "mecha" if c.config.meta.migration == owner.config.meta.migration {
 						config: c.config
 						setup: {
-							actors: c.setup.actors
-							guards: c.setup.guards
+							actors:  c.setup.actors
+							guards:  c.setup.guards
 							actions: c.setup.actions
 						}
 					}]
@@ -3862,12 +3965,12 @@ _pgrollDir: "services/database/pgroll"
 			if E.code.state.migrations != _|_ for n, m in E.code.state.migrations {
 				"\(_pgrollDir)/\(n).json": {format: "json", data: m}
 			}
-			for n, m in (#laterEntityMigrations & {code: E.code}).out {
+			if E.code.state.baseline != _|_ for n, m in (#laterEntityMigrations & {code: E.code, later: E._appMigrations.later}).out {
 				"\(_pgrollDir)/\(n).json": {format: "json", data: m}
 			}
 			"services/database/migrations/004_types.sql": {
 				format: "type-sql"
-				data: [for _, e in E.code.state.entities if e.server for f in e.fields if f.type == "decimal" {precision: f.precision, scale: f.scale}]
+				data:   [for _, e in E.code.state.entities if e.server for f in e.fields if f.type == "decimal" {precision: f.precision, scale: f.scale}]
 			}
 			"services/database/migrations/000_extensions.sql": {
 				format: "sql"
@@ -3890,10 +3993,10 @@ _pgrollDir: "services/database/pgroll"
 				_roles: list.Concat([["anon"], [if E._authOn {"app_user"}, if E._serviceOn {"service"}], [if E._serverOn {"electric"}]])
 				text: "DO $$ BEGIN\n" + strings.Join([for r in _roles {
 					"""
-					  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
-					    CREATE ROLE \(r) NOLOGIN;
-					  END IF;
-					"""
+						  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '\(r)') THEN
+						    CREATE ROLE \(r) NOLOGIN;
+						  END IF;
+						"""
 				}], "\n") + "\n" + _authenticator + "END $$;\n" + _login + strings.Join(_bypass, "") + strings.Join(_timeouts, "")
 
 				// PostgREST's login, which switches to the role a request's token
@@ -3927,8 +4030,7 @@ _pgrollDir: "services/database/pgroll"
 						"GRANT USAGE ON SCHEMA public TO electric;\n" +
 						"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
 						"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n" +
-						""
-					},
+						""},
 				]
 
 				// The innermost timeouts of a request (plugins/pronto/resilience), per token role.
@@ -3936,8 +4038,8 @@ _pgrollDir: "services/database/pgroll"
 					for r in _tokenRoles
 					let tier = [if r == "service" {"service"}, "client"][0] {
 						"ALTER ROLE \(r) SET statement_timeout = '\(resilience.resilience.timeouts.statement[tier])s';\n" +
-						"ALTER ROLE \(r) SET lock_timeout = '\(resilience.resilience.timeouts.lock[tier])s';\n" +
-						"ALTER ROLE \(r) SET idle_in_transaction_session_timeout = '\(resilience.resilience.timeouts.idleInTransaction[tier])s';\n"
+							"ALTER ROLE \(r) SET lock_timeout = '\(resilience.resilience.timeouts.lock[tier])s';\n" +
+							"ALTER ROLE \(r) SET idle_in_transaction_session_timeout = '\(resilience.resilience.timeouts.idleInTransaction[tier])s';\n"
 					},
 				]])
 			}
@@ -3998,22 +4100,22 @@ _pgrollDir: "services/database/pgroll"
 				text: [
 					if len(E._baseTables) > 0 {
 						"""
-				\([if len(E._baseTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: E._baseTables}).out + _marker + "\n-- tier: any"}, "-- No authoritative source entity: nothing for the bus to read."][0])
+							\([if len(E._baseTables) > 0 {"-- tier: \(_wal)\n" + (#publication & {name: E._pub, tables: E._baseTables}).out + _marker + "\n-- tier: any"}, "-- No authoritative source entity: nothing for the bus to read."][0])
 
-				-- Electric's own publication, declared rather than left to it.
-				-- ELECTRIC_MANUAL_TABLE_PUBLISHING makes it validate this instead of
-				-- building one, which is what lets its role hold only REPLICATION and
-				-- SELECT: creating a publication needs CREATE on the database, and
-				-- adding a table to one needs ownership of that table. A sync service
-				-- that owns the app's tables can drop them.
-				-- tier: \(_wal)
-				\((#publication & {name: "electric_publication_default", tables: E._baseTables}).out)
+							-- Electric's own publication, declared rather than left to it.
+							-- ELECTRIC_MANUAL_TABLE_PUBLISHING makes it validate this instead of
+							-- building one, which is what lets its role hold only REPLICATION and
+							-- SELECT: creating a publication needs CREATE on the database, and
+							-- adding a table to one needs ownership of that table. A sync service
+							-- that owns the app's tables can drop them.
+							-- tier: \(_wal)
+							\((#publication & {name: "electric_publication_default", tables: E._baseTables}).out)
 
-				\(strings.Join([for t in E._baseTables {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
-				-- tier: any
-				GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
+							\(strings.Join([for t in E._baseTables {"ALTER TABLE \(t) REPLICA IDENTITY FULL;"}], "\n"))
+							-- tier: any
+							GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
 
-				"""
+							"""
 					},
 					"""
 						-- No synced entity: nothing to publish, nothing to grant.
@@ -4036,7 +4138,7 @@ _pgrollDir: "services/database/pgroll"
 			// merging silently.
 			if len([for r in E._raw if r.name == "005_create_tables.sql" {r}]) == 0 {
 				"services/database/migrations/005_create_tables.sql": {
-					format: "sql"
+					format:      "sql"
 					_indexLines: list.Concat([for ent in E._baseServer if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 					text: strings.Join(list.Concat([
 						[for ent in E._baseServer {(#tableSql & {e: ent, columns: E.code._machineColumns}).out}],
@@ -4100,20 +4202,20 @@ _pgrollDir: "services/database/pgroll"
 				"services/database/migrations/\(E._steps.actors)": {format: "mecha-reducer-sql", data: {
 					reducers: {for n, h in E.code.state.mecha.reducers {(n): {machine: h.reducer, rules: h.rules}}}
 					entities: E.code.state.entities
-					timers: [if len([for _, h in E.code.state.mecha.reducers if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
+					timers:   [if len([for _, h in E.code.state.mecha.reducers if h.reducer.ports != _|_ if h.reducer.ports.wake != _|_ {h}]) > 0 {mecha.#MachineTimersSql}, ""][0]
 				}}
 			}
 			if len(_machines) > 0 if len([for r in E._raw if r.name == E._steps.machines {r}]) == 0 {
 				"services/database/migrations/\(E._steps.machines)": {
 					format: "sql"
-					text: [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], runtime: false, step: E._steps.machines}).out}], "\n\n") + "\n"
+					text:   [if len(E._timedMachines) > 0 {mecha.#MachineTimersSql + "\n\n"}, ""][0] + [if len([for m in _machines if m.cortex != _|_ {m}]) > 0 {#cortexRuntimeSql + "\n\n" + #cortexRuntimeExemptSql + "\n\n"}, ""][0] + strings.Join([for m in _machines {(#mechaMachineSql & {machine: m, entities: E.code.state.entities, effects: [if E.code.state.effects != _|_ {E.code.state.effects}, {}][0], runtime: false, step: E._steps.machines}).out}], "\n\n") + "\n"
 				}
 			}
 
 			if E.code.state.signals != _|_ if len([for r in E._raw if r.name == "802_signals.sql" {r}]) == 0 {
 				"services/database/migrations/802_signals.sql": {
 					format: "sql"
-					text: (#signalsSql & {signals: E.code.state.signals, state: E.code.state}).out
+					text:   (#signalsSql & {signals: E.code.state.signals, state: E.code.state}).out
 				}
 			}
 
@@ -4134,13 +4236,13 @@ _pgrollDir: "services/database/pgroll"
 				for sName, st in m.states if st.invoke != _|_
 				let x = E.code.state.effects[st.invoke.src]
 				let ent = [for en, e in E.code.state.entities if en == m.entity || e.table == m.entity {e}][0] {
-					effect: x
-					table:  ent.table
-					field:  m.field
-					state:  sName
+					effect:  x
+					table:   ent.table
+					field:   m.field
+					state:   sName
 					onDone:  [if (st.invoke.onDone & string) != _|_ {st.invoke.onDone}, if (st.invoke.onDone & [...]) != _|_ {st.invoke.onDone[len(st.invoke.onDone)-1].target}, st.invoke.onDone.target][0]
 					onError: [if (st.invoke.onError & string) != _|_ {st.invoke.onError}, if (st.invoke.onError & [...]) != _|_ {st.invoke.onError[len(st.invoke.onError)-1].target}, st.invoke.onError.target][0]
-					row: [for f in ent.fields if f.pk != _|_ if f.pk {f.name}]
+					row:     [for f in ent.fields if f.pk != _|_ if f.pk {f.name}]
 				},
 			]
 			if len(_invoking) > 0 {
@@ -4162,6 +4264,7 @@ _pgrollDir: "services/database/pgroll"
 							if i.effect.secrets != _|_ {secrets: i.effect.secrets}
 							if i.effect.sink.credential != _|_ {credential: i.effect.sink.credential}
 							if i.effect.sink.contentType != _|_ {contentType: i.effect.sink.contentType}
+
 							// Where the edge's airlock goes: it has no daprd to read an endpoint from.
 							let edge = (#SinkAt & {sink: i.effect.sink, target: "cloudflare"}).out
 							if list.Contains(E.code.meta.targets, "cloudflare") if edge != null if edge.origin != _|_ {edgeOrigin: edge.origin}
@@ -4208,20 +4311,20 @@ _pgrollDir: "services/database/pgroll"
 					format: "sql"
 					text: strings.Join([for _, sc in E.code.state.schedules {
 						"""
-						INSERT INTO schedule (name, cron, time_zone, suspended, max_lateness_seconds,
-						                      concurrency_policy, done_entity, done_filter,
-						                      emits_entity, emits_values)
-						VALUES (\((#sqlLit & {v: sc.name}).out), \((#sqlLit & {v: sc.cron}).out), \((#sqlLit & {v: sc.timeZone}).out), \(sc.suspend), \(sc.maxLatenessSeconds),
-						        \((#sqlLit & {v: sc.concurrency}).out), \([if sc.done != _|_ {(#sqlLit & {v: E.code.state.entities[sc.done.entity].table}).out}, "NULL"][0]), \([if sc.done != _|_ {(#sqlLit & {v: sc.done.filter}).out}, "NULL"][0]),
-						        \((#sqlLit & {v: E.code.state.entities[sc.emits.entity].table}).out), \((#sqlLit & {v: json.Marshal(sc.emits.values)}).out))
-						ON CONFLICT (name) DO UPDATE SET
-						  cron = EXCLUDED.cron, time_zone = EXCLUDED.time_zone,
-						  suspended = EXCLUDED.suspended,
-						  max_lateness_seconds = EXCLUDED.max_lateness_seconds,
-						  concurrency_policy = EXCLUDED.concurrency_policy,
-						  done_entity = EXCLUDED.done_entity, done_filter = EXCLUDED.done_filter,
-						  emits_entity = EXCLUDED.emits_entity, emits_values = EXCLUDED.emits_values;
-						"""
+							INSERT INTO schedule (name, cron, time_zone, suspended, max_lateness_seconds,
+							                      concurrency_policy, done_entity, done_filter,
+							                      emits_entity, emits_values)
+							VALUES (\((#sqlLit & {v: sc.name}).out), \((#sqlLit & {v: sc.cron}).out), \((#sqlLit & {v: sc.timeZone}).out), \(sc.suspend), \(sc.maxLatenessSeconds),
+							        \((#sqlLit & {v: sc.concurrency}).out), \([if sc.done != _|_ {(#sqlLit & {v: E.code.state.entities[sc.done.entity].table}).out}, "NULL"][0]), \([if sc.done != _|_ {(#sqlLit & {v: sc.done.filter}).out}, "NULL"][0]),
+							        \((#sqlLit & {v: E.code.state.entities[sc.emits.entity].table}).out), \((#sqlLit & {v: json.Marshal(sc.emits.values)}).out))
+							ON CONFLICT (name) DO UPDATE SET
+							  cron = EXCLUDED.cron, time_zone = EXCLUDED.time_zone,
+							  suspended = EXCLUDED.suspended,
+							  max_lateness_seconds = EXCLUDED.max_lateness_seconds,
+							  concurrency_policy = EXCLUDED.concurrency_policy,
+							  done_entity = EXCLUDED.done_entity, done_filter = EXCLUDED.done_filter,
+							  emits_entity = EXCLUDED.emits_entity, emits_values = EXCLUDED.emits_values;
+							"""
 					}], "\n") + "\n"
 				}
 			}
@@ -4239,10 +4342,10 @@ _pgrollDir: "services/database/pgroll"
 
 					""" + strings.Join([for ent in E._baseServer {
 					"""
-					DROP TRIGGER IF EXISTS restamp_txid ON \(ent.table);
-					CREATE TRIGGER restamp_txid BEFORE UPDATE ON \(ent.table)
-					  FOR EACH ROW EXECUTE FUNCTION restamp_txid();
-					"""
+						DROP TRIGGER IF EXISTS restamp_txid ON \(ent.table);
+						CREATE TRIGGER restamp_txid BEFORE UPDATE ON \(ent.table)
+						  FOR EACH ROW EXECUTE FUNCTION restamp_txid();
+						"""
 				}], "\n") + "\n"
 			}
 			for rm in E._raw {
@@ -4374,9 +4477,9 @@ _pgrollDir: "services/database/pgroll"
 						p:           pl
 						sourceTable: E.code.state.entities[pl.from].table
 						sinkTable:   E.code.state.entities[pl.to].table
-						sinkPk: [for fld in E.code.state.entities[pl.to].fields if fld.pk {fld.name}][0]
-						carriers: E._cdcCarriers
-						authOn:   E._authOn
+						sinkPk:      [for fld in E.code.state.entities[pl.to].fields if fld.pk {fld.name}][0]
+						carriers:    E._cdcCarriers
+						authOn:      E._authOn
 					}).out
 				}
 			}
@@ -4394,7 +4497,7 @@ _pgrollDir: "services/database/pgroll"
 			for _, dr in E.code.state.drains if dr.stream {
 				"docker/\(E.code.meta.name)-\(dr.name).yaml": {
 					format: "yaml"
-					data: (#rpkDrain & {d: dr, app: E.code.meta.name, authOn: E._authOn}).out
+					data:   (#rpkDrain & {d: dr, app: E.code.meta.name, authOn: E._authOn}).out
 				}
 			}
 
@@ -4403,7 +4506,7 @@ _pgrollDir: "services/database/pgroll"
 			// pipelines alike.
 			for _, pl in E.code.state.pipelines if pl.raw != _|_ {
 				"docker/\(E.code.meta.name)-\(pl.name).yaml": {format: "yaml", src: pl.src}
-				"\(pl.src)": {format: "yaml", src: pl.src}
+				"\(pl.src)":                                  {format: "yaml", src: pl.src}
 			}
 
 			_duckstreams: [if E.code.state.duckstreams != _|_ {[for _, d in E.code.state.duckstreams {d}]}, []][0]
@@ -4442,19 +4545,19 @@ _pgrollDir: "services/database/pgroll"
 			// router that /shell/ is no route of this app. It is the app's root
 			// they meant.
 			_entry: """
-			    @entry path /\(E.terminal.surface.entry) /\(strings.TrimSuffix(E.terminal.surface.entry, "index.html"))
-			    redir @entry / permanent
+				    @entry path /\(E.terminal.surface.entry) /\(strings.TrimSuffix(E.terminal.surface.entry, "index.html"))
+				    redir @entry / permanent
 
-			"""
+				"""
 			_alias: [
 				if E._shell.i18n != _|_ {"""
-				    @unprefixed path /\(E._shell.i18n.locales[E._shell.i18n.default].path)
-				    rewrite @unprefixed /\(E._shell.i18n.locales[E._shell.i18n.default].path)/
-				    handle_path /\(E._shell.i18n.locales[E._shell.i18n.default].path)/* {
-				      redir {uri} permanent
-				    }
+					    @unprefixed path /\(E._shell.i18n.locales[E._shell.i18n.default].path)
+					    rewrite @unprefixed /\(E._shell.i18n.locales[E._shell.i18n.default].path)/
+					    handle_path /\(E._shell.i18n.locales[E._shell.i18n.default].path)/* {
+					      redir {uri} permanent
+					    }
 
-				"""},
+					"""},
 				"",
 			][0]
 			// The reader's language decided at the door, so a reader whose
@@ -4525,13 +4628,13 @@ _pgrollDir: "services/database/pgroll"
 					], "/"),
 				][0]
 				let captures = [for c, l in E._meansLocale if l == tag {c}] {"""
-				        @\(r.screen)_\(E._shell.i18n.locales[tag].path)\(suffix) {
-				\(at)
-				          not query lang=*
-				          vars_regexp {re.lang.1} (?i)^(\(strings.Join(captures, "|")))$
-				        }
-				        rewrite @\(r.screen)_\(E._shell.i18n.locales[tag].path)\(suffix) \(target)
-				"""},
+					        @\(r.screen)_\(E._shell.i18n.locales[tag].path)\(suffix) {
+					\(at)
+					          not query lang=*
+					          vars_regexp {re.lang.1} (?i)^(\(strings.Join(captures, "|")))$
+					        }
+					        rewrite @\(r.screen)_\(E._shell.i18n.locales[tag].path)\(suffix) \(target)
+					"""},
 			]
 			// Caddy refuses an empty path matcher at provision, so a program with
 			// no route emits neither this block nor `_rewrite` below.
@@ -4541,18 +4644,18 @@ _pgrollDir: "services/database/pgroll"
 				if len(E._others) == 0 {""},
 				if _routeless {""},
 				"""
-				    route {
-				      @negotiable path \(strings.Join(list.SortStrings([for _, w in _widened {w}]), " "))
-				      header @negotiable Vary Accept-Language
-				      @lang header_regexp lang Accept-Language (?i)(?:^|,)\\s*(\(strings.Join(E._alternatives, "|")))\\b
-				      handle @lang {
-				\(strings.Join(_branches, "\n"))
-				      }
-				    }
+					    route {
+					      @negotiable path \(strings.Join(list.SortStrings([for _, w in _widened {w}]), " "))
+					      header @negotiable Vary Accept-Language
+					      @lang header_regexp lang Accept-Language (?i)(?:^|,)\\s*(\(strings.Join(E._alternatives, "|")))\\b
+					      handle @lang {
+					\(strings.Join(_branches, "\n"))
+					      }
+					    }
 
-				""",
+					""",
 			][0]
-			_addressed: E._addressed
+			_addressed:   E._addressed
 			_routeRegexp: "^(?:" + strings.Join([for a in list.SortStrings(_addressed) {(#routeRegexp & {path: a}).out}], "|") + ")(?:\\?.*)?$"
 			// `route`, because caddy orders directives by its own table and the
 			// catch-all `handle` sorts ahead of both `handle_path` and `route`:
@@ -4579,21 +4682,21 @@ _pgrollDir: "services/database/pgroll"
 			_render: [
 				if len(E._onRequest) == 0 {""},
 				"""
-				    @rendered {
-				      expression `{http.request.uri}.matches(\(json.Marshal(_renderedRegexp)))`
-				      not file {
-				        root {$PRONTO_SRV_ROOT:/srv}
-				        try_files {path} {path}/index.html
-				      }
-				    }
-				    handle @rendered {
-				      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:\(omnishell.#Render.port)} {
-				        header_up dapr-app-id render
-				        import bounded-render
-				      }
-				    }
+					    @rendered {
+					      expression `{http.request.uri}.matches(\(json.Marshal(_renderedRegexp)))`
+					      not file {
+					        root {$PRONTO_SRV_ROOT:/srv}
+					        try_files {path} {path}/index.html
+					      }
+					    }
+					    handle @rendered {
+					      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:\(omnishell.#Render.port)} {
+					        header_up dapr-app-id render
+					        import bounded-render
+					      }
+					    }
 
-				""",
+					""",
 			][0]
 			// The documents rendered before any request, in both slash spellings
 			// as `@route` below. Each is a template naming the deployment's
@@ -4610,20 +4713,20 @@ _pgrollDir: "services/database/pgroll"
 			_document: [
 				if len(_documentAt) == 0 {""},
 				"""
-				    @developmentDocument {
-				      path \(strings.Join(_documentAt, " "))
-				      expression `"{$PRONTO_FILE_MODE:release}" == "development"`
-				    }
-				    rewrite @developmentDocument /\(E.terminal.surface.entry)
-				    @document path \(strings.Join(_documentAt, " "))
-				    handle @document {
-				      root * {$PRONTO_SRV_ROOT:/srv}
-				      header Cache-Control "no-cache"
-				      try_files {path}/index.html
-				      import templated text/html
-				    }
+					    @developmentDocument {
+					      path \(strings.Join(_documentAt, " "))
+					      expression `"{$PRONTO_FILE_MODE:release}" == "development"`
+					    }
+					    rewrite @developmentDocument /\(E.terminal.surface.entry)
+					    @document path \(strings.Join(_documentAt, " "))
+					    handle @document {
+					      root * {$PRONTO_SRV_ROOT:/srv}
+					      header Cache-Control "no-cache"
+					      try_files {path}/index.html
+					      import templated text/html
+					    }
 
-				""",
+					""",
 			][0]
 			_served: """
 				  route {
@@ -4660,13 +4763,14 @@ _pgrollDir: "services/database/pgroll"
 			// A presenter's worker script answers with the presenter's own
 			// policy, which governs the worker it starts.
 			_presenterAt: [if E._shell.presenter != _|_ {"/omnishell/interpreter/presenter.js"}]
-			_fenced: list.Concat([_unitPaths, _presenterAt])
+			_fenced:      list.Concat([_unitPaths, _presenterAt])
 			_security: [if E.terminal.surface.contentSecurityPolicy != _|_ {
 				// The ladder's pages answer with their own policy (E._ladderPolicy),
 				// so the terminal's names every path but theirs.
 				let matcher = "  @terminal not path \(strings.Join(list.Concat([["/docs/*"], _fenced]), " "))\n  header @terminal"
 				let ladder = "  @ladder path /docs/*\n  header @ladder Content-Security-Policy \(json.Marshal(E._ladderPolicy))\n"
 				let presenter = [for p in _presenterAt {"  @presenter path \(p)\n  header @presenter Content-Security-Policy \(json.Marshal(E._shell.presenter.policy))\n"}]
+
 				// What the presenter's script-src 'self' admits is answered
 				// from a file the door holds, never by an upstream.
 				let scripted = [for p in _presenterAt {"  @scripted {\n    header_regexp Sec-Fetch-Dest ^(\(strings.Join(E._shell.presenter.scripted, "|")))$\n    not file {\n      root {$PRONTO_SRV_ROOT:/srv}\n    }\n  }\n  handle @scripted {\n    respond \"\" 403\n  }\n"}]
@@ -4674,6 +4778,7 @@ _pgrollDir: "services/database/pgroll"
 				// A door built as a release names the inline scripts its documents
 				// run; an addressed file never changes, so it is never revalidated.
 				let policy = [if E.cluster.meta.served != _|_ {strings.Replace(E._browserPolicy, "script-src 'self'", "script-src 'self' {$PRONTO_RELEASE_SCRIPTS}", 1)}, E._browserPolicy][0]
+
 				// A realm's document is isolated by the seat's sandbox; loaded any
 				// other way it would run at this origin under no policy. So it
 				// carries the same sandbox itself (omnishell hatch.js SANDBOX), and
@@ -4699,21 +4804,21 @@ _pgrollDir: "services/database/pgroll"
 				let matcher = "door_\(strings.Replace(hn, "-", "_", -1))"
 				let upstream = "PRONTO_UPSTREAM_\(strings.ToUpper(strings.Replace(hn, "-", "_", -1)))"
 				"""
-				  @\(matcher) path \(h.door.route) \(h.door.route)/*
-				  handle @\(matcher) {
-				    reverse_proxy {$\(upstream):\(hn):\(h.door.port)} {
-				      header_up dapr-app-id \(hn)
-				      import bounded-hatch
-				    }
-				  }
+					  @\(matcher) path \(h.door.route) \(h.door.route)/*
+					  handle @\(matcher) {
+					    reverse_proxy {$\(upstream):\(hn):\(h.door.port)} {
+					      header_up dapr-app-id \(hn)
+					      import bounded-hatch
+					    }
+					  }
 
-				"""
+					"""
 			}], "")
 			_subdomainBlocks: strings.Join([for s in _subdomains {
 				"\nhttps://\(s).localhost:{$CADDY_DOOR_PORT:8443}, https://\(s).caddy:{$CADDY_DOOR_PORT:8443} {\n  tls {$CADDY_TLS:internal}\n  import app\n}\n"
 			}], "")
 			_doorAnchored: true & strings.Contains(_caddyfileAsset, _doorAnchor)
-			text: resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1) + _subdomainBlocks
+			text:          resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1) + _subdomainBlocks
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why
@@ -4737,7 +4842,7 @@ _pgrollDir: "services/database/pgroll"
 					# generated by pronto from program.cue — do not edit
 					User-agent: *
 					Allow: /
-					""" + [if E._envelope.sitemap.enabled { "\n\nSitemap: {{$o}}/sitemap.xml\n" }, "\n"][0]},
+					""" + [if E._envelope.sitemap.enabled {"\n\nSitemap: {{$o}}/sitemap.xml\n"}, "\n"][0]},
 				"""
 					# generated by pronto from program.cue — do not edit
 					User-agent: *
@@ -4756,7 +4861,7 @@ _pgrollDir: "services/database/pgroll"
 		}
 		if E._envelope.sitemap.enabled {
 			"sitemap.xml": {
-				format: "text"
+				format:      "text"
 				_isAdvanced: E._envelope.sitemap.declared
 				// One <url> per crawlable route per locale, each carrying the whole
 				// alternate set including itself — which is what the protocol asks
@@ -4795,8 +4900,8 @@ _pgrollDir: "services/database/pgroll"
 								"    <loc>\(_o)\(locAddr)</loc>",
 							],
 							[
-								if _isAdvanced { "    <changefreq>\(meta.freq)</changefreq>" },
-								if _isAdvanced { "    <priority>\(meta.priority)</priority>" },
+								if _isAdvanced {"    <changefreq>\(meta.freq)</changefreq>"},
+								if _isAdvanced {"    <priority>\(meta.priority)</priority>"},
 							],
 							[for other in E._locales {
 								"    <xhtml:link rel=\"alternate\" hreflang=\"\(other)\" href=\"\(_o)\(spelled[other][i])\"/>"
@@ -4809,7 +4914,7 @@ _pgrollDir: "services/database/pgroll"
 					},
 					if _isAdvanced for ext in E._envelope.sitemap.extra {
 						let loc = [
-							if strings.HasPrefix(ext, "http://") || strings.HasPrefix(ext, "https://") { ext },
+							if strings.HasPrefix(ext, "http://") || strings.HasPrefix(ext, "https://") {ext},
 							"\(_o)\(ext)",
 						][0]
 						let locEsc = strings.Replace(
@@ -4817,10 +4922,14 @@ _pgrollDir: "services/database/pgroll"
 								strings.Replace(
 									strings.Replace(
 										strings.Replace(loc, "&", "&amp;", -1),
-										"<", "&lt;", -1),
-									">", "&gt;", -1),
-								"\"", "&quot;", -1),
-							"'", "&apos;", -1)
+										"<", "&lt;", -1,
+									),
+									">", "&gt;", -1,
+								),
+								"\"", "&quot;", -1,
+							),
+							"'", "&apos;", -1,
+						)
 						strings.Join([
 							"  <url>",
 							"    <loc>\(locEsc)</loc>",
@@ -4854,7 +4963,7 @@ _pgrollDir: "services/database/pgroll"
 		".pronto/development/.gitignore": {format: "text", text: "*\n"}
 		".pronto/development/shell.json": {
 			format: "json"
-			data: E._developmentShell
+			data:   E._developmentShell
 		}
 		"shell/shell.json": {
 			format: "json"
@@ -4862,8 +4971,8 @@ _pgrollDir: "services/database/pgroll"
 		}
 		"\(E.terminal.surface.entry)": {
 			let _parts = strings.Split(E.terminal.surface.assets.html, "<link rel=\"icon\" href=\"data:,\">")
-			_markerCheck: [if !E._envelope._hasEnvelopeInjections || len(_parts) == 2 { true }, "omnishell html asset must contain exactly one <link rel=\"icon\" href=\"data:,\"> marker, found \(len(_parts) - 1)"][0] & true
-			format: "text"
+			_markerCheck: [if !E._envelope._hasEnvelopeInjections || len(_parts) == 2 {true}, "omnishell html asset must contain exactly one <link rel=\"icon\" href=\"data:,\"> marker, found \(len(_parts)-1)"][0] & true
+			format:       "text"
 			_html: [
 				if E._envelope._hasEnvelopeInjections if len(_parts) == 2 {
 					_parts[0] + E._envelope.headLinks + _parts[1]
@@ -4915,7 +5024,7 @@ _pgrollDir: "services/database/pgroll"
 		for _, pl in E.code.state.pipelines if pl.trigger == "cdc" if pl.raw == _|_ {
 			if pl.fold == _|_ {
 				"\(pl.transform.src)": {format: "bloblang", src: pl.transform.src}
-				"\(pl.shim)": {format: "js", src: pl.shim}
+				"\(pl.shim)":          {format: "js", src: pl.shim}
 			}
 			if pl.fold != _|_ {
 				"\(pl.fold.src)": {format: "js", src: pl.fold.src}
@@ -4959,7 +5068,7 @@ _pgrollDir: "services/database/pgroll"
 		}
 		"bayt.cue": {
 			format: "cue"
-			text:   """
+			text: """
 				// The build graph is authored in program.cue (the build seat) and
 				// lands here as bayt.json; unifying it back through bayt.#project
 				// keeps bayt's schema live at generate time.
@@ -5006,9 +5115,10 @@ _pgrollDir: "services/database/pgroll"
 		if len([for t in E.code.meta.targets if t == "pages" || t == "cloudflare" || t == "docker" {t}]) > 0 {
 			".goreleaser.yaml": {
 				format: "yaml"
-				data: {version: 2, project_name: E.code.meta.name, dist: "dist/goreleaser", builds: [{builder: "zig", skip: true}], release: {disable: true}, changelog: {disable: true}}
+				data:   {version: 2, project_name: E.code.meta.name, dist: "dist/goreleaser", builds: [{builder: "zig", skip: true}], release: {disable: true}, changelog: {disable: true}}
 			}
 		}
+
 		// The mirror release: the workflow bundles and deploys the app on its
 		// mirror, where copybara moves it to the root GitHub reads.
 		let hasPages = list.Contains(E.code.meta.targets, "pages")
@@ -5017,6 +5127,7 @@ _pgrollDir: "services/database/pgroll"
 			// An app at the mirror's root releases from there.
 			let pagesDir = [if E.build.project.dir != "" {"\n        working-directory: \(E.build.project.dir)"}, ""][0]
 			let pagesPrefix = [if E.build.project.dir != "" {"\(E.build.project.dir)/"}, ""][0]
+
 			// The app's tools, the runtime among them, are its pinned releases,
 			// which setup installs.
 			let pagesSetup = "\n      - run: sayt setup\(pagesDir)"
@@ -5071,14 +5182,14 @@ _pgrollDir: "services/database/pgroll"
 				"""
 
 			let jobsList = [
-				if hasPages { pagesJob },
-				if hasCloudflare { cloudflareJob },
+				if hasPages {pagesJob},
+				if hasCloudflare {cloudflareJob},
 			]
 			let jobsBody = strings.Join(jobsList, "\n")
 
 			".github/workflows/cd.yml": {
 				format: "yaml"
-				text:   """
+				text: """
 					# Release the app to its declared hosting targets.
 					#
 					# GitHub reads workflows only from a repository's root .github/, so this
