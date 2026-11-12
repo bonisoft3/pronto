@@ -78,6 +78,7 @@ def run-tests [] {
 	test_render_manifests_eks
 	test_render_manifests_metal
 	test_render_ready_through_the_door
+	test_crud_lives_on_its_own
 	test_app_services
 	test_app_service_readiness
 	test_rollout_guard
@@ -550,6 +551,15 @@ def test_render_ready_through_the_door [] {
 	# A pod still syncing its tables is given time to start before liveness may kill it (PRONTO-107).
 	assert equal $render.startupProbe.httpGet.path "/health"
 	assert (($render.startupProbe.periodSeconds * $render.startupProbe.failureThreshold) >= 120) "render may take compose's start_period to start"
+}
+
+def test_crud_lives_on_its_own [] {
+	print "test crud is live on PostgREST's own /live and ready on /ready..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let crud = (render-manifests $app.cue_path "metal" | from yaml | where kind == "Deployment" and metadata.name == "sample-crud" | first | get spec.template.spec.containers | where name == "crud" | first)
+	# A database that restarts makes /ready fail; liveness on it restarted crud with every release (PRONTO-440).
+	assert equal $crud.livenessProbe.httpGet.path "/live"
+	assert equal $crud.readinessProbe.httpGet.path "/ready"
 }
 
 def test_container_resources_and_files [] {

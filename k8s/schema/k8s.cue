@@ -831,9 +831,11 @@ import (
 							{name: "PGRST_ADMIN_SERVER_PORT", value: "3001"},
 						]
 						resources: (#resourcesOf & {r: release, n: "crud"}).out
+						// Liveness asks whether PostgREST itself runs (/live), never whether the database answers (/ready):
+						// a database restarting with a release made every crud restart with it (PRONTO-440, 39 in 31 h).
 						livenessProbe: {
 							httpGet: {
-								path: "/ready"
+								path: "/live"
 								port: 3001
 							}
 							initialDelaySeconds: 5
