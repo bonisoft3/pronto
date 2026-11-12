@@ -8,6 +8,7 @@ bundle/edge-pglite_test.ts
 bundle/edge-reader_test.ts
 bundle/edge-signin_test.ts
 bundle/edge-static_test.ts
+bundle/prose_test.ts
 bundle/publish-edge-secrets_test.ts
 bundle/publish-edge-state_test.ts
 bundle/publish-edge-storage.test.ts
