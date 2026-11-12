@@ -327,7 +327,8 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     }))
     await write('shell/shell.css', '')
     await write('shell/design.css', '')
-    await write('shell/screens/home.css', '')
+    // A screen's sheet importing a sheet the head links carries only its own rules.
+    await write('shell/screens/home.css', '@import url("shared/chrome.css"); .home { gap: 1px; }')
     // A comment naming the @import a screen's sheet carries is prose, not an
     // import, which the bundler refused a shared sheet for.
     // A string's `/*` opens no comment: the import after it is still inlined.
@@ -377,7 +378,14 @@ Deno.test('a page bundled with derived rows boots holding them in place of the s
     }).output()
     assert.deepEqual(bundled.success, true, 'bundle.ts failed')
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
-    assert.ok(html.includes('<style>/* shared through the @import atop each screen; was @import "./gone.css"; */ body { padding-top: 72px; } a::after { content: "/*"; } .rail { gap: 0; }</style>'))
+    // The comment is prose the first load does not carry (prose.ts).
+    assert.ok(html.includes('<style> body { padding-top: 72px; } a::after { content: "/*"; } .rail { gap: 0; }</style>'))
+    // The head carries the shared sheet it links: no screen preloads it, and
+    // the payload holds it once, in the head.
+    const shipped = JSON.parse(/<script type="application\/json" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1])
+    assert.ok(!('shell/shared/chrome.css' in shipped.files) && !('shell/shared/chrome.css' in shipped.same))
+    assert.deepEqual(JSON.parse(shipped.files['shell/shell.json']).routes[0].files.shared, ['shell/shared/rail.css'])
+    assert.equal(shipped.files['shell/screens/home.css'], ' .home { gap: 1px; }')
     assert.ok(!/<link rel="stylesheet"/.test(html))
     assert.ok(!/import\s+.*from\s+["']node:/.test(html), 'the bundled page must not contain unresolvable node:* imports')
 
