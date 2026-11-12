@@ -188,11 +188,16 @@ import (
 			}
 			spec: {
 				instances: release.database.instances
-				// upstream's parameters for the services an app's compose runs beside the cluster
-				// (feldera, conduit: logical slots); an app without them keeps the parameters its
-				// live database runs with, as a change to them restarts it.
-				if len(release.runtime) > 0 {
-					postgresql: parameters: {
+				// Every database's replication room (PRONTO-363): a slot and a sender for each Electric
+				// (its own temporary slot, twice over while a rollout runs the old pods beside the new),
+				// each standby and two to spare, never under CloudNativePG's own defaults (32 slots, 10
+				// senders), so a database already running them is not restarted for them. 128 each
+				// with upstream's parameters for the services an app's compose runs beside the cluster
+				// (feldera, conduit: logical slots). Any slot holds at most slotWalKeepMB of WAL. The
+				// app's own parameters win.
+				let streams = 2*countOf["electric"] + release.database.instances - 1 + 2
+				let base = {
+					if len(release.runtime) > 0 {
 						wal_level:             "logical"
 						max_replication_slots: "128"
 						max_wal_senders:       "128"
@@ -201,9 +206,15 @@ import (
 						synchronous_commit:    "on"
 						full_page_writes:      "on"
 					}
+					if len(release.runtime) == 0 {
+						max_replication_slots: "\(list.Max([32, streams]))"
+						max_wal_senders:       "\(list.Max([10, streams]))"
+					}
+					max_slot_wal_keep_size: "\(release.database.slotWalKeepMB)MB"
 				}
-				if len(release.database.parameters) > 0 {
-					postgresql: parameters: release.database.parameters
+				postgresql: parameters: {
+					for k, v in base if release.database.parameters[k] == _|_ {(k): v}
+					release.database.parameters
 				}
 				// Standbys (release.cue's database.instances): synchronous replication and slots.
 				if release.database.instances > 1 {
@@ -920,6 +931,14 @@ import (
 								}
 							},
 							{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
+							// Electric 1.8.1 names its slot, and the advisory lock behind it, by the stream id,
+							// shared by every replica: a second one waited on the lock and never served. Each
+							// replica takes a temporary slot of a random name, its own, which Postgres drops with
+							// its connection and which holds no WAL once it is gone (PRONTO-363, as gcp.cue's
+							// Cloud Run). The publication stays the default stream's; the permanent slot it held
+							// before, electric_slot_default, the release drops (drop-retired-electric-slot).
+							{name: "CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN", value: "true"},
+							{name: "ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME", value: "true"},
 						]
 						resources: (#resourcesOf & {r: release, n: "electric"}).out
 						livenessProbe: {

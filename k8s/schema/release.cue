@@ -1,6 +1,10 @@
 package schema
 
-import "strings"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 // #Environment defines the infrastructure profile for target clusters.
 #Environment: {
@@ -117,7 +121,14 @@ import "strings"
 	}
 
 	database: {
-		storage: string | *"1Gi"
+		// The database's volume. An app states it (PRONTO-363): every slot's WAL cap is a share of it.
+		storage: *"1Gi" | =~"^[1-9][0-9]*(Mi|Gi|Ti)$"
+		let sizeOf = regexp.FindSubmatch("^([0-9]+)(Mi|Gi|Ti)$", storage)
+		// The most WAL a replication slot may hold, in MB (Postgres's max_slot_wal_keep_size): a
+		// replica that hangs while still connected (an Electric, a standby) keeps its slot and the WAL
+		// behind it, and past this the slot is given up rather than the disk filled. A quarter of the
+		// volume.
+		slotWalKeepMB: int & >=64 | *div(strconv.Atoi(sizeOf[1])*{Mi: 1, Gi: 1024, Ti: 1048576}[sizeOf[2]], 4)
 		// CloudNativePG's instances: one primary and instances-1 standbys, for which the operator
 		// keeps a PodDisruptionBudget itself. A preview runs as many.
 		instances: int & >=1 | *1

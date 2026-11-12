@@ -8,6 +8,7 @@ const fixtures_dir = path self testdata
 use std/assert
 
 use release.nu [
+	drop-retired-electric-slot
 	tenant-manifests
 	tenant-refusals
 	tenant-repo
@@ -55,6 +56,7 @@ def run-tests [] {
 
 	test_operators_metadata
 	test_dapr_ha
+	test_electric_slots
 	test_native_runtime
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
@@ -1427,18 +1429,65 @@ def test_database_ha [] {
 	let one = (do $cluster {})
 	assert equal $one.instances 1
 	for f in [enablePDB replicationSlots] { assert ($f not-in ($one | columns)) $"one instance renders no ($f), as before" }
-	assert ($one.postgresql? == null) "nor a postgresql block"
+	assert ("synchronous" not-in ($one.postgresql | columns)) "nor synchronous replication"
 	let three = (do $cluster {database: {instances: 3, parameters: {max_slot_wal_keep_size: "2GB"}}})
 	assert equal $three.instances 3
 	assert equal $three.postgresql.synchronous {method: "any", number: 1, dataDurability: "preferred"}
 	assert equal $three.replicationSlots {highAvailability: {enabled: true}}
 	assert equal $three.enablePDB true
-	assert equal $three.postgresql.parameters {max_slot_wal_keep_size: "2GB"}
+	assert equal $three.postgresql.parameters {max_replication_slots: "32", max_wal_senders: "10", max_slot_wal_keep_size: "2GB"} "the app's own parameter wins"
 	let strict = (do $cluster {database: {instances: 3, synchronous: {dataDurability: "required"}, haSlots: false, enablePDB: false}})
 	assert equal $strict.postgresql.synchronous.dataDurability "required"
 	assert ("replicationSlots" not-in ($strict | columns))
 	assert equal $strict.enablePDB false
 	assert equal (do $cluster {database: {enablePDB: false}} | get enablePDB) false "one instance may turn the budget off"
+}
+
+def test_electric_slots [] {
+	print "test every Electric takes a temporary slot of its own, the database has room for them, and the old slot goes once..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let render = {|app_data|
+		let data = (mktemp -t slots.XXXXXX.json | str trim)
+		{App: $app_data} | to json | save -f $data
+		let objs = (render-manifests $app.cue_path metal --data $data | from yaml)
+		rm $data
+		$objs
+	}
+	let one = (do $render {})
+	let electric = ($one | where kind == Deployment and metadata.name == sample-electric | first | get spec.template.spec.containers.0.env)
+	for v in [CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME] {
+		assert equal ($electric | where name == $v | first | get value) "true" $"($v): a slot of its own, gone with its connection"
+	}
+	# Room: one slot and sender an Electric, twice over through a rollout, each standby's and two to
+	# spare, never under CloudNativePG's defaults; a slot's WAL capped at a quarter of the volume.
+	let params = {|objs| $objs | where kind == Cluster | first | get spec.postgresql.parameters }
+	assert equal (do $params $one) {max_replication_slots: "32", max_wal_senders: "10", max_slot_wal_keep_size: "256MB"}
+	let big = (do $params (do $render {replicas: 3, scale: {electric: {replicas: 6}}, database: {instances: 3, storage: "20Gi"}}))
+	assert equal $big {max_replication_slots: "32", max_wal_senders: "16", max_slot_wal_keep_size: "5120MB"} "6 Electrics twice over, 2 standbys and 2 to spare"
+	let preview = (do $params (do $render {preview: pr1, scale: {electric: {replicas: 6, preview: 2}}}))
+	assert equal $preview.max_wal_senders "10" "a preview's Electrics are its own count"
+	assert equal (do $params (do $render {database: {storage: "512Mi", slotWalKeepMB: 100}}) | get max_slot_wal_keep_size) "100MB"
+	assert ((try { do $render {database: {storage: "1G"}}; false } catch { true })) "a volume is stated in Mi, Gi or Ti"
+
+	# The old slot: dropped once nothing holds it, waited for while something does, and a rerun finds none.
+	let dir = (mktemp -d -t slots.XXXXXX | str trim)
+	mkdir $"($dir)/bin"
+	$"#!/bin/sh\necho \"$*\" >> ($dir)/log\ncase \"$*\" in\n  *pg_drop_replication_slot*\) echo 1 ;;\n  *\) cat ($dir)/state ;;\nesac\n" | save $"($dir)/bin/kubectl"
+	chmod +x $"($dir)/bin/kubectl"
+	let db = {namespace: sample, pod: sample-db-1, database: sample}
+	with-env {PATH: ($env.PATH | prepend $"($dir)/bin")} {
+		"" | save -f $"($dir)/state"
+		assert equal (drop-retired-electric-slot $db) "none" "a database without the slot is left as it is"
+		assert (open $"($dir)/log" | lines | all {|l| not ($l | str contains pg_drop_replication_slot) }) "and nothing is dropped"
+		"f\n" | save -f $"($dir)/state"
+		assert equal (drop-retired-electric-slot $db) "dropped"
+		let drop = (open $"($dir)/log" | lines | where {|l| $l | str contains pg_drop_replication_slot } | first)
+		assert ($drop | str contains "exec -n sample sample-db-1 -c postgres -- psql -U postgres -d sample") $"on the primary: ($drop)"
+		assert ($drop | str contains "WHERE slot_name = 'electric_slot_default' AND NOT active") $"only a slot nobody holds: ($drop)"
+		"t\n" | save -f $"($dir)/state"
+		assert ((try { drop-retired-electric-slot $db --wait 1sec; false } catch {|e| $e.msg | str contains "still held" })) "a slot still held fails the release once its wait is out"
+	}
+	rm -r $dir
 }
 
 def test_preview_renders_apart [] {

@@ -971,6 +971,30 @@ export def db-primary [namespace: string, cluster?: string]: nothing -> record {
 	{namespace: $namespace, pod: $c.status.currentPrimary, database: $c.spec.bootstrap.initdb.database}
 }
 
+# Electric's permanent slot from before its temporary ones (PRONTO-363): nobody streams from it
+# once the new Electric is up, and it would hold WAL for ever. Dropped when no connection holds it;
+# while one does (an old Electric's last seconds), waited for up to `wait`. A database without it
+# (a rerun, a new app) is left as it is. Says what it did: "none" or "dropped".
+export def drop-retired-electric-slot [db: record, --wait: duration = 180sec] {
+	let sql = {|q| ["exec" "-n" $db.namespace $db.pod "-c" "postgres" "--" "psql" "-U" "postgres" "-d" $db.database "-XtAc" $q] }
+	let slot = "electric_slot_default"
+	let deadline = (date now) + $wait
+	loop {
+		let held = (do { ^kubectl ...(do $sql $"SELECT active FROM pg_replication_slots WHERE slot_name = '($slot)'") } | complete)
+		if $held.exit_code != 0 { error make { msg: $"reading ($slot) on ($db.pod): ($held.stderr)" } }
+		match ($held.stdout | str trim) {
+			"" => { return "none" }
+			"f" => {
+				# Guarded again: a slot taken between the read and the drop is left, and read next time.
+				let dropped = (do { ^kubectl ...(do $sql $"WITH d AS \(SELECT pg_drop_replication_slot\(slot_name\) FROM pg_replication_slots WHERE slot_name = '($slot)' AND NOT active\) SELECT count\(*\) FROM d") } | complete)
+				if $dropped.exit_code == 0 and ($dropped.stdout | str trim) == "1" { return "dropped" }
+			}
+		}
+		if (date now) > $deadline { error make { msg: $"($slot) on ($db.pod) is still held after ($wait): an Electric of the old release still streams from it" } }
+		sleep 3sec
+	}
+}
+
 # Copies the released namespace's schema into a preview's database (schema-copy-steps), once:
 # a database initdb already marked is the preview's own by now, and is left as it is.
 export def copy-schema [source_ns: string, target: record, --pgroll] {
@@ -1593,6 +1617,8 @@ export def main [
 		kubectl rollout restart $"deployment/($rname)-render" -n $target_ns
 		kubectl rollout status $"deployment/($rname)-render" -n $target_ns $"--timeout=($rollout_wait)"
 	}
+	# Every Electric now runs on a temporary slot of its own: the permanent one goes, once.
+	print $"Electric's permanent slot: (drop-retired-electric-slot (db-primary $target_ns $"($rname)-db"))"
 	if $target_env.build.by == "node" { prune-node-registry $push_registry }
 	# A release with the publisher's rights alone may not run the registry's collector: the next operator's release does.
 	if $target_env.build.by == "buildkit" and ((do { ^kubectl auth can-i create pods/exec -n pronto-registry } | complete | get stdout | str trim) == "yes") {
