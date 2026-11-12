@@ -1073,6 +1073,7 @@ import (
 							if release.auth.android != "" {{name: "WEBAUTHN_ANDROID_ORIGINS", value: release.auth.android}},
 							if release.auth.apiKeysGate != "" {{name: "AUTH_API_KEYS", value: "true"}},
 							if release.auth.apiKeysGate != "" {{name: "AUTH_API_KEYS_GATE", value: release.auth.apiKeysGate}},
+							if release.auth.keyExchanged != "" {{name: "AUTH_KEY_EXCHANGED_HOOK", value: release.auth.keyExchanged}},
 							for k, v in release.auth.oidc {{name: k, value: v}},
 								for k in release.auth.oidcSecrets {{
 									name: k

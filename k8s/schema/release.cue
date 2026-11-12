@@ -217,6 +217,10 @@ import (
 		// compose gives auth AUTH_API_KEYS_GATE: named, keys are on and the
 		// gate answers for each request, so its flag decides.
 		apiKeysGate: *"" | =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
+		// The app's hook on a key's exchange (capabilities.auth.keyExchanged), as
+		// compose gives auth AUTH_KEY_EXCHANGED_HOOK: auth calls it with the key's
+		// owner before it signs the token. It does not turn keys on.
+		keyExchanged: *"" | =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
 	}
 
 	runtime: [string]: {

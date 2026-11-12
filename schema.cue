@@ -1899,6 +1899,14 @@ import (
 			// in a release to a node (AUTH_API_KEYS_GATE), and leaves the answer
 			// to the function, so a flag, not a deploy, turns them on and off.
 			apiKeysGate?: =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
+			// The app's hook on a key's exchange (mecha-fork's keyExchanged,
+			// PRONTO-316): a function schema.name(owner uuid) returns void in its
+			// database, which auth calls with the key's owner on every exchange
+			// before it signs the token, here and in a release to a node
+			// (AUTH_KEY_EXCHANGED_HOOK). If it fails the exchange answers 500 and
+			// issues no token, so what it does (marking a bot) cannot be skipped.
+			// It does not turn keys on.
+			keyExchanged?: =~"^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$"
 			// A named provider's settings, the cluster's defaults for what the
 			// deployment's OIDC_<NAME>_<SETTING> overrides: another issuer in
 			// the provider's place, where the cluster reaches it, the client

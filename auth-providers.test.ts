@@ -68,6 +68,19 @@ Deno.test("the app's API key gate reaches the cluster's auth and not the termina
   assertEquals(bad.success, false);
 });
 
+// An app's hook on a key's exchange (mecha-fork's keyExchanged, PRONTO-316): auth calls it per exchange;
+// it reaches auth's environment, never the terminal, and turns nothing on.
+Deno.test("the app's key-exchanged hook reaches the cluster's auth and not the terminal", async () => {
+  const code = withAuth(`{required: false, service: "/auth", apiKeys: true, keyExchanged: "player_record.mark_bot"}`);
+  const files = await exported(code, "out");
+  assertEquals(files.success, true, files.stderr);
+  assertEquals("keyExchanged" in files.value["shell/shell.json"].data.auth, false);
+  const env = await exported(code, "_cluster.surface.targets.auth.compose.environment");
+  assertEquals(env.value.AUTH_KEY_EXCHANGED_HOOK, "player_record.mark_bot");
+  const bad = await exported(withAuth(`{required: false, service: "/auth", keyExchanged: "x; drop table y"}`), "app.capabilities.auth.keyExchanged");
+  assertEquals(bad.success, false);
+});
+
 Deno.test("an app naming no provider leaves the terminal and the auth service as they were", async () => {
   const code = withAuth(`{required: false, service: "/auth"}`);
   const files = await exported(code, "out");

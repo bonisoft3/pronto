@@ -1290,6 +1290,8 @@ export def auth-provider-environment [environment: record]: nothing -> record {
 		android: ($environment.WEBAUTHN_ANDROID_ORIGINS? | default "")
 		# The app's gate over its API keys (capabilities.auth.apiKeysGate): keys on, its flag deciding.
 		apiKeysGate: ($environment.AUTH_API_KEYS_GATE? | default "")
+		# The app's hook on a key's exchange (capabilities.auth.keyExchanged): auth calls it with the owner.
+		keyExchanged: ($environment.AUTH_KEY_EXCHANGED_HOOK? | default "")
 	}
 }
 

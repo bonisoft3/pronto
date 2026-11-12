@@ -275,6 +275,15 @@ def test_auth_provider_secrets [] {
 	let gate_env = $with_gate.spec.template.spec.containers.0.env
 	assert equal ($gate_env | where name == "AUTH_API_KEYS" | first | get value) "true"
 	assert equal ($gate_env | where name == "AUTH_API_KEYS_GATE" | first | get value) "public.api_keys_on"
+	assert equal $split.keyExchanged ""
+	assert (($gate_env | where name == "AUTH_KEY_EXCHANGED_HOOK") | is-empty)
+	# An app's hook on a key's exchange (PRONTO-316) reaches auth's pod and turns nothing else on.
+	let hooked = (auth-provider-environment ($environment | insert AUTH_KEY_EXCHANGED_HOOK "player_record.mark_bot"))
+	{App: {auth: ($hooked | reject secretValues)}} | to json | save -f $data
+	let with_hook = (render-manifests $app.cue_path "kind" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-auth" | first)
+	let hook_env = $with_hook.spec.template.spec.containers.0.env
+	assert equal ($hook_env | where name == "AUTH_KEY_EXCHANGED_HOOK" | first | get value) "player_record.mark_bot"
+	assert (($hook_env | where name =~ "^AUTH_API_KEYS") | is-empty)
 	let rotated = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET "rotated-credential"))
 	assert ($rotated.oidcSecretDigest != $split.oidcSecretDigest)
 	let public_client = (auth-provider-environment ($environment | update OIDC_GOOGLE_CLIENT_SECRET ""))
