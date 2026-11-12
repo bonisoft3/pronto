@@ -35,6 +35,17 @@ Pronto is a federated relational application compiler. It is maintained across m
 
 ## 2. THE MULTI-TIER STACK ARCHITECTURE
 
+For a new app, look for lifecycles whose events, ordering, guards, or deadlines
+need explicit coordination and model them as machines instead of hiding the
+state and event switchboard in a reducer. Mecha owns authoritative domain transitions and
+transactional changes; Omnishell machines own browser `tab` or `device` row
+interactions; Cortex coordinates hosts, sessions, and commands. Keep pure
+arithmetic and other algorithms in functions, and derived facts in views or
+folds. Give each machine's state field one writer; a fold sharing its row owns
+other columns and communicates through intents or observed facts. Test the
+resulting behavior, guards, and effects as well as walking chart arrows. Use
+only the tiers and services the app needs, not extra services for coverage.
+
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ BROWSER TIER (Omnishell)                                                               │
