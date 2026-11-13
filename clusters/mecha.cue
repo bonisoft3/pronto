@@ -214,6 +214,11 @@ _postgresTool:    "postgres-" + strings.SliceRunes(hex.Encode(sha256.Sum256(_pos
 #MachineTimersSql: impl.#MachineTimersSql
 #UnaccentSql:      impl.#UnaccentSql
 
+// The tenancy floor for a database's schemas, and the step it takes.
+#Tenancy:          impl.#Tenancy
+#SchemaName:       impl.#SchemaName
+#TenancyMigration: impl.#TenancyMigration
+
 // A machine Mecha runs: XState's configuration and the setup beside it.
 #Machine: impl.#Machine
 #XState:  impl.#XState
