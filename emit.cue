@@ -2282,7 +2282,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"services/database/migrations/000_extensions.sql",
 		"services/database/migrations/001_roles.sql",
 		"services/database/migrations/002_grants.sql",
-		"services/database/migrations/\(mecha.#TenancyMigration)",
+		// A live baseline that applied its own floor keeps it.
+		if len([for r in M.raw if r.name == mecha.#TenancyMigration {r}]) == 0 {"services/database/migrations/\(mecha.#TenancyMigration)"},
 		"services/database/migrations/004_types.sql",
 		// A live baseline keeps the tables it applied; a later column is a migration's.
 		if len([for r in M.raw if r.name == "005_create_tables.sql" {r}]) == 0 {"services/database/migrations/005_create_tables.sql"},
@@ -4108,10 +4109,12 @@ _pgrollDir: "services/database/pgroll"
 			// the image, on a host and in the unit tests, so the floor is the
 			// runtime's, not the published image's. initdb's alone, as the image's
 			// was: no replay list names it.
-			"services/database/migrations/\(mecha.#TenancyMigration)": {
-				format:    "sql"
-				inSchemas: true
-				text:   (mecha.#Tenancy & {schema: E.cluster.meta.schema}).out
+			if len([for r in E._raw if r.name == mecha.#TenancyMigration {r}]) == 0 {
+				"services/database/migrations/\(mecha.#TenancyMigration)": {
+					format:    "sql"
+					inSchemas: true
+					text:      (mecha.#Tenancy & {schema: E.cluster.meta.schema}).out
+				}
 			}
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"

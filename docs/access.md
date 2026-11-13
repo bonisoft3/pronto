@@ -115,8 +115,9 @@ owns the database, else a refusal naming the one-time `ALTER DATABASE`), and
 every migration opens with that path. The writer renames pronto's SQL and the
 app's authored migrations by position ([`schema-names.ts`](../schema-names.ts)):
 a floor function to the floor's schema, a list to mecha's, anything else in
-`public` to the app's; a literal is renamed only where it names an object,
-and `resolvers` lists the app's own functions whose first argument does. The
+`public` to the app's; a literal is renamed only where it names an object
+or is SQL text (a resolver's argument, a dynamic statement's piece), and
+`resolvers` lists the app's own functions whose first argument names one. The
 door names the schema to Electric, and the gcp and k8s targets read the
 schemas from `.pronto/cluster.json` for PostgREST and auth.
 

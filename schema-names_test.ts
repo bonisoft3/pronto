@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1.0.11";
+import { assertEquals, assertThrows } from "jsr:@std/assert@1.0.11";
 import { inSchemas, type Schemas } from "./schema-names.ts";
 
 const DEFAULT: Schemas = { app: "public", floor: "public", mecha: "mecha", names: { floor: [], mecha: [], resolvers: [] } };
@@ -26,6 +26,9 @@ const cases: [string, Schemas, string, string][] = [
   ["a floor function in upper case is the floor's", own, "SELECT PUBLIC.APP_PRE_REQUEST()", "SELECT mecha.APP_PRE_REQUEST()"],
   ["SET search_path TO is a statement's too", own, "SET search_path TO public, pg_catalog;\nCREATE TABLE t ()", "SET search_path TO orders, mecha, pg_catalog;\nCREATE TABLE t ()"],
   ["a literal that only looks like a name is data", own, "INSERT INTO note (body) VALUES ('public.foo')", "INSERT INTO note (body) VALUES ('public.foo')"],
+  ["a literal cast to a name type is a name, the type bare or pg_catalog's", own, "SELECT 'public.t'::regclass, 'public.t'::pg_catalog.regclass, 'public.f'::pg_catalog.regproc, 'public.ty'::\"pg_catalog\".regtype, 'public.t'::text", "SELECT 'orders.t'::regclass, 'orders.t'::pg_catalog.regclass, 'orders.f'::pg_catalog.regproc, 'orders.ty'::\"pg_catalog\".regtype, 'public.t'::text"],
+  ["a cast to every object-reference type is a name", own, "SELECT 'public.a'::regcollation, 'public.b'::regconfig, 'public.c'::regdictionary, 'public.d'::regoper, 'public.e'::regoperator, 'public.f'::regprocedure, 'public.g'::REGCLASS, 'public.h'::\"regclass\"", "SELECT 'orders.a'::regcollation, 'orders.b'::regconfig, 'orders.c'::regdictionary, 'orders.d'::regoper, 'orders.e'::regoperator, 'orders.f'::regprocedure, 'orders.g'::REGCLASS, 'orders.h'::\"regclass\""],
+  ["a cast to another type is data, whatever its name begins with or however it is quoted", own, "SELECT 'public.t'::region, 'public.t'::pg_catalog.region, 'public.t'::regclassy, 'public.t'::\"Regclass\", 'public.t'::\"region\"", "SELECT 'public.t'::region, 'public.t'::pg_catalog.region, 'public.t'::regclassy, 'public.t'::\"Regclass\", 'public.t'::\"region\""],
   ["a literal a resolver reads is a name", own, "SELECT to_regclass('public.t'); CALL rls_protect('public.t')", "SELECT to_regclass('orders.t'); CALL rls_protect('orders.t')"],
   ["an unquoted qualifier in any case", own, "SELECT * FROM PUBLIC.supply; GRANT USAGE ON SCHEMA Public TO anon", "SELECT * FROM orders.supply; GRANT USAGE ON SCHEMA orders TO anon"],
   ["a quoted PUBLIC is another name", own, 'SELECT * FROM "PUBLIC".t', 'SELECT * FROM "PUBLIC".t'],
@@ -41,8 +44,25 @@ const cases: [string, Schemas, string, string][] = [
   ["a mecha name the floor does not make stays", listsApart, "SELECT mecha.other()", "SELECT mecha.other()"],
   ["no cascade: a renamed schema is not renamed again", listsApart, "SELECT public.auth_uid(), public.t", "SELECT fl.auth_uid(), app.t"],
   ["a word ending in public is no qualifier", own, "SELECT republic.x, x.public", "SELECT republic.x, x.public"],
+  ["a literal that reads as SQL text but is data keeps its text", own, "INSERT INTO notes VALUES ('see public.foo here'); UPDATE t SET note = 'a (public.b)'; SELECT lower('x public.y')", "INSERT INTO notes VALUES ('see public.foo here'); UPDATE t SET note = 'a (public.b)'; SELECT lower('x public.y')"],
+  ["a dynamic statement's pieces are SQL text, quotes and placeholders too", own, "EXECUTE format('SELECT public.%I()', g); EXECUTE 'SELECT to_regclass(''public.t''), ''public.t''' || x", "EXECUTE format('SELECT orders.%I()', g); EXECUTE 'SELECT to_regclass(''orders.t''), ''public.t''' || x"],
+  ["a trigger's arguments are data", own, "FOR EACH ROW EXECUTE FUNCTION f('see public.x'); GRANT EXECUTE ON FUNCTION public.f() TO anon", "FOR EACH ROW EXECUTE FUNCTION f('see public.x'); GRANT EXECUTE ON FUNCTION orders.f() TO anon"],
+  ["public declared as an alias names a column in its statement only", own, "SELECT public.id FROM customers AS public; SELECT public.id FROM public.customers public; SELECT public.id FROM public.t", "SELECT public.id FROM customers AS public; SELECT public.id FROM orders.customers public; SELECT orders.id FROM orders.t"],
+  ["a quoted name or a spaced dot after public is still qualified", own, 'SELECT public."F", public . foo, "public" . "G", public . auth_uid(), public."auth_uid"()', 'SELECT orders."F", orders . foo, "orders" . "G", mecha . auth_uid(), mecha."auth_uid"()'],
+  ["a quoted name that differs in case is not the floor's", own, 'SELECT public."AUTH_UID"()', 'SELECT orders."AUTH_UID"()'],
 ];
 
 for (const [why, s, sql, want] of cases) {
   Deno.test(why, () => assertEquals(inSchemas(sql, s), want));
 }
+
+// What the lexer cannot read safely is refused on schemas of its own, and passes untouched on the defaults.
+Deno.test("an escape string or a search_path naming $user is refused on schemas of its own", () => {
+  for (const sql of ["INSERT INTO t VALUES (E'it\\'s public.x')", "SELECT e'a'", 'SET search_path = "$user", public;', 'ALTER ROLE r SET search_path TO "$user",public']) {
+    assertThrows(() => inSchemas(sql, own), Error, "cannot take", sql);
+    assertEquals(inSchemas(sql, DEFAULT), sql);
+  }
+  // A word ending in e before a literal is no escape string, and $user in a literal is data.
+  assertEquals(inSchemas("SELECT 'a' FROM t WHERE note = 'x' AND kind LIKE 'e'", own), "SELECT 'a' FROM t WHERE note = 'x' AND kind LIKE 'e'");
+  assertEquals(inSchemas("SELECT set_config('x', '\"$user\"', true)", own), "SELECT set_config('x', '\"$user\"', true)");
+});
