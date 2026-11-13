@@ -4085,14 +4085,20 @@ _pgrollDir: "services/database/pgroll"
 					  END IF;
 					  FOREACH r IN ARRAY ARRAY[\(strings.Join([for r in _tokenRoles {"'\(r)'"}], ", "))] LOOP
 					    -- PostgREST only switches into these: no grant of one, by any grantor, lets it
-					    -- inherit the role's privileges or grant it on.
+					    -- inherit the role's privileges or grant it on. An ADMIN it already granted
+					    -- onward stays (revoking it would need CASCADE, which drops the deployment's
+					    -- grants), with a notice.
 					    FOR m IN SELECT pg_get_userbyid(grantor) AS g, inherit_option, admin_option FROM pg_auth_members
 					             WHERE roleid = r::regrole AND member = 'authenticator'::regrole AND (inherit_option OR admin_option) LOOP
 					      IF m.inherit_option THEN
 					        EXECUTE format('REVOKE INHERIT OPTION FOR %I FROM authenticator GRANTED BY %I', r, m.g);
 					      END IF;
 					      IF m.admin_option THEN
-					        EXECUTE format('REVOKE ADMIN OPTION FOR %I FROM authenticator GRANTED BY %I', r, m.g);
+					        IF EXISTS (SELECT FROM pg_auth_members WHERE roleid = r::regrole AND grantor = 'authenticator'::regrole) THEN
+					          RAISE NOTICE 'authenticator keeps ADMIN on % (granted by %): it has granted % onward', r, m.g, r;
+					        ELSE
+					          EXECUTE format('REVOKE ADMIN OPTION FOR %I FROM authenticator GRANTED BY %I', r, m.g);
+					        END IF;
 					      END IF;
 					    END LOOP;
 					    IF NOT EXISTS (SELECT FROM pg_auth_members WHERE roleid = r::regrole AND member = 'authenticator'::regrole AND set_option) THEN
