@@ -10,6 +10,7 @@ use std/assert
 use release.nu [
 	drop-retired-electric-slot
 	tenant-manifests
+	tenant-bake-allows
 	tenant-refusals
 	tenant-repo
 	node-registry-manifests
@@ -74,6 +75,8 @@ def run-tests [] {
 	test_release_tree
 	test_read_environment
 	test_render_manifests_kind
+	test_tenant_keeps_what_the_render_wrote
+	test_tenant_bake_allows
 	test_tenant_release
 	test_render_manifests_eks
 	test_render_manifests_metal
@@ -485,6 +488,25 @@ def test_render_manifests_metal [] {
 	# Kind keeps its HTTPS listener.
 	let kind_gateway = (render-manifests $app.cue_path "kind" | from yaml | where kind == "Gateway" | first)
 	assert equal ($kind_gateway.spec.listeners | get name) ["http" "https"]
+}
+
+def test_tenant_keeps_what_the_render_wrote [] {
+	print "test a tenant's manifests are not written again: a string that YAML 1.1 reads as a boolean stays quoted..."
+	let rendered = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: studio-ana\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: caddy\n  namespace: studio-ana\nspec:\n  template:\n    spec:\n      containers:\n        - name: caddy\n          env:\n            - name: PRONTO_TRACING\n              value: \"on\"\n            - name: OFF\n              value: \"off\"\n            - name: YES\n              value: \"yes\"\n"
+	let out = ($rendered | tenant-manifests "studio-ana")
+	assert ($out | str contains 'value: "on"')
+	assert ($out | str contains 'value: "off"')
+	assert ($out | str contains 'value: "yes"')
+	assert (not ($out | str contains "Namespace"))
+	assert equal ($out | from yaml | get spec.template.spec.containers.0.env.0.value) "on"
+	# Several documents are joined, each its own.
+	let two = ($"($rendered)---\napiVersion: v1\nkind: Service\nmetadata:\n  name: s\n  namespace: studio-ana\n" | tenant-manifests "studio-ana")
+	assert equal ($two | split row --regex '(?m)^---\s*$' | length) 2
+}
+
+def test_tenant_bake_allows [] {
+	print "test a tenant's bake is allowed the repository's read and the images' folder's write, and nothing else..."
+	assert equal (tenant-bake-allows "/r" "/tmp/tenant-images.x") ["--allow=fs.read=/r" "--allow=fs.write=/tmp/tenant-images.x"]
 }
 
 def test_tenant_release [] {

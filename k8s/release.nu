@@ -1340,12 +1340,24 @@ export def auth-provider-secret [name: string, namespace: string, values: record
 # isolation (no NetworkPolicy of the app's, whose allows would widen what the maker denies); anything
 # outside `namespace`, or cluster-wide, is refused before anything is applied.
 export def tenant-manifests [namespace: string]: string -> string {
-	let docs = ($in | from yaml | where {|d| $d.kind not-in ["Namespace" "NetworkPolicy"] })
-	let outside = ($docs | where {|d| ($d.metadata.namespace? | default "") != $namespace })
+	# The documents are kept as the render wrote them, not read and written again: nushell's `to yaml` writes the
+	# string "on" (caddy's PRONTO_TRACING) bare, and kubectl reads YAML 1.1, where that is a boolean, so the server
+	# refused the Deployment ("cannot unmarshal bool into Go struct field EnvVar.value of type string").
+	let kept = ($in | split row --regex '(?m)^---\s*$' | where ($it | str trim | is-not-empty)
+		| each {|text| {text: $text, doc: ($text | from yaml)} }
+		| where {|d| $d.doc.kind not-in ["Namespace" "NetworkPolicy"] })
+	let outside = ($kept | get doc | where {|d| ($d.metadata.namespace? | default "") != $namespace })
 	if ($outside | is-not-empty) {
 		error make {msg: $"a tenant's release writes only inside ($namespace), and this one holds (($outside | each {|d| $'($d.kind)/($d.metadata.name) in ($d.metadata.namespace? | default "the cluster")' } | str join ', '))"}
 	}
-	$docs | each { to yaml } | str join "---\n"
+	$kept | get text | each {|t| ($t | str trim --left --char "\n" | str trim --right) + "\n" } | str join "---\n"
+}
+
+# What `docker buildx bake` is allowed on a tenant's build: the repository read, and the write of the folder it
+# bakes the images into as OCI archives (`output=type=oci,dest=<out>/<svc>.tar`). buildx (0.19 and later) refuses a
+# write it was not granted ("additional privileges requested"), so the first image build of a tenant's release failed.
+export def tenant-bake-allows [root: string, out: string]: nothing -> list<string> {
+	[$"--allow=fs.read=($root)" $"--allow=fs.write=($out)"]
 }
 
 # What a tenant's release refuses before it builds: a namespace and a host to release into, and
@@ -1390,7 +1402,7 @@ export def tenant-images [app_dir: string, compose: string, services: list<strin
 		do {
 			cd $app_dir
 			with-env {SOURCE_DATE_EPOCH: "0"} {
-				$compose | ^docker buildx bake -f - --builder $builder --provenance=false $"--allow=fs.read=($root)" ...$platform_set ...$sets ...$services
+				$compose | ^docker buildx bake -f - --builder $builder --provenance=false ...(tenant-bake-allows $root $out) ...$platform_set ...$sets ...$services
 			}
 		}
 		let registry = $"127.0.0.1:($reg.port)"
