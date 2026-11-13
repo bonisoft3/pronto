@@ -1157,6 +1157,28 @@ export def runtime-services [compose: record]: nothing -> record {
 	}
 }
 
+# What a release builds, rolls and signs a service token for, each once: the cluster's services, the
+# app's own (App.services), the blob plane's and the runtime's (release-runtime). `components` are
+# the ones Dapr's injector gives a sidecar, which the release checks for and rolls within its usual
+# wait; `runtime`, the rest of the runtime's, rolls within native startup's.
+export def release-plan [runtime: record, services: list<string>, blob_svcs: list<string>, --migrate, --render]: nothing -> record {
+	let injected = ($runtime | columns | where {|s| $s in ["ticker" "rclone-s3" "imgproxy"] })
+	let components = (["crud" "electric" "auth" "caddy"] | append (if $render { ["render"] } else { [] }) | append $services | append $blob_svcs | append $injected | uniq)
+	{
+		build: (["database" "crud" "electric" "auth" "caddy"] | append (if $migrate { ["migrate"] } else { [] }) | append (if $render { ["render"] } else { [] }) | append $services | append $blob_svcs | append ($runtime | columns) | uniq)
+		components: $components
+		runtime: ($runtime | columns | where {|s| $s not-in $components })
+		serviceToken: (($services | is-not-empty) or ($runtime | values | any {|r| $r.serviceToken }))
+	}
+}
+
+# What the compose project runs beside the cluster (runtime.cue), on every cluster but metal,
+# whose release names its services itself (App.services, App.blobs) and runs no other.
+export def release-runtime [app_dir: string, env_name: string]: nothing -> record {
+	if $env_name == "metal" or not ($app_dir | path join compose.yaml | path exists) { return {} }
+	runtime-services (do { cd $app_dir; docker compose --profile "*" config --format json } | from json)
+}
+
 export def render-manifests [
 	cue_path: string
 	env_name: string
@@ -1169,12 +1191,7 @@ export def render-manifests [
 	let roles_file = (mktemp -t roles.XXXXXX.json | str trim)
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
-	# What the compose project runs beside the cluster (runtime.cue), on every cluster but metal,
-	# whose release names its services itself (App.services, App.blobs) and runs no other.
-	let app_dir = ($cue_path | path dirname)
-	let runtime = if $env_name != "metal" and ($app_dir | path join compose.yaml | path exists) {
-		runtime-services (do { cd $app_dir; docker compose --profile "*" config --format json } | from json)
-	} else { {} }
+	let runtime = (release-runtime ($cue_path | path dirname) $env_name)
 	{App: {database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}, runtime: $runtime, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
@@ -1594,7 +1611,9 @@ export def main [
 
 	# migrate runs where the app has ledger migrations or permissions to reconcile, as in compose.
 	let has_migrate = ("migrate" in $compose_services)
-	let build_svcs = ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
+	# What runs beside the cluster (runtime.cue), built from the app's compose services as the cluster's own are.
+	let plan = (release-plan (release-runtime $app_source_dir $cluster_env) $services $blob_svcs --migrate=$has_migrate --render=$has_render)
+	let build_svcs = $plan.build
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
 	# A node's registry is pushed to through this release's tunnel, on a local
 	# port, while the manifests name it as the node sees it (registry).
@@ -1731,23 +1750,29 @@ export def main [
 		sleep 3sec
 	}
 
-	# The app's own services call crud as the service role, with a token signed by
-	# the JWT secret the cluster generated (an ExternalSecret, there by now: crud
+	# The app's own services and the runtime's (the ticker) call crud as the service role, with a
+	# token signed by the JWT secret the cluster generated (an ExternalSecret, there by now: crud
 	# logs in with it).
-	if ($services | is-not-empty) { ensure-service-jwt $workload_name $target_ns }
+	if $plan.serviceToken { ensure-service-jwt $workload_name $target_ns }
 	seed-configmaps $app_meta.services $app_source_dir $target_ns
 	apply-alert-rules $workload_name ($app_meta.alerting?.rules? | default []) $app_source_dir $target_ns
 
-	let components = ["crud" "electric" "auth" "caddy"] | append (if $has_render { ["render"] } else { [] }) | append $services | append $blob_svcs
+	let components = $plan.components
 	let names = ($components | each { $"($rname)-($in)" })
+	let runtime_names = ($plan.runtime | each { $"($rname)-($in)" })
 	# Each Deployment's floor through its rollout, from what runs before it (PRONTO-367).
 	let floors = (rollout-floors (rollout-sample (deployments-now $names $target_ns)))
+	let runtime_floors = if ($runtime_names | is-empty) { {} } else { rollout-floors (rollout-sample (deployments-now $runtime_names $target_ns)) }
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
 	# A preview is a second whole stack starting on a node already running the released one and the rest (its pods
 	# wait on each other through a loaded node): it is given longer than a release to come up (PRONTO-153).
 	let rollout_wait = if ($preview | is-not-empty) { 900sec } else { 180sec }
 	watch-rollout $names $target_ns $floors $rollout_wait
+	# Native compute's first start compiles its pipelines.
+	if ($runtime_names | is-not-empty) {
+		watch-rollout $runtime_names $target_ns $runtime_floors 900sec
+	}
 	# The renderer reads the app through the door once, as it starts: one that rolled beside the door
 	# may have read the old door's catalogues and handlers, and renders every page a 500 until it starts
 	# again ("unknown message", "no Jessie module": PRONTO-154). So it starts again once the door has.

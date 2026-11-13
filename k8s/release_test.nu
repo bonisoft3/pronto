@@ -35,6 +35,8 @@ use release.nu [
 	auth-provider-environment
 	auth-provider-secret
 	runtime-services
+	release-runtime
+	release-plan
 	schema-copy-steps
 	release-tree
 	release-override
@@ -67,6 +69,7 @@ def run-tests [] {
 	test_electric_sticky
 	test_electric_slots
 	test_native_runtime
+	test_release_plan
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
@@ -1483,7 +1486,7 @@ def test_native_runtime [] {
 	}
 	assert equal ($docs | where kind == "PersistentVolumeClaim" | get metadata.name | sort) [native-compute native-feldera native-redis]
 	let compute = ($deployments | where metadata.name == native-compute | first | get spec.template.spec.containers.0.env)
-	assert equal ($compute | where name == SERVICE_JWT | first | get valueFrom.secretKeyRef.name) native-service-token
+	assert equal ($compute | where name == SERVICE_JWT | first | get valueFrom.secretKeyRef.name) native-service-jwt
 	assert equal ($compute | where name == FELDERA_URL | first | get value) "http://feldera:8080"
 	let conduit = ($deployments | where metadata.name == native-conduit | first | get spec.template.spec.containers.0.env)
 	assert equal ($conduit | where name == CONDUIT_DB_TYPE | first | get value) postgres
@@ -1496,6 +1499,25 @@ def test_native_runtime [] {
 	assert ($gcp.stdout | str contains "us-central1-docker.pkg.dev/test-project/pronto/native-compute:latest")
 	assert ($gcp.stdout | str contains "storageClassName: standard-rwo")
 	assert ($gcp.stdout | str contains "kind: PersistentVolumeClaim")
+}
+
+def test_release_plan [] {
+	print "test a release builds, rolls and signs a token for the compose project's runtime services, each once, and none on metal..."
+	let app = (resolve-app ($fixtures_dir | path join native))
+	let runtime = (release-runtime $app.dir kind)
+	# The upstream sync left the runtime's Deployments on images nothing pushed, with no service token.
+	let plan = (release-plan $runtime [ticker] [] --migrate)
+	assert equal ($plan.build | sort) ([database crud electric auth caddy migrate ticker compute feldera conduit redis transform] | sort)
+	assert equal ($plan.build | uniq | length) ($plan.build | length) "a service that is both the app's and the runtime's is built once"
+	assert equal ($plan.runtime | sort) [compute conduit feldera redis transform] "rolled within native startup's wait"
+	assert $plan.serviceToken "compute and transform read SERVICE_JWT"
+	let injected = (release-plan {ticker: {serviceToken: true}, rclone-s3: {serviceToken: false}, imgproxy: {serviceToken: false}} [ticker] [])
+	assert equal $injected.components [crud electric auth caddy ticker rclone-s3 imgproxy] "the injected ones are checked for their sidecar, each once"
+	assert equal ($injected.build | where {|s| $s == ticker } | length) 1 "the app's ticker and the runtime's are one build"
+	assert equal $injected.runtime []
+	let metal = (release-plan (release-runtime $app.dir metal) [] [])
+	assert equal $metal.build [database crud electric auth caddy] "metal builds no compose runtime"
+	assert not $metal.serviceToken
 }
 
 def test_replicas_budget_spread [] {
