@@ -1599,7 +1599,8 @@ def test_airlock_runtime [] {
 	assert equal ($out.ports | get port | sort) [443 8443] "the sinks' ports, an origin's own included"
 	assert equal ($out.to.0.ipBlock.except | sort) ["10.0.0.0/8" "100.64.0.0/10" "169.254.0.0/16" "172.16.0.0/12" "192.168.0.0/16"] "nothing private, shared or link-local (a cloud's metadata server)"
 	# DNS goes to the cluster's resolvers alone, not to any address on 53.
-	let dns = [{to: [{namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": kube-system}}, podSelector: {matchLabels: {"k8s-app": kube-dns}}}, {ipBlock: {cidr: "169.254.20.10/32"}}], ports: [{port: 53, protocol: TCP}, {port: 53, protocol: UDP}]}]
+	# GKE's Cloud DNS answers at the metadata server's address, on 53 alone.
+	let dns = [{to: [{namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": kube-system}}, podSelector: {matchLabels: {"k8s-app": kube-dns}}}, {ipBlock: {cidr: "169.254.20.10/32"}}, {ipBlock: {cidr: "169.254.169.254/32"}}], ports: [{port: 53, protocol: TCP}, {port: 53, protocol: UDP}]}]
 	assert equal ($airlock.egress | where {|r| $r.ports | any {|p| $p.port == 53 } }) $dns
 	assert equal ($mesh.egress | where {|r| $r.ports | any {|p| $p.port == 53 } }) $dns
 	assert equal ($mesh.egress | last) {to: [{podSelector: {matchLabels: {"app.kubernetes.io/name": effects, "app.kubernetes.io/component": rclone-s3}}}], ports: [{port: 3900, protocol: TCP}]} "an answer's bytes to the blob plane"

@@ -17,10 +17,12 @@ import (
 	let appLabels = {"app.kubernetes.io/name": app.id}
 	let componentLabels = {for svc, _ in servicePorts {(svc): appLabels & {"app.kubernetes.io/component": svc}}}
 	let dns = {ports: [{port: 53, protocol: "TCP"}, {port: 53, protocol: "UDP"}]}
-	// DNS named: the cluster's kube-dns, and NodeLocal DNSCache's address where a node runs one.
+	// DNS named: the cluster's kube-dns, NodeLocal DNSCache's address where a node runs one, and the
+	// metadata server's, which answers DNS under GKE's Cloud DNS (on 53 alone: its HTTP stays shut).
 	let namedDns = dns & {to: [
 		{namespaceSelector: matchLabels: {"kubernetes.io/metadata.name": "kube-system"}, podSelector: matchLabels: {"k8s-app": "kube-dns"}},
 		{ipBlock: cidr: "169.254.20.10/32"},
+		{ipBlock: cidr: "169.254.169.254/32"},
 	]}
 	let mesh = *app.runtime["airlock-mesh"].env | {}
 	// The sinks' ports, each origin's own or 443 (mecha's #Origin).
