@@ -1175,6 +1175,10 @@ def reads-variable [text: string, k: string]: nothing -> bool {
 # the operator's environment. Any other variable the airlock reads from the environment fails it,
 # but those the release sets itself (DATABASE_URL, ORIGIN).
 export def airlock-secrets [raw: record]: nothing -> list<string> {
+	# Compose merges an env_file into the environment, so its values would reach the manifests as plain variables.
+	if ($raw.services.airlock?.env_file? | default [] | is-not-empty) {
+		error make { msg: "the airlock reads an env_file, whose values release@k8s would write into its manifests: an effect's secret is `${K:?…}` in its environment" }
+	}
 	let entries = (env-entries ($raw.services.airlock? | default {}))
 	let secret = {|e| $e.value != null and (($e.value | into string) starts-with ("${" + $e.key + ":?") or ($e.value | into string) == ("${" + $e.key + ":-simulator}")) }
 	let unknown = ($entries | where {|e| not (do $secret $e) and $e.key not-in ["DATABASE_URL" "ORIGIN"] and ($e.value == null or (($e.value | into string | str replace -a '$$' '') =~ '\$\{?[A-Za-z_]')) } | get key)
