@@ -796,7 +796,9 @@ lists, by metadata alone (`gcloud secrets versions describe latest`, which gives
 value), the secrets the release reads by name (the OIDC secrets and every
 `GCP.sidecars.<n>.secrets`) in every project it touches, the release's and the rc
 preview's, and fails naming every pair (project, secret) whose latest version is not enabled, all at once. Declare one in
-the repo's `infra/gcp`, applied by `release@infra`. gcloud not signed in is a failure too.
+the repo's `infra/gcp`, applied by `release@infra`. gcloud not signed in is a failure too. `INTEGRATE_LOCAL_SECRETS=skip`
+leaves the check to `release@gcp` alone, for an app whose release project is still a placeholder no
+one can sign in to; any other value but unset is refused.
 
 Before any of that, a release (gated or `--no-gate`, not a preview, a dry run
 or a snapshot) runs the same drivers on the machine releasing: `release.nu`
