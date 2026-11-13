@@ -1701,7 +1701,19 @@ def test_airlock_compose_reads [] {
 " | save -f ($project | path join compose.yaml)
 	"TOKEN=plaintext\n" | save -f ($project | path join airlock.env)
 	let filed = (try { airlock-secrets (compose-raw $project); "" } catch {|e| $e.msg })
-	assert ($filed | str contains "the airlock reads an env_file") $filed
+	assert ($filed | str contains "airlock reads an env_file") $filed
+	# So would its daprd's, whose environment the release writes out too.
+	"services:
+  airlock:
+    image: a
+    environment:
+      KEY: \"${KEY:?k}\"
+  airlock-mesh:
+    image: m
+    env_file: [airlock.env]
+" | save -f ($project | path join compose.yaml)
+	let mesh_filed = (try { airlock-secrets (compose-raw $project); "" } catch {|e| $e.msg })
+	assert ($mesh_filed | str contains "airlock-mesh reads an env_file") $mesh_filed
 	rm -r $project
 	# Cloud Build's compose reads a stand-in for every airlock secret, a shared one too, never an
 	# operator's value; the gcp target's build, none.
