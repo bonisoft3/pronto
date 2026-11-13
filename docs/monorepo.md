@@ -21,7 +21,9 @@ module, which is the monorepo. It holds:
 - **`path:` overrides** for the five tools, pointing at `../../plugins/pronto`,
   `../../plugins/omnishell`, `../../libraries/mecha`, `../../plugins/bayt`
   and `../../plugins/sayt`. mise layers the file over `.mise.toml`, and its
-  `path:` versions win.
+  `path:` versions win. bayt's fingerprint takes each tree as an input of
+  every target that reads the file, so an edit to the platform reruns an
+  app's `generate` as a pin bump does.
 - **`MONOREPO_COMPOSE_MODE=service`**, the one switch for what cannot run a
   command (see [the switch](#images-the-switch)).
 - **`BAYT_RUNTIME` and `COMPOSE_PROJECT_NAME`**: the checkout's bayt runtime
@@ -95,14 +97,15 @@ checkout; its data-plane bundle, `interpreter/vendor/mecha-client.js`, is a
 build product of bayt's `bundle` target (`bundle:mecha-client` in
 `package.json`), bundled from mecha's own `packages/client/omnishell-entry.ts`
 under mecha's config at `mise where github:bonisoft3/mecha`, and is not
-committed: the host verbs that import it build it first, and the mirror's
-`cd.yml` builds it before its image and release. So an omnishell release needs
+committed: an app's `build`, `launch` and `integrate`, and its `release` at
+pages and cloudflare, build it first at each of their platforms that reads the
+tree (the `omnishell-bundle` rule `builders/bayt.cue` emits), and
+the mirror's `cd.yml` builds it before its image and release. So an omnishell release needs
 a mecha release that carries the entry, pinned first. The pin lags that
 release: omnishell's `.mise.toml` names a mecha without the entry, so the
 mirror's `cd.yml` fails at the bundle until mecha releases it and the pin and
-`mise.lock` move. An app's host verbs build the bundle in the monorepo and
-refuse an omnishell tree without it (`builders/bayt.cue`), since the terminal
-would otherwise come up dead. An installed pronto contains its tree alone: a
+`mise.lock` move. That rule builds the bundle in the monorepo and refuses an
+omnishell tree without it, since the terminal would otherwise come up dead. An installed pronto contains its tree alone: a
 module of its release imports nothing outside it, neither by a path nor by
 the sibling names its `deno.json` maps, and the checkout-only harnesses are
 the `#TestModules` of `distribution/config.cue` (`installed_test.ts`); which

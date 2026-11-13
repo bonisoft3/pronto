@@ -63,11 +63,40 @@ externalImageTestUsesGeneratedInputs: _externalBuild.targets.test.cmd.builtin.do
 externalLintChecksConcreteCue: _externalBuild.files["checks.yaml"].say.lint.rulemap.cue.cmds[0].do & "mise exec -- cue vet -c ./..."
 externalGenerateKeepsCheckerInputs: list.Contains(_externalBuild.targets.generate.state.globs, ".pronto/check-inputs.json") & true
 
-// A host verb builds omnishell's data-plane bundle in the monorepo (the
-// switch set) and refuses a release without it, before the stack comes up: a
-// fresh checkout's integrate@host served a dead terminal and no error.
-_hostBundle: "use tools.nu [run-mise]; def omnishell-bundle [] { let omnishell = (run-mise where github:bonisoft3/omnishell | str trim); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
-_hostVerb: {for verb in ["launch", "integrate"] {(verb): "\(_hostBundle); def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task \(verb) --generate ...$args } }; host-verb"}}
+// build, launch and integrate build omnishell's data-plane bundle in the
+// monorepo (the switch set) and refuse a release without it, ahead of their
+// builtin: a fresh checkout's integrate@host served a dead terminal and no
+// error, and its launch --watch died copying the file.
+_omnishellBundle: "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
+_hostVerb: {for verb in ["launch", "integrate"] {(verb): "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task \(verb) --generate ...$args } }; host-verb"}}
+_bundleGate: {priority: -2, cmds: [{do: "\(_omnishellBundle); omnishell-bundle"}]}
+_bundleGates: {
+	build:     {default: true, platforms: []}
+	launch:    {default: true, platforms: ["host", "compose", "cloudflare"]}
+	integrate: {default: true, platforms: ["host"]}
+	release:   {default: false, platforms: ["pages", "cloudflare"]}
+}
+// The fixture releases nowhere; this one releases everywhere a release goes,
+// and only the two ceremonies that bundle from omnishell's tree are gated.
+_releasing: pronto.#App & {
+	for k, v in _code if k != "meta" {(k): v}
+	meta: {
+		for k, v in _code.meta if k != "targets" {(k): v}
+		targets: ["pages", "cloudflare", "docker"]
+	}
+}
+_releasingBuild: (pronto.#DefaultBuild & {code: _releasing, loop: _loop, cluster: _cluster, terminal: _terminal}).out.project
+externalVerbsBuildTheBundle: {for verb, g in _bundleGates {(verb): {
+	if g.default {default: _externalBuild.files["say.yaml"].say[verb].rulemap["omnishell-bundle"] & _bundleGate}
+	for p in g.platforms {(p): _releasingBuild.files["say.yaml"].say[verb].rulemap["omnishell-bundle-\(p)"] & _bundleGate & {platform: p}}
+}}}
+externalReleaseGatesOnlyItsTargets: (_externalBuild.files["say.yaml"].say.release == _|_) & (_releasingBuild.files["say.yaml"].say.release.rulemap["omnishell-bundle"] == _|_) & (_releasingBuild.files["say.yaml"].say.release.rulemap["omnishell-bundle-docker"] == _|_) & true
+// sayt keeps a rule without a platform at the verb's default alone: every
+// platform a verb's rules name has its own gate, or that tier serves a dead
+// terminal (integrate@host did, with the gate only on the default).
+externalBundleReachesEveryPlatform: {for verb, _ in _bundleGates for name, r in _releasingBuild.files["say.yaml"].say[verb].rulemap if r.platform != _|_ {
+	"\(verb)/\(name)": _releasingBuild.files["say.yaml"].say[verb].rulemap["omnishell-bundle-\(r.platform)"].platform & r.platform
+}}
 externalLaunchHostGate: _externalBuild.files["say.yaml"].say.launch.rulemap.host.cmds & [{use: "./bayt-task.nu", do: _hostVerb.launch}]
 externalIntegrateAction: _externalBuild.files["say.yaml"].say.integrate.rulemap.builtin.cmds & [{use: "./bayt-task.nu", do: "bayt-task integrate-action --generate"}]
 externalIntegrateHostGate: _externalBuild.files["say.yaml"].say.integrate.rulemap.host.cmds & [{use: "./bayt-task.nu", do: _hostVerb.integrate}]

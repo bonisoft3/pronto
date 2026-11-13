@@ -316,7 +316,42 @@
               "cmds": [
                 {
                   "use": "./bayt-task.nu",
-                  "do": "use tools.nu [run-mise]; def omnishell-bundle [] { let omnishell = (run-mise where github:bonisoft3/omnishell | str trim); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task launch --generate ...$args } }; host-verb"
+                  "do": "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task launch --generate ...$args } }; host-verb"
+                }
+              ]
+            },
+            "omnishell-bundle": {
+              "priority": -2,
+              "cmds": [
+                {
+                  "do": "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; omnishell-bundle"
+                }
+              ]
+            },
+            "omnishell-bundle-host": {
+              "platform": "host",
+              "priority": -2,
+              "cmds": [
+                {
+                  "do": "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; omnishell-bundle"
+                }
+              ]
+            },
+            "omnishell-bundle-compose": {
+              "platform": "compose",
+              "priority": -2,
+              "cmds": [
+                {
+                  "do": "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; omnishell-bundle"
+                }
+              ]
+            },
+            "omnishell-bundle-cloudflare": {
+              "platform": "cloudflare",
+              "priority": -2,
+              "cmds": [
+                {
+                  "do": "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; omnishell-bundle"
                 }
               ]
             }
@@ -339,7 +374,58 @@
               "cmds": [
                 {
                   "use": "./bayt-task.nu",
-                  "do": "use tools.nu [run-mise]; def omnishell-bundle [] { let omnishell = (run-mise where github:bonisoft3/omnishell | str trim); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task integrate --generate ...$args } }; host-verb"
+                  "do": "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task integrate --generate ...$args } }; host-verb"
+                }
+              ]
+            },
+            "omnishell-bundle": {
+              "priority": -2,
+              "cmds": [
+                {
+                  "do": "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; omnishell-bundle"
+                }
+              ]
+            },
+            "omnishell-bundle-host": {
+              "platform": "host",
+              "priority": -2,
+              "cmds": [
+                {
+                  "do": "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; omnishell-bundle"
+                }
+              ]
+            }
+          }
+        },
+        "build": {
+          "rulemap": {
+            "builtin": {
+              "stop": true,
+              "cmds": [
+                {
+                  "use": "./bayt-task.nu",
+                  "do": "bayt-task build --generate"
+                }
+              ]
+            },
+            "omnishell-bundle": {
+              "priority": -2,
+              "cmds": [
+                {
+                  "do": "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; omnishell-bundle"
+                }
+              ]
+            }
+          }
+        },
+        "release": {
+          "rulemap": {
+            "omnishell-bundle-pages": {
+              "platform": "pages",
+              "priority": -2,
+              "cmds": [
+                {
+                  "do": "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }; omnishell-bundle"
                 }
               ]
             }
@@ -370,19 +456,6 @@
                 {
                   "use": "./bayt-task.nu",
                   "do": "bayt-task generate"
-                }
-              ]
-            }
-          }
-        },
-        "build": {
-          "rulemap": {
-            "builtin": {
-              "stop": true,
-              "cmds": [
-                {
-                  "use": "./bayt-task.nu",
-                  "do": "bayt-task build --generate"
                 }
               ]
             }

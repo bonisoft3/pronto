@@ -602,16 +602,38 @@ import (
 				host: {
 					platform: "host"
 					stop:     true
-					cmds:     [{use: "./bayt-task.nu", do: "\(_hostBundle); def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; omnishell-bundle; bayt-task \(verb) --generate ...$args } }; host-verb"}]
+					cmds:     [{use: "./bayt-task.nu", do: "def --wrapped host-verb [...args] { if (\"--watch\" in $args) or (\"-w\" in $args) { error make {msg: \"Native watch is disabled; use sayt launch --watch for Docker\"} }; with-env { MISE_ENV: 'host' } { ^mise install; bayt-task \(verb) --generate ...$args } }; host-verb"}]
 				}
 			}
 		}}
-		// The host tier serves omnishell from `mise where`, and its data-plane
+		// A verb that reads omnishell's tree (OMNISHELL_DIR, else `mise
+		// where`) — build's served tree, launch's and integrate's live tree,
+		// release@pages's interpreter and release@cloudflare's fragment
+		// (bundle/bundle.ts, bundle/edge.ts) — runs this first at each such
+		// platform. sayt keeps a rule without a platform at the verb's default
+		// platform alone, and a platform's own rules alone under
+		// `verb@platform`; it runs rules in ascending priority, and the
+		// builtin (0) and every platform rule stop. omnishell's data-plane
 		// bundle is a build product (omnishell's bayt `bundle`): in the
-		// monorepo, where the switch is set, the host verbs build it from the
+		// monorepo, where the switch is set, the verb builds it from the
 		// checkout's mecha; a release ships it, and one without it is refused
-		// here rather than served as a dead terminal.
-		_hostBundle: "use tools.nu [run-mise]; def omnishell-bundle [] { let omnishell = (run-mise where github:bonisoft3/omnishell | str trim); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
+		// here rather than served as a dead terminal. The graph cannot carry
+		// this edge: the targets an app commits are its mirror's, and a
+		// cross-project dep includes a tree the mirror lacks.
+		_bundleGates: {
+			build:     {default: true, platforms: []}
+			launch:    {default: true, platforms: ["host", "compose", "cloudflare"]}
+			integrate: {default: true, platforms: ["host"]}
+			release:   {default: false, platforms: [for t in B.meta.targets if t == "pages" || t == "cloudflare" {t}]}
+		}
+		_bundleGate: {priority: -2, cmds: [{do: "\(_omnishellBundle); omnishell-bundle"}]}
+		files: "say.yaml": say: {for verb, g in _bundleGates if g.default || len(g.platforms) > 0 {
+			(verb): rulemap: {
+				if g.default {"omnishell-bundle": _bundleGate}
+				for p in g.platforms {"omnishell-bundle-\(p)": _bundleGate & {platform: p}}
+			}
+		}}
+		_omnishellBundle: "use tools.nu [run-mise]; def --wrapped omnishell-bundle [...args] { let omnishell = (if ($env.OMNISHELL_DIR? | default '') != '' { $env.OMNISHELL_DIR } else { (run-mise where github:bonisoft3/omnishell | str trim) }); if (run-mise env --json | from json | get -o MONOREPO_COMPOSE_MODE | default '') != '' { run-mise tool-stub ((run-mise where github:bonisoft3/sayt | str trim) | path join task.toml) -t ($omnishell | path join .bayt Taskfile.yml) bayt:bundle } else if not ($omnishell | path join interpreter vendor mecha-client.js | path exists) { error make {msg: $\"($omnishell) carries no interpreter/vendor/mecha-client.js, the terminal's data-plane bundle an omnishell release ships\"} } }"
 		// The app is its repository's root, in its mirror and in the monorepo
 		// alike: the files it commits are its mirror's. Its images take the
 		// monorepo's layout where the switch is on.
