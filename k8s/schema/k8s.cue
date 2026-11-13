@@ -112,6 +112,9 @@ import (
 		env: [
 			{name: "OTEL_SERVICE_NAME", value: service},
 			{name: "OTEL_EXPORTER_OTLP_ENDPOINT", value: "http://jaeger.observability.svc.cluster.local:\(port)"},
+			// OpenTelemetry's exporters default to http/protobuf: caddy's, pointed at gRPC's 4317, sent
+			// HTTP POSTs Jaeger refused as "bogus greeting" (PRONTO-475).
+			if port == 4317 {{name: "OTEL_EXPORTER_OTLP_PROTOCOL", value: "grpc"}},
 		]
 	}
 

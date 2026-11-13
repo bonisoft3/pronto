@@ -236,6 +236,10 @@ import "encoding/yaml"
 							{name: "COLLECTOR_ZIPKIN_HOST_PORT", value: ":9411"},
 							{name: "COLLECTOR_OTLP_ENABLED", value: "true"},
 							{name: "QUERY_BASE_PATH", value: "/jaeger"},
+							// All-in-one keeps 50000 traces in memory by default, far past the limit below: it was
+							// OOMKilled every ~10 minutes (513 restarts in 7 days, every daprd's "traces export" error,
+							// PRONTO-475). 5000 recent traces fit.
+							{name: "MEMORY_MAX_TRACES", value: "5000"},
 						]
 						ports: [
 							{name: "ui", containerPort: 16686},
@@ -245,7 +249,7 @@ import "encoding/yaml"
 						]
 						resources: {
 							requests: {cpu: "20m", memory: "60Mi"}
-							limits: {cpu: "200m", memory: "250Mi"}
+							limits: {cpu: "200m", memory: "512Mi"}
 						}
 					}]
 				}

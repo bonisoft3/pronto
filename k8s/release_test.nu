@@ -360,6 +360,9 @@ def test_schema_jobs [] {
 	assert ($yaml | str contains "name: PRONTO_TRACING\n              value: \"on\"")
 	assert ($yaml | str contains "value: http://jaeger.observability.svc.cluster.local:4317")
 	assert ($yaml | str contains "value: http://jaeger.observability.svc.cluster.local:4318")
+	# An exporter defaults to HTTP: against gRPC's port it must say so (Jaeger refused caddy's POSTs), and only there.
+	assert equal ($yaml | split row "name: OTEL_EXPORTER_OTLP_PROTOCOL" | length) 2
+	assert ($yaml | str contains "name: OTEL_EXPORTER_OTLP_PROTOCOL\n              value: grpc")
 }
 
 def test_read_environment [] {
@@ -1346,6 +1349,10 @@ def test_observability_manifests [] {
 	let yaml = (cue export --expression '(#ObservabilityStack & {domainSuffix: "localhost"}).manifests' --out text $obs_cue)
 
 	assert ($yaml | str contains "name: vmsingle")
+	# Jaeger keeps a bounded number of traces, which its memory limit holds (it was OOMKilled every ~10 minutes, PRONTO-475).
+	let jaeger = ($yaml | from yaml | where kind == Deployment and metadata.name == jaeger | first | get spec.template.spec.containers.0)
+	assert equal ($jaeger.env | where name == MEMORY_MAX_TRACES | first | get value) "5000"
+	assert equal $jaeger.resources.limits.memory "512Mi"
 	# Its samples outlive the pod (PRONTO-189).
 	let vm = ($yaml | from yaml)
 	assert equal ($vm | where kind == PersistentVolumeClaim | get metadata.name) [vmsingle-data]
