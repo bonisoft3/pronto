@@ -933,6 +933,7 @@ import (
 								}
 							},
 							{name: "ELECTRIC_MANUAL_TABLE_PUBLISHING", value: "true"},
+							{name: "ELECTRIC_DB_POOL_SIZE", value: "\(release.electric.pool)"},
 							// Electric 1.8.1 names its slot, and the advisory lock behind it, by the stream id,
 							// shared by every replica: a second one waited on the lock and never served. Each
 							// replica takes a temporary slot of a random name, its own, which Postgres drops with

@@ -114,6 +114,12 @@ import (
 		preview?:  int & >=1
 	}
 
+	// Electric's connection pool per pod (ELECTRIC_DB_POOL_SIZE; Electric's own default is 20): each of
+	// `replicas` pods holds that many Postgres connections, and a rollout runs old and new pods side by
+	// side, so 3 pods at 20 held 63 of CloudNativePG's 97 usable and a rollout's surge ran the database
+	// out ("too many clients already", PRONTO-475).
+	electric: pool: int & >=2 & <=40 | *8
+
 	env:     *{} | {[string]: string}
 	externalSecrets: {
 		enabled:        bool | *false

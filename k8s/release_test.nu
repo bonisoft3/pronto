@@ -1602,6 +1602,10 @@ def test_electric_slots [] {
 	}
 	let one = (do $render {})
 	let electric = ($one | where kind == Deployment and metadata.name == sample-electric | first | get spec.template.spec.containers.0.env)
+	# A pod's pool is 8 unless the app says: three pods at Electric's default 20 ran CloudNativePG's 100 connections out.
+	assert equal ($electric | where name == ELECTRIC_DB_POOL_SIZE | first | get value) "8"
+	let pooled = (do $render {electric: {pool: 5}} | where kind == Deployment and metadata.name == sample-electric | first | get spec.template.spec.containers.0.env)
+	assert equal ($pooled | where name == ELECTRIC_DB_POOL_SIZE | first | get value) "5"
 	for v in [CLEANUP_REPLICATION_SLOTS_ON_SHUTDOWN ELECTRIC_TEMPORARY_REPLICATION_SLOT_USE_RANDOM_NAME] {
 		assert equal ($electric | where name == $v | first | get value) "true" $"($v): a slot of its own, gone with its connection"
 	}
