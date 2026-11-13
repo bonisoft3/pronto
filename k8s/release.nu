@@ -272,24 +272,152 @@ export def run-job [manifest: string, name: string, namespace: string, --timeout
 	kubectl logs -n $namespace $"job/($name)" --tail=5
 }
 
-export def runtime-services [compose: record]: nothing -> record {
-	let supported = ["compute" "feldera" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy"]
-	if "airlock" in $compose.services {
-		error make {msg: "native release does not yet deploy airlock; refusing to omit a runtime service"}
+# The airlock's secrets (airlock.secrets) are the operator's, in the app's namespace: without one the
+# airlock never starts, and the effects enqueued meanwhile wait unseen.
+export def check-airlock-secrets [objects: list, namespace: string] {
+	let refs = ($objects | where kind == "Deployment" and spec.template.metadata.labels."app.kubernetes.io/component"? == "airlock"
+		| each {|d| $d.spec.template.spec.containers.0.env } | flatten
+		| where {|e| $e.name != "PGPASSWORD" and $e.valueFrom?.secretKeyRef? != null }
+		| each {|e| $e.valueFrom.secretKeyRef })
+	for ref in $refs {
+		# Its keys alone: no value is read.
+		let got = (do { ^kubectl get secret $ref.name -n $namespace -o 'go-template={{range $k, $_ := .data}}{{$k}}{{"\n"}}{{end}}' } | complete)
+		if $got.exit_code != 0 and not ($got.stderr =~ '\(NotFound\)') {
+			error make { msg: $"airlock.secrets: reading Secret ($ref.name) in ($namespace): ($got.stderr | str trim)" }
+		}
+		if $ref.key not-in ($got.stdout | lines) {
+			error make { msg: $"airlock.secrets: Secret ($ref.name) in ($namespace) needs ($ref.key), which an effect reads \(kubectl create secret generic ($ref.name) -n ($namespace) --from-file=($ref.key)=/dev/stdin\)" }
+		}
 	}
-	let names = ($compose.services | columns | where {|s| $s in $supported })
+}
+
+# A service's environment as entries, from the map compose writes or the list (`K`, `K=v`).
+def env-entries [svc: record]: nothing -> list<record> {
+	let e = ($svc.environment? | default {})
+	if ($e | describe) starts-with "list" {
+		$e | each {|x| let p = ($x | into string | split row -n 2 "="); {key: $p.0, value: ($p | get -o 1)} }
+	} else { $e | transpose key value }
+}
+
+# Whether `text` reads the variable `k` (`$k`, `${k}`, `${k:-…}`); `$$` is compose's escape, no read.
+def reads-variable [text: string, k: string]: nothing -> bool {
+	($text | str replace -a '$$' '') =~ ('\$\{?' + $k + '([^A-Za-z0-9_]|$)')
+}
+
+# The variables compose requires of the airlock, each an effect's secret: `${K:?…}`, or
+# `${K:-simulator}` where a simulator stands in for the sink locally. Read from the project before
+# interpolation (`config --no-interpolate`), since a release takes each from a Secret, never from
+# the operator's environment. Any other variable the airlock reads from the environment fails it,
+# but those the release sets itself (DATABASE_URL, ORIGIN).
+export def airlock-secrets [raw: record]: nothing -> list<string> {
+	# Compose merges an env_file into the environment, so its values would reach the manifests as plain variables.
+	for svc in [airlock airlock-mesh] {
+		if ($raw.services | get -o $svc | get -o env_file | default [] | is-not-empty) {
+			error make { msg: $"($svc) reads an env_file, whose values release@k8s would write into its manifests: an effect's secret is `${K:?…}` in the airlock's environment" }
+		}
+	}
+	let entries = (env-entries ($raw.services.airlock? | default {}))
+	let secret = {|e| $e.value != null and (($e.value | into string) starts-with ("${" + $e.key + ":?") or ($e.value | into string) == ("${" + $e.key + ":-simulator}")) }
+	let unknown = ($entries | where {|e| not (do $secret $e) and $e.key not-in ["DATABASE_URL" "ORIGIN"] and ($e.value == null or (($e.value | into string | str replace -a '$$' '') =~ '\$\{?[A-Za-z_]')) } | get key)
+	if ($unknown | is-not-empty) {
+		error make { msg: $"the airlock reads ($unknown | str join ', ') from the environment, which release@k8s neither takes from a Secret nor sets: an effect's secret is `${K:?…}` \(or `${K:-simulator}`\)" }
+	}
+	$entries | where {|e| do $secret $e } | get key
+}
+
+# The airlock's secrets another service of the project also reads, each with its readers: by a
+# reference, by passing it through by name (`environment: [K]`, `K:`), or through an env_file,
+# which may hold any of them. That service takes the variable's value from the environment, so the
+# name gets no stand-in.
+export def airlock-shared-secrets [raw: record]: nothing -> record {
+	let others = ($raw.services | transpose name svc | where name != "airlock")
+	airlock-secrets $raw | reduce -f {} {|k, acc|
+		let readers = ($others | where {|o|
+			($o.svc.env_file? | default [] | is-not-empty) or ($k in (env-entries $o.svc | get key)) or (reads-variable ($o.svc | to json --raw) $k)
+		} | get name)
+		if ($readers | is-empty) { $acc } else { $acc | insert $k $readers }
+	}
+}
+
+# Each effect secret a service's build reads (build.args and the rest), which no build may: the
+# images would carry it. An arg passed through by name (`args: [K]`, `K:`) reads it too, and is
+# seen only before normalization (compose-raw).
+export def airlock-build-refusals [raw: record]: nothing -> list<string> {
+	let secrets = (airlock-secrets $raw)
+	$raw.services | transpose name svc | where {|o| $o.svc.build? != null } | each {|o|
+		let passed = (env-entries {environment: ($o.svc.build.args? | default {})} | where value == null | get key)
+		let read = ($secrets | where {|k| $k in $passed or (reads-variable ($o.svc.build | to json --raw) $k) })
+		if ($read | is-not-empty) { $"($o.name)'s build reads ($read | str join ', '), an effect's secret: an image would carry it" }
+	} | compact
+}
+
+# The app's compose project as written, before interpolation and normalization (which drops a build
+# arg passed through by name).
+export def compose-raw [app_dir: string]: nothing -> record {
+	do { cd $app_dir; ^docker compose --profile "*" config --no-interpolate --no-normalize --format json } | from json
+}
+
+# Each airlock secret no other service reads, as a stand-in for every compose read of the project:
+# compose then neither refuses one unset nor reads the operator's, which the release never needs
+# (its pods read them from Secrets).
+export def airlock-stand-ins [app_dir: string]: nothing -> record {
+	let raw = (compose-raw $app_dir)
+	let shared = (airlock-shared-secrets $raw | columns)
+	airlock-secrets $raw | where {|k| $k not-in $shared } | reduce -f {} {|k, acc| $acc | insert $k "secretKeyRef" }
+}
+
+# The app's compose project: as text, as JSON (--json) or its services' names (--services), each
+# airlock secret no other service reads a stand-in (airlock-stand-ins). A secret another service
+# reads is that service's from the environment: unset, compose refuses it, and so does this, naming
+# the service.
+export def compose-config [app_dir: string, --json, --services]: nothing -> any {
+	let args = if $services { ["--services"] } else if $json { ["--format" "json"] } else { [] }
+	let r = (with-env (airlock-stand-ins $app_dir) { cd $app_dir; ^docker compose --profile "*" config ...$args } | complete)
+	if $r.exit_code != 0 {
+		let shared = (airlock-shared-secrets (compose-raw $app_dir) | transpose key readers | where {|e| $r.stderr =~ $"variable ($e.key) " })
+		let why = ($shared | each {|e| $"($e.key) is an effect's secret and also ($e.readers | str join ', ')'s, which reads it from the environment: export it" } | str join "; ")
+		error make { msg: (if ($why | is-empty) { $r.stderr | str trim } else { $"($why) \(($r.stderr | str trim)\)" }) }
+	}
+	if $services { $r.stdout | lines } else if $json { $r.stdout | from json } else { $r.stdout }
+}
+
+export def runtime-services [compose: record, --secrets: list<string> = []]: nothing -> record {
+	let supported = ["compute" "feldera" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy" "airlock" "airlock-mesh"]
+	let services = ($compose.services | columns)
+	# What the airlock reaches past its daprd runs beside it in compose, and in no pod here.
+	if "tsbifrost" in $services {
+		error make {msg: "native release does not deploy the AI gateway (tsbifrost): an effect with `ai` or capabilities.ai has no release@k8s"}
+	}
+	let mesh = ($compose.services."airlock-mesh"?.environment? | default {})
+	let bridges = ($mesh.AIRLOCK_BRIDGES? | default "" | split row " " | where {|b| $b != "" } | append ($mesh | columns | where {|k| $k =~ '^BRIDGE_.*_URL$' }) | uniq)
+	if ($bridges | is-not-empty) {
+		error make {msg: $"native release does not deploy container bridges: this app's effects reach ($bridges | str join ', ')"}
+	}
+	if ("airlock" in $services) != ("airlock-mesh" in $services) {
+		error make {msg: "native release deploys the airlock and its daprd (airlock-mesh) together: the compose project has one alone"}
+	}
+	let names = ($services | where {|s| $s in $supported })
 	$names | reduce -f {} {|name, acc|
 		let vars = ($compose.services | get $name | get -o environment | default {})
 		if $name == "compute" and ($vars.DUCKSTREAM_ENGINE? | default "") != "feldera" {
 			error make {msg: "native release requires DUCKSTREAM_ENGINE=feldera for compute"}
 		}
+		let own_secrets = if $name == "airlock" { $secrets } else { [] }
 		$acc | insert $name {
-			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING)
+			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING ...$own_secrets)
 			databaseEnvironment: ([DATABASE_URL FELDERA_DATABASE_URL] | where {|key| $key in $vars })
 			serviceToken: ("SERVICE_JWT" in $vars)
 			jwtSecret: ("PGRST_JWT_SECRET" in $vars)
+			secrets: $own_secrets
 		}
 	}
+}
+
+# What the app's compose project runs beside the cluster (runtime.cue), the airlock's secrets read
+# before interpolation.
+export def release-runtime [app_dir: string]: nothing -> record {
+	if not ($app_dir | path join compose.yaml | path exists) { return {} }
+	runtime-services (compose-config $app_dir --json) --secrets (airlock-secrets (compose-raw $app_dir))
 }
 
 export def render-manifests [
@@ -305,9 +433,7 @@ export def render-manifests [
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
 	let app_dir = ($cue_path | path dirname)
-	let runtime = if ($app_dir | path join compose.yaml | path exists) {
-		runtime-services (do { cd $app_dir; docker compose --profile "*" config --format json } | from json)
-	} else { {} }
+	let runtime = (release-runtime $app_dir)
 	{App: {database: {tokenRoles: $facts.tokenRoles}, runtime: $runtime, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
@@ -454,11 +580,13 @@ export def main [
 
 	# The caddy image proxies its SSR routes to `render` whenever the app builds one,
 	# so a release that omits it serves 502 on every rendered page.
-	let compose_services = (do { cd $app_source_dir; docker compose --profile "*" config --services } | lines)
+	let compose_services = (compose-config $app_source_dir --services)
 	let compose_render = ("render" in $compose_services)
 	if $compose_render != $has_render {
 		error make { msg: $"($app_info.cue_path): render.enabled is ($has_render) but the app's compose project (if $compose_render { 'defines' } else { 'lacks' }) a render service" }
 	}
+	let refused = (airlock-build-refusals (compose-raw $app_source_dir))
+	if ($refused | is-not-empty) { error make { msg: ($refused | str join "; ") } }
 
 	let target_env = if $cluster_env == "gke" {
 		let config = (^cue export --expression GKE --out json $app_info.cue_path | from json)
@@ -501,10 +629,10 @@ export def main [
 
 	# migrate runs where the app has ledger migrations or permissions to reconcile, as in compose.
 	let has_migrate = ("migrate" in $compose_services)
-	let runtime = (runtime-services (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json))
+	let runtime = (release-runtime $app_source_dir)
 	let build_svcs = ($runtime | columns) | append ["database" "crud" "electric" "auth" "caddy"] | append (if $has_migrate { ["migrate"] } else { [] }) | append (if $has_render { ["render"] } else { [] })
 	print $"Building native Pronto services \(($build_svcs | str join ', ')\) for ($app_info.name)..."
-	let bake_targets = (bake-images $app_source_dir (do { cd $app_source_dir; docker compose --profile "*" config }) $build_svcs --platform ($target_env.platform? | default ""))
+	let bake_targets = (bake-images $app_source_dir (compose-config $app_source_dir) $build_svcs --platform ($target_env.platform? | default ""))
 	let pushed = ($build_svcs | each {|svc|
 		let local = ($bake_targets | get $svc | get tags | where {|t| $t ends-with ":latest" } | first)
 		# The database's tag is its Postgres major, which CloudNativePG reads; the
@@ -523,12 +651,12 @@ export def main [
 	} | reduce -f {} {|it, acc| $acc | insert $it.svc $it.ref })
 	# What compose gives the migrate service beyond the database it names.
 	let migrate = if $has_migrate {
-		{migrate: {env: (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.migrate.environment | reject DATABASE_URL)}}
+		{migrate: {env: (compose-config $app_source_dir --json | get services.migrate.environment | reject DATABASE_URL)}}
 	} else { {} }
 	# The providers compose gives the auth service, and each one's client:
 	# compose refuses to render a provider whose client is unset.
 	let release_providers = (do { cd $app_source_dir; ^cue export . -e '{if code.capabilities.auth != _|_ {if code.capabilities.auth.provider != _|_ {v: code.capabilities.auth.provider}, if code.capabilities.auth.provider == _|_ {v: {}}}, if code.capabilities.auth == _|_ {v: {}}}.v' --out json } | complete | if $in.exit_code == 0 { $in.stdout | from json } else { {} })
-	let oidc = (auth-provider-environment (do { cd $app_source_dir; docker compose --profile "*" config --format json } | from json | get services.auth.environment) $release_providers)
+	let oidc = (auth-provider-environment (compose-config $app_source_dir --json | get services.auth.environment) $release_providers)
 	# An issuer the release trusts, TRUSTED_JWKS, for the roles the program
 	# declares: its public keys are checked here, before anything is applied,
 	# and digested so a change of keys rolls crud. Unset, crud verifies the
@@ -561,6 +689,7 @@ export def main [
 		auth-provider-secret $workload_name $target_ns $oidc.secretValues
 			| to json | kubectl apply --server-side --field-manager=pronto-oidc -f -
 	}
+	check-airlock-secrets ($released | from yaml) $target_ns
 
 	# In the order a fresh cluster needs: the database and everything around it,
 	# then its schema, then the services that read it, so none starts on a
@@ -629,10 +758,12 @@ export def main [
 	# A changed image digest rolls its deployment; an unchanged one has nothing to roll.
 	$deployments_yaml | str join "\n---\n" | kubectl apply -f -
 	if $trusted_changed { kubectl rollout restart $"deployment/($app_info.name)-crud" -n $target_ns }
+	# Native compute's first start compiles its pipelines, and the airlock admits every handler before it listens.
 	let runtime_names = ($runtime | columns)
 	for name in $runtime_names {
 		kubectl rollout status $"deployment/($app_info.name)-($name)" -n $target_ns --timeout=900s
 	}
+	# The airlock and airlock-mesh are never components: airlock-mesh is a daprd of its own.
 	let components = ["crud" "electric" "auth" "caddy"] | append ($runtime_names | where {|s| $s in ["ticker" "rclone-s3" "imgproxy"] }) | append (if $has_render { ["render"] } else { [] })
 	for d in ($components | each { $"deployment/($app_info.name)-($in)" }) {
 		print $"Waiting for ($d) rollout..."

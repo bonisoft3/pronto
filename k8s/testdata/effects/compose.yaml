@@ -1,0 +1,31 @@
+services:
+  billing:
+    image: effects-billing:test
+    environment:
+      SINK_TOKEN: ${SINK_TOKEN:-}
+  pager:
+    image: effects-pager:test
+    environment: [PAGER_KEY]
+  ticker:
+    image: effects-ticker:test
+    environment:
+      CRUD_URL: http://crud:3000
+      WAKE_URLS: http://airlock:9997/healthz
+      SERVICE_JWT: dev-token
+  airlock:
+    image: effects-airlock:test
+    environment:
+      DATABASE_URL: postgres://postgres:dev-password@database:5432/effects
+      MESH_URL: http://airlock-mesh:3500
+      ORIGIN: ${ORIGIN:-http://localhost:8080}
+      AIRLOCK_DIR: /airlock
+      BLOB_URL: /img/insecure/plain/s3://mecha-objects/
+      SINK_TOKEN: "${SINK_TOKEN:?SINK_TOKEN is required: an effect declares it}"
+      MAIL_KEY: ${MAIL_KEY:-simulator}
+      PAGER_KEY: "${PAGER_KEY:?PAGER_KEY is required: an effect declares it}"
+  airlock-mesh:
+    image: effects-airlock-mesh:test
+    environment:
+      AIRLOCK_ORIGINS: https://api.example.com https://mail.example.com:8443
+      AIRLOCK_BRIDGES: ""
+      BLOBS_S3_URL: http://rclone-s3:3900
