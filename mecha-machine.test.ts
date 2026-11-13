@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 import { PGlite } from "npm:@electric-sql/pglite@0.5.8";
 
@@ -584,8 +584,26 @@ Deno.test("an effect's cluster keeps the wake's names, and the service role the 
 // migration that set one would overwrite it whenever it ran.
 Deno.test("the roles migration leaves electric's password to the deployment", async () => {
   const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
-  assertStringIncludes(roles, "ALTER ROLE electric BYPASSRLS REPLICATION LOGIN;");
+  for (const a of ["BYPASSRLS", "REPLICATION", "LOGIN"]) assertStringIncludes(roles, `ALTER ROLE electric ${a};`);
   assertEquals(/PASSWORD/i.test(roles), false);
+});
+
+// Roles managed outside (a DBA, an operator) are already as the migration
+// would make them, and the login that migrates holds no CREATEROLE: every role
+// change is guarded, so that login runs it, and a role short of an attribute
+// still fails on the privilege it lacks. Timeouts compare as durations.
+Deno.test("the roles migration changes a role only where it lacks what it sets", async () => {
+  const roles = (await emitFiles(paymentProgram()))["services/database/migrations/001_roles.sql"].text;
+  const db = new PGlite();
+  try {
+    await db.exec(roles);
+    await db.exec("ALTER ROLE anon SET lock_timeout = 2000; CREATE ROLE migrator NOCREATEROLE; GRANT CREATE ON SCHEMA public TO migrator; SET ROLE migrator");
+    await db.exec(roles);
+    await db.exec("RESET ROLE; ALTER ROLE electric NOLOGIN; SET ROLE migrator");
+    await assertRejects(() => db.exec(roles), Error, "permission denied to alter role");
+    const members = await db.query("SELECT inherit_option, set_option, admin_option FROM pg_auth_members WHERE member = 'authenticator'::regrole");
+    assertEquals(members.rows, [{ inherit_option: false, set_option: true, admin_option: false }, { inherit_option: false, set_option: true, admin_option: false }]);
+  } finally { await db.close(); }
 });
 
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {

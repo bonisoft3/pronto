@@ -4077,7 +4077,31 @@ _pgrollDir: "services/database/pgroll"
 					  END IF;
 
 					"""
-				_login: "\nALTER ROLE authenticator LOGIN;\nGRANT \(strings.Join(_tokenRoles, ", ")) TO authenticator;\n"
+				_login: """
+
+					DO $$ DECLARE r text; m record; BEGIN
+					  IF NOT (SELECT rolcanlogin AND NOT rolinherit FROM pg_roles WHERE rolname = 'authenticator') THEN
+					    ALTER ROLE authenticator NOINHERIT LOGIN;
+					  END IF;
+					  FOREACH r IN ARRAY ARRAY[\(strings.Join([for r in _tokenRoles {"'\(r)'"}], ", "))] LOOP
+					    -- PostgREST only switches into these: no grant of one, by any grantor, lets it
+					    -- inherit the role's privileges or grant it on.
+					    FOR m IN SELECT pg_get_userbyid(grantor) AS g, inherit_option, admin_option FROM pg_auth_members
+					             WHERE roleid = r::regrole AND member = 'authenticator'::regrole AND (inherit_option OR admin_option) LOOP
+					      IF m.inherit_option THEN
+					        EXECUTE format('REVOKE INHERIT OPTION FOR %I FROM authenticator GRANTED BY %I', r, m.g);
+					      END IF;
+					      IF m.admin_option THEN
+					        EXECUTE format('REVOKE ADMIN OPTION FOR %I FROM authenticator GRANTED BY %I', r, m.g);
+					      END IF;
+					    END LOOP;
+					    IF NOT EXISTS (SELECT FROM pg_auth_members WHERE roleid = r::regrole AND member = 'authenticator'::regrole AND set_option) THEN
+					      EXECUTE format('GRANT %I TO authenticator WITH INHERIT FALSE, SET TRUE', r);
+					    END IF;
+					  END LOOP;
+					END $$;
+
+					"""
 
 				// The tenancy floor binds PUBLIC, which includes service. A pipeline
 				// and the auth service read every tenant's rows by definition, so
@@ -4089,27 +4113,62 @@ _pgrollDir: "services/database/pgroll"
 				// current_scopes(), so every shape yields an empty snapshot with no
 				// error.
 				_bypass: [
-					if E._serviceOn {"\nALTER ROLE service BYPASSRLS;\n"},
+					if E._serviceOn {"""
+
+						DO $$ BEGIN
+						  IF NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'service') THEN
+						    ALTER ROLE service BYPASSRLS;
+						  END IF;
+						END $$;
+
+						"""},
 					// No password: the deployment's secret sets it (mecha's
 					// #RolePasswordsStep), and a schema that set one would
 					// overwrite it whenever it ran.
-					if E._serverOn {"\nALTER ROLE electric BYPASSRLS REPLICATION LOGIN;\n" +
-						"GRANT USAGE ON SCHEMA public TO electric;\n" +
-						"GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;\n" +
-						"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;\n" +
-						""
-					},
+					if E._serverOn {"""
+
+						DO $$ BEGIN
+						  -- One attribute at a time, so a role short of one asks only for that one's privilege.
+						  IF NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'electric') THEN
+						    ALTER ROLE electric BYPASSRLS;
+						  END IF;
+						  IF NOT (SELECT rolreplication FROM pg_roles WHERE rolname = 'electric') THEN
+						    ALTER ROLE electric REPLICATION;
+						  END IF;
+						  IF NOT (SELECT rolcanlogin FROM pg_roles WHERE rolname = 'electric') THEN
+						    ALTER ROLE electric LOGIN;
+						  END IF;
+						END $$;
+						GRANT USAGE ON SCHEMA public TO electric;
+						GRANT SELECT ON ALL TABLES IN SCHEMA public TO electric;
+						ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;
+
+						"""},
 				]
 
-				// The innermost timeouts of a request (plugins/pronto/resilience), per token role.
-				_timeouts: list.Concat([["\n-- Finite machine bounds: statement, lock, and idle timeouts.\n"], [
+				// The innermost timeouts of a request (plugins/pronto/resilience), per token role,
+				// compared as durations: a value stored as a bare number is in milliseconds, the
+				// unit of all three, so '5s' and 5000 hold alike.
+				_timeouts: list.Concat([["\n-- Finite machine bounds: statement, lock, and idle timeouts.\nDO $$ DECLARE s record; BEGIN\n  FOR s IN SELECT * FROM (VALUES\n"], [strings.Join([
 					for r in _tokenRoles
-					let tier = [if r == "service" {"service"}, "client"][0] {
-						"ALTER ROLE \(r) SET statement_timeout = '\(resilience.resilience.timeouts.statement[tier])s';\n" +
-						"ALTER ROLE \(r) SET lock_timeout = '\(resilience.resilience.timeouts.lock[tier])s';\n" +
-						"ALTER ROLE \(r) SET idle_in_transaction_session_timeout = '\(resilience.resilience.timeouts.idleInTransaction[tier])s';\n"
-					},
-				]])
+					let tier = [if r == "service" {"service"}, "client"][0]
+					for k, v in {
+						statement_timeout:                   resilience.resilience.timeouts.statement[tier]
+						lock_timeout:                        resilience.resilience.timeouts.lock[tier]
+						idle_in_transaction_session_timeout: resilience.resilience.timeouts.idleInTransaction[tier]
+					} {"    ('\(r)', '\(k)', '\(v)s')"},
+				], ",\n")], ["""
+
+					  ) AS v(role, setting, value) LOOP
+					    IF NOT EXISTS (SELECT FROM pg_db_role_setting, unnest(setconfig) AS c
+					                   WHERE setdatabase = 0 AND setrole = s.role::regrole AND split_part(c, '=', 1) = s.setting
+					                     AND (CASE WHEN split_part(c, '=', 2) ~ '^[0-9]+$' THEN split_part(c, '=', 2) || 'ms' ELSE split_part(c, '=', 2) END)::interval = s.value::interval) THEN
+					      EXECUTE format('ALTER ROLE %I SET %I = %L', s.role, s.setting, s.value);
+					    END IF;
+					  END LOOP;
+					END $$;
+
+					"""]])
 			}
 			"services/database/migrations/002_grants.sql": {
 				format: "sql"
