@@ -6,6 +6,7 @@ const k8s_dir = path self .
 const fixtures_dir = path self testdata
 
 use std/assert
+use ../gcp/build.nu [cloud-build-step]
 
 use release.nu [
 	drop-retired-electric-slot
@@ -35,8 +36,15 @@ use release.nu [
 	auth-provider-environment
 	auth-provider-secret
 	runtime-services
+	airlock-secrets
+	airlock-stand-ins
+	airlock-shared-secrets
+	airlock-build-refusals
 	release-runtime
 	release-plan
+	airlock-refusals
+	compose-config
+	check-airlock-secrets
 	schema-copy-steps
 	release-tree
 	release-override
@@ -70,6 +78,8 @@ def run-tests [] {
 	test_electric_slots
 	test_native_runtime
 	test_release_plan
+	test_airlock_runtime
+	test_airlock_compose_reads
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
@@ -1526,6 +1536,168 @@ def test_release_plan [] {
 	let metal = (release-plan (release-runtime $app.dir metal) [] [])
 	assert equal $metal.build [database crud electric auth caddy] "metal builds no compose runtime"
 	assert not $metal.serviceToken
+}
+
+def test_airlock_runtime [] {
+	print "test the airlock and its daprd deploy as two pods behind two walls, their secrets from Secrets..."
+	let app = (resolve-app ($fixtures_dir | path join effects))
+	let data = (mktemp -t airlock.XXXXXX.json | str trim)
+	# Secrets are read before interpolation: a required one unset fails no compose read, and the
+	# operator's own value never reaches the manifests.
+	assert equal (airlock-secrets (do { cd $app.dir; docker compose config --no-interpolate --format json } | from json) | sort) [MAIL_KEY PAGER_KEY SINK_TOKEN]
+	let runtime = (with-env {SINK_TOKEN: "operator-value", PAGER_KEY: "operator-pager"} { release-runtime $app.dir gke })
+	assert equal ($runtime | columns | sort) [airlock airlock-mesh ticker]
+	assert equal ($runtime.airlock.secrets | sort) [MAIL_KEY PAGER_KEY SINK_TOKEN]
+	assert not ("SINK_TOKEN" in $runtime.airlock.env) "a secret is no plain variable"
+	assert equal (release-runtime $app.dir metal) {} "metal runs no compose service"
+	# An effect's secret the release does not place fails it, naming the variable.
+	let refused = (try { with-env {SINK_TOKEN: "operator-value", PAGER_KEY: "operator-pager"} { render-manifests $app.cue_path gke }; "" } catch {|e| $e.msg })
+	assert ($refused | str contains "MAIL_KEY, PAGER_KEY, SINK_TOKEN") $"an unplaced secret fails the release: ($refused)"
+	let secrets = {SINK_TOKEN: "effects-sinks", MAIL_KEY: "effects-mail", PAGER_KEY: "effects-pager"}
+	# Without its network policies the airlock has no walls: refused.
+	{App: {airlock: {secrets: $secrets}, networkPolicy: {enabled: false}}} | to json | save -f $data
+	let open = (try { with-env {SINK_TOKEN: "operator-value", PAGER_KEY: "operator-pager"} { render-manifests $app.cue_path gke --data $data }; "" } catch {|e| $e.msg })
+	assert ($open | str contains "runs only behind its network policies") $open
+	{App: {airlock: {secrets: $secrets}, networkPolicy: {internet: "airlock"}}} | to json | save -f $data
+	let rendered = (with-env {SINK_TOKEN: "operator-value", PAGER_KEY: "operator-pager"} { render-manifests $app.cue_path gke --data $data })
+	rm $data
+	assert not ($rendered | str contains "operator-value")
+	assert not ($rendered | str contains "operator-pager")
+	assert not ($rendered | str contains "dev-password")
+	let objs = ($rendered | from yaml)
+	let deployment = {|n| $objs | where kind == "Deployment" and metadata.name == $"effects-($n)" | first }
+	for n in [airlock airlock-mesh] {
+		let d = (do $deployment $n)
+		# airlock-mesh is a daprd of its own: an injected sidecar would be a second, unwalled one.
+		assert ($d.spec.template.metadata.annotations? | default {} | columns | where {|k| $k starts-with "dapr.io/" } | is-empty) $"($n) joins no mesh"
+		assert equal $d.spec.strategy.type "Recreate"
+	}
+	assert equal ((do $deployment ticker).spec.template.metadata.annotations."dapr.io/app-id") "ticker"
+	assert equal ($objs | where kind == "Service" and metadata.name in [airlock airlock-mesh] | each {|s| [$s.metadata.name $s.spec.ports.0.port] } | sort) [[airlock 9997] [airlock-mesh 3500]]
+	let vars = ((do $deployment airlock).spec.template.spec.containers.0.env)
+	for k in [SINK_TOKEN MAIL_KEY PAGER_KEY] {
+		let e = ($vars | where name == $k | first)
+		assert ($e.value? == null) $"($k) has no value of its own"
+		assert equal $e.valueFrom.secretKeyRef.key $k
+	}
+	assert equal ($vars | where name == SINK_TOKEN | first | get valueFrom.secretKeyRef.name) effects-sinks
+	assert equal ($vars | where name == DATABASE_URL | first | get value) 'postgresql://postgres:$(PGPASSWORD)@database:5432/effects?sslmode=disable' "the owner, as compose's"
+	assert equal ($vars | where name == MESH_URL | first | get value) "http://airlock-mesh:3500"
+	assert equal ($vars | where name == ORIGIN | first | get value) "https://effects.example.test" "the door's origin, not compose's"
+	let policy = {|n| $objs | where kind == "NetworkPolicy" and metadata.name == $"effects-($n)" | first | get spec }
+	let airlock = (do $policy airlock)
+	assert equal $airlock.ingress [{from: [{podSelector: {matchLabels: {"app.kubernetes.io/name": effects, "app.kubernetes.io/component": ticker}}}], ports: [{port: 9997, protocol: TCP}]}] "only the ticker's wake"
+	assert equal ($airlock.egress | each {|r| [($r.to?.0?.podSelector?.matchLabels? | default {}) ($r.ports | get port | uniq)] }) [
+		[{"cnpg.io/cluster": effects-db} [5432]]
+		[{"app.kubernetes.io/name": effects, "app.kubernetes.io/component": airlock-mesh} [3500]]
+		[{"k8s-app": kube-dns} [53]]
+	] "the database, its daprd and DNS alone"
+	let mesh = (do $policy airlock-mesh)
+	assert equal $mesh.ingress [{from: [{podSelector: {matchLabels: {"app.kubernetes.io/name": effects, "app.kubernetes.io/component": airlock}}}], ports: [{port: 3500, protocol: TCP}]}] "only the airlock"
+	let out = ($mesh.egress | where {|r| $r.to?.0?.ipBlock? != null } | first)
+	assert equal ($out.ports | get port | sort) [443 8443] "the sinks' ports, an origin's own included"
+	assert equal ($out.to.0.ipBlock.except | sort) ["10.0.0.0/8" "100.64.0.0/10" "169.254.0.0/16" "172.16.0.0/12" "192.168.0.0/16"] "nothing private, shared or link-local (a cloud's metadata server)"
+	# DNS goes to the cluster's resolvers alone, not to any address on 53.
+	let dns = [{to: [{namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": kube-system}}, podSelector: {matchLabels: {"k8s-app": kube-dns}}}, {ipBlock: {cidr: "169.254.20.10/32"}}], ports: [{port: 53, protocol: TCP}, {port: 53, protocol: UDP}]}]
+	assert equal ($airlock.egress | where {|r| $r.ports | any {|p| $p.port == 53 } }) $dns
+	assert equal ($mesh.egress | where {|r| $r.ports | any {|p| $p.port == 53 } }) $dns
+	assert equal ($mesh.egress | last) {to: [{podSelector: {matchLabels: {"app.kubernetes.io/name": effects, "app.kubernetes.io/component": rclone-s3}}}], ports: [{port: 3900, protocol: TCP}]} "an answer's bytes to the blob plane"
+	assert equal ($mesh.egress | length) 3 "DNS, the sinks and the blob plane alone"
+	# Under internet "airlock" no other runtime service reaches the internet.
+	assert ($objs | where kind == "NetworkPolicy" and metadata.name == "effects-ticker" | first | get spec.egress | all {|r| $r.to?.0?.ipBlock? == null })
+	# Policies add up: one more selecting either pod would reopen its wall.
+	let walled = [airlock airlock-mesh]
+	let selects = {|p|
+		let sel = $p.spec.podSelector
+		let labels = ($sel.matchLabels? | default {})
+		let component = ($labels | get -o "app.kubernetes.io/component")
+		if "cnpg.io/cluster" in $labels { false
+		} else if $component != null { $component in $walled
+		} else if ($sel.matchExpressions? | is-not-empty) { $sel.matchExpressions | any {|e| $e.values | any {|v| $v in $walled } }
+		} else { true }
+	}
+	assert equal ($objs | where kind == "NetworkPolicy" | where {|p| do $selects $p } | get metadata.name | sort) [effects-airlock effects-airlock-mesh] "no other policy selects them"
+	# Where the walls would not stand, or real effects would run apart from the release, it is refused.
+	assert equal (airlock-refusals $runtime "" "") []
+	assert ((airlock-refusals $runtime "studio-ana" "") | first | str contains "NetworkPolicy") "a tenant's release drops every policy"
+	assert ((airlock-refusals $runtime "" "rc") | first | str contains "for real") "a preview would perform real effects"
+	assert equal (airlock-refusals {ticker: {}} "studio-ana" "rc") [] "an app without effects is not the airlock's to refuse"
+	# What the target cannot deploy still fails the release rather than dropping out of it.
+	let bridge = (try { runtime-services {services: {airlock: {}, airlock-mesh: {environment: {AIRLOCK_BRIDGES: "pdf", BRIDGE_PDF_URL: "http://pdf:8080"}}}}; "" } catch {|e| $e.msg })
+	assert ($bridge | str contains "container bridges") $bridge
+	let gateway = (try { runtime-services {services: {airlock: {}, airlock-mesh: {}, tsbifrost: {}}}; "" } catch {|e| $e.msg })
+	assert ($gateway | str contains "tsbifrost") $gateway
+	let alone = (try { runtime-services {services: {airlock: {}}}; "" } catch {|e| $e.msg })
+	assert ($alone | str contains "together") $alone
+}
+
+def test_airlock_compose_reads [] {
+	print "test an airlock-only secret is a stand-in for every compose read, a shared one the operator's, and secrets are checked by key..."
+	let dir = ($fixtures_dir | path join effects)
+	let raw = (do { cd $dir; docker compose config --no-interpolate --format json } | from json)
+	# billing reads SINK_TOKEN by reference, pager passes PAGER_KEY through by name.
+	assert equal (airlock-shared-secrets $raw) {SINK_TOKEN: [billing], PAGER_KEY: [pager]}
+	let shared = {SINK_TOKEN: "operator-value", PAGER_KEY: "operator-pager"}
+	# MAIL_KEY is the airlock's alone: unset, every read the release makes (auth, its own services,
+	# migrate) still works, and the operator need not export it.
+	assert equal (with-env ($shared | insert MAIL_KEY null) { airlock-stand-ins $dir }) {MAIL_KEY: secretKeyRef}
+	let own = (with-env ($shared | insert MAIL_KEY null) { app-services-environment (compose-config $dir --json) [billing pager] {billing: [], pager: []} })
+	# A service that reads a shared name gets the operator's value, never a stand-in,
+	assert equal $own.billing.env.SINK_TOKEN "operator-value"
+	assert equal $own.pager.env.PAGER_KEY "operator-pager"
+	# and unset, the release fails naming who reads it.
+	let unset = (try { with-env {MAIL_KEY: null, SINK_TOKEN: "operator-value", PAGER_KEY: null} { compose-config $dir --json }; "" } catch {|e| $e.msg })
+	assert ($unset | str contains "PAGER_KEY is an effect's secret and also pager's") $unset
+	assert equal (with-env ($shared | insert MAIL_KEY null) { compose-config $dir --services } | sort) [airlock airlock-mesh billing pager ticker]
+	# What reads a variable: a reference, the name passed through, an env_file; `$$` is an escape.
+	let airlock = {environment: {KEY: "${KEY:?k}", KEY_2: "${KEY_2:?k}"}}
+	let readers = {|svc| airlock-shared-secrets {services: {airlock: $airlock, s: $svc}} }
+	assert equal (do $readers {environment: {A: "$KEY"}}) {KEY: [s]}
+	assert equal (do $readers {environment: {A: "x${KEY}y"}}) {KEY: [s]}
+	assert equal (do $readers {environment: {A: "${KEY:-x}"}}) {KEY: [s]}
+	assert equal (do $readers {environment: {A: "$KEY_2"}}) {KEY_2: [s]} "KEY_2 is not KEY"
+	assert equal (do $readers {environment: {A: "$$KEY", B: "$${KEY}"}}) {} "an escape reads nothing"
+	assert equal (do $readers {environment: {A: "$$$KEY"}}) {KEY: [s]} "an escaped dollar, then a read"
+	assert equal (do $readers {environment: ["KEY"]}) {KEY: [s]}
+	assert equal (do $readers {environment: ["KEY=literal"]}) {KEY: [s]}
+	assert equal (do $readers {environment: {KEY: null}}) {KEY: [s]}
+	assert equal (do $readers {env_file: [{path: "x.env"}]}) {KEY: [s], KEY_2: [s]} "an env_file may hold any"
+	# The airlock reads no other variable from the environment than its secrets and what the release sets.
+	let stray = (try { airlock-secrets {services: {airlock: {environment: {KEY: "${KEY:?k}", TOKEN: "${TOKEN}"}}}}; "" } catch {|e| $e.msg })
+	assert ($stray | str contains "reads TOKEN from the environment") $stray
+	let through = (try { airlock-secrets {services: {airlock: {environment: ["KEY"]}}}; "" } catch {|e| $e.msg })
+	assert ($through | str contains "reads KEY") $through
+	assert equal (airlock-secrets {services: {airlock: {environment: {DATABASE_URL: "postgres://${POSTGRES_USER:-postgres}@database", ORIGIN: "${ORIGIN:-http://localhost}", AIRLOCK_DIR: "/airlock", N: "$$X"}}}}) []
+	# A build that reads an effect's secret would bake it into an image: refused.
+	assert equal (airlock-build-refusals $raw) []
+	let baked = (airlock-build-refusals {services: {airlock: $airlock, web: {build: {context: ".", args: {T: "${KEY}"}}}}})
+	assert ($baked | first | str contains "web's build reads KEY") ($baked | to nuon)
+	# Cloud Build's compose reads a stand-in for every airlock secret, a shared one too, never an
+	# operator's value; the gcp target's build, none.
+	let step = (with-env ($shared | insert MAIL_KEY "operator-mail") { cloud-build-step "docker compose config" (airlock-secrets $raw | each {|k| $"($k)=secretKeyRef" }) })
+	assert equal ($step.env | sort) ["MAIL_KEY=secretKeyRef" "PAGER_KEY=secretKeyRef" "SINK_TOKEN=secretKeyRef" "SOURCE_DATE_EPOCH=0"]
+	assert not ($step | to yaml | str contains "operator-")
+	assert equal (cloud-build-step "true" []).env ["SOURCE_DATE_EPOCH=0"]
+	# check-airlock-secrets reads keys alone, and only NotFound means missing.
+	let bin = (mktemp -d)
+	"#!/bin/sh
+case \"$*\" in
+  *present*) printf 'SINK_TOKEN\\n' ;;
+  *absent*) echo 'Error from server (NotFound): secrets \"absent\" not found' >&2; exit 1 ;;
+  *) echo 'Error from server (Forbidden): secrets is forbidden' >&2; exit 1 ;;
+esac
+" | save -f ($bin | path join kubectl)
+	chmod +x ($bin | path join kubectl)
+	let deployment = {|name| [{kind: Deployment, spec: {template: {metadata: {labels: {"app.kubernetes.io/component": airlock}}, spec: {containers: [{env: [
+		{name: PGPASSWORD, valueFrom: {secretKeyRef: {name: effects-db-postgres, key: password}}}
+		{name: SINK_TOKEN, valueFrom: {secretKeyRef: {name: $name, key: SINK_TOKEN}}}
+	]}]}}}}] }
+	let run = {|name| with-env {PATH: ($env.PATH | prepend $bin)} { try { check-airlock-secrets (do $deployment $name) effects; "" } catch {|e| $e.msg } } }
+	assert equal (do $run present) ""
+	assert ((do $run absent) | str contains "needs SINK_TOKEN") (do $run absent)
+	let denied = (do $run denied)
+	assert (($denied | str contains "Forbidden") and not ($denied | str contains "needs")) $"another failure is itself: ($denied)"
+	rm -r $bin
 }
 
 def test_replicas_budget_spread [] {
