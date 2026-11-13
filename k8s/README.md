@@ -122,6 +122,8 @@ The schema is built as compose builds it, by two Jobs on the app's images: `<app
 
 An app's own services, a plugin's (pronto-billing's `billing`, say), are `App.services`, as `GCP.sidecars` are on Cloud Run: `services: billing: {port: 8688, env: BILLING_BROKER: "https://…"}`. Each names a service of the compose project, built and pushed with the cluster's images, and runs as a Deployment of its own in the mesh, which the door reaches at `PRONTO_UPSTREAM_<NAME>`. Its environment is compose's under what release.cue sets, a peer compose names (`http://crud:3000`) is that peer through the mesh, and `SERVICE_JWT` is the release's own: the service role's token signed with the cluster's `PGRST_JWT_SECRET`, kept in `<app>-service-jwt`. Its network policy lets it reach the internet on 443 (a broker), which the cluster's own services cannot.
 
+What else the compose project runs beside the cluster (native compute, the ticker, the blob plane, an app's effects through the airlock) is read from it on every target but metal, built and pushed with the cluster's images, and deployed as [[docs/index]] states: the airlock as two pods, `airlock` and its own daprd `airlock-mesh`, each behind a network policy of its own, its effects' secrets read from the Secrets `airlock.secrets` names. Container bridges and the AI gateway are refused, and so are a tenant's release and a preview of an app with effects.
+
 ---
 
 ## 9. Timeouts and Load Shedding

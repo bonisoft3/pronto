@@ -1216,6 +1216,13 @@ applies:
 `k8s` is built for Kind and for a cluster the operator runs behind NAT
 (`envs.Metal`): its images built in Cloud Build and pulled from Artifact
 Registry, its door a Cloudflare Tunnel ([k8s/README.md](../k8s/README.md#12-metal-a-cluster-of-your-own-behind-nat)).
+On every cluster but metal it also deploys what the compose project runs
+beside the cluster, an app's effects included: mecha's airlock and its own
+daprd as two pods, each walled by a network policy as compose walls them with
+two networks, the effects' secrets read from Secrets the release names
+([k8s/docs/index.md](../k8s/docs/index.md#the-airlock)). Container bridges,
+the AI gateway, and a tenant's release or a preview of an app with effects are
+refused there.
 
 The compute scales by itself; the floor is the database, and AWS's is the
 highest, since Aurora does not pause while logical replication is on. Project,
