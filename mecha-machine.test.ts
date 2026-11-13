@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { assert, assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { cue, emitFiles, paymentProgram } from "./effects-fixtures.ts";
 import { PGlite } from "npm:@electric-sql/pglite@0.5.8";
 
@@ -647,6 +647,28 @@ Deno.test("the roles migration repairs memberships made before it and outside it
     assertEquals((await members(db, "service")).rows, [{ grantor: "postgres", inherit_option: false, set_option: true, admin_option: true }]);
     assertEquals((await db.query("SELECT 1 FROM pg_auth_members WHERE member = 'downstream'::regrole")).rows.length, 1);
   } finally { await db.close(); }
+});
+
+// An app's schemas reach every reader of them: the migration that makes the
+// schema, the floor at 003 for it, the door's Electric route (Electric reads a
+// bare table as public's) and the facts the release targets read. Unset, the
+// app is as before: public's tables, no schema made, the door unchanged.
+Deno.test("an app's schemas reach its migrations, its door and its release facts", async () => {
+  const at = (files: Record<string, { text: string }>, rel: string) => files[rel] as unknown as { text: string; data: { schemas: unknown } };
+  const plain = await emitFiles(paymentProgram());
+  assertEquals(at(plain, ".pronto/cluster.json").data.schemas, { app: "public", floor: "public", mecha: "mecha" });
+  assertEquals(plain["services/database/migrations/000_extensions.sql"].text.includes("CREATE SCHEMA"), false);
+  assertEquals(at(plain, "docker/Caddyfile").text.includes("uri query table"), false);
+  const own = await emitFiles(paymentProgram() + '\napp: meta: schemas: {app: "orders", floor: "mecha"}\n');
+  assertEquals(at(own, ".pronto/cluster.json").data.schemas, { app: "orders", floor: "mecha", mecha: "mecha" });
+  assertStringIncludes(own["services/database/migrations/000_extensions.sql"].text, "CREATE SCHEMA IF NOT EXISTS orders;");
+  assertStringIncludes(own["services/database/migrations/000_extensions.sql"].text, "SET search_path = orders, mecha");
+  assertStringIncludes(own["services/database/migrations/003_rls.sql"].text, "FUNCTION mecha.auth_uid()");
+  // After the gate, which compares the bare table, and right where the secret is added: Electric is sent
+  // orders.<table>, never a bare name it would read as public's.
+  const door = at(own, "docker/Caddyfile").text;
+  assertStringIncludes(door, "      uri query secret {$ELECTRIC_SECRET}\n      uri query table orders.{query.table}\n");
+  assert(door.indexOf("uri /auth/shape/verify") < door.indexOf("uri query table orders."), "the table is named after the gate");
 });
 
 Deno.test("an effect reached through a bridge gets the bridge's in-cluster endpoint", async () => {

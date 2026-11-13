@@ -1022,6 +1022,12 @@ def ensure-service-jwt [name: string, namespace: string] {
 	service-jwt $key | kubectl create secret generic $"($name)-service-jwt" -n $namespace --from-file=SERVICE_JWT=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - | ignore
 }
 
+# The app's schemas as a release's database takes them, from its .pronto/cluster.json: where
+# generate wrote them, else none, and the release's CUE has the defaults (an older file).
+export def schema-facts [facts: record]: nothing -> record {
+	if ($facts.schemas? | is-empty) { {} } else { {schemas: ($facts.schemas | select app floor mecha)} }
+}
+
 export def resolve-app [app_arg?: string]: nothing -> record {
 	let dir = if ($app_arg | is-empty) {
 		$env.PWD
@@ -1361,7 +1367,7 @@ export def render-manifests [
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
 	let runtime = (release-runtime ($cue_path | path dirname) $env_name)
 	let airlock = if "airlock" in $runtime { {airlock: {sinks: $facts.k8sSinks}} } else { {} }
-	{App: ({database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}, runtime: $runtime, doors: ($facts.doors? | default [])} | merge $airlock)} | to json | save -f $roles_file
+	{App: ({database: ({tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])} | merge (schema-facts $facts)), runtime: $runtime, doors: ($facts.doors? | default [])} | merge $airlock)} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file

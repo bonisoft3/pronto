@@ -69,6 +69,8 @@ use release.nu [
 def main [] {
 	let cache = (mktemp -d)
 	with-env {XDG_CACHE_HOME: $cache, LOCALAPPDATA: $cache} { run-tests }
+	# CUE extracts the modules it fetches read-only.
+	^chmod -R u+w $cache
 	rm -r $cache
 }
 
@@ -88,6 +90,7 @@ def run-tests [] {
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
+	test_app_schemas
 	test_auth_providers
 	test_auth_provider_secrets
 	test_release_tree
@@ -333,6 +336,21 @@ def test_auth_provider_secrets [] {
 	})
 	rm $data
 	assert $refused
+}
+
+def test_app_schemas [] {
+	print "test an app's own schemas reach PostgREST, which keeps public after the floor..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t schemas.XXXXXX.json | str trim)
+	{App: {database: {schemas: {app: "shop", floor: "lists", mecha: "mecha"}}}} | to json | save -f $data
+	let yaml = (render-manifests $app.cue_path "kind" --data $data)
+	rm $data
+	assert ($yaml | str contains "name: PGRST_DB_SCHEMA\n              value: shop")
+	assert ($yaml | str contains "value: lists.app_pre_request")
+	# Extensions keep their functions in public, PostgREST's own default, which naming the floor drops.
+	assert ($yaml | str contains "name: PGRST_DB_EXTRA_SEARCH_PATH\n              value: lists,public")
+	let plain = (render-manifests $app.cue_path "kind")
+	assert not ($plain | str contains "PGRST_DB_EXTRA_SEARCH_PATH")
 }
 
 def test_schema_jobs [] {

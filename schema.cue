@@ -2223,6 +2223,20 @@ import (
 		// (pronto-billing's billing, pronto-flags' flagd). The renderer is
 		// pronto's own (#DefaultCluster), so a plugin's join it.
 		hostPeers?: [=~"^[a-z][a-z0-9-]*$"]: int & >0
+		// The database's schemas (mecha's cluster meta.schema): `app` the one the
+		// program's tables, views and API functions live in and PostgREST serves,
+		// `floor` the tenancy floor's functions, `mecha` the floor's lists. Unset,
+		// `public`, `public` and `mecha`. An app whose database lends it no
+		// `public` names its own, and keeps the floor out of the served schema.
+		let schemaName = mechaCluster.#SchemaName
+		schemas?: {
+			app?:   schemaName
+			floor?: schemaName
+			mecha?: schemaName
+			// The app's own functions whose first argument, a literal, names a table or a function,
+			// so a `'public.x'` handed to one is renamed with the schema (schema-names.ts).
+			resolvers?: [...=~"^[a-z_][a-z0-9_]{0,62}$"]
+		}
 		// A frozen archive retains its schedules and runs none, at the edge or
 		// in a page.
 		edgeClock?: "ticker" | "disabled"

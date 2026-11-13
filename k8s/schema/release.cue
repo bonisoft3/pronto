@@ -195,6 +195,8 @@ import (
 				audience:        string | *"https://iam.googleapis.com/\(provider)"
 			}
 		}
+		// Where the app's tables and the floor's functions are (the same file; the release fills it).
+		schemas: {app: *"public" | #SchemaName, floor: *"public" | #SchemaName, mecha: *"mecha" | #SchemaName}
 	}
 
 	// The container hatches caddy's door routes to, by app id (the app's
@@ -502,3 +504,8 @@ import (
 		platform:         "linux/amd64"
 	}
 }
+
+// A schema's name, as the app's .pronto/cluster.json states it: generate took it from the cluster,
+// which refuses keywords and the names its services keep (mecha's meta.schema). Read here without
+// mecha's module, which the release does not otherwise import.
+#SchemaName: =~"^[a-z_][a-z0-9_]{0,62}$" & !~"^pg_"

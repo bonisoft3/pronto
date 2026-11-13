@@ -37,7 +37,7 @@ say:
       distribution:
         priority: -1
         cmds:
-          - do: "deno test --parallel --config deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
+          - do: "deno test --parallel --config deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts schema-names_test.ts terminal-corpus_test.ts"
       types:
         priority: -1
         cmds:

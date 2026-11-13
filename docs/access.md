@@ -90,10 +90,35 @@ and "everyone's" to the server.
 The owner column names a row's subject, and `WITH CHECK (owner =
 auth_uid())` refuses a spoofed one. When the client omits it, the apps fill it
 with a column default, `default: "auth_uid()"` on the field, so `auth_uid()`,
-which mecha's database image defines in its tenancy floor `003_rls.sql`, must
+which the app's tenancy floor `003_rls.sql` (mecha's `#Tenancy`) defines, must
 exist before `005_create_tables.sql` creates the table. Moving the stamp to an
 emitted trigger beside the policies is
 [owner stamping](decisions/2026-08-31-owner-stamping.md), which is not built.
+
+## The app's schemas
+
+`code.meta.schemas` names the database's schemas, as mecha's cluster takes
+them (`meta.schema`): `app` holds the program's tables, views and API
+functions and is the one PostgREST serves, `floor` the tenancy floor's
+functions, `mecha` the floor's lists. Unset they are `public`, `public` and
+`mecha`, and nothing below changes. An app whose database lends it no
+`public` names its own, and keeps the floor out of the served schema:
+
+```cue
+app: meta: schemas: {app: "orders", floor: "mecha"}
+```
+
+The floor is each app's own `003_rls.sql`, mecha's `#Tenancy` for those
+schemas. `000_extensions.sql` makes the app's schema and requires the
+database's `search_path` to open with it (set there where the migrating role
+owns the database, else a refusal naming the one-time `ALTER DATABASE`), and
+every migration opens with that path. The writer renames pronto's SQL and the
+app's authored migrations by position ([`schema-names.ts`](../schema-names.ts)):
+a floor function to the floor's schema, a list to mecha's, anything else in
+`public` to the app's; a literal is renamed only where it names an object,
+and `resolvers` lists the app's own functions whose first argument does. The
+door names the schema to Electric, and the gcp and k8s targets read the
+schemas from `.pronto/cluster.json` for PostgREST and auth.
 
 ## A count the reader is inside of
 
