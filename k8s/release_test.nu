@@ -815,8 +815,16 @@ def test_initdb_replays [] {
 	let job = (render-manifests ($dir | path join release.cue) "metal" | from yaml | where kind == "Job" and metadata.name == "sample-initdb" | first)
 	rm -r $dir
 	let script = ($job.spec.template.spec.containers.0.command | last)
-	assert ($script | str contains "010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps: ($script)"
-	assert ($script | str contains "--single-transaction") "010_machines in one transaction"
+	assert ($script | str contains "010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock.sql 2>/dev/null) $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) 700_gold.sql 780_standin.sql; do") $"the replays follow the generated steps, the airlock's ledger among them: ($script)"
+	assert ($script | str contains "010_machines.sql|*_airlock.sql) one=--single-transaction") "010_machines and the airlock's step each in one transaction"
+	# Graphile's step inserts its first migration and creates its tables bare: a second run fails the
+	# release, so it runs once, on a database without its schema, before the replays.
+	assert ($script | str contains `for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_graphile_worker.sql 2>/dev/null || true); do`) $script
+	# An assignment, so a psql that fails fails the job rather than reading as present.
+	assert ($script | str contains `missing=$(psql -XtAc "SELECT to_regclass('graphile_worker.migrations') IS NULL")`) "only where it is missing"
+	assert ($script | str contains `psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f "/docker-entrypoint-initdb.d/$f"`) "in one transaction"
+	assert (($script | str index-of "graphile_worker.migrations") < ($script | str index-of "010_machines.sql")) "before the replays"
+	assert ($script | str starts-with "set -euo pipefail") "a failing assignment ends the job"
 	# A database built on V8's plv8 moves onto pljs before the machines' code is replayed (PRONTO-279).
 	let repoint = ($script | str index-of "DO $repoint$")
 	assert ($repoint > 0 and $repoint < ($script | str index-of "for step in")) $"the plv8 repoint runs before the replays: ($script)"
