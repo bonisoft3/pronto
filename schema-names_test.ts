@@ -41,6 +41,12 @@ const cases: [string, Schemas, string, string][] = [
   ["a mecha name the floor does not make stays", listsApart, "SELECT mecha.other()", "SELECT mecha.other()"],
   ["no cascade: a renamed schema is not renamed again", listsApart, "SELECT public.auth_uid(), public.t", "SELECT fl.auth_uid(), app.t"],
   ["a word ending in public is no qualifier", own, "SELECT republic.x, x.public", "SELECT republic.x, x.public"],
+  ["a literal that reads as SQL text but is data keeps its text", own, "INSERT INTO notes VALUES ('see public.foo here'); UPDATE t SET note = 'a (public.b)'; SELECT lower('x public.y')", "INSERT INTO notes VALUES ('see public.foo here'); UPDATE t SET note = 'a (public.b)'; SELECT lower('x public.y')"],
+  ["a dynamic statement's pieces are SQL text, quotes and placeholders too", own, "EXECUTE format('SELECT public.%I()', g); EXECUTE 'SELECT to_regclass(''public.t''), ''public.t''' || x", "EXECUTE format('SELECT orders.%I()', g); EXECUTE 'SELECT to_regclass(''orders.t''), ''public.t''' || x"],
+  ["a trigger's arguments are data", own, "FOR EACH ROW EXECUTE FUNCTION f('see public.x'); GRANT EXECUTE ON FUNCTION public.f() TO anon", "FOR EACH ROW EXECUTE FUNCTION f('see public.x'); GRANT EXECUTE ON FUNCTION orders.f() TO anon"],
+  ["public declared as an alias names a column in its statement only", own, "SELECT public.id FROM customers AS public; SELECT public.id FROM public.customers public; SELECT public.id FROM public.t", "SELECT public.id FROM customers AS public; SELECT public.id FROM orders.customers public; SELECT orders.id FROM orders.t"],
+  ["a quoted name or a spaced dot after public is still qualified", own, 'SELECT public."F", public . foo, "public" . "G", public . auth_uid(), public."auth_uid"()', 'SELECT orders."F", orders . foo, "orders" . "G", mecha . auth_uid(), mecha."auth_uid"()'],
+  ["a quoted name that differs in case is not the floor's", own, 'SELECT public."AUTH_UID"()', 'SELECT orders."AUTH_UID"()'],
 ];
 
 for (const [why, s, sql, want] of cases) {
