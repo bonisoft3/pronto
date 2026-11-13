@@ -491,20 +491,34 @@ import (
 					END
 					$repoint$;
 					SQL
+					  # Graphile Worker's schema, where the app declares an effect, reaches a database
+					  # built before its first one: once, when it is not there, since its step is no
+					  # replay (it inserts its first migration and creates its tables bare) and Graphile
+					  # migrates its own schema at every worker start. Before the replays: the airlock's
+					  # step and an app's own migration may name what it makes.
+					  for f in $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_graphile_worker.sql 2>/dev/null || true); do
+					    missing=$(psql -XtAc "SELECT to_regclass('graphile_worker.migrations') IS NULL")
+					    if [ "$missing" = t ]; then
+					      echo "initdb: applying $f, once"
+					      psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f "/docker-entrypoint-initdb.d/$f"
+					    fi
+					  done
 					  # Its re-runnable steps are the release's, though (emit.cue's), as on Cloud Run
 					  # (gcp.cue's): a new entity's table and a new field's column, every policy,
 					  # trigger and publication, the status charts' triggers (010_machines), the
-					  # mecha machines' code (found by its suffix, wherever the program places it), and the app's own migrations (database.replays), each
+					  # airlock's ledger, where the app declares an effect (found by its suffix, as the
+					  # mecha machines' code is, wherever the program places it), and the app's own migrations (database.replays), each
 					  # idempotent, run again, keeping every row, before migrate's pgroll steps call
 					  # what they define. Live traffic can deadlock a step's ALTER: being idempotent,
 					  # the step is run again, up to three times.
-					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(release.database.replays, " ")); do
+					  for step in 005_create_tables.sql 006_policies.sql 007_txid.sql 008_publication.sql 010_machines.sql $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_airlock.sql 2>/dev/null) $(cd /docker-entrypoint-initdb.d && ls [0-7][0-9][0-9]_mecha_actors.sql 2>/dev/null) \(strings.Join(release.database.replays, " ")); do
 					    f=/docker-entrypoint-initdb.d/$step
 					    if [ -f "$f" ]; then echo "initdb: replaying $step"
 					      for try in 1 2 3; do
-					        # 010 drops and recreates triggers and constraints: one transaction, so no
-					        # write slips between them and a failure leaves the old ones in force.
-					        if [ "$step" = 010_machines.sql ]; then one=--single-transaction; else one=; fi
+					        # 010 drops and recreates triggers and constraints, and the airlock's step
+					        # changes its ledger's policies: one transaction, so no write slips between
+					        # them and a failure leaves the old ones in force.
+					        case "$step" in 010_machines.sql|*_airlock.sql) one=--single-transaction ;; *) one= ;; esac
 					        if psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; then break; fi
 					        if [ "$try" = 3 ]; then exit 1; fi
 					        echo "initdb: $step failed, again in 10s"; sleep 10
@@ -2416,6 +2430,7 @@ import (
 		app:         release
 		environment: targetEnv
 		images: {for name, _ in release.runtime {(name): (#appImage & {svc: name}).out}}
+		origin: originValue
 	}).objects
 
 	// objects collects all generated Kubernetes API definitions in standard order

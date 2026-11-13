@@ -234,7 +234,25 @@ import (
 		databaseEnvironment: [..."DATABASE_URL" | "FELDERA_DATABASE_URL"]
 		serviceToken: bool
 		jwtSecret:    *false | bool
+		// The airlock's: the variables an effect reads as a secret, each from airlock.secrets.
+		secrets: *[] | [...=~"^[A-Z][A-Z0-9_]*$"]
 	}
+	// Where the airlock's secrets live (the app's effects' `secrets`), by variable: a Secret the
+	// operator keeps in the app's namespace, holding it under the variable's name. A variable the
+	// effects read and this does not name fails the release; a Secret not there fails it too, before
+	// anything rolls (check-airlock-secrets).
+	airlock: secrets: [=~"^[A-Z][A-Z0-9_]*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+	_unsecured: [for _, r in runtime for k in r.secrets if airlock.secrets[k] == _|_ {k}]
+	_secured: [
+		if len(_unsecured) == 0 {true},
+		"the app's effects read \(strings.Join(_unsecured, ", ")), which airlock.secrets does not name: name the Secret holding each",
+	][0] & true
+	// The airlock's network policies are its walls (runtime.cue): without them nothing keeps it to its
+	// daprd, nor its daprd to the declared sinks.
+	_walled: [
+		if runtime.airlock == _|_ || networkPolicy.enabled {true},
+		"the app declares effects and networkPolicy.enabled is false: the airlock runs only behind its network policies",
+	][0] & true
 	runtimeStorage: *"10Gi" | string
 	runtimeResources: {
 		requests: {cpu: *"500m" | string, memory: *"1Gi" | string}

@@ -269,6 +269,12 @@ export def pushed-for [refs: list<record>, keys: record]: nothing -> list<record
 	} | compact
 }
 
+# The one step of push-images' build: `script` run by the builder, with what compose reads there.
+# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
+export def cloud-build-step [script: string, build_env: list<string>]: nothing -> record {
+	{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: (["SOURCE_DATE_EPOCH=0"] | append $build_env)}
+}
+
 # The runtime images, built in Cloud Build as the app's compose project builds
 # them, so the machine releasing needs no Docker daemon, and pushed by digest:
 # what integrate tested is what releases. The build reads the app's own files
@@ -284,6 +290,7 @@ export def push-images [
 	app_dir: string, plan: record, name: string, services: list<string>
 	--platform: string = "linux/amd64"
 	--override: string # compose YAML read over the app's compose.yaml
+	--build-env: list<string> = [] # NAME=value that compose reads in the build (release@k8s's airlock secrets' stand-ins)
 ]: nothing -> record {
 	let p = $plan.project
 	let host = ($plan.registry | split row "/" | first)
@@ -300,7 +307,7 @@ export def push-images [
 	# Compose is asked from the app's resolved directory, so a symlink (/tmp) cannot change the
 	# paths it prints and with them every key.
 	let compose = if ($override | is-not-empty) { null } else {
-		let r = (do { cd ($app_dir | path expand); ^docker compose --profile "*" config --format json } | complete)
+		let r = (with-env ($build_env | parse "{k}={v}" | reduce -f {} {|e, acc| $acc | insert $e.k $e.v }) { cd ($app_dir | path expand); ^docker compose --profile "*" config --format json } | complete)
 		if $r.exit_code == 0 { try { $r.stdout | from json } catch { null } } else {
 			print $"gcp: (stamp) image reuse is coarse: docker compose config failed, so each image is keyed by the whole app \(($r.stderr | lines | last | default '' | str trim)\)"
 			null
@@ -367,8 +374,7 @@ export def push-images [
 		$"docker compose ($compose_files)--profile '*' config | docker buildx bake ($bake_files) --push --provenance=false --allow=fs.read=/workspace --set '*.platform=($platform)' ($sets) ($services | str join ' ')"
 	] | str join "\n")
 	{
-		# Cloud Build reads `$NAME` in a step as its own substitution; `$$` is a `$`.
-		steps: [{name: $builder, entrypoint: "sh", args: ["-c" ($script | str replace -a "$" "$$")], env: ["SOURCE_DATE_EPOCH=0"]}]
+		steps: [(cloud-build-step $script $build_env)]
 		options: {machineType: "E2_HIGHCPU_8", logging: "CLOUD_LOGGING_ONLY"}
 		timeout: "86400s"
 	} | to yaml | save -f $"($work)/cloudbuild.yaml"
