@@ -1045,6 +1045,13 @@ applies:
 | `azure` | Azure Service Operator v2 | Container Apps | Flexible Server, B1ms |
 | `k8s` | skaffold, against a named kube context | mecha's images, scaled from zero by KEDA | CloudNativePG |
 
+`k8s` also deploys what the compose project runs beside the cluster, an
+app's effects included: mecha's airlock and its own daprd as two pods, each
+walled by a network policy as compose walls them with two networks, the
+effects' secrets read from Secrets the release names
+([k8s/docs/index.md](../k8s/docs/index.md#the-airlock)). Container bridges
+and the AI gateway are refused there.
+
 The compute scales by itself; the floor is the database, and AWS's is the
 highest, since Aurora does not pause while logical replication is on. Project,
 account, region and domain are declarations on the cluster; credentials are

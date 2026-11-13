@@ -120,6 +120,8 @@ Every service runs the image the app's own compose project builds (database, mig
 
 The schema is built as compose builds it, by two Jobs on the app's images: `<app>-initdb` runs the database image's `/docker-entrypoint-initdb.d` once, on a fresh database (a database comment marks it built), and `<app>-migrate`, where the app has pgroll migrations, carries the schema forward on every release. The services are applied after both, so none starts on a missing schema.
 
+What else the compose project runs beside the cluster (native compute, the ticker, the blob plane, an app's effects through the airlock) is read from it, built and pushed with the cluster's images, and deployed as [[docs/index]] states: the airlock as two pods, `airlock` and its own daprd `airlock-mesh`, each behind a network policy of its own, its effects' secrets read from the Secrets `airlock.secrets` names. Container bridges and the AI gateway are refused.
+
 ---
 
 ## 9. Timeouts and Load Shedding
