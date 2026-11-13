@@ -447,10 +447,17 @@ import (
 		pin:     string
 		out:     "${MONOREPO_COMPOSE_MODE:-docker-image://\(S.pin)}${MONOREPO_COMPOSE_MODE:+:\(S.service)}"
 	}
-	// mecha's images, named by #DefaultCluster.
+	// mecha's images, named by #DefaultCluster. PRONTO_IMAGE_REGISTRY, set where
+	// the build runs, pulls each from that registry instead of its publisher's:
+	// the same name and digest, so a mirror serves the same bytes or none.
+	_registered: R={
+		pin:    string
+		_parts: strings.Split(R.pin, "/")
+		out:    "${PRONTO_IMAGE_REGISTRY:-\(strings.Join(list.Slice(R._parts, 0, len(R._parts)-1), "/"))}/\(R._parts[len(R._parts)-1])"
+	}
 	_mechaContexts: {
 		for s, pin in mecha.published {
-			"libraries_mecha-\(s)-image": (_switch & {service: "libraries_mecha-\(s)-image", "pin": pin}).out
+			"libraries_mecha-\(s)-image": (_switch & {service: "libraries_mecha-\(s)-image", "pin": (_registered & {"pin": pin}).out}).out
 		}
 		// An image mecha has not published yet builds in the monorepo alone:
 		// elsewhere a build that needs it pulls a reference that names why.
