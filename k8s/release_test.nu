@@ -40,6 +40,7 @@ use release.nu [
 	airlock-stand-ins
 	airlock-shared-secrets
 	airlock-build-refusals
+	compose-raw
 	release-runtime
 	release-plan
 	airlock-refusals
@@ -1672,6 +1673,24 @@ def test_airlock_compose_reads [] {
 	assert equal (airlock-build-refusals $raw) []
 	let baked = (airlock-build-refusals {services: {airlock: $airlock, web: {build: {context: ".", args: {T: "${KEY}"}}}}})
 	assert ($baked | first | str contains "web's build reads KEY") ($baked | to nuon)
+	# An arg passed through by name reads the environment too; normalization drops it, so compose-raw
+	# keeps the project unnormalized.
+	let project = (mktemp -d)
+	"services:
+  airlock:
+    image: a
+    environment:
+      KEY: \"${KEY:?k}\"
+  listed:
+    build: {context: ., args: [KEY, OTHER=1]}
+  mapped:
+    build:
+      context: .
+      args:
+        KEY:
+" | save -f ($project | path join compose.yaml)
+	assert equal (airlock-build-refusals (compose-raw $project) | sort) ["listed's build reads KEY, an effect's secret: an image would carry it" "mapped's build reads KEY, an effect's secret: an image would carry it"]
+	rm -r $project
 	# Cloud Build's compose reads a stand-in for every airlock secret, a shared one too, never an
 	# operator's value; the gcp target's build, none.
 	let step = (with-env ($shared | insert MAIL_KEY "operator-mail") { cloud-build-step "docker compose config" (airlock-secrets $raw | each {|k| $"($k)=secretKeyRef" }) })

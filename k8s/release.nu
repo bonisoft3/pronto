@@ -1199,18 +1199,21 @@ export def airlock-shared-secrets [raw: record]: nothing -> record {
 }
 
 # Each effect secret a service's build reads (build.args and the rest), which no build may: the
-# images would carry it.
+# images would carry it. An arg passed through by name (`args: [K]`, `K:`) reads it too, and is
+# seen only before normalization (compose-raw).
 export def airlock-build-refusals [raw: record]: nothing -> list<string> {
 	let secrets = (airlock-secrets $raw)
 	$raw.services | transpose name svc | where {|o| $o.svc.build? != null } | each {|o|
-		let read = ($secrets | where {|k| reads-variable ($o.svc.build | to json --raw) $k })
+		let passed = (env-entries {environment: ($o.svc.build.args? | default {})} | where value == null | get key)
+		let read = ($secrets | where {|k| $k in $passed or (reads-variable ($o.svc.build | to json --raw) $k) })
 		if ($read | is-not-empty) { $"($o.name)'s build reads ($read | str join ', '), an effect's secret: an image would carry it" }
 	} | compact
 }
 
-# The app's compose project as written, before interpolation.
+# The app's compose project as written, before interpolation and normalization (which drops a build
+# arg passed through by name).
 export def compose-raw [app_dir: string]: nothing -> record {
-	do { cd $app_dir; ^docker compose --profile "*" config --no-interpolate --format json } | from json
+	do { cd $app_dir; ^docker compose --profile "*" config --no-interpolate --no-normalize --format json } | from json
 }
 
 # Each airlock secret no other service reads, as a stand-in for every compose read of the project:
