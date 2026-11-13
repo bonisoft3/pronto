@@ -3,7 +3,7 @@
 Pronto is a CUE module and a source distribution, not a CLI. The agent plugin
 carries installation knowledge; it is not the compiler installation.
 
-Use Pronto **1.1.2** through CUE module **1.1.3**, and Sayt **0.48.0**.
+Use Pronto **1.1.2** through CUE module **1.1.5**, and Sayt **0.48.0**.
 Verify both Pronto releases and the Sayt release exist before installation; do
 not substitute `main` or `latest` for a missing release.
 
@@ -42,7 +42,7 @@ export CUE_REGISTRY='github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,git
 
    ```sh
    ./saytw --script tools.nu cue mod init example.com/my-app@v0
-   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.1.3
+   ./saytw --script tools.nu cue mod get github.com/bonisoft3/pronto@v1.1.5
    ./saytw --script tools.nu cue cmd bootstrap github.com/bonisoft3/pronto/bootstrap@v1
    ```
 
