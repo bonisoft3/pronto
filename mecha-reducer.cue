@@ -28,17 +28,17 @@ import (
 	// What anyone may read of an instance: `rules.publish(state)` returns it, or
 	// null for an instance nobody else sees, into `<name>_public`.
 	public?: #MechaShape & {type: "object"}
-	contracts: [string]: {reads: [...string], writes?: [...string]}
+	contracts: [string]: {reads: [...string], writes?: [...string], reason?: string}
 	events: [string]: {
 		tier:    "omnishell" | "mecha"
 		payload: #MechaShape & {type: "object"}
 	}
 	states: [string]: {
 		final:   *false | bool
-		always?: [...{target: string, guard?: string, reduce?: string}]
+		always?: [...{target: string, guard?: [...string], reduce?: string}]
 		on: [string]: {
 			target?: string
-			guard?:  string
+			guard?:  [...string]
 			reduce?: string
 			// Tried in order: the first that is not true refuses the event with its reason.
 			requires?: [...{sql: string, reason: string & =~"^[a-z][a-z0-9_]{0,63}$"}]
@@ -111,12 +111,14 @@ import (
 		view: _s.types.view
 		if _s.types.public != _|_ {public: _s.types.public}
 
-		// Keyed by the rule the step runs: a database guard's contract is its
-		// rules guard's.
+		// Keyed by the rule the step runs: a database guard runs after the
+		// rules' guards it names, each under its own contract.
 		contracts: {
 			for n, a in _s.actions if (a & [...]) == _|_ {(n): a}
-			for n, g in _s.guards if g.sql == _|_ if g.checks == _|_ {(n): {reads: g.reads}}
-			for _, g in _s.guards if g.sql != _|_ || g.checks != _|_ if g.rules != _|_ {(g.rules): {reads: [if g.reads != _|_ {g.reads}, []][0]}}
+			for n, g in _s.guards if g.sql == _|_ if g.checks == _|_ {(n): {
+				reads: g.reads
+				if g.reason != _|_ {reason: g.reason}
+			}}
 		}
 		events: _s.types.events
 		states: {for sn, st in _c.states {
@@ -130,7 +132,7 @@ import (
 }
 
 // One XState transition as the reducer takes it. An event names one
-// transition: a guarded alternative belongs in the guard.
+// transition: a guarded alternative is another of its guards.
 #reducerArrow: {
 	let A = self
 	value: _
@@ -145,20 +147,21 @@ import (
 	_effect:  {for a in A._actions if A.setup.actions[a] != _|_ if (A.setup.actions[a] & [...]) != _|_ {(a): A.setup.actions[a]}}
 	_reduces: [for a in A._actions if A._effect[a] == _|_ {a}]
 	_effects: list.Concat([for a in A._actions if A._effect[a] != _|_ {A._effect[a]}])
-	// A database guard: one sql and its reason, or checks, each with its own reason, tried in order.
-	_guard: [if A._t.guard != _|_ if A.setup.guards[A._t.guard] != _|_ if A.setup.guards[A._t.guard].sql != _|_ || A.setup.guards[A._t.guard].checks != _|_ {A.setup.guards[A._t.guard]}, null][0]
+	// The guards a transition names, in order. One the database implements
+	// stands for the rules' guards it names and its own sql, one with its
+	// reason or checks each with theirs; the rules' guards are tried first.
+	_named: [if A._t.guard != _|_ {[if (A._t.guard & string) != _|_ {[A._t.guard]}, A._t.guard][0]}, []][0]
+	_db: {for g in A._named if A.setup.guards[g] != _|_ if A.setup.guards[g].sql != _|_ || A.setup.guards[g].checks != _|_ {(g): A.setup.guards[g]}}
+	_rules: list.Concat([for g in A._named {[if A._db[g] == _|_ {[g]}, if A._db[g].rules != _|_ {A._db[g].rules}, []][0]}])
+	_requires: list.Concat([for g in A._named if A._db[g] != _|_ {[if A._db[g].checks != _|_ {[for c in A._db[g].checks {sql: c.sql, reason: c.reason}]}, [{sql: A._db[g].sql, reason: A._db[g].reason}]][0]}])
 	out: {
 		if A._t.target != _|_ {target: A._t.target}
 		if len(A._reduces) == 1 {reduce: A._reduces[0]}
 		if len(A._reduces) > 1 {
 			reduce: _|_ // an event updates the context once
 		}
-		if A._t.guard != _|_ if A._guard == null {guard: A._t.guard}
-		if A._guard != null {
-			if A._guard.rules != _|_ {guard: A._guard.rules}
-			if A._guard.checks != _|_ {requires: [for c in A._guard.checks {sql: c.sql, reason: c.reason}]}
-			if A._guard.checks == _|_ {requires: [{sql: A._guard.sql, reason: A._guard.reason}]}
-		}
+		if len(A._rules) > 0 {guard: A._rules}
+		if len(A._requires) > 0 {requires: A._requires}
 		if len(A._effects) > 0 {actions: A._effects}
 	}
 }

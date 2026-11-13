@@ -270,7 +270,7 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
 
     await t.step("PLV8 uses the same cage and refuses computed ambient authority", async () => {
       for (const [name, expression] of Object.entries({ random: "Math['random']()", database: "({}).constructor.constructor('return plv8')()" })) {
-        const altered = await compileMechaReducer({ ...spec, name: `proof_${name}` }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", `play: () => ${expression}`), terminal);
+        const altered = await compileMechaReducer({ ...spec, name: `proof_${name}` }, rules.replace("play: ({context: state, event}) => putCard(state, event.card, event._time)", `play: () => ${expression}`), terminal);
         await sql(`${surface(`proof_${name}`)} ${altered.sql}`);
         const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
         const failure = await psql(`SELECT hybrid_proof_${name}.step(${quote(input)});`);
@@ -324,7 +324,7 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
     });
 
     await t.step("runaway reducer is terminated by the shared deterministic fuel limit", async () => {
-      const altered = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
+      const altered = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: ({context: state, event}) => putCard(state, event.card, event._time)", "play: () => { while (true) {} }"), terminal);
       await sql(`${surface("proof_spin")} ${altered.sql}`);
       const input = { state: initial(), event: request(0).event, context: { actor: "a", tier: "omnishell", now: 0 }, viewers: ["a"] };
       const start = performance.now();

@@ -220,7 +220,9 @@ a broken release, for a program with:
 - a shared entity, since one user shares with nobody and the client opens a
   keyed shape per grant, which the page's cluster does not serve;
 - a validation, which runs in plv8, and PGlite has none
-  ([Jessie in the database](decisions/2026-11-05-database-jessie.md#validations)).
+  ([Jessie in the database](decisions/2026-11-05-database-jessie.md#validations));
+- a [rewrite](rewrites.md), which the container door alone applies yet. The
+  cloudflare target refuses one too.
 
 **The page runs its drains and its clock**
 ([mecha's dispatcher](https://github.com/bonisoft3/mecha/blob/v0.22.0/docs/browser.md#drains-and-the-clock)):

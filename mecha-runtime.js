@@ -42,23 +42,23 @@
     if (value !== null) check(spec.public, value, "public");
     return { public: value };
   };
-  // A rule is handed the inputs its contract reads. Any other is a getter
-  // that refuses, and is not enumerable, so a spread of the context passes
-  // over it rather than reading it.
-  const refused = (target, key, rule, input = key) => Object.defineProperty(target, key, {get: () => fail(`${rule} reads ${input} outside its contract`), enumerable: false});
-  const handed = (rule, event, context) => {
+  // A rule is one argument, XState's `{context, event}`, and the event holds
+  // every input the step has beside the context: its type, its payload's
+  // fields, and what the runtime states, each under the underscore SCXML
+  // reserves for the platform: the sender as `_origin`, the step's `_time`
+  // and its `_entropy`. A rule is handed the fields its contract reads. Any
+  // other is a getter that refuses, and is not enumerable, so a spread of the
+  // event passes over it rather than reading it.
+  const stated = {_origin: "actor", _time: "now", _entropy: "entropy"};
+  const refused = (target, key, rule) => Object.defineProperty(target, key, {get: () => fail(`${rule} reads ${key} outside its contract`), enumerable: false});
+  const handed = (rule, event, host) => {
     const reads = spec.contracts[rule].reads;
-    const given = {tier: context.tier};
-    for (const key of ["actor", "now", "entropy"]) {
-      if (reads.includes(key)) given[key] = context[key];
+    const given = {type: event.kind};
+    for (const [key, value] of [...Object.entries(event.payload), ...Object.entries(stated).map(([key, from]) => [key, host[from]])]) {
+      if (reads.includes(key)) given[key] = value;
       else refused(given, key, rule);
     }
-    const payload = {};
-    for (const [key, value] of Object.entries(event.payload)) {
-      if (reads.includes(`payload.${key}`)) payload[key] = value;
-      else refused(payload, key, rule, `payload.${key}`);
-    }
-    return [harden({kind: event.kind, payload}), harden(given)];
+    return harden(given);
   };
   const kept = (rule, previous, next) => {
     const writes = spec.contracts[rule].writes;
@@ -66,26 +66,28 @@
       if (key !== "phase" && !writes.includes(key) && JSON.stringify(previous[key]) !== JSON.stringify(next[key])) fail(`${rule} writes ${key} outside its contract`);
     }
   };
-  const control = ({target, guard, reduce}) => ({target, guard, reduce});
+  // A transition's guards are XState's `and`, in order; the chart takes them as one name.
+  const control = ({target, guard, reduce}) => ({target, guard: guard?.join(" "), reduce});
   const chart = {initial: spec.initial, states: Object.fromEntries(Object.entries(spec.states).map(([name, state]) => [name, {
     final: state.final, on: Object.fromEntries(Object.entries(state.on).map(([event, arrow]) => [event, control(arrow)])),
     always: (state.always ?? []).map(control),
   }]))};
   const step = Statechart(chart, {
-    guard: (state, name, event, automatic) => {
-      const verdict = rules[name](harden(state), ...handed(name, event.original, event.host));
-      if (automatic) {
-        if (typeof verdict !== "boolean") fail("automatic guard must return a boolean");
-        return verdict;
+    // A guard is XState's: it answers a boolean. The first that answers
+    // false refuses the event, with the reason its contract states.
+    guard: (state, names, event, automatic) => {
+      for (const name of names.split(" ")) {
+        const verdict = rules[name](harden({context: state, event: handed(name, event.original, event.host)}));
+        if (typeof verdict !== "boolean") fail(`guard ${name} must return a boolean`);
+        if (verdict) continue;
+        if (automatic) return false;
+        event.refusal = spec.contracts[name].reason ?? "refused";
+        throw new Error(event.refusal);
       }
-      if (verdict === true) return true;
-      if (verdict === false) event.refusal = "refused";
-      else if (typeof verdict === "string" && verdict.length > 0 && verdict.length <= 64) event.refusal = verdict;
-      else fail("guard must return a boolean or a refusal code");
-      throw new Error(event.refusal);
+      return true;
     },
     reduce: (previous, transition, event) => {
-      const reduced = transition.reduce ? rules[transition.reduce](harden(previous), ...handed(transition.reduce, event.original, event.host)) : previous;
+      const reduced = transition.reduce ? rules[transition.reduce](harden({context: previous, event: handed(transition.reduce, event.original, event.host)})) : previous;
       if (reduced.phase !== previous.phase) fail("a reducer cannot select the target state");
       if (transition.reduce) kept(transition.reduce, previous, reduced);
       const next = {...reduced, phase: transition.target ?? previous.phase};
@@ -98,7 +100,10 @@
     if (input.initialize === true) {
       if (!spec.initialize) refuse("initialization is not declared");
       check(spec.initialize.input, input.payload, "input", refuse);
-      const seeded = rules[spec.initialize.reduce](input.payload, context);
+      // XState's context factory, `({input})`. Whoever creates an actor states
+      // its input, and the runtime creates every instance: it adds the step's
+      // `_time` there, as it states an event's.
+      const seeded = rules[spec.initialize.reduce](harden({input: own(context, "now") ? {...input.payload, _time: context.now} : input.payload}));
       validState(seeded);
       if (seeded.phase !== spec.initial) fail("initializer must select the initial phase");
       return {state: seeded, views: project(seeded, viewers), ...publish(seeded)};

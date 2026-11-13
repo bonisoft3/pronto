@@ -287,7 +287,7 @@ admits it, which is narrower than ECMAScript — `while (n --> 0)`, the text
 `eval(` in a string, and top-level await are each refused — without the
 clock, randomness, time zone and locale. `endowments` grants it what it names
 of `Crypto` (WebCrypto's deterministic-by-specification subset),
-`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`, `Cheerio` and `Pdf`, as a surface module
+`TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`, `Cheerio`, `Pdf` and `Xlsx`, as a surface module
 is granted `Intl`; an undeclared one throws where it is reached.
 
 `Cheerio.load(html)` creates a private mutable document using the pinned Cheerio
@@ -305,6 +305,15 @@ page, so one image gives several pages, a face each. It is the endowment's only
 call: no load, fonts, forms or encryption, the paths that reach the clock and
 `Math.random`, and the document carries no modification date, so the same input
 writes the same bytes.
+
+`Xlsx.fromRows({sheets})` writes a workbook with the pinned SheetJS
+(`@e965/xlsx`, the npm mirror of SheetJS's own release): each sheet is
+`{name, rows}`, and each row a list of cells from column A, each text, a finite
+number, a boolean, or `null` for an empty cell. It is the endowment's only call: no
+reader, formulas, styles or dates, so text beginning with `=` stays text, a date is
+the text or number its caller makes of it, and the same rows write the same bytes.
+A sheet holds at most 1,048,576 rows; an export larger than a run should hold is
+split by the app into several files.
 
 A computation can call an ordinary Crawlee-shaped function without changing the
 platform contract. Keep that function in the same module, call it from `finish`,

@@ -223,8 +223,16 @@ at every rung ([omnishell's `cel:` line](https://github.com/bonisoft3/omnishell/
 ([access](docs/access.md#the-browsers-mirror)); an `owner`
 on `public` would let the emitter write both the arms and the stamp.
 
+**The store refuses no write a role refuses**
+([access](docs/access.md#the-browsers-mirror)); the reader's role is in the
+grant rows and membership rows the store already holds, so `write` could
+judge it before the optimistic row is shown.
+
+**Groups have not run in a browser or on the edge**
+([the record](docs/decisions/2026-11-13-drive-roles-and-event-origin.md#unbuilt)).
+
 **A cluster entity may omit `access`**
-([access](docs/access.md#the-four-modes)); every app in the tree declares one,
+([access](docs/access.md#the-modes)); every app in the tree declares one,
 and requiring it wherever `#Entity.server` is true would keep it so at `cue
 vet`.
 

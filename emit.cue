@@ -272,6 +272,8 @@ _sqlType: {
 	let T = self
 	e:        _
 	columns!: #machineColumns
+	// Parent lookup, for a composition under a row that names a group.
+	entities: _
 	_lines: list.Concat([
 		[for fld in T.e.fields {
 			let column = #machineColumn & {columns: T.columns, entityName: T.e.name, fieldName: fld.name}
@@ -311,6 +313,10 @@ _sqlType: {
 		[if T.e.access != _|_ if T.e.access.scope == "folder" {
 			"  \"scope_id\" TEXT NOT NULL"
 		}],
+		// A membership row is addressed to its member, whose scope it carries.
+		[if T.e.access != _|_ if T.e.access.scope == "group" {
+			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('user:' || \"\(T.e.access.user)\") STORED NOT NULL"
+		}],
 		// A constant: every subject holds `public:` (subject_scopes in rls.sql
 		// says what a public row reached by scope rather than by exemption buys).
 		// Writes stay with the permissive policies below and the table grants.
@@ -323,6 +329,22 @@ _sqlType: {
 		// the policy and the shape predicate come out as the same statement.
 		[if T.e.access != _|_ if T.e.access.scope == "internal" if T.e.table == "app_user" {
 			"  \"scope_id\" TEXT GENERATED ALWAYS AS ('user:' || \"id\") STORED NOT NULL"
+		}],
+		// Platform column, never a #Field: the group a row names by one of its
+		// columns, which a shape over the table is keyed on.
+		[if T.e.access != _|_ if T.e.access.scope == "private" if T.e.access.groups != _|_ for g in T.e.access.groups if g.of != _|_ {
+			"  \"group_\(g.group)\" TEXT GENERATED ALWAYS AS (\"\(g.of)\"::text || ':\(g.group)') STORED"
+		}],
+		// A composition under such a row carries the same column, copied from
+		// its parent by a trigger emitted beside the policies, so one shape
+		// delivers the group its parent's rows and theirs.
+		[if T.e.access != _|_ if T.e.access.scope == "folder" if T.entities[T.e.access.parent] != _|_ if T.entities[T.e.access.parent].access.scope == "private" if T.entities[T.e.access.parent].access.groups != _|_ for g in T.entities[T.e.access.parent].access.groups if g.of != _|_ {
+			"  \"group_\(g.group)\" TEXT"
+		}],
+		// A grant names a user or a group, and which column it fills is the
+		// grantee's type.
+		[for _, x in T.entities if x.access != _|_ if x.access.scope == "private" if x.access.shared != _|_ if x.access.shared.via == T.e.table if x.access.shared.group != _|_ {
+			"  CHECK (num_nonnulls(\"\(x.access.shared.user)\", \"\(x.access.shared.group)\") = 1)"
 		}],
 		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
 	])
@@ -404,7 +426,7 @@ _sqlType: {
 		"""
 			CREATE OR REPLACE FUNCTION \(V._fn[n])(state jsonb, event jsonb) RETURNS text
 			LANGUAGE plv8 IMMUTABLE AS $validation$
-			\(V._statements[n])const verdict = (\(v.module.completion))(state, event);
+			\(V._statements[n])const verdict = (\(v.module.completion))({context: state, event});
 			return verdict === true ? "true" : verdict === false ? "false" : "answered " + typeof verdict;
 			$validation$;
 
@@ -425,7 +447,9 @@ _sqlType: {
 	out: strings.Join([for n in G.guards {
 		let v = G.e.validations[n]
 		let reads = strings.Join([for ed in v.edges {
-			"'\(ed.table)', (SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM \(ed.table) r WHERE r.\"\(ed.key)\" = \(G.row).\"\(ed.from)\")"
+			// An edge from the origin reads the rows addressed to whoever sent
+			// the write, which no column of the row names.
+			"'\(ed.table)', (SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM \(ed.table) r WHERE r.\"\(ed.key)\" = \([if ed.from == "$origin" {"sender"}, "\(G.row).\"\(ed.from)\""][0]))"
 		}], ", ")
 		"""
 			  v := \(G.e.table)_validation_\(strings.Replace(n, "-", "_", -1))(jsonb_build_object('items', items, 'rows', jsonb_build_object(\(reads))), event);
@@ -978,6 +1002,21 @@ _sqlType: {
 				"""
 		}]
 		_timing: [if S.machine["timing"] != _|_ {S.machine.timing}, "AFTER"][0]
+		// The columns a composition copies from its parent. An update that
+		// changes nothing else is the parent's handover or regrouping reaching
+		// the row, and no write of the row's to judge.
+		_copied: [if _entity.access != _|_ if _entity.access.scope == "folder" for c in list.Concat([["scope_id"], [
+			if S.entities[_entity.access.parent].access.groups != _|_ for g in S.entities[_entity.access.parent].access.groups if g.of != _|_ {"group_\(g.group)"},
+		]]) {"'\(c)'"}]
+		_copy: [if len(_copied) > 0 {
+			"""
+				  IF TG_OP = 'UPDATE' AND to_jsonb(NEW) - 'txid' IS DISTINCT FROM to_jsonb(OLD) - 'txid'
+				     AND to_jsonb(NEW) - ARRAY['txid', \(strings.Join(_copied, ", "))] = to_jsonb(OLD) - ARRAY['txid', \(strings.Join(_copied, ", "))] THEN
+				    RETURN NEW;
+				  END IF;
+
+				"""
+		}, ""][0]
 		"""
 			CREATE OR REPLACE FUNCTION "\(_fnName)"() RETURNS trigger
 			LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
@@ -985,9 +1024,18 @@ _sqlType: {
 			  items jsonb;
 			  event jsonb;
 			  v text;
+			  sender uuid;
 			BEGIN
-			  items := CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN jsonb_build_array(to_jsonb(OLD)) ELSE '[]'::jsonb END;
-			  event := jsonb_build_object('type', lower(TG_OP), 'row', CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END);
+			\(_copy)  items := CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN jsonb_build_array(to_jsonb(OLD)) ELSE '[]'::jsonb END;
+			  -- The origin is who sent the write, as a mecha rule's event names its
+			  -- sender; a write the service makes has none. Asked of the token's
+			  -- role, since the function runs as its owner, and before its subject
+			  -- is read: a service token's need not be a person's id.
+			  IF current_setting('request.jwt.claims', true)::json->>'role' = 'app_user' THEN
+			    sender := auth_uid();
+			  END IF;
+			  event := jsonb_build_object('type', lower(TG_OP), 'row', CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END)
+			    || CASE WHEN sender IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('_origin', 'user:' || sender) END;
 			\(strings.Join(_branches, "\n"))
 			  RETURN COALESCE(NEW, OLD);
 			END $$;
@@ -1227,21 +1275,29 @@ _sqlType: {
 	GRANT EXECUTE ON FUNCTION public.claim_upload(), public.upload_allowed(text) TO anon, app_user;
 	"""
 
+// Whether a private entity is shared: a grant table, a group, or both.
+#isShared: {
+	a:   #Access
+	out: bool
+	if a.scope == "private" {out: a.shared != _|_ || a.groups != _|_}
+	if a.scope != "private" {out: false}
+}
+
 // The app_user USING clause of a private entity. `qual` prefixes the row's
 // own columns: the table name in the entity's policies, the parent alias
 // when a folder-scope child inlines this clause. `table` is the private
-// entity's table regardless of qual — it names the shared-arm helper.
+// entity's table regardless of qual — it names the role helper.
 #ownedUsing: {
 	let U = self
 	a:     #Access
 	qual:  string
 	table: string
-	// The membership test is a SECURITY DEFINER helper (emitted with the
-	// owned entity's policies), not an inline EXISTS: the via table's own
-	// policy references this table back, and inlining would recurse
-	// (Postgres aborts with "infinite recursion detected in policy").
+	// The grant test is a SECURITY DEFINER helper (emitted with the owned
+	// entity's policies), not an inline EXISTS: the via table's own policy
+	// references this table back, and inlining would recurse (Postgres aborts
+	// with "infinite recursion detected in policy").
 	_shared: [
-		if U.a.shared != _|_ {" OR \(U.table)_shared(\(U.qual).id)"},
+		if (#isShared & {a: U.a}).out {" OR \(U.table)_role(\(U.qual).id) IS NOT NULL"},
 		"",
 	][0]
 	out: "\(U.qual).\(U.a.owner) = auth_uid()" + U._shared
@@ -1272,10 +1328,13 @@ _sqlType: {
 	// there is no scope both parties hold that does not also grant everything
 	// else the owner has.
 	_exempt: string
-	if P.e.access.scope == "private" if P.e.access.shared != _|_ {
-		_exempt: "private with a per-object share via \(P.e.access.shared.via): finer than tenancy, guarded by its own policies"
+	if P.e.access.scope == "private" if P._isShared {
+		_exempt: "private with per-object grants: finer than tenancy, guarded by its own policies"
 	}
-	if P.e.access.scope == "private" if P.e.access.shared == _|_ {_exempt: ""}
+	if P.e.access.scope == "private" if !P._isShared {_exempt: ""}
+	// A membership row's scope is its member's, so the floor delivers each
+	// subject their own and the list syncs as any scoped table does.
+	if P.e.access.scope == "group" {_exempt: ""}
 	if P.e.access.scope == "public" {_exempt: ""}
 	if P.e.access.scope == "internal" if P._t != "app_user" {
 		_exempt: "internal: no app_user reaches it"
@@ -1290,11 +1349,12 @@ _sqlType: {
 		// none to hand down, and the composition is a schema error.
 		_p:        P.entities[P.e.access.parent]
 		_pFloored: bool
-		if P._p.access.scope == "private" {_pFloored: P._p.access.shared == _|_}
+		if P._p.access.scope == "private" {_pFloored: !(#isShared & {a: P._p.access}).out}
 		if P._p.access.scope == "public" {_pFloored: true}
 		if P._p.access.scope == "folder" {_pFloored: false}
 		if P._p.access.scope == "internal" {_pFloored: false}
-		_pScoped: bool & (P._p.access.scope != "folder" && (P._p.access.scope != "internal" || P._p.table == "app_user")) & true
+		if P._p.access.scope == "group" {_pFloored: false}
+		_pScoped: bool & (P._p.access.scope != "folder" && P._p.access.scope != "group" && (P._p.access.scope != "internal" || P._p.table == "app_user")) & true
 		if P._pFloored {_exempt: ""}
 		if !P._pFloored {
 			_exempt: "folder \(P.e.access.parent), which is itself exempt: the child inherits its visibility"
@@ -1314,32 +1374,160 @@ _sqlType: {
 				CREATE TRIGGER \(P._t)_scope BEFORE INSERT OR UPDATE ON \(P._t)
 				  FOR EACH ROW EXECUTE FUNCTION mecha.scope_from_parent('\(P._parentTable)', 'id', '\(P.e.access.on)');
 				""",
+			// A row handed to another owner takes what is under it along: the
+			// copy is the parent's fact, and a child left with the previous
+			// owner's scope would still sync to them.
+			if P._p.access.scope == "private" {
+				"""
+					CREATE OR REPLACE FUNCTION \(P._t)_rescope() RETURNS trigger
+					LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+					BEGIN
+					  UPDATE \(P._t) SET scope_id = NEW.scope_id WHERE \(P.e.access.on)\(P._onCast) = NEW.id;
+					  RETURN NULL;
+					END $$;
+					DROP TRIGGER IF EXISTS \(P._t)_rescope ON \(P._parentTable);
+					CREATE TRIGGER \(P._t)_rescope AFTER UPDATE ON \(P._parentTable)
+					  FOR EACH ROW WHEN (OLD.\(P._p.access.owner) IS DISTINCT FROM NEW.\(P._p.access.owner)) EXECUTE FUNCTION \(P._t)_rescope();
+					"""
+			},
 		]
 	}
 
 	e:        {access: #Access, ...}
 	entities: _ // parent lookup for folder scope
 	_t:       P.e.table
+	_isShared: (#isShared & {a: P.e.access}).out
+	_underShared: bool
+	if P.e.access.scope == "folder" {_underShared: (#isShared & {a: P._p.access}).out}
+	if P.e.access.scope != "folder" {_underShared: false}
+	// The membership list a group grant is read against: the program's one
+	// scope "group" entity.
+	_members: [for _, x in P.entities if x.access != _|_ if x.access.scope == "group" {x}]
+	_grouped: bool
+	if P.e.access.scope == "private" {_grouped: P.e.access.groups != _|_}
+	if P.e.access.scope != "private" {_grouped: false}
+	// Whether the entity's grant table names groups beside users.
+	_granted: bool
+	if P.e.access.scope == "private" {_granted: P.e.access.shared != _|_ && P.e.access.shared.group != _|_}
+	if P.e.access.scope != "private" {_granted: false}
+	_ok: true
+	if P._grouped || P._granted {_ok: (len(P._members) == 1) & true}
+	// The groups a composition's parent names by a column of its own: the
+	// child carries each as the same column, so a shape over it is keyed alike.
+	_above: [if P._underShared if P._p.access.groups != _|_ for g in P._p.access.groups if g.of != _|_ {g.group}]
 	if P.e.access.scope == "private" {
 		_using: (#ownedUsing & {a: P.e.access, qual: P._t, table: P._t}).out
-		// The helper runs as the migration superuser, so its read of the via
-		// table bypasses RLS — the cycle-break #ownedUsing relies on. auth_uid()
-		// still reads the caller's session GUC (set_config is role-independent).
 		_pkType: [for f in P.e.fields if f.pk {f.type}][0]
+		_pkOf:   [for f in P.e.fields if f.pk {f.name}][0]
+		_owner:  P.e.access.owner
+		// A grant table's rows, each the role its column holds, or "writer"
+		// where it has none; a group's members, each the role its grant states.
+		// A grant row is the caller's by its user, or by its group where the
+		// membership list has the caller's row for it.
+		_grantee: [if P.e.access.shared != _|_ {[
+			if P.e.access.shared.group != _|_ {
+				"(s.\(P.e.access.shared.user) = auth_uid() OR EXISTS (SELECT 1 FROM \(P._members[0].table) m WHERE m.\(P._members[0].access.group) = s.\(P.e.access.shared.group) AND m.\(P._members[0].access.user) = auth_uid()))"
+			},
+			"s.\(P.e.access.shared.user) = auth_uid()",
+		][0]}, ""][0]
+		_viaTest: [if P.e.access.shared != _|_ {
+			"EXISTS (SELECT 1 FROM \(P.e.access.shared.via) s WHERE s.\(P.e.access.shared.on) = r.\(P._pkOf) AND \(P._grantee)"
+		}, ""][0]
+		_groupTests: [if P._grouped for g in P.e.access.groups {
+			role: g.role
+			test: "EXISTS (SELECT 1 FROM \(P._members[0].table) m WHERE m.\(P._members[0].access.group) = r.\([if g.of != _|_ {g.of}, P._pkOf][0])::text || ':\(g.group)' AND m.\(P._members[0].access.user) = auth_uid())"
+		}]
+		_writers: list.Concat([
+			[if P.e.access.shared != _|_ if P.e.access.shared.role == _|_ {P._viaTest + ")"}],
+			[if P.e.access.shared != _|_ if P.e.access.shared.role != _|_ {P._viaTest + " AND s.\(P.e.access.shared.role) = 'writer')"}],
+			[for g in P._groupTests if g.role == "writer" {g.test}],
+		])
+		_readers: list.Concat([
+			[if P.e.access.shared != _|_ if P.e.access.shared.role != _|_ {P._viaTest + ")"}],
+			[for g in P._groupTests if g.role == "reader" {g.test}],
+		])
+		// A row that names its group by a reference to a shared row is written
+		// only by someone who reads that row, or anyone could file a row into
+		// a group they are no part of.
+		_within: strings.Join([if P._grouped for g in P.e.access.groups if g.of != _|_ for f in P.e.fields if f.name == g.of if f.ref != _|_ for _, x in P.entities if x.table == f.ref if x.access != _|_ if (#isShared & {a: x.access}).out {
+			" AND (\(P._t).\(g.of) IS NULL OR \(x.table)_role(\(P._t).\(g.of)) IS NOT NULL)"
+		}], "")
+		// The grant row a handover writes: the grant table's key where it has
+		// no default, the row, the previous owner, and the role where it has one.
+		if P.e.access.shared != _|_ {
+			_s: P.e.access.shared
+			_viaFields: [for _, x in P.entities if x.table == P._s.via {x.fields}][0]
+			_viaCast: [for f in P._viaFields if f.name == P._s.on if f.type != P._pkType {"::\(_sqlType[f.type])"}, ""][0]
+			_handed: list.Concat([
+				[for f in P._viaFields if f.pk if f.default == _|_ {column: f.name, value: "gen_random_uuid()"}],
+				[{column: P._s.on, value: "NEW.\(P._pkOf)\(P._viaCast)"}, {column: P._s.user, value: "OLD.\(P._owner)"}],
+				[if P._s.role != _|_ {column: P._s.role, value: "'writer'"}],
+			])
+		}
+		// The helpers run as the migration superuser, so their read of the
+		// grant and membership tables bypasses RLS — the cycle-break
+		// #ownedUsing relies on. auth_uid() still reads the caller's session
+		// GUC (set_config is role-independent). The guard is the caller's: a
+		// delete by a reader would otherwise answer no rows and no refusal,
+		// and an UPDATE policy cannot compare the owner before and after.
 		_pre: [
+			if P._isShared {
+				"""
+					CREATE OR REPLACE FUNCTION \(P._t)_role(row_id \(_sqlType[P._pkType])) RETURNS text
+					LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+					  SELECT CASE
+					    WHEN r.\(P._owner) = auth_uid() THEN 'owner'
+					    WHEN \([if len(P._writers) > 0 {strings.Join(P._writers, " OR ")}, "false"][0]) THEN 'writer'
+					    WHEN \([if len(P._readers) > 0 {strings.Join(P._readers, " OR ")}, "false"][0]) THEN 'reader'
+					  END FROM \(P._t) r WHERE r.\(P._pkOf) = row_id
+					$$;
+					CREATE OR REPLACE FUNCTION \(P._t)_owner_guard() RETURNS trigger
+					LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
+					BEGIN
+					  IF current_user = 'app_user' AND OLD.\(P._owner) IS DISTINCT FROM auth_uid() THEN
+					    IF TG_OP = 'DELETE' THEN
+					      RAISE insufficient_privilege USING MESSAGE = '\(P._t): only the owner deletes a row';
+					    END IF;
+					    IF NEW.\(P._owner) IS DISTINCT FROM OLD.\(P._owner) THEN
+					      RAISE insufficient_privilege USING MESSAGE = '\(P._t): only the owner hands a row to another';
+					    END IF;
+					  END IF;
+					  RETURN COALESCE(NEW, OLD);
+					END $$;
+					DROP TRIGGER IF EXISTS \(P._t)_owner_guard ON \(P._t);
+					CREATE TRIGGER \(P._t)_owner_guard BEFORE UPDATE OR DELETE ON \(P._t)
+					  FOR EACH ROW EXECUTE FUNCTION \(P._t)_owner_guard();
+					"""
+			},
+			// Drive leaves whoever hands a row over as its writer, and the new
+			// owner's grant is spent: the cluster writes both, as the previous
+			// owner no longer may.
 			if P.e.access.shared != _|_ {
 				"""
-					CREATE OR REPLACE FUNCTION \(P._t)_shared(row_id \(_sqlType[P._pkType])) RETURNS boolean
-					LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-					  SELECT EXISTS (SELECT 1 FROM \(P.e.access.shared.via) s WHERE s.\(P.e.access.shared.on) = row_id AND s.\(P.e.access.shared.user) = auth_uid())
-					$$;
+					CREATE OR REPLACE FUNCTION \(P._t)_handover() RETURNS trigger
+					LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+					BEGIN
+					  DELETE FROM \(P._s.via) WHERE \(P._s.on) = NEW.\(P._pkOf)\(P._viaCast) AND \(P._s.user) IN (OLD.\(P._owner), NEW.\(P._owner));
+					  INSERT INTO \(P._s.via) (\(strings.Join([for c in P._handed {c.column}], ", "))) VALUES (\(strings.Join([for c in P._handed {c.value}], ", ")));
+					  RETURN NULL;
+					END $$;
+					DROP TRIGGER IF EXISTS \(P._t)_handover ON \(P._t);
+					CREATE TRIGGER \(P._t)_handover AFTER UPDATE ON \(P._t)
+					  FOR EACH ROW WHEN (OLD.\(P._owner) IS DISTINCT FROM NEW.\(P._owner)) EXECUTE FUNCTION \(P._t)_handover();
 					"""
 			},
 		]
 		_appUser: [
 			(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (\(P._using))"}).out,
-			(#policy & {name: "\(P._t)_app_user_insert", table: P._t, rest: "FOR INSERT TO app_user WITH CHECK (\(P._t).\(P.e.access.owner) = auth_uid())"}).out,
-			(#policy & {name: "\(P._t)_app_user_update", table: P._t, rest: "FOR UPDATE TO app_user USING (\(P._using))"}).out,
+			(#policy & {name: "\(P._t)_app_user_insert", table: P._t, rest: "FOR INSERT TO app_user WITH CHECK (\(P._t).\(P.e.access.owner) = auth_uid()\(P._within))"}).out,
+			if !P._isShared {
+				(#policy & {name: "\(P._t)_app_user_update", table: P._t, rest: "FOR UPDATE TO app_user USING (\(P._using))"}).out
+			},
+			// A reader's update finds the row and fails its check, so it is a
+			// refusal and not zero rows.
+			if P._isShared {
+				(#policy & {name: "\(P._t)_app_user_update", table: P._t, rest: "FOR UPDATE TO app_user USING (\(P._using)) WITH CHECK (\(P._t)_role(\(P._t).\(P._pkOf)) IN ('owner', 'writer')\(P._within))"}).out
+			},
 			(#policy & {name: "\(P._t)_app_user_delete", table: P._t, rest: "FOR DELETE TO app_user USING (\(P._using))"}).out,
 		]
 	}
@@ -1354,10 +1542,80 @@ _sqlType: {
 		_onType: [for f in P.e.fields if f.name == P.e.access.on {f.type}][0]
 		_pkType: [for f in P._parent.fields if f.pk {f.type}][0]
 		_onCast: [if P._onType == P._pkType {""}, "::\(_sqlType[P._pkType])"][0]
-		_pre:    []
-		_expr:   "EXISTS (SELECT 1 FROM \(P._parent.table) p WHERE p.id = \(P._t).\(P.e.access.on)\(P._onCast) AND (\((#ownedUsing & {a: P._parent.access, qual: "p", table: P._parent.table}).out)))"
+		if !P._underShared {
+			_pre:  []
+			_expr: "EXISTS (SELECT 1 FROM \(P._parent.table) p WHERE p.id = \(P._t).\(P.e.access.on)\(P._onCast) AND (\((#ownedUsing & {a: P._parent.access, qual: "p", table: P._parent.table}).out)))"
+			_appUser: [
+				(#policy & {name: "\(P._t)_app_user_all", table: P._t, rest: "FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr))"}).out,
+			]
+		}
+		// Under a shared parent the child has the parent's role: a reader reads
+		// it and a writer changes it, the parent's own grant table included
+		// unless the parent keeps its grants to its owner.
+		if P._underShared {
+			_role:  "\(P._parent.table)_role(\(P._t).\(P.e.access.on)\(P._onCast))"
+			_may:   [if P._parent.access.shared != _|_ if P._parent.access.shared.via == P._t if P._parent.access.shared.writersCanShare != _|_ if !P._parent.access.shared.writersCanShare {"= 'owner'"}, "IN ('owner', 'writer')"][0]
+			_pre: [
+				"""
+					CREATE OR REPLACE FUNCTION \(P._t)_write_guard() RETURNS trigger
+					LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
+					BEGIN
+					  IF current_user = 'app_user' AND (TG_OP = 'DELETE' OR NEW.\(P.e.access.on) IS DISTINCT FROM OLD.\(P.e.access.on))
+					     AND \(P._parent.table)_role(OLD.\(P.e.access.on)\(P._onCast)) \(P._may) IS NOT TRUE THEN
+					    IF TG_OP = 'DELETE' THEN
+					      RAISE insufficient_privilege USING MESSAGE = '\(P._t): the role held on its \(P._parent.table) deletes no row';
+					    END IF;
+					    RAISE insufficient_privilege USING MESSAGE = '\(P._t): the role held on its \(P._parent.table) moves no row out of it';
+					  END IF;
+					  RETURN COALESCE(NEW, OLD);
+					END $$;
+					DROP TRIGGER IF EXISTS \(P._t)_write_guard ON \(P._t);
+					CREATE TRIGGER \(P._t)_write_guard BEFORE UPDATE OR DELETE ON \(P._t)
+					  FOR EACH ROW EXECUTE FUNCTION \(P._t)_write_guard();
+					DROP POLICY IF EXISTS \(P._t)_app_user_all ON \(P._t);
+					""",
+				if len(P._above) > 0 {
+					"""
+						CREATE OR REPLACE FUNCTION \(P._t)_groups() RETURNS trigger
+						LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+						BEGIN
+						  SELECT \(strings.Join([for g in P._above {"p.group_\(g)"}], ", ")) INTO \(strings.Join([for g in P._above {"NEW.group_\(g)"}], ", "))
+						    FROM \(P._parent.table) p WHERE p.id = NEW.\(P.e.access.on)\(P._onCast);
+						  RETURN NEW;
+						END $$;
+						DROP TRIGGER IF EXISTS \(P._t)_groups ON \(P._t);
+						CREATE TRIGGER \(P._t)_groups BEFORE INSERT OR UPDATE ON \(P._t)
+						  FOR EACH ROW EXECUTE FUNCTION \(P._t)_groups();
+						-- A parent that changes groups takes what is under it along,
+						-- whoever moved it: the copy is the parent's fact, not a write
+						-- of the mover's.
+						CREATE OR REPLACE FUNCTION \(P._t)_regroup() RETURNS trigger
+						LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+						BEGIN
+						  UPDATE \(P._t) SET \(strings.Join([for g in P._above {"group_\(g) = NEW.group_\(g)"}], ", ")) WHERE \(P.e.access.on)\(P._onCast) = NEW.id;
+						  RETURN NULL;
+						END $$;
+						DROP TRIGGER IF EXISTS \(P._t)_regroup ON \(P._parent.table);
+						CREATE TRIGGER \(P._t)_regroup AFTER UPDATE ON \(P._parent.table)
+						  FOR EACH ROW WHEN (\(strings.Join([for g in P._above {"OLD.group_\(g) IS DISTINCT FROM NEW.group_\(g)"}], " OR "))) EXECUTE FUNCTION \(P._t)_regroup();
+						"""
+				},
+			]
+			_appUser: [
+				(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (\(P._role) IS NOT NULL)"}).out,
+				(#policy & {name: "\(P._t)_app_user_insert", table: P._t, rest: "FOR INSERT TO app_user WITH CHECK (\(P._role) \(P._may))"}).out,
+				(#policy & {name: "\(P._t)_app_user_update", table: P._t, rest: "FOR UPDATE TO app_user USING (\(P._role) IS NOT NULL) WITH CHECK (\(P._role) \(P._may))"}).out,
+				(#policy & {name: "\(P._t)_app_user_delete", table: P._t, rest: "FOR DELETE TO app_user USING (\(P._role) IS NOT NULL)"}).out,
+			]
+		}
+	}
+	// A member reads the rows addressed to them, which is how their terminal
+	// learns its groups; nobody but the service writes one, or a subject
+	// could grant themself whatever a group reads.
+	if P.e.access.scope == "group" {
+		_pre: []
 		_appUser: [
-			(#policy & {name: "\(P._t)_app_user_all", table: P._t, rest: "FOR ALL TO app_user USING (\(P._expr)) WITH CHECK (\(P._expr))"}).out,
+			(#policy & {name: "\(P._t)_app_user_select", table: P._t, rest: "FOR SELECT TO app_user USING (\(P._t).\(P.e.access.user) = auth_uid())"}).out,
 		]
 	}
 	if P.e.access.scope == "public" {
@@ -1396,28 +1654,35 @@ _sqlType: {
 	// encode: a shared entity by its own key, its grant table by the sharee,
 	// a composition by its parent. Only where the parent is shared: a floored
 	// parent's children already carry its scope.
-	_pkName:   [for f in P.e.fields if f.pk {f.name}][0]
-	_isShared: bool
-	if P.e.access.scope == "private" {_isShared: P.e.access.shared != _|_}
-	if P.e.access.scope != "private" {_isShared: false}
-	_underShared: bool
-	if P.e.access.scope == "folder" {_underShared: P._p.access.scope == "private" && P._p.access.shared != _|_}
-	if P.e.access.scope != "folder" {_underShared: false}
-	_shapeKeys: [...string]
-	if P._isShared {
-		_shapeKeys: [
-			"INSERT INTO mecha.shape_key VALUES ('public.\(P._t)', '\(P._pkName)', 'public.\(P._t)', '\(P._pkName)') ON CONFLICT DO NOTHING;",
-			"INSERT INTO mecha.shape_key VALUES ('public.\(P.e.access.shared.via)', '\(P.e.access.shared.user)', 'subject', 'id') ON CONFLICT DO NOTHING;",
-		]
-	}
-	if P._underShared {
-		_shapeKeys: [
-			"INSERT INTO mecha.shape_key VALUES ('public.\(P._t)', '\(P.e.access.on)', 'public.\(P._p.table)', '\([for f in P._p.fields if f.pk {f.name}][0])') ON CONFLICT DO NOTHING;",
-		]
-	}
-	if !P._isShared if !P._underShared {_shapeKeys: []}
+	_pkName: [for f in P.e.fields if f.pk {f.name}][0]
+	_shapeKeys: list.Concat([
+		[if P._isShared {
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P._t)', '\(P._pkName)', 'public.\(P._t)', '\(P._pkName)') ON CONFLICT DO NOTHING;"
+		}],
+		[if P._isShared if P.e.access.shared != _|_ {
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P.e.access.shared.via)', '\(P.e.access.shared.user)', 'subject', 'id') ON CONFLICT DO NOTHING;"
+		}],
+		// A group's grants are one shape over the grant table's group column,
+		// reached by whoever reads a membership row for the group. A column
+		// has one edge, which is why a user and a group each have a column.
+		[if P._granted {
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P.e.access.shared.via)', '\(P.e.access.shared.group)', 'public.\(P._members[0].table)', '\(P._members[0].access.group)') ON CONFLICT DO NOTHING;"
+		}],
+		// A group the row names by another column: one shape over that
+		// column, reached by whoever reads a membership row for its value.
+		[if P._grouped for g in P.e.access.groups if g.of != _|_ {
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P._t)', 'group_\(g.group)', 'public.\(P._members[0].table)', '\(P._members[0].access.group)') ON CONFLICT DO NOTHING;"
+		}],
+		[for g in P._above {
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P._t)', 'group_\(g)', 'public.\(P._members[0].table)', '\(P._members[0].access.group)') ON CONFLICT DO NOTHING;"
+		}],
+		[if P._underShared {
+			"INSERT INTO mecha.shape_key VALUES ('public.\(P._t)', '\(P.e.access.on)', 'public.\(P._p.table)', '\([for f in P._p.fields if f.pk {f.name}][0])') ON CONFLICT DO NOTHING;"
+		}],
+	])
 
 	out: strings.Join(list.Concat([
+		[if !P._ok {""}],
 		P._pre,
 		P._scopeTrigger,
 		// The floor's text lives in mecha's rls.sql and is called, never
@@ -1870,7 +2135,32 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			scope: e.access.scope
 			if e.access.scope == "private" {
 				owner: e.access.owner
-				if e.access.shared != _|_ {shared: e.access.shared}
+				if e.access.shared != _|_ {
+					shared: {
+						e.access.shared
+						// The membership list a group's grant is read against.
+						if e.access.shared.group != _|_ for _, m in S.code.state.entities if m.access != _|_ if m.access.scope == "group" {
+							members: {table: m.table, group: m.access.group, user: m.access.user}
+						}
+					}
+				}
+				// Each group grant with what the terminal reads it against:
+				// the row's column naming the group's owner, the column a
+				// shape is keyed on where that is not the row's key, and the
+				// membership list.
+				if e.access.groups != _|_ {
+					groups: [for g in e.access.groups for _, m in S.code.state.entities if m.access != _|_ if m.access.scope == "group" {
+						group: g.group
+						role:  g.role
+						of:    [if g.of != _|_ {g.of}, for f in e.fields if f.pk {f.name}][0]
+						if g.of != _|_ {column: "group_\(g.group)"}
+						members: {table: m.table, group: m.access.group, user: m.access.user}
+					}]
+				}
+			}
+			if e.access.scope == "group" {
+				group: e.access.group
+				user:  e.access.user
 			}
 			if e.access.scope == "folder" {
 				parent: S.code.state.entities[e.access.parent].table
@@ -2321,7 +2611,7 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		let machines = L._machines[e.name]
 		(e.name): strings.Join(list.Concat([
 			["SET LOCAL lock_timeout = '5s';\nSET LOCAL statement_timeout = '30s';"],
-			[(#tableSql & {"e": e, columns: L.code._machineColumns}).out],
+			[(#tableSql & {"e": e, columns: L.code._machineColumns, entities: L.code.state.entities}).out],
 			[if e.indexes != _|_ {strings.Join((#indexSql & {"e": e}).out, "\n")}],
 			[for u in e.uniques {"CREATE UNIQUE INDEX IF NOT EXISTS \(u.name) ON \(e.table) (\(strings.Join(u.cols, ", ")));"}],
 			[if e.access != _|_ {(#policySql & {"e": e, entities: L.code.state.entities}).out}],
@@ -3107,9 +3397,18 @@ _pgrollDir: "services/database/pgroll"
 	_pagesBundle: {
 		if list.Contains(E.code.meta.targets, "pages") {
 			units:       true & (len([for _, v in E.code.capabilities.vendored if v.isolation == "agent" if v.role == "presenter" {v}]) == 0)
-			shared:      true & (len([for _, e in E.code.state.entities if e.access != _|_ if e.access.shared != _|_ {e}]) == 0)
+			shared:      true & (len([for _, e in E.code.state.entities if e.access != _|_ if (#isShared & {a: e.access}).out {e}]) == 0)
 			validations: true & (len(E._validated) == 0)
 			providers:   true & [if E.code.capabilities.auth != _|_ if E.code.capabilities.auth.providers != _|_ {len(E.code.capabilities.auth.providers) == 0}, true][0]
+		}
+	}
+
+	// A rewrite is the container door's; the page and the edge do not apply one
+	// yet, so those targets are refused rather than released without it.
+	_rewriteTargets: {
+		if E.code.state.rewrites != _|_ if len(E.code.state.rewrites) > 0 {
+			pages:      true & !list.Contains(E.code.meta.targets, "pages")
+			cloudflare: true & !list.Contains(E.code.meta.targets, "cloudflare")
 		}
 	}
 
@@ -4143,7 +4442,7 @@ _pgrollDir: "services/database/pgroll"
 					format:      "sql"
 					_indexLines: list.Concat([for ent in E._baseServer if ent.indexes != _|_ {(#indexSql & {e: ent}).out}])
 					text: strings.Join(list.Concat([
-						[for ent in E._baseServer {(#tableSql & {e: ent, columns: E.code._machineColumns}).out}],
+						[for ent in E._baseServer {(#tableSql & {e: ent, columns: E.code._machineColumns, entities: E.code.state.entities}).out}],
 						[if len(_indexLines) > 0 {strings.Join(_indexLines, "\n")}],
 						[if len(E._uniqueLines) > 0 {strings.Join(E._uniqueLines, "\n")}],
 					]), "\n\n") + "\n"
@@ -4816,11 +5115,41 @@ _pgrollDir: "services/database/pgroll"
 
 					"""
 			}], "")
+			// An app's rewrite (#Rewrite), beside the hatches' doors: the source's
+			// parameters captured, and the destination asked of crud as /crud
+			// itself asks it.
+			_rewriteDoors: strings.Join([if E.code.state.rewrites != _|_ for rn, r in E.code.state.rewrites {
+				let matcher = "rewrite_\(strings.Replace(rn, "-", "_", -1))"
+				let params = [if strings.Contains(r.source, ":") for m in regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1) {m}]
+				let placed = strings.Join([for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[a-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", strings.TrimPrefix(r.destination, "/crud"), -1) {
+					[for i, p in params if p == t {"{re.\(matcher).\(i+1)}"}, t][0]
+				}], "")
+				let query = [if strings.Contains(placed, "?") {"&{query}"}, "?{query}"][0]
+				let methods = [if r.methods != _|_ {"    method \(strings.Join(r.methods, " "))\n"}, ""][0]
+				"""
+					  @\(matcher) {
+					\(methods)    path_regexp \(matcher) ^\(regexp.ReplaceAll(":[^/]+", r.source, "([A-Za-z0-9._~-]+)"))$
+					  }
+					  handle @\(matcher) {
+					    route {
+					      @\(matcher)_post method POST
+					      request_header @\(matcher)_post Prefer "return=representation,resolution=ignore-duplicates"
+					      request_header X-Rewrite-Path {http.request.uri.path}
+					      rewrite * \(placed)\(query)
+					      reverse_proxy {$PRONTO_UPSTREAM_CRUD:crud:3000} {
+					        header_up dapr-app-id crud
+					        import bounded-crud
+					      }
+					    }
+					  }
+
+					"""
+			}], "")
 			_subdomainBlocks: strings.Join([for s in _subdomains {
 				"\nhttps://\(s).localhost:{$CADDY_DOOR_PORT:8443}, https://\(s).caddy:{$CADDY_DOOR_PORT:8443} {\n  tls {$CADDY_TLS:internal}\n  import app\n}\n"
 			}], "")
 			_doorAnchored: true & strings.Contains(_caddyfileAsset, _doorAnchor)
-			text:          resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1) + _subdomainBlocks
+			text:          resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _rewriteDoors + _doorAnchor, 1) + _subdomainBlocks
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why

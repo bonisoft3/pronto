@@ -515,20 +515,34 @@ import (
 }
 
 // Row visibility, enforced as RLS policies (006_policies.sql). Modeled after the
-// Google Drive access model:
-//   scope: "private"   - owned by user, optional shared list
+// Google Drive access model, in its words:
+//   scope: "private"   - owned by user, optional shared list and group grants
 //   scope: "folder"    - inherited access from parent entity
 //   scope: "public"    - public read-only to anyone
 //   scope: "internal"  - restricted to backend services
-// Column names (`owner`, `on`, `user`) are of the entity's own table;
-// `via` is a table name, `parent` an entity name whose access is private.
+//   scope: "group"     - the membership list: who is in which group
+// Column names (`owner`, `on`, `user`, `role`, `of`, `group` under scope
+// "group") are of the entity's own table; `via` is a table name, `parent` an
+// entity name whose access is private.
+//
+// A grant carries a Drive role. `shared.role` names the grant table's column
+// holding it, and a grant table without one grants "writer". A reader reads
+// the row and what is under it; a writer also changes both and edits its
+// grants, unless `writersCanShare: false`, Drive's setting of that name, keeps
+// the grants the owner's; only the owner deletes the row or hands it to
+// another owner, and is left its writer by a grant row the cluster writes.
+//
+// A grant names a user or, where `shared.group` names a second column of the
+// grant table, a group: the membership list's group id as it is written. A
+// grant row fills one of the two columns, and which one is the grantee's type.
 #Access: {
-	scope: "private" | "folder" | "public" | "internal"
+	scope: "private" | "folder" | "public" | "internal" | "group"
 	if scope == "private" {
 		close({
 			scope:   "private"
 			owner:   string
-			shared?: {via: string, on: string, user: string}
+			shared?: {via: string, on: string, user: string, group?: string, role?: string, writersCanShare?: bool}
+			groups?: [#GroupGrant, ...#GroupGrant]
 		})
 	}
 	if scope == "folder" {
@@ -549,7 +563,26 @@ import (
 			scope: "internal"
 		})
 	}
+	if scope == "group" {
+		close({
+			scope: "group"
+			group: string
+			user:  string
+		})
+	}
 }
+
+#Role: "reader" | "writer"
+
+// A row shared with a group it names: the group `<value of "of">:<group>`,
+// where `of` is a column of the row and its key when omitted, as Drive's
+// finance@acme is a name at a domain. Membership is the program's one
+// scope "group" entity, which the service writes.
+#GroupGrant: close({
+	group: =~"^[a-z][a-z0-9_]{0,30}$"
+	of?:   string
+	role:  #Role
+})
 
 #Durability: "server" | "live" | "offline" | "tab" | "device"
 
@@ -1212,6 +1245,22 @@ import (
 	count:   string
 }
 
+// A path of the app's own, answered at another the door already answers:
+// Next.js's `rewrites`, a subset. `source` is path-to-regexp's literal and
+// `:name` segments, a parameter being letters, digits and `. _ ~ -`;
+// `destination` is a PostgREST path under `/crud`, naming the parameters it
+// uses, and takes the request's own query after its own. `methods`, as
+// Vercel's routes spell it, narrows what is otherwise every method. The
+// request is handed on as it came, its `Authorization` included, with the
+// path it asked for in `X-Rewrite-Path`. What the subset leaves out (`has`,
+// `missing`, wildcards, patterns) is refused, never ignored.
+#Rewrite: {
+	source:      =~"^(/([A-Za-z0-9][A-Za-z0-9_-]*|:[a-z][A-Za-z0-9_]*))+$" & !~"^/(crud|signal|electric|auth|poke|blob-claim|blobs|img|health|omnishell|shell|seed-assets)(/|$)"
+	destination: =~"^/crud/(rpc/)?[a-z][a-z0-9_]*(\\?[^\\s{}\"`\\\\#]*)?$"
+	methods?: [#RewriteMethod, ...#RewriteMethod] & list.UniqueItems()
+}
+#RewriteMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
+
 // What a sink reads a caller's credential from: `Authorization: Bearer <key>`
 // is `{scheme: "Bearer", secret: "KEY"}`; an `X-Api-Key` header is
 // `{header: "X-Api-Key", secret: "KEY"}`; `Basic` takes the secret already
@@ -1699,6 +1748,8 @@ import (
 		}
 		// Each a route a provider posts to (#Signal).
 		signals?: [=~"^[a-z][a-z0-9-]*$"]: #Signal
+		// Each a path answered at another under /crud (#Rewrite), on a container target.
+		rewrites?: [=~"^[a-z][a-z0-9-]*$"]: #Rewrite
 		_rawMigrationNames: [if rawMigrations != _|_ for migration in rawMigrations {migration.name}] & list.UniqueItems()
 		// Where the framework's own steps run, for an app whose steps already
 		// hold their default digits (#steps). The program writes each step's
@@ -2624,6 +2675,114 @@ import (
 		},
 	]
 	_signalRefusal: [if len(_signalViolations) == 0 {true}, _signalViolations[0]][0] & true
+	// A destination names only its source's parameters, and two rewrites one
+	// request matches would leave the answer to their order.
+	_rewrites: [if A.state.rewrites != _|_ {A.state.rewrites}, {}][0]
+	_rewriteSegments: {for n, r in _rewrites {(n): strings.Split(r.source, "/")}}
+	_rewriteViolations: [
+		for n, r in _rewrites
+		for t in regexp.FindAll("::|[A-Za-z0-9_]+::?[A-Za-z0-9_]*|:[a-z][A-Za-z0-9_]*|[A-Za-z0-9_]+|[^:A-Za-z0-9_]+|:", r.destination, -1)
+		if t =~ "^:[a-z]" if !strings.Contains(r.source + "/", "/" + t + "/") {
+			"rewrite \(n): the destination names \(t), which the source does not"
+		},
+		for n, r in _rewrites if strings.Contains(r.source, ":")
+		let ps = regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1)
+		if len(ps) != len({for p in ps {(p): true}}) {
+			"rewrite \(n): the source names a parameter twice"
+		},
+		for n, r in _rewrites
+		for m, o in _rewrites if m < n
+		let rs = _rewriteSegments[n]
+		let os = _rewriteSegments[m]
+		// One request matches both where every segment is the same word, or
+		// a parameter in either.
+		if len(rs) == len(os) if len([for i, s in rs if s != os[i] if !strings.HasPrefix(s, ":") if !strings.HasPrefix(os[i], ":") {s}]) == 0
+		let rm = [if r.methods != _|_ {r.methods}, []][0]
+		let om = [if o.methods != _|_ {o.methods}, []][0]
+		if len(rm) == 0 || len(om) == 0 || len([for x in rm if list.Contains(om, x) {x}]) > 0 {
+			"rewrites \(m) and \(n): both answer \(strings.Join([for i, s in rs {[if !strings.HasPrefix(s, ":") {s}, if !strings.HasPrefix(os[i], ":") {os[i]}, ":"][0]}], "/"))"
+		},
+	]
+	_rewriteRefusal: [if len(_rewriteViolations) == 0 {true}, _rewriteViolations[0]][0] & true
+	// A group grant is read against one membership list, and a role, a group's
+	// `of` and a membership's columns each name a field that exists.
+	_groupLists: [for n, e in A.state.entities if e.access != _|_ if e.access.scope == "group" {n}]
+	// Whose keys a group's name is read over: the entity's own, the entity a
+	// reference names, or the column's where it references nothing.
+	_groupOver: [for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_ for g in e.access.groups {
+		group:  g.group
+		entity: n
+		over: [if g.of == _|_ {e.table}, for f in e.fields if g.of != _|_ if f.name == g.of if f.ref != _|_ {f.ref}, "\(e.table).\(g.of)"][0]
+	}]
+	_groupViolations: [
+		// A membership names a group as "<key>:<name>" and no entity, so one
+		// name over two entities' keys would let a member of one read the other.
+		for a in _groupOver for b in _groupOver if a.group == b.group if a.over < b.over {
+			"group \(a.group): named over \(a.over) by \(a.entity) and over \(b.over) by \(b.entity), and a group's name is one entity's"
+		},
+		if len(_groupLists) > 1 {
+			"entities \(strings.Join(_groupLists, ", ")): one entity is the membership list, scope \"group\""
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "group"
+		for c in [e.access.group, e.access.user] if len([for f in e.fields if f.name == c {f}]) == 0 {
+			"entity \(n): the membership list names \(c), which is no field of it"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_ if len(_groupLists) == 0 {
+			"entity \(n): shared with a group, and no entity is the membership list, scope \"group\""
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_
+		for g in e.access.groups if g.of != _|_ if len([for f in e.fields if f.name == g.of {f}]) == 0 {
+			"entity \(n): group \(g.group) is of \(g.of), which is no field of it"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.role != _|_
+		if len([for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.role {f}]) == 0 {
+			"entity \(n): the grant table \(e.access.shared.via) has no field \(e.access.shared.role) to hold a role"
+		},
+		// The policy compares the role with a name, and a membership's group
+		// with "<key>:<name>".
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.role != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.role if f.type != "string" {
+			"entity \(n): the grant table \(e.access.shared.via) holds a role in \(f.name), which is a string and not \(f.type)"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "group"
+		for f in e.fields if f.name == e.access.group if f.type != "string" {
+			"entity \(n): the membership list names a group in \(f.name), which is a string and not \(f.type)"
+		},
+		// A group is one column of the row, so an entity names it once.
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_
+		for i, g in e.access.groups for j, h in e.access.groups if i < j if g.group == h.group {
+			"entity \(n): group \(g.group) is named twice, and a group holds one role on a row"
+		},
+	]
+	// A grant table that names groups is read against the membership list, and
+	// a grant row fills its user or its group, so neither column is required.
+	_grantViolations: [
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_ if len(_groupLists) == 0 {
+			"entity \(n): its grant table names groups, and no entity is the membership list, scope \"group\""
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_
+		if len([for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.group {f}]) == 0 {
+			"entity \(n): the grant table \(e.access.shared.via) has no field \(e.access.shared.group) to name a group"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.group || f.name == e.access.shared.user if f.required {
+			"entity \(n): a grant in \(e.access.shared.via) names a user or a group, so \(f.name) is required: false"
+		},
+	]
+	// A row handed to another owner leaves the previous one a grant, which the
+	// cluster writes from the row alone: its key, the grantee and the role.
+	_handoverViolations: [
+		if len(_groupViolations) + len(_grantViolations) == 0
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields
+		if f.required if !f.retired if f.default == _|_ if f.generated == _|_ if !(f.pk && f.type == "uuid")
+		if !list.Contains([e.access.shared.on, e.access.shared.user, if e.access.shared.role != _|_ {e.access.shared.role}], f.name) {
+			"entity \(n): a row handed to another owner grants the previous one in \(e.access.shared.via), which cannot fill \(f.name): give it a default"
+		},
+	]
+	_handoverRefusal: [if len(_handoverViolations) == 0 {true}, _handoverViolations[0]][0] & true
+	_groupRefusal: [if len(_groupViolations) == 0 {true}, _groupViolations[0]][0] & true
+	_grantRefusal: [if len(_grantViolations) == 0 {true}, _grantViolations[0]][0] & true
 	_invokes: [
 		if A.state.mecha.rows != _|_
 		for mName, m in A.state.mecha.rows

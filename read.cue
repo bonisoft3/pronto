@@ -52,6 +52,8 @@ import (
 		for _, e in A.state.entities if e.access != _|_ {
 			if e.access.scope == "folder" {(A.state.entities[e.access.parent].table): e.access.parent}
 			if e.access.scope == "private" if e.access.shared != _|_ {(e.access.shared.via): A._entityByTable[e.access.shared.via]}
+			if e.access.scope == "private" if e.access.groups != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {(x.table): m}
+			if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {(x.table): m}
 		}
 	}
 
@@ -105,13 +107,16 @@ import (
 		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: p.from, why: "the fold \(pn) projects the reader's own contribution from it"}],
 		[for pn, p in A.state.pipelines if p.fold != _|_ {entity: A._entityByTable[p.fold.pair.table], why: "the fold \(pn) reads the reader's pair from it"}],
 		[for n, e in A.state.entities for vn, _ in e.validations {entity: n, why: "validation \(vn) finds the row a write changes in it"}],
-		// A validation walks forward along a ref field, or back along
-		// "<Entity>.<field>" (validations.ts resolveEdges).
+		// A validation walks forward along a ref field, back along
+		// "<Entity>.<field>", or from the write's origin to the membership
+		// list (validations.ts resolveEdges).
 		[for n, e in A.state.entities for vn, v in e.validations for x in v.via {
-			entity: [if strings.Contains(x, ".") {strings.Split(x, ".")[0]}, for f in e.fields if f.name == x if f.ref != _|_ {A._entityByTable[f.ref]}][0]
+			entity: [if strings.Contains(x, ".") {strings.Split(x, ".")[0]}, for f in e.fields if f.name == x if f.ref != _|_ {A._entityByTable[f.ref]}, if x == "_origin" for m, y in A.state.entities if y.access != _|_ if y.access.scope == "group" {m}][0]
 			why:    "validation \(n).\(vn) walks to it"
 		}],
 		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ {entity: A._entityByTable[e.access.shared.via], why: "\(n)'s visibility is decided by its grants"}],
+		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {entity: m, why: "\(n)'s visibility is decided by its groups' members"}],
+		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {entity: m, why: "\(n)'s grants name groups, read against their members"}],
 		[for n, e in A.state.entities if e.access != _|_ if e.access.scope == "folder" {entity: e.access.parent, why: "\(n)'s visibility is decided by its parent"}],
 		[if A.capabilities.auth != _|_ if A.capabilities.auth.self != _|_ if A.capabilities.auth.self.name != _|_ {
 			entity: A._entityByTable[A.capabilities.auth.self.name.table]

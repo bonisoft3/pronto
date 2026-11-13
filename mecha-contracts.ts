@@ -1,16 +1,20 @@
 import type { MechaReducerMachine } from "./mecha-reducer.ts";
 
-/** The step's inputs an event reaches its rules with: the time always, the
- * draw where the machine declares entropy, the sender where a reader sent it,
- * and the payload's fields. */
+/** The prefix of what the runtime states on an event or an input, which no
+ * payload or input field begins with: SCXML reserves it for the platform. */
+export const STATED = "_";
+
+/** The event fields a rule can read on `event`: the time always, the draw
+ * where the machine declares entropy, the origin where a reader sent it, and
+ * the payload's fields. */
 export function carried(spec: MechaReducerMachine, event: string): Set<string> {
   const e = spec.events[event];
   const fields = e.payload.type === "object" ? Object.keys(e.payload.fields) : [];
   return new Set([
-    "now",
-    ...((spec.entropy ?? 0) > 0 ? ["entropy"] : []),
-    ...(e.tier === "omnishell" ? ["actor"] : []),
-    ...fields.map((f) => `payload.${f}`),
+    "_time",
+    ...((spec.entropy ?? 0) > 0 ? ["_entropy"] : []),
+    ...(e.tier === "omnishell" ? ["_origin"] : []),
+    ...fields,
   ]);
 }
 
@@ -19,7 +23,7 @@ export function carried(spec: MechaReducerMachine, event: string): Set<string> {
  * from where it lands, whichever of their guards hold. */
 export function reached(spec: MechaReducerMachine, phase: string, event: string): string[] {
   const arrow = spec.states[phase].on[event];
-  const rules = [arrow.guard, arrow.reduce];
+  const rules = [...(arrow.guard ?? []), arrow.reduce];
   const seen = new Set<string>();
   const pending = [arrow.target ?? phase];
   while (pending.length) {
@@ -27,7 +31,7 @@ export function reached(spec: MechaReducerMachine, phase: string, event: string)
     if (seen.has(at)) continue;
     seen.add(at);
     for (const next of spec.states[at].always ?? []) {
-      rules.push(next.guard, next.reduce);
+      rules.push(...(next.guard ?? []), next.reduce);
       pending.push(next.target);
     }
   }
@@ -42,20 +46,34 @@ export function contracted(spec: MechaReducerMachine): void {
     throw new Error(`${spec.name}: ${message}`);
   };
   const contracts = spec.contracts ?? {};
+  for (const [name, event] of Object.entries(spec.events)) {
+    for (const field of event.payload.type === "object" ? Object.keys(event.payload.fields) : []) {
+      if (field.startsWith(STATED)) fail(`event ${name} carries a payload field ${field}, and a name beginning ${STATED} is the runtime's to state`);
+      if (field === "type") fail(`event ${name} carries a payload field type, which is the event's own name`);
+    }
+  }
+  for (const field of spec.initialize?.input.type === "object" ? Object.keys(spec.initialize.input.fields) : []) {
+    if (field.startsWith(STATED)) fail(`the input carries a field ${field}, and a name beginning ${STATED} is the runtime's to state`);
+  }
   const fields = spec.state.type === "object" ? spec.state.fields : {};
   const guards = new Set<string>();
   const actions = new Set<string>();
   for (const state of Object.values(spec.states)) {
     for (const arrow of [...Object.values(state.on), ...(state.always ?? [])]) {
-      if (arrow.guard) guards.add(arrow.guard);
+      for (const guard of arrow.guard ?? []) guards.add(guard);
       if (arrow.reduce) actions.add(arrow.reduce);
     }
   }
   for (const rule of [...guards, ...actions]) {
+    // A transition's guards reach the chart as one name, joined by a space.
+    if (!/^[A-Za-z_$][\w$]*$/.test(rule)) fail(`rule ${JSON.stringify(rule)} is not a name: a letter, then letters, digits, _ or $`);
     if (!contracts[rule]) fail(`${rule} states no contract in setup`);
   }
   for (const rule of guards) {
     if (contracts[rule].writes?.length) fail(`guard ${rule} writes`);
+  }
+  for (const [rule, contract] of Object.entries(contracts)) {
+    if (contract.reason !== undefined && !guards.has(rule)) fail(`${rule} states a reason, and is no transition's guard`);
   }
   for (const rule of actions) {
     if (contracts[rule].writes === undefined) fail(`${rule} is an action, and its contract lists no writes`);
@@ -67,7 +85,7 @@ export function contracted(spec: MechaReducerMachine): void {
 }
 
 /** The reads some event reaching a rule does not carry: an action reading the
- * sender, run by an event the machine's own tier sends. The runtime refuses
+ * origin, run by an event the machine's own tier sends. The runtime refuses
  * that read when it happens; this finds it before any step does. */
 export function carries(spec: MechaReducerMachine): string[] {
   const found = new Set<string>();

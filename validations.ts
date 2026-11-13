@@ -9,7 +9,12 @@ export type VEntity = {
   fields: { name: string; ref?: string }[];
   uniques?: { name: string }[];
   validations?: Record<string, { src: string; via: string[]; machine?: string }>;
+  access?: { scope: string; user?: string };
 };
+
+/** What an edge's `from` holds when it starts at the write's origin, not at
+ * a column of the row: no column is spelled so. */
+export const ORIGIN = "$origin";
 
 const LOCAL = new Set(["tab", "device"]);
 
@@ -36,6 +41,14 @@ export function resolveEdges(entities: Record<string, VEntity>, ename: string, v
       byId(entities, ename, target.name);
       return { table: forward.ref!, key: "id", from: v };
     }
+    // The origin's own memberships: the rows of the program's membership list
+    // addressed to whoever sent the write. A reference of that name is the
+    // entity's own field, read above.
+    if (v === "_origin") {
+      const members = Object.entries(entities).filter(([, e]) => e.access?.scope === "group");
+      if (members.length !== 1) throw new Error(`entity ${ename}: via "_origin" walks to the membership list, and ${members.length} entities declare scope "group"`);
+      return { table: members[0][1].table, key: members[0][1].access!.user!, from: ORIGIN };
+    }
     const m = /^([A-Za-z]\w*)\.(\w+)$/.exec(v);
     if (m !== null) {
       const other = entities[m[1]];
@@ -54,7 +67,7 @@ export function resolveEdges(entities: Record<string, VEntity>, ename: string, v
   const seen = new Set<string>();
   for (const e of edges) {
     if (seen.has(e.table)) {
-      throw new Error(`entity ${ename}: validations walk to ${e.table} twice; state.rows holds one row set per table`);
+      throw new Error(`entity ${ename}: validations walk to ${e.table} twice; context.rows holds one row set per table`);
     }
     seen.add(e.table);
   }
@@ -132,6 +145,7 @@ export function validationsSelfTest(): string[] {
     Tag: { table: "tag", durability: "server", fields: [{ name: "slug" }] },
     ArticleTag: { table: "article_tag", durability: "server", fields: [{ name: "id" }, { name: "tag_id", ref: "tag" }] },
     Review: { table: "review", durability: "server", fields: [{ name: "id" }, { name: "article_id", ref: "article" }, { name: "reply_to_id", ref: "article" }] },
+    Member: { table: "member", durability: "server", access: { scope: "group", user: "user_id" }, fields: [{ name: "id" }, { name: "group_id" }, { name: "user_id" }] },
   };
   const cases: { name: string; entity: string; via: string[]; want: Edge[] | string }[] = [
     { name: "a forward edge is the referenced row by its id", entity: "Favorite", via: ["article_id"], want: [{ table: "article", key: "id", from: "article_id" }] },
@@ -143,6 +157,7 @@ export function validationsSelfTest(): string[] {
     { name: "a forward edge needs an id on the entity it walks to", entity: "ArticleTag", via: ["tag_id"], want: "walk to Tag by id, and Tag declares no id field" },
     { name: "a backward edge needs an id on this entity", entity: "Tag", via: ["ArticleTag.tag_id"], want: "walk to Tag by id, and Tag declares no id field" },
     { name: "two edges may not name one table", entity: "Review", via: ["article_id", "reply_to_id"], want: "twice" },
+    { name: "the origin's edge is the sender's rows of the membership list", entity: "Favorite", via: ["_origin"], want: [{ table: "member", key: "user_id", from: ORIGIN }] },
   ];
   for (const t of cases) {
     let got: Edge[] | string;
@@ -173,9 +188,9 @@ export function validationsSelfTest(): string[] {
   }
   const rendered = renderValidations("realworld", [{
     entity: "Favorite", machine: "FavoriteRules", name: "own-article", edges: [{ table: "article", key: "id", from: "article_id" }],
-    statements: "", completion: "(state, event) => true",
+    statements: "", completion: "({ context, event }) => true",
   }]);
-  if (!rendered.includes(`"own-article": {`) || !rendered.includes(`completion: "(state, event) => true"`)) {
+  if (!rendered.includes(`"own-article": {`) || !rendered.includes(`completion: "({ context, event }) => true"`)) {
     failures.push(`validations render: got ${rendered}`);
   }
   return failures;

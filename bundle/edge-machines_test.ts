@@ -53,8 +53,8 @@ Deno.test("edge steps initialize rules and spend initialization fuel on every in
   const { spec, rules } = await fixture();
   const stateful = `let count = 0; for (let i = 0; i < 3; i++) count++;\n${
     rules.replace(
-      "play: (state, event, context) => putCard(state, event.payload.card, context.now)",
-      "play: (state, event, context) => putCard(state, event.payload.card, ++count)",
+      "play: ({context: state, event}) => putCard(state, event.card, event._time)",
+      "play: ({context: state, event}) => putCard(state, event.card, ++count)",
     )
   }`;
   const compiled = await compileMechaReducer(spec, stateful, terminal);

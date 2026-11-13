@@ -117,6 +117,7 @@
     {"name":"Crypto","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"Cheerio","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"Pdf","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
+    {"name":"Xlsx","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"TextEncoder","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"TextDecoder","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},
     {"name":"URL","reason":"safe platform primitives require opt-in via manifest endowments","except_role":""},

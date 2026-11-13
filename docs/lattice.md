@@ -150,8 +150,10 @@ with nothing precomputed and pays with two engines. An app picks by whether
 the set is worth materializing. A validation is a named guard on the entity's lifecycle machine, selected by
 its insert, update or delete transition. Its name is the refusal that reaches
 the screen; its neighbourhood is the references the schema declares
-(`via`). Its signature is the reduce's, `(state, event)`, so a reduce, a guard
-and a validation are one grammar in three positions.
+(`via`). Its signature is the reduce's, XState's `({context, event})`, so a reduce, a guard
+and a validation are one grammar in three positions. Its event names who sent
+the write, `event._origin`, the field a mecha rule's event carries
+([[decisions/2026-11-13-drive-roles-and-event-origin|the record]]).
 
 Where each seat runs it, and what the trigger guarantees, is
 [Jessie in the database](decisions/2026-11-05-database-jessie.md#validations).

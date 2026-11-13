@@ -1,7 +1,7 @@
 // A handler is this one arrow and nothing else: no import, no export. `from` is
 // the clicked element's id; every update names its op.
-(state, event) => {
-  const row = state.items[0];
+({ context, event }) => {
+  const row = context.items[0];
   if (event.type !== "click" || row === undefined) return { updates: [] };
   // Stay inside the field's CEL bound: a refused write reaches only a region
   // declaring data-on-mutation, so here it would vanish without a word.

@@ -97,7 +97,7 @@ Declarative invocations allow the compiler to derive surface row writes
 verifying Mecha's admission rules as precondition guards on the transition.
 Where custom client entropy or multi-machine aggregation is needed, `handler`
 supplies the fold: `write.ts` emits `shell/handlers/<actor>.js` from the app's
-Jessie module `(state, event, machine, machines)`.
+Jessie module `({context, event}, {machine, machines})`.
 
 ### Through rows
 

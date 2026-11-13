@@ -611,6 +611,17 @@ WHERE h.completion = 'other'
 
 UNION ALL
 
+-- A handler and a validation are handed XState's one argument. One that
+-- names its first parameter is the earlier (state, event, params), and
+-- would read undefined from the object.
+SELECT 'error',
+       h.path,
+       'a ' || h.role || ' is ({context, event}, params) => ..., XState''s one argument; this one names its first parameter, the earlier (state, event, params)'
+FROM handler h
+WHERE h.completion = 'positional'
+
+UNION ALL
+
 -- CLOSED against CLOSED. An app declaring i18n must not leave unlocalized
 -- prose in screen templates: every natural language string must carry
 -- data-text="{msg.*}" or be a row binding.

@@ -62,7 +62,7 @@ for (const [name, subdir, module] of [
       assert(JSON.stringify(input.actors) === "{}", "an app without Cortex acquired actors");
       const grants = (input.endowments as Record<string, string[]>)["shell/handlers/local.js"];
       assert(JSON.stringify(grants) === '["Statechart"]', "automatic emitted grants were omitted from derivation");
-      assert(jessieFacts("(state) => Statechart.initial(state)", "handler", grants).references.length === 0, "generated host was treated as a denied reference");
+      assert(jessieFacts("({ context }) => Statechart.initial(context)", "handler", grants).references.length === 0, "generated host was treated as a denied reference");
       assert(input.designCss === "authored design override" && input.shellCss === "authored shell override", "emitted stylesheet overrides lost");
       assert(JSON.stringify(input.statics) === '[{"file":"asset.svg","target":"/authored-asset.svg"}]', "emitted static overrides lost");
       const program = input.program as {

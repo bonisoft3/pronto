@@ -19,14 +19,14 @@ const mecha = `${root}libraries/mecha`;
 Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a deadline", sanitizeOps: false, sanitizeResources: false, fn: async t => {
   Deno.statSync(`${mecha}/packages/pglite-workerd/dist/pglite.wasm`);
   const { spec, rules, compiled } = await fixture();
-  const spin = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"), terminal);
+  const spin = await compileMechaReducer({ ...spec, name: "proof_spin" }, rules.replace("play: ({context: state, event}) => putCard(state, event.card, event._time)", "play: () => { while (true) {} }"), terminal);
   const schema = "hybrid_proof_turn";
   const tmp = await Deno.makeTempDir({ prefix: "pronto-mecha-edge-" });
 
   // The app's rules, where the release reads them.
   await Deno.mkdir(`${tmp}/app/machines`, { recursive: true });
   await Deno.copyFile(`${root}plugins/pronto/testdata/mecha/turn.js`, `${tmp}/app/machines/turn.js`);
-  await Deno.writeTextFile(`${tmp}/app/machines/spin.js`, rules.replace("play: (state, event, context) => putCard(state, event.payload.card, context.now)", "play: () => { while (true) {} }"));
+  await Deno.writeTextFile(`${tmp}/app/machines/spin.js`, rules.replace("play: ({context: state, event}) => putCard(state, event.card, event._time)", "play: () => { while (true) {} }"));
 
   // The data directory, as pgdata.ts builds one: PostgreSQL's roles and
   // tenancy floor, the ticker's tables a timed machine shares, the surface,

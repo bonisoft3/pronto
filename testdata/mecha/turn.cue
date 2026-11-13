@@ -15,8 +15,8 @@ machine~(M): pronto.#Machine & {
 		initial: "playing"
 		states: {
 			playing: on: {
-				play:    {guard: "mayPlay", actions: "play"}
-				timeout: {guard: "isDue", actions: "timeout"}
+				play:    {guard: ["inTime", "yourTurn", "holdsCard"], actions: "play"}
+				timeout: {guard: ["isDue", "hasCards"], actions: "timeout"}
 				finish:  {guard: "isComplete", target: "finished", actions: "finish"}
 			}
 			finished: type: "final"
@@ -25,13 +25,16 @@ machine~(M): pronto.#Machine & {
 	setup: {
 		version: 1
 		guards: {
-			mayPlay: reads:    ["now", "actor", "payload.card"]
-			isDue: reads:      ["now"]
-			isComplete: reads: []
+			inTime:     {reads: ["_time"], reason: "expired"}
+			yourTurn:   {reads: ["_origin"], reason: "not_your_turn"}
+			holdsCard:  {reads: ["_origin", "card"], reason: "not_your_card"}
+			isDue:      {reads: ["_time"], reason: "not_due"}
+			hasCards:   {reads: [], reason: "no_cards"}
+			isComplete: {reads: [], reason: "cards_remain"}
 		}
 		actions: {
-			play:    {reads: ["now", "payload.card"], writes: ["a", "b", "plays", "turn", "deadline"]}
-			timeout: {reads: ["now"], writes: ["a", "b", "plays", "turn", "deadline"]}
+			play:    {reads: ["_time", "card"], writes: ["a", "b", "plays", "turn", "deadline"]}
+			timeout: {reads: ["_time"], writes: ["a", "b", "plays", "turn", "deadline"]}
 			finish:  {reads: [], writes: []}
 		}
 		types: {
