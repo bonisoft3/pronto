@@ -227,8 +227,8 @@ comes back in `Metadata.statuscode` (B1, B6). A sink that reads a credential fro
 (`Authorization: Bearer …`, `X-Api-Key`) declares it on the sink, `credential: {header,
 scheme, secret}`, naming an environment variable the cluster requires: the airlock reads
 it once and adds the header to every call through the same metadata (B11), so the handler
-never holds it and no component carries it. A client certificate, which ponto's eSocial
-submission will need, is a binding's `MTLSClientCert` and is not declared yet
+never holds it and no component carries it. A client certificate, as required by eSocial
+submission, is a binding's `MTLSClientCert` and is not declared yet
 ([open](#open)).
 
 The airlock's daprd now invokes declared `HTTPEndpoint`s, since the bindings API cannot carry a
@@ -602,7 +602,7 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 - **A client certificate for a sink.** Dapr's HTTP binding takes `MTLSClientCert`,
   `MTLSClientKey` and `MTLSRootCA` as component metadata, which would have to be read from
   a secret store the airlock's daprd does not run. The grammar would be `credential` with a
-  `certificate` kind; nothing declares one until an app needs it (ponto's eSocial).
+  `certificate` kind; nothing declares one until an app needs it.
 - **Bridges beyond mail.** A Dapr binding of another type as a bridge needs only its
   declaration in `state.bridges` and a call shape for the handler; a bridge the program
   owns needs a declaration for its image and its server.

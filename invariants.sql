@@ -258,8 +258,8 @@ UNION ALL
 -- Elevation is the one dimension where matching by value is the wrong test: a
 -- shadow list is not a length, so its geometry is not joined. Its INK is, and
 -- the seven twinned shadow-ink roles exist precisely so that no stylesheet
--- writes a black by hand. A colour reached through a token — realworld's and
--- thenote's color-mix() focus rings — never reaches this table.
+-- writes a black by hand. A colour reached through a token, including a
+-- color-mix() focus ring, never reaches this table.
 SELECT DISTINCT 'warning',
        l.path,
        l.prop || ' inks ' || l.value || ' by hand; the shadow-ink roles carry both appearances'

@@ -130,7 +130,7 @@ deployment's origin ([mecha's proxy](https://github.com/bonisoft3/mecha/blob/v0.
 — a prerendered one through the door, as the sitemap is. Only a param-less route can be prerendered, because the rows an
 `/article/:slug` needs do not exist at build. The choice is per route since
 the split falls inside apps: shadcnui's documentation routes are content,
-thenote's `/note/:id` would be harmed by indexing, and realworld's
+a private `/note/:id` would be harmed by indexing, and realworld's
 `/article/:slug` is content and parameterized. How either is rendered and
 served is [screens](screens.md#how-a-routes-first-document-is-rendered). A public app's
 `sitemap.xml` lists every route without a `:param` once per locale, each entry carrying the

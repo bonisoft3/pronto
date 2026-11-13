@@ -281,9 +281,8 @@ The page serves no blob, and nothing refuses a program that declares one
 `/electric`. Social sign-in providers (`capabilities.auth.providers`) are
 refused at release (`_authTargetRefusal`): the browser tier runs a local
 one-user cluster with guest sessions and has no server to redeem OIDC codes or
-receive callbacks. A duckstream is neither a stream nor a computation, so xpense
-targets `pages`, declares `recount-months` and `recount-buckets`, and nothing
-in the page fills `MonthStat` or `CategoryMonthStat`.
+receive callbacks. A duckstream is neither a stream nor a computation, so
+nothing in the page fills its sink.
 
 ## cloudflare
 

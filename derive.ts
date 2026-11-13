@@ -1204,8 +1204,7 @@ function selfTest(): void {
       throws: "&hellip; is not an entity this pass decodes",
     },
     {
-      // truco writes a decision as the <p> itself and thenote as an <li> of
-      // bare text, so a note is not owed a paragraph.
+      // A decision can be bare list-item text; a note is not owed a paragraph.
       name: "a lead-in and bare text, no <p> anywhere",
       body: `<strong>A lead.</strong> And the rest.`,
       note: "A lead. And the rest",

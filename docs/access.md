@@ -79,8 +79,7 @@ So policies added in raw SQL may widen access only where the mirror already
 allows, and may narrow it freely. `#Access` has no "everyone reads, the owner
 writes" mode, because `public` names no owner and its optional write arm applies to everyone:
 realworld's `011_owner_writes.sql` hand-writes owner-gated arms for `article`
-and `comment` and restates their owners, and xpense's `011_ledger_writes.sql`
-opens `category` and `expense` to every signed-in writer
+and `comment` and restates their owners
 ([pending](../PENDING.md#access)). Declaring such a table `private` and
 widening its SELECT in SQL instead would make it mean "mine" to the browser
 and "everyone's" to the server.

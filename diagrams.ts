@@ -12,15 +12,12 @@
 
 import { parseHTML } from "npm:linkedom@0.18.4";
 
-// A node id is unique to its own block and no further: thenote reuses `U`, `V`
-// and `C` across sixteen diagrams for unrelated things. Every row carries the
-// diagram it came from, or one block's claim answers for another's.
+// A node id is unique only within its block. Every row carries the diagram
+// it came from, or one block's claim answers for another's.
 export type Node = { diagram: number; id: string; label: string; shape: string };
 export type Edge = { diagram: number; source: string; target: string; stroke: string; label: string };
 
-/** Both container spellings the corpus uses — thenote and realworld write
- * <pre class="mermaid">, truco and xpense write <div class="mermaid"> — with the
- * class in any attribute position, since an id may precede it. */
+/** Accept pre and div containers, with the class in any attribute position. */
 const BLOCK = /<(pre|div)\s([^>]*)>([\s\S]*?)<\/\1>/g;
 const MERMAID = /(^|\s)class="mermaid"/;
 

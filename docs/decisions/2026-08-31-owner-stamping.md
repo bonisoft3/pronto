@@ -24,8 +24,6 @@ takes any SQL expression, and seven fields use it to stamp an owner:
 
 | app | field | access |
 |---|---|---|
-| thenote | `Note.owner_id` | `private`, `owner: "owner_id"` |
-| thenote | `Label.owner_id` | `private`, `owner: "owner_id"` |
 | realworld | `Favorite.user_id` | `private`, `owner: "user_id"` |
 | realworld | `Bookmark.user_id` | `private`, `owner: "user_id"` |
 | realworld | `Follow.follower_id` | `private`, `owner: "follower_id"` |

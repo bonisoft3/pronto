@@ -113,10 +113,10 @@ spelling and keeps the ordinal. Once holders keep the name,
 [schema changes](docs/schema-change-admission.md#what-pronto-admits) refuse the
 rename, so the command serves a field no deployment holds yet.
 
-**`tsvector` is a field.** realworld, thenote and xpense each declare a
+**`tsvector` is a field.** realworld declares a
 generated `search` column of type `tsvector`, which `#typeAlias` maps to
 `string` though it is an index, a construction rather than a value anyone
-states. Each is filtered by markup as `search=plfts(simple).…`, so once it is
+states. It is filtered by markup as `search=plfts(simple).…`, so once it is
 an index the markup checks must admit a filter on a name no field carries, and
 the construction must keep that name.
 
@@ -180,8 +180,7 @@ refused because an optimistic row lacks the schema's defaulted booleans, which
 belongs with the writers paragraph below. A named read (`data-read-*`) counts as a whole
 read until derive can prove an identical view on its screen serves it, and an
 `is.null` clause on a domain-typed column counts as a comparison Electric
-cannot make, though `IS NULL` needs no operator; it is the first reason ponto's
-`shift` is eager. No pronto deployment carries a data directory from one
+cannot make, though `IS NULL` needs no operator. No pronto deployment carries a data directory from one
 image to the next, so the domain/base split reaches every database rebuilt from
 the regenerated migrations; a database container started again from an image
 built before it keeps its domains, and the first subset on one is Electric's
@@ -296,8 +295,7 @@ overflow the pseudo-locale shows and the default does not. There is no such
 lane.
 
 **Prose in CSS reaches no catalogue.** truco's `arena.css` writes `content:
-"você"`, xpense's `month.css` `content: "orçamento "`, thenote's `wall.css`
-`content: "on its way"`. `facts.ts` strips `<style>`, linkedom applies no CSS,
+"você"`. `facts.ts` strips `<style>`, linkedom applies no CSS,
 and `innerText` excludes pseudo-element content, so no pass sees them. A
 `content:` string carrying a word, in an app with catalogues, is decidable
 from the stylesheet parse `styles.ts` already runs.
@@ -526,8 +524,7 @@ the page moves no stream's table, chance or rating; the derivation running in
 the page on DuckStream's machinery is what closes it.
 
 **A duckstream's sink is empty in the page** ([pages](docs/release-targets.md#pages)):
-the release derives the rows of streams and computations, and xpense's
-`MonthStat` and `CategoryMonthStat` are neither's.
+the release derives the rows of streams and computations, but not duckstream sinks.
 
 **Settling waits out the slowest computation's cadence**
 ([pages](docs/release-targets.md#pages)): compute says nothing when a look
