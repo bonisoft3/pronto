@@ -40,6 +40,7 @@ use release.nu [
 	airlock-stand-ins
 	airlock-shared-secrets
 	airlock-build-refusals
+	compose-raw
 	release-runtime
 	release-plan
 	airlock-refusals
@@ -1598,7 +1599,8 @@ def test_airlock_runtime [] {
 	assert equal ($out.ports | get port | sort) [443 8443] "the sinks' ports, an origin's own included"
 	assert equal ($out.to.0.ipBlock.except | sort) ["10.0.0.0/8" "100.64.0.0/10" "169.254.0.0/16" "172.16.0.0/12" "192.168.0.0/16"] "nothing private, shared or link-local (a cloud's metadata server)"
 	# DNS goes to the cluster's resolvers alone, not to any address on 53.
-	let dns = [{to: [{namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": kube-system}}, podSelector: {matchLabels: {"k8s-app": kube-dns}}}, {ipBlock: {cidr: "169.254.20.10/32"}}], ports: [{port: 53, protocol: TCP}, {port: 53, protocol: UDP}]}]
+	# GKE's Cloud DNS answers at the metadata server's address, on 53 alone.
+	let dns = [{to: [{namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": kube-system}}, podSelector: {matchLabels: {"k8s-app": kube-dns}}}, {ipBlock: {cidr: "169.254.20.10/32"}}, {ipBlock: {cidr: "169.254.169.254/32"}}], ports: [{port: 53, protocol: TCP}, {port: 53, protocol: UDP}]}]
 	assert equal ($airlock.egress | where {|r| $r.ports | any {|p| $p.port == 53 } }) $dns
 	assert equal ($mesh.egress | where {|r| $r.ports | any {|p| $p.port == 53 } }) $dns
 	assert equal ($mesh.egress | last) {to: [{podSelector: {matchLabels: {"app.kubernetes.io/name": effects, "app.kubernetes.io/component": rclone-s3}}}], ports: [{port: 3900, protocol: TCP}]} "an answer's bytes to the blob plane"
@@ -1672,6 +1674,47 @@ def test_airlock_compose_reads [] {
 	assert equal (airlock-build-refusals $raw) []
 	let baked = (airlock-build-refusals {services: {airlock: $airlock, web: {build: {context: ".", args: {T: "${KEY}"}}}}})
 	assert ($baked | first | str contains "web's build reads KEY") ($baked | to nuon)
+	# An arg passed through by name reads the environment too; normalization drops it, so compose-raw
+	# keeps the project unnormalized.
+	let project = (mktemp -d)
+	"services:
+  airlock:
+    image: a
+    environment:
+      KEY: \"${KEY:?k}\"
+  listed:
+    build: {context: ., args: [KEY, OTHER=1]}
+  mapped:
+    build:
+      context: .
+      args:
+        KEY:
+" | save -f ($project | path join compose.yaml)
+	assert equal (airlock-build-refusals (compose-raw $project) | sort) ["listed's build reads KEY, an effect's secret: an image would carry it" "mapped's build reads KEY, an effect's secret: an image would carry it"]
+	# Compose merges the airlock's env_file into its environment, which the release would write out.
+	"services:
+  airlock:
+    image: a
+    env_file: [airlock.env]
+    environment:
+      KEY: \"${KEY:?k}\"
+" | save -f ($project | path join compose.yaml)
+	"TOKEN=plaintext\n" | save -f ($project | path join airlock.env)
+	let filed = (try { airlock-secrets (compose-raw $project); "" } catch {|e| $e.msg })
+	assert ($filed | str contains "airlock reads an env_file") $filed
+	# So would its daprd's, whose environment the release writes out too.
+	"services:
+  airlock:
+    image: a
+    environment:
+      KEY: \"${KEY:?k}\"
+  airlock-mesh:
+    image: m
+    env_file: [airlock.env]
+" | save -f ($project | path join compose.yaml)
+	let mesh_filed = (try { airlock-secrets (compose-raw $project); "" } catch {|e| $e.msg })
+	assert ($mesh_filed | str contains "airlock-mesh reads an env_file") $mesh_filed
+	rm -r $project
 	# Cloud Build's compose reads a stand-in for every airlock secret, a shared one too, never an
 	# operator's value; the gcp target's build, none.
 	let step = (with-env ($shared | insert MAIL_KEY "operator-mail") { cloud-build-step "docker compose config" (airlock-secrets $raw | each {|k| $"($k)=secretKeyRef" }) })
