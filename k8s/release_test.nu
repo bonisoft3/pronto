@@ -209,6 +209,19 @@ def test_schema_jobs [] {
 	assert ($yaml | str contains "name: sample-initdb")
 	assert ($yaml | str contains "image: localhost:5001/sample-database:latest")
 	assert ($yaml | str contains "docker_process_init_files /docker-entrypoint-initdb.d/*")
+	let script = ($yaml | from yaml | where kind == "Job" and metadata.name == "sample-initdb" | first | get spec.template.spec.containers.0.command | last)
+	assert ($script | str starts-with "set -euo pipefail") "a failing assignment ends the job"
+	# A database built before the app's first effect lacks the airlock's ledger: replayed, in one transaction.
+	assert ($script | str contains "/docker-entrypoint-initdb.d/[0-7][0-9][0-9]_airlock.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_mecha_actors.sql; do") $script
+	assert ($script | str contains "*_airlock.sql) one=--single-transaction") $script
+	# The machines step is no replay: before migrate, a chart's CHECK on a column pgroll adds fails it,
+	# and it would install a changed timer interpreter around mecha's timer check.
+	assert not ($script | str contains "_machines.sql") $script
+	# Graphile's step inserts its first migration and creates its tables bare: a second run fails the
+	# release, so it runs once, on a database without its schema, before the replays.
+	assert ($script | str contains `missing=$(psql -XtAc "SELECT to_regclass('graphile_worker.migrations') IS NULL")`) "only where it is missing, a failing psql failing the job"
+	assert ($script | str contains `psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f "$f"`) "in one transaction"
+	assert (($script | str index-of "graphile_worker.migrations") < ($script | str index-of "005_create_tables.sql")) "before the replays"
 	assert ($yaml | str contains "name: sample-migrate")
 	assert ($yaml | str contains "image: localhost:5001/sample-migrate:latest")
 	assert ($yaml | str contains "value: schedule")

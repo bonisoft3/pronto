@@ -231,12 +231,30 @@ import (
 					marker=$(psql -XtAc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()")
 					if [ "$marker" = "pronto initdb" ]; then
 					  echo "initdb: already built"
+					  # Graphile Worker's schema, where the app declares an effect, reaches a database
+					  # built before its first one: once, when it is not there, since its step is no
+					  # replay (it inserts its first migration and creates its tables bare) and Graphile
+					  # migrates its own schema at every worker start. Before the replays: the airlock's
+					  # step may name what it makes.
+					  for f in /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_graphile_worker.sql; do
+					    if [ -f "$f" ]; then
+					      missing=$(psql -XtAc "SELECT to_regclass('graphile_worker.migrations') IS NULL")
+					      if [ "$missing" = t ]; then
+					        echo "initdb: applying $f, once"
+					        psql -v ON_ERROR_STOP=1 -Xq --single-transaction -f "$f"
+					      fi
+					    fi
+					  done
 					  # Its re-runnable steps are the release's, though (emit.cue's): a new
-					  # entity's table, every policy, trigger and publication, and the mecha
-					  # machines' code run again, keeping every row; that step is found by its
-					  # suffix, wherever the program places it.
-					  for f in /docker-entrypoint-initdb.d/005_create_tables.sql /docker-entrypoint-initdb.d/006_policies.sql /docker-entrypoint-initdb.d/007_txid.sql /docker-entrypoint-initdb.d/008_publication.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_mecha_actors.sql; do
-					    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq -f "$f"; fi
+					  # entity's table, every policy, trigger and publication, the airlock's ledger
+					  # where the app declares an effect, and the mecha machines' code run again,
+					  # keeping every row; the last two are found by their suffix, wherever the
+					  # program places them. The airlock's step changes its ledger's policies: one
+					  # transaction, so a failure leaves the old ones in force. The machines step is
+					  # no replay here: it would run before migrate and around mecha's timer check.
+					  for f in /docker-entrypoint-initdb.d/005_create_tables.sql /docker-entrypoint-initdb.d/006_policies.sql /docker-entrypoint-initdb.d/007_txid.sql /docker-entrypoint-initdb.d/008_publication.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_airlock.sql /docker-entrypoint-initdb.d/[0-7][0-9][0-9]_mecha_actors.sql; do
+					    case "$f" in *_airlock.sql) one=--single-transaction ;; *) one= ;; esac
+					    if [ -f "$f" ]; then psql -v ON_ERROR_STOP=1 -Xq $one -f "$f"; fi
 					  done
 					  exit 0
 					fi
