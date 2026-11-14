@@ -2,7 +2,7 @@
 FROM debian:13.7-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS setup
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --from=bonitao/lazybox:0.8.5@sha256:091a3b63ba222777000acc3bf8327faebfea4870e23ee07c6eb42431dadb2ac6 /lazybox/ /root/.local/share/lazybox/
+COPY --from=bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df /lazybox/ /root/.local/share/lazybox/
 ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH
 ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo
 RUN --mount=type=cache,target=/apt-store,id=/apt-store,sharing=shared --mount=type=cache,target=/var/cache/apt,id=idioms-setup:/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt/lists,id=idioms-setup:/var/lib/apt/lists,sharing=locked s=/apt-store; d=/var/cache/apt/archives; mkdir -p "$s" "$d"; cp -r "$s"/. "$d"/ 2>/dev/null || true; rm -f /etc/apt/apt.conf.d/docker-clean && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends 'git=1:2.47.*' 'libatomic1=14.2.*' 'curl=8.14.*' 'ca-certificates=20250419*' 'procps=2:4.0.*' || exit; cd "$d" && for f in *.deb; do [ -f "$f" ] || continue; o="$s/$f"; [ -e "$o" ] && continue; t="$(mktemp "$s/.pXXXXXX")" && cp "$f" "$t" && mv -f "$t" "$o"; done; :
@@ -17,7 +17,7 @@ RUN mise install
 FROM busybox:musl@sha256:03db190ed4c1ceb1c55d179a0940e2d71d42130636a780272629735893292223 AS setup_ctxs
 ARG BAYT_DIR
 WORKDIR /monorepo/${BAYT_DIR}
-COPY --parents [m]ise.toml [.]mise.toml [m]ise.lock [.]tool-versions ./
+COPY --parents [m]ise.toml [.]mise.toml [m]ise.lock [.]tool-versions [m]ise.local.toml ./
 ARG SOURCE_DATE_EPOCH
 ARG BAYT_CLAMP=1
 RUN if [ "${BAYT_CLAMP:-1}" != 0 ]; then find /monorepo/${BAYT_DIR} -exec touch -hd @${SOURCE_DATE_EPOCH:-0} {} + && { d=$(dirname /monorepo/${BAYT_DIR}); while [ "$d" != / ]; do touch -hd @${SOURCE_DATE_EPOCH:-0} "$d" || exit; d=$(dirname "$d"); done; }; fi

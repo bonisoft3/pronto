@@ -26,6 +26,7 @@ import (
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 	"github.com/bonisoft3/pronto/resilience"
+	"github.com/bonisoft3/pronto/identity"
 	apt "github.com/bonisoft3/bayt/distros/apt"
 )
 
@@ -298,7 +299,7 @@ import (
 		}
 		\(B._prepareHostWork)
 		$"log_location: ($work_fwd)/proc.log\n" | save -f ($work | path join "pc-logs.yaml")
-		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(B.cluster.meta.door.env)") | get var | uniq | sort | append (if $os == "windows" { ["_PC_PORT"] } else { [] }))
+		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(B.cluster.meta.door.env)") and ($it.var != "\(identity.issuerPortEnv)") | get var | uniq | sort | append (if $os == "windows" { ["_PC_PORT"] } else { [] }))
 		let start_p = (20000 + (($h | str substring 0..6 | into int -r 16) mod 7000))
 		let alloc = (^mise x -- deno eval --no-config 'const vars = JSON.parse(Deno.args[0]); let p = Number(Deno.args[1]); const out = {}; for (const k of vars) { while (true) { try { const l = Deno.listen({ hostname: "127.0.0.1", port: p }); l.close(); break; } catch { p++; } } out[k] = String(p++); } console.log(JSON.stringify(out));' ($pvars | to json -r) ($start_p | into string) | from json)
 		let port = ($alloc._PC_PORT? | default $def_port)
@@ -385,7 +386,7 @@ import (
 		  DENO_CERT: $cert_p
 		}
 		let pc_bin = (^mise which process-compose | str trim)
-		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) | get var | uniq | sort)
+		let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where (($it.def | into int) >= 10000) and ($it.var != "\(identity.issuerPortEnv)") | get var | uniq | sort)
 		mut next_p = (15000 + (((($nu.pid * 2654435761) + (random int 0..999999)) mod 85) * 200))
 		let ok = (try {
 		  for suite in [\(B._localSuites)] {
@@ -484,7 +485,7 @@ import (
 		// then resolve the trees before they are copied.
 		dockerfile: epilogue: list.Concat([
 			[for v in _toolchainViews {"COPY --from=\(v) /monorep[o] /monorepo/"}],
-			["COPY [m]ise.local.toml ./", "RUN mise install"],
+			[{srcs: ["[m]ise.local.toml"]}, "RUN mise install"],
 		])
 		compose: build: additional_contexts: {for v in _toolchainViews {(v): (_switch & {service: v, pin: core.lock.images.busybox}).out}}
 	}

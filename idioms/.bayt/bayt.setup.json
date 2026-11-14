@@ -17,7 +17,7 @@
   },
   "dockerfile": {
     "preamble": [
-      "COPY --from=bonitao/lazybox:0.8.5@sha256:091a3b63ba222777000acc3bf8327faebfea4870e23ee07c6eb42431dadb2ac6 /lazybox/ /root/.local/share/lazybox/",
+      "COPY --from=bonitao/lazybox:0.8.6@sha256:0f30c48513fac757f844f02c864802991dec045f9c4189e3db2ae4ac297544df /lazybox/ /root/.local/share/lazybox/",
       "ENV PATH=/root/.local/bin:/root/.local/share/lazybox/bin:$PATH",
       "ENV MISE_TRUSTED_CONFIG_PATHS=/monorepo",
       "RUN --mount=type=cache,target=/apt-store,id=/apt-store,sharing=shared --mount=type=cache,target=/var/cache/apt,id=idioms-setup:/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt/lists,id=idioms-setup:/var/lib/apt/lists,sharing=locked s=/apt-store; d=/var/cache/apt/archives; mkdir -p \"$s\" \"$d\"; cp -r \"$s\"/. \"$d\"/ 2>/dev/null || true; rm -f /etc/apt/apt.conf.d/docker-clean && echo 'Binary::apt::APT::Keep-Downloaded-Packages \"true\";' > /etc/apt/apt.conf.d/keep-cache && apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends 'git=1:2.47.*' 'libatomic1=14.2.*' 'curl=8.14.*' 'ca-certificates=20250419*' 'procps=2:4.0.*' || exit; cd \"$d\" && for f in *.deb; do [ -f \"$f\" ] || continue; o=\"$s/$f\"; [ -e \"$o\" ] && continue; t=\"$(mktemp \"$s/.pXXXXXX\")\" && cp \"$f\" \"$t\" && mv -f \"$t\" \"$o\"; done; :"
@@ -32,7 +32,11 @@
     "extra_hosts": [],
     "epilogue": [
       "COPY --from=workspaceroot-pronto-sources_srcs /monorep[o] /monorepo/",
-      "COPY [m]ise.local.toml ./",
+      {
+        "srcs": [
+          "[m]ise.local.toml"
+        ]
+      },
       "RUN mise install"
     ],
     "copy": [],
@@ -139,7 +143,8 @@
           "[m]ise.toml",
           "[.]mise.toml",
           "[m]ise.lock",
-          "[.]tool-versions"
+          "[.]tool-versions",
+          "[m]ise.local.toml"
         ],
         "exclude": []
       },

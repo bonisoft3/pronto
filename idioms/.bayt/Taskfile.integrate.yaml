@@ -107,7 +107,7 @@ tasks:
         DENO_CERT: \$cert_p
       }
       let pc_bin = (^mise which process-compose | str trim)
-      let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where ((\$it.def | into int) >= 10000) | get var | uniq | sort)
+      let pvars = (open --raw .bayt/process-compose.yaml | lines | parse -r '(?<var>[A-Z0-9_]+_PORT):-(?<def>[0-9]+)' | where ((\$it.def | into int) >= 10000) and (\$it.var != \"IDENTITY_HTTP_PORT\") | get var | uniq | sort)
       mut next_p = (15000 + ((((\$nu.pid * 2654435761) + (random int 0..999999)) mod 85) * 200))
       let ok = (try {
         for suite in ['visual'] {

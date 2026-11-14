@@ -38,6 +38,10 @@ hydraImage: "oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b
 
 // The broker a local launch runs, whose issuer an app names by default.
 localBroker: "http://localhost:28443"
+// The variable that publishes the local broker's port. A capability's issuer
+// is literal, so the port must stay the one localBroker spells: host
+// integrate, which reassigns published ports, leaves this one alone.
+issuerPortEnv: "IDENTITY_HTTP_PORT"
 
 #Signin: {
 	let S = self
@@ -166,8 +170,10 @@ localBroker: "http://localhost:28443"
 						cmd: builtin: null
 						activate:    ""
 						healthcheck: {port: 28443, path: "/health"}
-						// The broker's issuer, which the browser and Google's redirect name.
-						expose: http: port: 28443
+						// The broker's issuer, which the browser and Google's redirect name:
+						// published by a person's launch alone, so concurrent integrate
+						// stacks share no host port; see issuerPortEnv.
+						expose: http: {port: 28443, host: 28443, publish: environment: issuerPortEnv}
 						"process-compose": activate: "mise x --"
 						entrypoint: {
 							do:         _frontCmd
@@ -208,7 +214,6 @@ localBroker: "http://localhost:28443"
 							]
 						}
 						compose: {
-							ports: ["28443:28443"]
 							environment: {
 								BROKER_ISSUER:        S.signin.broker
 								BROKER_SECRET:        "${BROKER_SECRET:-pronto-identity-local-launch-secret-0000}"

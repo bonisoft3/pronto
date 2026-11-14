@@ -68,8 +68,10 @@ installedRootCompose: _installedFiles["compose.yaml"].data.include & [{path: "./
 // Without it an image's mise found mise.local.toml naming paths it lacked.
 _busyboxView: "${MONOREPO_COMPOSE_MODE:-docker-image://\(core.lock.images.busybox)}${MONOREPO_COMPOSE_MODE:+:workspaceroot-pronto-sources_srcs}"
 // After the pinned install, so an edit to the tree leaves it cached; a
-// second install resolves the path: tools without fetching.
-installedToolchainCopy: _installedProject.targets.setup.dockerfile.epilogue & ["COPY --from=workspaceroot-pronto-sources_srcs /monorep[o] /monorepo/", "COPY [m]ise.local.toml ./", "RUN mise install"]
+// second install resolves the path: tools without fetching. mise.local.toml
+// is a structured copy, so the setup's `_srcs` view carries it into every
+// tree assembled from views, CI's nested builds included.
+installedToolchainCopy: _installedProject.targets.setup.dockerfile.epilogue & ["COPY --from=workspaceroot-pronto-sources_srcs /monorep[o] /monorepo/", {srcs: ["[m]ise.local.toml"]}, "RUN mise install"]
 installedToolchainContext: _installedProject.targets.setup.compose.build.additional_contexts["workspaceroot-pronto-sources_srcs"] & _busyboxView
 
 // A runner's RUN builds its stack inside, where the host's environment does
