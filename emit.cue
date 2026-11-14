@@ -42,6 +42,9 @@ import (
 	text?:  string // raw formats, writer-materialized
 	data?:  _      // structured formats, writer-serialized
 	src?:   string // assembly file authored in place; writer verifies presence
+	// SQL already written for the app's schemas (the floor, mecha's #Tenancy): the writer does not
+	// rename it again, so what it means to keep in `public` (a legacy object's drop) stays there.
+	inSchemas?: true
 }
 
 _caddyfileAsset:   _ @embed(file="assets/Caddyfile", type=text)
@@ -2279,6 +2282,8 @@ _traceHeader: include_patterns: ["^traceparent$"]
 		"services/database/migrations/000_extensions.sql",
 		"services/database/migrations/001_roles.sql",
 		"services/database/migrations/002_grants.sql",
+		// A live baseline that applied its own floor keeps it.
+		if len([for r in M.raw if r.name == mecha.#TenancyMigration {r}]) == 0 {"services/database/migrations/\(mecha.#TenancyMigration)"},
 		"services/database/migrations/004_types.sql",
 		// A live baseline keeps the tables it applied; a later column is a migration's.
 		if len([for r in M.raw if r.name == "005_create_tables.sql" {r}]) == 0 {"services/database/migrations/005_create_tables.sql"},
@@ -2766,6 +2771,8 @@ _pgrollDir: "services/database/pgroll"
 			if len(D._hostPeers) > 0 {
 				hostPeers: [for n, p in D._hostPeers {"\(n)=\(p)"}]
 			}
+			// The schemas the cluster keeps; the app's resolvers are the writer's alone.
+			if D.code.meta.schemas != _|_ {schema: {for k, v in D.code.meta.schemas if k != "resolvers" {(k): v}}}
 		}
 		// The cluster's auth service and JWT envs follow the program's auth
 		// block; the blob plane follows the program's flag; the data plane
@@ -3912,6 +3919,8 @@ _pgrollDir: "services/database/pgroll"
 					// framework's re-runnable steps (gcp's schema job): each is
 					// idempotent, as initdb replays it on a fresh volume.
 					replays: [for r in [if E.code.state.rawMigrations != _|_ {E.code.state.rawMigrations}, []][0] {r.name}]
+					// Where the tables and the floor's functions are (mecha's meta.schema).
+					schemas: {app: E.cluster.meta.schema.app, floor: E.cluster.meta.schema.floor, mecha: E.cluster.meta.schema.mecha}
 					computations: E.cluster.state.computations
 					drains: list.Concat([
 						[for _, d in E.code.state.drains {name: d.name, on: d.on, call: d.call, body: d.body}],
@@ -4060,10 +4069,52 @@ _pgrollDir: "services/database/pgroll"
 				// once: a correction below it reaches a database that already
 				// holds the extension, and CREATE EXTENSION alone would abort
 				// the whole file before the correction ran.
-				text: [
+				text: _schema + [
 					if len(E._validated) > 0 {"CREATE EXTENSION IF NOT EXISTS plv8;\n"},
 					if len(E._validated) == 0 {"-- no extensions required\n"},
 				][0]
+				// An app schema other than `public` is made here, first, and every
+				// migration runs with it opening its search_path (write.ts). A
+				// session the cluster opens outside a migration (auth's, a replay's
+				// psql, Electric's) reads the database's own search_path, so it opens
+				// with the schema too: set here where the role may (the database's
+				// owner, a superuser), and otherwise required of whoever owns it.
+				let S = E.cluster.meta.schema
+				let path = strings.Join(list.Concat([[S.app], [if S.floor != S.app {S.floor}]]), ", ")
+				// The path must open with the app's schema and then the floor's, each maybe quoted.
+				let _pathPattern = strings.Join([for n in list.Concat([[S.app], [if S.floor != S.app {S.floor}]]) {"\"?\(n)\"?"}], " *, *")
+				_schema: [
+					if S.app != "public" {"""
+						CREATE SCHEMA IF NOT EXISTS \(S.app);
+						DO $$ BEGIN
+						  IF coalesce((SELECT split_part(c, '=', 2) FROM pg_db_role_setting, unnest(setconfig) AS c
+						                WHERE setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())
+						                  AND setrole = 0 AND split_part(c, '=', 1) = 'search_path'), '') !~ '^\(_pathPattern)( *,|$)' THEN
+						    IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)
+						       OR pg_has_role((SELECT datdba FROM pg_database WHERE datname = current_database()), 'MEMBER') THEN
+						      EXECUTE format('ALTER DATABASE %I SET search_path = \(path)', current_database());
+						    ELSE
+						      RAISE EXCEPTION 'the database''s search_path must open with \(path), and only its owner may set it: the database''s one-time setup runs ALTER DATABASE % SET search_path = \(path), before this step', quote_ident(current_database());
+						    END IF;
+						  END IF;
+						END $$;
+
+
+						"""},
+					"",
+				][0]
+			}
+			// The tenancy floor, for the app's schemas (mecha's #Tenancy), as every
+			// app's own step at 003: the database image's 003 is replaced by it in
+			// the image, on a host and in the unit tests, so the floor is the
+			// runtime's, not the published image's. initdb's alone, as the image's
+			// was: no replay list names it.
+			if len([for r in E._raw if r.name == mecha.#TenancyMigration {r}]) == 0 {
+				"services/database/migrations/\(mecha.#TenancyMigration)": {
+					format:    "sql"
+					inSchemas: true
+					text:      (mecha.#Tenancy & {schema: E.cluster.meta.schema}).out
+				}
 			}
 			"services/database/migrations/001_roles.sql": {
 				format: "sql"
@@ -4990,9 +5041,19 @@ _pgrollDir: "services/database/pgroll"
 			// than emitting a proxy that silently 404s every deep link.
 			// An app's seed assets are its own server's, in a cluster: not the blob plane's.
 			if E.code.capabilities.seedAssets != _|_ {_doorAnchored: true & strings.Contains(_caddyfileAsset, "  handle /blobs/* {")}
-			_door: [
-				if E.code.capabilities.seedAssets != _|_ {strings.Replace(_caddyfileAsset, "  handle /blobs/* {", "  handle /seed-assets/* {\n    reverse_proxy {$PRONTO_UPSTREAM_ASSETS:assets:8787}\n  }\n  handle /blobs/* {", 1)},
+			// Electric reads a bare table name as public's: where the app's tables are
+			// in a schema of their own, the door names it, after the gate has
+			// compared the table with the token's (the gatekeeper's names are bare).
+			// An asset without the line it follows is refused, not served unnamed.
+			_electricAnchor: "      uri query secret {$ELECTRIC_SECRET}\n"
+			_named: [
+				if E.cluster.meta.schema.app != "public" && !strings.Contains(_caddyfileAsset, _electricAnchor) {error("assets/Caddyfile has no `uri query secret` line for Electric's route: the door cannot name the app's schema \(E.cluster.meta.schema.app) to Electric")},
+				if E.cluster.meta.schema.app != "public" {strings.Replace(_caddyfileAsset, _electricAnchor, _electricAnchor + "      uri query table \(E.cluster.meta.schema.app).{query.table}\n", 1)},
 				_caddyfileAsset,
+			][0]
+			_door: [
+				if E.code.capabilities.seedAssets != _|_ {strings.Replace(_named, "  handle /blobs/* {", "  handle /seed-assets/* {\n    reverse_proxy {$PRONTO_UPSTREAM_ASSETS:assets:8787}\n  }\n  handle /blobs/* {", 1)},
+				_named,
 			][0]
 			_split: strings.SplitN(_door, _anchor, 2)
 			// A realm's document is its own protection domain behind an opaque
@@ -5473,4 +5534,19 @@ _pgrollDir: "services/database/pgroll"
 	}
 
 	manifest: list.SortStrings([for p, _ in files {p}])
+
+	// The database's schemas and the names the floor spells in them (mecha's
+	// #Tenancy), which write.ts renames pronto's SQL by.
+	let tenancyNames = (mecha.#Tenancy & {schema: E.cluster.meta.schema}).names
+	schemas: {
+		app:   E.cluster.meta.schema.app
+		floor: E.cluster.meta.schema.floor
+		mecha: E.cluster.meta.schema.mecha
+		names: {
+			floor: tenancyNames.floor
+			mecha: tenancyNames.mecha
+			// The functions whose first argument, a literal, names an object (the app's own).
+			resolvers: [if E.code.meta.schemas != _|_ if E.code.meta.schemas.resolvers != _|_ for r in E.code.meta.schemas.resolvers {r}]
+		}
+	}
 }

@@ -145,6 +145,8 @@ import (
 	database: tokenRoles: [...string]
 	// The app's own migrations (rawMigrations), replayed on a built database.
 	database: replays: *[] | [...string]
+	// Where the app's tables and the floor's functions are (.pronto/cluster.json; the release fills it).
+	database: schemas: {app: *"public" | #SchemaName, floor: *"public" | #SchemaName, mecha: *"mecha" | #SchemaName}
 
 	// Present where the app's compose project runs mecha's ticker: the
 	// environment compose gives it beside CRUD_URL, SERVICE_JWT and PORT, filled
@@ -474,9 +476,11 @@ import (
 					env: [
 						(secretOf & {env: "PGRST_DB_URI", secret: sq.CRUD_DB_URI}).out,
 						(secretOf & {env: "PGRST_JWT_SECRET", secret: sq.PGRST_JWT_SECRET}).out,
-						{name: "PGRST_DB_SCHEMA", value: "public"},
+						{name: "PGRST_DB_SCHEMA", value: R.database.schemas.app},
 						{name: "PGRST_DB_ANON_ROLE", value: "anon"},
-						{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
+						{name: "PGRST_DB_PRE_REQUEST", value: "\(R.database.schemas.floor).app_pre_request"},
+						// As mecha's cluster states them (meta.schema).
+						if R.database.schemas.floor != "public" {{name: "PGRST_DB_EXTRA_SEARCH_PATH", value: "\(R.database.schemas.floor),public"}},
 						// Cloud Run probes the instance's address, not loopback.
 						{name: "PGRST_SERVER_HOST", value: "*"},
 						{name: "PGRST_DB_POOL", value: "\(#Pools.crud)"},
@@ -497,6 +501,9 @@ import (
 						// The service refuses to start without its statement bound: compose's
 						// where it gives one, else resilience's client statement, in ms.
 						[if R.auth.env.AUTH_STATEMENT_TIMEOUT_MS == _|_ {{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"}}],
+						// Where the tables, the floor and its lists are, as mecha's cluster states them.
+						[for k, v in {MECHA_DB_SCHEMA: R.database.schemas.app, MECHA_FLOOR_SCHEMA: R.database.schemas.floor, MECHA_SCHEMA: R.database.schemas.mecha}
+							if R.auth.env[k] == _|_ {{name: k, value: v}}],
 						[for k, v in R.auth.env {name: k, value: v}], [for k, v in R.auth.oidc {name: k, value: v}], [for k, v in R.auth.oidcSecrets {(secretOf & {env: k, secret: v}).out}]])
 					startupProbe: {tcpSocket: port: P.auth, periodSeconds: 2, failureThreshold: 60}
 				}, {
@@ -930,3 +937,8 @@ import (
 	}])
 	_noLiteralSecret: true & !strings.Contains(json.Marshal(B.service), "postgres://")
 }
+
+// A schema's name, as the app's .pronto/cluster.json states it: generate took it from the cluster,
+// which refuses keywords and the names its services keep (mecha's meta.schema). Read here without
+// mecha's module, which the release does not otherwise import.
+#SchemaName: =~"^[a-z_][a-z0-9_]{0,62}$" & !~"^pg_"

@@ -833,9 +833,11 @@ import (
 								name:  "PGRST_DB_URI"
 								value: "postgres://authenticator:$(AUTHENTICATOR_PASSWORD)@database:5432/\(release.id)"
 							},
-							{name: "PGRST_DB_SCHEMA", value: "public"},
+							{name: "PGRST_DB_SCHEMA", value: release.database.schemas.app},
 							{name: "PGRST_DB_ANON_ROLE", value: "anon"},
-							{name: "PGRST_DB_PRE_REQUEST", value: "public.app_pre_request"},
+							{name: "PGRST_DB_PRE_REQUEST", value: "\(release.database.schemas.floor).app_pre_request"},
+							// As mecha's cluster states them (meta.schema).
+							if release.database.schemas.floor != "public" {{name: "PGRST_DB_EXTRA_SEARCH_PATH", value: "\(release.database.schemas.floor),public"}},
 							{
 								name: "PGRST_JWT_SECRET"
 								valueFrom: secretKeyRef: {
@@ -1081,6 +1083,10 @@ import (
 								value: "postgres://postgres:$(PG_PASSWORD)@database:5432/\(release.id)"
 							},
 							{name: "AUTH_STATEMENT_TIMEOUT_MS", value: "\(bounds.statement.client*1000)"},
+							// Where the tables, the floor and its lists are, as mecha's cluster states them.
+							{name: "MECHA_DB_SCHEMA", value: release.database.schemas.app},
+							{name: "MECHA_FLOOR_SCHEMA", value: release.database.schemas.floor},
+							{name: "MECHA_SCHEMA", value: release.database.schemas.mecha},
 							{
 								name: "PGRST_JWT_SECRET"
 								valueFrom: secretKeyRef: {

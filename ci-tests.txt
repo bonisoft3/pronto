@@ -35,6 +35,7 @@ local-drivers.test.ts
 local-gate-key.test.ts
 proto-baseline.test.ts
 release-flow.test.ts
+schema-names_test.ts
 table-order.test.ts
 upgrade-from-released.test.ts
 verify/airlock_test.ts

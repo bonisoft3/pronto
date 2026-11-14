@@ -36,8 +36,9 @@ import { compileFunction } from "./database-functions.ts";
 import { compileCortexSql } from "./cortex-machine.ts";
 import { surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
 import { sha256Hex } from "./facts.ts";
+import { inSchemas, isDefault, migrationPath, type Schemas } from "./schema-names.ts";
 
-type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
+type EmitFile = { format: string; text?: string; data?: unknown; src?: string; inSchemas?: true };
 type Emission = {
   manifest: string[];
   files: Record<string, EmitFile>;
@@ -46,6 +47,7 @@ type Emission = {
   build?: { meta?: { dir?: string } };
   cluster?: { meta?: { root?: string; statics?: { file: string; target: string }[] } };
   development?: { statics: { file: string; target: string }[] };
+  schemas: Schemas;
 };
 
 // jessie/bloblang/js entries always carry `src`, never `text`, so they need
@@ -80,10 +82,15 @@ function fail(msg: string): never {
   Deno.exit(1);
 }
 
+// The database's schemas, read from the emission before anything renders (schema-names.ts).
+let schemas: Schemas;
+const searchPathPrologue = () => isDefault(schemas) ? "" : `SET search_path = ${migrationPath(schemas)};\n`;
+
 /** SQL with its provenance header, wrapped where the file is a migration. */
-function sqlFile(rel: string, body: string): string {
+function sqlFile(rel: string, body: string, rendered = false): string {
+  if (!rendered) body = inSchemas(body, schemas);
   if (!MIGRATION.test(rel)) return HEADER.sql + body;
-  return HEADER.sql + PROLOGUE + body + (body.endsWith("\n") ? "" : "\n") + "\nCOMMIT;\n";
+  return HEADER.sql + searchPathPrologue() + PROLOGUE + body + (body.endsWith("\n") ? "" : "\n") + "\nCOMMIT;\n";
 }
 
 const appDir = Deno.args[0] ?? fail("usage: write.ts <appDir>  (runs `cue export` in appDir — needs --allow-run=cue)");
@@ -120,7 +127,7 @@ function render(rel: string, f: EmitFile): string {
   if (f.format === "proto") return generateProto(f.data as Record<string, ProtoEntity>);
   if (f.format === "json") return JSON.stringify(rel === "bayt.json" ? targetsSorted(f.data) : f.data, null, 2) + "\n"; // no comment syntax, no header
   const header = HEADER[f.format] ?? fail(`${rel}: unknown format ${f.format}`);
-  if (f.text !== undefined) return f.format === "sql" ? sqlFile(rel, f.text) : header + f.text;
+  if (f.text !== undefined) return f.format === "sql" ? sqlFile(rel, f.text, f.inSchemas) : header + f.text;
   if (f.format === "yaml") return header + stringify(f.data, { lineWidth: -1 });
   return fail(`${rel}: no text and format ${f.format} is not structured`);
 }
@@ -153,6 +160,7 @@ async function exportEmission(): Promise<{ emission: Emission; drawing: Drawing 
   if (!exported.success) fail("cue export failed");
   const exportedJson = JSON.parse(new TextDecoder().decode(exported.stdout)) as { emission: Emission } & Drawing;
   const emission = exportedJson.emission;
+  schemas = emission.schemas ?? fail("the emission names no schemas: the pronto that wrote it predates them");
   cortexSql(emission);
   checkTypeSeeds(emission.files["schema/entities.proto"].data as Record<string, TypeEntity>);
   const checks = await projectSay(appDir, emission.files[".say.yaml"].data) as { say: Record<string, unknown> };
@@ -303,7 +311,10 @@ async function rendered(emission: Emission): Promise<Map<string, string | Uint8A
     const stat = await ifMissing(Deno.stat(`${appDir}/${f.src}`), null) ?? fail(`${rel}: missing assembly source ${f.src}`);
     if (!stat.isFile) fail(`${rel}: assembly source ${f.src} is not a file`);
     if (f.src !== rel) {
-      contents.set(rel, await Deno.readTextFile(`${appDir}/${f.src}`));
+      // An authored migration is renamed as pronto's own SQL is, under the search_path every
+      // migration runs with.
+      const authored = await Deno.readTextFile(`${appDir}/${f.src}`);
+      contents.set(rel, MIGRATION.test(rel) && rel.endsWith(".sql") ? searchPathPrologue() + inSchemas(authored, schemas) : authored);
       continue;
     }
     // A file the writer emitted cannot become the author's by being named in

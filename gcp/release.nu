@@ -1,7 +1,7 @@
 # GCP releases use the native Kubernetes stack when GKE is declared;
 # otherwise they run Cloud Run beside Cloud SQL.
 
-use ../k8s/release.nu [resolve-app]
+use ../k8s/release.nu [resolve-app schema-facts]
 use verify.nu [start-drivers go-drivers finish-drivers cancel-drivers run-rehearsal plan-of]
 use build.nu [builder stamp key-tag gc exists build-account push-images service-jwt failure-message]
 use local-gate-key.nu
@@ -506,7 +506,7 @@ def base-of [app_info: record, preview: string]: nothing -> record {
 	if not ($facts_path | path exists) { error make {msg: $"($facts_path) is missing: generate the app before releasing it"} }
 	let facts = (open $facts_path)
 	if not $facts.server { error make {msg: $"($facts_path): this app has no server tier to release to GCP"} }
-	{GCP: ({database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}} | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }))}
+	{GCP: ({database: ({tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])} | merge (schema-facts $facts))} | merge (if ($preview | is-empty) { {} } else { {preview: $preview} }))}
 }
 
 # The images a release builds or copies: the runtime's, the cluster's migrate step, the ticker, the
