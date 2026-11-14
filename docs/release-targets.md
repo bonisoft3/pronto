@@ -616,12 +616,12 @@ feed, and the ticker with its clock.
 What fixes its shape:
 
 - **Single self-contained image.** The appliance builds on `core.nubox`
-  (openSUSE Leap 16.0 with the lazybox toolbelt, Nushell, and GNU utilities),
-  adding PostgreSQL 18 with ICU collations (`--locale-provider=icu --icu-locale=und`),
-  `setpriv`, PostgREST, Caddy and `process-compose`. Leap ships neither pg_ivm, which
+  (Debian slim with the lazybox toolbelt, Nushell, and GNU utilities),
+  adding PostgreSQL 18 from PGDG with ICU collations (`--locale-provider=icu --icu-locale=und`),
+  `setpriv`, PostgREST, Caddy and `process-compose`. PGDG ships neither pg_ivm, which
   the cluster preloads, nor the `plv8` language the database's Jessie names:
-  mecha's `extensions` image builds both once, against Leap's
-  `postgresql18-server-devel` at the version the appliance's server installs
+  mecha's `extensions` image builds both once, against PGDG's
+  `postgresql-server-dev-18`, the major the appliance's server installs
   (mecha's `#AppliancePostgres`), from the recipe and pins its database image
   uses (pljs, QuickJS's PL/JavaScript, as `plv8`; and pg_ivm), and every app's
   appliance takes only their libraries and extension files. Outside the monorepo

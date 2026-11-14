@@ -185,10 +185,10 @@ Deno.test("every appliance carries pljs as plv8 and pg_ivm, built by the databas
   // per-app stage each docker app compiled the same toolchain in is gone.
   assert(!rd.deps.some((d) => d.includes("pg-extensions")), `a per-app extensions build: ${rd.deps}`);
   const copied = rd.dockerfile.copy.map((c) => `${c.from?.name ?? c.from?.ref ?? ""}${c.srcs.join(",")}>${c.dst}`);
-  assert(copied.includes("libraries_mecha-extensions-image/pg-extensions/lib/>/usr/lib/postgresql18/lib64/"), copied.join(" "));
-  assert(copied.includes("libraries_mecha-extensions-image/pg-extensions/extension/>/usr/share/postgresql18/extension/"), copied.join(" "));
+  assert(copied.includes("libraries_mecha-extensions-image/pg-extensions/lib/>/usr/lib/postgresql/18/lib/"), copied.join(" "));
+  assert(copied.includes("libraries_mecha-extensions-image/pg-extensions/extension/>/usr/share/postgresql/18/extension/"), copied.join(" "));
   const server = JSON.stringify(rd.dockerfile.defaultPreamble);
-  assertStringIncludes(server, "postgresql18-server=18.6-160000.1.1");
+  assertStringIncludes(server, "'postgresql-18=18.*'");
 });
 
 // The appliance once ran no change feed: an app's drains and pipelines, which
@@ -215,8 +215,8 @@ Deno.test("release-docker runs the change feed as compose does: Conduit, the bus
   const preamble = rd.dockerfile.preamble.join("\n");
   for (const s of ["ENV MECHA_MESH_DIR=/mesh-events", "ENV MECHA_TRANSFORM_DIR=/transform"]) assertStringIncludes(preamble, s);
   for (const p of ["conduit", "transform"]) assert(rd.dockerfile.cmd.includes(p), `${p} is not started: ${rd.dockerfile.cmd}`);
-  const zypper = await exportJson('_build.project.targets["release-docker"].dockerfile.defaultPreamble', code);
-  assertStringIncludes(JSON.stringify(zypper.value), "redis=8.2.0-bp160.1.3");
+  const packages = await exportJson('_build.project.targets["release-docker"].dockerfile.defaultPreamble', code);
+  assertStringIncludes(JSON.stringify(packages.value), "redis-server");
 });
 
 // The appliance refused computations, for want of the compute service and

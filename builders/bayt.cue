@@ -26,7 +26,7 @@ import (
 	mecha "github.com/bonisoft3/pronto/clusters:mecha"
 	omnishell "github.com/bonisoft3/pronto/terminals:omnishell"
 	"github.com/bonisoft3/pronto/resilience"
-	zypper "github.com/bonisoft3/bayt/distros/zypper"
+	apt "github.com/bonisoft3/bayt/distros/apt"
 )
 
 // bayt's own project schema, re-exported so a compiler (or anyone) can
@@ -1205,21 +1205,17 @@ import (
 						image: "${BAYT_DOCKER_REPOSITORY:-ghcr.io/bonisoft3/\(B.meta.app)}:${BAYT_IMAGE_TAG:-latest}"
 					}
 					dockerfile: core.nubox & {
-						defaultPreamble: "zypper-postgres": (zypper.#install & {
-							pkgs: list.Concat([
-								[
-									"postgresql18-server=\(mecha.#AppliancePostgres)",
-									"postgresql18-contrib=\(mecha.#AppliancePostgres)",
-									"libopenssl3=3.5.0-160000.10.1",
-								],
-								// The bus's store; Redis's own image links musl.
-								[if _capture {"redis=8.2.0-bp160.1.3"}],
-							])
-							then: [
-								"rm -rf /usr/lib/locale/*",
-								"mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql",
-							]
-						}).out
+						defaultPreamble: {
+							"pgdg": {priority: -6, line: mecha.#AppliancePgdg}
+							"postgres": (apt.#install & {
+								pkgs: list.Concat([
+									["postgresql-\(mecha.#AppliancePostgres)=\(mecha.#AppliancePostgres).*"],
+									// The bus's store; Redis's own image links musl.
+									[if _capture {"redis-server=5:8.0.*"}],
+								])
+								then: ["mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql"]
+							}).out
+						}
 						add: B._processComposeAdd
 						copy: list.Concat([
 							[
@@ -1232,10 +1228,10 @@ import (
 								{from: {ref: ":caddy"}, srcs: ["/usr/bin/caddy"], dst: "/usr/bin/caddy"},
 								{from: {ref: ":caddy"}, srcs: ["/etc/caddy/Caddyfile"], dst: "/etc/caddy/Caddyfile"},
 								{srcs: [".bayt/process-compose.yaml"], dst: "/.bayt/process-compose.yaml"},
-								// pljs as `plv8` and pg_ivm, which leap ships without, built once by
+								// pljs as `plv8` and pg_ivm, which PGDG ships without, built once by
 								// mecha against this same server (mecha.#AppliancePostgres).
-								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/lib/"], dst: "/usr/lib/postgresql18/lib64/"},
-								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/extension/"], dst: "/usr/share/postgresql18/extension/"},
+								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/lib/"], dst: "/usr/lib/postgresql/\(mecha.#AppliancePostgres)/lib/"},
+								{from: name: "libraries_mecha-extensions-image", srcs: ["/pg-extensions/extension/"], dst: "/usr/share/postgresql/\(mecha.#AppliancePostgres)/extension/"},
 							],
 							// The door's tree as this target releases it (emit.cue's
 							// served-release), and the inline scripts its policy names.
@@ -1352,7 +1348,7 @@ import (
 								#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'while sleep "${POKE_INTERVAL_SECONDS:-60}"; do' '  curl -fsS -X POST -H "Authorization: Bearer ${SERVICE_JWT}" "http://ticker:\#(mecha.#AppliancePort.ticker)/poke?caller=appliance" >/dev/null || { echo "clock: the ticker refused its poke" >&2; exit 1; }' 'done' > /usr/local/bin/appliance-clock.sh && chmod 755 /usr/local/bin/appliance-clock.sh"#,
 							]},
 							[
-								"ENV PATH=/usr/lib/postgresql18/bin:/usr/local/bin:$PATH",
+								"ENV PATH=/usr/lib/postgresql/\(mecha.#AppliancePostgres)/bin:/usr/local/bin:$PATH",
 								"ENV PGDATA=/var/lib/pgsql/data",
 								"ENV DATABASE_PG_PORT=5432",
 								"ENV CRUD_HTTP_PORT=3000",
@@ -1375,7 +1371,7 @@ import (
 						])
 						epilogue: [
 							// The temporary server starts with the server's options.
-							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if [ "$1" = "postgres" ]; then shift; fi' 'export PGDATA="${PGDATA:-/var/lib/pgsql/data}"' 'export POSTGRES_DB="${POSTGRES_DB:-\#(B.meta.app)}"' 'export PATH="/usr/lib/postgresql18/bin:$PATH"' 'q=$(printf "\047")' 'if [ ! -s "$PGDATA/PG_VERSION" ]; then' '  mkdir -p "$PGDATA" /run/postgresql' '  chown -R postgres:postgres "$PGDATA" /run/postgresql' '  setpriv --reuid=postgres --regid=postgres --clear-groups initdb -D "$PGDATA" --no-sync --encoding=UTF8 --auth=trust --locale-provider=icu --icu-locale=und --locale=C' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  if [ "$POSTGRES_DB" != "postgres" ]; then setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\""; fi' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      echo "Applying $f..."' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '      base=$(basename "$f")' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q) ON CONFLICT DO NOTHING"' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'else' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      base=$(basename "$f")' '      case "$base" in *seed*) continue;; esac' '      applied=$(setpriv --reuid=postgres --regid=postgres --clear-groups psql -t -A -U postgres -d "$POSTGRES_DB" -c "SELECT count(*) FROM _pronto_migrations WHERE name = $q$base$q")' '      if [ "$applied" = "0" ]; then' '        echo "Applying pending migration $f..."' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q)"' '      fi' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'fi' 'exec setpriv --reuid=postgres --regid=postgres --clear-groups postgres -D "$PGDATA" -c listen_addresses=127.0.0.1 "$@"' > /usr/local/bin/docker-entrypoint.sh && chmod 755 /usr/local/bin/docker-entrypoint.sh"#,
+							#"RUN printf '%s\n' '#!/bin/sh' 'set -e' 'if [ "$1" = "postgres" ]; then shift; fi' 'export PGDATA="${PGDATA:-/var/lib/pgsql/data}"' 'export POSTGRES_DB="${POSTGRES_DB:-\#(B.meta.app)}"' 'export PATH="/usr/lib/postgresql/\#(mecha.#AppliancePostgres)/bin:$PATH"' 'q=$(printf "\047")' 'if [ ! -s "$PGDATA/PG_VERSION" ]; then' '  mkdir -p "$PGDATA" /run/postgresql' '  chown -R postgres:postgres "$PGDATA" /run/postgresql' '  setpriv --reuid=postgres --regid=postgres --clear-groups initdb -D "$PGDATA" --no-sync --encoding=UTF8 --auth=trust --locale-provider=icu --icu-locale=und --locale=C' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  if [ "$POSTGRES_DB" != "postgres" ]; then setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\""; fi' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      echo "Applying $f..."' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '      base=$(basename "$f")' '      setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q) ON CONFLICT DO NOTHING"' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'else' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -w -o "-c listen_addresses='\'''\'' $*" start' '  setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "CREATE TABLE IF NOT EXISTS _pronto_migrations (name text primary key, applied_at timestamptz default now())"' '  for f in /docker-entrypoint-initdb.d/*.sql; do' '    if [ -f "$f" ]; then' '      base=$(basename "$f")' '      case "$base" in *seed*) continue;; esac' '      applied=$(setpriv --reuid=postgres --regid=postgres --clear-groups psql -t -A -U postgres -d "$POSTGRES_DB" -c "SELECT count(*) FROM _pronto_migrations WHERE name = $q$base$q")' '      if [ "$applied" = "0" ]; then' '        echo "Applying pending migration $f..."' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -f "$f"' '        setpriv --reuid=postgres --regid=postgres --clear-groups psql -U postgres -d "$POSTGRES_DB" -c "INSERT INTO _pronto_migrations (name) VALUES ($q$base$q)"' '      fi' '    fi' '  done' '  setpriv --reuid=postgres --regid=postgres --clear-groups pg_ctl -D "$PGDATA" -m fast -w stop' 'fi' 'exec setpriv --reuid=postgres --regid=postgres --clear-groups postgres -D "$PGDATA" -c listen_addresses=127.0.0.1 "$@"' > /usr/local/bin/docker-entrypoint.sh && chmod 755 /usr/local/bin/docker-entrypoint.sh"#,
 							#"RUN printf '%s\n' '#!/bin/sh' 'if [ "$1" = "microcheck" ]; then' '  shift' '  exec "$@"' 'fi' 'exec "$@"' > /usr/local/bin/bayt && chmod 755 /usr/local/bin/bayt"#,
 							// nu, wherever mise installed it, by its own account.
 							#"RUN cp "$(/root/.local/share/lazybox/bin/nu -c '$nu.current-exe')" /usr/local/bin/nu && chmod 755 /usr/local/bin/nu && /usr/local/bin/nu --version"#,
