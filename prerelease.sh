@@ -58,7 +58,7 @@ for dep, v in (('mecha', mecha_v), ('omnishell', omnishell_v)):
     edit('cue.mod/module.cue', lambda s: re.sub(r'("github.com/bonisoft3/' + dep + r'@v0": \{\n\t\tv:\s+)"[^"]+"', lambda m: m.group(1) + f'"v{v}"', s))
 edit('distribution/config.cue', lambda s: re.sub(r'#Version:(\s+)"([^"]+)"', lambda m: f'#Version:{m.group(1)}"{pronto_v}" // was "{m.group(2)}"', s, count=1))
 registry = 'github.com/bonisoft3/pronto=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/mecha=ghcr.io/bsoneca/cue-modules,github.com/bonisoft3/omnishell=ghcr.io/bsoneca/cue-modules,registry.cue.works'
-edit('distribution/config.cue', lambda s: s.replace('\tmise: {\n\t\t...\n', f'\tmise: {{\n\t\t...\n\t\t// The fork\'s modules, where the fork publishes them (prerelease.sh), a default that an app sets again.\n\t\tenv: CUE_REGISTRY: *"{registry}" | string\n', 1))
+edit('distribution/config.cue', lambda s: s.replace('\tmise: {\n\t\t...\n', f'\tmise: {{\n\t\t...\n\t\t// The fork\'s modules, where the fork publishes them (prerelease.sh), a default that an app sets again.\n\t\t// Open (...), so an app may still set another mise env var beside it.\n\t\tenv: {{CUE_REGISTRY: *"{registry}" | string, ...}}\n', 1))
 EOF
 # The lock bootstrap ships: the fork's pronto, mecha and omnishell, and the tools its roster adds.
 python3 -I "$here/.github/fork-lock.py" "$PRONTO_V" "$MECHA_V" "$work/mecha-assets.json" "$OMNISHELL_V" "$work/omnishell-assets.json"
