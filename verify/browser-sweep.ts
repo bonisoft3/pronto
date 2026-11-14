@@ -14,6 +14,8 @@ export interface JourneyItem {
   screen: string;
   role?: string;
   path?: string;
+  /** The journey stands in for the sweep's representative visit of its screen. */
+  replaces?: boolean;
   run?: (page: any, ctx?: AirlockContext) => Promise<void>;
 }
 
@@ -390,10 +392,15 @@ export async function verifyBrowser(
       ? (typeof options.ctx.session === "string" ? options.ctx.session : JSON.stringify(options.ctx.session))
       : null;
 
+    // A journey that says it replaces the representative visit of its screen covers it:
+    // a screen whose canonical entry is another screen (a deck opening at its first
+    // card) reads a bare visit as a mismatch, and the journey is how it is reached.
     for (const j of options.journeys ?? []) {
       journeysToRun.push(j);
-      if ("run" in j && typeof j.run === "function") customScreens.add("spec" in j ? j.spec.screen : j.screen);
-      else coveredScreens.add("spec" in j ? j.spec.screen : j.screen);
+      const screen = "spec" in j ? j.spec.screen : j.screen;
+      const replaces = "spec" in j ? j.spec.replaces === true : j.replaces === true;
+      if ("run" in j && typeof j.run === "function") customScreens.add(screen);
+      if (!("run" in j && typeof j.run === "function") || replaces) coveredScreens.add(screen);
     }
 
     const representative = options.hints
