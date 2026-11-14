@@ -65,7 +65,8 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
     if (path.isAbsolute(decl.handler) || decl.handler.split(/[\\/]/).includes('..')) {
       throw new Error(`effect ${name}: unsafe handler path ${decl.handler}`)
     }
-    const handlerPath = path.join(appDir, decl.handler)
+    // A handler is named from the manifest's directory, where derive writes its bundle.
+    const handlerPath = path.join(appDir, 'services/airlock', decl.handler)
     await Deno.stat(handlerPath)
     const target: EffectTarget = decl.bridge !== undefined ? bridgeTarget(name, decl.bridge, containers) : decl.edgeOrigin ? { kind: 'origin', url: decl.edgeOrigin } : { kind: 'tsbifrost' }
     const ident = `handler_${i}`
