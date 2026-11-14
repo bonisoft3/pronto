@@ -294,3 +294,18 @@ Deno.test("registry bootstrap seeds the default roster, regenerates, and preserv
     await $`rm -rf ${scratch}`;
   }
 });
+
+// front_test.ts runs identity/hydra's hydra, the host roster pins hydra for apps:
+// one sqlite build per platform, stated twice, so they are held equal here.
+Deno.test("pronto's own hydra pin is the host roster's", async () => {
+  const cue = async (args: string[]) => {
+    const result = await new Deno.Command("cue", { args, cwd: repo, stdout: "piped", stderr: "piped" }).output();
+    assert(result.success, `${args.join(" ")}: ${decoder.decode(result.stderr)}`);
+    return decoder.decode(result.stdout);
+  };
+  const canonical = (value: unknown): string => JSON.stringify(value, (_, v) =>
+    v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);
+  const host = JSON.parse(await cue(["export", "./plugins/pronto/distribution", "-e", '#HostTools["http:hydra"]', "--out", "json"]));
+  const own = JSON.parse(await cue(["export", "toml:", "plugins/pronto/identity/hydra/mise.toml", "--out", "json"])).tools["http:hydra"];
+  assert(canonical(own) === canonical(host), `plugins/pronto/identity/hydra/mise.toml pins hydra as ${canonical(own)}; distribution/config.cue #HostTools as ${canonical(host)}`);
+});

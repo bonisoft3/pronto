@@ -15,7 +15,7 @@ say:
       omnishell-bundle:
         priority: -2
         cmds:
-          - do: "with-env {MISE_LOCKED: '0'} { mise tool-stub ../sayt/task.toml -t ../omnishell/.bayt/Taskfile.yml bayt:bundle }"
+          - do: "mise tool-stub ../sayt/task.toml -t ../omnishell/.bayt/Taskfile.yml bayt:bundle"
       loop:
         priority: -1
         cmds:
@@ -67,7 +67,7 @@ say:
           - do: "cue vet -c=false ./identity"
           - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
           - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker identity/hydra/fake_test.ts"
-          - do: "mise x github:ory/hydra@26.2.0 -- sh -c 'HYDRA_BIN=$(command -v hydra) deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
+          - do: "mise -C identity/hydra x -- sh -c 'export HYDRA_BIN=$(command -v hydra); cd ../.. && deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
       outcome-obligations:
         priority: -1
         cmds:

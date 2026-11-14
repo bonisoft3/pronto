@@ -1,7 +1,7 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { fileURLToPath } from "node:url";
 
-Deno.test("non-watch launch invokes the sayt nu tool-stub with MISE_LOCKED=0", async () => {
+Deno.test("non-watch launch invokes the sayt nu tool-stub with the caller's locking", async () => {
   if (Deno.build.os === "windows") return;
   const root = await Deno.makeTempDir();
   try {
@@ -37,7 +37,7 @@ printf '%s\\n' "locked=$MISE_LOCKED" "stub=$2" "args=$PRONTO_LAUNCH_ARGS" > "${r
     assertEquals(out.code, 0);
     assertEquals(
       await Deno.readTextFile(`${root}/observed`),
-      `locked=0\nstub=${root}/sayt/nu.toml\nargs=["--port","8080"]\n`,
+      `locked=1\nstub=${root}/sayt/nu.toml\nargs=["--port","8080"]\n`,
     );
   } finally {
     await Deno.remove(root, { recursive: true });

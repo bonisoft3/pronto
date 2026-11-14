@@ -76,16 +76,12 @@ generated configuration, then lock the new tools before step 4:
 
 ```sh
 ./saytw --script tools.nu mise lock
-./saytw --script tools.nu nu -c 'with-env {MISE_LOCKED: "0"} { ^mise install }'
 ```
 
-`mise lock` reads release metadata from GitHub's API, so give it a
-`GITHUB_TOKEN`; it leaves HTTP artifacts without checksums, which the scoped
-install records for the current platform. Setting `MISE_LOCKED=0` outside
-that scoped command does not work: Sayt clears the launcher's override so
-project locking prevails. An already-installed tool is skipped without
-filling its entry; repeat the install with `--force <tool>` (for example,
-`^mise install --force http:duckdb`) and recheck the lock.
+`mise lock` resolves release metadata through mise's versions host and
+downloads each HTTP artifact once to record its checksum, for every platform
+the lock already lists. Installs stay locked: an unlocked install would
+rewrite the lock and fail on `mise.local.toml`'s `path:` pins.
 
 Once the app has a `program.cue`, that command rewrites only `.mise.toml` and
 `.mise.host.toml`; the seat's Sayt rules reach `.say.yaml` on the next

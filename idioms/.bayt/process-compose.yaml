@@ -1,8 +1,6 @@
 # generated from bayt.cue — do not edit
 version: "0.5"
 ordered_shutdown: true
-environment:
-- MISE_LOCKED=0
 processes:
   "launch:build":
     entrypoint:

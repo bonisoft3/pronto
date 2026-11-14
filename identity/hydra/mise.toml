@@ -1,0 +1,29 @@
+# front_test.ts runs a real Hydra from here, through `mise -C identity/hydra`, so
+# only that rule pays for the download: the sqlite builds, as distribution/config.cue
+# pins them for hosts, since the release's default assets carry no database.
+[settings]
+lockfile = true
+
+[tools."http:hydra"]
+version = "26.2.0"
+
+[tools."http:hydra".platforms.linux-x64]
+url = "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-linux_sqlite_64bit.tar.gz"
+
+[tools."http:hydra".platforms.linux-arm64]
+url = "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-linux_sqlite_arm64.tar.gz"
+
+[tools."http:hydra".platforms.linux-x64-musl]
+url = "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-linux_sqlite_64bit.tar.gz"
+
+[tools."http:hydra".platforms.linux-arm64-musl]
+url = "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-linux_sqlite_arm64.tar.gz"
+
+[tools."http:hydra".platforms.macos-x64]
+url = "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-macOS_sqlite_64bit.tar.gz"
+
+[tools."http:hydra".platforms.macos-arm64]
+url = "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-macOS_sqlite_arm64.tar.gz"
+
+[tools."http:hydra".platforms.windows-x64]
+url = "https://github.com/ory/hydra/releases/download/v{{ version }}/hydra_{{ version }}-windows_sqlite_64bit.zip"

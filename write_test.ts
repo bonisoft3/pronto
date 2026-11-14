@@ -71,7 +71,7 @@ Deno.test("a settled build preserves outputs and still follows new template read
           "build",
         ],
         cwd: app,
-        env: { MISE_TRUSTED_CONFIG_PATHS: repo, MISE_LOCKED: "0" },
+        env: { MISE_TRUSTED_CONFIG_PATHS: repo },
         stdout: "piped",
         stderr: "piped",
       }).output();
@@ -89,7 +89,7 @@ Deno.test("a settled build preserves outputs and still follows new template read
         "use auto-bayt.nu; auto-bayt",
       ],
       cwd: app,
-      env: { MISE_TRUSTED_CONFIG_PATHS: repo, MISE_LOCKED: "0" },
+      env: { MISE_TRUSTED_CONFIG_PATHS: repo },
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -329,7 +329,6 @@ Deno.test("Pronto check gates retain consumer rules and track test fixtures", as
       env: {
         ...commandEnv,
         MISE_TRUSTED_CONFIG_PATHS: repo,
-        MISE_LOCKED: "0",
       },
       stdout: "piped",
       stderr: "piped",
@@ -565,7 +564,7 @@ Deno.test("writer packages Activepieces assets and sweeps only stale generated c
     const result = await new Deno.Command(Deno.execPath(), {
       args: ["run", "--config", join(repo, "plugins/pronto/deno.json"), "--allow-all", writer, "."],
       cwd: app,
-      env: { MISE_TRUSTED_CONFIG_PATHS: repo, MISE_LOCKED: "0" },
+      env: { MISE_TRUSTED_CONFIG_PATHS: repo },
       stdout: "piped", stderr: "piped",
     }).output();
     assert(result.success, new TextDecoder().decode(result.stderr));
