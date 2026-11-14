@@ -48,7 +48,7 @@ export function pgrollMigrations(listing: string): string[] {
  * Carrying the oid is what lets the comparison tell "this column moved" from
  * "this table is not the table that was here".
  */
-export const CATALOG = `
+export const catalogQuery = (appSchema: string) => `
   SELECT c.oid::bigint AS rel,
          c.relname AS tbl,
          c.relkind AS kind,
@@ -58,7 +58,7 @@ export const CATALOG = `
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     JOIN pg_attribute a ON a.attrelid = c.oid
-   WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m')
+   WHERE n.nspname = '${appSchema}' AND c.relkind IN ('r','p','v','m')
      AND a.attnum > 0 AND NOT a.attisdropped
    ORDER BY c.relname, a.attnum`;
 
@@ -149,12 +149,12 @@ export async function compareCatalogs(before: Column[], after: Column[], path: s
 
 // Views may depend on now(); only stored rows must stay byte-identical when
 // the migration ledger says there is no work left to do.
-const DATA_SNAPSHOT = `
+export const dataSnapshotQuery = (appSchema: string) => `
   CREATE TEMP TABLE replay_rows (name text, rows bigint, digest text);
   DO $$ DECLARE r record; BEGIN
     FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-      WHERE n.nspname='public' AND c.relkind IN ('r','p','m') ORDER BY c.relname LOOP
-      EXECUTE format('INSERT INTO replay_rows SELECT %L, count(*), md5(coalesce(string_agg(md5(row_to_json(t)::text), '''' ORDER BY md5(row_to_json(t)::text)), '''')) FROM public.%I t', r.relname, r.relname);
+      WHERE n.nspname='${appSchema}' AND c.relkind IN ('r','p','m') ORDER BY c.relname LOOP
+      EXECUTE format('INSERT INTO replay_rows SELECT %L, count(*), md5(coalesce(string_agg(md5(row_to_json(t)::text), '''' ORDER BY md5(row_to_json(t)::text)), '''')) FROM ${appSchema}.%I t', r.relname, r.relname);
     END LOOP;
   END $$;
   SELECT coalesce(json_agg(r ORDER BY name), '[]') FROM replay_rows r;`;
@@ -240,12 +240,12 @@ export async function locate(appDir: string, scriptPath: string): Promise<string
 }
 
 export async function main(appDir: string): Promise<number> {
-  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published; actors?: string };
+  const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/cluster.json`)) as { server: boolean; schema?: Published; actors?: string; schemas?: { app: string } };
   if (!facts.server || facts.schema === undefined) {
     throw new Error("this app's every entity is a browser tier: it has no schema to replay");
   }
   const fixtures = await loadFixtures(appDir);
-  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures, actors: facts.actors });
+  const found = await replayDatabase({ appDir, published: facts.schema, env: Deno.env.toObject(), fixtures, actors: facts.actors, appSchema: facts.schemas?.app });
   console.log(JSON.stringify(found, null, 2));
   return found.some((f) => f.severity === "error") ? 1 : 0;
 }
@@ -256,8 +256,8 @@ export type Migrator = { entrypoint?: string[]; command?: string[]; env?: Record
  * the machines' migration (services/database/migrations/<actors>), whose SQL
  * reads time and randomness only as recorded input (sql-recorded.ts), judged
  * against the catalog of the database it just bootstrapped. */
-export async function replayDatabase({ appDir, published, env, migrator, fixtures = [], actors }: {
-  appDir: string; published: Published; env: Record<string, string>; migrator?: Migrator; fixtures?: UpgradeFixture[]; actors?: string;
+export async function replayDatabase({ appDir, published, env, migrator, fixtures = [], actors, appSchema = "public" }: {
+  appDir: string; published: Published; env: Record<string, string>; migrator?: Migrator; fixtures?: UpgradeFixture[]; actors?: string; appSchema?: string;
 }): Promise<Finding[]> {
   const settings = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_INITDB_ARGS"];
   const missing = settings.filter((k) => env[k] === undefined);
@@ -299,7 +299,7 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
       return out.stdout;
     };
     const sql = (db: string, query: string) => must(psql(db, `SET pgroll.no_inferred_migrations = 'TRUE'; ${query}`, ["-X", "-t", "-A"]), `query ${db}`);
-    const catalog = async (db: string): Promise<Column[]> => JSON.parse(await sql(db, `SELECT coalesce(json_agg(t), '[]') FROM (${CATALOG}) t`));
+    const catalog = async (db: string): Promise<Column[]> => JSON.parse(await sql(db, `SELECT coalesce(json_agg(t), '[]') FROM (${catalogQuery(appSchema)}) t`));
     const bootstrap = async (db: string, omitted: string[] = []) => {
       for (const name of omitted) {
         if (!scripts.some(s => s.endsWith(`/${name}`))) throw new Error(`retained fixture omits unknown initdb step ${name}`);
@@ -359,13 +359,13 @@ export async function replayDatabase({ appDir, published, env, migrator, fixture
       const argv = [...entrypoint, ...command];
       return await run(argv[0], argv.slice(1), { env: runEnv });
     };
-    const ledger = (db: string) => sql(db, "SELECT coalesce(json_agg(m ORDER BY name), '[]') FROM pgroll.migrations m WHERE schema = 'public'");
+    const ledger = (db: string) => sql(db, `SELECT coalesce(json_agg(m ORDER BY name), '[]') FROM pgroll.migrations m WHERE schema = '${appSchema}'`);
     const snapshot = async (db: string) => {
-      const schema = await must(run("pg_dump", ["-h", "127.0.0.1", "-U", user, "-d", db, "--schema-only", "--schema=public"], { env: pgEnv }), "dump schema");
+      const schema = await must(run("pg_dump", ["-h", "127.0.0.1", "-U", user, "-d", db, "--schema-only", `--schema=${appSchema}`], { env: pgEnv }), "dump schema");
       return JSON.stringify({
         schema: schema.split("\n").filter(l => !/^\\(?:un)?restrict /.test(l)).join("\n"),
         catalog: await catalog(db),
-        rows: await sql(db, DATA_SNAPSHOT),
+        rows: await sql(db, dataSnapshotQuery(appSchema)),
         ledger: await ledger(db),
       });
     };
