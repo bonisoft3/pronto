@@ -242,6 +242,20 @@ import (
 	// effects read and this does not name fails the release; a Secret not there fails it too, before
 	// anything rolls (check-airlock-secrets).
 	airlock: secrets: [=~"^[A-Z][A-Z0-9_]*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+	// Each effect's sink on this target, by effect (the app's .pronto/cluster.json k8sSinks; the
+	// release fills it): an https origin, or a Service of this cluster over plain HTTP. They become
+	// the airlock's daprd's HTTPEndpoints and its only egress past DNS (runtime.cue).
+	airlock: sinks: [=~"^[a-z][a-z0-9-]*$"]: {
+		origin?: =~"^https://"
+		service?: {
+			name:       =~"^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+			namespace:  =~"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+			port:       int & >=1 & <=65535
+			targetPort: int & >=1 & <=65535
+			path?:      =~"^/"
+		}
+		_one: (len([if origin != _|_ {1}]) + len([if service != _|_ {1}])) & 1
+	}
 	_unsecured: [for _, r in runtime for k in r.secrets if airlock.secrets[k] == _|_ {k}]
 	_secured: [
 		if len(_unsecured) == 0 {true},
@@ -429,6 +443,13 @@ import (
 		// the private ranges without one fails the release's vet, so a pull request adding one fails
 		// its gate.
 		internet: *"open" | "airlock"
+		// A service mesh whose sidecars run in the airlock's two pods (Istio's, say) needs its control
+		// plane, which the airlock's walls otherwise shut: each pod then also reaches `ports` in
+		// `namespace`. Absent, they reach no mesh.
+		meshControlPlane?: {
+			namespace: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" | *"istio-system"
+			ports: [...int & >=1 & <=65535] | *[15012]
+		}
 	}
 
 	// Each egress entry that reaches past the private ranges with no `why`, under "airlock".

@@ -1247,6 +1247,20 @@ export def compose-config [app_dir: string, --json, --services]: nothing -> any 
 	if $services { $r.stdout | lines } else if $json { $r.stdout | from json } else { $r.stdout }
 }
 
+# Each effect's sink on this target, as generate wrote them (.pronto/cluster.json k8sSinks): an
+# origin, or an in-cluster Service. What the release cannot deploy fails it, as runtime-services does.
+export def airlock-sinks [facts: record]: nothing -> record {
+	if ($facts.k8sSinks? == null) {
+		error make {msg: ".pronto/cluster.json names no k8sSinks: generate the app again before releasing its effects"}
+	}
+	for e in ($facts.k8sSinks | transpose name sink) {
+		if $e.sink == null { error make {msg: $"effect ($e.name) names no sink for target k8s"} }
+		if $e.sink.bridge? != null { error make {msg: $"native release does not deploy container bridges: effect ($e.name) reaches ($e.sink.bridge) on k8s"} }
+		if $e.sink.ai? != null { error make {msg: $"native release does not deploy the AI gateway \(tsbifrost\): effect ($e.name) reaches ai on k8s"} }
+	}
+	$facts.k8sSinks
+}
+
 export def runtime-services [compose: record, --secrets: list<string> = []]: nothing -> record {
 	let supported = ["compute" "feldera" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy" "airlock" "airlock-mesh"]
 	let services = ($compose.services | columns)
@@ -1315,7 +1329,8 @@ export def render-manifests [
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
 	let runtime = (release-runtime ($cue_path | path dirname) $env_name)
-	{App: {database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}, runtime: $runtime, doors: ($facts.doors? | default [])}} | to json | save -f $roles_file
+	let airlock = if "airlock" in $runtime { {airlock: {sinks: (airlock-sinks $facts)}} } else { {} }
+	{App: ({database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}, runtime: $runtime, doors: ($facts.doors? | default [])} | merge $airlock)} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
 	rm $roles_file

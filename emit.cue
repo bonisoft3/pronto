@@ -3914,6 +3914,11 @@ _pgrollDir: "services/database/pgroll"
 				// The effect steps a page or edge release places among the
 				// migrations, where the program places them, and why it may.
 				if E.code.state.steps != _|_ {steps: {graphile: E._steps.graphile, airlock: E._steps.airlock, note: E.code.state.steps.note}}
+				// Each effect's sink on a Kubernetes release, which writes the
+				// airlock's daprd's endpoints and egress from them (null: none).
+				if E.code.state.effects != _|_ if len(E.code.state.effects) > 0 {
+					k8sSinks: {for n, x in E.code.state.effects {(n): (#SinkAt & {sink: x.sink, target: "k8s"}).out}}
+				}
 				// The bridges a release lowers past the cluster: each container's
 				// port, release targets and the cluster target building its image,
 				// whose bayt files hold the Dockerfile and the resolved environment

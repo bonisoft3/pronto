@@ -1,9 +1,11 @@
 package schema
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/yaml"
 	"regexp"
 	"strconv"
-	"strings"
 )
 
 #Runtime: {
@@ -25,13 +27,34 @@ import (
 		{ipBlock: cidr: "169.254.169.254/32"},
 	]}
 	let mesh = *app.runtime["airlock-mesh"].env | {}
+	let sinks = app.airlock.sinks
 	// The sinks' ports, each origin's own or 443 (mecha's #Origin).
 	let sinkPorts = {
-		for o in strings.Fields(*mesh.AIRLOCK_ORIGINS | "") {
-			let p = [if o =~ ":[0-9]+$" {strconv.Atoi(regexp.FindSubmatch("^.*:([0-9]+)$", o)[1])}, 443][0]
+		for _, s in sinks if s.origin != _|_ {
+			let p = [if s.origin =~ ":[0-9]+$" {strconv.Atoi(regexp.FindSubmatch("^.*:([0-9]+)$", s.origin)[1])}, 443][0]
 			"\(p)": p
 		}
 	}
+	// The in-cluster sinks' pod ports, by namespace.
+	let inCluster = {for _, s in sinks if s.service != _|_ {(s.service.namespace): "\(s.service.targetPort)": s.service.targetPort}}
+	// Each effect's HTTPEndpoint on this target, mounted over the one the image bakes from compose's.
+	let endpoints = {for n, s in sinks {
+		"\(n).yaml": yaml.Marshal({
+			apiVersion: "dapr.io/v1alpha1"
+			kind:       "HTTPEndpoint"
+			metadata: name: n
+			spec: baseUrl: [
+				if s.origin != _|_ {s.origin},
+				if s.service != _|_ {"http://\(s.service.name).\(s.service.namespace).svc.cluster.local\([if s.service.port != 80 {":\(s.service.port)"}, ""][0])\([if s.service.path != _|_ {s.service.path}, ""][0])"},
+			][0]
+		})
+	}}
+	// A service mesh's control plane, which its sidecars in the airlock's pods reach.
+	let meshControlPlane = [if app.networkPolicy.meshControlPlane != _|_ {
+		let m = app.networkPolicy.meshControlPlane
+		to: [{namespaceSelector: matchLabels: {"kubernetes.io/metadata.name": m.namespace}}]
+		ports: [for p in m.ports {port: p, protocol: "TCP"}]
+	}]
 	// The two walls compose keeps with two networks (mecha's #AirlockNetworks), as two pods: the
 	// airlock reaches the database and its daprd alone, and only the ticker's wake reaches it; its
 	// daprd is reached by the airlock alone and reaches the sinks, under networkPolicy.internet
@@ -44,6 +67,7 @@ import (
 				{to: [{podSelector: matchLabels: {"cnpg.io/cluster": "\(app.id)-db"}}], ports: [{port: 5432, protocol: "TCP"}]},
 				{to: [{podSelector: matchLabels: componentLabels["airlock-mesh"]}], ports: [{port: 3500, protocol: "TCP"}]},
 				namedDns,
+				for r in meshControlPlane {r},
 			]
 		}
 		"airlock-mesh": {
@@ -56,15 +80,28 @@ import (
 					to: [{ipBlock: {cidr: "0.0.0.0/0", except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"]}}]
 					ports: [for _, p in sinkPorts {port: p, protocol: "TCP"}]
 				},
+				// Each in-cluster sink's namespace, on its pods' ports: a NetworkPolicy matches the
+				// connection after the Service's address is translated to a pod's.
+				for ns, podPorts in inCluster {
+					to: [{namespaceSelector: matchLabels: {"kubernetes.io/metadata.name": ns}}]
+					ports: [for _, p in podPorts {port: p, protocol: "TCP"}]
+				},
 				// The blob plane's binding, where the app has one.
 				if mesh.BLOBS_S3_URL != _|_ {
 					to: [{podSelector: matchLabels: componentLabels["rclone-s3"]}]
 					ports: [{port: servicePorts["rclone-s3"], protocol: "TCP"}]
 				},
+				for r in meshControlPlane {r},
 			]
 		}
 	}
 	objects: [for svc, runtime in app.runtime for object in [
+		if svc == "airlock-mesh" {
+			apiVersion: "v1"
+			kind:       "ConfigMap"
+			metadata: {name: "\(app.id)-airlock-endpoints", namespace: app.ns}
+			data: endpoints
+		},
 		if mounts[svc] != _|_ {
 			apiVersion: "v1"
 			kind:       "PersistentVolumeClaim"
@@ -95,6 +132,8 @@ import (
 								"dapr.io/config":   "\(app.id)-dapr-config"
 							}
 						}
+						// A changed endpoint rolls the daprd, which reads its resources at start.
+						if svc == "airlock-mesh" {annotations: "pronto.dev/config": hex.Encode(sha256.Sum256(yaml.Marshal(endpoints)))}
 					}
 					spec: {
 						terminationGracePeriodSeconds: 120
@@ -102,12 +141,15 @@ import (
 						if mounts[svc] != _|_ {
 							volumes: [{name: "state", persistentVolumeClaim: claimName: "\(app.id)-\(svc)"}]
 						}
+						if svc == "airlock-mesh" {volumes: [{name: "endpoints", configMap: name: "\(app.id)-airlock-endpoints"}]}
 						containers: [{
 							"name":          svc
 							image:           images[svc]
 							imagePullPolicy: environment.imagePullPolicy
 							resources:       app.runtimeResources
 							if mounts[svc] != _|_ {volumeMounts: [{name: "state", mountPath: mounts[svc]}]}
+							// File by file: the image's wall, resiliency and blob binding stay.
+							if svc == "airlock-mesh" {volumeMounts: [for n, _ in sinks {name: "endpoints", mountPath: "/dapr/airlock/\(n).yaml", subPath: "\(n).yaml", readOnly: true}]}
 							if svc == "redis" {args: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]}
 							env: [
 								if len(runtime.databaseEnvironment) > 0 {{name: "PGPASSWORD", valueFrom: secretKeyRef: {name: "\(app.id)-db-postgres", key: "password"}}},

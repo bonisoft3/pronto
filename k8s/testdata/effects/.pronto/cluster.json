@@ -1,1 +1,1 @@
-{"server":true,"tokenRoles":["anon","app_user","service"]}
+{"server":true,"tokenRoles":["anon","app_user","service"],"k8sSinks":{"charge":{"origin":"https://api.example.com"},"mail":{"origin":"https://mail.example.com:8443"}}}

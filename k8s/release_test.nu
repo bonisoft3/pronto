@@ -81,6 +81,7 @@ def run-tests [] {
 	test_release_plan
 	test_airlock_runtime
 	test_airlock_compose_reads
+	test_airlock_in_cluster_sinks
 	test_resolve_app_by_path
 	test_resolve_app_nonexistent_fails
 	test_schema_jobs
@@ -1605,6 +1606,15 @@ def test_airlock_runtime [] {
 	assert equal ($mesh.egress | where {|r| $r.ports | any {|p| $p.port == 53 } }) $dns
 	assert equal ($mesh.egress | last) {to: [{podSelector: {matchLabels: {"app.kubernetes.io/name": effects, "app.kubernetes.io/component": rclone-s3}}}], ports: [{port: 3900, protocol: TCP}]} "an answer's bytes to the blob plane"
 	assert equal ($mesh.egress | length) 3 "DNS, the sinks and the blob plane alone"
+	# Each effect's endpoint is this target's, mounted file by file over the image's compose ones.
+	let endpoints = ($objs | where kind == "ConfigMap" and metadata.name == "effects-airlock-endpoints" | first | get data)
+	assert equal ($endpoints | columns | sort) ["charge.yaml" "mail.yaml"]
+	assert equal ($endpoints."mail.yaml" | from yaml) {apiVersion: "dapr.io/v1alpha1", kind: HTTPEndpoint, metadata: {name: mail}, spec: {baseUrl: "https://mail.example.com:8443"}}
+	let meshPod = (do $deployment airlock-mesh).spec.template
+	assert equal ($meshPod.spec.containers.0.volumeMounts | each {|m| [$m.mountPath $m.subPath] } | sort) [["/dapr/airlock/charge.yaml" "charge.yaml"] ["/dapr/airlock/mail.yaml" "mail.yaml"]] "the wall, resiliency and blob binding stay the image's"
+	assert equal ($meshPod.spec.volumes) [{name: endpoints, configMap: {name: effects-airlock-endpoints}}]
+	assert ($meshPod.metadata.annotations."pronto.dev/config" | is-not-empty) "a changed endpoint rolls the daprd"
+	assert equal ($airlock.egress | length) 3 "no service mesh's control plane unless named"
 	# Under internet "airlock" no other runtime service reaches the internet.
 	assert ($objs | where kind == "NetworkPolicy" and metadata.name == "effects-ticker" | first | get spec.egress | all {|r| $r.to?.0?.ipBlock? == null })
 	# Policies add up: one more selecting either pod would reopen its wall.
@@ -1631,6 +1641,55 @@ def test_airlock_runtime [] {
 	assert ($gateway | str contains "tsbifrost") $gateway
 	let alone = (try { runtime-services {services: {airlock: {}}}; "" } catch {|e| $e.msg })
 	assert ($alone | str contains "together") $alone
+}
+
+def test_airlock_in_cluster_sinks [] {
+	print "test an effect's k8s sink may be an in-cluster service over plain http, its namespace the daprd's only way to it..."
+	let secrets = {SINK_TOKEN: "effects-sinks", MAIL_KEY: "effects-mail", PAGER_KEY: "effects-pager"}
+	let shared = {SINK_TOKEN: "operator-value", PAGER_KEY: "operator-pager"}
+	# A copy of effects beside it, so cue finds pronto's schema, whose facts name the sinks.
+	let dir = ($fixtures_dir | path join $".sinks-(random uuid)")
+	cp -r ($fixtures_dir | path join effects) $dir
+	let facts = ($dir | path join .pronto cluster.json)
+	let render = {|sinks, app|
+		open $facts | upsert k8sSinks $sinks | to json | save -f $facts
+		let data = (mktemp -t sinks.XXXXXX.json | str trim)
+		{App: ({airlock: {secrets: $secrets}, networkPolicy: {internet: "airlock"}} | merge deep $app)} | to json | save -f $data
+		let out = (try { with-env $shared { render-manifests ($dir | path join release.cue) gke --data $data } | from yaml } catch {|e| $e.msg })
+		rm $data
+		$out
+	}
+	let ledger = {service: {name: ledger, namespace: payments, port: 80, targetPort: 8080, path: "/v1"}}
+	let notify = {service: {name: notify, namespace: messaging, port: 8081, targetPort: 8081}}
+	let objs = (do $render {charge: $ledger, mail: $notify} {})
+	let endpoints = ($objs | where kind == "ConfigMap" and metadata.name == "effects-airlock-endpoints" | first | get data)
+	assert equal ($endpoints."charge.yaml" | from yaml | get spec.baseUrl) "http://ledger.payments.svc.cluster.local/v1" "port 80 is the scheme's own"
+	assert equal ($endpoints."mail.yaml" | from yaml | get spec.baseUrl) "http://notify.messaging.svc.cluster.local:8081"
+	let mesh = ($objs | where kind == "NetworkPolicy" and metadata.name == "effects-airlock-mesh" | first | get spec)
+	assert ($mesh.egress | all {|r| $r.to | all {|t| $t.ipBlock? == null or $t.ipBlock.cidr != "0.0.0.0/0" } }) "every sink in the cluster: no internet at all"
+	let peers = ($mesh.egress | where {|r| $r.to.0.namespaceSelector? != null and $r.to.0.podSelector? == null } | each {|r| [($r.to.0.namespaceSelector.matchLabels."kubernetes.io/metadata.name") ($r.ports | get port)] } | sort)
+	assert equal $peers [[messaging [8081]] [payments [8080]]] "each sink's namespace on its pods' port, not the Service's"
+	# One origin left: the internet on its port alone, beside the in-cluster peer.
+	let mixed = (do $render {charge: $ledger, mail: {origin: "https://mail.example.com:8443"}} {} | where kind == "NetworkPolicy" and metadata.name == "effects-airlock-mesh" | first | get spec.egress)
+	assert equal ($mixed | where {|r| $r.to.0.ipBlock? != null } | first | get ports.port) [8443]
+	assert equal ($mixed | where {|r| $r.to.0.namespaceSelector? != null and $r.to.0.podSelector? == null } | get to.0.namespaceSelector.matchLabels."kubernetes.io/metadata.name") [payments]
+	# A service mesh's sidecars reach its control plane from both pods, only when named.
+	let meshed = (do $render {charge: $ledger, mail: $notify} {networkPolicy: {meshControlPlane: {}}})
+	for n in [airlock airlock-mesh] {
+		let egress = ($meshed | where kind == "NetworkPolicy" and metadata.name == $"effects-($n)" | first | get spec.egress)
+		assert equal ($egress | last) {to: [{namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": istio-system}}}], ports: [{port: 15012, protocol: TCP}]} $n
+	}
+	let named = (do $render {charge: $ledger, mail: $notify} {networkPolicy: {meshControlPlane: {namespace: mesh-system, ports: [15012 15017]}}} | where kind == "NetworkPolicy" and metadata.name == "effects-airlock" | first | get spec.egress | last)
+	assert equal $named {to: [{namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": mesh-system}}}], ports: [{port: 15012, protocol: TCP} {port: 15017, protocol: TCP}]}
+	# What the target cannot deploy, or a cluster.json written before k8sSinks, fails the release.
+	let none = (do $render {charge: null, mail: $notify} {})
+	assert ($none | str contains "effect charge names no sink for target k8s") $none
+	let bridged = (do $render {charge: {bridge: pdf}, mail: $notify} {})
+	assert ($bridged | str contains "container bridges") $bridged
+	open $facts | reject k8sSinks | to json | save -f $facts
+	let stale = (try { with-env $shared { render-manifests ($dir | path join release.cue) gke }; "" } catch {|e| $e.msg })
+	assert ($stale | str contains "generate the app again") $stale
+	rm -r $dir
 }
 
 def test_airlock_compose_reads [] {
