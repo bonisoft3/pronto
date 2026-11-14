@@ -178,7 +178,11 @@ export async function broker(p: { issuer: string; secret: string; providers: Pro
         alg: "RS256", issuers: provider.issuers, audience: provider.clientId, nonce: leg.pn as string, keys: provider.keys,
       }));
     } catch (e) {
-      if (!(e instanceof Refused)) throw e;
+      // The provider's keys out of reach is no refusal of the person: 503, which they may retry.
+      if (!(e instanceof Refused)) {
+        console.error(`broker: ${name}'s keys: ${e instanceof Error ? e.message : String(e)}`);
+        return json(503, { error: "provider unavailable" });
+      }
       console.error(`broker: ${name}'s id token refused: ${e.message}`);
       return back(r.redirectUri, { error: "access_denied", state: r.state });
     }

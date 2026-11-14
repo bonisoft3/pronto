@@ -171,7 +171,11 @@ export async function front(p: {
         alg: "RS256", issuers: provider.issuers, audience: provider.clientId, nonce: leg.pn as string, keys: provider.keys,
       }));
     } catch (e) {
-      if (!(e instanceof Refused)) throw e;
+      // The provider's keys out of reach is no refusal of the person: 503, which they may retry.
+      if (!(e instanceof Refused)) {
+        console.error(`front: ${name}'s keys: ${e instanceof Error ? e.message : String(e)}`);
+        return json(503, { error: "provider unavailable" });
+      }
       return await refuse(`${name}'s id token refused: ${e.message}`);
     }
     // Hydra holds the challenge to the tenant it was issued for, so the subject
