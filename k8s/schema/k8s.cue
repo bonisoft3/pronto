@@ -1315,7 +1315,7 @@ import (
 						// was ever Ready. Liveness stays its own /health, so a slow door never
 						// restarts it.
 						readinessProbe: {
-							httpGet: {path: "/ready", port: release.render.port}
+							httpGet: {path: release.render.ready, port: release.render.port}
 							initialDelaySeconds: 2
 							periodSeconds:       5
 							timeoutSeconds:      5

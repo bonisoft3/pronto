@@ -298,6 +298,12 @@ import (
 	render: {
 		enabled: bool | *false
 		port:    int | *8090
+		// The path render's readiness probe asks (PRONTO-452). Render's own /ready (omnishell 0.23.0-fork.13 and
+		// after: tables synced and the door answering, PRONTO-451) is what a release is rolled out on; a render
+		// built on an older omnishell serves /health alone, answers /ready 404 and is never Ready, so the rollout
+		// waits for ever. An app whose render runtime is older says "/health", the probe a release made before
+		// PRONTO-451 had.
+		ready: string & =~"^/" | *"/ready"
 	}
 
 	// Services of the app's own beside the cluster's, a plugin's (pronto-billing's

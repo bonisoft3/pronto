@@ -99,6 +99,7 @@ def run-tests [] {
 	test_render_manifests_eks
 	test_render_manifests_metal
 	test_render_ready_through_the_door
+	test_render_ready_path_follows_its_runtime
 	test_crud_lives_on_its_own
 	test_app_services
 	test_app_service_readiness
@@ -594,6 +595,22 @@ def test_render_ready_through_the_door [] {
 	# A pod still syncing its tables is given time to start before liveness may kill it (PRONTO-107).
 	assert equal $render.startupProbe.httpGet.path "/health"
 	assert (($render.startupProbe.periodSeconds * $render.startupProbe.failureThreshold) >= 120) "render may take compose's start_period to start"
+}
+
+def test_render_ready_path_follows_its_runtime [] {
+	print "test render is ready on /ready, or on /health when its runtime serves no /ready (PRONTO-452)..."
+	let app = (resolve-app ($fixtures_dir | path join "sample"))
+	let data = (mktemp -t render-ready.XXXXXX.json | str trim)
+	{App: {render: {ready: "/health"}}} | to json | save -f $data
+	let render = (render-manifests $app.cue_path "metal" --data $data | from yaml | where kind == "Deployment" and metadata.name == "sample-render" | first | get spec.template.spec.containers | where name == "render" | first)
+	rm -f $data
+	assert equal $render.readinessProbe.httpGet.path "/health"
+	assert equal $render.livenessProbe.httpGet.path "/health"
+	let bad = (mktemp -t render-ready.XXXXXX.json | str trim)
+	{App: {render: {ready: "ready"}}} | to json | save -f $bad
+	let refused = (try { render-manifests $app.cue_path "metal" --data $bad | ignore; "" } catch {|e| $e.msg })
+	rm -f $bad
+	assert ($refused | is-not-empty) "a path that does not start with / is refused"
 }
 
 def test_crud_lives_on_its_own [] {
