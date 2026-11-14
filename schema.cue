@@ -1149,12 +1149,17 @@ import (
 	// models: the entry wins, the rest take the default, and a target left with
 	// neither is refused. docker is the compose stack every app launches and
 	// integrates on, simulators included. Sandbox or live is the app's own value.
+	// k8s alone may name an in-cluster `service` instead (#InClusterSink;
+	// k8s/docs/index.md, "The airlock").
 	sink: {
 		origin?: mechaCluster.#Origin
 		bridge?: string
 		ai?:     mechaCluster.#AiModality
 		if ai != _|_ {tier: *"cheap" | mechaCluster.#AiBackendTier}
-		targets?: [("docker" | "cloudflare" | "gcp" | "k8s" | "aws")]: {origin?: mechaCluster.#Origin, bridge?: string}
+		targets?: {
+			[("docker" | "cloudflare" | "gcp" | "aws")]: {origin?: mechaCluster.#Origin, bridge?: string}
+			k8s?: {origin?: mechaCluster.#Origin, bridge?: string, service?: #InClusterSink}
+		}
 		credential?:  #Credential
 		contentType?: =~"^[a-z]+/[a-z0-9][a-z0-9.+-]*$" & !="application/json"
 	}
@@ -1176,6 +1181,21 @@ import (
 	// What its handler may use past the language, as an omnishell module
 	// declares Intl: Crypto to sign with, TextEncoder to give it bytes.
 	endowments?: [...mechaCluster.#CageEndowment]
+}
+
+// A sink in the release's own Kubernetes cluster: a Service the airlock's daprd
+// calls at http://<name>.<namespace>.svc.cluster.local[:port][path], plain
+// HTTP whose encryption is the cluster's service mesh's. Its egress is opened
+// to `namespace` on `targetPort`, the pod's port, since a NetworkPolicy matches
+// the connection after the Service's address is translated to a pod's;
+// `podSelector`, the pods' labels, narrows it to them.
+#InClusterSink: {
+	name:       =~"^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+	namespace:  =~"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+	port:       *80 | int & >=1 & <=65535
+	targetPort: *port | int & >=1 & <=65535
+	path?:      =~"^(/[A-Za-z0-9._~-]+)+$"
+	podSelector?: [string]: string
 }
 
 // A provider's word that a row may have changed: `POST /signal/<name>[/<id>]`.
@@ -2826,8 +2846,8 @@ import (
 				"effect \(n) names more than one of origin, bridge and ai as its default sink"
 		}],
 		[for n, x in _effects if x.sink.targets != _|_ for t, at in x.sink.targets
-			if len([if at.origin != _|_ {1}]) + len([if at.bridge != _|_ {1}]) != 1 {
-				"effect \(n) names one of origin and bridge for target \(t)"
+			if len([if at.origin != _|_ {1}]) + len([if at.bridge != _|_ {1}]) + len([if at.service != _|_ {1}]) != 1 {
+				"effect \(n) names one of origin, bridge and service for target \(t)"
 		}],
 		[for n, x in _effects if x.sink.origin == _|_ if x.sink.bridge != _|_ || x.sink.ai != _|_ if x.sink.credential != _|_ || x.sink.contentType != _|_ {
 			"effect \(n) declares a credential or content type for a sink that is no origin"
