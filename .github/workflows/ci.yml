@@ -65,6 +65,9 @@ jobs:
         run: |
           # shellcheck disable=SC2046
           "$MISE" exec github:nushell/nushell@0.116.1 -- deno test -A --no-check $(cat ci-tests.txt)
+      # The door's several sites against the Caddyfile that ships, on the caddy mecha's door runs.
+      - name: Door sites
+        run: '"$MISE" exec github:caddyserver/caddy@2.11.7 -- deno test -A --no-check caddy-sites.integration.test.ts'
       # The monorepo around this checkout: plugins/pronto beside omnishell, mecha, sayt and bayt, the
       # imports back on bonisoft.org, mecha, omnishell and bootstrap's lock as the fork publishes them
       # (.github/monorepo.sh). bundle/'s tests take bundle/deno.json, as

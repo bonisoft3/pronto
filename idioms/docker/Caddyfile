@@ -137,6 +137,89 @@
 (tracing-off) {
 }
 
+# One site: the origin every absolute address the app answers is spelled
+# against, read by a template as `http.vars.origin`. The deployment's, never
+# the request's: this door answers any Host (mecha's docs/proxy.md, "The
+# origin"). Another name the deployment answers to (a gcp release's aliases,
+# such as www) sends the reader on to the origin: a passkey's relying party is
+# the origin alone. Unset, it names a host nobody asks for. Every upstream is
+# sent that origin as X-Pronto-Origin and no X-Client-Id, whatever the request
+# carried, so a reader trusts both in either mode.
+(sites-off) {
+  vars origin {$ORIGIN}
+  @alias host {$PRONTO_ALIASES:alias.invalid}
+  redir @alias {$ORIGIN}{uri} 308
+  request_header X-Pronto-Origin {$ORIGIN}
+  request_header -X-Client-Id
+}
+
+# Several sites: the contract is mecha's docs/proxy.md, "Several sites".
+# A Host with no line, or whose origin is not exactly an origin (a template
+# writes it into markup as it stands), is unlisted. `invoke` answers it because
+# it is ordered ahead of `handle`, where a `respond` would come after every
+# route; /health is exempt, since a probe names the pod, not a site.
+&(site-unlisted) {
+  respond "" 421
+}
+(brand-files) {
+  map {site_template} {brand_dir} {
+    {$BRAND_DIRS}
+    default -
+  }
+  # Nested, not one matcher set: a set's matchers run in no fixed order, and
+  # the expression reads the capture path_regexp writes.
+  handle /brand/* {
+    @shaped path_regexp brandfile ^/brand/(logo|favicon|font)/([a-z0-9][a-z0-9-]*)/[A-Za-z0-9][A-Za-z0-9._-]*$
+    handle @shaped {
+      @mine expression `{re.brandfile.2} == {brand_dir}`
+      handle @mine {
+        reverse_proxy {$BRAND_ASSETS_ORIGIN:http://brand-assets.invalid} {
+          header_up Host {upstream_hostport}
+          header_up User-Agent pronto-door-brand-assets
+          header_up -Cookie
+          header_up -Authorization
+          header_up -X-Client-Id
+          header_up -X-Pronto-Origin
+          header_down -Set-Cookie
+          @missing status 404
+          handle_response @missing {
+            respond "" 404
+          }
+          @failed status 4xx 5xx
+          handle_response @failed {
+            respond "" 502
+          }
+        }
+        header Cache-Control "public, max-age=0, must-revalidate"
+        header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+        header X-Content-Type-Options nosniff
+      }
+      respond "" 404
+    }
+    respond "" 404
+  }
+}
+(sites-on) {
+  map {host} {site_origin} {site_template} {site_client} {
+    {$SITES}
+    default - - -
+  }
+  vars origin {site_origin}
+  @unlisted {
+    not vars_regexp {site_origin} ^https?://[A-Za-z0-9.-]+(:[0-9]+)?$
+    not path /health
+  }
+  invoke @unlisted site-unlisted
+  request_header X-Pronto-Origin {site_origin}
+  # Both carry a matcher, so they exclude each other: caddy runs a matched
+  # request_header ahead of a bare one, which would delete what it just set.
+  @client not vars {site_client} -
+  request_header @client X-Client-Id {site_client}
+  @clientless vars {site_client} -
+  request_header @clientless -X-Client-Id
+  import brand-files
+}
+
 # Each upstream's bound is `import bounded-<hop>`, a snippet emitted ahead of
 # this file from plugins/pronto/resilience.
 (app) {
@@ -156,15 +239,9 @@
   # its traceID. The exporter reads the standard OTEL_* environment.
   import tracing-{$PRONTO_TRACING:off}
   log
-  # The origin every absolute address the app answers is spelled against,
-  # read by a template as `http.vars.origin`. The deployment's, never the
-  # request's: this door answers any Host (mecha's docs/proxy.md, "The origin").
-  vars origin {$ORIGIN}
-  # Another name the deployment answers to (a gcp release's aliases, such as
-  # www) sends the reader on to the origin: a passkey's relying party is the
-  # origin alone. Unset, it names a host nobody asks for.
-  @alias host {$PRONTO_ALIASES:alias.invalid}
-  redir @alias {$ORIGIN}{uri} 308
+  # The origin every absolute address is spelled against: one per deployment,
+  # or one per listed site (sites-on, SITES_MODE=on).
+  import sites-{$SITES_MODE:off}
   # The interpreter ships as plain ES modules plus a vendored data-plane
   # driver measured in hundreds of KiB; compression at the door is what keeps
   # a cold cache from paying for that in seconds on a slow link. Caddy's own
