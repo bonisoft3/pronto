@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1.0.11";
 import { inSchemas, type Schemas } from "./schema-names.ts";
+import { generateTypeSQL } from "./type-sql.ts";
 
 const DEFAULT: Schemas = { app: "public", floor: "public", mecha: "mecha", names: { floor: [], mecha: [], resolvers: [] } };
 
@@ -65,4 +66,11 @@ Deno.test("an escape string or a search_path naming $user is refused on schemas 
   // A word ending in e before a literal is no escape string, and $user in a literal is data.
   assertEquals(inSchemas("SELECT 'a' FROM t WHERE note = 'x' AND kind LIKE 'e'", own), "SELECT 'a' FROM t WHERE note = 'x' AND kind LIKE 'e'");
   assertEquals(inSchemas("SELECT set_config('x', '\"$user\"', true)", own), "SELECT set_config('x', '\"$user\"', true)");
+});
+
+// The type DDL every app carries (type-sql.ts) is no exception: an app on schemas of its own
+// renames it like any other migration, so it may take no escape string either.
+Deno.test("the portable type DDL renames clean on schemas of its own: no escape string of its own", () => {
+  const renamed = inSchemas(generateTypeSQL(), own);
+  assertEquals(renamed.includes(`orders.portable_bytes`), true);
 });
