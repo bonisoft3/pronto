@@ -48,6 +48,8 @@ Deno.test("every rule states a contract, and an action writes only what the cont
   assertThrows(() => contracted(contract(spec, "finish", [], ["score"])), Error, "finish writes score, which the context does not hold");
   assertThrows(() => contracted(contract(spec, "finish", [], ["phase"])), Error, "finish writes phase");
   assertThrows(() => contracted(contract(spec, "isDue", ["_time"], ["turn"])), Error, "guard isDue writes");
+  // An action that only moves the phase lists no field, and is still no guard.
+  assertThrows(() => contracted(contract(spec, "isDue", ["_time"], [])), Error, "guard isDue writes");
   const spaced: MechaReducerMachine = {...spec, states: {...spec.states, playing: {...spec.states.playing, on: {...spec.states.playing.on, timeout: {...spec.states.playing.on.timeout, guard: ["is due"]}}}}};
   assertThrows(() => contracted(spaced), Error, `rule "is due" is not a name`);
   // A contract stated as a guard's, for a rule the chart runs as an action,

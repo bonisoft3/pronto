@@ -30,6 +30,11 @@ Deno.test("a guard that answers false does not take the transition, as in XState
   const first = await step(initial(), request(0).event);
   const refused = await step(first.state, request(1, "play", { card: 1 }).event);
   assertEquals([refused.kind, refused.reason], ["rejected", "not_your_card"]);
+  // A guard whose declaration states no reason refuses with "refused".
+  const bare = { ...spec, contracts: { ...spec.contracts, holdsCard: { reads: spec.contracts!.holdsCard.reads } } };
+  const unnamed = await compileMechaReducer(bare, rules.replace("yourTurn: ({context: state, event}) => event._origin === state.turn,", "yourTurn: () => true,").replace("holdsCard: ({context: state, event}) =>", "holdsCard: ({context: state, event}) => event.card !== 1 &&"), terminal);
+  const again = await executeMecha(unnamed.source, bare.fuel, { state: first.state, event: request(1, "play", { card: 1 }).event, context: { actor: "a", tier: "omnishell", now: 1000 }, viewers: ["a", "b"] }) as { kind: string; reason?: string };
+  assertEquals([again.kind, again.reason], ["rejected", "refused"]);
 });
 
 Deno.test("a machine no reader commands compiles no command table's triggers", async () => {

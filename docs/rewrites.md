@@ -18,7 +18,7 @@ state: rewrites: {
 
 | Field | Is |
 |---|---|
-| `source` | path-to-regexp's literal and `:name` segments. A parameter is letters, digits and `. _ ~ -`, so its value carries no second query parameter |
+| `source` | path-to-regexp's literal and `:name` segments, the first a literal, since the door tries a rewrite before its own routes. A parameter is letters, digits and `. _ ~ -`, so its value carries no second query parameter |
 | `destination` | a [PostgREST](https://docs.postgrest.org/en/stable/references/api.html) path under `/crud`: a table, a view or `rpc/<function>`, with any query, naming the parameters it uses as `:name`; a colon after a name is PostgREST's own, an alias (`select=codigo:id`) or a cast, and is left as written |
 | `methods` | the methods the rewrite answers, as Vercel's `routes` spell it; without it, every method |
 

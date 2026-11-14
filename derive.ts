@@ -707,6 +707,9 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
   for (const v of validated) {
     for (const edge of v.edges) {
       if (held.has(edge.table)) continue;
+      // The membership list an edge from the origin reads is registered for
+      // the guard itself (#App.#collections), whether or not a screen names it.
+      if (edge.from === "$origin") continue;
       fail(
         `entity ${v.entity}: validations "${v.name}" walk to ${edge.table}, ` +
           `which no screen reads and no form writes, so the store cannot judge it`,

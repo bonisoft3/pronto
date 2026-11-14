@@ -2,7 +2,7 @@ import { MECHA_NAME } from "./mecha-spec.ts";
 import type { MechaPorts, MechaPortSql } from "./mecha-ports.ts";
 import { jessieFacts } from "./jessie.ts";
 import { partsOf } from "./mecha-surface.ts";
-import { contracted } from "./mecha-contracts.ts";
+import { carries, contracted } from "./mecha-contracts.ts";
 // Read as text, so it loads wherever this module does (an app's tests take it
 // by URL); deno.lock records the module import of the same file, not the text.
 import "./mecha-runtime.js";
@@ -76,6 +76,8 @@ export async function compileMechaReducer(
     if (!["omnishell", "mecha"].includes(event.tier) || event.payload.type !== "object") throw new Error("invalid mecha event declaration");
   }
   contracted(spec);
+  const unread = carries(spec);
+  if (unread.length) throw new Error(`mecha contracts: ${unread[0]}`);
   const facts = jessieFacts(source, "handler");
   if (facts.references.length) throw new Error(`mecha rules reach ${facts.references.join(", ")}`);
   const script = `(() => {

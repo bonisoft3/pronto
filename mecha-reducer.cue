@@ -35,7 +35,8 @@ import (
 	}
 	states: [string]: {
 		final:   *false | bool
-		always?: [...{target: string, guard?: [...string], reduce?: string}]
+		// A guard or an action the database implements has no automatic form.
+		always?: [...close({target: string, guard?: [...string], reduce?: string})]
 		on: [string]: {
 			target?: string
 			guard?:  [...string]

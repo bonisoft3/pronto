@@ -227,8 +227,8 @@ answers a boolean, and a context factory is handed `{input}`.
   shapes, a declared group's and a granted one's, under unit test. The
   store's `visible()` reads both and is under none, as its reading of a
   user's grant is not. Neither has run against a cluster.
-- **The edge.** The policies are the same SQL; the edge's gatekeeper and the
-  `pages` target, which refuses a shared entity, have not met a group.
+- **The edge.** The policies are the same SQL, but the edge serves no keyed
+  shape, so the `cloudflare` target refuses a shared entity as `pages` does.
 - **A membership of a row that is gone.** The list has no reference to what
   a group is of, so a membership the service leaves behind opens a shape the
   gatekeeper refuses, and the client reports it.

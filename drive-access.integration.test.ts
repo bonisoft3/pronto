@@ -142,6 +142,10 @@ app: state: mecha: rows: GrantRules: {
     await refused(outsider, "POST", advance(uuid(34), outsider, acme, 999), policy);
     await refused(requester, "POST", advance(uuid(34), employee, acme, 999), policy);
     await answers(requester, "POST", `INSERT INTO advance_grant (id, advance_id, user_id, role) VALUES (gen_random_uuid(), '${first}', '${approver}', 'reader') RETURNING group_finance;`, `${acme}:finance`);
+    // A grant holds a role Drive has, and only the owner files the advance
+    // under another company's finance.
+    await refused(requester, "POST", `INSERT INTO advance_grant (id, advance_id, user_id, role) VALUES (gen_random_uuid(), '${first}', '${employee}', 'editor');`, "violates check constraint");
+    await refused(approver, "PATCH", `UPDATE advance SET company_id = NULL WHERE id = '${first}';`, "only the owner files a row under another finance");
     await refused(approver, "POST", `INSERT INTO advance_grant (id, advance_id, user_id, role) VALUES (gen_random_uuid(), '${first}', '${employee}', 'reader');`, policy);
     const sees = "SELECT coalesce(string_agg(amount::text, ' ' ORDER BY amount), 'none') FROM advance;";
     await answers(requester, "GET", sees, "100");

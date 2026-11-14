@@ -19,6 +19,7 @@ import { pathToFileURL } from "node:url";
 import { stringify } from "jsr:@std/yaml@1.0.5";
 import { derive, GENERATED_HTML_HEADER, terminalPath } from "./derive.ts";
 import { mint } from "./identity.ts";
+import { jessieFacts } from "./jessie.ts";
 import { entries, exists, ifMissing } from "./missing.ts";
 import { projectSay, projectGates } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
@@ -223,6 +224,11 @@ async function rendered(emission: Emission): Promise<Map<string, string | Uint8A
       const spec = JSON.stringify(declaredMachine(data.machine.machine));
       const machines = JSON.stringify(Object.fromEntries(Object.entries(data.machines).sort(([a], [b]) => a < b ? -1 : 1).map(([n, m]) => [n, {spec: declaredMachine(m)}])));
       const app = (await Deno.readTextFile(`${appDir}/${data.src}`)).trim();
+      // The generated wrapper is what the facts are taken from, and it always
+      // takes the one argument, so the module it wraps is asked here.
+      if (jessieFacts(`${app}\n`, "handler").completion === "positional") {
+        fail(`${data.src}: a composed handler is ({context, event}, {machine, machines}) => ..., XState's one argument; this one names its first parameter`);
+      }
       let machine = "{spec}";
       if (data.local) {
         const rules = await Deno.readTextFile(`${appDir}/${data.machine.rules}`);

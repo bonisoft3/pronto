@@ -30,6 +30,11 @@ Deno.test("a shared entity's policies ask its role, and a group is one shape", a
   assertStringIncludes(policies, "INSERT INTO mecha.shape_key VALUES ('public.advance_grant', 'user_id', 'subject', 'id')");
   assertStringIncludes(policies, "INSERT INTO mecha.shape_key VALUES ('public.advance_grant', 'group_id', 'public.group_member', 'group_id')");
   assert(!policies.includes("company_grant', 'group_id'"));
+  // A grant holds one of the two roles, and the role's helper is not an RPC.
+  assertStringIncludes(tables, `CHECK ("role" IN ('reader', 'writer'))`);
+  assertStringIncludes(policies, "AND s.role = 'reader')");
+  assertStringIncludes(policies, "REVOKE ALL ON FUNCTION advance_role(uuid) FROM PUBLIC;");
+  assertStringIncludes(policies, "advance: only the owner files a row under another finance");
   // Filed only into a company the writer reads.
   assertStringIncludes(policies, "WITH CHECK (advance.owner_id = auth_uid() AND (advance.company_id IS NULL OR company_role(advance.company_id) IS NOT NULL))");
   // A composition is moved or deleted by the role that writes its parent, and
@@ -56,6 +61,11 @@ Deno.test("a group grant with no membership list, or an unknown column, is refus
   // The policy compares a role with a name, and a group is one column of its row.
   await assertRejects(() => emitFiles(driveProgram(driveEntities.replace(`{name: "user_id", type: "uuid"}, {name: "role", type: "string"}]`, `{name: "user_id", type: "uuid"}, {name: "role", type: "int32"}]`))), Error, "the grant table company_grant holds a role in role, which is a string and not int32");
   await assertRejects(() => emitFiles(driveProgram(driveEntities.replace(`{group: "finance", of: "company_id", role: "reader"}`, `{group: "finance", of: "company_id", role: "reader"}, {group: "finance", of: "company_id", role: "writer"}`))), Error, "group finance is named twice");
+  // The grant table is the entity's own composition, with a role it must hold.
+  await assertRejects(() => emitFiles(driveProgram(driveEntities.replace(`access: {scope: "folder", parent: "Advance", on: "advance_id"}`, `access: {scope: "private", owner: "user_id"}`))), Error, "entity Advance: its grant table advance_grant is an entity with access");
+  await assertRejects(() => emitFiles(driveProgram(driveEntities.replace(`{name: "user_id", type: "uuid"}, {name: "role", type: "string"}]`, `{name: "user_id", type: "uuid"}, {name: "role", type: "string", required: false}]`))), Error, "a grant in company_grant holds a role, so role is required");
+  // A group is filed under by a reference, and a shared row's key is id.
+  await assertRejects(() => emitFiles(driveProgram(driveEntities.replace(`{name: "company_id", type: "uuid", ref: "company"}, {name: "amount", type: "int32"}`, `{name: "company_id", type: "uuid"}, {name: "amount", type: "int32"}`))), Error, "group finance is of company_id, which references no private or public entity");
   // The previous owner's grant is written from the row alone.
   await assertRejects(() => emitFiles(driveProgram(driveEntities.replace(`{name: "user_id", type: "uuid"}, {name: "role", type: "string"}]`, `{name: "user_id", type: "uuid"}, {name: "role", type: "string"}, {name: "note", type: "string"}]`))), Error, "a row handed to another owner grants the previous one in company_grant, which cannot fill note: give it a default");
 });
@@ -77,7 +87,7 @@ app: state: mecha: rows: AdvanceRules: {
   const machines = files["services/database/migrations/010_machines.sql"].text;
   assertStringIncludes(machines, `FROM group_member r WHERE r."user_id" = sender`);
   // A service's token names a subject too: the origin is a reader's alone.
-  assertStringIncludes(machines, "current_setting('request.jwt.claims', true)::json->>'role' = 'app_user'");
+  assertStringIncludes(machines, "pg_trigger_depth() = 1 AND current_setting('request.jwt.claims', true)::json->>'role' = 'app_user'");
 });
 
 // A handover restamps what is under the row, and a guard that refuses every

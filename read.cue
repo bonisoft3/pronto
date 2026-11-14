@@ -55,6 +55,9 @@ import (
 			if e.access.scope == "private" if e.access.groups != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {(x.table): m}
 			if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_ for m, x in A.state.entities if x.access != _|_ if x.access.scope == "group" {(x.table): m}
 		}
+		// A guard that walks from the write's origin reads the membership list,
+		// which no markup and perhaps no grant names.
+		for _, e in A.state.entities for _, v in e.validations for x in v.via if x == "_origin" for m, y in A.state.entities if y.access != _|_ if y.access.scope == "group" {(y.table): m}
 	}
 
 	// Each server entity's mode, and the reason for it: the first reason it

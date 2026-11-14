@@ -66,6 +66,8 @@ Deno.test("what Next.js's rewrites allow and this subset does not is refused, no
     // A parameter the destination names and the source does not, or names twice.
     [`{list: {source: "/expense/:id", destination: "/crud/payment_list?id=eq.:key"}}`, "[]", "rewrite list: the destination names :key, which the source does not"],
     [`{list: {source: "/expense/:id/:id", destination: "/crud/payment_list"}}`, "[]", "rewrite list: the source names a parameter twice"],
+    // A parameter first would answer the door's own /health and the shell's files.
+    [`{list: {source: "/:slug", destination: "/crud/payment_list?id=eq.:slug"}}`, "[]", "rewrite list: the source begins with a parameter, and its first segment is a word"],
     // One request, two rewrites: parameters are told apart by position alone.
     [`{a: {source: "/expense/:id", destination: "/crud/payment_list"}, b: {source: "/expense/:key", destination: "/crud/payment", methods: ["GET"]}}`, "[]", "rewrites a and b: both answer /expense/:"],
     [`{a: {source: "/expense/payments/:id", destination: "/crud/payment_list"}, b: {source: "/expense/payments/summary", destination: "/crud/payment"}}`, "[]", "rewrites a and b: both answer /expense/payments/summary"],

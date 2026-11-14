@@ -56,7 +56,7 @@ signals they send and hold the chart to hearing each one.
 
 ## Affordances, Commands, and Intents
 
-To prevent overlap with [Omnishell machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md#omnishell-machines),
+To prevent overlap with [Omnishell machines](https://github.com/bonisoft3/omnishell/blob/v0.23.0/docs/machines.md#machines),
 Cortex does not listen to raw DOM gestures (`click@<id>`, keyboard events).
 Local UI widget concerns — modal visibility, selected tab, input field values,
 and hover states — remain strictly in **Omnishell `#Machine`** on `tab` rows (Level ≤ 2).

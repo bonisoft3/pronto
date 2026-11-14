@@ -11,6 +11,7 @@ export function carried(spec: MechaReducerMachine, event: string): Set<string> {
   const e = spec.events[event];
   const fields = e.payload.type === "object" ? Object.keys(e.payload.fields) : [];
   return new Set([
+    "type",
     "_time",
     ...((spec.entropy ?? 0) > 0 ? ["_entropy"] : []),
     ...(e.tier === "omnishell" ? ["_origin"] : []),
@@ -70,7 +71,7 @@ export function contracted(spec: MechaReducerMachine): void {
     if (!contracts[rule]) fail(`${rule} states no contract in setup`);
   }
   for (const rule of guards) {
-    if (contracts[rule].writes?.length) fail(`guard ${rule} writes`);
+    if (contracts[rule].writes !== undefined) fail(`guard ${rule} writes`);
   }
   for (const [rule, contract] of Object.entries(contracts)) {
     if (contract.reason !== undefined && !guards.has(rule)) fail(`${rule} states a reason, and is no transition's guard`);
@@ -85,8 +86,8 @@ export function contracted(spec: MechaReducerMachine): void {
 }
 
 /** The reads some event reaching a rule does not carry: an action reading the
- * origin, run by an event the machine's own tier sends. The runtime refuses
- * that read when it happens; this finds it before any step does. */
+ * origin, run by an event the machine's own tier sends. The runtime hands such
+ * a read nothing, so this finds it before any step does. */
 export function carries(spec: MechaReducerMachine): string[] {
   const found = new Set<string>();
   for (const [phase, state] of Object.entries(spec.states)) {

@@ -43,8 +43,12 @@ answers the caller's: `owner`, `writer`, `reader`, or none.
 | `writer` | yes | yes | unless `writersCanShare: false` | |
 | the owner | yes | yes | yes | yes |
 
-`shared.role` names the grant table's column holding the role, a `string`; a
-grant table without one grants `writer`. What a role refuses is an error and never zero
+`shared.role` names the grant table's column holding the role, a required
+`string` the table checks to be `reader` or `writer`; a grant table without one
+grants `writer`. The grant table is the entity's own composition, `{scope:
+"folder", parent: <the entity>, on: <shared.on>}`, and no other entity's, or its
+rows would be written under another's policies; a shared entity's key is `id`.
+What a role refuses is an error and never zero
 rows: an update finds the row and fails its check, and a `BEFORE` trigger
 refuses a delete, an owner change and a composition moved out from under its
 parent, none of which a policy, which sees one version of the row, can.
@@ -89,7 +93,9 @@ entity owes a group, and the grant row for what its owner decides afterwards.
 A declared group is `<value>:<group>`, the value being the row's key, or the
 column `of` names: company `c1` is read by the members of `c1:everyone`, and an
 advance of company `c1` by the members of `c1:finance`, and an advance with
-no company by no group. A membership names no entity, so one group name is
+no company by no group. A group granted row by row that ends as one of these does
+is told from it where the key is a `uuid`; over a `string` key it is named so
+that it cannot be read as `<key>:<group>`. A membership names no entity, so one group name is
 read over one entity's keys: `finance` of a company and `finance` of a project
 is refused, as is one entity naming a group twice. The program's one
 `scope: "group"` entity is the membership list, written by the service from
@@ -97,13 +103,19 @@ wherever the program's people are administered.
 
 A group named by `of` adds a generated column `group_<name>` to the table and
 to each composition under it, which is what one shape is keyed on; a row moved
-to another group takes its compositions along. Where `of`
-is a `ref` to a shared row, the row is written only by someone who reads that
-one, so nobody files a row into a group they are no part of. That row's entity
-is declared first, since the policy calls its role function.
+to another group takes its compositions along. `of` is a `ref` to a private
+or public entity, and the row is written only by someone who reads the row it
+names (its owner, where that entity is unshared), so nobody files a row into a
+group they are no part of; only the owner files it under another afterwards.
+That row's entity is declared first, since the policy calls its role function.
+A group over the row's own key is named by the key's text, so that key is a
+`uuid` or a `string`.
 
 Who may take a step that depends on the row's state is not a role: it is a
-[[../GUIDE#Validations|lifecycle guard]] reading `event._origin`.
+[[../GUIDE#Validations|lifecycle guard]] reading `event._origin`. The origin is
+who sent the write; a write a trigger makes, as a handover's grant, has none.
+The `pages` and `cloudflare` targets refuse a shared entity: neither serves
+the keyed shapes it syncs through.
 
 `write: "update"` uses column grants as well as an UPDATE policy: a reader
 cannot create or delete rows, or rename a primary key to replace a seeded row.

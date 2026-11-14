@@ -346,6 +346,10 @@ _sqlType: {
 		[for _, x in T.entities if x.access != _|_ if x.access.scope == "private" if x.access.shared != _|_ if x.access.shared.via == T.e.table if x.access.shared.group != _|_ {
 			"  CHECK (num_nonnulls(\"\(x.access.shared.user)\", \"\(x.access.shared.group)\") = 1)"
 		}],
+		// A grant holds one of Drive's two roles, or it would read as the lesser.
+		[for _, x in T.entities if x.access != _|_ if x.access.scope == "private" if x.access.shared != _|_ if x.access.shared.via == T.e.table if x.access.shared.role != _|_ {
+			"  CHECK (\"\(x.access.shared.role)\" IN ('reader', 'writer'))"
+		}],
 		[if T.e.invariant.check != _|_ {"  CHECK (\(T.e.invariant.check))"}],
 	])
 	out: "CREATE TABLE IF NOT EXISTS \(T.e.table) (\n" + strings.Join(_lines, ",\n") + "\n);"
@@ -1028,10 +1032,11 @@ _sqlType: {
 			BEGIN
 			\(_copy)  items := CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN jsonb_build_array(to_jsonb(OLD)) ELSE '[]'::jsonb END;
 			  -- The origin is who sent the write, as a mecha rule's event names its
-			  -- sender; a write the service makes has none. Asked of the token's
-			  -- role, since the function runs as its owner, and before its subject
-			  -- is read: a service token's need not be a person's id.
-			  IF current_setting('request.jwt.claims', true)::json->>'role' = 'app_user' THEN
+			  -- sender; a write the service makes has none, nor one another trigger
+			  -- makes, as a handover's grant. Asked of the token's role, since the
+			  -- function runs as its owner, and before its subject is read: a
+			  -- service token's need not be a person's id.
+			  IF pg_trigger_depth() = 1 AND current_setting('request.jwt.claims', true)::json->>'role' = 'app_user' THEN
 			    sender := auth_uid();
 			  END IF;
 			  event := jsonb_build_object('type', lower(TG_OP), 'row', CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END)
@@ -1444,14 +1449,28 @@ _sqlType: {
 			[for g in P._groupTests if g.role == "writer" {g.test}],
 		])
 		_readers: list.Concat([
-			[if P.e.access.shared != _|_ if P.e.access.shared.role != _|_ {P._viaTest + ")"}],
+			[if P.e.access.shared != _|_ if P.e.access.shared.role != _|_ {P._viaTest + " AND s.\(P.e.access.shared.role) = 'reader')"}],
 			[for g in P._groupTests if g.role == "reader" {g.test}],
 		])
 		// A row that names its group by a reference to a shared row is written
 		// only by someone who reads that row, or anyone could file a row into
 		// a group they are no part of.
-		_within: strings.Join([if P._grouped for g in P.e.access.groups if g.of != _|_ for f in P.e.fields if f.name == g.of if f.ref != _|_ for _, x in P.entities if x.table == f.ref if x.access != _|_ if (#isShared & {a: x.access}).out {
-			" AND (\(P._t).\(g.of) IS NULL OR \(x.table)_role(\(P._t).\(g.of)) IS NOT NULL)"
+		_within: strings.Join([if P._grouped for g in P.e.access.groups if g.of != _|_ for f in P.e.fields if f.name == g.of if f.ref != _|_ for _, x in P.entities if x.table == f.ref if x.access != _|_ if x.access.scope == "private" {
+			[
+				if (#isShared & {a: x.access}).out {" AND (\(P._t).\(g.of) IS NULL OR \(x.table)_role(\(P._t).\(g.of)) IS NOT NULL)"},
+				// An unshared row is read by its owner alone.
+				" AND (\(P._t).\(g.of) IS NULL OR EXISTS (SELECT 1 FROM \(x.table) x WHERE x.id = \(P._t).\(g.of) AND x.\(x.access.owner) = auth_uid()))",
+			][0]
+		}], "")
+		// Moving a row to another group is the owner's, as handing it over is:
+		// the role a writer holds is read from the row as it stood.
+		_refile: strings.Join([if P._grouped for g in P.e.access.groups if g.of != _|_ {
+			"""
+				    IF NEW.\(g.of) IS DISTINCT FROM OLD.\(g.of) THEN
+				      RAISE insufficient_privilege USING MESSAGE = '\(P._t): only the owner files a row under another \(g.group)';
+				    END IF;
+
+				"""
 		}], "")
 		// The grant row a handover writes: the grant table's key where it has
 		// no default, the row, the previous owner, and the role where it has one.
@@ -1460,7 +1479,7 @@ _sqlType: {
 			_viaFields: [for _, x in P.entities if x.table == P._s.via {x.fields}][0]
 			_viaCast: [for f in P._viaFields if f.name == P._s.on if f.type != P._pkType {"::\(_sqlType[f.type])"}, ""][0]
 			_handed: list.Concat([
-				[for f in P._viaFields if f.pk if f.default == _|_ {column: f.name, value: "gen_random_uuid()"}],
+				[for f in P._viaFields if f.pk if f.default == _|_ if f.name != P._s.on if f.name != P._s.user {column: f.name, value: "gen_random_uuid()"}],
 				[{column: P._s.on, value: "NEW.\(P._pkOf)\(P._viaCast)"}, {column: P._s.user, value: "OLD.\(P._owner)"}],
 				[if P._s.role != _|_ {column: P._s.role, value: "'writer'"}],
 			])
@@ -1475,13 +1494,15 @@ _sqlType: {
 			if P._isShared {
 				"""
 					CREATE OR REPLACE FUNCTION \(P._t)_role(row_id \(_sqlType[P._pkType])) RETURNS text
-					LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+					LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 					  SELECT CASE
 					    WHEN r.\(P._owner) = auth_uid() THEN 'owner'
 					    WHEN \([if len(P._writers) > 0 {strings.Join(P._writers, " OR ")}, "false"][0]) THEN 'writer'
 					    WHEN \([if len(P._readers) > 0 {strings.Join(P._readers, " OR ")}, "false"][0]) THEN 'reader'
 					  END FROM \(P._t) r WHERE r.\(P._pkOf) = row_id
 					$$;
+					REVOKE ALL ON FUNCTION \(P._t)_role(\(_sqlType[P._pkType])) FROM PUBLIC;
+					GRANT EXECUTE ON FUNCTION \(P._t)_role(\(_sqlType[P._pkType])) TO app_user, service;
 					CREATE OR REPLACE FUNCTION \(P._t)_owner_guard() RETURNS trigger
 					LANGUAGE plpgsql SET search_path = public, pg_catalog AS $$
 					BEGIN
@@ -1492,7 +1513,7 @@ _sqlType: {
 					    IF NEW.\(P._owner) IS DISTINCT FROM OLD.\(P._owner) THEN
 					      RAISE insufficient_privilege USING MESSAGE = '\(P._t): only the owner hands a row to another';
 					    END IF;
-					  END IF;
+					\(P._refile)					  END IF;
 					  RETURN COALESCE(NEW, OLD);
 					END $$;
 					DROP TRIGGER IF EXISTS \(P._t)_owner_guard ON \(P._t);
@@ -2155,6 +2176,9 @@ _traceHeader: include_patterns: ["^traceparent$"]
 						role:  g.role
 						of:    [if g.of != _|_ {g.of}, for f in e.fields if f.pk {f.name}][0]
 						if g.of != _|_ {column: "group_\(g.group)"}
+						// The key's type, where the group is named over it: the
+						// terminal tells a row's group from another that ends alike.
+						if g.of == _|_ for f in e.fields if f.pk {key: f.type}
 						members: {table: m.table, group: m.access.group, user: m.access.user}
 					}]
 				}
@@ -3406,6 +3430,10 @@ _pgrollDir: "services/database/pgroll"
 
 	// A rewrite is the container door's; the page and the edge do not apply one
 	// yet, so those targets are refused rather than released without it.
+	// A shared entity syncs through keyed shapes, which the edge does not serve
+	// (mecha-edge's cluster.ts), so the target is refused as the page's is.
+	_sharedTargets: cloudflare: true & [if list.Contains(E.code.meta.targets, "cloudflare") {len([for _, e in E.code.state.entities if e.access != _|_ if (#isShared & {a: e.access}).out {e}]) == 0}, true][0]
+
 	_rewriteTargets: {
 		if E.code.state.rewrites != _|_ if len(E.code.state.rewrites) > 0 {
 			pages:      true & !list.Contains(E.code.meta.targets, "pages")

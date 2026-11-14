@@ -81,6 +81,9 @@ export async function renderEffects(app: string, appDir: string, mecha: string, 
   for (const [endowment, file] of [['Pdf', 'pdf.ts'], ['Xlsx', 'xlsx.ts']]) {
     if (!names.some((n) => effects[n].endowments?.includes(endowment))) continue
     imports.push(`import { ${endowment} } from ${JSON.stringify(fromSrc(path.join(mecha, 'services/airlock', file)))}`)
+    // Its calls are frozen with it, or one handler's write to a call would
+    // outlive the invocation in the isolate the next one shares.
+    imports.push(`Object.values(${endowment}).forEach(Object.freeze)`)
     imports.push(`Object.defineProperty(globalThis, '${endowment}', { value: Object.freeze(${endowment}) })`)
   }
 

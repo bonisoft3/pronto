@@ -108,7 +108,7 @@ app: state: mecha: rows: PaymentRules: {
   }
 } });
 
-// Who sent a write is the event's `origin`, the session's subject and never a
+// Who sent a write is the event's `_origin`, the session's subject and never a
 // column the writer fills, and an edge from it reads the origin's own rows of
 // the membership list.
 Deno.test({ name: "a lifecycle guard reads the write's origin and its memberships", sanitizeOps: false, sanitizeResources: false, fn: async () => {

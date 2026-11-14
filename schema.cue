@@ -2689,6 +2689,11 @@ import (
 		if t =~ "^:[a-z]" if !strings.Contains(r.source + "/", "/" + t + "/") {
 			"rewrite \(n): the destination names \(t), which the source does not"
 		},
+		// The door tries a rewrite before its own routes, so a parameter in
+		// the first segment would answer /health and the shell's files.
+		for n, _ in _rewrites if strings.HasPrefix(_rewriteSegments[n][1], ":") {
+			"rewrite \(n): the source begins with a parameter, and its first segment is a word"
+		},
 		for n, r in _rewrites if strings.Contains(r.source, ":")
 		let ps = regexp.FindAll(":[a-z][A-Za-z0-9_]*", r.source, -1)
 		if len(ps) != len({for p in ps {(p): true}}) {
@@ -2761,6 +2766,42 @@ import (
 	// A grant table that names groups is read against the membership list, and
 	// a grant row fills its user or its group, so neither column is required.
 	_grantViolations: [
+		// The grant table is the entity's own composition, or its policies are
+		// another's: a grant anyone may write is the row anyone may read.
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
+		if len([for _, v in A.state.entities if v.table == e.access.shared.via if v.access != _|_ if v.access.scope == "folder" if v.access.parent == n if v.access.on == e.access.shared.on {v}]) == 0 {
+			"entity \(n): its grant table \(e.access.shared.via) is an entity with access {scope: \"folder\", parent: \"\(n)\", on: \"\(e.access.shared.on)\"}"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
+		for m, x in A.state.entities if n < m if x.access != _|_ if x.access.scope == "private" if x.access.shared != _|_ if x.access.shared.via == e.access.shared.via {
+			"entities \(n), \(m): one grant table, \(e.access.shared.via), shares one entity's rows"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via
+		if len([for f in v.fields if f.name == e.access.shared.user {f}]) == 0 {
+			"entity \(n): the grant table \(e.access.shared.via) has no field \(e.access.shared.user) to name a user"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.role != _|_
+		for _, v in A.state.entities if v.table == e.access.shared.via for f in v.fields if f.name == e.access.shared.role if !f.required {
+			"entity \(n): a grant in \(e.access.shared.via) holds a role, so \(f.name) is required"
+		},
+		// The policies, the triggers and the sync path address a shared row by
+		// `id`, and name a group over the row's own key by the key's text.
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ || e.access.groups != _|_
+		for f in e.fields if f.pk if f.name != "id" {
+			"entity \(n): shared, and its key is \(f.name): a shared entity's key is id"
+		},
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_
+		for g in e.access.groups if g.of == _|_ for f in e.fields if f.pk if f.type != "uuid" if f.type != "string" {
+			"entity \(n): group \(g.group) is named over its key, a \(f.type): a uuid or a string, whose text the cluster and the terminal spell alike"
+		},
+		// A row is filed under a group by a reference, so who may file it there
+		// is who reads the row it names.
+		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.groups != _|_
+		for g in e.access.groups if g.of != _|_ for f in e.fields if f.name == g.of
+		if len([for _, x in A.state.entities if f.ref != _|_ if x.table == f.ref if x.access != _|_ if x.access.scope == "private" || x.access.scope == "public" {x}]) == 0 {
+			"entity \(n): group \(g.group) is of \(g.of), which references no private or public entity"
+		},
 		for n, e in A.state.entities if e.access != _|_ if e.access.scope == "private" if e.access.shared != _|_ if e.access.shared.group != _|_ if len(_groupLists) == 0 {
 			"entity \(n): its grant table names groups, and no entity is the membership list, scope \"group\""
 		},
