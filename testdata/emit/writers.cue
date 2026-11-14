@@ -62,7 +62,7 @@ _writersApp: pronto.#App & {
 			}
 		}
 		handlers: {}
-		design: {}
+		design:   _fixtureDesign
 		flows: {}
 	}
 	meta: {

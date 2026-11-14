@@ -146,7 +146,7 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
     flows: {}
   }
 }
@@ -269,7 +269,7 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
     flows: {}
   }
 }
@@ -384,7 +384,7 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
     flows: {}
   }
 }
@@ -918,7 +918,7 @@ app: pronto.#App & {
   surface: {
     screens: {}
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
     flows: {}
   }
 }
@@ -1017,7 +1017,7 @@ app: pronto.#App & {
   surface: {
     screens: {}
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
     flows: {}
   }
 }

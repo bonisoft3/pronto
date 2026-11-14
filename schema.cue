@@ -65,119 +65,23 @@ import (
 // colours and declared as ROLES, where the twin is closed. #scale.shadow is
 // then geometry alone.
 //
-// Required of every preset below, in both halves. #scale.shadow depends on
-// these names, so a preset that omitted them would export cleanly and emit
-// `--shadow-1: 0 1px 2px -1px var(--shadow-ink-10)` with nothing declaring
-// the ink: invalid at computed-value time, and every elevation silently gone.
+// Required of every design, in both halves, with structural defaults below so
+// `--shadow-1..6` never dangle when an app leaves elevation inks untinted.
 #shadowInks: ["shadow-ink-3", "shadow-ink-4", "shadow-ink-5", "shadow-ink-6",
 	"shadow-ink-7", "shadow-ink-8", "shadow-ink-10"]
 
-// Starting points for #Design. A preset is named rather than implicit so a
-// reviewer can see which opinion an app took, and so adding a second is a data
-// change rather than a fork.
-//
-// The token NAMES are the schema contract and the platform's; the hex is the
-// designer's to evolve.
-#designPresets: [string]~(Name,_): {
-	colors: [string]: string
-	colors: {for n in #shadowInks {(n): string}}
-	dark: [string]: string
-	dark: {for n in #shadowInks {(n): string}}
-	rounded: [string]:   string
-	spacing: [string]:   string
-	motion: [string]:    string
-	control: [string]:   string
-	measures: [string]:  string
-	type: [string]:      string
-	component: [string]: #Reference
-}
-#designPresets: press: {
-	// Identity for an editorial reading surface; the default an app takes
-	// when it names no preset.
-	colors: {
-		primary:         "#16181A"
-		secondary:       "#6B7076"
-		accent:          "#1D6A4F"
-		danger:          "#A93226"
-		neutral:         "#FBFAF7"
-		surface:         "#FFFFFF"
-		border:          "#E4E1D9"
-		"surface-muted": "#EFEDE6"
-		"shadow-ink-3":  "hsl(220 3% 15% / 3%)"
-		"shadow-ink-4":  "hsl(220 3% 15% / 4%)"
-		"shadow-ink-5":  "hsl(220 3% 15% / 5%)"
-		"shadow-ink-6":  "hsl(220 3% 15% / 6%)"
-		"shadow-ink-7":  "hsl(220 3% 15% / 7%)"
-		"shadow-ink-8":  "hsl(220 3% 15% / 8%)"
-		"shadow-ink-10": "hsl(220 3% 15% / 10%)"
-	}
-	dark: {
-		primary:         "#E9E7E2"
-		secondary:       "#9AA0A6"
-		accent:          "#63BE95"
-		danger:          "#E2705F"
-		neutral:         "#131414"
-		surface:         "#1C1E1F"
-		border:          "#2E3133"
-		"surface-muted": "#24272A"
-		"shadow-ink-3":  "hsl(220 40% 2% / 27%)"
-		"shadow-ink-4":  "hsl(220 40% 2% / 28%)"
-		"shadow-ink-5":  "hsl(220 40% 2% / 29%)"
-		"shadow-ink-6":  "hsl(220 40% 2% / 30%)"
-		"shadow-ink-7":  "hsl(220 40% 2% / 31%)"
-		"shadow-ink-8":  "hsl(220 40% 2% / 32%)"
-		"shadow-ink-10": "hsl(220 40% 2% / 34%)"
-	}
-	rounded: {sm: "4px", md: "8px", full: "999px"}
-	// px, not var(--size-N). Three of the four are exactly a rung, which is
-	// evidence the roles were already right rather than a reason to make them
-	// indirections: rewriting them would convert six apps' --sp-* from device
-	// px to rem, identical at a 16px root and not above it, while the two apps
-	// that declare `spacing` concretely would keep the literals and fork the
-	// corpus on the very role meant to show the two namespaces meeting.
-	spacing: {sm: "8px", md: "16px", lg: "24px", xl: "40px"}
-	motion:  {fast: "110ms", base: "180ms", ease: "cubic-bezier(.2, 0, 0, 1)", shift: "6px"}
-	// A control's geometry, which sm/md/lg/xl could not say: that ladder
-	// orders spacing by size and is silent about which BOX gets which, so a
-	// control's height and inset had no name and became a number. pad-x is a
-	// role pointing at a role — the worked example of the two layers meeting.
-	control: {
-		"h-xs":  "28px"
-		"h-sm":  "32px"
-		h:       "36px"
-		"h-lg":  "40px"
-		"pad-x": "var(--sp-md)"
-	}
-	// Page-level widths. Identity, not scale: no vocabulary contains 720px,
-	// and pretending one does is how a measure stays a bare number. press
-	// declares none, so every entry is the app's own.
-	measures: {}
-	// Six purposes and two leadings, each value a step Primer publishes, so the
-	// identity is spelled in the vocabulary rather than beside it. A purpose
-	// decides its size and its leading together, the shape Material's typescale
-	// takes and a bare ladder cannot state. #Design.type states the tier's rules.
-	type: {
-		display:  "2.5rem"
-		title:    "2rem"
-		subtitle: "1.25rem"
-		body:     "1rem"
-		caption:  "0.875rem"
-		label:    "0.75rem"
-		// TWO leadings, not one per purpose. The vendored ladder has five steps and
-		// two roles at one norm raise, so a preset that named four would leave an
-		// app a single free value and any override it made would cascade. Prose and headings are the two readings a
-		// leading actually decides; a purpose that needs a third names it, and has
-		// three steps left to name it with.
-		"leading-title": "1.25"
-		"leading-body":  "1.625"
-	}
-	// Geometry ordered by ELEMENT CLASS rather than by size: field-radius,
-	// selector-radius, box-radius. This is the one thing an ordered sm/md/full
-	// ladder cannot state whatever it is filled with — press orders radii by
-	// size and other systems order them by which control wears them — so it is a
-	// tier and not another rung. press declares none.
-	component: {}
-}
+// The eight semantic colour roles every app owes in both appearances. Unlike
+// the shadow inks and structural ladders, identity colours carry no platform
+// default: naming none would hand every app the same palette by inertia.
+#colorRoles: ["primary", "secondary", "accent", "danger", "neutral",
+	"surface", "border", "surface-muted"]
+
+// The three navigation postures emit.cue renders at `:where(...)` specificity:
+// a horizontal sticky top bar (`strip`), an inline-start vertical rail with a
+// narrow-viewport top bar (`sidebar`), or app-owned container geometry with
+// only the base link and control resets (`custom`). Required with no default
+// so every app chooses its chrome explicitly.
+#NavPosture: "strip" | "sidebar" | "custom"
 
 // The joins the scanner implements. A bucket's dimension says which norm()
 // runs over its steps and which properties' literals can reach them, so this is
@@ -283,7 +187,7 @@ import (
 // the generator publishes that this list drops is caught by the admission rule in
 // invariants.sql, which asks the archive rather than this list.
 //
-// Not a #designPresets entry: a preset is one identity among several, this is
+// Distinct from #Design: #Design states one app's own identity, whereas this is
 // the vocabulary every identity is spelled in. And it has no app seam at all —
 // an app that needs a length the scale lacks names a ROLE, which is a
 // decision, rather than a rung, which is not. That is what keeps a scale from
@@ -307,8 +211,8 @@ import (
 		size:   scales.openprops.buckets.size
 		border: scales.openprops.buckets.border
 		// Geometry only, and pronto's own: the six upstream NAMES republished over
-		// the twinned ink roles, for the reason #shadowInks gives. Every preset
-		// carries the inks, so these var()s never dangle.
+		// the twinned ink roles, for the reason #shadowInks gives. #Design defaults
+		// the inks, so these var()s never dangle.
 		shadow: {
 			prefix:    "--shadow-"
 			dimension: "opaque"
@@ -361,44 +265,81 @@ import (
 // The design system's values. An app states them once, as the YAML
 // frontmatter of its DESIGN.md, and program.cue reads them through #DesignMd
 // below — the file's body argues the identity and its frontmatter carries it,
-// the same division the ir and the program keep for behaviour. Every field is
-// optional: the preset supplies what the app does not say. The emitter alone
-// turns these into CSS; the fact-store join (invariants.sql) guards the fork.
+// the same division the ir and the program keep for behaviour. There are no
+// named theme presets: every app explicitly authors its eight core colour roles
+// in both `colors` and `dark` and selects its navigation posture in `shell.nav`,
+// while structural geometry and motion carry sensible defaults an app may
+// refine. The emitter alone turns these into CSS; the fact-store join
+// (invariants.sql) guards the fork.
 #Design: {
 	let D = self
 
-	// The starting set this app took. Naming a token below replaces that one
-	// and leaves the rest, exactly as `motion` works.
-	preset:  *"press" | string
-	_preset: #designPresets[D.preset]
-
-	colors: [string]: string
-	colors: {for k, v in D._preset.colors {(k): *v | string}}
+	colors: [string]: string & !=""
+	colors: {
+		for n in #colorRoles {(n): string & !=""}
+		"shadow-ink-3":  *"hsl(220 3% 15% / 3%)" | (string & !="")
+		"shadow-ink-4":  *"hsl(220 3% 15% / 4%)" | (string & !="")
+		"shadow-ink-5":  *"hsl(220 3% 15% / 5%)" | (string & !="")
+		"shadow-ink-6":  *"hsl(220 3% 15% / 6%)" | (string & !="")
+		"shadow-ink-7":  *"hsl(220 3% 15% / 7%)" | (string & !="")
+		"shadow-ink-8":  *"hsl(220 3% 15% / 8%)" | (string & !="")
+		"shadow-ink-10": *"hsl(220 3% 15% / 10%)" | (string & !="")
+	}
 	// The dark twin declares the SAME names — appearance is a token
 	// resolution, never a state. Emitted as the second argument of each
 	// token's light-dark(), so the two palettes are one declaration and a
 	// name can no longer appear in a single appearance: a missing twin and a
 	// twin nothing reads are both errors here rather than a token that
 	// silently stops changing, or never changed at all.
-	dark: close({for k, _ in D.colors {(k): string}})
-	dark: {for k, v in D._preset.dark {(k): *v | string}}
+	dark: close({for k, _ in D.colors {(k): string & !=""}})
+	dark: {
+		"shadow-ink-3":  *"hsl(220 40% 2% / 27%)" | (string & !="")
+		"shadow-ink-4":  *"hsl(220 40% 2% / 28%)" | (string & !="")
+		"shadow-ink-5":  *"hsl(220 40% 2% / 29%)" | (string & !="")
+		"shadow-ink-6":  *"hsl(220 40% 2% / 30%)" | (string & !="")
+		"shadow-ink-7":  *"hsl(220 40% 2% / 31%)" | (string & !="")
+		"shadow-ink-8":  *"hsl(220 40% 2% / 32%)" | (string & !="")
+		"shadow-ink-10": *"hsl(220 40% 2% / 34%)" | (string & !="")
+	}
 	rounded: [string]: string
-	rounded: {for k, v in D._preset.rounded {(k): *v | string}}
+	rounded: {
+		sm:   *"4px" | string
+		md:   *"8px" | string
+		full: *"999px" | string
+	}
+	// px, not var(--size-N): rewriting structural roles to rem indirections
+	// would fork apps that declare `spacing` concretely at non-16px roots.
 	spacing: [string]: string
-	spacing: {for k, v in D._preset.spacing {(k): *v | string}}
+	spacing: {
+		sm: *"8px" | string
+		md: *"16px" | string
+		lg: *"24px" | string
+		xl: *"40px" | string
+	}
 	// The motion vocabulary. The terminal ships no style at all — its
 	// shell.css is the empty contract — so this is the only declaration;
-	// the preset supplies the defaults and naming one here replaces it.
+	// naming a key here replaces its structural default.
 	motion: [string]: string
-	motion: {for k, v in D._preset.motion {(k): *v | string}}
+	motion: {
+		fast:  *"110ms" | string
+		base:  *"180ms" | string
+		ease:  *"cubic-bezier(.2, 0, 0, 1)" | string
+		shift: *"6px" | string
+	}
 	// Lengths a screen reaches for by role rather than by rung. #scale is the
 	// vocabulary beneath these and has no app seam; a length the scale lacks
 	// is named HERE, because a decision belongs in the app's own block and a
-	// rung does not.
+	// rung does not. pad-x points at a spacing role — the two layers meeting.
 	control: [string]: string
-	control: {for k, v in D._preset.control {(k): *v | string}}
+	control: {
+		"h-xs":  *"28px" | string
+		"h-sm":  *"32px" | string
+		h:       *"36px" | string
+		"h-lg":  *"40px" | string
+		"pad-x": *"var(--sp-md)" | string
+	}
+	// Page-level widths. Identity, not scale: every entry is the app's own.
 	measures: [string]: string
-	measures: {for k, v in D._preset.measures {(k): *v | string}}
 	// A named size or leading, emitted --type-*, chosen so it collides with no
 	// vendored ladder's prefix. A key spelled leading-* is a line-height and any
 	// other is a font size, because a role's dimension is read off its name and a
@@ -409,8 +350,11 @@ import (
 	// A purpose is named from `display, title, subtitle, heading, lead, body,
 	// body-small, label, caption, overline, code`, each with an optional
 	// `leading-<stem>` twin: Primer's functional layer read as a list of
-	// purposes, so a reader who knows that vocabulary knows this one. What a
-	// purpose is worth is the app's or its preset's.
+	// purposes, so a reader who knows that vocabulary knows this one.
+	//
+	// TWO default leadings, not one per purpose: the vendored ladder has five
+	// steps and two roles at one norm raise, so prose and headings leave three
+	// steps free for any purpose that needs its own.
 	//
 	// A role carries its VALUE. A role that aliased a rung would win its norm, and
 	// `best` keeps one step per (dimension, norm), so the rung would drop out of
@@ -419,7 +363,16 @@ import (
 	// that purpose", which is also the one legal spelling of it, since two roles
 	// at one norm raise.
 	type: [string]: string
-	type: {for k, v in D._preset.type {(k): *v | string}}
+	type: {
+		display:         *"2.5rem" | string
+		title:           *"2rem" | string
+		subtitle:        *"1.25rem" | string
+		body:            *"1rem" | string
+		caption:         *"0.875rem" | string
+		label:           *"0.75rem" | string
+		"leading-title": *"1.25" | string
+		"leading-body":  *"1.625" | string
+	}
 	// Keys are <element>-<property> and values POINT AT a role or a rung, so the
 	// tier says which geometry a class of control wears without inventing a value.
 	// A constraint, not a convention: this tier publishes no step, so a literal
@@ -431,16 +384,16 @@ import (
 	// Emitted --c-*, and like control and measures it publishes no step: which box
 	// gets which is a decision, not a value to refuse a literal toward.
 	component: [string]: #Reference
-	component: {for k, v in D._preset.component {(k): *v | string}}
 	// Which colour the terminal's own chrome resolves to, and which navigation
 	// posture (`strip` across the top, `sidebar` down the inline start on wide
 	// viewports with a top strip on narrow ones, or `custom` with only the
 	// link/control reset) `design.css` emits at `:where(...)` specificity.
+	// `nav` has no default: every app chooses its chrome explicitly.
 	shell: {
 		bg:   *"neutral" | string
 		fg:   *"primary" | string
 		rule: *"border" | string
-		nav:  *"strip" | "sidebar" | "custom"
+		nav:  #NavPosture
 	}
 }
 
@@ -448,13 +401,10 @@ import (
 // (`_designMd: _ @embed(file="DESIGN.md", type=text)` under `@extern(embed)`),
 // and `design` is its YAML frontmatter — the lines between a first line that is
 // exactly `---` and the next such line — unified with #Design, so that a key
-// #Design lacks, a value of the wrong shape and a file without a frontmatter
-// are all errors at `cue vet` and at export. The frontmatter is the one
-// declaration: program.cue restates none of it (`surface: design:
-// (pronto.#DesignMd & {text: _designMd}).design`), and it carries the app's own
-// overrides and additions, `var(--…)` references included — never the resolved
-// palette, so the preset keeps filling the rest. An empty frontmatter is the
-// preset as it is.
+// #Design lacks, a missing required palette role or `shell.nav` posture, a value
+// of the wrong shape and a file without a frontmatter are all errors at `cue vet`
+// and at export. The frontmatter is the one declaration: program.cue restates
+// none of it (`surface: design: (pronto.#DesignMd & {text: _designMd}).design`).
 #DesignMd: {
 	text:   string
 	_lines: strings.Split(text, "\n")
@@ -464,8 +414,7 @@ import (
 	_closes: [for i, l in _lines if i > 0 && l == "---" {i}]
 	_fenced: _lines[0] == "---" && len(_closes) > 0
 	// The error sits on `design` itself, so it surfaces wherever the design is
-	// read rather than only where the reader is inspected. An empty frontmatter
-	// unmarshals to top, which is the preset untouched.
+	// read rather than only where the reader is inspected.
 	if _fenced {
 		design: #Design & yaml.Unmarshal(strings.Join(list.Slice(_lines, 1, _closes[0]), "\n"))
 	}

@@ -19,17 +19,24 @@ cards under `plugins/pronto/agents/`.
 
 ### DESIGN.md
 
-The role layer, and the app's one design declaration. Its YAML frontmatter —
-between the file's first two `---` lines — is the design block: exactly the
-fields of pronto's `#Design` (`preset`, `colors`, `dark`, `rounded`,
-`spacing`, `motion`, `control`, `measures`, `type`, `component`, `shell`),
-every one optional, the named preset supplying the rest. It carries the app's
-own overrides and additions, `var(--…)` references included, never the
-resolved palette. `program.cue` embeds the file and derives its design from it
-through `#DesignMd`, restating nothing; a frontmatter key `#Design` lacks, a
-value of the wrong shape, or a file without a frontmatter is an error at
-`cue vet`. The body is the argument for the values — the comparison, the
-verdicts, and what each token means — in prose.
+The role layer, and the app's one design declaration. Pronto ships **zero**
+named theme presets (`preset` is refused at `cue vet`) and **no** default
+navigation posture. Its YAML frontmatter — between the file's first two `---`
+lines — is the design block: pronto's `#Design` (`colors`, `dark`, `rounded`,
+`spacing`, `motion`, `control`, `measures`, `type`, `component`, `shell`). Every
+app must explicitly author the eight core semantic colour roles (`primary`,
+`secondary`, `accent`, `danger`, `neutral`, `surface`, `border`,
+`surface-muted`, plus any domain-specific roles) in `colors`, provide a matching
+`dark` twin for every `colors` key (`dark` is closed over `colors`), and choose
+`shell.nav` (`"strip" | "sidebar" | "custom"`). Structural tiers (`rounded`,
+`spacing`, `motion`, `control`, `measures`, `type`, `component`), shadow inks
+(`shadow-ink-3..10`), and `shell.{bg,fg,rule}` carry schema defaults that an app
+may override or extend (`var(--…)` references included). `program.cue` embeds
+the file and derives its design from it through `#DesignMd`, restating nothing;
+a missing core colour role, an untwinned colour, an omitted `shell.nav`, a
+`preset` key, or a file without frontmatter is an error at `cue vet`. The body
+is the argument for the values — the landscape consultation, the competing
+directions, and what each token and chrome posture means — in prose.
 
 ## brief.md
 

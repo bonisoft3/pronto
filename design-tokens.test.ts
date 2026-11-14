@@ -5,7 +5,7 @@
 // verbatim under testdata/daisyui-5.7.32/ — and coverage of it is the check.
 // Nothing here transcribes a published value: the suite parses the vendored
 // CSS, so the quotation cannot drift from its source by being retyped. What
-// the fixture holds is this platform's READING of that contract — which press
+// the fixture holds is this platform's READING of that contract — which `#Design`
 // role a token lands on, and why it departs — in columns of its own, so a
 // departure cannot be hidden by rewording daisyUI.
 //
@@ -26,7 +26,7 @@
 //
 // That leaves the naming axis and the value axis genuinely independent, which
 // is what makes the last case a progress meter rather than a constant: adding
-// a role to the press preset moves the first and nothing else.
+// a role to #Design moves the first and nothing else.
 //
 // The cue probes are why the suite runs under --allow-run=cue: a run of
 // `cue export` is the only way to read the schema's own default field set
@@ -47,8 +47,11 @@ const EMITTER = new URL("emit.cue", HERE);
 // A probe reads through stdin, not -e: Windows bounds a command line at
 // 32K characters, which every theme's body at once overruns. It is a file of
 // its own package importing pronto's, as a stdin file merges into none.
+// `#Base` fills only the required un-defaulted `#colorRoles` and `shell.nav`
+// slots from the schema's own `#colorRoles` list so role discovery and bucket
+// admission probes never restate role names here.
 const probe = (expr: string) =>
-  `package probe\n\nimport pronto "bonisoft.org/plugins/pronto"\n\n#Design: pronto.#Design\n#App: pronto.#App\n\nout: ${expr}\n`;
+  `package probe\n\nimport pronto "bonisoft.org/plugins/pronto"\n\n#Design: pronto.#Design\n#Base: pronto.#Design & {\n\tcolors: {for n in pronto.#colorRoles {(n): *"#000000" | string}}\n\tdark: {for n in pronto.#colorRoles {(n): *"#000000" | string}}\n\tshell: nav: *"strip" | "sidebar" | "custom"\n}\n#App: pronto.#App\n\nout: ${expr}\n`;
 
 // The quotation this suite grades, hashed: every vendored theme stylesheet in
 // themeOrder, then each reading's token and the daisyUI meaning it quotes. It
@@ -121,9 +124,9 @@ const cue = async (args: string[], stdin?: string): Promise<{ ok: boolean; out: 
   return { ok: r.success, out: dec.decode(r.stdout) + dec.decode(r.stderr) };
 };
 
-/** Unify `#Design` with one probe body and report what cue actually does. */
+/** Unify `#Base` with one probe body and report what cue actually does. */
 const design = (body: string) =>
-  cue(["export", "-", "-e", "out", "--out", "json"], probe(`#Design & {\n${body}\n}\n`));
+  cue(["export", "-", "-e", "out", "--out", "json"], probe(`#Base & {\n${body}\n}\n`));
 
 const q = (s: string) => JSON.stringify(s);
 const kv = (o: Record<string, string>) =>
@@ -141,7 +144,6 @@ type Contract = {
   roles: Map<string, Role>;
   /** The colour keys the closed twin mirrors. */
   twinned: string[];
-  presets: string[];
 };
 
 const contract = async (): Promise<Contract> => {
@@ -152,15 +154,14 @@ const contract = async (): Promise<Contract> => {
     prefix.set(m[1], m[2]);
   }
 
-  const d = await cue(["export", ...SCHEMA, "-e", "#Design", "--out", "json"]);
-  assert(d.ok, `cue could not export #Design, so there is no contract to grade:\n${d.out}`);
+  const d = await cue(["export", "-", "-e", "out", "--out", "json"], probe("#Base"));
+  assert(d.ok, `cue could not export #Base, so there is no contract to grade:\n${d.out}`);
   const block = JSON.parse(d.out) as Record<string, Record<string, string> | string>;
 
   const roles = new Map<string, Role>();
   for (const [bucket, kvs] of Object.entries(block)) {
-    // `dark` is the twin of `colors`, not a second set of roles; `preset` is
-    // the choice, not a token.
-    if (bucket === "dark" || bucket === "preset") continue;
+    // `dark` is the twin of `colors`, not a second set of roles.
+    if (bucket === "dark") continue;
     assert(typeof kvs === "object", `#Design.${bucket} is not a bucket of tokens`);
     if (bucket === "shell") {
       // Three fixed colour keys, emitted one literal line each rather than by
@@ -187,13 +188,10 @@ const contract = async (): Promise<Contract> => {
     }
   }
 
-  const p = await cue(["export", ...SCHEMA, "-e", "#designPresets", "--out", "json"]);
-  assert(p.ok, `cue could not export #designPresets:\n${p.out}`);
   return {
     prefix,
     roles,
     twinned: Object.keys(block.dark as Record<string, string>),
-    presets: Object.keys(JSON.parse(p.out) as Record<string, unknown>),
   };
 };
 
@@ -254,7 +252,7 @@ const carriage = async (
     // export at all, so the probe supplies the light half twice. That it must
     // is one of the departures this suite records, not a workaround for one.
     if (want.colors) lines.push(`\t\tdark: {${kv(want.colors)}}`);
-    asked.push({ theme: t.name, body: `\t${q(t.name)}: #Design & {\n${lines.join("\n")}\n\t}`, want });
+    asked.push({ theme: t.name, body: `\t${q(t.name)}: #Base & {\n${lines.join("\n")}\n\t}`, want });
   }
   const r = await cue(
     ["export", "-", "-e", "out", "--out", "json"], probe(`{\n${asked.map((a) => a.body).join("\n")}\n}\n`),
@@ -509,7 +507,7 @@ Deno.test("the wide-gamut census is a fact about daisyUI's palette and not a los
   assert(lost.size === 0, `${lost.size} values are lost, so this census stops being an observation and becomes a verdict`);
 });
 
-Deno.test("a colour the preset does not publish costs a twin, and one it does publish is rebound silently", async () => {
+Deno.test("a colour #Design does not publish costs a twin, and one it does publish is rebound silently", async () => {
   const { contract: c } = await report();
   const orphans = fixture.reading
     .filter((r) => r.maps_to === "" && r.bucket === "colors")
@@ -518,47 +516,49 @@ Deno.test("a colour the preset does not publish costs a twin, and one it does pu
   const collides = orphans.filter((n) => c.roles.has(`colors/${n}`));
   assert(fresh.length > 0 && collides.length > 0, `${fresh.length} fresh and ${collides.length} colliding orphans`);
 
-  // A name the preset does not publish: close() over D.colors makes
+  // A name #Design does not publish: close() over D.colors makes
   // dark.<name> non-concrete, and cue refuses to write the file at all. The
   // name itself is admitted — case "what the design layer refuses" measures
   // that — so what an app pays for a new colour is exactly one dark value.
   const bad = await cue(
-    ["export", "-", "-e", "out", "--out", "json"], probe(`{\n${fresh.map((n) => `${q(n)}: #Design & {colors: {${q(n)}: "#123456"}}`).join("\n")}\n}\n`),
+    ["export", "-", "-e", "out", "--out", "json"], probe(`{\n${fresh.map((n) => `${q(n)}: #Base & {colors: {${q(n)}: "#123456"}}`).join("\n")}\n}\n`),
   );
   assert(!bad.ok, `cue accepted ${fresh.length} untwinned colours:\n${bad.out}`);
   const flat = bad.out.replaceAll('"', "");
   const quiet = fresh.filter((n) => !flat.includes(`${n}.dark.${n}`));
   assert(quiet.length === 0, `close() demanded no twin for: ${quiet.join(", ")}\n${bad.out}`);
 
-  // A name the preset HAS, meaning something else: nothing objects. The value
-  // is simply written into press's role, which is why `maps_to` may not be
+  // A name #Design HAS, meaning something else: nothing objects. The value
+  // is simply written into the role, which is why `maps_to` may not be
   // derived from a shared word and why this suite grades injectivity.
   const ok = await cue(
     ["export", "-", "-e", "out", "--out", "json"], probe(`{\n${
-      collides.map((n) => `${q(n)}: #Design & {colors: {${q(n)}: "#123456"}, dark: {${q(n)}: "#123456"}}`).join("\n")
+      collides.map((n) => `${q(n)}: #Base & {colors: {${q(n)}: "#123456"}, dark: {${q(n)}: "#123456"}}`).join("\n")
     }\n}\n`),
   );
   assert(ok.ok, `cue refused a colliding name:\n${ok.out}`);
   const out = JSON.parse(ok.out) as Record<string, { colors: Record<string, string> }>;
   const kept = collides.filter((n) => out[n].colors[n] !== "#123456");
-  assert(kept.length === 0, `these kept press's value instead of taking daisyUI's: ${kept.join(", ")}`);
+  assert(kept.length === 0, `these kept #Base's value instead of taking daisyUI's: ${kept.join(", ")}`);
 });
 
-Deno.test("one preset, two appearances, no siblings: daisyUI's theme system has no seam here", async () => {
+Deno.test("zero presets, explicit palette and nav, two appearances, no siblings: daisyUI's theme system has no seam here", async () => {
   const { contract: c } = await report();
   const problems: string[] = [];
 
-  // daisyUI ships 35 identities and selects among them at runtime with
-  // [data-theme]. Each of these probes asks the schema for the seam that would
-  // hold a second identity, and reports what cue says instead of arguing it.
-  if (c.presets.length !== 1) {
-    problems.push(`#designPresets publishes ${c.presets.length} identities (${c.presets.join(", ")}), so this case's premise moved`);
+  // Zero named presets: `#designPresets` is absent and `preset` on `#Design` is
+  // refused outright so no app can lean on a platform theme monoculture.
+  const presets = await cue(["export", ...SCHEMA, "-e", "#designPresets", "--out", "json"]);
+  if (presets.ok) problems.push(`#designPresets still exports (${presets.out.trim()}); zero presets are owed`);
+  const legacyPreset = await cue(["export", "-", "-e", "out", "--out", "json"], probe(`#Base & {preset: "press"}\n`));
+  if (legacyPreset.ok) problems.push(`#Design still accepts a preset field`);
+  else if (!/preset: field not allowed/.test(legacyPreset.out)) {
+    problems.push(`naming preset failed for another reason: ${legacyPreset.out.trim()}`);
   }
-  const unknown = await design(`\tpreset: "dracula"`);
-  if (unknown.ok) problems.push(`an app may name a preset the schema does not publish`);
-  else if (!/undefined field: dracula/.test(unknown.out)) {
-    problems.push(`naming an unpublished preset failed for another reason: ${unknown.out.trim()}`);
-  }
+
+  // Raw `#Design` with no authored palette or `shell.nav` is non-concrete.
+  const bareDesign = await cue(["export", ...SCHEMA, "-e", "#Design", "--out", "json"]);
+  if (bareDesign.ok) problems.push(`bare #Design exported without explicit colors, dark, and shell.nav`);
 
   // A third appearance. `dark` is the twin and the schema is a closed
   // definition, so there is no room for a second sibling palette beside it.
@@ -577,7 +577,7 @@ Deno.test("one preset, two appearances, no siblings: daisyUI's theme system has 
   // Two identities side by side under one app, which is what [data-theme]
   // selects between. #App.surface.design is one struct.
   const siblings = await cue(
-    ["export", "-", "-e", "out", "--out", "json"], probe(`#App.surface & {design: {press: #Design, dracula: #Design}}\n`),
+    ["export", "-", "-e", "out", "--out", "json"], probe(`#App.surface & {design: {press: #Base, dracula: #Base}}\n`),
   );
   if (siblings.ok) problems.push(`#App.surface.design held two identities, so sibling themes are expressible`);
   else if (!/design\.dracula: field not allowed/.test(siblings.out)) {
@@ -587,7 +587,7 @@ Deno.test("one preset, two appearances, no siblings: daisyUI's theme system has 
 });
 
 // The naming meter, pinned as an EQUALITY the way meta.design.pendingLiterals
-// is: the preset publishing a role for one more daisyUI token moves the
+// is: #Design publishing a role for one more daisyUI token moves the
 // reading, and the pin moves with it in a diff a reviewer sees. Pinned as the
 // mapping itself and not its count, so a swap that names one token and drops
 // another cannot hold the number. A ceiling would let the reading fall in
@@ -647,7 +647,7 @@ Deno.test("the expressibility meter reads its pinned mapping: which of the 28 to
   assert(
     JSON.stringify(reading) === JSON.stringify(PINNED_NAMED),
     `the meter reads ${named.length} of ${total} named and the pin holds ${PINNED_NAMED.length}. ` +
-      `Move PINNED_NAMED with the preset, never the other way.\n\n` +
+      `Move PINNED_NAMED with #Design, never the other way.\n\n` +
       `${lines.length} of ${ts.length} published themes cannot be expressed, on the naming axis alone.\n\n` +
       `NAMES: the design layer publishes ${c.roles.size} roles. ${named.length} of the ${total} ` +
       `published tokens land on one ` +
@@ -662,7 +662,7 @@ Deno.test("the expressibility meter reads its pinned mapping: which of the 28 to
       `${free.map((r) => `${r.token} (${r.bucket})`).join(" ")}\n\n` +
       `VALUES: ${carried.rows.length} of ${carried.rows.length} published declarations are stored byte ` +
       `for byte, wide-gamut oklch included — a bucket holds an opaque string. Storage is not the gap.\n\n` +
-      `A theme is also one identity pinning its own color-scheme, where #Design is one preset with a ` +
+      `A theme is also one identity pinning its own color-scheme, where #Design is one identity with a ` +
       `closed twin, so each of these would additionally have to write its light half into dark.\n` +
       `What each theme sets for itself:\n  ` + lines.join("\n  "),
   );

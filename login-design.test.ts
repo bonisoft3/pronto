@@ -1,29 +1,37 @@
-import { assert, assertEquals, assertFalse, assertStringIncludes } from "jsr:@std/assert@1.0.11";
+import { assert, assertEquals, assertFalse, assertRejects, assertStringIncludes } from "jsr:@std/assert@1.0.11";
 import { emitFiles, paymentProgram } from "./effects-fixtures.ts";
 
 const FLOW_PHYSICAL =
   /(?:^|[;{\s])(?:margin|padding)-(?:left|right)\s*:|(?:^|[;{\s])border-(?:left|right)(?:-(?:width|style|color))?\s*:|(?:^|[;{\s])border-(?:top|bottom)-(?:left|right)-radius\s*:|text-align\s*:\s*(?:left|right)\b|(?:float|clear)\s*:\s*(?:left|right)\b/;
 
-function navProgram(nav?: string): string {
+function withDesign(designCue: string): string {
   return paymentProgram().replace(
-    "design: {}",
-    nav ? `design: { shell: { nav: "${nav}" } }` : "design: {}",
+    /design: \{[\s\S]*?\n    \}/,
+    `design: ${designCue}`,
   );
+}
+
+function navProgram(nav: "strip" | "sidebar" | "custom"): string {
+  return paymentProgram() + `\napp: surface: design: shell: nav: "${nav}"\n`;
 }
 
 function loginProgram(surfaceOverride = ""): string {
   return paymentProgram()
-    .replace("capabilities: {hatches: {},", `capabilities: {auth: {required: true, service: "/auth", providers: ["google"]}, hatches: {},`)
-    .replace("design: {}", `design: {
-      colors: {
-        primary: "#101010", secondary: "#353535", neutral: "#202020", surface: "#f5f5f5"
-        ${surfaceOverride ? `"login-surface": "${surfaceOverride}"` : ""}
-      }
-      dark: {
-        primary: "#f5f5f5", secondary: "#dddddd", neutral: "#eeeeee", surface: "#181818"
-        ${surfaceOverride ? `"login-surface": "#222222"` : ""}
-      }
-    }`);
+    .replace(
+      "capabilities: {hatches: {},",
+      `capabilities: {auth: {required: true, service: "/auth", providers: ["google"]}, hatches: {},`,
+    ) + `
+app: surface: design: {
+  colors: {
+    primary: "#101010", secondary: "#353535", neutral: "#202020", surface: "#f5f5f5"
+    ${surfaceOverride ? `"login-surface": "${surfaceOverride}"` : ""}
+  }
+  dark: {
+    primary: "#f5f5f5", secondary: "#dddddd", neutral: "#eeeeee", surface: "#181818"
+    ${surfaceOverride ? `"login-surface": "#222222"` : ""}
+  }
+}
+`;
 }
 
 function palette(css: string, name: string): string[] {
@@ -70,26 +78,68 @@ Deno.test("an app can declare a login surface in both appearances without changi
   assertStringIncludes(css, "body:has(.shell-login) { background: var(--login-surface, var(--surface)); }");
 });
 
+Deno.test("design refuses preset keys and requires explicit palette twins and shell.nav posture", async () => {
+  await assertRejects(() => emitFiles(withDesign("{}")), Error, "unresolved disjunction");
+  await assertRejects(
+    () => emitFiles(withDesign(`{ shell: nav: "strip" }`)),
+    Error,
+    "non-concrete value",
+  );
+  await assertRejects(
+    () =>
+      emitFiles(withDesign(`{
+      colors: { primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef" }
+      dark: { primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424" }
+    }`)),
+    Error,
+    'unresolved disjunction "strip" | "sidebar" | "custom"',
+  );
+  await assertRejects(
+    () => emitFiles(paymentProgram() + `\napp: surface: design: preset: "press"\n`),
+    Error,
+    "preset: field not allowed",
+  );
+  await assertRejects(
+    () => emitFiles(paymentProgram() + `\napp: surface: design: colors: primary: ""\n`),
+    Error,
+    'invalid value ""',
+  );
+});
+
 Deno.test("shell.nav emits zero-specificity :where(...) rules for strip, sidebar, and custom postures without physical flow properties", async () => {
-  const stripCss = (await emitFiles(navProgram()))["shell/design.css"].text;
+  const stripCss = (await emitFiles(navProgram("strip")))["shell/design.css"].text;
   assertStringIncludes(stripCss, ":where(body > nav) { position: sticky; top: 0; z-index: 10;");
-  assertStringIncludes(stripCss, ":where(body > nav .shell-me) { margin-inline-start: auto;");
-  assertStringIncludes(stripCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register))");
+  assertStringIncludes(stripCss, ':where(body > nav > a[aria-current="page"]) {');
+  assertStringIncludes(stripCss, "color: var(--shell-nav-active-fg, inherit);");
+  assertStringIncludes(stripCss, "color-mix(in srgb, currentColor 9%, transparent)");
+  assertStringIncludes(stripCss, ":where(body > nav > a:hover) {");
+  assertStringIncludes(stripCss, ":where(body > nav .shell-me) { margin-inline-start: auto; flex: none;");
+  assertStringIncludes(stripCss, ":where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }");
+  assertStringIncludes(stripCss, ":where(body > nav > a ~ .shell-me) {");
+  assertStringIncludes(stripCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register, .shell-provider))");
+  assertStringIncludes(stripCss, "@media print { :where(body > nav) { display: none; } }");
+  assertStringIncludes(stripCss, ":where(body > nav[hidden]) { display: none; }");
   assertFalse(FLOW_PHYSICAL.test(stripCss));
 
   const sidebarCss = (await emitFiles(navProgram("sidebar")))["shell/design.css"].text;
   assertStringIncludes(sidebarCss, "@media (min-width: 860px) {");
   assertStringIncludes(sidebarCss, ":where(body > nav) { position: fixed; inset-block: 0; inset-inline-start: 0;");
   assertStringIncludes(sidebarCss, "border-inline-end: 1px solid var(--shell-rule);");
+  assertStringIncludes(sidebarCss, ':where(body > nav > a[aria-current="page"]) {');
+  assertStringIncludes(sidebarCss, "color: var(--shell-nav-active-fg, inherit);");
+  assertStringIncludes(sidebarCss, ":where(body > nav > a ~ .shell-me) {");
   assertStringIncludes(sidebarCss, ":where(body:has(> nav:not([hidden])) > #app) {");
   assertStringIncludes(sidebarCss, "margin-inline-start: var(--shell-nav-width, var(--size-13));");
-  assertStringIncludes(sidebarCss, "@media (max-width: 859px) {");
-  assertStringIncludes(sidebarCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register))");
+  assertStringIncludes(sidebarCss, "@media not all and (min-width: 860px) {");
+  assertFalse(sidebarCss.includes("@media (max-width: 859px)"));
+  assertStringIncludes(sidebarCss, "@media print {");
+  assertStringIncludes(sidebarCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register, .shell-provider))");
   assertFalse(FLOW_PHYSICAL.test(sidebarCss));
 
   const customCss = (await emitFiles(navProgram("custom")))["shell/design.css"].text;
   assertFalse(customCss.includes(":where(body > nav) {"));
+  assertFalse(customCss.includes(':where(body > nav > a[aria-current="page"]) {'));
   assertStringIncludes(customCss, ":where(body > nav a) { color: inherit; text-decoration: none; }");
-  assertStringIncludes(customCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register))");
+  assertStringIncludes(customCss, ":where(body > nav :is(.shell-signout, .shell-signin, .shell-register, .shell-provider))");
   assertFalse(FLOW_PHYSICAL.test(customCss));
 });

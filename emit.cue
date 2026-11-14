@@ -3530,52 +3530,95 @@ _pgrollDir: "services/database/pgroll"
 		}
 		"""
 	// The navigation chrome's posture (`#Design.shell.nav`). Every selector is
-	// wrapped in `:where(...)` so the default posture has specificity (0,0,0),
+	// wrapped in `:where(...)` so the chosen posture has specificity (0,0,0),
 	// letting an app's own `chrome.css` or `nav.css` override any property at
 	// ordinary selector weight without `!important`.
 	_navCss: [
 		if E._design.shell.nav == "strip" {
 			"""
-				/* Sticky, because the navigation stack restores a screen's scroll
-				   position on return — without it the way back to the primary
-				   navigation is scrolling up. A sticky element is transparent, so it
-				   needs its own background or content runs under it.
-
-				   One line, always: a wrapped strip is as tall as its rows and pushes
-				   the masthead below the fold, and any app with more routes than a
-				   phone's width holds would wrap at its natural size. It scrolls
-				   instead, and the scrollbar is hidden because a horizontal bar across
-				   the chrome reads as a second rule under the strip. */
+				/* Top-bar posture (`shell.nav: "strip"`): sticky horizontal bar with
+				   pill-shaped route tabs, subtle surface hover, inset-ring active indicator,
+				   and inline-end session cluster. Tints and borders derive from `currentColor`
+				   and active text defaults to `inherit` so apps that paint an inverted bar
+				   (`body > nav { background: ...; color: ... }`) keep full foreground contrast. */
 				:where(body > nav) { position: sticky; top: 0; z-index: 10;
 				  background: var(--shell-bg);
-				  display: flex; gap: var(--shell-nav-gap, 20px);
+				  display: flex; gap: var(--shell-nav-gap, 6px);
 				  flex-wrap: nowrap; align-items: center;
+				  min-height: var(--shell-nav-height, 52px); box-sizing: border-box;
 				  overflow-x: auto; scrollbar-width: none;
-				  padding: var(--shell-nav-pad, 14px 24px);
-				  font-weight: var(--shell-nav-weight, 600);
+				  padding: var(--shell-nav-pad, 8px 20px);
+				  font-size: var(--shell-nav-size, var(--type-caption, 0.875rem));
+				  font-weight: var(--shell-nav-weight, 500);
 				  border-block-end: 1px solid var(--shell-rule); }
 				:where(body > nav)::-webkit-scrollbar { display: none; }
-				/* The routes carry their own width — shrinking them is what would make
-				   the strip fit by breaking words, which is the wrap this avoids. The
-				   identity beside them keeps flex's default shrink, so it is the part
-				   that gives and ellipsises. 24px is check-visual's touch-target floor:
-				   nav labels are small type, so the box grows to the floor rather than
-				   the type growing with it. */
+				/* Route pills and the session cluster hold their own width (`flex: none`) so
+				   neither breaks mid-word nor collapses below its controls when the strip
+				   scrolls horizontally on narrow viewports (preserving `nav`'s inline-end
+				   padding past `.shell-signout`), while `.shell-who` caps at `--shell-who-max`
+				   and ellipsises long handles. `--control-h-sm` (32px) clears check-visual's
+				   24px touch floor. */
 				:where(body > nav > a) { white-space: nowrap; flex: none;
-				  display: inline-flex; align-items: center; min-height: 24px; }
-				/* The signed-in person at the strip's far end, name-then-handle as a
-				   byline. All four ellipsis rules are load-bearing: nowrap alone
-				   cannot shrink, and min-width: 0 is what lets a flex item shrink
-				   below its content width at all. */
-				:where(body > nav .shell-me) { margin-inline-start: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
+				  display: inline-flex; align-items: center; gap: var(--sp-sm, 8px);
+				  min-height: var(--control-h-sm, 32px); box-sizing: border-box;
+				  padding-block: var(--shell-nav-link-pad-y, 6px); padding-inline: var(--shell-nav-link-pad-x, 12px);
+				  border-radius: var(--shell-nav-radius, var(--r-md, 8px));
+				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), color var(--motion-fast, 110ms) var(--motion-ease, ease), box-shadow var(--motion-fast, 110ms) var(--motion-ease, ease); }
+				:where(body > nav > a:hover) {
+				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
+				  text-decoration: var(--shell-nav-hover, none); }
+				:where(body > nav > a[aria-current="page"]) {
+				  background: var(--shell-nav-active-bg, color-mix(in srgb, currentColor 9%, transparent));
+				  color: var(--shell-nav-active-fg, inherit);
+				  font-weight: var(--shell-nav-active-weight, 600);
+				  box-shadow: var(--shell-nav-active-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)); }
+				/* The signed-in person at the strip's inline end, separated by a rule only
+				   when route links precede it (`> a ~ .shell-me`). */
+				:where(body > nav .shell-me) { margin-inline-start: auto; flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); }
+				:where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
+				:where(body > nav > a ~ .shell-me) {
+				  padding-inline-start: var(--shell-nav-me-pad, var(--sp-md, 16px));
+				  border-inline-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				  flex: none; display: inline-flex; align-items: center; justify-content: center;
+				  min-height: var(--control-h-xs, 28px); box-sizing: border-box;
+				  padding-block: var(--shell-nav-btn-pad-y, 4px); padding-inline: var(--shell-nav-btn-pad-x, 10px); white-space: nowrap;
+				  border: var(--shell-nav-btn-border, 1px solid color-mix(in srgb, currentColor 20%, transparent)); border-radius: var(--r-sm, 4px);
+				  font-weight: 500;
+				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), border-color var(--motion-fast, 110ms) var(--motion-ease, ease); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider):hover) {
+				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
+				  text-decoration: none; }
+				@media print { :where(body > nav) { display: none; } }
 				"""
 		},
 		if E._design.shell.nav == "sidebar" {
 			"""
 				/* Sidebar posture (`shell.nav: "sidebar"`): a vertical inline-start rail
-				   on wide viewports and a sticky top strip on narrow ones, emitted at
-				   `:where(...)` specificity so the app's own chrome sheet can refine
-				   surfaces, icons, or mobile tabs without `!important`. */
+				   on wide viewports and a sticky top strip on narrow ones (`not all and (min-width: 860px)`
+				   so fractional DPR widths around 859.5px have no dead zone), sharing the same
+				   `currentColor` pill geometry, active indicator, and session controls at `:where(...)`
+				   specificity so app stylesheets can refine without `!important`. */
+				:where(body > nav > a) {
+				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), color var(--motion-fast, 110ms) var(--motion-ease, ease), box-shadow var(--motion-fast, 110ms) var(--motion-ease, ease); }
+				:where(body > nav > a:hover) {
+				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
+				  text-decoration: var(--shell-nav-hover, none); }
+				:where(body > nav > a[aria-current="page"]) {
+				  background: var(--shell-nav-active-bg, color-mix(in srgb, currentColor 9%, transparent));
+				  color: var(--shell-nav-active-fg, inherit);
+				  font-weight: var(--shell-nav-active-weight, 600);
+				  box-shadow: var(--shell-nav-active-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				  flex: none; display: inline-flex; align-items: center; justify-content: center;
+				  min-height: var(--control-h-xs, 28px); box-sizing: border-box;
+				  padding-block: var(--shell-nav-btn-pad-y, 4px); padding-inline: var(--shell-nav-btn-pad-x, 10px); white-space: nowrap;
+				  border: var(--shell-nav-btn-border, 1px solid color-mix(in srgb, currentColor 20%, transparent)); border-radius: var(--r-sm, 4px);
+				  font-weight: 500;
+				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), border-color var(--motion-fast, 110ms) var(--motion-ease, ease); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider):hover) {
+				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
+				  text-decoration: none; }
 				@media (min-width: 860px) {
 				  :where(body > nav) { position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 10;
 				    width: var(--shell-nav-width, var(--size-13)); height: 100dvh;
@@ -3583,37 +3626,58 @@ _pgrollDir: "services/database/pgroll"
 				    display: flex; flex-direction: column; gap: var(--shell-nav-gap, 4px);
 				    overflow-y: auto; scrollbar-width: none;
 				    padding: var(--shell-nav-pad, 16px 12px);
-				    font-weight: var(--shell-nav-weight, 600);
+				    font-size: var(--shell-nav-size, var(--type-caption, 0.875rem));
+				    font-weight: var(--shell-nav-weight, 500);
 				    border-inline-end: 1px solid var(--shell-rule); }
 				  :where(body > nav)::-webkit-scrollbar { display: none; }
 				  :where(body > nav > a) { white-space: nowrap; flex: none;
 				    display: flex; align-items: center; gap: var(--sp-sm, 8px);
-				    width: 100%; box-sizing: border-box; min-height: 40px; }
+				    width: 100%; box-sizing: border-box; min-height: var(--control-h-lg, 40px);
+				    padding-block: var(--shell-nav-link-pad-y, 8px); padding-inline: var(--shell-nav-link-pad-x, 12px);
+				    border-radius: var(--shell-nav-radius, var(--r-md, 8px)); }
 				  :where(body > nav .shell-me) { margin-block-start: auto; width: 100%; box-sizing: border-box;
 				    display: flex; flex-direction: column; gap: var(--sp-sm, 8px); min-width: 0; }
+				  :where(body > nav > a ~ .shell-me) {
+				    padding-block-start: var(--shell-nav-me-pad, var(--sp-md, 16px));
+				    border-block-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
+				  :where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				    width: 100%; min-height: var(--control-h-sm, 32px); }
 				  :where(body:has(> nav:not([hidden])) > #app) {
 				    margin-inline-start: var(--shell-nav-width, var(--size-13));
 				    box-sizing: border-box; min-width: 0; }
 				}
-				@media (max-width: 859px) {
+				@media not all and (min-width: 860px) {
 				  :where(body > nav) { position: sticky; top: 0; z-index: 10;
 				    background: var(--shell-bg);
-				    display: flex; gap: var(--shell-nav-gap, 20px);
+				    display: flex; gap: var(--shell-nav-gap, 6px);
 				    flex-wrap: nowrap; align-items: center;
+				    min-height: var(--shell-nav-height, 52px); box-sizing: border-box;
 				    overflow-x: auto; scrollbar-width: none;
-				    padding: var(--shell-nav-pad, 14px 24px);
-				    font-weight: var(--shell-nav-weight, 600);
+				    padding: var(--shell-nav-pad, 8px 16px);
+				    font-size: var(--shell-nav-size, var(--type-caption, 0.875rem));
+				    font-weight: var(--shell-nav-weight, 500);
 				    border-block-end: 1px solid var(--shell-rule); }
 				  :where(body > nav)::-webkit-scrollbar { display: none; }
 				  :where(body > nav > a) { white-space: nowrap; flex: none;
-				    display: inline-flex; align-items: center; min-height: 24px; }
-				  :where(body > nav .shell-me) { margin-inline-start: auto; display: flex; align-items: center; gap: var(--shell-nav-gap, 20px); min-width: 0; }
+				    display: inline-flex; align-items: center; gap: var(--sp-sm, 8px);
+				    min-height: var(--control-h-sm, 32px); box-sizing: border-box;
+				    padding-block: var(--shell-nav-link-pad-y, 6px); padding-inline: var(--shell-nav-link-pad-x, 12px);
+				    border-radius: var(--shell-nav-radius, var(--r-md, 8px)); }
+				  :where(body > nav .shell-me) { margin-inline-start: auto; flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); }
+				  :where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
+				  :where(body > nav > a ~ .shell-me) {
+				    padding-inline-start: var(--shell-nav-me-pad, var(--sp-md, 16px));
+				    border-inline-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
+				}
+				@media print {
+				  :where(body > nav) { display: none; }
+				  :where(body:has(> nav:not([hidden])) > #app) { margin-inline-start: 0; }
 				}
 				"""
 		},
 		"""
 			/* Custom posture (`shell.nav: "custom"`): the app's own stylesheet owns
-			   the container geometry; only the link and control resets below apply. */
+			   the container geometry; only the link and control resets apply. */
 			""",
 	][0]
 	_designCss: """
@@ -3621,9 +3685,10 @@ _pgrollDir: "services/database/pgroll"
 		\(E._scaleCss)
 
 		/* Design system values, from DESIGN.md's frontmatter, which the program
-		   reads as its design block: the roles the preset publishes, each colour
-		   carrying both appearances. A screen that redeclares one of these has
-		   forked the system — the shared layer is the only declaration. */
+		   reads as its design block: the roles #Design publishes and the palette
+		   the app authors, each colour carrying both appearances. A screen that
+		   redeclares one of these has forked the system — the shared layer is the
+		   only declaration. */
 		:root {
 		\(strings.Join(list.Concat([
 			// One declaration per colour, both appearances inside it. The dark
@@ -3657,7 +3722,7 @@ _pgrollDir: "services/database/pgroll"
 
 		/* The terminal's chrome, styled here because the terminal ships no
 		   style: its markup carries stable classes and attributes, and this
-		   emission — program-owned, preset-derived, app-overridable — is the
+		   emission — program-owned, design-derived, app-overridable — is the
 		   only stylesheet they have. Aesthetic values stay behind --shell-*
 		   variables so an app can retheme without repeating structure. */
 		/* The scrollbar's room is kept whether or not the page overflows: a
@@ -3667,7 +3732,6 @@ _pgrollDir: "services/database/pgroll"
 		html { scrollbar-gutter: stable; }
 		body { margin: 0; font: var(--shell-font, 1rem/1.5 system-ui, sans-serif);
 		  background: var(--shell-bg); color: var(--shell-fg); }
-		\(E._navCss)
 		:where(body > nav a) { color: inherit; text-decoration: none; }
 		:where(body > nav a:hover) { text-decoration: var(--shell-nav-hover, underline); }
 		:where(body > nav .shell-who) { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
@@ -3680,10 +3744,13 @@ _pgrollDir: "services/database/pgroll"
 		/* A short word is still a target: "sair" sets 23px of text, under the
 		   24px minimum a finger needs, so the box keeps the floor the label
 		   does not. */
-		:where(body > nav :is(.shell-signout, .shell-signin, .shell-register)) { font: inherit; font-weight: 400;
+		:where(body > nav :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) { font: inherit; font-weight: 400;
 		  color: inherit; background: none; border: 0; padding: 0; cursor: pointer;
+		  flex: none; white-space: nowrap;
 		  display: inline-flex; align-items: center; justify-content: center;
 		  min-height: 24px; min-width: 24px; }
+		\(E._navCss)
+		:where(body > nav[hidden]) { display: none; }
 
 		/* Not a preference to weigh against the design: durations collapse
 		   and the interpreter's exit path, which waits on running animations,

@@ -68,7 +68,17 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {
+      colors: {
+        primary: *"#111111" | string, secondary: *"#555555" | string, accent: *"#0055aa" | string, danger: *"#aa0000" | string,
+        neutral: *"#fafafa" | string, surface: *"#ffffff" | string, border: *"#dddddd" | string, "surface-muted": *"#efefef" | string
+      }
+      dark: {
+        primary: *"#f5f5f5" | string, secondary: *"#aaaaaa" | string, accent: *"#66aaff" | string, danger: *"#ff6666" | string,
+        neutral: *"#111111" | string, surface: *"#1a1a1a" | string, border: *"#333333" | string, "surface-muted": *"#242424" | string
+      }
+      shell: nav: *"strip" | "sidebar" | "custom"
+    }
     flows: {}
   }
 }

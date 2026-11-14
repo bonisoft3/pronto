@@ -47,7 +47,7 @@ const ROOT_PX = 16;
  * implements, which is what settles its membership. A property decides what a
  * LITERAL is (PROPERTY_DIMENSION); a RUNG's is its bucket's, by construction,
  * and only a ROLE still needs its name read (ROLE_DIMENSION). Without that
- * last map, press's --sp-xl: 40px and --control-h-lg: 40px would both answer
+ * last map, `#Design`'s --sp-xl: 40px and --control-h-lg: 40px would both answer
  * `padding: 40px`.
  *
  * `opaque` is a bucket that publishes a name and joins nothing: an elevation is

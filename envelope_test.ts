@@ -26,7 +26,7 @@ app: pronto.#App & {
       states: []
     }
     handlers: {}
-    design: {}
+    design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
     flows: {}
   }
 }
@@ -951,7 +951,7 @@ Deno.test("adaptive light and dark theme-color meta tags are derived from surfac
   `);
   const indexHtml = res.files["shell/index.html"]?.text ?? "";
   assertStringIncludes(indexHtml, '<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">');
-  assertStringIncludes(indexHtml, '<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1e1f">');
+  assertStringIncludes(indexHtml, '<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1a1a1a">');
 });
 
 Deno.test("manifest shortcuts are auto-derived from non-root static screens in surface.screens", async () => {
@@ -994,7 +994,7 @@ Deno.test("manifest shortcuts are auto-derived from non-root static screens in s
         }
       }
       handlers: {}
-      design: {}
+      design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
       flows: {}
     }
   `);
@@ -1076,7 +1076,7 @@ Deno.test("meta.llms: true auto-synthesizes llms.txt and llms-full.txt from scre
         }
       }
       handlers: {}
-      design: {}
+      design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
       flows: {}
     }
   `);
@@ -1163,7 +1163,7 @@ Deno.test("meta.sitemap: true emits intelligent priority, changefreq, and link r
         }
       }
       handlers: {}
-      design: {}
+      design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
       flows: {}
     }
   `);
@@ -1219,7 +1219,7 @@ Deno.test("meta.sitemap with exclude and extra shapes crawlable routes and stati
         }
       }
       handlers: {}
-      design: {}
+      design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
       flows: {}
     }
   `);
@@ -1265,7 +1265,7 @@ Deno.test("meta.sitemap with exclude: ['/'] excludes only root route while keepi
         }
       }
       handlers: {}
-      design: {}
+      design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
       flows: {}
     }
   `);
@@ -1754,7 +1754,7 @@ Deno.test("meta.llms: true excludes entities with private or internal access sco
         }
       }
       handlers: {}
-      design: {}
+      design: {colors: {primary: "#111111", secondary: "#555555", accent: "#0055aa", danger: "#aa0000", neutral: "#fafafa", surface: "#ffffff", border: "#dddddd", "surface-muted": "#efefef"}, dark: {primary: "#f5f5f5", secondary: "#aaaaaa", accent: "#66aaff", danger: "#ff6666", neutral: "#111111", surface: "#1a1a1a", border: "#333333", "surface-muted": "#242424"}, shell: nav: "strip"}
       flows: {}
     }
   `);

@@ -424,7 +424,36 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
   const lifting = previous.includes("@tag(derive,");
 
   const stubDesign = !(await exists(`${appDir}/DESIGN.md`));
-  if (stubDesign) await Deno.writeTextFile(`${appDir}/DESIGN.md`, '---\npreset: "press"\n---\n');
+  if (stubDesign) {
+    await Deno.writeTextFile(
+      `${appDir}/DESIGN.md`,
+      [
+        "---",
+        "colors:",
+        '  primary: "#000000"',
+        '  secondary: "#444444"',
+        '  accent: "#0055aa"',
+        '  danger: "#aa0000"',
+        '  neutral: "#ffffff"',
+        '  surface: "#ffffff"',
+        '  border: "#cccccc"',
+        '  surface-muted: "#eeeeee"',
+        "dark:",
+        '  primary: "#ffffff"',
+        '  secondary: "#bbbbbb"',
+        '  accent: "#66aaff"',
+        '  danger: "#ff6666"',
+        '  neutral: "#000000"',
+        '  surface: "#111111"',
+        '  border: "#333333"',
+        '  surface-muted: "#222222"',
+        "shell:",
+        '  nav: "strip"',
+        "---",
+        "",
+      ].join("\n"),
+    );
+  }
   let exp: {
     // The export carries a whole #Entity; each module declares the slice it
     // reads, and this pass reads both the lint slice and the validation one.
@@ -950,7 +979,9 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
   }
 
   if (!(await exists(`${appDir}/DESIGN.md`))) {
-    problems.push('DESIGN.md: no such file — author DESIGN.md (with YAML frontmatter `---\\npreset: "press"\\n---`)');
+    problems.push(
+      'DESIGN.md: no such file — author DESIGN.md (with YAML frontmatter declaring `colors` + matching `dark` twins for `primary, secondary, accent, danger, neutral, surface, border, surface-muted`, plus `shell.nav`: `"strip" | "sidebar" | "custom"`)',
+    );
   }
   if (exp.statics.some((s) => s.file === "journal.html") && !(await exists(`${appDir}/journal.html`))) {
     problems.push(

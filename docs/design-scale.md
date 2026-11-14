@@ -85,8 +85,8 @@ in it has an appearance:
 - A rung whose value carries a colour is an error.
 - Elevation is decomposed. Open Props' `--shadow-color` and
   `--shadow-strength` are no `<color>` that `light-dark()` can twin, so the
-  strengths are pre-composed into seven ink roles (`#shadowInks`), which every
-  preset declares in both halves, and the shadow rungs reference them.
+  strengths are pre-composed into seven ink roles (`#shadowInks`), which
+  `#Design` defaults in both halves, and the shadow rungs reference them.
 - Every `var()` either emitted block writes names a token one of the two blocks
   declares, so a dangling reference is an error rather than a declaration that
   silently fails to apply.
