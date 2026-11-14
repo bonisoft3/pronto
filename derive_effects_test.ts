@@ -1,28 +1,239 @@
-// The fact rows derive writes for an effect's handler, which lint's denylist
-// joins: a denied name reached, and a grant the effect declared excepted.
+// An effect's handler as derive leaves it: bundled with the modules it imports
+// into the one module importing nothing that the airlock admits, and read as a
+// fact row that lint's denylist joins, a grant the effect declared excepted.
 
-import { assertEquals } from "jsr:@std/assert@1.0.11";
-import { effectModules } from "./derive.ts";
+import { assertEquals, assertNotEquals, assertRejects } from "jsr:@std/assert@1.0.11";
+import { dirname, join } from "node:path";
+import { effectArtifacts, effectModules } from "./derive.ts";
+import { bundleEffect } from "./effect-bundle.ts";
+import { LinkError } from "./engine-link.ts";
 
-async function app(handlers: Record<string, string>): Promise<string> {
-  const dir = await Deno.makeTempDir();
-  await Deno.mkdir(`${dir}/effects`);
-  for (const [name, source] of Object.entries(handlers)) await Deno.writeTextFile(`${dir}/effects/${name}.js`, source);
-  return dir;
-}
+const MODULE_SOURCE = "npm:@endo/module-source@1.4.0";
 
-Deno.test("a handler's reach is a fact row in the effect role, its declared endowments excepted", async () => {
-  const dir = await app({
-    charge: `export const issue = async (input, sink) => ({ done: await Crypto.digest("SHA-256", new TextEncoder().encode(input.id)) });`,
-    leak: `export const issue = async (input) => fetch(input.url);`,
-  });
+async function app(files: Record<string, string>, test: (dir: string) => Promise<void>) {
+  const dir = await Deno.makeTempDir({ prefix: "effects " });
   try {
-    assertEquals(await effectModules(dir, { charge: { endowments: ["Crypto", "TextEncoder"] }, leak: {} }), [
-      { path: "effects/charge.js", references: [], completion: "exports", role: "effect" },
-      { path: "effects/leak.js", references: ["fetch"], completion: "exports", role: "effect" },
-    ]);
-    assertEquals((await effectModules(dir, { charge: {} }))[0].references, ["Crypto", "TextEncoder"]);
+    for (const [path, text] of Object.entries(files)) {
+      await Deno.mkdir(dirname(join(dir, path)), { recursive: true });
+      await Deno.writeTextFile(join(dir, path), text);
+    }
+    await test(dir);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
+}
+
+/** What the airlock's ModuleSource reads of a module: its imports and exports. */
+async function linked(text: string): Promise<{ imports: string[]; exports: string[] }> {
+  const { ModuleSource } = await import(MODULE_SOURCE);
+  const { imports, exports } = new ModuleSource(text, "effect.js");
+  return { imports, exports };
+}
+
+Deno.test("a handler's reach is a fact row in the effect role, its declared endowments excepted", async () => {
+  await app({
+    "effects/charge.js": `export const issue = async (input, sink) => ({ done: await Crypto.digest("SHA-256", new TextEncoder().encode(input.id)) });`,
+    "effects/leak.js": `export const issue = async (input) => fetch(input.url);`,
+  }, async (dir) => {
+    assertEquals((await effectModules(dir, { charge: { endowments: ["Crypto", "TextEncoder"] }, leak: {} })).rows, [
+      { path: "effects/charge.js", references: [], completion: "exports", role: "effect" },
+      { path: "effects/leak.js", references: ["fetch"], completion: "exports", role: "effect" },
+    ]);
+    assertEquals((await effectModules(dir, { charge: {} })).rows[0].references, ["Crypto", "TextEncoder"]);
+  });
 });
+
+// Two handlers share a call wrapper and each has a helper of its own: what the
+// airlock loads imports nothing, exports the handler's contract, and answers as
+// the modules did.
+const shared = {
+  "effects/lib/call.js": `import { PATHS } from "./paths.js";\nexport const post = (sink, name, body) => sink.fetch(PATHS[name], { method: "POST", body });\n`,
+  "effects/lib/paths.js": `export const PATHS = Object.freeze({ charge: "/v1/charges", refund: "/v1/refunds" });\n`,
+  "effects/lib/key.js": `// The key a charge is filed under.\nexport function chargeKey(input) { return \`charge-\${input.id}\`; }\n`,
+  "effects/charge.js": `import { post } from "./lib/call.js";\nimport * as keys from "./lib/key.js";\n\nexport async function issue(input, sink) {\n  const r = await post(sink, "charge", { key: keys.chargeKey(input), amount: input.amount });\n  return r.status < 300 ? { done: r.body } : { failed: r.body };\n}\n`,
+  "effects/refund.js": `import { post as send } from "./lib/call.js";\nexport const issue = async (input, sink) => ({ done: (await send(sink, "refund", input)).body });\n`,
+};
+
+Deno.test("a handler importing helpers bundles to one module importing nothing", async () => {
+  await app(shared, async (dir) => {
+    const { rows, sources } = await effectModules(dir, { charge: {}, refund: {} });
+    assertEquals(rows.map((r) => r.references), [[], []]);
+    assertEquals(sources, ["effects/charge.js", "effects/lib/call.js", "effects/lib/key.js", "effects/lib/paths.js", "effects/refund.js"]);
+    for (const name of ["charge", "refund"]) {
+      const text = await Deno.readTextFile(join(dir, `services/airlock/effects/${name}.js`));
+      assertEquals(text.startsWith(`// generated by pronto from effects/${name}.js — do not edit\n`), true);
+      assertEquals(await linked(text), { imports: [], exports: ["issue"] });
+    }
+    const calls: unknown[] = [];
+    const sink = { fetch: (path: string, init: unknown) => (calls.push([path, init]), Promise.resolve({ status: 201, body: { ok: path } })) };
+    const load = async (name: string) => await import(`data:text/javascript,${encodeURIComponent(await Deno.readTextFile(join(dir, `services/airlock/effects/${name}.js`)))}`);
+    assertEquals(await (await load("charge")).issue({ id: "a1", amount: 5 }, sink), { done: { ok: "/v1/charges" } });
+    assertEquals(await (await load("refund")).issue({ id: "a1" }, sink), { done: { ok: "/v1/refunds" } });
+    assertEquals(calls, [["/v1/charges", { method: "POST", body: { key: "charge-a1", amount: 5 } }], ["/v1/refunds", { method: "POST", body: { id: "a1" } }]]);
+  });
+});
+
+Deno.test("a helper re-exporting another's names bundles as the names it re-exports", async () => {
+  await app({
+    ...shared,
+    "effects/lib/index.js": `export { post } from "./call.js";\nexport { PATHS as paths } from "./paths.js";\n`,
+    "effects/e.js": `import { post, paths } from "./lib/index.js";\nexport const issue = async (input, sink) => ({ done: [paths.refund, (await post(sink, "charge", input)).status] });\n`,
+  }, async (dir) => {
+    const { text } = await bundleEffect(dir, "effects/e.js");
+    assertEquals(await linked(text), { imports: [], exports: ["issue"] });
+    const sink = { fetch: () => Promise.resolve({ status: 202, body: null }) };
+    assertEquals(await (await import(`data:text/javascript,${encodeURIComponent(text)}`)).issue({}, sink), { done: ["/v1/refunds", 202] });
+  });
+});
+
+// The bundle's bytes are hashed into its derived artifact row, so the same
+// sources must give the same bytes on every run, and a helper's edit must not.
+Deno.test("a bundle is byte-stable across runs and moves with its helpers", async () => {
+  await app(shared, async (dir) => {
+    const first = (await bundleEffect(dir, "effects/charge.js")).text;
+    assertEquals((await bundleEffect(dir, "effects/charge.js")).text, first);
+    await Deno.writeTextFile(join(dir, "effects/lib/paths.js"), shared["effects/lib/paths.js"].replace("/v1/charges", "/v2/charges"));
+    assertNotEquals((await bundleEffect(dir, "effects/charge.js")).text, first);
+  });
+});
+
+// The clock and entropy are refused by the airlock's cage at run time and by
+// lint before it; a helper reaching them is the handler reaching them.
+Deno.test("a helper reaching the clock or entropy is the handler's reach, as it would be inline", async () => {
+  await app({
+    "effects/stamp.js": `import { now, nonce } from "./lib/time.js";\nexport const issue = async (input, sink) => ({ done: { at: now(), n: nonce() } });\n`,
+    "effects/lib/time.js": `export const now = () => Date.now();\nexport const nonce = () => Math.random();\n`,
+    "effects/inline.js": `export const issue = async (input, sink) => ({ done: { at: Date.now(), n: Math.random() } });\n`,
+  }, async (dir) => {
+    const { rows } = await effectModules(dir, { inline: {}, stamp: {} });
+    assertEquals(rows.map((r) => [r.path, r.references]), [["effects/inline.js", ["Date", "Math.random"]], ["effects/stamp.js", ["Date", "Math.random"]]]);
+  });
+});
+
+/** A bundle's exports, run from a data: URL as an ES module. */
+async function run(text: string): Promise<Record<string, (...args: unknown[]) => Promise<unknown>>> {
+  return await import(`data:text/javascript,${encodeURIComponent(text)}`);
+}
+
+// The handler's own module was the bundle's top level, enclosing every helper:
+// a helper's free name resolved to the handler's binding of it.
+Deno.test("no module's bindings are in scope of another's, the handler's included", async () => {
+  await app({
+    "effects/e.js": `import { probe } from "./x.js";\nconst token = "handler";\nconst TextEncoder = "shadowed";\nexport const issue = async () => ({ done: [token, TextEncoder, probe()] });\n`,
+    "effects/x.js": `export const probe = () => [typeof token, typeof TextEncoder];\n`,
+  }, async (dir) => {
+    const { text } = await bundleEffect(dir, "effects/e.js");
+    assertEquals(await (await run(text)).issue(), { done: ["handler", "shadowed", ["undefined", "function"]] });
+  });
+});
+
+// The bundle froze each namespace with whatever `Object` the module had bound.
+Deno.test("a module binding Object leaves the bundle's own code the intrinsic", async () => {
+  await app({
+    "effects/e.js": `import * as x from "./x.js";\nexport const issue = async () => ({ done: [x.Object, Object.isFrozen(x), Object.getPrototypeOf(x)] });\n`,
+    "effects/x.js": `const Object = "mine";\nexport { Object };\n`,
+  }, async (dir) => {
+    const { text } = await bundleEffect(dir, "effects/e.js");
+    assertEquals(await (await run(text)).issue(), { done: ["mine", true, null] });
+  });
+});
+
+Deno.test("a namespace has no prototype, as an ES module namespace has none", async () => {
+  await app({
+    "effects/e.js": `import * as x from "./x.js";\nexport const issue = async () => ({ done: [typeof x.toString, "__proto__" in x, Object.keys(x)] });\n`,
+    "effects/x.js": `export const b = 2;\nexport const a = 1;\n`,
+  }, async (dir) => {
+    assertEquals(await (await run((await bundleEffect(dir, "effects/e.js")).text)).issue(), { done: ["undefined", false, ["a", "b"]] });
+  });
+});
+
+// A re-export was a local const beside the import it re-exported: two
+// declarations of one name, which the bundle's own parse refused.
+Deno.test("a handler re-exporting a name it also imports bundles", async () => {
+  await app({
+    "effects/e.js": `import { a } from "./x.js";\nexport { a } from "./x.js";\nexport const issue = async () => ({ done: a });\n`,
+    "effects/x.js": `export const a = 1;\n`,
+  }, async (dir) => {
+    const { text } = await bundleEffect(dir, "effects/e.js");
+    const mod = await run(text);
+    assertEquals([Object.keys(mod).sort(), await mod.issue()], [["a", "issue"], { done: 1 }]);
+  });
+});
+
+// The bundle declared the handler's export names at its top level, in scope
+// of every module: a helper read the handler's TextEncoder for the global, and
+// an exported Object was in its dead zone when the prelude read the intrinsic.
+Deno.test("a handler's export names are no bindings of the modules or the prelude", async () => {
+  await app({
+    "effects/e.js": `import { eager, lazy } from "./x.js";\nexport const TextEncoder = "mine";\nexport const Object = "also mine";\nexport const issue = async () => ({ done: [eager, lazy(), TextEncoder, Object] });\n`,
+    "effects/x.js": `export const eager = typeof TextEncoder;\nexport const lazy = () => [typeof TextEncoder, typeof Object.freeze];\n`,
+  }, async (dir) => {
+    const mod = await run((await bundleEffect(dir, "effects/e.js")).text);
+    assertEquals(await mod.issue(), { done: ["function", ["function", "function"], "mine", "also mine"] });
+    assertEquals([mod.TextEncoder, mod.Object], ["mine", "also mine"]);
+  });
+});
+
+Deno.test("a handler may export default or a keyword by name, as a module may", async () => {
+  await app({
+    "effects/e.js": `const d = 1;\nconst k = 2;\nexport { d as default, k as if };\nexport const issue = async () => ({ done: d + k });\n`,
+  }, async (dir) => {
+    const mod = await run((await bundleEffect(dir, "effects/e.js")).text);
+    assertEquals([Object.keys(mod).sort(), mod.default, mod.if, await mod.issue()], [["default", "if", "issue"], 1, 2, { done: 3 }]);
+  });
+});
+
+Deno.test("an export let never assigned is read like a const", async () => {
+  await app({
+    "effects/e.js": `import { n } from "./x.js";\nexport const issue = async () => ({ done: n });\n`,
+    "effects/x.js": `export let n = 7;\n`,
+  }, async (dir) => {
+    assertEquals(await (await run((await bundleEffect(dir, "effects/e.js")).text)).issue(), { done: 7 });
+  });
+});
+
+Deno.test("a bundle's artifact rows: each module read once as a source, each bundle derived", () => {
+  assertEquals(effectArtifacts(["computations/score.js", "effects/charge.js", "effects/lib/call.js"], ["refund", "charge"], new Set(["computations/score.js"])), [
+    { path: "effects/charge.js", derived: false },
+    { path: "effects/lib/call.js", derived: false },
+    { path: "services/airlock/effects/charge.js", derived: true },
+    { path: "services/airlock/effects/refund.js", derived: true },
+  ]);
+});
+
+const refusals: [string, Record<string, string>, string][] = [
+  ["a bare import", { "effects/e.js": `import { z } from "zod";\nexport const issue = async () => ({ done: z });\n` }, `effects/e.js imports "zod": a handler imports its own modules by relative path`],
+  ["a node: import", { "effects/e.js": `import { createHash } from "node:crypto";\nexport const issue = async () => ({ done: createHash });\n` }, `imports "node:crypto"`],
+  ["a URL import", { "effects/e.js": `import { x } from "https://example.com/x.js";\nexport const issue = async () => ({ done: x });\n` }, `imports "https://example.com/x.js"`],
+  ["a bare import in a helper", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export { v as x } from "lodash";\n` }, `effects/x.js imports "lodash"`],
+  ["a dynamic import", { "effects/e.js": `export const issue = async () => ({ done: await import("./x.js") });\n` }, "effects/e.js imports dynamically"],
+  ["a path out of the app", { "effects/e.js": `import { x } from "../../x.js";\nexport const issue = async () => ({ done: x });\n` }, "which leaves the app"],
+  ["a module that is not there", { "effects/e.js": `import { x } from "./gone.js";\nexport const issue = async () => ({ done: x });\n` }, "effects/gone.js is not a file of the app"],
+  ["a cycle", {
+    "effects/e.js": `import { a } from "./a.js";\nexport const issue = async () => ({ done: a() });\n`,
+    "effects/a.js": `import { b } from "./b.js";\nexport const a = () => b();\n`,
+    "effects/b.js": `import { a } from "./a.js";\nexport const b = () => 1;\nexport const c = () => a();\n`,
+  }, "effects/a.js imports effects/b.js imports effects/a.js: a handler's modules form no cycle"],
+  ["a default import", { "effects/e.js": `import x from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export const y = 1;\n` }, `effects/e.js imports a default from "./x.js"`],
+  ["a name the helper does not export", { "effects/e.js": `import { y } from "./x.js";\nexport const issue = async () => ({ done: y });\n`, "effects/x.js": `export const x = 1;\n` }, `effects/e.js imports y from "./x.js", which does not export it`],
+  ["a re-export of a name a helper does not export", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export { y as x } from "./y.js";\n`, "effects/y.js": `export const z = 1;\n` }, `effects/x.js re-exports y from "./y.js", which does not export it`],
+  ["a re-export of a name by the handler that its module does not export", { "effects/e.js": `export { y } from "./y.js";\nexport const issue = async () => ({ done: 1 });\n`, "effects/y.js": `export const z = 1;\n` }, `effects/e.js re-exports y from "./y.js", which does not export it`],
+  ["a reassigned export", { "effects/e.js": `import { n } from "./x.js";\nexport const issue = async () => ({ done: n });\n`, "effects/x.js": `export let n = 1;\nn = 2;\n` }, "effects/x.js exports n and assigns it"],
+  ["import.meta in the handler", { "effects/e.js": `export const issue = async () => ({ done: import.meta.url });\n` }, "effects/e.js reads import.meta"],
+  ["the reserved prefix", { "effects/e.js": `const __pronto_module_0 = 1;\nexport const issue = async () => ({ done: __pronto_module_0 });\n` }, "effects/e.js names __pronto_"],
+  ["a default export in a helper", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export const x = 1;\nexport default x;\n` }, "effects/x.js exports a default"],
+  ["a namespace re-export", { "effects/e.js": `import { ns } from "./x.js";\nexport const issue = async () => ({ done: ns });\n`, "effects/x.js": `export * as ns from "./y.js";\n`, "effects/y.js": `export const z = 1;\n` }, "effects/x.js re-exports * as a namespace"],
+  ["a top-level await", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export const x = await Promise.resolve(1);\n` }, "effects/x.js awaits at its top level"],
+  ["an escaped identifier", { "effects/e.js": `const \\u005f_pronto_module_0 = 1;\nexport const issue = async () => ({ done: \\u005f_pronto_module_0 });\n` }, "effects/e.js escapes an identifier with \\u"],
+  ["a string export name", { "effects/e.js": `const x = 1;\nexport { x as "a-b" };\nexport const issue = async () => ({ done: x });\n` }, "effects/e.js names an import or export by a string"],
+  ["a string import name", { "effects/e.js": `import { "a-b" as y } from "./x.js";\nexport const issue = async () => ({ done: y });\n`, "effects/x.js": `export const z = 1;\n` }, "effects/e.js names an import or export by a string"],
+  ["a star re-export", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export * from "./y.js";\n`, "effects/y.js": `export const x = 1;\n` }, `effects/x.js re-exports * from "./y.js"`],
+];
+for (const [name, files, message] of refusals) {
+  Deno.test(`a handler's bundle refuses ${name}, naming it`, async () => {
+    await app(files, async (dir) => {
+      await assertRejects(() => effectModules(dir, { e: {} }), LinkError, `effect e: `);
+      await assertRejects(() => bundleEffect(dir, "effects/e.js"), LinkError, message);
+    });
+  });
+}

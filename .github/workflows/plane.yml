@@ -1,0 +1,20 @@
+# This repository's pull requests move their issues on bsoneca/pronto's board (its PRONTO project),
+# through pronto-plugins' one board workflow (.github/workflows/devflow-board.yml there, PRONTO-479),
+# from this repository's devflow/devflow.cue. The token is the PLANE_TOKEN secret, the same token
+# bsoneca/pronto's holds (Secret Manager's plane-api-token). A pull request runs the workflow of
+# the branch it merges into, so every branch pull requests merge into carries this file.
+
+name: plane
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, edited, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  board:
+    uses: bsoneca/pronto-plugins/.github/workflows/devflow-board.yml@67185e011e18894b35d36a9e286be349136ab8ce # main, PRONTO-479
+    secrets:
+      PLANE_TOKEN: ${{ secrets.PLANE_TOKEN }}

@@ -17,15 +17,17 @@ import { dirname, resolve } from "node:path";
 import { packageHatch, type Declaration } from "./activepieces-package.ts";
 import { pathToFileURL } from "node:url";
 import { stringify } from "jsr:@std/yaml@1.0.5";
-import { derive, GENERATED_HTML_HEADER, terminalPath } from "./derive.ts";
+import { derive, exclusive, GENERATED_HTML_HEADER, programPackage, readApp, terminalPath } from "./derive.ts";
 import { mint } from "./identity.ts";
 import { entries, exists, ifMissing } from "./missing.ts";
+import { keepBlocks, writeWhole } from "./caddy-blocks.ts";
 import { projectSay, projectGates } from "./project-config.ts";
 import { generateTypeSQL } from "./type-sql.ts";
 import { generateProto, type ProtoEntity } from "./type-proto.ts";
 import { checkTypeSeeds, type TypeEntity } from "./type-check.ts";
 import { parseHeld, seedSql, type SeedData } from "./seed.ts";
 import { type Program, renderIr, writeIrStylesheet } from "./ir-render.ts";
+import { irMarkdown } from "./ir-md.ts";
 import { declaredMachine } from "./mecha-spec.ts";
 import { compileMechaPorts } from "./mecha-ports.ts";
 import { compileMechaReducer, type MechaReducerMachine, type Terminal } from "./mecha-reducer.ts";
@@ -34,8 +36,9 @@ import { compileFunction } from "./database-functions.ts";
 import { compileCortexSql } from "./cortex-machine.ts";
 import { surfaceOf, type SurfaceEntity } from "./mecha-surface.ts";
 import { sha256Hex } from "./facts.ts";
+import { inSchemas, isDefault, migrationPath, type Schemas } from "./schema-names.ts";
 
-type EmitFile = { format: string; text?: string; data?: unknown; src?: string };
+type EmitFile = { format: string; text?: string; data?: unknown; src?: string; inSchemas?: true };
 type Emission = {
   manifest: string[];
   files: Record<string, EmitFile>;
@@ -44,6 +47,7 @@ type Emission = {
   build?: { meta?: { dir?: string } };
   cluster?: { meta?: { root?: string; statics?: { file: string; target: string }[] } };
   development?: { statics: { file: string; target: string }[] };
+  schemas: Schemas;
 };
 
 // jessie/bloblang/js entries always carry `src`, never `text`, so they need
@@ -78,10 +82,15 @@ function fail(msg: string): never {
   Deno.exit(1);
 }
 
+// The database's schemas, read from the emission before anything renders (schema-names.ts).
+let schemas: Schemas;
+const searchPathPrologue = () => isDefault(schemas) ? "" : `SET search_path = ${migrationPath(schemas)};\n`;
+
 /** SQL with its provenance header, wrapped where the file is a migration. */
-function sqlFile(rel: string, body: string): string {
+function sqlFile(rel: string, body: string, rendered = false): string {
+  if (!rendered) body = inSchemas(body, schemas);
   if (!MIGRATION.test(rel)) return HEADER.sql + body;
-  return HEADER.sql + PROLOGUE + body + (body.endsWith("\n") ? "" : "\n") + "\nCOMMIT;\n";
+  return HEADER.sql + searchPathPrologue() + PROLOGUE + body + (body.endsWith("\n") ? "" : "\n") + "\nCOMMIT;\n";
 }
 
 const appDir = Deno.args[0] ?? fail("usage: write.ts <appDir>  (runs `cue export` in appDir — needs --allow-run=cue)");
@@ -91,6 +100,15 @@ const appDir = Deno.args[0] ?? fail("usage: write.ts <appDir>  (runs `cue export
 async function terminal(): Promise<Terminal> {
   const { instrument } = await import(pathToFileURL(resolve(await terminalPath("instrument.ts", appDir))).href);
   return { instrument, ses: await Deno.readTextFile(await terminalPath("interpreter/vendor/ses.umd.min.js", appDir)) };
+}
+
+/** bayt.json with its targets by name: cue orders the targets a comprehension adds by where their
+ * files sit, so a checkout whose path sorts before the module cache's (~/.cache/… beside
+ * ~/Library/Caches/cue) wrote the same project in another order. */
+function targetsSorted(data: unknown): unknown {
+  const d = data as { targets?: Record<string, unknown> };
+  if (d.targets === undefined) return data;
+  return { ...d, targets: Object.fromEntries(Object.entries(d.targets).sort(([a], [b]) => a < b ? -1 : 1)) };
 }
 
 function render(rel: string, f: EmitFile): string {
@@ -107,9 +125,9 @@ function render(rel: string, f: EmitFile): string {
     return sqlFile(rel, seedSql(data, held));
   }
   if (f.format === "proto") return generateProto(f.data as Record<string, ProtoEntity>);
-  if (f.format === "json") return JSON.stringify(f.data, null, 2) + "\n"; // no comment syntax, no header
+  if (f.format === "json") return JSON.stringify(rel === "bayt.json" ? targetsSorted(f.data) : f.data, null, 2) + "\n"; // no comment syntax, no header
   const header = HEADER[f.format] ?? fail(`${rel}: unknown format ${f.format}`);
-  if (f.text !== undefined) return f.format === "sql" ? sqlFile(rel, f.text) : header + f.text;
+  if (f.text !== undefined) return f.format === "sql" ? sqlFile(rel, f.text, f.inSchemas) : header + f.text;
   if (f.format === "yaml") return header + stringify(f.data, { lineWidth: -1 });
   return fail(`${rel}: no text and format ${f.format} is not structured`);
 }
@@ -132,15 +150,17 @@ const DRAWING = "program: {state: code.state, surface: code.surface, capabilitie
 /** The emission, and the drawing read in the same evaluation: each export of a
  * program evaluates it whole. */
 async function exportEmission(): Promise<{ emission: Emission; drawing: Drawing }> {
-  const exported = await new Deno.Command("cue", {
+  // Under derive's lock: a derivation's read writes a file into the app that this export would read.
+  const exported = await exclusive(appDir, () => new Deno.Command("cue", {
     args: ["export", ".", "-e", `{emission: out, ${DRAWING}}`, "--out", "json"],
     cwd: appDir,
     stdout: "piped",
     stderr: "inherit",
-  }).output();
+  }).output());
   if (!exported.success) fail("cue export failed");
   const exportedJson = JSON.parse(new TextDecoder().decode(exported.stdout)) as { emission: Emission } & Drawing;
   const emission = exportedJson.emission;
+  schemas = emission.schemas ?? fail("the emission names no schemas: the pronto that wrote it predates them");
   cortexSql(emission);
   checkTypeSeeds(emission.files["schema/entities.proto"].data as Record<string, TypeEntity>);
   const checks = await projectSay(appDir, emission.files[".say.yaml"].data) as { say: Record<string, unknown> };
@@ -291,7 +311,10 @@ async function rendered(emission: Emission): Promise<Map<string, string | Uint8A
     const stat = await ifMissing(Deno.stat(`${appDir}/${f.src}`), null) ?? fail(`${rel}: missing assembly source ${f.src}`);
     if (!stat.isFile) fail(`${rel}: assembly source ${f.src} is not a file`);
     if (f.src !== rel) {
-      contents.set(rel, await Deno.readTextFile(`${appDir}/${f.src}`));
+      // An authored migration is renamed as pronto's own SQL is, under the search_path every
+      // migration runs with.
+      const authored = await Deno.readTextFile(`${appDir}/${f.src}`);
+      contents.set(rel, MIGRATION.test(rel) && rel.endsWith(".sql") ? searchPathPrologue() + inSchemas(authored, schemas) : authored);
       continue;
     }
     // A file the writer emitted cannot become the author's by being named in
@@ -393,13 +416,19 @@ async function writeEmission(emission: Emission): Promise<{ written: string[]; c
   }
   const put = async (rel: string, value: string | Uint8Array) => {
     const path = `${appDir}/${rel}`;
-    const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
     const previous = await ifMissing(Deno.readFile(path), null);
+    // The app's own blocks in its Caddyfile outlive a rewrite (caddy-blocks.ts).
+    const kept = rel === "docker/Caddyfile" && typeof value === "string"
+      ? keepBlocks(previous === null ? null : new TextDecoder().decode(previous), value)
+      : value;
+    const bytes = typeof kept === "string" ? new TextEncoder().encode(kept) : kept;
     if (previous !== null && previous.length === bytes.length && previous.every((byte, i) => byte === bytes[i])) return;
     changed = true;
     const dir = parent(path);
     if (dir !== appDir) await Deno.mkdir(dir, { recursive: true });
-    await Deno.writeFile(path, bytes);
+    // Whole or not at all: a reader in another process never sees half a file.
+    if (typeof kept === "string") await writeWhole(path, kept);
+    else await Deno.writeFile(path, bytes);
   };
   for (const [rel, text] of contents) await put(rel, text);
   for (const [rel, text] of await renderDocuments(emission)) await put(rel, text);
@@ -571,18 +600,24 @@ await generate();
 async function drawIr(drawn: Drawing | undefined): Promise<boolean> {
   const { program, ir } = drawn ?? await exportDrawing();
   const facts = JSON.parse(await Deno.readTextFile(`${appDir}/.pronto/facts.json`));
-  return await renderIr(appDir, ir, program, facts);
+  const redrawn = await renderIr(appDir, ir, program, facts);
+  // ir.md beside it, the whole document as Markdown: from the author's prose and the cards both,
+  // so it is written whenever either moved (ir-md.ts).
+  const md = irMarkdown(await Deno.readTextFile(`${appDir}/${ir}`), ir);
+  const mdPath = `${appDir}/${ir.replace(/\.html$/, "")}.md`;
+  if ((await Deno.readTextFile(mdPath).catch(() => null)) !== md) await Deno.writeTextFile(mdPath, md);
+  return redrawn;
 }
 
 // Strict, as the emission's export is, so a reused drawing and a fresh one
 // are the same read of the program.
 async function exportDrawing(): Promise<Drawing> {
-  const out = await new Deno.Command("cue", {
+  const out = await exclusive(appDir, () => new Deno.Command("cue", {
     args: ["export", ".", "-e", `{${DRAWING}}`, "--out", "json"],
     cwd: appDir,
     stdout: "piped",
     stderr: "piped",
-  }).output();
+  }).output());
   if (!out.success) fail(new TextDecoder().decode(out.stderr));
   return JSON.parse(new TextDecoder().decode(out.stdout)) as Drawing;
 }

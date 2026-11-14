@@ -28,3 +28,19 @@ export async function writeEdgeAssets(app: string, terminal: string, out: string
   }
   await Deno.copyFile(path.join(out, 'shell/index.html'), path.join(out, 'index.html'))
 }
+
+// A page carries its host-DOM hatches as files beside it: the shim serves text it
+// inlined, and a hatch is a module the browser imports by its URL, with the
+// files it fetches (sounds, fonts) next to it. These are the statics inside the
+// directory of each hatch's src, by their address under the page's root.
+export function hostDomAssets(assets: StaticAsset[], srcs: string[]): Map<string, string> {
+  const dirs = srcs.map((src) => `/srv/${path.posix.dirname(src)}/`)
+  const held = new Map<string, string>()
+  for (const asset of assets) {
+    if (!dirs.some((dir) => asset.target.startsWith(dir))) continue
+    const target = asset.target.slice('/srv/'.length)
+    if (target.split(/[\\/]/).some(part => part === '..' || part === '.')) throw new Error(`invalid static asset target: ${asset.target}`)
+    held.set(target, asset.file)
+  }
+  return held
+}

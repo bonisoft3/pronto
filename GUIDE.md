@@ -40,6 +40,7 @@ An app is one directory. What you author:
 | `program.cue` and the `.cue` files of its package | the program: entities, pipelines, screens, flows, tests, decisions (split into sibling files like `screens.cue` or `seed.cue` when large) |
 | `shell/screens/<name>.html` + `.css`, or `markup:` in CUE | a screen: HTML at `files.html`, or a `markup` string for a component-bearing screen, which the writer emits there |
 | `shell/handlers/*.js`, `shell/validations/*.js` | Jessie modules, one arrow function each |
+| `effects/<name>.js` | an external effect's handler, which may import the program's own modules by relative path; derive bundles it into `services/airlock/effects/<name>.js`, the one module the airlock loads, so an edit to a handler or a module it imports reaches a running airlock only after `generate` |
 | `pipelines/*.blobl`, `pipelines/*.browser.js` | a pipeline's transform and its browser twin |
 | `messages/<tag>.json` | one message catalogue per declared locale |
 | `services/database/sql/*.sql` | SQL beyond the derived DDL |
@@ -220,6 +221,29 @@ state: seed: src: "seed.json" // {"<Entity>": [row, ...]}
 
 Why data, and why judged this way rather than in TypeScript or not at all, is
 [held seeds](docs/archive/2026-10-02-held-seeds.md).
+
+
+### Fixture rows
+
+A seed is the program's: every database the app runs holds it, a released one
+too. A test sometimes needs rows nobody released should see: the visual lint
+fills a route's `:param` (`/player/:id`) from a row the running cluster serves,
+and a test database is empty until something writes one, so the route goes
+unlinted, a critical finding. Those rows are a fixture, SQL beside the program:
+
+```cue
+state: fixture: src: "tests/fixtures/visual.sql"
+```
+
+- The writer copies it into `services/database/migrations/950_fixture.sql`, the
+  last step of a fresh database's initdb.
+- It runs wherever a test builds the database: the local stack
+  (`launch@local`, `integrate@local`), compose's `integrate`, and a gcp
+  preview, the release gate's among them.
+- A gcp release's initdb and a k8s release's skip it, so production never holds
+  it, even on its first build.
+- It runs as postgres, before the pgroll migrations: write it against the
+  tables 005_create_tables.sql makes, naming only the columns it sets.
 
 ### Schedules
 

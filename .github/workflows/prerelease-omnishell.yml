@@ -1,0 +1,134 @@
+# Publishes a forks' prerelease of omnishell (bsoneca/pronto forks/README.md) from
+# Actions, as prerelease-mecha.yml does mecha's: the CUE module to
+# ghcr.io/bsoneca/cue-modules and the runtime tarballs as a release here, tagged
+# omnishell-v<version>. A module already published is kept, so a run that failed
+# later runs again. An app routing omnishell to ghcr finds the upstream releases
+# pronto requires there too.
+#
+# Push a branch named `publish-omnishell/v<version>`, such as
+# publish-omnishell/v0.20.3-phone.1: the version is the branch's, and the commit is
+# .github/prerelease-omnishell.env's OMNISHELL_REF.
+name: prerelease-omnishell
+on:
+  push:
+    branches: ['publish-omnishell/v*']
+permissions:
+  contents: write
+  packages: write
+env:
+  REG: ghcr.io/bsoneca/cue-modules/github.com/bonisoft3/omnishell
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: versions
+        run: |
+          echo "OMNISHELL_V=${GITHUB_REF_NAME#publish-omnishell/v}" >> "$GITHUB_ENV"
+          grep -E '^OMNISHELL_REF=[0-9a-f]{40}$' .github/prerelease-omnishell.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: bsoneca/omnishell-fork
+          ref: ${{ env.OMNISHELL_REF }}
+          path: omnishell
+          fetch-depth: 0
+      # A fork's next version carries every commit of the one before it: fork.9-17 were cut from
+      # another line than fork.8's and lost its eight PRs, the visitor's guest among them (PRONTO-70).
+      # A <base>-fork.<n> is refused unless the highest published <base>-fork.<k>, k < n, is its
+      # ancestor; a patch on a version (fork.8.1) is its own and checks nothing.
+      - name: descends from the version before
+        run: |
+          base=${OMNISHELL_V%-fork.*}
+          n=${OMNISHELL_V##*-fork.}
+          case "$n" in *[!0-9]* | "") echo "$OMNISHELL_V is no <base>-fork.<n>: nothing to descend from"; exit 0 ;; esac
+          prev=$(git ls-remote origin "refs/heads/publish-omnishell/v$base-fork.*" | sed -n "s|.*refs/heads/publish-omnishell/v$base-fork\.\([0-9]*\)$|\1|p" | awk -v n="$n" '$1 < n' | sort -n | tail -n 1)
+          [ -n "$prev" ] || { echo "no $base-fork before $n: nothing to descend from"; exit 0; }
+          git fetch -q origin "publish-omnishell/v$base-fork.$prev"
+          ref=$(git show FETCH_HEAD:.github/prerelease-omnishell.env | sed -n 's/^OMNISHELL_REF=\([0-9a-f]\{40\}\)$/\1/p')
+          if git -C omnishell merge-base --is-ancestor "$ref" "$OMNISHELL_REF"; then
+            echo "$OMNISHELL_V ($OMNISHELL_REF) descends from $base-fork.$prev ($ref)"
+          else
+            echo "::error::$OMNISHELL_V ($OMNISHELL_REF) does not carry $base-fork.$prev ($ref): it would drop:"
+            git -C omnishell log --oneline "$OMNISHELL_REF..$ref"
+            exit 1
+          fi
+      - uses: cue-lang/setup-cue@v1.0.1
+        with:
+          version: v0.16.1
+      # GHCR_TOKEN, a token with write:packages, when the package doesn't
+      # grant this repository's Actions write.
+      - name: crane
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sSL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz | tar xz -C /usr/local/bin crane
+          echo "$GH_TOKEN" | crane auth login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+      - name: published already
+        id: published
+        run: |
+          if crane digest "$REG:v$OMNISHELL_V" >/dev/null 2>&1; then echo "$REG:v$OMNISHELL_V is published: the module is kept"; echo "module=true" >> "$GITHUB_OUTPUT"; fi
+      - name: snapshot
+        run: |
+          mkdir "$RUNNER_TEMP/omnishell"
+          git -C omnishell archive HEAD | tar x -C "$RUNNER_TEMP/omnishell"
+          cd "$RUNNER_TEMP/omnishell"
+          # The runtime mise installs as github:bonisoft3/omnishell is this
+          # prerelease too, so the module's toolchain names its own version.
+          python3 -I "$GITHUB_WORKSPACE/.github/omnishell-snapshot.py" "$OMNISHELL_V"
+          grep -n '"github:bonisoft3/omnishell"' toolchain/tools.cue
+          grep -n 'module:' cue.mod/module.cue
+      # ghcr takes no single upload over 4MiB and `cue mod publish` sends a
+      # module in one: publish to a local registry and let crane copy it up.
+      - name: module
+        if: steps.published.outputs.module != 'true'
+        run: |
+          crane registry serve --address localhost:5051 >/dev/null 2>&1 &
+          sleep 2
+          cd "$RUNNER_TEMP/omnishell"
+          git init -q && git add -A && git -c user.email=fork@local -c user.name=fork commit -qm "omnishell v$OMNISHELL_V"
+          CUE_REGISTRY='github.com/bonisoft3/omnishell=localhost:5051+insecure,registry.cue.works' cue mod publish "v$OMNISHELL_V"
+          crane copy --insecure "localhost:5051/github.com/bonisoft3/omnishell:v$OMNISHELL_V" "$REG:v$OMNISHELL_V"
+      # An app routes every version of omnishell to ghcr, so the upstream
+      # releases pronto and mecha require are there too.
+      - name: base
+        run: |
+          for v in v0.19.1 v0.20.2 v0.20.3; do
+            crane digest "$REG:$v" >/dev/null 2>&1 || crane copy "registry.cue.works/github.com/bonisoft3/omnishell:$v" "$REG:$v"
+          done
+      - name: runtime
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "omnishell-v$OMNISHELL_V" >/dev/null 2>&1; then
+            echo "omnishell-v$OMNISHELL_V is released: its tarballs are kept"
+          else
+            mkdir dist
+            for triple in linux-x64 linux-arm64 linux-armv7 macos-x64 macos-arm64 windows-x64 windows-arm64; do
+              tar czf "dist/omnishell-$triple.tar.gz" -C "$RUNNER_TEMP/omnishell" --exclude=.git --exclude=.github --exclude=node_modules .
+            done
+            gh release create "omnishell-v$OMNISHELL_V" dist/*.tar.gz --target "$GITHUB_SHA" --prerelease --title "omnishell v$OMNISHELL_V (fork prerelease)" --notes "omnishell's runtime of the forks' prerelease, from bsoneca/omnishell-fork@$OMNISHELL_REF: see bsoneca/pronto forks/README.md."
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/omnishell-v$OMNISHELL_V" --jq '.assets[]|"\(.name) \(.id) \(.digest)"' | tee -a "$GITHUB_STEP_SUMMARY"
+      # The runtime tree as the image an app's release copies (/omnishell in its
+      # served image), as upstream publishes bonitao/omnishell: omnishell's
+      # runtime-image target, its files on an empty base, for both Linux
+      # architectures. An app names it as its build's omnishellRuntime
+      # (builders/bayt.cue); the pin line is in the summary.
+      - name: runtime image
+        env:
+          IMG: ghcr.io/bsoneca/omnishell
+        run: |
+          if d=$(crane digest "$IMG:$OMNISHELL_V" 2>/dev/null); then
+            echo "$IMG:$OMNISHELL_V is published: kept"
+          else
+            cd "$RUNNER_TEMP/omnishell"
+            ls -d interpreter components src server test/storybook-injector.ts test/canonical.ts check-visual.ts base-url.ts read-markup.ts render-documents.ts machine.cue 2>/dev/null > "$RUNNER_TEMP/runtime-files"
+            tar cf "$RUNNER_TEMP/runtime.tar" --owner=0 --group=0 --exclude=node_modules -T "$RUNNER_TEMP/runtime-files"
+            for a in amd64 arm64; do
+              crane append -f "$RUNNER_TEMP/runtime.tar" -t "$IMG:$OMNISHELL_V-$a-base"
+              crane mutate "$IMG:$OMNISHELL_V-$a-base" --set-platform "linux/$a" --label org.opencontainers.image.source=https://github.com/bsoneca/omnishell-fork --label "org.opencontainers.image.revision=$OMNISHELL_REF" -t "$IMG:$OMNISHELL_V-$a"
+            done
+            crane index append -m "$IMG:$OMNISHELL_V-amd64" -m "$IMG:$OMNISHELL_V-arm64" -t "$IMG:$OMNISHELL_V"
+            d=$(crane digest "$IMG:$OMNISHELL_V")
+          fi
+          echo "omnishellRuntime: \"$IMG:$OMNISHELL_V@$d\"" | tee -a "$GITHUB_STEP_SUMMARY"

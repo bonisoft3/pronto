@@ -60,7 +60,8 @@ The broker's pins move with pronto's version: nothing to refresh.
 
 ## The local broker
 
-With the default broker (`http://localhost:28443`), the app's own launch brings
+With the default broker (`http://localhost:<port>`, the port hashed from the app's
+name, one per app, so two apps' launches never share it), the app's own launch brings
 it up: `identity-hydra` (Ory Hydra, in memory) and `identity` (the front), two
 services of its cluster.
 

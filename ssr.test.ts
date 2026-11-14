@@ -46,9 +46,31 @@ Deno.test("a public route's addresses reach the renderer, ahead of the entry", a
   if (!r.ok) throw new Error(r.out);
   const { caddyfile: out } = JSON.parse(r.out) as { caddyfile: string };
   const rendered = out.indexOf("@rendered {\n      expression");
-  if (out.indexOf("handle @rendered {\n      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
+  if (out.indexOf("handle @rendered {\n      vars renderer true\n      reverse_proxy {$PRONTO_UPSTREAM_RENDER:render:8090} {", rendered) < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered < 0) throw new Error(`no renderer route:\n${out}`);
   if (rendered > out.indexOf("rewrite @route")) throw new Error("the entry's rewrite answers before the renderer does");
+});
+
+// Regression: a renderer down answered every visitor of a table or player link
+// with Cloud Run's 429 page for minutes. The SPA draws the route itself, so the
+// door serves the entry, status 200, when the renderer is rate-limited, failing
+// or unreachable, and passes every other answer, a real 404 included, through.
+Deno.test("a renderer that is down or limiting falls back to the entry at 200", async () => {
+  const { ok, out } = await ask("_view", "caddyfile");
+  if (!ok) throw new Error(out);
+  const proxy = out.slice(out.indexOf("handle @rendered {"));
+  const response = proxy.slice(proxy.indexOf("@renderdown status 429 502 503 504\n"), proxy.indexOf("    handle {\n"));
+  if (!response.includes("handle_response @renderdown {") || !response.includes("rewrite * /shell/index.html")) throw new Error(`no fallback on the renderer's answer:\n${out}`);
+  if (/\bstatus (404|500)\b/.test(response.split("handle_response")[0])) throw new Error("a real answer is replaced");
+  const errors = out.slice(out.indexOf("handle_errors {"));
+  if (!errors.includes("expression {err.status_code} in [502, 503, 504]") || !errors.includes("vars {http.vars.renderer} true") || !out.includes("vars renderer true") || !errors.includes("rewrite * /shell/index.html") || !errors.includes("status 200")) throw new Error(`no fallback when the renderer is unreachable:\n${out}`);
+  // The shell is answered whole and only to a read: a conditional or range request
+  // would turn status 200 into an empty or partial 200, and a write is no read.
+  const handler = errors.slice(errors.indexOf("@renderdown {"), errors.indexOf("file_server {"));
+  if (!handler.includes("method GET HEAD")) throw new Error(`the fallback answers a write:\n${out}`);
+  for (const h of ["If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range", "Range"]) {
+    if (!handler.includes(`request_header -${h}\n`)) throw new Error(`the fallback keeps ${h}:\n${out}`);
+  }
 });
 
 // Each upstream is dialed at its own PRONTO_UPSTREAM_<SERVICE> when set: a k8s
@@ -63,13 +85,38 @@ Deno.test("every upstream the door dials is its own variable's when set, naming 
   const { caddyfile: out } = JSON.parse(r.out) as { caddyfile: string };
   const proxies = [...out.matchAll(/^\s*(reverse_proxy|forward_auth)\b(.*)$/gm)];
   if (!proxies.some((m) => m[2].includes("render:"))) throw new Error(`no renderer upstream:\n${out}`);
+  // Electric's route names its upstream in a snippet the door chooses (PRONTO-364): the one Electric's,
+  // held to the same rule here, or its pods' (k8s), which the door dials straight with a cookie.
+  const electric = /^\s*reverse_proxy \{\n\s*import electric-upstream-\{\$PRONTO_ELECTRIC_UPSTREAM:one\}$/m;
+  if (!electric.test(out)) throw new Error(`no Electric route choosing its upstream:\n${out}`);
+  const one = out.match(/^\(electric-upstream-one\) \{\n\s*to \{\$PRONTO_UPSTREAM_ELECTRIC:electric:3000\}\n\s*header_up dapr-app-id electric\n\}$/m);
+  if (!one) throw new Error(`the one Electric's snippet dials past its variable:\n${out}`);
   for (const m of proxies) {
+    if (m[2] === " {" && out.slice(m.index! + m[0].length).split("\n")[1]?.trim().startsWith("import electric-upstream-")) continue;
+    // A site's brand files come from an assets host outside the cluster (BRAND_ASSETS_ORIGIN, an
+    // origin, not a service), dialed straight, never through the mesh.
+    if (m[2] === " {$BRAND_ASSETS_ORIGIN:http://brand-assets.invalid} {") continue;
     const spelled = m[2].match(/^ \{\$PRONTO_UPSTREAM_([A-Z0-9_]+):([a-z0-9-]+):\d+\} \{$/);
     if (!spelled) throw new Error(`${m[0].trim()} dials past its variable`);
     if (spelled[1] !== spelled[2].toUpperCase().replaceAll("-", "_")) throw new Error(`${m[0].trim()} names another service's variable`);
     const next = out.slice(m.index! + m[0].length).split("\n").slice(1, 4).map((l) => l.trim());
     if (!next.includes(`header_up dapr-app-id ${spelled[2]}`)) throw new Error(`${m[0].trim()} names no dapr-app-id ${spelled[2]}`);
   }
+});
+
+Deno.test("a host launch runs the program's peers beside the door; the renderer is the door's peer variable, not on the list", async () => {
+  const peers = (c: string) => exported(`(#peersCase & ${c}).hostPeers`, false);
+  const both = await peers("{peers: {billing: 8688, flagd: 8016}}");
+  if (!both.ok) throw new Error(both.out);
+  const listed = JSON.parse(both.out) as string[];
+  if (JSON.stringify([...listed].sort()) !== JSON.stringify(["billing=8688", "flagd=8016"])) throw new Error(`peers: ${both.out}`);
+  const alone = await peers("{ssr: false}");
+  if (!alone.ok || JSON.parse(alone.out).length !== 0) throw new Error(`an app with no peers: ${alone.out}`);
+  // A plugin that still states the list itself, on an app that renders nothing.
+  const stated = await peers('{ssr: false, stated: ["billing=8688"]}');
+  if (!stated.ok || JSON.parse(stated.out)[0] !== "billing=8688") throw new Error(`a stated list: ${stated.out}`);
+  const bad = await peers('{peers: {"Billing!": 8688}}');
+  if (bad.ok) throw new Error("a peer named as no service can be was admitted");
 });
 
 Deno.test("the renderer reads through the door, as a guest would", async () => {
@@ -265,7 +312,7 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
   const privData = JSON.parse(priv.out);
   if (privData.screen.access !== "private" || privData.screen.ssr !== "spa") throw new Error(priv.out);
   if (privData.shellRoute.access !== "private" || privData.shellRoute.ssr !== "spa") throw new Error(priv.out);
-  if (privData.caddyfile.includes("@rendered")) throw new Error(privData.caddyfile);
+  if (privData.caddyfile.includes("@rendered") || privData.caddyfile.includes("renderdown")) throw new Error(privData.caddyfile);
   if (privData.sitemap.includes("/jogos</loc>")) throw new Error(privData.sitemap);
 
   // Explicit access: "private" override on an open or mixed screen -> derives ssr: "spa" and omits from sitemap.xml.
@@ -276,6 +323,16 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
   if (overData.caddyfile.includes("@rendered")) throw new Error(overData.caddyfile);
   if (overData.sitemap.includes("/jogos</loc>")) throw new Error(overData.sitemap);
 
+  // An app behind a sign-in: its screens are private unless one is declared public, which
+  // the terminal then opens to visitors (a guest session, no sign-in), so its route says so.
+  const walled = await exported("(#accessCase & {reads: [_view], signIn: true}).out.shellRoute", false);
+  if (!walled.ok) throw new Error(walled.out);
+  if ("access" in JSON.parse(walled.out)) throw new Error(`a screen behind the sign-in names an access:\n${walled.out}`);
+  const opened = await exported('(#accessCase & {reads: [_view], signIn: true, extra: {access: "public"}}).out', false);
+  if (!opened.ok) throw new Error(opened.out);
+  const openedData = JSON.parse(opened.out);
+  if (openedData.screen.access !== "public" || openedData.shellRoute.access !== "public") throw new Error(opened.out);
+
   // Inconsistent overrides are refused.
   if (pubOverPriv.ok || !/screen jogo declares access: "public" over Note \(private\)/.test(pubOverPriv.out)) {
     throw new Error(pubOverPriv.out);
@@ -283,4 +340,16 @@ Deno.test("a screen's access and ssr derive from its top-level regions and gover
   if (ssrOverPriv.ok || !/screen jogo is private and declares ssr: "ssr"/.test(ssrOverPriv.out)) {
     throw new Error(ssrOverPriv.out);
   }
+});
+
+// A Cloudflare Pages build has no rewrite with a status, so the door's route
+// list is carried as `_redirects` proxy rules at 200 (bundle.ts), from the same
+// addresses as the Caddyfile's @route: a route answers the entry, a :param stays
+// a placeholder, both slash spellings are listed, and `/` needs no rule.
+Deno.test("the routes' addresses are a Pages _redirects file, each proxied to the entry at 200", async () => {
+  const { ok, out } = await exported("#ssgCase.pagesRedirects", true);
+  if (!ok) throw new Error(out);
+  // cue --out text ends the document with a newline of its own.
+  const want = "/jogo/:id / 200\n/jogo/:id/ / 200\n/regras / 200\n/regras/ / 200\n\n";
+  if (out !== want) throw new Error(`unexpected _redirects:\n${out}`);
 });

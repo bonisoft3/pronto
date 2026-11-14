@@ -7,7 +7,8 @@
 //     [--derived <file> | --from <dir>] [--assets-from <previous-public-dir>] [--ssr-origin <https-origin>] [--ssr-database existing|separate] [--clock ticker|disabled]
 //
 // <out>/public   the terminal and app assets; data requests reach the Worker
-// <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources
+// <out>/pglite   pglite-workerd's package, baked from mecha's pinned sources,
+//                in Cloud Build with EDGE_BUILD_PROJECT=<project>
 // <out>/src/machines.js   the app's machines, each the step its migration
 //                declares (mecha-reducer.ts), for the object's host import
 // <out>/src/functions.js  the app's database functions (database-functions.ts),
@@ -19,7 +20,8 @@
 // <out>/migrations.json   the migrations by name in the order a directory
 //                applies them, the cluster's pgroll set last: what a publish
 //                hands a data directory the object kept (publish-edge.ts)
-// <out>/src/index.ts, <out>/wrangler.jsonc
+// <out>/src/index.ts, <out>/wrangler.jsonc, whose vars name the providers a
+//                person signs in through (edge-signin.ts)
 import { readEdgeHatches, applyHatchAttributes } from './edge-hatches.ts'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,6 +36,8 @@ import { computationPackages } from './compute.ts'
 import { writeEdgeCompute } from './edge-compute.ts'
 import { writeEdgeReader } from './edge-reader.ts'
 import { type Functions, renderFunctions } from './edge-functions.ts'
+import { buildPglite } from './edge-pglite.ts'
+import { signInVars } from './edge-signin.ts'
 import { renderEffects } from './edge-effects.ts'
 import { dispatcherName, writeEdgeDispatcher } from './edge-dispatcher.ts'
 import { imagePlanRefusal } from './edge-image-plan.ts'
@@ -139,6 +143,15 @@ const statics = await new Deno.Command('cue', {
 }).output()
 if (!statics.success) fail('cue export of public assets failed')
 const { statics: terminalStatics, clusterStatics } = JSON.parse(new TextDecoder().decode(statics.stdout)) as { statics: StaticAsset[]; clusterStatics: StaticAsset[] }
+const signIn = await new Deno.Command('cue', {
+  // A cluster with no provider sign-in has no signIn: no provider either.
+  args: ['export', '.', '-e', '*cluster.capabilities.signIn | {}', '--out', 'json'],
+  cwd: app, stdout: 'piped', stderr: 'inherit',
+}).output()
+if (!signIn.success) fail("cue export of the cluster's signIn failed")
+let vars: Record<string, string>
+try { vars = signInVars(JSON.parse(new TextDecoder().decode(signIn.stdout)), (name) => Deno.env.get(name)) }
+catch (e) { fail((e as Error).message) }
 await writeEdgeAssets(app, omnishell, publicDir, [...terminalStatics, ...clusterStatics])
 await applyHatchAttributes(publicDir, hatches)
 const hints = await addressEdgeAssets(addresses, publicDir, { previous: retainedFrom, iceServers })
@@ -191,12 +204,10 @@ if (!clustered) {
   Deno.exit(0)
 }
 
-// PGlite for workerd. Bake reads the project's compose from its .bayt/, and a
-// local export adds to its destination, which is fresh here.
+// PGlite for workerd: baked in Cloud Build when EDGE_BUILD_PROJECT names a
+// project, by the local Docker otherwise (edge-pglite.ts).
 const pglite = path.join(out, 'pglite')
-const workerd = path.join(mecha, 'packages/pglite-workerd')
-await run('docker', ['buildx', 'bake', `--allow=fs.read=${workerd}`, `--allow=fs.write=${out}`, '-f', 'compose.yaml', '--set', `package.output=type=local,dest=${pglite}`, 'package'], path.join(workerd, '.bayt'))
-await Deno.remove(path.join(pglite, '.bayt'), { recursive: true })
+await buildPglite(path.join(mecha, 'packages/pglite-workerd'), pglite, Deno.env.get('EDGE_BUILD_PROJECT') || undefined, run, fail)
 const reader = compute ? await writeEdgeReader(out, mecha, compute.definitions, name) : undefined
 if (compute) {
   compute.deployments.push('compute/reader/wrangler.jsonc')
@@ -383,7 +394,8 @@ await Deno.writeTextFile(path.join(out, 'wrangler.jsonc'), JSON.stringify({
   observability: { enabled: true },
   ...blobBindings,
   // A handler's sink.origin: the release's domain, never the host a request came by.
-  ...(domain ? { vars: { ...blobVars, ORIGIN: `https://${domain}` } } : {}),
+  // The providers a person signs in through (edge-signin.ts) beside them.
+  ...(domain || Object.keys(vars).length ? { vars: { ...vars, ...(domain ? { ...blobVars, ORIGIN: `https://${domain}` } : {}) } } : {}),
   ...(pokes ? { triggers: { crons: [POKE_CRON] } } : {}),
   ...(domain ? { routes: [{ pattern: domain, custom_domain: true }] } : { workers_dev: true }),
   rules: [

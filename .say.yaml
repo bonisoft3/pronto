@@ -27,9 +27,8 @@ say:
         priority: -1
         cmds:
           - do: "cue vet -c ./testdata/emit"
-          - do: "deno test --parallel --no-config --allow-read --allow-write --allow-run=cue,nu,sh read.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts host-postgres.test.ts"
+          - do: "deno test --parallel --no-config --allow-read --allow-write --allow-run=cue,nu,sh read.test.ts table-order.test.ts ssr.test.ts builder-inputs.test.ts release-gcp.test.ts release-docker.test.ts host-postgres.test.ts"
           - do: "deno test --config deno.json --allow-read --allow-write --allow-run=cue bridge-targets.test.ts"
-          - do: "deno test --no-config --allow-read --allow-write --allow-env --allow-run=git,nu,tar,sh gcp-build.test.ts"
       activepieces:
         priority: -1
         cmds:
@@ -38,7 +37,7 @@ say:
       distribution:
         priority: -1
         cmds:
-          - do: "deno test --parallel --config deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts terminal-corpus_test.ts"
+          - do: "deno test --parallel --config deno.json --allow-read --allow-write --allow-run --allow-env --allow-net=127.0.0.1 bootstrap_test.ts installed_test.ts layout_test.ts derive-input.test.ts project-config.test.ts write_test.ts schema-names_test.ts terminal-corpus_test.ts"
       types:
         priority: -1
         cmds:
@@ -54,10 +53,20 @@ say:
         cmds:
           - do: "deno test --config deno.json --allow-read --allow-run=cue identity_test.ts"
           - do: "deno test --no-config --allow-read --allow-run=cue auth-providers.test.ts login-design.test.ts"
+      # The cue wrapper at the runtime's root, against a fake cue (cue-budget/cue_test.ts).
+      cue-budget:
+        priority: -1
+        cmds:
+          - do: "deno test --no-config --allow-read --allow-write --allow-run --allow-env --allow-sys cue-budget/cue_test.ts"
       k8s:
         priority: -1
         cmds:
           - do: "nu k8s/release_test.nu"
+      gcp:
+        priority: -1
+        cmds:
+          - do: "nu gcp/release_test.nu"
+          - do: "nu gcp/build_test.nu"
       # The identity broker and identity.#Signin (docs/identity.md). The front
       # runs against a real Hydra, which mise fetches here and no consumer's
       # toolchain carries.
@@ -65,9 +74,13 @@ say:
         priority: -1
         cmds:
           - do: "cue vet -c=false ./identity"
-          - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
-          - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/broker identity/hydra/fake_test.ts"
+          - do: "deno test --no-config --allow-read --allow-run=cue identity/issuer_test.ts"
+          - do: "deno test --no-config --allow-net --allow-env --allow-read identity/oidc_test.ts identity/bearer_test.ts identity/broker identity/hydra/fake_test.ts"
           - do: "mise x github:ory/hydra@26.2.0 -- sh -c 'HYDRA_BIN=$(command -v hydra) deno test --no-config --allow-net --allow-env --allow-read --allow-run identity/hydra/front_test.ts'"
+          # Last: its fixtures import the monorepo's bonisoft.org/plugins/pronto,
+          # which only the monorepo resolves, and a rule stops at its first
+          # failing step.
+          - do: "deno test --no-config --allow-read --allow-run=cue identity-signin.test.ts"
       outcome-obligations:
         priority: -1
         cmds:
@@ -100,7 +113,7 @@ say:
           - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-env mecha-snapshot.test.ts mecha-snapshot-materialize.test.ts"
           - do: "mise exec -- deno test --parallel --config deno.json --frozen --allow-read --allow-write --allow-env --allow-run=cue cortex-machine.test.ts cortex-sources.test.ts cortex-conformance.test.ts cortex-validation.test.ts"
           - do: 'mise exec -- deno test --config deno.json --allow-read --allow-run=cue --filter "server timers refuse" machine-timers.integration.test.ts'
-          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-machine.test.ts"
+          - do: "mise exec -- deno test --parallel --config deno.json --allow-read --allow-write --allow-run=cue ir-render_test.ts ir-md_test.ts ir-machine.test.ts"
       # What each Jessie role may be granted, held against both cages and the schema.
       endowments:
         priority: -1

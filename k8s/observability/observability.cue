@@ -58,6 +58,10 @@ import "encoding/yaml"
 			        target_label: __address__
 			      - action: labelmap
 			        regex: __meta_kubernetes_pod_label_(.+)
+			      # Every series names its pod, as the export's do (PRONTO-370): a service at several
+			      # replicas is read per pod, and a dashboard sums or takes the max over them.
+			      - source_labels: [__meta_kubernetes_pod_name]
+			        target_label: pod
 			  - job_name: 'postgrest'
 			    kubernetes_sd_configs:
 			      - role: pod
@@ -125,6 +129,23 @@ import "encoding/yaml"
 		},
 	]
 
+	// Its samples live on a volume of the cluster's default class: on the container's own disk, a
+	// restart (an OOM kill, a node reboot, a rollout) emptied every series, and with them each
+	// dashboard's history (PRONTO-189).
+	let vmVolumeObj = [{
+		apiVersion: "v1"
+		kind:       "PersistentVolumeClaim"
+		metadata: {
+			name:      "vmsingle-data"
+			namespace: ns
+			labels:    appLabels & {"app.kubernetes.io/name": "vmsingle"}
+		}
+		spec: {
+			accessModes: ["ReadWriteOnce"]
+			resources: requests: storage: "20Gi"
+		}
+	}]
+
 	let vmDeploymentObj = [{
 		apiVersion: "apps/v1"
 		kind:       "Deployment"
@@ -135,6 +156,8 @@ import "encoding/yaml"
 		}
 		spec: {
 			replicas: 1
+			// One process on the data at a time: the old one stops before the new one opens it.
+			strategy: type: "Recreate"
 			selector: matchLabels: {"app.kubernetes.io/name": "vmsingle"}
 			template: {
 				metadata: labels: appLabels & {"app.kubernetes.io/name": "vmsingle"}
@@ -145,6 +168,8 @@ import "encoding/yaml"
 						image: "docker.io/victoriametrics/victoria-metrics:v1.106.1@sha256:54b283129634239db62798fd8d92e8d8d4372a0b114e72967eb233dbb264ff53"
 						args: [
 							"-promscrape.config=/etc/vmsingle/promscrape.yaml",
+							// A changed scrape config is read from the mounted ConfigMap, without a restart.
+							"-promscrape.configCheckInterval=1m",
 							"-storageDataPath=/vmsingle-data",
 							"-httpListenAddr=:8428",
 						]
@@ -152,15 +177,23 @@ import "encoding/yaml"
 						volumeMounts: [{
 							name:      "config"
 							mountPath: "/etc/vmsingle"
+						}, {
+							name:      "data"
+							mountPath: "/vmsingle-data"
 						}]
+						// 250Mi was OOM-killed once the apps' collectors and exporters were scraped here
+						// (2026-11-10, PRONTO-189).
 						resources: {
-							requests: {cpu: "20m", memory: "50Mi"}
-							limits: {cpu: "200m", memory: "250Mi"}
+							requests: {cpu: "20m", memory: "200Mi"}
+							limits: {cpu: "500m", memory: "1Gi"}
 						}
 					}]
 					volumes: [{
 						name: "config"
 						configMap: name: "vmsingle-config"
+					}, {
+						name: "data"
+						persistentVolumeClaim: claimName: "vmsingle-data"
 					}]
 				}
 			}
@@ -203,6 +236,10 @@ import "encoding/yaml"
 							{name: "COLLECTOR_ZIPKIN_HOST_PORT", value: ":9411"},
 							{name: "COLLECTOR_OTLP_ENABLED", value: "true"},
 							{name: "QUERY_BASE_PATH", value: "/jaeger"},
+							// All-in-one keeps 50000 traces in memory by default, far past the limit below: it was
+							// OOMKilled every ~10 minutes (513 restarts in 7 days, every daprd's "traces export" error,
+							// PRONTO-475). 5000 recent traces fit.
+							{name: "MEMORY_MAX_TRACES", value: "5000"},
 						]
 						ports: [
 							{name: "ui", containerPort: 16686},
@@ -212,7 +249,7 @@ import "encoding/yaml"
 						]
 						resources: {
 							requests: {cpu: "20m", memory: "60Mi"}
-							limits: {cpu: "200m", memory: "250Mi"}
+							limits: {cpu: "200m", memory: "512Mi"}
 						}
 					}]
 				}
@@ -388,15 +425,13 @@ import "encoding/yaml"
 						{port: 53, protocol: "TCP"},
 					]
 				},
-				// Scrape targets: PostgREST's admin port, CloudNativePG's exporter,
-				// caddy, daprd's metrics.
+				// Scrape targets: any pod of the cluster, on the port its annotations name. A fixed list
+				// (PostgREST's admin, CloudNativePG's exporter, caddy, daprd) missed every app's own
+				// services.<n>.metrics port (a journeys collector's 9598, an exporter's 9399), whose
+				// scrapes were refused, so their series never reached VictoriaMetrics. Pods only: what
+				// lies outside the cluster stays at the API server's ports below.
 				{
-					ports: [
-						{port: 3001, protocol: "TCP"},
-						{port: 9187, protocol: "TCP"},
-						{port: 8080, protocol: "TCP"},
-						{port: 9090, protocol: "TCP"},
-					]
+					to: [{namespaceSelector: {}}]
 				},
 				// Pod discovery through the API server.
 				{
@@ -414,6 +449,7 @@ import "encoding/yaml"
 			namespaceObj,
 			vmScrapeConfigObj,
 			vmRbacObj,
+			vmVolumeObj,
 			vmDeploymentObj,
 			vmServiceObj,
 			jaegerDeploymentObj,

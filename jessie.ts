@@ -186,7 +186,7 @@ const stripAtoms = (source: string, ambiguous = true) => walkAtoms(source, (c) =
 
 // The same walk, padding every dropped character with a space, so an index
 // into the result is an index into the source.
-const padAtoms = (source: string) => walkAtoms(source, (c) => (c === "\n" ? "\n" : " "));
+export const padAtoms = (source: string) => walkAtoms(source, (c) => (c === "\n" ? "\n" : " "));
 
 const ARROW_HEAD = /^(\(([^()]|\([^()]*\))*\)|[A-Za-z_$][\w$]*)\s*=>/;
 // An adapter ends in a parenthesised object literal: `({ toItems: ... })`.

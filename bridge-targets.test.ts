@@ -24,7 +24,7 @@ Deno.test("a bridge on docker needs its appliance form, and one on a target that
   assert(!bare.success, "a bridge on docker without an appliance form was accepted");
   assertStringIncludes(bare.stderr, "appliance");
   const k8s = await cue(["export", "-", "-e", "out"], program('{container: "transport", targets: ["k8s"]}'));
-  assert(!k8s.success, "a bridge on k8s, whose release runs no airlock, was accepted");
+  assert(!k8s.success, "a bridge on k8s, whose release runs the airlock but deploys no bridge, was accepted");
   assertStringIncludes(k8s.stderr, "bridges.fetch.targets");
   const held = await cue(["export", "-", "-e", "out"], program('{container: "transport", targets: ["docker"], appliance: {srcs: ["/bin/fetch"], command: ["/bin/fetch"]}}'));
   assert(!held.success, "a bridge served on the appliance door's port 8080 was accepted");

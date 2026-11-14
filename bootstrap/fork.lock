@@ -1,0 +1,219 @@
+# The lock entries of the tools this fork's roster adds to upstream's (bootstrap/mise.lock): the
+# host launch's (mecha's toolchain #Tools: Postgres, PostgREST, pgroll, CMake for PLV8) and
+# process-compose, at the versions the fork's apps install them. prerelease.sh adds each one the
+# shipped lock lacks, so a repo the fork's bootstrap starts installs them asking GitHub nothing.
+# A pin that moves moves here too: a fresh bootstrap's `saytw setup` fails on one this misses.
+[[tools."aqua:xataio/pgroll"]]
+version = "0.16.3"
+backend = "aqua:xataio/pgroll"
+
+[tools."aqua:xataio/pgroll"."platforms.linux-arm64"]
+checksum = "sha256:c37f41f29b8e5784a47f91069975bd397448cf1014d47cd426680f18a84804a7"
+url = "https://github.com/xataio/pgroll/releases/download/v0.16.3/pgroll.linux.arm64"
+url_api = "https://api.github.com/repos/xataio/pgroll/releases/assets/550613840"
+
+[tools."aqua:xataio/pgroll"."platforms.linux-arm64-musl"]
+checksum = "sha256:c37f41f29b8e5784a47f91069975bd397448cf1014d47cd426680f18a84804a7"
+url = "https://github.com/xataio/pgroll/releases/download/v0.16.3/pgroll.linux.arm64"
+url_api = "https://api.github.com/repos/xataio/pgroll/releases/assets/550613840"
+
+[tools."aqua:xataio/pgroll"."platforms.linux-x64"]
+checksum = "sha256:e86ccd704f7d99a0794a75a6c1d1095d30c8bc8c21a22b793914db8340bad182"
+url = "https://github.com/xataio/pgroll/releases/download/v0.16.3/pgroll.linux.amd64"
+url_api = "https://api.github.com/repos/xataio/pgroll/releases/assets/550613834"
+
+[tools."aqua:xataio/pgroll"."platforms.linux-x64-musl"]
+checksum = "sha256:e86ccd704f7d99a0794a75a6c1d1095d30c8bc8c21a22b793914db8340bad182"
+url = "https://github.com/xataio/pgroll/releases/download/v0.16.3/pgroll.linux.amd64"
+url_api = "https://api.github.com/repos/xataio/pgroll/releases/assets/550613834"
+
+[tools."aqua:xataio/pgroll"."platforms.macos-arm64"]
+checksum = "sha256:43dfe63f05c74b98a83077bea466238371ad0a245e4081d30ed78760227cd8b4"
+url = "https://github.com/xataio/pgroll/releases/download/v0.16.3/pgroll.macos.arm64"
+url_api = "https://api.github.com/repos/xataio/pgroll/releases/assets/550613836"
+
+[tools."aqua:xataio/pgroll"."platforms.macos-x64"]
+checksum = "sha256:06569f896f9e489968779485dd4000027ecce3dde63f24a0fca2ac3317df29af"
+url = "https://github.com/xataio/pgroll/releases/download/v0.16.3/pgroll.macos.amd64"
+url_api = "https://api.github.com/repos/xataio/pgroll/releases/assets/550613887"
+
+[tools."aqua:xataio/pgroll"."platforms.windows-arm64"]
+checksum = "sha256:691911916079f9c4343a2b8d107639949cc1de218d6907aeec900811bb48a47a"
+url = "https://github.com/xataio/pgroll/releases/download/v0.16.3/pgroll.win.amd64.exe"
+url_api = "https://api.github.com/repos/xataio/pgroll/releases/assets/550613833"
+
+[tools."aqua:xataio/pgroll"."platforms.windows-x64"]
+checksum = "sha256:691911916079f9c4343a2b8d107639949cc1de218d6907aeec900811bb48a47a"
+url = "https://github.com/xataio/pgroll/releases/download/v0.16.3/pgroll.win.amd64.exe"
+url_api = "https://api.github.com/repos/xataio/pgroll/releases/assets/550613833"
+
+[[tools."github:F1bonacc1/process-compose"]]
+version = "1.122.0"
+backend = "github:F1bonacc1/process-compose"
+
+[tools."github:F1bonacc1/process-compose"."platforms.linux-arm64"]
+checksum = "sha256:52fa7d5a2d5e0db470faec5976204fc215ed7e3d13689e930cf522becfb63778"
+url = "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/F1bonacc1/process-compose/releases/assets/518622328"
+
+[tools."github:F1bonacc1/process-compose"."platforms.linux-arm64-musl"]
+checksum = "sha256:52fa7d5a2d5e0db470faec5976204fc215ed7e3d13689e930cf522becfb63778"
+url = "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/F1bonacc1/process-compose/releases/assets/518622328"
+
+[tools."github:F1bonacc1/process-compose"."platforms.linux-x64"]
+checksum = "sha256:9b6dbc38324c0b0481f1cd1dd828ffdc78117129ec797678f4bf8c4023311281"
+url = "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/F1bonacc1/process-compose/releases/assets/518622317"
+
+[tools."github:F1bonacc1/process-compose"."platforms.linux-x64-musl"]
+checksum = "sha256:9b6dbc38324c0b0481f1cd1dd828ffdc78117129ec797678f4bf8c4023311281"
+url = "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/F1bonacc1/process-compose/releases/assets/518622317"
+
+[tools."github:F1bonacc1/process-compose"."platforms.macos-arm64"]
+checksum = "sha256:eaa1238a1d6c300e928ef855d36a3d95aab8da64997104d74ea73d91d3cb6c60"
+url = "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/F1bonacc1/process-compose/releases/assets/518622315"
+
+[tools."github:F1bonacc1/process-compose"."platforms.macos-x64"]
+checksum = "sha256:b4f76e881759e13f7913a5b2fed16a0e75275c04d3a61e656d40448921f1c3ec"
+url = "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/F1bonacc1/process-compose/releases/assets/518622318"
+
+[tools."github:F1bonacc1/process-compose"."platforms.windows-arm64"]
+checksum = "sha256:36a7bcf76e584a630f0b6ec7253c51cd116e686f8ffdd61c9371eeb69e7b3b49"
+url = "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_windows_arm64.zip"
+url_api = "https://api.github.com/repos/F1bonacc1/process-compose/releases/assets/518622325"
+
+[tools."github:F1bonacc1/process-compose"."platforms.windows-x64"]
+checksum = "sha256:13fd7023199c7375c26477f11f213fde826e932d831f7dd51a5c229fbee3bf79"
+url = "https://github.com/F1bonacc1/process-compose/releases/download/v1.122.0/process-compose_windows_amd64.zip"
+url_api = "https://api.github.com/repos/F1bonacc1/process-compose/releases/assets/518622326"
+
+[[tools."github:Kitware/CMake"]]
+version = "4.1.2"
+backend = "github:Kitware/CMake"
+
+[tools."github:Kitware/CMake"."platforms.linux-arm64"]
+checksum = "sha256:0634996f918b3bab11f45522899c81c987b09c9a64d15f6a0d2bb51c42099534"
+url = "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-linux-aarch64.tar.gz"
+url_api = "https://api.github.com/repos/Kitware/CMake/releases/assets/298954804"
+
+[tools."github:Kitware/CMake"."platforms.linux-arm64-musl"]
+checksum = "sha256:0634996f918b3bab11f45522899c81c987b09c9a64d15f6a0d2bb51c42099534"
+url = "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-linux-aarch64.tar.gz"
+url_api = "https://api.github.com/repos/Kitware/CMake/releases/assets/298954804"
+
+[tools."github:Kitware/CMake"."platforms.linux-x64"]
+checksum = "sha256:773cc679c3a7395413bd096523f8e5d6c39f8718af4e12eb4e4195f72f35e4ab"
+url = "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-linux-x86_64.tar.gz"
+url_api = "https://api.github.com/repos/Kitware/CMake/releases/assets/298954823"
+
+[tools."github:Kitware/CMake"."platforms.linux-x64-musl"]
+checksum = "sha256:773cc679c3a7395413bd096523f8e5d6c39f8718af4e12eb4e4195f72f35e4ab"
+url = "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-linux-x86_64.tar.gz"
+url_api = "https://api.github.com/repos/Kitware/CMake/releases/assets/298954823"
+
+[tools."github:Kitware/CMake"."platforms.macos-arm64"]
+checksum = "sha256:3be85f5b999e327b1ac7d804cbc9acd767059e9f603c42ec2765f6ab68fbd367"
+url = "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-macos-universal.tar.gz"
+url_api = "https://api.github.com/repos/Kitware/CMake/releases/assets/298954851"
+
+[tools."github:Kitware/CMake"."platforms.macos-x64"]
+checksum = "sha256:3be85f5b999e327b1ac7d804cbc9acd767059e9f603c42ec2765f6ab68fbd367"
+url = "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-macos-universal.tar.gz"
+url_api = "https://api.github.com/repos/Kitware/CMake/releases/assets/298954851"
+
+[tools."github:Kitware/CMake"."platforms.windows-arm64"]
+checksum = "sha256:396bb14c77d12615dfbd666ef6ecd67d3442eb449c321aad25d738216fd9962d"
+url = "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-windows-arm64.zip"
+url_api = "https://api.github.com/repos/Kitware/CMake/releases/assets/298954947"
+
+[tools."github:Kitware/CMake"."platforms.windows-x64"]
+checksum = "sha256:82730741149681597510a4bc7095da1460b472dac24eaf9c23ad7440f47753ab"
+url = "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-windows-x86_64.zip"
+url_api = "https://api.github.com/repos/Kitware/CMake/releases/assets/298954995"
+
+[[tools."github:PostgREST/postgrest"]]
+version = "16.4"
+backend = "github:PostgREST/postgrest"
+
+[tools."github:PostgREST/postgrest"."platforms.linux-arm64"]
+checksum = "sha256:bf544f94f305a1ff37d82f5ef1298d584f1f98b51dfd8182d1437a02073d8731"
+url = "https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-aarch64.tar.xz"
+url_api = "https://api.github.com/repos/PostgREST/postgrest/releases/assets/585233040"
+
+[tools."github:PostgREST/postgrest"."platforms.linux-arm64-musl"]
+checksum = "sha256:bf544f94f305a1ff37d82f5ef1298d584f1f98b51dfd8182d1437a02073d8731"
+url = "https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-aarch64.tar.xz"
+url_api = "https://api.github.com/repos/PostgREST/postgrest/releases/assets/585233040"
+
+[tools."github:PostgREST/postgrest"."platforms.linux-x64"]
+checksum = "sha256:b47ecc82fce1dcebbbc4183d839e52f07f7630c9d7ad0f54db753d1939299354"
+url = "https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-x86-64.tar.xz"
+url_api = "https://api.github.com/repos/PostgREST/postgrest/releases/assets/585233042"
+
+[tools."github:PostgREST/postgrest"."platforms.linux-x64-musl"]
+checksum = "sha256:b47ecc82fce1dcebbbc4183d839e52f07f7630c9d7ad0f54db753d1939299354"
+url = "https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-x86-64.tar.xz"
+url_api = "https://api.github.com/repos/PostgREST/postgrest/releases/assets/585233042"
+
+[tools."github:PostgREST/postgrest"."platforms.macos-arm64"]
+checksum = "sha256:5720fbde4a19ade9fb189791615c84beb9f0e58201b1b6d17fe3b698faf60776"
+url = "https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-macos-aarch64.tar.xz"
+url_api = "https://api.github.com/repos/PostgREST/postgrest/releases/assets/585233038"
+
+[tools."github:PostgREST/postgrest"."platforms.macos-x64"]
+checksum = "sha256:9c50547cddf94ede6abf42dacc586caa18e17db4557aee386c6e45e6806aaed2"
+url = "https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-macos-x86-64.tar.xz"
+url_api = "https://api.github.com/repos/PostgREST/postgrest/releases/assets/585233039"
+
+[tools."github:PostgREST/postgrest"."platforms.windows-x64"]
+checksum = "sha256:29a5b56e5a09b7168bb552ef14aa7ade40bf0a81dd0687cffa86610187b89d78"
+url = "https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-windows-x86-64.zip"
+url_api = "https://api.github.com/repos/PostgREST/postgrest/releases/assets/585233058"
+
+[[tools."github:theseus-rs/postgresql-binaries"]]
+version = "18.6.1"
+backend = "github:theseus-rs/postgresql-binaries"
+
+[tools."github:theseus-rs/postgresql-binaries"."platforms.linux-arm64"]
+checksum = "sha256:1ab47fa2f06ff70454309ad02e5d89c46488300d43977231481fd6b160b9d556"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654378218"
+
+[tools."github:theseus-rs/postgresql-binaries"."platforms.linux-arm64-musl"]
+checksum = "sha256:d33d7d3249d7cf7ae72f35aaa20e46d30bdc1c17f4d102b2b3a39d618848ea8b"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654430290"
+
+[tools."github:theseus-rs/postgresql-binaries"."platforms.linux-x64"]
+checksum = "sha256:e84b02dd8d0ce5879fb697330a789231c8b8f8d958dae3ad4d90fecc710b1315"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/654246574"
+
+[tools."github:theseus-rs/postgresql-binaries"."platforms.linux-x64-musl"]
+checksum = "sha256:80287b4596d427cf8456eb946c44b1607b3d2f0a0ad48ffe26dde0068bee5ff3"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653957730"
+
+[tools."github:theseus-rs/postgresql-binaries"."platforms.macos-arm64"]
+checksum = "sha256:89e91cc80650a43d22c018b95ca356a0c9e15838a1182fed2880bfb5d7d9c9a6"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653610275"
+
+[tools."github:theseus-rs/postgresql-binaries"."platforms.macos-x64"]
+checksum = "sha256:4229812543e19c91864ebdf5d8f78883c5816d51d4cc5d065298260c1f64d37e"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653681678"
+
+[tools."github:theseus-rs/postgresql-binaries"."platforms.windows-arm64"]
+checksum = "sha256:601da1e9f156520cde83b867189997cade9b728b28eec8ecfecb478eaf36dd96"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-aarch64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653714013"
+
+[tools."github:theseus-rs/postgresql-binaries"."platforms.windows-x64"]
+checksum = "sha256:d82142f3a9a49be8467f0e87f5a079f627515539f94a070fe1463208fa8eb3c6"
+url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.6.1/postgresql-18.6.1-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/theseus-rs/postgresql-binaries/releases/assets/653680782"

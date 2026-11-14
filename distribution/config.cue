@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	saycfg "github.com/bonisoft3/sayt:say"
+	"github.com/bonisoft3/pronto/resilience"
 )
 
 #Version:     "1.1.2"
@@ -57,6 +58,11 @@ import (
 	// Draws an entity's machines into ir.html (ir-render.ts): one binary from
 	// its GitHub release, never aqua (whose registry meets rate limits).
 	"github:terrastruct/d2": "v0.9.0"
+	// Runs the cluster as host processes (launch@local, integrate@local): a
+	// tool of the app's own, at the version sayt's stub names, so it starts
+	// inside the app's toolchain and every process it starts finds that
+	// toolchain on PATH, as sayt's stub, which resets PATH on Linux, does not.
+	"github:F1bonacc1/process-compose": "v1.122.0"
 	"http:duckdb": {
 		version: "1.5.6"
 		platforms: {
@@ -104,6 +110,29 @@ import (
 	out:  "use tools.nu [run-mise]; let pronto = (run-mise where \(#Runtimes.pronto) | str trim); \(args)"
 }
 
+// The cluster as host processes under process-compose, inside the app's
+// toolchain: every process and probe finds the cluster's tools and bayt's on
+// its PATH. mecha's host processes are nu scripts that build and fetch what they
+// need themselves (mecha 0.22 dropped the surface's hostPrepare), so nothing runs
+// before process-compose starts.
+#LaunchLocal: {
+	out: "use tools.nu [run-mise]; run-mise exec -- env MISE_LOCKED=0 process-compose --no-server -f .bayt/process-compose.yaml up --tui=false"
+}
+
+// The same stack, the terminal's visual lint against its door, and the stack
+// down again (integrate-local.ts): `integrate` without containers. The
+// omnishell tree is the installed one unless given.
+#IntegrateLocal: I={
+	// A screen settles inside its door's bounds, as the visual check's.
+	let _door = resilience.resilience.timeouts.door
+	settleMs:  *((_door.auth + _door.crud) * 1000) | (int & >0)
+	omnishell: *"(run-mise where \(#Runtimes.omnishell) | str trim)" | string
+	// An app with a slot guard (tests/slot.ts) runs it on a slot of its own, so another stack of the
+	// machine, on the app's ports or any, never meets it; inside a slot (STACK_SLOT) it runs plain.
+	let _direct = "run-mise exec -- env MISE_LOCKED=0 deno run -A --config ($pronto | path join deno.json) ($pronto | path join integrate-local.ts) . --omnishell \(I.omnishell) --settle \(I.settleMs)"
+	out: (#Run & {args: "if ('tests/slot.ts' | path exists) and ($env.STACK_SLOT? | is-empty) { run-mise exec -- deno run -A tests/slot.ts ./saytw integrate@local } else { \(_direct) }"}).out
+}
+
 #Writer: {
 	root: string
 	out:  "deno run --config (\(root) | path join deno.json) --allow-read --allow-write=. --allow-run --allow-env (\(root) | path join write.ts) ."
@@ -114,6 +143,10 @@ import (
 	domain:    *"" | string
 	ssrOrigin: *"" | string
 	edgeClock: *"ticker" | "disabled"
+	// The most bytes, gzipped, a pages release's first load may weigh: its
+	// document and the module chunks that document imports. A bundle over it
+	// fails the release; 0 sets none.
+	firstLoad: *0 | int & >=0
 	// The interpreter's root and mecha's, which the bundler reads from.
 	_omnishell: "(run-mise where \(#Runtimes.omnishell) | str trim)"
 	_mecha:     "(run-mise where \(#Runtimes.mecha) | str trim)"
@@ -158,7 +191,7 @@ import (
 	derive: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle derived.ts) . --tables \(strings.Join(P.derived.tables, ","))\([if len(P.derived.streams) > 0 {" --streams \(strings.Join(P.derived.streams, ","))"}, ""][0]) --out \(P._derivedOut)"}).out
 	// The browser tier's artifact: the app bundled into dist/browser/index.html,
 	// under the path prefix `sayt release@pages --base=/<prefix>` names.
-	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])"}).out
+	bundle: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out dist/browser --base ($env.SAY_RELEASE_ARGS_BASE? | default \"\")\([if len(P.derived.tables) > 0 {" --derived \(P._derivedOut)"}, ""][0])\([if P.edgeClock == "disabled" {" --clock disabled"}, ""][0])\([if P.firstLoad > 0 {" --first-load \(P.firstLoad)"}, ""][0])"}).out
 	// The edge tier's artifact, dist/cloudflare (bundle/edge.ts): the page, the
 	// Worker on mecha's edge cluster and the data directory its object loads.
 	// `--from`, given to `sayt release@cloudflare`, starts that directory from
@@ -177,6 +210,11 @@ import (
 	k8s: (_run & {args: "run-mise exec -- nu ($pronto | path join k8s release.nu)"}).out
 	// The cloud tier on GCP: Cloud Run beside Cloud SQL, with gcloud alone.
 	gcp: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp release.nu)"}).out
+	// Its integration tests against a deployed copy (verify@gcp): the drivers
+	// integrate runs that read APP_URL, in Cloud Build against its address.
+	gcpVerify: (_run & {args: "run-mise exec -- nu ($pronto | path join gcp verify.nu)"}).out
+	// The cluster as host processes (#LaunchLocal).
+	launchLocal: #LaunchLocal
 	// Post-release verification across live deployments.
 	let _verifyArgs = "...(if ($env.SAY_VERIFY_ARGS_TARGET? | is-empty) { [] } else { ['--target', $env.SAY_VERIFY_ARGS_TARGET] }) ...(if ($env.SAY_VERIFY_ARGS_TIER? | is-empty) { [] } else { ['--tier', $env.SAY_VERIFY_ARGS_TIER] }) ...(if ($env.SAY_VERIFY_ARGS_HEADLESS? | is-empty) { [] } else { ['--headless', $env.SAY_VERIFY_ARGS_HEADLESS] }) ...(if ($env.SAY_VERIFY_ARGS_SESSION? | is-empty) { [] } else { ['--session', $env.SAY_VERIFY_ARGS_SESSION] })"
 	verifyPages: (_run & {args: "run-mise exec -- deno run -A --config ($pronto | path join deno.json) ($pronto | path join verify verify.ts) . --platform pages\([if P.domain != "" {" --default-domain \(P.domain)"}, ""][0]) \(_verifyArgs)"}).out
@@ -191,6 +229,9 @@ import (
 		facts: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-facts.ts) ."}).out
 		sql: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-sql.ts) ."}).out
 		proto: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read --allow-run --allow-env ($pronto | path join check-proto.ts) ."}).out
+		// The pages bundle written to a scratch folder and held to firstLoad.
+		firstLoad: (_run & {args: "let out = (mktemp -d); run-mise exec -- deno run -A --config ($pronto | path join bundle deno.json) ($pronto | path join bundle bundle.ts) . --omnishell \(P._omnishell) --mecha \(P._mecha) --out $out --first-load \(P.firstLoad); rm -r $out"}).out
+		hybrids: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-hybrids.ts) ."}).out
 		outcomes: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-verification.ts) . --omnishell \(P._omnishell)"}).out
 		mecha: (_run & {args: "run-mise exec -- deno run --config ($pronto | path join deno.json) --allow-read ($pronto | path join check-mecha.ts) ."}).out
 		// Under the compute service's own pins, as it runs them: queries over
@@ -199,9 +240,9 @@ import (
 		// Each module loaded as the service loads it at startup, so one it
 		// would refuse fails here; the emitter appends the modules' paths.
 		admit: (_run & {args: "run-mise exec -- deno run --config (\(P._mecha) | path join services compute deno.json) --frozen --unstable-worker-options --allow-read --allow-env (\(P._mecha) | path join services compute admit.ts)"}).out
-		// Each effect's handler admitted as the airlock admits it at startup,
-		// against the manifest write emits beside it.
-		admitEffects: (_run & {args: "run-mise exec -- deno run --config (\(P._mecha) | path join services airlock deno.json) --frozen --unstable-worker-options --allow-read --allow-env (\(P._mecha) | path join services airlock admit.ts) services/airlock/effects.json ."}).out
+		// Each effect's handler admitted as the airlock admits it at startup:
+		// the manifest write emits, and the bundles derive writes beside it.
+		admitEffects: (_run & {args: "run-mise exec -- deno run --config (\(P._mecha) | path join services airlock deno.json) --frozen --unstable-worker-options --allow-read --allow-env (\(P._mecha) | path join services airlock admit.ts) services/airlock/effects.json services/airlock"}).out
 	}
 	say: say: {
 		...
@@ -213,6 +254,12 @@ import (
 			// An app that bootstraps its repository's root from pronto keeps that
 			// project in pronto/, with the command that writes it; a pronto/
 			// holding only an app's own rules has nothing to write.
+			// First: one generate at a time in a checkout (generate-lock.sh), so a
+			// stack's `launch --watch` and a gate never write the same files at once.
+			"generate-lock": {
+				priority: -1000
+				cmds: [{do: (_run & {args: "^sh ($pronto | path join generate-lock.sh) .task/bayt/generate.lock"}).out}]
+			}
 			"auto-cue": cmds: [{use: "./tools.nu", do: "if ('pronto/generate_tool.cue' | path exists) { tools run-cue cmd generate ./pronto }"}]
 			"pronto": {
 				priority: 1

@@ -147,7 +147,7 @@ type Contract = {
 const contract = async (): Promise<Contract> => {
   const emitter = await Deno.readTextFile(EMITTER);
   const prefix = new Map<string, string>();
-  for (const m of emitter.matchAll(/for k, v in E\._design\.(\w+) \{"  --([a-z-]*)\\\(k\)/g)) {
+  for (const m of emitter.matchAll(/for k, v in D\.design\.(\w+) \{"  --([a-z-]*)\\\(k\)/g)) {
     assert(!prefix.has(m[1]), `emit.cue spells the ${m[1]} bucket twice, so its CSS name is ambiguous`);
     prefix.set(m[1], m[2]);
   }
@@ -167,7 +167,7 @@ const contract = async (): Promise<Contract> => {
       // comprehension, so the emitter is asked about them by name.
       for (const key of Object.keys(kvs as Record<string, string>)) {
         assert(
-          emitter.includes(`"  --shell-${key}: var(--\\(E._design.shell.${key}));"`),
+          emitter.includes(`"  --shell-${key}: var(--\\(D.design.shell.${key}));"`),
           `#Design.shell.${key} is declared and emit.cue emits no --shell-${key}`,
         );
         roles.set(`shell/${key}`, {

@@ -114,6 +114,19 @@ cases.push(["a tampered round trip is refused without redirecting", async () => 
   assertEquals(res.headers.get("location"), null);
 }]);
 
+// Regression: Search Console reported id.bonkchess.com's /authorize?... pages as
+// duplicates with no canonical, and /robots.txt answered 404 application/json.
+cases.push(["the broker stays out of search results: robots.txt refuses crawlers and every answer says noindex", async () => {
+  const robots = await call(`${ISSUER}/robots.txt`);
+  assertEquals([robots.status, robots.headers.get("content-type"), await robots.text()], [200, "text/plain; charset=utf-8", "User-agent: *\nDisallow: /\n"]);
+  const q = new URLSearchParams({ client_id: A, redirect_uri: `${A}/auth/oidc/google/callback`, response_type: "code", scope: "openid", state: "s", nonce: "n", provider: "google", code_challenge: "c", code_challenge_method: "S256" });
+  for (const path of [`/authorize?${q}`, "/authorize", "/authorize/continue?leg=x", "/robots.txt", "/jwks", "/health", "/nowhere"]) {
+    const res = await call(`${ISSUER}${path}`);
+    assertEquals(res.headers.get("x-robots-tag"), "noindex, nofollow", `${path} answered ${res.status}`);
+    await res.body?.cancel();
+  }
+}]);
+
 cases.push(["discovery and keys describe a pairwise ES256 provider", async () => {
   const d = await (await call(`${ISSUER}/.well-known/openid-configuration`)).json();
   assertEquals([d.issuer, d.subject_types_supported, d.id_token_signing_alg_values_supported, d.token_endpoint_auth_methods_supported],

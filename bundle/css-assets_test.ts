@@ -24,8 +24,7 @@ Deno.test('bundled CSS retains its asset URLs under a Pages prefix', async () =>
     const result = await new Deno.Command(Deno.execPath(), { args: ['run', '-A', '--config', path.join(here, 'deno.json'), path.join(here, 'bundle.ts'), app, '--omnishell', path.join(repo, 'plugins/omnishell'), '--mecha', path.join(repo, 'libraries/mecha'), '--base', '/truco'], stdout: 'inherit', stderr: 'inherit' }).output()
     assert.equal(result.success, true)
     const html = await Deno.readTextFile(path.join(app, 'dist/browser/index.html'))
-    const encoded = /<script type="application\/octet-stream" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1]
-    const payload = JSON.parse(atob(encoded))
+    const payload = JSON.parse(/<script type="application\/json" id="pronto-payload">([^<]*)<\/script>/.exec(html)![1])
     const css = payload.files['shell/screens/home.css']
     assert.match(css, /url\("\/truco\/shell\/assets\/a\.png"\)/)
     assert.match(css, /url\("\/truco\/shell\/assets\/b\.png"\)/)
