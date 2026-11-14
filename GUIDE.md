@@ -40,6 +40,7 @@ An app is one directory. What you author:
 | `program.cue` and the `.cue` files of its package | the program: entities, pipelines, screens, flows, tests, decisions (split into sibling files like `screens.cue` or `seed.cue` when large) |
 | `shell/screens/<name>.html` + `.css`, or `markup:` in CUE | a screen: HTML at `files.html`, or a `markup` string for a component-bearing screen, which the writer emits there |
 | `shell/handlers/*.js`, `shell/validations/*.js` | Jessie modules, one arrow function each |
+| `effects/<name>.js` | an external effect's handler, which may import the program's own modules by relative path; derive bundles it into `services/airlock/effects/<name>.js`, the one module the airlock loads |
 | `pipelines/*.blobl`, `pipelines/*.browser.js` | a pipeline's transform and its browser twin |
 | `messages/<tag>.json` | one message catalogue per declared locale |
 | `services/database/sql/*.sql` | SQL beyond the derived DDL |

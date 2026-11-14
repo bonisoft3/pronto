@@ -176,8 +176,21 @@ call.
                                                            └   UPDATE status = outcome.target
 ```
 
-- **The handler** is one module, `effects/<name>.js`, exporting `issue` and, where it
-  reconciles, `reconcile`. It runs in compute's realm (`services/compute/realm.ts`, which
+- **The handler** is authored at `effects/<name>.js`, exporting `issue` and, where it
+  reconciles, `reconcile`. It may import other modules of the program by relative path
+  (a call wrapper, generated constants, a key derivation shared by several handlers),
+  statically and by name; a package, `node:` or URL specifier, a dynamic import, a default
+  or `export *`, and a cycle are refused at generate, naming the module and the import.
+  Derive bundles each handler with what it imports (`effect-bundle.ts`, over the module
+  walk an engine's link uses) into `services/airlock/effects/<name>.js`, one module
+  importing nothing, beside the manifest whose `handler` names it; that bundle is what
+  the cluster copies and the airlock admits. The authored modules are source rows of the
+  derived artifacts, the bundle a derived one, its bytes fixed by its sources (modules in
+  import order, nothing of the time or place). Each imported module runs once, before
+  its importers, its exports read by value, so a module that reassigns an export is
+  refused. Lint reads the bundle, so a helper reaching `Date` or `Math.random` is the
+  handler reaching it, and the airlock's cage refuses it at run time as it would inline.
+  The bundle runs in compute's realm (`services/compute/realm.ts`, which
   compute's own cage shares): SES, no clock, no entropy, nothing of the host, and the
   realm's deterministic `Crypto`. Its one capability is an argument, `sink`, whose `fetch` the host
   performs as a call of the effect's Dapr binding (below), stamped with the idempotency
@@ -596,6 +609,15 @@ S1-S2 and W2 are steps of the first, W1 of the second.
 - **A stable replica name per process, its previous pool unlocked at start.** It needs a
   name no scale-to-zero tier gives, nothing enforces that two live processes never share
   one, and it unlocks only when the same name starts again.
+- **Linking a handler's modules in the airlock**, as the terminal links an engine's
+  precompiled records in a Compartment. The airlock, the edge's dispatcher and lint would
+  each load a graph rather than one file, mecha's admission would change with it, and the
+  artifact a release copies and hashes would be several. Bundled at generate, every one of
+  them reads the module it read before.
+- **A general bundler** (esbuild, rollup) for the bundle. A second toolchain to pin, built
+  for what a handler is refused (packages, dynamic imports, default and star exports); the
+  rewrite needs only the static, named imports the walk already resolves, and Endo's
+  parser checks its output.
 
 ## Open
 

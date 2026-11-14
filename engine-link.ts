@@ -40,8 +40,29 @@ const key = (path: string) => `./${path}`;
  * the link, naming itself. Cycles are what ES modules make of them.
  */
 export async function linkEngine(appDir: string, src: string): Promise<EngineGraph> {
+  const { entry, modules } = await linkModules(appDir, src, "an engine", (path, text) => {
+    const references = jessieFacts(text, "engine").references;
+    if (references.length > 0) {
+      const name = references[0];
+      throw new LinkError(`${path} reaches ${name} (${DENIED.find((d) => d.name === name)?.reason ?? "an engine is endowed with nothing"})`);
+    }
+  });
+  return { entry, modules };
+}
+
+/** A graph as linkModules walks it: each module's record and its text. */
+export type ModuleGraph = EngineGraph & { sources: Record<string, string> };
+
+/**
+ * The graph `src` reaches by static relative imports, `scan` handed each
+ * module's text before it is compiled; `who` names the graph's owner in a
+ * refusal. Shared by an engine's link and an effect handler's bundle
+ * (effect-bundle.ts), so both refuse the same specifiers the same way.
+ */
+export async function linkModules(appDir: string, src: string, who: string, scan: (path: string, text: string) => void = () => {}): Promise<ModuleGraph> {
   const { ModuleSource } = await import(MODULE_SOURCE);
   const modules: Record<string, ModuleRecord> = {};
+  const sources: Record<string, string> = {};
   const pending = [src];
   while (pending.length > 0) {
     const path = pending.pop()!;
@@ -53,29 +74,26 @@ export async function linkEngine(appDir: string, src: string): Promise<EngineGra
       if (e instanceof Deno.errors.NotFound) throw new LinkError(`${path} is not a file of the app`);
       throw e;
     }
-    const references = jessieFacts(text, "engine").references;
-    if (references.length > 0) {
-      const name = references[0];
-      throw new LinkError(`${path} reaches ${name} (${DENIED.find((d) => d.name === name)?.reason ?? "an engine is endowed with nothing"})`);
-    }
+    scan(path, text);
     let record: ModuleRecord;
     try {
       record = JSON.parse(JSON.stringify(new ModuleSource(text, path)));
     } catch (e) {
       throw new LinkError(`${path}: ${(e as Error).message}`);
     }
-    if (record.__needsImport__) throw new LinkError(`${path} imports dynamically: an engine's modules are linked before it runs`);
-    if (record.__needsImportMeta__) throw new LinkError(`${path} reads import.meta: an engine knows nothing of where it is served`);
+    if (record.__needsImport__) throw new LinkError(`${path} imports dynamically: ${who}'s modules are linked before it runs`);
+    if (record.__needsImportMeta__) throw new LinkError(`${path} reads import.meta: ${who} knows nothing of where it is served`);
     modules[key(path)] = record;
-    for (const specifier of record.imports) pending.push(resolveSpecifier(path, specifier));
+    sources[key(path)] = text;
+    for (const specifier of record.imports) pending.push(resolveSpecifier(path, specifier, who));
   }
-  return { entry: key(src), modules };
+  return { entry: key(src), modules, sources };
 }
 
 /** The app-relative path `specifier` names from `referrer`, or a LinkError. */
-export function resolveSpecifier(referrer: string, specifier: string): string {
+export function resolveSpecifier(referrer: string, specifier: string, who = "an engine"): string {
   if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
-    throw new LinkError(`${referrer} imports "${specifier}": an engine imports its own modules by relative path, never a package or a URL`);
+    throw new LinkError(`${referrer} imports "${specifier}": ${who} imports its own modules by relative path, never a package or a URL`);
   }
   const path = posix.normalize(posix.join(posix.dirname(referrer), specifier));
   if (path.startsWith("..") || posix.relative(".", path).startsWith("..")) {

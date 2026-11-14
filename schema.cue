@@ -1765,7 +1765,9 @@ import (
 			}}
 		}
 		// Each also a Dapr output binding of the airlock's, and a handler the
-		// program ships at effects/<name>.js (libraries/mecha/services/airlock).
+		// program writes at effects/<name>.js, which derive bundles with the
+		// modules it imports into services/airlock/effects/<name>.js, the one
+		// module the airlock loads (libraries/mecha/services/airlock).
 		effects?: [Name=string]: #ExternalEffect & {name: Name}
 		// An Airlock-facing endpoint of a declared container hatch.
 		// A bridge runs as its simulator in the local stack and as its container

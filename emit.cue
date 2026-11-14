@@ -2822,10 +2822,12 @@ _pgrollDir: "services/database/pgroll"
 			}]
 			schedules: [for _, sc in D.code.state.schedules {sc.name}]
 			(#MachineTimerState & {code: D.code}).out
-			// The emitted manifest, endpoints and handlers sit where the
-			// cluster looks for them by default.
+			// The emitted manifest and endpoints sit where the cluster looks for
+			// them by default; a handler is its bundle, which derive writes from
+			// effects/<name>.js (effect-bundle.ts).
 			effects: [if D.code.state.effects != _|_ for n, x in D.code.state.effects {
-				name: n
+				name:    n
+				handler: "services/airlock/effects/\(n).js"
 				// The compose stack is the docker target's.
 				(#SinkAt & {sink: x.sink, target: "docker"}).out
 				if x.sink.targets != _|_ if x.sink.targets.docker != _|_ if x.sink.targets.docker.bridge != _|_ {simulated: true}
