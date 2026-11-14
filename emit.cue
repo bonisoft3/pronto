@@ -5059,7 +5059,11 @@ _pgrollDir: "services/database/pgroll"
 				"""
 			}], "")
 			_doorAnchored: true & strings.Contains(_caddyfileAsset, _doorAnchor)
-			text: resilience.caddySnippets + strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1)
+			// The sites the door reads (sites-on): one variable per front, or SITES.
+			_sitesAnchor:   "    {$SITES}\n"
+			_sitesAnchored: true & strings.Contains(_caddyfileAsset, _sitesAnchor)
+			_sites: [if E.code.surface.fronts != _|_ {strings.Join([for _, f in E.code.surface.fronts {"{$\(f.sites)}"}], "\n    ")}, "{$SITES}"][0]
+			text: resilience.caddySnippets + strings.Replace(strings.Replace(strings.Replace(_split[0] + _served + _split[1], "(app) {\n", "(app) {\n" + _security, 1), _doorAnchor, _doors + _doorAnchor, 1), _sitesAnchor, "    \(_sites)\n", 1)
 		}
 		// The crawler files and the documents are caddy templates. `$o` is the
 		// deployment's origin, which the door holds — see the Caddyfile for why

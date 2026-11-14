@@ -2183,6 +2183,11 @@ import (
 		// global.
 		engines: [Name=string]: {src: #Jessie, note: string, role: *"engine" | "sound"}
 		design: #Design
+		// The fronts the door's several-sites mode serves (mecha's docs/proxy.md,
+		// "Several sites"), each by the variable the deployment lists its sites
+		// in, so a deployment names them by front. Without fronts the door reads
+		// SITES.
+		fronts?: [Name=string]: close({sites!: =~"^[A-Z][A-Z0-9_]*$"})
 		flows: [Name=string]: #Flow & {name: Name}
 		// What a terminal module may use past the language, keyed by its
 		// app-relative path: the one spelling every loader and lint read, and
