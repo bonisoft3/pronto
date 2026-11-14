@@ -620,8 +620,8 @@ Deno.test("a sink's target entry wins, the rest take its default, and a target l
 });
 
 Deno.test("on k8s alone a sink may be an in-cluster service, which a Kubernetes release reads from cluster.json", async () => {
-  const k8sSinks = async (sink: string) => {
-    const files = await emitFiles(bridged(MAIL_BRIDGE, sink).replace("targets: []", 'targets: ["k8s"]'));
+  const k8sSinks = async (sink: string, bridges = "") => {
+    const files = await emitFiles(bridged(bridges, sink).replace("targets: []", 'targets: ["k8s"]'));
     return JSON.parse(JSON.stringify(files[".pronto/cluster.json"])).data.k8sSinks;
   };
   assertEquals(await k8sSinks(`sink: {origin: "https://a.example", targets: k8s: service: {name: "ledger", namespace: "payments", path: "/v1"}, idempotent: true}`), {
@@ -631,16 +631,16 @@ Deno.test("on k8s alone a sink may be an in-cluster service, which a Kubernetes 
     charge: { service: { name: "ledger", namespace: "payments", port: 8081, targetPort: 9000, podSelector: { app: "ledger" } } },
   });
   // A simulator on the stack every app launches on, the cluster's own service on k8s.
-  assertEquals(await k8sSinks(`sink: {bridge: "mail", targets: k8s: service: {name: "ledger", namespace: "payments"}, idempotent: false}\n      reentry: "repeat"`), {
+  assertEquals(await k8sSinks(`sink: {bridge: "mail", targets: k8s: service: {name: "ledger", namespace: "payments"}, idempotent: false}\n      reentry: "repeat"`, MAIL_BRIDGE), {
     charge: { service: { name: "ledger", namespace: "payments", port: 80, targetPort: 80 } },
   });
   // The default where k8s names none, as on every target.
   assertEquals(await k8sSinks(`sink: {origin: "https://a.example", idempotent: true}`), { charge: { origin: "https://a.example" } });
   for (const t of ["docker", "cloudflare", "gcp", "aws"]) {
-    assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: ${t}: service: {name: "ledger", namespace: "payments"}, idempotent: true}`)), "service");
+    assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: ${t}: service: {name: "ledger", namespace: "payments"}, idempotent: true}`)), "service");
   }
-  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: k8s: {origin: "https://b.example", service: {name: "ledger", namespace: "payments"}}, idempotent: true}`)), "names one of origin, bridge and service for target k8s");
-  assertStringIncludes(await refusal(bridged(MAIL_BRIDGE, `sink: {origin: "https://a.example", targets: k8s: service: {name: "Ledger.x", namespace: "payments"}, idempotent: true}`)), "name");
+  assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: k8s: {origin: "https://b.example", service: {name: "ledger", namespace: "payments"}}, idempotent: true}`)), "names one of origin, bridge and service for target k8s");
+  assertStringIncludes(await refusal(bridged("", `sink: {origin: "https://a.example", targets: k8s: service: {name: "Ledger.x", namespace: "payments"}, idempotent: true}`)), "name");
 });
 
 Deno.test("a bridged effect states what a repeat costs: neither idempotent nor reconciled", async () => {
