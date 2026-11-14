@@ -35,8 +35,8 @@ import (
 #StepDigits: string & =~"^(0[1-9][0-9]|[1-7][0-9]{2})$"
 
 // The framework's steps an app's program runs, by name: the defaults unless
-// `state.steps` places them. The effect ledger precedes the airlock's tables,
-// as mecha's cluster.cue orders them.
+// `state.steps` places them. The effect ledger precedes the airlock's tables
+// and those the job key's function, as mecha's cluster.cue orders them.
 #steps: {
 	let S = self
 	code:    _
@@ -46,12 +46,15 @@ import (
 		actors:   [if _placed.actors != _|_ {_placed.actors}, "016"][0]
 		graphile: [if _placed.graphile != _|_ {_placed.graphile}, "011"][0]
 		airlock:  [if _placed.airlock != _|_ {_placed.airlock}, "012"][0]
+		jobKey:   [if _placed.jobKey != _|_ {_placed.jobKey}, "013"][0]
 	}
-	_ledgerFirst: true & (_digits.graphile < _digits.airlock)
-	machines:     "\(_digits.machines)_machines.sql"
-	actors:       "\(_digits.actors)_mecha_actors.sql"
-	graphile:     "\(_digits.graphile)_graphile_worker.sql"
-	airlock:      "\(_digits.airlock)_airlock.sql"
+	_ledgerFirst:  true & (_digits.graphile < _digits.airlock)
+	_airlockFirst: true & (_digits.airlock < _digits.jobKey)
+	machines:      "\(_digits.machines)_machines.sql"
+	actors:        "\(_digits.actors)_mecha_actors.sql"
+	graphile:      "\(_digits.graphile)_graphile_worker.sql"
+	airlock:       "\(_digits.airlock)_airlock.sql"
+	jobKey:        "\(_digits.jobKey)_airlock_job_key.sql"
 }
 #SafeEndowment: "Intl" | "TextEncoder" | "TextDecoder" | "URL" | "URLSearchParams" | "Statechart"
 
@@ -1762,6 +1765,7 @@ import (
 			actors?:   #StepDigits
 			graphile?: #StepDigits
 			airlock?:  #StepDigits
+			jobKey?:   #StepDigits
 			note!:     string & !=""
 		}
 		cortex?: [string]: #CortexMachine

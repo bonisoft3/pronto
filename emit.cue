@@ -1115,8 +1115,9 @@ _sqlType: {
 // queue on the one row; a claim that skips the row while the ticker is ticking
 // it is woken by that tick. A key already claimed was performed, so entering
 // again under it is an error, never a second performance. The job's key is the
-// ledger key's SHA-256 (mecha's reentry.ts jobKeySql): Graphile caps a key at
-// 512 bytes, and a key field may carry a deck's every card.
+// ledger key's digest, airlock.job_key (mecha's services/airlock/job_key.sql):
+// Graphile caps a key at 512 bytes, and a key field may carry a deck's every
+// card.
 // What Graphile may retry beyond an effect's attempts: the ledger's `entered`
 // decides when an effect runs out (mecha's airlock.ts), and a run that fails
 // before it counts, or a crash Graphile counted, must not exhaust the queue
@@ -1136,7 +1137,7 @@ _sqlType: {
 		        IF NOT FOUND THEN
 		          RAISE EXCEPTION 'external effect % was already performed: entering \(I.state) again needs a new key', \(_key) USING ERRCODE = 'unique_violation';
 		        END IF;
-		        PERFORM graphile_worker.add_job('external_effect', json_build_object('key', \(_key)), job_key => encode(sha256(convert_to(\(_key), 'UTF8')), 'hex'), max_attempts => \(I.effect.attempts+#QueueHeadroom));
+		        PERFORM graphile_worker.add_job('external_effect', json_build_object('key', \(_key)), job_key => airlock.job_key(\(_key)), max_attempts => \(I.effect.attempts+#QueueHeadroom));
 		        UPDATE "public"."schedule" SET "due_at" = date_trunc('milliseconds', clock_timestamp()), "last_tick_at" = NULL
 		         WHERE "name" = 'airlock' AND "last_tick_at" IS NOT NULL
 		           AND "name" IN (SELECT "name" FROM "public"."schedule" WHERE "name" = 'airlock' FOR UPDATE SKIP LOCKED);
@@ -3052,7 +3053,7 @@ _pgrollDir: "services/database/pgroll"
 			bridges: [if D.code.state.bridges != _|_ for _, b in D.code.state.bridges {b}]
 			if D.code.state.steps != _|_ {
 				let placed = #steps & {code: D.code}
-				steps: {graphile: placed.graphile, airlock: placed.airlock}
+				steps: {graphile: placed.graphile, airlock: placed.airlock, jobKey: placed.jobKey}
 			}
 			computations: [for _, c in D.code.state.computations {
 				name: "\(D.code.meta.name)-\(c.name)"
@@ -4152,7 +4153,7 @@ _pgrollDir: "services/database/pgroll"
 
 				// The effect steps a page or edge release places among the
 				// migrations, where the program places them, and why it may.
-				if E.code.state.steps != _|_ {steps: {graphile: E._steps.graphile, airlock: E._steps.airlock, note: E.code.state.steps.note}}
+				if E.code.state.steps != _|_ {steps: {graphile: E._steps.graphile, airlock: E._steps.airlock, jobKey: E._steps.jobKey, note: E.code.state.steps.note}}
 
 				// The bridges a release lowers past the cluster: each container's
 				// port, release targets and the cluster target building its image,

@@ -41,6 +41,7 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
       CREATE TABLE payment (id uuid PRIMARY KEY, status text NOT NULL, total numeric(12,2) NOT NULL, failure text);
       ${await Deno.readTextFile(new URL("../../libraries/mecha/services/ticker/schedule.sql", import.meta.url))}
       ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/airlock.sql", import.meta.url))}
+      ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/job_key.sql", import.meta.url))}
       ${files["services/database/migrations/010_machines.sql"].text}
       INSERT INTO payment VALUES ('00000000-0000-0000-0000-000000000001', 'pending', 12.50, NULL),
                                  ('00000000-0000-0000-0000-000000000002', 'pending', 7.00, NULL);`);
@@ -59,11 +60,11 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
       assertEquals((await psql(`SELECT last_tick_at IS NOT NULL FROM schedule WHERE name = 'airlock';`)).out, "t");
       const r = await psql(`UPDATE payment SET status = 'charging' WHERE id = '${one}';
         SELECT row::text || ' ' || input::text FROM airlock.external_effect_ledger WHERE key = 'charge:${one}';
-        SELECT identifier || ' ' || payload::text || ' ' || job_key || ' ' || max_attempts FROM graphile_worker.added;
+        SELECT identifier || ' ' || payload::text || ' ' || (job_key = airlock.job_key(payload->>'key')) || ' ' || max_attempts FROM graphile_worker.added;
         SELECT cron IS NULL AND due_at IS NOT NULL AND last_tick_at IS NULL FROM schedule WHERE name = 'airlock';`);
       assertEquals(r.out.split("\n"), [
         `{"id": "${one}"} {"amount": 12.50, "currency": "BRL"}`,
-        `external_effect {"key" : "charge:${one}"} charge:${one} 30`,
+        `external_effect {"key" : "charge:${one}"} true 30`,
         "t",
       ]);
     });
@@ -152,7 +153,7 @@ Deno.test({ name: "an invoking state's interpreter claims, enqueues and admits o
       const five = "00000000-0000-0000-0000-000000000005";
       const claimed = await psql(`INSERT INTO payment VALUES ('${five}', 'pending', 31.00, NULL);
         UPDATE payment SET status = 'charging' WHERE id = '${five}';
-        SELECT identifier FROM graphile_worker.added WHERE job_key = 'charge:${five}';`);
+        SELECT identifier FROM graphile_worker.added WHERE job_key = airlock.job_key('charge:${five}');`);
       if (!claimed.ok) throw new Error(claimed.err);
       assertEquals(claimed.out, "migrated_external_effect", "startup preserves the app migration's trigger behavior");
     });

@@ -304,6 +304,7 @@ Deno.test({ name: "mecha commands serialize, replay and preserve private project
         CREATE TABLE payment (id uuid PRIMARY KEY, status text NOT NULL, total numeric(12,2) NOT NULL, failure text);
         ${await Deno.readTextFile(new URL("../../libraries/mecha/services/ticker/schedule.sql", import.meta.url))}
         ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/airlock.sql", import.meta.url))}
+        ${await Deno.readTextFile(new URL("../../libraries/mecha/services/airlock/job_key.sql", import.meta.url))}
         ${files["services/database/migrations/010_machines.sql"].text}
         ${surface("effect_turn")}
         ${composed.sql}

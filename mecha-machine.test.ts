@@ -459,8 +459,8 @@ Deno.test("entering an invoking state claims the ledger and enqueues in the tran
   assertStringIncludes(sql, `VALUES ('charge:' || NEW."id"::text, 'charge', jsonb_build_object('id', NEW."id"), jsonb_build_object('amount', NEW."total", 'currency', 'BRL'))`);
   // A second claim of a performed key is refused, not skipped.
   assertStringIncludes(sql, `IF NOT FOUND THEN\n          RAISE EXCEPTION 'external effect % was already performed: entering charging again needs a new key', 'charge:' || NEW."id"::text USING ERRCODE = 'unique_violation';`);
-  // The job key as mecha's reentry.ts jobKeySql spells it, which pronto's own build cannot import.
-  assertStringIncludes(sql, `PERFORM graphile_worker.add_job('external_effect', json_build_object('key', 'charge:' || NEW."id"::text), job_key => encode(sha256(convert_to('charge:' || NEW."id"::text, 'UTF8')), 'hex'), max_attempts => 30);`);
+  // The job key is the ledger key's digest, which mecha's job_key.sql defines once for the guards and the edge's leases.
+  assertStringIncludes(sql, `PERFORM graphile_worker.add_job('external_effect', json_build_object('key', 'charge:' || NEW."id"::text), job_key => airlock.job_key('charge:' || NEW."id"::text), max_attempts => 30);`);
   // And the ticker's one-shot row re-armed, so a cluster asleep is woken for the job.
   // The re-arm writes only a row not yet armed and waits on no lock, so
   // claims never queue on the one row (emit.cue).

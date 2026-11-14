@@ -255,7 +255,7 @@ An edge release that keeps its data directory, or starts one from an archive
 ([release targets](release-targets.md#cloudflare)), carries it forward with
 every script of the release its ledger lacks: the pgroll set, and the files
 too — a framework step the program places (`060_graphile_worker.sql`,
-`061_airlock.sql`), the reducer actors (`0NN_mecha_actors.sql`), the database
+`061_airlock.sql`, `064_airlock_job_key.sql`), the reducer actors (`0NN_mecha_actors.sql`), the database
 functions, a raw migration added since. The ledger (pglite-workerd's
 [`scripts.ts`](https://github.com/bonisoft3/mecha/blob/v0.22.0/packages/pglite-workerd/scripts.ts))
 is established when a directory is built, and for an archive when it is
