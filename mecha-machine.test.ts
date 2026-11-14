@@ -627,8 +627,12 @@ Deno.test("on k8s alone a sink may be an in-cluster service, which a Kubernetes 
   assertEquals(await k8sSinks(`sink: {origin: "https://a.example", targets: k8s: service: {name: "ledger", namespace: "payments", path: "/v1"}, idempotent: true}`), {
     charge: { service: { name: "ledger", namespace: "payments", port: 80, targetPort: 80, path: "/v1" } },
   });
-  assertEquals(await k8sSinks(`sink: {origin: "https://a.example", targets: k8s: service: {name: "ledger", namespace: "payments", port: 8081, targetPort: 9000}, idempotent: true}`), {
-    charge: { service: { name: "ledger", namespace: "payments", port: 8081, targetPort: 9000 } },
+  assertEquals(await k8sSinks(`sink: {origin: "https://a.example", targets: k8s: service: {name: "ledger", namespace: "payments", port: 8081, targetPort: 9000, podSelector: app: "ledger"}, idempotent: true}`), {
+    charge: { service: { name: "ledger", namespace: "payments", port: 8081, targetPort: 9000, podSelector: { app: "ledger" } } },
+  });
+  // A simulator on the stack every app launches on, the cluster's own service on k8s.
+  assertEquals(await k8sSinks(`sink: {bridge: "mail", targets: k8s: service: {name: "ledger", namespace: "payments"}, idempotent: false}\n      reentry: "repeat"`), {
+    charge: { service: { name: "ledger", namespace: "payments", port: 80, targetPort: 80 } },
   });
   // The default where k8s names none, as on every target.
   assertEquals(await k8sSinks(`sink: {origin: "https://a.example", idempotent: true}`), { charge: { origin: "https://a.example" } });

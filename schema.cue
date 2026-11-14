@@ -1187,13 +1187,15 @@ import (
 // calls at http://<name>.<namespace>.svc.cluster.local[:port][path], plain
 // HTTP whose encryption is the cluster's service mesh's. Its egress is opened
 // to `namespace` on `targetPort`, the pod's port, since a NetworkPolicy matches
-// the connection after the Service's address is translated to a pod's.
+// the connection after the Service's address is translated to a pod's;
+// `podSelector`, the pods' labels, narrows it to them.
 #InClusterSink: {
 	name:       =~"^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
 	namespace:  =~"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
 	port:       *80 | int & >=1 & <=65535
 	targetPort: *port | int & >=1 & <=65535
 	path?:      =~"^(/[A-Za-z0-9._~-]+)+$"
+	podSelector?: [string]: string
 }
 
 // A provider's word that a row may have changed: `POST /signal/<name>[/<id>]`.

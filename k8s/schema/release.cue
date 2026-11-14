@@ -243,19 +243,37 @@ import (
 	// anything rolls (check-airlock-secrets).
 	airlock: secrets: [=~"^[A-Z][A-Z0-9_]*$"]: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	// Each effect's sink on this target, by effect (the app's .pronto/cluster.json k8sSinks; the
-	// release fills it): an https origin, or a Service of this cluster over plain HTTP. They become
-	// the airlock's daprd's HTTPEndpoints and its only egress past DNS (runtime.cue).
+	// release fills it): an https origin (mecha's #Origin), or a Service of this cluster over plain
+	// HTTP (pronto's #InClusterSink). They become the airlock's daprd's HTTPEndpoints and its only
+	// egress past DNS (runtime.cue).
 	airlock: sinks: [=~"^[a-z][a-z0-9-]*$"]: {
-		origin?: =~"^https://"
+		origin?: =~"^https://([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]([a-z0-9-]*[a-z0-9])?(:[0-9]{1,5})?$"
 		service?: {
 			name:       =~"^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
 			namespace:  =~"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
 			port:       int & >=1 & <=65535
 			targetPort: int & >=1 & <=65535
-			path?:      =~"^/"
+			path?:      =~"^(/[A-Za-z0-9._~-]+)+$"
+			podSelector?: [string]: string
 		}
 		_one: (len([if origin != _|_ {1}]) + len([if service != _|_ {1}])) & 1
 	}
+	// An in-cluster sink is called over plain HTTP: the credential header and the body cross the
+	// network in cleartext unless a service mesh's sidecars encrypt them (networkPolicy.
+	// meshControlPlane). Without one, the release states it knows (`plaintext: true`).
+	airlock: plaintext: *false | bool
+	_inCluster: [for n, s in airlock.sinks if s.service != _|_ {n}]
+	_encrypted: [
+		if len(_inCluster) == 0 || networkPolicy.meshControlPlane != _|_ || airlock.plaintext {true},
+		"effects \(strings.Join(_inCluster, ", ")) reach in-cluster services over plain HTTP, their credential and body in cleartext: set networkPolicy.meshControlPlane where a service mesh's sidecars encrypt them, or airlock.plaintext: true",
+	][0] & true
+	// The egress to an in-cluster sink admits its whole namespace (or its podSelector there), which
+	// must not be the app's own nor kube-system's.
+	_insiders: [for n, s in airlock.sinks if s.service != _|_ if s.service.namespace == ns || s.service.namespace == "kube-system" {"\(n) (\(s.service.namespace))"}]
+	_outside: [
+		if len(_insiders) == 0 {true},
+		"effects \(strings.Join(_insiders, ", ")) reach a service in the app's own namespace or kube-system, which the airlock's daprd may not reach whole",
+	][0] & true
 	_unsecured: [for _, r in runtime for k in r.secrets if airlock.secrets[k] == _|_ {k}]
 	_secured: [
 		if len(_unsecured) == 0 {true},
@@ -445,10 +463,11 @@ import (
 		internet: *"open" | "airlock"
 		// A service mesh whose sidecars run in the airlock's two pods (Istio's, say) needs its control
 		// plane, which the airlock's walls otherwise shut: each pod then also reaches `ports` in
-		// `namespace`. Absent, they reach no mesh.
+		// `namespace`. Absent, they reach no mesh. Sidecar mode: an ambient mesh's node proxies would
+		// need other rules.
 		meshControlPlane?: {
 			namespace: =~"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" | *"istio-system"
-			ports: [...int & >=1 & <=65535] | *[15012]
+			ports: [int & >=1 & <=65535, ...int & >=1 & <=65535] | *[15012]
 		}
 	}
 

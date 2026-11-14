@@ -3,9 +3,12 @@ package schema
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/yaml"
+	"list"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 #Runtime: {
@@ -35,18 +38,32 @@ import (
 			"\(p)": p
 		}
 	}
-	// The in-cluster sinks' pod ports, by namespace.
-	let inCluster = {for _, s in sinks if s.service != _|_ {(s.service.namespace): "\(s.service.targetPort)": s.service.targetPort}}
+	// The in-cluster sinks' pod ports, by namespace and the pods' labels there.
+	let inCluster = {for _, s in sinks if s.service != _|_ {
+		let pods = *s.service.podSelector | {}
+		(s.service.namespace + json.Marshal(pods)): {
+			namespace: s.service.namespace
+			podSelector: pods
+			ports: "\(s.service.targetPort)": s.service.targetPort
+		}
+	}}
+	// Where each sink is, and its HTTPEndpoint's base URL there.
+	let at = {for n, s in sinks {
+		(n): [
+			if s.origin != _|_ {{origin: s.origin, base: s.origin}},
+			if s.service != _|_ {
+				let o = "http://\(s.service.name).\(s.service.namespace).svc.cluster.local\([if s.service.port != 80 {":\(s.service.port)"}, ""][0])"
+				{origin: o, base: o + [if s.service.path != _|_ {s.service.path}, ""][0]}
+			},
+		][0]
+	}}
 	// Each effect's HTTPEndpoint on this target, mounted over the one the image bakes from compose's.
-	let endpoints = {for n, s in sinks {
+	let endpoints = {for n, _ in sinks {
 		"\(n).yaml": yaml.Marshal({
 			apiVersion: "dapr.io/v1alpha1"
 			kind:       "HTTPEndpoint"
 			metadata: name: n
-			spec: baseUrl: [
-				if s.origin != _|_ {s.origin},
-				if s.service != _|_ {"http://\(s.service.name).\(s.service.namespace).svc.cluster.local\([if s.service.port != 80 {":\(s.service.port)"}, ""][0])\([if s.service.path != _|_ {s.service.path}, ""][0])"},
-			][0]
+			spec: baseUrl: at[n].base
 		})
 	}}
 	// A service mesh's control plane, which its sidecars in the airlock's pods reach.
@@ -82,9 +99,12 @@ import (
 				},
 				// Each in-cluster sink's namespace, on its pods' ports: a NetworkPolicy matches the
 				// connection after the Service's address is translated to a pod's.
-				for ns, podPorts in inCluster {
-					to: [{namespaceSelector: matchLabels: {"kubernetes.io/metadata.name": ns}}]
-					ports: [for _, p in podPorts {port: p, protocol: "TCP"}]
+				for _, c in inCluster {
+					to: [{
+						namespaceSelector: matchLabels: {"kubernetes.io/metadata.name": c.namespace}
+						if len(c.podSelector) > 0 {podSelector: matchLabels: c.podSelector}
+					}]
+					ports: [for _, p in c.ports {port: p, protocol: "TCP"}]
 				},
 				// The blob plane's binding, where the app has one.
 				if mesh.BLOBS_S3_URL != _|_ {
@@ -156,6 +176,9 @@ import (
 								for envName in runtime.databaseEnvironment {name: envName, value: "postgresql://postgres:$(PGPASSWORD)@database:5432/\(app.id)?sslmode=disable"},
 								if runtime.serviceToken {{name: "SERVICE_JWT", valueFrom: secretKeyRef: {name: "\(app.id)-service-jwt", key: "SERVICE_JWT"}}},
 								for k, v in runtime.env if k != "ORIGIN" {name: k, value: v},
+								// What this daprd may reach, for an operator (daprd reads none of it): this
+								// target's sinks, not compose's.
+								if svc == "airlock-mesh" {{name: "AIRLOCK_ORIGINS", value: strings.Join(list.SortStrings([for o, _ in {for _, a in at {(a.origin): true}} {o}]), " ")}},
 								if runtime.env.ORIGIN != _|_ {{name: "ORIGIN", value: origin}},
 								for k in runtime.secrets {name: k, valueFrom: secretKeyRef: {name: app.airlock.secrets[k], key: k}},
 								if svc == "conduit" {{name: "CONDUIT_DB_TYPE", value: "postgres"}},

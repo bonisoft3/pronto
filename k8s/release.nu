@@ -1248,7 +1248,8 @@ export def compose-config [app_dir: string, --json, --services]: nothing -> any 
 }
 
 # Each effect's sink on this target, as generate wrote them (.pronto/cluster.json k8sSinks): an
-# origin, or an in-cluster Service. What the release cannot deploy fails it, as runtime-services does.
+# origin, or an in-cluster Service. What the release cannot deploy (a bridge's container, the AI
+# gateway) fails it.
 export def airlock-sinks [facts: record]: nothing -> record {
 	if ($facts.k8sSinks? == null) {
 		error make {msg: ".pronto/cluster.json names no k8sSinks: generate the app again before releasing its effects"}
@@ -1261,17 +1262,18 @@ export def airlock-sinks [facts: record]: nothing -> record {
 	$facts.k8sSinks
 }
 
-export def runtime-services [compose: record, --secrets: list<string> = []]: nothing -> record {
+# The compose project's runtime services, as this target deploys them. Compose is the docker
+# target's: what its airlock reaches past its daprd (a bridge's container, the AI gateway) runs
+# beside it there and in no pod here, where the effects' k8s sinks (airlock-sinks), which refuse
+# both, are what the daprd reaches.
+export def runtime-services [compose: record, --secrets: list<string> = [], --sinks: record = {}]: nothing -> record {
 	let supported = ["compute" "feldera" "redis" "conduit" "mesh-events" "transform" "ticker" "clock" "rclone-s3" "imgproxy" "airlock" "airlock-mesh"]
 	let services = ($compose.services | columns)
-	# What the airlock reaches past its daprd runs beside it in compose, and in no pod here.
-	if "tsbifrost" in $services {
-		error make {msg: "native release does not deploy the AI gateway (tsbifrost): an effect with `ai` or capabilities.ai has no release@k8s"}
+	if ("airlock" in $services) and ($sinks | is-empty) {
+		error make {msg: "native release deploys the airlock with its effects' k8s sinks (airlock-sinks): none were given"}
 	}
-	let mesh = ($compose.services."airlock-mesh"?.environment? | default {})
-	let bridges = ($mesh.AIRLOCK_BRIDGES? | default "" | split row " " | where {|b| $b != "" } | append ($mesh | columns | where {|k| $k =~ '^BRIDGE_.*_URL$' }) | uniq)
-	if ($bridges | is-not-empty) {
-		error make {msg: $"native release does not deploy container bridges: this app's effects reach ($bridges | str join ', ')"}
+	if ("tsbifrost" in $services) and ("airlock" not-in $services) {
+		error make {msg: "native release does not deploy the AI gateway (tsbifrost)"}
 	}
 	if ("airlock" in $services) != ("airlock-mesh" in $services) {
 		error make {msg: "native release deploys the airlock and its daprd (airlock-mesh) together: the compose project has one alone"}
@@ -1283,8 +1285,10 @@ export def runtime-services [compose: record, --secrets: list<string> = []]: not
 			error make {msg: "native release requires DUCKSTREAM_ENGINE=feldera for compute"}
 		}
 		let own_secrets = if $name == "airlock" { $secrets } else { [] }
+		# airlock-mesh's peers past its daprd are compose's: runtime.cue states this target's sinks.
+		let compose_peers = if $name == "airlock-mesh" { $vars | columns | where {|k| $k in [AIRLOCK_ORIGINS AIRLOCK_BRIDGES TSBIFROST_URL] or $k =~ '^BRIDGE_.*_URL$' } } else { [] }
 		$acc | insert $name {
-			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING ...$own_secrets)
+			env: ($vars | reject -o DATABASE_URL FELDERA_DATABASE_URL SERVICE_JWT PGRST_JWT_SECRET CONDUIT_DB_TYPE CONDUIT_DB_POSTGRES_CONNECTION_STRING ...$own_secrets ...$compose_peers)
 			databaseEnvironment: ([DATABASE_URL FELDERA_DATABASE_URL] | where {|key| $key in $vars })
 			serviceToken: ("SERVICE_JWT" in $vars)
 			jwtSecret: ("PGRST_JWT_SECRET" in $vars)
@@ -1313,7 +1317,9 @@ export def release-plan [runtime: record, services: list<string>, blob_svcs: lis
 # whose release names its services itself (App.services, App.blobs) and runs no other.
 export def release-runtime [app_dir: string, env_name: string]: nothing -> record {
 	if $env_name == "metal" or not ($app_dir | path join compose.yaml | path exists) { return {} }
-	runtime-services (compose-config $app_dir --json) --secrets (airlock-secrets (compose-raw $app_dir))
+	let compose = (compose-config $app_dir --json)
+	let sinks = if "airlock" in $compose.services { airlock-sinks (open ($app_dir | path join .pronto cluster.json)) } else { {} }
+	runtime-services $compose --secrets (airlock-secrets (compose-raw $app_dir)) --sinks $sinks
 }
 
 export def render-manifests [
@@ -1329,7 +1335,7 @@ export def render-manifests [
 	let facts = (open $facts_path)
 	if not $facts.server { error make { msg: $"($facts_path): this app has no server tier to release to Kubernetes" } }
 	let runtime = (release-runtime ($cue_path | path dirname) $env_name)
-	let airlock = if "airlock" in $runtime { {airlock: {sinks: (airlock-sinks $facts)}} } else { {} }
+	let airlock = if "airlock" in $runtime { {airlock: {sinks: $facts.k8sSinks}} } else { {} }
 	{App: ({database: {tokenRoles: $facts.tokenRoles, replays: ($facts.replays? | default [])}, runtime: $runtime, doors: ($facts.doors? | default [])} | merge $airlock)} | to json | save -f $roles_file
 	let inputs = [$cue_path $roles_file] | append (if ($data | is-not-empty) { [$data] } else { [] })
 	let res = (do { cue export --expression $expr --out text ...$inputs } | complete)
