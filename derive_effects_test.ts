@@ -160,6 +160,38 @@ Deno.test("a handler re-exporting a name it also imports bundles", async () => {
   });
 });
 
+// The bundle declared the handler's export names at its top level, in scope
+// of every module: a helper read the handler's TextEncoder for the global, and
+// an exported Object was in its dead zone when the prelude read the intrinsic.
+Deno.test("a handler's export names are no bindings of the modules or the prelude", async () => {
+  await app({
+    "effects/e.js": `import { eager, lazy } from "./x.js";\nexport const TextEncoder = "mine";\nexport const Object = "also mine";\nexport const issue = async () => ({ done: [eager, lazy(), TextEncoder, Object] });\n`,
+    "effects/x.js": `export const eager = typeof TextEncoder;\nexport const lazy = () => [typeof TextEncoder, typeof Object.freeze];\n`,
+  }, async (dir) => {
+    const mod = await run((await bundleEffect(dir, "effects/e.js")).text);
+    assertEquals(await mod.issue(), { done: ["function", ["function", "function"], "mine", "also mine"] });
+    assertEquals([mod.TextEncoder, mod.Object], ["mine", "also mine"]);
+  });
+});
+
+Deno.test("a handler may export default or a keyword by name, as a module may", async () => {
+  await app({
+    "effects/e.js": `const d = 1;\nconst k = 2;\nexport { d as default, k as if };\nexport const issue = async () => ({ done: d + k });\n`,
+  }, async (dir) => {
+    const mod = await run((await bundleEffect(dir, "effects/e.js")).text);
+    assertEquals([Object.keys(mod).sort(), mod.default, mod.if, await mod.issue()], [["default", "if", "issue"], 1, 2, { done: 3 }]);
+  });
+});
+
+Deno.test("an export let never assigned is read like a const", async () => {
+  await app({
+    "effects/e.js": `import { n } from "./x.js";\nexport const issue = async () => ({ done: n });\n`,
+    "effects/x.js": `export let n = 7;\n`,
+  }, async (dir) => {
+    assertEquals(await (await run((await bundleEffect(dir, "effects/e.js")).text)).issue(), { done: 7 });
+  });
+});
+
 Deno.test("a bundle's artifact rows: each module read once as a source, each bundle derived", () => {
   assertEquals(effectArtifacts(["computations/score.js", "effects/charge.js", "effects/lib/call.js"], ["refund", "charge"], new Set(["computations/score.js"])), [
     { path: "effects/charge.js", derived: false },
@@ -192,6 +224,9 @@ const refusals: [string, Record<string, string>, string][] = [
   ["a default export in a helper", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export const x = 1;\nexport default x;\n` }, "effects/x.js exports a default"],
   ["a namespace re-export", { "effects/e.js": `import { ns } from "./x.js";\nexport const issue = async () => ({ done: ns });\n`, "effects/x.js": `export * as ns from "./y.js";\n`, "effects/y.js": `export const z = 1;\n` }, "effects/x.js re-exports * as a namespace"],
   ["a top-level await", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export const x = await Promise.resolve(1);\n` }, "effects/x.js awaits at its top level"],
+  ["an escaped identifier", { "effects/e.js": `const \\u005f_pronto_module_0 = 1;\nexport const issue = async () => ({ done: \\u005f_pronto_module_0 });\n` }, "effects/e.js escapes an identifier with \\u"],
+  ["a string export name", { "effects/e.js": `const x = 1;\nexport { x as "a-b" };\nexport const issue = async () => ({ done: x });\n` }, "effects/e.js names an import or export by a string"],
+  ["a string import name", { "effects/e.js": `import { "a-b" as y } from "./x.js";\nexport const issue = async () => ({ done: y });\n`, "effects/x.js": `export const z = 1;\n` }, "effects/e.js names an import or export by a string"],
   ["a star re-export", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export * from "./y.js";\n`, "effects/y.js": `export const x = 1;\n` }, `effects/x.js re-exports * from "./y.js"`],
 ];
 for (const [name, files, message] of refusals) {

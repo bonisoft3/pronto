@@ -37,6 +37,7 @@ const EXPORT_DECLARATION = /(?<=^|[;}\n])(\s*)export\s+(?=(const|let|var|functio
 const EXPORT_DEFAULT = /(?<=^|[;}\n])\s*export\s+default\b/;
 const EXPORT_STAR_AS = /(?<=^|[;}\n])\s*export\s*\*\s*as\b/;
 const IDENT = /^[A-Za-z_$][\w$]*$/;
+const STRING_NAME = /(?<=^|[;}\n])\s*(import|export)\s*\{[^}]*["'`]/;
 
 type Edit = { start: number; end: number; text: string };
 
@@ -49,6 +50,9 @@ function quoted(source: string, at: number, match: string, quote: string): strin
 function refuse(path: string, source: string): void {
   if (RESERVED.test(source)) throw new LinkError(`${path} names __pronto_, which a handler's bundle reserves`);
   const padded = padAtoms(source);
+  // An escaped identifier would hide a reserved name from the check above.
+  if (/\\u/.test(padded)) throw new LinkError(`${path} escapes an identifier with \\u: a handler's modules spell their names plainly`);
+  if (STRING_NAME.test(padded)) throw new LinkError(`${path} names an import or export by a string: a handler's modules name them by identifier`);
   if (EXPORT_DEFAULT.test(padded)) throw new LinkError(`${path} exports a default: a handler's modules export by name`);
   if (EXPORT_STAR_AS.test(padded)) throw new LinkError(`${path} re-exports * as a namespace: import it as one and export that by name`);
 }
@@ -100,7 +104,13 @@ export async function bundleEffect(appDir: string, src: string): Promise<{ text:
     return `// ${path(k)}\nconst ${scope(index.get(k)!)} = ${wrapped};\n`;
   });
   const exports = graph.modules[graph.entry].exports;
-  const text = `${PRELUDE}\n${parts.join("\n")}\nexport const { ${exports.join(", ")} } = ${scope(index.get(graph.entry)!)};\n`;
+  // Exported through reserved locals, so no export name is a binding in scope
+  // of a module or of the prelude.
+  const local = (i: number) => `__pronto_export_${i}`;
+  const text = `${PRELUDE}\n${parts.join("\n")}
+const { ${exports.map((name, i) => `${name}: ${local(i)}`).join(", ")} } = ${scope(index.get(graph.entry)!)};
+export { ${exports.map((name, i) => `${local(i)} as ${name}`).join(", ")} };
+`;
 
   // The bundle is held to what the airlock reads: a module importing nothing
   // that exports what the handler exports. Anything the rewrite misread fails
