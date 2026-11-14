@@ -1414,6 +1414,11 @@ import (
 			receivers: prometheus: config: scrape_configs: [for sn, s in release.services if s.metrics != _|_ {
 				job_name:        sn
 				scrape_interval: x.interval
+				// A series' own timestamp is when it last changed (Vector's exporter stamps every one, and keeps
+				// a quiet series for days): Managed Service for Prometheus refuses a point more than 25 hours
+				// old and the exporter drops the whole batch with it (4000 "Dropping data" in a day, PRONTO-475).
+				// The scrape's time is the point's.
+				honor_timestamps: false
 				metrics_path:    s.metrics.path
 				kubernetes_sd_configs: [{
 					role: "pod"

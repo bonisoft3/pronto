@@ -904,6 +904,8 @@ def test_metrics_export [] {
 	let config = ($cm.data."config.yaml" | from yaml)
 	# Each pod, not the Service (PRONTO-370): its own address and its name on every series.
 	let scrape = ($config.receivers.prometheus.config.scrape_configs | first)
+	# A series' own timestamp is its last change, which Managed Service for Prometheus refuses past 25 hours: the scrape's time is the point's.
+	assert equal $scrape.honor_timestamps false
 	assert ("static_configs" not-in ($scrape | columns)) "no scrape of the Service, which answers from one pod at random"
 	assert equal $scrape.kubernetes_sd_configs [{role: "pod", namespaces: {names: [sample]}, selectors: [{role: "pod", label: "app.kubernetes.io/name=sample,app.kubernetes.io/component=journeys-collector"}]}]
 	assert equal ($scrape.relabel_configs | get target_label? | compact) ["__address__" "pod"]
