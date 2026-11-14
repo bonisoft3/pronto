@@ -421,6 +421,11 @@ import (
 	// gets which is a decision, not a value to refuse a literal toward.
 	component: [string]: #Reference
 	component: {for k, v in D._preset.component {(k): *v | string}}
+	// The appearances the app is drawn in. Absent, both: each colour's dark
+	// twin answers a dark colour-scheme. "light" pins the page to its light
+	// half, for an identity that has no dark one yet (its twins then restate
+	// the light values, as #Design.dark is closed over the same names).
+	colorScheme?: "light"
 	// Which colour the terminal's own chrome resolves to; the shell has no
 	// opinion about which swatch is a background.
 	shell: {
