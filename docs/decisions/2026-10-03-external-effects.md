@@ -179,16 +179,18 @@ call.
 - **The handler** is authored at `effects/<name>.js`, exporting `issue` and, where it
   reconciles, `reconcile`. It may import other modules of the program by relative path
   (a call wrapper, generated constants, a key derivation shared by several handlers),
-  statically and by name; a package, `node:` or URL specifier, a dynamic import, a default
-  or `export *`, and a cycle are refused at generate, naming the module and the import.
+  statically and by name; a package, `node:` or URL specifier, a dynamic import, a
+  top-level `await`, a default, `export *` or `export * as`, a name its module does not
+  export, and a cycle are refused at generate, naming the module and the import.
   Derive bundles each handler with what it imports (`effect-bundle.ts`, over the module
   walk an engine's link uses) into `services/airlock/effects/<name>.js`, one module
   importing nothing, beside the manifest whose `handler` names it; that bundle is what
   the cluster copies and the airlock admits. The authored modules are source rows of the
   derived artifacts, the bundle a derived one, its bytes fixed by its sources (modules in
-  import order, nothing of the time or place). Each imported module runs once, before
-  its importers, its exports read by value, so a module that reassigns an export is
-  refused. Lint reads the bundle, so a helper reaching `Date` or `Math.random` is the
+  import order, nothing of the time or place). Each module, the handler's own included,
+  runs once in a scope of its own, after the modules it imports, so no module sees
+  another's bindings; its exports are a frozen namespace with no prototype, read by
+  value, so a module that reassigns an export is refused. Lint reads the bundle, so a helper reaching `Date` or `Math.random` is the
   handler reaching it, and the airlock's cage refuses it at run time as it would inline.
   The bundle runs in compute's realm (`services/compute/realm.ts`, which
   compute's own cage shares): SES, no clock, no entropy, nothing of the host, and the

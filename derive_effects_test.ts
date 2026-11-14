@@ -4,7 +4,7 @@
 
 import { assertEquals, assertNotEquals, assertRejects } from "jsr:@std/assert@1.0.11";
 import { dirname, join } from "node:path";
-import { effectModules } from "./derive.ts";
+import { effectArtifacts, effectModules } from "./derive.ts";
 import { bundleEffect } from "./effect-bundle.ts";
 import { LinkError } from "./engine-link.ts";
 
@@ -86,8 +86,8 @@ Deno.test("a helper re-exporting another's names bundles as the names it re-expo
   });
 });
 
-// The sha in the derived artifacts list is the bundle's, so two runs over the
-// same app write the same bytes, and a change to a helper changes them.
+// The bundle's bytes are hashed into its derived artifact row, so the same
+// sources must give the same bytes on every run, and a helper's edit must not.
 Deno.test("a bundle is byte-stable across runs and moves with its helpers", async () => {
   await app(shared, async (dir) => {
     const first = (await bundleEffect(dir, "effects/charge.js")).text;
@@ -110,6 +110,65 @@ Deno.test("a helper reaching the clock or entropy is the handler's reach, as it 
   });
 });
 
+/** A bundle's exports, run from a data: URL as an ES module. */
+async function run(text: string): Promise<Record<string, (...args: unknown[]) => Promise<unknown>>> {
+  return await import(`data:text/javascript,${encodeURIComponent(text)}`);
+}
+
+// The handler's own module was the bundle's top level, enclosing every helper:
+// a helper's free name resolved to the handler's binding of it.
+Deno.test("no module's bindings are in scope of another's, the handler's included", async () => {
+  await app({
+    "effects/e.js": `import { probe } from "./x.js";\nconst token = "handler";\nconst TextEncoder = "shadowed";\nexport const issue = async () => ({ done: [token, TextEncoder, probe()] });\n`,
+    "effects/x.js": `export const probe = () => [typeof token, typeof TextEncoder];\n`,
+  }, async (dir) => {
+    const { text } = await bundleEffect(dir, "effects/e.js");
+    assertEquals(await (await run(text)).issue(), { done: ["handler", "shadowed", ["undefined", "function"]] });
+  });
+});
+
+// The bundle froze each namespace with whatever `Object` the module had bound.
+Deno.test("a module binding Object leaves the bundle's own code the intrinsic", async () => {
+  await app({
+    "effects/e.js": `import * as x from "./x.js";\nexport const issue = async () => ({ done: [x.Object, Object.isFrozen(x), Object.getPrototypeOf(x)] });\n`,
+    "effects/x.js": `const Object = "mine";\nexport { Object };\n`,
+  }, async (dir) => {
+    const { text } = await bundleEffect(dir, "effects/e.js");
+    assertEquals(await (await run(text)).issue(), { done: ["mine", true, null] });
+  });
+});
+
+Deno.test("a namespace has no prototype, as an ES module namespace has none", async () => {
+  await app({
+    "effects/e.js": `import * as x from "./x.js";\nexport const issue = async () => ({ done: [typeof x.toString, "__proto__" in x, Object.keys(x)] });\n`,
+    "effects/x.js": `export const b = 2;\nexport const a = 1;\n`,
+  }, async (dir) => {
+    assertEquals(await (await run((await bundleEffect(dir, "effects/e.js")).text)).issue(), { done: ["undefined", false, ["a", "b"]] });
+  });
+});
+
+// A re-export was a local const beside the import it re-exported: two
+// declarations of one name, which the bundle's own parse refused.
+Deno.test("a handler re-exporting a name it also imports bundles", async () => {
+  await app({
+    "effects/e.js": `import { a } from "./x.js";\nexport { a } from "./x.js";\nexport const issue = async () => ({ done: a });\n`,
+    "effects/x.js": `export const a = 1;\n`,
+  }, async (dir) => {
+    const { text } = await bundleEffect(dir, "effects/e.js");
+    const mod = await run(text);
+    assertEquals([Object.keys(mod).sort(), await mod.issue()], [["a", "issue"], { done: 1 }]);
+  });
+});
+
+Deno.test("a bundle's artifact rows: each module read once as a source, each bundle derived", () => {
+  assertEquals(effectArtifacts(["computations/score.js", "effects/charge.js", "effects/lib/call.js"], ["refund", "charge"], new Set(["computations/score.js"])), [
+    { path: "effects/charge.js", derived: false },
+    { path: "effects/lib/call.js", derived: false },
+    { path: "services/airlock/effects/charge.js", derived: true },
+    { path: "services/airlock/effects/refund.js", derived: true },
+  ]);
+});
+
 const refusals: [string, Record<string, string>, string][] = [
   ["a bare import", { "effects/e.js": `import { z } from "zod";\nexport const issue = async () => ({ done: z });\n` }, `effects/e.js imports "zod": a handler imports its own modules by relative path`],
   ["a node: import", { "effects/e.js": `import { createHash } from "node:crypto";\nexport const issue = async () => ({ done: createHash });\n` }, `imports "node:crypto"`],
@@ -125,6 +184,14 @@ const refusals: [string, Record<string, string>, string][] = [
   }, "effects/a.js imports effects/b.js imports effects/a.js: a handler's modules form no cycle"],
   ["a default import", { "effects/e.js": `import x from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export const y = 1;\n` }, `effects/e.js imports a default from "./x.js"`],
   ["a name the helper does not export", { "effects/e.js": `import { y } from "./x.js";\nexport const issue = async () => ({ done: y });\n`, "effects/x.js": `export const x = 1;\n` }, `effects/e.js imports y from "./x.js", which does not export it`],
+  ["a re-export of a name a helper does not export", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export { y as x } from "./y.js";\n`, "effects/y.js": `export const z = 1;\n` }, `effects/x.js re-exports y from "./y.js", which does not export it`],
+  ["a re-export of a name by the handler that its module does not export", { "effects/e.js": `export { y } from "./y.js";\nexport const issue = async () => ({ done: 1 });\n`, "effects/y.js": `export const z = 1;\n` }, `effects/e.js re-exports y from "./y.js", which does not export it`],
+  ["a reassigned export", { "effects/e.js": `import { n } from "./x.js";\nexport const issue = async () => ({ done: n });\n`, "effects/x.js": `export let n = 1;\nn = 2;\n` }, "effects/x.js exports n and assigns it"],
+  ["import.meta in the handler", { "effects/e.js": `export const issue = async () => ({ done: import.meta.url });\n` }, "effects/e.js reads import.meta"],
+  ["the reserved prefix", { "effects/e.js": `const __pronto_module_0 = 1;\nexport const issue = async () => ({ done: __pronto_module_0 });\n` }, "effects/e.js names __pronto_"],
+  ["a default export in a helper", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export const x = 1;\nexport default x;\n` }, "effects/x.js exports a default"],
+  ["a namespace re-export", { "effects/e.js": `import { ns } from "./x.js";\nexport const issue = async () => ({ done: ns });\n`, "effects/x.js": `export * as ns from "./y.js";\n`, "effects/y.js": `export const z = 1;\n` }, "effects/x.js re-exports * as a namespace"],
+  ["a top-level await", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export const x = await Promise.resolve(1);\n` }, "effects/x.js awaits at its top level"],
   ["a star re-export", { "effects/e.js": `import { x } from "./x.js";\nexport const issue = async () => ({ done: x });\n`, "effects/x.js": `export * from "./y.js";\n`, "effects/y.js": `export const x = 1;\n` }, `effects/x.js re-exports * from "./y.js"`],
 ];
 for (const [name, files, message] of refusals) {

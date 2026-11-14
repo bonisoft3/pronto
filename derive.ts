@@ -335,6 +335,16 @@ export async function effectModules(
   return { rows, sources: [...sources].sort() };
 }
 
+/** The artifact rows the effects add past the paths `listed`: every module a
+ * bundle read, once, as a source (a computation's src may be one), and each
+ * bundle as derived. */
+export function effectArtifacts(sources: string[], effects: string[], listed: Set<string>): { path: string; derived: boolean }[] {
+  return [
+    ...sources.filter((path) => !listed.has(path)).map((path) => ({ path, derived: false })),
+    ...[...effects].sort().map((name) => ({ path: effectBundle(name), derived: true })),
+  ];
+}
+
 async function cueJson(cwd: string, args: string[]): Promise<unknown> {
   const result = await new Deno.Command("cue", {
     args, cwd, stdout: "piped", stderr: "piped",
@@ -1136,9 +1146,9 @@ export async function derive(appDir: string): Promise<{ entities: Record<string,
     artifacts.push({ path, sha256: await sha(path), derived });
   }
   for (const c of Object.values(state.computations ?? {})) artifacts.push({ path: c.src, sha256: await sha(c.src), derived: false });
-  // A handler's source is every module its bundle read; the bundle is derived.
-  for (const path of effected.sources) artifacts.push({ path, sha256: await sha(path), derived: false });
-  for (const name of Object.keys(state.effects ?? {}).sort()) artifacts.push({ path: effectBundle(name), sha256: await sha(effectBundle(name)), derived: true });
+  for (const { path, derived } of effectArtifacts(effected.sources, Object.keys(state.effects ?? {}), new Set(artifacts.map((a) => a.path)))) {
+    artifacts.push({ path, sha256: await sha(path), derived });
+  }
   // The stylesheets the rules above read, so that editing one and not
   // regenerating is a stale-row finding rather than a green literal lint over
   // yesterday's numbers. A screen's row hashes the STRING scanned rather than a
