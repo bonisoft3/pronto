@@ -251,7 +251,13 @@ const ONE_ARGUMENT = new RegExp(`^${ONE_ARGUMENT_HEAD}`);
 function positional(stripped: string, last: string, shape: string): boolean {
   if (shape === "arrow") return !ONE_ARGUMENT.test(last);
   if (shape !== "name") return false;
-  const name = /[A-Za-z_$][\w$]*$/.exec(last)![0].replace(/\$/g, "\\$");
+  // The completion's name, followed through `const a = b;` to what it names.
+  let name = /[A-Za-z_$][\w$]*$/.exec(last)![0].replace(/\$/g, "\\$");
+  for (let hops = 0; hops < 8; hops++) {
+    const alias = new RegExp(`(?:const|let|var)\\s+${name}\\s*=\\s*([A-Za-z_$][\\w$]*)\\s*;`).exec(stripped);
+    if (alias === null) break;
+    name = alias[1].replace(/\$/g, "\\$");
+  }
   return new RegExp(`(?:(?:const|let|var)\\s+${name}\\s*=\\s*|function\\s+${name}\\s*)(?!${ONE_ARGUMENT_HEAD})(?:\\(|[A-Za-z_$][\\w$]*\\s*=>)`).test(stripped);
 }
 
@@ -424,6 +430,8 @@ const label = "a Date for the window";
     { name: "a validation that names its first parameter is the earlier form", role: "validation", source: `function test(state, event) { return true; }\ntest;\n`, expect: ["completion:positional"] },
     { name: "a leaf that takes the earlier state apart is the earlier form", source: `({ items }, event) => ({ updates: items });\n`, expect: ["completion:positional"] },
     { name: "a named leaf that takes the earlier state apart is the earlier form", source: `const reduce = ({ items }, event) => ({ updates: items });\nreduce;\n`, expect: ["completion:positional"] },
+    { name: "a leaf named through an alias is followed to its definition", source: `const reduce = (state, event) => ({ updates: [] });\nconst handler = reduce;\nhandler;\n`, expect: ["completion:positional"] },
+    { name: "an alias of a one-argument leaf passes", source: `const reduce = ({ context }) => ({ updates: context.items });\nconst handler = reduce;\nhandler;\n`, expect: [] },
     { name: "a leaf that reads neither takes no parameter", source: `() => ({ updates: [] });\n`, expect: [] },
     { name: "a renderer's parameter is a name", role: "renderer", source: `(value) => value;\n`, expect: [] },
     { name: "plv8 is denylisted", source: `({ context, event }) => plv8.execute("select 1");\n`, expect: ["plv8"] },
