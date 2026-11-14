@@ -77,7 +77,7 @@ app: pronto.#App & {
         primary: *"#f5f5f5" | string, secondary: *"#aaaaaa" | string, accent: *"#66aaff" | string, danger: *"#ff6666" | string,
         neutral: *"#111111" | string, surface: *"#1a1a1a" | string, border: *"#333333" | string, "surface-muted": *"#242424" | string
       }
-      shell: nav: *"strip" | "sidebar" | "custom"
+      shell: nav: *"topbar" | "tabbar" | "sidebar" | "dock" | "custom"
     }
     flows: {}
   }
@@ -106,7 +106,7 @@ export async function cue(args: string[], code: string): Promise<{ success: bool
   return { success: res.success, stdout: new TextDecoder().decode(res.stdout), stderr: new TextDecoder().decode(res.stderr) };
 }
 
-export async function emitFiles(code: string): Promise<Record<string, { text: string }>> {
+export async function emitFiles(code: string): Promise<Record<string, { text: string; data?: any }>> {
   const res = await cue(["export", "-", "-e", "out", "--out", "json"], code);
   if (!res.success) throw new Error(res.stderr);
   return JSON.parse(res.stdout);

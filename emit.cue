@@ -2226,6 +2226,14 @@ _traceHeader: include_patterns: ["^traceparent$"]
 	}
 	out: {
 		app: S.code.meta.name
+		if S.code.surface.design.shell.title != _|_ {
+			brand: {
+				label: S.code.surface.design.shell.title
+				if S.code.surface.design.shell.titleKey != _|_ {
+					key: S.code.surface.design.shell.titleKey
+				}
+			}
+		}
 		if S.code.state.cortex != _|_ {
 			for _, c in S.code.state.cortex if c.config.meta != _|_ if c.config.meta.host != _|_ if c.config.meta.host == "omnishell" {
 				cortex: {config: c.config, actors: {for name, actor in c.setup.actors if actor.via == "navigation" || actor.via == "rows" {(name): actor}}}
@@ -2283,8 +2291,18 @@ _traceHeader: include_patterns: ["^traceparent$"]
 			nav: {
 				label: s.title
 				if s.label != _|_ {key: s.label}
+				if s.icon != _|_ {icon: s.icon}
+				if s.iconOnly != _|_ if s.iconOnly {display: "icon-only"}
 				if !s.strip {strip: false}
-				if len(s.entries) > 0 {entries: s.entries}
+				if len(s.entries) > 0 {
+					entries: [for entry in s.entries {
+						label: entry.label
+						if entry.key != _|_ {key: entry.key}
+						if entry.icon != _|_ {icon: entry.icon}
+						if entry.iconOnly != _|_ if entry.iconOnly {display: "icon-only"}
+						params: entry.params
+					}]
+				}
 			}
 			if len(s.hatches) > 0 {hatches: s.hatches}
 			files: {
@@ -3535,26 +3553,34 @@ _pgrollDir: "services/database/pgroll"
 	// letting an app's own `chrome.css` or `nav.css` override any property at
 	// ordinary selector weight without `!important`.
 	_navCss: [
-		if E._design.shell.nav == "strip" {
+		if E._design.shell.nav == "topbar" {
 			"""
-				/* Top-bar posture (`shell.nav: "strip"`): sticky horizontal bar with
-				   pill-shaped route tabs, subtle surface hover, inset-ring active indicator,
-				   and inline-end session cluster. Tints and borders derive from `currentColor`
-				   and active text defaults to `inherit` so apps that paint an inverted bar
-				   (`body > nav { background: ...; color: ... }`) keep full foreground contrast. */
-				:where(body > nav) { position: sticky; top: 0; z-index: 10;
-				  background: var(--shell-bg);
+				/* Topbar posture (`shell.nav: "topbar"`): fluid full-width sticky horizontal
+				   toolbar with optional inline-start brand title, pill-shaped route controls
+				   (text, icon+label, or icon-only), subtle surface hover, inset-ring active
+				   indicator, and inline-end session cluster. Tints and borders derive from
+				   `currentColor` and active text defaults to `inherit` so apps that paint an
+				   inverted bar (`body > nav { background: ...; color: ... }`) keep full
+				   foreground contrast across viewports without artificial max-width clamping. */
+				:where(body > nav) { position: sticky; inset-block-start: 0; z-index: 10;
+				  background: var(--shell-nav-bg, var(--shell-bg));
 				  display: flex; gap: var(--shell-nav-gap, 6px);
 				  flex-wrap: nowrap; align-items: center;
 				  min-height: var(--shell-nav-height, 52px); box-sizing: border-box;
 				  overflow-x: auto; scrollbar-width: none;
-				  padding: var(--shell-nav-pad, 8px 20px);
+				  padding: var(--shell-nav-pad, 8px clamp(16px, 3vw, 32px));
 				  font-size: var(--shell-nav-size, var(--type-caption, 0.875rem));
 				  font-weight: var(--shell-nav-weight, 500);
 				  border-block-end: 1px solid var(--shell-rule); }
 				:where(body > nav)::-webkit-scrollbar { display: none; }
+				:where(body > nav > .shell-brand) { flex: none; white-space: nowrap;
+				  font-size: var(--shell-brand-size, var(--type-body, 1rem));
+				  font-weight: var(--shell-brand-weight, 700);
+				  letter-spacing: -0.015em;
+				  margin-inline-end: var(--shell-brand-gap, auto);
+				  padding-inline-end: var(--sp-sm, 8px); }
 				/* Route pills and the session cluster hold their own width (`flex: none`) so
-				   neither breaks mid-word nor collapses below its controls when the strip
+				   neither breaks mid-word nor collapses below its controls when the bar
 				   scrolls horizontally on narrow viewports (preserving `nav`'s inline-end
 				   padding past `.shell-signout`), while `.shell-who` caps at `--shell-who-max`
 				   and ellipsises long handles. `--control-h-sm` (32px) clears check-visual's
@@ -3573,7 +3599,7 @@ _pgrollDir: "services/database/pgroll"
 				  color: var(--shell-nav-active-fg, inherit);
 				  font-weight: var(--shell-nav-active-weight, 600);
 				  box-shadow: var(--shell-nav-active-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)); }
-				/* The signed-in person at the strip's inline end, separated by a rule only
+				/* The signed-in person at the bar's inline end, separated by a rule only
 				   when route links precede it (`> a ~ .shell-me`). */
 				:where(body > nav .shell-me) { margin-inline-start: auto; flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); }
 				:where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
@@ -3593,10 +3619,101 @@ _pgrollDir: "services/database/pgroll"
 				@media print { :where(body > nav) { display: none; } }
 				"""
 		},
+		if E._design.shell.nav == "tabbar" {
+			"""
+				/* Tabbar posture (`shell.nav: "tabbar"`): Apple iPadOS / visionOS floating
+				   top pill capsule on tablet and desktop (`>= 640px`) that adapts into a
+				   pinned bottom tab bar with safe-area clearance on compact phone screens
+				   (`not all and (min-width: 640px)`). */
+				:where(body > nav > a) {
+				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), color var(--motion-fast, 110ms) var(--motion-ease, ease), box-shadow var(--motion-fast, 110ms) var(--motion-ease, ease); }
+				:where(body > nav > a:hover) {
+				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
+				  text-decoration: var(--shell-nav-hover, none); }
+				:where(body > nav > a[aria-current="page"]) {
+				  background: var(--shell-nav-active-bg, color-mix(in srgb, currentColor 10%, transparent));
+				  color: var(--shell-nav-active-fg, inherit);
+				  font-weight: var(--shell-nav-active-weight, 600);
+				  box-shadow: var(--shell-nav-active-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)); }
+				:where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				  flex: none; display: inline-flex; align-items: center; justify-content: center;
+				  min-height: var(--control-h-xs, 28px); box-sizing: border-box;
+				  padding-block: var(--shell-nav-btn-pad-y, 4px); padding-inline: var(--shell-nav-btn-pad-x, 10px); white-space: nowrap;
+				  border: var(--shell-nav-btn-border, 1px solid color-mix(in srgb, currentColor 20%, transparent)); border-radius: var(--r-full, 999px);
+				  font-weight: 500;
+				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), border-color var(--motion-fast, 110ms) var(--motion-ease, ease); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider):hover) {
+				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
+				  text-decoration: none; }
+				@media (min-width: 640px) {
+				  :where(body > nav) { position: sticky; inset-block-start: var(--shell-nav-offset, 12px); z-index: 10;
+				    width: fit-content; max-width: calc(100% - var(--sp-lg, 24px));
+				    margin-block-start: var(--shell-nav-offset, 12px); margin-inline: auto;
+				    background: var(--shell-nav-bg, var(--shell-bg));
+				    display: flex; gap: var(--shell-nav-gap, 4px);
+				    flex-wrap: nowrap; align-items: center;
+				    min-height: var(--shell-nav-height, 44px); box-sizing: border-box;
+				    overflow-x: auto; scrollbar-width: none;
+				    padding: var(--shell-nav-pad, 5px 8px);
+				    font-size: var(--shell-nav-size, var(--type-caption, 0.875rem));
+				    font-weight: var(--shell-nav-weight, 500);
+				    border: 1px solid var(--shell-rule);
+				    border-radius: var(--shell-nav-radius, var(--r-full, 999px));
+				    box-shadow: var(--shell-nav-shadow, var(--shadow-2)); }
+				  :where(body > nav)::-webkit-scrollbar { display: none; }
+				  :where(body > nav > .shell-brand) { flex: none; white-space: nowrap;
+				    font-weight: var(--shell-brand-weight, 700); letter-spacing: -0.015em;
+				    padding-inline: var(--sp-sm, 10px);
+				    border-inline-end: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+				    margin-inline-end: 2px; }
+				  :where(body > nav > a) { white-space: nowrap; flex: none;
+				    display: inline-flex; align-items: center; gap: var(--sp-sm, 6px);
+				    min-height: var(--control-h-sm, 32px); box-sizing: border-box;
+				    padding-block: var(--shell-nav-link-pad-y, 6px); padding-inline: var(--shell-nav-link-pad-x, 14px);
+				    border-radius: var(--shell-nav-link-radius, var(--r-full, 999px)); }
+				  :where(body > nav .shell-me) { flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); padding-inline-end: 4px; }
+				  :where(body > nav > a ~ .shell-me) {
+				    padding-inline-start: var(--shell-nav-me-pad, var(--sp-sm, 10px));
+				    border-inline-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
+				}
+				@media not all and (min-width: 640px) {
+				  :where(body > nav) { position: fixed; inset-block-end: 0; inset-inline: 0; z-index: 10;
+				    background: var(--shell-nav-bg, var(--shell-bg));
+				    display: flex; gap: var(--shell-nav-gap, 6px);
+				    flex-wrap: nowrap; align-items: center; justify-content: safe center;
+				    min-height: var(--shell-nav-height, 56px); box-sizing: border-box;
+				    overflow-x: auto; scrollbar-width: none;
+				    padding-block-start: 6px; padding-block-end: calc(6px + env(safe-area-inset-bottom, 0px));
+				    padding-inline: 12px;
+				    font-size: var(--shell-nav-size, var(--type-caption, 0.875rem));
+				    font-weight: var(--shell-nav-weight, 500);
+				    border-block-start: 1px solid var(--shell-rule); }
+				  :where(body > nav)::-webkit-scrollbar { display: none; }
+				  :where(body > nav:has(> a + a) > .shell-brand) { display: none; }
+				  :where(body > nav > .shell-brand) { flex: none; white-space: nowrap; font-weight: var(--shell-brand-weight, 700); padding-inline-end: var(--sp-sm, 8px); }
+				  :where(body > nav > a) { white-space: nowrap; flex: none;
+				    display: inline-flex; align-items: center; gap: var(--sp-sm, 6px);
+				    min-height: var(--control-h-sm, 36px); box-sizing: border-box;
+				    padding-block: var(--shell-nav-link-pad-y, 6px); padding-inline: var(--shell-nav-link-pad-x, 12px);
+				    border-radius: var(--shell-nav-link-radius, var(--r-full, 999px)); }
+				  :where(body > nav .shell-me) { flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); }
+				  :where(body > nav > a ~ .shell-me) {
+				    padding-inline-start: var(--shell-nav-me-pad, var(--sp-sm, 10px));
+				    border-inline-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
+				  :where(body:has(> nav:not([hidden])) > #app) {
+				    padding-block-end: calc(var(--shell-nav-clearance, 76px) + env(safe-area-inset-bottom, 0px)); box-sizing: border-box; }
+				}
+				@media print {
+				  :where(body > nav) { display: none; }
+				  :where(body:has(> nav:not([hidden])) > #app) { padding-block-end: 0; }
+				}
+				"""
+		},
 		if E._design.shell.nav == "sidebar" {
 			"""
 				/* Sidebar posture (`shell.nav: "sidebar"`): a vertical inline-start rail
-				   on wide viewports and a sticky top strip on narrow ones (`not all and (min-width: 860px)`
+				   on wide viewports and a sticky top bar on narrow ones (`not all and (min-width: 860px)`
 				   so fractional DPR widths around 859.5px have no dead zone), sharing the same
 				   `currentColor` pill geometry, active indicator, and session controls at `:where(...)`
 				   specificity so app stylesheets can refine without `!important`. */
@@ -3623,7 +3740,7 @@ _pgrollDir: "services/database/pgroll"
 				@media (min-width: 860px) {
 				  :where(body > nav) { position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 10;
 				    width: var(--shell-nav-width, var(--size-13)); height: 100dvh;
-				    box-sizing: border-box; background: var(--shell-bg);
+				    box-sizing: border-box; background: var(--shell-nav-bg, var(--shell-bg));
 				    display: flex; flex-direction: column; gap: var(--shell-nav-gap, 4px);
 				    overflow-y: auto; scrollbar-width: none;
 				    padding: var(--shell-nav-pad, 16px 12px);
@@ -3631,11 +3748,19 @@ _pgrollDir: "services/database/pgroll"
 				    font-weight: var(--shell-nav-weight, 500);
 				    border-inline-end: 1px solid var(--shell-rule); }
 				  :where(body > nav)::-webkit-scrollbar { display: none; }
+				  :where(body > nav > .shell-brand) { flex: none;
+				    font-size: var(--shell-brand-size, var(--type-body, 1rem));
+				    font-weight: var(--shell-brand-weight, 700); letter-spacing: -0.015em;
+				    padding-block: var(--sp-sm, 8px); padding-inline: var(--shell-nav-link-pad-x, 12px);
+				    margin-block-end: var(--sp-sm, 4px);
+				    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 				  :where(body > nav > a) { white-space: nowrap; flex: none;
 				    display: flex; align-items: center; gap: var(--sp-sm, 8px);
 				    width: 100%; box-sizing: border-box; min-height: var(--control-h-lg, 40px);
 				    padding-block: var(--shell-nav-link-pad-y, 8px); padding-inline: var(--shell-nav-link-pad-x, 12px);
 				    border-radius: var(--shell-nav-radius, var(--r-md, 8px)); }
+				  :where(body > nav > a[data-display="icon-only"]) {
+				    width: var(--control-h-lg, 40px); }
 				  :where(body > nav .shell-me) { margin-block-start: auto; width: 100%; box-sizing: border-box;
 				    display: flex; flex-direction: column; gap: var(--sp-sm, 8px); min-width: 0; }
 				  :where(body > nav > a ~ .shell-me) {
@@ -3648,8 +3773,8 @@ _pgrollDir: "services/database/pgroll"
 				    box-sizing: border-box; min-width: 0; }
 				}
 				@media not all and (min-width: 860px) {
-				  :where(body > nav) { position: sticky; top: 0; z-index: 10;
-				    background: var(--shell-bg);
+				  :where(body > nav) { position: sticky; inset-block-start: 0; z-index: 10;
+				    background: var(--shell-nav-bg, var(--shell-bg));
 				    display: flex; gap: var(--shell-nav-gap, 6px);
 				    flex-wrap: nowrap; align-items: center;
 				    min-height: var(--shell-nav-height, 52px); box-sizing: border-box;
@@ -3659,6 +3784,11 @@ _pgrollDir: "services/database/pgroll"
 				    font-weight: var(--shell-nav-weight, 500);
 				    border-block-end: 1px solid var(--shell-rule); }
 				  :where(body > nav)::-webkit-scrollbar { display: none; }
+				  :where(body > nav > .shell-brand) { flex: none; white-space: nowrap;
+				    font-size: var(--shell-brand-size, var(--type-body, 1rem));
+				    font-weight: var(--shell-brand-weight, 700); letter-spacing: -0.015em;
+				    margin-inline-end: var(--shell-brand-gap, auto);
+				    padding-inline-end: var(--sp-sm, 8px); }
 				  :where(body > nav > a) { white-space: nowrap; flex: none;
 				    display: inline-flex; align-items: center; gap: var(--sp-sm, 8px);
 				    min-height: var(--control-h-sm, 32px); box-sizing: border-box;
@@ -3676,9 +3806,75 @@ _pgrollDir: "services/database/pgroll"
 				}
 				"""
 		},
+		if E._design.shell.nav == "dock" {
+			"""
+				/* Dock posture (`shell.nav: "dock"`): centered floating pill capsule anchored
+				   at the bottom edge across viewports (`env(safe-area-inset-bottom)` aware),
+				   leaving the top edge completely chrome-free while reserving bottom clearance
+				   on `#app`. */
+				:where(body > nav) {
+				  position: fixed;
+				  inset-block-end: max(var(--sp-md, 16px), env(safe-area-inset-bottom, 0px));
+				  inset-inline: 0; z-index: 10;
+				  width: fit-content; max-width: calc(100% - var(--sp-lg, 24px));
+				  margin-inline: auto;
+				  background: var(--shell-nav-bg, var(--shell-bg));
+				  display: flex; gap: var(--shell-nav-gap, 4px);
+				  flex-wrap: nowrap; align-items: center;
+				  min-height: var(--shell-nav-height, 48px); box-sizing: border-box;
+				  overflow-x: auto; scrollbar-width: none;
+				  padding: var(--shell-nav-pad, 6px 8px);
+				  font-size: var(--shell-nav-size, var(--type-caption, 0.875rem));
+				  font-weight: var(--shell-nav-weight, 500);
+				  border: 1px solid var(--shell-rule);
+				  border-radius: var(--shell-nav-radius, var(--r-full, 999px));
+				  box-shadow: var(--shell-nav-shadow, var(--shadow-3)); }
+				:where(body > nav)::-webkit-scrollbar { display: none; }
+				:where(body > nav > .shell-brand) { flex: none; white-space: nowrap;
+				  font-weight: var(--shell-brand-weight, 700); letter-spacing: -0.015em;
+				  padding-inline: var(--sp-sm, 10px);
+				  border-inline-end: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+				  margin-inline-end: 2px; }
+				:where(body > nav > a) { white-space: nowrap; flex: none;
+				  display: inline-flex; align-items: center; gap: var(--sp-sm, 6px);
+				  min-height: var(--control-h-sm, 36px); box-sizing: border-box;
+				  padding-block: var(--shell-nav-link-pad-y, 6px); padding-inline: var(--shell-nav-link-pad-x, 14px);
+				  border-radius: var(--shell-nav-link-radius, var(--r-full, 999px));
+				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), color var(--motion-fast, 110ms) var(--motion-ease, ease), box-shadow var(--motion-fast, 110ms) var(--motion-ease, ease); }
+				:where(body > nav > a:hover) {
+				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
+				  text-decoration: var(--shell-nav-hover, none); }
+				:where(body > nav > a[aria-current="page"]) {
+				  background: var(--shell-nav-active-bg, color-mix(in srgb, currentColor 10%, transparent));
+				  color: var(--shell-nav-active-fg, inherit);
+				  font-weight: var(--shell-nav-active-weight, 600);
+				  box-shadow: var(--shell-nav-active-shadow, inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent)); }
+				:where(body > nav .shell-me) { flex: none; display: flex; align-items: center; gap: var(--sp-sm, 8px); padding-inline-end: 4px; }
+				:where(body > nav .shell-who) { max-width: var(--shell-who-max, 24ch); }
+				:where(body > nav > a ~ .shell-me) {
+				  padding-inline-start: var(--shell-nav-me-pad, var(--sp-sm, 10px));
+				  border-inline-start: var(--shell-nav-me-rule, 1px solid color-mix(in srgb, currentColor 16%, transparent)); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider)) {
+				  flex: none; display: inline-flex; align-items: center; justify-content: center;
+				  min-height: var(--control-h-xs, 28px); box-sizing: border-box;
+				  padding-block: var(--shell-nav-btn-pad-y, 4px); padding-inline: var(--shell-nav-btn-pad-x, 10px); white-space: nowrap;
+				  border: var(--shell-nav-btn-border, 1px solid color-mix(in srgb, currentColor 20%, transparent)); border-radius: var(--r-full, 999px);
+				  font-weight: 500;
+				  transition: background-color var(--motion-fast, 110ms) var(--motion-ease, ease), border-color var(--motion-fast, 110ms) var(--motion-ease, ease); }
+				:where(body > nav .shell-me :is(.shell-signout, .shell-signin, .shell-register, .shell-provider):hover) {
+				  background: var(--shell-nav-hover-bg, color-mix(in srgb, currentColor 7%, transparent));
+				  text-decoration: none; }
+				:where(body:has(> nav:not([hidden])) > #app) {
+				  padding-block-end: calc(var(--shell-nav-clearance, 84px) + env(safe-area-inset-bottom, 0px)); box-sizing: border-box; }
+				@media print {
+				  :where(body > nav) { display: none; }
+				  :where(body:has(> nav:not([hidden])) > #app) { padding-block-end: 0; }
+				}
+				"""
+		},
 		"""
 			/* Custom posture (`shell.nav: "custom"`): the app's own stylesheet owns
-			   the container geometry; only the link and control resets apply. */
+			   the container geometry; only the link, icon, and control resets apply. */
 			""",
 	][0]
 	_designCss: """
@@ -3735,6 +3931,11 @@ _pgrollDir: "services/database/pgroll"
 		  background: var(--shell-bg); color: var(--shell-fg); }
 		:where(body > nav a) { color: inherit; text-decoration: none; }
 		:where(body > nav a:hover) { text-decoration: var(--shell-nav-hover, underline); }
+		:where(body > nav .shell-nav-icon) { flex: none; width: var(--shell-nav-icon-size, 1.125em); height: var(--shell-nav-icon-size, 1.125em); display: block; }
+		:where(body > nav > a[data-display="icon-only"]) { min-width: var(--control-h-sm, 32px); min-height: var(--control-h-sm, 32px); }
+		:where(body > nav > a[data-display="icon-only"] > .shell-nav-label) {
+		  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+		  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 		:where(body > nav .shell-who) { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; }
 		:where(body > nav .shell-who .name) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		:where(body > nav .shell-who .name:empty) { display: none; }
@@ -3751,6 +3952,7 @@ _pgrollDir: "services/database/pgroll"
 		  display: inline-flex; align-items: center; justify-content: center;
 		  min-height: 24px; min-width: 24px; }
 		\(E._navCss)
+		:where(body > nav > a[data-display="icon-only"]) { padding-inline: var(--shell-nav-icon-pad-x, 6px); justify-content: center; gap: 0; }
 		:where(body > nav[hidden]) { display: none; }
 
 		/* Not a preference to weigh against the design: durations collapse

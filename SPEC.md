@@ -28,7 +28,11 @@ app must explicitly author the eight core semantic colour roles (`primary`,
 `secondary`, `accent`, `danger`, `neutral`, `surface`, `border`,
 `surface-muted`, plus any domain-specific roles) in `colors`, provide a matching
 `dark` twin for every `colors` key (`dark` is closed over `colors`), and choose
-`shell.nav` (`"strip" | "sidebar" | "custom"`). Structural tiers (`rounded`,
+`shell.nav` (`"topbar" | "tabbar" | "sidebar" | "dock" | "custom"`). `shell`
+may also declare `title` (and `titleKey` under `meta.i18n`) to place a brand
+wordmark at the inline start of `body > nav`, while each `#Screen` (and each
+`entries` link) may declare `icon` (`#NavIcon`) and `iconOnly: true` for named
+stroke icons. Structural tiers (`rounded`,
 `spacing`, `motion`, `control`, `measures`, `type`, `component`), shadow inks
 (`shadow-ink-3..10`), and `shell.{bg,fg,rule}` carry schema defaults that an app
 may override or extend (`var(--…)` references included). `program.cue` embeds

@@ -98,5 +98,5 @@ _fixtureDesign: {
 		border:          "#333333"
 		"surface-muted": "#242424"
 	}
-	shell: nav: "strip"
+	shell: nav: "topbar"
 }

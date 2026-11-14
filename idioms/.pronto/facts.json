@@ -10,7 +10,7 @@
   ],
   "artifact": [
     {"path":"program.cue","sha256":"fce66a85c5041a756bc11f6c5e1d0934220e956f324db333aeed62e959ee19c4","derived":false},
-    {"path":"DESIGN.md","sha256":"b40432b0c8c5335083ed93123d89de044da4277b715981f84e9fd93e86896752","derived":false},
+    {"path":"DESIGN.md","sha256":"c9bc72b3f10be238fe138f161387c0b3f33fcd93870a05d2e9fa4a17a6a26dce","derived":false},
     {"path":"ir.html","sha256":"4ca474522006fd7c71f0bdad845a3884a0c0c1bf5c3bfeb36cacebd548cecc2f","derived":false},
     {"path":"acceptance.md","sha256":"37c3de8f47e18855d72001b9f14668952600b341a84277d41fc5fce0278c9bae","derived":false},
     {"path":".pronto/cel.json","sha256":"8e3f3ea654983cbd7d3ec0db953d0d17db3a71de0b32cd7ed7eda582c8198d85","derived":true},
@@ -20,7 +20,7 @@
     {"path":"shell/screens/grid.css","sha256":"0a0a8faea9e085a84b0e62484b3fc5d456057d622610178d11bd1c2f727ea260","derived":false},
     {"path":"shell/screens/timer.css","sha256":"cc2b8115dbcb569c8a3bbb50ef23a1a52d7bfd4794d862c69362b416ee160a85","derived":false},
     {"path":"shell/screens/todo.css","sha256":"50064d600905b02d451fd45d301cdc5d004165bc6a0d3bd7ef120ddc60a201fa","derived":false},
-    {"path":"shell/design.css","sha256":"e5326e9637775c6c4a26e7d8bf4938e17f2be236a1a39f6950f9513415e14898","derived":true}
+    {"path":"shell/design.css","sha256":"f057a488c801765f965cf6b9f7df22c080451398fbd07c90bb0b5ef7bd97265b","derived":true}
   ],
   "cel_ir": [
     {"cel":"this == 'board'"},

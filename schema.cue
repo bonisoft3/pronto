@@ -76,12 +76,30 @@ import (
 #colorRoles: ["primary", "secondary", "accent", "danger", "neutral",
 	"surface", "border", "surface-muted"]
 
-// The three navigation postures emit.cue renders at `:where(...)` specificity:
-// a horizontal sticky top bar (`strip`), an inline-start vertical rail with a
-// narrow-viewport top bar (`sidebar`), or app-owned container geometry with
-// only the base link and control resets (`custom`). Required with no default
-// so every app chooses its chrome explicitly.
-#NavPosture: "strip" | "sidebar" | "custom"
+// The five Apple-aligned navigation postures emit.cue renders at `:where(...)`
+// specificity:
+//   - `topbar`: fluid full-width sticky horizontal toolbar across viewports
+//   - `tabbar`: centered floating top pill capsule on tablet/desktop (>= 640px)
+//               that adapts to a pinned bottom tab bar on compact phones (< 640px)
+//   - `sidebar`: inline-start vertical column on wide screens (>= 860px) that
+//                collapses to a compact sticky top bar on narrower screens
+//   - `dock`: centered floating pill capsule anchored near the bottom edge
+//             across viewports, leaving the top edge chrome-free
+//   - `custom`: zero-specificity link/control resets only; app CSS owns geometry
+// Required with no default so every app chooses its chrome explicitly.
+#NavPosture: "topbar" | "tabbar" | "sidebar" | "dock" | "custom"
+
+// Named 24x24 stroke icons Omnishell's chrome renders in `body > nav` links
+// (`plugins/omnishell/interpreter/chrome.js` `CHROME_ICONS`). Held equal to
+// `CHROME_ICONS` by `login-design.test.ts`.
+#NavIcon: "home" | "compass" | "search" | "sparkles" | "globe" | "map-pin" |
+	"layout-grid" | "grid-3x3" | "list" | "kanban" | "layers" | "table" |
+	"calendar" | "clock" | "history" |
+	"chart-bar" | "chart-line" | "chart-pie" | "trending-up" | "wallet" | "credit-card" | "receipt" | "shopping-bag" |
+	"book-open" | "file-text" | "newspaper" | "scroll" | "circle-help" | "info" | "bookmark" | "tag" | "folder" |
+	"message-square" | "mail" | "inbox" | "bell" | "users" | "user" | "heart" | "share" |
+	"gamepad" | "trophy" | "award" | "flame" | "zap" | "play" | "music" | "image" |
+	"plus-circle" | "check-circle" | "sliders" | "settings" | "shield" | "code" | "terminal"
 
 // The joins the scanner implements. A bucket's dimension says which norm()
 // runs over its steps and which properties' literals can reach them, so this is
@@ -384,16 +402,21 @@ import (
 	// Emitted --c-*, and like control and measures it publishes no step: which box
 	// gets which is a decision, not a value to refuse a literal toward.
 	component: [string]: #Reference
-	// Which colour the terminal's own chrome resolves to, and which navigation
-	// posture (`strip` across the top, `sidebar` down the inline start on wide
-	// viewports with a top strip on narrow ones, or `custom` with only the
-	// link/control reset) `design.css` emits at `:where(...)` specificity.
-	// `nav` has no default: every app chooses its chrome explicitly.
+	// Which colour the terminal's own chrome resolves to, optional brand title
+	// rendered at the inline start of `body > nav`, and which navigation posture
+	// (`topbar`, `tabbar`, `sidebar`, `dock`, or `custom`) `design.css` emits at
+	// `:where(...)` specificity. `nav` has no default: every app chooses its
+	// chrome explicitly.
 	shell: {
-		bg:   *"neutral" | string
-		fg:   *"primary" | string
-		rule: *"border" | string
-		nav:  #NavPosture
+		bg:        *"neutral" | string
+		fg:        *"primary" | string
+		rule:      *"border" | string
+		nav:       #NavPosture
+		title?:    string & !=""
+		titleKey?: string & !=""
+		if titleKey != _|_ {
+			title: string & !=""
+		}
 	}
 }
 
@@ -1494,10 +1517,25 @@ import (
 	// static href. A trailing `:name?` is optional, and a route may list the
 	// addresses it takes with it as further strip entries, each a link of its
 	// own that is current at its own address: the shelves of a library.
+	// Optional named stroke icon (`#NavIcon`) rendered inside the route's link
+	// on `body > nav`, and `iconOnly: true` for compact utility routes (such as
+	// rules or stats) whose visible chrome is the icon while screen readers,
+	// `aria-label`, and `title` retain the localized label.
+	icon?:     #NavIcon
+	iconOnly?: bool
+	if S.iconOnly != _|_ if S.iconOnly {
+		icon: #NavIcon
+	}
 	strip: *true | bool
 	entries: *[] | [...{
-		label: string
-		key?:  string
+		let E = self
+		label:     string
+		key?:      string
+		icon?:     #NavIcon
+		iconOnly?: bool
+		if E.iconOnly != _|_ if E.iconOnly {
+			icon: #NavIcon
+		}
 		params: [string]: string
 	}]
 	paths: [string]~(Name,_): {states: [...string], accepts: [...string]}

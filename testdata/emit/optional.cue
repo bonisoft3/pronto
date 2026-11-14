@@ -78,7 +78,7 @@ _code: pronto.#App & {
 				border:          "#2E3133"
 				"surface-muted": "#24272A"
 			}
-			shell: nav: "strip"
+			shell: nav: "topbar"
 		}
 		flows: {}
 	}
