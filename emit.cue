@@ -1035,8 +1035,9 @@ _sqlType: {
 			  -- sender; a write the service makes has none, nor one another trigger
 			  -- makes, as a handover's grant. Asked of the token's role, since the
 			  -- function runs as its owner, and before its subject is read: a
-			  -- service token's need not be a person's id.
-			  IF pg_trigger_depth() = 1 AND current_setting('request.jwt.claims', true)::json->>'role' = 'app_user' THEN
+			  -- service token's need not be a person's id. A setting a request set
+			  -- LOCAL reads back as '' once its transaction ends, not NULL.
+			  IF pg_trigger_depth() = 1 AND nullif(current_setting('request.jwt.claims', true), '')::json->>'role' = 'app_user' THEN
 			    sender := auth_uid();
 			  END IF;
 			  event := jsonb_build_object('type', lower(TG_OP), 'row', CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END)

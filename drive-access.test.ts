@@ -87,7 +87,11 @@ app: state: mecha: rows: AdvanceRules: {
   const machines = files["services/database/migrations/010_machines.sql"].text;
   assertStringIncludes(machines, `FROM group_member r WHERE r."user_id" = sender`);
   // A service's token names a subject too: the origin is a reader's alone.
-  assertStringIncludes(machines, "pg_trigger_depth() = 1 AND current_setting('request.jwt.claims', true)::json->>'role' = 'app_user'");
+  // Read through nullif: once a request's transaction has set the claims
+  // LOCAL, the setting reads back as '' for the rest of the session, and
+  // ''::json raised in the edge airlock's lane, which moves rows outside any
+  // request (snapcards generation stalled on 2026-11-14).
+  assertStringIncludes(machines, "pg_trigger_depth() = 1 AND nullif(current_setting('request.jwt.claims', true), '')::json->>'role' = 'app_user'");
 });
 
 // A handover restamps what is under the row, and a guard that refuses every

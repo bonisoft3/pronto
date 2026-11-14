@@ -170,6 +170,10 @@ Deno.test({ name: "mecha commands step in the edge object, and its alarm wakes a
       const first = await answer(call(10, 1, 100));
       assertEquals(first.kind, "accepted");
       assertEquals(first.revision, "1");
+      // The request set its claims LOCAL; the session reads the service's
+      // afterwards, never the '' a LOCAL setting leaves, which ''::json would
+      // refuse in the airlock's own moves.
+      assertEquals(await one("SELECT current_setting('request.jwt.claims', true)::json->>'role';"), "service");
       const actual = await snapshot(10);
       const now = Number(await one(`SELECT now FROM ${schema}.receipt WHERE instance_id = '${uuid(10)}' AND command_id = '${uuid(100)}';`));
       const context = { actor: "a", tier: "omnishell", now };
