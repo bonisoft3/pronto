@@ -1114,6 +1114,17 @@ export def db-primary [namespace: string, cluster?: string]: nothing -> record {
 	{namespace: $namespace, pod: $c.status.currentPrimary, database: $c.spec.bootstrap.initdb.database}
 }
 
+# The release's step on Electric's permanent slot (drop-retired-electric-slot): not a tenant's (PRONTO-452). The step is a
+# `kubectl exec` of psql in the database's pod, which needs the right to exec into pods, and a tenant's publisher is given
+# the rights to write its game's objects and read its pods and their logs, no more (Studio's spec/tenants.cue): a tenant's
+# first release failed on it ("cannot create resource pods/exec"), after the game had rolled out. A tenant's game never had
+# the permanent slot either: every release it can have been made by has Electric on a temporary one (PRONTO-363), which is
+# what the slot is dropped for. So a tenant's release does not look, and says why.
+export def retire-electric-slot [tenant: string, namespace: string, cluster: string]: nothing -> string {
+	if ($tenant | is-not-empty) { return "none (a tenant's game never had it, and its publisher may not exec into a pod)" }
+	drop-retired-electric-slot (db-primary $namespace $cluster)
+}
+
 # Electric's permanent slot from before its temporary ones (PRONTO-363): nobody streams from it
 # once the new Electric is up, and it would hold WAL for ever. Dropped when no connection holds it;
 # while one does (an old Electric's last seconds), waited for up to `wait`. A database without it
@@ -1968,7 +1979,7 @@ export def main [
 		watch-rollout $render $target_ns $render_floors $rollout_wait
 	}
 	# Every Electric now runs on a temporary slot of its own: the permanent one goes, once.
-	print $"Electric's permanent slot: (drop-retired-electric-slot (db-primary $target_ns $"($rname)-db"))"
+	print $"Electric's permanent slot: (retire-electric-slot $tenant $target_ns $"($rname)-db")"
 	if $target_env.build.by == "node" { prune-node-registry $push_registry }
 	# A release with the publisher's rights alone may not run the registry's collector: the next operator's release does.
 	if $target_env.build.by == "buildkit" and ((do { ^kubectl auth can-i create pods/exec -n pronto-registry } | complete | get stdout | str trim) == "yes") {

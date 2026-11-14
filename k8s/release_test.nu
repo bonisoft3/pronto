@@ -10,6 +10,7 @@ use ../gcp/build.nu [cloud-build-step]
 
 use release.nu [
 	drop-retired-electric-slot
+	retire-electric-slot
 	tenant-manifests
 	tenant-bake-allows
 	tenant-refusals
@@ -2030,6 +2031,18 @@ def test_electric_slots [] {
 		assert ((try { drop-retired-electric-slot $db --wait 1sec; false } catch {|e| $e.msg | str contains "still held" })) "a slot still held fails the release once its wait is out"
 	}
 	rm -r $dir
+
+	# A tenant's release asks nothing of the database's pod: its publisher may not exec into one (PRONTO-452), and no tenant's game
+	# had the permanent slot.
+	let tdir = (mktemp -d -t slots.XXXXXX | str trim)
+	mkdir $"($tdir)/bin"
+	$"#!/bin/sh\necho \"$*\" >> ($tdir)/log\nexit 1\n" | save $"($tdir)/bin/kubectl"
+	chmod +x $"($tdir)/bin/kubectl"
+	with-env {PATH: ($env.PATH | prepend $"($tdir)/bin")} {
+		assert (retire-electric-slot studio-ana studio-ana sample-db | str starts-with "none") "a tenant's release leaves the slot alone"
+		assert (not ($"($tdir)/log" | path exists)) "and runs no kubectl for it"
+	}
+	rm -r $tdir
 }
 
 def test_preview_renders_apart [] {
